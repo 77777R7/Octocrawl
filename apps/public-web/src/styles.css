@@ -1179,24 +1179,42 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .can-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 44px 0 0; padding: 0; border-top: 1px solid #e0e8f2; border-left: 1px solid #e0e8f2; list-style: none; }
 .can-cell { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 26px 28px 22px; border-right: 1px solid #e0e8f2; border-bottom: 1px solid #e0e8f2; background: #fbfcfe; transition: background-color .3s ease; }
 .can-cell h3 { transition: color .3s ease; }
-.can-cell::before { content: ""; position: absolute; top: -1px; left: -1px; width: 7px; height: 7px; background: transparent; transition: background-color .25s ease; }
+.can-cell::before { content: ""; position: absolute; z-index: 2; top: -1px; left: -1px; width: 7px; height: 7px; background: transparent; transition: background-color .25s ease; }
+/* Pointed at, a cell fills with the brand orange from the left (and lets it go to the right), and its words turn white,
+   which reads better on this orange than dark text does (APCA Lc 62 against 46 for the deep navy); the art's accents
+   turn the deep navy. */
+.can-cell::after { content: ""; position: absolute; z-index: 0; inset: 0; background: var(--orange); transform: scaleX(0); transform-origin: right center; transition: transform .38s cubic-bezier(.65, 0, .35, 1); pointer-events: none; }
+.can-cell > * { position: relative; z-index: 1; }
 .can-cell:hover, .can-cell:focus-within { background: #fff; }
 .can-cell:hover::before, .can-cell:focus-within::before { background: #fb7b4c; }
 .can-cell.is-out { background: #f2f5f9; }
 .can-cell.is-out::before { background: transparent; }
 .can-cell.is-out h3 { color: #566b8c; }
 .can-art { min-height: 75px; margin: 0 0 10px; overflow: hidden; color: rgba(20, 37, 74, .46); font: 11px/15px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; transition: color .3s ease; }
-.can-art b { color: #e0592d; font-weight: inherit; }
+.can-art b { color: #e0592d; font-weight: inherit; transition: color .2s ease; }
 .can-cell:hover .can-art, .can-cell:focus-within .can-art { color: rgba(20, 37, 74, .72); }
 .can-cell.is-out .can-art { color: rgba(20, 37, 74, .3); }
 .can-cell.is-out .can-art b { color: inherit; }
 .can-cell h3 { margin: 0; color: #14254a; font-size: 17px; line-height: 1.35; letter-spacing: -.02em; }
 .can-cell p { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.6; text-wrap: pretty; }
+.can-points { display: grid; gap: 7px; margin: 2px 0 0; padding: 0; list-style: none; }
+.can-points li { display: grid; grid-template-columns: 1.3em minmax(0, 1fr); color: var(--ink-soft); font-size: 14.5px; line-height: 1.45; text-wrap: pretty; transition: color .3s ease; }
+.can-points li::before { content: "·"; content: "·" / ""; color: #5c6d8a; font-weight: 700; transition: color .3s ease; }
 .can-cell .can-where { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: auto; padding-top: 10px; font: 500 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; }
 .can-where > span::before { content: "●"; margin-right: .8ch; }
 .can-where .is-yes { color: #1d64ac; }
 .can-where .is-no { color: #5c6d8a; text-decoration: line-through; text-decoration-color: rgba(92, 109, 138, .55); }
 .can-where .is-no::before { content: "○"; display: inline-block; text-decoration: none; }
+.can-where > span { transition: color .3s ease; }
+@media (hover: hover) {
+  .can-cell:not(.is-out):hover::after { transform: scaleX(1); transform-origin: left center; }
+  .can-cell:not(.is-out):hover h3, .can-cell:not(.is-out):hover .can-points li, .can-cell:not(.is-out):hover .can-points li::before, .can-cell:not(.is-out):hover .can-where > span { color: #fff; }
+  .can-cell:not(.is-out):hover .can-where .is-no { text-decoration-color: rgba(255, 255, 255, .7); }
+  .can-cell:not(.is-out):hover .can-art { color: rgba(255, 255, 255, .92); }
+  .can-cell:not(.is-out):hover .can-art b { color: var(--navy-deep); }
+  /* White once the orange is (nearly) across, so no word goes white on white; back at once when it leaves. */
+  .can-cell:not(.is-out):hover h3, .can-cell:not(.is-out):hover .can-points li, .can-cell:not(.is-out):hover .can-points li::before, .can-cell:not(.is-out):hover .can-where > span, .can-cell:not(.is-out):hover .can-art, .can-cell:not(.is-out):hover .can-art b { transition: color .14s ease .22s; }
+}
 
 /* 03 Get started: a centred head over a breathing glyph cloud, the ways in as a row of tabs, and one navy terminal
    window that shows a few real steps for each. */
@@ -1352,5 +1370,5 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 }
 @media (prefers-reduced-motion: reduce) {
   .is-story .tier-row .tier-panel { transition: none; }
-  .can-cell, .can-cell h3, .can-art, .can-filter label, .can-bracket, .tier-head::before, .tier-n, .tier-row { transition: none; }
+  .can-cell, .can-cell::after, .can-art b, .can-cell h3, .can-points li, .can-points li::before, .can-where > span, .can-art, .can-filter label, .can-bracket, .tier-head::before, .tier-n, .tier-row { transition: none; }
 }

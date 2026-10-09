@@ -80,6 +80,16 @@ describe('Page markup', () => {
     expect(page).toContain('Hosted <span class="can-count">3</span>')
   })
 
+  it('says what each capability does in a few short points', () => {
+    const page = pageMarkup()
+    for (const c of CAPABILITIES) {
+      expect(c.points.length).toBeGreaterThanOrEqual(2)
+      expect(c.points.length).toBeLessThanOrEqual(3)
+      for (const point of c.points) expect(point.length).toBeLessThanOrEqual(70)
+      expect(page).toContain(`<ul class="can-points" role="list">${c.points.map(p => `<li>${p}</li>`).join('')}</ul>`)
+    }
+  })
+
   it('states the free allowances the services enforce', () => {
     const hostedApi = readFileSync(new URL('../../../packages/mcp/src/hostedApi.ts', import.meta.url), 'utf8')
     const constant = (name: string) => Number(new RegExp(`export const ${name} = ([\\d_]+)`).exec(hostedApi)?.[1]?.replace(/_/g, ''))

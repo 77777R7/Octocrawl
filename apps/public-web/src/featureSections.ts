@@ -24,12 +24,13 @@ const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').
 /** A line of glyph art: `{…}` marks the accent, written as <b>. */
 const art = (lines: readonly string[]) => lines.map(line => esc(line).replace(/\{([^}]*)\}/g, '<b>$1</b>')).join('\n')
 
-type Capability = { key: string, hosted: boolean, title: string, text: string, art: readonly string[] }
+// `points`: what it does, a short line each, read at a glance.
+type Capability = { key: string, hosted: boolean, title: string, points: readonly string[], art: readonly string[] }
 
 export const CAPABILITIES: readonly Capability[] = [
   {
     key: 'scrape', hosted: true, title: 'Scrape a page',
-    text: 'Markdown, links, tables and fields from one URL, read over HTTP, or in a browser when the page needs one.',
+    points: ['Markdown, links, tables and fields', 'From one URL', 'Over HTTP, or in a browser when the page needs one'],
     art: [
       '┌──────────┐',
       '│ ░▒░░▒▒░░ │    # Overview',
@@ -40,7 +41,7 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     key: 'map', hosted: true, title: 'Map a site',
-    text: 'The URLs a site lists in its sitemap and links, before you read a single page.',
+    points: ['The URLs a site lists in its sitemap and links', 'Before you read a single page'],
     art: [
       '{×} site.example',
       ' ├─ /docs',
@@ -51,7 +52,7 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     key: 'jobs', hosted: false, title: 'Crawl and batch',
-    text: 'Follow a site’s links, or read a list of up to 1,000 URLs. A crawl that stops resumes where it left off.',
+    points: ['Follow a site’s links', 'Or read a list of up to 1,000 URLs', 'A crawl that stops resumes where it left off'],
     art: [
       '[{×××××××××}·······]',
       ' ✓ page 1   ✓ page 5',
@@ -62,7 +63,7 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     key: 'monitor', hosted: false, title: 'Watch a page',
-    text: 'A Monitor re-reads a page and sends what changed to your HTTPS webhook, signed with your secret. Timed re-runs need a repository checkout.',
+    points: ['A Monitor re-reads a page', 'Sends what changed to your HTTPS webhook, signed with your secret', 'Timed re-runs need a repository checkout'],
     art: [
       ' run ·──·──·──{×}──·',
       '              │',
@@ -73,7 +74,7 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     key: 'chrome', hosted: false, title: 'Your own Chrome',
-    text: 'Read pages signed in as you, and hand a page that stops at a check to your Chrome to get past it yourself.',
+    points: ['Read pages signed in as you', 'A page that stops at a check goes to your Chrome', 'You get past it yourself'],
     art: [
       '┌ your Chrome ─────────┐',
       '│ {●} signed in as you   │',
@@ -84,7 +85,7 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     key: 'evidence', hosted: true, title: 'An Evidence Record',
-    text: 'Every result says where it came from: the final URL, the HTTP status, the robots.txt decision and a hash of what was read.',
+    points: ['Every result says where it came from', 'The final URL, HTTP status and robots.txt decision', 'A hash of what was read'],
     art: [
       'finalUrl       https://example.com',
       'httpStatus     {200}',
@@ -211,7 +212,7 @@ function capabilityCell(item: Capability): string {
   return `<li class="can-cell" data-hosted="${item.hosted}">
                 <pre class="can-art" aria-hidden="true">${art(item.art)}</pre>
                 <h3>${item.title}</h3>
-                <p>${item.text}</p>
+                <ul class="can-points" role="list">${item.points.map(point => `<li>${point}</li>`).join('')}</ul>
                 <p class="can-where"><span class="${hosted}">Hosted<span class="visually-hidden">${item.hosted ? ': yes' : ': no'}</span></span><span class="is-yes">Your computer<span class="visually-hidden">: yes</span></span></p>
               </li>`
 }
