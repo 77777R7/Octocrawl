@@ -4,7 +4,7 @@ import { archivedSectionsMarkup } from '../src/archive/landingSections.js'
 import { VISITOR_DAILY_PREVIEWS } from '../../../packages/public-preview/src/quota.js'
 import { CAPABILITIES, clientCopy, CLIENTS, tierAmount, tierCaption, TIERS } from '../src/featureSections.js'
 import { glyphBand } from '../src/glyphArt.js'
-import { pageMarkup, sectionBar } from '../src/page.js'
+import { FAQ, faqJsonLd, pageMarkup, sectionBar } from '../src/page.js'
 import { REAL_SITE_MISSES, REAL_SITE_RUN } from '../src/realSiteRun.js'
 
 describe('Page markup', () => {
@@ -19,6 +19,21 @@ describe('Page markup', () => {
     const sections = [...page.matchAll(/<section class="[^"]*" id="([^"]+)"/g)].map(([, id]) => id)
     expect(sections).toEqual(['result-section', 'how-it-works', 'what-it-does', 'get-started', 'free-tiers', 'faq'])
     for (const [, target] of page.matchAll(/href="#([^"]+)"/g)) expect(page).toContain(`id="${target}"`)
+  })
+
+  it('gives search engines the FAQ the page shows, as FAQPage data that cannot close its script', () => {
+    const script = faqJsonLd()
+    const json = script.replace(/^<script type="application\/ld\+json">/, '').replace(/<\/script>$/, '')
+    expect(json).not.toContain('<')
+    const data = JSON.parse(json) as { '@type': string, mainEntity: Array<{ name: string, acceptedAnswer: { text: string } }> }
+    expect(data['@type']).toBe('FAQPage')
+    expect(data.mainEntity.map(item => item.name)).toEqual(FAQ.map(([question]) => question))
+    expect(data.mainEntity[1]!.acceptedAnswer.text).toContain('Amazon.sg product pages (/dp/ASIN) are in Beta.')
+    expect(pageMarkup().match(/<details class="faq-item">/g)).toHaveLength(FAQ.length)
+  })
+
+  it('marks only links that leave the site with an arrow in the header', () => {
+    expect(pageMarkup()).toContain('<a href="/docs/">Docs</a>')
   })
 
   it('links the brand to the home page and keeps the header octopus still', () => {
