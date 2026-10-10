@@ -11,6 +11,7 @@ import { SITEMAP_MODES } from './crawl.js'
 import { MAX_PDF_PAGES, type FetchOptions, type PdfParser } from './execution.js'
 import type { FetchResult, FetchWarning, LadderRunAudit, TraceEvent } from './result.js'
 import { unsafeRegexReason } from './regexSafety.js'
+import { MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_KEYS, VERIFY_CHECK_TYPES, type VerifyCheck, type VerifyCheckType, type VerifyContract } from './verify.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { AttributeSelector, ListField, ListFormatRequest, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
@@ -35,6 +36,11 @@ export const MAX_WAIT_FOR_MS = 60_000
  * formats ask for those.
  */
 export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'includeHtml' | 'includeRawHtml' | 'includeImages' | 'attributes' | 'screenshot' | 'list'> {
+  /**
+   * A task contract (ADR 0006): checks the result must pass for the task to be done, judged after the fetch into the
+   * result's `verification`. It changes nothing the lanes fetch, the cache key or the result's `status`.
+   */
+  verify?: VerifyContract
   /**
    * The whole scrape's deadline in milliseconds, 1 000 to 300 000; default
    * 300 000. When it fires the result is `partial` with the best content a
@@ -319,6 +325,8 @@ export interface CompactScrapeResponse {
   /** The call's facts (`scrapeId`, `proxyUsed`, the concurrency pair, ...) and the page's own declarations, as on the full response. */
   metadata: ScrapeResponseMetadata
   json?: StructuredExtractionResult | null
+  /** The result judged against the request's task contract (`verify`, ADR 0006): `passed`, `failed` with the checks that failed, or `not_requested`. The `status` above stays the fetch's. */
+  verification: import('./verify.js').Verification
   /** The file the response was, as on the full response; absent for a web page. */
   file?: FetchResult['file']
   /** The fetch's caveats (a recorded robots override, a suspected client-rendered shell, a thin http answer kept), as on the full response; absent when it had none. */
@@ -968,7 +976,7 @@ function asRecord(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-export const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown'] as const
+export const PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'skipTlsVerification', 'fastMode', 'blockAds', 'removeBase64Images', 'parsers', 'maxAge', 'minAge', 'storeInCache', 'lockdown', 'verify'] as const
 export const ATTRIBUTION_KEYS = ['origin', 'integration'] as const
 export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'robotsOverride', 'actions', 'handoff', 'lane', 'access', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** The lanes a request may ask for by name. */
@@ -1777,6 +1785,79 @@ function readCacheOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | und
 }
 
 /** onlyMainContent, waitFor, timeout, maxFileBytes, includeTags, excludeTags, headers, mobile, skipTlsVerification, fastMode, blockAds, removeBase64Images and the cache options, shared by scrape, batch and crawl. */
+const MAX_VERIFY_COUNT = 1_000_000
+const MAX_RECORD_FIELDS = 50
+
+function verifyText(value: unknown, at: string): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_VERIFY_TEXT) throw new RequestError(`${at} must be a string of 1 to ${MAX_VERIFY_TEXT} characters`)
+  return value
+}
+
+function verifyCount(value: unknown, at: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > MAX_VERIFY_COUNT) throw new RequestError(`${at} must be an integer from 0 to ${MAX_VERIFY_COUNT}`)
+  return value
+}
+
+/** A check's pattern: flags from i, m, s, u and y (the runner adds g where it counts), compiled, and of a shape that cannot backtrack catastrophically. */
+function verifyPattern(rec: Record<string, unknown>, at: string): { pattern: string; flags?: string } {
+  const pattern = verifyText(rec.pattern, `${at}.pattern`)
+  if (rec.flags !== undefined && (typeof rec.flags !== 'string' || !/^[imsuy]*$/.test(rec.flags))) throw new RequestError(`${at}.flags may hold only i, m, s, u and y`)
+  const flags = rec.flags as string | undefined
+  try { new RegExp(pattern, flags) } catch (error) { throw new RequestError(`${at}.pattern is not a valid regular expression: ${(error as Error).message}`) }
+  const unsafe = unsafeRegexReason(pattern)
+  if (unsafe !== null) throw new RequestError(`${at}.pattern is refused: ${unsafe}`)
+  return { pattern, ...(flags === undefined ? {} : { flags }) }
+}
+
+const verifyScalar = (value: unknown): value is string | number | boolean | null => value === null || ['string', 'number', 'boolean'].includes(typeof value)
+
+function readVerifyCheck(value: unknown, at: string): VerifyCheck {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError(`${at} must be an object`)
+  const rec = value as Record<string, unknown>
+  if (typeof rec.type !== 'string' || !(VERIFY_CHECK_TYPES as readonly string[]).includes(rec.type)) throw new RequestError(`${at}.type must be one of ${VERIFY_CHECK_TYPES.join(', ')}`)
+  const type = rec.type as VerifyCheckType
+  rejectUnknownKeys(rec, VERIFY_CHECK_KEYS[type], at)
+  switch (type) {
+    case 'markdownIncludes': return { type, text: verifyText(rec.text, `${at}.text`) }
+    case 'markdownMatches': return { type, ...verifyPattern(rec, at) }
+    case 'markdownCountMin': return { type, ...verifyPattern(rec, at), min: verifyCount(rec.min, `${at}.min`) }
+    case 'minTables': return { type, min: verifyCount(rec.min, `${at}.min`) }
+    case 'listRecordsMin': return { type, min: verifyCount(rec.min, `${at}.min`), ...(rec.path === undefined ? {} : { path: verifyText(rec.path, `${at}.path`) }) }
+    case 'recordFields': {
+      if (!Array.isArray(rec.fields) || rec.fields.length === 0 || rec.fields.length > MAX_RECORD_FIELDS) throw new RequestError(`${at}.fields must be a list of 1 to ${MAX_RECORD_FIELDS} field names`)
+      return { type, fields: rec.fields.map((field, i) => verifyText(field, `${at}.fields[${i}]`)), min: verifyCount(rec.min, `${at}.min`) }
+    }
+    case 'field': {
+      const path = verifyText(rec.path, `${at}.path`)
+      const comparisons = (['equals', 'in', 'present'] as const).filter((key) => rec[key] !== undefined).length + (rec.min !== undefined || rec.max !== undefined ? 1 : 0)
+      if (comparisons !== 1) throw new RequestError(`${at} must name exactly one comparison: equals, in, present, or min and/or max`)
+      if (rec.equals !== undefined && !verifyScalar(rec.equals)) throw new RequestError(`${at}.equals must be a string, number, boolean or null`)
+      if (rec.in !== undefined && (!Array.isArray(rec.in) || rec.in.length === 0 || rec.in.length > MAX_VERIFY_CHECKS || !rec.in.every(verifyScalar))) throw new RequestError(`${at}.in must be a list of 1 to ${MAX_VERIFY_CHECKS} strings, numbers, booleans or nulls`)
+      if (rec.present !== undefined && typeof rec.present !== 'boolean') throw new RequestError(`${at}.present must be a boolean`)
+      for (const key of ['min', 'max'] as const) if (rec[key] !== undefined && (typeof rec[key] !== 'number' || !Number.isFinite(rec[key]))) throw new RequestError(`${at}.${key} must be a number`)
+      return {
+        type, path,
+        ...(rec.equals === undefined ? {} : { equals: rec.equals as string | number | boolean | null }),
+        ...(rec.in === undefined ? {} : { in: rec.in as (string | number | boolean | null)[] }),
+        ...(rec.present === undefined ? {} : { present: rec.present as boolean }),
+        ...(rec.min === undefined ? {} : { min: rec.min as number }),
+        ...(rec.max === undefined ? {} : { max: rec.max as number }),
+      }
+    }
+  }
+}
+
+/** A request's task contract (`verify`, ADR 0006): closed keys, 1 to MAX_VERIFY_CHECKS checks, each pattern compiled and of a safe shape. */
+export function readVerify(value: unknown): VerifyContract | undefined {
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError('verify must be an object: { checks: [...], emptyOk? }')
+  const rec = value as Record<string, unknown>
+  rejectUnknownKeys(rec, ['checks', 'emptyOk'], 'verify')
+  if (!Array.isArray(rec.checks) || rec.checks.length === 0 || rec.checks.length > MAX_VERIFY_CHECKS) throw new RequestError(`verify.checks must be a list of 1 to ${MAX_VERIFY_CHECKS} checks`)
+  if (rec.emptyOk !== undefined && typeof rec.emptyOk !== 'boolean') throw new RequestError('verify.emptyOk must be a boolean')
+  return { checks: rec.checks.map((check, i) => readVerifyCheck(check, `verify.checks[${i}]`)), ...(rec.emptyOk === undefined ? {} : { emptyOk: rec.emptyOk as boolean }) }
+}
+
 function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | undefined): PageOptions {
   if (rec.onlyMainContent !== undefined && typeof rec.onlyMainContent !== 'boolean') throw new RequestError('onlyMainContent must be a boolean')
   const maxFileBytes = rec.maxFileBytes
@@ -1794,6 +1875,7 @@ function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | unde
   const parsers = readParsers(rec.parsers)
   const actions = readActions(rec.actions)
   const cache = readCacheOptions(rec, mode)
+  const verify = readVerify(rec.verify)
   // A page after actions is that run's page: it is never stored, and never answered from a page stored without them.
   if (actions !== undefined && (cacheLookupRequested(cache) || cache.storeInCache === true)) throw new RequestError('the cache is not available with actions: a page after actions is never stored or reused')
   // A script in a page read with the person's session could read that session's cookies and storage; clicks, typing and scrolling stay available.
@@ -1813,6 +1895,7 @@ function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | unde
     ...(removeBase64Images === undefined ? {} : { removeBase64Images }),
     ...(parsers === undefined ? {} : { parsers }),
     ...(actions === undefined ? {} : { actions }),
+    ...(verify === undefined ? {} : { verify }),
     ...cache,
   }
 }

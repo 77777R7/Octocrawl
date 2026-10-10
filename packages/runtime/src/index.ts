@@ -30,3 +30,5 @@ export type { PageCacheBounds, PageCacheHit, PageCacheOptions } from './pageCach
 export type { EvidenceOutput, EvidenceRecordOptions } from './evidenceRecord.js'
 export { MapRunner } from './map.js'
 export type { MapSpec } from './map.js'
+export { VERIFIER_VERSION, contractSha256, verify } from './verify.js'
+export type { VerifyOptions, VerifyView } from './verify.js'
