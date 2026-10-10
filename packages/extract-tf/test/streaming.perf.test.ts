@@ -82,10 +82,12 @@ describe('resolveReactStreaming (ROADMAP PA item 4)', () => {
       let largeBest = Infinity
       for (let i = 0; i < 5; i++) {
         smallBest = Math.min(smallBest, run(1_000))
-        largeBest = Math.min(largeBest, run(4_000))
+        largeBest = Math.min(largeBest, run(8_000))
       }
-      // Walking up every part's parents takes sixteen times as long for four times the parts.
-      expect(largeBest / smallBest, kind).toBeLessThan(8)
+      // Eight times the parts take about eight times the time (5 to 14 measured on a loaded machine); walking up every
+      // part's parents took 50 to 72 times as long. Four times the parts measured 4 to 8.2 against 13 to 18, too close for
+      // a bound between them to hold on CI.
+      expect(largeBest / smallBest, kind).toBeLessThan(24)
     }
   })
 
