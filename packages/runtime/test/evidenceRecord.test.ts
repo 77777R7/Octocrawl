@@ -65,6 +65,7 @@ describe('toEvidenceRecord', () => {
       pageActions: null,
       // The run's third-party cost is unknown here (null in usage), so it stays unknown.
       access: { route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: null, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null }, session: null, paidCalls: null, grant: null },
+      verification: { status: 'not_requested', verifier: null, contractSha256: null, reason: null, failed: [] },
       readiness: { state: 'ready', basis: [] },
     })
   })

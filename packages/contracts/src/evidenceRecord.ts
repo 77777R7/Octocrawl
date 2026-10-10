@@ -324,8 +324,22 @@ export interface EvidenceRecord {
   pageActions: EvidencePageActions | null
   /** How the result was reached (EvidenceAccess). Added to v1 later (EVIDENCE_RECORD_ADDED_KEYS). */
   access: EvidenceAccess
+  /** The result judged against the request's task contract (ADR 0006). Added to v1 later (EVIDENCE_RECORD_ADDED_KEYS). */
+  verification: EvidenceVerification
   /** Whether the page was ready for its task when it was read (Readiness, ADR 0007). Added to v1 later (EVIDENCE_RECORD_ADDED_KEYS). */
   readiness: EvidenceReadiness
+}
+
+/** A result's verification against its task contract, without the checks' sentences: enough to know whether the task was done and which checks failed. */
+export interface EvidenceVerification {
+  status: 'passed' | 'failed' | 'not_requested'
+  /** The verifier's version; null when no contract was given. */
+  verifier: string | null
+  /** SHA-256 of the contract's canonical JSON; null when no contract was given. */
+  contractSha256: string | null
+  reason: 'checks_failed' | 'page_not_read' | 'empty_not_allowed' | null
+  /** The type of each check that failed, in the contract's order. */
+  failed: string[]
 }
 
 /** The result's readiness (Readiness in result.ts): its state and the signal codes it was read from, without the wait. */
@@ -341,7 +355,7 @@ const keysOf = <T>() => <const K extends readonly (keyof T)[]>(keys: K & EveryKe
 
 /** Field order of the record and of each nested object, as in the schema file. */
 export const EVIDENCE_RECORD_KEYS = {
-  record: keysOf<EvidenceRecord>()(['schemaVersion', 'requestedUrl', 'finalUrl', 'redirectChain', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'robotsDecision', 'rawSha256', 'contentEncoding', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'proxy', 'identity', 'pageActions', 'access', 'readiness']),
+  record: keysOf<EvidenceRecord>()(['schemaVersion', 'requestedUrl', 'finalUrl', 'redirectChain', 'fetchedAt', 'httpStatus', 'status', 'reason', 'lane', 'robotsDecision', 'rawSha256', 'contentEncoding', 'outputSha256', 'extractor', 'fieldEvidence', 'artifacts', 'proxy', 'identity', 'pageActions', 'access', 'verification', 'readiness']),
   redirectChain: keysOf<EvidenceRedirectChain>()(['urls', 'complete']),
   robotsDecision: keysOf<EvidenceRobotsDecision>()(['decision', 'robotsUrl', 'robotsSha256', 'unreachable', 'crawlDelayMs', 'userOverride', 'overrideBasis']),
   outputSha256: keysOf<EvidenceOutputSha256>()(['markdown', 'json']),
@@ -358,6 +372,7 @@ export const EVIDENCE_RECORD_KEYS = {
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
   accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'outcome', 'reason', 'answer']),
   accessGrant: keysOf<EvidenceAccessGrant>()(['sha256', 'tier', 'attestedAt']),
+  verification: keysOf<EvidenceVerification>()(['status', 'verifier', 'contractSha256', 'reason', 'failed']),
   readiness: keysOf<EvidenceReadiness>()(['state', 'basis']),
 } as const
 
@@ -366,7 +381,7 @@ export const EVIDENCE_RECORD_KEYS = {
  * that records written before them stay valid, though W2L always writes them.
  */
 export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RECORD_KEYS, readonly string[]>> = {
-  record: ['contentEncoding', 'pageActions', 'access', 'readiness'],
+  record: ['contentEncoding', 'pageActions', 'access', 'verification', 'readiness'],
   artifact: ['bytes', 'contentType'],
   identity: ['device', 'requestHeaders'],
   robotsDecision: ['overrideBasis'],

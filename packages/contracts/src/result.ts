@@ -420,6 +420,8 @@ export interface FetchResult {
   rawHtml?: string | null
   /** Present only when a JSON format was requested. */
   json?: StructuredExtractionResult | null
+  /** The result judged against the request's task contract (`verify`, ADR 0006); `not_requested` without one. Set after the fetch, never by a lane. */
+  verification?: import('./verify.js').Verification
   /**
    * Present when the response was a file (PDF, CSV, JSON, text, XLSX, XLS,
    * ZIP) rather than a web page: what it was, its size, SHA-256 and where it

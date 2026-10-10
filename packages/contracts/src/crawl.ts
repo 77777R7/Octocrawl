@@ -293,6 +293,8 @@ export interface CrawlPage {
   /** The page's own title, description, language, ... as on a scrape result; absent when no page was extracted. */
   metadata?: FetchResult['metadata']
   json?: import('./structured.js').StructuredExtractionResult | null
+  /** The page judged against the task's contract (`verify`, ADR 0006); `not_requested` without one. */
+  verification?: import('./verify.js').Verification
   /** The file the page was (PDF, CSV, ...), as on a scrape result; absent for a web page. */
   file?: FetchResult['file']
   failureReason: string | null

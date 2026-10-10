@@ -29,7 +29,7 @@ import type {
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
 import { browserFingerprintFor, cacheStateOf, CONTENTFUL_STATUS, defaultApiMode, warningOf } from '@w2l/contracts'
-import { compilePathFilter, readinessOf, toEvidenceRecord } from '@w2l/runtime'
+import { compilePathFilter, readinessOf, toEvidenceRecord, verify } from '@w2l/runtime'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
 
@@ -986,6 +986,8 @@ export async function prepareScrapeResponse(
     ? await extractStructured(extractionInput(result), customJsonFormat(formats), execution, modelConfig ?? structuredModelConfigFromEnv())
     : undefined
   const modelMs = json?.modelUsage ? Math.max(0, performance.now() - modelStart) : 0
+  // The task's contract judged on the whole result, before the response leaves out what was not asked for.
+  const verification = verify(req.verify, { ...result, ...(json === undefined ? {} : { json }) })
   const serializeStart = performance.now()
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
   const warning = warningOf(result.warnings)
@@ -1000,6 +1002,7 @@ export async function prepareScrapeResponse(
     ...(hasFormat(formats, 'rawHtml') ? { rawHtml: result.rawHtml ?? null } : {}),
     ...(hasFormat(formats, 'screenshot') ? { screenshot: result.screenshot ?? null } : {}),
     ...(json === undefined ? {} : { json }),
+    verification,
     summary: withoutRepeatedBodies(result.summary, req.debug === true),
   }
   const serializeMs = Math.max(0, performance.now() - serializeStart)
@@ -1009,7 +1012,7 @@ export async function prepareScrapeResponse(
     scrapeId,
     metadata: scrapeResponseMetadata(next, scrapeId),
     snapshot: scrapeSnapshot(next),
-    evidenceRecord: scrapeEvidenceRecord(result, req, next),
+    evidenceRecord: scrapeEvidenceRecord({ ...result, verification }, req, next),
     // Read from the full result: a failed page's whole-page evidence is in its Markdown whether or not markdown was asked for.
     readiness: readinessOf(result),
     usage: {
@@ -1168,6 +1171,7 @@ export function compactScrapeResponse(
     } }),
     metadata: next.metadata,
     ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
+    verification: next.verification ?? { status: 'not_requested' },
     ...(next.file === undefined ? {} : { file: next.file }),
     ...(next.warnings === undefined ? {} : { warnings: next.warnings }),
     ...(warningOf(next.warnings) === undefined ? {} : { warning: warningOf(next.warnings) }),

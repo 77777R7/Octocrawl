@@ -104,6 +104,10 @@
       "description": "How the result was reached: the route, the client that sent its requests and the third-party spend of the run, read from the result's own trace (ADR 0005). Added to v1 with enhanced access: optional here so that earlier records stay valid; W2L writes it on every record.",
       "$ref": "#/$defs/access"
     },
+    "verification": {
+      "description": "The result judged against the request's task contract (`verify`, ADR 0006): whether the task was done, which is not the fetch's `status`. Added to v1 with task verification: optional here so that earlier records stay valid; W2L writes it on every record.",
+      "$ref": "#/$defs/verification"
+    },
     "readiness": {
       "description": "Whether the page was ready for its task when it was read, from the result's own signals (ADR 0007). Added to v1 later: optional here so that earlier records stay valid; W2L writes it on every record.",
       "$ref": "#/$defs/readiness"
@@ -536,6 +540,37 @@
         "attestedAt": {
           "description": "When the grant's attestation says the operator accepted the providers' terms and costs; null when it has none.",
           "type": ["string", "null"]
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "verifier", "contractSha256", "reason", "failed"],
+      "properties": {
+        "status": {
+          "description": "passed: every check passed, or the result was empty and the contract allows that; failed; not_requested: the request had no contract.",
+          "enum": ["passed", "failed", "not_requested"]
+        },
+        "verifier": {
+          "description": "The verifier's version, which changes when a check is judged differently; null without a contract.",
+          "type": ["string", "null"]
+        },
+        "contractSha256": {
+          "description": "SHA-256 of the contract's canonical JSON (RFC 8785); null without a contract.",
+          "anyOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "reason": {
+          "description": "Why a verification failed: checks_failed (the page was read and a check failed), page_not_read (no check ran) or empty_not_allowed; null otherwise.",
+          "enum": ["checks_failed", "page_not_read", "empty_not_allowed", null]
+        },
+        "failed": {
+          "description": "The type of each check that failed, in the contract's order.",
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     },
