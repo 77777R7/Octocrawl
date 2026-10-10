@@ -1,6 +1,6 @@
 # ADR 0006：任务验证与抓取状态分开
 
-- 状态：提议（待 Howard 确认）
+- 状态：已接受（Howard，2026-10-10）
 - 日期：2026-10-10
 - 前置：ROADMAP.md「PA · Enhanced access」第 10 项（#353）、ADR 0005
 
@@ -135,8 +135,8 @@ view 里的字段都可以缺：
 - 第 11 项（区域就绪）用 `verification.reason`、失败的判定和它们的结构化计数，再对 DOM 视图跑一遍验证器，把 `checks_failed` 细分成 `not_loaded`、`not_extracted`、`not_served`；`page_not_read` 交给访问路线处理。两项的接口在第 2、3 节和第 4 节的"执行阶梯"一行。
 - 托管服务暂时不能用正则判定，等有了能限时的正则引擎再开放。
 
-## 待 Howard 确认
+## Howard 的确认（2026-10-10）
 
-1. 带契约时，验证失败要不要让执行阶梯继续往下一级走（在 `enhanced` 下可能多花付费调用）？建议：要。
-2. 托管服务先拒绝正则判定？建议：先拒绝。
-3. 顶层 `status` 保持抓取状态不变，"任务完成"只看 `verification`？建议：是。
+1. 带契约时，验证失败可以让执行阶梯继续往下一级走，先过第 11 项的就绪判断；在 `enhanced` 下可能多花付费调用，都在已批准的 grant 和预算以内。
+2. 托管服务先拒绝正则判定（`markdownMatches`、`markdownCountMin`），等有能限时的正则引擎再开放。
+3. 顶层 `status` 保持抓取状态不变，"任务完成"只看 `verification`。
