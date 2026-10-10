@@ -102,7 +102,7 @@ interface LiveSession {
   browser: CdpBrowser
   handoffUrl: string | null
   resumeContext: VendorResumeContext | null
-  /** Just before the session was asked for: the provider bills from its creation. */
+  /** Just before the session was asked for (`performance.now()`): the provider bills from its creation. */
   openedAt: number
 }
 
@@ -205,7 +205,8 @@ export class CdpVendorTransport implements ProviderTransport {
     throwIfExecutionStopped({ signal, deadlineAt: deadlineMs })
     if (this.live !== null) return this.live
 
-    const openedAt = Date.now()
+    // A monotonic clock: a wall clock stepped back mid-session (a time sync, a laptop waking) would shorten the time charged.
+    const openedAt = performance.now()
     let session: VendorSession
     try {
       session = await this.ops.createSession(this.resume, deadlineMs, signal)
@@ -273,7 +274,7 @@ export class CdpVendorTransport implements ProviderTransport {
     } catch {
       released = false
     }
-    this.closed.push({ sessionMs: Date.now() - openedAt, released })
+    this.closed.push({ sessionMs: Math.ceil(performance.now() - openedAt), released })
   }
 
   private scrub(message: string): string {

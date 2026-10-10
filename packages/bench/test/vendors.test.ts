@@ -220,6 +220,24 @@ describe('steel session config', () => {
     expect(api.requests[1]!.url).toBe('https://api.steel.dev/v1/sessions/st_1/release')
   })
 
+  it('times a session from before it is asked for to after its release is confirmed (ROADMAP PA item 4)', async () => {
+    const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 60))
+    const api = sessionServing('st_1')
+    const base = steelOps({ apiKey: 'steel_key' }, api.handler)
+    const ops = { ...base, async createSession(...args: Parameters<typeof base.createSession>) { await pause(); return base.createSession(...args) }, async releaseSession(id: string) { await pause(); return base.releaseSession(id) } }
+    const transport = new CdpVendorTransport(ops, connectorFor(fakeBrowser()).connector)
+    await transport.resolveUserAgent()
+    expect(transport.closedSessions()).toEqual([])
+    await transport.close()
+    const [closed, ...more] = transport.closedSessions()
+    expect(more).toEqual([])
+    expect(closed!.released).toBe(true)
+    // Both the slow create and the slow release are in it, in whole milliseconds.
+    expect(Number.isInteger(closed!.sessionMs)).toBe(true)
+    expect(closed!.sessionMs).toBeGreaterThanOrEqual(120)
+    expect(closed!.sessionMs).toBeLessThan(2_000)
+  })
+
   it('fails a release the vendor did not confirm: the session bills until its timeout (ROADMAP PA item 4)', async () => {
     for (const [vendor, ops, id] of [
       ['steel', (api: FakeApi) => steelOps({ apiKey: 'steel_key' }, api.handler), 'st_1'],

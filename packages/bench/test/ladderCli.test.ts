@@ -602,6 +602,25 @@ describe('buildChannels + LadderRunner session composition', () => {
     expect(kept.result.usage.vendorSessionMs).toBeUndefined()
     expect(kept.result.trace.find((e) => e.event === 'spend_settled')?.detail).toMatchObject({ basis: 'ceiling' })
     await Promise.all(unconfirmed.map((c) => c.close?.().catch(() => {})))
+    // The time runs from before the session is asked for to after its release is confirmed: a slow create and a slow
+    // release are both in it.
+    const slow = buildChannels('authed', {
+      localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: {
+        steel: (() => {
+          const ops = fakeVendorOps('steel', () => {})
+          const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 60))
+          return { ...ops, async createSession(...args: Parameters<VendorOps['createSession']>) { await pause(); return ops.createSession(...args) }, async releaseSession() { await pause() } }
+        })(),
+      },
+      vendorTariffs: { steel: tariff },
+      ...vendorEnv(),
+    })
+    const timed = paidCall(await new LadderRunner(slow, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p'))
+    expect(timed.sessionMs as number).toBeGreaterThanOrEqual(120)
+    expect(timed.chargedUsd).toBeCloseTo(0.001 + (0.12 * (timed.sessionMs as number)) / 3_600_000, 9)
+    await Promise.all(slow.map((c) => c.close?.().catch(() => {})))
     // Each session is billed on its own, by the tariff's minimum and step; the whole is at most the ceiling.
     const byMinute = { perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 120_000, minBilledMs: 60_000, billingIncrementMs: 60_000 }
     const base = run.result
