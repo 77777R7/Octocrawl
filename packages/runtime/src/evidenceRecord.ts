@@ -18,6 +18,7 @@ import {
   type EvidenceAccessEgress,
   type EvidenceAccessGrant,
   type EvidenceAccessSession,
+  type EvidenceVerification,
   type EvidencePaidCall,
   type EvidenceArtifact,
   type EvidenceFieldLocation,
@@ -112,6 +113,7 @@ export function toEvidenceRecord(
     },
     pageActions: pageActions(result),
     access: evidenceAccess(result),
+    verification: evidenceVerification(result),
   }
 }
 
@@ -258,12 +260,19 @@ export function sourceCommitFromEnv(): string | null {
   return /^[0-9a-f]{7,40}$/.test(value) ? value : null
 }
 
+/** The result's verification without the checks' sentences (EvidenceVerification): a result that carries none was not verified. */
+function evidenceVerification(result: FetchResult): EvidenceVerification {
+  const v = result.verification
+  if (v === undefined || v.status === 'not_requested') return { status: 'not_requested', verifier: null, contractSha256: null, reason: null, failed: [] }
+  return { status: v.status, verifier: v.verifier, contractSha256: v.contractSha256, reason: v.reason, failed: v.checks.filter((check) => check.passed === false).map((check) => check.type) }
+}
+
 /**
  * RFC 8785 canonical JSON for the values W2L emits: object keys sorted by
  * UTF-16 code units at every level, no whitespace, JSON.stringify for strings
  * and numbers. Undefined members are left out, as JSON.stringify does.
  */
-function canonicalJson(value: JsonValue): string {
+export function canonicalJson(value: JsonValue): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(item => canonicalJson(item ?? null)).join(',')}]`
   const members = Object.keys(value).sort().filter(key => value[key] !== undefined)

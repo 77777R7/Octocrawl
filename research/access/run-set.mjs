@@ -78,6 +78,7 @@ import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isData, judge } from './judge.mjs'
 
 // Every file the runner writes goes through scrub() (defined below, before the first write), except a page's own Markdown.
 const writeFile = (file, text) => writeRaw(file, scrub(text))
@@ -99,8 +100,6 @@ const TARGETS = { octocrawl: 'the local Octocrawl API', firecrawl: 'Firecrawl Cl
 if (!(target in TARGETS)) throw new Error(`--target must be one of ${Object.keys(TARGETS).join(', ')}`)
 if (target !== 'octocrawl' && flag('--access') !== undefined) throw new Error('--access is an Octocrawl option; a competitor runs with its own strongest route')
 
-const DATA_TYPES = new Set(['markdownIncludes', 'markdownMatches', 'markdownCountMin', 'minTables', 'listRecordsMin'])
-const isData = (p) => DATA_TYPES.has(p.type) || (p.type === 'field' && /^(json|list|tables)\b/.test(p.path))
 
 const taskText = await readFile(join(here, 'tasks.v1.json'), 'utf8')
 const tasksSha256 = createHash('sha256').update(taskText).digest('hex')
@@ -209,28 +208,6 @@ const runDir = rejudgeDir === undefined ? join(repo, '.w2l/access/runs', environ
 await mkdir(join(runDir, 'pages'), { recursive: true })
 const linesFile = join(runDir, 'attempts.jsonl')
 
-const get = (obj, path) => path.split('.').reduce((v, k) => (v === undefined || v === null ? undefined : v[k]), obj)
-const gfmTableCount = (md) => (md.match(/^\|.*\|\s*\n\|\s*:?-{3,}/gm) ?? []).length
-
-function judge(p, doc) {
-  const md = typeof doc.markdown === 'string' ? doc.markdown : ''
-  switch (p.type) {
-    case 'markdownIncludes': return md.includes(p.text)
-    case 'markdownMatches': return new RegExp(p.pattern, p.flags ?? 'm').test(md)
-    case 'markdownCountMin': return (md.match(new RegExp(p.pattern, (p.flags ?? '').replace('g', '') + 'g')) ?? []).length >= p.min
-    case 'minTables': return gfmTableCount(md) >= p.min
-    case 'listRecordsMin': { const r = get(doc, p.path ?? 'list.records'); return Array.isArray(r) && r.length >= p.min }
-    case 'field': {
-      const v = get(doc, p.path)
-      if ('equals' in p) return v === p.equals
-      if ('in' in p) return p.in.includes(v)
-      if ('present' in p) return (v !== undefined && v !== null && v !== '') === p.present
-      if ('min' in p || 'max' in p) return typeof v === 'number' && v >= (p.min ?? -Infinity) && v <= (p.max ?? Infinity)
-      throw new Error(`field predicate on ${p.path} names no comparison`)
-    }
-    default: throw new Error(`unknown predicate type ${p.type}`)
-  }
-}
 
 /**
  * Firecrawl Cloud's scrape of one task, as the document the predicates read: its success with the target's 2xx is

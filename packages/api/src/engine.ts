@@ -115,7 +115,7 @@ import {
 } from '@w2l/contracts'
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
-import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
+import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
@@ -126,7 +126,7 @@ import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, FileSessionStore, mergeListPages, publicSession, SessionBroker, type SessionStore } from '@w2l/bench'
-import { BLOCK_REASON, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
+import { BLOCK_REASON, VERIFY_REGEX_CHECK_TYPES, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
 
@@ -771,6 +771,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode', 'invalid_request', undefined, [REFUSAL_HINTS.hostedSkipTlsVerification])
     // A step runs the caller's clicks and scripts in the operator's browser; a hosted engine takes none until that isolation is reviewed.
     if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run Octocrawl locally to use them')
+    // A JavaScript regular expression cannot be bounded in time, and a page's Markdown is far longer than a safe pattern's text (ADR 0006).
+    const regexChecks = req.verify?.checks.filter((check) => (VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(check.type)).map((check) => check.type) ?? []
+    if (hosted && regexChecks.length > 0) throw new RequestError(`verify: ${[...new Set(regexChecks)].join(' and ')} checks are not available in hosted mode (a regular expression cannot be bounded in time); use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally`, 'unsupported_parameter', { parameters: ['verify'] })
   }
   /**
    * `access: "enhanced"` asks for what the server's access grant of tier enhanced approves (ADR 0005), within its
@@ -1404,6 +1407,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                   markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
                   links: hasFormat(formats, 'links') || selection.includeLinks === true ? result.links : [],
                   ...(json === undefined ? {} : { json }),
+                  verification: verify(selection.verify, { ...result, ...(json === undefined ? {} : { json }) }),
                 }
                 // An engine shutting down writes nothing more.
                 if (shutdownController.signal.aborted || handoffClosing.signal.aborted) {
@@ -1541,6 +1545,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           // A crawl stores every page's links: its frontier and resume follow them. Output filters them.
           links: task.batch === undefined || wants('links') || selection.includeLinks === true ? outcome.result.links : [],
           ...(json === undefined ? {} : { json }),
+          // The task's contract judged on the whole page, before the stored result leaves out what was not asked for.
+          verification: verify(selection.verify, { ...outcome.result, ...(json === undefined ? {} : { json }) }),
         } }
       },
       close: closeLadders,
@@ -2483,6 +2489,7 @@ function pageOptions(req: PageOptions): PageOptions {
     ...(req.minAge === undefined ? {} : { minAge: req.minAge }),
     ...(req.storeInCache === undefined ? {} : { storeInCache: req.storeInCache }),
     ...(req.lockdown === undefined ? {} : { lockdown: req.lockdown }),
+    ...(req.verify === undefined ? {} : { verify: req.verify }),
   }
 }
 
@@ -2817,6 +2824,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task, handof
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),
+    ...(result === null || result === undefined ? {} : { verification: result.verification ?? { status: 'not_requested' } }),
     ...(result?.file === undefined ? {} : { file: result.file }),
     ...(result?.actions === undefined ? {} : { actions: result.actions }),
     ...(result?.list === undefined ? {} : { list: result.list }),

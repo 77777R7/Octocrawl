@@ -400,6 +400,28 @@ Anything else is refused with HTTP 400 `unsupported_parameter`, whose `details.p
 
 Model fallback is opt-in with `modelFallback: true` and runs only when a required field is missing or a value breaks the schema; configure an OpenAI-compatible endpoint through `W2L_EXTRACT_BASE_URL`, `W2L_EXTRACT_MODEL` and optional `W2L_EXTRACT_API_KEY`. Without those variables, page content is never sent to a model and the JSON result reports `model_unavailable`. The model receives the main-content Markdown and the values already read. It fills only what is missing, or replaces a page value that breaks the schema; every value read from the page keeps its value and evidence whatever the model answers, and every value the model wrote has `model` evidence. The request uses strict structured outputs (`json_schema` with `strict: true`) with a strict-safe copy of the schema: every object closed, every property required and the optional ones nullable, assertions and annotations left out. The answer is still checked against your schema, with one repair round, and a `null` your schema does not allow is dropped as "not found". A schema strict mode cannot express, such as an object without `properties`, is sent as given without strict mode; `json.modelUsage.strict` says which was used and `strictReason` why not.
 
+**Did the page give what the task needs? (`verify`)** A fetch can succeed without the data a task asked for: a page of navigation, a sheet drawn on a canvas, a listing that had not loaded. A request (`POST /v1/scrape`, `POST /v1/batches` and `POST /v1/crawl`, for every page) may carry a task contract, and the answer then says whether the page met it, in `verification`, beside a `status` that stays the fetch's ([ADR 0006](docs/adr/0006-task-verification.md)):
+
+```json
+{ "url": "https://example.com/laptops", "verify": { "checks": [
+  { "type": "markdownCountMin", "pattern": "\\$\\d", "min": 5 },
+  { "type": "recordFields", "fields": ["name", "price", "url"], "min": 5 }
+], "emptyOk": false } }
+```
+
+- **Checks:**
+  - `markdownIncludes` (`text`), `markdownMatches` (`pattern`, `flags`) and `markdownCountMin` (`pattern`, `flags`, `min`): on the page's Markdown.
+  - `minTables` (`min`): GFM tables in the Markdown.
+  - `listRecordsMin` (`min`) and `recordFields` (`fields`, `min`): records of the `list` format; `recordFields` counts the records that hold every field named.
+  - `field` (`path`, and one of `equals`, `in`, `present`, or `min`/`max`): a value of the result, such as `json.data.price`.
+  - `emptyOk: true` passes an empty result (`empty_verified`), such as a search with no hits.
+- **Limits:** at most 32 checks. Patterns take the flags `i`, `m`, `s`, `u` and `y`, must compile, and are refused when they can backtrack catastrophically. A hosted server refuses `markdownMatches` and `markdownCountMin`, since a regular expression cannot be bounded in time there.
+- **The answer:** `verification.status` is `passed`, `failed` or `not_requested` (no contract).
+  - When failed, `reason` is `checks_failed` (the page was read and a check failed), `page_not_read` (no check ran) or `empty_not_allowed`.
+  - Each check carries `passed` and a sentence of what was seen; count checks also carry `observedCount` and `asked`.
+  - The Evidence Record carries `verification` too: status, verifier version (`verify/1`), the contract's SHA-256, and the checks that failed.
+- The checks are those of the access task runner (`research/access/run-set.mjs`), judged the same way, so its tasks can be sent unchanged.
+
 Run the fixed 10-product, three-round Amazon MCP baseline with:
 
 ```bash
