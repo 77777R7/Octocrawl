@@ -23,7 +23,7 @@ import {
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
 import { login } from './login.js'
 
-export const CLI_VERSION = '0.4.0'
+export const CLI_VERSION = '0.4.1'
 
 export interface CliIo {
   env: NodeJS.ProcessEnv
