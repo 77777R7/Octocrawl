@@ -156,7 +156,7 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
 type Page = {
   url?: string; requestedUrl?: string; markdown?: string | null; tables?: readonly PageTable[]
   status?: string; lane?: string | null; failureReason?: string | null; blockReason?: string | null; budgetExceeded?: string | null
-  cacheState?: string; cachedAt?: string; evidenceRecord?: EvidenceRecord | null
+  cacheState?: string; cachedAt?: string; evidenceRecord?: EvidenceRecord | null; verification?: { status: string }
   /** A scrape response gives the cache outcome here, not at the top level. */
   metadata?: object | null
 }
@@ -262,7 +262,7 @@ async function writeOut(dir: string, pages: readonly Page[], report: CrawlReport
  */
 export const EVIDENCE_COLUMNS = [
   'url', 'status', 'reason', 'final_url', 'fetched_at', 'http_status', 'lane', 'robots_decision',
-  'raw_sha256', 'markdown_sha256', 'extractor', 'source_commit', 'cache_state', 'cached_at', 'markdown_file',
+  'raw_sha256', 'markdown_sha256', 'extractor', 'source_commit', 'cache_state', 'cached_at', 'verification', 'markdown_file',
 ] as const
 
 function evidenceRow(page: Page, markdownFile: string | null): Array<string | number | null | undefined> {
@@ -283,6 +283,8 @@ function evidenceRow(page: Page, markdownFile: string | null): Array<string | nu
     record?.extractor.commit,
     page.cacheState ?? metadata.cacheState,
     page.cachedAt ?? metadata.cachedAt,
+    // passed, failed or not_requested (ADR 0006); empty from a server that does not verify.
+    page.verification?.status ?? record?.verification?.status,
     markdownFile,
   ]
 }

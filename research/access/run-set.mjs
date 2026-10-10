@@ -5,7 +5,7 @@
 // .w2l/access/runs/<timestamp>/ and, with --record, a Markdown summary that is the committed record.
 //
 // Usage: node research/access/run-set.mjs [--set frozen|healthy|blind|candidate|all] [--only T01,T02] [--warm]
-//          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--record research/access/runs/<date>-<label>-<commit>.md]
+//          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--no-contract] [--record research/access/runs/<date>-<label>-<commit>.md]
 //        node research/access/run-set.mjs --rejudge .w2l/access/runs/<timestamp> [--record research/access/runs/<new file>.md]
 //   --target     who fetches the pages (ROADMAP PA item 9, the competitor baseline). octocrawl (the default) is the local
 //                API. firecrawl is Firecrawl Cloud's POST /v2/scrape with FIRECRAWL_API_KEY: the task's own formats,
@@ -23,6 +23,10 @@
 //   recorded as the exit address (for example https://api.ipify.org).
 //   --set frozen (the default) selects the frozen and the unstable tasks: PA's denominator. healthy,
 //   blind and candidate select that part alone; all selects every task.
+//   task contract (octocrawl) each task's predicates go to the API as its `verify` contract (ADR 0006), and the answer's
+//                `verification` is recorded beside the runner's own verdict: the record says on how many attempts they
+//                agreed and names each one where they did not. --no-contract sends none (an API before task verification
+//                refuses the key). A competitor is never sent one.
 //   --rejudge re-evaluates a finished run's saved Markdown against the current predicates in
 //   tasks.v1.json, without fetching. The run's own attempts.jsonl and summary.json are never
 //   rewritten: the new verdicts go to attempts.rejudged-<time>.jsonl and summary.rejudged-<time>.json
@@ -91,6 +95,7 @@ const flag = (name) => { const i = args.indexOf(name); return i === -1 ? undefin
 const setFilter = flag('--set') ?? 'frozen'
 const only = flag('--only')?.split(',').map((s) => s.trim())
 const warm = args.includes('--warm')
+const sendContract = !args.includes('--no-contract')
 const access = flag('--access') === undefined ? undefined : JSON.parse(flag('--access'))
 const recordFile = flag('--record')
 const rejudgeDir = flag('--rejudge')
@@ -286,7 +291,7 @@ function chargedOf(doc) {
 }
 
 async function attempt(task, temperature) {
-  const body = { url: task.url, ...(task.request ?? {}), maxAge: 0, ...(access === undefined ? {} : { access }) }
+  const body = { url: task.url, ...(task.request ?? {}), maxAge: 0, ...(access === undefined ? {} : { access }), ...(target === 'octocrawl' && sendContract ? { verify: { checks: task.predicates } } : {}) }
   const started = Date.now()
   let doc = null, apiStatus = null, error = null, waitedMs = 0
   try {
@@ -320,6 +325,8 @@ async function attempt(task, temperature) {
       markdownChars: typeof doc?.markdown === 'string' ? doc.markdown.length : null,
       ...(doc?.requestCost === undefined ? {} : { requestCost: doc.requestCost }),
       ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc) } : {}),
+      // The product's own verdict on the task's contract (ADR 0006); null when none was sent or the answer has none.
+      productVerification: typeof doc?.verification?.status === 'string' && doc.verification.status !== 'not_requested' ? doc.verification.status : null,
     },
     intervention: { access: access ?? null, lane: doc?.lane ?? null, egress: doc?.evidence?.envProxy ?? null },
     outcome: {
@@ -398,6 +405,10 @@ const summary = (temp) => {
   const verifiedN = r.filter((x) => x.outcome.verified).length
   return {
     attempts: r.length, verified: verifiedN, falseSuccess: r.filter((x) => x.outcome.falseSuccess).length,
+    // The product's verification against the runner's verdict, over the attempts that carry one.
+    productVerified: r.filter((x) => x.observed.productVerification === 'passed').length,
+    productJudged: r.filter((x) => typeof x.observed.productVerification === 'string').length,
+    productAgreed: r.filter((x) => typeof x.observed.productVerification === 'string' && (x.observed.productVerification === 'passed') === x.outcome.verified).length,
     p50Ms: pct(r.map((x) => x.outcome.wallMs), 0.5), p95Ms: pct(r.map((x) => x.outcome.wallMs), 0.95),
     externalCostPer1000VerifiedUsd: costs.some((c) => c === null) || verifiedN === 0 ? null : (costs.reduce((a, b) => a + b, 0) / verifiedN) * 1000,
     egressCostPer1000VerifiedUsd: null,
@@ -443,6 +454,10 @@ if (recordFile !== undefined) {
     `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}`,
     ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}`),
+    ...Object.entries(totals).filter(([, t]) => t.productJudged > 0).map(([temp, t]) => {
+      const disagree = rows.filter((x) => x.temperature === temp && typeof x.observed.productVerification === 'string' && (x.observed.productVerification === 'passed') !== x.outcome.verified)
+      return `- Task contract (${temp}): the product's verification agreed with the runner on ${t.productAgreed} of ${t.productJudged} attempts that carry one (${t.productVerified} passed)${disagree.length === 0 ? '' : `; disagreed on ${disagree.map((x) => `${x.taskId} (product ${x.observed.productVerification}, runner ${x.outcome.verified ? 'verified' : 'not verified'})`).join(', ')}`}`
+    }),
     '', 'Suspected cause: not isolated for any task (a run through the product cannot isolate it; see the method).', '',
     ...(droppedRows.length === 0 ? [] : [`Not rejudged, counted above with the run's own verdict (removed from the task file, or its URL changed, after this run; a reason, where given, is in tasks.v1.json \`excluded\`): ${[...new Set(droppedRows.map((r) => r.taskId))].join(', ')}.`, '']),
   ].join('\n')

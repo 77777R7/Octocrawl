@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { MAP_KEYS, type MapResponse } from '@w2l/contracts'
+import { BATCH_KEYS, CRAWL_KEYS, MAP_KEYS, SCRAPE_KEYS, type MapResponse } from '@w2l/contracts'
 import { SDK_ORIGIN, W2L } from '@w2l/sdk'
 import { callTool, TOOL_NAMES, TOOLS } from '../src/tools.js'
 import { createMcpServer, mcpOrigin } from '../src/server.js'
@@ -680,6 +680,18 @@ describe('MCP tools', () => {
     for (const name of ['crawl', 'batch_scrape']) {
       const properties = TOOLS.find((tool) => tool.name === name)?.inputSchema.properties as Record<string, { anyOf?: unknown[] }>
       expect(properties.webhook?.anyOf, name).toHaveLength(2)
+    }
+  })
+
+  it('takes on scrape, batch_scrape and crawl every key the request takes, verify among them, but origin and parsers', () => {
+    // origin is the host's own; parsers (PDF options) are not offered over MCP.
+    const notOffered = ['origin', 'parsers']
+    for (const [name, keys] of [['scrape', SCRAPE_KEYS], ['batch_scrape', BATCH_KEYS], ['crawl', CRAWL_KEYS]] as const) {
+      const tool = TOOLS.find((t) => t.name === name)!
+      const properties = Object.keys(tool.inputSchema.properties)
+      expect((keys as readonly string[]).filter((key) => !properties.includes(key) && !notOffered.includes(key)), name).toEqual([])
+      expect(properties.filter((key) => !(keys as readonly string[]).includes(key) && key !== 'debug'), name).toEqual([])
+      expect((tool.inputSchema.properties as Record<string, { required?: string[] }>).verify?.required, name).toEqual(['checks'])
     }
   })
 
