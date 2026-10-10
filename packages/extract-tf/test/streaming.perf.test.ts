@@ -52,11 +52,13 @@ describe('resolveReactStreaming (ROADMAP PA item 4)', () => {
       let smallBest = Infinity
       let largeBest = Infinity
       for (let i = 0; i < 5; i++) {
-        smallBest = Math.min(smallBest, run(2_000))
+        smallBest = Math.min(smallBest, run(1_000))
         largeBest = Math.min(largeBest, run(8_000))
       }
-      // Moving every part's nodes again takes sixteen times as long for four times the parts.
-      expect(largeBest / smallBest, kind).toBeLessThan(8)
+      // Eight times the parts take about eight times the time (7 to 17 measured on a loaded machine); moving every part's
+      // nodes again took 64 to 76 times as long. Four times the parts measured up to 7.2 against 17, too close for a bound
+      // between them to hold on CI. Eight times 2 000 parts would pass the 10 000 calls a page is read for.
+      expect(largeBest / smallBest, kind).toBeLessThan(28)
     }
   })
 
