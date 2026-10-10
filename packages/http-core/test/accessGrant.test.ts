@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeAccessGrant, tariffCeilingUsd } from '../src/accessGrant.js'
+import { normalizeAccessGrant, tariffCeilingUsd, tariffCostUsd } from '../src/accessGrant.js'
 
 const ATTESTATION = { principal: 'tester', at: '2026-10-05T00:00:00Z', statement: 'I accept these routes.' }
 
@@ -25,6 +25,20 @@ describe('normalizeAccessGrant', () => {
     expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 90_000, minBilledMs: 0, billingIncrementMs: 60_000 })).toBeCloseTo(0.004)
     // A provider that cannot be told to end a session before 60 s bills up to then when a release fails.
     expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 20_000, minBilledMs: 0, billingIncrementMs: 1 }, 60_000)).toBeCloseTo(0.002)
+  })
+
+  it('prices a session by its measured time under the tariff (ROADMAP PA item 4)', () => {
+    const steel = { perCallUsd: 0, perHourUsd: 0.1, maxSessionMs: 120_000, minBilledMs: 60_000, billingIncrementMs: 60_000 }
+    // A 17 s session billed by the minute, at least one, is a minute; 61 s is two.
+    expect(tariffCostUsd(steel, 17_000)).toBeCloseTo(0.1 / 60, 9)
+    expect(tariffCostUsd(steel, 61_000)).toBeCloseTo(0.2 / 60, 9)
+    // Billed by the millisecond with no minimum, it is its own time, and a per-call price comes on top.
+    expect(tariffCostUsd({ ...steel, minBilledMs: 0, billingIncrementMs: 1 }, 17_000)).toBeCloseTo((0.1 * 17) / 3600, 9)
+    expect(tariffCostUsd({ ...steel, perCallUsd: 0.01, minBilledMs: 0, billingIncrementMs: 1 }, 0)).toBeCloseTo(0.01, 9)
+    // A minimum above the step: a 17 s session billed at least a minute, by the millisecond, is a minute.
+    expect(tariffCostUsd({ ...steel, billingIncrementMs: 1 }, 17_000)).toBeCloseTo(0.1 / 60, 9)
+    // The ceiling is what the longest session costs.
+    expect(tariffCeilingUsd(steel)).toBeCloseTo(tariffCostUsd(steel, 120_000), 9)
   })
 
   it('refuses a tariff whose cost has no ceiling, or that names no price', () => {

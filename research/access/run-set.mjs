@@ -55,8 +55,9 @@
 //   paid calls     (octocrawl) the provider calls the page's Evidence Record lists (access.paidCalls, ROADMAP PA item 4):
 //                  each one's provider, what Octocrawl made of the page it returned (never the provider's word), and
 //                  whether it is the answer; chargedUsd is what the API's spend ledger charged the scrape
-//                  (usage.externalCostChargedUsd): the provider's stated price, else its price ceiling, an upper bound
-//                  and not its bill. 0 when the record lists no paid call; null when the API's record says nothing of
+//                  (usage.externalCostChargedUsd): the provider's stated price, else its sessions' measured time under
+//                  the grant's tariff, else its price ceiling; an estimate from the tariff, never below what it bills,
+//                  and not the provider's bill. 0 when the record lists no paid call; null when the API's record says nothing of
 //                  paid calls (a build before them, or no record).
 //   competitors    the same tasks, the same Markdown predicates and the same counts. A competitor's own claim stands
 //                  for `status`: Firecrawl's success with the target's 2xx (metadata.statusCode) is `success`; its
@@ -460,7 +461,7 @@ if (recordFile !== undefined) {
     `| Attempts | Verified | False success | p50 ms | p95 ms | External cost per 1,000 verified (USD) | Egress cost per 1,000 verified (USD) |${'credits' in totals.cold ? ' Credits (inferred) | Credits per 1,000 verified |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- |${'credits' in totals.cold ? ' --- | --- |' : ''}`,
     ...Object.entries(totals).map(([temp, t]) => `| ${temp}: ${t.attempts} | ${t.verified} | ${t.falseSuccess} | ${fmt(t.p50Ms)} | ${fmt(t.p95Ms)} | ${fmt(t.externalCostPer1000VerifiedUsd)} | ${fmt(t.egressCostPer1000VerifiedUsd)} |${'credits' in t ? ` ${fmt(t.credits)} | ${fmt(t.creditsPer1000Verified === null ? null : Math.round(t.creditsPer1000Verified))} |` : ''}`), '',
-    ...Object.entries(totals).filter(([, t]) => 'paidCalls' in t).map(([temp, t]) => `- Paid provider calls (${temp}): ${fmt(t.paidCalls)}; tasks verified with a paid call's page as the answer: ${fmt(t.verifiedFromPaidCall)}; charged by the spend ledger: ${t.chargedUsd === null ? 'unknown' : `$${t.chargedUsd.toFixed(4)}`} (a provider that states no price is charged its price ceiling: an upper bound, not its bill)`),
+    ...Object.entries(totals).filter(([, t]) => 'paidCalls' in t).map(([temp, t]) => `- Paid provider calls (${temp}): ${fmt(t.paidCalls)}; tasks verified with a paid call's page as the answer: ${fmt(t.verifiedFromPaidCall)}; charged by the spend ledger: ${t.chargedUsd === null ? 'unknown' : `$${t.chargedUsd.toFixed(4)}`} (a provider that states no price is charged its sessions' measured time under the grant's tariff, else its price ceiling: an estimate from the tariff, not its bill)`),
     ...(Object.values(totals).some((t) => 'paidCalls' in t) ? [''] : []),
     `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}`,

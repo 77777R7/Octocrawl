@@ -105,10 +105,18 @@ export interface EvidencePaidCall {
   capabilities: readonly string[]
   /** What the ledger reserved before the call: its price ceiling, from the grant's tariff. */
   ceilingUsd: number
-  /** What the ledger charged: the price the provider stated, else the ceiling (a call that threw or was cut included). */
+  /**
+   * What the ledger charged: the price the provider stated, else its sessions' measured time under the grant's tariff
+   * (`sessionMs`), else the ceiling (a call that threw or was cut, or a session whose release went unconfirmed, included).
+   */
   chargedUsd: number
   /** The price the provider stated for the call; null when it stated none (Browserbase and Steel state none per call). */
   reportedCostUsd: number | null
+  /**
+   * How long the call's provider sessions lasted, from just before each was created to the provider's confirmation of its
+   * release, when the charge is what that time costs under the tariff; null when the charge is not measured.
+   */
+  sessionMs?: number | null
   /**
    * What Octocrawl made of the page the call returned, by its own checks (a block page, an empty or unverified read, an
    * identity it did not send): never the provider's word that it succeeded. Null when the call returned no page (it
@@ -339,7 +347,7 @@ export const EVIDENCE_RECORD_KEYS = {
   accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit']),
   accessEgressExit: keysOf<EvidenceAccessEgressExit>()(['ip', 'country', 'observedAt']),
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
-  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'outcome', 'reason', 'answer']),
+  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'outcome', 'reason', 'answer']),
   accessGrant: keysOf<EvidenceAccessGrant>()(['sha256', 'tier', 'attestedAt']),
 } as const
 
@@ -354,4 +362,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   robotsDecision: ['overrideBasis'],
   access: ['completion', 'egress', 'session', 'paidCalls', 'grant'],
   accessEgress: ['exit'],
+  accessPaidCall: ['sessionMs'],
 }

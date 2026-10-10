@@ -10,6 +10,7 @@ import { track, trackLinkClicks, trackPageView } from './analytics'
 import { mountWaitlist } from './waitlist'
 import { mountCrawlView } from './crawlView'
 import { readPreview, STAGE_STREAM } from './previewStream'
+import { buildWindow } from './windowBuild'
 import { API_SERVER, fieldsSchema, HOSTED_MCP, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
@@ -390,8 +391,8 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
   json.type = 'button'
   json.id = 'guidance-json-button'
   json.addEventListener('click', () => {
-    setOutputView('json')
-    content.querySelector<HTMLSelectElement>('.output-view-select')?.focus()
+    setOutputView('json', 'body')
+    content.querySelector<HTMLElement>('.window-tab[aria-selected="true"]')?.focus()
   })
   const docs = result.status === 'quota_exceeded'
     ? textElement('a', 'Run it yourself ↗', 'guidance-link')
@@ -404,7 +405,8 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
 }
 
 function appendInline(target: HTMLElement, source: string): void {
-  const tokens = /(\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|\*\*([^*]+)\*\*|`([^`]+)`)/g
+  // An image is kept as a link to it, marked as one; the page's images are never loaded here.
+  const tokens = /(!?\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|\*\*([^*]+)\*\*|`([^`]+)`)/g
   let cursor = 0
   for (const match of source.matchAll(tokens)) {
     const index = match.index ?? 0
@@ -412,7 +414,7 @@ function appendInline(target: HTMLElement, source: string): void {
     if (match[2] && match[3]) {
       const href = safeWebUrl(match[3])
       if (href) {
-        const link = textElement('a', match[2])
+        const link = textElement('a', match[1]!.startsWith('!') ? `▣ ${match[2]}` : match[2])
         link.href = href
         link.target = '_blank'
         link.rel = 'noopener noreferrer'
@@ -493,7 +495,6 @@ function renderMarkdown(markdown: string): HTMLElement {
   }
   flushParagraph()
   if (code) { const pre = document.createElement('pre'); pre.append(textElement('code', code.join('\n'))); body.append(pre) }
-  if (markdown.length > 150_000) body.append(textElement('p', 'This page is long, so the preview shows the first 150,000 characters. Copy content still copies the full returned text.', 'content-note'))
   return body
 }
 
@@ -778,7 +779,79 @@ function viewPayload(result: PreviewResponse, view: OutputView): string {
   return result.markdown ?? ''
 }
 
-function renderOutputPanel(result: PreviewResponse): void {
+/** Raw text as numbered lines. The numbers are drawn by the styles, so a selection copies the text alone, and
+ * `tint` marks each line's syntax; text is only ever set as text. */
+function sourceView(text: string, tint: (line: string, into: HTMLElement) => void): HTMLElement {
+  const pre = document.createElement('pre')
+  pre.className = 'source-view'
+  const code = document.createElement('code')
+  for (const line of text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n')) {
+    const row = document.createElement('span')
+    row.className = 'source-line'
+    const body = document.createElement('span')
+    body.className = 'source-text'
+    tint(line, body)
+    row.append(body)
+    code.append(row)
+  }
+  pre.append(code)
+  return pre
+}
+
+function tinted(into: HTMLElement, text: string, className?: string): void {
+  if (!text) return
+  if (className) into.append(textElement('span', text, className))
+  else into.append(text)
+}
+
+/** Markdown's syntax marks (#, list markers, link brackets and targets, emphasis, fences) dimmed, so the words read
+ * first, as in the Markdown an agent receives. Lines inside a fence are left as written. */
+function markdownTint(): (line: string, into: HTMLElement) => void {
+  let fenced = false
+  return (line, into) => {
+    if (/^\s*```/.test(line)) { fenced = !fenced; tinted(into, line, 'tok-mark'); return }
+    if (fenced) { tinted(into, line, 'tok-code'); return }
+    const heading = /^(#{1,6}\s+)(.*)$/.exec(line)
+    if (heading) { tinted(into, heading[1]!, 'tok-mark'); tinted(into, heading[2]!, 'tok-heading'); return }
+    if (/^\s*([-*_]\s*){3,}$/.test(line)) { tinted(into, line, 'tok-mark'); return }
+    const lead = /^(\s*(?:[-*+]|\d+[.)])\s+|\s*>\s?)/.exec(line)
+    if (lead) tinted(into, lead[1]!, 'tok-mark')
+    const rest = lead ? line.slice(lead[1]!.length) : line
+    let cursor = 0
+    for (const match of rest.matchAll(/(!?\[)([^\]]*)(\]\()([^)\s]*)(\))|\*\*|__|`[^`]+`/g)) {
+      const index = match.index ?? 0
+      tinted(into, rest.slice(cursor, index))
+      if (match[1]) {
+        tinted(into, match[1], 'tok-mark'); tinted(into, match[2]!); tinted(into, match[3]!, 'tok-mark')
+        tinted(into, match[4]!, 'tok-url'); tinted(into, match[5]!, 'tok-mark')
+      } else if (match[0].startsWith('`')) tinted(into, match[0], 'tok-code')
+      else tinted(into, match[0], 'tok-mark')
+      cursor = index + match[0].length
+    }
+    tinted(into, rest.slice(cursor))
+  }
+}
+
+function jsonTint(line: string, into: HTMLElement): void {
+  let cursor = 0
+  for (const match of line.matchAll(/("(?:[^"\\]|\\.)*")(\s*:)?|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b/g)) {
+    const index = match.index ?? 0
+    tinted(into, line.slice(cursor, index), 'tok-mark')
+    if (match[1]) { tinted(into, match[1], match[2] ? 'tok-key' : 'tok-string'); tinted(into, match[2] ?? '', 'tok-mark') }
+    else tinted(into, match[0], 'tok-literal')
+    cursor = index + match[0].length
+  }
+  tinted(into, line.slice(cursor), 'tok-mark')
+}
+
+/** How the Markdown view shows the text: as received (the default, what Copy copies) or rendered. Kept for the visit. */
+let markdownMode: 'source' | 'preview' = 'source'
+const MARKDOWN_PREVIEW_LIMIT = 150_000
+
+/** The result as a window: its views as tabs, Copy and Download beside them, the content scrolling inside the
+ * window (the page stays short however long the page read was), and under it the file Download saves. `build`
+ * prints it in glyphs: the whole window for a new result, the body alone for another view. */
+function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | 'none' = 'none'): void {
   content.querySelector('.output-panel')?.remove()
   // A failed capture has no content to show; its guidance panel offers the JSON view.
   if (outputView !== 'json' && !isPageRead(result)) return
@@ -786,80 +859,140 @@ function renderOutputPanel(result: PreviewResponse): void {
   // A view this result does not have (links of a file, say) falls back to the first it has; the choice stays.
   const view = views.includes(outputView) ? outputView : views[0]!
   const text = VIEW_TEXT[view]
+  const payload = viewPayload(result, view)
   const output = document.createElement('section')
-  output.className = 'output-panel'
+  output.className = 'output-panel result-window'
   output.setAttribute('aria-labelledby', 'content-title')
-  const header = document.createElement('div')
-  header.className = 'output-head'
-  const title = document.createElement('div')
-  title.append(textElement('p', text.kicker, 'panel-kicker'))
-  const h3 = textElement('h3', text.title)
+  const h3 = textElement('h3', text.title, 'visually-hidden')
   h3.id = 'content-title'
-  title.append(h3)
-  header.append(title)
+
+  const bar = document.createElement('div')
+  bar.className = 'window-bar'
+  const tabs = document.createElement('div')
+  tabs.className = 'window-tabs'
+  tabs.setAttribute('role', 'tablist')
+  tabs.setAttribute('aria-label', 'Output format')
+  const tabButtons = views.map((option) => {
+    const tab = textElement('button', VIEW_NAMES[option], 'window-tab')
+    tab.type = 'button'
+    tab.id = `window-tab-${option}`
+    tab.dataset.view = option
+    tab.setAttribute('role', 'tab')
+    tab.setAttribute('aria-selected', String(option === view))
+    tab.setAttribute('aria-controls', 'window-body')
+    tab.tabIndex = option === view ? 0 : -1
+    tab.addEventListener('click', () => chooseView(option))
+    return tab
+  })
+  const chooseView = (option: OutputView): void => {
+    if (option !== view) track('view_change', { view: option })
+    setOutputView(option, 'body')
+    content.querySelector<HTMLElement>('.window-tab[aria-selected="true"]')?.focus()
+  }
+  tabs.addEventListener('keydown', (event) => {
+    const at = views.indexOf(view)
+    const next = event.key === 'ArrowRight' ? (at + 1) % views.length : event.key === 'ArrowLeft' ? (at + views.length - 1) % views.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? views.length - 1 : -1
+    if (next < 0) return
+    event.preventDefault()
+    chooseView(views[next]!)
+  })
+  tabs.append(...tabButtons)
 
   const actions = document.createElement('div')
   actions.className = 'output-actions'
-  const viewLabel = textElement('label', 'View', 'output-view-label')
-  const viewSelect = document.createElement('select')
-  viewSelect.className = 'output-view-select'
-  viewSelect.setAttribute('aria-label', 'View output format')
-  for (const option of views) viewSelect.append(new Option(VIEW_NAMES[option], option))
-  viewSelect.value = view
-  viewSelect.addEventListener('change', () => {
-    track('view_change', { view: viewSelect.value })
-    setOutputView(viewSelect.value as OutputView)
-    const nextFocus = content.querySelector<HTMLElement>('.output-view-select') ?? content.querySelector<HTMLElement>('#guidance-json-button')
-    nextFocus?.focus()
-  })
-  viewLabel.append(viewSelect)
-  actions.append(viewLabel)
-  const payload = viewPayload(result, view)
-  const copy = textElement('button', text.copy, 'copy-button')
+  const copy = textElement('button', 'Copy', 'copy-button')
   copy.type = 'button'
+  copy.title = text.copy
   copy.disabled = !payload
   copy.addEventListener('click', async () => {
     track('result_copy', { view })
     try {
       await navigator.clipboard.writeText(payload)
       copy.textContent = 'Copied ✓'
-      window.setTimeout(() => { copy.textContent = text.copy }, 2200)
+      window.setTimeout(() => { copy.textContent = 'Copy' }, 2200)
     } catch { copy.textContent = 'Copy failed. Select the text manually.' }
   })
-  actions.append(copy)
-  const download = textElement('button', text.download, 'download-button')
+  const filename = resultFilename(result, text.extension)
+  const download = textElement('button', `↓ .${text.extension}`, 'download-button')
   download.type = 'button'
+  // The name holds the visible label, so it can be spoken to voice control.
+  download.setAttribute('aria-label', `Download .${text.extension}`)
+  download.title = text.download.replace(/^↓\s*/, '')
   download.disabled = !payload
   download.addEventListener('click', () => {
     track('result_download', { view })
-    downloadFile(payload, resultFilename(result, text.extension), text.type)
+    downloadFile(payload, filename, text.type)
   })
-  actions.append(download)
-  header.append(actions)
-  output.append(header)
-  if (view === 'json') {
-    output.append(textElement('p', 'This is the sanitized server response. Its totalMs measures server processing; the page total above includes browser network time. Verified Amazon.sg product fields appear under “product” when available.', 'output-explanation'))
-    output.append(textElement('pre', payload, 'json-output'))
-  } else if (view === 'fields') output.append(renderFields(result))
-  else if (view === 'links') output.append(renderLinks(result))
-  else if (view === 'info') output.append(renderPageInfo(result))
-  else {
-    if (result.markdownTruncated) output.append(textElement('p', 'This page is very long: the preview returned its first 1,000,000 characters.', 'content-note'))
-    if (payload.trim()) output.append(renderMarkdown(payload))
-    else output.append(textElement('p', 'No readable Markdown was returned. Switch to Result JSON to inspect the status and reason.', 'empty-content'))
+  actions.append(copy, download)
+  bar.append(tabs, actions)
+
+  const notes: string[] = []
+  if (view === 'json') notes.push('The sanitized server response. Its totalMs measures server processing; the run’s total time includes browser network time. Verified Amazon.sg product fields appear under “product” when available.')
+  if (view === 'markdown' && result.markdownTruncated) notes.push('This page is very long: the preview returned its first 1,000,000 characters.')
+  if (view === 'markdown' && payload.length > MARKDOWN_PREVIEW_LIMIT) notes.push(`This page is long, so the window shows the first ${MARKDOWN_PREVIEW_LIMIT.toLocaleString()} characters. Copy and Download still take the full returned text.`)
+
+  const body = document.createElement('div')
+  body.className = `window-body view-${view}`
+  body.id = 'window-body'
+  body.setAttribute('role', 'tabpanel')
+  body.setAttribute('aria-labelledby', `window-tab-${view}`)
+  // Scrolls with the keyboard too.
+  body.tabIndex = 0
+  if (view === 'json') body.append(sourceView(payload, jsonTint))
+  else if (view === 'fields') body.append(renderFields(result))
+  else if (view === 'links') body.append(renderLinks(result))
+  else if (view === 'info') body.append(renderPageInfo(result))
+  else if (!payload.trim()) body.append(textElement('p', 'No readable Markdown was returned. Switch to JSON to inspect the status and reason.', 'empty-content'))
+  else if (markdownMode === 'preview') body.append(renderMarkdown(payload))
+  else body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), markdownTint()))
+
+  const foot = document.createElement('div')
+  foot.className = 'window-foot'
+  const bytes = formatBytes(new TextEncoder().encode(payload).length)
+  const lines = view === 'markdown' || view === 'json' || view === 'links' ? payload.replace(/\n$/, '').split('\n').length : null
+  const stats = textElement('p', [filename, bytes, lines === null ? null : `${lines.toLocaleString()} ${lines === 1 ? 'line' : 'lines'}`].filter(Boolean).join(' · '), 'window-stats')
+  foot.append(stats)
+  if (view === 'markdown' && payload.trim()) {
+    const modes = document.createElement('div')
+    modes.className = 'window-modes'
+    modes.setAttribute('role', 'group')
+    modes.setAttribute('aria-label', 'Show the Markdown')
+    for (const [mode, label] of [['source', 'Source'], ['preview', 'Preview']] as const) {
+      const button = textElement('button', label, 'window-mode')
+      button.type = 'button'
+      button.setAttribute('aria-pressed', String(markdownMode === mode))
+      button.addEventListener('click', () => {
+        if (markdownMode === mode) return
+        markdownMode = mode
+        track('markdown_mode', { mode })
+        renderOutputPanel(result, 'body')
+        content.querySelector<HTMLElement>(`.window-mode[aria-pressed="true"]`)?.focus()
+      })
+      modes.append(button)
+    }
+    foot.append(modes)
   }
+
+  output.append(h3, bar)
+  for (const note of notes) output.append(textElement('p', note, 'window-note'))
+  output.append(body, foot)
   content.append(output)
+  if (build === 'none') return
+  const lead = [...body.querySelectorAll<HTMLElement>('.source-line')].slice(0, 48)
+  if (build === 'body') buildWindow(body, lead, 260)
+  else buildWindow(output, [...tabButtons, copy, download, stats, ...lead], 620)
 }
 
-/** Choose what the result panel shows (the Format button and the panel's own View select stay in step), and show
- * it for the selected run: every view comes from the same extraction. */
-function setOutputView(view: OutputView): void {
+/** Choose what the result panel shows (the Format button and the window's tabs stay in step), and show it for the
+ * selected run: every view comes from the same extraction. */
+function setOutputView(view: OutputView, build: 'body' | 'none' = 'none'): void {
   outputView = view
   formatLabel.textContent = VIEW_NAMES[view]
   const radio = formatPanel.querySelector<HTMLInputElement>(`input[value="${view}"]`)
   if (radio) radio.checked = true
   const run = runs.find((candidate) => candidate.id === selectedRunId)
-  if (run?.result) renderOutputPanel(run.result)
+  if (run?.result) renderOutputPanel(run.result, build)
 }
 
 /** One extraction in this visit. Runs live only in memory and are never sent anywhere. */
@@ -972,7 +1105,7 @@ function renderDetail(run: Run): void {
     content.append(textElement('p', statusDetail(result.status, result.reason), 'result-note'))
   }
   if (result.product) content.append(renderProduct(result.product))
-  renderOutputPanel(result)
+  renderOutputPanel(result, 'window')
 }
 
 /** Point to the result below; its guidance panel carries the reason. */
@@ -1004,9 +1137,9 @@ function setResultMessage(result: PreviewResponse): void {
   message.className = `form-message${read ? '' : ' is-error'}`
 }
 
-/** Brings the runs into view, below the hero. */
+/** Brings the selected run's result into view, below the hero; the run cards sit just above it. */
 function revealResults(): void {
-  section.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+  runDetail.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
 }
 
 /** Shows the run's result; the page moves to it unless the crawl window is still playing (it moves there after). */
