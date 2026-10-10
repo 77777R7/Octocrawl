@@ -110,6 +110,23 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     expect(new RegionTracker({ contract: { checks: [{ type: 'minTables', min: 1 }] } }).expression()).not.toContain('outerHTML')
   })
 
+  it('begins no read that would end past its bound, as long as the last one took', async () => {
+    // Each read takes 400 ms (a large page's HTML and its Markdown): after the first, a second would end at 1,300 ms, past 1,000.
+    let clock = 0
+    const slow = { evaluate: async () => { clock += 400; return JSON.stringify(view('Results')) }, waitForTimeout: async (ms: number) => { clock += ms } }
+    const outcome = await waitForRegion(slow, { contract: prices }, { maxMs: 1_000, sampleMs: 500, now: () => clock })
+    expect(outcome).toMatchObject({ ready: false, reads: 1 })
+    expect(clock).toBeLessThanOrEqual(1_000)
+  })
+
+  it('does not judge the Markdown checks on a page whose HTML the page itself found too large to send', () => {
+    const links: VerifyContract = { checks: [{ type: 'markdownCountMin', pattern: '\\]\\(https?://', min: 2 }] }
+    const tracker = new RegionTracker({ contract: links })
+    tracker.observe(JSON.stringify({ loading: false, text: 9, href: 'https://shop.test/', html: null, tableCount: 0 }))
+    expect(tracker.judgeable).toBe(false)
+    expect(tracker.expression()).toContain('html.length > 5000000 ? null : html')
+  })
+
   it('records the wait by its counts, never the page\'s text', () => {
     const outcome = { ready: false, empty: false, waitedMs: 4_000, reads: 9, judged: 9, loading: false, steady: true, contractSha256: 'c'.repeat(64), checks: [{ index: 0, type: 'markdownCountMin' as const, passed: false, observedCount: 1 }] }
     expect(regionWaitEvent(outcome, 7, 'browser_local')).toEqual({ at: 7, lane: 'browser_local', event: 'region_wait', detail: outcome })

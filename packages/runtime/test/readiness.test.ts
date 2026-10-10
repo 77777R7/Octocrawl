@@ -130,6 +130,9 @@ describe('readinessOf (ADR 0007, ROADMAP PA item 11)', () => {
     const unread = { ...verified('failed', 'page_not_read'), status: 'failed' as const, failureReason: 'empty_unverified' as const, markdown: null }
     expect(readinessOf(result(unread, [region({ ready: true })]))).toEqual({ state: 'not_extracted', basis: ['empty_unverified', 'region_ready'], waitedMs: 3_000 })
     expect(readinessOf(result(unread, [region({})])).state).toBe('not_loaded')
+    // Only a page left without main content, and only a region that held with records: a block, or an empty list, is not.
+    expect(readinessOf(result({ ...unread, failureReason: null, status: 'blocked', blockReason: 'captcha' }, [region({ ready: true })]))).toMatchObject({ state: 'not_served', basis: ['captcha'] })
+    expect(readinessOf(result(unread, [region({ ready: true, empty: true })])).state).toBe('not_loaded')
     // A page proven empty the contract does not accept, and a page not read, which its own status tells.
     expect(readinessOf(result({ ...verified('failed', 'empty_not_allowed'), status: 'empty_verified', markdown: null }))).toEqual({ state: 'not_served', basis: ['empty_not_allowed'] })
     expect(readinessOf(result({ ...verified('failed', 'page_not_read'), status: 'blocked', blockReason: 'captcha', markdown: null }))).toEqual({ state: 'not_served', basis: ['captcha'] })

@@ -131,7 +131,11 @@ export function regionViewExpression(list?: RegionSpec['list'], maxRecords = MIN
     let tableCount = 0
     for (const table of document.querySelectorAll('table')) if (table.rows.length >= 2 && shown(table)) tableCount++
     for (const grid of document.querySelectorAll('[role="table"], [role="grid"]')) if (grid.tagName !== 'TABLE' && grid.querySelectorAll('[role="row"]').length >= 2 && shown(grid)) tableCount++
-    const view = { loading: ${LOADING_PROBE}, text: text.length, tableCount${withHtml ? ', href: location.href, html: document.documentElement ? document.documentElement.outerHTML : \'\'' : ''} }${listPart}
+    const view = { loading: ${LOADING_PROBE}, text: text.length, tableCount }${withHtml ? `
+    // The page's HTML for the Markdown checks, not sent past MAX_VIEW_HTML: those checks are then not judged.
+    const html = document.documentElement ? document.documentElement.outerHTML : ''
+    view.href = location.href
+    view.html = html.length > ${MAX_VIEW_HTML} ? null : html` : ''}${listPart}
     return JSON.stringify(view)
   } catch (error) {
     return JSON.stringify({ error: String(error && error.message || error).slice(0, 200) })
@@ -144,7 +148,7 @@ interface RegionView {
   loading?: boolean
   text?: number
   href?: string
-  html?: string
+  html?: string | null
   tableCount?: number
   list?: { records: { values: Record<string, string | null>; missing: string[] }[] }
   error?: string
@@ -256,6 +260,7 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
   const sampleMs = options.sampleMs ?? REGION_SAMPLE_MS
   const deadline = now() + Math.max(0, options.maxMs)
   for (;;) {
+    const readStarted = now()
     let json: unknown
     try {
       json = await page.evaluate(expression)
@@ -265,8 +270,11 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
     }
     const ready = tracker.observe(json)
     if (!tracker.judgeable) return undefined
-    if (ready || now() >= deadline) return tracker.outcome()
-    await page.waitForTimeout(Math.max(1, Math.min(sampleMs, deadline - now())))
+    // A read takes what the last one took (a large page's HTML, its Markdown): none is begun that would end past the bound.
+    const readMs = now() - readStarted
+    const pause = Math.max(1, Math.min(sampleMs, deadline - now()))
+    if (ready || now() + pause + readMs > deadline) return tracker.outcome()
+    await page.waitForTimeout(pause)
   }
 }
 
