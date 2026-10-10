@@ -21,7 +21,7 @@ import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
-import { createApp, createApiEngine, type ApiEngine } from '@w2l/api'
+import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION } from './server.js'
@@ -371,6 +371,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     apiListener(req, res)
   })
   server.requestTimeout = 120_000
+  // A crawl's extraction runs in this process and can stall it past the keep-alive timeout: a request sent meanwhile is answered, not reset.
+  closeIdleOnlyWhenUnread(server)
   server.listen(config.port, config.host ?? '127.0.0.1')
   let closing: Promise<void> | null = null
   return {

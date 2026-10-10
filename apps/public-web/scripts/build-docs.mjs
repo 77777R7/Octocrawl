@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import MarkdownIt from 'markdown-it'
 import { versionPublicAssets } from './publicAssetVersions.mjs'
 import { HOME_UPDATED, pages } from './docsPages.mjs'
-import { BLOG_AUTHOR, BLOG_UPDATED, blogPath, posts } from './blogPosts.mjs'
+import { BLOG_AUTHOR, BLOG_CATEGORIES, BLOG_UPDATED, blogPath, categoryPath, posts } from './blogPosts.mjs'
 import { siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -310,7 +310,7 @@ const jsonLd = data => `<script type="application/ld+json">${JSON.stringify(data
 const blogCrumbs = trail => ({ '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: trail.map(([name, path], index) => ({ '@type': 'ListItem', position: index + 1, name, item: `${ORIGIN}${path}` })) })
 const PUBLISHER = { '@type': 'Organization', name: 'Octocrawl', url: `${ORIGIN}/`, logo: { '@type': 'ImageObject', url: `${ORIGIN}/assets/favicon-192.png` } }
 const bySlug = Object.fromEntries(posts.map(post => [post.slug, post]))
-const blogCard = (post, heading = 'h2') => `<a class="blog-card" href="${blogPath(post)}"><img src="${versioned(coverPath(post, 'card.webp'))}" alt="" width="836" height="470" loading="lazy" decoding="async" /><span class="blog-card-body"><time datetime="${post.pubDate}">${longDate(post.pubDate)}</time><${heading}>${escape(post.title)}</${heading}><p>${escape(post.description)}</p></span></a>`
+const blogCard = (post, heading = 'h2') => `<a class="blog-card" href="${blogPath(post)}"><img src="${versioned(coverPath(post, 'card.webp'))}" alt="" width="836" height="470" loading="lazy" decoding="async" /><span class="blog-card-body"><span class="blog-card-meta"><span>${escape(BLOG_CATEGORIES.find(category => category.slug === post.category)?.name ?? '')}</span><time datetime="${post.pubDate}">${longDate(post.pubDate)}</time></span><${heading}>${escape(post.title)}</${heading}><p>${escape(post.description)}</p></span></a>`
 const blogFooter = '<footer class="doc-footer"><span>Try a page in the browser here, connect your agent to mcp.octocrawl.dev, or run Octocrawl on your computer with npx.</span><a href="/">Try a page ↗</a></footer>'
 
 const blogMarkdown = []
@@ -340,17 +340,33 @@ for (const post of posts) {
   await writeFile(join(target, 'index.md'), text)
   blogMarkdown.push({ post, text })
 }
+// The index and one page per category: the title, a tab per category with articles, the newest article large, the rest
+// as cards. The tabs are links, so they work without a script; a category page is noindex, since the index lists all.
 {
   const title = 'Octocrawl Blog: Web Scraping for Agents and Pipelines'
   const description = 'How to read the web for AI agents and data pipelines with Octocrawl, each article built on commands we ran and the output they returned.'
+  const categoryOf = Object.fromEntries(BLOG_CATEGORIES.map(category => [category.slug, category]))
+  for (const post of posts) if (!categoryOf[post.category]) throw new Error(`${post.slug}: category ${post.category} is not in BLOG_CATEGORIES`)
+  const tabs = [{ name: 'All Posts', path: BLOG_PATH }, ...BLOG_CATEGORIES.filter(category => posts.some(post => post.category === category.slug)).map(category => ({ name: category.name, path: categoryPath(category) }))]
+  const byline = post => `<span class="blog-author"><img src="/assets/favicon-192.png" alt="" width="28" height="28" loading="lazy" decoding="async" />${escape(BLOG_AUTHOR)}</span><time datetime="${post.pubDate}">${longDate(post.pubDate)}</time>`
+  const feature = post => `<a class="blog-feature" href="${blogPath(post)}"><img src="${versioned(coverPath(post, 'cover.webp'))}" alt="" width="1672" height="941" fetchpriority="high" decoding="async" /><span class="blog-feature-body"><span class="blog-feature-category">${escape(categoryOf[post.category].name)}</span><h2>${escape(post.title)}</h2><p>${escape(post.description)}</p><span class="blog-feature-meta">${byline(post)}</span></span></a>`
+  const listing = (path, list) => `<div class="doc-layout blog-layout blog-index"><main id="main-content" class="doc-main blog-main"><h1 class="blog-index-title">Blog</h1><nav class="blog-tabs" aria-label="Blog categories">${tabs.map(tab => `<a href="${tab.path}"${tab.path === path ? ' aria-current="page"' : ''}>${escape(tab.name)}</a>`).join('')}</nav>${feature(list[0])}${list.length > 1 ? `<div class="blog-grid">${list.slice(1).map(post => blogCard(post)).join('')}</div>` : ''}${blogFooter}</main></div><script defer src="/docs-assets/nav.js"></script>`
   const collection = { '@context': 'https://schema.org', '@type': 'Blog', name: 'Octocrawl Blog', description, url: `${ORIGIN}${BLOG_PATH}`, publisher: PUBLISHER,
     blogPost: posts.map(post => ({ '@type': 'BlogPosting', headline: post.title, url: `${ORIGIN}${blogPath(post)}`, datePublished: post.pubDate, image: `${ORIGIN}${coverPath(post, 'og.jpg')}`, author: { '@type': 'Organization', name: BLOG_AUTHOR } })) }
-  const html = `<!doctype html>
-<html lang="en"><head>${blogHead(title, description, BLOG_PATH)}${jsonLd([collection, blogCrumbs([['Octocrawl', '/'], ['Blog', BLOG_PATH]])])}<title>${escape(title)}</title></head>
+  const page = (head, body) => `<!doctype html>
+<html lang="en"><head>${head}</head>
 <body><a class="skip-link" href="#main-content">Skip to content</a>${header('blog')}
-<div class="doc-layout blog-layout blog-index"><main id="main-content" class="doc-main blog-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / Blog</p><h1 class="blog-index-title">Blog</h1><p class="blog-index-lead">${escape(description)}</p><div class="blog-grid">${posts.map(post => blogCard(post)).join('')}</div>${blogFooter}</main></div><script defer src="/docs-assets/nav.js"></script></body></html>`
+${body}</body></html>`
   await mkdir(join(root, 'dist', 'blog'), { recursive: true })
-  await writeFile(join(root, 'dist', 'blog', 'index.html'), versionPublicAssets(html, join(root, 'public')))
+  await writeFile(join(root, 'dist', 'blog', 'index.html'), versionPublicAssets(page(`${blogHead(title, description, BLOG_PATH)}${jsonLd([collection, blogCrumbs([['Octocrawl', '/'], ['Blog', BLOG_PATH]])])}<title>${escape(title)}</title>`, listing(BLOG_PATH, posts)), join(root, 'public')))
+  for (const tab of tabs.slice(1)) {
+    const category = BLOG_CATEGORIES.find(item => categoryPath(item) === tab.path)
+    const list = posts.filter(post => post.category === category.slug)
+    const pageTitle = `${category.name} | Octocrawl Blog`
+    const pageDescription = `${category.name} articles on the Octocrawl Blog: ${list.map(post => post.title).join('; ')}.`
+    await mkdir(join(root, 'dist', 'blog', 'category', category.slug), { recursive: true })
+    await writeFile(join(root, 'dist', 'blog', 'category', category.slug, 'index.html'), versionPublicAssets(page(`${blogHead(pageTitle, pageDescription, tab.path)}<meta name="robots" content="noindex, follow" /><title>${escape(pageTitle)}</title>`, listing(tab.path, list)), join(root, 'public')))
+  }
 }
 // Each docs guide that became an article answers with a 301 to it (packages/public-preview reads this file).
 await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify(Object.fromEntries(posts.flatMap(post => [[post.from, blogPath(post)], [`${post.from}index.md`, `${blogPath(post)}index.md`]])), null, 2)}\n`)

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { BLOG_UPDATED, blogPath, posts } from '../scripts/blogPosts.mjs'
+import { BLOG_CATEGORIES, BLOG_UPDATED, blogPath, posts } from '../scripts/blogPosts.mjs'
 import { pages } from '../scripts/docsPages.mjs'
 
 const app = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url))
@@ -41,6 +41,12 @@ describe('Blog articles', () => {
         expect([post.slug, href, found]).toEqual([post.slug, href, true])
       }
     }
+  })
+
+  it('each sit in one of the index\'s categories', () => {
+    expect(new Set(BLOG_CATEGORIES.map(category => category.slug)).size).toBe(BLOG_CATEGORIES.length)
+    for (const category of BLOG_CATEGORIES) expect(category.slug).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+    for (const post of posts) expect([post.slug, BLOG_CATEGORIES.some(category => category.slug === post.category)]).toEqual([post.slug, true])
   })
 
   it('point Keep reading at three other articles, and answer the docs address they replaced', () => {
