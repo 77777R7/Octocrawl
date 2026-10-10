@@ -89,7 +89,7 @@
 
 **本地浏览器相对 HTTP 的真实增量**:+3 页 (+21pp)。三处胜利可点名:
 
-- **indeed.com** — http 每次 `bot_gate`,浏览器 2/2 成功(3.0s、2647 tokens)。jobs 列表是 W2L 的核心垂直,这条增量是浏览器通道存在的理由。
+- **indeed.com** — http 每次 `bot_gate`,浏览器 2/2 成功(3.0s、2647 tokens)。jobs 列表是 Octocrawl 的核心垂直,这条增量是浏览器通道存在的理由。
 - **producthunt.com** — http 也「成功」但只拿到 105–155 tokens(JS 壳),浏览器拿到 23,796–24,621 tokens。**相同成功率下,浏览器通道的 token 产出约为 HTTP 的 150 倍**——速度慢 2s,内容多两个数量级。
 - **glassdoor.com** — 抖动最诚实的一例:第一次运行两条通道都成功(经 307 跳到 glassdoor.com.hk),后两次都被 gate 挡住(http=bot_gate,browser=login_required)。gate 行为本身会随时间抖动,这也正是需要一个能自动升级、而不是赌单次的梯子的原因。
 
