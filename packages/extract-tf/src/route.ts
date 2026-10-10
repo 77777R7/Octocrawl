@@ -251,17 +251,25 @@ function collectTopLevelProducts(root: unknown, out: string[]): void {
   }
 }
 
-/** Whether a script sits in a section of recommendations: inside an element named for them, or under a heading that names them. */
-function inRecommendations(el: Element): boolean {
-  for (let up = el.parentElement; up !== null; up = up.parentElement) {
-    if (hasRecommendationToken(`${up.getAttribute('id') ?? ''} ${up.getAttribute('class') ?? ''}`)) return true
+/**
+ * The JSON-LD scripts in a section of recommendations: inside an element named for them, or whose nearest heading
+ * before them (h2-h6) names them. One pass over the page's headings and scripts.
+ */
+function scriptsInRecommendations(doc: Document): Set<Element> {
+  const under = new Set<Element>()
+  let section = false
+  for (const el of qsa(doc, 'h1, h2, h3, h4, h5, h6, script[type="application/ld+json"]')) {
+    if (tagOf(el) !== 'script') {
+      section = /^h[2-6]$/.test(tagOf(el)) && isRecommendationHeading(textOf(el))
+      continue
+    }
+    let named = section
+    for (let up = el.parentElement; up !== null && !named; up = up.parentElement) {
+      named = hasRecommendationToken(`${up.getAttribute('id') ?? ''} ${up.getAttribute('class') ?? ''}`)
+    }
+    if (named) under.add(el)
   }
-  const all = qsa(el.ownerDocument, 'h1, h2, h3, h4, h5, h6, script[type="application/ld+json"]')
-  for (let at = all.indexOf(el) - 1; at >= 0; at--) {
-    const heading = all[at]!
-    if (/^h[1-6]$/.test(tagOf(heading))) return /^h[2-6]$/.test(tagOf(heading)) && isRecommendationHeading(textOf(heading))
-  }
-  return false
+  return under
 }
 
 /** Whether the page's h1 names one of the products (it holds the name, or the name holds it). */
@@ -318,6 +326,7 @@ function collectPageSignals(doc: Document): PageSignals {
   const pageTypes: string[] = []
   let ownListed: string[] = []
   const topLevelProducts: string[] = []
+  const recommended = scriptsInRecommendations(doc)
   for (const el of qsa(doc, 'script[type="application/ld+json"]')) {
     const text = (el.textContent ?? '').trim()
     if (text.length === 0) continue
@@ -327,7 +336,7 @@ function collectPageSignals(doc: Document): PageSignals {
       collectPageTypes(parsed, pageTypes)
       const own = ownListedProducts(parsed)
       if (own.length > ownListed.length) ownListed = own
-      if (!inRecommendations(el)) collectTopLevelProducts(parsed, topLevelProducts)
+      if (!recommended.has(el)) collectTopLevelProducts(parsed, topLevelProducts)
     } catch {
       // Malformed JSON-LD is not a routing signal; ignore it.
     }
