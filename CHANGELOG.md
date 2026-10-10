@@ -3,6 +3,7 @@
 ## Unreleased
 
 - A paid provider call that states no price is charged what its sessions' measured time costs under the access grant's tariff, not its price ceiling. Each session is timed from just before it is created to the provider's confirmation of its release, so the charge is never below what the tariff bills, and it is at most the ceiling. A release the provider did not confirm (Steel and Browserbase now fail one that answers other than 2xx) leaves the session billing until its timeout, so that call, like one that threw, is still charged at its ceiling. The `spend_settled` event says which basis applied (`reported`, `measured` or `ceiling`); a provider answer carries `usage.vendorSessionMs` and `usage.measuredCostUsd`; and each of the Evidence Record's `access.paidCalls` has `sessionMs` (null when the charge is not measured). Steel's dashboard had billed $0.23 for 483 sessions in 24 hours, where the ledger, charging each at its ceiling, had recorded $1.48.
+- On a narrow screen the Blog's category tabs show that the row scrolls: the edge with more tabs past it darkens, and stops once the row is scrolled to that end. It is pure CSS (backgrounds that scroll with the tabs), so a row that fits, as on a desktop, shows nothing.
 
 ## 0.4.1 — 2026-10-10
 
