@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { MAP_KEYS, type MapResponse } from '@w2l/contracts'
+import { BATCH_KEYS, CRAWL_KEYS, MAP_KEYS, SCRAPE_KEYS, type MapResponse } from '@w2l/contracts'
 import { SDK_ORIGIN, W2L } from '@w2l/sdk'
 import { callTool, TOOL_NAMES, TOOLS } from '../src/tools.js'
 import { createMcpServer, mcpOrigin } from '../src/server.js'
@@ -681,6 +681,31 @@ describe('MCP tools', () => {
       const properties = TOOLS.find((tool) => tool.name === name)?.inputSchema.properties as Record<string, { anyOf?: unknown[] }>
       expect(properties.webhook?.anyOf, name).toHaveLength(2)
     }
+  })
+
+  it('takes on scrape, batch_scrape and crawl every key the request takes, verify among them, but origin and parsers', () => {
+    // origin is the host's own; parsers (PDF options) are not offered over MCP.
+    const notOffered = ['origin', 'parsers']
+    for (const [name, keys] of [['scrape', SCRAPE_KEYS], ['batch_scrape', BATCH_KEYS], ['crawl', CRAWL_KEYS]] as const) {
+      const tool = TOOLS.find((t) => t.name === name)!
+      const properties = Object.keys(tool.inputSchema.properties)
+      expect((keys as readonly string[]).filter((key) => !properties.includes(key) && !notOffered.includes(key)), name).toEqual([])
+      expect(properties.filter((key) => !(keys as readonly string[]).includes(key) && key !== 'debug'), name).toEqual([])
+      expect((tool.inputSchema.properties as Record<string, { required?: string[] }>).verify?.required, name).toEqual(['checks'])
+    }
+  })
+
+  it('sends a task contract on scrape, crawl and batch_scrape to the API', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return String(input).endsWith('/v1/scrape') ? json({ status: 'success' }) : json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const verify = { checks: [{ type: 'minTables', min: 1 }, { type: 'field', path: 'json.data.price', equals: null }], emptyOk: true }
+    await callTool(client, 'scrape', { url: 'https://example.com/', verify })
+    await callTool(client, 'crawl', { url: 'https://example.com/', verify })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/'], verify })
+    expect(bodies.map((body) => body.verify)).toEqual([verify, verify, verify])
   })
 
   it('offers map as a read-only tool with the map request\'s keys and an output schema, compact by default and in full with debug', async () => {

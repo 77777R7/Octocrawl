@@ -36,6 +36,8 @@ describe('flags', () => {
     expect(parseCommandLine('batch', ['https://example.com/', '--lane', 'my-browser']).body).toEqual({ lane: 'my-browser' })
     expect(usage('batch')).toContain('--lane my-browser')
     expect(parseCommandLine('crawl', ['https://example.com/', '--access', 'standard']).body).toEqual({ access: 'standard' })
+    // A task contract (ADR 0006) as JSON, checked by the same parser as the REST body.
+    expect(parseCommandLine('scrape', ['https://example.com/', '--verify', '{"checks":[{"type":"minTables","min":1}],"emptyOk":true}']).body).toEqual({ verify: { checks: [{ type: 'minTables', min: 1 }], emptyOk: true } })
   })
 
   it('reads booleans, integers, lists, repeated patterns, formats, parsers and headers into the API body', () => {
@@ -130,7 +132,7 @@ describe('octocrawl against a local site', () => {
     const lines = (await readFile(join(dir, 'results.csv'), 'utf8')).split('\r\n')
     expect(lines.at(-1)).toBe('')
     expect(lines[0]).toBe(EVIDENCE_COLUMNS.join(','))
-    expect(lines[0]).toBe('url,status,reason,final_url,fetched_at,http_status,lane,robots_decision,raw_sha256,markdown_sha256,extractor,source_commit,cache_state,cached_at,markdown_file')
+    expect(lines[0]).toBe('url,status,reason,final_url,fetched_at,http_status,lane,robots_decision,raw_sha256,markdown_sha256,extractor,source_commit,cache_state,cached_at,verification,markdown_file')
     const rows = lines.slice(1, -1).map((line) => Object.fromEntries(line.split(',').map((value, i) => [EVIDENCE_COLUMNS[i], value])))
     expect(rows).toHaveLength(2)
     const items = (await readFile(join(dir, 'results.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
@@ -138,6 +140,8 @@ describe('octocrawl against a local site', () => {
     const record = items.find((item) => item.url === `${origin}/tides/a`).evidenceRecord
     expect(ok).toMatchObject({ status: 'success', reason: '', final_url: record.finalUrl, fetched_at: record.fetchedAt, http_status: '200', lane: 'http', robots_decision: 'allowed', raw_sha256: record.rawSha256, extractor: record.extractor.version, cache_state: '' })
     expect(ok.markdown_sha256).toBe(createHash('sha256').update(await readFile(join(dir, ok.markdown_file!))).digest('hex'))
+    // No task contract was sent: the page says so (ADR 0006).
+    expect(ok.verification).toBe('not_requested')
     // The page W2L could not read stays in the file, with its reason; what was not observed is empty, not 0.
     const failed = rows.find((row) => row.url === unreachable)!
     expect(failed.status).toBe('failed')

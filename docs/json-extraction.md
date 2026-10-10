@@ -63,6 +63,8 @@ A fetch can succeed without the data a task asked for: a page of navigation, a s
   - Each check carries `passed` and a sentence of what was seen; count checks also carry `observedCount` and `asked`.
   - The Evidence Record carries `verification` too: status, verifier version (`verify/1`), the contract's SHA-256, and the checks that failed.
 - The checks are those of the access task runner (`research/access/run-set.mjs`), judged the same way, so its tasks can be sent unchanged.
+- **Where it is taken:** REST (`verify` in the body), the MCP `scrape`, `batch_scrape` and `crawl` tools (`verify`), the command line (`--verify '<json>'`), the TypeScript SDK (the request types) and the Python client (`verify=` passed through). The command line's `results.csv` and the Python client's rows carry a `verification` column: the status, or empty from a server that does not verify.
+- **The access task runner** sends each task's predicates as its contract and records, beside its own verdict, on how many attempts the product agreed, naming each disagreement (`--no-contract` sends none).
 
 ## The Amazon baseline
 
