@@ -63,6 +63,14 @@ A fetch can succeed without the data a task asked for: a page of navigation, a s
   - Each check carries `passed` and a sentence of what was seen; count checks also carry `observedCount` and `asked`.
   - The Evidence Record carries `verification` too: status, verifier version (`verify/1`), the contract's SHA-256, and the checks that failed.
 - The checks are those of the access task runner (`research/access/run-set.mjs`), judged the same way, so its tasks can be sent unchanged.
+- **How it steers the fetch:** each rung of the ladder's page is judged as it comes (the `verification_checked` events of `ladderTrace` with `debug: true`).
+  - A page that passes every check is the answer, with no hop to a stronger lane after it.
+  - A page that fails a check goes on up the ladder, within the request's `mode` and `access` and the grant's budget, as a page the site did not serve. Region readiness (ROADMAP PA item 11) will tell a page still loading, or one whose content came but was not extracted, which goes on to the local rungs alone.
+  - A check on what is extracted after the fetch (`json.*`) decides nothing there.
+  - When no rung passes, the page with most content is the answer, as without a contract.
+  - A page served from the cache is judged without being fetched again.
+  - A provider's success on a host is counted by the contract when it has one, not by whether it returned content.
+- **Counts:** a batch's status (`GET /v1/batches/:id`) and a crawl's (`GET /v1/crawl/:id`) carry `verified` and `verificationFailed` when the job has a contract. They count the pages `succeeded` and `failed` count (a crawl's latest attempt), never a duplicate. `succeeded` keeps its meaning.
 - **Where it is taken:** REST (`verify` in the body), the MCP `scrape`, `batch_scrape` and `crawl` tools (`verify`), the command line (`--verify '<json>'`), the TypeScript SDK (the request types) and the Python client (`verify=` passed through). The command line's `results.csv` and the Python client's rows carry a `verification` column: the status, or empty from a server that does not verify.
 - **The access task runner** sends each task's predicates as its contract and records, beside its own verdict, on how many attempts the product agreed, naming each disagreement (`--no-contract` sends none).
 

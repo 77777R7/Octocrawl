@@ -179,6 +179,19 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.countSteps('task-1', 'attempt-2')).toEqual({})
     })
 
+    it('counts the steps that passed the task contract and those that did not, a step stored without one and no duplicate among them', async () => {
+      ;({ store, cleanup } = await open())
+      await seed(store)
+      const judged = (status: 'passed' | 'failed') => ({ ...pageResult('https://example.com/'), verification: { status, verifier: 'verify/1', contractSha256: 'a'.repeat(64), reason: status === 'passed' ? null : 'checks_failed' as const, checks: [] } })
+      await store.putStep(step({ result: judged('passed') }))
+      await store.putStep(step({ id: 'step-2', result: judged('failed'), createdAt: LATER }))
+      await store.putStep(step({ id: 'step-3', url: 'https://example.com/other', canonicalUrl: 'https://example.com/other', status: 'failed', result: null, createdAt: LATER }))
+      await store.putStep(step({ id: 'step-4', url: 'https://example.com/copy', canonicalUrl: 'https://example.com/copy', status: 'duplicate', result: { ...judged('passed'), status: 'duplicate' }, createdAt: LATER }))
+      expect(await store.countVerifications('task-1')).toEqual({ verified: 1, verificationFailed: 2 })
+      expect(await store.countVerifications('task-1', 'attempt-1')).toEqual({ verified: 1, verificationFailed: 2 })
+      expect(await store.countVerifications('task-1', 'attempt-2')).toEqual({ verified: 0, verificationFailed: 0 })
+    })
+
     it('finds the steps whose trace has an event by name, without a lookalike name or another task\'s', async () => {
       ;({ store, cleanup } = await open())
       await seed(store)
