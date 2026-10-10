@@ -305,6 +305,12 @@ describe('browser and vendor execution cancellation', () => {
     expect((await navigateOnce(answering(403, '<p>Access denied</p>'), 'https://example.com/', Date.now() + 20_000, undefined, region)).region).toBeUndefined()
     expect((await navigateOnce(answering(200, '<html><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script></html>'), 'https://example.com/', Date.now() + 20_000, undefined, region)).region).toBeUndefined()
     expect(regionReads).toBe(0)
+    // A region that never holds is read a second before the deadline: the page is captured within it.
+    const quiet: CdpBrowser = { close: async () => {}, contexts: () => [{ pages: () => [], newPage: async () => ({ ...page, evaluate: async (expression: string) => expression.includes('tableCount') ? shows('Results') : JSON.stringify({ size: 10, text: 'Results', loading: false }) }) }] }
+    const deadline = Date.now() + 3_500
+    const bounded = await navigateOnce(quiet, 'https://example.com/', deadline, undefined, region)
+    expect(bounded.region).toMatchObject({ ready: false })
+    expect(deadline - Date.now()).toBeGreaterThan(700)
   })
 
   it('vendor HTTP respects deadline through its response body', async () => {

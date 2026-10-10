@@ -70,6 +70,8 @@ interface FakeScript {
   noContext?: boolean
   /** The page says its data is loading for this many settle samples, then shows it. */
   loadingSamples?: number
+  /** What the region view reads on the page (ADR 0007), one per read, the last from then on. */
+  regionViews?: string[]
 }
 
 interface FakeState {
@@ -89,6 +91,7 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
       state.pagesOpened++
       let current = 'about:blank'
       let samples = 0
+      let regionReads = 0
       return {
         async goto(url: string): Promise<CdpResponse | null> {
           if (script.gotoError) throw script.gotoError
@@ -107,6 +110,7 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
         },
         async evaluate(expression: string) {
           if (expression === 'navigator.userAgent') return ua
+          if (script.regionViews !== undefined && expression.includes('tableCount')) return script.regionViews[Math.min(regionReads++, script.regionViews.length - 1)]
           if (script.loadingSamples === undefined) return undefined
           const loading = samples++ < script.loadingSamples
           return JSON.stringify({ size: loading ? 10 : 90, text: loading ? 'Fetching...' : 'the data', loading })
@@ -324,6 +328,17 @@ describe('vendor identity', () => {
     const res = await transport.fetch('https://shop.example/dp/A', Date.now() + 20_000)
     expect(res.settle).toMatchObject({ loadingSeen: true, stillLoading: false })
     expect(res.settle!.waitedMs).toBeGreaterThan(1_500)
+  })
+
+  it('hands navigateOnce the region a task needs, and returns what its wait saw (ADR 0007)', async () => {
+    const api = sessionServing('bb_1')
+    const shows = (markdown: string) => JSON.stringify({ loading: false, text: markdown.length, markdown, tableCount: 0 })
+    const bb = fakeBrowser({ regionViews: [shows('Results'), shows('$1 $2 $3')] })
+    const transport = new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, api.handler), connectorFor(bb).connector)
+    const region = { contract: { checks: [{ type: 'markdownCountMin' as const, pattern: '\\$\\d', min: 3 }] } }
+    const res = await transport.fetch('https://shop.example/dp/A', Date.now() + 20_000, undefined, region)
+    expect(res.region).toMatchObject({ ready: true, reads: 3, checks: [{ passed: true, observedCount: 3 }] })
+    expect((await transport.fetch('https://shop.example/dp/A', Date.now() + 20_000)).region).toBeUndefined()
   })
 
   it('fails clearly when the vendor provisioned no context', async () => {

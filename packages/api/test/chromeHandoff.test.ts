@@ -122,7 +122,8 @@ describe('the person\'s Chrome', () => {
     const read = await (await openUserChrome({ userDataDir, connect: fakeChrome(changing).connect })).read('https://site.test/a', { pollMs: 20, waitMs: 1_000 })
     expect(read.html).toBe(PAGE)
     expect(read.settle).toMatchObject({ steady: false })
-    expect(read.wallMs).toBeLessThan(1_000)
+    // Read before the wait's end, give or take the last read itself.
+    expect(read.wallMs).toBeLessThan(1_500)
   })
 
   it('reads a settled page once the task\'s region holds on it, and says what it saw (ADR 0007)', async () => {
@@ -136,6 +137,10 @@ describe('the person\'s Chrome', () => {
     const never = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('Results') })]).connect })).read('https://site.test/a', { pollMs: 20, waitMs: 1_000, region })
     expect(never.html).toBe(PAGE)
     expect(never.region).toMatchObject({ ready: false, steady: true, checks: [{ passed: false, observedCount: 0 }] })
+    // A page that stops being through (a check comes back) starts the region's reads afresh once it is through again.
+    const back = [...Array(4).fill(at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('Results') })), at('https://site.test/a', GATE, { active: true }), ...Array(3).fill(at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('$1 $2 $3') }))]
+    const again = await (await openUserChrome({ userDataDir, connect: fakeChrome(back).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, region })
+    expect(again.region).toMatchObject({ ready: true, reads: 2 })
     // A contract the page cannot judge (a json field alone) is not waited for, and no region is reported.
     const json = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80 })]).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, region: { contract: { checks: [{ type: 'field', path: 'json.price', present: true }] } } })
     expect(json.region).toBeUndefined()

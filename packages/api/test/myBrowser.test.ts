@@ -47,6 +47,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
   let polled = 0
   let targets = 0
   let shownTries = 0
+  let regionReads = 0
   let shownMoves = 0
   const kinds = new Map<string, 'scope' | 'page'>()
   const answerNow = (): Answer => answers[Math.min(polled, answers.length - 1)]!
@@ -86,6 +87,11 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
         }
         // The page asked for: never clicked on, so the lane reads it without the person.
         if (p.contextId === 7) return { result: { value: false } }
+        // The region view (ADR 0007): the page's text, which holds the ledger's rows.
+        if (expression.includes('tableCount')) {
+          regionReads++
+          return { result: { value: JSON.stringify({ loading: false, text: 120, markdown: 'Tide ledger 06:00 07:00 08:00', tableCount: 1 }) } }
+        }
         if (expression.includes('importNode')) {
           if ((page.shownFails ?? 0) > shownTries++) throw new ChromeLoginError('Chrome refused the request: Inspected target navigated or closed')
           // The page as it shows, on the page's own address; `shownMoved` times another page, as one that moved on.
@@ -99,7 +105,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
     ...(page.documentStatus === undefined ? {} : { on: (method: string, sessionId: string | undefined, listener: (params: Record<string, unknown>) => void) => { listeners.set(`${method}@${String(sessionId)}`, listener); return () => { listeners.delete(`${method}@${String(sessionId)}`) } } }),
     close() { connectionClosed = true },
   })
-  return { connect, written, created, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed }
+  return { connect, written, created, navigated, mostOpen: () => mostOpen, live, afterClose, closed: () => connectionClosed, regionReads: () => regionReads }
 }
 
 describe('the my-browser lane', () => {
@@ -149,6 +155,16 @@ describe('the my-browser lane', () => {
     // Octocrawl fetched nothing: no robots decision, no request of its own.
     expect(record.robotsDecision).toBeNull()
     expect(body.trace.some((event: { event: string }) => event.event === 'handoff_from')).toBe(false)
+  })
+
+  it('waits in the person\'s Chrome for the region the request\'s contract needs, and records it (ADR 0007)', async () => {
+    const chrome = fakeChrome([{ answer: '', active: false }, { answer: 'allowed', active: true }], { href: 'https://site.test/a', html: PAGE })
+    const app = await setup(chrome)
+    const verify = { checks: [{ type: 'markdownIncludes', text: 'Tide ledger' }] }
+    const { body } = await scrape(app, { url: 'https://site.test/a', lane: 'my-browser', verify, debug: true })
+    expect(body).toMatchObject({ status: 'success', lane: 'my_browser', verification: { status: 'passed' }, readiness: { state: 'ready', basis: ['verified'] } })
+    expect(chrome.regionReads()).toBe(2)
+    expect(body.trace).toContainEqual(expect.objectContaining({ lane: 'my_browser', event: 'region_wait', detail: expect.objectContaining({ ready: true, reads: 2 }) }))
   })
 
   it('does not take Allow set by a script: the person\'s own click on the page is what allows the site', async () => {

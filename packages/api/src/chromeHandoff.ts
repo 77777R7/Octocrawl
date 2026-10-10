@@ -35,7 +35,7 @@
 
 import { extractTf } from '@w2l/extract-tf'
 import { classifyGate, type GateVerdict } from '@w2l/http-core'
-import { isLoginPath, LOADING_PROBE, REGION_WAIT_MAX_MS, RegionTracker, regionViewExpression, sessionCoversHost, STEADY_WAIT_MAX_MS, type RegionSpec, type SteadyOutcome, type UserBrowserRead } from '@w2l/bench'
+import { isLoginPath, LOADING_PROBE, REGION_WAIT_MAX_MS, RegionTracker, sessionCoversHost, STEADY_WAIT_MAX_MS, type RegionSpec, type SteadyOutcome, type UserBrowserRead } from '@w2l/bench'
 import { chromeEndpoint, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
 
 export interface UserChromeOptions {
@@ -563,7 +563,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
     // Once the page has settled, the wait for the region the task needs: its reads, and since when.
     let region: RegionTracker | null = null
     let regionSince: number | null = null
-    const regionView = options.region === undefined ? null : regionViewExpression(options.region.list)
+    const regionView = options.region === undefined ? null : new RegionTracker(options.region).expression()
     // The page's own address and the documents heard of at the last read: the page as it shows must be read on the same one.
     let seen = { href: '', documents: 0 }
     let last: { state: PageState; response: DocumentResponse | null } | null = null

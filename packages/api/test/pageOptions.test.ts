@@ -291,6 +291,17 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     expect(refused.body.trace).toContainEqual(expect.objectContaining({ event: 'wait_for_unavailable' }))
   })
 
+  it('hands the lanes the request\'s task contract, for the browser to wait for its region (ADR 0007)', async () => {
+    const seen: Seen[] = []
+    const { origin, post, engine } = await setup(recordingBrowser(seen))
+    const verify = { checks: [{ type: 'markdownIncludes', text: 'harbour' }] }
+    await post('/v1/scrape', { url: `${origin}/chrome`, waitFor: 250, timeout: 20_000, verify })
+    expect(seen.at(-1)).toMatchObject({ options: { waitFor: 250, verify } })
+    const batch = await engine.startBatch({ urls: [`${origin}/chrome`], waitFor: 250, timeout: 5_000, verify } as never)
+    expect(await finished(() => engine.getBatch(batch.taskId))).toMatchObject({ status: 'completed' })
+    expect(seen.at(-1)).toMatchObject({ options: { waitFor: 250, verify } })
+  })
+
   it('a batch or crawl page\'s timeout also ends its JSON model fallback', async () => {
     // A model endpoint that answers 15 s after each request, unless the request is aborted first.
     const modelCalls: Array<{ aborted: boolean }> = []

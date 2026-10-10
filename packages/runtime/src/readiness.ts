@@ -56,15 +56,20 @@ function answered(result: FetchResult): boolean {
   return typeof status === 'number' && status >= 200 && status < 300
 }
 
-/** How long the lane waited for the page to settle: its last recorded wait. */
+/** How long the lane waited for the page: its last settle wait (loading_wait, steady_wait) and its last region wait, together. */
 function waitedOf(result: FetchResult): number | undefined {
-  for (let i = result.trace.length - 1; i >= 0; i--) {
-    const event = result.trace[i]!
-    if (event.event !== 'loading_wait' && event.event !== 'steady_wait' && event.event !== 'region_wait') continue
-    const waited = Number(event.detail?.waitedMs)
-    if (Number.isFinite(waited) && waited >= 0) return Math.round(waited)
+  const last = (names: readonly string[]): number | undefined => {
+    for (let i = result.trace.length - 1; i >= 0; i--) {
+      const event = result.trace[i]!
+      if (!names.includes(event.event)) continue
+      const waited = Number(event.detail?.waitedMs)
+      if (Number.isFinite(waited) && waited >= 0) return Math.round(waited)
+    }
+    return undefined
   }
-  return undefined
+  const settle = last(['loading_wait', 'steady_wait'])
+  const region = last(['region_wait'])
+  return settle === undefined && region === undefined ? undefined : (settle ?? 0) + (region ?? 0)
 }
 
 function readiness(state: Readiness['state'], basis: readonly string[], result: FetchResult): Readiness {
@@ -72,13 +77,15 @@ function readiness(state: Readiness['state'], basis: readonly string[], result: 
   return waitedMs === undefined ? { state, basis } : { state, basis, waitedMs }
 }
 
-/** The lane's last wait for the region the task needs, as the trace records it. */
-function regionWaitOf(result: FetchResult): { ready: boolean; empty: boolean; loading: boolean; steady: boolean } | undefined {
+/** The lane's last wait for the region the task needs, as the trace records it, when it judged this contract on at least one read. */
+function regionWaitOf(result: FetchResult, sha: string): { ready: boolean; empty: boolean; loading: boolean; steady: boolean | null } | undefined {
   for (let i = result.trace.length - 1; i >= 0; i--) {
     const event = result.trace[i]!
     if (event.event !== 'region_wait') continue
     const detail = event.detail ?? {}
-    return { ready: detail.ready === true, empty: detail.empty === true, loading: detail.loading === true, steady: detail.steady === true }
+    // A stored page (the cache) may carry another request's wait: it says nothing of this contract's region.
+    if (detail.contractSha256 !== sha || !(Number(detail.judged) > 0)) return undefined
+    return { ready: detail.ready === true, empty: detail.empty === true, loading: detail.loading === true, steady: typeof detail.steady === 'boolean' ? detail.steady : null }
   }
   return undefined
 }
@@ -93,24 +100,32 @@ export function readinessOf(result: FetchResult): Readiness {
   return signalReadiness(result)
 }
 
-/** With a task contract: the verification, and the region wait where a browser lane made one. Undefined when the page was not read, for the page's own signals to tell. */
+/**
+ * With a task contract: the verification, and the region wait where a browser lane judged this contract on the live
+ * page. Undefined when the page was not read, for the page's own signals to tell.
+ */
 function verifiedReadiness(result: FetchResult, verification: Exclude<NonNullable<FetchResult['verification']>, { status: 'not_requested' }>): Readiness | undefined {
   if (verification.status === 'passed') return readiness('ready', ['verified'], result)
   if (verification.reason === 'page_not_read') return undefined
   // A page proven empty that the contract does not accept: what the task needs was not served.
   if (verification.reason === 'empty_not_allowed') return readiness('not_served', ['empty_not_allowed'], result)
-  const region = regionWaitOf(result)
+  const region = regionWaitOf(result, verification.contractSha256)
   if (region !== undefined) {
-    // The list showed none on a settled page, which the contract accepts: an explicit empty state.
-    if (region.empty) return readiness('ready', ['region_empty'], result)
-    if (region.ready) return readiness('not_extracted', ['checks_failed', 'region_ready'], result)
-    if (region.loading || !region.steady) return readiness('not_loaded', ['checks_failed', 'region_not_ready', ...(region.loading ? ['page_still_loading'] : ['page_still_changing'])], result)
+    if (region.ready && !region.empty) return readiness('not_extracted', ['checks_failed', 'region_ready'], result)
+    // The list showed none on a settled page: the site served no records (or the selector names none).
+    if (region.empty) return readiness('not_served', ['checks_failed', 'region_empty'], result)
+    if (region.loading) return readiness('not_loaded', ['checks_failed', 'region_not_ready', 'page_still_loading'], result)
+    if (region.steady === false) return readiness('not_loaded', ['checks_failed', 'region_not_ready', 'page_still_changing'], result)
+    // One judged read, nothing to compare it with: whether the page had settled is not known.
+    if (region.steady === null) return readiness('not_loaded', ['checks_failed', 'region_not_ready', 'steady_unknown'], result)
     return readiness('not_served', ['checks_failed', 'region_absent'], result)
   }
   // Read without its scripts, a page whose checks failed may hold its data once a browser runs them.
   if (UNRENDERED_LANES.has(result.lane)) return readiness('not_loaded', ['checks_failed', 'not_rendered'], result)
-  const signals = notLoadedSignals(result)
-  return signals.length > 0 ? readiness('not_loaded', ['checks_failed', ...signals], result) : readiness('not_served', ['checks_failed'], result)
+  // No live page judged this contract (a contract of json fields alone, a wait that had no time): the page's own
+  // signals tell its state, and the basis says the contract failed where nothing on the page was judged.
+  const signals = signalReadiness(result)
+  return { ...signals, basis: [...signals.basis, 'checks_failed', 'region_unjudged'] }
 }
 
 /** Without a task contract, or for a page not read: the page-wide signals. */

@@ -49,6 +49,13 @@ describe('a page read in the person\'s browser', () => {
     expect(unsettled.warnings?.map((warning) => warning.code)).toEqual(['page_still_loading', 'page_still_changing'])
   })
 
+  it('records what the wait for the task\'s region saw (ADR 0007)', () => {
+    const region = { ready: true, empty: false, waitedMs: 1_500, reads: 4, judged: 4, loading: false, steady: true, contractSha256: 'c'.repeat(64), checks: [{ index: 0, type: 'markdownIncludes' as const, passed: true }] }
+    const result = pageFromUserBrowser(read(PAGE, { region }), null, {})
+    expect(result.trace).toContainEqual({ at: 42_000, lane: 'my_browser', event: 'region_wait', detail: region })
+    expect(pageFromUserBrowser(read(PAGE), null, {}).trace.some((event) => event.event === 'region_wait')).toBe(false)
+  })
+
   it('a page that still shows its check is blocked again, and a status the browser did not report is unknown', () => {
     expect(pageFromUserBrowser(read('<html><body><div class="g-recaptcha" data-sitekey="k"></div></body></html>'), STOPPED, {})).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
     expect(pageFromUserBrowser(read(PAGE, { status: null, contentType: null }), STOPPED, {}).evidence).toMatchObject({ httpStatus: null, contentType: null })
