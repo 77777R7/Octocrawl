@@ -40,17 +40,21 @@
 .header-actions .try-link:hover { background: #ff9365; }
 .nav-toggle { display: none; }
 
-/* Phones and narrow windows: a Menu button opens the navigation as a sheet under the header, menus as sections. */
-@media (max-width: 900px) {
-  .has-nav-js .nav-toggle:not([hidden]) { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border: 1px solid rgba(255, 255, 255, .26); border-radius: 10px; color: #fff; background: rgba(255, 255, 255, .08); font-family: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
+/* Phones and narrow windows: a Menu button opens the navigation as a sheet under the header, menus as sections. It is
+   laid out so from the first paint wherever scripts run (scripting: enabled), not once nav.js has run, so the header
+   does not shrink under the page as it loads (a layout shift of 0.16 on phones). Without scripts the navigation stays
+   in the header as links and <details>; a browser that does not know the media feature keeps that layout too. :root
+   keeps these above .doc-header nav (docs.css), as .has-nav-js did. */
+@media (max-width: 900px) and (scripting: enabled) {
+  :root .nav-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border: 1px solid rgba(255, 255, 255, .26); border-radius: 10px; color: #fff; background: rgba(255, 255, 255, .08); font-family: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
   .nav-toggle-mark { font-size: 16px; }
-  .has-nav-js .site-nav { position: absolute; z-index: 40; top: 100%; left: 8px; right: 8px; display: none; max-height: calc(100svh - 96px); overflow-y: auto; padding: 10px; border: 1px solid #e0e8f2; border-radius: 14px; background: #fff; box-shadow: 0 24px 60px rgba(7, 27, 79, .28); }
-  .has-nav-js .site-nav.is-open { display: block; }
-  .has-nav-js .nav-list { flex-direction: column; align-items: stretch; gap: 0; }
-  .has-nav-js .site-nav summary, .has-nav-js .site-nav .nav-link { display: flex; justify-content: space-between; color: #14254a; font-size: 15px; }
-  .has-nav-js .site-nav summary:hover, .has-nav-js .site-nav .nav-link:hover, .has-nav-js .nav-drop[open] > summary { color: #b8461d; }
-  .has-nav-js .nav-panel { position: relative; top: auto; left: auto; width: auto; grid-template-columns: 1fr; padding: 4px 4px 12px; border: 0; box-shadow: none; transform: none; }
-  .has-nav-js .nav-panel::before { display: none; }
+  :root .site-nav { position: absolute; z-index: 40; top: 100%; left: 8px; right: 8px; display: none; max-height: calc(100svh - 96px); overflow-y: auto; padding: 10px; border: 1px solid #e0e8f2; border-radius: 14px; background: #fff; box-shadow: 0 24px 60px rgba(7, 27, 79, .28); }
+  :root .site-nav.is-open { display: block; }
+  :root .nav-list { flex-direction: column; align-items: stretch; gap: 0; }
+  :root .site-nav summary, :root .site-nav .nav-link { display: flex; justify-content: space-between; color: #14254a; font-size: 15px; }
+  :root .site-nav summary:hover, :root .site-nav .nav-link:hover, :root .nav-drop[open] > summary { color: #b8461d; }
+  :root .nav-panel { position: relative; top: auto; left: auto; width: auto; grid-template-columns: 1fr; padding: 4px 4px 12px; border: 0; box-shadow: none; transform: none; }
+  :root .nav-panel::before { display: none; }
   .nav-feature code { display: none; }
 }
 @media (max-width: 900px) {
