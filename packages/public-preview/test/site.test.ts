@@ -330,6 +330,8 @@ describe('first-party analytics', () => {
 
   it('keeps event properties short and plain, and rotates the visitor pseudonym daily', () => {
     expect(parseWebEvent({ name: 'result_copy', props: { view: 'markdown' } })).toEqual({ name: 'result_copy', props: { view: 'markdown' } })
+    // A page view names where it came from: a referrer host, utm tags, or the site's own `from` tag.
+    expect(parseWebEvent({ name: 'page_view', props: { path: '/', from: 'blog-web-scraping-for-rag', utm_source: 'npm' } })).toEqual({ name: 'page_view', props: { path: '/', from: 'blog-web-scraping-for-rag', utm_source: 'npm' } })
     expect(parseWebEvent({ name: 'result_copy', props: { view: 'x'.repeat(121) } })).toBeNull()
     expect(parseWebEvent({ name: 'result_copy', props: { view: { nested: true } } })).toBeNull()
     const day1 = dailyVisitorId('k'.repeat(32), 'visitor:abc', new Date('2026-09-30T12:00:00Z'))

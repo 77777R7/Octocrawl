@@ -1,5 +1,9 @@
 # Octocrawl — Web-to-LLM Context Extraction
 
+[![npm](https://img.shields.io/npm/v/octocrawl?label=npm%20octocrawl)](https://www.npmjs.com/package/octocrawl) [![PyPI](https://img.shields.io/pypi/v/octocrawl-client?label=PyPI%20octocrawl-client)](https://pypi.org/project/octocrawl-client/) [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+
+**[Website](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=nav)** · **[Docs](https://octocrawl.dev/docs/?utm_source=github&utm_medium=readme&utm_campaign=nav)** · **[Connect MCP](https://octocrawl.dev/docs/connect-mcp/?utm_source=github&utm_medium=readme&utm_campaign=nav)** · **[Blog](https://octocrawl.dev/blog/?utm_source=github&utm_medium=readme&utm_campaign=nav)** · **[Changelog](https://octocrawl.dev/changelog/?utm_source=github&utm_medium=readme&utm_campaign=nav)**
+
 Octocrawl turns web pages into Markdown and data for RAG and agent workflows. It records how it got each page, so every result can be checked.
 
 When a page fails, Octocrawl says so and says why. It does not report a blocked or empty page as a success.
@@ -80,6 +84,8 @@ The full reference lives in [docs/](docs/README.md):
 | Your login, enhanced access, handoff, your own Chrome | [Access](docs/access.md) |
 | Scheduled re-reads and HTTPS events | [Monitors](docs/monitors.md) |
 | Moving from Firecrawl | [Firecrawl shim](docs/firecrawl-shim.md) |
+
+Walkthroughs of real runs are on the [blog](https://octocrawl.dev/blog/?utm_source=github&utm_medium=readme&utm_campaign=docs): [Claude Code web scraping with MCP](https://octocrawl.dev/blog/claude-code-web-scraping/?utm_source=github&utm_medium=readme&utm_campaign=docs), [Web scraping for RAG](https://octocrawl.dev/blog/web-scraping-for-rag/?utm_source=github&utm_medium=readme&utm_campaign=docs), [Find all pages on a website](https://octocrawl.dev/blog/find-all-pages-on-a-website/?utm_source=github&utm_medium=readme&utm_campaign=docs), [Scrape a website with login, in your own Chrome](https://octocrawl.dev/blog/scrape-website-with-login/?utm_source=github&utm_medium=readme&utm_campaign=docs), [Extract structured data without an LLM](https://octocrawl.dev/blog/extract-structured-data-from-web-page/?utm_source=github&utm_medium=readme&utm_campaign=docs), [Scrape a list of URLs and keep every failure](https://octocrawl.dev/blog/scrape-list-of-urls/?utm_source=github&utm_medium=readme&utm_campaign=docs).
 
 For researchers, two guides walk through a real run: [From a URL list to a CSV with evidence](docs/guides/url-list-to-csv.md) and [Citing web data in a paper](docs/guides/citing-web-data.md).
 

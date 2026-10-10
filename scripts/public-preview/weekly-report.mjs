@@ -41,6 +41,7 @@ export function summarizeSiteEvents(lines) {
   for (const key of visitorDays) perDay.set(key.slice(0, 10), (perDay.get(key.slice(0, 10)) ?? 0) + 1)
   const sources = new Map()
   const paths = new Map()
+  const fromTags = new Map()
   for (const line of views) {
     const props = line.props ?? {}
     const source = props.ref ? props.ref : props.utm_source ? `utm_source=${props.utm_source}` : DIRECT
@@ -49,6 +50,7 @@ export function summarizeSiteEvents(lines) {
     if (line.vid) entry.visitors.add(`${day(line.timestamp)}:${line.vid}`)
     sources.set(source, entry)
     paths.set(props.path ?? '(unknown)', (paths.get(props.path ?? '(unknown)') ?? 0) + 1)
+    if (props.from) fromTags.set(props.from, (fromTags.get(props.from) ?? 0) + 1)
   }
   const actions = new Map()
   for (const line of kept) if (line.event === 'w2l_web_event' && line.name !== 'page_view') actions.set(line.name, (actions.get(line.name) ?? 0) + 1)
@@ -61,6 +63,7 @@ export function summarizeSiteEvents(lines) {
     sources: [...sources].map(([source, entry]) => ({ source, views: entry.views, visitorDays: entry.visitors.size }))
       .sort((a, b) => b.visitorDays - a.visitorDays || b.views - a.views || a.source.localeCompare(b.source)),
     paths: sortedCounts(paths),
+    fromTags: sortedCounts(fromTags),
     actions: sortedCounts(actions),
     previews: sortedCounts(previews),
   }
@@ -161,6 +164,7 @@ export function renderReport(report) {
     out.push(markdownTable(['Day', 'Visitors'], s.perDay), '')
     out.push('### Where they came from', '', markdownTable(['Source', 'Visitor-days', 'Page views'], s.sources.map(r => [r.source, r.visitorDays, r.views])), '')
     out.push('### Pages', '', markdownTable(['Path', 'Page views'], s.paths), '')
+    out.push('### The site\'s own links (`from`)', '', s.fromTags.length ? markdownTable(['from', 'Page views'], s.fromTags) : 'None.', '')
     out.push('### What they did', '', s.actions.length ? markdownTable(['Event', 'Count'], s.actions) : 'No events besides page views.', '')
     out.push('### Previews', '', s.previews.length ? markdownTable(['Outcome', 'Count'], s.previews) : 'No anonymous previews.', '')
   }

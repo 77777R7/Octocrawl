@@ -28,8 +28,9 @@ const out = join(root, '.w2l', 'pack')
 const read = (path) => JSON.parse(readFileSync(join(root, path), 'utf8'))
 const rootPackage = read('package.json')
 const repository = { type: 'git', url: 'git+https://github.com/77777R7/Octocrawl.git' }
-// npm shows these: the site is the home page (directories and search engines follow it), issues go to GitHub.
-const homepage = 'https://octocrawl.dev'
+// npm shows these: the site is the home page (directories and search engines follow it), issues go to GitHub. The
+// homepage carries utm tags so the site's page events can tell visitors from npm apart (its canonical stays the site).
+const homepage = 'https://octocrawl.dev/?utm_source=npm&utm_medium=package'
 const bugs = { url: 'https://github.com/77777R7/Octocrawl/issues' }
 const KEYWORDS = ['octocrawl', 'web-scraping', 'web-crawler', 'scraper', 'markdown', 'html-to-markdown', 'llm', 'rag', 'ai-agents', 'evidence']
 
