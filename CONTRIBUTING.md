@@ -39,8 +39,8 @@ Full DCO text: https://developercertificate.org/
 ## Development Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/w2l.git
-cd w2l
+git clone https://github.com/YOUR_USERNAME/Octocrawl.git
+cd Octocrawl
 npm install
 npm run typecheck
 npm test
@@ -70,6 +70,19 @@ Set up once, by a maintainer:
 - On npmjs.com, for each of `octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk` and `@octocrawl/mcp`: Settings → Trusted publishing → GitHub Actions, repository `77777R7/Octocrawl`, workflow `release.yml`, environment `release`.
 - On pypi.org, for `octocrawl-client`: Manage → Publishing → add a GitHub publisher with the same repository, workflow and environment.
 - On GitHub: Settings → Environments → `release`, with the maintainer as a required reviewer, so nothing is published without their approval.
+
+## Writing docs
+
+Docs are read by people new to Octocrawl. Write them so a first-time reader understands each section without reading the rest.
+
+- **Say what a thing is in one sentence first.** Put options, limits and exceptions after it.
+- **One sentence, one point.** If a sentence needs "unless", "except" or a long parenthesis, split it or make a list.
+- **Keep sentences short.** Aim for under 25 words. Over 40 words, split it.
+- **Put reference in `docs/`.** The README keeps the pitch, the quick start and links. A page in `docs/` covers one topic and starts with a short summary. List new pages in [docs/README.md](docs/README.md).
+- **Keep CHANGELOG entries scannable.** Each release starts with up to five highlights. Move very long notes to `docs/changelog/<version>.md`.
+- **Call the product Octocrawl.** The old name W2L survives only in identifiers; see [Naming in AGENTS.md](AGENTS.md#naming).
+
+Dated records under `docs/evidence/`, `docs/archive/` and `research/` keep the wording they were written with.
 
 ## Code Standards
 
