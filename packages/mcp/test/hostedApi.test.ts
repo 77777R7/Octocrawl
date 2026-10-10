@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
-import { createHostedApi, keyDigest, MemoryHostedKeys, MemoryHostedQuota, sweepTaskRoot, type HostedKeyRecord } from '../src/hostedApi.js'
+import { createHostedApi, fromClaude, keyDigest, MemoryHostedKeys, MemoryHostedQuota, sweepTaskRoot, type HostedKeyRecord } from '../src/hostedApi.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
 
 const HASH_KEY = 'h'.repeat(40)
@@ -39,14 +39,14 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord> } = {}) {
+async function start(options: { keylessDaily?: number; claudeDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord> } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
   const records = new Map(Object.entries(options.keys ?? {}).map(([key, record]) => [keyDigest(HASH_KEY, key), record]))
   const quota = new MemoryHostedQuota()
   const service = createHostedApi({
     port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: new MemoryHostedKeys(records), quota,
-    keylessDaily: options.keylessDaily ?? 2, siteDaily: 100, proxySecret: options.proxySecret,
+    keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: 100, proxySecret: options.proxySecret,
     networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: () => {},
   })
   close = service.close
@@ -111,6 +111,37 @@ it('a key is looked up by its digest, a revoked or unknown one is 401, and a key
   const spent = await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_live' })
   expect(spent.status).toBe(429)
   expect(((await spent.json()) as { error: string }).error).toContain('key allowance')
+})
+
+it('Claude\'s egress range is one published IPv4 block, matched exactly', () => {
+  for (const inside of ['160.79.104.0', '160.79.105.17', '160.79.111.255']) expect(fromClaude(inside), inside).toBe(true)
+  for (const outside of ['160.79.103.255', '160.79.112.0', '203.0.113.1', '2607:6bc0::1', 'unknown', '']) expect(fromClaude(outside), outside).toBe(false)
+})
+
+it('keyless calls from Claude\'s egress range share one pool of their own, beside every address\'s own day', async () => {
+  const { url } = await start({ keylessDaily: 1, claudeDaily: 2, proxySecret: 's'.repeat(32), keys: { oc_range: { enabled: true, plan: 'free', dailyLimit: 5, browser: false } } })
+  const from = (ip: string) => ({ 'x-w2l-proxy-secret': 's'.repeat(32), 'cf-connecting-ip': ip })
+  // Two of Anthropic's addresses draw on the same two pages, past the one an address gets.
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, from('160.79.104.10'))).status).toBe(200)
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, from('160.79.110.20'))).status).toBe(200)
+  const spent = await post(url, '/v1/scrape', { url: `${origin}/page` }, from('160.79.104.10'))
+  expect(spent.status).toBe(429)
+  const refusal = await spent.json() as { error: string; agentHints: string[] }
+  expect(refusal.error).toContain('every Claude connector without a key shares')
+  // A key cannot be sent from claude.ai, so the hint says to run Octocrawl on your computer rather than to get one.
+  expect(refusal.agentHints[0]).toContain('npx octocrawl serve')
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { ...from('160.79.104.10'), authorization: 'Bearer oc_range' })).status).toBe(200)
+  // An address outside the range keeps its own day.
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, from('203.0.113.9'))).status).toBe(200)
+  // Without the Worker's secret an address in the range is not believed, and a key holder in the range keeps the key's day.
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { 'cf-connecting-ip': '160.79.104.10' })).status).toBe(200)
+  // The MCP endpoint counts the same way: the pool is spent.
+  const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: from('160.79.106.30') } })
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(transport)
+    await expect(client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })).rejects.toThrow(/Claude connector|429/)
+  } finally { await client.close() }
 })
 
 it('the Worker\'s address header counts only with the shared secret', async () => {
