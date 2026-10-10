@@ -26,6 +26,7 @@ import { adapterFor } from './adapters.js'
 import { documentBaseUrl } from './links.js'
 import { collectLabelledValues } from './labels.js'
 import { collectPageMetadata } from './metadata.js'
+import { resolveReactStreaming } from './streaming.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -128,6 +129,8 @@ export class ExtractTf implements Extractor {
     const doc = parse(html)
     const parseMs = Math.max(0, performance.now() - parseStart)
     const extractionStart = performance.now()
+    // A page React streamed is read as its scripts put it together: its body moved out of the hidden parts it came in.
+    resolveReactStreaming(doc.document)
 
     // Semantic page-type signals must be collected BEFORE cleaning: they live
     // in <script type="application/ld+json">, <meta>, and itemprop attributes,
