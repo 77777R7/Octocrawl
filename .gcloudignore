@@ -23,6 +23,7 @@ research/*
 *.md
 !CHANGELOG.md
 !apps/public-web/content/*.md
+!apps/public-web/content/blog/*.md
 *.py
 *.tgz
 *.zip
