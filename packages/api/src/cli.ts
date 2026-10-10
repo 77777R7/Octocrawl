@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { serve } from '@hono/node-server'
+import type { Server } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -7,6 +8,7 @@ import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
 import { loadImpit, loadPatchrightEngine } from '@w2l/bench'
 import { createApp, injectJobWebSockets, isLoopbackAuthority } from './app.js'
 import { createApiEngine, defaultSessionsFile } from './engine.js'
+import { closeIdleOnlyWhenUnread } from './keepAlive.js'
 import { parseListen, parsePort } from './listen.js'
 
 export { parseListen, parsePort }
@@ -65,6 +67,8 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
   const workerController = new AbortController()
   const workerLoop = worker.run(workerController.signal).catch((error) => { console.error(error); process.exitCode = 1 })
   const server = serve({ fetch: app.fetch, hostname: listen.host, port: listen.port })
+  // A crawl's extraction can stall this thread past the keep-alive timeout: a request sent meanwhile is answered, not reset.
+  closeIdleOnlyWhenUnread(server as Server)
   // The job stream WebSocket routes complete their upgrades on this server; a no-op when the stream routes are off.
   injectJobWebSockets(app, server)
   let stopping: Promise<void> | null = null

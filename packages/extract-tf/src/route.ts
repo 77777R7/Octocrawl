@@ -241,6 +241,47 @@ function ownListedProducts(root: unknown): string[] {
   return most
 }
 
+/** The names of the Products among a parsed JSON-LD script's top-level nodes and @graph members ('' for one without a name). */
+function collectTopLevelProducts(root: unknown, out: string[]): void {
+  for (const node of Array.isArray(root) ? root : [root]) {
+    if (typeof node !== 'object' || node === null) continue
+    const record = node as Record<string, unknown>
+    if (typeNames(record).includes('product')) out.push(typeof record['name'] === 'string' ? record['name'].replace(/\s+/g, ' ').trim() : '')
+    if (Array.isArray(record['@graph'])) collectTopLevelProducts(record['@graph'], out)
+  }
+}
+
+/**
+ * The JSON-LD scripts in a section of recommendations: inside an element named for them, or whose nearest heading
+ * before them (h2-h6) names them. One pass over the page's headings and scripts.
+ */
+function scriptsInRecommendations(doc: Document): Set<Element> {
+  const under = new Set<Element>()
+  let section = false
+  for (const el of qsa(doc, 'h1, h2, h3, h4, h5, h6, script[type="application/ld+json"]')) {
+    if (tagOf(el) !== 'script') {
+      section = /^h[2-6]$/.test(tagOf(el)) && isRecommendationHeading(textOf(el))
+      continue
+    }
+    let named = section
+    for (let up = el.parentElement; up !== null && !named; up = up.parentElement) {
+      named = hasRecommendationToken(`${up.getAttribute('id') ?? ''} ${up.getAttribute('class') ?? ''}`)
+    }
+    if (named) under.add(el)
+  }
+  return under
+}
+
+/** Whether the page's h1 names one of the products (it holds the name, or the name holds it). */
+function h1NamesOne(doc: Document, names: readonly string[]): boolean {
+  const lower = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase()
+  const titles = qsa(doc, 'h1').map((h1) => lower(textOf(h1))).filter((title) => title.length > 0)
+  return names.some((name) => {
+    const named = lower(name)
+    return named.length >= 3 && titles.some((title) => title.includes(named) || named.includes(title))
+  })
+}
+
 /** A JSON-LD node's normalized @type names. */
 function typeNames(node: Record<string, unknown>): string[] {
   const t = node['@type']
@@ -284,6 +325,8 @@ function collectPageSignals(doc: Document): PageSignals {
   const listed = { products: 0 }
   const pageTypes: string[] = []
   let ownListed: string[] = []
+  const topLevelProducts: string[] = []
+  const recommended = scriptsInRecommendations(doc)
   for (const el of qsa(doc, 'script[type="application/ld+json"]')) {
     const text = (el.textContent ?? '').trim()
     if (text.length === 0) continue
@@ -293,9 +336,24 @@ function collectPageSignals(doc: Document): PageSignals {
       collectPageTypes(parsed, pageTypes)
       const own = ownListedProducts(parsed)
       if (own.length > ownListed.length) ownListed = own
+      if (!recommended.has(el)) collectTopLevelProducts(parsed, topLevelProducts)
     } catch {
       // Malformed JSON-LD is not a routing signal; ignore it.
     }
+  }
+  // Products the page declares each on its own, at the top level, under PRODUCT_CARDS names or more, are a listing's
+  // cards (Redfin's search results: a script per home), not the page's own product: they count as listed, and as the
+  // page's own list for the buy-box check. Not those declared in a section of recommendations (a product page's
+  // "Customers Also Viewed" cards, each with a script of its own, on Zappos), nor a set one of which the page's h1 names.
+  const distinctTopLevel = [...new Set(topLevelProducts.filter((name) => name.length > 0))]
+  if (distinctTopLevel.length >= PRODUCT_CARDS && !h1NamesOne(doc, distinctTopLevel)) {
+    for (let i = 0; i < topLevelProducts.length; i++) {
+      const at = jsonLdTypes.indexOf('product')
+      if (at < 0) break
+      jsonLdTypes.splice(at, 1)
+      listed.products++
+    }
+    if (distinctTopLevel.length > ownListed.length) ownListed = distinctTopLevel
   }
   const itempropTokens: string[] = []
   for (const el of qsa(doc, '[itemprop]')) {
