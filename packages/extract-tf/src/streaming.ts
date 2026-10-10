@@ -101,8 +101,9 @@ function completeSegment(page: Page, segmentId: string, placeholderId: string): 
   const placeholder = page.byId.get(placeholderId)
   if (placeholder === undefined || placeOf(page, placeholder, segment) !== 'placed' || placeholder.parentNode === null) return dropPart(page, segment)
   const children = Array.from(segment.childNodes)
-  // A call that would pass the budget is not made, so no part is left half moved.
-  if (!charge(page.budget, children.length)) return false
+  // A call that would pass the budget (its children moved, its segment and placeholder removed) is not made, so no
+  // part is left half moved.
+  if (!charge(page.budget, children.length + 2)) return false
   segment.remove()
   for (const child of children) placeholder.parentNode.insertBefore(child, placeholder)
   placeholder.remove()
@@ -136,8 +137,9 @@ function completeBoundary(page: Page, boundaryId: string, segmentId: string): bo
     fallback.push(end)
   }
   const children = Array.from(segment.childNodes)
-  // A call that would pass the budget is not made, so no part is left half moved.
-  if (!charge(page.budget, fallback.length + children.length)) return false
+  // A call that would pass the budget (its fallback removed, its children moved, its segment removed) is not made, so
+  // no part is left half moved.
+  if (!charge(page.budget, fallback.length + children.length + 1)) return false
   segment.remove()
   for (const node of fallback) node.remove()
   for (const child of children) parent.insertBefore(child, end)
