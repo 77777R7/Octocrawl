@@ -88,7 +88,7 @@ function charge(budget: Budget, steps: number): boolean {
   return true
 }
 
-/** A part whose target is gone, or that holds its own target, goes too: React's calls remove the part first. */
+/** A part whose target is gone, or that holds its own target, goes too: React's calls remove the part first, and it shows nowhere. */
 function dropPart(page: Page, segment: Element): false {
   if (charge(page.budget, 1)) segment.remove()
   return false
@@ -115,10 +115,11 @@ function completeBoundary(page: Page, boundaryId: string, segmentId: string): bo
   if (segment === undefined || placeOf(page, segment, null) !== 'placed') return false
   const boundary = page.byId.get(boundaryId)
   if (boundary === undefined || placeOf(page, boundary, segment) !== 'placed') return dropPart(page, segment)
-  // A boundary whose sibling before it is not its marker comment is left as it is.
+  // A boundary whose sibling before it is not its marker comment is left as it is, and its part with it: React's call
+  // would still put the part somewhere, so the part is kept for what reads the page.
   const marker = boundary.previousSibling
   const parent = marker?.parentNode ?? null
-  if (marker === null || parent === null || marker.nodeType !== 8) return dropPart(page, segment)
+  if (marker === null || parent === null || marker.nodeType !== 8) return false
   // The fallback: what follows the marker up to its matching end marker, nested boundaries counted.
   const fallback: ChildNode[] = []
   let end = marker.nextSibling

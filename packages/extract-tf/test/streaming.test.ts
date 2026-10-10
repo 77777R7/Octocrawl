@@ -42,20 +42,23 @@ describe('resolveReactStreaming (ROADMAP PA item 4)', () => {
     const together = '<!doctype html><html><body><main><h1>Profile</h1><!--$--><article>Post one</article><!--/$--></main><script>$RC("B:0","S:0");$RS("S:1","P:1")</script></body></html>'
     expect(resolved(together)).toMatchObject({ applied: 0 })
     expect(resolved(together).body).toContain('<article>Post one</article>')
-    // A boundary with no marker before it, and a segment that holds its own placeholder, take nothing: the part goes, as React's calls remove it first.
+    // A boundary with no marker before it is left as it is, its part kept.
+    const noMarker = resolved('<!doctype html><html><body><main><template id="B:0"></template></main><div hidden id="S:0"><p>x</p></div><script>$RC("B:0","S:0")</script></body></html>')
+    expect(noMarker.applied).toBe(0)
+    expect(noMarker.body).toMatch(/<div hidden(="")? id="S:0"><p>x<\/p><\/div>/)
+    // A segment that holds its own placeholder or boundary takes nothing: the part goes, as React's calls remove it first.
     for (const page of [
-      '<!doctype html><html><body><main><template id="B:0"></template></main><div hidden id="S:0"><p>x</p></div><script>$RC("B:0","S:0")</script></body></html>',
       '<!doctype html><html><body><div hidden id="S:1"><template id="P:1"></template><p>x</p></div><script>$RS("S:1","P:1")</script></body></html>',
       '<!doctype html><html><body><div hidden id="S:0"><!--$?--><template id="B:0"></template><p>x</p><!--/$--></div><script>$RC("B:0","S:0")</script></body></html>',
     ]) {
       expect(resolved(page), page).toMatchObject({ applied: 0 })
       expect(resolved(page).body, page).not.toContain('<p>x</p>')
     }
-    // A boundary whose sibling before it is an element, not its marker, is left as it is.
+    // A boundary whose sibling before it is an element, not its marker, is left as it is, its part kept.
     const unmarked = resolved('<!doctype html><html><body><main><span>Kept</span><template id="B:0"></template><p>Also kept</p></main><div hidden id="S:0"><p>Streamed</p></div><script>$RC("B:0","S:0")</script></body></html>')
     expect(unmarked.applied).toBe(0)
     expect(unmarked.body).toContain('<main><span>Kept</span><template id="B:0"></template><p>Also kept</p></main>')
-    expect(unmarked.body).not.toContain('Streamed')
+    expect(unmarked.body).toContain('<p>Streamed</p>')
     // A script that only defines the functions applies nothing.
     expect(resolved('<!doctype html><html><body><script>$RS=function(a,b){a=document.getElementById(a)}</script></body></html>').applied).toBe(0)
   })
