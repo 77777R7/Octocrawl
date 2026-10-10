@@ -454,8 +454,11 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
 
   it('documents exactly these codes and statuses in the docs reference table', () => {
     const reference = readFileSync(new URL('../../../apps/public-web/content/reference.md', import.meta.url), 'utf8')
-    const rows = [...reference.matchAll(/^\| `([a-z_]+)` \| (\d{3}) \|/gm)].map(([, code, status]) => [code, Number(status)])
-    expect(rows).toEqual(API_ERROR_CODES.map((code) => [code, API_ERROR_STATUS[code]]))
+    const rows = [...reference.matchAll(/^\| `([a-z_]+)` \| (\d{3}) \|/gm)].map(([, code, status]) => [code, Number(status)] as const)
+    // The table also documents what a rate-limited or hosted server answers, which no API route raises as an ApiErrorCode.
+    const outsideApi: Record<string, number> = { rate_limited: 429, quota_exhausted: 429, hosted_unavailable: 403 }
+    expect(rows.filter(([code]) => !(code in outsideApi))).toEqual(API_ERROR_CODES.map((code) => [code, API_ERROR_STATUS[code]]))
+    expect(Object.fromEntries(rows.filter(([code]) => code in outsideApi))).toEqual(outsideApi)
   })
 
   it('gives each rejected request a code and names unsupported parameters and formats in details', () => {
