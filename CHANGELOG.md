@@ -20,6 +20,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- A paid provider's step that its session's end cut off is read as that session's timeout when its timer fired a little early. A timer set for a deadline can fire a millisecond or two before the clock reaches it. The vendor rung then read the session as not yet ended: a CDP connect that gave up at the session's end answered `provider_error` instead of `timeout`. The connect case of `ladderCli.test.ts` failed that way twice in CI. The session's end is now read 25 ms early; the request's own end is read as the ladder reads it.
 - A page React streamed (React 18 and 19 server rendering) is read over HTTP as its own scripts put it together. The parts it sent later in `<div hidden id="S:…">` are moved into place, in the order the page calls them: `$RS` moves a segment into its placeholder, and `$RC`/`$RR` replace a boundary's fallback.
   - x.com's posts had sat in hidden parts outside the `<main>` that holds the profile. So the HTTP answer kept the posts without the profile's follower count.
   - A fetch of Wayfair's sofa category (T018) on 2026-10-10, put together, no longer reads as a shell. It holds 85 prices by T018's pattern, where it held 46.
