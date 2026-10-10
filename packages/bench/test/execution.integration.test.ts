@@ -299,6 +299,12 @@ describe('browser and vendor execution cancellation', () => {
     expect(out.region).toMatchObject({ ready: true, reads: 4, checks: [{ index: 0, passed: true, observedCount: 3 }] })
     // Without a contract it does not wait.
     expect((await navigateOnce(browser, 'https://example.com/', Date.now() + 20_000)).region).toBeUndefined()
+    // Nor on a page that did not answer 2xx, or that shows a decisive check with a 200: neither is waited on, nor paid for.
+    const answering = (status: number, body: string): CdpBrowser => ({ close: async () => {}, contexts: () => [{ pages: () => [], newPage: async () => ({ ...page, goto: async () => ({ ...response, status: () => status }) as never, content: async () => body }) }] })
+    regionReads = 0
+    expect((await navigateOnce(answering(403, '<p>Access denied</p>'), 'https://example.com/', Date.now() + 20_000, undefined, region)).region).toBeUndefined()
+    expect((await navigateOnce(answering(200, '<html><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script></html>'), 'https://example.com/', Date.now() + 20_000, undefined, region)).region).toBeUndefined()
+    expect(regionReads).toBe(0)
   })
 
   it('vendor HTTP respects deadline through its response body', async () => {

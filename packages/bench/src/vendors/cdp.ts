@@ -1,4 +1,4 @@
-import { createExecutionScope, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
+import { classifyGate, createExecutionScope, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 /**
  * The CDP seam: what a vendor transport needs from a remote browser, as a
  * structural subset of Playwright's types. Injectable so the transports can
@@ -187,8 +187,12 @@ export async function navigateOnce(
       loadingMaxMs: deadlineMs === undefined ? LOADING_WAIT_MAX_MS : Math.min(LOADING_WAIT_MAX_MS, Math.max(1, deadlineMs - 1_000 - Date.now())),
     }), scope.signal)
     throwIfExecutionStopped(scope)
-    // The region the task needs (ADR 0007): waited for on the same page, leaving a second to read it before the deadline.
-    const regionOutcome = region === undefined ? undefined : await raceWithSignal(waitForRegion(page, region, {
+    // The region the task needs (ADR 0007): waited for on the same page, leaving a second to read it before the deadline,
+    // only on a page that answered 2xx and shows no decisive check: a block page is not waited on, nor paid for.
+    const answered = response?.status() ?? 0
+    const gated = region === undefined || answered < 200 || answered >= 300
+      || classifyGate({ status: answered, header: (name) => response?.headers()[name.toLowerCase()] ?? null, body: await raceWithSignal(page.content(), scope.signal), contentful: true }) !== null
+    const regionOutcome = gated ? undefined : await raceWithSignal(waitForRegion(page, region!, {
       maxMs: deadlineMs === undefined ? REGION_WAIT_MAX_MS : Math.min(REGION_WAIT_MAX_MS, deadlineMs - 1_000 - Date.now()),
     }), scope.signal)
     throwIfExecutionStopped(scope)

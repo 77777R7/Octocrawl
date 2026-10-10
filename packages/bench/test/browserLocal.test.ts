@@ -1056,6 +1056,12 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
       expect(json.trace.some((event) => event.event === 'region_wait')).toBe(false)
       // Nor is a request without a contract.
       expect((await subject.fetch(`${url}/spa`)).trace.some((event) => event.event === 'region_wait')).toBe(false)
+      // Nor a page that shows a check: it is read at once, as blocked.
+      const started = Date.now()
+      const gated = await subject.fetch(`${url}/gate`, Date.now() + 20_000, undefined, undefined, { verify })
+      expect(gated.status).toBe('blocked')
+      expect(gated.trace.some((event) => event.event === 'region_wait')).toBe(false)
+      expect(Date.now() - started).toBeLessThan(8_000)
     } finally {
       await subject.teardown()
     }
