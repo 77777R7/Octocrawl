@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.4.1 — 2026-10-10
+
+The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `octocrawl-client`) at 0.4.1: 0.4.0 and the fix for a request reset on a kept-alive connection when the server's event loop was held, which polling clients of a crawl met.
+
+- A client of the local API or the local MCP host no longer has its next request on a kept-alive connection reset (`TypeError: fetch failed`, `read ECONNRESET`) after the server's work held its event loop for longer than the keep-alive timeout, as a crawl's synchronous extraction did for 5 to 6 s: a crawl's status poll after a mid-run `/pages` read was reset about one run in two (the real-site cases A14, A15 and A31 of the 2026-10-10 regression check). An idle connection is closed at the timeout only when no request has arrived on it; a request that did is answered. The hosted API's server has the same change, which takes effect when hosted Octocrawl is next deployed.
 - The Blog index (`/blog/`) is laid out like a publication's: the title alone, a row of category tabs (All Posts, AI Agents, AI Engineering, Web Extraction), the newest article large with its cover, category, byline and date, then the others as cards that name their category. Each tab is a link to its own page (`/blog/category/<slug>/`, `noindex, follow`), so the tabs work without a script. Each article's registry entry (`apps/public-web/scripts/blogPosts.mjs`) names its category.
 
 ## 0.4.0 — 2026-10-10
