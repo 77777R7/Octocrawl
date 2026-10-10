@@ -3,7 +3,7 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { BATCH_ERRORS_MAX_LIMIT, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchHandoffRequest, parseBatchStartRequest, parseLoginImportRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { BATCH_ERRORS_MAX_LIMIT, MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_TYPES, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchHandoffRequest, parseBatchStartRequest, parseLoginImportRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
 import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
@@ -16,6 +16,38 @@ export type ToolName = (typeof TOOL_NAMES)[number]
 const idSchema = {type:'object',properties:{id:{type:'string'},debug:{type:'boolean'}},required:['id'],additionalProperties:false} as const
 /** A client-chosen key on crawl and batch_scrape: the same key and arguments again return the first call's answer with replayed: true and start nothing. */
 const IDEMPOTENCY_KEY_PROPERTY = { type: 'string', minLength: 1, maxLength: 200, description: 'A client-chosen key (1 to 200 characters): a retried call with the same key and the same arguments returns the first call\'s taskId with replayed: true instead of starting a second job; the same key with other arguments is refused (conflict). Keys live 24 hours.' } as const
+/** A task contract (ADR 0006): the server checks each check's fields by its type and compiles each pattern. */
+const VERIFY_PROPERTY = {
+  type: 'object',
+  description: 'A task contract: checks the result must pass for the task to be done, judged after the fetch into the answer\'s verification (passed, failed with the checks that failed and why, or not_requested); status stays the fetch\'s. markdownIncludes {text}, markdownMatches {pattern, flags?}, markdownCountMin {pattern, flags?, min}, minTables {min}, listRecordsMin {min, path?}, recordFields {fields, min}: list records holding every field named, field {path, and one of equals, in, present, or min/max}. emptyOk: an empty result passes. A hosted server refuses markdownMatches and markdownCountMin.',
+  properties: {
+    checks: {
+      type: 'array', minItems: 1, maxItems: MAX_VERIFY_CHECKS,
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: [...VERIFY_CHECK_TYPES] },
+          text: { type: 'string', minLength: 1, maxLength: MAX_VERIFY_TEXT },
+          pattern: { type: 'string', minLength: 1, maxLength: MAX_VERIFY_TEXT },
+          flags: { type: 'string', pattern: '^[imsuy]*$' },
+          min: { type: 'number' },
+          max: { type: 'number' },
+          path: { type: 'string', minLength: 1, maxLength: MAX_VERIFY_TEXT },
+          fields: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string', minLength: 1, maxLength: MAX_VERIFY_TEXT } },
+          equals: { type: ['string', 'number', 'boolean', 'null'] },
+          in: { type: 'array', minItems: 1, maxItems: MAX_VERIFY_CHECKS, items: { type: ['string', 'number', 'boolean', 'null'] } },
+          present: { type: 'boolean' },
+        },
+        required: ['type'],
+        additionalProperties: false,
+      },
+    },
+    emptyOk: { type: 'boolean', description: 'An empty result (empty_verified, such as a search with no hits) is the task done. Default false.' },
+  },
+  required: ['checks'],
+  additionalProperties: false,
+} as const
+
 /** Options scrape, crawl and batch_scrape share; crawl and batch apply them to every page. */
 const PAGE_OPTION_PROPERTIES = {
   onlyMainContent: { type: 'boolean', description: 'false returns the whole page (header, navigation and footer kept) instead of the main content. Default true.' },
@@ -30,6 +62,7 @@ const PAGE_OPTION_PROPERTIES = {
   fastMode: { type: 'boolean', description: 'http lane only, no browser escalation: a page that needs script execution returns the http lane\'s verdict (a shell is failed/empty_unverified, never rendered). Default false.' },
   blockAds: { type: 'boolean', description: 'Abort requests to a bundled list of ad-serving hosts on the browser lane and remove ad and cookie-banner elements before extraction. Default true; false keeps them.' },
   removeBase64Images: { type: 'boolean', description: 'Leave an image whose src is a data: URI out of the Markdown, keeping its alt text (default true, Firecrawl\'s default). false keeps it as ![alt](data:…), which contentTokens then counts. html and rawHtml are never rewritten.' },
+  verify: VERIFY_PROPERTY,
   maxAge: { type: 'integer', minimum: 0, maximum: MAX_CACHE_AGE_MS, description: 'Reuse a stored result of this page fetched at most this many milliseconds ago with the same options, instead of fetching it. Default 0: nothing is reused, the page is fetched live. A reused result says metadata.cacheState "hit" (cacheState on a crawl page or batch item) with cachedAt, its fetch time, and carries that fetch\'s evidenceRecord unchanged; a page looked up and not found says "miss". Not in mode authed.' },
   minAge: { type: 'integer', minimum: 0, maximum: MAX_CACHE_AGE_MS, description: 'Reuse only a stored result at least this many milliseconds old (at most maxAge; without maxAge, any age from this one on).' },
   storeInCache: { type: 'boolean', description: 'Store this page\'s result for later reuse when it succeeds. Default true, except for a request with custom headers, which stores only with true (the stored trace keeps their values); mode authed never stores.' },
@@ -495,6 +528,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       ...(req.handoff === undefined ? {} : { handoff: req.handoff }),
       ...(req.lane === undefined ? {} : { lane: req.lane }),
       ...(req.access === undefined ? {} : { access: req.access }),
+      ...(req.verify === undefined ? {} : { verify: req.verify }),
       ...integrationOf(req),
     }, request)
   }
@@ -528,6 +562,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       ...(req.webhook === undefined ? {} : { webhook: req.webhook }),
       ...(req.ignoreRobotsTxt === undefined ? {} : { ignoreRobotsTxt: req.ignoreRobotsTxt }),
       ...(req.access === undefined ? {} : { access: req.access }),
+      ...(req.verify === undefined ? {} : { verify: req.verify }),
       onlyMainContent: req.onlyMainContent,
       waitFor: req.waitFor,
       timeout: req.timeout,
@@ -567,7 +602,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
     const req = parseBatchStartRequest(withoutOrigin(args))
     // With ignoreInvalidURLs the server's list is authoritative: the entries go as the caller sent them, and the API reports the ones it skipped.
     const urls = req.ignoreInvalidURLs === true ? (args as { urls: readonly string[] }).urls : req.urls
-    return client.batchScrape(urls, { ...(req.actions === undefined ? {} : { actions: req.actions }), mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...(req.lane === undefined ? {} : { lane: req.lane }), ...(req.access === undefined ? {} : { access: req.access }), ...integrationOf(req) }, request)
+    return client.batchScrape(urls, { ...(req.actions === undefined ? {} : { actions: req.actions }), mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...(req.lane === undefined ? {} : { lane: req.lane }), ...(req.access === undefined ? {} : { access: req.access }), ...(req.verify === undefined ? {} : { verify: req.verify }), ...integrationOf(req) }, request)
   }
   if (name === 'get_batch_errors') {
     const rec = readRecord(args)

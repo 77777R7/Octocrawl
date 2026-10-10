@@ -59,11 +59,18 @@ def test_batch_waits_pages_and_gives_evidence_rows():
     assert rows[0] == {
         "url": "https://a.example/", "status": "success", "reason": None, "final_url": "https://a.example/", "fetched_at": "2026-10-03T08:00:00.000Z",
         "http_status": 200, "lane": "http", "robots_decision": "allowed", "raw_sha256": "a" * 64, "markdown_sha256": "b" * 64,
-        "extractor": "extract-tf/5", "source_commit": None, "cache_state": "hit", "cached_at": "2026-10-03T08:00:00.000Z", "markdown": "# A",
+        "extractor": "extract-tf/5", "source_commit": None, "cache_state": "hit", "cached_at": "2026-10-03T08:00:00.000Z", "verification": None, "markdown": "# A",
     }
     # Unknown stays None: no fetch time, no status, no hash for a page that was not read; no record at all for one without a result.
     assert rows[1]["reason"] == "dns_error" and rows[1]["http_status"] is None and rows[1]["fetched_at"] is None
     assert rows[2]["status"] == "pending" and rows[2]["final_url"] is None and rows[2]["lane"] is None
+
+
+def test_evidence_row_reads_the_verification():
+    from octocrawl_client.frame import evidence_row
+    assert evidence_row({"url": "u", "status": "success", "verification": {"status": "failed", "reason": "checks_failed"}})["verification"] == "failed"
+    assert evidence_row({"url": "u", "status": "success", "evidenceRecord": {"verification": {"status": "passed"}}})["verification"] == "passed"
+    assert evidence_row({"url": "u", "status": "success"})["verification"] is None
 
 
 def test_to_pandas_keeps_unknown_missing():
