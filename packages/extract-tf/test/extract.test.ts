@@ -112,6 +112,41 @@ describe('extractTf', () => {
     expect(inner.mainHtml).not.toContain('the best budget gaming laptops')
   })
 
+  it('takes the page\'s <main> over a region the cascade found outside it when every h1 is in the <main> (ROADMAP PA item 4)', () => {
+    // Sephora's category page: the header's promotion is the one block of prose, and the <main> holds the title and
+    // product tiles that are mostly links, so no blocks of their own (T023).
+    const tile = (i: number) => `<div class="tile"><a href="/product/${i}">Brand ${i} Hydrating Cream ${i}</a><span>${i + 2}K</span><span>$${20 + i}.00 - $32.00</span></div>`
+    const page = (title: string, outside = '') => `<!doctype html><html><body><div class="css-1f3kb08"><div class="css-i36fct"><p><b>Don't miss out!</b> So many deals, trial sizes, sample sets and more. Shop Beauty Offers.</p></div>${outside}</div><main>${title}<p class="count">726 Results</p>${Array.from({ length: 2 }, (_, i) => tile(i)).join('')}</main><footer><a href="/help">Help</a></footer></body></html>`
+    const out = extractTf.extract(page('<h1>Moisturizers</h1>'))
+    expect(out.mainHtml).toContain('726 Results')
+    expect(out.mainHtml).toContain('$21.00 - $32.00')
+    expect(out.mainHtml).not.toContain("Don't miss out")
+    // With an h1 outside the <main> the page's title is not all in it, and the cascade's region stands.
+    expect(extractTf.extract(page('<h2>Moisturizers</h2>', '<h1>Sephora</h1>')).mainHtml).toContain("Don't miss out")
+    // With no h1 at all the cascade's region stands too.
+    expect(extractTf.extract(page('<h2>Moisturizers</h2>')).mainHtml).toContain("Don't miss out")
+    // An h1 inside the <main> and another outside it: the page's titles are not all in it, and the cascade's region stands.
+    expect(extractTf.extract(page('<h1>Moisturizers</h1>', '<h1>Sephora</h1>')).mainHtml).toContain("Don't miss out")
+    // A region inside a hidden element stands: React streams a page's body hidden outside the <main> its script moves
+    // it into (x.com), and an Eurostat-like page whose only prose is a hidden banner still escalates.
+    const story = Array.from({ length: 5 }, (_, i) => `<p>Paragraph ${i + 1}: the council approved the library budget after a long debate over branch hours and staffing.</p>`).join('')
+    const streamed = extractTf.extract(`<!doctype html><html><body><main><h1>Council approves library budget</h1><p>By A. Writer</p><template id="B:0"></template><div>Loading…</div></main><div hidden id="S:0"><div>${story}</div></div><script>$RC("B:0","S:0")</script></body></html>`)
+    expect(streamed.mainHtml).toContain('Paragraph 5')
+    const banner = extractTf.extract(`<!doctype html><html><body><div class="css-globan"><div hidden><p>All official European Union website addresses are in the europa.eu domain, and here is how to tell.</p></div></div><main><h1>Population on 1 January</h1><div id="app"></div></main></body></html>`)
+    expect(banner.escalate).toBe(true)
+    // A region inside the <main> stands, an <article> in it for one: it is not widened to the whole <main>.
+    const lead = Array.from({ length: 2 }, (_, i) => `<p>Long paragraph ${i + 1}: ${'the survey covers forty villages and three hundred households in the upper valley over two winters, '.repeat(4)}</p>`).join('')
+    const inner = extractTf.extract(`<!doctype html><html><body><main><h1>Valley survey</h1><div class="sidebar"><ul><li><a href="/a">Alpha district notes</a></li><li><a href="/b">Beta district notes</a></li></ul><p>Sidebar note: districts are listed by their old names here.</p></div><article>${lead}</article></main></body></html>`)
+    expect(inner.mainHtml).toContain('Long paragraph 2')
+    expect(inner.mainHtml).not.toContain('Sidebar note')
+    // A region that holds the <main> and more is not cut down to it: a page whose title and lead are in its <main> and
+    // whose body follows beside it keeps the body.
+    const body = Array.from({ length: 5 }, (_, i) => `<p>Paragraph ${i + 1}: the survey covers forty villages and three hundred households in the upper valley over two winters.</p>`).join('')
+    const wide = extractTf.extract(`<!doctype html><html><body><div class="layout"><main><h1>Valley survey</h1><p>A two-winter survey of the upper valley.</p></main><section>${body}</section></div></body></html>`)
+    expect(wide.mainHtml).toContain('Valley survey')
+    expect(wide.mainHtml).toContain('Paragraph 5')
+  })
+
   it('keeps the page\'s h1 when it sits outside the region marked role="main"', () => {
     // Stack Exchange: the question's h1 and its Asked/Viewed line sit above <div id="mainbar" role="main">, which holds
     // the question and the answers (one of them with an h1 of its own).
