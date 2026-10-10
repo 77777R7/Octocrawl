@@ -212,7 +212,7 @@ console.log(await client.getCrawlErrors(taskId, { limit: 10 }))
 JS
 ```
 
-`waitCrawl` polls until the crawl is completed, failed or cancelled and returns its status; `crawlAndWait(url, options, waitOptions)` starts the crawl, waits and returns `{ taskId, report, pages, errors }` in one call (`waitBatch` and `batchAndWait` do the same for a batch). When `timeoutMs` runs out the wait throws `WaitTimeoutError` with `taskId`, `timeoutMs` and `last` (the last status read, or null), and the crawl keeps running. While polling, a network error or an HTTP 408, 429 or 5xx answer is retried with backoff (`maxRetries`, default 5); see the README.
+`waitCrawl` polls until the crawl is completed, failed or cancelled and returns its status; `crawlAndWait(url, options, waitOptions)` starts the crawl, waits and returns `{ taskId, report, pages, errors }` in one call (`waitBatch` and `batchAndWait` do the same for a batch). When `timeoutMs` runs out the wait throws `WaitTimeoutError` with `taskId`, `timeoutMs` and `last` (the last status read, or null), and the crawl keeps running. While polling, a network error or an HTTP 408, 429 or 5xx answer is retried with backoff (`maxRetries`, default 5); see [Waiting for a job](batch-crawl-map.md#waiting-for-a-job).
 
 The SDK exports Crawl, Monitor and Delivery contract types. Mutation methods retain the server's error status/body. Optional final `{ signal }` arguments work with reads, mutations and pagination:
 

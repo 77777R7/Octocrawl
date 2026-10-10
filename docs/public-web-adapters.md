@@ -1,8 +1,8 @@
 # Public Web Adapters
 
-W2L remains a public-web capture product. Amazon, Reddit, X, and later site adapters do not call official platform APIs and do not require platform API keys. Official API documentation may be used to understand field and pagination models or to compare results, but it is not on the runtime success path.
+Octocrawl remains a public-web capture product. Amazon, Reddit, X, and later site adapters do not call official platform APIs and do not require platform API keys. Official API documentation may be used to understand field and pagination models or to compare results, but it is not on the runtime success path.
 
-The capture order is ordinary HTTP, embedded JSON-LD/microdata/hydration data, content loaded by a normal public browser session, then DOM parsing. A user-authorized session may read pages that user can already view. W2L does not replay protected private endpoints, copy access tokens, bypass login, or solve CAPTCHA. A login wall or challenge is a blocked result, not partial success.
+The capture order is ordinary HTTP, embedded JSON-LD/microdata/hydration data, content loaded by a normal public browser session, then DOM parsing. A user-authorized session may read pages that user can already view. Octocrawl does not replay protected private endpoints, copy access tokens, bypass login, or solve CAPTCHA. A login wall or challenge is a blocked result, not partial success.
 
 ## Contract
 
@@ -29,7 +29,7 @@ REST/SDK calls that omit both `formats` and `debug` keep their previous full Mar
 
 ## Reproducible Amazon gates
 
-The repository includes the fixed ten-URL manifest, an anonymous public preference setup, and a runner that invokes W2L through stdio MCP → local API → public browser capture:
+The repository includes the fixed ten-URL manifest, an anonymous public preference setup, and a runner that invokes Octocrawl through stdio MCP → local API → public browser capture:
 
 ```bash
 node scripts/section-b/amazon-public-state.mjs

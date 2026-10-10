@@ -31,7 +31,7 @@ while the LaunchAgent points at it. On a non-macOS system, run
 If this Mac reaches the web through a proxy, add `HTTPS_PROXY=...`,
 `HTTP_PROXY=...` and `NO_PROXY=...` lines to `.w2l/local-mcp.env` (the
 LaunchAgent does not inherit your shell) and restart the service. Captures
-then follow them as described in the README; `W2L_PROXY=off` ignores them.
+then follow them as described in [Behind a proxy](local-setup.md#behind-a-proxy); `W2L_PROXY=off` ignores them.
 The hosted process below never uses these variables.
 
 For a signed HTTPS receiver on the **same Mac**, install the separate
