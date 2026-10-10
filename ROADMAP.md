@@ -203,8 +203,7 @@ Decided 2026-10-05: enhanced fetching as a product capability, built on maintain
   - 30 paid calls, 6 of whose pages were verified answers;
   - $0.1000 charged by the ledger, an upper bound since Steel states no price per call;
   - before #310: 45 verified and 16 false successes ([record](research/access/runs/2026-10-09-pa4-steel-all-06b9354.md)).
-
-  Open: Steel's own bill against the ledger, the provider's built-in CAPTCHA solving (not on), and the remaining false successes ([diagnosis](research/access/runs/2026-10-09-pa4-steel-false-success-diagnosis-06b9354.md)).
+  - Open: Steel's own bill against the ledger, the provider's built-in CAPTCHA solving (not on), and the remaining false successes ([diagnosis](research/access/runs/2026-10-09-pa4-steel-false-success-diagnosis-06b9354.md)).
 - 5: built and opt-in (#224); the A/B showed no reproducible gain (#229), so it is not adopted.
 - 6: not started.
 - 7: built (#259). `standard` and `enhanced` were checked on real pages, on one server holding a Steel grant, with ten tasks: six the provider had verified, and four healthy controls.
@@ -311,7 +310,7 @@ Every result from every lane carries the same record. It is the product's identi
 | `rawSha256` / `outputSha256` | Hashes of the raw page and of the extracted output | In `evidenceRecord`: the body each lane read, the delivered Markdown and `json.data` as canonical JSON |
 | `extractor` | Name, version, commit | In `evidenceRecord`: `extract-tf` and `EXTRACTOR_VERSION` for a page, `pdf-text/1` or `file-text/1` for a file, and the commit when `W2L_SOURCE_COMMIT` is set |
 | `fieldEvidence` | Where each field came from: JSON-LD path, DOM locator, table index, PDF page | In `evidenceRecord` for every JSON field read from the page; generic JSON-LD, microdata and meta values have no locator yet; a PDF's `Label: value` lines as `pdf` with `page N "label"` |
-| `snapshot` / `screenshot` | Optional snapshot and screenshot paths with hashes | `evidenceRecord.artifacts` with SHA-256, when `W2L_CAPTURE_RAW_DIR` is set: a downloaded file (`kind: "file"`, with size and type), the raw snapshot and, with the `screenshot` format, the capture (`kind: "screenshot"`, with size and type). The capture itself travels inline on the response (`screenshot.base64`, `sha256`) |
+| `snapshot` / `screenshot` | Optional snapshot and screenshot paths with hashes | `evidenceRecord.artifacts` with SHA-256: a downloaded file (`kind: "file"`, with size and type). When `W2L_CAPTURE_RAW_DIR` is set, also the raw snapshot and, with the `screenshot` format, the capture (`kind: "screenshot"`, with size and type). The capture itself travels inline on the response (`screenshot.base64`, `sha256`) |
 
 ### Free core, hosted credits and Pro
 
