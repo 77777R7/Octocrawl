@@ -75,6 +75,18 @@ export interface ResourceUsage {
    * it in the run's cap. Absent when no paid call was made through a ledger; `externalCostUsd` stays the exact cost or null.
    */
   externalCostChargedUsd?: number
+  /**
+   * How long the provider sessions this fetch opened lasted, from just before each was created to the provider's
+   * confirmation of its release (ROADMAP PA item 4). Absent when not measured, or when a release went unconfirmed: that
+   * session bills until its own timeout.
+   */
+  vendorSessionMs?: number
+  /**
+   * What those sessions cost under the access grant's tariff, at most the call's price ceiling. The spend ledger charges
+   * it when the provider states no price; measured from before creation to after release, it is not below what a
+   * provider billing that tariff charged.
+   */
+  measuredCostUsd?: number
   /** Stage timings use a monotonic clock. Optional for legacy producers. */
   timings?: ResourceTimings
   /**

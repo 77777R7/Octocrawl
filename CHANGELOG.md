@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A paid provider call that states no price is charged what its sessions' measured time costs under the access grant's tariff, not its price ceiling. Each session is timed from just before it is created to the provider's confirmation of its release, so the charge is never below what the tariff bills, and it is at most the ceiling. A release the provider did not confirm (Steel and Browserbase now fail one that answers other than 2xx) leaves the session billing until its timeout, so that call, like one that threw, is still charged at its ceiling. The `spend_settled` event says which basis applied (`reported`, `measured` or `ceiling`); a provider answer carries `usage.vendorSessionMs` and `usage.measuredCostUsd`; and each of the Evidence Record's `access.paidCalls` has `sessionMs` (null when the charge is not measured). Steel's dashboard had billed $0.23 for 483 sessions in 24 hours, where the ledger, charging each at its ceiling, had recorded $1.48.
+
 ## 0.4.0 — 2026-10-10
 
 The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `octocrawl-client`) at 0.4.0, the release ROADMAP's PA phase names once items 3, 7 and 8 have their real-site records (their code shipped in 0.3.1 and 0.3.2): everything below since 0.3.2 on 2026-10-09, among it a short page that names a refusal or a browser check judged a block, products a page's JSON-LD collection or `ItemList` declares read as a listing, a main region the page hides no longer taken for its content, and a vendor session that cannot be opened reported as the provider's failure.

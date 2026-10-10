@@ -830,12 +830,16 @@ export class LadderRunner {
       throw error
     }
     if (reservation === null || ceiling === undefined) return result
-    const charged = reservation.settle(result.usage.externalCostUsd)
-    const call = paidCall(progress, channel, label, ceiling, charged, result.usage.externalCostUsd, result)
+    // The provider's stated price, else what its sessions' measured time costs under the tariff, else the ceiling.
+    const reported = result.usage.externalCostUsd
+    const measured = reported === null && typeof result.usage.measuredCostUsd === 'number' ? result.usage.measuredCostUsd : null
+    const charged = reservation.settle(reported ?? measured)
+    const sessionMs = measured === null ? null : result.usage.vendorSessionMs ?? null
+    const call = paidCall(progress, channel, label, ceiling, charged, reported, result, sessionMs)
     return {
       ...result,
       usage: { ...result.usage, externalCostChargedUsd: (result.usage.externalCostChargedUsd ?? 0) + charged },
-      trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'spend_settled', detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: result.usage.externalCostUsd === null ? 'ceiling' : 'reported', call } }],
+      trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'spend_settled', detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: reported !== null ? 'reported' : measured !== null ? 'measured' : 'ceiling', ...(sessionMs === null ? {} : { sessionMs }), call } }],
     }
   }
 
@@ -1090,12 +1094,12 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
  * One call the ledger settled, added to the run's charge and to its paid calls: Octocrawl's verdict on the page the call
  * returned (null when it returned none), never the provider's word. Returns the call's number in the run.
  */
-function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceilingUsd: number, chargedUsd: number, reportedCostUsd: number | null, result: FetchResult | null): number {
+function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceilingUsd: number, chargedUsd: number, reportedCostUsd: number | null, result: FetchResult | null, sessionMs: number | null = null): number {
   progress.charged = (progress.charged ?? 0) + chargedUsd
   progress.grant ??= channel.grant ?? null
   const call = progress.paidCalls.length + 1
   progress.paidCalls.push({
-    provider: channel.vendorId ?? channel.id, rung, capabilities: [...(channel.grantCapabilities ?? [])], ceilingUsd, chargedUsd, reportedCostUsd,
+    provider: channel.vendorId ?? channel.id, rung, capabilities: [...(channel.grantCapabilities ?? [])], ceilingUsd, chargedUsd, reportedCostUsd, sessionMs,
     outcome: result?.status ?? null, reason: result === null ? null : result.failureReason ?? result.blockReason ?? result.budgetExceeded ?? null, call,
   })
   return call

@@ -219,6 +219,18 @@ describe('steel session config', () => {
     await ops.releaseSession('st_1')
     expect(api.requests[1]!.url).toBe('https://api.steel.dev/v1/sessions/st_1/release')
   })
+
+  it('fails a release the vendor did not confirm: the session bills until its timeout (ROADMAP PA item 4)', async () => {
+    for (const [vendor, ops, id] of [
+      ['steel', (api: FakeApi) => steelOps({ apiKey: 'steel_key' }, api.handler), 'st_1'],
+      ['browserbase', (api: FakeApi) => browserbaseOps({ apiKey: 'bb_key' }, api.handler), 'bb_1'],
+    ] as const) {
+      const api = new FakeApi((req) => req.method === 'POST' && req.url.endsWith('/v1/sessions') ? { status: 201, json: { id, connectUrl: `wss://cdp.example/${id}` } } : { status: 503, json: {} })
+      const vendorOps = ops(api)
+      await vendorOps.createSession()
+      await expect(vendorOps.releaseSession(id), vendor).rejects.toThrow(`${vendor}: session release returned 503`)
+    }
+  })
 })
 
 // --- identity is measured, not asserted ---------------------------------------

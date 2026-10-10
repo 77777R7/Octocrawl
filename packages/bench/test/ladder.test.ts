@@ -1392,14 +1392,31 @@ describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', ()
     expect(ledger.settledUsd).toBeCloseTo(0.08)
   })
 
+  it('charges a provider\'s stated price first, else its sessions\' measured cost, else the ceiling (ROADMAP PA item 4)', async () => {
+    const answer = (usage: Partial<FetchResult['usage']>) => {
+      const page = contentfulResult(url, 'provider')
+      return { ...page, usage: { ...page.usage, ...usage } }
+    }
+    const charge = async (usage: Partial<FetchResult['usage']>) => {
+      const run = await new LadderRunner([blockedHttp(), priced(0.03, [answer(usage)])], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })
+      const call = (run.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }).calls[0]!
+      const basis = run.result.trace.find((event) => event.event === 'spend_settled')?.detail?.basis
+      return { charged: call.chargedUsd, sessionMs: call.sessionMs, basis }
+    }
+    expect(await charge({ externalCostUsd: null, measuredCostUsd: 0.001, vendorSessionMs: 5_000 })).toEqual({ charged: 0.001, sessionMs: 5_000, basis: 'measured' })
+    // A stated price wins over a measured one, and the record then holds no session time for the charge.
+    expect(await charge({ externalCostUsd: 0.002, measuredCostUsd: 0.001, vendorSessionMs: 5_000 })).toEqual({ charged: 0.002, sessionMs: null, basis: 'reported' })
+    expect(await charge({ externalCostUsd: null })).toEqual({ charged: 0.03, sessionMs: null, basis: 'ceiling' })
+  })
+
   it('puts every paid call of the run on the answer: the provider, its charge, what Octocrawl made of its page, and which is the answer', async () => {
     const grant = { sha256: 'a'.repeat(64), tier: 'enhanced', attestedAt: '2026-10-09T00:00:00Z' }
     const failing = { ...channel('provider', [providerErrorResult(url, 'browserbase')], 'browserbase'), priceCeilingUsd: 0.05, grant, grantCapabilities: ['vendor_remote_browser'] }
     const winning = { ...priced(0.03, [contentfulResult(url, 'provider')]), grant, grantCapabilities: ['vendor_remote_browser', 'vendor_captcha_solving'] }
     const run = await new LadderRunner([blockedHttp(), failing, winning], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })
     expect(run.result.trace.filter((event) => event.event === 'paid_calls').map((event) => event.detail)).toEqual([{ grant, calls: [
-      { provider: 'browserbase', rung: 'provider', capabilities: ['vendor_remote_browser'], ceilingUsd: 0.05, chargedUsd: 0.05, reportedCostUsd: null, outcome: 'failed', reason: 'provider_error', answer: false },
-      { provider: 'steel', rung: 'provider', capabilities: ['vendor_remote_browser', 'vendor_captcha_solving'], ceilingUsd: 0.03, chargedUsd: 0.03, reportedCostUsd: null, outcome: 'success', reason: null, answer: true },
+      { provider: 'browserbase', rung: 'provider', capabilities: ['vendor_remote_browser'], ceilingUsd: 0.05, chargedUsd: 0.05, reportedCostUsd: null, sessionMs: null, outcome: 'failed', reason: 'provider_error', answer: false },
+      { provider: 'steel', rung: 'provider', capabilities: ['vendor_remote_browser', 'vendor_captcha_solving'], ceilingUsd: 0.03, chargedUsd: 0.03, reportedCostUsd: null, sessionMs: null, outcome: 'success', reason: null, answer: true },
     ] }])
     // A run that called no provider has none.
     const local = await new LadderRunner([channel('http', [contentfulResult(url, 'http')])], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })

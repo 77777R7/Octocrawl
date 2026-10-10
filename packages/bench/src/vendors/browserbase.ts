@@ -197,13 +197,15 @@ export function browserbaseOps(
     },
 
     async releaseSession(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<void> {
-      await api({
+      const res = await api({
         method: 'POST',
         url: `${base}/v1/sessions/${sessionId}`,
         headers,
         body: { status: 'REQUEST_RELEASE' },
         deadlineMs, signal,
       })
+      // A release the vendor did not confirm leaves the session billing until its own timeout.
+      if (res.status < 200 || res.status >= 300) throw new Error(`browserbase: session release returned ${res.status}`)
     },
   }
 }
