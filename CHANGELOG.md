@@ -8,7 +8,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 | Version | Date | What changed |
 | --- | --- | --- |
-| Unreleased | | Lighter images on octocrawl.dev for phones; docs titles worded for search; paid provider calls charged by measured time |
+| Unreleased | | React-streamed pages put together over HTTP; paid provider calls charged by measured time; lighter images on octocrawl.dev for phones; docs titles worded for search |
 | 0.4.1 | 2026-10-10 | Fix: a request on a kept-alive connection was reset; two main-content fixes |
 | 0.4.0 | 2026-10-10 | Better block and listing detection; a Blog and new guides on octocrawl.dev |
 | 0.3.2 | 2026-10-09 | The `my-browser` lane; lists continued in your Chrome; paid provider calls on a spend ledger |
@@ -20,6 +20,13 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- A page React streamed (React 18 and 19 server rendering) is read over HTTP as its own scripts put it together. The parts it sent later in `<div hidden id="S:…">` are moved into place, in the order the page calls them: `$RS` moves a segment into its placeholder, and `$RC`/`$RR` replace a boundary's fallback.
+  - x.com's posts had sat in hidden parts outside the `<main>` that holds the profile. So the HTTP answer kept the posts without the profile's follower count.
+  - A fetch of Wayfair's sofa category (T018) on 2026-10-10, put together, no longer reads as a shell. It holds 85 prices by T018's pattern, where it held 46.
+  - A call that names no part in the page is left alone, as on a page a browser already put together. A part whose target is gone (a boundary inside a fallback an earlier call replaced) is removed, as React's calls remove it.
+  - Every step the calls take is charged to a budget of four steps per element of the page. A step is a node moved or removed, or a parent walked past to see where an element is. So the time is linear in the page however its parts nest. Pages of 10,000 parts each nested in the next, or each 20 elements deep in the one before, had made the calls take from 3 seconds to over 4 minutes. They now take 20 to 250 ms. A page that spends the budget keeps the parts it did not reach hidden.
+  - On 51 real pages the calls took at most 0.09 steps per element. 20 of them were streamed: x.com, Wayfair, Vinted, nextjs.org, vercel.com, shadcn/ui, shopify.dev.
+  - The extractor is now `extract-tf/21`.
 - On screens up to 1049 px the faint octopus behind the home page's hero copy uses its own 720 px copy (`octopus-ghost.webp`, 39 KB) instead of the 1254 px artwork (196 KB). The octopus is drawn at 14–16% opacity. That copy is what the page preloads. Wider screens keep the full artwork. The four client logos on Connect MCP carry a `?v=` content version, so they are cached for a year instead of four hours.
 - The docs pages say in search results what they are for. The six product pages get titles worded as people search ("Connect Octocrawl MCP to Claude Code, Cursor and Codex", "Octocrawl API Reference: REST, SDK, JSON and Evidence", …). The titles come through a new `seoTitle` in `apps/public-web/scripts/docsPages.mjs`. The sidebar keeps their short names. Every docs page's description is 140 to 160 characters instead of 65 to 134. A test holds titles to 60 characters and descriptions to 140–160, unique across the docs and the blog.
 - The home page's first-screen artwork loads sooner and is cached for a year. On screens up to 1049 px its largest paint, the faint octopus behind the hero copy, is a CSS background the browser found late; it is now preloaded. `mountain-hero.webp` and `octopus-original.webp` carry a `?v=` content version in every reference. The references are in the page, in the home stylesheet and scripts through a Vite plugin, and in `docs.css`, whose own version now follows it. So the server caches them for a year instead of an hour, and no page fetches one twice.
