@@ -88,7 +88,7 @@ export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', '
  */
 export function hostedServerCard() {
   return {
-    serverInfo: { name: 'octocrawl', title: 'Octocrawl', version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev' },
+    serverInfo: { name: 'octocrawl', title: 'Octocrawl', version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server-card&utm_medium=listing' },
     authentication: { required: false },
     tools: TOOLS.filter((tool) => HOSTED_API_TOOLS.has(tool.name)),
     resources: [],
@@ -193,7 +193,7 @@ export function clientAddress(req: IncomingMessage, proxySecret: string | undefi
   return isIP(socket) ? socket : 'unknown'
 }
 
-const LOCAL_HINT = 'run Octocrawl on your computer for this: npx octocrawl serve, then npx -y @octocrawl/mcp (https://octocrawl.dev/docs/connect-mcp/)'
+const LOCAL_HINT = 'run Octocrawl on your computer for this: npx octocrawl serve, then npx -y @octocrawl/mcp (https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint)'
 
 export function createHostedApi(config: HostedApiConfig): { server: HttpServer; engine: ApiEngine; close: () => Promise<void> } {
   if (config.hashKey.length < 32) throw new Error('hashKey must contain at least 32 characters')
@@ -266,7 +266,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const addressWait = addressLimiter.retryAfterSeconds(digest(config.hashKey, 'ip', c.env.socketAddress))
     if (addressWait !== null) return refuse(c, 429, 'rate_limited', `too many requests from this address: at most ${ADDRESS_PER_MINUTE} a minute`, [`retry after ${addressWait} s`], { 'Retry-After': String(addressWait) })
     const caller = await identify(c.req.raw.headers, c.env.socketAddress)
-    if (caller === 'unknown_key') return refuse(c, 401, 'unauthorized', 'this key is not one Octocrawl issued, or it was revoked', ['send no Authorization header to use the keyless allowance, or ask for a key at https://octocrawl.dev/docs/connect-mcp/'])
+    if (caller === 'unknown_key') return refuse(c, 401, 'unauthorized', 'this key is not one Octocrawl issued, or it was revoked', ['send no Authorization header to use the keyless allowance, or ask for a key at https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint'])
     c.set('caller', caller)
     if (!starts) return next()
     const retryAfter = (caller.kind === 'key' ? keyLimiter : keylessLimiter).retryAfterSeconds(caller.id)
@@ -278,7 +278,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const seconds = secondsToUtcMidnight(now)
       const site = quota.limited.endsWith('-site')
       return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served its ${quota.limit} pages for today` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
-        [caller.kind === 'keyless' && !site ? 'a key raises the allowance: https://octocrawl.dev/docs/connect-mcp/' : LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+        [caller.kind === 'keyless' && !site ? 'a key raises the allowance: https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint' : LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
     }
     if (path === '/v1/scrape') {
       // The scrape route runs here with the request pinned: nothing is stored for reuse (the page cache would grow with every

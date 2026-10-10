@@ -7,7 +7,7 @@ const view = (timestamp, vid, props, extra = {}) => ({ event: 'w2l_web_event', n
 test('site visitors are browsers per UTC day, without automated or internal lines, by referrer and utm_source', () => {
   const summary = summarizeSiteEvents([
     view('2026-10-09T10:00:00Z', 'a', { path: '/' }),
-    view('2026-10-09T11:00:00Z', 'a', { path: '/docs/' }),
+    view('2026-10-09T11:00:00Z', 'a', { path: '/', from: 'blog-web-scraping-for-rag' }),
     view('2026-10-10T09:00:00Z', 'a', { path: '/', ref: 'news.ycombinator.com' }),
     view('2026-10-10T09:30:00Z', 'b', { path: '/', utm_source: 'devto' }),
     view('2026-10-10T09:40:00Z', 'c', { path: '/' }, { automated: true }),
@@ -23,7 +23,8 @@ test('site visitors are browsers per UTC day, without automated or internal line
     { source: 'news.ycombinator.com', views: 1, visitorDays: 1 },
     { source: 'utm_source=devto', views: 1, visitorDays: 1 },
   ])
-  assert.deepEqual(summary.paths, [['/', 3], ['/docs/', 1]])
+  assert.deepEqual(summary.paths, [['/', 4]])
+  assert.deepEqual(summary.fromTags, [['blog-web-scraping-for-rag', 1]])
   assert.deepEqual(summary.actions, [['link_click', 1]])
   assert.deepEqual(summary.previews, [['success', 1]])
 })

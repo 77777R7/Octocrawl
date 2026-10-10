@@ -14,4 +14,4 @@ const { report, items } = await client.batchAndWait(['https://example.com/a', 'h
 
 Start a local API with `npx octocrawl serve`. Requires a runtime with `fetch` (Node.js 18 or later, browsers, Deno, Bun).
 
-Licence: MIT. Website and docs: https://octocrawl.dev. Source and the API reference: https://github.com/77777R7/Octocrawl
+Licence: MIT. Website and docs: https://octocrawl.dev/?utm_source=npm&utm_medium=readme&utm_campaign=sdk. Source and the API reference: https://github.com/77777R7/Octocrawl

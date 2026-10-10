@@ -2,7 +2,7 @@
 
 This page covers the public Octocrawl page and its preview service. When you run Octocrawl on your own computer, none of it applies: requests, results and logs stay on your machine.
 
-Last updated 10 October 2026.
+Last updated 11 October 2026.
 
 ## What you submit
 
@@ -16,7 +16,7 @@ When the page opens, and after each preview, it asks `GET /api/quota` how many p
 
 - **The visitor cookie, `w2l_visitor`.** A random identifier, signed by the service, kept for a year. It counts your five previews a day, and the same identifier (or, without the cookie, your IP address), hashed per day, is the pseudonym on page events and preview outcomes (below). It is not shared with anyone. A second cookie, `w2l_internal`, is set only when a page is opened with `?internal=1`; the operator uses it to mark their own browser, and `?internal=0` removes it.
 - **A daily preview counter.** For each UTC day, a count of previews under a keyed hash of that day and your cookie (or, without the cookie, your IP address). Without the service's secret key, the hash cannot be turned back into either. These counters are kept in Google Cloud Firestore and expire one day after the day they count; Firestore then deletes them, usually within a day.
-- **Page events.** The page tells its own service when it is opened and when you choose an example, change the output view, copy or download a result, open Get code or copy code from it or from the docs, pick an MCP client in the docs, open or send the waitlist form, or follow a link. Each event names the page path, the referring site's host (never its path), any `utm_` tags on the address, the view, Get code tab, client or waitlist entry point involved, and for a link, where it leads: its path on this site, or another site's host and path (never a query).
+- **Page events.** The page tells its own service when it is opened and when you choose an example, change the output view, copy or download a result, open Get code or copy code from it or from the docs, pick an MCP client in the docs, open or send the waitlist form, or follow a link. Each event names the page path, the referring site's host (never its path), any `utm_` or `from` tags on the address, the view, Get code tab, client or waitlist entry point involved, and for a link, where it leads: its path on this site, or another site's host and path (never a query).
 - **Preview outcomes.** For each preview: its state (for example `success` or `blocked`), the diagnostic code, the **host** of the page you asked for (never its path or query), whether you set options, and the server time.
 
 Events and outcomes carry a pseudonym that changes every UTC day, so a visit can be counted but not followed from one day to the next, a flag for requests that look automated, and an internal flag when the `w2l_internal` cookie is present or the request comes from the browser built into the Claude desktop app (its user agent names `Claude/`), where the operator checks the site. Links taken from a page you extracted (its final address, its Markdown, its link list) are never logged. When your browser sends Do Not Track or Global Privacy Control, the page sends no events and the service logs no preview outcome; the cookie and the daily counter still work, since without them the five-a-day limit could not.

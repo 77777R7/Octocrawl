@@ -270,6 +270,21 @@ node scripts/public-preview/waitlist.mjs --expire   # entries older than 12 mont
 
 To pause anonymous capture without removing the public page, run `gcloud run services update w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --update-env-vars=W2L_PREVIEW_ENABLED=false`. The deployment must not set `W2L_CAPTURE_RAW_DIR` or the local Reddit/X proxy/exception options. Never enable arbitrary-domain browser fallback: the public browser path is restricted to Amazon.sg and its fixed resource hosts; generic pages use the guarded HTTP path.
 
+### Tagging links
+
+A page view records the referring site's host, the address's `utm_source`, `utm_medium` and `utm_campaign`, and its `from` tag. Many places strip the referrer (MCP clients, terminals, npm and PyPI pages, some forums), so every link to octocrawl.dev that Octocrawl puts somewhere else carries utm tags, and the weekly report groups visitors by them:
+
+| Where the link is | `utm_source` | `utm_medium` |
+| --- | --- | --- |
+| The repository's README and docs on GitHub | `github` | `readme` (`utm_campaign` names the spot: `nav`, `top`, `quick-start`, `docs`, `mcp`) |
+| npm package pages and their manifests' homepage | `npm` | `readme` (`utm_campaign` = `cli`, `sdk`, `mcp`) or `package` |
+| PyPI (`octocrawl-client`) | `pypi` | `readme` or `package` |
+| The MCP Registry entry (`server.json`) and the hosted server card | `mcp-registry`, `mcp-server-card` | `listing` |
+| Hints in hosted API and MCP answers | `hosted` | `hint` |
+| A post or listing elsewhere | the venue: `hn`, `reddit`, `devto`, `producthunt`, `smithery`, `glama`, `mcp-directory`, … | `post` or `listing` |
+
+`from` is for the site's own links to its home page (`/?from=blog-<slug>`, `/?from=limits#waitlist`): lowercase letters, digits and hyphens, at most 60 characters, so a link inside the site still says which page sent the visitor. `limits` and `connect-mcp` also open the waitlist form.
+
 ### Weekly report
 
 `scripts/public-preview/weekly-report.mjs` puts a week's numbers on one Markdown page, counts only (no address, IP, key or visitor id):

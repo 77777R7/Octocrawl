@@ -25,6 +25,7 @@ export type { IdempotencyClaim, IdempotencyStoreOptions } from './idempotencySto
 
 export * from './webhookInbox.js'
 export { sourceCommitFromEnv, toEvidenceRecord } from './evidenceRecord.js'
+export { readinessOf } from './readiness.js'
 export { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, untriedAudit, withCacheMiss, withCacheStored } from './pageCache.js'
 export type { PageCacheBounds, PageCacheHit, PageCacheOptions } from './pageCache.js'
 export type { EvidenceOutput, EvidenceRecordOptions } from './evidenceRecord.js'

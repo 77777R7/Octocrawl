@@ -33,6 +33,8 @@ beforeAll(async () => {
     const html = (body: string, status = 200, headers: Record<string, string> = {}) => { res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', ...headers }); res.end(`<!doctype html><html><head><title>Members</title></head><body>${body}</body></html>`) }
     if (req.url === '/robots.txt') { res.writeHead(404); res.end(); return }
     if (req.url === '/open') return html(ARTICLE.replace('member page', 'open page'))
+    // A page that shows "Loading…" for a while, then fills in its posts one by one, then stops (ADR 0007).
+    if (req.url === '/filling') return html('<main><p id="state">Loading…</p><div id="posts"></div></main><script>setTimeout(() => { document.getElementById("state").textContent = "Posts"; let n = 0; const add = setInterval(() => { document.getElementById("posts").insertAdjacentHTML("beforeend", "<article><p>Post " + (++n) + ": the timeline filled in by its script, one post after another, as a feed does.</p></article>"); if (n === 6) clearInterval(add) }, 300) }, 2000)</script>')
     // As a Lark sheet: its grid on a canvas, its shortcut list in a sidebar a class hides; a closed tab, a hidden box
     // with one thing shown in it, and the page's data. First, an element whose class adds a child to each copy made of it,
     // and a form named for a property of the document.
@@ -171,6 +173,20 @@ describe('reading a page in the person\'s own Chrome', () => {
       const whole = await reader.read(`${base}/sheet`, { unattended: true, pollMs: 50, waitMs: 20_000 })
       expect(whole.html).toContain('Insert new sheet')
       expect(whole.html).toContain('The closed tab')
+    } finally {
+      reader.close()
+    }
+  }, 60_000)
+})
+
+describe('reading a page in the person\'s own Chrome once it has settled (ADR 0007)', () => {
+  it('waits while the page shows a loading message and while its text still grows, then reads it whole', async () => {
+    const reader = await openUserChrome({ userDataDir: join(root, 'chrome') })
+    try {
+      // At the lane's own pace (a read every 0.5 s): "Loading…" for 2 s, then a post every 0.3 s.
+      const read = await reader.read(`${base}/filling`, { unattended: true, waitMs: 20_000 })
+      expect(read.html).toContain('Post 6')
+      expect(read.settle).toMatchObject({ loadingSeen: true, stillLoading: false, steady: true })
     } finally {
       reader.close()
     }

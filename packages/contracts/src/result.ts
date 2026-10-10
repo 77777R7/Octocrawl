@@ -324,9 +324,33 @@ export interface FetchWarning {
    * result stands. `page_still_loading`: a browser or provider lane read the
    * page as content while it still showed a loading indicator, after waiting
    * for it (`loading_wait` in the trace): its data may not be in the answer.
+   * `page_still_changing`: the my-browser lane read the page while its text
+   * was still changing, after waiting for it to stop (`steady_wait` in the
+   * trace): its data may not all be in the answer.
    */
   code: string
   message: string
+}
+
+/**
+ * Whether the page was ready for its task when it was read (ADR 0007, ROADMAP PA item 11), from the result's own
+ * signals: `ready`; `not_loaded`, read before what it shows had come, which waiting or acting in the same session may
+ * change; `not_extracted`, read as served but not extracted, an extraction fault no paid retry mends; `not_served`, the
+ * route, the access or the region did not serve it.
+ */
+export const READINESS_STATE = ['ready', 'not_loaded', 'not_extracted', 'not_served'] as const
+export type ReadinessState = (typeof READINESS_STATE)[number]
+
+export interface Readiness {
+  state: ReadinessState
+  /**
+   * The signals the state was read from, in the order they were found: warning codes (`page_still_loading`,
+   * `client_rendered_suspected`, ...), the failure, block or budget reason, and the trace's (`wait_cut_short`,
+   * `deadline_exceeded`, `little_text`). Codes only, never the page's text; empty for a page ready by every signal.
+   */
+  basis: readonly string[]
+  /** How long the lane waited for the page to settle, when it recorded the wait (`loading_wait`, `steady_wait`). */
+  waitedMs?: number
 }
 
 /**

@@ -232,6 +232,10 @@ describe('Evidence Record: HTTP lane', () => {
     expect(pages.find(page => page.url === `${origin}/article`)?.evidenceRecord).toMatchObject({ status: 'success', outputSha256: { markdown: expect.stringMatching(/^[0-9a-f]{64}$/) } })
     // A link the crawl discovered obeys robots.txt, where the batch's named URL above did not.
     expect(errors.find(page => page.url === `${origin}/private`)?.evidenceRecord).toMatchObject({ reason: 'policy_denied', robotsDecision: { decision: 'disallowed', userOverride: false, overrideBasis: null } })
+    // Each page says whether it was ready, as its record does (ADR 0007): the article was, the page robots.txt kept out was not served.
+    for (const page of [...pages, ...errors]) expect(page.readiness).toEqual(page.evidenceRecord?.readiness)
+    expect(pages.find(page => page.url === `${origin}/article`)?.readiness).toEqual({ state: 'ready', basis: [] })
+    expect(errors.find(page => page.url === `${origin}/private`)?.readiness).toEqual({ state: 'not_served', basis: ['policy_denied'] })
 
     // A crawl started with ignoreRobotsTxt fetches that link too, and its record says on whose word.
     const ignoring = await client.crawl(`${origin}/hub`, { maxPages: 4, crawlEntireDomain: true, ignoreRobotsTxt: true })

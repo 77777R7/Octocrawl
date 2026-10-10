@@ -15,6 +15,7 @@ function track(name, props = {}) {
   } catch {}
   const query = new URLSearchParams(location.search)
   for (const key of ['utm_source', 'utm_medium', 'utm_campaign']) if (query.get(key)) props[key] = query.get(key).slice(0, 120)
+  if (/^[a-z0-9-]{1,60}$/.test(query.get('from') ?? '')) props.from = query.get('from')
   track('page_view', props)
 }
 document.addEventListener('click', event => {

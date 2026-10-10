@@ -9,7 +9,7 @@ import { BROWSER_FINGERPRINT, browserFingerprintFor, type CrawlMode, type Robots
 import type { CrawlError, CrawlPage, CrawlPageList, CrawlReport, SitemapMode } from './crawl.js'
 import { SITEMAP_MODES } from './crawl.js'
 import { MAX_PDF_PAGES, type FetchOptions, type PdfParser } from './execution.js'
-import type { FetchResult, FetchWarning, LadderRunAudit, TraceEvent } from './result.js'
+import type { FetchResult, FetchWarning, LadderRunAudit, Readiness, TraceEvent } from './result.js'
 import { unsafeRegexReason } from './regexSafety.js'
 import { MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_KEYS, VERIFY_CHECK_TYPES, type VerifyCheck, type VerifyCheckType, type VerifyContract } from './verify.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
@@ -254,7 +254,7 @@ export function warningOf(warnings: readonly FetchWarning[] | undefined): string
  * call's facts beside the page's declarations, and the snapshot and Evidence
  * Record set on every response the API sends (see evidenceRecord.ts).
  */
-export type ScrapeResponse = ScrapeRun & { scrapeId: string; metadata: ScrapeResponseMetadata; snapshot?: CompactScrapeResponse['snapshot']; evidenceRecord?: EvidenceRecord }
+export type ScrapeResponse = ScrapeRun & { scrapeId: string; metadata: ScrapeResponseMetadata; snapshot?: CompactScrapeResponse['snapshot']; evidenceRecord?: EvidenceRecord; readiness: Readiness }
 
 /**
  * What `GET /v1/scrapes/:id` returns: the record of one scrape call, written
@@ -333,6 +333,8 @@ export interface CompactScrapeResponse {
   warnings?: FetchResult['warnings']
   /** The warnings' messages joined with a space, present exactly when `warnings` is (Firecrawl's `warning`). */
   warning?: string
+  /** Whether the page was ready for its task when it was read (Readiness, ADR 0007), as on the full response. */
+  readiness: Readiness
   /** Present when the request itself left something on the table (`fastMode` declined a browser hop the http lane asked for), as on the full response. */
   agentHints?: AgentHints
   /** A page stopped at a check a person can get through, on a server that hands pages to them: why, and how (`handoff: true`), as on the full response. */

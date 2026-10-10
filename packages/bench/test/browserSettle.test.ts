@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FetchResult } from '@w2l/contracts'
-import { loadingWaitEvent, waitForRenderedStability, withStillLoadingWarning } from '../src/browserSettle.js'
+import { loadingWaitEvent, steadyWaitEvents, waitForRenderedStability, withStillChangingWarning, withStillLoadingWarning } from '../src/browserSettle.js'
 
 describe('waitForRenderedStability', () => {
   it('does not accept a stable shell before the minimum observation window', async () => {
@@ -86,5 +86,25 @@ describe('waitForRenderedStability', () => {
     // A failed or blocked page claims no content, and a page whose indicator went has nothing to warn of.
     expect(withStillLoadingWarning({ ...page, status: 'failed' }).warnings).toBeUndefined()
     expect(withStillLoadingWarning({ ...page, trace: [{ ...event, detail: { waitedMs: 3_000, cleared: true } }] }).warnings).toBeUndefined()
+  })
+})
+
+describe('the my-browser lane\'s settle wait (ADR 0007, ROADMAP PA item 11)', () => {
+  it('records a loading indicator it saw and a wait it made, and warns of a page read while still changing', () => {
+    // A page settled at its first clear reads leaves nothing.
+    expect(steadyWaitEvents({ waitedMs: 0, loadingSeen: false, stillLoading: false, steady: true }, 9, 'my_browser')).toEqual([])
+    expect(steadyWaitEvents(undefined, 9, 'my_browser')).toEqual([])
+    const events = steadyWaitEvents({ waitedMs: 8_000, loadingSeen: true, stillLoading: false, steady: false }, 9, 'my_browser')
+    expect(events).toEqual([
+      { at: 9, lane: 'my_browser', event: 'loading_wait', detail: { waitedMs: 8_000, cleared: true } },
+      { at: 9, lane: 'my_browser', event: 'steady_wait', detail: { waitedMs: 8_000, steady: false } },
+    ])
+    const page = { status: 'success', trace: events } as unknown as FetchResult
+    expect(withStillChangingWarning(page).warnings).toEqual([{ code: 'page_still_changing', message: 'The page was still changing when it was read, after 8 s: its data may not all be in this answer.' }])
+    // A failed page claims no content, and a page that settled has nothing to warn of.
+    expect(withStillChangingWarning({ ...page, status: 'failed' }).warnings).toBeUndefined()
+    const settled = steadyWaitEvents({ waitedMs: 1_200, loadingSeen: false, stillLoading: false, steady: true }, 9, 'my_browser')
+    expect(settled).toEqual([{ at: 9, lane: 'my_browser', event: 'steady_wait', detail: { waitedMs: 1_200, steady: true } }])
+    expect(withStillChangingWarning({ ...page, trace: settled }).warnings).toBeUndefined()
   })
 })
