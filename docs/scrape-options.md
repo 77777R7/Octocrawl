@@ -162,6 +162,27 @@ When a thin or shell-like HTTP answer stays the answer, it also carries `{ code:
 
 Every response that carries `warnings` also carries `warning`: their messages joined with a space, Firecrawl's name for it. This holds for full and compact scrape responses, batch items, crawl pages, and `data.warning` on `/fc`, which so passes the native warnings through.
 
+## readiness
+
+`readiness` says whether the page was ready for its task when it was read ([ADR 0007](adr/0007-region-readiness.md)). It is read from the result's own status, warnings and trace, never from page text.
+
+Where it appears: full and compact scrape responses, batch items and crawl pages, as `{ state, basis, waitedMs? }`, and the Evidence Record, as `readiness: { state, basis }`.
+
+`state` is one of four values:
+
+- `ready`.
+- `not_loaded`: the page was read before what it shows had come, so waiting or acting in the same session may change it. The signals: `page_still_loading`, `client_rendered_suspected`, `page_still_changing`, `wait_cut_short`, `list_not_exhausted`, `deadline_exceeded` on a `partial` result, a `timeout` the deadline ended on a page that had answered, `action_failed`, or `empty_unverified` with `not_rendered` (read by the http lane without its scripts) or `little_text` (a rendered page of at most 4,000 visible characters, such as OECD's Data Explorer before its data arrived).
+- `not_extracted`: the page came but was not read into content, which no other route mends: `empty_unverified` in a rendered page with more visible text than that, a file with no text, or one that could not be read.
+- `not_served`: the route, the access or the region did not serve it: a block reason, `http_error`, `policy_denied`, a network failure, a `timeout` with no answer, `internal_error`, or a spent budget.
+
+`basis` lists the codes in the order found. `waitedMs` is the lane's last recorded wait for the page to settle.
+
+The visible text is the extractor's count, recorded as `textChars` on each lane's `extract` trace event, so a batch item reads as its scrape does whatever formats it asked for. A result whose lane recorded none says `text_unknown`.
+
+The my-browser lane reads a page that is through only once it has settled: no loading indicator, and its text the same length on three reads in a row. It waits at most 8 s, and never past the read's own wait. A page still loading or changing then is read as it is, with `page_still_loading` or `page_still_changing` in `warnings` (`loading_wait` and `steady_wait` in the trace).
+
+For now `readiness` changes nothing the ladder does. A request's task contract will refine it (ROADMAP PA items 10 and 11).
+
 ## agentHints
 
 `agentHints` tells the caller what to change about the request next time. Each hint is one sentence.

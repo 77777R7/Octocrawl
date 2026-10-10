@@ -10,7 +10,7 @@ const GATE = '<html><body><div class="g-recaptcha" data-sitekey="k"></div></body
 const PAGE = `<html><body><article><h1>Page</h1>${'<p>Prose long enough to be the page. </p>'.repeat(4)}</article></body></html>`
 
 /** What the tab shows on one read; `active`: the person has clicked or typed on this document (its user activation, which only Chrome sets). */
-type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null; active?: boolean; hidden?: boolean }
+type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null; active?: boolean; hidden?: boolean; loading?: boolean; text?: number }
 
 /**
  * A Chrome that shows the tab W2L opens as `states`, one per read, the last
@@ -79,6 +79,45 @@ describe('the person\'s Chrome', () => {
       'Target.getTargetInfo', 'Runtime.evaluate@s1', 'Page.createIsolatedWorld@s1', 'Runtime.evaluate@s1',
       'Target.getTargetInfo', 'Runtime.evaluate@s1', 'Runtime.evaluate@s1',
       ...Array(2).fill(['Target.getTargetInfo', 'Runtime.evaluate@s1']).flat(), 'Target.closeTarget', 'close'])
+  })
+
+  it('reads a page that is through once it has settled: its text the same length on three reads and no loading indicator (ADR 0007)', async () => {
+    // x.com's timeline filling in: through from the first read, its text growing for four reads.
+    const growing = [100, 200, 300, 400, 400, 400].map((text, i) => at('https://site.test/a', `${PAGE}<!--${i}-->`, { active: true, text }))
+    const chrome = fakeChrome(growing)
+    const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
+    const read = await reader.read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })
+    reader.close()
+    expect(read.html).toBe(`${PAGE}<!--5-->`)
+    expect(read.settle).toMatchObject({ loadingSeen: false, stillLoading: false, steady: true })
+    // A page that shows a loading indicator is waited for until it goes.
+    const loading = [...Array(5).fill(at('https://site.test/a', `${PAGE}<!--loading-->`, { active: true, text: 50, loading: true })), at('https://site.test/a', PAGE, { active: true, text: 50 })]
+    const shown = await (await openUserChrome({ userDataDir, connect: fakeChrome(loading).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })
+    expect(shown.html).toBe(PAGE)
+    expect(shown.settle).toMatchObject({ loadingSeen: true, stillLoading: false, steady: true })
+    // A page settled at its first clear reads is read then, with no wait.
+    const still = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80 })]).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })
+    expect(still.settle).toMatchObject({ waitedMs: 0, loadingSeen: false, steady: true })
+  })
+
+  it('reads a page still loading or changing when its settle wait ends as it is, and says so (ADR 0007)', async () => {
+    const changing = Array.from({ length: 2_000 }, (_, i) => at('https://site.test/a', PAGE, { active: true, text: i, loading: i % 2 === 0 }))
+    const read = await (await openUserChrome({ userDataDir, connect: fakeChrome(changing).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, steadyWaitMs: 30 })
+    expect(read.html).toBe(PAGE)
+    expect(read.settle).toMatchObject({ loadingSeen: true, steady: false })
+    expect(read.settle!.waitedMs).toBeGreaterThanOrEqual(30)
+    // Still showing its loading indicator when the wait ends, it says so.
+    const loading = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 9, loading: true })]).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, steadyWaitMs: 30 })
+    expect(loading.settle).toMatchObject({ loadingSeen: true, stillLoading: true, steady: true })
+  })
+
+  it('never lets the settle wait outlast the caller\'s: a page that is through near its end is read, not lost (ADR 0007)', async () => {
+    // Through from the first read, its text growing on every read, with a wait shorter than the settle wait.
+    const changing = Array.from({ length: 2_000 }, (_, i) => at('https://site.test/a', PAGE, { active: true, text: i }))
+    const read = await (await openUserChrome({ userDataDir, connect: fakeChrome(changing).connect })).read('https://site.test/a', { pollMs: 20, waitMs: 1_000 })
+    expect(read.html).toBe(PAGE)
+    expect(read.settle).toMatchObject({ steady: false })
+    expect(read.wallMs).toBeLessThan(1_000)
   })
 
   it('a tab that stays out of sight is pointed out once, while one hidden for a moment is not', async () => {

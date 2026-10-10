@@ -148,6 +148,40 @@ export function withStillLoadingWarning(result: FetchResult): FetchResult {
   return { ...result, warnings: [...(result.warnings ?? []), warning] }
 }
 
+/**
+ * How the my-browser lane waited, once the page was through, for it to settle (ADR 0007): until no loading indicator
+ * showed and its text stayed the same length on consecutive reads, at most STEADY_WAIT_MAX_MS.
+ */
+export interface SteadyOutcome {
+  waitedMs: number
+  loadingSeen: boolean
+  stillLoading: boolean
+  /** Whether the page's text had stopped changing when it was read. */
+  steady: boolean
+}
+
+/** How long the my-browser lane waits for a page that is through to stop loading and changing, before it reads it anyway. */
+export const STEADY_WAIT_MAX_MS = 8_000
+
+/** The trace events a settle wait leaves: `loading_wait` when it saw a loading indicator, `steady_wait` when it waited at all. */
+export function steadyWaitEvents(outcome: SteadyOutcome | undefined, at: number, lane: Lane): TraceEvent[] {
+  if (outcome === undefined) return []
+  const events: TraceEvent[] = []
+  if (outcome.loadingSeen) events.push({ at, lane, event: 'loading_wait', detail: { waitedMs: outcome.waitedMs, cleared: !outcome.stillLoading } })
+  if (outcome.waitedMs > 0 || !outcome.steady) events.push({ at, lane, event: 'steady_wait', detail: { waitedMs: outcome.waitedMs, steady: outcome.steady } })
+  return events
+}
+
+/** A page read while its text was still changing says so: its data may not all be in the answer. */
+export function withStillChangingWarning(result: FetchResult): FetchResult {
+  if (result.status !== 'success' && result.status !== 'partial') return result
+  const waited = result.trace.find((event) => event.event === 'steady_wait' && event.detail?.steady === false)
+  if (waited === undefined) return result
+  const seconds = Math.round(Number(waited.detail?.waitedMs ?? 0) / 100) / 10
+  const warning = { code: 'page_still_changing', message: `The page was still changing when it was read, after ${seconds} s: its data may not all be in this answer.` }
+  return { ...result, warnings: [...(result.warnings ?? []), warning] }
+}
+
 function isLoading(snapshot: string): boolean {
   try { return (JSON.parse(snapshot) as { loading?: unknown }).loading === true } catch { return false }
 }

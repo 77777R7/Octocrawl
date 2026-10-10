@@ -8,7 +8,7 @@
 import type { AgentHints, JobWebhookStatus, RequestAttribution } from './api.js'
 import type { CrawlBudget, StepStatus, TaskStatus } from './checkpoint.js'
 import type { CrawlMode } from './compliance.js'
-import type { Evidence, FetchResult, FetchWarning, HandoffRequest, LadderRunAudit, TraceEvent } from './result.js'
+import type { Evidence, FetchResult, FetchWarning, HandoffRequest, LadderRunAudit, Readiness, TraceEvent } from './result.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { Lane } from './status.js'
 import type { BudgetKind } from './status.js'
@@ -303,6 +303,8 @@ export interface CrawlPage {
   evidence: Evidence | null
   /** The page's Evidence Record v1; null while the page has no result yet. */
   evidenceRecord: EvidenceRecord | null
+  /** Whether the page was ready for its task when it was read (Readiness, ADR 0007); null while the page has no result yet. */
+  readiness: Readiness | null
   /** Per-URL latency, attempts and metering without loading the full audit. */
   usage?: import('./result.js').ResourceUsage | null
   trace: readonly TraceEvent[]

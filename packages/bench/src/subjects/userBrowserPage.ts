@@ -17,6 +17,7 @@ import { estimateTokens, givenUpPaidCalls, type BlockReason, type FetchOptions, 
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { classifyGate, sha256Utf8 } from '@w2l/http-core'
 import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown, withListCaveat } from './errorPage.js'
+import { steadyWaitEvents, withStillChangingWarning, withStillLoadingWarning, type SteadyOutcome } from '../browserSettle.js'
 
 /** The lanes a page read in the person's browser is recorded on: after a handoff, or on the my-browser lane. */
 export type UserBrowserLane = 'browser_local_authed' | 'my_browser'
@@ -48,6 +49,8 @@ export interface UserBrowserRead {
   act: string | null
   /** Which browser: `chrome` and its version, as it reported them. */
   browser: string
+  /** How the lane waited, once the page was through, for it to stop loading and changing; absent when it did not wait (a handoff read before ADR 0007). */
+  settle?: SteadyOutcome
 }
 
 /** The result of a page read in the person's browser: in place of `prior`, the result the check stopped, or, with none, on the my-browser lane. */
@@ -67,6 +70,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     { at: 0, lane: LANE, event: 'identity_sent', detail: { mode: 'authed', headers: [], by: 'user_browser' } },
     { at: 0, lane: LANE, event: 'identity_unobserved', detail: { reason: `the person's own browser (${read.browser}) sent the request; its headers were not seen` } },
     { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs } },
+    ...steadyWaitEvents(read.settle, wallMs, LANE),
   ]
   const base = {
     requestedUrl: read.requestedUrl,
@@ -111,7 +115,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
 
   const extracted = extractTf.extract(body, { url: finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
   const links = collectLinks(body, finalUrl)
-  trace.push({ at: wallMs, lane: LANE, event: 'extract', detail: { pageType: extracted.pageType, strategy: extracted.strategy, confidence: extracted.confidence, escalate: extracted.escalate, linkCount: links.length, ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}), ...tagOptions(options) } })
+  trace.push({ at: wallMs, lane: LANE, event: 'extract', detail: { pageType: extracted.pageType, strategy: extracted.strategy, confidence: extracted.confidence, escalate: extracted.escalate, linkCount: links.length, ...(extracted.render === undefined ? {} : { textChars: extracted.render.textChars }), ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}), ...tagOptions(options) } })
   let wholePage: string | null = null
   let listPage = false
   // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
@@ -133,7 +137,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   const tables = tablesFormat(wholePageAsked(options)
     ? { html: body, options: { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
     : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, finalUrl, options, trace, LANE, wallMs)
-  return withListCaveat({
+  return withStillChangingWarning(withStillLoadingWarning(withListCaveat({
     ...base,
     status: 'success',
     failureReason: null,
@@ -159,7 +163,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     },
     ...htmlFormats(whole, body, extracted.mainHtml, options),
     usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
-  })
+  })))
 }
 
 /**

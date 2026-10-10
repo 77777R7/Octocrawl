@@ -107,6 +107,10 @@
     "verification": {
       "description": "The result judged against the request's task contract (`verify`, ADR 0006): whether the task was done, which is not the fetch's `status`. Added to v1 with task verification: optional here so that earlier records stay valid; W2L writes it on every record.",
       "$ref": "#/$defs/verification"
+    },
+    "readiness": {
+      "description": "Whether the page was ready for its task when it was read, from the result's own signals (ADR 0007). Added to v1 later: optional here so that earlier records stay valid; W2L writes it on every record.",
+      "$ref": "#/$defs/readiness"
     }
   },
   "allOf": [
@@ -565,6 +569,22 @@
         },
         "failed": {
           "description": "The type of each check that failed, in the contract's order.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "basis"],
+      "properties": {
+        "state": {
+          "description": "ready; not_loaded, read before what it shows had come (waiting or acting in the same session may change it); not_extracted, read as served but not extracted; not_served, the route, the access or the region did not serve it.",
+          "enum": ["ready", "not_loaded", "not_extracted", "not_served"]
+        },
+        "basis": {
+          "description": "The signal codes the state was read from, in the order found: warning codes, the failure, block or budget reason, and trace signals such as wait_cut_short. Codes only, never page text; empty for a page ready by every signal.",
           "type": "array",
           "items": { "type": "string" }
         }
