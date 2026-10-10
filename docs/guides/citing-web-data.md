@@ -66,7 +66,7 @@ BibTeX (biblatex):
   title   = {Power usage effectiveness -- Google Data Centers},
   url     = {https://datacenters.google/efficiency/},
   urldate = {2026-10-03},
-  note    = {Accessed 2026-10-03T06:31:24Z with W2L (commit 8356314). SHA-256 of the extracted Markdown: 3235ac0f85cc90b6751e5288781f683fc2940b2c5dff9f9265f8e98b0c535c93}
+  note    = {Accessed 2026-10-03T06:31:24Z with Octocrawl (commit 8356314). SHA-256 of the extracted Markdown: 3235ac0f85cc90b6751e5288781f683fc2940b2c5dff9f9265f8e98b0c535c93}
 }
 ```
 
