@@ -103,6 +103,13 @@ try {
   const landing = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null
   if (landing && !hero.contains(landing) && !window.scrollY) landing.scrollIntoView({ behavior: 'instant' })
 } catch { /* A malformed fragment keeps the browser's own handling. */ }
+// A section link (Free tiers, Back to top, /#get-started from a docs page) only moves the page: the address goes back
+// to the home page's own, so it never names a section the visitor has scrolled away from, and a reload or a copied
+// address starts from the page. A link that arrives with a fragment keeps it until the page has loaded and landed.
+const dropFragment = () => { if (location.hash) history.replaceState(history.state, '', `${location.pathname}${location.search}`) }
+addEventListener('hashchange', dropFragment)
+if (document.readyState === 'complete') dropFragment()
+else addEventListener('load', dropFragment, { once: true })
 mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, document.querySelector<HTMLElement>('#hero-glyphs')!, hero)
 mountHeroClick(document.querySelector<HTMLElement>('#hero-click-spark')!, hero)
 mountHowReplay(document.querySelector<HTMLElement>('#how-replay')!)
