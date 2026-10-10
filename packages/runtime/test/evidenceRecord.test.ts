@@ -158,6 +158,13 @@ describe('toEvidenceRecord', () => {
     expect(access([givenUp, own])).toMatchObject({ route: 'vendor', paidCalls: [{ ...call, outcome: null, answer: false }, call], grant })
     // No paid call, no grant: the grant is named only for the calls made under it.
     expect(access([{ ...own, detail: { grant, calls: [{ provider: 'steel' }] } }])).toMatchObject({ paidCalls: null, grant: null })
+    // A call charged by its session's measured time keeps that time; a call from before it was kept, or with a time that
+    // is not whole milliseconds, has none.
+    const measured = { ...call, chargedUsd: 0.0006, sessionMs: 17_250 }
+    const timed = (calls: unknown[]) => access([{ ...own, detail: { grant, calls } }])?.paidCalls
+    expect(timed([measured])).toEqual([measured])
+    expect(timed([call])).toEqual([{ ...call, sessionMs: null }])
+    expect(timed([{ ...measured, sessionMs: 17.5 }, { ...measured, sessionMs: -1 }, { ...measured, sessionMs: '17250' }])).toEqual([0, 1, 2].map(() => ({ ...measured, sessionMs: null })))
   })
 
   it('records the device the answering lane declared and the custom headers it sent, sorted by name', () => {

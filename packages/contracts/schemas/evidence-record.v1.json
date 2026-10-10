@@ -485,13 +485,18 @@
           "minimum": 0
         },
         "chargedUsd": {
-          "description": "What the ledger charged in USD: the price the provider stated, else the ceiling (a call that threw or was cut included).",
+          "description": "What the ledger charged in USD: the price the provider stated, else its sessions' measured time under the grant's tariff (sessionMs), else the ceiling (a call that threw or was cut, or a session whose release went unconfirmed, included).",
           "type": "number",
           "minimum": 0
         },
         "reportedCostUsd": {
           "description": "The price the provider stated for the call, in USD; null when it stated none (Browserbase and Steel state none per call).",
           "type": ["number", "null"],
+          "minimum": 0
+        },
+        "sessionMs": {
+          "description": "How long the call's provider sessions lasted in milliseconds, from just before each was created to the provider's confirmation of its release, when the charge is what that time costs under the tariff; null when the charge is not measured.",
+          "type": ["integer", "null"],
           "minimum": 0
         },
         "outcome": {

@@ -73,9 +73,16 @@ export interface VendorTariff {
  * billed minimum and `floorMs`, the shortest session the provider can be told to end at) rounded up to the billing step.
  */
 export function tariffCeilingUsd(tariff: VendorTariff, floorMs = 0): number {
-  const sessionMs = Math.max(tariff.maxSessionMs ?? 0, tariff.minBilledMs, tariff.maxSessionMs === null ? 0 : floorMs)
+  return tariffCostUsd(tariff, Math.max(tariff.maxSessionMs ?? 0, tariff.maxSessionMs === null ? 0 : floorMs))
+}
+
+/**
+ * What one call whose session lasted `sessionMs` costs under this tariff, in US dollars: its per-call price, and the
+ * session's time (at least the billed minimum) rounded up to the billing step.
+ */
+export function tariffCostUsd(tariff: VendorTariff, sessionMs: number): number {
   const step = tariff.billingIncrementMs > 0 ? tariff.billingIncrementMs : 1
-  const billedMs = Math.ceil(sessionMs / step) * step
+  const billedMs = Math.ceil(Math.max(sessionMs, tariff.minBilledMs, 0) / step) * step
   return tariff.perCallUsd + (tariff.perHourUsd * billedMs) / 3_600_000
 }
 

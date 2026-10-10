@@ -155,12 +155,14 @@ export function steelOps(
     },
 
     async releaseSession(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<void> {
-      await api({
+      const res = await api({
         method: 'POST',
         url: `${base}/v1/sessions/${sessionId}/release`,
         headers,
         deadlineMs, signal,
       })
+      // A release the vendor did not confirm leaves the session billing until its own timeout.
+      if (res.status < 200 || res.status >= 300) throw new Error(`steel: session release returned ${res.status}`)
     },
   }
 }

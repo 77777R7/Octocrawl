@@ -40,7 +40,7 @@ import {
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
 import { readFileSync } from 'node:fs'
-import { accessGrantFromText, accessGrantRef, createSpendLedger, tariffCeilingUsd, VENDOR_CAPABILITY_ACCESS } from '@w2l/http-core'
+import { accessGrantFromText, accessGrantRef, createSpendLedger, tariffCeilingUsd, tariffCostUsd, VENDOR_CAPABILITY_ACCESS, type VendorTariff } from '@w2l/http-core'
 import { browserEngineChoice } from './subjects/browserEngine.js'
 import { CompatTransport, compatIdentity } from './compatTransport.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
@@ -55,7 +55,7 @@ import { connectVendor } from './vendors/connect.js'
 import { scrubSecret } from './vendors/api.js'
 import { BROWSERBASE_MIN_SESSION_MS, browserbaseOps } from './vendors/browserbase.js'
 import { STEEL_MIN_SESSION_MS, steelOps } from './vendors/steel.js'
-import type { VendorResumeContext } from './vendors/transport.js'
+import type { ClosedVendorSession, VendorResumeContext } from './vendors/transport.js'
 import {
   FileRoutingHistory,
   MemoryRoutingHistory,
@@ -517,6 +517,7 @@ export function buildChannels(
           return await failed(err)
         }
         const { declaration, transport } = vendor
+        let outcome: FetchResult
         try {
           if (pendingResume !== null) {
             transport.useResumedSession(pendingResume)
@@ -529,15 +530,16 @@ export function buildChannels(
             null,
             providerRobots,
           )
-          return await subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options)
+          outcome = await subject.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options)
         } catch (err) {
           // The session's own time running out before the request's (robots.txt, the gate) is the provider's timeout,
           // as it is during the page's navigation; any other error is not this rung's to hide.
           if (requestEnded() || !sessionEnded()) throw err
-          return await failed(err)
+          outcome = await failed(err)
         } finally {
           if (tariff !== null) await transport.close().catch(() => {})
         }
+        return tariff === null ? outcome : withMeasuredSessions(outcome, transport.closedSessions(), tariff, tariffCeilingUsd(tariff, sessionFloorMs))
       },
       close: async () => {
         if (connected !== null) {
@@ -577,6 +579,19 @@ export function buildChannels(
   }
 
   return channels
+}
+
+/**
+ * A call under a tariff with the time its sessions lasted and what that cost (ROADMAP PA item 4): the provider states
+ * no price, so the ledger charges the measured cost instead of the ceiling. Each session is billed by the tariff on its
+ * own (its minimum and step), and the whole is at most the ceiling. Not when a session's release went unconfirmed (it
+ * bills until its timeout) or none was closed: the ceiling stays the charge.
+ */
+export function withMeasuredSessions(result: FetchResult, sessions: readonly ClosedVendorSession[], tariff: VendorTariff, ceilingUsd: number): FetchResult {
+  if (sessions.length === 0 || sessions.some((session) => !session.released)) return result
+  const vendorSessionMs = sessions.reduce((sum, session) => sum + session.sessionMs, 0)
+  const measuredCostUsd = Math.min(ceilingUsd, sessions.reduce((sum, session) => sum + tariffCostUsd(tariff, session.sessionMs), 0))
+  return { ...result, usage: { ...result.usage, vendorSessionMs, measuredCostUsd } }
 }
 
 /**

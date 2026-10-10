@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { buildChannels, formatScrapeReport, parseArgs, USAGE } from '../src/ladderCli.js'
+import { buildChannels, formatScrapeReport, parseArgs, USAGE, withMeasuredSessions } from '../src/ladderCli.js'
 import { identityBundleFrom, modeIdentity, PREVIEW_PRODUCT_TOKEN, type ExecutionContext, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { LadderRunner } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
@@ -569,6 +569,67 @@ describe('buildChannels + LadderRunner session composition', () => {
     const run = await new LadderRunner(unpriced, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p')
     expect(run.result.lane).not.toBe('provider')
     await Promise.all(unpriced.map((c) => c.close?.().catch(() => {})))
+  })
+
+  it('charges a call under a tariff by its session\'s measured time, and at its ceiling when the release went unconfirmed (ROADMAP PA item 4)', async () => {
+    // Steel states no price per call; its dashboard billed 137 browser minutes for 483 sessions, not a minute each.
+    const tariff = { perCallUsd: 0.001, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 }
+    const build = (release: () => void) => buildChannels('authed', {
+      localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: { steel: { ...fakeVendorOps('steel', () => {}), async releaseSession() { release() } } },
+      vendorTariffs: { steel: tariff },
+      ...vendorEnv(),
+    })
+    const paidCall = (run: Awaited<ReturnType<LadderRunner['run']>>) => (run.result.trace.find((e) => e.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }).calls[0]!
+    const confirmed = build(() => {})
+    const run = await new LadderRunner(confirmed, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p')
+    expect(run.result.lane).toBe('provider')
+    const call = paidCall(run)
+    const sessionMs = call.sessionMs as number
+    expect(Number.isInteger(sessionMs) && sessionMs >= 0).toBe(true)
+    expect(call.chargedUsd).toBeCloseTo(0.001 + (0.12 * sessionMs) / 3_600_000, 9)
+    expect(call.chargedUsd as number).toBeLessThan(call.ceilingUsd as number)
+    expect(run.result.usage.vendorSessionMs).toBe(sessionMs)
+    expect(run.result.trace.find((e) => e.event === 'spend_settled')?.detail).toMatchObject({ basis: 'measured', sessionMs })
+    await Promise.all(confirmed.map((c) => c.close?.().catch(() => {})))
+    // A release the provider did not confirm leaves the session billing until its timeout: the ceiling is the charge.
+    const unconfirmed = build(() => { throw new Error('steel: session release returned 503') })
+    const kept = await new LadderRunner(unconfirmed, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p')
+    const ceilingCall = paidCall(kept)
+    expect(ceilingCall).toMatchObject({ sessionMs: null })
+    expect(ceilingCall.chargedUsd).toBeCloseTo(ceilingCall.ceilingUsd as number, 9)
+    expect(kept.result.usage.vendorSessionMs).toBeUndefined()
+    expect(kept.result.trace.find((e) => e.event === 'spend_settled')?.detail).toMatchObject({ basis: 'ceiling' })
+    await Promise.all(unconfirmed.map((c) => c.close?.().catch(() => {})))
+    // The time runs from before the session is asked for to after its release is confirmed: a slow create and a slow
+    // release are both in it.
+    const slow = buildChannels('authed', {
+      localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: {
+        steel: (() => {
+          const ops = fakeVendorOps('steel', () => {})
+          const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 60))
+          return { ...ops, async createSession(...args: Parameters<VendorOps['createSession']>) { await pause(); return ops.createSession(...args) }, async releaseSession() { await pause() } }
+        })(),
+      },
+      vendorTariffs: { steel: tariff },
+      ...vendorEnv(),
+    })
+    const timed = paidCall(await new LadderRunner(slow, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p'))
+    expect(timed.sessionMs as number).toBeGreaterThanOrEqual(120)
+    expect(timed.chargedUsd).toBeCloseTo(0.001 + (0.12 * (timed.sessionMs as number)) / 3_600_000, 9)
+    await Promise.all(slow.map((c) => c.close?.().catch(() => {})))
+    // Each session is billed on its own, by the tariff's minimum and step; the whole is at most the ceiling.
+    const byMinute = { perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 120_000, minBilledMs: 60_000, billingIncrementMs: 60_000 }
+    const base = run.result
+    expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true }, { sessionMs: 5_000, released: true }], byMinute, 0.004).usage).toMatchObject({ vendorSessionMs: 22_000, measuredCostUsd: 0.004 })
+    expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true }], byMinute, 0.004).usage.measuredCostUsd).toBeCloseTo(0.002, 9)
+    expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true }, { sessionMs: 5_000, released: true }], byMinute, 0.003).usage.measuredCostUsd).toBe(0.003)
+    // No session closed, or one unconfirmed: the result is as it was, and the ceiling stays the charge.
+    expect(withMeasuredSessions(base, [], byMinute, 0.004)).toBe(base)
+    expect(withMeasuredSessions(base, [{ sessionMs: 1_000, released: true }, { sessionMs: 1_000, released: false }], byMinute, 0.004)).toBe(base)
   })
 
   it('answers a vendor that cannot open a session as the provider\'s failure, not a thrown error, and keeps its paid call (ROADMAP PA item 4)', async () => {

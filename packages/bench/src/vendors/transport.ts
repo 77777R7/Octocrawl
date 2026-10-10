@@ -102,10 +102,19 @@ interface LiveSession {
   browser: CdpBrowser
   handoffUrl: string | null
   resumeContext: VendorResumeContext | null
+  /** Just before the session was asked for (`performance.now()`): the provider bills from its creation. */
+  openedAt: number
+}
+
+/** A session this transport closed: how long it lasted, and whether the provider confirmed its release. */
+export interface ClosedVendorSession {
+  sessionMs: number
+  released: boolean
 }
 
 export class CdpVendorTransport implements ProviderTransport {
   private live: LiveSession | null = null
+  private readonly closed: ClosedVendorSession[] = []
   private declaredUserAgent: string | null = null
   private resume: VendorResumeContext | null = null
 
@@ -196,6 +205,8 @@ export class CdpVendorTransport implements ProviderTransport {
     throwIfExecutionStopped({ signal, deadlineAt: deadlineMs })
     if (this.live !== null) return this.live
 
+    // A monotonic clock: a wall clock stepped back mid-session (a time sync, a laptop waking) would shorten the time charged.
+    const openedAt = performance.now()
     let session: VendorSession
     try {
       session = await this.ops.createSession(this.resume, deadlineMs, signal)
@@ -207,7 +218,7 @@ export class CdpVendorTransport implements ProviderTransport {
     try {
       browser = await this.connector(session.connectUrl, deadlineMs, signal)
     } catch (err) {
-      await this.ops.releaseSession(session.sessionId, Date.now() + 5_000).catch(() => {})
+      await this.release(session.sessionId, openedAt)
       throw new Error(this.scrub(err instanceof Error ? err.message : String(err)))
     }
 
@@ -218,12 +229,12 @@ export class CdpVendorTransport implements ProviderTransport {
         current = await measureUserAgent(browser, deadlineMs, signal)
       } catch (err) {
         await browser.close().catch(() => {})
-        await this.ops.releaseSession(session.sessionId, Date.now() + 5_000).catch(() => {})
+        await this.release(session.sessionId, openedAt)
         throw new Error(this.scrub(err instanceof Error ? err.message : String(err)))
       }
       if (current !== this.declaredUserAgent) {
         await browser.close().catch(() => {})
-        await this.ops.releaseSession(session.sessionId, Date.now() + 5_000).catch(() => {})
+        await this.release(session.sessionId, openedAt)
         throw new Error(
           `${this.ops.vendorId}: session user agent changed from "${this.declaredUserAgent}" to ` +
             `"${current}". The identity the robots gate evaluated is not the identity on offer; ` +
@@ -237,8 +248,14 @@ export class CdpVendorTransport implements ProviderTransport {
       browser,
       handoffUrl: session.handoffUrl,
       resumeContext: session.resumeContext,
+      openedAt,
     }
     return this.live
+  }
+
+  /** The sessions this transport has closed, in order: what a call under a tariff is charged by (ladderCli). */
+  closedSessions(): readonly ClosedVendorSession[] {
+    return this.closed
   }
 
   private async dropSession(_deadlineMs?: number): Promise<void> {
@@ -246,7 +263,18 @@ export class CdpVendorTransport implements ProviderTransport {
     this.live = null
     if (live === null) return
     await live.browser.close().catch(() => {})
-    await this.ops.releaseSession(live.sessionId, Date.now() + 5_000).catch(() => {})
+    await this.release(live.sessionId, live.openedAt)
+  }
+
+  /** Release a session and record how long it lasted; a release that fails is recorded unconfirmed, never thrown. */
+  private async release(sessionId: string, openedAt: number): Promise<void> {
+    let released = true
+    try {
+      await this.ops.releaseSession(sessionId, Date.now() + 5_000)
+    } catch {
+      released = false
+    }
+    this.closed.push({ sessionMs: Math.ceil(performance.now() - openedAt), released })
   }
 
   private scrub(message: string): string {
