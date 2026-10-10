@@ -126,6 +126,10 @@ describe('readinessOf (ADR 0007, ROADMAP PA item 11)', () => {
     expect(readinessOf(result({ ...verified('failed'), warnings: warned('page_still_loading') }))).toEqual({ state: 'not_loaded', basis: ['page_still_loading', 'checks_failed', 'region_unjudged'] })
     // A page that had come by every signal, its contract failed on what was extracted: not extracted, since ready is the contract passing.
     expect(readinessOf(result(verified('failed')))).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'] })
+    // No main content found on a page whose region held on the live page: there, not extracted. Without that, its own signals.
+    const unread = { ...verified('failed', 'page_not_read'), status: 'failed' as const, failureReason: 'empty_unverified' as const, markdown: null }
+    expect(readinessOf(result(unread, [region({ ready: true })]))).toEqual({ state: 'not_extracted', basis: ['empty_unverified', 'region_ready'], waitedMs: 3_000 })
+    expect(readinessOf(result(unread, [region({})])).state).toBe('not_loaded')
     // A page proven empty the contract does not accept, and a page not read, which its own status tells.
     expect(readinessOf(result({ ...verified('failed', 'empty_not_allowed'), status: 'empty_verified', markdown: null }))).toEqual({ state: 'not_served', basis: ['empty_not_allowed'] })
     expect(readinessOf(result({ ...verified('failed', 'page_not_read'), status: 'blocked', blockReason: 'captcha', markdown: null }))).toEqual({ state: 'not_served', basis: ['captcha'] })

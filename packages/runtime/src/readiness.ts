@@ -106,7 +106,12 @@ export function readinessOf(result: FetchResult): Readiness {
  */
 function verifiedReadiness(result: FetchResult, verification: Exclude<NonNullable<FetchResult['verification']>, { status: 'not_requested' }>): Readiness | undefined {
   if (verification.status === 'passed') return readiness('ready', ['verified'], result)
-  if (verification.reason === 'page_not_read') return undefined
+  if (verification.reason === 'page_not_read') {
+    // The extractor found no main content on a page whose region held on the live page: it was there, not extracted
+    // (TikTok's home on 2026-10-11). Any other page not read goes by its own signals.
+    const region = result.status === 'failed' && result.failureReason === 'empty_unverified' ? regionWaitOf(result, verification.contractSha256) : undefined
+    return region?.ready === true && !region.empty ? readiness('not_extracted', ['empty_unverified', 'region_ready'], result) : undefined
+  }
   // A page proven empty that the contract does not accept: what the task needs was not served.
   if (verification.reason === 'empty_not_allowed') return readiness('not_served', ['empty_not_allowed'], result)
   const region = regionWaitOf(result, verification.contractSha256)
