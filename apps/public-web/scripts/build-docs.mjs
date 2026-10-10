@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import MarkdownIt from 'markdown-it'
-import { versionPublicAssets } from './publicAssetVersions.mjs'
+import { versionAssetReferences, versionPublicAssets } from './publicAssetVersions.mjs'
 import { HOME_UPDATED, pages } from './docsPages.mjs'
 import { BLOG_AUTHOR, BLOG_CATEGORIES, BLOG_UPDATED, blogPath, categoryPath, posts } from './blogPosts.mjs'
 import { siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
@@ -12,10 +12,15 @@ import { siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const output = join(root, 'dist', 'docs')
 const assetRoot = join(root, 'public', 'docs-assets')
-const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css'].map(async name => [
-  name,
-  createHash('sha256').update(await readFile(join(assetRoot, name))).digest('hex').slice(0, 12),
-])))
+// The docs' own stylesheets and script, each versioned by its content. A stylesheet's references to versioned public
+// files (the header's mountain artwork) get their ?v= first and go to dist in that form, so its own version changes
+// when the artwork does.
+const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css'].map(async name => {
+  const source = await readFile(join(assetRoot, name), 'utf8')
+  const shipped = name.endsWith('.css') ? versionAssetReferences(source, join(root, 'public')) : source
+  if (shipped !== source) await writeFile(join(root, 'dist', 'docs-assets', name), shipped)
+  return [name, createHash('sha256').update(shipped).digest('hex').slice(0, 12)]
+})))
 
 // The preview server replaces this token with the site's public origin when it serves a page, the sitemap or
 // robots.txt (packages/public-preview/src/site.ts), so absolute URLs follow the domain without a rebuild.
@@ -232,6 +237,9 @@ function nav(active) {
 }
 
 /** Canonical address and link-preview card; every page shares the home page's card image. */
+/** A docs page's <title>: its seoTitle, else its name with the docs suffix. */
+const docTitle = page => page.seoTitle ?? `${page.title} | Octocrawl Docs`
+
 function shareHead(path, title, description, image = { url: OG_IMAGE, alt: OG_IMAGE_ALT }) {
   return `<link rel="canonical" href="${ORIGIN}${path}" /><meta property="og:type" content="article" /><meta property="og:site_name" content="Octocrawl" /><meta property="og:url" content="${ORIGIN}${path}" /><meta property="og:title" content="${escape(title)}" /><meta property="og:description" content="${escape(description)}" /><meta property="og:image" content="${image.url}" /><meta property="og:image:width" content="1200" /><meta property="og:image:height" content="630" /><meta property="og:image:alt" content="${escape(image.alt)}" /><meta name="twitter:card" content="summary_large_image" /><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />`
 }
@@ -258,7 +266,7 @@ function documentHtml(page, content, index, toc) {
   const next = pages[index + 1]
   const adjacent = `<nav class="doc-adjacent" aria-label="Next and previous pages">${previous ? `<a href="${pathFor(previous)}"><small>← Previous</small>${escape(previous.title)}</a>` : '<span></span>'}${next ? `<a href="${pathFor(next)}"><small>Next →</small>${escape(next.title)}</a>` : '<span></span>'}</nav>`
   return `<!doctype html>
-<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(page.description)}" />${shareHead(pathFor(page), `${page.title} | Octocrawl Docs`, page.description)}<link rel="alternate" type="text/markdown" href="${pathFor(page)}index.md" /><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><link rel="stylesheet" href="/docs-assets/nav.css" />${articleData(page)}<title>${escape(page.title)} | Octocrawl Docs</title></head>
+<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(page.description)}" />${shareHead(pathFor(page), docTitle(page), page.description)}<link rel="alternate" type="text/markdown" href="${pathFor(page)}index.md" /><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><link rel="stylesheet" href="/docs-assets/nav.css" />${articleData(page)}<title>${escape(docTitle(page))}</title></head>
 <body><a class="skip-link" href="#main-content">Skip to content</a>${header()}
 <div class="doc-layout${toc.length >= 2 ? ' has-toc' : ''}"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav(page)}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs: ${escape(page.title)}</summary><nav aria-label="Documentation pages on mobile">${nav(page)}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / ${escape(page.group)}</p><article class="doc-article">${content}</article>${adjacent}<footer class="doc-footer"><span>Try a page in the browser here, connect your agent to mcp.octocrawl.dev, or run Octocrawl on your computer with npx.</span><a href="/">Try a page ↗</a></footer></main>${tocHtml(toc)}</div><div id="copy-announcement" class="sr-only" role="status" aria-live="polite"></div><script defer src="/docs-assets/docs.js?v=${assetVersions['docs.js']}"></script><script defer src="/docs-assets/nav.js"></script></body></html>`
 }

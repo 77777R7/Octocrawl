@@ -1,7 +1,10 @@
 import { defineConfig } from 'vite'
 import { fileURLToPath } from 'node:url'
 import { faqJsonLd, pageMarkup } from './src/page'
-import { versionPublicAssets } from './scripts/publicAssetVersions.mjs'
+import { versionAssetReferences, versionPublicAssets } from './scripts/publicAssetVersions.mjs'
+
+const publicDir = fileURLToPath(new URL('./public', import.meta.url))
+const srcDir = fileURLToPath(new URL('./src/', import.meta.url))
 
 export default defineConfig({
   plugins: [{
@@ -12,7 +15,19 @@ export default defineConfig({
       if (!html.includes(slot)) throw new Error('index.html must contain an empty #app element')
       // The FAQ's structured data goes in the head, from the same list the FAQ section shows.
       const withFaq = html.replace('</head>', `  ${faqJsonLd()}\n  </head>`)
-      return versionPublicAssets(withFaq.replace(slot, `<div id="app">${pageMarkup()}</div>`), fileURLToPath(new URL('./public', import.meta.url)))
+      return versionPublicAssets(withFaq.replace(slot, `<div id="app">${pageMarkup()}</div>`), publicDir)
+    },
+  }, {
+    // The stylesheet's and the scripts' references to the versioned public files (the hero artwork among them) carry
+    // the same ?v= as the page's, so a file is fetched once and cached for a year.
+    name: 'w2l-version-public-assets',
+    // Before Vite's own CSS handling, so the stylesheet's url() references are seen as written.
+    enforce: 'pre',
+    transform(code, id) {
+      const file = id.split('?')[0]!
+      if (!file.startsWith(srcDir) || !/\.(?:[jt]sx?|css)$/.test(file)) return null
+      const versioned = versionAssetReferences(code, publicDir)
+      return versioned === code ? null : { code: versioned, map: null }
     },
   }],
   build: {
