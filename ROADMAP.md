@@ -10,8 +10,8 @@ Version 2, updated 2026-09-29, is in git history. What it said below stands unle
 
 - **What Octocrawl is.** It turns a list of URLs into a table where every row traces back to its page. It runs on your machine or as a hosted service.
 - **Now.** Enhanced access ([PA](#pa--enhanced-access)) comes first since 2026-10-09: reaching the pages that block a plain request. Hosted Octocrawl ([PH](#ph--hosted-octocrawl)) phase 1 runs beside it, with P2's remaining items.
-- **PA on 2026-10-09.** Items 1, 2 and 8 are accepted. Item 3 is merged, item 7 is built, and item 4 is under way. Item 5 is built but not adopted. Item 6 is not started. Item 9 has its first window recorded.
-- **Next.** The release of the finished PA items, 0.4.0, shipped on 2026-10-10. PA goes on in its order: items 4 and 6.
+- **PA on 2026-10-09.** Items 1, 2 and 8 are accepted. Item 3 is merged, item 7 is built, and item 4 is under way. Item 5 is built but not adopted. Item 6 is not started. Item 9 has its first window recorded. Items 10 and 11 were added on 2026-10-10 and are not started.
+- **Next (from 2026-10-10).** 0.4.0 and 0.4.1 were published on 2026-10-10. Item 10, task verification apart from the fetch status, comes first, then item 11, readiness of the region a task needs. Item 4 finishes what is in flight. New paid configurations and item 6 wait until 10 and 11 are accepted.
 - **The bar.** On item 1's frozen task set, reach at least the best competitor's verified completion, with no more false successes.
 - **Success at week 16 (2027-01-17).** Three paying users or ten weekly active users.
 - **Paused.** An own browser engine or residential IP network, an in-house CAPTCHA model, a second stealth engine, a hosted browser cluster, more Amazon.sg work and Firecrawl features outside the core. See [Paused](#paused).
