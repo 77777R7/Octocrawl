@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "octocrawl-client"
-version = "0.3.2"
+version = "0.4.0"
 description = "Python client for the Octocrawl API: web pages as Markdown, tables and JSON, each with its Evidence Record, into pandas."
 readme = "README.md"
 license = "MIT"

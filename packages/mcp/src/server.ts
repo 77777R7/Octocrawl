@@ -18,7 +18,7 @@ export interface McpServerOptions {
 }
 
 /** This server's own version: the `origin` of a call whose client declared no name and version. */
-export const MCP_VERSION = '0.3.2'
+export const MCP_VERSION = '0.4.0'
 
 /**
  * The `origin` W2L records for this client's calls: `mcp-<client name>@<client
