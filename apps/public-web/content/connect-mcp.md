@@ -33,7 +33,7 @@ The answer carries the page's Markdown and an Evidence Record: final URL, fetch 
 ## What hosted Octocrawl does not do
 
 - `crawl`, `batch_scrape` and the Monitor tools: on your computer (below), where they run without limit. The hosted answer names this.
-- Proxies, CAPTCHA solving and stealth: not offered on the hosted service. A page that blocks a plain request comes back as `blocked` with the reason; the [access grant](https://github.com/77777R7/Octocrawl#enhanced-access-an-access-grant) for those routes works on your own server.
+- Proxies, CAPTCHA solving and stealth: not offered on the hosted service. A page that blocks a plain request comes back as `blocked` with the reason; the [access grant](https://github.com/77777R7/Octocrawl/blob/main/docs/access.md#enhanced-access-an-access-grant) for those routes works on your own server.
 - Private network addresses, robots.txt overrides and saved logins: refused in hosted mode; robots.txt is obeyed for every URL.
 
 The allowances and what is recorded are on [Limits](/docs/limits/#hosted-api-and-mcp) and [Privacy](/docs/privacy/#hosted-api-and-mcp).
