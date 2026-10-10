@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
 import { hostedNetworkPolicy, localNetworkPolicy, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
-import { defaultSessionsFile } from '@w2l/api'
+import { closeIdleOnlyWhenUnread, defaultSessionsFile } from '@w2l/api'
 import { createManagedRuntime } from './managedRuntime.js'
 import { createMcpServer } from './server.js'
 import { validateAmazonPublicState } from './amazonState.js'
@@ -92,6 +92,8 @@ export function createLocalService(config: LocalConfig): {server: HttpServer; cl
     }
   })
   server.requestTimeout=120_000
+  // A crawl's extraction runs in this process and can stall it past the keep-alive timeout: a request sent meanwhile is answered, not reset.
+  closeIdleOnlyWhenUnread(server)
   server.listen(config.port,'127.0.0.1')
   return {server,close:()=>{
     if(closing)return closing
