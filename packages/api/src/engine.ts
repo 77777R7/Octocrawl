@@ -114,7 +114,7 @@ import {
   type ScrapeOutcome,
 } from '@w2l/contracts'
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
-import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
+import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
@@ -2826,6 +2826,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task, handof
     evidence: result?.evidence ?? null,
     // The stored result is the full one, trace included, with only the formats the task asked for.
     evidenceRecord: result === null ? null : toEvidenceRecord(result, { mode }, { markdown: result.markdown, ...(result.json === undefined ? {} : { json: result.json }) }),
+    readiness: result === null ? null : readinessOf(result),
     usage: result?.usage ?? null,
     trace: result?.trace ?? [],
     audit: step.audit,

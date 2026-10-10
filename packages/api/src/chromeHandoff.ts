@@ -35,7 +35,7 @@
 
 import { extractTf } from '@w2l/extract-tf'
 import { classifyGate, type GateVerdict } from '@w2l/http-core'
-import { isLoginPath, sessionCoversHost, type UserBrowserRead } from '@w2l/bench'
+import { isLoginPath, LOADING_PROBE, sessionCoversHost, STEADY_WAIT_MAX_MS, type SteadyOutcome, type UserBrowserRead } from '@w2l/bench'
 import { chromeEndpoint, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
 
 export interface UserChromeOptions {
@@ -60,6 +60,8 @@ export interface UserChromeReadOptions {
   onHidden?: (url: string) => void
   /** How long the tab is out of sight before onHidden. Default 3 s: Chrome's Allow dialog hides it for a moment as it opens. */
   hiddenNoticeMs?: number
+  /** How long a page that is through is waited for to stop loading and changing before it is read anyway. Default STEADY_WAIT_MAX_MS (8 s). */
+  steadyWaitMs?: number
   /** Ends the wait: the caller went away. The page is not read and its tab is closed. */
   signal?: AbortSignal
   /**
@@ -169,6 +171,10 @@ interface PageState {
   field: string | null
   /** The tab is out of sight: another tab or window is in front of it. */
   hidden: boolean
+  /** The page shows that its data is still on the way (LOADING_PROBE). */
+  loading?: boolean
+  /** The length of the page's text (`innerText`): a page still filling in changes it from one read to the next. */
+  text?: number
 }
 
 /** What the page shows now. */
@@ -179,6 +185,8 @@ const STATE = `JSON.stringify({
   html: document.documentElement ? document.documentElement.outerHTML : '',
   secret: Array.from(document.querySelectorAll('input[type=password], input[autocomplete="one-time-code"]')).some((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'),
   hidden: document.visibilityState === 'hidden',
+  loading: ${LOADING_PROBE},
+  text: document.body ? document.body.innerText.length : 0,
   field: (() => { const el = document.activeElement; if (!el) return null; if (el.isContentEditable) return 'edit:' + String(el.textContent).slice(0, 500); return ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ? el.tagName + ':' + String(el.value).slice(0, 500) : null })(),
 })`
 
@@ -544,6 +552,12 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
     let hiddenSince: number | null = null
     let toldHidden = false
     let clear = 0
+    // The page's text length at the last read, the reads in a row it has stayed so, and, once the page is through and
+    // ready to read, since when it has been waited for to settle and whether it showed a loading indicator meanwhile.
+    let lastText: number | undefined
+    let steadyReads = 0
+    let settleSince: number | null = null
+    let loadingSeen = false
     // The page's own address and the documents heard of at the last read: the page as it shows must be read on the same one.
     let seen = { href: '', documents: 0 }
     let last: { state: PageState; response: DocumentResponse | null } | null = null
@@ -609,8 +623,10 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       const inScope = allowed === null || allowed.has(hostAndPort(state.href))
       const through = inScope && state.ready === 'complete' && gate === null && (status === null || (status >= 200 && status < 300))
         && sameSite(state.href, host) && !onLoginPath(state.href, url) && !state.secret && !typing && arrived
+      steadyReads = state.text === lastText ? steadyReads + 1 : 0
+      lastText = state.text
       clear = through ? clear + 1 : 0
-      if (clear < CLEAR_READS) continue
+      if (clear < CLEAR_READS) { settleSince = null; loadingSeen = false; continue }
       // The person has not acted in the tab: a page clear without them is not read until they click on it, unless its site is one they allowed.
       if (heard.act === null && options.unattended !== true) {
         if (!confirming) { confirming = true; options.onConfirm?.(url) }
@@ -629,6 +645,14 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         open(true)
         continue
       }
+      // Ready to read, the page is read once it has settled: it shows no loading indicator and its text stayed the same
+      // length on CLEAR_READS reads in a row (x.com's timeline, read at its first clear reads, was 386 KB of 516). One still
+      // loading or changing steadyWaitMs after it was first ready is read as it is, and its result says so (ADR 0007).
+      settleSince ??= Date.now()
+      loadingSeen ||= state.loading === true
+      const steady = steadyReads >= CLEAR_READS - 1
+      if ((!steady || state.loading === true) && Date.now() - settleSince < (options.steadyWaitMs ?? STEADY_WAIT_MAX_MS)) continue
+      const settle: SteadyOutcome = { waitedMs: Date.now() - settleSince, loadingSeen, stillLoading: state.loading === true, steady }
       let html = state.html
       let whole: string | undefined
       if (options.shownOnly === true) {
@@ -662,6 +686,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         sawGate,
         act: heard.act,
         browser,
+        settle,
       }, tab: { targetId, sessionId, stops } }
     }
     // The check still holding the page when the wait ended: what the read is blocked by, which an earlier response

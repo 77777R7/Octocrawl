@@ -29,7 +29,7 @@ import type {
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
 import { browserFingerprintFor, cacheStateOf, CONTENTFUL_STATUS, defaultApiMode, warningOf } from '@w2l/contracts'
-import { compilePathFilter, toEvidenceRecord } from '@w2l/runtime'
+import { compilePathFilter, readinessOf, toEvidenceRecord } from '@w2l/runtime'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
 
@@ -1010,6 +1010,8 @@ export async function prepareScrapeResponse(
     metadata: scrapeResponseMetadata(next, scrapeId),
     snapshot: scrapeSnapshot(next),
     evidenceRecord: scrapeEvidenceRecord(result, req, next),
+    // Read from the full result: a failed page's whole-page evidence is in its Markdown whether or not markdown was asked for.
+    readiness: readinessOf(result),
     usage: {
       ...next.usage,
       wallMs: totalMs,
@@ -1169,6 +1171,7 @@ export function compactScrapeResponse(
     ...(next.file === undefined ? {} : { file: next.file }),
     ...(next.warnings === undefined ? {} : { warnings: next.warnings }),
     ...(warningOf(next.warnings) === undefined ? {} : { warning: warningOf(next.warnings) }),
+    readiness: next.readiness,
     ...(next.agentHints === undefined ? {} : { agentHints: next.agentHints }),
     ...(next.handoff === undefined || next.handoff === null ? {} : { handoff: next.handoff }),
     truncated: next.truncated,

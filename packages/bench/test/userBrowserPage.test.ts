@@ -39,6 +39,16 @@ describe('a page read in the person\'s browser', () => {
     expect(toEvidenceRecord(result, { mode: 'standard' }, { markdown: result.markdown }).access).toMatchObject({ route: 'user_browser', completion: 'handed_to_person', paidCalls: [{ ...call, answer: false }], grant })
   })
 
+  it('records how the lane waited for the page to settle, and warns of one read while still loading or changing (ADR 0007)', () => {
+    const settled = pageFromUserBrowser(read(PAGE, { settle: { waitedMs: 0, loadingSeen: false, stillLoading: false, steady: true } }), null, {})
+    expect(settled.trace.map((event) => event.event)).toEqual(['identity_sent', 'identity_unobserved', 'user_browser_read', 'extract'])
+    expect(settled.warnings).toBeUndefined()
+    const unsettled = pageFromUserBrowser(read(PAGE, { settle: { waitedMs: 8_000, loadingSeen: true, stillLoading: true, steady: false } }), null, {})
+    expect(unsettled).toMatchObject({ status: 'success', lane: 'my_browser' })
+    expect(unsettled.trace.map((event) => event.event)).toEqual(['identity_sent', 'identity_unobserved', 'user_browser_read', 'loading_wait', 'steady_wait', 'extract'])
+    expect(unsettled.warnings?.map((warning) => warning.code)).toEqual(['page_still_loading', 'page_still_changing'])
+  })
+
   it('a page that still shows its check is blocked again, and a status the browser did not report is unknown', () => {
     expect(pageFromUserBrowser(read('<html><body><div class="g-recaptcha" data-sitekey="k"></div></body></html>'), STOPPED, {})).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
     expect(pageFromUserBrowser(read(PAGE, { status: null, contentType: null }), STOPPED, {}).evidence).toMatchObject({ httpStatus: null, contentType: null })

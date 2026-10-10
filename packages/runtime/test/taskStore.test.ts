@@ -356,6 +356,7 @@ describe('@w2l/runtime public surface', () => {
       'isLoopbackHostname',
       'pageCacheKey',
       'parseWebhookRetryAfter',
+      'readinessOf',
       'registerDeliveryDestination',
       'reportFromTaskAttempt',
       'requestFingerprint',

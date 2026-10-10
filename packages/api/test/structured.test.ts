@@ -159,6 +159,27 @@ describe('warning string', () => {
   })
 })
 
+describe('readiness (ADR 0007, ROADMAP PA item 11)', () => {
+  const summary = { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [] }
+
+  it('says on the full and compact responses and their Evidence Record whether the page was ready, read from the full result', async () => {
+    const ready = { ...result, channelsTried: ['http'], ladderTrace: [], summary }
+    for (const response of [await prepareScrapeResponse(ready, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now()), await prepareScrapeResponse(ready, { url: result.requestedUrl }, {}, null, performance.now())]) {
+      expect(response.readiness).toEqual({ state: 'ready', basis: [] })
+      expect(response.evidenceRecord?.readiness).toEqual({ state: 'ready', basis: [] })
+    }
+    // WSJ's market data over HTTP: a shell its scripts fill in.
+    const shell = { ...ready, warnings: [{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (loading_text); this HTTP capture may be a shell.' }] }
+    const compact = await prepareScrapeResponse(shell, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now()) as import('@w2l/contracts').CompactScrapeResponse
+    expect(compact.readiness).toEqual({ state: 'not_loaded', basis: ['client_rendered_suspected'] })
+    // A page with no main content whose whole-page evidence holds its text, though markdown was not asked for: the extractor missed it.
+    const missed = { ...ready, status: 'failed' as const, failureReason: 'empty_unverified' as const, markdown: 'x'.repeat(5_000) }
+    const full = await prepareScrapeResponse(missed, { url: result.requestedUrl, formats: ['links'] }, {}, null, performance.now()) as ScrapeResponse
+    expect(full.readiness).toEqual({ state: 'not_extracted', basis: ['empty_unverified'] })
+    expect(full.evidenceRecord?.readiness).toEqual({ state: 'not_extracted', basis: ['empty_unverified'] })
+  })
+})
+
 describe('format entries by type', () => {
   const summary = { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [] }
   const attributes = { type: 'attributes' as const, selectors: [{ selector: 'a', attribute: 'href' }] }

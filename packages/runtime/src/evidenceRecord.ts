@@ -38,6 +38,7 @@ import {
 } from '@w2l/contracts'
 import { EXTRACTOR_VERSION, FILE_TEXT_VERSION, PDF_TEXT_VERSION } from '@w2l/extract-tf'
 import { sha256Utf8 } from '@w2l/http-core'
+import { readinessOf } from './readiness.js'
 
 /** What this response delivered from the result, after format selection. */
 export interface EvidenceOutput {
@@ -112,7 +113,14 @@ export function toEvidenceRecord(
     },
     pageActions: pageActions(result),
     access: evidenceAccess(result),
+    readiness: evidenceReadiness(result),
   }
+}
+
+/** The result's readiness as the record states it: its state and basis, without the wait (ADR 0007). */
+function evidenceReadiness(result: FetchResult): EvidenceRecord['readiness'] {
+  const { state, basis } = readinessOf(result)
+  return { state, basis: [...basis] }
 }
 
 /**
