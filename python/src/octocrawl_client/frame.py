@@ -20,6 +20,7 @@ EVIDENCE_COLUMNS = (
     "source_commit",    # the W2L commit that ran, when the server declares it
     "cache_state",      # hit or miss when the request asked the cache; None otherwise
     "cached_at",        # on a hit, when the reused result was fetched
+    "verification",     # passed, failed or not_requested against the request's task contract; None from a server that does not verify
     "markdown",
 )
 
@@ -50,6 +51,7 @@ def evidence_row(item: dict[str, Any], include_markdown: bool = True) -> dict[st
         "source_commit": _get(record, "extractor", "commit"),
         "cache_state": item.get("cacheState"),
         "cached_at": item.get("cachedAt"),
+        "verification": _get(item, "verification", "status") or _get(record, "verification", "status"),
         "markdown": item.get("markdown"),
     }
     if not include_markdown:
