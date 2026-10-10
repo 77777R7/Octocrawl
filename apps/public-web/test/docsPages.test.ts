@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { posts } from '../scripts/blogPosts.mjs'
 import { HOME_UPDATED, pages } from '../scripts/docsPages.mjs'
 
 const appDir = fileURLToPath(new URL('..', import.meta.url))
@@ -44,5 +45,17 @@ describe('sitemap lastmod', () => {
       if (!previous || !files.some(file => changed.has(file))) continue
       expect([page, `${previous} → ${updated}`, updated > previous || updated >= recent]).toEqual([page, `${previous} → ${updated}`, true])
     }
+  })
+})
+
+describe('search snippet', () => {
+  it('gives every page a <title> of at most 60 characters and a description of 140 to 160, both unique on the site', () => {
+    const titles = pages.map(page => page.seoTitle ?? `${page.title} | Octocrawl Docs`)
+    for (const [index, page] of pages.entries()) {
+      expect([page.file, titles[index]!.length <= 60]).toEqual([page.file, true])
+      expect([page.file, page.description.length >= 140 && page.description.length <= 160]).toEqual([page.file, true])
+    }
+    expect(new Set([...titles, ...posts.map(post => post.title)]).size).toBe(titles.length + posts.length)
+    expect(new Set([...pages, ...posts].map(entry => entry.description)).size).toBe(pages.length + posts.length)
   })
 })

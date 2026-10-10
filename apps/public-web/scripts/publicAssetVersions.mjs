@@ -1,7 +1,9 @@
-// Fixed-name files under public/ get a content hash as a query string wherever the page or the docs reference them,
-// so a new favicon or wordmark reaches browsers and Cloudflare at once instead of after their four-hour cache.
-// Only brand and icon files and the shared navigation's stylesheet and script are listed: the artwork is referenced from the stylesheet and the scripts too, and
-// versioning one of those references but not the others would make browsers download the same image twice.
+// Fixed-name files under public/ get a content hash as a query string wherever the page, the docs, their stylesheets or
+// the home page's scripts reference them, so a new favicon, wordmark or artwork reaches browsers and Cloudflare at once,
+// and the files can be cached for a year (packages/public-preview/src/server.ts) instead of four hours. Every reference
+// to a listed file must carry the same version, or browsers download it twice: HTML goes through versionPublicAssets,
+// and stylesheets and scripts through versionAssetReferences (vite.config.ts for src/, scripts/build-docs.mjs for the
+// docs' stylesheets).
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -13,6 +15,9 @@ export const VERSIONED_PUBLIC_FILES = [
   '/assets/octocrawl-wordmark.svg',
   '/assets/octopus-160.webp',
   '/assets/og-card.jpg',
+  // The home page's first-screen artwork: its hero backdrop and, on narrow screens, its largest paint.
+  '/assets/mountain-hero.webp',
+  '/assets/octopus-original.webp',
   '/docs-assets/nav.css',
   '/docs-assets/nav.js',
 ]
@@ -29,4 +34,12 @@ export function versionPublicAssets(html, publicDir) {
   const versions = publicAssetVersions(publicDir)
   return html.replace(/\b(src|href|content)="((?:__W2L_ORIGIN__)?)(\/[^"?]+)"/g, (match, attribute, origin, path) =>
     path in versions ? `${attribute}="${origin}${path}?v=${versions[path]}"` : match)
+}
+
+/** Appends `?v=<hash>` to every quoted or url() reference to a listed file in a stylesheet or a script, the same
+ * version versionPublicAssets gives the pages. */
+export function versionAssetReferences(text, publicDir) {
+  const versions = publicAssetVersions(publicDir)
+  return text.replace(/(['"`(])((?:__W2L_ORIGIN__)?)(\/[^'"`()?\s]+)(?=['"`)])/g, (match, open, origin, path) =>
+    path in versions ? `${open}${origin}${path}?v=${versions[path]}` : match)
 }
