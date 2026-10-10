@@ -68,9 +68,10 @@
 适用于 browser_local、provider 和 my_browser 三条通道。
 
 **DOM 视图。** 在现有的稳定判断（和调用方的 `waitFor`、`actions`、列表步骤）之后，如果请求带了契约，就每 500 ms 读一次页面的 DOM 视图，交给 ADR 0006 的 `verify(contract, view)`：
-- `markdown` 用 `body.innerText`；
-- `tables` 用可见的 `<table>`，以及至少两行的 `role=table`/`grid`；
-- `list` 按 `itemSelector` 读出记录。
+- `markdown` 用 `body.innerText`，`markdownIncludes`、`markdownMatches`、`markdownCountMin` 就在它上面跑；
+- `tableCount` 填可见的 `<table>` 和至少两行的 `role=table`/`grid` 的个数，`minTables` 用它，不去数 Markdown 里的表格（ADR 0006 第 2 节）；
+- `list` 按 `itemSelector` 读出记录；
+- 没有 `json`：`field` 这类判定在 DOM 视图上会报 "not available in this view"，判断就绪时跳过，不算通过也不算不通过。
 
 **什么时候算就绪：** 下面两种情况满足任意一种。
 - 所有判定在连续两次读取中都通过，而且计数（ADR 0006 的 `observedCount`）没有变化；
