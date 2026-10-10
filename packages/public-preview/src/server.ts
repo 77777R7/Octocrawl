@@ -8,7 +8,7 @@ import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } f
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse, type PreviewStage } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
-import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
+import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, INTERNAL_COOKIE, internalVisit, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
   requestOrigin, stdoutLogger, targetHost, type Logger } from './site.js'
 import { parseWaitlistEntry, WAITLIST_BODY_BYTES, WAITLIST_DAILY_SUBMISSIONS, type WaitlistStore } from './waitlist.js'
 
@@ -129,6 +129,16 @@ function issueVisitorCookie(req: IncomingMessage, res: ServerResponse, secret: s
   const signature = createHmac('sha256', secret).update(id).digest('hex')
   const secure = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host ?? '') ? '' : '; Secure'
   res.setHeader('set-cookie', `w2l_visitor=${id}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}`)
+}
+
+/** ?internal=1 marks this browser as the operator's own and ?internal=0 clears it; any other value is ignored. */
+function setInternalCookie(req: IncomingMessage, res: ServerResponse, search: string): void {
+  const value = new URLSearchParams(search).get('internal')
+  if (value !== '1' && value !== '0') return
+  const secure = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host ?? '') ? '' : '; Secure'
+  const cookie = `${INTERNAL_COOKIE}=${value === '1' ? '1; Max-Age=31536000' : '; Max-Age=0'}; Path=/; HttpOnly; SameSite=Lax${secure}`
+  const existing = res.getHeader('set-cookie')
+  res.setHeader('set-cookie', [...(Array.isArray(existing) ? existing : typeof existing === 'string' ? [existing] : []), cookie])
 }
 
 function visitorKey(req: IncomingMessage, secret: string | undefined): string {
@@ -368,7 +378,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       let event
       try { event = parseWebEvent(await readRequestBody(req, EVENT_BODY_BYTES)) } catch { event = null }
       if (!event) { if (!res.destroyed) res.writeHead(400, { 'cache-control': 'no-store' }).end(); return }
-      if (!optedOut(req)) log({ event: 'w2l_web_event', name: event.name, props: event.props, vid: visitorId(req), automated: looksAutomated(req) })
+      if (!optedOut(req)) log({ event: 'w2l_web_event', name: event.name, props: event.props, vid: visitorId(req), automated: looksAutomated(req), ...(internalVisit(req) ? { internal: true } : {}) })
       res.writeHead(204, { 'cache-control': 'no-store' }).end()
       return
     }
@@ -379,6 +389,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       const secret = options.visitorCookieSecret
       await serveStatic(req, res, options.staticDir, pathname, requestUrl.search, requestOrigin(req, publicOrigin), () => {
         if (req.method === 'GET' && secret) issueVisitorCookie(req, res, secret)
+        if (req.method === 'GET') setInternalCookie(req, res, requestUrl.search)
       })
       return
     }
@@ -403,7 +414,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       if (!owner && !optedOut(req)) log({
         event: 'w2l_preview', status: outcome.status, http: status, code: outcome.diagnostic?.code ?? null,
         host: targetHost(submitted), options: submittedOptions, totalMs: Math.round(outcome.totalMs),
-        vid: visitorId(req), automated: looksAutomated(req),
+        vid: visitorId(req), automated: looksAutomated(req), ...(internalVisit(req) ? { internal: true } : {}),
       })
       if (streaming) target.end(`${JSON.stringify({ type: 'result', http: status, body })}\n`)
       else sendJson(target, status, body, headers)
