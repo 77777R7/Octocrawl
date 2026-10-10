@@ -42,6 +42,8 @@ it('serves all tools on loopback and preserves Monitor state across MCP connecti
   const service=createLocalService({taskRoot:root,port})
   close=service.close
   if(!service.server.listening)await once(service.server,'listening')
+  // The keep-alive idle timeout goes through closeIdleOnlyWhenUnread (packages/api/test/keepAlive.test.ts tests it).
+  expect(service.server.listenerCount('timeout')).toBe(1)
   const base=`http://127.0.0.1:${port}`
   expect((await fetch(`${base}/healthz`)).status).toBe(200)
   expect((await fetch(`${base}/mcp`,{method:'GET'})).status).toBe(405)

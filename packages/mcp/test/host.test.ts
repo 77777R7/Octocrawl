@@ -23,6 +23,8 @@ it('speaks real Streamable HTTP and enforces origin, bearer subject and scope',a
   const service=createHostedService({mcpUrl:`https://127.0.0.1:${port}/mcp`,issuer:'https://auth.example',ownerSubject:'user-howard',receiverUrl:'https://receiver.example/webhook',amazonPublicState,taskRoot:root,port,host:'127.0.0.1',verifyToken:async token=>({sub:token==='other' ? 'user-other' : 'user-howard',scope:token==='no-scope' ? 'profile' : 'openid profile'})})
   close=service.close
   if (!service.server.listening) await once(service.server,'listening')
+  // The keep-alive idle timeout goes through closeIdleOnlyWhenUnread (packages/api/test/keepAlive.test.ts tests it).
+  expect(service.server.listenerCount('timeout')).toBe(1)
   const url=`http://127.0.0.1:${port}`
   expect((await fetch(`${url}/healthz`)).status).toBe(200)
   const metadata=await (await fetch(`${url}/.well-known/oauth-protected-resource`)).json()

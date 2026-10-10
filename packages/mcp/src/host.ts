@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
-import type { ApiEngine } from '@w2l/api'
+import { closeIdleOnlyWhenUnread, type ApiEngine } from '@w2l/api'
 import { FIRECRAWL_MONITOR_ID, hostedNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
 import { createMcpServer } from './server.js'
 import { createManagedRuntime } from './managedRuntime.js'
@@ -128,6 +128,8 @@ export function createHostedService(config: HostedConfig): {server: HttpServer; 
     }
   })
   server.requestTimeout = 120_000
+  // A crawl's extraction runs in this process and can stall it past the keep-alive timeout: a request sent meanwhile is answered, not reset.
+  closeIdleOnlyWhenUnread(server)
   server.listen(config.port,config.host ?? '127.0.0.1')
   return {server,engine,close:()=>{
     if (closing) return closing
