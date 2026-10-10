@@ -58,6 +58,11 @@
 - DOM 里有、Markdown 里没有，就是"读到了但没抽到"。这是抽取的问题，不该再花钱重试。
 - DOM 里也没有，就是"还没加载完"或"网站根本没给"。
 
+view 里的字段都可以缺：
+
+- `minTables` 有 `view.tableCount` 就用它，没有才数 `view.markdown` 里的 GFM 表格；后者和 `run-set.mjs` 的判法一致。DOM 视图可以把可见的 `<table>` 和 `role=table`/`grid` 的数量填进 `tableCount`。
+- 一份 view 里没有某类判定需要的部分（例如 DOM 视图没有 `json`，`field` 判定就没法跑），这条判定记为 `passed: null`，`observed` 为 "not available in this view"，不算通过也不算失败。对最终结果构造的 view，这类判定照常判失败。
+
 ### 3. 结果：`verification`，顶层 `status` 不变
 
 每个 scrape 结果、batch 和 crawl 的每一页（`CrawlPage`）、webhook 的 page 事件都带上：
