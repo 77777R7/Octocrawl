@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- On a narrow screen the Blog's category tabs show that the row scrolls: the edge with more tabs past it darkens, and stops once the row is scrolled to that end. It is pure CSS (backgrounds that scroll with the tabs), so a row that fits, as on a desktop, shows nothing.
+
 ## 0.4.1 — 2026-10-10
 
 The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `octocrawl-client`) at 0.4.1: 0.4.0, the fix for a request reset on a kept-alive connection when the server's event loop was held, which polling clients of a crawl met, and two main-content fixes from PA item 4 (products a page lists at the top level of its JSON-LD read as a listing; the page's `<main>` preferred over chrome around it).
