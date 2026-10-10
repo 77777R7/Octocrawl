@@ -106,6 +106,18 @@ describe('the person\'s Chrome', () => {
     expect(read.html).toBe(PAGE)
     expect(read.settle).toMatchObject({ loadingSeen: true, steady: false })
     expect(read.settle!.waitedMs).toBeGreaterThanOrEqual(30)
+    // Still showing its loading indicator when the wait ends, it says so.
+    const loading = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 9, loading: true })]).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, steadyWaitMs: 30 })
+    expect(loading.settle).toMatchObject({ loadingSeen: true, stillLoading: true, steady: true })
+  })
+
+  it('never lets the settle wait outlast the caller\'s: a page that is through near its end is read, not lost (ADR 0007)', async () => {
+    // Through from the first read, its text growing on every read, with a wait shorter than the settle wait.
+    const changing = Array.from({ length: 2_000 }, (_, i) => at('https://site.test/a', PAGE, { active: true, text: i }))
+    const read = await (await openUserChrome({ userDataDir, connect: fakeChrome(changing).connect })).read('https://site.test/a', { pollMs: 20, waitMs: 1_000 })
+    expect(read.html).toBe(PAGE)
+    expect(read.settle).toMatchObject({ steady: false })
+    expect(read.wallMs).toBeLessThan(1_000)
   })
 
   it('a tab that stays out of sight is pointed out once, while one hidden for a moment is not', async () => {

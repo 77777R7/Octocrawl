@@ -647,11 +647,13 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       }
       // Ready to read, the page is read once it has settled: it shows no loading indicator and its text stayed the same
       // length on CLEAR_READS reads in a row (x.com's timeline, read at its first clear reads, was 386 KB of 516). One still
-      // loading or changing steadyWaitMs after it was first ready is read as it is, and its result says so (ADR 0007).
+      // loading or changing steadyWaitMs after it was first ready, or when the caller's wait has no poll left, is read as
+      // it is, and its result says so (ADR 0007): a page that is through is never lost to the wait for it to settle.
       settleSince ??= Date.now()
       loadingSeen ||= state.loading === true
       const steady = steadyReads >= CLEAR_READS - 1
-      if ((!steady || state.loading === true) && Date.now() - settleSince < (options.steadyWaitMs ?? STEADY_WAIT_MAX_MS)) continue
+      const settling = Date.now() - settleSince < (options.steadyWaitMs ?? STEADY_WAIT_MAX_MS) && Date.now() - started + pollMs < waitMs
+      if ((!steady || state.loading === true) && settling) continue
       const settle: SteadyOutcome = { waitedMs: Date.now() - settleSince, loadingSeen, stillLoading: state.loading === true, steady }
       let html = state.html
       let whole: string | undefined

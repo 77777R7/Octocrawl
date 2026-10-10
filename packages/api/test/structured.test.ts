@@ -172,8 +172,8 @@ describe('readiness (ADR 0007, ROADMAP PA item 11)', () => {
     const shell = { ...ready, warnings: [{ code: 'client_rendered_suspected', message: 'The page appears to fill in its data with JavaScript (loading_text); this HTTP capture may be a shell.' }] }
     const compact = await prepareScrapeResponse(shell, { url: result.requestedUrl, formats: ['markdown'], debug: false }, {}, null, performance.now()) as import('@w2l/contracts').CompactScrapeResponse
     expect(compact.readiness).toEqual({ state: 'not_loaded', basis: ['client_rendered_suspected'] })
-    // A page with no main content whose whole-page evidence holds its text, though markdown was not asked for: the extractor missed it.
-    const missed = { ...ready, status: 'failed' as const, failureReason: 'empty_unverified' as const, markdown: 'x'.repeat(5_000) }
+    // A rendered page with no main content whose visible text was there: the extractor missed it, whatever formats were asked for.
+    const missed = { ...ready, status: 'failed' as const, failureReason: 'empty_unverified' as const, lane: 'browser_local' as const, markdown: 'x'.repeat(5_000), trace: [...ready.trace, { at: 1, lane: 'browser_local' as const, event: 'extract', detail: { textChars: 5_000 } }] }
     const full = await prepareScrapeResponse(missed, { url: result.requestedUrl, formats: ['links'] }, {}, null, performance.now()) as ScrapeResponse
     expect(full.readiness).toEqual({ state: 'not_extracted', basis: ['empty_unverified'] })
     expect(full.evidenceRecord?.readiness).toEqual({ state: 'not_extracted', basis: ['empty_unverified'] })

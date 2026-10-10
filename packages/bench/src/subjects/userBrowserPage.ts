@@ -115,7 +115,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
 
   const extracted = extractTf.extract(body, { url: finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
   const links = collectLinks(body, finalUrl)
-  trace.push({ at: wallMs, lane: LANE, event: 'extract', detail: { pageType: extracted.pageType, strategy: extracted.strategy, confidence: extracted.confidence, escalate: extracted.escalate, linkCount: links.length, ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}), ...tagOptions(options) } })
+  trace.push({ at: wallMs, lane: LANE, event: 'extract', detail: { pageType: extracted.pageType, strategy: extracted.strategy, confidence: extracted.confidence, escalate: extracted.escalate, linkCount: links.length, ...(extracted.render === undefined ? {} : { textChars: extracted.render.textChars }), ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}), ...tagOptions(options) } })
   let wholePage: string | null = null
   let listPage = false
   // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
