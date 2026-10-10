@@ -110,7 +110,7 @@ const EVENT_NAMES = new Set([
   'get_code_open', 'get_code_copy', 'link_click', 'docs_code_copy', 'mcp_client_select', 'example_tab', 'selfhost_tab',
   'waitlist_open', 'waitlist_submit',
 ])
-const PROP_KEYS = new Set(['path', 'ref', 'utm_source', 'utm_medium', 'utm_campaign', 'view', 'tab', 'target', 'href', 'client', 'trigger'])
+const PROP_KEYS = new Set(['path', 'ref', 'utm_source', 'utm_medium', 'utm_campaign', 'from', 'view', 'tab', 'target', 'href', 'client', 'trigger'])
 
 export type WebEvent = { name: string; props: Record<string, string | number | boolean> }
 

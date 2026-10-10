@@ -15,7 +15,8 @@ export function track(name: string, props: Props = {}): void {
   void fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true, credentials: 'same-origin' }).catch(() => {})
 }
 
-/** Where the visit came from: the referring site's host (never its path) and any utm_ tags on this page's address. */
+/** Where the visit came from: the referring site's host (never its path), any utm_ tags on this page's address, and
+ * its `from` tag, which the site's own links use to name the page or channel that sent a visitor (`?from=blog-…`). */
 export function trackPageView(): void {
   const props: Props = { path: location.pathname }
   try {
@@ -27,6 +28,8 @@ export function trackPageView(): void {
     const value = query.get(key)
     if (value) props[key] = value.slice(0, 120)
   }
+  const from = query.get('from')
+  if (from && /^[a-z0-9-]{1,60}$/.test(from)) props.from = from
   track('page_view', props)
 }
 

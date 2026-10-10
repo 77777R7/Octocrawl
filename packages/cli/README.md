@@ -18,4 +18,4 @@ Every option of the REST API is a flag under its kebab-case name (`maxAge` is `-
 - Paid browser services (Browserbase, Steel) are used only when you name them in `W2L_VENDORS` (for example `W2L_VENDORS=browserbase`) and their key is set; a key alone does nothing.
 - `octocrawl serve` listens on 127.0.0.1. On any other address it needs a token (`--token` or `W2L_API_TOKEN`), since other machines could otherwise use it to reach your localhost and network.
 
-Licence: AGPL-3.0-only. Website and docs: https://octocrawl.dev. Source and the API reference: https://github.com/77777R7/Octocrawl
+Licence: AGPL-3.0-only. Website and docs: https://octocrawl.dev/?utm_source=npm&utm_medium=readme&utm_campaign=cli. Source and the API reference: https://github.com/77777R7/Octocrawl
