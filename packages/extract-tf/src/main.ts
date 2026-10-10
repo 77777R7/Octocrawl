@@ -43,6 +43,19 @@ function layoutParent(el: Element): Element | null {
  * Returns the element whose HTML should be emitted.
  */
 export function selectMain(doc: Document, blocks: TextBlock[]): Element | null {
+  const picked = pickRegion(doc, blocks)
+  // A region the cascade found outside the page's <main>, when every h1 of the page is in that <main>, is not its
+  // content: the blocks it won on are chrome (Sephora's category page, whose header promotion was its one block of
+  // prose while its <main> held the title and the product tiles, link-heavy and so no blocks of their own). A region
+  // inside a hidden element is left as it is: React streams a page's body in `<div hidden id="S:1">` outside the
+  // <main> its script moves it into (x.com), and any other hidden region is the extractor's to report as hidden.
+  const main = doc.querySelector('main')
+  if (picked === null || main === null || main.contains(picked) || picked.contains(main) || picked.closest('[hidden]') !== null) return picked
+  const h1s = qsa(doc, 'h1')
+  return h1s.length > 0 && h1s.every((h1) => main.contains(h1)) ? main : picked
+}
+
+function pickRegion(doc: Document, blocks: TextBlock[]): Element | null {
   if (blocks.length === 0) return null
 
   // Explicit semantic container: if article/main, or the element the page

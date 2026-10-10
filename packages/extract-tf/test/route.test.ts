@@ -393,6 +393,42 @@ describe('routePage', () => {
       expect(route(wrap(`<main><h1>Cobalt teapot</h1><p>Hand-thrown stoneware, glazed in cobalt ash.</p>${cards}</main>`, own)).type).toBe('product')
     })
 
+    it('reads products each declared on its own at the top level as a listing\'s cards (ROADMAP PA item 4)', () => {
+      // Redfin's search results: one JSON-LD script per home, each a top-level [SingleFamilyResidence, Product] (T043).
+      const each = (list: readonly string[]) => list.map((n, i) => `<script type="application/ld+json">${JSON.stringify([{ '@context': 'https://schema.org', '@type': 'SingleFamilyResidence', name: n }, { '@context': 'https://schema.org', '@type': 'Product', name: n, offers: { '@type': 'Offer', price: `${400 + i}000`, priceCurrency: 'USD' } }])}</script>`).join('')
+      const route = (html: string) => { const doc = parse(html); const decision = routePage(doc.document); doc.close(); return decision }
+      const results = (scripts: string, n = 8) => wrap(`<main><h1>Seattle, WA homes for sale</h1><p>3,221 homes</p>${grid(n)}</main>`, scripts)
+      expect(route(results(each(names)))).toEqual({ type: 'collection', strategy: 'article' })
+      const out = extractTf.extract(results(each(names)))
+      for (let i = 0; i < 8; i++) expect(out.mainHtml).toContain(name(i))
+      // Two products, or one product declared three times, are not a listing.
+      expect(route(results(each(names.slice(0, 2)), 2)).type).toBe('product')
+      expect(route(results(each([name(0), name(0), name(0)]), 3)).type).toBe('product')
+      // A product page that declares its own product and its related ones each at the top level shows its own price under its title.
+      expect(route(wrap(`<main><h1>Cobalt teapot</h1><div class="buy"><span class="price">$84.00</span></div><p>Hand-thrown stoneware.</p>${grid(3)}</main>`, each(['Cobalt teapot', ...names.slice(0, 3)]))).type).toBe('product')
+      // Exactly three names, members of an @graph, and four declarations of three names are each a listing too.
+      expect(route(results(each(names.slice(0, 3)), 3))).toEqual({ type: 'collection', strategy: 'article' })
+      const graph = `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@graph': names.map((n) => ({ '@type': 'Product', name: n })) })}</script>`
+      expect(route(results(graph))).toEqual({ type: 'collection', strategy: 'article' })
+      expect(route(results(each([name(0), name(1), name(2), name(2)]), 3))).toEqual({ type: 'collection', strategy: 'article' })
+    })
+
+    it('keeps a product page whose recommendations each declare a product of their own a product page', () => {
+      // Zappos, rendered: the page's own Product in its head, then "Customers Also Viewed", each card with a script of its
+      // own; its price sits in no element the buy-box check reads as a price.
+      const own = `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: 'Lone Peak 9', offers: { '@type': 'Offer', price: '144.95', priceCurrency: 'USD' } })}</script>`
+      const card = (n: string, i: number) => `<article class="card"><script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: n, offers: { '@type': 'Offer', price: `${150 + i}.95`, priceCurrency: 'USD' } })}</script><a href="/p/${i}">${n}</a><span>$${150 + i}.95</span></article>`
+      const pdp = (heading: string, title = "Altra Lone Peak 9 Men's") => wrap(`<main><h1>${title}</h1><div data-testid="pdpProductPrice"><span>$144.95</span></div><p>A trail shoe with a balanced cushion and a wide toe box.</p><section><h2>${heading}</h2>${names.slice(0, 4).map(card).join('')}</section></main>`, own)
+      const route = (html: string) => { const doc = parse(html); const decision = routePage(doc.document); doc.close(); return decision }
+      expect(route(pdp('Customers Also Viewed')).type).toBe('product')
+      // So does the heading alone, with a title that does not name the product.
+      expect(route(pdp('Customers Also Viewed', 'Trail runner for men')).type).toBe('product')
+      // Under a heading that names no recommendations, the h1 naming the page's own product keeps it one too.
+      expect(route(pdp('More from Altra')).type).toBe('product')
+      // Neither: the cards are a listing's.
+      expect(route(pdp('More from Altra', 'Trail shoes')).type).toBe('collection')
+    })
+
     it('keeps a page whose own price follows its title a product page beside an unnamed list of products', () => {
       for (const top of [
         '<h1>Cobalt teapot</h1><span class="price">$84.00</span>',
