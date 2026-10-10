@@ -9,9 +9,9 @@ import type { FetchResult, Readiness } from '@w2l/contracts'
 /**
  * A rendered page with no main content and no more visible text than this is read as one whose content had not come
  * (a client-rendered shell, as OECD's Data Explorer reads before its data arrives); past it, as one whose content the
- * extractor missed. The text is the extractor's count of the page's visible characters (`textChars` on the lane's
- * `extract` event), the measure the browser's loading probe draws the same line with (LOADING_PAGE_TEXT_MAX in
- * @w2l/bench).
+ * extractor missed. The text is the extractor's count of the page's visible characters once it has set aside what it
+ * prunes, navigation among it (`textChars` on the lane's `extract` event). The browser's loading probe draws its line
+ * at the same length (LOADING_PAGE_TEXT_MAX in @w2l/bench), on the page's whole `innerText`.
  */
 export const SHELL_TEXT_MAX = 4_000
 
