@@ -251,6 +251,29 @@ function collectTopLevelProducts(root: unknown, out: string[]): void {
   }
 }
 
+/** Whether a script sits in a section of recommendations: inside an element named for them, or under a heading that names them. */
+function inRecommendations(el: Element): boolean {
+  for (let up = el.parentElement; up !== null; up = up.parentElement) {
+    if (hasRecommendationToken(`${up.getAttribute('id') ?? ''} ${up.getAttribute('class') ?? ''}`)) return true
+  }
+  const all = qsa(el.ownerDocument, 'h1, h2, h3, h4, h5, h6, script[type="application/ld+json"]')
+  for (let at = all.indexOf(el) - 1; at >= 0; at--) {
+    const heading = all[at]!
+    if (/^h[1-6]$/.test(tagOf(heading))) return /^h[2-6]$/.test(tagOf(heading)) && isRecommendationHeading(textOf(heading))
+  }
+  return false
+}
+
+/** Whether the page's h1 names one of the products (it holds the name, or the name holds it). */
+function h1NamesOne(doc: Document, names: readonly string[]): boolean {
+  const lower = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase()
+  const titles = qsa(doc, 'h1').map((h1) => lower(textOf(h1))).filter((title) => title.length > 0)
+  return names.some((name) => {
+    const named = lower(name)
+    return named.length >= 3 && titles.some((title) => title.includes(named) || named.includes(title))
+  })
+}
+
 /** A JSON-LD node's normalized @type names. */
 function typeNames(node: Record<string, unknown>): string[] {
   const t = node['@type']
@@ -304,16 +327,17 @@ function collectPageSignals(doc: Document): PageSignals {
       collectPageTypes(parsed, pageTypes)
       const own = ownListedProducts(parsed)
       if (own.length > ownListed.length) ownListed = own
-      collectTopLevelProducts(parsed, topLevelProducts)
+      if (!inRecommendations(el)) collectTopLevelProducts(parsed, topLevelProducts)
     } catch {
       // Malformed JSON-LD is not a routing signal; ignore it.
     }
   }
   // Products the page declares each on its own, at the top level, under PRODUCT_CARDS names or more, are a listing's
   // cards (Redfin's search results: a script per home), not the page's own product: they count as listed, and as the
-  // page's own list for the buy-box check.
+  // page's own list for the buy-box check. Not those declared in a section of recommendations (a product page's
+  // "Customers Also Viewed" cards, each with a script of its own, on Zappos), nor a set one of which the page's h1 names.
   const distinctTopLevel = [...new Set(topLevelProducts.filter((name) => name.length > 0))]
-  if (distinctTopLevel.length >= PRODUCT_CARDS) {
+  if (distinctTopLevel.length >= PRODUCT_CARDS && !h1NamesOne(doc, distinctTopLevel)) {
     for (let i = 0; i < topLevelProducts.length; i++) {
       const at = jsonLdTypes.indexOf('product')
       if (at < 0) break

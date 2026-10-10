@@ -125,6 +125,20 @@ describe('extractTf', () => {
     expect(extractTf.extract(page('<h2>Moisturizers</h2>', '<h1>Sephora</h1>')).mainHtml).toContain("Don't miss out")
     // With no h1 at all the cascade's region stands too.
     expect(extractTf.extract(page('<h2>Moisturizers</h2>')).mainHtml).toContain("Don't miss out")
+    // An h1 inside the <main> and another outside it: the page's titles are not all in it, and the cascade's region stands.
+    expect(extractTf.extract(page('<h1>Moisturizers</h1>', '<h1>Sephora</h1>')).mainHtml).toContain("Don't miss out")
+    // A region inside a hidden element stands: React streams a page's body hidden outside the <main> its script moves
+    // it into (x.com), and an Eurostat-like page whose only prose is a hidden banner still escalates.
+    const story = Array.from({ length: 5 }, (_, i) => `<p>Paragraph ${i + 1}: the council approved the library budget after a long debate over branch hours and staffing.</p>`).join('')
+    const streamed = extractTf.extract(`<!doctype html><html><body><main><h1>Council approves library budget</h1><p>By A. Writer</p><template id="B:0"></template><div>Loading…</div></main><div hidden id="S:0"><div>${story}</div></div><script>$RC("B:0","S:0")</script></body></html>`)
+    expect(streamed.mainHtml).toContain('Paragraph 5')
+    const banner = extractTf.extract(`<!doctype html><html><body><div class="css-globan"><div hidden><p>All official European Union website addresses are in the europa.eu domain, and here is how to tell.</p></div></div><main><h1>Population on 1 January</h1><div id="app"></div></main></body></html>`)
+    expect(banner.escalate).toBe(true)
+    // A region inside the <main> stands, an <article> in it for one: it is not widened to the whole <main>.
+    const lead = Array.from({ length: 2 }, (_, i) => `<p>Long paragraph ${i + 1}: ${'the survey covers forty villages and three hundred households in the upper valley over two winters, '.repeat(4)}</p>`).join('')
+    const inner = extractTf.extract(`<!doctype html><html><body><main><h1>Valley survey</h1><div class="sidebar"><ul><li><a href="/a">Alpha district notes</a></li><li><a href="/b">Beta district notes</a></li></ul><p>Sidebar note: districts are listed by their old names here.</p></div><article>${lead}</article></main></body></html>`)
+    expect(inner.mainHtml).toContain('Long paragraph 2')
+    expect(inner.mainHtml).not.toContain('Sidebar note')
     // A region that holds the <main> and more is not cut down to it: a page whose title and lead are in its <main> and
     // whose body follows beside it keeps the body.
     const body = Array.from({ length: 5 }, (_, i) => `<p>Paragraph ${i + 1}: the survey covers forty villages and three hundred households in the upper valley over two winters.</p>`).join('')
