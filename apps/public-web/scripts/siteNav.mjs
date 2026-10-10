@@ -10,11 +10,11 @@ const pathFor = page => page.slug ? `/docs/${page.slug}/` : '/docs/'
 
 /** What Octocrawl does, as on the home page's What it does section, each with where to read more. */
 export const NAV_CAPABILITIES = [
-  { glyph: '▤', title: 'Scrape a page', text: 'Markdown, tables and fields from one URL', href: '/docs/guides/extract-page/' },
-  { glyph: '├', title: 'Map a site', text: 'Every URL in its sitemap and links', href: '/docs/guides/map-site/' },
-  { glyph: '»', title: 'Crawl and batch', text: 'Follow links, or read up to 1,000 URLs', href: '/docs/guides/batch-results/' },
+  { glyph: '▤', title: 'Scrape a page', text: 'Markdown, tables and fields from one URL', href: '/blog/extract-structured-data-from-web-page/' },
+  { glyph: '├', title: 'Map a site', text: 'Every URL in its sitemap and links', href: '/blog/find-all-pages-on-a-website/' },
+  { glyph: '»', title: 'Crawl and batch', text: 'Follow links, or read up to 1,000 URLs', href: '/blog/scrape-list-of-urls/' },
   { glyph: '◷', title: 'Watch a page', text: 'What changed, to your HTTPS webhook', href: '/docs/guides/monitor-webhook/' },
-  { glyph: '●', title: 'Your own Chrome', text: 'Pages signed in as you, checks you pass', href: '/docs/guides/own-chrome/' },
+  { glyph: '●', title: 'Your own Chrome', text: 'Pages signed in as you, checks you pass', href: '/blog/scrape-website-with-login/' },
   { glyph: '#', title: 'Evidence Record', text: 'Where every result came from', href: '/docs/reference/#evidence-record' },
 ]
 
@@ -35,7 +35,7 @@ export const NAV_DOC_GROUPS = ['Get started', 'Guides', 'Reference']
 const item = ({ glyph, title, text, href }) => `<li><a href="${href}"><span class="nav-glyph" aria-hidden="true">${esc(glyph)}</span> <span class="nav-title">${esc(title)}</span> <span class="nav-text">${esc(text)}</span></a></li>`
 
 /** The header's navigation and its two actions (GitHub, Try it), the same on every page. `current` marks a top-level
- * item as the page being read: 'docs' or 'changelog'. */
+ * item as the page being read: 'docs', 'blog' or 'changelog'. */
 export function siteNavMarkup(current = '') {
   const docs = NAV_DOC_GROUPS.map(group => `<div class="nav-col"><p class="nav-kicker">${esc(group)}</p><ul>${pages.filter(page => page.group === group).map(page => `<li><a href="${pathFor(page)}"><span class="nav-title">${esc(page.title)}</span></a></li>`).join('')}${group === 'Reference' ? '<li><a href="/llms.txt"><span class="nav-title">llms.txt</span></a></li>' : ''}</ul></div>`).join('')
   return `<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="nav-toggle-mark" aria-hidden="true">≡</span>Menu</button>
@@ -47,6 +47,7 @@ export function siteNavMarkup(current = '') {
                 <a class="nav-feature" href="/docs/connect-mcp/"><span class="nav-feature-tag">MCP</span> <span class="nav-feature-title">Connect your agent in one line</span> <code>claude mcp add \\\n  --transport http octocrawl \\\n  https://mcp.octocrawl.dev/mcp</code> <span class="nav-feature-note">No account, 20 pages a day. Setup for every client <span aria-hidden="true">→</span></span></a>
               </div></details></li>
               <li class="nav-item"><details class="nav-drop"><summary${current === 'docs' ? ' aria-current="page"' : ''}>Docs<span class="nav-caret" aria-hidden="true">▾</span></summary><div class="nav-panel nav-docs">${docs}</div></details></li>
+              <li class="nav-item"><a class="nav-link" href="/blog/"${current === 'blog' ? ' aria-current="page"' : ''}>Blog</a></li>
               <li class="nav-item"><a class="nav-link" href="/#free-tiers">Free tiers</a></li>
               <li class="nav-item"><a class="nav-link" href="/changelog/"${current === 'changelog' ? ' aria-current="page"' : ''}>Changelog</a></li>
             </ul>

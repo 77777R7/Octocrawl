@@ -1,0 +1,10 @@
+{
+ "started": "2026-10-09T17:38:54Z",
+ "finished": "2026-10-09T17:39:25Z",
+ "command": "claude -p \"$(cat prompt.txt)\" --mcp-config mcp.json --strict-mcp-config --allowedTools mcp__octocrawl__map mcp__octocrawl__scrape --disallowedTools WebFetch WebSearch Bash --output-format stream-json --verbose < /dev/null",
+ "os": "macOS (Darwin 25.6.0, arm64)",
+ "network": "through local proxy 127.0.0.1:7890",
+ "server": "https://mcp.octocrawl.dev/mcp (hosted revision h2card, source ff6a5a5)",
+ "note": "tool results over 600 characters are cut; the scraped specification text is not kept",
+ "redacted": "2026-10-10: the scraped specification page's Markdown (14,522 characters, kept twice in the scrape's tool_use_result) and the thinking blocks' signatures were replaced with [not kept: N characters]"
+}

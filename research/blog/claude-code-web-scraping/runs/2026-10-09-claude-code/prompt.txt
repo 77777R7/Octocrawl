@@ -1,0 +1,1 @@
+Use Octocrawl's map tool to find the pages on https://modelcontextprotocol.io about streamable http, then use its scrape tool on the 2025-11-25 specification page you found. Tell me which HTTP methods a client uses on the MCP endpoint, and cite the page's final URL and the fetch time from its evidence record.

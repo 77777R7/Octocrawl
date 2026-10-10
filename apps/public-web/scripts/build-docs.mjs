@@ -1,16 +1,18 @@
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import MarkdownIt from 'markdown-it'
 import { versionPublicAssets } from './publicAssetVersions.mjs'
 import { HOME_UPDATED, pages } from './docsPages.mjs'
+import { BLOG_AUTHOR, BLOG_UPDATED, blogPath, posts } from './blogPosts.mjs'
 import { siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const output = join(root, 'dist', 'docs')
 const assetRoot = join(root, 'public', 'docs-assets')
-const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js'].map(async name => [
+const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css'].map(async name => [
   name,
   createHash('sha256').update(await readFile(join(assetRoot, name))).digest('hex').slice(0, 12),
 ])))
@@ -39,6 +41,50 @@ md.renderer.rules.link_open = (tokens, index, options, env, self) => {
   const href = token.attrGet('href') ?? ''
   if (/^https?:\/\//i.test(href)) token.attrSet('rel', 'noopener noreferrer')
   return self.renderToken(tokens, index, options)
+}
+
+/** A file under public/ with its content version, so it can be cached for a year and still change. */
+const publicVersions = new Map()
+function versioned(path) {
+  if (!publicVersions.has(path)) publicVersions.set(path, createHash('sha256').update(readFileSync(join(root, 'public', path))).digest('hex').slice(0, 12))
+  return `${path}?v=${publicVersions.get(path)}`
+}
+
+/** An image's width and height from its own header (WebP or PNG), so the page reserves its box before it loads. */
+function imageSize(path) {
+  const bytes = readFileSync(join(root, 'public', path))
+  if (bytes.toString('ascii', 1, 4) === 'PNG') return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+  if (bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') {
+    const chunk = bytes.toString('ascii', 12, 16)
+    if (chunk === 'VP8X') return { width: 1 + bytes.readUIntLE(24, 3), height: 1 + bytes.readUIntLE(27, 3) }
+    if (chunk === 'VP8 ') return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff }
+    if (chunk === 'VP8L') { const b = bytes.readUInt32LE(21); return { width: 1 + (b & 0x3fff), height: 1 + ((b >> 14) & 0x3fff) } }
+  }
+  throw new Error(`${path}: not a PNG or WebP image this build can measure`)
+}
+
+// An image alone in its paragraph is a figure: the image with its size, and its title as the caption. Images are
+// files under public/ (an absolute path); one elsewhere is refused, since the site's policy only loads its own.
+md.core.ruler.after('inline', 'figure', state => {
+  for (let index = 0; index + 2 < state.tokens.length; index++) {
+    const [open, inline, close] = state.tokens.slice(index, index + 3)
+    if (open.type !== 'paragraph_open' || inline.type !== 'inline' || close.type !== 'paragraph_close') continue
+    const children = inline.children.filter(child => !(child.type === 'text' && !child.content.trim()))
+    if (children.length !== 1 || children[0].type !== 'image') continue
+    open.tag = close.tag = 'figure'
+    open.attrSet('class', 'doc-figure')
+    children[0].meta = { figure: true }
+  }
+})
+md.renderer.rules.image = (tokens, index) => {
+  const token = tokens[index]
+  const src = token.attrGet('src') ?? ''
+  if (!src.startsWith('/') || src.startsWith('//')) throw new Error(`image ${src}: use a file under public/, by its absolute path`)
+  const { width, height } = imageSize(src)
+  const alt = token.children?.map(child => child.content).join('') ?? token.content
+  const caption = token.attrGet('title')
+  const image = `<img src="${escape(versioned(src))}" alt="${escape(alt)}" width="${width}" height="${height}" loading="lazy" decoding="async" />`
+  return token.meta?.figure && caption ? `${image}<figcaption>${md.renderInline(caption)}</figcaption>` : image
 }
 
 /** The page's HTML, with an id on every heading and a number on every section (h2); the sections also go to the
@@ -186,8 +232,8 @@ function nav(active) {
 }
 
 /** Canonical address and link-preview card; every page shares the home page's card image. */
-function shareHead(path, title, description) {
-  return `<link rel="canonical" href="${ORIGIN}${path}" /><meta property="og:type" content="article" /><meta property="og:site_name" content="Octocrawl" /><meta property="og:url" content="${ORIGIN}${path}" /><meta property="og:title" content="${escape(title)}" /><meta property="og:description" content="${escape(description)}" /><meta property="og:image" content="${OG_IMAGE}" /><meta property="og:image:width" content="1200" /><meta property="og:image:height" content="630" /><meta property="og:image:alt" content="${OG_IMAGE_ALT}" /><meta name="twitter:card" content="summary_large_image" /><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />`
+function shareHead(path, title, description, image = { url: OG_IMAGE, alt: OG_IMAGE_ALT }) {
+  return `<link rel="canonical" href="${ORIGIN}${path}" /><meta property="og:type" content="article" /><meta property="og:site_name" content="Octocrawl" /><meta property="og:url" content="${ORIGIN}${path}" /><meta property="og:title" content="${escape(title)}" /><meta property="og:description" content="${escape(description)}" /><meta property="og:image" content="${image.url}" /><meta property="og:image:width" content="1200" /><meta property="og:image:height" content="630" /><meta property="og:image:alt" content="${escape(image.alt)}" /><meta name="twitter:card" content="summary_large_image" /><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />`
 }
 
 /** The site's header: the same navigation as the home page (siteNav.mjs), with the page's own top-level item marked. */
@@ -253,6 +299,62 @@ const changelogSource = (await readFile(join(root, '..', '..', 'CHANGELOG.md'), 
   await writeFile(join(root, 'dist', 'changelog', 'index.md'), changelogSource)
 }
 
+// The blog: an index of the articles, newest first, each with its cover, and one page per article. An article's
+// Markdown starts with its h1; the byline and the cover go under it, Keep reading after it. Each also has its own
+// Markdown copy, its own link-preview image and its BlogPosting data.
+const BLOG_PATH = '/blog/'
+const blogHead = (title, description, path, image) => `<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(description)}" />${shareHead(path, title, description, image)}<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><link rel="stylesheet" href="/docs-assets/nav.css" /><link rel="stylesheet" href="/docs-assets/blog.css?v=${assetVersions['blog.css']}" />`
+const longDate = day => new Date(`${day}T00:00:00Z`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' })
+const coverPath = (post, name) => `/blog-assets/${post.slug}/${name}`
+const jsonLd = data => `<script type="application/ld+json">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`
+const blogCrumbs = trail => ({ '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: trail.map(([name, path], index) => ({ '@type': 'ListItem', position: index + 1, name, item: `${ORIGIN}${path}` })) })
+const PUBLISHER = { '@type': 'Organization', name: 'Octocrawl', url: `${ORIGIN}/`, logo: { '@type': 'ImageObject', url: `${ORIGIN}/assets/favicon-192.png` } }
+const bySlug = Object.fromEntries(posts.map(post => [post.slug, post]))
+const blogCard = (post, heading = 'h2') => `<a class="blog-card" href="${blogPath(post)}"><img src="${versioned(coverPath(post, 'card.webp'))}" alt="" width="836" height="470" loading="lazy" decoding="async" /><span class="blog-card-body"><time datetime="${post.pubDate}">${longDate(post.pubDate)}</time><${heading}>${escape(post.title)}</${heading}><p>${escape(post.description)}</p></span></a>`
+const blogFooter = '<footer class="doc-footer"><span>Try a page in the browser here, connect your agent to mcp.octocrawl.dev, or run Octocrawl on your computer with npx.</span><a href="/">Try a page ↗</a></footer>'
+
+const blogMarkdown = []
+for (const post of posts) {
+  const source = await readFile(join(root, 'content', post.file), 'utf8')
+  const [, h1, body] = source.match(/^# (.+)\n([\s\S]*)$/) ?? []
+  if (!h1) throw new Error(`${post.file}: the article must start with its h1`)
+  const toc = []
+  const content = renderMarkdown(body, toc)
+  const words = body.replace(/```[\s\S]*?```/g, ' ').split(/\s+/).filter(Boolean).length
+  const updated = post.updatedDate ? ` · Updated <time datetime="${post.updatedDate}">${longDate(post.updatedDate)}</time>` : ''
+  const cover = `<figure class="blog-cover"><img src="${versioned(coverPath(post, 'cover.webp'))}" alt="${escape(post.coverAlt)}" width="1672" height="941" fetchpriority="high" decoding="async" /></figure>`
+  const related = post.related.map(slug => { const other = bySlug[slug]; if (!other) throw new Error(`${post.slug}: related article ${slug} is not published`); return blogCard(other, 'h3') }).join('')
+  const ogImage = { url: `${ORIGIN}${versioned(coverPath(post, 'og.jpg'))}`, alt: post.coverAlt }
+  const article = { '@context': 'https://schema.org', '@type': 'BlogPosting', headline: post.title, description: post.description,
+    image: [`${ORIGIN}${coverPath(post, 'og.jpg')}`, `${ORIGIN}${coverPath(post, 'cover.webp')}`], datePublished: post.pubDate, ...(post.updatedDate ? { dateModified: post.updatedDate } : {}),
+    author: { '@type': 'Organization', name: BLOG_AUTHOR, url: `${ORIGIN}/` }, publisher: PUBLISHER, mainEntityOfPage: `${ORIGIN}${blogPath(post)}`,
+    url: `${ORIGIN}${blogPath(post)}`, inLanguage: 'en', wordCount: words, isPartOf: { '@type': 'Blog', name: 'Octocrawl Blog', url: `${ORIGIN}${BLOG_PATH}` } }
+  const html = `<!doctype html>
+<html lang="en"><head>${blogHead(post.title, post.description, blogPath(post), ogImage)}<meta property="article:published_time" content="${post.pubDate}" />${post.updatedDate ? `<meta property="article:modified_time" content="${post.updatedDate}" />` : ''}<link rel="alternate" type="text/markdown" href="${blogPath(post)}index.md" />${jsonLd([article, blogCrumbs([['Octocrawl', '/'], ['Blog', BLOG_PATH], [post.title, blogPath(post)]])])}<title>${escape(post.title)}</title></head>
+<body><a class="skip-link" href="#main-content">Skip to content</a>${header('blog')}
+<div class="doc-layout blog-layout${toc.length >= 2 ? ' has-toc' : ''}"><main id="main-content" class="doc-main blog-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span><a href="${BLOG_PATH}">Octocrawl / Blog</a></p><article class="doc-article blog-article"><h1>${md.renderInline(h1)}</h1><p class="blog-byline">By ${escape(BLOG_AUTHOR)} · <time datetime="${post.pubDate}">${longDate(post.pubDate)}</time>${updated}</p>${cover}${content}</article><section class="blog-related" aria-labelledby="keep-reading"><h2 id="keep-reading">Keep reading</h2><div class="blog-grid">${related}</div></section>${blogFooter}</main>${tocHtml(toc)}</div><div id="copy-announcement" class="sr-only" role="status" aria-live="polite"></div><script defer src="/docs-assets/docs.js?v=${assetVersions['docs.js']}"></script><script defer src="/docs-assets/nav.js"></script></body></html>`
+  const target = join(root, 'dist', 'blog', post.slug)
+  await mkdir(target, { recursive: true })
+  await writeFile(join(target, 'index.html'), versionPublicAssets(html, join(root, 'public')))
+  const text = `# ${h1}\n\nBy ${BLOG_AUTHOR}, ${longDate(post.pubDate)}.\n${body}`
+  await writeFile(join(target, 'index.md'), text)
+  blogMarkdown.push({ post, text })
+}
+{
+  const title = 'Octocrawl Blog: Web Scraping for Agents and Pipelines'
+  const description = 'How to read the web for AI agents and data pipelines with Octocrawl, each article built on commands we ran and the output they returned.'
+  const collection = { '@context': 'https://schema.org', '@type': 'Blog', name: 'Octocrawl Blog', description, url: `${ORIGIN}${BLOG_PATH}`, publisher: PUBLISHER,
+    blogPost: posts.map(post => ({ '@type': 'BlogPosting', headline: post.title, url: `${ORIGIN}${blogPath(post)}`, datePublished: post.pubDate, image: `${ORIGIN}${coverPath(post, 'og.jpg')}`, author: { '@type': 'Organization', name: BLOG_AUTHOR } })) }
+  const html = `<!doctype html>
+<html lang="en"><head>${blogHead(title, description, BLOG_PATH)}${jsonLd([collection, blogCrumbs([['Octocrawl', '/'], ['Blog', BLOG_PATH]])])}<title>${escape(title)}</title></head>
+<body><a class="skip-link" href="#main-content">Skip to content</a>${header('blog')}
+<div class="doc-layout blog-layout blog-index"><main id="main-content" class="doc-main blog-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / Blog</p><h1 class="blog-index-title">Blog</h1><p class="blog-index-lead">${escape(description)}</p><div class="blog-grid">${posts.map(post => blogCard(post)).join('')}</div>${blogFooter}</main></div><script defer src="/docs-assets/nav.js"></script></body></html>`
+  await mkdir(join(root, 'dist', 'blog'), { recursive: true })
+  await writeFile(join(root, 'dist', 'blog', 'index.html'), versionPublicAssets(html, join(root, 'public')))
+}
+// Each docs guide that became an article answers with a 301 to it (packages/public-preview reads this file).
+await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify(Object.fromEntries(posts.flatMap(post => [[post.from, blogPath(post)], [`${post.from}index.md`, `${blogPath(post)}index.md`]])), null, 2)}\n`)
+
 // llms.txt (https://llmstxt.org): what Octocrawl is, and a link to the Markdown copy of every page. llms-full.txt carries
 // all of them in one file.
 const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. It is open source (AGPL-3.0). Hosted Octocrawl serves scrape and map at https://api.octocrawl.dev and https://mcp.octocrawl.dev/mcp, keyless within a daily allowance; the published packages (npx octocrawl) run everything on your own computer through REST, a TypeScript SDK, a Python client or MCP.'
@@ -261,10 +363,11 @@ const llms = [
   '# Octocrawl', '', `> ${summary}`, '',
   `Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/Octocrawl.`, '',
   ...groups.flatMap(group => [`## ${group}`, '', ...pages.filter(page => page.group === group).map(page => `- [${page.title}](${ORIGIN}${pathFor(page)}index.md): ${page.description}`), '']),
+  '## Blog', '', ...posts.map(post => `- [${post.title}](${ORIGIN}${blogPath(post)}index.md): ${post.description}`), '',
   '## Optional', '', `- [All documentation in one file](${ORIGIN}/llms-full.txt)`, `- [Changelog](${ORIGIN}${CHANGELOG_PATH}index.md): what changed, version by version`, '',
 ].join('\n')
 await writeFile(join(root, 'dist', 'llms.txt'), llms)
-await writeFile(join(root, 'dist', 'llms-full.txt'), [`# Octocrawl documentation\n\n> ${summary}\n`, ...markdown.map(({ page, text }) => `<!-- ${ORIGIN}${pathFor(page)} -->\n\n${text.trim()}\n`)].join('\n'))
+await writeFile(join(root, 'dist', 'llms-full.txt'), [`# Octocrawl documentation\n\n> ${summary}\n`, ...markdown.map(({ page, text }) => `<!-- ${ORIGIN}${pathFor(page)} -->\n\n${text.trim()}\n`), ...blogMarkdown.map(({ post, text }) => `<!-- ${ORIGIN}${blogPath(post)} -->\n\n${text.trim()}\n`)].join('\n'))
 
 // The page the server answers with, status 404, for any path without a file: in the docs' reading layout, with the
 // docs pages beside it and the two ways back. It is never indexed.
@@ -274,9 +377,10 @@ const notFound = `<!doctype html>
 <div class="doc-layout"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav({ slug: null })}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs</summary><nav aria-label="Documentation pages on mobile">${nav({ slug: null })}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / 404</p><article class="doc-article"><h1>Page not found</h1><p>There is no page at this address. It may have moved, or the link may be mistyped.</p><ul><li><a href="/">Try Octocrawl with a public URL</a></li><li><a href="/docs/">Read the documentation</a></li></ul></article></main></div><script defer src="/docs-assets/nav.js"></script></body></html>`
 await writeFile(join(root, 'dist', '404.html'), versionPublicAssets(notFound, join(root, 'public')))
 
-// Crawlers may read every page; the API is not for them. The sitemap lists the home page, each docs page and the changelog.
+// Crawlers may read every page; the API is not for them. The sitemap lists the home page, each docs page, the blog and
+// its articles, and the changelog.
 await writeFile(join(root, 'dist', 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${ORIGIN}/sitemap.xml\n`)
 // The changelog changes with almost every merge, so it carries no lastmod rather than a day that is soon wrong.
-const locations = [['/', HOME_UPDATED], ...pages.map(page => [pathFor(page), page.updated]), [CHANGELOG_PATH, null]]
+const locations = [['/', HOME_UPDATED], ...pages.map(page => [pathFor(page), page.updated]), [BLOG_PATH, BLOG_UPDATED], ...posts.map(post => [blogPath(post), post.updatedDate ?? post.pubDate]), [CHANGELOG_PATH, null]]
 await writeFile(join(root, 'dist', 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locations.map(([path, updated]) => `  <url><loc>${ORIGIN}${path}</loc>${updated ? `<lastmod>${updated}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>\n`)
-console.log(`Built ${pages.length} Octocrawl documentation pages in ${output}, with Markdown copies, the changelog, llms.txt, 404.html, robots.txt and sitemap.xml`)
+console.log(`Built ${pages.length} Octocrawl documentation pages in ${output} and ${posts.length} blog articles, with Markdown copies, the changelog, llms.txt, 404.html, robots.txt, sitemap.xml and redirects.json`)

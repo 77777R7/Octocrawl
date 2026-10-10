@@ -1,0 +1,11 @@
+{
+ "purpose": "check the claims of the 2026-10-09 run that it did not save: the hosted answer's heading, table and code-block counts, the hash of the Markdown as received, the same page through the local CLI, two independent local batches, and the chunk script with an address that answers 404",
+ "hosted": "curl POST https://api.octocrawl.dev/v1/scrape {url: https://docs.python.org/3/library/json.html, formats: [markdown]}; hosted revision octocrawl-api-h3v032-e3a37ef (100% of traffic; v0.3.2 is an ancestor of e3a37ef); curl time_total in hosted.curltime; counts by count.py, run over the answer before it was deleted",
+ "local_scrape": "npx -y octocrawl@0.3.2 scrape https://docs.python.org/3/library/json.html --formats markdown --task-root <temp dir>",
+ "batches": "npx -y octocrawl@0.3.2 batch --urls-file urls.txt --formats markdown --out outN --task-root <a fresh temp dir per run>, run twice (no shared page cache)",
+ "python": "octocrawl-client 0.3.2 in a venv; the 2026-10-09 to_chunks.py reading urls404.txt (urls.txt plus https://docs.python.org/3/tutorial/does-not-exist.html) against npx -y octocrawl@0.3.2 serve --task-root <temp dir> on 127.0.0.1:8787; stdout in py.out",
+ "os": "macOS (Darwin 25.6.0, arm64), Node 26.8.1",
+ "network": "through local proxy 127.0.0.1:7890; loopback direct",
+ "dates": "UTC; the folder is named by the local date (UTC+8)",
+ "note": "page text of docs.python.org is not kept: only counts, hashes and results.csv"
+}

@@ -1,0 +1,7 @@
+{
+ "command": "npx -y octocrawl@0.3.2 batch --urls-file urls.txt --formats markdown --out out --task-root <temp dir>",
+ "os": "macOS (Darwin 25.6.0, arm64), Node 26.8.1",
+ "network": "through local proxy 127.0.0.1:7890",
+ "note": "page Markdown is not kept: out/results.jsonl has its length only and out/markdown-files.txt lists the files that were written; started.txt and finished.txt bound the run",
+ "redacted": "2026-10-10: each book's description in out/results.jsonl (metadata.description, over 700 characters) was replaced with [not kept: N characters]"
+}

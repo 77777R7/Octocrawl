@@ -1,0 +1,10 @@
+{
+ "runs": {
+  "hosted-map-root-search-transports.json": "2026-10-09T12:06:34Z {\"url\":\"https://modelcontextprotocol.io\",\"search\":\"transports\"}",
+  "hosted-map-docs.json": "2026-10-09T12:15:36Z {\"url\":\"https://modelcontextprotocol.io/docs\"}",
+  "hosted-map-root.json": "2026-10-09T12:15:44Z {\"url\":\"https://modelcontextprotocol.io\"}",
+  "hosted-map-octocrawl-dev.json": "2026-10-09T12:03:01Z {\"url\":\"https://octocrawl.dev\"}"
+ },
+ "endpoint": "POST https://api.octocrawl.dev/v1/map (hosted revision h2card, source ff6a5a5)",
+ "network": "through local proxy 127.0.0.1:7890"
+}

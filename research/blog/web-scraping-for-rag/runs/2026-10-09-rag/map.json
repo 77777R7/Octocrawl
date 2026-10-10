@@ -1,0 +1,115 @@
+{
+  "id": "473282a4-96c5-4d63-a5f1-b0dd2850b2a0",
+  "url": "https://docs.python.org/3/tutorial/",
+  "status": "completed",
+  "stoppedBy": "limit",
+  "links": [
+    {
+      "url": "https://docs.python.org/3/tutorial/",
+      "via": [
+        "start"
+      ],
+      "robots": "allowed",
+      "title": "The Python Tutorial — Python 3.15.0 documentation",
+      "description": "Python is an easy to learn, powerful programming language. It has efficient high-level data structures and a simple but effective approach to object-oriented programming. Python’s elegant syntax an...",
+      "titleSource": "page"
+    },
+    {
+      "url": "https://docs.python.org/3/tutorial/appetite.html",
+      "title": "1. Whetting Your Appetite",
+      "titleSource": "anchor",
+      "via": [
+        "link"
+      ],
+      "robots": "allowed"
+    },
+    {
+      "url": "https://docs.python.org/3/tutorial/interpreter.html",
+      "title": "2. Using the Python Interpreter",
+      "titleSource": "anchor",
+      "via": [
+        "link"
+      ],
+      "robots": "allowed"
+    },
+    {
+      "url": "https://docs.python.org/3/tutorial/introduction.html",
+      "title": "3. An Informal Introduction to Python",
+      "titleSource": "anchor",
+      "via": [
+        "link"
+      ],
+      "robots": "allowed"
+    },
+    {
+      "url": "https://docs.python.org/3/tutorial/controlflow.html",
+      "title": "4. More Control Flow Tools",
+      "titleSource": "anchor",
+      "via": [
+        "link"
+      ],
+      "robots": "allowed"
+    },
+    {
+      "url": "https://docs.python.org/3/tutorial/datastructures.html",
+      "title": "5. Data Structures",
+      "titleSource": "anchor",
+      "via": [
+        "link"
+      ],
+      "robots": "allowed"
+    }
+  ],
+  "sources": {
+    "startPage": {
+      "url": "https://docs.python.org/3/tutorial/",
+      "finalUrl": "https://docs.python.org/3/tutorial/",
+      "httpStatus": 200,
+      "status": "success",
+      "failureReason": null,
+      "lane": "http",
+      "robots": "allowed",
+      "rawBodySha256": "4243cb32012032e8c631d1e34d6cbb7ebccaa3d478665d84f3422119a1bdb743",
+      "linksFound": 36,
+      "title": "The Python Tutorial — Python 3.15.0 documentation",
+      "description": "Python is an easy to learn, powerful programming language. It has efficient high-level data structures and a simple but effective approach to object-oriented programming. Python’s elegant syntax an..."
+    },
+    "sitemap": {
+      "mode": "include",
+      "sources": [],
+      "files": [],
+      "listed": 0,
+      "accepted": 0,
+      "truncated": "urls",
+      "error": null
+    }
+  },
+  "refused": {
+    "duplicate": 1,
+    "collapsed": 0,
+    "hostDenied": 4,
+    "subtreeDenied": 15,
+    "pathDenied": 0,
+    "assetDenied": 0,
+    "robots": 0,
+    "robotsUnchecked": 0,
+    "searchFiltered": 0,
+    "overLimit": 11,
+    "samples": {
+      "collapsed": [],
+      "hostDenied": [
+        "https://www.python.org/",
+        "https://github.com/python/cpython/blob/3.15/Doc/tutorial/index.rst?plain=1",
+        "https://www.python.org/psf/donations/",
+        "https://www.sphinx-doc.org/"
+      ],
+      "robots": []
+    }
+  },
+  "identity": {
+    "mode": "standard",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+  },
+  "warnings": [],
+  "elapsedMs": 849
+}

@@ -208,6 +208,20 @@ export function immutable(pathname: string, search: string): boolean {
   return /^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(pathname) || /[?&]v=[0-9a-f]{8,}(?:&|$)/.test(search)
 }
 
+/** Addresses that moved, from the build's redirects.json (`{ "/old/": "/new/" }`): a docs guide that became a blog
+ * article, say. Read once per directory; a site without the file has none. */
+const movedPages = new Map<string, Promise<Map<string, string>>>()
+function movedPagesOf(root: string): Promise<Map<string, string>> {
+  let moved = movedPages.get(root)
+  if (!moved) {
+    moved = readFile(resolve(root, 'redirects.json'), 'utf8')
+      .then((text) => new Map(Object.entries(JSON.parse(text) as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].startsWith('/') && !entry[1].startsWith('//'))))
+      .catch(() => new Map<string, string>())
+    movedPages.set(root, moved)
+  }
+  return moved
+}
+
 async function serveStatic(req: IncomingMessage, res: ServerResponse, directory: string, pathname: string, search: string, origin: string, onPage: () => void): Promise<void> {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return }
   const root = resolve(directory)
@@ -221,6 +235,11 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, directory:
   if (isDirectory) { file = resolve(file, 'index.html'); info = await stat(file).catch(() => null) }
   const moved = info?.isFile() ? pageAddressRedirect(pathname, isDirectory, !isDirectory && basename(file) === 'index.html') : null
   if (moved !== null) { res.writeHead(301, { location: `${moved}${search}`, 'cache-control': 'public, max-age=3600', ...transportHeaders(origin) }).end(); return }
+  // A page that moved answers with a 301 to where it is now, with or without its trailing slash.
+  if (!info?.isFile()) {
+    const movedTo = await movedPagesOf(root).then((moved) => moved.get(pathname) ?? moved.get(`${pathname}/`))
+    if (movedTo !== undefined) { res.writeHead(301, { location: `${movedTo}${search}`, 'cache-control': 'public, max-age=3600', ...transportHeaders(origin) }).end(); return }
+  }
   // The site has no client-side routes: a path without a file is a 404, never the home page answering 200.
   let status = 200
   if (!info?.isFile() || relative(root, file).startsWith('..')) {

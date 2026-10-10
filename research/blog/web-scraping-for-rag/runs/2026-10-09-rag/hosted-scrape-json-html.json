@@ -1,0 +1,539 @@
+{
+ "requestedUrl": "https://docs.python.org/3/library/json.html",
+ "truncated": false,
+ "truncatedAt": null,
+ "compliance": null,
+ "evidence": {
+  "finalUrl": "https://docs.python.org/3/library/json.html",
+  "httpStatus": 200,
+  "redirectChain": [],
+  "contentType": "text/html",
+  "rawBodySha256": "50d5ca329f6e71fb7ca16849cbc19e43b44dcc20c91d3c135fd910380f2f4350",
+  "artifacts": [],
+  "fetchedAt": "2026-10-09T18:17:19.002Z",
+  "etag": "\"6ac92dc5-1c1a0\"",
+  "lastModified": "Fri, 09 Oct 2026 18:09:09 GMT",
+  "cacheControl": null,
+  "vary": "Accept-Encoding",
+  "setsCookie": false,
+  "contentEncoding": "identity"
+ },
+ "usage": {
+  "wallMs": 1736.299041999504,
+  "bytesWire": 115104,
+  "bytesDecompressed": 115104,
+  "requestCount": 1,
+  "attemptCount": 1,
+  "contentTokens": 8260,
+  "browserMs": 0,
+  "externalCostUsd": 0,
+  "timings": {
+   "queueMs": 0.05227299965918064,
+   "robotsMs": 236.26994899846613,
+   "cooldownWaitMs": 0,
+   "retryWaitMs": 0,
+   "requestMs": 243.64097199961543,
+   "bodyReadMs": 3.523529998958111,
+   "transportMs": 247.16450199857354,
+   "parseMs": 314.25400000065565,
+   "extractMs": 482.0797719992697,
+   "formatMs": 271.6849509999156,
+   "serializeMs": 0.06092599965631962,
+   "modelMs": 0,
+   "totalMs": 1736.299041999504
+  }
+ },
+ "trace": [
+  {
+   "at": 0,
+   "lane": "http",
+   "event": "identity_sent",
+   "detail": {
+    "mode": "standard",
+    "device": "desktop",
+    "headers": [
+     {
+      "name": "sec-ch-ua",
+      "value": "\"Chromium\";v=\"128\", \"Google Chrome\";v=\"128\", \"Not;A=Brand\";v=\"24\""
+     },
+     {
+      "name": "sec-ch-ua-mobile",
+      "value": "?0"
+     },
+     {
+      "name": "sec-ch-ua-platform",
+      "value": "\"macOS\""
+     },
+     {
+      "name": "user-agent",
+      "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+     }
+    ]
+   }
+  },
+  {
+   "at": 248,
+   "lane": "http",
+   "event": "robots_checked",
+   "detail": {
+    "decision": "allowed",
+    "robotsUrl": "https://docs.python.org/robots.txt",
+    "robotsSha256": "ddf15edaeea82d5097df61da8e6f59ccdf66de0c20820f1367d0d076f5a9fd63",
+    "matchedGroup": "*",
+    "ruleCount": 0,
+    "crawlDelayMs": null
+   }
+  },
+  {
+   "at": 492,
+   "lane": "http",
+   "event": "extract",
+   "detail": {
+    "pageType": "collection",
+    "strategy": "article",
+    "confidence": 0.75,
+    "escalate": false,
+    "linkCount": 36
+   }
+  },
+  {
+   "at": 492,
+   "lane": "http",
+   "event": "tables_extracted",
+   "detail": {
+    "count": 2,
+    "rows": [
+     9,
+     8
+    ],
+    "columns": [
+     2,
+     2
+    ]
+   }
+  }
+ ],
+ "status": "success",
+ "failureReason": null,
+ "blockReason": null,
+ "budgetExceeded": null,
+ "lane": "http",
+ "escalations": [],
+ "markdown": "[not kept: 33037 characters of docs.python.org; the evidence hash below identifies it]",
+ "links": [],
+ "tables": [
+  {
+   "tableIndex": 0,
+   "caption": null,
+   "sourceUrl": "https://docs.python.org/3/library/json.html",
+   "headerRows": 1,
+   "columns": 2,
+   "rows": [
+    [
+     "JSON",
+     "Python"
+    ],
+    [
+     "object",
+     "dict"
+    ],
+    [
+     "array",
+     "list"
+    ],
+    [
+     "string",
+     "str"
+    ],
+    [
+     "number (int)",
+     "int"
+    ],
+    [
+     "number (real)",
+     "float"
+    ],
+    [
+     "true",
+     "True"
+    ],
+    [
+     "false",
+     "False"
+    ],
+    [
+     "null",
+     "None"
+    ]
+   ],
+   "csvSha256": "946e8500aae5118c26f1848253a28aa8ade8126ffa531fcbbf915056b7957c76"
+  },
+  {
+   "tableIndex": 1,
+   "caption": null,
+   "sourceUrl": "https://docs.python.org/3/library/json.html",
+   "headerRows": 1,
+   "columns": 2,
+   "rows": [
+    [
+     "Python",
+     "JSON"
+    ],
+    [
+     "dict, frozendict",
+     "object"
+    ],
+    [
+     "list, tuple",
+     "array"
+    ],
+    [
+     "str",
+     "string"
+    ],
+    [
+     "int, float, int- & float-derived Enums",
+     "number"
+    ],
+    [
+     "True",
+     "true"
+    ],
+    [
+     "False",
+     "false"
+    ],
+    [
+     "None",
+     "null"
+    ]
+   ],
+   "csvSha256": "57b0c6375b1d22f8acb6212ae0d18902861a99c556999c062be62fce209fcdf4"
+  }
+ ],
+ "metadata": {
+  "title": "json — JSON encoder and decoder — Python 3.15.0 documentation",
+  "description": "Source code: Lib/json/__init__.py JSON (JavaScript Object Notation), specified by RFC 7159(which obsoletes RFC 4627) and by ECMA-404, is a lightweight data interchange format inspired by JavaScript...",
+  "language": "en",
+  "keywords": null,
+  "robots": null,
+  "favicon": "https://docs.python.org/3/_static/py.svg",
+  "canonicalUrl": "https://docs.python.org/3/library/json.html",
+  "ogTitle": "json — JSON encoder and decoder",
+  "ogDescription": "Source code: Lib/json/__init__.py JSON (JavaScript Object Notation), specified by RFC 7159(which obsoletes RFC 4627) and by ECMA-404, is a lightweight data interchange format inspired by JavaScript...",
+  "ogUrl": "https://docs.python.org/3/library/json.html",
+  "ogImage": "https://docs.python.org/3.15/_images/social_previews/summary_library_json_0fabf18f.png",
+  "ogSiteName": "Python documentation",
+  "scrapeId": "b600b6f4-0f0f-4e4d-998a-8bce4eaad452",
+  "sourceURL": "https://docs.python.org/3/library/json.html",
+  "url": "https://docs.python.org/3/library/json.html",
+  "statusCode": 200,
+  "contentType": "text/html",
+  "proxyUsed": null,
+  "timezone": null,
+  "concurrencyLimited": false,
+  "concurrencyQueueDurationMs": 0
+ },
+ "document": {
+  "title": "json — JSON encoder and decoder¶",
+  "pageType": "collection",
+  "strategy": "article",
+  "confidence": 0.75,
+  "product": null,
+  "adapter": {
+   "id": "generic",
+   "version": "1.0.0",
+   "status": "generic"
+  },
+  "entities": [],
+  "adapterValidation": {
+   "valid": true,
+   "issues": []
+  },
+  "labelledValues": "[not kept: 27 labelled values, 22919 characters of page text]"
+ },
+ "channelsTried": [
+  "http"
+ ],
+ "ladderTrace": [
+  {
+   "at": 0,
+   "event": "ladder_channels_filtered",
+   "channel": "—",
+   "detail": {
+    "reason": "fastMode",
+    "dropped": [
+     "browser_local"
+    ]
+   }
+  },
+  {
+   "at": 1734.5502809993923,
+   "event": "ladder_step",
+   "channel": "http",
+   "detail": {
+    "vendorId": null,
+    "status": "success",
+    "escalate": null
+   }
+  }
+ ],
+ "summary": {
+  "channelsTried": [
+   "http"
+  ],
+  "attempts": [
+   {
+    "channel": "http",
+    "ordinal": 1,
+    "startedAt": "2026-10-09T18:17:18.509Z",
+    "endedAt": "2026-10-09T18:17:20.245Z",
+    "result": {
+     "requestedUrl": "https://docs.python.org/3/library/json.html",
+     "truncated": false,
+     "truncatedAt": null,
+     "compliance": null,
+     "evidence": {
+      "finalUrl": "https://docs.python.org/3/library/json.html",
+      "httpStatus": 200,
+      "redirectChain": [],
+      "contentType": "text/html",
+      "rawBodySha256": "50d5ca329f6e71fb7ca16849cbc19e43b44dcc20c91d3c135fd910380f2f4350",
+      "artifacts": [],
+      "fetchedAt": "2026-10-09T18:17:19.002Z",
+      "etag": "\"6ac92dc5-1c1a0\"",
+      "lastModified": "Fri, 09 Oct 2026 18:09:09 GMT",
+      "cacheControl": null,
+      "vary": "Accept-Encoding",
+      "setsCookie": false,
+      "contentEncoding": "identity"
+     },
+     "usage": {
+      "wallMs": 1734.5502809993923,
+      "bytesWire": 115104,
+      "bytesDecompressed": 115104,
+      "requestCount": 1,
+      "attemptCount": 1,
+      "contentTokens": 8260,
+      "browserMs": 0,
+      "externalCostUsd": 0,
+      "timings": {
+       "queueMs": 0.05227299965918064,
+       "robotsMs": 236.26994899846613,
+       "cooldownWaitMs": 0,
+       "retryWaitMs": 0,
+       "requestMs": 243.64097199961543,
+       "bodyReadMs": 3.523529998958111,
+       "transportMs": 247.16450199857354,
+       "parseMs": 314.25400000065565,
+       "extractMs": 482.0797719992697,
+       "formatMs": 271.6849509999156,
+       "serializeMs": 0,
+       "modelMs": 0,
+       "totalMs": 1734.5502809993923
+      }
+     },
+     "trace": [
+      {
+       "at": 0,
+       "lane": "http",
+       "event": "identity_sent",
+       "detail": {
+        "mode": "standard",
+        "device": "desktop",
+        "headers": [
+         {
+          "name": "sec-ch-ua",
+          "value": "\"Chromium\";v=\"128\", \"Google Chrome\";v=\"128\", \"Not;A=Brand\";v=\"24\""
+         },
+         {
+          "name": "sec-ch-ua-mobile",
+          "value": "?0"
+         },
+         {
+          "name": "sec-ch-ua-platform",
+          "value": "\"macOS\""
+         },
+         {
+          "name": "user-agent",
+          "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+         }
+        ]
+       }
+      },
+      {
+       "at": 248,
+       "lane": "http",
+       "event": "robots_checked",
+       "detail": {
+        "decision": "allowed",
+        "robotsUrl": "https://docs.python.org/robots.txt",
+        "robotsSha256": "ddf15edaeea82d5097df61da8e6f59ccdf66de0c20820f1367d0d076f5a9fd63",
+        "matchedGroup": "*",
+        "ruleCount": 0,
+        "crawlDelayMs": null
+       }
+      },
+      {
+       "at": 492,
+       "lane": "http",
+       "event": "extract",
+       "detail": {
+        "pageType": "collection",
+        "strategy": "article",
+        "confidence": 0.75,
+        "escalate": false,
+        "linkCount": 36
+       }
+      },
+      {
+       "at": 492,
+       "lane": "http",
+       "event": "tables_extracted",
+       "detail": {
+        "count": 2,
+        "rows": [
+         9,
+         8
+        ],
+        "columns": [
+         2,
+         2
+        ]
+       }
+      }
+     ],
+     "status": "success",
+     "failureReason": null,
+     "blockReason": null,
+     "budgetExceeded": null,
+     "lane": "http",
+     "escalations": [],
+     "markdown": null,
+     "links": [],
+     "metadata": {
+      "title": "json — JSON encoder and decoder — Python 3.15.0 documentation",
+      "description": "Source code: Lib/json/__init__.py JSON (JavaScript Object Notation), specified by RFC 7159(which obsoletes RFC 4627) and by ECMA-404, is a lightweight data interchange format inspired by JavaScript...",
+      "language": "en",
+      "keywords": null,
+      "robots": null,
+      "favicon": "https://docs.python.org/3/_static/py.svg",
+      "canonicalUrl": "https://docs.python.org/3/library/json.html",
+      "ogTitle": "json — JSON encoder and decoder",
+      "ogDescription": "Source code: Lib/json/__init__.py JSON (JavaScript Object Notation), specified by RFC 7159(which obsoletes RFC 4627) and by ECMA-404, is a lightweight data interchange format inspired by JavaScript...",
+      "ogUrl": "https://docs.python.org/3/library/json.html",
+      "ogImage": "https://docs.python.org/3.15/_images/social_previews/summary_library_json_0fabf18f.png",
+      "ogSiteName": "Python documentation"
+     },
+     "document": {
+      "title": "json — JSON encoder and decoder¶",
+      "pageType": "collection",
+      "strategy": "article",
+      "confidence": 0.75,
+      "product": null,
+      "adapter": {
+       "id": "generic",
+       "version": "1.0.0",
+       "status": "generic"
+      },
+      "entities": [],
+      "adapterValidation": {
+       "valid": true,
+       "issues": []
+      },
+      "labelledValues": "[not kept: 27 labelled values, 22919 characters of page text]"
+     }
+    }
+   }
+  ],
+  "wallMs": 1734.5502809993923,
+  "browserMs": 0,
+  "bytesWire": 115104,
+  "bytesDecompressed": 115104,
+  "requestCount": 1,
+  "attemptCount": 1,
+  "contentTokens": 8260,
+  "externalCostUsd": 0,
+  "externalCost": {
+   "knownSubtotal": 0,
+   "unknown": false
+  },
+  "contentTokenMeter": {
+   "knownSubtotal": 8260,
+   "unknown": false
+  },
+  "artifacts": [],
+  "totalMs": 1736.299041999504
+ },
+ "scrapeId": "b600b6f4-0f0f-4e4d-998a-8bce4eaad452",
+ "snapshot": {
+  "rawBodySha256": "50d5ca329f6e71fb7ca16849cbc19e43b44dcc20c91d3c135fd910380f2f4350",
+  "artifacts": [],
+  "httpStatus": 200,
+  "contentType": "text/html"
+ },
+ "evidenceRecord": {
+  "schemaVersion": "w2l.evidence/1",
+  "requestedUrl": "https://docs.python.org/3/library/json.html",
+  "finalUrl": "https://docs.python.org/3/library/json.html",
+  "redirectChain": {
+   "urls": [
+    "https://docs.python.org/3/library/json.html"
+   ],
+   "complete": true
+  },
+  "fetchedAt": "2026-10-09T18:17:19.002Z",
+  "httpStatus": 200,
+  "status": "success",
+  "reason": null,
+  "lane": "http",
+  "robotsDecision": {
+   "decision": "allowed",
+   "robotsUrl": "https://docs.python.org/robots.txt",
+   "robotsSha256": "ddf15edaeea82d5097df61da8e6f59ccdf66de0c20820f1367d0d076f5a9fd63",
+   "unreachable": null,
+   "crawlDelayMs": null,
+   "userOverride": false,
+   "overrideBasis": null
+  },
+  "rawSha256": "50d5ca329f6e71fb7ca16849cbc19e43b44dcc20c91d3c135fd910380f2f4350",
+  "contentEncoding": "identity",
+  "outputSha256": {
+   "markdown": "abec4b896a640b5115e809f43bd71b8decdf8842a7281f29d0499e10d588142d",
+   "json": null
+  },
+  "extractor": {
+   "name": "extract-tf",
+   "version": "extract-tf/16",
+   "commit": "e3a37efa474917fe992692144ced5aa3ac1316bf"
+  },
+  "fieldEvidence": null,
+  "artifacts": [],
+  "proxy": null,
+  "identity": {
+   "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+   "mode": "standard",
+   "contact": null,
+   "device": "desktop",
+   "requestHeaders": []
+  },
+  "pageActions": null,
+  "access": {
+   "route": "http",
+   "executor": "undici",
+   "executorVersion": null,
+   "profile": null,
+   "externalCostUsd": 0,
+   "completion": "unattended",
+   "egress": {
+    "proxy": null,
+    "source": "direct",
+    "switchedFrom": null,
+    "exit": null
+   },
+   "session": null,
+   "paidCalls": null,
+   "grant": null
+  }
+ }
+}
