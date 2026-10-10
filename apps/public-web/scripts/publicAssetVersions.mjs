@@ -18,6 +18,13 @@ export const VERSIONED_PUBLIC_FILES = [
   // The home page's first-screen artwork: its hero backdrop and, on narrow screens, its largest paint.
   '/assets/mountain-hero.webp',
   '/assets/octopus-original.webp',
+  // The same octopus at 720 px for the faint copy behind the hero on narrow screens (src/styles.css .hero-octopus-static).
+  '/assets/octopus-ghost.webp',
+  // The client logos on Connect MCP.
+  '/docs-assets/agent-clients/claude-code.svg',
+  '/docs-assets/agent-clients/codex.svg',
+  '/docs-assets/agent-clients/cursor.svg',
+  '/docs-assets/agent-clients/opencode.svg',
   '/docs-assets/nav.css',
   '/docs-assets/nav.js',
 ]
