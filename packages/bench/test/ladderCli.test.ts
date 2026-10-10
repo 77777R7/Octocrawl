@@ -632,6 +632,30 @@ describe('buildChannels + LadderRunner session composition', () => {
     expect(withMeasuredSessions(base, [{ sessionMs: 1_000, released: true }, { sessionMs: 1_000, released: false }], byMinute, 0.004)).toBe(base)
   })
 
+  it('answers a provider error just before the request\'s deadline as the provider\'s failure, not a thrown error (ROADMAP PA item 4)', async () => {
+    // The rung reads the request's end as the ladder reads its deadline: an error 10 ms before it is answered, not thrown
+    // into a 500. The session ends with the request, so its slack reads the error as its timeout; a timer that fires late
+    // makes it the ladder's deadline, also a timeout.
+    const late = (): VendorOps => ({
+      ...fakeVendorOps('steel', () => {}),
+      async createSession() {
+        await new Promise<void>((resolve) => { const give = () => Date.now() >= deadlineAt - 10 ? resolve() : void setTimeout(give, Math.max(1, deadlineAt - 10 - Date.now())); give() })
+        throw new Error('steel: session create returned 503')
+      },
+    })
+    const channels = buildChannels('authed', {
+      localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: { steel: late() },
+      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 } },
+      ...vendorEnv(),
+    })
+    const deadlineAt = Date.now() + 400
+    const run = await new LadderRunner(channels, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p', null, { deadlineAt })
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'timeout' })
+    await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
+  })
+
   it('answers a vendor that cannot open a session as the provider\'s failure, not a thrown error, and keeps its paid call (ROADMAP PA item 4)', async () => {
     // The PA 4 Steel runs: Steel's session create hung past the vendor API's 30 s cap, the error escaped the rung,
     // and the API answered 500 at about 32 s with no record of the page or the call.
@@ -680,10 +704,17 @@ describe('buildChannels + LadderRunner session composition', () => {
       vendorConnector: connector,
       ...(robotsFetcher === undefined ? {} : { robotsFetcher }),
     })
-    // As Playwright's connectOverCDP does: it gives up at the deadline it was handed.
-    const hangingConnect = async (_url: string, deadlineMs?: number) => await new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('browserType.connectOverCDP: Timeout exceeded')), Math.max(1, (deadlineMs ?? Date.now()) - Date.now())))
+    // As Playwright's connectOverCDP does: it gives up at the deadline it was handed, `early` ms before it by Date.now(),
+    // as a timer set for the deadline can fire (the slack the rung reads the session's end with).
+    const connectGivingUp = (early: number) => async (_url: string, deadlineMs?: number) => await new Promise<never>((_resolve, reject) => {
+      const at = (deadlineMs ?? Date.now()) - early
+      const give = () => Date.now() >= at ? reject(new Error('browserType.connectOverCDP: Timeout exceeded')) : void setTimeout(give, Math.max(1, at - Date.now()))
+      give()
+    })
+    const hangingConnect = connectGivingUp(0)
     for (const [label, channelsFor] of [
       ['connect', () => capped(hangingConnect)],
+      ['connect, its timer early', () => capped(connectGivingUp(5))],
       ['robots.txt', () => capped(async () => fakeBrowser(), () => new Promise<never>(() => {}))],
     ] as const) {
       const set = channelsFor()
