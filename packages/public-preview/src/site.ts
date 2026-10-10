@@ -68,15 +68,34 @@ const AUTOMATED_AGENT = /bot|crawl|spider|slurp|headless|preview|fetch|curl|wget
  * stale string, not a visitor; the site's own page events showed them opening the page and never touching it. */
 const STALE_IOS_BEFORE = 15
 const STALE_CHROME_BEFORE = 110
+const STALE_FIREFOX_BEFORE = 115
+/** Strings seen opening the page and never touching it: a Safari token cut to "537.3", the "Edge/" token of
+ * EdgeHTML (retired in 2021; today's Edge says "Edg/"), and one frozen Chrome 117 build that scanners share. */
+const FORGED_AGENT = /Safari\/537\.3(?!\d)|\bEdge\/\d|\bChrome\/117\.0\.5938\.132\b/
 
 export function looksAutomated(req: IncomingMessage): boolean {
   const agent = req.headers['user-agent']
-  if (typeof agent !== 'string' || AUTOMATED_AGENT.test(agent)) return true
+  if (typeof agent !== 'string' || AUTOMATED_AGENT.test(agent) || FORGED_AGENT.test(agent)) return true
   const ios = /(?:iPhone|CPU) OS (\d+)_\d/.exec(agent)
   if (ios && Number(ios[1]) < STALE_IOS_BEFORE) return true
   const chrome = /\bChrome\/(\d+)\./.exec(agent)
   if (chrome && Number(chrome[1]) < STALE_CHROME_BEFORE) return true
+  const firefox = /\bFirefox\/(\d+)\./.exec(agent)
+  if (firefox && Number(firefox[1]) < STALE_FIREFOX_BEFORE) return true
   return false
+}
+
+/** The operator's own browser, marked by visiting any page with ?internal=1 (and cleared with ?internal=0), and the
+ * browser built into the Claude desktop app, where the operator's and its agents' site checks run: it reads as a
+ * current Chrome with a "Claude/<version>" token added (not Anthropic's crawlers, which say "ClaudeBot" or
+ * "Claude-User"). Their events are still logged, flagged internal, so counts can leave them out without losing deploy
+ * checks. */
+export const INTERNAL_COOKIE = 'w2l_internal'
+const CLAUDE_APP_AGENT = /\bClaude\/\d/
+export function internalVisit(req: IncomingMessage): boolean {
+  const agent = req.headers['user-agent']
+  if (typeof agent === 'string' && CLAUDE_APP_AGENT.test(agent)) return true
+  return req.headers.cookie?.split(';').some(part => part.trim() === `${INTERNAL_COOKIE}=1`) ?? false
 }
 
 export const EVENT_BODY_BYTES = 2_048
