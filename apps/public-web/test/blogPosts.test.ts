@@ -27,7 +27,7 @@ describe('Blog articles', () => {
     for (const post of posts) {
       expect(post.file).toBe(`blog/${post.slug}.md`)
       expect(readFileSync(app(`content/${post.file}`), 'utf8')).toMatch(/^# \S/)
-      for (const name of ['cover.webp', 'card.webp', 'og.jpg']) expect([post.slug, name, existsSync(app(`public/blog-assets/${post.slug}/${name}`))]).toEqual([post.slug, name, true])
+      for (const name of ['cover.webp', 'cover-1254.webp', 'card.webp', 'og.jpg']) expect([post.slug, name, existsSync(app(`public/blog-assets/${post.slug}/${name}`))]).toEqual([post.slug, name, true])
       expect(post.coverAlt.length).toBeGreaterThan(20)
     }
   })

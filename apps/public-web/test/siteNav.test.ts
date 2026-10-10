@@ -36,10 +36,12 @@ describe('Top navigation', () => {
     for (const page of pages.filter(p => p.group !== 'Project')) expect(nav).toContain(`>${page.title}<`)
   })
 
-  it('works without a script: menus are <details>, and the phone menu button stays hidden until nav.js shows it', () => {
+  it('works without a script: menus are <details>, and the phone menu button stays hidden; where scripts run, the phone layout holds from the first paint', () => {
     const nav = siteNavMarkup()
     expect(nav.match(/<details class="nav-drop">/g)).toHaveLength(2)
     expect(nav).toMatch(/<button class="nav-toggle"[^>]* hidden>/)
+    // The folded phone header is laid out by CSS wherever scripts run, not once nav.js has run (a 64 px layout shift).
+    expect(readFileSync(app('public/docs-assets/nav.css'), 'utf8')).toContain('@media (max-width: 900px) and (scripting: enabled) {')
     expect(pageMarkup()).toContain(nav)
     const html = readFileSync(app('index.html'), 'utf8')
     expect(html).toContain('href="/docs-assets/nav.css"')

@@ -1,6 +1,7 @@
 // The blog's articles, newest first. Each is content/blog/<slug>.md, served at /blog/<slug>/ with its cover from
-// public/blog-assets/<slug>/ (cover.webp 1672×941 for the article, card.webp 836×470 for the list, og.jpg 1200×630
-// for link previews). The research behind each article is research/blog/<slug>/brief.md.
+// public/blog-assets/<slug>/ (cover.webp 1672×941 and cover-1254.webp 1254×706 for the article, card.webp 836×470 for
+// the list and as the cover's smallest width, og.jpg 1200×630 for link previews). The research behind each article is
+// research/blog/<slug>/brief.md.
 //
 // - title: the page's <title>, card and headline; at most 60 characters, no brand suffix. The article's h1 is its
 //   first line, `# ...`, and may say more.

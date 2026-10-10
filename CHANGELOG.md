@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- octocrawl.dev no longer jumps on phones as it loads. The header's Menu button and its folded navigation are laid out from the first paint wherever scripts run (`@media (scripting: enabled)`), not once `nav.js` has run, so the header no longer shrinks by 64 px under the page: the layout shift Lighthouse measured on a phone was 0.162 on docs and blog pages and 0.133 on the home page, and is 0 and 0.003 now. Without scripts the navigation stays in the header as before.
+- A blog cover comes in three widths (`card.webp` 836, the new `cover-1254.webp` and `cover.webp` 1672) through `srcset` on the article and on the index's featured card, so a phone downloads the 836 or 1254 one instead of the 1672 one (about 140 KB instead of 235 KB on a 3x phone, about 100 KB on most others).
 - On a narrow screen the Blog's category tabs show that the row scrolls: the edge with more tabs past it darkens, and stops once the row is scrolled to that end. It is pure CSS (backgrounds that scroll with the tabs), so a row that fits, as on a desktop, shows nothing.
 
 ## 0.4.1 — 2026-10-10
