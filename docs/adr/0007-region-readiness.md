@@ -1,6 +1,6 @@
 # ADR 0007：任务所需区域的就绪
 
-- 状态：提议（待 Howard 确认）
+- 状态：已接受（Howard 2026-10-10 确认，三个问题都按建议）
 - 日期：2026-10-10
 - 前置：ROADMAP.md「PA · Enhanced access」第 11 项（#353）、[ADR 0006](0006-task-verification.md)（第 10 项，#355）
 
@@ -149,8 +149,8 @@ ADR 0006 已经在质量跳级前面留了一个位置：带契约时遇到 `che
 - 不带契约的请求只多一个 `readiness` 字段，行为不变。
 - OECD 这样的页面，默认显示时根本没有表格，要操作才有。光靠等待解决不了，结果会如实标成 `not_loaded`（等到期限页面还在变），或 `not_served`。要拿到表格，调用方得自己写 `actions`。产品要不要替调用方猜该点哪里，不在这个 ADR 里定。
 
-## 待 Howard 确认
+## Howard 的确认（2026-10-10）
 
-1. **`readiness` 是不是每个结果都带，就绪的也带 `ready`？** 建议：都带。和 `verification.status` 的 `not_requested` 一样，客户端不用先判断字段有没有。
-2. **区域就绪的等待默认上限多少？** 建议：10 秒，调用方可以通过 `timeout` 放宽。OECD 光是显示 Overview 就要 16 秒，10 秒不够，它会被标成 `not_loaded`。
-3. **`not_extracted` 时，只禁止升到付费的级别，免费的级别照走？** 建议：是。
+1. **`readiness` 是不是每个结果都带，就绪的也带 `ready`？** 确认：都带。和 `verification.status` 的 `not_requested` 一样，客户端不用先判断字段有没有。
+2. **区域就绪的等待默认上限多少？** 确认：10 秒，调用方可以通过 `timeout` 放宽。OECD 光是显示 Overview 就要 16 秒，10 秒不够，它会被标成 `not_loaded`。
+3. **`not_extracted` 时，只禁止升到付费的级别，免费的级别照走？** 确认：是。
