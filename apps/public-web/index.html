@@ -22,8 +22,9 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" />
     <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
     <link rel="preload" as="image" href="/assets/mountain-hero.webp" />
-    <!-- Below 1050px the faint octopus behind the hero copy (.hero-octopus-static, a CSS background) is the largest paint. -->
-    <link rel="preload" as="image" href="/assets/octopus-original.webp" media="(max-width: 1049px)" fetchpriority="high" />
+    <!-- Below 1050px the faint octopus behind the hero copy (.hero-octopus-static, a CSS background) is the largest paint.
+         It is drawn at 14–16% opacity, so it has its own small copy of the artwork, octopus-ghost.webp. -->
+    <link rel="preload" as="image" href="/assets/octopus-ghost.webp" media="(max-width: 1049px)" fetchpriority="high" />
     <link rel="stylesheet" href="/docs-assets/nav.css" />
     <script type="application/ld+json">[{"@context":"https://schema.org","@type":"WebSite","name":"Octocrawl","url":"__W2L_ORIGIN__/"},{"@context":"https://schema.org","@type":"Organization","name":"Octocrawl","url":"__W2L_ORIGIN__/","logo":"__W2L_ORIGIN__/assets/apple-touch-icon.png","email":"hello@octocrawl.dev","sameAs":["https://github.com/77777R7/Octocrawl"]},{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Octocrawl","url":"__W2L_ORIGIN__/","description":"Readable Markdown and checked fields from public web pages, for AI agents, RAG pipelines and research. A page that can't be read comes back with the reason.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux, Windows (Node.js 22.13 or later)","license":"https://github.com/77777R7/Octocrawl/blob/main/LICENSE","codeRepository":"https://github.com/77777R7/Octocrawl","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}]</script>
     <title>Octocrawl — No-Code Web Scraper and Web Scraping API</title>
