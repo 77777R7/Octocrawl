@@ -393,6 +393,21 @@ describe('routePage', () => {
       expect(route(wrap(`<main><h1>Cobalt teapot</h1><p>Hand-thrown stoneware, glazed in cobalt ash.</p>${cards}</main>`, own)).type).toBe('product')
     })
 
+    it('reads products each declared on its own at the top level as a listing\'s cards (ROADMAP PA item 4)', () => {
+      // Redfin's search results: one JSON-LD script per home, each a top-level [SingleFamilyResidence, Product] (T043).
+      const each = (list: readonly string[]) => list.map((n, i) => `<script type="application/ld+json">${JSON.stringify([{ '@context': 'https://schema.org', '@type': 'SingleFamilyResidence', name: n }, { '@context': 'https://schema.org', '@type': 'Product', name: n, offers: { '@type': 'Offer', price: `${400 + i}000`, priceCurrency: 'USD' } }])}</script>`).join('')
+      const route = (html: string) => { const doc = parse(html); const decision = routePage(doc.document); doc.close(); return decision }
+      const results = (scripts: string, n = 8) => wrap(`<main><h1>Seattle, WA homes for sale</h1><p>3,221 homes</p>${grid(n)}</main>`, scripts)
+      expect(route(results(each(names)))).toEqual({ type: 'collection', strategy: 'article' })
+      const out = extractTf.extract(results(each(names)))
+      for (let i = 0; i < 8; i++) expect(out.mainHtml).toContain(name(i))
+      // Two products, or one product declared three times, are not a listing.
+      expect(route(results(each(names.slice(0, 2)), 2)).type).toBe('product')
+      expect(route(results(each([name(0), name(0), name(0)]), 3)).type).toBe('product')
+      // A product page that declares its own product and its related ones each at the top level shows its own price under its title.
+      expect(route(wrap(`<main><h1>Cobalt teapot</h1><div class="buy"><span class="price">$84.00</span></div><p>Hand-thrown stoneware.</p>${grid(3)}</main>`, each(['Cobalt teapot', ...names.slice(0, 3)]))).type).toBe('product')
+    })
+
     it('keeps a page whose own price follows its title a product page beside an unnamed list of products', () => {
       for (const top of [
         '<h1>Cobalt teapot</h1><span class="price">$84.00</span>',

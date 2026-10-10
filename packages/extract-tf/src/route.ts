@@ -241,6 +241,16 @@ function ownListedProducts(root: unknown): string[] {
   return most
 }
 
+/** The names of the Products among a parsed JSON-LD script's top-level nodes and @graph members ('' for one without a name). */
+function collectTopLevelProducts(root: unknown, out: string[]): void {
+  for (const node of Array.isArray(root) ? root : [root]) {
+    if (typeof node !== 'object' || node === null) continue
+    const record = node as Record<string, unknown>
+    if (typeNames(record).includes('product')) out.push(typeof record['name'] === 'string' ? record['name'].replace(/\s+/g, ' ').trim() : '')
+    if (Array.isArray(record['@graph'])) collectTopLevelProducts(record['@graph'], out)
+  }
+}
+
 /** A JSON-LD node's normalized @type names. */
 function typeNames(node: Record<string, unknown>): string[] {
   const t = node['@type']
@@ -284,6 +294,7 @@ function collectPageSignals(doc: Document): PageSignals {
   const listed = { products: 0 }
   const pageTypes: string[] = []
   let ownListed: string[] = []
+  const topLevelProducts: string[] = []
   for (const el of qsa(doc, 'script[type="application/ld+json"]')) {
     const text = (el.textContent ?? '').trim()
     if (text.length === 0) continue
@@ -293,9 +304,23 @@ function collectPageSignals(doc: Document): PageSignals {
       collectPageTypes(parsed, pageTypes)
       const own = ownListedProducts(parsed)
       if (own.length > ownListed.length) ownListed = own
+      collectTopLevelProducts(parsed, topLevelProducts)
     } catch {
       // Malformed JSON-LD is not a routing signal; ignore it.
     }
+  }
+  // Products the page declares each on its own, at the top level, under PRODUCT_CARDS names or more, are a listing's
+  // cards (Redfin's search results: a script per home), not the page's own product: they count as listed, and as the
+  // page's own list for the buy-box check.
+  const distinctTopLevel = [...new Set(topLevelProducts.filter((name) => name.length > 0))]
+  if (distinctTopLevel.length >= PRODUCT_CARDS) {
+    for (let i = 0; i < topLevelProducts.length; i++) {
+      const at = jsonLdTypes.indexOf('product')
+      if (at < 0) break
+      jsonLdTypes.splice(at, 1)
+      listed.products++
+    }
+    if (distinctTopLevel.length > ownListed.length) ownListed = distinctTopLevel
   }
   const itempropTokens: string[] = []
   for (const el of qsa(doc, '[itemprop]')) {
