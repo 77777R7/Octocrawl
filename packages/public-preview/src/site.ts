@@ -72,10 +72,16 @@ const STALE_FIREFOX_BEFORE = 115
 /** Strings seen opening the page and never touching it: a Safari token cut to "537.3", the "Edge/" token of
  * EdgeHTML (retired in 2021; today's Edge says "Edg/"), and one frozen Chrome 117 build that scanners share. */
 const FORGED_AGENT = /Safari\/537\.3(?!\d)|\bEdge\/\d|\bChrome\/117\.0\.5938\.132\b/
+/** Lighthouse and PageSpeed Insights: they run the page's scripts as a phone they emulate, a "moto g power (2022)" on
+ * Android 11 (a Moto G4 before Lighthouse 10), and add "Chrome-Lighthouse" only on PageSpeed. A current Chrome on
+ * Android names no device (it says "Android 10; K"), so these strings are a lab run, not a visitor: 15 page events in
+ * the 30 days to 2026-10-10 came from them. The device must close the parenthesis: an app's WebView on a real phone of
+ * that model says "moto g power (2022) Build/…; wv)" and stays a visitor. */
+const LIGHTHOUSE_AGENT = /; moto g power \(2022\)\)|; Moto G \(4\)\)|Chrome-Lighthouse/
 
 export function looksAutomated(req: IncomingMessage): boolean {
   const agent = req.headers['user-agent']
-  if (typeof agent !== 'string' || AUTOMATED_AGENT.test(agent) || FORGED_AGENT.test(agent)) return true
+  if (typeof agent !== 'string' || AUTOMATED_AGENT.test(agent) || FORGED_AGENT.test(agent) || LIGHTHOUSE_AGENT.test(agent)) return true
   const ios = /(?:iPhone|CPU) OS (\d+)_\d/.exec(agent)
   if (ios && Number(ios[1]) < STALE_IOS_BEFORE) return true
   const chrome = /\bChrome\/(\d+)\./.exec(agent)
