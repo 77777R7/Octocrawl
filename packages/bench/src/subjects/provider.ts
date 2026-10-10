@@ -27,6 +27,7 @@ import { identityCompromised } from '../routing/identity.js'
 import { errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import { loadingWaitEvent, withStillLoadingWarning, type SettleOutcome } from '../browserSettle.js'
+import { regionSpecOf, regionWaitEvent, type RegionOutcome, type RegionSpec } from '../regionWait.js'
 import type { Dispatcher } from 'undici'
 
 /**
@@ -63,7 +64,7 @@ export interface ProviderTransport {
    * status of the vendor's own API — a 200 from the vendor wrapping a 403
    * from the target is a 403.
    */
-  fetch(url: string, deadlineMs?: number, signal?: AbortSignal): Promise<ProviderResponse>
+  fetch(url: string, deadlineMs?: number, signal?: AbortSignal, region?: RegionSpec): Promise<ProviderResponse>
   close?(): Promise<void>
 }
 
@@ -93,6 +94,8 @@ export interface ProviderResponse {
   declaredUserAgent?: string | null
   /** What the wait for the rendered page saw, a loading indicator included, when the transport waited for it. */
   settle?: SettleOutcome
+  /** What the wait for the region the task needs saw (ADR 0007), when the request had a task contract and the transport waited for it. */
+  region?: RegionOutcome
   /** What the vendor billed us, when it says. Reported, never estimated. */
   costUsd?: number | null
   /**
@@ -322,10 +325,12 @@ export class ProviderSubject implements SubjectAdapter {
     let res: ProviderResponse
     let fetchedAt: string
     try {
-      res = await raceWithSignal(this.transport.fetch(url, execution.deadlineAt, execution.signal), execution.signal)
+      res = await raceWithSignal(this.transport.fetch(url, execution.deadlineAt, execution.signal, regionSpecOf(options)), execution.signal)
       fetchedAt = new Date().toISOString()
       const waited = loadingWaitEvent(res.settle, Date.now() - start, 'provider')
       if (waited !== null) trace.push(waited)
+      const regionWaited = regionWaitEvent(res.region, Date.now() - start, 'provider')
+      if (regionWaited !== null) trace.push(regionWaited)
       if (res.status === 429 || res.status === 503) {
         const delay = parseRetryAfterMs(res.headers['retry-after'] ?? null)
         if (delay !== null) execution.onRetryAfter?.(res.finalUrl, Date.now() + delay)

@@ -2,6 +2,7 @@ import type { AppliedRobotsOverride } from './compliance.js'
 import type { FetchWarning, TraceEvent } from './result.js'
 import type { AttributeSelector, ListFormatRequest, ScreenshotOptions } from './structured.js'
 import type { PageAction } from './actions.js'
+import type { VerifyContract } from './verify.js'
 
 /** In-process cancellation and an absolute UTC deadline. Never serialize signal. */
 export interface ExecutionContext {
@@ -265,6 +266,12 @@ export interface FetchOptions {
   attributes?: readonly AttributeSelector[]
   /** The `list` format's request, set from the requested formats, not by a caller; the API has checked its selectors. */
   list?: ListFormatRequest
+  /**
+   * The request's task contract (ADR 0006), for the browser lanes' wait for the region the task needs (ADR 0007): its
+   * checks run on the live page until they hold, within a bound. It does not shape a successful result's content, so
+   * the page cache's key leaves it out, as the verification does.
+   */
+  verify?: VerifyContract
   /**
    * Whether an `<img>` whose `src` is a `data:` URI is left out of the
    * Markdown, its alt text kept (Firecrawl's `removeBase64Images`). Default

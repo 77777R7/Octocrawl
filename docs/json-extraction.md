@@ -63,6 +63,7 @@ A fetch can succeed without the data a task asked for: a page of navigation, a s
   - Each check carries `passed` and a sentence of what was seen; count checks also carry `observedCount` and `asked`.
   - The Evidence Record carries `verification` too: status, verifier version (`verify/1`), the contract's SHA-256, and the checks that failed.
 - The checks are those of the access task runner (`research/access/run-set.mjs`), judged the same way, so its tasks can be sent unchanged.
+- **The browser waits for the region the contract needs** ([ADR 0007](adr/0007-region-readiness.md)). On a page read in a browser (the local browser, a provider's, or your own Chrome), once the page has settled and after `waitFor`, `actions` and list steps, the contract's checks run on the live page every 0.5 s: its text, the tables it shows and, with a `list` format that names `itemSelector` and `fields`, its records. The page is read once every check the live page can judge passes on two reads in a row with the same counts, or, under `emptyOk`, once the list shows no record on a settled page, waiting at most 10 s more and never past the request's `timeout`. A contract of `field` checks alone is not waited for. The trace records the wait as `region_wait` (whether it held, how long, and each check's `passed` and count, never page text), and [`readiness`](scrape-options.md#readiness) reads it. The contract does not enter the page cache's key.
 
 ## The Amazon baseline
 

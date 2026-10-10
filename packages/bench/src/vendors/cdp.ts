@@ -135,6 +135,8 @@ export interface NavigationOutcome {
   sentClientHints: Record<string, string>
   /** What the wait for the rendered page saw, a loading indicator included. */
   settle?: SettleOutcome
+  /** What the wait for the region the task needs saw (ADR 0007), when one was asked for. */
+  region?: RegionOutcome
 }
 
 /**
@@ -164,6 +166,7 @@ export async function navigateOnce(
   url: string,
   deadlineMs?: number,
   signal?: AbortSignal,
+  region?: RegionSpec,
 ): Promise<NavigationOutcome> {
   // The caller's absolute deadline maps onto the page's own navigation
   // timeout. Remaining budget is computed explicitly from the deadline —
@@ -182,6 +185,11 @@ export async function navigateOnce(
     const settle = await raceWithSignal(waitForRenderedStability(page, {
       maxMs: deadlineMs === undefined ? 1_500 : Math.min(1_500, Math.max(1, deadlineMs - Date.now())),
       loadingMaxMs: deadlineMs === undefined ? LOADING_WAIT_MAX_MS : Math.min(LOADING_WAIT_MAX_MS, Math.max(1, deadlineMs - 1_000 - Date.now())),
+    }), scope.signal)
+    throwIfExecutionStopped(scope)
+    // The region the task needs (ADR 0007): waited for on the same page, leaving a second to read it before the deadline.
+    const regionOutcome = region === undefined ? undefined : await raceWithSignal(waitForRegion(page, region, {
+      maxMs: deadlineMs === undefined ? REGION_WAIT_MAX_MS : Math.min(REGION_WAIT_MAX_MS, deadlineMs - 1_000 - Date.now()),
     }), scope.signal)
     throwIfExecutionStopped(scope)
 
@@ -213,6 +221,7 @@ export async function navigateOnce(
       sentUserAgent,
       sentClientHints,
       settle,
+      ...(regionOutcome === undefined ? {} : { region: regionOutcome }),
     }
   } finally {
     scope.signal.removeEventListener('abort', abort)
@@ -221,3 +230,4 @@ export async function navigateOnce(
   }
 }
 import { LOADING_WAIT_MAX_MS, waitForRenderedStability, type SettleOutcome } from '../browserSettle.js'
+import { REGION_WAIT_MAX_MS, waitForRegion, type RegionOutcome, type RegionSpec } from '../regionWait.js'

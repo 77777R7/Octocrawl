@@ -1,7 +1,9 @@
 /**
  * Whether a page was ready for its task when it was read (ADR 0007, ROADMAP PA item 11), from the result's own
  * signals: its status and reason, its warnings and its trace. Without a task contract only the page-wide signals
- * speak; a contract's checks run on the page (ADR 0006) refine `not_extracted` and `not_served` later.
+ * speak. With one, the result's verification (ADR 0006) and the browser lane's wait for the region (`region_wait`)
+ * tell the three apart: a region that held on the live page but not in what was extracted was not extracted; one that
+ * never held on a page still loading or changing had not loaded; one that never held on a settled page was not served.
  */
 
 import type { FetchResult, Readiness } from '@w2l/contracts'
@@ -58,7 +60,7 @@ function answered(result: FetchResult): boolean {
 function waitedOf(result: FetchResult): number | undefined {
   for (let i = result.trace.length - 1; i >= 0; i--) {
     const event = result.trace[i]!
-    if (event.event !== 'loading_wait' && event.event !== 'steady_wait') continue
+    if (event.event !== 'loading_wait' && event.event !== 'steady_wait' && event.event !== 'region_wait') continue
     const waited = Number(event.detail?.waitedMs)
     if (Number.isFinite(waited) && waited >= 0) return Math.round(waited)
   }
@@ -70,8 +72,49 @@ function readiness(state: Readiness['state'], basis: readonly string[], result: 
   return waitedMs === undefined ? { state, basis } : { state, basis, waitedMs }
 }
 
+/** The lane's last wait for the region the task needs, as the trace records it. */
+function regionWaitOf(result: FetchResult): { ready: boolean; empty: boolean; loading: boolean; steady: boolean } | undefined {
+  for (let i = result.trace.length - 1; i >= 0; i--) {
+    const event = result.trace[i]!
+    if (event.event !== 'region_wait') continue
+    const detail = event.detail ?? {}
+    return { ready: detail.ready === true, empty: detail.empty === true, loading: detail.loading === true, steady: detail.steady === true }
+  }
+  return undefined
+}
+
 /** The result's readiness: see Readiness in @w2l/contracts and ADR 0007's table. */
 export function readinessOf(result: FetchResult): Readiness {
+  const verification = result.verification
+  if (verification !== undefined && verification.status !== 'not_requested') {
+    const verified = verifiedReadiness(result, verification)
+    if (verified !== undefined) return verified
+  }
+  return signalReadiness(result)
+}
+
+/** With a task contract: the verification, and the region wait where a browser lane made one. Undefined when the page was not read, for the page's own signals to tell. */
+function verifiedReadiness(result: FetchResult, verification: Exclude<NonNullable<FetchResult['verification']>, { status: 'not_requested' }>): Readiness | undefined {
+  if (verification.status === 'passed') return readiness('ready', ['verified'], result)
+  if (verification.reason === 'page_not_read') return undefined
+  // A page proven empty that the contract does not accept: what the task needs was not served.
+  if (verification.reason === 'empty_not_allowed') return readiness('not_served', ['empty_not_allowed'], result)
+  const region = regionWaitOf(result)
+  if (region !== undefined) {
+    // The list showed none on a settled page, which the contract accepts: an explicit empty state.
+    if (region.empty) return readiness('ready', ['region_empty'], result)
+    if (region.ready) return readiness('not_extracted', ['checks_failed', 'region_ready'], result)
+    if (region.loading || !region.steady) return readiness('not_loaded', ['checks_failed', 'region_not_ready', ...(region.loading ? ['page_still_loading'] : ['page_still_changing'])], result)
+    return readiness('not_served', ['checks_failed', 'region_absent'], result)
+  }
+  // Read without its scripts, a page whose checks failed may hold its data once a browser runs them.
+  if (UNRENDERED_LANES.has(result.lane)) return readiness('not_loaded', ['checks_failed', 'not_rendered'], result)
+  const signals = notLoadedSignals(result)
+  return signals.length > 0 ? readiness('not_loaded', ['checks_failed', ...signals], result) : readiness('not_served', ['checks_failed'], result)
+}
+
+/** Without a task contract, or for a page not read: the page-wide signals. */
+function signalReadiness(result: FetchResult): Readiness {
   switch (result.status) {
     case 'success':
     case 'partial': {

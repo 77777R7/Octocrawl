@@ -181,7 +181,14 @@ The visible text is the extractor's count, recorded as `textChars` on each lane'
 
 The my-browser lane reads a page that is through only once it has settled: no loading indicator, and its text the same length on three reads in a row. It waits at most 8 s, and never past the read's own wait. A page still loading or changing then is read as it is, with `page_still_loading` or `page_still_changing` in `warnings` (`loading_wait` and `steady_wait` in the trace).
 
-For now `readiness` changes nothing the ladder does. A request's task contract will refine it (ROADMAP PA items 10 and 11).
+With a task contract (`verify`, see [JSON extraction](json-extraction.md)), the verification and the browser's wait for the region the contract needs decide first:
+
+- `ready` with `verified` when the contract passed, whatever page-wide signal there was; with `region_empty` when the list showed no record on a settled page and the contract has `emptyOk`.
+- `not_extracted` with `checks_failed` and `region_ready`: the checks held on the live page, not in what was extracted.
+- `not_loaded` with `checks_failed`, `region_not_ready` and `page_still_loading` or `page_still_changing`: they never held, and the page had not stopped loading or changing when the wait ended. With `not_rendered`: the http lane answered without running the page's scripts.
+- `not_served` with `checks_failed` and `region_absent`: they never held on a settled page. With `empty_not_allowed`: the page was proven empty and the contract does not accept that.
+
+A page the contract could not judge because it was not read (`page_not_read`) goes by its own signals, as above. For now `readiness` changes nothing the ladder does (ROADMAP PA items 10 and 11).
 
 ## agentHints
 

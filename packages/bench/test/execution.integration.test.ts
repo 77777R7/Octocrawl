@@ -280,6 +280,27 @@ describe('browser and vendor execution cancellation', () => {
     expect(busyHits).toBe(1)
   })
 
+  it('waits on the provider\'s page for the region a task needs, and reports what it saw (ADR 0007)', async () => {
+    let regionReads = 0
+    const shows = (markdown: string) => JSON.stringify({ loading: false, text: markdown.length, markdown, tableCount: 0 })
+    const response = { status: () => 200, headers: () => ({}), request: () => ({ headers: () => ({}) }) }
+    const page: CdpPage = {
+      goto: async () => response as never,
+      // The settle's snapshots are steady; the region's prices come on its third read.
+      evaluate: async (expression: string) => expression.includes('tableCount') ? (regionReads++ < 2 ? shows('Results') : shows('$1 $2 $3')) : JSON.stringify({ size: 10, text: 'Results', loading: false }),
+      waitForTimeout: async (ms: number) => { await new Promise((resolve) => setTimeout(resolve, Math.min(ms, 5))) },
+      content: async () => '<html><body><p>$1 $2 $3</p></body></html>',
+      url: () => 'https://example.com/',
+      close: async () => {},
+    }
+    const browser: CdpBrowser = { close: async () => {}, contexts: () => [{ pages: () => [], newPage: async () => page }] }
+    const region = { contract: { checks: [{ type: 'markdownCountMin' as const, pattern: '\\$\\d', min: 3 }] } }
+    const out = await navigateOnce(browser, 'https://example.com/', Date.now() + 20_000, undefined, region)
+    expect(out.region).toMatchObject({ ready: true, reads: 4, checks: [{ index: 0, passed: true, observedCount: 3 }] })
+    // Without a contract it does not wait.
+    expect((await navigateOnce(browser, 'https://example.com/', Date.now() + 20_000)).region).toBeUndefined()
+  })
+
   it('vendor HTTP respects deadline through its response body', async () => {
     let closed = false
     const origin = await server((_req, res) => { res.write('{'); res.on('close', () => { closed = true }) })

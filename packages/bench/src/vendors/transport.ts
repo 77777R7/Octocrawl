@@ -19,6 +19,7 @@ import { createExecutionScope, throwIfExecutionStopped } from '@w2l/http-core'
 
 import type { PolicyDecision } from '@w2l/http-core'
 import type { ProviderResponse, ProviderTransport } from '../subjects/provider.js'
+import type { RegionSpec } from '../regionWait.js'
 import { scrubSecret } from './api.js'
 import {
   measureUserAgent,
@@ -159,16 +160,16 @@ export class CdpVendorTransport implements ProviderTransport {
     }
   }
 
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal): Promise<ProviderResponse> {
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, region?: RegionSpec): Promise<ProviderResponse> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs })
-    try { return await this.fetchWithinBudget(url, deadlineMs, scope.signal) } finally { scope.dispose() }
+    try { return await this.fetchWithinBudget(url, deadlineMs, scope.signal, region) } finally { scope.dispose() }
   }
 
-  private async fetchWithinBudget(url: string, deadlineMs?: number, signal?: AbortSignal): Promise<ProviderResponse> {
+  private async fetchWithinBudget(url: string, deadlineMs?: number, signal?: AbortSignal, region?: RegionSpec): Promise<ProviderResponse> {
     const declared = await this.resolveUserAgent(deadlineMs, signal)
     const { browser } = await this.ensureSession(deadlineMs, signal)
     try {
-      const res = await navigateOnce(browser, url, deadlineMs, signal)
+      const res = await navigateOnce(browser, url, deadlineMs, signal, region)
       return {
         status: res.status,
         body: res.body,
@@ -179,6 +180,7 @@ export class CdpVendorTransport implements ProviderTransport {
         sentUserAgent: res.sentUserAgent,
         sentClientHints: res.sentClientHints,
         ...(res.settle === undefined ? {} : { settle: res.settle }),
+        ...(res.region === undefined ? {} : { region: res.region }),
         declaredUserAgent: declared,
         // Neither vendor states a per-request price in its API response, and
         // an estimate in this field would read as a measurement.
