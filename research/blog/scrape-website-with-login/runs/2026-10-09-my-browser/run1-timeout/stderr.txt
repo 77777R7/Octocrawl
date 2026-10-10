@@ -1,0 +1,7 @@
+octocrawl: outbound https: and http: requests use the environment proxy 127.0.0.1:7890; loopback and NO_PROXY (localhost, 127.0.0.1, ::1, .local) go direct. W2L_PROXY=off ignores the proxy variables.
+octocrawl scrape: in your Chrome, click Allow, then Allow reading these sites in the page Octocrawl opened (github.com); close that page or click Revoke to stop. While remote debugging is on, sites see navigator.webdriver true: turn it off at chrome://inspect/#remote-debugging when you are done
+{"component":"api","event":"my_browser_approval","kind":"scrape","step":"shown","targetId":"C682A5F3FF3A063D07348DAF18BA3A34","hosts":1}
+{"component":"api","event":"my_browser_approval","kind":"scrape","step":"ready","buttons":true}
+{"component":"api","event":"my_browser_approval","kind":"scrape","step":"refused","reason":"timeout","answer":"","active":false,"buttons":true}
+octocrawl: you did not allow the sites in Chrome within 10 minutes: the page was not clicked
+exit=1

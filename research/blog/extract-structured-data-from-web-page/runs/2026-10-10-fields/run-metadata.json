@@ -1,0 +1,10 @@
+{
+ "api": "POST https://api.octocrawl.dev/v1/scrape with request.json (hosted, source e3a37ef, extract-tf/16)",
+ "api_runs": {
+  "response.json": "2026-10-09T19:37:46Z",
+  "response-isbn-required.json": "2026-10-09T19:38:00Z"
+ },
+ "preview": "octocrawl.dev home page, URL + Options > + product fields, Fields view; Playwright Chromium, see preview-run.json",
+ "network": "through local proxy 127.0.0.1:7890",
+ "redacted": "2026-10-10: the book's description (metadata.description, 1,017 characters) and document.labelledValues were replaced with [not kept: …]; json and evidenceRecord are as the API answered"
+}

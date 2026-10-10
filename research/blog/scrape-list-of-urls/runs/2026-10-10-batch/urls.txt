@@ -1,0 +1,7 @@
+# Four book pages, one category page, and one address that answers 404.
+https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html
+https://books.toscrape.com/catalogue/tipping-the-velvet_999/index.html
+https://books.toscrape.com/catalogue/soumission_998/index.html
+https://books.toscrape.com/catalogue/sharp-objects_997/index.html
+https://books.toscrape.com/catalogue/category/books/poetry_23/index.html
+https://books.toscrape.com/catalogue/this-book-does-not-exist_0/index.html

@@ -238,7 +238,7 @@ export function pageMarkup(): string {
               <li class="how-step"><span class="step-number" aria-hidden="true">02</span><div><h3>Octocrawl checks, then reads</h3><p>It respects robots.txt and reads only what anyone can open, then reports the status, final URL and time.</p></div></li>
               <li class="how-step"><span class="step-number" aria-hidden="true">03</span><div><h3>Use the content</h3><p>Copy or download readable Markdown or the result JSON. Amazon.sg product pages add checked fields.</p></div></li>
             </ol>
-            <p class="how-links"><a href="/docs/guides/extract-page/">Extract a public page <span aria-hidden="true">↗</span></a><a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
+            <p class="how-links"><a href="/blog/extract-structured-data-from-web-page/">Extract structured data from a page <span aria-hidden="true">↗</span></a><a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
           </div>
           <figure class="how-specimen">
             <div class="how-replay" id="how-replay">
@@ -284,8 +284,8 @@ export function pageMarkup(): string {
       </div>
       <div class="band band-dark">
         <nav class="frame footer-columns" aria-label="Footer">
-          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try Octocrawl</a></li><li><a href="#how-it-works">How it works</a></li><li><a href="#what-it-does">What it does</a></li><li><a href="#get-started">Get started</a></li><li><a href="#free-tiers">Free tiers</a></li><li><a href="#faq">FAQ</a></li><li><a href="/changelog/">Changelog</a></li></ul></div>
-          <div class="footer-col"><p class="footer-heading">Docs</p><ul><li><a href="/docs/guides/extract-page/">Extract a public page</a></li><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/guides/monitor-webhook/">Monitor to HTTPS Webhook</a></li><li><a href="/docs/guides/batch-results/">Page through batch results</a></li><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li><li><a href="/llms.txt">llms.txt</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try Octocrawl</a></li><li><a href="#how-it-works">How it works</a></li><li><a href="#what-it-does">What it does</a></li><li><a href="#get-started">Get started</a></li><li><a href="#free-tiers">Free tiers</a></li><li><a href="#faq">FAQ</a></li><li><a href="/blog/">Blog</a></li><li><a href="/changelog/">Changelog</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Docs</p><ul><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/guides/monitor-webhook/">Monitor to HTTPS Webhook</a></li><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li><li><a href="/llms.txt">llms.txt</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Legal</p><ul><li><a href="/docs/terms/">Terms of use</a></li><li><a href="/docs/acceptable-use/">Acceptable use</a></li><li><a href="/docs/privacy/">Privacy</a></li><li><a href="https://github.com/77777R7/Octocrawl/blob/main/LICENSE">AGPL-3.0 license ↗</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Contact</p><ul><li><a href="mailto:hello@octocrawl.dev">hello@octocrawl.dev</a></li><li><a href="https://github.com/77777R7/Octocrawl/issues">GitHub issues ↗</a></li><li><a href="https://github.com/77777R7/Octocrawl">GitHub repository ↗</a></li><li><a href="/docs/contact/">Contact page</a></li><li><a href="#top">Back to top ↑</a></li></ul></div>
         </nav>

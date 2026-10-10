@@ -8,7 +8,7 @@ import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } f
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse, type PreviewStage } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
-import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
+import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, INTERNAL_COOKIE, internalVisit, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
   requestOrigin, stdoutLogger, targetHost, type Logger } from './site.js'
 import { parseWaitlistEntry, WAITLIST_BODY_BYTES, WAITLIST_DAILY_SUBMISSIONS, type WaitlistStore } from './waitlist.js'
 
@@ -131,6 +131,16 @@ function issueVisitorCookie(req: IncomingMessage, res: ServerResponse, secret: s
   res.setHeader('set-cookie', `w2l_visitor=${id}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}`)
 }
 
+/** ?internal=1 marks this browser as the operator's own and ?internal=0 clears it; any other value is ignored. */
+function setInternalCookie(req: IncomingMessage, res: ServerResponse, search: string): void {
+  const value = new URLSearchParams(search).get('internal')
+  if (value !== '1' && value !== '0') return
+  const secure = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host ?? '') ? '' : '; Secure'
+  const cookie = `${INTERNAL_COOKIE}=${value === '1' ? '1; Max-Age=31536000' : '; Max-Age=0'}; Path=/; HttpOnly; SameSite=Lax${secure}`
+  const existing = res.getHeader('set-cookie')
+  res.setHeader('set-cookie', [...(Array.isArray(existing) ? existing : typeof existing === 'string' ? [existing] : []), cookie])
+}
+
 function visitorKey(req: IncomingMessage, secret: string | undefined): string {
   const cookie = secret ? validVisitorCookie(req, secret) : null
   return cookie === null ? `ip:${visitorAddress(req)}` : `visitor:${cookie}`
@@ -198,6 +208,20 @@ export function immutable(pathname: string, search: string): boolean {
   return /^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(pathname) || /[?&]v=[0-9a-f]{8,}(?:&|$)/.test(search)
 }
 
+/** Addresses that moved, from the build's redirects.json (`{ "/old/": "/new/" }`): a docs guide that became a blog
+ * article, say. Read once per directory; a site without the file has none. */
+const movedPages = new Map<string, Promise<Map<string, string>>>()
+function movedPagesOf(root: string): Promise<Map<string, string>> {
+  let moved = movedPages.get(root)
+  if (!moved) {
+    moved = readFile(resolve(root, 'redirects.json'), 'utf8')
+      .then((text) => new Map(Object.entries(JSON.parse(text) as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].startsWith('/') && !entry[1].startsWith('//'))))
+      .catch(() => new Map<string, string>())
+    movedPages.set(root, moved)
+  }
+  return moved
+}
+
 async function serveStatic(req: IncomingMessage, res: ServerResponse, directory: string, pathname: string, search: string, origin: string, onPage: () => void): Promise<void> {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return }
   const root = resolve(directory)
@@ -211,6 +235,11 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, directory:
   if (isDirectory) { file = resolve(file, 'index.html'); info = await stat(file).catch(() => null) }
   const moved = info?.isFile() ? pageAddressRedirect(pathname, isDirectory, !isDirectory && basename(file) === 'index.html') : null
   if (moved !== null) { res.writeHead(301, { location: `${moved}${search}`, 'cache-control': 'public, max-age=3600', ...transportHeaders(origin) }).end(); return }
+  // A page that moved answers with a 301 to where it is now, with or without its trailing slash.
+  if (!info?.isFile()) {
+    const movedTo = await movedPagesOf(root).then((moved) => moved.get(pathname) ?? moved.get(`${pathname}/`))
+    if (movedTo !== undefined) { res.writeHead(301, { location: `${movedTo}${search}`, 'cache-control': 'public, max-age=3600', ...transportHeaders(origin) }).end(); return }
+  }
   // The site has no client-side routes: a path without a file is a 404, never the home page answering 200.
   let status = 200
   if (!info?.isFile() || relative(root, file).startsWith('..')) {
@@ -349,7 +378,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       let event
       try { event = parseWebEvent(await readRequestBody(req, EVENT_BODY_BYTES)) } catch { event = null }
       if (!event) { if (!res.destroyed) res.writeHead(400, { 'cache-control': 'no-store' }).end(); return }
-      if (!optedOut(req)) log({ event: 'w2l_web_event', name: event.name, props: event.props, vid: visitorId(req), automated: looksAutomated(req) })
+      if (!optedOut(req)) log({ event: 'w2l_web_event', name: event.name, props: event.props, vid: visitorId(req), automated: looksAutomated(req), ...(internalVisit(req) ? { internal: true } : {}) })
       res.writeHead(204, { 'cache-control': 'no-store' }).end()
       return
     }
@@ -360,6 +389,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       const secret = options.visitorCookieSecret
       await serveStatic(req, res, options.staticDir, pathname, requestUrl.search, requestOrigin(req, publicOrigin), () => {
         if (req.method === 'GET' && secret) issueVisitorCookie(req, res, secret)
+        if (req.method === 'GET') setInternalCookie(req, res, requestUrl.search)
       })
       return
     }
@@ -384,7 +414,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       if (!owner && !optedOut(req)) log({
         event: 'w2l_preview', status: outcome.status, http: status, code: outcome.diagnostic?.code ?? null,
         host: targetHost(submitted), options: submittedOptions, totalMs: Math.round(outcome.totalMs),
-        vid: visitorId(req), automated: looksAutomated(req),
+        vid: visitorId(req), automated: looksAutomated(req), ...(internalVisit(req) ? { internal: true } : {}),
       })
       if (streaming) target.end(`${JSON.stringify({ type: 'result', http: status, body })}\n`)
       else sendJson(target, status, body, headers)

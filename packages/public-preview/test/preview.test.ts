@@ -110,6 +110,22 @@ describe('anonymous preview contract', () => {
     expect((await fetch(`${url}/docs/not-a-page/`)).status).toBe(404)
   })
 
+  it('answers a moved page with a 301 to its new address, from the build\'s redirects.json', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'w2l-preview-moved-'))
+    tempDirs.push(dir)
+    await mkdir(join(dir, 'blog', 'find-all-pages-on-a-website'), { recursive: true })
+    await writeFile(join(dir, 'blog', 'find-all-pages-on-a-website', 'index.html'), '<h1>Find all pages</h1>')
+    await writeFile(join(dir, 'redirects.json'), JSON.stringify({ '/docs/guides/map-site/': '/blog/find-all-pages-on-a-website/', '/docs/guides/map-site/index.md': '/blog/find-all-pages-on-a-website/index.md', '/elsewhere/': '//evil.example/' }))
+    const url = await endpoint({ consume: async () => 'ok' }, async target => fixture(target.url), { staticDir: dir })
+    for (const [path, location] of [['/docs/guides/map-site/', '/blog/find-all-pages-on-a-website/'], ['/docs/guides/map-site', '/blog/find-all-pages-on-a-website/'], ['/docs/guides/map-site/?from=x', '/blog/find-all-pages-on-a-website/?from=x'], ['/docs/guides/map-site/index.md', '/blog/find-all-pages-on-a-website/index.md']]) {
+      const moved = await fetch(`${url}${path}`, { redirect: 'manual' })
+      expect([path, moved.status, moved.headers.get('location')]).toEqual([path, 301, location])
+    }
+    expect((await fetch(`${url}/blog/find-all-pages-on-a-website/`)).status).toBe(200)
+    // A target that would leave the site is never followed.
+    expect((await fetch(`${url}/elsewhere/`, { redirect: 'manual' })).status).toBe(404)
+  })
+
   it('rejects an exhausted Amazon visitor before acquiring the origin gate', async () => {
     let acquires = 0
     let consumes = 0

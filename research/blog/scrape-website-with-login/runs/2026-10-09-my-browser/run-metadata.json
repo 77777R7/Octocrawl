@@ -1,0 +1,7 @@
+{
+ "command": "npx octocrawl@0.3.2 scrape https://github.com/notifications --lane my-browser --formats markdown",
+ "run1": "2026-10-09T14:58:02Z → 15:08:05Z, not allowed within 10 minutes, exit 1",
+ "run2": "2026-10-09T15:34:45Z → 2026-10-09T15:34:54Z, success",
+ "browser": "Chrome/154.0.8037.98, macOS, remote debugging on",
+ "note": "the page Markdown (the account owner's notifications) was removed before saving"
+}

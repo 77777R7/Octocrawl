@@ -1,0 +1,9 @@
+{
+ "hosted_scrape": "2026-10-09T18:17:17Z, curl POST https://api.octocrawl.dev/v1/scrape (hosted revision h2card)",
+ "cli": "npx octocrawl@0.3.2 map https://docs.python.org/3/tutorial/ --limit 6; npx octocrawl@0.3.2 batch --urls-file urls.txt --formats markdown --out out (t0 → t1)",
+ "python": "octocrawl-client 0.3.2 in a venv, to_chunks.py against npx octocrawl@0.3.2 serve on 127.0.0.1:8787",
+ "os": "macOS (Darwin 25.6.0, arm64), Node 26.8.1",
+ "network": "through local proxy 127.0.0.1:7890",
+ "note": "page text of docs.python.org is not kept; hashes and counts identify it",
+ "redacted": "2026-10-10: document.labelledValues (27 entries of docs.python.org text) was replaced with [not kept: …]"
+}

@@ -1,0 +1,21 @@
+{
+  "url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+  "formats": [
+    "markdown",
+    {
+      "type": "json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "upc": { "type": "string" },
+          "price_incl_tax": { "type": "number" },
+          "availability": { "type": "string" },
+          "number_of_reviews": { "type": "integer" },
+          "isbn": { "type": "string" }
+        },
+        "required": ["title", "upc", "price_incl_tax"]
+      }
+    }
+  ]
+}

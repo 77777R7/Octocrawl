@@ -1,0 +1,4 @@
+octocrawl: outbound https: and http: requests use the environment proxy 127.0.0.1:7890; loopback and NO_PROXY (127.0.0.1, localhost) go direct. W2L_PROXY=off ignores the proxy variables.
+octocrawl batch: task f827227e-ebf9-414c-8950-c61db018a2da
+octocrawl: wrote 6 results (results.jsonl, results.csv), 6 Markdown files and 0 CSV tables to out1
+exit=0

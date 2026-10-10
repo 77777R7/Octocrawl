@@ -1,0 +1,6 @@
+1590 out/0001-books.toscrape.com-catalogue-a-light-in-the-attic-1000-index.html.md
+2339 out/0002-books.toscrape.com-catalogue-soumission-998-index.html.md
+1944 out/0003-books.toscrape.com-catalogue-tipping-the-velvet-999-index.html.md
+3128 out/0004-books.toscrape.com-catalogue-sharp-objects-997-index.html.md
+6759 out/0005-books.toscrape.com-catalogue-category-books-poetry-23-index.html.md
+34 out/0006-books.toscrape.com-catalogue-this-book-does-not-exist-0-index.html.md
