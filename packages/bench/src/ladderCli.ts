@@ -124,6 +124,14 @@ export function parseArgs(argv: readonly string[]): Args {
 }
 
 /**
+ * A timer set for a deadline can fire a millisecond or two before Date.now() reaches it: the vendor rung reads a
+ * paid session's end this much early, so a step the session's deadline cut off (a CDP connect handed that deadline)
+ * is the session's timeout, not a provider error. In CI the connect case of ladderCli.test.ts answered
+ * `provider_error` when the connect's timer fired early.
+ */
+const SESSION_END_SLACK_MS = 25
+
+/**
  * Build the ladder's channels. Vendors are LAZY: no session is created here.
  * `connectVendor` runs on the first fetch that reaches the rung — after
  * governance has cleared the URL and the local rungs have failed.
@@ -485,8 +493,9 @@ export function buildChannels(
         const start = Date.now()
         // Under a tariff `execution` ends with the session; the request's own deadline is the ladder's.
         const requestDeadlineAt = execution !== undefined && requestDeadlines.has(execution) ? requestDeadlines.get(execution) : execution?.deadlineAt
+        // The request's end is read as the ladder reads its deadline (deadlineReached), so an error the rung throws is the ladder's to answer.
         const requestEnded = () => execution?.signal?.aborted === true || (requestDeadlineAt !== undefined && Date.now() >= requestDeadlineAt)
-        const sessionEnded = () => execution?.deadlineAt !== undefined && Date.now() >= execution.deadlineAt
+        const sessionEnded = () => execution?.deadlineAt !== undefined && Date.now() + SESSION_END_SLACK_MS >= execution.deadlineAt
         const failed = async (err: unknown): Promise<FetchResult> => {
           const { providerFailure } = await import('./subjects/provider.js')
           const wallMs = Date.now() - start
