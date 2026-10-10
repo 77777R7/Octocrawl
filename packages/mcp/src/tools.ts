@@ -221,6 +221,7 @@ export const TOOLS = [
   {
     name:'scrape_product',
     description:'Get evidence-backed JSON for one anonymous Amazon.sg /dp/{ASIN} product. No schema or model setup needed.',
+    annotations: { title: 'Amazon.sg product JSON', readOnlyHint: true, openWorldHint: true },
     inputSchema:{type:'object',properties:{url:{type:'string'},debug:{type:'boolean'}},required:['url'],additionalProperties:false},
   },
   {
@@ -231,6 +232,9 @@ export const TOOLS = [
   {
     name: 'scrape',
     description: 'Fetch one URL through the Octocrawl coverage ladder. Compact by default; set debug=true for the full audit. The result\'s warnings name what its content cannot vouch for: robots_overridden (robots.txt disallows the URL; a local server fetched it because you named it), or client_rendered_suspected when the HTTP page looks like a shell its scripts fill in and the browser rung found nothing better. Its agentHints, when present, say what to change next time (a login wall, a robots.txt rule, a gate, a wait). metadata.scrapeId names the call\'s record for get_scrape.',
+    // Not marked read-only here: on a server on the person's machine, page `actions` can click and type, and `mode: authed`
+    // does so signed in as them. Hosted Octocrawl refuses both and marks its copy read-only (hostedApi.ts).
+    annotations: { title: 'Scrape a page', openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {

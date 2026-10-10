@@ -81,16 +81,23 @@ const SWEEP_EVERY_MS = 60_000
 const REMEMBERED_CALLERS = 20_000
 /** The tools the remote endpoint offers; the rest are refused by name. */
 export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', 'scrape_product'])
+
+/** The tools hosted Octocrawl lists to a caller: scrape_product only to a key with the browser lane, since it needs one,
+ * so every tool a client sees can answer. All are read-only here: hosted Octocrawl refuses page actions and logins. */
+export function hostedTools(browser: boolean) {
+  return TOOLS.filter((tool) => HOSTED_API_TOOLS.has(tool.name) && (browser || tool.name !== 'scrape_product'))
+    .map((tool) => ({ ...tool, annotations: { ...('annotations' in tool ? tool.annotations : {}), readOnlyHint: true } }))
+}
 /**
  * What directories that list MCP servers read before, or instead of, a live scan (Smithery's static server card,
  * https://smithery.ai/docs/build/publish): the server, that it needs no sign-in, and the tools it offers, taken from
- * the same definitions tools/list answers with, so the card cannot drift from the server.
+ * the same definitions tools/list answers a caller without a key, so the card cannot drift from the server.
  */
 export function hostedServerCard() {
   return {
     serverInfo: { name: 'octocrawl', title: 'Octocrawl', version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server-card&utm_medium=listing' },
     authentication: { required: false },
-    tools: TOOLS.filter((tool) => HOSTED_API_TOOLS.has(tool.name)),
+    tools: hostedTools(false),
     resources: [],
     prompts: [],
   }
@@ -347,6 +354,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     })
     const server = createMcpServer(client, {
       allowedTools: HOSTED_API_TOOLS,
+      tools: hostedTools(caller.browser === true),
       calls: trackPost(calls, req, res, parsed, [caller.id]),
       normalizeCall: (name, args) => {
         if (!HOSTED_API_TOOLS.has(name)) throw new Error(`${name} is not served by hosted Octocrawl: scrape, map and scrape_product only; ${LOCAL_HINT}`)
