@@ -123,9 +123,11 @@ function verifiedReadiness(result: FetchResult, verification: Exclude<NonNullabl
   // Read without its scripts, a page whose checks failed may hold its data once a browser runs them.
   if (UNRENDERED_LANES.has(result.lane)) return readiness('not_loaded', ['checks_failed', 'not_rendered'], result)
   // No live page judged this contract (a contract of json fields alone, a wait that had no time): the page's own
-  // signals tell its state, and the basis says the contract failed where nothing on the page was judged.
+  // signals tell whether it had come, and the basis says the contract failed where nothing on the page was judged. A
+  // page that had come by every signal, its contract failed on what was extracted from it, was not extracted: ready
+  // is the contract passing.
   const signals = signalReadiness(result)
-  return { ...signals, basis: [...signals.basis, 'checks_failed', 'region_unjudged'] }
+  return { ...signals, state: signals.state === 'ready' ? 'not_extracted' : signals.state, basis: [...signals.basis, 'checks_failed', 'region_unjudged'] }
 }
 
 /** Without a task contract, or for a page not read: the page-wide signals. */

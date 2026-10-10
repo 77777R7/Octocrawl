@@ -188,7 +188,7 @@ With a task contract (`verify`, see [JSON extraction](json-extraction.md)), the 
   - `not_extracted` with `region_ready`: the checks held on the live page, not in what was extracted.
   - `not_loaded` with `region_not_ready` and `page_still_loading`, `page_still_changing` or `steady_unknown` (one judged read, nothing to compare): they never held, and the page had not settled.
   - `not_served` with `region_absent`: they never held on a settled page; with `region_empty`: the list showed no record on a settled page (the site served none, or the selector names none).
-- With no such wait: `not_loaded` with `not_rendered` when the http lane answered without the page's scripts; otherwise the state the page's own signals give, with `checks_failed` and `region_unjudged` added to the basis (a contract of `json` fields, a wait that had no time, or a page from the cache whose wait judged another contract).
+- With no such wait: `not_loaded` with `not_rendered` when the http lane answered without the page's scripts; otherwise the state the page's own signals give, `not_extracted` where they would say `ready` (the page had come, and its contract failed on what was extracted), with `checks_failed` and `region_unjudged` added to the basis (a contract of `json` fields, a wait that had no time, or a page from the cache whose wait judged another contract).
 - `not_served` with `empty_not_allowed`: the page was proven empty and the contract does not accept that.
 
 A page the contract could not judge because it was not read (`page_not_read`) goes by its own signals, as above. `waitedMs` is the lane's last settle wait and its region wait together. For now `readiness` changes nothing the ladder does (ROADMAP PA items 10 and 11).

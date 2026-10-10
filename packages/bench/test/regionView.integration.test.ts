@@ -36,7 +36,7 @@ afterAll(async () => {
   await browser?.close()
 })
 
-const view = async (list?: Parameters<typeof regionViewExpression>[0], max?: number) => JSON.parse(await page.evaluate(regionViewExpression(list, max)) as string) as { markdown: string; tableCount: number; list?: { records: { values: Record<string, string | null>; missing: string[] }[] }; error?: string }
+const view = async (list?: Parameters<typeof regionViewExpression>[0], max?: number, withHtml = false) => JSON.parse(await page.evaluate(regionViewExpression(list, max, withHtml)) as string) as { html?: string; href?: string; tableCount: number; list?: { records: { values: Record<string, string | null>; missing: string[] }[] }; error?: string }
 
 describe('the region view of the live page (ADR 0007, ROADMAP PA item 11)', () => {
   it('reads the records the list format reads: nested items, first matches, text CSS hides, attributes and their URLs', async () => {
@@ -54,7 +54,11 @@ describe('the region view of the live page (ADR 0007, ROADMAP PA item 11)', () =
     const live = await view({ itemSelector: 'li.it', fields: [{ name: 'name', selector: 'a' }] }, 2)
     expect(live.tableCount).toBe(2)
     expect(live.list?.records).toHaveLength(2)
-    expect(live.markdown).toContain('Shown')
+    expect(live.html).toBeUndefined()
+    // With the HTML, for the Markdown checks: the whole document, and the address it resolves against.
+    const whole = await view(undefined, undefined, true)
+    expect(whole.html).toContain('<td>Shown</td>')
+    expect(whole.href).toBe(PAGE_URL)
   })
 
   it('leaves the list out, not the view, when the browser does not take its selector', async () => {

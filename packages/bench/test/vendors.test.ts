@@ -332,7 +332,7 @@ describe('vendor identity', () => {
 
   it('hands navigateOnce the region a task needs, and returns what its wait saw (ADR 0007)', async () => {
     const api = sessionServing('bb_1')
-    const shows = (markdown: string) => JSON.stringify({ loading: false, text: markdown.length, markdown, tableCount: 0 })
+    const shows = (text: string) => JSON.stringify({ loading: false, text: text.length, href: 'https://site.test/a', html: `<html><body><p>${text}</p></body></html>`, tableCount: 0 })
     const bb = fakeBrowser({ regionViews: [shows('Results'), shows('$1 $2 $3')] })
     const transport = new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, api.handler), connectorFor(bb).connector)
     const region = { contract: { checks: [{ type: 'markdownCountMin' as const, pattern: '\\$\\d', min: 3 }] } }

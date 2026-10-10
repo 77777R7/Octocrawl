@@ -18,7 +18,7 @@ function page(views: unknown[]) {
   }
 }
 
-const view = (markdown: string, extra: Record<string, unknown> = {}) => ({ loading: false, text: markdown.length, markdown, tableCount: 0, ...extra })
+const view = (text: string, extra: Record<string, unknown> = {}) => ({ loading: false, text: text.length, href: 'https://shop.test/', html: `<html><body><p>${text}</p></body></html>`, tableCount: 0, ...extra })
 const prices: VerifyContract = { checks: [{ type: 'markdownCountMin', pattern: '\\$\\d+', min: 3 }] }
 
 describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', () => {
@@ -97,6 +97,17 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     expect(tracker.observe(JSON.stringify({ error: 'SyntaxError' }))).toBe(false)
     expect(tracker.judgeable).toBe(true)
     expect(tracker.outcome()).toMatchObject({ reads: 1, judged: 0, steady: null })
+  })
+
+  it('judges a check written for Markdown on the live page\'s HTML converted as the result\'s Markdown is', async () => {
+    // Links counted as the access tasks count them: by their Markdown, which the page's plain text does not have.
+    const links: VerifyContract = { checks: [{ type: 'markdownCountMin', pattern: '\\]\\(https?://', min: 2 }] }
+    const html = '<html><body><nav><a href="/a">A</a> <a href="https://shop.test/b">B</a></nav><p>Story</p></body></html>'
+    const linked = page([{ loading: false, text: 7, href: 'https://shop.test/', html, tableCount: 0 }])
+    expect(await waitForRegion(linked, { contract: links }, { maxMs: 5_000, now: linked.now })).toMatchObject({ ready: true, checks: [{ passed: true, observedCount: 2 }] })
+    // The HTML is read only for a contract with a Markdown check.
+    expect(new RegionTracker({ contract: links }).expression()).toContain('outerHTML')
+    expect(new RegionTracker({ contract: { checks: [{ type: 'minTables', min: 1 }] } }).expression()).not.toContain('outerHTML')
   })
 
   it('records the wait by its counts, never the page\'s text', () => {

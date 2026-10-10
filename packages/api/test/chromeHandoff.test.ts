@@ -128,7 +128,7 @@ describe('the person\'s Chrome', () => {
 
   it('reads a settled page once the task\'s region holds on it, and says what it saw (ADR 0007)', async () => {
     const region = { contract: { checks: [{ type: 'markdownCountMin' as const, pattern: '\\$\\d', min: 3 }] } }
-    const shows = (markdown: string) => ({ loading: false, text: markdown.length, markdown, tableCount: 0 })
+    const shows = (text: string) => ({ loading: false, text: text.length, href: 'https://site.test/a', html: `<html><body><p>${text}</p></body></html>`, tableCount: 0 })
     // Through and settled from the first reads; its prices come in on the fifth read and hold on the sixth.
     const states = [...Array(4).fill(at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('Results') })), at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('$1 $2 $3') })]
     const read = await (await openUserChrome({ userDataDir, connect: fakeChrome(states).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, region })

@@ -43,6 +43,10 @@ beforeAll(async () => {
           '<!doctype html><html><body><article><h1>Recovered</h1><p>Succeeded on the second attempt.</p></article></body></html>',
         )
       }
+    } else if (req.url === '/links') {
+      // Twenty article links, all in the HTML: what the access tasks count by their Markdown (ADR 0007).
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><main><h1>Latest</h1><ul>' + Array.from({ length: 20 }, (_, i) => `<li><a href="https://news.test/story/${i}">Story ${i}: the council and the harbour, a long enough headline</a></li>`).join('') + '</ul></main></body></html>')
     } else if (req.url === '/late-records') {
       // A table and a list of records its script draws 1.5 s after load (ADR 0007).
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -1054,6 +1058,9 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
       // A contract the live page cannot judge (a json field alone) is not waited for.
       const json = await subject.fetch(`${url}/spa`, undefined, undefined, undefined, { verify: { checks: [{ type: 'field', path: 'json.price', present: true }] } })
       expect(json.trace.some((event) => event.event === 'region_wait')).toBe(false)
+      // A check written for Markdown (a link's `](https://`) holds on the live page's HTML converted as the result's is: no wait.
+      const linked = await subject.fetch(`${url}/links`, Date.now() + 20_000, undefined, undefined, { verify: { checks: [{ type: 'markdownCountMin', pattern: '\\]\\(https?://', min: 10 }] } })
+      expect(linked.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: true, reads: 2, checks: [{ passed: true, observedCount: 20 }] })
       // Nor is a request without a contract.
       expect((await subject.fetch(`${url}/spa`)).trace.some((event) => event.event === 'region_wait')).toBe(false)
       // Nor a page that shows a check: it is read at once, as blocked.

@@ -282,7 +282,7 @@ describe('browser and vendor execution cancellation', () => {
 
   it('waits on the provider\'s page for the region a task needs, and reports what it saw (ADR 0007)', async () => {
     let regionReads = 0
-    const shows = (markdown: string) => JSON.stringify({ loading: false, text: markdown.length, markdown, tableCount: 0 })
+    const shows = (text: string) => JSON.stringify({ loading: false, text: text.length, href: 'https://site.test/a', html: `<html><body><p>${text}</p></body></html>`, tableCount: 0 })
     const response = { status: () => 200, headers: () => ({}), request: () => ({ headers: () => ({}) }) }
     const page: CdpPage = {
       goto: async () => response as never,

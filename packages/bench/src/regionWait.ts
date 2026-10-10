@@ -9,6 +9,7 @@
  */
 
 import type { FetchOptions, Lane, ListField, TraceEvent, VerificationCheck, VerifyContract } from '@w2l/contracts'
+import { htmlToMarkdown } from '@w2l/extract-tf'
 import { contractSha256, verify, type VerifyView } from '@w2l/runtime'
 import { isNavigationError, LOADING_PROBE, type SettlePage } from './browserSettle.js'
 
@@ -20,6 +21,10 @@ export const REGION_SAMPLE_MS = 500
 const MIN_VIEW_RECORDS = 2_000
 /** Reads in a row an empty list must show, on a settled page, to count as the page's explicit empty state. */
 const EMPTY_READS = 3
+/** The largest live page whose Markdown the view converts; past it, the Markdown checks are not judged on the live page. */
+const MAX_VIEW_HTML = 5_000_000
+/** The checks that read the Markdown: on the live page, they read the page's whole HTML converted as the result's Markdown is. */
+const MARKDOWN_CHECKS: ReadonlySet<string> = new Set(['markdownIncludes', 'markdownMatches', 'markdownCountMin'])
 
 /** What the wait judges: the request's task contract, and the list format's records when it names them. */
 export interface RegionSpec {
@@ -53,8 +58,9 @@ function recordsAsked(contract: VerifyContract): number {
 }
 
 /**
- * The view of the live page, as JSON: whether it shows a loading indicator, its text and its length, how many tables
- * it shows (a `<table>`, or an element with role table or grid, of at least two rows: a one-row table lays the page
+ * The view of the live page, as JSON: whether it shows a loading indicator, the length of its text, with `withHtml` its
+ * address and whole HTML (the Markdown checks read it converted to Markdown: a pattern written for Markdown, a link's
+ * `](https://`, does not match the page's plain text), how many tables it shows (a `<table>`, or an element with role table or grid, of at least two rows: a one-row table lays the page
  * out, as the extractor reads it) and, with a list, its records as the list format reads them
  * (packages/extract-tf/src/list.ts): an item inside another item is not one; a field is its selector's first match in
  * the item, or the item; a value is the element's text, script, style, template, an SVG's title and description left
@@ -62,7 +68,7 @@ function recordsAsked(contract: VerifyContract): number {
  * selector the browser does not take leaves the list out of the view, so its checks are not judged. The probe never
  * fails the page: an error reads as `error`.
  */
-export function regionViewExpression(list?: RegionSpec['list'], maxRecords = MIN_VIEW_RECORDS): string {
+export function regionViewExpression(list?: RegionSpec['list'], maxRecords = MIN_VIEW_RECORDS, withHtml = false): string {
   const listPart = list === undefined ? '' : `
     try {
       const itemSelector = ${JSON.stringify(list.itemSelector)}
@@ -121,11 +127,11 @@ export function regionViewExpression(list?: RegionSpec['list'], maxRecords = MIN
       const style = getComputedStyle(el)
       return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
     }
-    const markdown = body === null ? '' : (body.innerText ?? '')
+    const text = body === null ? '' : (body.innerText ?? '')
     let tableCount = 0
     for (const table of document.querySelectorAll('table')) if (table.rows.length >= 2 && shown(table)) tableCount++
     for (const grid of document.querySelectorAll('[role="table"], [role="grid"]')) if (grid.tagName !== 'TABLE' && grid.querySelectorAll('[role="row"]').length >= 2 && shown(grid)) tableCount++
-    const view = { loading: ${LOADING_PROBE}, text: markdown.length, markdown, tableCount }${listPart}
+    const view = { loading: ${LOADING_PROBE}, text: text.length, tableCount${withHtml ? ', href: location.href, html: document.documentElement ? document.documentElement.outerHTML : \'\'' : ''} }${listPart}
     return JSON.stringify(view)
   } catch (error) {
     return JSON.stringify({ error: String(error && error.message || error).slice(0, 200) })
@@ -137,7 +143,8 @@ export function regionViewExpression(list?: RegionSpec['list'], maxRecords = MIN
 interface RegionView {
   loading?: boolean
   text?: number
-  markdown?: string
+  href?: string
+  html?: string
   tableCount?: number
   list?: { records: { values: Record<string, string | null>; missing: string[] }[] }
   error?: string
@@ -174,17 +181,21 @@ export class RegionTracker {
   private sameReads = 0
   private previousKey: string | null = null
   private previousText: number | undefined
+  private readonly needsMarkdown: boolean
+  /** The last HTML converted and its Markdown: a page that did not change is not converted again. */
+  private converted: { html: string; markdown: string } | null = null
   private last: Omit<RegionOutcome, 'waitedMs' | 'reads' | 'judged' | 'contractSha256'> = { ready: false, empty: false, loading: false, steady: null, checks: [] }
   judgeable = true
 
   constructor(private readonly spec: RegionSpec, private readonly now: () => number = Date.now) {
     this.started = now()
     this.sha = contractSha256(spec.contract)
+    this.needsMarkdown = spec.contract.checks.some((check) => MARKDOWN_CHECKS.has(check.type))
   }
 
   /** The expression a lane reads the view with: enough records for the contract's own minimum. */
   expression(): string {
-    return regionViewExpression(this.spec.list, Math.max(MIN_VIEW_RECORDS, recordsAsked(this.spec.contract)))
+    return regionViewExpression(this.spec.list, Math.max(MIN_VIEW_RECORDS, recordsAsked(this.spec.contract)), this.needsMarkdown)
   }
 
   /** Judge one read; true once the region is ready. A read with no view (cut off, or the probe failed) breaks the run of reads. */
@@ -192,7 +203,7 @@ export class RegionTracker {
     this.reads++
     let view: RegionView
     try { view = typeof json === 'string' ? JSON.parse(json) as RegionView : {} } catch { view = {} }
-    if (view.error !== undefined || typeof view.markdown !== 'string') {
+    if (view.error !== undefined || typeof view.text !== 'number') {
       this.previousKey = null
       this.previousText = undefined
       this.sameReads = 0
@@ -200,7 +211,8 @@ export class RegionTracker {
       return false
     }
     this.judged++
-    const verifyView: VerifyView = { status: 'success', markdown: view.markdown, tableCount: view.tableCount ?? 0, ...(view.list === undefined ? {} : { list: view.list }) }
+    const markdown = this.markdownOf(view)
+    const verifyView: VerifyView = { status: 'success', tableCount: view.tableCount ?? 0, ...(markdown === undefined ? {} : { markdown }), ...(view.list === undefined ? {} : { list: view.list }) }
     const verification = verify(this.spec.contract, verifyView, { partial: true })
     const checks = verification.status === 'not_requested' ? [] : verification.checks.map(({ index, type, passed, observedCount }) => ({ index, type, passed, ...(observedCount === undefined ? {} : { observedCount }) }))
     // The first judged view decides whether the page can judge the contract at all.
@@ -218,6 +230,13 @@ export class RegionTracker {
     this.previousText = view.text
     this.last = { ready: passed || empty, empty, loading, steady, checks }
     return passed || empty
+  }
+
+  /** The live page's whole Markdown, converted as the result's is; undefined when no check reads it or the page is too large. */
+  private markdownOf(view: RegionView): string | undefined {
+    if (!this.needsMarkdown || typeof view.html !== 'string' || view.html.length > MAX_VIEW_HTML) return undefined
+    if (this.converted?.html !== view.html) this.converted = { html: view.html, markdown: htmlToMarkdown(view.html, { baseUrl: view.href }) }
+    return this.converted.markdown
   }
 
   outcome(): RegionOutcome {

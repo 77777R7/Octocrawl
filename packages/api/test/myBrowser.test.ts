@@ -90,7 +90,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
         // The region view (ADR 0007): the page's text, which holds the ledger's rows.
         if (expression.includes('tableCount')) {
           regionReads++
-          return { result: { value: JSON.stringify({ loading: false, text: 120, markdown: 'Tide ledger 06:00 07:00 08:00', tableCount: 1 }) } }
+          return { result: { value: JSON.stringify({ loading: false, text: 120, href: 'https://site.test/a', html: '<html><body><h1>Tide ledger</h1><p>06:00 07:00 08:00</p></body></html>', tableCount: 1 }) } }
         }
         if (expression.includes('importNode')) {
           if ((page.shownFails ?? 0) > shownTries++) throw new ChromeLoginError('Chrome refused the request: Inspected target navigated or closed')
