@@ -398,6 +398,9 @@ for (const task of rejudgeDir === undefined ? tasks : []) {
   }
 }
 
+// The product judged each attempt by the predicates sent with it, so it is compared with the
+// runner's verdict on those same predicates: the run's own, not a rejudge's.
+const runnerAtRun = (x) => x.original?.verified ?? x.outcome.verified
 const pct = (xs, q) => { if (xs.length === 0) return null; const s = [...xs].sort((a, b) => a - b); return Math.round(s[Math.min(s.length - 1, Math.floor(q * s.length))]) }
 const summary = (temp) => {
   const r = rows.filter((x) => x.temperature === temp)
@@ -408,7 +411,7 @@ const summary = (temp) => {
     // The product's verification against the runner's verdict, over the attempts that carry one.
     productVerified: r.filter((x) => x.observed.productVerification === 'passed').length,
     productJudged: r.filter((x) => typeof x.observed.productVerification === 'string').length,
-    productAgreed: r.filter((x) => typeof x.observed.productVerification === 'string' && (x.observed.productVerification === 'passed') === x.outcome.verified).length,
+    productAgreed: r.filter((x) => typeof x.observed.productVerification === 'string' && (x.observed.productVerification === 'passed') === runnerAtRun(x)).length,
     p50Ms: pct(r.map((x) => x.outcome.wallMs), 0.5), p95Ms: pct(r.map((x) => x.outcome.wallMs), 0.95),
     externalCostPer1000VerifiedUsd: costs.some((c) => c === null) || verifiedN === 0 ? null : (costs.reduce((a, b) => a + b, 0) / verifiedN) * 1000,
     egressCostPer1000VerifiedUsd: null,
@@ -455,8 +458,8 @@ if (recordFile !== undefined) {
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}`,
     ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}`),
     ...Object.entries(totals).filter(([, t]) => t.productJudged > 0).map(([temp, t]) => {
-      const disagree = rows.filter((x) => x.temperature === temp && typeof x.observed.productVerification === 'string' && (x.observed.productVerification === 'passed') !== x.outcome.verified)
-      return `- Task contract (${temp}): the product's verification agreed with the runner on ${t.productAgreed} of ${t.productJudged} attempts that carry one (${t.productVerified} passed)${disagree.length === 0 ? '' : `; disagreed on ${disagree.map((x) => `${x.taskId} (product ${x.observed.productVerification}, runner ${x.outcome.verified ? 'verified' : 'not verified'})`).join(', ')}`}`
+      const disagree = rows.filter((x) => x.temperature === temp && typeof x.observed.productVerification === 'string' && (x.observed.productVerification === 'passed') !== runnerAtRun(x))
+      return `- Task contract (${temp}): the product's verification agreed with the runner${rejudged === null ? '' : "'s verdict at the time of the run (the predicates the product was sent, not the rejudge's)"} on ${t.productAgreed} of ${t.productJudged} attempts that carry one (${t.productVerified} passed)${disagree.length === 0 ? '' : `; disagreed on ${disagree.map((x) => `${x.taskId} (product ${x.observed.productVerification}, runner ${runnerAtRun(x) ? 'verified' : 'not verified'})`).join(', ')}`}`
     }),
     '', 'Suspected cause: not isolated for any task (a run through the product cannot isolate it; see the method).', '',
     ...(droppedRows.length === 0 ? [] : [`Not rejudged, counted above with the run's own verdict (removed from the task file, or its URL changed, after this run; a reason, where given, is in tasks.v1.json \`excluded\`): ${[...new Set(droppedRows.map((r) => r.taskId))].join(', ')}.`, '']),

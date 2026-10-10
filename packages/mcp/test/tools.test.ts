@@ -695,6 +695,19 @@ describe('MCP tools', () => {
     }
   })
 
+  it('sends a task contract on scrape, crawl and batch_scrape to the API', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return String(input).endsWith('/v1/scrape') ? json({ status: 'success' }) : json({ taskId: 'task-1' }, 202)
+    }) as typeof fetch })
+    const verify = { checks: [{ type: 'minTables', min: 1 }, { type: 'field', path: 'json.data.price', equals: null }], emptyOk: true }
+    await callTool(client, 'scrape', { url: 'https://example.com/', verify })
+    await callTool(client, 'crawl', { url: 'https://example.com/', verify })
+    await callTool(client, 'batch_scrape', { urls: ['https://example.com/'], verify })
+    expect(bodies.map((body) => body.verify)).toEqual([verify, verify, verify])
+  })
+
   it('offers map as a read-only tool with the map request\'s keys and an output schema, compact by default and in full with debug', async () => {
     const tool = TOOLS.find((t) => t.name === 'map')!
     expect(Object.keys(tool.inputSchema.properties).sort()).toEqual([...MAP_KEYS.filter((key) => key !== 'origin'), 'debug'].sort())

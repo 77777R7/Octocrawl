@@ -528,6 +528,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       ...(req.handoff === undefined ? {} : { handoff: req.handoff }),
       ...(req.lane === undefined ? {} : { lane: req.lane }),
       ...(req.access === undefined ? {} : { access: req.access }),
+      ...(req.verify === undefined ? {} : { verify: req.verify }),
       ...integrationOf(req),
     }, request)
   }
@@ -561,6 +562,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
       ...(req.webhook === undefined ? {} : { webhook: req.webhook }),
       ...(req.ignoreRobotsTxt === undefined ? {} : { ignoreRobotsTxt: req.ignoreRobotsTxt }),
       ...(req.access === undefined ? {} : { access: req.access }),
+      ...(req.verify === undefined ? {} : { verify: req.verify }),
       onlyMainContent: req.onlyMainContent,
       waitFor: req.waitFor,
       timeout: req.timeout,
@@ -600,7 +602,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: R
     const req = parseBatchStartRequest(withoutOrigin(args))
     // With ignoreInvalidURLs the server's list is authoritative: the entries go as the caller sent them, and the API reports the ones it skipped.
     const urls = req.ignoreInvalidURLs === true ? (args as { urls: readonly string[] }).urls : req.urls
-    return client.batchScrape(urls, { ...(req.actions === undefined ? {} : { actions: req.actions }), mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...(req.lane === undefined ? {} : { lane: req.lane }), ...(req.access === undefined ? {} : { access: req.access }), ...integrationOf(req) }, request)
+    return client.batchScrape(urls, { ...(req.actions === undefined ? {} : { actions: req.actions }), mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...(req.lane === undefined ? {} : { lane: req.lane }), ...(req.access === undefined ? {} : { access: req.access }), ...(req.verify === undefined ? {} : { verify: req.verify }), ...integrationOf(req) }, request)
   }
   if (name === 'get_batch_errors') {
     const rec = readRecord(args)
