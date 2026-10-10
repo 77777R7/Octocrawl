@@ -69,16 +69,20 @@ function judge(check: VerifyCheck, view: VerifyView, partial: boolean): Judged {
       const path = check.path ?? 'list.records'
       if (partial && !(path.split('.')[0]! in view)) return unavailable
       const records = get(view, path)
-      return counted(Array.isArray(records) ? records.length : 0, check.min, 'record')
+      // No list at all fails, as the runner judges it, even when the minimum is 0.
+      if (!Array.isArray(records)) return { passed: false, observedCount: 0, asked: check.min, observed: `no records at ${path}, at least ${check.min} asked` }
+      return counted(records.length, check.min, 'record')
     }
     case 'recordFields': {
       if (partial && !('list' in view)) return unavailable
       const records = get(view, 'list.records')
-      const whole = Array.isArray(records) ? records.filter((record) => {
+      // No list at all fails, as listRecordsMin does, even when the minimum is 0.
+      if (!Array.isArray(records)) return { passed: false, observedCount: 0, asked: check.min, observed: `no records at list.records, at least ${check.min} asked` }
+      const whole = records.filter((record) => {
         const values = (record as { values?: Record<string, unknown> } | null)?.values ?? {}
         const missing = (record as { missing?: unknown } | null)?.missing
         return check.fields.every((field) => !(Array.isArray(missing) && missing.includes(field)) && values[field] !== undefined && values[field] !== null && values[field] !== '')
-      }).length : 0
+      }).length
       return counted(whole, check.min, 'record', ' with every field')
     }
     case 'field': {

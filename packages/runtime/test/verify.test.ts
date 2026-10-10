@@ -71,6 +71,18 @@ describe('the task verifier (ADR 0006)', () => {
     expect(verification.checks[3]!.observed).toBe('json.data.title is an empty string')
   })
 
+  it('fails listRecordsMin where there is no list, even at a minimum of 0, as the runner does', () => {
+    for (const [check, doc] of [
+      [{ type: 'listRecordsMin', min: 0 }, { status: 'success', markdown: '' }],
+      [{ type: 'listRecordsMin', min: 0, path: 'json.data.items' }, { status: 'success', markdown: '', json: { data: {} } }],
+      [{ type: 'listRecordsMin', min: 0 }, { status: 'success', markdown: '', list: { records: [] } }],
+    ] as [VerifyCheck, Record<string, unknown>][]) {
+      const verification = verify({ checks: [check] }, doc)
+      if (verification.status === 'not_requested') throw new Error('a contract was sent')
+      expect(verification.checks[0]!.passed).toBe(judge(check, doc))
+    }
+  })
+
   it('counts the records that hold every field asked for (recordFields): a name, a price and a link of one record', () => {
     const list = { records: [
       { values: { name: 'Acer', price: '$649', url: 'https://a' }, missing: [] },
@@ -81,6 +93,8 @@ describe('the task verifier (ADR 0006)', () => {
     const at = (min: number) => verify({ checks: [{ type: 'recordFields', fields: ['name', 'price', 'url'], min }] }, { status: 'success', markdown: '', list })
     expect(at(2)).toMatchObject({ status: 'passed', checks: [{ passed: true, observedCount: 2, asked: 2 }] })
     expect(at(3)).toMatchObject({ status: 'failed', reason: 'checks_failed', checks: [{ passed: false, observedCount: 2, asked: 3, observed: '2 records with every field, at least 3 asked' }] })
+    // No list at all fails, even at a minimum of 0, as listRecordsMin does.
+    expect(verify({ checks: [{ type: 'recordFields', fields: ['name'], min: 0 }] }, { status: 'success', markdown: '' })).toMatchObject({ status: 'failed', checks: [{ passed: false, observedCount: 0 }] })
   })
 
   it('runs no check on a page not read, and passes an empty result only where the contract allows it', () => {

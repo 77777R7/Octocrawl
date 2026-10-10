@@ -2804,7 +2804,8 @@ function compactPage(step: StepRecord, task: Task): CrawlPage {
 }
 
 function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task, handoffOffered = false): CrawlPage {
-  const result = step.result
+  // A page whose fetch threw was stored without passing the verifier: it is judged here, against the task's contract.
+  const result = step.result === null || step.result.verification !== undefined ? step.result : { ...step.result, verification: verify((task.batch ?? task.crawl)?.verify, { ...step.result }) }
   const handoff = handoffOffered && handoffNeededIn(task, step) ? handoffRequestOf(step) : null
   const mode = task.mode
   // The same hints a scrape of this page would carry, from its stored result and routing audit.
@@ -2824,7 +2825,7 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task, handof
     ...(includeLinks ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),
-    ...(result === null || result === undefined ? {} : { verification: result.verification ?? { status: 'not_requested' } }),
+    ...(result === null ? {} : { verification: result.verification! }),
     ...(result?.file === undefined ? {} : { file: result.file }),
     ...(result?.actions === undefined ? {} : { actions: result.actions }),
     ...(result?.list === undefined ? {} : { list: result.list }),

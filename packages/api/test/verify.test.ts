@@ -108,6 +108,20 @@ describe('task verification on a request (ADR 0006)', () => {
     expect(byUrl[`${origin}/article`].evidenceRecord.verification).toMatchObject({ status: 'passed' })
   })
 
+  it('judges a batch page whose fetch threw against the contract, not as one sent without it', async () => {
+    const engine = engineWith({ channelsFor: mode => buildChannels(mode, { networkPolicy: policy }).filter(channel => channel.id === 'http').map(channel => Object.assign(Object.create(Object.getPrototypeOf(channel) as object) as typeof channel, channel, { fetch: async () => { throw new Error('the lane broke') } })) })
+    const started = await call(engine, 'POST', '/v1/batches', { urls: [`${origin}/article`], verify: passing })
+    const id = started.json.taskId ?? started.json.id
+    for (let i = 0; i < 200; i++) {
+      if (!['pending', 'running'].includes((await call(engine, 'GET', `/v1/batches/${id}`)).json.status)) break
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    const [item] = (await call(engine, 'GET', `/v1/batches/${id}/items?debug=true`)).json.items as Record<string, any>[]
+    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/1', reason: 'page_not_read', checks: [] } })
+    expect(validate(item!.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
+    expect(item!.evidenceRecord.verification).toMatchObject({ status: 'failed', reason: 'page_not_read', contractSha256: item!.verification.contractSha256 })
+  })
+
   it('is refused with its regex checks by a hosted server, which takes the others', async () => {
     const hosted = engineWith({ hosted: true })
     const refused = await call(hosted, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })
