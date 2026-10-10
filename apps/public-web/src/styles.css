@@ -467,8 +467,8 @@ input:checked + .row-mark { background: var(--orange); transform: scale(.875); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .product-panel, .output-panel, .guidance-panel { margin-top: 26px; padding: 31px 34px; border: 1px solid #dbe3ee; border-radius: 14px; background: #fff; box-shadow: 0 16px 46px rgba(17, 46, 96, .035); }
-.product-top, .output-head { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
-.product-top h3, .output-head h3, .guidance-panel h3 { margin: 7px 0 0; color: #14254a; font-size: 25px; letter-spacing: -.045em; }
+.product-top { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
+.product-top h3, .guidance-panel h3 { margin: 7px 0 0; color: #14254a; font-size: 25px; letter-spacing: -.045em; }
 .product-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 25px 0 0; border-top: 1px solid #e6edf5; }
 .product-field { min-height: 95px; padding: 19px 18px 16px 0; border-bottom: 1px solid #e6edf5; }
 .product-field:not(:nth-child(3n + 1)) { padding-left: 20px; border-left: 1px solid #e6edf5; }
@@ -484,12 +484,52 @@ input:checked + .row-mark { background: var(--orange); transform: scale(.875); }
 .copy-button { flex: none; padding: 10px 15px; border: 1px solid #cfdae9; border-radius: 8px; color: #28588e; background: #f7faff; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .copy-button:hover { border-color: #8db9e8; background: #eaf4ff; }
 .output-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.output-view-label { display: inline-flex; align-items: center; gap: 6px; color: #566b8c; font-size: 12px; font-weight: 700; }
-.output-view-select { padding: 7px 28px 7px 10px; border: 1px solid #cfdae9; border-radius: 8px; color: #28588e; background: #fff; font-weight: 700; cursor: pointer; }
+/* The result as a window: views as bracketed tabs and the actions in its bar, the content scrolling inside it (the
+   page stays short however long the page read was), and the saved file's name and size at its foot. Rules are the
+   ledgers' dotted lines. */
+.result-window { --window-dots: radial-gradient(circle, #b4c3d8 1px, transparent 1.45px); position: relative; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.window-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px 12px 16px; background: var(--window-dots) 0 100% / 8px 3px repeat-x; }
+.window-tabs { display: flex; flex-wrap: wrap; gap: 2px 4px; min-width: 0; }
+.window-tab { padding: 8px 4px; border: 0; border-radius: 6px; color: var(--muted); background: none; font: 600 12.5px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; }
+.window-tab::before, .window-tab::after { color: transparent; font-weight: 700; }
+.window-tab::before { content: "["; margin-right: .5ch; }
+.window-tab::after { content: "]"; margin-left: .5ch; }
+.window-tab:hover { color: var(--text); }
+.window-tab[aria-selected="true"] { color: var(--text); }
+.window-tab[aria-selected="true"]::before, .window-tab[aria-selected="true"]::after { color: var(--orange-ink); }
+.window-tab:focus-visible, .window-mode:focus-visible { outline: 2px solid #8db9e8; outline-offset: 1px; }
+.result-window .copy-button, .result-window .download-button { padding: 9px 12px; font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.window-note { margin: 0; padding: 10px 18px; color: #6c593d; background: #fff8ee; font-size: 12.5px; line-height: 1.6; }
+.window-body { position: relative; max-height: clamp(360px, 68vh, 760px); max-height: clamp(360px, 68svh, 760px); padding: 18px 20px; overflow: auto; }
+.window-body:focus-visible { outline: 2px solid #8db9e8; outline-offset: -2px; }
+.window-body > .ledger-view, .window-body > .readable-content, .window-body > .empty-content { margin-top: 0; }
+.window-body > .readable-content { padding-top: 0; border-top: 0; }
+.window-body .ledger-scroll { max-height: none; overflow: visible; -webkit-mask-image: none; mask-image: none; }
+.window-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px 10px 16px; background: var(--window-dots) 0 0 / 8px 3px repeat-x, #fbfcfe; }
+.window-stats { min-width: 0; margin: 0; color: #6a7b95; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.window-modes { display: flex; flex: none; gap: 2px; }
+.window-mode { padding: 6px 8px; border: 0; border-radius: 6px; color: var(--muted); background: none; font: 600 11.5px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.window-mode:hover { color: var(--text); }
+.window-mode[aria-pressed="true"] { color: var(--orange-ink); background: #fff1e8; }
+/* Markdown and JSON as received: numbered lines (the numbers are not part of a selection), the syntax dimmed. */
+.source-view { margin: 0; color: var(--text); font: 12.5px/18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; counter-reset: line; }
+.source-view code { font: inherit; }
+.source-line { display: grid; grid-template-columns: 4.5ch minmax(0, 1fr); column-gap: 2ch; counter-increment: line; }
+.source-line::before { content: counter(line); color: #b4c3d8; text-align: right; -webkit-user-select: none; user-select: none; }
+.source-text { min-width: 0; }
+.tok-mark { color: #9fb0c7; }
+.tok-heading { font-weight: 700; }
+.tok-url { color: #7d8ba3; }
+.tok-code, .tok-literal { color: var(--orange-ink); }
+.tok-key { color: #174f88; }
+.tok-string { color: #087b50; }
+/* The print head that builds the window (windowBuild.ts): two rows of noise glyphs over the line being printed,
+   under a dotted orange rule. */
+.build-head { position: absolute; top: 0; left: 0; right: 0; z-index: 2; height: 18px; padding: 0 16px; overflow: hidden; color: #9fb0c7; background: #fff; font: 11px/9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; pointer-events: none; }
+.build-head::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: 0; height: 3px; background: radial-gradient(circle, var(--orange-ink) 1.1px, transparent 1.5px) 0 50% / 7px 3px repeat-x; }
 .download-button { flex: none; padding: 10px 15px; border: 1px solid #bed4e9; border-radius: 8px; color: #174f88; background: #edf6ff; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .download-button:hover:not(:disabled) { border-color: #8db9e8; background: #dcefff; }
 .download-button:disabled, .copy-button:disabled { cursor: not-allowed; opacity: .5; }
-.output-explanation { margin: 24px 0 0; color: #566b8c; font-size: 13px; line-height: 1.6; }
 /* Fields, page info and links: evidence ledgers in the session sheets' grammar, on paper. A mark per line (✓ read,
    · not stated, : more than one value or a warning) heads it, in order; each line gives the value and, under it,
    where on the page it was read, as the download records it. */
@@ -529,7 +569,6 @@ input:checked + .row-mark { background: var(--orange); transform: scale(.875); }
 .link-path { color: #174f88; }
 a.link-target:hover .link-path { text-decoration: underline; text-underline-offset: 3px; }
 .ledger-notes li::before { content: ":"; display: inline-block; width: 2ch; color: #9b602b; font: 700 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.json-output { max-height: 620px; margin: 16px 0 0; padding: 20px; overflow: auto; border-radius: 8px; color: #d7e8ff; background: #0b224e; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .readable-content { margin-top: 27px; padding-top: 22px; border-top: 1px solid #e6edf5; color: #344967; font-size: 15px; line-height: 1.8; overflow-wrap: anywhere; }
 /* Cap line length per block so the divider above still spans the card. */
 .readable-content > * { max-width: 910px; }
@@ -552,7 +591,6 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .guidance-panel ul { max-width: 720px; margin: 0; padding-left: 20px; color: #344967; font-size: 14px; line-height: 1.7; }
 .guidance-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-top: 24px; }
 .guidance-link { color: #1d64ac; font-size: 13px; font-weight: 700; text-underline-offset: 3px; }
-.content-note { color: #966342; font-size: 13px; }
 
 /* How it works: three ruled steps beside a replay of recorded runs that shows them happening. */
 .how-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: end; gap: clamp(40px, 5vw, 72px); padding: 96px 32px 104px; }
@@ -796,11 +834,18 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .run-detail { padding: 32px 18px 48px; }
   .detail-head h2 { font-size: 32px; }
   .detail-head h2.is-url { font-size: 24px; }
-  .product-panel, .output-panel, .guidance-panel { padding: 22px 18px; }
-  .product-top, .output-head { align-items: flex-start; }
-  .output-head { flex-direction: column; gap: 18px; }
+  .product-panel, .guidance-panel { padding: 22px 18px; }
+  .product-top { align-items: flex-start; }
+  .window-bar { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; }
+  .window-tabs { flex-wrap: nowrap; gap: 0 2px; margin: 0 -4px; overflow-x: auto; scrollbar-width: none; }
+  .window-tab { padding: 8px 3px; font-size: 12px; }
+  .window-tab::before { margin-right: .25ch; }
+  .window-tab::after { margin-left: .25ch; }
   .output-actions { justify-content: flex-start; }
-  .product-top h3, .output-head h3, .guidance-panel h3 { font-size: 22px; }
+  .window-body { max-height: 64vh; max-height: 64svh; padding: 14px 12px; }
+  .window-foot { flex-wrap: wrap; padding: 10px 12px; }
+  .source-line { grid-template-columns: 3.5ch minmax(0, 1fr); column-gap: 1.4ch; }
+  .product-top h3, .guidance-panel h3 { font-size: 22px; }
   .product-state { padding: 7px 9px; font-size: 10px; }
   .product-grid { grid-template-columns: 1fr; }
   .product-field, .product-field:nth-child(2n) { min-height: 75px; padding: 15px 0; border-left: 0; }
