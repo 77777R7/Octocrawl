@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The Blog index (`/blog/`) is laid out like a publication's: the title alone, a row of category tabs (All Posts, AI Agents, AI Engineering, Web Extraction), the newest article large with its cover, category, byline and date, then the others as cards that name their category. Each tab is a link to its own page (`/blog/category/<slug>/`, `noindex, follow`), so the tabs work without a script. Each article's registry entry (`apps/public-web/scripts/blogPosts.mjs`) names its category.
+
 ## 0.4.0 — 2026-10-10
 
 The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `octocrawl-client`) at 0.4.0, the release ROADMAP's PA phase names once items 3, 7 and 8 have their real-site records (their code shipped in 0.3.1 and 0.3.2): everything below since 0.3.2 on 2026-10-09, among it a short page that names a refusal or a browser check judged a block, products a page's JSON-LD collection or `ItemList` declares read as a listing, a main region the page hides no longer taken for its content, and a vendor session that cannot be opened reported as the provider's failure.
