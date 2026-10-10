@@ -1,0 +1,53 @@
+{
+ "batchMarkdownSha256": {
+  "https://docs.python.org/3/tutorial/": {
+   "run1": "c19587eb3ead2ee85ef0a390725300d8faa841998edf367eac48d82234115441",
+   "run2": "c19587eb3ead2ee85ef0a390725300d8faa841998edf367eac48d82234115441",
+   "2026-10-09": "c19587eb3ead2ee85ef0a390725300d8faa841998edf367eac48d82234115441",
+   "allEqual": true
+  },
+  "https://docs.python.org/3/tutorial/appetite.html": {
+   "run1": "f48d422a48699e45489a66f8d8abbca58600b9d35e33f3bbdf758ba60025aed1",
+   "run2": "f48d422a48699e45489a66f8d8abbca58600b9d35e33f3bbdf758ba60025aed1",
+   "2026-10-09": "f48d422a48699e45489a66f8d8abbca58600b9d35e33f3bbdf758ba60025aed1",
+   "allEqual": true
+  },
+  "https://docs.python.org/3/tutorial/interpreter.html": {
+   "run1": "7796ececec1d7b2694653908dbca0bf7bf476c5f0f2ea4b6d496bdf713d182f3",
+   "run2": "7796ececec1d7b2694653908dbca0bf7bf476c5f0f2ea4b6d496bdf713d182f3",
+   "2026-10-09": "7796ececec1d7b2694653908dbca0bf7bf476c5f0f2ea4b6d496bdf713d182f3",
+   "allEqual": true
+  },
+  "https://docs.python.org/3/tutorial/introduction.html": {
+   "run1": "6c3bac043e0cf519e6f6dc867ea83c506312e73884cfe486a9a6896c1e7a6ecb",
+   "run2": "6c3bac043e0cf519e6f6dc867ea83c506312e73884cfe486a9a6896c1e7a6ecb",
+   "2026-10-09": "6c3bac043e0cf519e6f6dc867ea83c506312e73884cfe486a9a6896c1e7a6ecb",
+   "allEqual": true
+  },
+  "https://docs.python.org/3/tutorial/controlflow.html": {
+   "run1": "9b8db0f6659db02d25f4491b6c21dc2d0ddc13cfe0eb21d3e46b53a1b4a36df7",
+   "run2": "9b8db0f6659db02d25f4491b6c21dc2d0ddc13cfe0eb21d3e46b53a1b4a36df7",
+   "2026-10-09": "9b8db0f6659db02d25f4491b6c21dc2d0ddc13cfe0eb21d3e46b53a1b4a36df7",
+   "allEqual": true
+  },
+  "https://docs.python.org/3/tutorial/datastructures.html": {
+   "run1": "8d8fc73ab94212974cfaad35be7f31ae312c0ace09feee4ce5eafd5e26622509",
+   "run2": "8d8fc73ab94212974cfaad35be7f31ae312c0ace09feee4ce5eafd5e26622509",
+   "2026-10-09": "8d8fc73ab94212974cfaad35be7f31ae312c0ace09feee4ce5eafd5e26622509",
+   "allEqual": true
+  }
+ },
+ "chunks": {
+  "count": 47,
+  "per_url": {
+   "https://docs.python.org/3/tutorial/": 1,
+   "https://docs.python.org/3/tutorial/appetite.html": 1,
+   "https://docs.python.org/3/tutorial/interpreter.html": 6,
+   "https://docs.python.org/3/tutorial/introduction.html": 6,
+   "https://docs.python.org/3/tutorial/controlflow.html": 19,
+   "https://docs.python.org/3/tutorial/datastructures.html": 14
+  },
+  "largest_text_chars": 17212,
+  "chunkIdsEqualTo2026-10-09Example": true
+ }
+}

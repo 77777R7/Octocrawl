@@ -1,0 +1,110 @@
+{
+ "requestedUrl": "https://github.com/notifications",
+ "finalUrl": "https://github.com/notifications",
+ "snapshot": {
+  "rawBodySha256": "70848fdc96d51b3fb83be9ba5bd5d088bb6815a0eabd374dd895e95288e77899",
+  "artifacts": [],
+  "httpStatus": 200,
+  "contentType": "text/html; charset=utf-8"
+ },
+ "evidenceRecord": {
+  "schemaVersion": "w2l.evidence/1",
+  "requestedUrl": "https://github.com/notifications",
+  "finalUrl": "https://github.com/notifications",
+  "redirectChain": {
+   "urls": [
+    "https://github.com/notifications"
+   ],
+   "complete": false
+  },
+  "fetchedAt": "2026-10-09T15:34:54.114Z",
+  "httpStatus": 200,
+  "status": "success",
+  "reason": null,
+  "lane": "my_browser",
+  "robotsDecision": null,
+  "rawSha256": "70848fdc96d51b3fb83be9ba5bd5d088bb6815a0eabd374dd895e95288e77899",
+  "contentEncoding": null,
+  "outputSha256": {
+   "markdown": "b9ec9a3f26753d1e7de54ae74a3446823bd3d1503dcbaf068f3e942a622b3ce7",
+   "json": null
+  },
+  "extractor": {
+   "name": "extract-tf",
+   "version": "extract-tf/16",
+   "commit": null
+  },
+  "fieldEvidence": null,
+  "artifacts": [],
+  "proxy": null,
+  "identity": {
+   "userAgent": null,
+   "mode": "authed",
+   "contact": null,
+   "device": null,
+   "requestHeaders": []
+  },
+  "pageActions": null,
+  "access": {
+   "route": "user_browser",
+   "executor": "Chrome/154.0.8037.98",
+   "executorVersion": null,
+   "profile": null,
+   "externalCostUsd": 0,
+   "completion": "user_browser",
+   "egress": null,
+   "session": null,
+   "paidCalls": null,
+   "grant": null
+  }
+ },
+ "status": "success",
+ "failureReason": null,
+ "blockReason": null,
+ "budgetExceeded": null,
+ "lane": "my_browser",
+ "formats": [
+  "markdown"
+ ],
+ "markdown": "[removed: the account owner's notifications, 11448 characters]",
+ "document": "[removed]",
+ "metadata": {
+  "title": "Notifications",
+  "description": "GitHub is where people build software. More than 225 million people use GitHub to discover, fork, and contribute to over 800 million projects.",
+  "language": "en",
+  "keywords": null,
+  "robots": null,
+  "favicon": "https://github.githubassets.com/favicons/favicon-dark.png",
+  "canonicalUrl": null,
+  "ogTitle": "Build software better, together",
+  "ogDescription": "GitHub is where people build software. More than 225 million people use GitHub to discover, fork, and contribute to over 800 million projects.",
+  "ogUrl": "https://github.com/",
+  "ogImage": "https://github.githubassets.com/assets/github-logo-55c5b9a1fe52.png",
+  "ogSiteName": "GitHub",
+  "scrapeId": "00522ce0-1c14-4588-81e7-943b6cbda70f",
+  "sourceURL": "https://github.com/notifications",
+  "url": "https://github.com/notifications",
+  "statusCode": 200,
+  "contentType": "text/html; charset=utf-8",
+  "proxyUsed": null,
+  "timezone": null,
+  "concurrencyLimited": false,
+  "concurrencyQueueDurationMs": 0
+ },
+ "truncated": false,
+ "truncatedAt": null,
+ "usage": {
+  "wallMs": 7005.381249999999,
+  "bytesWire": null,
+  "bytesDecompressed": 909173,
+  "requestCount": 0,
+  "attemptCount": 0,
+  "contentTokens": 2863,
+  "browserMs": 4038,
+  "externalCostUsd": 0,
+  "totalMs": 7005.381249999999
+ },
+ "channelsTried": [
+  "my_browser"
+ ]
+}

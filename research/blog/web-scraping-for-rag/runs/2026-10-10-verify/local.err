@@ -1,0 +1,2 @@
+octocrawl: outbound https: and http: requests use the environment proxy 127.0.0.1:7890; loopback and NO_PROXY (127.0.0.1, localhost) go direct. W2L_PROXY=off ignores the proxy variables.
+exit=0
