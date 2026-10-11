@@ -10,7 +10,7 @@ Version 2, updated 2026-09-29, is in git history. What it said below stands unle
 
 - **What Octocrawl is.** It turns a list of URLs into a table where every row traces back to its page. It runs on your machine or as a hosted service.
 - **Now.** Enhanced access ([PA](#pa--enhanced-access)) comes first since 2026-10-09: reaching the pages that block a plain request. Hosted Octocrawl ([PH](#ph--hosted-octocrawl)) phase 1 runs beside it, with P2's remaining items.
-- **PA on 2026-10-09.** Items 1, 2 and 8 are accepted. Item 3 is merged, item 7 is built, and item 4 is under way. Item 5 is built but not adopted. Item 6 is not started. Item 9 has its first window recorded. Items 10 and 11 were added on 2026-10-10 and are not started.
+- **PA on 2026-10-09.** Items 1, 2 and 8 are accepted. Item 3 is merged, item 7 is built, and item 4 is under way. Item 5 is built but not adopted. Item 6 is not started. Item 9 has its first window recorded. Items 10 and 11 were added on 2026-10-10. Item 11 was accepted on 2026-10-11.
 - **Next (from 2026-10-10).** 0.4.0 and 0.4.1 were published on 2026-10-10. Item 10, task verification apart from the fetch status, comes first, then item 11, readiness of the region a task needs. Item 4 finishes what is in flight. New paid configurations and item 6 wait until 10 and 11 are accepted.
 - **The bar.** On item 1's frozen task set, reach at least the best competitor's verified completion, with no more false successes.
 - **Success at week 16 (2027-01-17).** Three paying users or ten weekly active users.
@@ -213,7 +213,19 @@ Decided 2026-10-05: enhanced fetching as a product capability, built on maintain
 - 8: accepted (#297) on ten pages behind the person's login, on macOS; Windows and Linux not checked. Round 1 read 9 of 10 and verified 4: five checks named text the Markdown drops ([record](research/access/runs/2026-10-09-my-browser-final-26dba3e.md), kept in the denominator). Round 2, with checks revised from round 1's structure and not its content, read 10 of 10 and verified 9 ([record](research/access/runs/2026-10-09-my-browser-final-round2-b6c7524.md)). The tenth, a Lark sheet, was `success` with the text of a help panel the page hides. The lane now reads a page's content as it shows (#315). A sheet's cells, drawn on a canvas, are not in the page to read. A page not read says why (#292, #303, #308).
 - 9: window 1 recorded (#291, [record](research/access/runs/2026-10-09-pa9-w1-baseline-3cde6e8.md)). On the 50 frozen tasks Octocrawl verified 2 by default and 6 by its best route, Firecrawl Cloud 35 and ZenRows 29; on all 92, 36, 38, 70 and 58, with 9, 7, 12 and 19 false successes. Octocrawl's best route through a residential exit verified 8 of the 35 tasks Firecrawl verified and it did not ([record](research/access/runs/2026-10-09-pa9-w1-octocrawl-best-residential-094c6d6.md)). A second window on another day is still to run.
 - 10: not started; first in PA's order from 2026-10-10.
-- 11: not started; after 10.
+- 11: accepted on 2026-10-11, on four records, all proxied. Built in #363 and #369 under [ADR 0007](docs/adr/0007-region-readiness.md) (#358). Every result says `readiness`: `ready`, `not_loaded`, `not_extracted` or `not_served`, with its basis and how long it waited. With a task contract, the browser lanes wait up to 10 s for its region on the live page.
+  - All 92 tasks with each task's contract, the ladder reading readiness (#370, #373): 55 verified and 5 false successes, against 53 and 8 in the same day's control run ([record](research/access/runs/2026-10-11-pa11-acceptance-ladder-steel-1a75770.md), [control](research/access/runs/2026-10-11-pa11-acceptance-steel-40b2558.md)).
+    - Every `ready` is a verified task; each false success is `not_served`. The product's verification agreed with the runner's on 92 of 92.
+    - 35 paid calls, $0.0213 charged by the ledger; 10 verified tasks took a paid call's page as the answer. Of the six tasks the new reading sent on to Steel, five found their data missing there too.
+    - Of the net two gained, T006 is the ladder's. T051 and T052 met no challenge this time and T031 was lost; neither is isolated.
+  - The four pages:
+    - WSJ's market data: verified after its region held in 1.2 s.
+    - Tesla's inventory shell: `not_loaded` (`little_text`), told apart from a page not served.
+    - OECD's table: `not_served` (`region_absent`). It appears only after a click that no signal on the page shows.
+    - x.com: read before it had loaded on 2026-10-10, it was read after the my-browser lane's settle wait and verified ([record](research/access/runs/2026-10-11-pa11-my-browser-f1432da.md)).
+  - No regression: item 1's 25 healthy tasks verified 25 (23 in the control run). The real-site batches passed 180 of 207 cases, against 177 at `3e103bc5`. One case is worse, AR05, a list step with no contract; why is not isolated ([record](research/parity/runs/2026-10-11-pa11-health-all-proxied-49033bb0.md)).
+  - Not shown: a page the region wait itself kept from being read early. L3 was read early in a batch without a contract. Run again with one, its region held on the first two reads, so the wait made no difference there.
+  - Open: T073 is `not_extracted`, its region held on Steel's page and no main content extracted. T076 skipped Steel after its robots.txt rule was set aside on the local rung, inferred from its result; the runner keeps no ladder trace.
 
 - The exit's no-regression check, 2026-10-10: all 207 real-site cases at `3e103bc5`, proxied. 177 passed, against 182 and 181 in the last full runs (`f052375`). Each of the seven that passed there and failed here fails the same way on `f052375` today, so none is a regression of the code ([record](research/parity/runs/2026-10-10-health-all-proxied-3e103bc5.md)). Found there: a crawl's status poll after a mid-run `/pages` read can be reset (`ECONNRESET`), on both commits.
 
