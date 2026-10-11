@@ -20,7 +20,7 @@ npx octocrawl serve                                  # keep it running: the API 
 claude mcp add octocrawl -- npx -y @octocrawl/mcp    # the published stdio server, a client of that API
 ```
 
-**Self-hosted for others**: `npx octocrawl serve --hosted --token <token>` listens on all interfaces behind a bearer token, with private addresses, robots overrides, saved logins, handoff and non-HTTPS webhooks refused; point `@octocrawl/mcp` at it with `--base-url` and `--token` (or `W2L_API_URL` and `W2L_API_TOKEN`).
+**Self-hosted for others**: `npx octocrawl serve --hosted --token <token>` listens on all interfaces behind a bearer token, with private addresses, robots overrides, saved logins, handoff and non-HTTPS webhooks refused; point `@octocrawl/mcp` at it with `--base-url` and `--token` (or `W2L_API_URL` and `W2L_API_TOKEN`). [Docker Compose](self-host-docker.md) runs the API in a container, with Chromium.
 
 ## Ports
 
