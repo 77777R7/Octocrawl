@@ -26,6 +26,7 @@ function fakeIdentity() {
     async signInWithIdp(requestUri, sessionId) { calls.push({ method: 'signInWithIdp', args: [requestUri, sessionId] }); if (idp instanceof Error) throw idp; return idp },
     async sendEmailLink(email, continueUrl) { calls.push({ method: 'sendEmailLink', args: [email, continueUrl] }) },
     async signInWithEmailLink(email, oobCode) { calls.push({ method: 'signInWithEmailLink', args: [email, oobCode] }); if (link instanceof Error) throw link; return link },
+    async linkIdp(idToken, pending, requestUri) { calls.push({ method: 'linkIdp', args: [idToken, pending, requestUri] }) },
   }
   return { identity, calls, answer: (next: SignedIn | Error) => { idp = next }, linkAnswer: (next: SignedIn | Error) => { link = next } }
 }
@@ -88,6 +89,49 @@ describe('signing in with GitHub or Google', () => {
     fake.answer(new SignInRefused('invalid', 'INVALID_IDP_RESPONSE : bad_verification_code for ada@example.org'))
     await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: await begin() } })
     expect(lines.at(-1)).toMatchObject({ event: 'w2l_auth', provider: 'google.com', outcome: 'invalid', reason: 'INVALID_IDP_RESPONSE : bad_verification_code for <email>' })
+  })
+
+  it('keeps a GitHub sign-in for an address that has an account, and links it when the account signs in as before', async () => {
+    const { url, fake, accounts, lines } = await start()
+    const begin = async (provider: string) => (await fetch(`${url}/auth/${provider}`, { redirect: 'manual' })).headers.getSetCookie()[0]!.split(';')[0]!
+    const pending = { provider: 'github.com' as const, email: 'ada@example.org', accessToken: 'gho_secret_token' }
+    fake.answer(new SignInRefused('other_provider', 'this email already signs in another way', pending))
+    const refused = await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: await begin('github') } })
+    expect([refused.status, refused.headers.get('location')]).toEqual([303, '/signin/?error=link_needed&provider=github'])
+    expect(cookies(refused).w2l_session).toBeUndefined()
+    const waiting = cookies(refused).w2l_link!
+    expect(refused.headers.getSetCookie().find(line => line.startsWith('w2l_link='))).toMatch(/; Path=\/; HttpOnly; SameSite=Lax; Max-Age=1800$/)
+    // The token is sealed, not just signed: the cookie does not carry it, nor the address, readably.
+    expect(Buffer.from(waiting, 'base64url').toString('latin1')).not.toMatch(/gho_secret_token|ada@example/)
+    // A sign-in as a different address keeps its own account and links nothing.
+    fake.answer({ uid: 'google-user-0002', email: 'bob@example.org', provider: 'google.com', idToken: 'bob-token' })
+    const other = await fetch(`${url}/__/auth/handler?code=def`, { redirect: 'manual', headers: { cookie: `${await begin('google')}; w2l_link=${waiting}` } })
+    expect(other.headers.get('location')).toBe('/account/')
+    expect(fake.calls.some(call => call.method === 'linkIdp')).toBe(false)
+    expect(cookies(other).w2l_link).toBe('')
+    // The same address, signed in with Google as before: GitHub is linked to that account, and the account page says so.
+    fake.answer({ uid: 'google-user-0001', email: 'Ada@example.org', provider: 'google.com', idToken: 'ada-token' })
+    const linked = await fetch(`${url}/__/auth/handler?code=ghi`, { redirect: 'manual', headers: { cookie: `${await begin('google')}; w2l_link=${waiting}` } })
+    expect([linked.status, linked.headers.get('location')]).toEqual([303, '/account/?linked=github'])
+    expect(fake.calls.at(-1)).toEqual({ method: 'linkIdp', args: ['ada-token', pending, `${url}/__/auth/handler`] })
+    expect(cookies(linked).w2l_link).toBe('')
+    expect(accounts.users.get('google-user-0001')?.providers).toEqual(new Set(['google.com', 'github.com']))
+    expect(lines).toContainEqual(expect.objectContaining({ event: 'w2l_auth', step: 'link', provider: 'github.com', outcome: 'ok' }))
+    // A forged or tampered cookie links nothing.
+    const linksBefore = fake.calls.filter(call => call.method === 'linkIdp').length
+    await fetch(`${url}/__/auth/handler?code=jkl`, { redirect: 'manual', headers: { cookie: `${await begin('google')}; w2l_link=${waiting.slice(0, -4)}AAAA` } })
+    expect(fake.calls.filter(call => call.method === 'linkIdp')).toHaveLength(linksBefore)
+  })
+
+  it('links a waiting GitHub sign-in when the account signs in with an email link', async () => {
+    const { url, fake, accounts } = await start()
+    fake.answer(new SignInRefused('other_provider', 'linked', { provider: 'github.com', email: 'ada@example.org', accessToken: 'gho_token' }))
+    const oauth = (await fetch(`${url}/auth/github`, { redirect: 'manual' })).headers.getSetCookie()[0]!.split(';')[0]!
+    const waiting = cookies(await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: oauth } })).w2l_link!
+    fake.linkAnswer({ uid: 'email-user-0001', email: 'ada@example.org', provider: 'emailLink', idToken: 'ada-token' })
+    const signed = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url, cookie: `w2l_link=${waiting}` }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
+    expect(signed.headers.get('location')).toBe('/account/?linked=github')
+    expect(accounts.users.get('email-user-0001')?.providers).toEqual(new Set(['emailLink', 'github.com']))
   })
 
   it('keeps the way back on this site: another host or a protocol-relative path is the account page', () => {
@@ -201,15 +245,23 @@ describe('Firebase\'s REST API', () => {
     // Google is asked for a code, which reaches the server; its default ID-token flow puts the token in the fragment.
     expect(sent.shift()!.body).toEqual({ providerId: 'google.com', continueUri: 'https://octocrawl.dev/__/auth/handler', authFlowType: 'CODE_FLOW', oauthScope: '{"google.com":"openid email profile"}' })
     answers.push({ status: 200, body: { localId: 'uid-000000001', idToken: 't', email: 'ada@example.org', providerId: 'google.com' } })
-    expect(await toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=1', 'sid')).toEqual({ uid: 'uid-000000001', email: 'ada@example.org', provider: 'google.com' })
-    expect(sent[0]).toEqual({ url: 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=AIzaSyTestKey0123456789abcdef', body: { requestUri: 'https://octocrawl.dev/__/auth/handler?code=1', sessionId: 'sid', returnSecureToken: true } })
+    expect(await toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=1', 'sid')).toEqual({ uid: 'uid-000000001', email: 'ada@example.org', provider: 'google.com', idToken: 't' })
+    expect(sent[0]).toEqual({ url: 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=AIzaSyTestKey0123456789abcdef', body: { requestUri: 'https://octocrawl.dev/__/auth/handler?code=1', sessionId: 'sid', returnSecureToken: true, returnIdpCredential: true } })
     // Without an ID token (a second factor pending) there is no sign-in.
     answers.push({ status: 200, body: { localId: 'uid-000000001', email: 'ada@example.org', providerId: 'github.com', mfaPendingCredential: 'x' } })
     await expect(toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=3', 'sid')).rejects.toMatchObject({ code: 'invalid' })
     answers.push({ status: 400, body: { error: { message: 'FEDERATED_USER_ID_ALREADY_LINKED' } } })
     await expect(toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=4', 'sid')).rejects.toMatchObject({ code: 'other_provider' })
     answers.push({ status: 200, body: { needConfirmation: true, email: 'ada@example.org', providerId: 'github.com' } })
-    await expect(toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=2', 'sid')).rejects.toMatchObject({ code: 'other_provider' })
+    await expect(toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=2', 'sid')).rejects.toMatchObject({ code: 'other_provider', pending: undefined })
+    // With the provider's token in the answer, the credential can wait to be linked; linking sends it with the account's ID token.
+    answers.push({ status: 200, body: { needConfirmation: true, email: 'Ada@Example.org', providerId: 'github.com', oauthAccessToken: 'gho_token' } })
+    await expect(toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=5', 'sid')).rejects.toMatchObject({ code: 'other_provider', pending: { provider: 'github.com', email: 'ada@example.org', accessToken: 'gho_token' } })
+    answers.push({ status: 200, body: { localId: 'uid-000000001', idToken: 't2' } })
+    await toolkit.linkIdp('id-token', { provider: 'github.com', email: 'ada@example.org', accessToken: 'gho_token' }, 'https://octocrawl.dev/__/auth/handler')
+    expect(sent.at(-1)!.body).toEqual({ idToken: 'id-token', postBody: 'access_token=gho_token&providerId=github.com', requestUri: 'https://octocrawl.dev/__/auth/handler', returnSecureToken: true })
+    answers.push({ status: 400, body: { error: { message: 'FEDERATED_USER_ID_ALREADY_LINKED' } } })
+    await expect(toolkit.linkIdp('id-token', { provider: 'github.com', email: 'ada@example.org', accessToken: 'gho_token' }, 'https://octocrawl.dev/__/auth/handler')).rejects.toMatchObject({ code: 'other_provider' })
     answers.push({ status: 400, body: { error: { message: 'EXPIRED_OOB_CODE' } } })
     await expect(toolkit.signInWithEmailLink('ada@example.org', 'code')).rejects.toMatchObject({ code: 'expired' })
     answers.push({ status: 400, body: { error: { message: 'INVALID_EMAIL' } } })
