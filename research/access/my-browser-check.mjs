@@ -31,6 +31,7 @@ import { execSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { platform, release } from 'node:os'
+import { Agent, fetch } from 'undici'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../..')
@@ -68,8 +69,11 @@ function judge(p, md) {
   }
 }
 
+// A page in the person's Chrome may take the read's whole wait (ten minutes by default): no client timeout cuts it first.
+const patient = new Agent({ headersTimeout: 0, bodyTimeout: 0 })
+
 async function call(method, path, body) {
-  const res = await fetch(`${api}${path}`, { method, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+  const res = await fetch(`${api}${path}`, { method, dispatcher: patient, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   const json = await res.json().catch(() => null)
   return { status: res.status, json }
 }
@@ -93,9 +97,12 @@ const productOf = (answer) => typeof answer?.verification?.status === 'string' &
 if (contract) {
   for (const task of tasks) {
     console.log(`${task.id}: its own scrape with its contract; Chrome asks for this site.`)
-    const answer = await call('POST', '/v1/scrape', { url: task.url, ...asked, formats: ['markdown'], verify: { checks: task.predicates } })
+    const answer = await call('POST', '/v1/scrape', { url: task.url, ...asked, formats: ['markdown'], verify: { checks: task.predicates }, debug: true })
     const md = typeof answer.json?.markdown === 'string' ? answer.json.markdown : ''
     await writeFile(join(outDir, `${task.id}.md`), md)
+    // How the read waited (its settle, loading and region waits), beside the page in the git-ignored run directory.
+    const waits = (answer.json?.trace ?? []).filter((event) => ['steady_wait', 'loading_wait', 'region_wait'].includes(event.event))
+    await writeFile(join(outDir, `${task.id}.waits.json`), JSON.stringify({ waits, readiness: answer.json?.readiness ?? null, verification: answer.json?.verification ?? null }, null, 2))
     const passed = task.predicates.map((p) => judge(p, md))
     results.push({
       task, route: 'scrape', status: answer.json?.status ?? `HTTP ${answer.status}`, reason: answer.json?.failureReason ?? answer.json?.blockReason ?? answer.json?.error ?? null, lane: answer.json?.lane ?? null,
