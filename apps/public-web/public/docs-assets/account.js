@@ -5,8 +5,6 @@
   const params = new URLSearchParams(location.search)
   const safeNext = (value) => (typeof value === 'string' && /^\/(?![/\\])[\x21-\x5b\x5d-\x7e]{0,300}$/.test(value) ? value : '/dashboard/')
   const say = (element, text, error = false) => { element.textContent = text; element.classList.toggle('is-error', error) }
-  const day = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : '')
-  const number = (n) => Number(n).toLocaleString('en-US')
 
   const ERRORS = {
     cancelled: 'Sign-in was cancelled. Try again when you are ready.',
