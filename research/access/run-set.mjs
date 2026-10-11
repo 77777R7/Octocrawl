@@ -66,7 +66,9 @@
 //   rungs skipped  (octocrawl) the rungs the answer's ladder passed over (its ladderTrace's ladder_channel_skipped events),
 //                  each as its channel, provider and the rule that held it back (wait_for, not_extracted, robots_override,
 //                  no_price_ceiling, budget; other, with the ladder's words, for a reason this runner does not name).
-//                  So a task that stopped short of a paid rung says why. null when the answer carries no ladder trace.
+//                  So a task the ladder held back from a rung says why. A rung taken out before the ladder ran
+//                  (ladder_channels_filtered) or refused by its identity check is not among them. null when the answer carries
+//                  no ladder trace.
 //   competitors    the same tasks, the same Markdown predicates and the same counts. A competitor's own claim stands
 //                  for `status`: Firecrawl's success with the target's 2xx (metadata.statusCode) is `success`; its
 //                  success with another status, or no success, is `failed` with the reason it gave (an API that names the
@@ -476,6 +478,8 @@ if (recordFile !== undefined) {
     const byRule = new Map()
     for (const x of r) for (const s of x.observed.ladderSkips ?? []) byRule.set(s.rule, [...(byRule.get(s.rule) ?? []), `${x.taskId} (${s.channel}${s.vendorId ? `, ${s.vendorId}` : ''}${s.rule === 'other' && s.reason !== null ? `: ${s.reason}` : ''})`])
     const unknown = r.filter((x) => !Array.isArray(x.observed.ladderSkips)).length
+    // No attempt with a ladder trace says nothing of skips: not known, not none.
+    if (unknown === r.length) return `- Rungs the ladder passed over (${temp}): not known, no attempt carries a ladder trace`
     return `- Rungs the ladder passed over (${temp}, its \`ladder_channel_skipped\` events): ${byRule.size === 0 ? 'none' : [...byRule].map(([rule, at]) => `${rule} on ${at.join(', ')}`).join('; ')}${unknown === 0 ? '' : `; not known on ${unknown} attempt${unknown === 1 ? '' : 's'} without a ladder trace`}`
   }
   const paidCell = (calls) => calls === null || calls === undefined ? 'unknown' : calls.map((c) => `${c.provider}: ${c.outcome ?? 'no page'}${c.reason ? `/${c.reason}` : ''}${c.answer ? ' (answer)' : ''}`).join('; ')
