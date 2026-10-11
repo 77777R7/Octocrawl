@@ -385,6 +385,12 @@ ${card('olivia-rodrigo', 'Olivia Rodrigo', 'Oct 11 - May 10 2027', 101864867)}
     expect(out.mainHtml).toContain('Metallica')
     expect(out.mainHtml).toContain('Olivia Rodrigo')
     expect(out.mainHtml).not.toContain('Sign In')
+    // Cards with no h1 to name them may sit beside a wall: they are a last resort, which the lanes check for one.
+    expect(out.lastResort).toBe(true)
+    const wall = extractTf.extract(`<!doctype html><html><head><title>Sign in</title></head><body><div class="auth"><h2>Sign in to see your orders</h2>
+<form action="/login" method="post"><input name="email" type="email"><input name="password" type="password"><button>Sign in</button></form></div>
+<h2>Popular right now</h2><ul class="grid">${['Stainless steel water bottle', 'Wireless noise cancelling earbuds', 'Ergonomic mesh office chair'].map((name, i) => `<li class="card"><a href="/p/${i}">${name}</a><span>$${19 + i}.99</span><span>Ships tomorrow</span></li>`).join('')}</ul></body></html>`)
+    expect(wall).toMatchObject({ escalate: false, lastResort: true })
   })
 
   it('keeps a home page of linked cards with short descriptions', () => {
