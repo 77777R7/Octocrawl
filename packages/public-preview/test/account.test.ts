@@ -22,6 +22,7 @@ const identity: IdentityProvider = {
   async signInWithIdp() { return { uid: 'account-0001', email: 'ada@example.org', provider: 'github.com' } },
   async sendEmailLink() {},
   async signInWithEmailLink() { return { uid: 'account-0001', email: 'ada@example.org', provider: 'emailLink' } },
+  async linkIdp() {},
 }
 
 async function start(now = new Date('2026-10-11T08:00:00Z')) {

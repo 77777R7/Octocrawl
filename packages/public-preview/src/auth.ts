@@ -12,10 +12,14 @@
  *   POST /auth/logout                 ends the session
  *   GET  /api/me                      who is signed in, if anyone
  *
+ * Firebase keeps one account per email address. A GitHub sign-in whose address already has an account (made with
+ * Google or an email link) is not refused for good: its credential waits, encrypted in a short cookie, until the visitor
+ * signs in the way they did before, in the same browser, with the same address; then GitHub is linked to that account.
+ *
  * A sign-in ends in a session: a random id in an HttpOnly cookie, kept in Firestore under its HMAC with the account's
  * uid (Firebase's localId, which hostedCredits.ts keys credits by). Accounts are recorded in `users/{uid}`.
  */
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { metadataAccessToken } from './quota.js'
 import type { Logger } from './site.js'
@@ -27,13 +31,20 @@ export interface SignedIn {
   uid: string
   email: string | null
   provider: Provider
+  /** Firebase's ID token for this sign-in, used only to link a waiting way of signing in to the account. */
+  idToken?: string
+  /** Ways of signing in linked to the account during this sign-in, recorded with `provider`. */
+  linked?: Provider[]
 }
+
+/** A provider's credential for an address that already has an account, waiting to be linked to it. */
+export interface PendingLink { provider: 'github.com' | 'google.com'; email: string; accessToken: string }
 
 /** Why a sign-in did not complete, as the page shows it. */
 export type SignInError = 'cancelled' | 'other_provider' | 'expired' | 'invalid' | 'unavailable'
 
 export class SignInRefused extends Error {
-  constructor(readonly code: SignInError, message: string) { super(message) }
+  constructor(readonly code: SignInError, message: string, readonly pending?: PendingLink) { super(message) }
 }
 
 export interface IdentityProvider {
@@ -41,6 +52,8 @@ export interface IdentityProvider {
   signInWithIdp(requestUri: string, sessionId: string): Promise<SignedIn>
   sendEmailLink(email: string, continueUrl: string): Promise<void>
   signInWithEmailLink(email: string, oobCode: string): Promise<SignedIn>
+  /** Adds a provider's credential to the account the ID token belongs to. */
+  linkIdp(idToken: string, link: PendingLink, requestUri: string): Promise<void>
 }
 
 /** Firebase Authentication's REST API with the project's web API key (public: Firebase puts it in every web page). */
@@ -57,13 +70,19 @@ export class IdentityToolkit implements IdentityProvider {
   }
   async signInWithIdp(requestUri: string, sessionId: string): Promise<SignedIn> {
     const body = await this.call('accounts:signInWithIdp', { requestUri, sessionId, returnSecureToken: true }) as
-      { localId?: string; idToken?: string; email?: string; providerId?: string; needConfirmation?: boolean; errorMessage?: string }
-    // The address already belongs to an account that signs in another way (Firebase links one account per email).
-    if (body.needConfirmation) throw new SignInRefused('other_provider', 'this email already signs in another way')
+      { localId?: string; idToken?: string; email?: string; providerId?: string; needConfirmation?: boolean; errorMessage?: string; oauthAccessToken?: string }
+    // The address already belongs to an account that signs in another way (Firebase links one account per email). The
+    // provider's token comes with the answer, so the way can be linked once the visitor signs in as before.
+    if (body.needConfirmation) {
+      const pending = body.oauthAccessToken && body.email && (body.providerId === 'github.com' || body.providerId === 'google.com')
+        ? { provider: body.providerId, email: body.email.toLowerCase(), accessToken: body.oauthAccessToken } as PendingLink
+        : undefined
+      throw new SignInRefused('other_provider', 'this email already signs in another way', pending)
+    }
     if (body.errorMessage) throw new SignInRefused('cancelled', body.errorMessage)
     // No ID token means the sign-in is not complete (a second factor pending, say): no session for it.
     if (!body.localId || !body.idToken || (body.providerId !== 'github.com' && body.providerId !== 'google.com')) throw new SignInRefused('invalid', 'Firebase gave no account')
-    return { uid: body.localId, email: body.email ?? null, provider: body.providerId }
+    return { uid: body.localId, email: body.email ?? null, provider: body.providerId, idToken: body.idToken }
   }
   async sendEmailLink(email: string, continueUrl: string) {
     await this.call('accounts:sendOobCode', { requestType: 'EMAIL_SIGNIN', email, continueUrl, canHandleCodeInApp: true })
@@ -71,7 +90,12 @@ export class IdentityToolkit implements IdentityProvider {
   async signInWithEmailLink(email: string, oobCode: string): Promise<SignedIn> {
     const body = await this.call('accounts:signInWithEmailLink', { email, oobCode }) as { localId?: string; idToken?: string; email?: string }
     if (!body.localId || !body.idToken) throw new SignInRefused('invalid', 'Firebase gave no account')
-    return { uid: body.localId, email: body.email ?? email, provider: 'emailLink' }
+    return { uid: body.localId, email: body.email ?? email, provider: 'emailLink', idToken: body.idToken }
+  }
+  async linkIdp(idToken: string, link: PendingLink, requestUri: string) {
+    const postBody = new URLSearchParams({ access_token: link.accessToken, providerId: link.provider }).toString()
+    const body = await this.call('accounts:signInWithIdp', { idToken, postBody, requestUri, returnSecureToken: true }) as { localId?: string; needConfirmation?: boolean }
+    if (!body.localId || body.needConfirmation) throw new SignInRefused('invalid', 'Firebase did not link the provider')
   }
   private async call(method: string, payload: unknown): Promise<unknown> {
     const response = await this.fetcher(`https://identitytoolkit.googleapis.com/v1/${method}?key=${this.apiKey}`, {
@@ -103,7 +127,7 @@ export class MemoryAccountStore implements AccountStore {
   readonly sessions = new Map<string, Session & { expiresAt: Date }>()
   async signIn(user: SignedIn, sessionHash: string, expiresAt: Date, now: Date) {
     const known = this.users.get(user.uid)
-    this.users.set(user.uid, { email: user.email ?? known?.email ?? null, providers: new Set([...(known?.providers ?? []), user.provider]), createdAt: known?.createdAt ?? now, lastSignInAt: now })
+    this.users.set(user.uid, { email: user.email ?? known?.email ?? null, providers: new Set([...(known?.providers ?? []), user.provider, ...(user.linked ?? [])]), createdAt: known?.createdAt ?? now, lastSignInAt: now })
     this.sessions.set(sessionHash, { uid: user.uid, email: user.email, expiresAt })
   }
   async session(sessionHash: string, now: Date) {
@@ -133,7 +157,7 @@ export class FirestoreAccountStore implements AccountStore {
           // The first sign-in time is kept (the smaller wins), and each way of signing in is added once.
           updateTransforms: [
             { fieldPath: 'createdAtMs', minimum: { integerValue: String(now.getTime()) } },
-            { fieldPath: 'providers', appendMissingElements: { values: [{ stringValue: user.provider }] } },
+            { fieldPath: 'providers', appendMissingElements: { values: [user.provider, ...(user.linked ?? [])].map(stringValue => ({ stringValue })) } },
           ],
         },
         {
@@ -179,6 +203,9 @@ export const SESSION_COOKIE = 'w2l_session'
 const OAUTH_COOKIE = 'w2l_oauth'
 const EMAIL_COOKIE = 'w2l_signin_email'
 const ACCOUNT_HINT_COOKIE = 'w2l_account'
+const LINK_COOKIE = 'w2l_link'
+/** How long a waiting credential is kept: time to sign in the other way, or to ask for and open an email link. */
+const LINK_SECONDS = 1_800
 export const SESSION_DAYS = 30
 /** Sign-in links one network address, or one email address, may ask for an hour on one instance: a typo and a retry. */
 const EMAIL_LINKS_PER_HOUR = 3
@@ -205,6 +232,22 @@ function verify(secret: string, purpose: string, value: string | null): string |
   const expected = Buffer.from(sign(secret, purpose, payload).slice(at + 1))
   const given = Buffer.from(value.slice(at + 1))
   return expected.length === given.length && timingSafeEqual(expected, given) ? payload : null
+}
+/** AES-256-GCM under a key drawn from the secret: the provider's token is the visitor's own, but stays unreadable in the cookie. */
+function seal(secret: string, value: string): string {
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', createHmac('sha256', secret).update('link-cookie').digest(), iv)
+  const sealed = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
+  return Buffer.concat([iv, cipher.getAuthTag(), sealed]).toString('base64url')
+}
+function unseal(secret: string, value: string | null): string | null {
+  if (value === null || !/^[A-Za-z0-9_-]{40,4000}$/.test(value)) return null
+  try {
+    const raw = Buffer.from(value, 'base64url')
+    const decipher = createDecipheriv('aes-256-gcm', createHmac('sha256', secret).update('link-cookie').digest(), raw.subarray(0, 12))
+    decipher.setAuthTag(raw.subarray(12, 28))
+    return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8')
+  } catch { return null }
 }
 export function sessionHash(secret: string, id: string): string { return createHmac('sha256', secret).update(`session:${id}`).digest('hex') }
 
@@ -273,6 +316,27 @@ export function createAuthRoutes(options: AuthOptions) {
     return true
   }
 
+  /** Links a waiting way of signing in when this sign-in is the same address's account signed in another way. A link
+   * that fails, or does not match, still lets the sign-in through; the cookie goes either way. */
+  async function linkWaiting(req: IncomingMessage, origin: string, user: SignedIn): Promise<SignedIn> {
+    const raw = unseal(options.secret, cookieValue(req, LINK_COOKIE))
+    if (raw === null) return user
+    let pending: (PendingLink & { e: number }) | null = null
+    try { pending = JSON.parse(raw) } catch { pending = null }
+    if (pending === null || typeof pending.accessToken !== 'string' || !(pending.e > now().getTime()) || pending.provider === user.provider || user.email?.toLowerCase() !== pending.email || !user.idToken) {
+      log({ event: 'w2l_auth', step: 'link', provider: pending?.provider ?? 'unknown', outcome: 'skipped' })
+      return user
+    }
+    try {
+      await options.identity.linkIdp(user.idToken, { provider: pending.provider, email: pending.email, accessToken: pending.accessToken }, `${origin}/__/auth/handler`)
+      log({ event: 'w2l_auth', step: 'link', provider: pending.provider, outcome: 'ok' })
+      return { ...user, linked: [pending.provider] }
+    } catch (error) {
+      log({ event: 'w2l_auth', step: 'link', provider: pending.provider, outcome: error instanceof SignInRefused ? error.code : 'unavailable' })
+      return user
+    }
+  }
+
   async function startSession(res: ServerResponse, origin: string, user: SignedIn, extraCookies: string[] = []): Promise<void> {
     const id = randomBytes(32).toString('base64url')
     const at = now()
@@ -317,11 +381,19 @@ export function createAuthRoutes(options: AuthOptions) {
       if (state === null || typeof state.s !== 'string' || !(state.e > now().getTime())) { res.setHeader('set-cookie', clearOauth); fail('expired', 'unknown'); return true }
       if (url.searchParams.has('error')) { res.setHeader('set-cookie', clearOauth); fail('cancelled', state.p); return true }
       try {
-        const user = await options.identity.signInWithIdp(`${origin}${path}${url.search}`, state.s)
-        await startSession(res, origin, user, [clearOauth])
+        const user = await linkWaiting(req, origin, await options.identity.signInWithIdp(`${origin}${path}${url.search}`, state.s))
+        await startSession(res, origin, user, [clearOauth, cookie(origin, LINK_COOKIE, '', '/', 0)])
         log({ event: 'w2l_auth', step: 'sign_in', provider: user.provider, outcome: 'ok' })
-        res.writeHead(303, { ...NO_STORE, location: safeNext(state.n) }).end()
+        res.writeHead(303, { ...NO_STORE, location: user.linked ? `/account/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : safeNext(state.n) }).end()
       } catch (error) {
+        if (error instanceof SignInRefused && error.pending) {
+          // Kept until the visitor signs in the way they did before; the page says so.
+          const waiting = seal(options.secret, JSON.stringify({ ...error.pending, e: now().getTime() + LINK_SECONDS * 1_000 }))
+          res.setHeader('set-cookie', [clearOauth, cookie(origin, LINK_COOKIE, waiting, '/', LINK_SECONDS)])
+          log({ event: 'w2l_auth', step: 'sign_in', provider: error.pending.provider, outcome: 'link_needed' })
+          res.writeHead(303, { ...NO_STORE, location: `/signin/?error=link_needed&provider=${error.pending.provider === 'github.com' ? 'github' : 'google'}` }).end()
+          return true
+        }
         res.setHeader('set-cookie', clearOauth)
         fail(error instanceof SignInRefused ? error.code : 'unavailable', state.p, error)
       }
@@ -374,10 +446,10 @@ export function createAuthRoutes(options: AuthOptions) {
       const code = form.get('oobCode') ?? ''
       if (!EMAIL.test(email) || !/^[A-Za-z0-9_-]{10,400}$/.test(code)) { fail('invalid', 'emailLink'); return true }
       try {
-        const user = await options.identity.signInWithEmailLink(email, code)
-        await startSession(res, origin, user, [cookie(origin, EMAIL_COOKIE, '', '/auth/email', 0)])
+        const user = await linkWaiting(req, origin, await options.identity.signInWithEmailLink(email, code))
+        await startSession(res, origin, user, [cookie(origin, EMAIL_COOKIE, '', '/auth/email', 0), cookie(origin, LINK_COOKIE, '', '/', 0)])
         log({ event: 'w2l_auth', step: 'sign_in', provider: 'emailLink', outcome: 'ok' })
-        res.writeHead(303, { ...NO_STORE, location: '/account/' }).end()
+        res.writeHead(303, { ...NO_STORE, location: user.linked ? `/account/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : '/account/' }).end()
       } catch (error) { fail(error instanceof SignInRefused ? error.code : 'unavailable', 'emailLink', error) }
       return true
     }
