@@ -112,10 +112,12 @@ describe('resolveReactStreaming (ROADMAP PA item 4)', () => {
     let smallBest = Infinity
     let largeBest = Infinity
     for (let i = 0; i < 5; i++) {
-      smallBest = Math.min(smallBest, run(20_000))
-      largeBest = Math.min(largeBest, run(80_000))
+      smallBest = Math.min(smallBest, run(10_000))
+      largeBest = Math.min(largeBest, run(160_000))
     }
-    // Four times the attributes and children took sixteen times as long.
-    expect(largeBest / smallBest).toBeLessThan(8)
-  })
+    // Sixteen times the attributes and children take about sixteen times the time (14 to 21 measured, on an overloaded
+    // machine too); moving the children one first child at a time took 280 to 365 times as long, about 47 s in all, hence
+    // the longer timeout. Four times them measured up to 6 against 9 to 10, too close for a bound between them to hold.
+    expect(largeBest / smallBest).toBeLessThan(64)
+  }, 120_000)
 })
