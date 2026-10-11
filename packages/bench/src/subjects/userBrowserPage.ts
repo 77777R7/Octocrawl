@@ -181,7 +181,8 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
 function withReadHiddenWarning(read: UserBrowserRead, result: FetchResult): FetchResult {
   if (read.tabHidden !== true || read.hiddenWaitMs === undefined) return result
   const seconds = Math.round(read.hiddenWaitMs / 100) / 10
-  const warning = { code: 'page_read_hidden', message: `The tab was out of sight in your Chrome when the page was read, after waiting ${seconds} s for it to come in front: the whole document was read, which may hold what the page does not show.` }
+  const waited = seconds > 0 ? `after waiting ${seconds} s for it to come in front` : 'not waited for again (an earlier read waited for it)'
+  const warning = { code: 'page_read_hidden', message: `The tab was out of sight in your Chrome when the page was read, ${waited}: the whole document was read, which may hold what the page does not show.` }
   return { ...result, warnings: [...(result.warnings ?? []), warning] }
 }
 

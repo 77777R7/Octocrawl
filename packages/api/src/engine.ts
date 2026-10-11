@@ -1242,13 +1242,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * the check it still showed (`blocked`), Chrome refusing a command (`connection_error`), the site leading the tab
    * elsewhere each time it was taken back to the page (`redirect_limit`), or the wait over (`timeout`).
    */
-  async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number): Promise<FetchResult> {
+  async function readAllowed(chrome: UserChrome, allowed: AllowedSites, url: string, fetchOpts: FetchOptions, waitMs: number | undefined, hooks: HandoffHooks, signal: AbortSignal, started: number, hiddenWaitMs?: number): Promise<FetchResult> {
     try {
       const read = await chrome.read(url, {
         unattended: true,
         allowedHosts: allowed.hosts,
         // What the person sees in their Chrome: not a panel the page keeps hidden (a sheet's shortcut list beside its grid).
         shownOnly: true,
+        ...(hiddenWaitMs === undefined ? {} : { hiddenWaitMs }),
         ...(waitMs === undefined ? {} : { waitMs }),
         ...(hooks.onWaiting === undefined ? {} : { onWaiting: hooks.onWaiting }),
         ...(hooks.onHidden === undefined ? {} : { onHidden: hooks.onHidden }),
@@ -1295,6 +1296,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const stop = new AbortController()
     const signal = AbortSignal.any([shutdownController.signal, handoffClosing.signal, stop.signal])
     let reading: Promise<unknown> | null = null
+    // A batch waits once for a tab out of sight: after one page's tab stayed out of sight through the wait, the pages after
+    // it are read whole at once (page_read_hidden), not each after 30 s more.
+    let hiddenWaitedOut = false
     const open = (): Promise<Opened> => opened ??= (async (): Promise<Opened> => {
       if (userChrome === null) return { refused: 'this server does not read pages in your Chrome: run Octocrawl on your own machine (octocrawl serve, the local MCP host, or the octocrawl CLI)', status: 'connection_error' }
       let chrome: UserChrome
@@ -1317,10 +1321,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         if (!connection.allowed.hosts.includes(new URL(url).host)) return unread(url, 'cancelled', `${new URL(url).host} is not among the sites you allowed for this run of the batch`, started)
         if (signal.aborted || context?.signal?.aborted === true) return unread(url, 'cancelled', `the batch stopped before ${url} was read`, started)
         // The task's cancel, or this engine shutting down, ends the read; the page's own timeout does not: the person's time is theirs.
-        const pending = readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started)
+        const pending = readAllowed(connection.chrome, connection.allowed, url, fetchOpts, undefined, {}, AbortSignal.any([signal, ...(context?.signal === undefined ? [] : [context.signal])]), started, hiddenWaitedOut ? 0 : undefined)
         reading = pending
         try {
           const read = await pending
+          if (read.warnings?.some((warning) => warning.code === 'page_read_hidden') === true) hiddenWaitedOut = true
           return { result: read, links: read.links ?? [] }
         } finally {
           if (reading === pending) reading = null
