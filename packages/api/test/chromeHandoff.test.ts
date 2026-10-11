@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -430,13 +430,22 @@ describe('a list the person pages on through, in the tab W2L kept', () => {
   })
 
   it('does not take a pager that disables Next while it loads the next page for the list\'s end', async () => {
-    // Next disabled for about 60 ms (many reads) while page 3 loads, then page 3; its Next stays disabled past the grace: the end.
+    // Next disabled for 30 reads (30 ms) while page 3 loads, then page 3; its Next stays disabled past the grace: the end.
     const chrome = fakeChrome([page(2), page(2), page(2), page(2), ...Array<State>(30).fill(page(2, { next: 'disabled' })), page(3), page(3), page(3, { next: 'disabled' })])
     const reader = await openUserChrome({ userDataDir, connect: chrome.connect })
-    const read = await reader.readList('https://site.test/list/2', { pollMs: 1, waitMs: 5_000, follow: { ...follow, endGraceMs: 100 } })
-    reader.close()
-    expect(read.pages.map((item) => item.url)).toEqual(['https://site.test/list/2', 'https://site.test/list/3'])
-    expect(read.stoppedBy).toBe('end')
+    // The fake moves on by reads and the grace runs on the clock: on a real clock a busy machine made 30 reads outlast it.
+    // A fake one moves pollMs per read, so the disabled stretch is 30 ms of the 100 ms grace however slow the machine is.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      const reading = reader.readList('https://site.test/list/2', { pollMs: 1, waitMs: 5_000, follow: { ...follow, endGraceMs: 100 } })
+      await vi.advanceTimersByTimeAsync(1_000)
+      const read = await reading
+      expect(read.pages.map((item) => item.url)).toEqual(['https://site.test/list/2', 'https://site.test/list/3'])
+      expect(read.stoppedBy).toBe('end')
+    } finally {
+      vi.useRealTimers()
+      reader.close()
+    }
   })
 
   it('ends as deadline when no new page shows for idleMs, as max at the page limit, and throws when cancelled or the tab is gone', async () => {
