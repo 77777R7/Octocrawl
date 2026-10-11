@@ -182,6 +182,9 @@ describe('the person\'s Chrome', () => {
     expect(whole.document).toBeUndefined()
     expect(whole).toMatchObject({ tabHidden: true })
     expect(whole.hiddenWaitMs).toBeGreaterThanOrEqual(50)
+    // The wait for the tab is said once, in hiddenWaitMs: the settle wait it overlapped does not count it (2026-10-12, a
+    // StubHub read whose steady_wait said 30.4 s of a page that had not changed).
+    expect(whole.settle!.waitedMs).toBeLessThan(whole.hiddenWaitMs!)
     const result = pageFromUserBrowser(whole, null, {})
     expect(result.warnings?.map((w) => w.code)).toContain('page_read_hidden')
     expect(result.trace.find((e) => e.event === 'user_browser_read')?.detail).toMatchObject({ tabHidden: true })

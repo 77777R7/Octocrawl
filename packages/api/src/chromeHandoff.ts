@@ -583,6 +583,8 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
     // With shownOnly, since when a page ready to read has waited for its tab to come in sight, and how long it waited once it did.
     let hiddenWaitSince: number | null = null
     let hiddenWaited: number | undefined
+    // When that wait began and ended: the settle wait it overlaps does not count it (it says how long the page changed).
+    let hiddenEndedAt: number | null = null
     while (Date.now() - started < waitMs) {
       await new Promise((resolve) => setTimeout(resolve, pollMs))
       if (options.signal?.aborted === true) throw new HandoffNotThrough(`the read of ${url} was cancelled before Octocrawl read it`, sawGate, 'cancelled')
@@ -685,6 +687,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
           if (Date.now() - hiddenWaitSince < (options.hiddenWaitMs ?? HIDDEN_WAIT_MS) && Date.now() - started + pollMs < waitMs) continue
         } else if (hiddenWaitSince !== null) {
           hiddenWaited = Date.now() - hiddenWaitSince
+          hiddenEndedAt = Date.now()
           hiddenWaitSince = null
           // With a poll left, it settles again; with none, it is read now: a page that is through is never lost to the wait.
           if (Date.now() - started + pollMs < waitMs) {
@@ -698,7 +701,11 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       }
       const readHidden = options.shownOnly === true && state.hidden === true
       const hiddenWaitMs = readHidden && hiddenWaitSince !== null ? Date.now() - hiddenWaitSince : hiddenWaited
-      const settle: SteadyOutcome = { waitedMs: Date.now() - settleSince, loadingSeen, stillLoading: state.loading === true, steady }
+      // The settle wait without the time it overlapped the wait for the tab: that is hiddenWaitMs, said once.
+      const hiddenFrom = hiddenWaitSince ?? (hiddenEndedAt !== null && hiddenWaited !== undefined ? hiddenEndedAt - hiddenWaited : null)
+      const hiddenTo = hiddenWaitSince !== null ? Date.now() : hiddenEndedAt
+      const overlap = hiddenFrom === null || hiddenTo === null ? 0 : Math.max(0, hiddenTo - Math.max(settleSince, hiddenFrom))
+      const settle: SteadyOutcome = { waitedMs: Math.max(0, Date.now() - settleSince - overlap), loadingSeen, stillLoading: state.loading === true, steady }
       // Settled, the region the task needs is read once a poll until the contract's checks hold, within its bound and the
       // caller's wait; a view that can judge none of them is not waited for, and its one read says why (`unjudged`).
       if (options.region !== undefined && regionView !== null) {
