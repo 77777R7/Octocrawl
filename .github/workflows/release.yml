@@ -112,9 +112,14 @@ jobs:
               continue
             fi
             # Trusted publishing cannot create a package: its first version is published by a maintainer (CONTRIBUTING.md).
-            if ! npm view "$name" name >/dev/null 2>&1; then
-              echo "::warning::$name is not on npm yet: a maintainer publishes its first version by hand and adds the trusted publisher; skipped"
-              continue
+            # Only npm's own "not found" (E404) skips it; any other failure (the registry unreachable) fails the job, to be run again.
+            if ! lookup=$(npm view "$name" name 2>&1); then
+              if grep -q 'E404' <<<"$lookup"; then
+                echo "::warning::$name is not on npm yet: a maintainer publishes its first version by hand and adds the trusted publisher; skipped"
+                continue
+              fi
+              echo "$lookup" >&2
+              exit 1
             fi
             # ./ in front: without it npm 11 reads tarballs/<name>.tgz as a GitHub owner/repo shorthand and runs git.
             npm publish "./$file" --access public

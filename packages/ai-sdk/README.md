@@ -20,7 +20,7 @@ const { text } = await generateText({
 })
 ```
 
-With `ai` 6, use `stepCountIs(5)` in place of `isStepCount(5)`.
+With `ai` 6, use `stepCountIs(5)` in place of `isStepCount(5)`. The tools need `zod` 4. With `ai` 7, which needs Node.js 22, a CommonJS project needs Node.js 22.12 or later to load it.
 
 ## Options
 
@@ -34,7 +34,7 @@ With `ai` 6, use `stepCountIs(5)` in place of `isStepCount(5)`.
 
 `scrape` returns `status`, `requestedUrl`, `finalUrl`, `httpStatus`, `title`, the formats asked for (`markdown` by default), `warning` and `agentHints` when there are any, and `evidenceRecord`. Only `success` and `partial` carry the page's content. For the other statuses, `failureReason` or `blockReason` says why.
 
-`map` returns `status`, `links` (`url`, with `title` and `description` when known), and `counts` of the URLs returned and of those left out (off the site, disallowed by robots.txt).
+`map` returns `status`, `links` (`url`, with `title` and `description` when known), and `counts` of the URLs returned and of those left out: outside the site, disallowed by robots.txt, repeated, filtered by `search` or past `limit`.
 
 When the API refuses a call, the tool answers `{ status: 'refused', httpStatus, code, error, agentHints, retryAfterSeconds }` instead of throwing, so the model can read what to do next. A refusal can be the daily allowance used up (`quota_exhausted`, reset at 00:00 UTC), a rate limit or an invalid key. A network failure still throws.
 

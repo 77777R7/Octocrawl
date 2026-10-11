@@ -10,5 +10,6 @@
   "os": "macOS (Darwin 25.6.0, arm64), Node 26.8.1",
   "network": "through local proxy 127.0.0.1:7890 (HTTPS_PROXY and HTTP_PROXY set, NODE_USE_ENV_PROXY=1)",
   "dates": "UTC: live.mjs between started.txt and finished.txt; one.mjs ran a minute earlier, at 2026-10-11T06:05:09Z (its fetchedAt)",
-  "note": "written 2026-10-11 from the session's command log; the scripts wrote live.out, live.err (empty), scrape-example.json and the two timestamps"
+  "note": "written 2026-10-11 from the session's command log; the scripts wrote live.out, live.err (empty), scrape-example.json and the two timestamps",
+  "source": "packages/ai-sdk as committed in 5634c43a (the run used the same code, packed before that commit); later commits on the branch changed only the zod peer range to ^4.1.8, docs and the package checks"
 }

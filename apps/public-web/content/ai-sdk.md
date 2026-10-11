@@ -8,7 +8,7 @@
 npm install @octocrawl/ai-sdk ai zod
 ```
 
-The tools work with `ai` 7 and `ai` 6, and with `zod` 3.25 or 4. The package is MIT-licensed.
+The tools work with `ai` 7 and `ai` 6, and with `zod` 4. The package is MIT-licensed. With `ai` 7, which needs Node.js 22, a CommonJS project needs Node.js 22.12 or later to load it.
 
 ## Give the tools to a model
 
@@ -52,7 +52,7 @@ On 2026-10-11 we ran the tools against hosted Octocrawl with the AI SDK's mock m
 
 The scripts and full output of that run are in the [run record](https://github.com/77777R7/Octocrawl/tree/main/research/docs/ai-sdk/runs/2026-10-11-hosted).
 
-Only `success` and `partial` carry the page's content. For the other statuses (`blocked`, `failed`, `empty_verified`), `failureReason` or `blockReason` says why. `warning` and `agentHints` appear when the read has a caveat or a next step. `map` returns `links` (each a `url`, with `title` and `description` when known) and `counts` of the URLs returned and of those it left out.
+Only `success` and `partial` carry the page's content. For the other statuses (`blocked`, `failed`, `empty_verified`), `failureReason` or `blockReason` says why. `warning` and `agentHints` appear when the read has a caveat or a next step. `map` returns `links` (each a `url`, with `title` and `description` when known) and `counts` of the URLs returned and of those it left out: outside the site, disallowed by robots.txt, repeated, filtered by `search` or past `limit`.
 
 ## When a call is refused
 

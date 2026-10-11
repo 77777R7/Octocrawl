@@ -27,7 +27,7 @@ const PAGE = {
 const MAP = {
   id: 'm1', url: 'https://example.com/', status: 'completed', stoppedBy: null,
   links: [{ url: 'https://example.com/', title: 'Example', via: 'start' }, { url: 'https://example.com/docs', via: 'sitemap', lastmod: '2026-10-01' }],
-  sources: { startPage: null, sitemap: null }, refused: { offScope: 2, robots: 1, samples: { offScope: ['https://other.test/'] } },
+  sources: { startPage: null, sitemap: null }, refused: { duplicate: 0, collapsed: 0, hostDenied: 2, subtreeDenied: 0, pathDenied: 0, assetDenied: 0, robots: 1, robotsUnchecked: 0, searchFiltered: 0, overLimit: 0, samples: { collapsed: [], hostDenied: ['https://other.test/'], robots: [] } },
   identity: { mode: 'standard', userAgent: 'x' }, warnings: [], elapsedMs: 5,
 }
 
