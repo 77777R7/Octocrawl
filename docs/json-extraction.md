@@ -66,8 +66,8 @@ A fetch can succeed without the data a task asked for: a page of navigation, a s
 - **How it steers the fetch:** each rung of the ladder's page is judged as it comes (the `verification_checked` events of `ladderTrace` with `debug: true`).
   - A page that passes every check is the answer, with no hop to a stronger lane after it.
   - A page that fails a check goes on up the ladder as its region readiness says ([ADR 0007](adr/0007-region-readiness.md)), within the request's `mode` and `access` and the grant's budget, with the readiness on the `ladder_step` event:
-    - `not_loaded` (read over HTTP without its scripts, or still loading after the browser's wait for the region) and `not_served` (the region never came, or came empty) go on up;
-    - `not_extracted` (the region held on the live page, and the checks failed on what was extracted) goes on to the local rungs alone, since a paid rung would read the same page.
+    - `not_loaded` (read over HTTP without its scripts, or still loading after the browser's wait for the region) and `not_served` (the region never came, came empty, or no live read could judge it) go on up;
+    - `not_extracted` (the region held on the live page, and the checks failed on what was extracted) goes on to the local rungs alone, since a paid rung would read the same page. A provider's page read so is not counted as that provider failing.
   - A check on what is extracted after the fetch (`json.*`) decides nothing there.
   - When no rung passes, the page with most content is the answer, as without a contract.
   - A page served from the cache is judged without being fetched again.

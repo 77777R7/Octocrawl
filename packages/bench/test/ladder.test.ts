@@ -1524,6 +1524,20 @@ describe('LadderRunner — a task contract (ADR 0006)', () => {
     expect(steps(extracted, 'ladder_step').map((t) => t.detail.readiness)).toEqual(['not_loaded', 'not_extracted'])
   })
 
+  it('goes on to a paid rung from a browser page whose region no live read judged, and keeps a vendor whose region held off its failures', async () => {
+    const vendor = channel('provider', [page('provider', 'Price 12')], 'steel')
+    const unjudged = await new LadderRunner([channel('http', [page('http', 'No figure.')]), channel('browser_local', [page('browser_local', 'Still no figure.')]), vendor], { mode: 'authed' }, null, null, null, { verify: wants }).run(url)
+    expect(unjudged.result.lane).toBe('provider')
+    expect(steps(unjudged, 'ladder_step').map((t) => t.detail.readiness)).toEqual(['not_loaded', 'not_served', undefined])
+
+    const history = new MemoryRoutingHistory()
+    const held: FetchResult = { ...page('provider', 'No figure.'), trace: [{ at: 1, lane: 'provider', event: 'region_wait', detail: { ready: true, empty: false, loading: false, steady: true, judged: 3, reads: 3, waitedMs: 2_000, contractSha256: contractSha256(wants), checks: [] } }] }
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), channel('provider', [held], 'steel')], { mode: 'authed' }, history, null, null, { verify: wants }).run(url)
+    expect(steps(run, 'ladder_step').at(-1)?.detail.readiness).toBe('not_extracted')
+    // Written into the history, not counted as the vendor failing (ADR 0007).
+    expect((await history.read('example.com')).vendors.steel).toMatchObject({ attempts: 1, contentful: 1 })
+  })
+
   it('decides nothing on a check the ladder cannot judge yet (one on the JSON a format extracts after the run)', async () => {
     const browser = channel('browser_local', [page('browser_local', 'Price 12')])
     const run = await new LadderRunner([channel('http', [page('http', 'No figure.')]), browser], { mode: 'authed' }, null, null, null, { verify: { checks: [{ type: 'field', path: 'json.data.price', present: true }] } }).run(url)
