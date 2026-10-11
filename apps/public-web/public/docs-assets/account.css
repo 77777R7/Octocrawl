@@ -24,6 +24,8 @@
 .account-button:disabled{opacity:.55;cursor:default}
 .account-message{min-height:1.5em;margin:12px 0 0;color:var(--text)}
 .account-message.is-error{color:var(--rust)}
+.account-message.is-notice{margin:0 0 18px;padding:12px 14px;border:1px solid #f3c3a8;border-radius:6px;background:#fff6f0;color:var(--ink);line-height:1.55}
+.signin-button[hidden]{display:none}
 .account-small{color:var(--muted);font-size:13px;line-height:1.55}
 .credits-figure{margin:0;color:var(--ink);font:700 44px/1.05 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
 .credits-figure small{margin-left:8px;color:var(--muted);font:600 14px "Helvetica Neue",Helvetica,Arial,sans-serif}
@@ -46,6 +48,7 @@
 .signin-layout .account-lead{margin-bottom:24px;font-size:16px}
 .signin-layout .account-panel{padding:24px}
 .signin-layout .signin-options{max-width:none}
+.signin-layout .account-message.is-notice{text-align:left}
 @media (max-width:540px){
   .signin-layout .doc-article h1{font-size:32px}
   .account-panel{padding:18px 16px}
