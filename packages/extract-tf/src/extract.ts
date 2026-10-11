@@ -231,10 +231,13 @@ export class ExtractTf implements Extractor {
       }
     }
     // A listing of cards has no text block for the cascade to find. Before
-    // the page is reported empty, look for one.
+    // the page is reported empty, look for one. Cards on a page with no h1 have
+    // no heading that makes them the page's own: they may sit beside a login
+    // form or an error, so the lanes check the page for a wall as a last resort.
     let lastResort = false
     if (main === null) {
       main = selectCardList(doc.document)
+      if (main !== null && doc.document.querySelector('h1') === null) lastResort = true
       if (main === null) {
         main = selectDetectedList(doc.document)
         lastResort = main !== null

@@ -79,6 +79,12 @@ const GATES: ReadonlyArray<{
     evidence: null,
   },
   {
+    path: '/block/login-wall-cards',
+    reason: 'login_wall',
+    why: '200 with a password field and, on a page with no h1, product cards beside it the extractor takes only as a last resort',
+    evidence: null,
+  },
+  {
     path: '/block/perimeterx',
     reason: 'captcha',
     why: '200 PerimeterX press-and-hold page (Walmart, 2026-10-05) that browser_local returned as success',

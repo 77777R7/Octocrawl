@@ -1263,6 +1263,39 @@ const blockLoginWallBenefits: Fixture = {
   }),
 }
 
+const blockLoginWallCards: Fixture = {
+  truth: {
+    id: 'block-login-wall-cards',
+    target: '/block/login-wall-cards',
+    kind: 'fixture',
+    category: 'blocked',
+    mustContain: [],
+    mustNotContain: ['Stainless steel water bottle'],
+    expectedLane: 'http',
+    emptyIsLegit: false,
+    expectedMainTokens: null,
+    budget: budget(500),
+    expectedStatus: 'blocked',
+    expectedBlockReason: 'login_wall',
+    notes:
+      'A login wall with no h1 and a row of product cards beside its form: cards the extractor takes on a ' +
+      'page with no h1 only as a last resort, which must not make the wall read as content.',
+  },
+  respond: () => ({
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+    body: `<!doctype html><html><head><title>Sign in</title></head><body>
+<div class="auth"><h2>Sign in to see your orders</h2>
+<form method="post" action="/login"><input name="email" type="email"><input name="password" type="password"><button>Sign in</button></form></div>
+<h2>Popular right now</h2><ul class="grid">
+<li class="card"><a href="/p/1">Stainless steel water bottle</a><span>$19.99</span><span>Ships tomorrow</span></li>
+<li class="card"><a href="/p/2">Wireless noise cancelling earbuds</a><span>$89.00</span><span>Ships tomorrow</span></li>
+<li class="card"><a href="/p/3">Ergonomic mesh office chair</a><span>$149.50</span><span>Ships tomorrow</span></li>
+</ul>
+</body></html>`,
+  }),
+}
+
 const blockPerimeterX: Fixture = {
   truth: {
     id: 'block-perimeterx',
@@ -1921,6 +1954,7 @@ export const FIXTURES: readonly Fixture[] = [
   blockRateLimit,
   blockLoginWall,
   blockLoginWallBenefits,
+  blockLoginWallCards,
   blockPerimeterX,
   blockPerimeterX429,
   soft404,
