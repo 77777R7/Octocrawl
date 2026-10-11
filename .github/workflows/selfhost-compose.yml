@@ -1,0 +1,63 @@
+name: Self-host compose
+
+# Runs deploy/docker/compose.yaml the way docs/self-host-docker.md says, on a clean runner: the image builds from the
+# published `octocrawl` package, the server answers only with its token, reads a page over HTTP, and its Chromium
+# captures a screenshot.
+on:
+  pull_request:
+    paths:
+      - 'deploy/docker/**'
+      - 'docs/self-host-docker.md'
+      - '.github/workflows/selfhost-compose.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: deploy/docker
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Start it as the guide says
+        run: |
+          echo "OCTOCRAWL_TOKEN=$(openssl rand -hex 24)" > .env
+          docker compose up -d --build
+      - name: Wait until the container reports healthy
+        run: |
+          for i in $(seq 1 60); do
+            state=$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose ps -q octocrawl)")
+            echo "health: $state"
+            [ "$state" = healthy ] && exit 0
+            sleep 5
+          done
+          exit 1
+      - name: Refuse a request without the token
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8787/v1/scrape -H 'content-type: application/json' -d '{"url":"https://example.com/"}')
+          echo "without a token: $code"
+          [ "$code" = 401 ]
+      - name: Read a page over HTTP, then capture one in Chromium
+        run: |
+          token=$(sed -n 's/^OCTOCRAWL_TOKEN=//p' .env)
+          scrape() { curl -sf -X POST http://127.0.0.1:8787/v1/scrape -H 'content-type: application/json' -H "authorization: Bearer $token" -d "$1"; }
+          page=$(scrape '{"url":"https://example.com/","formats":["markdown"]}')
+          echo "$page" | jq '{status, finalUrl, lane, httpStatus: .evidenceRecord.httpStatus}'
+          echo "$page" | jq -e '.status == "success" and .evidenceRecord.httpStatus == 200' > /dev/null
+          shot=$(scrape '{"url":"https://example.com/","formats":["screenshot"]}')
+          echo "$shot" | jq '{status, channelsTried, screenshot: (.screenshot | {width, height, bytes})}'
+          echo "$shot" | jq -e '.status == "success" and .channelsTried == ["browser_local"] and .screenshot.width == 1280' > /dev/null
+      - name: Keep the records in the data volume across a restart
+        run: |
+          docker compose restart octocrawl
+          docker compose exec -T octocrawl sh -c 'ls /data && test -n "$(ls -A /data)"'
+      - name: Server log
+        if: always()
+        run: docker compose logs --no-color | tail -n 100
+      - name: Remove it
+        if: always()
+        run: docker compose down -v

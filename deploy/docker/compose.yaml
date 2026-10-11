@@ -1,0 +1,38 @@
+# Octocrawl's API on your own server (docs/self-host-docker.md).
+#   echo "OCTOCRAWL_TOKEN=$(openssl rand -hex 24)" > .env
+#   docker compose up -d --build
+# Then call http://<this machine>:8787/v1/scrape with `Authorization: Bearer <that token>`.
+services:
+  octocrawl:
+    build:
+      context: .
+      args:
+        OCTOCRAWL_VERSION: ${OCTOCRAWL_VERSION:-latest}
+    image: octocrawl-selfhost:${OCTOCRAWL_VERSION:-latest}
+    restart: unless-stopped
+    init: true
+    environment:
+      # Every request needs this token. Anyone who holds it can make the server read pages for them.
+      W2L_API_TOKEN: ${OCTOCRAWL_TOKEN:?set OCTOCRAWL_TOKEN in .env}
+      # `hosted` refuses private addresses, robots.txt overrides and saved logins, and caps a crawl at 100 pages:
+      # for a server other people use. Leave it empty for your own use.
+      W2L_API_MODE: ${OCTOCRAWL_MODE:-}
+      # An outbound proxy, if this machine needs one to reach the web.
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
+    ports:
+      - "${OCTOCRAWL_PORT:-8787}:8787"
+    volumes:
+      - octocrawl-data:/data
+    # Chromium needs more shared memory than Docker's 64 MB default.
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/v1/crawl/active',{headers:{authorization:'Bearer '+process.env.W2L_API_TOKEN}}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  octocrawl-data:

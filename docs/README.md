@@ -7,6 +7,7 @@ This folder holds Octocrawl's reference, guides, design decisions and dated reco
 | Page | What it covers |
 | --- | --- |
 | [Running Octocrawl](local-setup.md) | Hosted, local and self-hosted servers; MCP clients, ports, tokens, proxies, robots.txt |
+| [Docker Compose](self-host-docker.md) | Octocrawl's API on your own server, with Chromium, a token and a data volume |
 | [Command line](cli.md) | The `octocrawl` command, its flags and exit codes |
 | [From a URL list to a CSV with evidence](guides/url-list-to-csv.md) | A researcher's run, from the command line and the Python client |
 | [Citing web data in a paper](guides/citing-web-data.md) | A methods section and a reference with access date and hash |
