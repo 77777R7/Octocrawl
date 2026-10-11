@@ -80,9 +80,12 @@ export async function runConfiguredMonitor(store: MonitorStore, revision: Monito
         }
       }
     } catch (caught) { error = caught instanceof Error ? caught.message : String(caught) }
-    if (scope.signal.aborted || Date.now() >= deadlineAt || outcome?.result.budgetExceeded === 'time') {
+    // A capture the deadline ended can return a little before Date.now() reaches it: the HTTP lane's header wait, set to
+    // the time left, ends early under load. The lane then says so in usage.deadlineExceeded.
+    const deadlineEnded = Date.now() >= deadlineAt || outcome?.result.budgetExceeded === 'time' || outcome?.result.usage.deadlineExceeded === true
+    if (scope.signal.aborted || deadlineEnded) {
       if (scope.signal.reason?.name === 'ShutdownError') store.interrupt(run)
-      else store.endAttempt(run, Date.now() >= deadlineAt || scope.signal.reason?.name === 'TimeoutError' || outcome?.result.budgetExceeded === 'time' ? 'expired' : 'cancelled', error ?? String(scope.signal.reason))
+      else store.endAttempt(run, deadlineEnded || scope.signal.reason?.name === 'TimeoutError' ? 'expired' : 'cancelled', error ?? (scope.signal.aborted ? String(scope.signal.reason) : 'Execution deadline exceeded'))
       return store.view(revision.monitorId, Date.now())
     }
     // This check also rejects a result returned after a different process reclaimed the run.
