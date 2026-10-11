@@ -5,7 +5,7 @@
 // .w2l/access/runs/<timestamp>/ and, with --record, a Markdown summary that is the committed record.
 //
 // Usage: node research/access/run-set.mjs [--set frozen|healthy|blind|candidate|all] [--only T01,T02] [--warm]
-//          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--no-contract] [--record research/access/runs/<date>-<label>-<commit>.md]
+//          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--no-contract] [--raw-html] [--record research/access/runs/<date>-<label>-<commit>.md]
 //        node research/access/run-set.mjs --rejudge .w2l/access/runs/<timestamp> [--record research/access/runs/<new file>.md]
 //   --target     who fetches the pages (ROADMAP PA item 9, the competitor baseline). octocrawl (the default) is the local
 //                API. firecrawl is Firecrawl Cloud's POST /v2/scrape with FIRECRAWL_API_KEY: the task's own formats,
@@ -27,6 +27,10 @@
 //                `verification` is recorded beside the runner's own verdict: the record says on how many attempts they
 //                agreed and names each one where they did not. --no-contract sends none (an API before task verification
 //                refuses the key). A competitor is never sent one.
+//   --raw-html   (octocrawl) asks each answer for its `rawHtml` too and saves it beside its Markdown, under the run's
+//                git-ignored pages/ (<task>-<attempt>.html), never in the record: the page as the lane read it, for a
+//                page whose Markdown leaves a question (a shell with no data: a block, or data that never came). An
+//                answer that carries no rawHtml (a failed one) saves none. The task's own formats are kept.
 //   --rejudge re-evaluates a finished run's saved Markdown against the current predicates in
 //   tasks.v1.json, without fetching. The run's own attempts.jsonl and summary.json are never
 //   rewritten: the new verdicts go to attempts.rejudged-<time>.jsonl and summary.rejudged-<time>.json
@@ -108,6 +112,7 @@ const setFilter = flag('--set') ?? 'frozen'
 const only = flag('--only')?.split(',').map((s) => s.trim())
 const warm = args.includes('--warm')
 const sendContract = !args.includes('--no-contract')
+const saveRawHtml = args.includes('--raw-html')
 const access = flag('--access') === undefined ? undefined : JSON.parse(flag('--access'))
 const recordFile = flag('--record')
 const rejudgeDir = flag('--rejudge')
@@ -343,7 +348,9 @@ function chargedOf(doc) {
 }
 
 async function attempt(task, temperature) {
-  const body = { url: task.url, ...(task.request ?? {}), maxAge: 0, ...(access === undefined ? {} : { access }), ...(target === 'octocrawl' && sendContract ? { verify: { checks: task.predicates } } : {}) }
+  const formats = task.request?.formats ?? ['markdown']
+  const asked = target === 'octocrawl' && saveRawHtml && !formats.includes('rawHtml') ? { ...(task.request ?? {}), formats: [...formats, 'rawHtml'] } : task.request ?? {}
+  const body = { url: task.url, ...asked, maxAge: 0, ...(access === undefined ? {} : { access }), ...(target === 'octocrawl' && sendContract ? { verify: { checks: task.predicates } } : {}) }
   const started = Date.now()
   let doc = null, apiStatus = null, error = null, waitedMs = 0
   try {
@@ -359,6 +366,7 @@ async function attempt(task, temperature) {
   const wallMs = Date.now() - started - waitedMs
   // The page's own Markdown, as the API gave it (a rejudge reads it back): not scrubbed, which would change the site's text.
   if (typeof doc?.markdown === 'string') await writeRaw(join(runDir, 'pages', `${task.id}-${temperature}.md`), doc.markdown)
+  if (saveRawHtml && typeof doc?.rawHtml === 'string') await writeRaw(join(runDir, 'pages', `${task.id}-${temperature}.html`), doc.rawHtml)
   const results = doc === null ? [] : task.predicates.map((p) => ({ p, pass: (() => { try { return judge(p, doc) } catch { return false } })() }))
   const answered = doc !== null && (doc.status === 'success' || doc.status === 'partial')
   const verified = answered && results.every((r) => r.pass)
