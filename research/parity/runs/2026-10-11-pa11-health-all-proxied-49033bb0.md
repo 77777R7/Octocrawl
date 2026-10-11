@@ -349,3 +349,11 @@ Failed checks with the observed value:
 - AR07 [action-step] traceEvent: 0 of 11 events match
 - AR07 [action-load-more] field `actions.lists.0.items`: undefined vs 24
 - AR10 [action-write] field `actions.javascriptReturns.1.value`: 30 vs 30
+
+## Notes (ROADMAP PA item 11 acceptance: the healthy real-site batches)
+
+- **Set-up:** all parity batches against a vendor-free local API on 8793, proxied, at `49033bb0`: main `bf95a8c`, with item 11's PR 1 (#363) and PR 2 (#369).
+- **No region wait ran.** No case here sends a task contract, so the browser lanes waited as before. What could have regressed is the `readiness` field on every result and the my-browser lane's settle wait.
+- **Compared with `2026-10-10-health-all-proxied-3e103bc5.md`:** 180 of 207 cases fully passing (177 before) and 1,174 of 1,232 checks (1,161 before).
+  - **Better:** A14, A15, A31 and AC02.
+  - **Worse:** one case, AR05 (github.com/topics/javascript). Its "Load more" step stopped by `end` after one round, with 20 items, so `actions.lists.0.items` was not above the 20 counted before. A browser_local list step, with no contract and no my-browser read in it. Not isolated why the button was gone; it passed at `3e103bc5`.
