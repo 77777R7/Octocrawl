@@ -23,13 +23,17 @@ describe('resolveReactStreaming (ROADMAP PA item 4)', () => {
     // The two sizes take turns, so a busy moment of the machine slows both.
     let smallBest = Infinity
     let largeBest = Infinity
-    for (let i = 0; i < 5; i++) {
-      smallBest = Math.min(smallBest, run(1_250))
-      largeBest = Math.min(largeBest, run(5_000))
+    for (let i = 0; i < 7; i++) {
+      smallBest = Math.min(smallBest, run(300))
+      largeBest = Math.min(largeBest, run(4_800))
     }
-    // Four times the calls take about four times the time; a lookup that scanned the page for each call takes sixteen times as long.
-    expect(largeBest / smallBest).toBeLessThan(8)
-  })
+    // Sixteen times the calls take about sixteen times the time (15 to 24 measured, up to 30 on an overloaded machine); a
+    // lookup that scanned the page for each call took 200 to 280 times as long, about 30 s in all, hence the longer timeout
+    // so that the bound, not the timeout, reports it. Four times the calls measured 4.2 against 14 and reached 8.2 on a CI
+    // runner, too close for a bound between them to hold. Sixteen times 300 parts stays within the 10 000 calls a page is
+    // read for (each part makes two).
+    expect(largeBest / smallBest).toBeLessThan(64)
+  }, 60_000)
 
   it('takes time linear in the page when each part is nested in the next and completed innermost first', () => {
     // Every call moves again what the earlier ones moved into its part: without a bound, n parts take n² moves.
