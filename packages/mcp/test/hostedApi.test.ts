@@ -124,7 +124,7 @@ it('the Worker\'s address header counts only with the shared secret', async () =
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { 'cf-connecting-ip': '203.0.113.4' })).status).toBe(429)
 })
 
-it('the /mcp endpoint speaks Streamable HTTP, offers three tools, and runs them through the same gate', async () => {
+it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape_product only to a key with the browser, and runs them through the same gate', async () => {
   const { url } = await start({ keylessDaily: 3, keys: { 'oc_live': { enabled: true, plan: 'free', dailyLimit: 3, browser: true } } })
   expect((await fetch(`${url}/mcp`, { method: 'GET' })).status).toBe(405)
   expect((await fetch(`${url}/mcp`, { method: 'POST', headers: { 'mcp-protocol-version': 'not-a-version', 'content-type': 'application/json' }, body: '{}' })).status).toBe(400)
@@ -133,8 +133,10 @@ it('the /mcp endpoint speaks Streamable HTTP, offers three tools, and runs them 
   const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
   try {
     await client.connect(transport)
-    const tools = (await client.listTools()).tools.map((tool) => tool.name)
-    expect(tools).toEqual(['scrape_product', 'scrape', 'map'])
+    const keyless = (await client.listTools()).tools
+    expect(keyless.map((tool) => tool.name)).toEqual(['scrape', 'map'])
+    // Every listed tool has a title and is read-only, as directories (Anthropic's among them) require.
+    for (const tool of keyless) expect(tool.annotations, tool.name).toMatchObject({ title: expect.any(String), readOnlyHint: true })
     const result = await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, formats: ['markdown'] } })
     const text = (result.content as { type: string; text: string }[])[0]!.text
     expect(JSON.parse(text)).toMatchObject({ status: 'success', lane: 'http' })
@@ -149,6 +151,9 @@ it('the /mcp endpoint speaks Streamable HTTP, offers three tools, and runs them 
   const holder = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
   try {
     await holder.connect(keyed)
+    const listed = (await holder.listTools()).tools
+    expect(listed.map((tool) => tool.name)).toEqual(['scrape_product', 'scrape', 'map'])
+    for (const tool of listed) expect(tool.annotations, tool.name).toMatchObject({ title: expect.any(String), readOnlyHint: true })
     const result = await holder.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
     expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject({ status: 'success' })
   } finally { await holder.close() }

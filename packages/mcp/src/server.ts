@@ -7,6 +7,8 @@ import { callTool, TOOLS } from './tools.js'
 
 export interface McpServerOptions {
   allowedTools?: ReadonlySet<string>
+  /** The definitions tools/list answers with, when a deployment offers its own copies (hosted Octocrawl's are read-only). */
+  tools?: readonly object[]
   authorizeCall?: (name: string, args: unknown) => void
   normalizeCall?: (name: string, args: unknown) => unknown
   /**
@@ -34,7 +36,7 @@ export function mcpOrigin(client: { name: string; version: string } | undefined)
 export function createMcpServer(client: W2L, options: McpServerOptions = {}): Server {
   const server = new Server({ name: 'octocrawl', version: MCP_VERSION }, { capabilities: { tools: {} } })
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS.filter(tool => options.allowedTools === undefined || options.allowedTools.has(tool.name)) }))
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...(options.tools ?? TOOLS.filter(tool => options.allowedTools === undefined || options.allowedTools.has(tool.name)))] as typeof TOOLS[number][] }))
   const calls = options.calls
   // Replaces the SDK's own handler, which reaches only the calls of this server, that is of this POST.
   if (calls) server.setNotificationHandler(CancelledNotificationSchema, notification => {

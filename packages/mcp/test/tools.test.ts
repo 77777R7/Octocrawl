@@ -708,6 +708,13 @@ describe('MCP tools', () => {
     expect(bodies.map((body) => body.verify)).toEqual([verify, verify, verify])
   })
 
+  it('names scrape and scrape_product, and claims read-only only where no call can act on a page', () => {
+    // scrape takes page actions and an authed mode on a server on the person's machine, so it is not read-only here.
+    expect(TOOLS.find((t) => t.name === 'scrape')).toMatchObject({ annotations: { title: 'Scrape a page', openWorldHint: true } })
+    expect((TOOLS.find((t) => t.name === 'scrape') as { annotations: Record<string, unknown> }).annotations.readOnlyHint).toBeUndefined()
+    expect(TOOLS.find((t) => t.name === 'scrape_product')).toMatchObject({ annotations: { title: 'Amazon.sg product JSON', readOnlyHint: true, openWorldHint: true } })
+  })
+
   it('offers map as a read-only tool with the map request\'s keys and an output schema, compact by default and in full with debug', async () => {
     const tool = TOOLS.find((t) => t.name === 'map')!
     expect(Object.keys(tool.inputSchema.properties).sort()).toEqual([...MAP_KEYS.filter((key) => key !== 'origin'), 'debug'].sort())
