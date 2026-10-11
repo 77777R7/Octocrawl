@@ -235,11 +235,16 @@ describe('first-party analytics', () => {
     const { url, lines } = await site({ visitorCookieSecret: 's'.repeat(32) })
     const post = (body: unknown, headers: Record<string, string> = {}) => fetch(`${url}/api/events`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) })
     expect((await post({ name: 'page_view', props: { path: '/', ref: 'news.ycombinator.com' } })).status).toBe(204)
+    expect((await post({ name: 'markdown_mode', props: { mode: 'preview' } })).status).toBe(204)
     expect((await post({ name: 'page_view', props: { email: 'a@b.c' } })).status).toBe(400)
+    expect((await post({ name: 'markdown_mode', props: { mode: 'raw' } })).status).toBe(400)
     expect((await post({ name: 'purchase' })).status).toBe(400)
     expect((await post({ name: 'page_view' }, { origin: 'https://evil.example' })).status).toBe(403)
     expect((await fetch(`${url}/api/events`)).status).toBe(405)
-    expect(lines).toEqual([{ event: 'w2l_web_event', name: 'page_view', props: { path: '/', ref: 'news.ycombinator.com' }, vid: expect.stringMatching(/^[a-f0-9]{16}$/), automated: true }])
+    expect(lines).toEqual([
+      { event: 'w2l_web_event', name: 'page_view', props: { path: '/', ref: 'news.ycombinator.com' }, vid: expect.stringMatching(/^[a-f0-9]{16}$/), automated: true },
+      { event: 'w2l_web_event', name: 'markdown_mode', props: { mode: 'preview' }, vid: expect.stringMatching(/^[a-f0-9]{16}$/), automated: true },
+    ])
   })
 
   it('flags the operator\'s own browser as internal once it opts in with ?internal=1, and clears it with ?internal=0', async () => {
@@ -334,6 +339,10 @@ describe('first-party analytics', () => {
     expect(parseWebEvent({ name: 'page_view', props: { path: '/', from: 'blog-web-scraping-for-rag', utm_source: 'npm' } })).toEqual({ name: 'page_view', props: { path: '/', from: 'blog-web-scraping-for-rag', utm_source: 'npm' } })
     expect(parseWebEvent({ name: 'result_copy', props: { view: 'x'.repeat(121) } })).toBeNull()
     expect(parseWebEvent({ name: 'result_copy', props: { view: { nested: true } } })).toBeNull()
+    // The Markdown's source/preview switch takes only the page's two modes.
+    expect(parseWebEvent({ name: 'markdown_mode', props: { mode: 'preview' } })).toEqual({ name: 'markdown_mode', props: { mode: 'preview' } })
+    expect(parseWebEvent({ name: 'markdown_mode', props: { mode: 'raw' } })).toBeNull()
+    expect(parseWebEvent({ name: 'markdown_mode', props: { mode: 1 } })).toBeNull()
     const day1 = dailyVisitorId('k'.repeat(32), 'visitor:abc', new Date('2026-09-30T12:00:00Z'))
     expect(dailyVisitorId('k'.repeat(32), 'visitor:abc', new Date('2026-09-30T23:00:00Z'))).toBe(day1)
     expect(dailyVisitorId('k'.repeat(32), 'visitor:abc', new Date('2026-10-01T00:00:00Z'))).not.toBe(day1)
