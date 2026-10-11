@@ -203,7 +203,11 @@ const STATE = `JSON.stringify({
 const SHOWN_HTML = `(() => {
   const root = document.documentElement
   if (!root) return JSON.stringify({ href: location.href, shown: '' })
-  const copy = new DOMParser().parseFromString('', 'text/html').importNode(root, true)
+  // A document of its own, inert: no script of the copy runs. createHTMLDocument, not DOMParser, which a page that
+  // requires Trusted Types (Gmail) refuses a plain string, every read, until the wait ran out; reached through
+  // Document.prototype, since a form named "implementation" would shadow document.implementation.
+  const implementation = Object.getOwnPropertyDescriptor(Document.prototype, 'implementation').get.call(document)
+  const copy = implementation.createHTMLDocument('').importNode(root, true)
   const originals = root.querySelectorAll('body *')
   const copies = copy.querySelectorAll('body *')
   const unshown = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'LINK', 'META', 'TITLE', 'BASE'])
