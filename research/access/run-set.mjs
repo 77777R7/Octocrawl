@@ -311,9 +311,11 @@ function ladderSkipsOf(doc) {
 /** The answer's robots.txt verdict, and with a disallow its rules or why robots.txt could not be read; null when it records no robots check. */
 function robotsOf(doc) {
   const events = [...(doc?.trace ?? []), ...(doc?.ladderTrace ?? [])]
-  const last = (name) => events.filter((t) => t.event === name).at(-1)?.detail
-  const checked = last('robots_checked')
-  if (checked === undefined) return null
+  const lastChecked = events.filter((t) => t.event === 'robots_checked').at(-1)
+  if (lastChecked === undefined) return null
+  const checked = lastChecked.detail ?? {}
+  // The same lane's disallow and override: a rung before it (an override the ladder carries onto the answer) read its own robots.txt.
+  const last = (name) => events.filter((t) => t.event === name && t.lane === lastChecked.lane).at(-1)?.detail
   const disallowed = last('robots_disallowed')
   const overridden = last('robots_overridden')
   return {
