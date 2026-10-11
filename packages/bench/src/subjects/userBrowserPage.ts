@@ -54,6 +54,13 @@ export interface UserBrowserRead {
   settle?: SteadyOutcome
   /** What the wait for the region the task needs saw (ADR 0007), when the request had a task contract the page could judge. */
   region?: RegionOutcome
+  /** Whether the tab was out of sight in the person's Chrome when the page was read; absent from a reader that did not say. */
+  tabHidden?: boolean
+  /**
+   * How long a read of the page as it shows waited for its tab to come in sight; absent when it did not wait. With
+   * `tabHidden`, the tab stayed out of sight and the whole document was read (`page_read_hidden`).
+   */
+  hiddenWaitMs?: number
 }
 
 /** The result of a page read in the person's browser: in place of `prior`, the result the check stopped, or, with none, on the my-browser lane. */
@@ -72,7 +79,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     ]),
     { at: 0, lane: LANE, event: 'identity_sent', detail: { mode: 'authed', headers: [], by: 'user_browser' } },
     { at: 0, lane: LANE, event: 'identity_unobserved', detail: { reason: `the person's own browser (${read.browser}) sent the request; its headers were not seen` } },
-    { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs } },
+    { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs, ...(read.tabHidden === undefined ? {} : { tabHidden: read.tabHidden }), ...(read.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: read.hiddenWaitMs }) } },
     ...steadyWaitEvents(read.settle, wallMs, LANE),
     ...[regionWaitEvent(read.region, wallMs, LANE)].filter((event): event is TraceEvent => event !== null),
   ]
@@ -141,7 +148,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   const tables = tablesFormat(wholePageAsked(options)
     ? { html: body, options: { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
     : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, finalUrl, options, trace, LANE, wallMs)
-  return withStillChangingWarning(withStillLoadingWarning(withListCaveat({
+  return withReadHiddenWarning(read, withStillChangingWarning(withStillLoadingWarning(withListCaveat({
     ...base,
     status: 'success',
     failureReason: null,
@@ -167,7 +174,15 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     },
     ...htmlFormats(whole, body, extracted.mainHtml, options),
     usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
-  })))
+  }))))
+}
+
+/** A read of the page as it shows that found its tab still out of sight: the whole document was read instead. */
+function withReadHiddenWarning(read: UserBrowserRead, result: FetchResult): FetchResult {
+  if (read.tabHidden !== true || read.hiddenWaitMs === undefined) return result
+  const seconds = Math.round(read.hiddenWaitMs / 100) / 10
+  const warning = { code: 'page_read_hidden', message: `The tab was out of sight in your Chrome when the page was read, after waiting ${seconds} s for it to come in front: the whole document was read, which may hold what the page does not show.` }
+  return { ...result, warnings: [...(result.warnings ?? []), warning] }
 }
 
 /**

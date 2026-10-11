@@ -326,7 +326,9 @@ export interface FetchWarning {
    * for it (`loading_wait` in the trace): its data may not be in the answer.
    * `page_still_changing`: the my-browser lane read the page while its text
    * was still changing, after waiting for it to stop (`steady_wait` in the
-   * trace): its data may not all be in the answer.
+   * trace): its data may not all be in the answer. `page_read_hidden`: the
+   * my-browser lane, reading the page as it shows, found its tab out of sight
+   * after waiting for it to come in front, and read the whole document.
    */
   code: string
   message: string
