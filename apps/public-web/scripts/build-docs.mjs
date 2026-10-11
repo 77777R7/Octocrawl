@@ -429,8 +429,14 @@ const accountBody = `<article class="doc-article"><h1>Your account</h1><p class=
 <section class="account-panel" aria-labelledby="usage-title"><h2 id="usage-title">Usage, last 30 days</h2><div class="table-scroll"><table class="account-table"><thead><tr><th>Day (UTC)</th><th class="num">HTTP</th><th class="num">Browser</th><th class="num">Not found</th><th class="num">Map</th><th class="num">Free</th><th class="num">Credits</th></tr></thead><tbody id="usage-body"></tbody></table></div><p class="account-small" id="usage-empty">No calls in the last 30 days.</p></section>
 <form class="account-signout" method="post" action="/auth/logout"><button class="account-button quiet" type="submit">Sign out</button></form>
 </div></article>`
+// Where an email sign-in link lands. auth.ts serves this page at /auth/email/finish with the confirmation form put
+// between the markers; opened here, it only says where the link is.
+const emailFinishBody = `<article class="doc-article" id="signin-finish"><h1>Finish signing in</h1><p class="account-lead">One more click to sign in with the link from your email.</p>
+<div class="account-panel"><!--w2l:email-finish--><p class="account-small">Open the sign-in link from your email to finish here, or <a href="/signin/">start again</a>.</p><!--/w2l:email-finish--></div>
+<p class="account-small">The link works once, for an hour. Signing in takes this click so that a mail scanner opening the link cannot use it up.</p></article>`
 for (const [path, title, description, body, layout] of [
   ['/signin/', 'Sign in', 'Sign in to Octocrawl with GitHub, Google or an email link to get 1,000 hosted credits a month and API keys.', signinBody, ' signin-layout'],
+  ['/signin/email/', 'Finish signing in', 'Finish signing in to Octocrawl with the link from your email.', emailFinishBody, ' signin-layout'],
   ['/account/', 'Your account', 'Your Octocrawl credits, API keys and usage.', accountBody, ''],
 ]) {
   await mkdir(join(root, 'dist', path.slice(1)), { recursive: true })

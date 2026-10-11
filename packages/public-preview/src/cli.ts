@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 import { createPreviewServer } from './server.js'
 import { firestoreQuotaFromEnv } from './quota.js'
 import { firestoreAmazonGateFromEnv } from './amazonGate.js'
@@ -17,6 +18,7 @@ const port = Number(process.env.PORT ?? '8080')
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error('PORT must be a TCP port')
 // Sign-in needs the project's Firebase web API key; without it the sign-in addresses are not served.
 const firebaseApiKey = process.env.W2L_FIREBASE_API_KEY?.trim()
+const staticDir = resolve(process.env.W2L_PUBLIC_WEB_DIST ?? 'apps/public-web/dist')
 const auth = firebaseApiKey
   ? createAuthRoutes({
     identity: new IdentityToolkit(firebaseApiKey),
@@ -24,6 +26,7 @@ const auth = firebaseApiKey
     // Trimmed as the hosted API trims it (hostedApiCli.ts), so a secret with a trailing newline gives both the same digests.
     secret: (process.env.W2L_QUOTA_HASH_KEY ?? '').trim(),
     log: line => console.log(JSON.stringify({ severity: 'INFO', ...line })),
+    emailFinishPage: () => readFile(join(staticDir, 'signin', 'email', 'index.html'), 'utf8'),
   })
   : undefined
 const monthlyCredits = Number(process.env.W2L_MONTHLY_CREDITS ?? 1_000)
@@ -37,7 +40,7 @@ const account = auth === undefined ? undefined : createAccountRoutes({
 const server = createPreviewServer({
   quota: firestoreQuotaFromEnv(),
   amazonGate: firestoreAmazonGateFromEnv(),
-  staticDir: resolve(process.env.W2L_PUBLIC_WEB_DIST ?? 'apps/public-web/dist'),
+  staticDir,
   amazonState,
   enabled: process.env.W2L_PREVIEW_ENABLED !== 'false',
   visitorCookieSecret: process.env.W2L_QUOTA_HASH_KEY,

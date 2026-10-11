@@ -30,13 +30,13 @@ function fakeIdentity() {
   return { identity, calls, answer: (next: SignedIn | Error) => { idp = next }, linkAnswer: (next: SignedIn | Error) => { link = next } }
 }
 
-async function start() {
+async function start(emailFinishPage?: () => Promise<string | null>) {
   const dir = await mkdtemp(join(tmpdir(), 'w2l-auth-')); dirs.push(dir)
   await writeFile(join(dir, '404.html'), '<title>Page not found</title>')
   const fake = fakeIdentity()
   const accounts = new MemoryAccountStore()
   const lines: LogLine[] = []
-  const auth = createAuthRoutes({ identity: fake.identity, accounts, secret: SECRET, log: line => lines.push(line) })
+  const auth = createAuthRoutes({ identity: fake.identity, accounts, secret: SECRET, log: line => lines.push(line), emailFinishPage })
   const server = createPreviewServer({ quota: { consume: async () => 'ok' }, staticDir: dir, amazonState: null, log: line => lines.push(line), visitorCookieSecret: SECRET, auth })
   servers.push(server)
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -71,7 +71,7 @@ describe('signing in with GitHub or Google', () => {
   })
 
   it('refuses a way back it did not start, a forged or old state cookie, a cancelled sign-in and an address that signs in another way', async () => {
-    const { url, fake } = await start()
+    const { url, fake, lines } = await start()
     const noState = await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual' })
     expect([noState.status, noState.headers.get('location')]).toEqual([303, '/signin/?error=expired'])
     const forged = await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: 'w2l_oauth=eyJzIjoieCJ9.bad' } })
@@ -84,6 +84,10 @@ describe('signing in with GitHub or Google', () => {
     expect(other.headers.get('location')).toBe('/signin/?error=other_provider')
     expect(cookies(other).w2l_session).toBeUndefined()
     expect(fake.calls.filter(call => call.method === 'signInWithIdp')).toHaveLength(1)
+    // Firebase's reason goes into the log line, without the email address it may name.
+    fake.answer(new SignInRefused('invalid', 'INVALID_IDP_RESPONSE : bad_verification_code for ada@example.org'))
+    await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: await begin() } })
+    expect(lines.at(-1)).toMatchObject({ event: 'w2l_auth', provider: 'google.com', outcome: 'invalid', reason: 'INVALID_IDP_RESPONSE : bad_verification_code for <email>' })
   })
 
   it('keeps the way back on this site: another host or a protocol-relative path is the account page', () => {
@@ -93,6 +97,19 @@ describe('signing in with GitHub or Google', () => {
 })
 
 describe('signing in with an email link', () => {
+  it('puts the confirmation form into the site\'s own page for the link, between its markers', async () => {
+    const site = '<header>Octocrawl</header><div class="account-panel"><!--w2l:email-finish--><p>Open the link</p><!--/w2l:email-finish--></div><script src="/docs-assets/nav.js"></script>'
+    const { url } = await start(async () => site)
+    const html = await (await fetch(`${url}/auth/email/finish?oobCode=code-0123456789`)).text()
+    expect(html).toMatch(/^<header>Octocrawl<\/header><div class="account-panel"><form class="account-form" method="post" action="\/auth\/email\/finish">.*<input type="hidden" name="oobCode" value="code-0123456789">.*<\/form><\/div><script/)
+    expect(html).not.toContain('Open the link')
+    // Without the site's page (not built, or no markers) the form still comes, on a plain page.
+    for (const missing of [async () => null, async () => '<p>no markers</p>', async () => { throw new Error('ENOENT') }]) {
+      const { url: other } = await start(missing)
+      expect(await (await fetch(`${other}/auth/email/finish?oobCode=code-0123456789`)).text()).toContain('<h1>Finish signing in</h1><form class="account-form"')
+    }
+  })
+
   it('sends a link, shows a button on the link\'s page instead of signing in, and signs in from the button', async () => {
     const { url, fake, accounts } = await start()
     const sent = await fetch(`${url}/auth/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: url }, body: JSON.stringify({ email: ' Ada@Example.org ' }) })
@@ -103,12 +120,12 @@ describe('signing in with an email link', () => {
     const opened = await fetch(`${url}/auth/email/finish?mode=signIn&oobCode=code-0123456789&apiKey=x`, { headers: { cookie: `w2l_signin_email=${remembered}` } })
     const html = await opened.text()
     expect(opened.status).toBe(200)
-    expect(html).toContain('Sign in as <strong>ada@example.org</strong>')
+    expect(html).toContain('Signing in as <strong>ada@example.org</strong>')
     expect(html).not.toContain('style=')
-    expect(opened.headers.get('content-security-policy')).toContain("script-src 'none'")
+    expect(opened.headers.get('content-security-policy')).toContain("form-action 'self'")
     expect(fake.calls.some(call => call.method === 'signInWithEmailLink')).toBe(false)
     // On another device the address is asked for.
-    expect(await (await fetch(`${url}/auth/email/finish?oobCode=code-0123456789`)).text()).toContain('Enter the email address')
+    expect(await (await fetch(`${url}/auth/email/finish?oobCode=code-0123456789`)).text()).toContain('The email address the link was sent to')
     const signed = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
     expect([signed.status, signed.headers.get('location')]).toEqual([303, '/account/'])
     expect(fake.calls.at(-1)).toEqual({ method: 'signInWithEmailLink', args: ['ada@example.org', 'code-0123456789'] })
