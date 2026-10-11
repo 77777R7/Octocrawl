@@ -197,8 +197,9 @@ const STATE = `JSON.stringify({
  * wait's last read, not sent again, so a page as large as the wait can read is read): `display: none`, or `visibility: hidden` with nothing shown
  * inside. Kept: what is never shown (script, style, template and the like) and what is inside an SVG, by its own rules.
  * The copy is made in a document of its own, with no window: the page's own element classes do not run on it, so it
- * stays element for element what the page has. (DOMParser, not document.implementation, which a form the page names
- * `implementation` hides.)
+ * stays element for element what the page has. (createHTMLDocument through Document.prototype: DOMParser is refused a
+ * plain string on a page that requires Trusted Types, and document.implementation is hidden by a form named
+ * `implementation`.)
  */
 const SHOWN_HTML = `(() => {
   const root = document.documentElement
