@@ -249,12 +249,32 @@ describe('Gate 2 real HTTP Monitor reliability', () => {
     const running = engine.runMonitor('price', kind, kind === 'deadline'
       ? { deadlineAt: Date.now() + 100 }
       : { signal: controller.signal })
-    await requestStarted
+    // On a busy machine the 100 ms can pass before the request is made, and the run ends without one: waiting for the
+    // request alone then hung until the test's timeout (CI run 38141589765). Whichever comes first is awaited.
+    const ended = running.then((view) => ({ view }), (error: unknown) => ({ error }))
+    const first = await Promise.race([requestStarted.then(() => null), ended])
     if (kind === 'signal') controller.abort(new Error('caller cancelled'))
-    const view = await running
+    const result = first ?? await ended
+    expect(requests).toEqual([])
+    if ('error' in result) {
+      // The deadline passed before the run was claimed, as the next test checks.
+      expect(kind).toBe('deadline')
+      expect(result.error).toMatchObject({ name: 'TimeoutError' })
+      return
+    }
+    const view = result.view
     expect(view.runs[0]?.state).toBe(kind === 'deadline' ? 'expired' : 'cancelled')
     expect(view.baseline).toBeNull()
     expect(view.events).toEqual([])
+  })
+
+  it('refuses a run whose deadline passed before it started, without a request', async () => {
+    await client.createMonitor(config())
+    delay = true
+    let requested = false
+    started = () => { requested = true }
+    await expect(engine.runMonitor('price', 'deadline', { deadlineAt: Date.now() - 1 })).rejects.toMatchObject({ name: 'TimeoutError' })
+    expect(requested).toBe(false)
     expect(requests).toEqual([])
   })
 })

@@ -27,6 +27,7 @@ const TIMED = [
   'packages/api/test/handoffRoute.test.ts',
   'packages/api/test/keepAlive.test.ts',
   'packages/api/test/map.test.ts',
+  'packages/api/test/monitorReliability.test.ts',
   'packages/api/test/pageOptions.test.ts',
   'packages/bench/test/browserLocal.test.ts',
   'packages/bench/test/originScheduler.test.ts',
