@@ -148,7 +148,8 @@ Suspected cause: not isolated for any task (a run through the product cannot iso
   - **T074.** The http lane's page met its contract, so the ladder stopped there. In the control run it went http → browser_local → Steel and was verified too.
   - **T076 (stackoverflow.com).** It was `blocked` (`cloudflare_challenge`) on the local browser and did not go on to Steel: `not_served`, not verified.
     - Its trace has `robots_disallowed` and `robots_overridden` this time. The URL's robots.txt rule was set aside under the request's recorded override.
-    - A local rung that sets a rule aside skips the vendor rungs, which take no override (`ladder_channel_skipped`, `packages/bench/src/routing/ladder.ts:580`). That rule predates items 10 and 11.
+    - Skipping Steel is consistent with the ladder's robots-override rule: a local rung that sets a rule aside skips the vendor rungs, which take no override (`packages/bench/src/routing/ladder.ts:580`, from `0265636d`, before items 10 and 11). This is inferred, not observed: the result has `robots_overridden` and no provider attempt, but the attempts keep no ladderTrace, so no `ladder_channel_skipped` event was seen.
+    - The ladder's other way past a vendor rung, a contract that failed on a page read as `not_extracted`, does not apply. The http page reads as `not_loaded` (it is not rendered), and the local browser's result was `blocked`.
     - The earlier runs' traces for this task show no disallow, and why robots.txt disallowed the URL this time is not isolated.
 - **T073 is `not_extracted`** (`empty_unverified`, `region_ready`): its region held on Steel's live page in 1.5 s and the extractor found no main content. Steel was the last rung, so no paid hop followed; the extraction is what fails it, as in the control run.
 
