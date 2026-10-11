@@ -227,6 +227,8 @@ describe('ProviderSubject robots gate', () => {
     // The load-bearing assertion. Routing to a banned UA would not avoid the
     // violation, it would arrange it — so the request must not happen at all.
     expect(transport.calls).toEqual([])
+    // No session was opened, so nothing was spent: the ladder settles the call at 0, not at its price ceiling.
+    expect(out.usage.externalCostUsd).toBe(0)
   })
 
   it('takes no recorded robots override: the rule still refuses, and the origin is not touched', async () => {
@@ -326,6 +328,7 @@ describe('ProviderSubject robots gate', () => {
       const out = await new ProviderSubject(decl(), transport, 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')
       expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
       expect(transport.calls).toEqual([])
+      expect(out.usage.externalCostUsd).toBe(0)
       expect(out.compliance!.robots).toMatchObject({ decision: 'disallowed', skippedFetch: true, robotsSha256: null, appliedRules: [], unreachable })
       expect(out.trace).toContainEqual(expect.objectContaining({ event: 'provider_refused', detail: expect.objectContaining({ refusal: 'robots_unreachable' }) }))
     }

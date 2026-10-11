@@ -699,7 +699,8 @@ export class ProviderSubject implements SubjectAdapter {
         attemptCount: 0,
         contentTokens: null,
         browserMs: 0,
-        externalCostUsd: null,
+        // Refused before the provider was called: no session was opened, so the ladder settles it at 0, not its ceiling.
+        externalCostUsd: 0,
       },
       trace,
     }
