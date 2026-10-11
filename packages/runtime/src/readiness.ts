@@ -56,12 +56,12 @@ function answered(result: FetchResult): boolean {
   return typeof status === 'number' && status >= 200 && status < 300
 }
 
-/** How long the lane waited for the page: its last settle wait (loading_wait, steady_wait) and its last region wait, together. */
+/** How long the lane waited for the page: its last settle wait (loading_wait, steady_wait) and its last region wait, together. A region wait that could judge none of the checks read the page once and waited for nothing. */
 function waitedOf(result: FetchResult): number | undefined {
   const last = (names: readonly string[]): number | undefined => {
     for (let i = result.trace.length - 1; i >= 0; i--) {
       const event = result.trace[i]!
-      if (!names.includes(event.event)) continue
+      if (!names.includes(event.event) || event.detail?.unjudged !== undefined) continue
       const waited = Number(event.detail?.waitedMs)
       if (Number.isFinite(waited) && waited >= 0) return Math.round(waited)
     }
@@ -77,7 +77,7 @@ function readiness(state: Readiness['state'], basis: readonly string[], result: 
   return waitedMs === undefined ? { state, basis } : { state, basis, waitedMs }
 }
 
-/** The lane's last wait for the region the task needs, as the trace records it, when it judged this contract on at least one read. */
+/** The lane's last wait for the region the task needs, as the trace records it, when it judged this contract on at least one read and could judge its checks. */
 function regionWaitOf(result: FetchResult, sha: string): { ready: boolean; empty: boolean; loading: boolean; steady: boolean | null } | undefined {
   for (let i = result.trace.length - 1; i >= 0; i--) {
     const event = result.trace[i]!
@@ -85,6 +85,8 @@ function regionWaitOf(result: FetchResult, sha: string): { ready: boolean; empty
     const detail = event.detail ?? {}
     // A stored page (the cache) may carry another request's wait: it says nothing of this contract's region.
     if (detail.contractSha256 !== sha || !(Number(detail.judged) > 0)) return undefined
+    // A wait whose view could judge none of the checks (a page too large, a contract of json fields) held nothing either way.
+    if (detail.unjudged !== undefined) return undefined
     return { ready: detail.ready === true, empty: detail.empty === true, loading: detail.loading === true, steady: typeof detail.steady === 'boolean' ? detail.steady : null }
   }
   return undefined

@@ -149,9 +149,9 @@ describe('the person\'s Chrome', () => {
     const back = [...Array(4).fill(at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('Results') })), at('https://site.test/a', GATE, { active: true }), ...Array(3).fill(at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('$1 $2 $3') }))]
     const again = await (await openUserChrome({ userDataDir, connect: fakeChrome(back).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, region })
     expect(again.region).toMatchObject({ ready: true, reads: 2 })
-    // A contract the page cannot judge (a json field alone) is not waited for, and no region is reported.
+    // A contract the page cannot judge (a json field alone) is not waited for: its one read is reported, saying why.
     const json = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80 })]).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, region: { contract: { checks: [{ type: 'field', path: 'json.price', present: true }] } } })
-    expect(json.region).toBeUndefined()
+    expect(json.region).toMatchObject({ ready: false, reads: 1, judged: 1, unjudged: 'checks_not_on_page' })
   })
 
   it('a tab that stays out of sight is pointed out once, while one hidden for a moment is not', async () => {
