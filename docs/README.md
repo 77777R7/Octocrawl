@@ -47,4 +47,4 @@ These pages record plans and runs at a date. They are not updated after the fact
 - [Gate 4 independent developer acceptance](independent-developer-acceptance.md): the run sheet for a non-author install.
 - [changelog/](changelog/): full release notes too long for [CHANGELOG.md](../CHANGELOG.md).
 - [launch/](launch/), [evidence/](evidence/) and [archive/](archive/): launch notes, evidence of past runs, and earlier plans.
-- Working task lists: [P2 remaining tasks](p2-remaining-tasks.md), [landing redesign](landing-redesign-tasks.md), the R1 pages (`r1-*.md`) and the [2026-09-30 handover](handover-2026-09-30.md).
+- Working task lists: [P2 remaining tasks](p2-remaining-tasks.md), [PA challenge pages and bot checks](pa-challenge-botcheck-tasks.md), [landing redesign](landing-redesign-tasks.md), the R1 pages (`r1-*.md`) and the [2026-09-30 handover](handover-2026-09-30.md).
