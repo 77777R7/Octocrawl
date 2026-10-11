@@ -193,7 +193,7 @@ const ACTIONS_SCHEMA = {
 
 const ROBOTS_OVERRIDE_SCHEMA = {
   type: 'object',
-  description: 'Your own reason for fetching this URL although its host robots.txt disallows it or could not be read. A local server fetches a URL you name anyway, recorded as user_named_url; with this field the record carries your reason and recordedBy instead (robots_override). robots.txt is still read; the rule set aside and the reason go into the trace, a robots_overridden warning and, in the browser lane, the compliance record. Local HTTP and browser rungs only: such a scrape never goes on to a vendor rung, and a hosted API, which obeys robots.txt for every URL, refuses this field.',
+  description: 'Your own reason for fetching this URL although its host robots.txt disallows it or could not be read. A local server fetches a URL you name anyway, recorded as user_named_url; with this field the record carries your reason and recordedBy instead (robots_override). robots.txt is still read; the rule set aside and the reason go into the trace, a robots_overridden warning and, in the browser lane, the compliance record. Local HTTP and browser rungs only: a scrape that set a rule aside never goes on to a vendor rung (one that set aside only a robots.txt it could not read may, and the vendor obeys robots.txt itself), and a hosted API, which obeys robots.txt for every URL, refuses this field.',
   properties: ROBOTS_OVERRIDE_PROPERTIES,
   required: ['reason'],
   additionalProperties: false,
