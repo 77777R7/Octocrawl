@@ -71,6 +71,10 @@
 //                  So a task the ladder held back from a rung says why. A rung taken out before the ladder ran
 //                  (ladder_channels_filtered) or refused by its identity check is not among them. null when the answer carries
 //                  no ladder trace.
+//   robots         (octocrawl) the answer's robots.txt verdict (its last robots_checked event): the decision, the group it
+//                  matched, the file's SHA-256 and, when robots.txt could not be read, why (timeout, network_error,
+//                  server_error: a complete disallow); with a disallow, the rules that applied; with an override, its basis.
+//                  null when the answer records no robots check.
 //   competitors    the same tasks, the same Markdown predicates and the same counts. A competitor's own claim stands
 //                  for `status`: Firecrawl's success with the target's 2xx (metadata.statusCode) is `success`; its
 //                  success with another status, or no success, is `failed` with the reason it gave (an API that names the
@@ -304,6 +308,26 @@ function ladderSkipsOf(doc) {
   })
 }
 
+/** The answer's robots.txt verdict, and with a disallow its rules or why robots.txt could not be read; null when it records no robots check. */
+function robotsOf(doc) {
+  const events = [...(doc?.trace ?? []), ...(doc?.ladderTrace ?? [])]
+  const lastChecked = events.filter((t) => t.event === 'robots_checked').at(-1)
+  if (lastChecked === undefined) return null
+  const checked = lastChecked.detail ?? {}
+  // The same lane's disallow and override: a rung before it (an override the ladder carries onto the answer) read its own robots.txt.
+  const last = (name) => events.filter((t) => t.event === name && t.lane === lastChecked.lane).at(-1)?.detail
+  const disallowed = last('robots_disallowed')
+  const overridden = last('robots_overridden')
+  return {
+    decision: checked.decision ?? null,
+    matchedGroup: checked.matchedGroup ?? null,
+    robotsSha256: checked.robotsSha256 ?? null,
+    ...(typeof checked.unreachable === 'string' ? { unreachable: checked.unreachable } : {}),
+    ...(disallowed === undefined ? {} : { rules: (disallowed.appliedRules ?? []).map((rule) => rule.pattern ?? null) }),
+    ...(overridden === undefined ? {} : { overridden: overridden.basis ?? 'robots_override' }),
+  }
+}
+
 function paidCallsOf(doc) {
   const access = doc?.evidenceRecord?.access
   if (access === undefined || access === null || !('paidCalls' in access)) return null
@@ -352,7 +376,7 @@ async function attempt(task, temperature) {
       gateEvents: events.filter((e) => /gate|blocked|challenge|quality|client_rendered|identity|robots/.test(e)),
       markdownChars: typeof doc?.markdown === 'string' ? doc.markdown.length : null,
       ...(doc?.requestCost === undefined ? {} : { requestCost: doc.requestCost }),
-      ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc), ladderSkips: ladderSkipsOf(doc) } : {}),
+      ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc), ladderSkips: ladderSkipsOf(doc), robots: robotsOf(doc) } : {}),
       // The product's own verdict on the task's contract (ADR 0006); null when none was sent or the answer has none.
       productVerification: typeof doc?.verification?.status === 'string' && doc.verification.status !== 'not_requested' ? doc.verification.status : null,
       // Whether the page was ready for its task (ADR 0007), and the browser's last wait for its region; null when the answer has none.
@@ -502,6 +526,15 @@ if (recordFile !== undefined) {
     return `${judged.length} (held on ${judged.filter((w) => w.ready).length})${why.length === 0 ? '' : `; not judged on ${waits.length - judged.length} (${why.join(', ')})`}`
   }
   const usedCell = (c) => [...('proxyBytes' in c ? [`${c.proxyBytes === null ? 'unknown' : c.proxyBytes} B${c.proxyCountry ? ` ${c.proxyCountry}` : ''}`] : []), ...('solves' in c ? [`${c.solves === null ? 'unknown' : c.solves} solved`] : [])]
+  // Each disallow by its rules or why robots.txt could not be read, for runs that recorded the verdict.
+  const robotsRecorded = rows.some((r) => r.observed.robots !== undefined && r.observed.robots !== null)
+  const robotsLine = (temp) => {
+    const r = rows.filter((x) => x.temperature === temp)
+    const disallowed = r.filter((x) => x.observed.robots?.decision === 'disallowed')
+    const why = (x) => x.observed.robots.unreachable !== undefined ? `unreachable, ${x.observed.robots.unreachable}` : `rule ${(x.observed.robots.rules ?? []).join(', ') || 'not recorded'}`
+    const unknown = r.filter((x) => x.observed.robots === undefined || x.observed.robots === null).length
+    return `- robots.txt (${temp}): disallowed on ${disallowed.length}${disallowed.length === 0 ? '' : ` (${disallowed.map((x) => `${x.taskId}: ${why(x)}${x.observed.robots.overridden ? ', set aside' : ''}`).join('; ')})`}${unknown === 0 ? '' : `; not known on ${unknown} attempt${unknown === 1 ? '' : 's'} without a robots check`}`
+  }
   const paidCell = (calls) => calls === null || calls === undefined ? 'unknown' : calls.map((c) => `${c.provider}: ${c.outcome ?? 'no page'}${c.reason ? `/${c.reason}` : ''}${usedCell(c).length === 0 ? '' : ` [${usedCell(c).join(', ')}]`}${c.answer ? ' (answer)' : ''}`).join('; ')
   const md = [
     `# Access task set run: ${priorRun?.set ?? setFilter}, ${environment.startedAt.slice(0, 10)}`, '',
@@ -521,6 +554,7 @@ if (recordFile !== undefined) {
     ...(Object.values(totals).some((t) => 'paidCalls' in t) ? [''] : []),
     ...(readinessColumn ? [...Object.keys(totals).map((temp) => `- Readiness (${temp}, ADR 0007): ${readinessCounts(temp)}; region waits: ${regionCounts(temp)}`), ''] : []),
     ...(skipsRecorded ? [...Object.keys(totals).map(skipsLine), ''] : []),
+    ...(robotsRecorded ? [...Object.keys(totals).map(robotsLine), ''] : []),
     `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}${readinessColumn ? ' Readiness |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}${readinessColumn ? ' --- |' : ''}`,
     ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}${readinessColumn ? ` ${readinessCell(r)} |` : ''}`),
