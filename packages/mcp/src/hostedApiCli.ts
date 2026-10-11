@@ -10,6 +10,7 @@
  *   W2L_HOSTED_STORE            `firestore` (default) or `memory` (a local run; nothing persists, no keys)
  *   W2L_PROXY_SECRET            shared with the Cloudflare Worker; proves CF-Connecting-IP
  *   W2L_KEYLESS_DAILY           keyless pages per address per UTC day (default 20)
+ *   W2L_CLAUDE_DAILY            keyless pages per UTC day shared by every call from Claude's egress range (default 200)
  *   W2L_SITE_DAILY              pages for the whole service per UTC day (default 1500)
  *   W2L_PUBLIC_API_ORIGIN       the public address, for hints (e.g. https://api.octocrawl.dev)
  *   W2L_SOURCE_COMMIT           recorded in the startup line
@@ -50,8 +51,9 @@ const service = createHostedApi({
   hashKey, keys, quota,
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
   keylessDaily: positive('W2L_KEYLESS_DAILY', 20),
+  claudeDaily: positive('W2L_CLAUDE_DAILY', 200),
   siteDaily: positive('W2L_SITE_DAILY', 1_500),
   publicOrigin: process.env.W2L_PUBLIC_API_ORIGIN || undefined,
 })
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void service.close().then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) }) })
-console.log(JSON.stringify({ service: 'octocrawl-hosted-api', port, store, keylessDaily: positive('W2L_KEYLESS_DAILY', 20), siteDaily: positive('W2L_SITE_DAILY', 1_500), sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
+console.log(JSON.stringify({ service: 'octocrawl-hosted-api', port, store, keylessDaily: positive('W2L_KEYLESS_DAILY', 20), claudeDaily: positive('W2L_CLAUDE_DAILY', 200), siteDaily: positive('W2L_SITE_DAILY', 1_500), sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))

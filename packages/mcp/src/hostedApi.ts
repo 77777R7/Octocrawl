@@ -14,7 +14,7 @@
  */
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { isIP } from 'node:net'
+import { BlockList, isIP } from 'node:net'
 import { readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getRequestListener } from '@hono/node-server'
@@ -66,6 +66,22 @@ export class MemoryHostedQuota implements HostedQuota {
 }
 
 export const DEFAULT_KEYLESS_DAILY = 20
+/**
+ * Claude's connectors (claude.ai, the desktop and mobile apps, the API's MCP connector, web fetch) call from Anthropic's
+ * servers, whose published outbound range is this one IPv4 block (https://platform.claude.com/docs/en/api/ip-addresses,
+ * read 2026-10-11; no outbound IPv6). Counted per address, every Claude user would share one address's 20 pages, so
+ * keyless calls from the range share a pool of their own instead, still under the site's daily total.
+ */
+export const CLAUDE_EGRESS = ['160.79.104.0/21'] as const
+export const DEFAULT_CLAUDE_DAILY = 200
+/** Starts a minute for the whole Claude pool: many people's calls, so a key holder's rate rather than one address's. */
+export const CLAUDE_PER_MINUTE = 60
+const claudeEgress = new BlockList()
+for (const range of CLAUDE_EGRESS) { const [network, bits] = range.split('/'); claudeEgress.addSubnet(network!, Number(bits), 'ipv4') }
+/** Whether an address is in Claude's published egress range. */
+export function fromClaude(address: string): boolean {
+  return isIP(address) === 4 && claudeEgress.check(address, 'ipv4')
+}
 export const DEFAULT_SITE_DAILY = 1_500
 /** Requests per minute a caller may start, so a loop cannot spend a day's allowance in a second. */
 export const KEYLESS_PER_MINUTE = 10
@@ -118,6 +134,8 @@ export interface HostedApiConfig {
   /** Shared with the Cloudflare Worker; proves CF-Connecting-IP. Absent: the socket address is the keyless identity. */
   proxySecret?: string
   keylessDaily?: number
+  /** Keyless pages a UTC day for every caller in Claude's egress range together (see CLAUDE_EGRESS). */
+  claudeDaily?: number
   siteDaily?: number
   /** The public address of this API, named in hints; e.g. https://api.octocrawl.dev */
   publicOrigin?: string
@@ -129,6 +147,8 @@ export interface HostedApiConfig {
 
 export interface HostedCaller {
   kind: 'key' | 'keyless'
+  /** Keyless calls from Claude's egress range, which share one pool. */
+  pool?: 'claude'
   /** The HMAC of the key or of the address: the quota and rate-limit identity. */
   id: string
   dailyLimit: number
@@ -207,6 +227,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const env = config.env ?? process.env
   const log = config.log ?? ((line: string) => console.log(line))
   const keylessDaily = config.keylessDaily ?? DEFAULT_KEYLESS_DAILY
+  const claudeDaily = config.claudeDaily ?? DEFAULT_CLAUDE_DAILY
   const siteDaily = config.siteDaily ?? DEFAULT_SITE_DAILY
   const base = config.networkPolicy ?? hostedNetworkPolicy()
   const policy = withOperatorContact({ ...base, maxFileBytes: Math.min(base.maxFileBytes ?? HOSTED_MAX_FILE_BYTES, HOSTED_MAX_FILE_BYTES) }, env)
@@ -227,6 +248,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const internalSecret = randomBytes(32).toString('hex')
   const keylessLimiter = new SlidingWindowLimiter(KEYLESS_PER_MINUTE)
   const keyLimiter = new SlidingWindowLimiter(KEY_PER_MINUTE)
+  const claudeLimiter = new SlidingWindowLimiter(CLAUDE_PER_MINUTE)
   const addressLimiter = new SlidingWindowLimiter(ADDRESS_PER_MINUTE)
   const sweeper = setInterval(() => { sweepTaskRoot(config.taskRoot).catch((error) => log(JSON.stringify({ severity: 'WARNING', event: 'hosted_sweep_failed', message: String(error) }))) }, SWEEP_EVERY_MS)
   sweeper.unref()
@@ -249,6 +271,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     }
     const internal = headers.get(INTERNAL_SECRET_HEADER)
     const address = internal !== null && sameSecret(internal, internalSecret) ? (headers.get(INTERNAL_CLIENT_HEADER) ?? socketAddress) : socketAddress
+    if (fromClaude(address)) return { kind: 'keyless', pool: 'claude', id: 'claude', dailyLimit: claudeDaily, browser: false, plan: 'keyless' }
     return { kind: 'keyless', id: digest(config.hashKey, 'ip', address), dailyLimit: keylessDaily, browser: false, plan: 'keyless' }
   }
 
@@ -276,16 +299,17 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (caller === 'unknown_key') return refuse(c, 401, 'unauthorized', 'this key is not one Octocrawl issued, or it was revoked', ['send no Authorization header to use the keyless allowance, or ask for a key at https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint'])
     c.set('caller', caller)
     if (!starts) return next()
-    const retryAfter = (caller.kind === 'key' ? keyLimiter : keylessLimiter).retryAfterSeconds(caller.id)
-    if (retryAfter !== null) return refuse(c, 429, 'rate_limited', `too many requests: at most ${caller.kind === 'key' ? KEY_PER_MINUTE : KEYLESS_PER_MINUTE} starts a minute`, [`retry after ${retryAfter} s`], { 'Retry-After': String(retryAfter) })
+    const limiter = caller.kind === 'key' ? keyLimiter : caller.pool === 'claude' ? claudeLimiter : keylessLimiter
+    const retryAfter = limiter.retryAfterSeconds(caller.id)
+    if (retryAfter !== null) return refuse(c, 429, 'rate_limited', `too many requests: at most ${caller.kind === 'key' ? KEY_PER_MINUTE : caller.pool === 'claude' ? CLAUDE_PER_MINUTE : KEYLESS_PER_MINUTE} starts a minute`, [`retry after ${retryAfter} s`], { 'Retry-After': String(retryAfter) })
     const now = new Date()
     const day = utcDay(now)
     const quota = await config.quota.consume([{ id: `${day}-site`, limit: siteDaily }, { id: `${day}-${caller.kind}-${caller.id}`, limit: caller.dailyLimit }], now)
     if (!quota.ok) {
       const seconds = secondsToUtcMidnight(now)
       const site = quota.limited.endsWith('-site')
-      return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served its ${quota.limit} pages for today` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
-        [caller.kind === 'keyless' && !site ? 'a key raises the allowance: https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint' : LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+      return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served its ${quota.limit} pages for today` : caller.pool === 'claude' ? `the ${quota.limit} pages a day that every Claude connector without a key shares are used up` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
+        [caller.kind === 'keyless' && caller.pool !== 'claude' && !site ? 'a key raises the allowance: https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint' : LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
     }
     if (path === '/v1/scrape') {
       // The scrape route runs here with the request pinned: nothing is stored for reuse (the page cache would grow with every

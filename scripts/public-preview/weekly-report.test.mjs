@@ -47,10 +47,11 @@ test('hosted requests are grouped by route and status class, from the run.app re
 
 test('quota documents count distinct callers per day and kind, ignoring other names', () => {
   const base = 'projects/p/databases/(default)/documents/hostedQuotas/'
-  assert.deepEqual(summarizeQuotaDocs([`${base}2026-10-10-keyless-aa`, `${base}2026-10-10-keyless-bb`, `${base}2026-10-10-key-cc`, `${base}2026-10-09-keyless-aa`, `${base}site-total`]), [
+  assert.deepEqual(summarizeQuotaDocs([`${base}2026-10-10-keyless-aa`, `${base}2026-10-10-keyless-bb`, `${base}2026-10-10-key-cc`, `${base}2026-10-09-keyless-aa`, `${base}2026-10-10-keyless-claude`, `${base}site-total`]), [
     { day: '2026-10-09', kind: 'keyless', callers: 1 },
     { day: '2026-10-10', kind: 'key', callers: 1 },
     { day: '2026-10-10', kind: 'keyless', callers: 2 },
+    { day: '2026-10-10', kind: 'keyless, Claude pool (many people)', callers: 1 },
   ])
 })
 
