@@ -15,7 +15,7 @@ const assetRoot = join(root, 'public', 'docs-assets')
 // The docs' own stylesheets and script, each versioned by its content. A stylesheet's references to versioned public
 // files (the header's mountain artwork) get their ?v= first and go to dist in that form, so its own version changes
 // when the artwork does.
-const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css'].map(async name => {
+const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css', 'account.css', 'account.js'].map(async name => {
   const source = await readFile(join(assetRoot, name), 'utf8')
   const shipped = name.endsWith('.css') ? versionAssetReferences(source, join(root, 'public')) : source
   if (shipped !== source) await writeFile(join(root, 'dist', 'docs-assets', name), shipped)
@@ -402,6 +402,40 @@ const notFound = `<!doctype html>
 <body><a class="skip-link" href="#main-content">Skip to content</a>${header('')}
 <div class="doc-layout"><aside class="doc-sidebar"><nav aria-label="Documentation pages">${nav({ slug: null })}</nav></aside><details class="doc-mobile-pages"><summary>Browse docs</summary><nav aria-label="Documentation pages on mobile">${nav({ slug: null })}</nav></details><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / 404</p><article class="doc-article"><h1>Page not found</h1><p>There is no page at this address. It may have moved, or the link may be mistyped.</p><ul><li><a href="/">Try Octocrawl with a public URL</a></li><li><a href="/docs/">Read the documentation</a></li></ul></article></main></div><script defer src="/docs-assets/nav.js"></script></body></html>`
 await writeFile(join(root, 'dist', '404.html'), versionPublicAssets(notFound, join(root, 'public')))
+
+// Sign-in and the account page (packages/public-preview auth.ts and account.ts serve their data). Not for search
+// engines: noindex, and left out of the sitemap. account.js fills them in; without a session the account page sends
+// the visitor to sign in.
+const GITHUB_ICON = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>'
+const GOOGLE_ICON = '<svg viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72A5.4 5.4 0 0 1 3.68 9c0-.6.1-1.18.29-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.05l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 9 0 9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>'
+function accountPageHtml(path, title, description, body) {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="robots" content="noindex" /><meta name="description" content="${escape(description)}" /><link rel="canonical" href="${ORIGIN}${path}" /><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><link rel="stylesheet" href="/docs-assets/nav.css" /><link rel="stylesheet" href="/docs-assets/account.css?v=${assetVersions['account.css']}" /><title>${escape(title)} | Octocrawl</title></head>
+<body><a class="skip-link" href="#main-content">Skip to content</a>${header('account')}
+<div class="doc-layout account-layout"><main id="main-content" class="doc-main"><p class="doc-eyebrow"><span class="kicker-square" aria-hidden="true"></span>Octocrawl / Account</p>${body}</main></div><script defer src="/docs-assets/account.js?v=${assetVersions['account.js']}"></script><script defer src="/docs-assets/nav.js"></script></body></html>`
+}
+const signinBody = `<article class="doc-article" id="signin"><h1>Sign in to Octocrawl</h1><p class="account-lead">An account gets 1,000 credits a month for hosted Octocrawl's API and MCP, and API keys for your agents. No card is needed.</p>
+<div class="account-panel"><div class="signin-options"><a class="signin-button" data-provider="github" href="/auth/github">${GITHUB_ICON}Continue with GitHub</a><a class="signin-button" data-provider="google" href="/auth/google">${GOOGLE_ICON}Continue with Google</a><p class="signin-or">or</p>
+<form class="account-form" id="email-form"><label for="signin-email">Email<input id="signin-email" name="email" type="email" required autocomplete="email" maxlength="254" /></label><button class="account-button" type="submit">Email me a sign-in link</button></form></div>
+<p class="account-message" id="signin-message" role="status" aria-live="polite"></p></div>
+<p class="account-small">Signing in records your email address and how you signed in, as the <a href="/docs/privacy/">privacy page</a> says. The <a href="/docs/terms/">terms</a> cover credits and keys. You can use Octocrawl without an account: hosted Octocrawl gives 20 pages a day without a key, and Octocrawl on your own computer has no limit.</p></article>`
+const accountBody = `<article class="doc-article"><h1>Your account</h1><p class="account-lead">Signed in as <strong id="account-email">…</strong>.</p><p class="account-message" id="account-message" role="status" aria-live="polite"></p>
+<div id="account" hidden>
+<section class="account-panel" aria-labelledby="credits-title"><h2 id="credits-title">Credits</h2><p class="credits-figure" id="credits-remaining"><span>…</span><small>credits left</small></p><p class="credits-detail" id="credits-detail"></p><p class="account-small">A page read over HTTP costs 1 credit, a page read in a browser 5, a page that does not exist 1, and a map 1. A page that was blocked, or a call that read nothing, costs nothing. <a href="/docs/limits/#hosted-api-and-mcp">Limits</a> has the details.</p></section>
+<section class="account-panel" aria-labelledby="keys-title"><h2 id="keys-title">API keys</h2><p>Send a key as <code>Authorization: Bearer &lt;key&gt;</code> to <code>https://api.octocrawl.dev</code> or <code>https://mcp.octocrawl.dev/mcp</code>. Its calls spend this account's credits and may use the browser.</p>
+<form class="account-form inline" id="key-form"><label for="key-label">Name (optional)<input id="key-label" name="label" maxlength="60" placeholder="laptop agent" /></label><button class="account-button" type="submit">Create key</button></form>
+<div class="key-reveal" id="key-reveal" hidden><p>Your new key. Copy it now: it is shown only once.</p><code id="new-key"></code><button class="account-button quiet" type="button" id="copy-key">Copy key</button><p class="account-small">Claude Code:</p><code id="new-key-mcp"></code></div>
+<div class="table-scroll"><table class="account-table"><thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Status</th><th><span class="sr-only">Action</span></th></tr></thead><tbody id="keys-body"></tbody></table></div><p class="account-small" id="keys-empty">No keys yet.</p></section>
+<section class="account-panel" aria-labelledby="usage-title"><h2 id="usage-title">Usage, last 30 days</h2><div class="table-scroll"><table class="account-table"><thead><tr><th>Day (UTC)</th><th class="num">HTTP</th><th class="num">Browser</th><th class="num">Not found</th><th class="num">Map</th><th class="num">Free</th><th class="num">Credits</th></tr></thead><tbody id="usage-body"></tbody></table></div><p class="account-small" id="usage-empty">No calls in the last 30 days.</p></section>
+<form class="account-signout" method="post" action="/auth/logout"><button class="account-button quiet" type="submit">Sign out</button></form>
+</div></article>`
+for (const [path, title, description, body] of [
+  ['/signin/', 'Sign in', 'Sign in to Octocrawl with GitHub, Google or an email link to get 1,000 hosted credits a month and API keys.', signinBody],
+  ['/account/', 'Your account', 'Your Octocrawl credits, API keys and usage.', accountBody],
+]) {
+  await mkdir(join(root, 'dist', path.slice(1)), { recursive: true })
+  await writeFile(join(root, 'dist', path.slice(1), 'index.html'), versionPublicAssets(accountPageHtml(path, title, description, body), join(root, 'public')))
+}
 
 // Crawlers may read every page; the API is not for them. The sitemap lists the home page, each docs page, the blog and
 // its articles, and the changelog.

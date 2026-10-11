@@ -2,7 +2,7 @@
 
 These terms cover the public Octocrawl page at this address and its preview service (“the preview”). They do not cover the Octocrawl software: its code is licensed under the [GNU AGPL-3.0](https://github.com/77777R7/Octocrawl/blob/main/LICENSE), and nothing here limits your rights under that licence. When you run Octocrawl on your own computer, these terms do not apply.
 
-Last updated 9 October 2026.
+Last updated 11 October 2026.
 
 ## Who runs the preview
 
@@ -10,7 +10,7 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 
 ## What the preview is
 
-- A limited, free public trial. There is no account and no payment.
+- A limited, free public trial. There is no payment, and an account is optional (below).
 - Each visitor gets five previews per UTC day, and the whole site 150. These limits may change.
 - The preview may be changed, slowed down, paused or stopped at any time, without notice.
 - It reads one public `http://` or `https://` address per request. It refuses private and reserved network addresses, pages whose robots.txt does not allow it or cannot be reached, and pages that ask for a login or show a verification challenge. Size and time limits are listed in [Limits and result states](/docs/limits/).
@@ -20,6 +20,14 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 - `api.octocrawl.dev` and `mcp.octocrawl.dev` are a free, limited service: a daily allowance without a key, and with a key the allowance it was issued with. There is no payment yet; keys are issued at our discretion and can be revoked.
 - It serves scrape and map only, obeys robots.txt for every page, refuses private addresses, and does not offer proxies, CAPTCHA solving or stealth. It may be changed, slowed down, paused or stopped at any time, without notice.
 - The same responsibilities below apply to what you fetch through it.
+
+## Accounts and credits
+
+- Signing in gives an account free credits each month (1,000 today), spent by its API keys on the hosted API and MCP. What a call costs is on [Limits](/docs/limits/#hosted-api-and-mcp).
+- Credits have no cash value and cannot be transferred. A month's free credits do not roll over. The amount and the costs may change, and this site says what applies.
+- One person, one account. Making accounts to collect more free credits, or sharing a key to get around a limit, may get the accounts suspended and their keys revoked.
+- Keep your keys secret. A key's calls spend its account's credits, whoever makes them.
+- We may suspend an account or revoke a key that breaks these terms or the [acceptable use policy](/docs/acceptable-use/). You can close your account at any time by email.
 
 ## Results
 

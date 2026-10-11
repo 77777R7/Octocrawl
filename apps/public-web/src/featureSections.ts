@@ -187,9 +187,9 @@ export const TIERS: readonly Tier[] = [
     link: ['/docs/connect-mcp/', 'Connect MCP', '↗'],
   },
   {
-    n: '03', name: 'Hosted, with a key', perDay: 1000, unit: 'pages a day, to start',
-    facts: [['Where', 'The same two addresses'], ['Needs', 'A key, issued by hand for now'], ['Reads', 'HTTP, then a browser when the key allows it, 60 a minute']],
-    link: ['#waitlist', 'Ask for a key', '↓'],
+    n: '03', name: 'Hosted, with an account', perDay: 1000, unit: 'credits a month, free',
+    facts: [['Where', 'The same two addresses'], ['Needs', 'An account: sign in with GitHub, Google or email, then make a key'], ['Reads', 'HTTP at 1 credit a page, then a browser at 5, 60 a minute']],
+    link: ['/signin/', 'Sign in', '→'],
   },
   {
     n: '04', name: 'Your computer', perDay: null, unit: 'no daily limit',

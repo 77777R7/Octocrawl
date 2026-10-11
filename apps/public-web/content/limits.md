@@ -6,12 +6,24 @@ Octocrawl reports whether it captured a page and whether a requested structured 
 
 Hosted Octocrawl (`https://api.octocrawl.dev`, `https://mcp.octocrawl.dev/mcp`) serves `POST /v1/scrape` and `POST /v1/map`, and the MCP tools `scrape`, `map` and `scrape_product`.
 
-| | Without a key | With a key |
-| --- | --- | --- |
-| Identity | Your address, hashed per day | The key, hashed |
-| Pages a day | 20 per address | The key's allowance (1,000 to start) |
-| Lane | HTTP only: no screenshot, no `scrape_product` | HTTP, then the browser when the key allows it |
-| Starts a minute | 10 | 60 |
+| | Without a key | With your account's key | With a key issued by hand |
+| --- | --- | --- | --- |
+| Identity | Your address, hashed per day | The key, hashed, and its account | The key, hashed |
+| Allowance | 20 pages a day per address | The account's credits: 1,000 a month | The key's pages a day |
+| Lane | HTTP only: no screenshot, no `scrape_product` | HTTP, then the browser | HTTP, then the browser when the key allows it |
+| Starts a minute | 10 | 60 | 60 |
+
+[Sign in](/signin/) to make keys for your account. An account's call costs what it returned:
+
+| Result | Credits |
+| --- | --- |
+| A page read over HTTP | 1 |
+| A page read in a browser | 5 |
+| A page that does not exist (404 or 410) | 1 |
+| A `map` that returned URLs | 1 |
+| Blocked, nothing read, or refused | 0 |
+
+The monthly credits come back at 00:00 UTC on the 1st. An account with fewer than 5 credits left reads over HTTP only. Once none are left, a call is answered HTTP 429 until then. Each answer gives the credits it used and what is left, in `X-Credits-Used` and `X-Credits-Remaining`.
 
 Claude's connectors (claude.ai, the desktop and mobile apps, and the API's MCP connector) call from Anthropic's servers, not from your device, so their calls without a key share one allowance of 200 pages a day, at up to 60 starts a minute, instead of counting as one address. From Claude Code your calls come from your own address, with its own 20. The whole service serves 1,500 pages a day. Over an allowance the answer is HTTP 429 with `Retry-After` until 00:00 UTC, and a refused request still counts as a start. Every request, of any kind, is limited to 120 a minute per address. A file (PDF, CSV) is read up to 5 MiB. Nothing is kept for reuse: records and files are deleted within ten minutes. `crawl`, `batch`, Monitors, logins, `/fc` and every other route answer 403 with a hint to run Octocrawl on your computer. Proxies, CAPTCHA solving and stealth are not offered; a blocked page is reported as blocked. These numbers may change; this page says what applies.
 
@@ -78,4 +90,4 @@ This is a support boundary, not a list of sites guaranteed to return content. Se
 
 The 200-page Amazon audit includes a fixed regression set and a separately frozen candidate set; neither cohort passed the 100/100 gate. The repository's R0 failure ledger records same-capture hashes and missing-evidence boundaries. Original HTML remains private on the operator's machine.
 
-Need more pages a day on the hosted service, or the browser lane? [Ask for a key](/?from=limits#waitlist).
+Need more than the keyless allowance, or the browser lane? [Sign in](/signin/) for 1,000 credits a month and keys. Need more than that, or something hosted Octocrawl does not do yet? [Tell us](/?from=limits#waitlist).

@@ -6,7 +6,7 @@ Hosted Octocrawl is one URL, no account: `https://mcp.octocrawl.dev/mcp`. It rea
 
 ## Add a key for more
 
-A key raises the daily allowance and opens the browser lane (pages that only appear in a browser, and `scrape_product` for Amazon.sg). Keys are issued by hand for now: [ask for one](/?from=connect-mcp#waitlist) with what you would use it for. The key goes in an `Authorization: Bearer` header, never in the URL:
+A key raises the daily allowance and opens the browser lane (pages that only appear in a browser, and `scrape_product` for Amazon.sg). [Sign in](/signin/) to make one: an account gets 1,000 credits a month, a page read over HTTP costs 1 and a page read in a browser 5. The key goes in an `Authorization: Bearer` header, never in the URL:
 
 ```bash
 # Claude Code

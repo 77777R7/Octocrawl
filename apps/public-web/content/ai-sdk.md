@@ -71,4 +71,4 @@ octocrawlTools({ apiKey: process.env.OCTOCRAWL_API_KEY })        // a key raises
 octocrawlTools({ baseUrl: 'http://127.0.0.1:8787' })            // your own server: npx octocrawl serve
 ```
 
-`apiKey` defaults to `OCTOCRAWL_API_KEY`, and `baseUrl` to `OCTOCRAWL_API_URL`, else hosted Octocrawl. Keys are issued by hand for now: see [Add a key for more](/docs/connect-mcp/#add-a-key-for-more). A server you run with `npx octocrawl serve` has no daily limit, and reads pages that only appear in a browser once `npx playwright install chromium` has run. [Limits](/docs/limits/) lists what hosted Octocrawl does and does not do. The same tools over MCP are on [Connect MCP](/docs/connect-mcp/).
+`apiKey` defaults to `OCTOCRAWL_API_KEY`, and `baseUrl` to `OCTOCRAWL_API_URL`, else hosted Octocrawl. Make a key after you [sign in](/signin/): an account gets 1,000 credits a month. A server you run with `npx octocrawl serve` has no daily limit, and reads pages that only appear in a browser once `npx playwright install chromium` has run. [Limits](/docs/limits/) lists what hosted Octocrawl does and does not do. The same tools over MCP are on [Connect MCP](/docs/connect-mcp/).

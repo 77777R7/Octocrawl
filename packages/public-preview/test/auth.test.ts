@@ -141,11 +141,20 @@ describe('sessions', () => {
     const session = cookies(await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: begin } })).w2l_session!
     expect(accounts.sessions.size).toBe(1)
     expect((await fetch(`${url}/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: `w2l_session=${session}`, origin: 'https://evil.example' } })).status).toBe(403)
-    const out = await fetch(`${url}/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: `w2l_session=${session}`, origin: url } })
-    expect([out.status, out.headers.get('location')]).toEqual([303, '/'])
-    expect(out.headers.getSetCookie()[0]).toMatch(/^w2l_session=; Path=\/; HttpOnly; SameSite=Lax; Max-Age=0$/)
+    // A browser names the request's site in Sec-Fetch-Site: another site's form is refused, even with a matching Origin.
+    expect((await fetch(`${url}/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: `w2l_session=${session}`, origin: url, 'sec-fetch-site': 'cross-site' } })).status).toBe(403)
+    expect((await fetch(`${url}/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: `w2l_session=${session}`, origin: url, 'sec-fetch-site': 'same-site' } })).status).toBe(403)
+    expect(accounts.sessions.size).toBe(1)
+    // The site's own form: under its no-referrer policy the browser sends Origin: null, and Sec-Fetch-Site same-origin.
+    const own = await fetch(`${url}/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: `w2l_session=${session}`, origin: 'null', 'sec-fetch-site': 'same-origin' } })
+    expect(own.status).toBe(303)
     expect(accounts.sessions.size).toBe(0)
-    expect(await (await fetch(`${url}/api/me`, { headers: { cookie: `w2l_session=${session}` } })).json()).toEqual({ signedIn: false })
+    const again = cookies(await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: (await fetch(`${url}/auth/github`, { redirect: 'manual' })).headers.getSetCookie()[0]!.split(';')[0]! } })).w2l_session!
+    const out = await fetch(`${url}/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: `w2l_session=${again}`, origin: url } })
+    expect([out.status, out.headers.get('location')]).toEqual([303, '/'])
+    expect(out.headers.getSetCookie()).toEqual(['w2l_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0', 'w2l_account=; Path=/; SameSite=Lax; Max-Age=0'])
+    expect(accounts.sessions.size).toBe(0)
+    expect(await (await fetch(`${url}/api/me`, { headers: { cookie: `w2l_session=${again}` } })).json()).toEqual({ signedIn: false })
   })
 
   it('without sign-in configured, its addresses are ordinary paths', async () => {

@@ -191,6 +191,16 @@ function requestOriginAllowed(req: IncomingMessage, host: string): boolean {
   return expected.has(origin)
 }
 
+/** Whether a sign-in or account POST came from this site's own pages. A browser says so in Sec-Fetch-Site, which a
+ * page cannot forge; the Origin header is no help there, as pages are served with `Referrer-Policy: no-referrer`, under
+ * which a browser sends a form's POST with `Origin: null`. Without Sec-Fetch-Site (an older browser, a script) the
+ * Origin check decides. */
+function postFromSite(req: IncomingMessage, host: string): boolean {
+  const site = req.headers['sec-fetch-site']
+  if (typeof site === 'string') return site === 'same-origin'
+  return requestOriginAllowed(req, host)
+}
+
 const STATIC_HEADERS = {
   'content-security-policy': "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'",
   'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
@@ -398,7 +408,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         // A sign-in begun on another host (the run.app address) moves to the public one first, so its cookies land there.
         const redirect = pathname.startsWith('/api/') ? null : canonicalRedirect(req, publicOrigin, pathname)
         if (redirect) { res.writeHead(301, { location: redirect, 'cache-control': 'no-store' }).end(); return }
-        const sameOrigin = requestOriginAllowed(req, siteHost(req, publicOrigin)) && req.headers['sec-fetch-site'] !== 'cross-site'
+        const sameOrigin = postFromSite(req, siteHost(req, publicOrigin))
         try {
           if (options.account && await options.account.handle(req, res, pathname, sameOrigin)) return
           if (await options.auth.handle(req, res, requestUrl, requestOrigin(req, publicOrigin), sameOrigin, visitorAddress(req))) return

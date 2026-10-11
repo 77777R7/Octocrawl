@@ -108,3 +108,10 @@
   // Back to a wide window: the sheet's state does not carry over.
   narrow.addEventListener('change', () => { setSheet(false); closeMenus() })
 })()
+
+// Signed in: the header's Sign in link reads Account. The server sets w2l_account=1 beside the HttpOnly session
+// cookie only as this hint; the account page itself asks the server.
+;(() => {
+  if (!/(?:^|;\s*)w2l_account=1(?:;|$)/.test(document.cookie)) return
+  for (const link of document.querySelectorAll('.account-link')) { link.textContent = 'Account'; link.href = '/account/' }
+})()

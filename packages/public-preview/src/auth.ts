@@ -175,6 +175,7 @@ export interface AuthOptions {
 export const SESSION_COOKIE = 'w2l_session'
 const OAUTH_COOKIE = 'w2l_oauth'
 const EMAIL_COOKIE = 'w2l_signin_email'
+const ACCOUNT_HINT_COOKIE = 'w2l_account'
 export const SESSION_DAYS = 30
 /** Sign-in links one network address, or one email address, may ask for an hour on one instance: a typo and a retry. */
 const EMAIL_LINKS_PER_HOUR = 3
@@ -212,6 +213,12 @@ export function safeNext(value: string | null | undefined): string {
 function cookie(origin: string, name: string, value: string, path: string, maxAgeSeconds: number): string {
   const secure = origin.startsWith('https:') ? '; Secure' : ''
   return `${name}=${value}; Path=${path}; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`
+}
+
+/** `w2l_account=1`, readable by the page: only a hint for the header's label, never trusted by the server. */
+function hintCookie(origin: string, signedIn: boolean): string {
+  const secure = origin.startsWith('https:') ? '; Secure' : ''
+  return `${ACCOUNT_HINT_COOKIE}=${signedIn ? '1' : ''}; Path=/; SameSite=Lax; Max-Age=${signedIn ? SESSION_DAYS * 86_400 : 0}${secure}`
 }
 
 function page(title: string, body: string): string {
@@ -268,7 +275,7 @@ export function createAuthRoutes(options: AuthOptions) {
     const at = now()
     const expiresAt = new Date(at.getTime() + SESSION_DAYS * 86_400_000)
     await options.accounts.signIn(user, sessionHash(options.secret, id), expiresAt, at)
-    res.setHeader('set-cookie', [cookie(origin, SESSION_COOKIE, id, '/', SESSION_DAYS * 86_400), ...extraCookies])
+    res.setHeader('set-cookie', [cookie(origin, SESSION_COOKIE, id, '/', SESSION_DAYS * 86_400), hintCookie(origin, true), ...extraCookies])
   }
 
   async function current(req: IncomingMessage): Promise<Session | null> {
@@ -371,7 +378,7 @@ export function createAuthRoutes(options: AuthOptions) {
       if (!sameOrigin) { res.writeHead(403, NO_STORE).end(); return true }
       const id = cookieValue(req, SESSION_COOKIE)
       if (id !== null && /^[A-Za-z0-9_-]{43}$/.test(id)) await options.accounts.endSession(sessionHash(options.secret, id)).catch(() => {})
-      res.writeHead(303, { ...NO_STORE, location: '/', 'set-cookie': cookie(origin, SESSION_COOKIE, '', '/', 0) }).end()
+      res.writeHead(303, { ...NO_STORE, location: '/', 'set-cookie': [cookie(origin, SESSION_COOKIE, '', '/', 0), hintCookie(origin, false)] }).end()
       return true
     }
 

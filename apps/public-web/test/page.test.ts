@@ -125,7 +125,7 @@ describe('Page markup', () => {
     expect(preview!.perDay).toBe(VISITOR_DAILY_PREVIEWS)
     expect(keyless!.perDay).toBe(constant('DEFAULT_KEYLESS_DAILY'))
     expect(keyless!.facts.map(([, v]) => v).join(' ')).toContain(`${constant('KEYLESS_PER_MINUTE')} a minute`)
-    expect(limits).toContain('(1,000 to start)')
+    expect(limits).toContain('The account\'s credits: 1,000 a month')
     expect(key!.perDay).toBe(1000)
     expect(key!.facts.map(([, v]) => v).join(' ')).toContain(`${constant('KEY_PER_MINUTE')} a minute`)
     expect(local!.perDay).toBeNull()
@@ -137,7 +137,7 @@ describe('Page markup', () => {
     expect(numbers.map((n, i) => `${n} ${units[i]}`)).toEqual([
       `${VISITOR_DAILY_PREVIEWS} previews a day, per visitor`,
       `${constant('DEFAULT_KEYLESS_DAILY')} pages a day, per address`,
-      '1,000 pages a day, to start',
+      '1,000 credits a month, free',
       '∞ no daily limit',
     ])
     expect(TIERS.map(t => tierAmount(t.perDay))).toEqual(numbers)
@@ -147,7 +147,7 @@ describe('Page markup', () => {
     const page = pageMarkup()
     const rows = [...page.matchAll(/<div class="tier-row" id="tier-\d\d" data-lights="([^"]+)" data-unit="([^"]+)" data-lit="([^"]+)">/g)]
     expect(rows.map(([, lights]) => lights)).toEqual(TIERS.map(t => String(t.perDay ?? 'all')))
-    expect(rows.map(([, , unit]) => unit)).toEqual(['previews a day', 'pages a day', 'pages a day', 'no daily limit'])
+    expect(rows.map(([, , unit]) => unit)).toEqual(['previews a day', 'pages a day', 'credits a month', 'no daily limit'])
     expect(rows.map(([, , , lit]) => lit)).toEqual(TIERS.map(tierLit))
     expect(tierLit(TIERS[2]!)).toBe('1,000 lit marks on the planet')
     expect(tierLit(TIERS[3]!)).toBe('Every mark on the planet lit')
