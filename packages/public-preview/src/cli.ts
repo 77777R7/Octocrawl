@@ -21,7 +21,8 @@ const auth = firebaseApiKey
   ? createAuthRoutes({
     identity: new IdentityToolkit(firebaseApiKey),
     accounts: new FirestoreAccountStore(process.env.W2L_FIRESTORE_PROJECT_ID ?? ''),
-    secret: process.env.W2L_QUOTA_HASH_KEY ?? '',
+    // Trimmed as the hosted API trims it (hostedApiCli.ts), so a secret with a trailing newline gives both the same digests.
+    secret: (process.env.W2L_QUOTA_HASH_KEY ?? '').trim(),
     log: line => console.log(JSON.stringify({ severity: 'INFO', ...line })),
   })
   : undefined
@@ -29,7 +30,7 @@ const monthlyCredits = Number(process.env.W2L_MONTHLY_CREDITS ?? 1_000)
 if (!Number.isSafeInteger(monthlyCredits) || monthlyCredits < 1) throw new Error('W2L_MONTHLY_CREDITS must be a positive integer')
 const account = auth === undefined ? undefined : createAccountRoutes({
   data: new FirestoreAccountData(process.env.W2L_FIRESTORE_PROJECT_ID ?? ''),
-  hashKey: process.env.W2L_QUOTA_HASH_KEY ?? '',
+  hashKey: (process.env.W2L_QUOTA_HASH_KEY ?? '').trim(),
   current: auth.current,
   monthlyCredits,
 })

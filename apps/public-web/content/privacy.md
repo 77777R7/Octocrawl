@@ -50,10 +50,11 @@ Signing in is optional. You can sign in with GitHub, with Google, or with a link
 **Firebase Authentication.** The sign-in itself is done by Firebase Authentication, a Google service, on this site's Google Cloud project, under Google's privacy policy. Firebase keeps:
 
 - your email address;
+- the name and profile photo address that GitHub or Google gives;
 - which way you signed in, and that service's id for you;
 - when you signed in.
 
-A sign-in link is sent by Firebase. GitHub and Google show you what they share before you agree. We ask GitHub for your email address only, and Google for your email address and profile.
+A sign-in link is sent by Firebase. GitHub and Google show you what they share before you agree. We ask GitHub for your email addresses, which also gives your public profile, and Google for your email address and basic profile.
 
 **This service.** The service keeps these in Google Cloud Firestore in Singapore:
 
@@ -64,7 +65,7 @@ A sign-in link is sent by Firebase. GitHub and Google show you what they share b
 
 **Cookies.** A sign-in sets `w2l_session`, which holds the session's id. Your browser keeps it for 30 days, and scripts on the page cannot read it. It also sets `w2l_account=1`, which tells the page to show **Account** in place of **Sign in**. While you sign in, two short cookies hold the sign-in's state: one for 10 minutes and one for an hour.
 
-**Logs.** The service logs that a sign-in happened, the way it happened and whether it worked. It never logs your email address or a code from a link.
+**Logs.** The service's own log lines say that a sign-in happened, the way it happened and whether it worked, without your email address. The request log (above, 30 days) keeps each request's path and query, so it holds the one-time code a sign-in carried back. Such a code works once and expires within an hour. For an account's key, the hosted API logs one line per call with the account's id, the kind of call and the credits it cost.
 
 **Deleting your account.** Email [hello@octocrawl.dev](mailto:hello@octocrawl.dev) from the account's address to delete it. We remove it from Firebase and from Firestore, its keys included.
 

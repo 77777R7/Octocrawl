@@ -141,6 +141,8 @@ describe('Page markup', () => {
       '∞ no daily limit',
     ])
     expect(TIERS.map(t => tierAmount(t.perDay))).toEqual(numbers)
+    // The account's credits are a month's, and the heading says so.
+    expect(page).toMatch(/id="tier-03"[\s\S]*?<b>1,000<\/b> a month<\/span><\/h3>/)
   })
 
   it('lights one painted mark per page a day, every mark for no daily limit, and says so on the planet', () => {

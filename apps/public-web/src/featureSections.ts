@@ -8,9 +8,9 @@ import { glyphCloud } from './glyphArt'
  * - Hosted Octocrawl serves scrape and map only (packages/mcp/src/hostedApi.ts refuses every other route by name); crawl,
  *   batch, Monitor, logins and the handoff to Chrome run on the person's computer.
  * - Allowances: five previews a visitor a day (VISITOR_DAILY_PREVIEWS, packages/public-preview/src/quota.ts); 20 pages a
- *   day per address without a key and 10 starts a minute (DEFAULT_KEYLESS_DAILY, KEYLESS_PER_MINUTE); a key's 1,000 to
- *   start and 60 a minute (content/limits.md, KEY_PER_MINUTE); 1,500 pages a day for the whole hosted service; no daily
- *   limit on the person's own computer.
+ *   day per address without a key and 10 starts a minute (DEFAULT_KEYLESS_DAILY, KEYLESS_PER_MINUTE); an account's
+ *   1,000 credits a month and 60 a minute (DEFAULT_MONTHLY_CREDITS in packages/mcp/src/hostedCredits.ts, KEY_PER_MINUTE);
+ *   1,500 pages a day for the whole hosted service; no daily limit on the person's own computer.
  * - `npx octocrawl serve` runs a Monitor when asked (POST /v1/monitors/:id/run) and delivers its events; timed re-runs
  *   come from the repository's managed local service (packages/mcp/src/managedRuntime.ts), as content/reference.md says.
  *   A delivery is signed when its destination names a secret (packages/runtime/src/deliveryWorker.ts).
@@ -163,7 +163,7 @@ export const CLIENTS: readonly Client[] = [
       ['more', "  -H 'content-type: application/json' \\"],
       ['more', `  -d '{"url":"https://example.com","formats":["markdown"]}'`],
     ],
-    note: "Add <code>-H 'authorization: Bearer &lt;key&gt;'</code> for more pages a day. <a href=\"/docs/limits/\">Limits and result states</a>",
+    note: "Add <code>-H 'authorization: Bearer &lt;key&gt;'</code> to spend your account's credits instead. <a href=\"/docs/limits/\">Limits and result states</a>",
   },
 ]
 
@@ -171,7 +171,8 @@ export const CLIENTS: readonly Client[] = [
 export const clientCopy = (c: Client) => c.lines.filter(([kind]) => kind === 'cmd' || kind === 'more' || kind === 'code' || (kind === 'gap' && c.lines.some(([k]) => k === 'code'))).map(([, text]) => text).join('\n').trim()
 
 type Tier = {
-  n: string, name: string, perDay: number | null, unit: string,
+  /** `perDay` is the allowance's number; `per` its period, a day unless it says month (an account's credits). */
+  n: string, name: string, perDay: number | null, per?: 'month', unit: string,
   facts: ReadonlyArray<readonly [string, string]>, link: readonly [href: string, label: string, arrow: string]
 }
 
@@ -187,7 +188,7 @@ export const TIERS: readonly Tier[] = [
     link: ['/docs/connect-mcp/', 'Connect MCP', '↗'],
   },
   {
-    n: '03', name: 'Hosted, with an account', perDay: 1000, unit: 'credits a month, free',
+    n: '03', name: 'Hosted, with an account', perDay: 1000, per: 'month', unit: 'credits a month, free',
     facts: [['Where', 'The same two addresses'], ['Needs', 'An account: sign in with GitHub, Google or email, then make a key'], ['Reads', 'HTTP at 1 credit a page, then a browser at 5, 60 a minute']],
     link: ['/signin/', 'Sign in', '→'],
   },
@@ -302,7 +303,7 @@ export function capabilitiesMarkup(bar: string): string {
  * painted. */
 export function tiersMarkup(bar: string): string {
   const rows = TIERS.map(t => `<div class="tier-row" id="tier-${t.n}" data-lights="${t.perDay ?? 'all'}" data-unit="${esc(tierUnit(t))}" data-lit="${esc(tierLit(t))}">
-              <h3 class="tier-head"><span class="tier-n" aria-hidden="true">${t.n}</span><span class="tier-name">${t.name}</span><span class="tier-leader" aria-hidden="true"></span><span class="tier-amount"><b>${tierAmount(t.perDay)}</b>${t.perDay === null ? '<span class="visually-hidden"> no daily limit</span>' : ' a day'}</span></h3>
+              <h3 class="tier-head"><span class="tier-n" aria-hidden="true">${t.n}</span><span class="tier-name">${t.name}</span><span class="tier-leader" aria-hidden="true"></span><span class="tier-amount"><b>${tierAmount(t.perDay)}</b>${t.perDay === null ? '<span class="visually-hidden"> no daily limit</span>' : ` a ${t.per ?? 'day'}`}</span></h3>
               <div class="tier-panel">
                 <p class="tier-unit">${t.unit}</p>
                 <dl class="tier-facts">${t.facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
@@ -319,7 +320,7 @@ export function tiersMarkup(bar: string): string {
             <div class="can-intro">
               <p class="section-kicker"><span class="kicker-square"></span> FREE TIERS</p>
               <h2 id="tier-title">Free to start,<br />four <em>ways.</em></h2>
-              <p class="can-lead">None of them needs a card. Each mark that lights up on the planet stands for a page a day.</p>
+              <p class="can-lead">None of them needs a card. Each mark that lights up on the planet stands for a page a day, or, for an account, a credit a month.</p>
               <p class="tier-hint" aria-hidden="true" hidden>Scroll to light the planet <span>↓</span></p>
             </div>
             <div class="tier-rail" id="tier-rail">
@@ -335,7 +336,7 @@ export function tiersMarkup(bar: string): string {
         </div>
       </div>
       <div class="band"><div class="frame tier-foot-band">
-        <p class="tier-foot">The whole hosted service serves 1,500 pages a day; over an allowance the answer is HTTP 429 until 00:00 UTC. Credit packs are planned but not sold yet. <a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
+        <p class="tier-foot">The whole hosted service serves 1,500 pages a day; over an allowance the answer is HTTP 429 until 00:00 UTC, and for an account's credits until the 1st. Credit packs are planned but not sold yet. <a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
       </div></div>
     </section>`
 }
