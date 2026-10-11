@@ -12,6 +12,7 @@ import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES
   requestOrigin, stdoutLogger, targetHost, type Logger } from './site.js'
 import { parseWaitlistEntry, WAITLIST_BODY_BYTES, WAITLIST_DAILY_SUBMISSIONS, type WaitlistStore } from './waitlist.js'
 import type { createAuthRoutes } from './auth.js'
+import type { createAccountRoutes } from './account.js'
 
 export interface PreviewServerOptions {
   quota: PreviewQuota
@@ -40,11 +41,13 @@ export interface PreviewServerOptions {
   waitlist?: WaitlistStore
   /** Sign-in (auth.ts). Unset, its addresses are ordinary paths: a 404 page, and /api/me a 404. */
   auth?: ReturnType<typeof createAuthRoutes>
+  /** The account page's data (account.ts); needs `auth`. */
+  account?: ReturnType<typeof createAccountRoutes>
 }
 
 /** The addresses sign-in answers: its own routes, the provider's way back, and who is signed in. */
 function authPath(pathname: string): boolean {
-  return pathname.startsWith('/auth/') || pathname === '/__/auth/handler' || pathname === '/api/me'
+  return pathname.startsWith('/auth/') || pathname === '/__/auth/handler' || pathname === '/api/me' || pathname === '/api/account' || pathname.startsWith('/api/account/')
 }
 
 const MIME: Record<string, string> = {
@@ -397,6 +400,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         if (redirect) { res.writeHead(301, { location: redirect, 'cache-control': 'no-store' }).end(); return }
         const sameOrigin = requestOriginAllowed(req, siteHost(req, publicOrigin)) && req.headers['sec-fetch-site'] !== 'cross-site'
         try {
+          if (options.account && await options.account.handle(req, res, pathname, sameOrigin)) return
           if (await options.auth.handle(req, res, requestUrl, requestOrigin(req, publicOrigin), sameOrigin, visitorAddress(req))) return
         } catch (error) {
           log({ event: 'w2l_auth_error', message: error instanceof Error ? error.message : String(error) })

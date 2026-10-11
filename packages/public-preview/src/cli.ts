@@ -7,6 +7,7 @@ import { firestoreAmazonGateFromEnv } from './amazonGate.js'
 import { firestoreWaitlistFromEnv } from './waitlist.js'
 import { validateAmazonPublicState } from './preview.js'
 import { createAuthRoutes, FirestoreAccountStore, IdentityToolkit } from './auth.js'
+import { createAccountRoutes, FirestoreAccountData } from './account.js'
 
 if (process.env.W2L_CAPTURE_RAW_DIR) throw new Error('Anonymous preview cannot persist raw capture artifacts')
 const stateFile = process.env.W2L_AMAZON_PUBLIC_STATE_FILE
@@ -24,6 +25,14 @@ const auth = firebaseApiKey
     log: line => console.log(JSON.stringify({ severity: 'INFO', ...line })),
   })
   : undefined
+const monthlyCredits = Number(process.env.W2L_MONTHLY_CREDITS ?? 1_000)
+if (!Number.isSafeInteger(monthlyCredits) || monthlyCredits < 1) throw new Error('W2L_MONTHLY_CREDITS must be a positive integer')
+const account = auth === undefined ? undefined : createAccountRoutes({
+  data: new FirestoreAccountData(process.env.W2L_FIRESTORE_PROJECT_ID ?? ''),
+  hashKey: process.env.W2L_QUOTA_HASH_KEY ?? '',
+  current: auth.current,
+  monthlyCredits,
+})
 const server = createPreviewServer({
   quota: firestoreQuotaFromEnv(),
   amazonGate: firestoreAmazonGateFromEnv(),
@@ -39,6 +48,7 @@ const server = createPreviewServer({
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
   waitlist: firestoreWaitlistFromEnv(),
   ...(auth === undefined ? {} : { auth }),
+  ...(account === undefined ? {} : { account }),
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false' }))
