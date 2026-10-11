@@ -197,13 +197,18 @@ const STATE = `JSON.stringify({
  * wait's last read, not sent again, so a page as large as the wait can read is read): `display: none`, or `visibility: hidden` with nothing shown
  * inside. Kept: what is never shown (script, style, template and the like) and what is inside an SVG, by its own rules.
  * The copy is made in a document of its own, with no window: the page's own element classes do not run on it, so it
- * stays element for element what the page has. (DOMParser, not document.implementation, which a form the page names
- * `implementation` hides.)
+ * stays element for element what the page has. (createHTMLDocument through Document.prototype: DOMParser is refused a
+ * plain string on a page that requires Trusted Types, and document.implementation is hidden by a form named
+ * `implementation`.)
  */
 const SHOWN_HTML = `(() => {
   const root = document.documentElement
   if (!root) return JSON.stringify({ href: location.href, shown: '' })
-  const copy = new DOMParser().parseFromString('', 'text/html').importNode(root, true)
+  // A document of its own, inert: no script of the copy runs. createHTMLDocument, not DOMParser, which a page that
+  // requires Trusted Types (Gmail) refuses a plain string, every read, until the wait ran out; reached through
+  // Document.prototype, since a form named "implementation" would shadow document.implementation.
+  const implementation = Object.getOwnPropertyDescriptor(Document.prototype, 'implementation').get.call(document)
+  const copy = implementation.createHTMLDocument('').importNode(root, true)
   const originals = root.querySelectorAll('body *')
   const copies = copy.querySelectorAll('body *')
   const unshown = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'LINK', 'META', 'TITLE', 'BASE'])

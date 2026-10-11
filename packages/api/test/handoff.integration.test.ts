@@ -44,6 +44,8 @@ beforeAll(async () => {
         + '<div style="display:none">The closed tab</div><script type="application/ld+json">{"@type":"Thing","name":"The data"}</script>'
         + '<script>customElements.define("x-grow", class extends HTMLElement { constructor() { super(); this.appendChild(document.createElement("span")) } })</script>')
     }
+    // As Gmail: a page that requires Trusted Types, where a script may not hand DOMParser a plain string.
+    if (req.url === '/trusted') return html(`${ARTICLE}<div style="display:none">The closed tab</div>`, 200, { 'content-security-policy': "require-trusted-types-for 'script'" })
     // A captcha until the person passes it: their browser then holds the cookie the page checks.
     if (req.url === '/gate') return cookie.includes('passed=1') ? html(ARTICLE) : html(captcha('passed'))
     // Through the captcha, a page with nothing on it: not the page asked for.
@@ -173,6 +175,10 @@ describe('reading a page in the person\'s own Chrome', () => {
       const whole = await reader.read(`${base}/sheet`, { unattended: true, pollMs: 50, waitMs: 20_000 })
       expect(whole.html).toContain('Insert new sheet')
       expect(whole.html).toContain('The closed tab')
+      // A page that requires Trusted Types is read as it shows too, not waited on until the wait runs out.
+      const trusted = await reader.read(`${base}/trusted`, { unattended: true, shownOnly: true, pollMs: 50, waitMs: 20_000 })
+      expect(trusted.html).toContain('The member page')
+      expect(trusted.html).not.toContain('The closed tab')
     } finally {
       reader.close()
     }
