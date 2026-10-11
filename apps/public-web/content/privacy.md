@@ -37,7 +37,7 @@ Nothing here is sold or shared for advertising.
 
 Calls to `api.octocrawl.dev` and `mcp.octocrawl.dev` pass through Cloudflare and Google Cloud Run in Singapore as the page does, and the same request log applies (30 days). In addition the service records:
 
-- **A daily counter** under a keyed hash of the UTC day and your address, or of your key, and one for the whole service; without the service's secret the hash cannot be turned back into either. They are kept in Firestore and deleted two days on.
+- **A daily counter** under a keyed hash of the UTC day and your address, or of your key, one for the calls from Claude's connectors together (they come from Anthropic's servers, so that counter holds no address of yours), and one for the whole service; without the service's secret the hash cannot be turned back into either. They are kept in Firestore and deleted two days on.
 - **Your key's record**, if you have one: a hash of the key (never the key), the label you gave when you asked for it, its plan and allowance, and when it was issued.
 - **The result of each call** for ten minutes, so that `GET /v1/scrapes/:id` can return it, then deleted with any file it read. The page you asked for is not kept for reuse by anyone else.
 

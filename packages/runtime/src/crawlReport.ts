@@ -25,12 +25,14 @@ export async function crawlReportFromStore(store: TaskStore, taskId: string): Pr
     }
   }
   const steps = await store.listSteps(taskId, latest.id)
-  return reportFromTaskAttempt(
+  const report = reportFromTaskAttempt(
     task,
     latest,
     steps.filter((step) => step.cached).length,
     steps.some((step) => step.result?.failureReason === 'loop_detected'),
   )
+  // A batch counts its contract over every attempt, where it counts succeeded and failed.
+  return task.batch === undefined && task.crawl?.verify !== undefined ? { ...report, ...(await store.countVerifications(taskId, latest.id)) } : report
 }
 
 export function reportFromTaskAttempt(

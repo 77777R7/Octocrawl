@@ -106,6 +106,31 @@ describe('task verification on a request (ADR 0006)', () => {
     expect(byUrl[`${origin}/gone`]).toMatchObject({ status: 'failed', verification: { status: 'failed', reason: 'page_not_read' } })
     expect(validate(byUrl[`${origin}/article`].evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
     expect(byUrl[`${origin}/article`].evidenceRecord.verification).toMatchObject({ status: 'passed' })
+    // The status counts the contract beside succeeded and failed; a batch without one carries no such count.
+    expect((await call(engine, 'GET', `/v1/batches/${id}`)).json).toMatchObject({ succeeded: 1, failed: 1, verified: 1, verificationFailed: 1 })
+    const plain = await call(engine, 'POST', '/v1/batches', { urls: [`${origin}/article`] })
+    for (let i = 0; i < 200; i++) {
+      if (!['pending', 'running'].includes((await call(engine, 'GET', `/v1/batches/${plain.json.taskId ?? plain.json.id}`)).json.status)) break
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    const plainStatus = (await call(engine, 'GET', `/v1/batches/${plain.json.taskId ?? plain.json.id}`)).json
+    expect(plainStatus.succeeded).toBe(1)
+    expect(plainStatus).not.toHaveProperty('verified')
+    expect(plainStatus).not.toHaveProperty('verificationFailed')
+  })
+
+  it('counts a crawl\'s pages against the task contract on its status', async () => {
+    const engine = engineWith()
+    const started = await call(engine, 'POST', '/v1/crawl', { url: `${origin}/article`, maxPages: 1, verify: failing })
+    expect(started.status).toBe(202)
+    const id = started.json.taskId ?? started.json.id
+    let report: Record<string, any> = {}
+    for (let i = 0; i < 200; i++) {
+      report = (await call(engine, 'GET', `/v1/crawl/${id}`)).json
+      if (!['pending', 'running'].includes(report.status)) break
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    expect(report).toMatchObject({ status: 'completed', pagesFetched: 1, verified: 0, verificationFailed: 1 })
   })
 
   it('judges a batch page whose fetch threw against the contract, not as one sent without it', async () => {
@@ -120,6 +145,22 @@ describe('task verification on a request (ADR 0006)', () => {
     expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/1', reason: 'page_not_read', checks: [] } })
     expect(validate(item!.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
     expect(item!.evidenceRecord.verification).toMatchObject({ status: 'failed', reason: 'page_not_read', contractSha256: item!.verification.contractSha256 })
+  })
+
+  it('goes on up the ladder from a page that fails the contract, and stops at the first page without one', async () => {
+    // A stand-in for the browser rung: the HTTP rung's page, with the line the task asks for.
+    const withBrowser = (mode: Parameters<typeof buildChannels>[0]) => {
+      const http = buildChannels(mode, { networkPolicy: policy }).filter(channel => channel.id === 'http')
+      const browser = { id: 'browser_local', identity: http[0]!.identity, fetch: async (...args: Parameters<typeof http[0]['fetch']>) => { const read = await http[0]!.fetch(...args); return { ...read, lane: 'browser_local' as const, markdown: `${read.markdown}\n\nHarbour fee: 12` } } }
+      return [...http, browser]
+    }
+    const engine = engineWith({ channelsFor: withBrowser })
+    const contract = { checks: [{ type: 'markdownIncludes', text: 'Harbour fee' }] }
+    const verified = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: contract, debug: true })
+    expect(verified.json).toMatchObject({ status: 'success', lane: 'browser_local', channelsTried: ['http', 'browser_local'], verification: { status: 'passed' } })
+    expect(verified.json.ladderTrace.filter((t: { event: string }) => t.event === 'verification_checked').map((t: { detail: { verdict: string } }) => t.detail.verdict)).toEqual(['failed', 'passed'])
+    const plain = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, debug: true, maxAge: 0 })
+    expect(plain.json).toMatchObject({ lane: 'http', channelsTried: ['http'] })
   })
 
   it('is refused with its regex checks by a hosted server, which takes the others', async () => {

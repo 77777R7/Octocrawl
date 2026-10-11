@@ -9,6 +9,15 @@
 import type { Attempt, ListPageRead, StepRecord, StepStatus, Task } from '@w2l/contracts'
 
 export type StepPageKind = 'pages' | 'errors' | 'all'
+
+/** A job's task-contract counts (ADR 0006), beside `succeeded` and `failed` on its status. */
+export interface VerificationCounts {
+  verified: number
+  verificationFailed: number
+}
+
+/** The step statuses a job's `succeeded` and `failed` count, and so its verification counts: not a step in flight, nor a duplicate of a page counted already. */
+export const VERIFICATION_COUNTED_STATUSES: readonly StepStatus[] = ['success', 'partial', 'empty_verified', 'failed', 'blocked', 'cancelled', 'budget_exceeded']
 export interface StepPageQuery {
   attemptId?: string
   cursor?: string
@@ -41,6 +50,12 @@ export interface TaskStore {
   countSteps(taskId: string, attemptId?: string): Promise<Partial<Record<StepStatus, number>>>
   /** How many of a task's `blocked` steps have each block reason, every attempt counted, without reading their bodies' text. */
   countBlockReasons(taskId: string): Promise<Record<string, number>>
+  /**
+   * Of an attempt's steps (every attempt's without attemptId) whose page was read or failed, the statuses `succeeded`
+   * and `failed` count, how many passed the task contract and how many did not (ADR 0006), without reading their text.
+   * A step stored without a verification (a fetch that threw) did not pass.
+   */
+  countVerifications(taskId: string, attemptId?: string): Promise<VerificationCounts>
   listStepsPage(taskId: string, query: StepPageQuery): Promise<StepPage>
   /**
    * Latest step for this canonical URL on the task (any attempt).
