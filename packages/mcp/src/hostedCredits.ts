@@ -48,9 +48,10 @@ export function scrapeCharge(result: PricedScrape): { credits: number; kind: Usa
   return { credits: 0, kind: 'unread' }
 }
 
-/** What a map answer costs: one credit when it returned URLs (completed or partial), nothing when it failed. */
-export function mapCharge(response: { status?: unknown }): { credits: number; kind: UsageKind } {
-  return response.status === 'completed' || response.status === 'partial' ? { credits: CREDITS.map, kind: 'map' } : { credits: 0, kind: 'unread' }
+/** What a map answer costs: one credit when it returned URLs (completed or partial with links), nothing otherwise. */
+export function mapCharge(response: { status?: unknown; links?: unknown }): { credits: number; kind: UsageKind } {
+  const returned = Array.isArray(response.links) && response.links.length > 0
+  return returned && (response.status === 'completed' || response.status === 'partial') ? { credits: CREDITS.map, kind: 'map' } : { credits: 0, kind: 'unread' }
 }
 
 /** Credits taken for one call, from the monthly grant and from bought credits, before it ran. */
@@ -140,6 +141,8 @@ interface FirestoreDoc { name: string; fields?: Record<string, Value>; updateTim
 interface CommitResponse { writeResults?: Array<{ transformResults?: Value[] }> }
 
 const UID = /^[A-Za-z0-9_-]{8,128}$/
+/** An account id usable as a Firestore document id: Firestore reserves ids of the form __name__. */
+export function validAccountId(uid: string): boolean { return UID.test(uid) && !/^__.*__$/.test(uid) }
 
 export class FirestoreCreditsStore implements CreditsStore {
   private readonly resource: string
@@ -156,7 +159,7 @@ export class FirestoreCreditsStore implements CreditsStore {
   }
 
   async reserve(uid: string, amount: number, site: QuotaEntry, now = new Date()): Promise<ReserveResult> {
-    if (!UID.test(uid)) throw new Error('account id is malformed')
+    if (!validAccountId(uid)) throw new Error('account id is malformed')
     const month = utcMonth(now)
     for (let attempt = 0; attempt < 6; attempt++) {
       const token = await this.token()
@@ -195,9 +198,10 @@ export class FirestoreCreditsStore implements CreditsStore {
     const back = giveBack(refund, reservation)
     const day = now.toISOString().slice(0, 10)
     const expireAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + USAGE_RETENTION_DAYS)).toISOString()
-    const token = await this.token()
     const increment = (fieldPath: string, by: number) => ({ fieldPath, increment: { integerValue: String(by) } })
-    const response = await this.commit(token, [
+    // Increments need no read, so a refused commit is retried as it is; one that timed out may have applied (see the log line).
+    let response: CommitResponse | 'retry' = 'retry'
+    for (let attempt = 0; attempt < 3 && response === 'retry'; attempt++) response = await this.commit(await this.token(), [
       {
         update: { name: `${this.resource}/credits/${reservation.uid}`, fields: {} },
         updateMask: { fieldPaths: [] },
@@ -243,7 +247,9 @@ export class FirestoreCreditsStore implements CreditsStore {
 }
 
 function integer(value: Value | undefined, name: string): number {
-  const n = Number(value?.integerValue)
+  // A field a writer has not set yet (a purchase that wrote only `purchased`) is zero, not a broken account.
+  if (value === undefined) return 0
+  const n = Number(value.integerValue)
   if (!Number.isSafeInteger(n) || n < 0) throw new Error(`credits document has a malformed ${name}`)
   return n
 }

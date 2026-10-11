@@ -22,9 +22,11 @@ describe('what a result costs', () => {
       { status: 'cancelled', lane: 'http' },
       {},
     ]) expect(scrapeCharge(result), JSON.stringify(result)).toEqual({ credits: 0, kind: 'unread' })
-    expect(mapCharge({ status: 'completed' })).toEqual({ credits: 1, kind: 'map' })
-    expect(mapCharge({ status: 'partial' })).toEqual({ credits: 1, kind: 'map' })
-    expect(mapCharge({ status: 'failed' })).toEqual({ credits: 0, kind: 'unread' })
+    expect(mapCharge({ status: 'completed', links: [{ url: 'https://example.com/' }] })).toEqual({ credits: 1, kind: 'map' })
+    expect(mapCharge({ status: 'partial', links: [{ url: 'https://example.com/' }] })).toEqual({ credits: 1, kind: 'map' })
+    // A map that returned no URL (a search nothing matched, an empty sitemap) costs nothing, whatever its status.
+    expect(mapCharge({ status: 'completed', links: [] })).toEqual({ credits: 0, kind: 'unread' })
+    expect(mapCharge({ status: 'failed', links: [] })).toEqual({ credits: 0, kind: 'unread' })
   })
 
   it('counts the time to the next grant to 00:00 UTC on the 1st', () => {
@@ -133,5 +135,9 @@ describe('the Firestore ledger', () => {
     expect(await store.reserve('account-2', 1, { id: SITE.id, limit: 1 }, OCT)).toEqual({ ok: false, limited: 'site', limit: 1 })
     expect(firestore.commits).toHaveLength(1)
     await expect(store.reserve('../other', 1, SITE, OCT)).rejects.toThrow(/malformed/)
+    await expect(store.reserve('__reserved__', 1, SITE, OCT)).rejects.toThrow(/malformed/)
+    // A balance a purchase wrote with `purchased` alone reads its missing grant as zero, not as a broken account.
+    firestore.docs.set(`${firestore.resource}/credits/account-3`, { fields: { month: { stringValue: '2026-10' }, purchased: { integerValue: '4' } }, updateTime: '2026-10-11T00:00:00Z' })
+    expect(await store.reserve('account-3', 1, SITE, OCT)).toMatchObject({ ok: true, reservation: { fromGrant: 0, fromPurchased: 1, remaining: 3 } })
   })
 })

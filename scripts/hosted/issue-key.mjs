@@ -71,7 +71,7 @@ if (command === 'issue') {
   if (!label) fail('--label is required: who the key is for')
   const dailyLimit = Number(options.daily ?? 1000)
   if (!Number.isSafeInteger(dailyLimit) || dailyLimit < 1) fail('--daily must be a positive integer')
-  if (options.uid !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(options.uid)) fail('--uid must be 8 to 128 letters, digits, _ or -')
+  if ('uid' in options && (typeof options.uid !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(options.uid) || /^__.*__$/.test(options.uid))) fail('--uid must be 8 to 128 letters, digits, _ or -, and not of the form __name__')
   const key = `oc_${randomBytes(32).toString('base64url')}`
   const record = { enabled: true, plan: options.uid === undefined ? (options.plan ?? 'free') : 'account', dailyLimit, browser: options.browser === true, label, createdAt: new Date().toISOString(), ...(options.uid === undefined ? {} : { uid: options.uid }) }
   const id = digest(key)

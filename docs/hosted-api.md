@@ -131,12 +131,13 @@ A key that names an account (`uid` on its `hostedApiKeys` document) spends that 
 
 - **How it is charged.** A call reserves the most it could cost before it runs: 5 when the key may use the browser lane, else 1. When it ends, it gives back what its result did not cost.
 - **Running short.** An account with at least 1 credit but fewer than 5 reads over HTTP alone for that call. With none left it is refused: `429 quota_exhausted`, with `Retry-After` counting down to the 1st.
-- **What the response says.** Each response says `X-Credits-Used` and `X-Credits-Remaining`. An MCP tool call spends the same way, through the same gate.
+- **What the response says.** A scrape or map the gate answered says `X-Credits-Used` and `X-Credits-Remaining`. An error raised inside (an invalid request, a server error) costs nothing but carries neither header. An MCP tool call spends the same way, through the same gate.
 - **Firestore.**
   - `credits/{uid}` holds `month`, `grant` and `purchased`.
   - A reservation updates that document and the site's daily counter (`hostedQuotas/{day}-site`) in one commit with update-time preconditions, so two instances cannot overspend.
   - The refund and the day's usage (`creditUsage/{uid}-{day}`: `http`, `browser`, `not_found`, `map`, `unread`, `credits`) are server-side increments. The usage documents expire after 90 days (the TTL policy above).
-- **Logs.** Every call logs `hosted_credits` with the account id, what it was counted as, and what it reserved and spent. A failed settle logs `hosted_credits_settle_failed` with the credits to give back.
+- **Logs.** Every call that reserved credits logs `hosted_credits` with the account id, what it was counted as, and what it reserved and spent. A reservation or settle that fails logs `hosted_credits_reserve_failed` or `hosted_credits_settle_failed`. A commit that timed out may still have applied, so check `credits/{uid}` and `creditUsage` before giving anything back by hand.
+- **Edge.** A call that runs across 00:00 UTC on the 1st gives its refund to the new month's grant, at most 4 credits over it.
 
 Sign-in and the account page come next, on octocrawl.dev. Until then, an account's key can be issued by hand for a test account:
 

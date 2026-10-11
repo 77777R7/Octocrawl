@@ -344,10 +344,15 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const site = { id: siteId, limit: siteDaily }
     const isScrape = path === '/v1/scrape'
     let browser = isScrape && caller.browser
-    let reserved = await credits.reserve(uid, browser ? CREDITS.browserPage : isScrape ? CREDITS.httpPage : CREDITS.map, site, now)
+    const reserve = (amount: number) => credits.reserve(uid, amount, site, now).catch((error: unknown) => {
+      // A commit that timed out may still have applied: the line names what may have been taken, to check against credits/{uid}.
+      log(JSON.stringify({ severity: 'ERROR', event: 'hosted_credits_reserve_failed', uid, amount, message: error instanceof Error ? error.message : String(error) }))
+      throw error
+    })
+    let reserved = await reserve(browser ? CREDITS.browserPage : isScrape ? CREDITS.httpPage : CREDITS.map)
     if (!reserved.ok && reserved.limited === 'credits' && browser && reserved.remaining >= CREDITS.httpPage) {
       browser = false
-      reserved = await credits.reserve(uid, CREDITS.httpPage, site, now)
+      reserved = await reserve(CREDITS.httpPage)
     }
     if (!reserved.ok) {
       if (reserved.limited === 'site') {
@@ -385,7 +390,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
         }
       } else {
         await next()
-        if (c.res.status === 200) charge = mapCharge(await c.res.clone().json().catch(() => ({})) as { status?: unknown })
+        if (c.res.status === 200) charge = mapCharge(await c.res.clone().json().catch(() => ({})) as { status?: unknown; links?: unknown })
         response = new Response(c.res.body, c.res)
       }
     } catch (error) {

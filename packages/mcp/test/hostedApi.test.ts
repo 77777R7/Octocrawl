@@ -217,9 +217,13 @@ it('an account\'s key spends credits by what each result returned, and says what
   const map = await post(url, '/v1/map', { url: `${origin}/page` }, auth)
   expect(map.status).toBe(200)
   expect([map.headers.get('x-credits-used'), map.headers.get('x-credits-remaining')]).toEqual(['1', '997'])
-  expect(credits.usage.get(`account-1-${new Date().toISOString().slice(0, 10)}`)).toEqual({ http: 1, browser: 0, not_found: 1, map: 1, unread: 3, credits: 3 })
+  // A map whose search matched nothing returned no URL and costs nothing.
+  const none = await post(url, '/v1/map', { url: `${origin}/page`, search: 'zzzz-no-match', sitemap: 'skip' }, auth)
+  expect(((await none.json()) as { links: unknown[] }).links).toEqual([])
+  expect(none.headers.get('x-credits-used')).toBe('0')
+  expect(credits.usage.get(`account-1-${new Date().toISOString().slice(0, 10)}`)).toEqual({ http: 1, browser: 0, not_found: 1, map: 1, unread: 4, credits: 3 })
   // The site's daily total still counts every start; no per-key daily counter is kept for an account.
-  expect([...credits.site.values()]).toEqual([6])
+  expect([...credits.site.values()]).toEqual([7])
   expect(quota.counts.size).toBe(0)
 })
 
