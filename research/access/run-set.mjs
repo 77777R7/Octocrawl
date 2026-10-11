@@ -63,6 +63,12 @@
 //                  the grant's tariff, else its price ceiling; an estimate from the tariff, never below what it bills,
 //                  and not the provider's bill. 0 when the record lists no paid call; null when the API's record says nothing of
 //                  paid calls (a build before them, or no record).
+//   rungs skipped  (octocrawl) the rungs the answer's ladder passed over (its ladderTrace's ladder_channel_skipped events),
+//                  each as its channel, provider and the rule that held it back (wait_for, not_extracted, robots_override,
+//                  no_price_ceiling, budget; other, with the ladder's words, for a reason this runner does not name).
+//                  So a task the ladder held back from a rung says why. A rung taken out before the ladder ran
+//                  (ladder_channels_filtered) or refused by its identity check is not among them. null when the answer carries
+//                  no ladder trace.
 //   competitors    the same tasks, the same Markdown predicates and the same counts. A competitor's own claim stands
 //                  for `status`: Firecrawl's success with the target's 2xx (metadata.statusCode) is `success`; its
 //                  success with another status, or no success, is `failed` with the reason it gave (an API that names the
@@ -284,6 +290,18 @@ function regionWaitOf(doc) {
   return last === undefined ? null : { ready: last.ready === true, empty: last.empty === true, waitedMs: last.waitedMs ?? null, judged: last.judged ?? null }
 }
 
+/** The ladder's reasons for passing a rung over (packages/bench/src/routing/ladder.ts), each by words its sentence carries. */
+const SKIP_RULES = [['waitFor', 'wait_for'], ['not_extracted', 'not_extracted'], ['robots override', 'robots_override'], ['no price ceiling', 'no_price_ceiling'], ['budget', 'budget']]
+
+/** The rungs the answer's ladder passed over, each as its channel, provider and rule; null when the answer carries no ladder trace. */
+function ladderSkipsOf(doc) {
+  if (!Array.isArray(doc?.ladderTrace)) return null
+  return doc.ladderTrace.filter((t) => t.event === 'ladder_channel_skipped').map((t) => {
+    const reason = typeof t.detail?.reason === 'string' ? t.detail.reason : null
+    return { channel: t.channel ?? null, vendorId: t.detail?.vendorId ?? null, rule: reason === null ? 'unknown' : SKIP_RULES.find(([words]) => reason.includes(words))?.[1] ?? 'other', reason }
+  })
+}
+
 function paidCallsOf(doc) {
   const access = doc?.evidenceRecord?.access
   if (access === undefined || access === null || !('paidCalls' in access)) return null
@@ -331,7 +349,7 @@ async function attempt(task, temperature) {
       gateEvents: events.filter((e) => /gate|blocked|challenge|quality|client_rendered|identity|robots/.test(e)),
       markdownChars: typeof doc?.markdown === 'string' ? doc.markdown.length : null,
       ...(doc?.requestCost === undefined ? {} : { requestCost: doc.requestCost }),
-      ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc) } : {}),
+      ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc), ladderSkips: ladderSkipsOf(doc) } : {}),
       // The product's own verdict on the task's contract (ADR 0006); null when none was sent or the answer has none.
       productVerification: typeof doc?.verification?.status === 'string' && doc.verification.status !== 'not_requested' ? doc.verification.status : null,
       // Whether the page was ready for its task (ADR 0007), and the browser's last wait for its region; null when the answer has none.
@@ -453,6 +471,17 @@ if (recordFile !== undefined) {
     const states = rows.filter((r) => r.temperature === temp).map((r) => r.observed.readiness?.state ?? 'unknown')
     return ['ready', 'not_loaded', 'not_extracted', 'not_served', 'unknown'].map((state) => `${state} ${states.filter((s) => s === state).length}`).join(', ')
   }
+  // The rungs the ladder passed over, by rule, for runs that recorded them: why a task stopped short of a rung.
+  const skipsRecorded = rows.some((r) => Array.isArray(r.observed.ladderSkips))
+  const skipsLine = (temp) => {
+    const r = rows.filter((x) => x.temperature === temp)
+    const byRule = new Map()
+    for (const x of r) for (const s of x.observed.ladderSkips ?? []) byRule.set(s.rule, [...(byRule.get(s.rule) ?? []), `${x.taskId} (${s.channel}${s.vendorId ? `, ${s.vendorId}` : ''}${s.rule === 'other' && s.reason !== null ? `: ${s.reason}` : ''})`])
+    const unknown = r.filter((x) => !Array.isArray(x.observed.ladderSkips)).length
+    // No attempt with a ladder trace says nothing of skips: not known, not none.
+    if (unknown === r.length) return `- Rungs the ladder passed over (${temp}): not known, no attempt carries a ladder trace`
+    return `- Rungs the ladder passed over (${temp}, its \`ladder_channel_skipped\` events): ${byRule.size === 0 ? 'none' : [...byRule].map(([rule, at]) => `${rule} on ${at.join(', ')}`).join('; ')}${unknown === 0 ? '' : `; not known on ${unknown} attempt${unknown === 1 ? '' : 's'} without a ladder trace`}`
+  }
   const paidCell = (calls) => calls === null || calls === undefined ? 'unknown' : calls.map((c) => `${c.provider}: ${c.outcome ?? 'no page'}${c.reason ? `/${c.reason}` : ''}${c.answer ? ' (answer)' : ''}`).join('; ')
   const md = [
     `# Access task set run: ${priorRun?.set ?? setFilter}, ${environment.startedAt.slice(0, 10)}`, '',
@@ -471,6 +500,7 @@ if (recordFile !== undefined) {
     ...Object.entries(totals).filter(([, t]) => 'paidCalls' in t).map(([temp, t]) => `- Paid provider calls (${temp}): ${fmt(t.paidCalls)}; tasks verified with a paid call's page as the answer: ${fmt(t.verifiedFromPaidCall)}; charged by the spend ledger: ${t.chargedUsd === null ? 'unknown' : `$${t.chargedUsd.toFixed(4)}`} (a provider that states no price is charged its sessions' measured time under the grant's tariff, else its price ceiling: an estimate from the tariff, not its bill)`),
     ...(Object.values(totals).some((t) => 'paidCalls' in t) ? [''] : []),
     ...(readinessColumn ? [...Object.keys(totals).map((temp) => `- Readiness (${temp}, ADR 0007): ${readinessCounts(temp)}; region waits: ${rows.filter((r) => r.temperature === temp && r.observed.regionWait).length} (held on ${rows.filter((r) => r.temperature === temp && r.observed.regionWait?.ready).length})`), ''] : []),
+    ...(skipsRecorded ? [...Object.keys(totals).map(skipsLine), ''] : []),
     `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}${readinessColumn ? ' Readiness |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}${readinessColumn ? ' --- |' : ''}`,
     ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}${readinessColumn ? ` ${readinessCell(r)} |` : ''}`),
