@@ -278,7 +278,7 @@ Sign-in (ROADMAP PH, decided 2026-10-11) uses Firebase Authentication on the sam
 | --- | --- |
 | `GET /auth/github`, `GET /auth/google` (`?next=/path`) | Sends the browser to the provider, with Firebase's session id in a signed 10-minute cookie |
 | `GET /__/auth/handler` | The provider's way back. Firebase checks the answer, a session opens, and the browser goes to `next` (else `/account/`) |
-| `POST /auth/email` (`{ "email" }`) | Firebase emails a sign-in link to `/auth/email/finish`. At most 3 links an hour per visitor and per address, on one instance |
+| `POST /auth/email` (`{ "email" }`) | Firebase emails a sign-in link to `/auth/email/finish`. At most 3 links an hour per network address and per email address, and 100 an hour and 500 a day for the instance, far under Firebase's 25,000 a day |
 | `GET /auth/email/finish` | The link's page: a Sign in button. Opening the link signs no one in, so a mail scanner cannot use the code up |
 | `POST /auth/email/finish` | Signs in with the link's code |
 | `POST /auth/logout` | Ends the session |

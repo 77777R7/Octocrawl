@@ -88,7 +88,7 @@ describe('signing in with GitHub or Google', () => {
 
   it('keeps the way back on this site: another host or a protocol-relative path is the account page', () => {
     expect(safeNext('/blog/')).toBe('/blog/')
-    for (const unsafe of ['//evil.example/', 'https://evil.example/', '/\\evil.example', 'blog', null, undefined, '/a b']) expect(safeNext(unsafe), String(unsafe)).toBe('/account/')
+    for (const unsafe of ['//evil.example/', 'https://evil.example/', '/\\evil.example', 'blog', null, undefined, '/a b', '/é']) expect(safeNext(unsafe), String(unsafe)).toBe('/account/')
   })
 })
 
@@ -123,6 +123,9 @@ describe('signing in with an email link', () => {
     expect((await send('not an address')).status).toBe(400)
     for (let i = 0; i < 3; i++) expect((await send(`ada${i}@example.org`)).status).toBe(200)
     expect((await send('ada9@example.org')).status).toBe(429)
+    // A fresh visitor cookie does not reset it: the count is the network address's.
+    const fresh = await fetch(`${url}/auth/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: url, cookie: 'w2l_visitor=' + 'a'.repeat(32) + '.' + 'b'.repeat(64) }, body: JSON.stringify({ email: 'ada10@example.org' }) })
+    expect(fresh.status).toBe(429)
     fake.linkAnswer(new SignInRefused('expired', 'EXPIRED_OOB_CODE'))
     const used = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
     expect(used.headers.get('location')).toBe('/signin/?error=expired')
@@ -167,9 +170,18 @@ describe('Firebase\'s REST API', () => {
       return new Response(JSON.stringify(next.body), { status: next.status })
     }) as typeof fetch
     const toolkit = new IdentityToolkit('AIzaSyTestKey0123456789abcdef', fetcher)
-    answers.push({ status: 200, body: { localId: 'uid-000000001', email: 'ada@example.org', providerId: 'google.com' } })
+    answers.push({ status: 200, body: { authUri: 'https://accounts.google.com/o/oauth2/auth?response_type=code', sessionId: 'sid' } })
+    await toolkit.createAuthUri('google.com', 'https://octocrawl.dev/__/auth/handler')
+    // Google is asked for a code, which reaches the server; its default ID-token flow puts the token in the fragment.
+    expect(sent.shift()!.body).toEqual({ providerId: 'google.com', continueUri: 'https://octocrawl.dev/__/auth/handler', authFlowType: 'CODE_FLOW', oauthScope: '{"google.com":"openid email profile"}' })
+    answers.push({ status: 200, body: { localId: 'uid-000000001', idToken: 't', email: 'ada@example.org', providerId: 'google.com' } })
     expect(await toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=1', 'sid')).toEqual({ uid: 'uid-000000001', email: 'ada@example.org', provider: 'google.com' })
     expect(sent[0]).toEqual({ url: 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=AIzaSyTestKey0123456789abcdef', body: { requestUri: 'https://octocrawl.dev/__/auth/handler?code=1', sessionId: 'sid', returnSecureToken: true } })
+    // Without an ID token (a second factor pending) there is no sign-in.
+    answers.push({ status: 200, body: { localId: 'uid-000000001', email: 'ada@example.org', providerId: 'github.com', mfaPendingCredential: 'x' } })
+    await expect(toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=3', 'sid')).rejects.toMatchObject({ code: 'invalid' })
+    answers.push({ status: 400, body: { error: { message: 'FEDERATED_USER_ID_ALREADY_LINKED' } } })
+    await expect(toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=4', 'sid')).rejects.toMatchObject({ code: 'other_provider' })
     answers.push({ status: 200, body: { needConfirmation: true, email: 'ada@example.org', providerId: 'github.com' } })
     await expect(toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=2', 'sid')).rejects.toMatchObject({ code: 'other_provider' })
     answers.push({ status: 400, body: { error: { message: 'EXPIRED_OOB_CODE' } } })

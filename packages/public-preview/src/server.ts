@@ -397,7 +397,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
         if (redirect) { res.writeHead(301, { location: redirect, 'cache-control': 'no-store' }).end(); return }
         const sameOrigin = requestOriginAllowed(req, siteHost(req, publicOrigin)) && req.headers['sec-fetch-site'] !== 'cross-site'
         try {
-          if (await options.auth.handle(req, res, requestUrl, requestOrigin(req, publicOrigin), sameOrigin, visitorKey(req, options.visitorCookieSecret))) return
+          if (await options.auth.handle(req, res, requestUrl, requestOrigin(req, publicOrigin), sameOrigin, visitorAddress(req))) return
         } catch (error) {
           log({ event: 'w2l_auth_error', message: error instanceof Error ? error.message : String(error) })
           if (!res.headersSent) res.writeHead(303, { location: '/signin/?error=unavailable', 'cache-control': 'no-store' }).end()

@@ -49,25 +49,28 @@ export class IdentityToolkit implements IdentityProvider {
     if (!/^[A-Za-z0-9_-]{20,64}$/.test(apiKey)) throw new Error('W2L_FIREBASE_API_KEY is malformed')
   }
   async createAuthUri(provider: 'github.com' | 'google.com', continueUri: string) {
-    const body = await this.call('accounts:createAuthUri', { providerId: provider, continueUri }) as { authUri?: string; sessionId?: string }
+    // Google answers with an ID token in the URL fragment by default, which never reaches a server: ask for a code instead.
+    const google = provider === 'google.com' ? { authFlowType: 'CODE_FLOW', oauthScope: JSON.stringify({ 'google.com': 'openid email profile' }) } : {}
+    const body = await this.call('accounts:createAuthUri', { providerId: provider, continueUri, ...google }) as { authUri?: string; sessionId?: string }
     if (!body.authUri || !body.sessionId) throw new SignInRefused('unavailable', 'Firebase gave no sign-in address')
     return { authUri: body.authUri, sessionId: body.sessionId }
   }
   async signInWithIdp(requestUri: string, sessionId: string): Promise<SignedIn> {
     const body = await this.call('accounts:signInWithIdp', { requestUri, sessionId, returnSecureToken: true }) as
-      { localId?: string; email?: string; providerId?: string; needConfirmation?: boolean; errorMessage?: string }
+      { localId?: string; idToken?: string; email?: string; providerId?: string; needConfirmation?: boolean; errorMessage?: string }
     // The address already belongs to an account that signs in another way (Firebase links one account per email).
     if (body.needConfirmation) throw new SignInRefused('other_provider', 'this email already signs in another way')
     if (body.errorMessage) throw new SignInRefused('cancelled', body.errorMessage)
-    if (!body.localId || (body.providerId !== 'github.com' && body.providerId !== 'google.com')) throw new SignInRefused('invalid', 'Firebase gave no account')
+    // No ID token means the sign-in is not complete (a second factor pending, say): no session for it.
+    if (!body.localId || !body.idToken || (body.providerId !== 'github.com' && body.providerId !== 'google.com')) throw new SignInRefused('invalid', 'Firebase gave no account')
     return { uid: body.localId, email: body.email ?? null, provider: body.providerId }
   }
   async sendEmailLink(email: string, continueUrl: string) {
     await this.call('accounts:sendOobCode', { requestType: 'EMAIL_SIGNIN', email, continueUrl, canHandleCodeInApp: true })
   }
   async signInWithEmailLink(email: string, oobCode: string): Promise<SignedIn> {
-    const body = await this.call('accounts:signInWithEmailLink', { email, oobCode }) as { localId?: string; email?: string }
-    if (!body.localId) throw new SignInRefused('invalid', 'Firebase gave no account')
+    const body = await this.call('accounts:signInWithEmailLink', { email, oobCode }) as { localId?: string; idToken?: string; email?: string }
+    if (!body.localId || !body.idToken) throw new SignInRefused('invalid', 'Firebase gave no account')
     return { uid: body.localId, email: body.email ?? email, provider: 'emailLink' }
   }
   private async call(method: string, payload: unknown): Promise<unknown> {
@@ -78,6 +81,7 @@ export class IdentityToolkit implements IdentityProvider {
     if (response.ok) return body
     const message = body.error?.message ?? `HTTP ${response.status}`
     // Firebase's messages name the case: an used or old link, a wrong code, a provider that refused.
+    if (/EMAIL_EXISTS|FEDERATED_USER_ID_ALREADY_LINKED|NEED_CONFIRMATION/.test(message)) throw new SignInRefused('other_provider', message)
     if (/EXPIRED_OOB_CODE|INVALID_OOB_CODE/.test(message)) throw new SignInRefused('expired', message)
     if (/INVALID_EMAIL|MISSING_EMAIL|INVALID_IDP_RESPONSE|INVALID_CONTINUE_URI|MISSING_OR_INVALID_NONCE/.test(message)) throw new SignInRefused('invalid', message)
     if (/OPERATION_NOT_ALLOWED|QUOTA_EXCEEDED|TOO_MANY_ATTEMPTS/.test(message)) throw new SignInRefused('unavailable', message)
@@ -172,8 +176,12 @@ export const SESSION_COOKIE = 'w2l_session'
 const OAUTH_COOKIE = 'w2l_oauth'
 const EMAIL_COOKIE = 'w2l_signin_email'
 export const SESSION_DAYS = 30
-/** Sign-in links a visitor or an address may ask for an hour, on one instance: enough for a typo and a retry. */
+/** Sign-in links one network address, or one email address, may ask for an hour on one instance: a typo and a retry. */
 const EMAIL_LINKS_PER_HOUR = 3
+/** Links the whole instance sends an hour and a day, far under Firebase's project quota (25,000 a day), so no one
+ * caller can use the day's sign-in emails up for everyone. */
+const EMAIL_LINKS_SITE_PER_HOUR = 100
+const EMAIL_LINKS_SITE_PER_DAY = 500
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/
 
 const NO_STORE = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' }
@@ -198,7 +206,7 @@ export function sessionHash(secret: string, id: string): string { return createH
 
 /** A path on this site to come back to; anything else (another host, `//host`, a backslash) is the account page. */
 export function safeNext(value: string | null | undefined): string {
-  return typeof value === 'string' && /^\/(?![/\\])[^\s\\]{0,300}$/.test(value) ? value : '/account/'
+  return typeof value === 'string' && /^\/(?![/\\])[\x21-\x5b\x5d-\x7e]{0,300}$/.test(value) ? value : '/account/'
 }
 
 function cookie(origin: string, name: string, value: string, path: string, maxAgeSeconds: number): string {
@@ -241,11 +249,17 @@ export function createAuthRoutes(options: AuthOptions) {
   const now = options.now ?? (() => new Date())
   const log = options.log ?? (() => {})
   const sent = new Map<string, number[]>()
-  const sendAllowed = (key: string, at: number) => {
-    const recent = (sent.get(key) ?? []).filter(time => time > at - 3_600_000)
-    if (recent.length >= EMAIL_LINKS_PER_HOUR) { sent.set(key, recent); return false }
-    if (sent.size >= 10_000) sent.clear()
-    sent.set(key, [...recent, at])
+  const siteSent: number[] = []
+  /** Whether every key may send one more link now; records the send against all of them only when all may. */
+  const sendAllowed = (keys: string[], at: number) => {
+    while (siteSent.length > 0 && siteSent[0]! <= at - 86_400_000) siteSent.shift()
+    if (siteSent.length >= EMAIL_LINKS_SITE_PER_DAY || siteSent.filter(time => time > at - 3_600_000).length >= EMAIL_LINKS_SITE_PER_HOUR) return false
+    const recent = keys.map(key => (sent.get(key) ?? []).filter(time => time > at - 3_600_000))
+    if (recent.some(times => times.length >= EMAIL_LINKS_PER_HOUR)) return false
+    // The oldest callers are forgotten first, never everyone at once.
+    while (sent.size >= 10_000) sent.delete(sent.keys().next().value as string)
+    keys.forEach((key, i) => { sent.delete(key); sent.set(key, [...recent[i]!, at]) })
+    siteSent.push(at)
     return true
   }
 
@@ -263,6 +277,7 @@ export function createAuthRoutes(options: AuthOptions) {
     return options.accounts.session(sessionHash(options.secret, id), now())
   }
 
+  /** `visitor` is the caller's network address (behind the Worker, CF-Connecting-IP), never a cookie a caller can mint. */
   async function handle(req: IncomingMessage, res: ServerResponse, url: URL, origin: string, sameOrigin: boolean, visitor: string): Promise<boolean> {
     const path = url.pathname
     const fail = (code: SignInError, provider: string) => {
@@ -308,7 +323,7 @@ export function createAuthRoutes(options: AuthOptions) {
       try { email = (await readForm(req)).get('email')?.trim().toLowerCase() ?? '' } catch { email = '' }
       if (!EMAIL.test(email)) { res.writeHead(400, { ...NO_STORE, 'content-type': 'application/json' }).end(JSON.stringify({ error: 'invalid_email' })); return true }
       const at = now().getTime()
-      if (!sendAllowed(`v:${visitor}`, at) || !sendAllowed(`e:${email}`, at)) { res.writeHead(429, { ...NO_STORE, 'content-type': 'application/json' }).end(JSON.stringify({ error: 'too_many_requests' })); return true }
+      if (!sendAllowed([`a:${visitor}`, `e:${email}`], at)) { res.writeHead(429, { ...NO_STORE, 'content-type': 'application/json' }).end(JSON.stringify({ error: 'too_many_requests' })); return true }
       try {
         await options.identity.sendEmailLink(email, `${origin}/auth/email/finish`)
         log({ event: 'w2l_auth', step: 'email_link', outcome: 'sent' })
