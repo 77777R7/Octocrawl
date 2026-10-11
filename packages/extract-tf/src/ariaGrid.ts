@@ -86,8 +86,10 @@ export function tablesFromAriaGrids(document: Document, options: AriaGridOptions
     })
     const ordered = [...merged.entries()].sort((a, b) => a[0] - b[0]).map(([, cells]) => cells).filter((cells) => cells.length > 0)
     const all = ordered.flat()
-    // A grid of controls (a toolbar, a date picker's buttons) or of no text is not a table of content.
-    if (ordered.length < 2 || !all.some((cell) => readable(cell, options))) continue
+    // A grid of controls (a toolbar, a date picker's buttons under its day names) or of no text below its column headers
+    // is not a table of content: a task asking for a table must not find one in a date picker.
+    const headRows = ordered.findIndex((cells) => !cells.every((cell) => cell.getAttribute('role') === 'columnheader'))
+    if (ordered.length < 2 || headRows < 0 || !ordered.slice(headRows).some((cells) => cells.some((cell) => readable(cell, options)))) continue
     const byColumn = all.every((cell) => index(cell, 'aria-colindex') !== null)
     const columns = byColumn ? [...new Set(all.map((cell) => index(cell, 'aria-colindex')!))].sort((a, b) => a - b) : null
     const width = columns?.length ?? Math.max(...ordered.map((cells) => cells.length))

@@ -547,6 +547,10 @@ describe('a data grid drawn with ARIA roles', () => {
     const toolbar = '<div role="grid"><div role="row"><button role="gridcell">Bold</button><button role="gridcell">Italic</button></div><div role="row"><button role="gridcell">Undo</button><button role="gridcell">Redo</button></div></div>'
     const wrapped = '<div role="grid"><div role="row"><div role="gridcell"><button>Bold</button></div><div role="gridcell"><button>Italic</button></div></div><div role="row"><div role="gridcell"><button>Undo</button></div><div role="gridcell"><select><option>x</option></select></div></div></div>'
     expect(htmlToMarkdown(toolbar + wrapped)).not.toMatch(/Bold|Italic|Undo|\|/)
+    // A date picker: day names over buttons. No table of empty rows for a task's minTables to find.
+    const picker = '<div role="grid"><div role="row"><span role="columnheader">S</span><span role="columnheader">M</span></div><div role="row"><button role="gridcell">1</button><button role="gridcell">2</button></div><div role="row"><button role="gridcell">8</button><button role="gridcell">9</button></div></div>'
+    expect(htmlToTables(picker)).toEqual([])
+    expect(gfmTables(htmlToMarkdown(picker))).toBe(0)
     // A cell, a row or a grid the page hides (the capture's marker) stays hidden.
     const marked = '<div role="table"><div role="row"><span role="cell" data-w2l-hidden="">0001</span><span role="cell">Pier</span></div><div role="row" data-w2l-hidden=""><span role="cell">Gone</span><span role="cell">row</span></div><div role="row"><span role="cell" data-w2l-hidden="">0002</span><span role="cell">Quay</span></div></div>'
     const markdown = htmlToMarkdown(marked + '<div role="grid" data-w2l-hidden=""><div role="row"><div role="gridcell">Hidden</div></div><div role="row"><div role="gridcell">grid</div></div></div>')
