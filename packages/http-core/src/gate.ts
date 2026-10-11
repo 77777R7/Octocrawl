@@ -209,10 +209,13 @@ const CF_JSD_PATH = '/cdn-cgi/challenge-platform/scripts/jsd/'
 const PX_CAPTCHA_SCRIPT = /\/captcha\/captcha\.js|captcha\.px-(?:cdn|cloud)\.net\/[^"'\s<>]*captcha\.js/
 const PX_CAPTCHA_CONTAINER = /<[a-z][^>]*\sid\s*=\s*["']?px-captcha(?=["'\s>/])/i
 
-/** The PerimeterX challenge's signals, or null when the page is not the challenge. */
-/** DataDome's challenge iframe, from captcha-delivery.com or a subdomain of it: its interstitial (a device check) or its captcha, by the path its src names. */
-const DATADOME_CHALLENGE = /<iframe\b[^>]*\bsrc\s*=\s*["']?https?:\/\/(?:[a-z0-9-]+\.)*captcha-delivery\.com\/(interstitial|captcha)\//i
+/**
+ * DataDome's challenge iframe, from captcha-delivery.com or a subdomain of it: its interstitial (a device check) or its
+ * captcha, by the path its src names. The tag's attributes before src are bounded, so a body of unclosed tags stays linear.
+ */
+const DATADOME_CHALLENGE = /<iframe\b[^>]{0,2000}?\bsrc\s*=\s*["']?https?:\/\/(?:[a-z0-9-]+\.)*captcha-delivery\.com\/(interstitial|captcha)\//i
 
+/** The PerimeterX challenge's signals, or null when the page is not the challenge. */
 function perimeterXChallenge(head: string, lower: string): string[] | null {
   if (!lower.includes('_pxappid') || !PX_CAPTCHA_SCRIPT.test(lower)) return null
   const signals = ['px_captcha_script', 'px_app_id']
