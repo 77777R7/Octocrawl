@@ -155,7 +155,6 @@ interface RegionView {
   error?: string
 }
 
-/** What the wait saw: whether the region was ready (or an accepted empty list), how long and how many reads, and the checks as last judged, by their counts. */
 /**
  * Why the live page could judge none of the contract's checks: its HTML was over MAX_VIEW_HTML for the Markdown checks
  * (the page sends none past it), or no check reads the live page at all (a `field` on `json`, a list check without the
@@ -163,6 +162,7 @@ interface RegionView {
  */
 export type RegionUnjudged = 'html_too_large' | 'checks_not_on_page'
 
+/** What the wait saw: whether the region was ready (or an accepted empty list), how long and how many reads, and the checks as last judged, by their counts. */
 export interface RegionOutcome {
   ready: boolean
   /** The contract accepts an empty result and the list showed none on a page that had settled. */

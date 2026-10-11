@@ -121,7 +121,7 @@ describe('readinessOf (ADR 0007, ROADMAP PA item 11)', () => {
     expect(readinessOf(result(verified('failed'), [region({ ready: true, contractSha256: 'd'.repeat(64) })]))).toMatchObject({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'] })
     expect(readinessOf(result(verified('failed'), [region({ ready: true, judged: 0 })]))).toMatchObject({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'] })
     // Nor one whose view could judge none of the checks (a page over the view's size): the trace says why, readiness as without it.
-    expect(readinessOf(result(verified('failed'), [region({ reads: 1, judged: 1, unjudged: 'html_too_large' })]))).toMatchObject({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'] })
+    expect(readinessOf(result(verified('failed'), [region({ reads: 1, judged: 1, unjudged: 'html_too_large' })]))).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'] })
     // No region wait: the http lane did not run the page's scripts; a rendered lane keeps the state its own signals give,
     // and says the contract failed where nothing on the page was judged (a contract of json fields alone).
     expect(readinessOf(result({ ...verified('failed'), lane: 'http' }))).toEqual({ state: 'not_loaded', basis: ['checks_failed', 'not_rendered'] })
