@@ -42,9 +42,81 @@ export interface CdpPage {
   close(): Promise<void>
 }
 
+/**
+ * A raw CDP session on one page (Playwright's `CDPSession`), the structural subset the byte meter needs. Playwright
+ * types `send` and `on` by protocol method and event name; `any` here is what lets its session stand in for this.
+ */
+export interface CdpSessionLike {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  send(method: any, params?: any): Promise<any>
+  on(event: any, handler: (params: any) => void): unknown
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+  detach(): Promise<void>
+}
+
 export interface CdpContext {
   newPage(): Promise<CdpPage>
   pages(): CdpPage[]
+  /**
+   * A raw CDP session on a page of this context (Chromium only); absent on a connector that cannot open one. The page
+   * is one this context's `newPage` returned (Playwright takes its own Page; the seam's CdpPage is its subset).
+   */
+  newCDPSession?(page: unknown): Promise<CdpSessionLike>
+}
+
+/**
+ * Counts the bytes a session's pages receive, as CDP reports them on the wire (`Network.loadingFinished`'s
+ * `encodedDataLength`), and says when they pass the most a call may move under its tariff (ROADMAP PA item 4, the
+ * `vendor_residential_proxy` grant). The count is the pages' own: a provider's proxy also carries the requests, TLS and
+ * what the browser fetched outside the page, so the provider's figure is the bill's and this one the bound.
+ */
+export class ByteMeter {
+  private counted = 0
+  private cappedAt: number | null = null
+  private readonly listeners: (() => void)[] = []
+
+  constructor(readonly capBytes: number) {}
+
+  /** Bytes counted so far. */
+  get bytes(): number { return this.counted }
+  /** The count at which the cap was passed; null while under it. */
+  get capped(): number | null { return this.cappedAt }
+
+  add(bytes: number): void {
+    if (!Number.isFinite(bytes) || bytes <= 0) return
+    this.counted += bytes
+    if (this.cappedAt === null && this.counted > this.capBytes) {
+      this.cappedAt = this.counted
+      for (const listener of this.listeners.splice(0)) listener()
+    }
+  }
+
+  /** Called once, when the cap is passed; at once if it already was. */
+  onCap(listener: () => void): void {
+    if (this.cappedAt !== null) listener()
+    else this.listeners.push(listener)
+  }
+
+  /** The meter's error, for a navigation the cap ended. */
+  error(): Error {
+    return new Error(`provider session ended at the tariff's maxBytesPerCall: ${this.counted} bytes received on the page against ${this.capBytes} allowed`)
+  }
+}
+
+/**
+ * Attach the meter to a page over a raw CDP session, when the context can open one; the detach is the caller's, in
+ * its finally. A context without `newCDPSession` leaves the meter at zero: the transport keeps the count with the
+ * closed session (`bytesCounted`), and the charge is settled on the provider's own figure, not on this count.
+ */
+export async function meterPage(context: CdpContext, page: CdpPage, meter: ByteMeter, signal: AbortSignal): Promise<CdpSessionLike | null> {
+  if (typeof context.newCDPSession !== 'function') return null
+  const session = await raceWithSignal(context.newCDPSession(page), signal)
+  session.on('Network.loadingFinished', (params) => {
+    const length = (params as { encodedDataLength?: unknown } | null)?.encodedDataLength
+    if (typeof length === 'number') meter.add(length)
+  })
+  await raceWithSignal(session.send('Network.enable'), signal)
+  return session
 }
 
 export interface CdpBrowser {
@@ -167,20 +239,29 @@ export async function navigateOnce(
   deadlineMs?: number,
   signal?: AbortSignal,
   region?: RegionSpec,
+  /** Counts what the page receives and ends the navigation past the tariff's maxBytesPerCall (ROADMAP PA item 4). */
+  meter?: ByteMeter,
 ): Promise<NavigationOutcome> {
   // The caller's absolute deadline maps onto the page's own navigation
   // timeout. Remaining budget is computed explicitly from the deadline —
   // no AbortSignal.timeout property is read anywhere.
   const scope = createExecutionScope({ signal, deadlineAt: deadlineMs })
   let page: CdpPage | undefined
+  let metering: CdpSessionLike | null = null
   const abort = () => { void page?.close().catch(() => {}) }
   scope.signal.addEventListener('abort', abort, { once: true })
   try {
     throwIfExecutionStopped(scope)
     page = await createExecutionPage(browser, scope.signal)
     throwIfExecutionStopped(scope)
+    if (meter !== undefined) {
+      metering = await meterPage(defaultContext(browser), page, meter, scope.signal)
+      // Past the cap the page is closed: the navigation then fails, and the error below says why.
+      meter.onCap(abort)
+    }
     const timeout = navigationTimeout(deadlineMs, Date.now())
     const response = await raceWithSignal(page.goto(url, { waitUntil: 'domcontentloaded', timeout }), scope.signal)
+    if (meter?.capped != null) throw meter.error()
     // A page still showing a loading indicator is waited for longer, leaving a second to read it before the deadline.
     const settle = await raceWithSignal(waitForRenderedStability(page, {
       maxMs: deadlineMs === undefined ? 1_500 : Math.min(1_500, Math.max(1, deadlineMs - Date.now())),
@@ -196,6 +277,8 @@ export async function navigateOnce(
       maxMs: deadlineMs === undefined ? REGION_WAIT_MAX_MS : Math.min(REGION_WAIT_MAX_MS, deadlineMs - 1_000 - Date.now()),
     }), scope.signal)
     throwIfExecutionStopped(scope)
+    // The settle and the region wait also fetched: past the cap here, the page is not read.
+    if (meter?.capped != null) throw meter.error()
 
     const headers: Record<string, string> = {}
     for (const [name, value] of Object.entries(response?.headers() ?? {})) {
@@ -227,9 +310,13 @@ export async function navigateOnce(
       settle,
       ...(regionOutcome === undefined ? {} : { region: regionOutcome }),
     }
+  } catch (err) {
+    // Past the cap the page was closed under the navigation, the settle or the region wait: the error is the meter's, not the closed target's.
+    throw meter !== undefined && meter.capped !== null ? meter.error() : err
   } finally {
     scope.signal.removeEventListener('abort', abort)
     scope.dispose()
+    await metering?.detach().catch(() => {})
     await page?.close().catch(() => {})
   }
 }

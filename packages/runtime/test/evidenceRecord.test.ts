@@ -167,6 +167,11 @@ describe('toEvidenceRecord', () => {
     expect(timed([measured])).toEqual([measured])
     expect(timed([call])).toEqual([{ ...call, sessionMs: null }])
     expect(timed([{ ...measured, sessionMs: 17.5 }, { ...measured, sessionMs: -1 }, { ...measured, sessionMs: '17250' }])).toEqual([0, 1, 2].map(() => ({ ...measured, sessionMs: null })))
+    // What the provider reported the sessions used, and the country its proxy was asked for, stay on the record when the
+    // call carried them (null for a figure it did not give); a call without them has none (a record from before).
+    const used = { ...measured, proxyBytes: 4_200_000, solves: 1, proxyCountry: 'US' }
+    expect(timed([used, { ...used, proxyBytes: null, solves: 1.5, proxyCountry: 'usa' }])).toEqual([used, { ...used, proxyBytes: null, solves: null, proxyCountry: null }])
+    expect(timed([measured])![0]).not.toHaveProperty('proxyBytes')
   })
 
   it('records the device the answering lane declared and the custom headers it sent, sorted by name', () => {

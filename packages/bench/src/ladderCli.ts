@@ -40,7 +40,7 @@ import {
 } from '@w2l/contracts'
 import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.js'
 import { readFileSync } from 'node:fs'
-import { accessGrantFromText, accessGrantRef, createSpendLedger, tariffCeilingUsd, tariffCostUsd, VENDOR_CAPABILITY_ACCESS, type VendorTariff } from '@w2l/http-core'
+import { accessGrantFromText, accessGrantRef, createSpendLedger, tariffCeilingUsd, tariffCostUsd, VENDOR_CAPABILITY_ACCESS, type VendorSessionUsage, type VendorTariff } from '@w2l/http-core'
 import { browserEngineChoice } from './subjects/browserEngine.js'
 import { CompatTransport, compatIdentity } from './compatTransport.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
@@ -161,6 +161,8 @@ export function buildChannels(
      * session and the most bytes one call may take. A provider without one is not called.
      */
     vendorTariffs?: Readonly<Record<string, import('@w2l/http-core').VendorTariff>>
+    /** The country a provider's residential proxy is asked for (ISO 3166-1 alpha-2); default W2L_VENDOR_PROXY_COUNTRY, else the adapter's. */
+    vendorProxyCountry?: string
     /** The access grant the provider rungs are called under, as their paid calls' record names it (accessGrantRef). */
     vendorGrant?: EvidenceAccessGrant
     /** Test seam: override the local http/browser subjects entirely, so a
@@ -548,7 +550,7 @@ export function buildChannels(
         } finally {
           if (tariff !== null) await transport.close().catch(() => {})
         }
-        return tariff === null ? outcome : withMeasuredSessions(outcome, transport.closedSessions(), tariff, tariffCeilingUsd(tariff, sessionFloorMs))
+        return tariff === null ? outcome : withMeasuredSessions(outcome, transport.closedSessions(), tariff, tariffCeilingUsd(tariff, sessionFloorMs), ops.limits?.proxyCountry ?? null)
       },
       close: async () => {
         if (connected !== null) {
@@ -583,7 +585,15 @@ export function buildChannels(
   }
   if (steelKey !== '' || opts.vendorOps?.steel !== undefined) {
     const sessionTimeoutMs = opts.vendorTariffs?.steel?.maxSessionMs ?? null
-    const ops = opts.vendorOps?.steel ?? steelOps({ apiKey: steelKey, ...(sessionTimeoutMs === null ? {} : { sessionTimeoutMs }) }, undefined, opts.vendorPolicy)
+    const maxBytesPerCall = opts.vendorTariffs?.steel?.maxBytesPerCall ?? null
+    // The country Steel's residential pool is asked for, under the vendor_residential_proxy grant (W2L_VENDOR_PROXY_COUNTRY).
+    const proxyCountry = opts.vendorProxyCountry ?? process.env.W2L_VENDOR_PROXY_COUNTRY?.trim().toUpperCase()
+    const ops = opts.vendorOps?.steel ?? steelOps({
+      apiKey: steelKey,
+      ...(sessionTimeoutMs === null ? {} : { sessionTimeoutMs }),
+      ...(maxBytesPerCall === null ? {} : { maxBytesPerCall }),
+      ...(proxyCountry === undefined || proxyCountry === '' ? {} : { proxyCountry }),
+    }, undefined, opts.vendorPolicy)
     channels.push(vendorChannel('steel', ops, STEEL_MIN_SESSION_MS))
   }
 
@@ -591,16 +601,37 @@ export function buildChannels(
 }
 
 /**
- * A call under a tariff with the time its sessions lasted and what that cost (ROADMAP PA item 4): the provider states
- * no price, so the ledger charges the measured cost instead of the ceiling. Each session is billed by the tariff on its
- * own (its minimum and step), and the whole is at most the ceiling. Not when a session's release went unconfirmed (it
- * bills until its timeout) or none was closed: the ceiling stays the charge.
+ * A call under a tariff with the time its sessions lasted, what they used and what that cost (ROADMAP PA item 4): the
+ * provider states no price, so the ledger charges the measured cost instead of the ceiling. Each session is billed by
+ * the tariff on its own (its minimum and step); its time part is at most the ceiling's, since the transport ends the
+ * session at maxSessionMs. Its bytes and solves are what the provider reported after release (a figure it did not
+ * report is priced at the ceiling's allowance), and can pass the ceiling: the provider's proxy also carries what the
+ * page's own count does not, and it solves what appears. Not when a session's release went unconfirmed (it bills until
+ * its timeout) or none was closed: the ceiling stays the charge.
  */
-export function withMeasuredSessions(result: FetchResult, sessions: readonly ClosedVendorSession[], tariff: VendorTariff, ceilingUsd: number): FetchResult {
+export function withMeasuredSessions(result: FetchResult, sessions: readonly ClosedVendorSession[], tariff: VendorTariff, ceilingUsd: number, proxyCountry: string | null = null): FetchResult {
   if (sessions.length === 0 || sessions.some((session) => !session.released)) return result
   const vendorSessionMs = sessions.reduce((sum, session) => sum + session.sessionMs, 0)
-  const measuredCostUsd = Math.min(ceilingUsd, sessions.reduce((sum, session) => sum + tariffCostUsd(tariff, session.sessionMs), 0))
-  return { ...result, usage: { ...result.usage, vendorSessionMs, measuredCostUsd } }
+  const timeOnly: VendorTariff = { ...tariff, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null }
+  const timeCeilingUsd = ceilingUsd - (tariffCostUsd(tariff, 0) - tariffCostUsd(timeOnly, 0))
+  const timeCostUsd = Math.min(timeCeilingUsd, sessions.reduce((sum, session) => sum + tariffCostUsd(timeOnly, session.sessionMs), 0))
+  const usageCostUsd = sessions.reduce((sum, session) => sum + tariffCostUsd(tariff, 0, session.usage ?? { proxyBytes: null, solves: null }) - tariffCostUsd(timeOnly, 0), 0)
+  const measuredCostUsd = timeCostUsd + usageCostUsd
+  // A total the provider gave for every session; null when it gave none for one of them.
+  const total = (read: (usage: VendorSessionUsage | null | undefined) => number | null): number | null => {
+    const figures = sessions.map((session) => read(session.usage))
+    return figures.some((figure) => figure === null) ? null : figures.reduce((sum, figure) => sum! + figure!, 0)
+  }
+  return {
+    ...result,
+    usage: {
+      ...result.usage, vendorSessionMs, measuredCostUsd,
+      // The provider's figures go on the result when the grant bought what they count, or a session used it anyway.
+      ...(tariff.perGbUsd > 0 || proxyCountry !== null ? { vendorProxyBytes: total((usage) => usage?.proxyBytes ?? null) } : {}),
+      ...(tariff.perSolveUsd > 0 || sessions.some((session) => (session.usage?.solves ?? 0) > 0) ? { vendorSolves: total((usage) => usage?.solves ?? null) } : {}),
+      ...(proxyCountry === null ? {} : { vendorProxyCountry: proxyCountry }),
+    },
+  }
 }
 
 /**

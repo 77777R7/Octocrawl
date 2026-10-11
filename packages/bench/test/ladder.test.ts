@@ -1408,6 +1408,11 @@ describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', ()
     // A stated price wins over a measured one, and the record then holds no session time for the charge.
     expect(await charge({ externalCostUsd: 0.002, measuredCostUsd: 0.001, vendorSessionMs: 5_000 })).toEqual({ charged: 0.002, sessionMs: null, basis: 'reported' })
     expect(await charge({ externalCostUsd: null })).toEqual({ charged: 0.03, sessionMs: null, basis: 'ceiling' })
+    // What the provider reported its sessions used goes on the call and the settlement; a measured charge above the
+    // ceiling (its proxy moved more than the page's count, or it solved more than allowed for) is charged and marked.
+    const over = await new LadderRunner([blockedHttp(), priced(0.03, [answer({ externalCostUsd: null, measuredCostUsd: 0.05, vendorSessionMs: 5_000, vendorProxyBytes: 4_000_000, vendorSolves: 1, vendorProxyCountry: 'US' })])], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })
+    expect(over.result.trace.find((event) => event.event === 'spend_settled')?.detail).toMatchObject({ chargedUsd: 0.05, basis: 'measured', proxyBytes: 4_000_000, solves: 1, proxyCountry: 'US', overCeiling: true })
+    expect((over.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }).calls[0]).toMatchObject({ chargedUsd: 0.05, sessionMs: 5_000, proxyBytes: 4_000_000, solves: 1, proxyCountry: 'US' })
   })
 
   it('puts every paid call of the run on the answer: the provider, its charge, what Octocrawl made of its page, and which is the answer', async () => {

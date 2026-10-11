@@ -17,11 +17,12 @@ import { createExecutionScope, throwIfExecutionStopped } from '@w2l/http-core'
  * holds.
  */
 
-import type { PolicyDecision } from '@w2l/http-core'
+import type { PolicyDecision, VendorSessionUsage } from '@w2l/http-core'
 import type { ProviderResponse, ProviderTransport } from '../subjects/provider.js'
 import type { RegionSpec } from '../regionWait.js'
 import { scrubSecret } from './api.js'
 import {
+  ByteMeter,
   measureUserAgent,
   navigateOnce,
   playwrightConnector,
@@ -89,6 +90,17 @@ export interface VendorOps {
   createSession(resume?: VendorResumeContext | null, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSession>
   releaseSession(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<void>
   /**
+   * What a released session used besides time, as the provider reports it (ROADMAP PA item 4): the bytes its proxy
+   * moved and the CAPTCHAs it solved. Null, or absent, when the provider reports none; a field it does not report is
+   * null, never zero. Asked once per session, after its release is confirmed.
+   */
+  sessionUsage?(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSessionUsage | null>
+  /**
+   * The bounds a tariff puts on one session (ROADMAP PA item 4): the most bytes its pages may receive before the
+   * transport ends it (null: uncounted), and the country its residential proxy was asked for (null: none).
+   */
+  limits?: { maxBytesPerCall: number | null; proxyCountry: string | null }
+  /**
    * Establish first-use persistence, when the policy authorized
    * session_persistence and no saved resume context exists yet: Browserbase
    * creates a persistent context and returns its id, Steel ensures the
@@ -105,12 +117,23 @@ interface LiveSession {
   resumeContext: VendorResumeContext | null
   /** Just before the session was asked for (`performance.now()`): the provider bills from its creation. */
   openedAt: number
+  /** Counts what the session's pages receive, under a tariff with maxBytesPerCall; null otherwise. */
+  meter: ByteMeter | null
 }
 
-/** A session this transport closed: how long it lasted, and whether the provider confirmed its release. */
+/**
+ * A session this transport closed: how long it lasted, whether the provider confirmed its release, what it used as the
+ * provider reports it, and what its pages received as this transport counted it (null when it did not count).
+ */
 export interface ClosedVendorSession {
   sessionMs: number
   released: boolean
+  /** The provider's figures after release (`VendorOps.sessionUsage`); null when it gives none, or the release failed. */
+  usage?: VendorSessionUsage | null
+  /** Bytes the session's pages received, as CDP reported them here; null when the transport did not count. */
+  bytesCounted?: number | null
+  /** True when the transport ended the session at the tariff's maxBytesPerCall. */
+  bytesCapped?: boolean
 }
 
 export class CdpVendorTransport implements ProviderTransport {
@@ -167,9 +190,9 @@ export class CdpVendorTransport implements ProviderTransport {
 
   private async fetchWithinBudget(url: string, deadlineMs?: number, signal?: AbortSignal, region?: RegionSpec): Promise<ProviderResponse> {
     const declared = await this.resolveUserAgent(deadlineMs, signal)
-    const { browser } = await this.ensureSession(deadlineMs, signal)
+    const { browser, meter } = await this.ensureSession(deadlineMs, signal)
     try {
-      const res = await navigateOnce(browser, url, deadlineMs, signal, region)
+      const res = await navigateOnce(browser, url, deadlineMs, signal, region, meter ?? undefined)
       return {
         status: res.status,
         body: res.body,
@@ -245,12 +268,14 @@ export class CdpVendorTransport implements ProviderTransport {
       }
     }
 
+    const cap = this.ops.limits?.maxBytesPerCall ?? null
     this.live = {
       sessionId: session.sessionId,
       browser,
       handoffUrl: session.handoffUrl,
       resumeContext: session.resumeContext,
       openedAt,
+      meter: cap === null ? null : new ByteMeter(cap),
     }
     return this.live
   }
@@ -265,18 +290,30 @@ export class CdpVendorTransport implements ProviderTransport {
     this.live = null
     if (live === null) return
     await live.browser.close().catch(() => {})
-    await this.release(live.sessionId, live.openedAt)
+    await this.release(live.sessionId, live.openedAt, live.meter)
   }
 
-  /** Release a session and record how long it lasted; a release that fails is recorded unconfirmed, never thrown. */
-  private async release(sessionId: string, openedAt: number): Promise<void> {
+  /**
+   * Release a session and record how long it lasted; a release that fails is recorded unconfirmed, never thrown. After a
+   * confirmed release the provider is asked what the session used (bytes through its proxy, solves), when it can say.
+   */
+  private async release(sessionId: string, openedAt: number, meter: ByteMeter | null = null): Promise<void> {
     let released = true
     try {
       await this.ops.releaseSession(sessionId, Date.now() + 5_000)
     } catch {
       released = false
     }
-    this.closed.push({ sessionMs: Math.ceil(performance.now() - openedAt), released })
+    const sessionMs = Math.ceil(performance.now() - openedAt)
+    let usage: VendorSessionUsage | null = null
+    if (released && typeof this.ops.sessionUsage === 'function') {
+      try { usage = await this.ops.sessionUsage(sessionId, Date.now() + 5_000) } catch { usage = null }
+    }
+    this.closed.push({
+      sessionMs, released,
+      ...(typeof this.ops.sessionUsage === 'function' ? { usage } : {}),
+      ...(meter === null ? {} : { bytesCounted: meter.bytes, bytesCapped: meter.capped !== null }),
+    })
   }
 
   private scrub(message: string): string {
