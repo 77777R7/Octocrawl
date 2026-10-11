@@ -38,7 +38,16 @@
 .doc-article .key-reveal code{display:block;padding:0;border:0;background:none;margin:8px 0 12px;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all;color:#fff}
 .key-reveal .account-button.quiet{background:transparent;color:#e6eefc;border-color:rgba(176,200,240,.4)}
 .account-signout{margin-top:8px}
+/* Sign-in: one narrow column in the middle of the page, the card's buttons and field as wide as the card. */
+.signin-layout .doc-main{width:100%;max-width:460px;margin:0 auto}
+.signin-layout .doc-eyebrow,.signin-layout .account-lead,.signin-layout .account-small,.signin-layout .account-message{text-align:center}
+.signin-layout .doc-eyebrow{justify-content:center}
+.signin-layout .doc-article h1{margin-bottom:14px;font-size:40px;text-align:center}
+.signin-layout .account-lead{margin-bottom:24px;font-size:16px}
+.signin-layout .account-panel{padding:24px}
+.signin-layout .signin-options{max-width:none}
 @media (max-width:540px){
+  .signin-layout .doc-article h1{font-size:32px}
   .account-panel{padding:18px 16px}
   .account-form.inline{grid-template-columns:minmax(0,1fr)}
   .credits-figure{font-size:36px}
