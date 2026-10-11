@@ -143,7 +143,13 @@ Suspected cause: not isolated for any task (a run through the product cannot iso
   - **T006** was verified on Steel's page.
   - **The other five** were not: Steel's page lacked their data too. T010, T019, T055 and T060 are `not_served` with `region_absent`; T012 is `not_loaded`.
   - These are the paid calls the ladder spent without a verified answer.
-- **T051, T052, T074 and T076 stopped short of Steel** where the control run had reached it: the local browser's page met their contracts. T051 and T052 are verified now.
+- **T051, T052, T074 and T076 did not reach Steel this time; the control run had sent each of them there.** The four went that way for different reasons:
+  - **T051 and T052.** In the control run the local browser met a Cloudflare challenge and went on to Steel. This time it did not meet one: it read the page, and both were verified. The difference is that no challenge page was served. It is not the ladder's contract decision, and why the site served none is not isolated.
+  - **T074.** The http lane's page met its contract, so the ladder stopped there. In the control run it went http → browser_local → Steel and was verified too.
+  - **T076 (stackoverflow.com).** It was `blocked` (`cloudflare_challenge`) on the local browser and did not go on to Steel: `not_served`, not verified.
+    - Its trace has `robots_disallowed` and `robots_overridden` this time. The URL's robots.txt rule was set aside under the request's recorded override.
+    - A local rung that sets a rule aside skips the vendor rungs, which take no override (`ladder_channel_skipped`, `packages/bench/src/routing/ladder.ts:580`). That rule predates items 10 and 11.
+    - The earlier runs' traces for this task show no disallow, and why robots.txt disallowed the URL this time is not isolated.
 - **T073 is `not_extracted`** (`empty_unverified`, `region_ready`): its region held on Steel's live page in 1.5 s and the extractor found no main content. Steel was the last rung, so no paid hop followed; the extraction is what fails it, as in the control run.
 
 **The four acceptance pages:**
@@ -154,4 +160,6 @@ Suspected cause: not isolated for any task (a run through the product cannot iso
 
 **Lost against the control run:** T031 (temu.com), `failed`/`empty_unverified` on Steel's page, `not_loaded`. It has gone both ways in earlier runs. Not isolated.
 
-**Gained:** T006, T051, T052.
+**Gained:**
+- **T006**, by the ladder: `not_served` on the local browser, sent on to Steel, verified there.
+- **T051 and T052**, by the site serving no challenge this time (see above). Not isolated, as T031's loss is.
