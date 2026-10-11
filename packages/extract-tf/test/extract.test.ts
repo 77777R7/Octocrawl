@@ -366,6 +366,27 @@ ${card(63, 'Aspire E1-510', '$306.99', '15.6", Pentium N3520 2.16GHz, 4GB, 500GB
     expect(out.escalate).toBe(true)
   })
 
+  it('keeps the cards of a page with no h1 at all', () => {
+    // StubHub's home on 2026-10-11, read from Ashburn: its sections are under h2s, and its only cards are the popular
+    // events, each a picture, a name, dates and an empty link laid over the card. The sections near the reader came empty.
+    const card = (slug: string, name: string, dates: string, i: number) => `<div><img src="https://media.example/${slug}.jpg" alt="${name}"><h2>${name}</h2><div>${dates}</div><a href="https://www.stubhub.com/${slug}-tickets/performer/${i}" aria-label="${name}"></a></div>`
+    const html = `<!doctype html><html><head><title>Buy sports, concert and theater tickets on StubHub!</title></head><body>
+<header><nav><a href="/explore">Explore</a> <a href="/sell">Sell Tickets</a> <a href="/secure/myaccount">My Tickets</a> <a href="/secure/login">Sign In</a></nav></header>
+<div id="app"><section><h2>Popular events</h2><div>
+${card('metallica', 'Metallica', 'Oct 15 - Jun 19 2027', 8147)}
+${card('savannah-bananas', 'Savannah Bananas', 'Fri, Oct 30 • 6:00 PM', 100283621)}
+${card('usher', 'Usher', 'Oct 15 - Dec 12', 5062)}
+${card('olivia-rodrigo', 'Olivia Rodrigo', 'Oct 11 - May 10 2027', 101864867)}
+</div></section>
+<section><h2>Recommended for you</h2></section><section><h2>Trending events near Ashburn</h2></section></div>
+<footer><a href="/about">About Us</a></footer></body></html>`
+    const out = extractTf.extract(html, { url: 'https://www.stubhub.com/' })
+    expect(out).toMatchObject({ escalate: false, strategy: 'list' })
+    expect(out.mainHtml).toContain('Metallica')
+    expect(out.mainHtml).toContain('Olivia Rodrigo')
+    expect(out.mainHtml).not.toContain('Sign In')
+  })
+
   it('keeps a home page of linked cards with short descriptions', () => {
     // data.gov.uk's home page: headings, card links and descriptions without
     // sentence punctuation, so not one block qualifies as prose.
