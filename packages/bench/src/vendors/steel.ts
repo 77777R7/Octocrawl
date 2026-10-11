@@ -27,7 +27,7 @@
  * can reach a trace or a bench artifact.
  */
 
-import type { CapabilityOffer, PolicyDecision, VendorPolicy } from '@w2l/http-core'
+import type { CapabilityOffer, PolicyDecision, VendorPolicy, VendorSessionUsage } from '@w2l/http-core'
 import { evaluateVendorPolicy } from '@w2l/http-core'
 import { fetchVendorApi, type VendorApi } from './api.js'
 import type { VendorOps, VendorResumeContext, VendorSession } from './transport.js'
@@ -39,11 +39,24 @@ export interface SteelConfig {
   connectBaseUrl?: string
   /**
    * Under a tariff (ROADMAP PA item 4): the longest a session may live. The session is created with Steel's own `timeout`
-   * (milliseconds, at least STEEL_MIN_SESSION_MS) and no proxy, so it ends on Steel's side when a release fails, and
-   * bills no bandwidth. Absent: Steel's defaults, as before.
+   * (milliseconds, at least STEEL_MIN_SESSION_MS), so it ends on Steel's side when a release fails. Absent: Steel's
+   * default timeout.
    */
   sessionTimeoutMs?: number
+  /**
+   * Under a tariff with a per-GB price: the most bytes one session's pages may receive before the transport ends it.
+   * Absent: uncounted (a grant without `vendor_residential_proxy` creates the session with `useProxy: false`).
+   */
+  maxBytesPerCall?: number
+  /**
+   * The country Steel's residential proxy is asked for (ISO 3166-1 alpha-2, `useProxy.geolocation.country`) when the
+   * grant names `vendor_residential_proxy`; US when absent. Steel's docs: US and GB pools have the highest quality.
+   */
+  proxyCountry?: string
 }
+
+/** The country asked for when the grant names the residential proxy and none is configured. */
+export const STEEL_DEFAULT_PROXY_COUNTRY = 'US'
 
 /** The shortest session `timeout` Steel accepts (15 s, its sessions configuration page). */
 export const STEEL_MIN_SESSION_MS = 15_000
@@ -64,13 +77,19 @@ export function steelSessionBody(
   decision: PolicyDecision,
   resume?: VendorResumeContext | null,
   sessionTimeoutMs?: number,
+  proxyCountry: string = STEEL_DEFAULT_PROXY_COUNTRY,
 ): unknown {
   const persistEnabled = decision.enabled.some((c) => c.capability === 'session_persistence')
   const solveEnabled = decision.enabled.some((c) => c.capability === 'captcha_solving')
   const stealthEnabled = decision.enabled.some((c) => c.capability === 'fingerprint_spoofing')
+  const residentialEnabled = decision.enabled.some((c) => c.capability === 'residential_proxy')
 
   return {
-    ...(sessionTimeoutMs === undefined ? {} : { timeout: Math.max(sessionTimeoutMs, STEEL_MIN_SESSION_MS), useProxy: false }),
+    ...(sessionTimeoutMs === undefined ? {} : { timeout: Math.max(sessionTimeoutMs, STEEL_MIN_SESSION_MS) }),
+    // Steel's proxy is always said explicitly, never bought by omission: its residential pool (billed per GB) only
+    // under the `vendor_residential_proxy` grant, with the country asked for; otherwise the browser machine's own
+    // address, which bills no bandwidth.
+    useProxy: residentialEnabled ? { geolocation: { country: proxyCountry } } : false,
     // Steel injects a synthetic fingerprint BY DEFAULT. skipFingerprintInjection
     // is the opt-out, sent unless the grant names `vendor_stealth` (ADR 0005);
     // a body without it would buy the capability by omission. Solving follows
@@ -103,11 +122,17 @@ export function steelOps(
   const connectBase = (config.connectBaseUrl ?? 'wss://connect.steel.dev').replace(/\/$/, '')
   const headers = { 'steel-api-key': config.apiKey } as const
   const decision: PolicyDecision = evaluateVendorPolicy(STEEL_CAPABILITIES, policy)
+  const residentialEnabled = decision.enabled.some((c) => c.capability === 'residential_proxy')
+  const solveEnabled = decision.enabled.some((c) => c.capability === 'captcha_solving')
+  const proxyCountry = config.proxyCountry ?? STEEL_DEFAULT_PROXY_COUNTRY
+  if (!/^[A-Z]{2}$/.test(proxyCountry)) throw new Error(`steel: proxyCountry is an ISO 3166-1 alpha-2 code, not "${proxyCountry}"`)
 
   return {
     vendorId: 'steel',
     secrets: [config.apiKey],
     decision,
+    // The byte bound is the residential proxy's: a session on the browser machine's own address moves no billed bytes.
+    limits: { maxBytesPerCall: residentialEnabled ? config.maxBytesPerCall ?? null : null, proxyCountry: residentialEnabled ? proxyCountry : null },
 
     /**
      * First-use persistence: Steel persists the profile when the session is
@@ -122,7 +147,7 @@ export function steelOps(
     },
 
     async createSession(resume?: VendorResumeContext | null, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSession> {
-      const body = steelSessionBody(decision, resume ?? null, config.sessionTimeoutMs)
+      const body = steelSessionBody(decision, resume ?? null, config.sessionTimeoutMs, proxyCountry)
       const res = await api({
         method: 'POST',
         url: `${base}/v1/sessions`,
@@ -164,5 +189,43 @@ export function steelOps(
       // A release the vendor did not confirm leaves the session billing until its own timeout.
       if (res.status < 200 || res.status >= 300) throw new Error(`steel: session release returned ${res.status}`)
     },
+
+    /**
+     * What the session used, as Steel reports it after release (ROADMAP PA item 4): `proxyBytesUsed` on the session
+     * object (GET /v1/sessions/{id}, its docs: measured on the wire at the proxy, both directions), and the solves on
+     * GET /v1/sessions/{id}/captchas/status when solving was granted (a task whose `status` is `solved`; its docs do not
+     * say that this count is the billed one, so the record calls it what Steel reported). A figure Steel did not give
+     * is null, never zero.
+     */
+    async sessionUsage(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSessionUsage | null> {
+      const res = await api({ method: 'GET', url: `${base}/v1/sessions/${sessionId}`, headers, deadlineMs, signal })
+      if (res.status !== 200) throw new Error(`steel: session read returned ${res.status}`)
+      const json = res.json as { proxyBytesUsed?: unknown } | null
+      const proxyBytes = typeof json?.proxyBytesUsed === 'number' && Number.isFinite(json.proxyBytesUsed) && json.proxyBytesUsed >= 0 ? Math.round(json.proxyBytesUsed) : null
+      let solves: number | null = solveEnabled ? null : 0
+      if (solveEnabled) {
+        try {
+          const status = await api({ method: 'GET', url: `${base}/v1/sessions/${sessionId}/captchas/status`, headers, deadlineMs, signal })
+          if (status.status === 200) solves = countSolved(status.json)
+        } catch {
+          solves = null
+        }
+      }
+      return { proxyBytes, solves }
+    },
   }
+}
+
+/** The solved tasks in Steel's captchas status answer, whatever it groups them by: every object whose `status` is `solved`. */
+export function countSolved(value: unknown): number {
+  let count = 0
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) { for (const item of node) walk(item); return }
+    if (typeof node !== 'object' || node === null) return
+    const record = node as Record<string, unknown>
+    if (record.status === 'solved') count++
+    for (const child of Object.values(record)) if (typeof child === 'object' && child !== null) walk(child)
+  }
+  walk(value)
+  return count
 }
