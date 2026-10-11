@@ -277,6 +277,13 @@ async function zenrowsScrape(task) {
 }
 
 /** The paid provider calls the answer's Evidence Record lists, each as its provider, verdict and role; null when the record says nothing of them. */
+/** The answer's last wait for its task's region (ADR 0007), by counts: whether it held, how long, how many reads it judged. */
+function regionWaitOf(doc) {
+  const waits = (doc?.trace ?? []).filter((t) => t.event === 'region_wait')
+  const last = waits.at(-1)?.detail
+  return last === undefined ? null : { ready: last.ready === true, empty: last.empty === true, waitedMs: last.waitedMs ?? null, judged: last.judged ?? null }
+}
+
 function paidCallsOf(doc) {
   const access = doc?.evidenceRecord?.access
   if (access === undefined || access === null || !('paidCalls' in access)) return null
@@ -327,6 +334,9 @@ async function attempt(task, temperature) {
       ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc) } : {}),
       // The product's own verdict on the task's contract (ADR 0006); null when none was sent or the answer has none.
       productVerification: typeof doc?.verification?.status === 'string' && doc.verification.status !== 'not_requested' ? doc.verification.status : null,
+      // Whether the page was ready for its task (ADR 0007), and the browser's last wait for its region; null when the answer has none.
+      readiness: typeof doc?.readiness?.state === 'string' ? { state: doc.readiness.state, basis: doc.readiness.basis ?? [] } : null,
+      regionWait: regionWaitOf(doc),
     },
     intervention: { access: access ?? null, lane: doc?.lane ?? null, egress: doc?.evidence?.envProxy ?? null },
     outcome: {
@@ -437,6 +447,12 @@ if (recordFile !== undefined) {
   const fmt = (v) => (v === null ? 'unknown' : String(v))
   // A provider call's provider, what Octocrawl made of its page and whether it is the answer, for runs that recorded them.
   const paidColumn = rows.some((r) => Array.isArray(r.observed.paidCalls) && r.observed.paidCalls.length > 0)
+  const readinessColumn = rows.some((r) => r.observed.readiness !== null && r.observed.readiness !== undefined)
+  const readinessCell = (r) => r.observed.readiness === null || r.observed.readiness === undefined ? 'unknown' : `${r.observed.readiness.state}${r.observed.readiness.basis.length === 0 ? '' : ` (${r.observed.readiness.basis.join(', ')})`}${r.observed.regionWait ? `; region ${r.observed.regionWait.ready ? 'held' : 'not held'} in ${r.observed.regionWait.waitedMs} ms` : ''}`
+  const readinessCounts = (temp) => {
+    const states = rows.filter((r) => r.temperature === temp).map((r) => r.observed.readiness?.state ?? 'unknown')
+    return ['ready', 'not_loaded', 'not_extracted', 'not_served', 'unknown'].map((state) => `${state} ${states.filter((s) => s === state).length}`).join(', ')
+  }
   const paidCell = (calls) => calls === null || calls === undefined ? 'unknown' : calls.map((c) => `${c.provider}: ${c.outcome ?? 'no page'}${c.reason ? `/${c.reason}` : ''}${c.answer ? ' (answer)' : ''}`).join('; ')
   const md = [
     `# Access task set run: ${priorRun?.set ?? setFilter}, ${environment.startedAt.slice(0, 10)}`, '',
@@ -454,9 +470,10 @@ if (recordFile !== undefined) {
     ...Object.entries(totals).map(([temp, t]) => `| ${temp}: ${t.attempts} | ${t.verified} | ${t.falseSuccess} | ${fmt(t.p50Ms)} | ${fmt(t.p95Ms)} | ${fmt(t.externalCostPer1000VerifiedUsd)} | ${fmt(t.egressCostPer1000VerifiedUsd)} |${'credits' in t ? ` ${fmt(t.credits)} | ${fmt(t.creditsPer1000Verified === null ? null : Math.round(t.creditsPer1000Verified))} |` : ''}`), '',
     ...Object.entries(totals).filter(([, t]) => 'paidCalls' in t).map(([temp, t]) => `- Paid provider calls (${temp}): ${fmt(t.paidCalls)}; tasks verified with a paid call's page as the answer: ${fmt(t.verifiedFromPaidCall)}; charged by the spend ledger: ${t.chargedUsd === null ? 'unknown' : `$${t.chargedUsd.toFixed(4)}`} (a provider that states no price is charged its sessions' measured time under the grant's tariff, else its price ceiling: an estimate from the tariff, not its bill)`),
     ...(Object.values(totals).some((t) => 'paidCalls' in t) ? [''] : []),
-    `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}`,
-    `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}`,
-    ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}`),
+    ...(readinessColumn ? [...Object.keys(totals).map((temp) => `- Readiness (${temp}, ADR 0007): ${readinessCounts(temp)}; region waits: ${rows.filter((r) => r.temperature === temp && r.observed.regionWait).length} (held on ${rows.filter((r) => r.temperature === temp && r.observed.regionWait?.ready).length})`), ''] : []),
+    `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}${readinessColumn ? ' Readiness |' : ''}`,
+    `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}${readinessColumn ? ' --- |' : ''}`,
+    ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}${readinessColumn ? ` ${readinessCell(r)} |` : ''}`),
     ...Object.entries(totals).filter(([, t]) => t.productJudged > 0).map(([temp, t]) => {
       const disagree = rows.filter((x) => x.temperature === temp && typeof x.observed.productVerification === 'string' && (x.observed.productVerification === 'passed') !== runnerAtRun(x))
       return `- Task contract (${temp}): the product's verification agreed with the runner${rejudged === null ? '' : "'s verdict at the time of the run (the predicates the product was sent, not the rejudge's)"} on ${t.productAgreed} of ${t.productJudged} attempts that carry one (${t.productVerified} passed)${disagree.length === 0 ? '' : `; disagreed on ${disagree.map((x) => `${x.taskId} (product ${x.observed.productVerification}, runner ${runnerAtRun(x) ? 'verified' : 'not verified'})`).join(', ')}`}`
