@@ -81,6 +81,44 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     expect(await waitForRegion(pending, { contract, list }, { maxMs: 1_000, now: pending.now })).toMatchObject({ ready: false, empty: false, loading: true })
   })
 
+  it('scrolls a settled page whose region loads as it comes into view, screen by screen, until it holds or the page ends', async () => {
+    // As Home Depot's drills page (T014): category links at the top, the product grid with its prices further down.
+    const lazy = (options: { pricesAfter: number; endAfter: number; loading?: boolean }) => {
+      let now = 0
+      let scrolled = 0
+      return {
+        scrolled: () => scrolled,
+        async evaluate(expression: string) {
+          if (expression.includes('scrollBy')) {
+            if (scrolled >= options.endAfter) return JSON.stringify({ moved: false, end: true })
+            scrolled++
+            return JSON.stringify({ moved: true, end: scrolled >= options.endAfter })
+          }
+          const shown = scrolled >= options.pricesAfter ? 'Drills $99 $149 $199 $249' : 'Drills by type'
+          return JSON.stringify(view(shown, { loading: options.loading === true }))
+        },
+        async waitForTimeout(ms: number) { now += ms; await new Promise((resolve) => setTimeout(resolve, 0)) },
+        now: () => now,
+      }
+    }
+    const grid = lazy({ pricesAfter: 3, endAfter: 10 })
+    const found = await waitForRegion(grid, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: grid.now })
+    expect(found).toMatchObject({ ready: true, scrolls: 3, checks: [{ passed: true, observedCount: 4 }] })
+    expect(regionWaitEvent(found, 0, 'browser_local')?.detail).toMatchObject({ ready: true, scrolls: 3 })
+    // Not asked to scroll: the region never comes.
+    const still = lazy({ pricesAfter: 3, endAfter: 10 })
+    const unscrolled = await waitForRegion(still, { contract: prices }, { maxMs: 3_000, sampleMs: 500, now: still.now, scroll: false })
+    expect(unscrolled.ready).toBe(false)
+    expect(unscrolled.scrolls).toBeUndefined()
+    expect(still.scrolled()).toBe(0)
+    // A page still loading is waited for, not scrolled; a page that ends before the region is scrolled no further.
+    const busy = lazy({ pricesAfter: 1, endAfter: 10, loading: true })
+    expect(await waitForRegion(busy, { contract: prices }, { maxMs: 3_000, sampleMs: 500, now: busy.now })).toMatchObject({ ready: false, scrolls: 0 })
+    const short = lazy({ pricesAfter: 99, endAfter: 2 })
+    expect(await waitForRegion(short, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: short.now })).toMatchObject({ ready: false, scrolls: 2 })
+    expect(short.scrolled()).toBe(2)
+  })
+
   it('does not wait on a view that can judge none of the checks, says why, and starts afresh after a read a navigation cut off', async () => {
     const json: VerifyContract = { checks: [{ type: 'field', path: 'json.price', present: true }] }
     const quiet = page([view('A page')])

@@ -18,6 +18,15 @@ import { isNavigationError, LOADING_PROBE, type SettlePage } from './browserSett
 export const REGION_WAIT_MAX_MS = 10_000
 /** Between two reads of the region. */
 export const REGION_SAMPLE_MS = 500
+/** At most this many screens a region wait scrolls down for a region that loads as it comes into view. */
+export const MAX_REGION_SCROLLS = 20
+/** Scrolls one screen down; says whether the page moved and whether it is at its end. */
+const SCROLL_SCREEN = `(() => {
+  const before = window.scrollY
+  window.scrollBy(0, Math.max(200, Math.round(window.innerHeight * 0.9)))
+  const root = document.scrollingElement || document.documentElement
+  return JSON.stringify({ moved: window.scrollY !== before, end: window.scrollY + window.innerHeight >= root.scrollHeight - 2 })
+})()`
 /** Records read per view, at least: more when a list check asks for more, so a contract's own minimum is always reachable. */
 const MIN_VIEW_RECORDS = 2_000
 /** Reads in a row an empty list must show, on a settled page, to count as the page's explicit empty state. */
@@ -182,6 +191,8 @@ export interface RegionOutcome {
   checks: readonly Pick<VerificationCheck, 'index' | 'type' | 'passed' | 'observedCount'>[]
   /** Set when the first judged view could judge none of the checks: the wait stopped at that read, and why. */
   unjudged?: RegionUnjudged
+  /** Screens the wait scrolled down for a region that loads as it comes into view; absent from a lane that does not scroll (the my-browser lane: the person's own tab). */
+  scrolls?: number
 }
 
 /**
@@ -271,13 +282,22 @@ export class RegionTracker {
  * Wait for the region on a page a lane drives (browser_local, a provider's browser): read the view every
  * REGION_SAMPLE_MS until it is ready or `maxMs` has passed, at least once. A view that can judge none of the contract's
  * checks ends it at that read, with `unjudged`. A read that a navigation cut off starts the comparison afresh.
+ *
+ * A region that loads as it comes into view (Home Depot's product grid below its category links, T014) is scrolled
+ * to: once a judged check fails on a page that has settled (its text steady, no loading indicator), the wait scrolls
+ * one screen down before each read after, until the region is ready, the page ends or MAX_REGION_SCROLLS, all within
+ * `maxMs`. `scroll: false` waits without scrolling.
  */
-export async function waitForRegion(page: SettlePage, spec: RegionSpec, options: { maxMs: number; sampleMs?: number; now?: () => number }): Promise<RegionOutcome> {
+export async function waitForRegion(page: SettlePage, spec: RegionSpec, options: { maxMs: number; sampleMs?: number; now?: () => number; scroll?: boolean }): Promise<RegionOutcome> {
   const now = options.now ?? Date.now
   const tracker = new RegionTracker(spec, now)
   const expression = tracker.expression()
   const sampleMs = options.sampleMs ?? REGION_SAMPLE_MS
   const deadline = now() + Math.max(0, options.maxMs)
+  let scrolls = 0
+  let scrolling = false
+  let ended = false
+  const outcome = (): RegionOutcome => options.scroll === false ? tracker.outcome() : { ...tracker.outcome(), scrolls }
   for (;;) {
     const readStarted = now()
     let json: unknown
@@ -288,11 +308,25 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
       json = undefined
     }
     const ready = tracker.observe(json)
-    if (!tracker.judgeable) return tracker.outcome()
+    if (!tracker.judgeable) return outcome()
     // A read takes what the last one took (a large page's HTML, its Markdown): none is begun that would end past the bound.
     const readMs = now() - readStarted
     const pause = Math.max(1, Math.min(sampleMs, deadline - now()))
-    if (ready || now() + pause + readMs > deadline) return tracker.outcome()
+    if (ready || now() + pause + readMs > deadline) return outcome()
+    // A check failed on a page that has settled: what it needs may load as it comes into view.
+    const seen = tracker.outcome()
+    const failing = seen.checks.some((check) => check.passed === false)
+    scrolling ||= options.scroll !== false && seen.steady === true && !seen.loading && failing
+    // Once the checks hold, the next read confirms them where they are.
+    if (scrolling && failing && !ended && scrolls < MAX_REGION_SCROLLS) {
+      try {
+        const moved = JSON.parse(String(await page.evaluate(SCROLL_SCREEN))) as { moved?: boolean; end?: boolean }
+        if (moved.moved === true) scrolls++
+        ended = moved.end === true || moved.moved !== true
+      } catch (error) {
+        if (!isNavigationError(error)) throw error
+      }
+    }
     await page.waitForTimeout(pause)
   }
 }
@@ -300,6 +334,6 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
 /** The trace event a region wait leaves: what it saw, by counts, never the page's text. */
 export function regionWaitEvent(outcome: RegionOutcome | undefined, at: number, lane: Lane): TraceEvent | null {
   if (outcome === undefined) return null
-  const { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, unjudged } = outcome
-  return { at, lane, event: 'region_wait', detail: { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, ...(unjudged === undefined ? {} : { unjudged }) } }
+  const { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, unjudged, scrolls } = outcome
+  return { at, lane, event: 'region_wait', detail: { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, ...(unjudged === undefined ? {} : { unjudged }), ...(scrolls === undefined ? {} : { scrolls }) } }
 }

@@ -57,6 +57,17 @@ beforeAll(async () => {
           '"<ul>" + [1, 2, 3].map(function (n) { return "<li class=\\"it\\"><a href=\\"/p/" + n + "\\">Listing " + n + "</a> <span class=\\"price\\">$" + n + "0</span></li>" }).join("") + "</ul>"' +
           '}, 1500)</script></body></html>',
       )
+    } else if (req.url === '/lazy-grid') {
+      // As Home Depot's drills page (T014): category links on top, the product grid far below, its prices loaded only as it comes into view.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><main><h1>Drills</h1><p>Shop drills by power source, by type and by battery platform, from cordless drills to hammer drills and drill presses.</p>' +
+          '<ul><li><a href="/cordless">Cordless drills</a></li><li><a href="/corded">Corded drills</a></li><li><a href="/hammer">Hammer drills</a></li></ul>' +
+          '<div style="height: 6000px"></div><section id="grid"><h2>Products</h2></section></main>' +
+          '<script>new IntersectionObserver(function (entries, observer) { if (!entries[0].isIntersecting) return; observer.disconnect(); ' +
+          'document.getElementById("grid").insertAdjacentHTML("beforeend", "<ul><li>Drill one $99.00</li><li>Drill two $149.00</li><li>Drill three $199.00</li><li>Drill four $249.00</li></ul>") }).observe(document.getElementById("grid"))</script>' +
+          '</body></html>',
+      )
     } else if (req.url === '/delayed') {
       // Part of the article is in the HTML; the rest arrives two seconds after load.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -1061,6 +1072,11 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
       // A check written for Markdown (a link's `](https://`) holds on the live page's HTML converted as the result's is: no wait.
       const linked = await subject.fetch(`${url}/links`, Date.now() + 20_000, undefined, undefined, { verify: { checks: [{ type: 'markdownCountMin', pattern: '\\]\\(https?://', min: 10 }] } })
       expect(linked.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: true, reads: 2, checks: [{ passed: true, observedCount: 20 }] })
+      // A region that loads as it comes into view (T014's product grid) is scrolled to, screen by screen.
+      const lazy = await subject.fetch(`${url}/lazy-grid`, Date.now() + 30_000, undefined, undefined, { verify: { checks: [{ type: 'markdownCountMin', pattern: '\\$\\d', min: 3 }] } })
+      expect(lazy.markdown).toContain('$249.00')
+      expect(lazy.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: true, checks: [{ passed: true, observedCount: 4 }] })
+      expect(Number(lazy.trace.find((event) => event.event === 'region_wait')?.detail?.scrolls)).toBeGreaterThan(0)
       // Nor is a request without a contract.
       expect((await subject.fetch(`${url}/spa`)).trace.some((event) => event.event === 'region_wait')).toBe(false)
       // Nor a page that shows a check: it is read at once, as blocked.
