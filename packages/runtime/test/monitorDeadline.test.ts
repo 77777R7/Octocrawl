@@ -110,6 +110,32 @@ describe('Monitor deadline through synchronous validation and persistence', () =
     expect(view.lastVerifiedAt).toBeNull()
   })
 
+  // The HTTP lane waits for headers as long as the deadline leaves, and that wait can end some hundreds of milliseconds
+  // early (713 to 978 ms of a 1 s deadline measured once other requests ran in the process): the capture then reports
+  // usage.deadlineExceeded before Date.now() reaches the deadline.
+  const timedOut = (deadlineExceeded: boolean): ScrapeOutcome => ({ ...outcome, result: { ...outcome.result, status: 'failed', failureReason: 'timeout', markdown: null,
+    evidence: { ...outcome.result.evidence, httpStatus: null, etag: undefined, cacheControl: undefined },
+    usage: { ...outcome.result.usage, ...(deadlineExceeded ? { deadlineExceeded: true } : {}) } } })
+
+  it('expires a run whose capture the deadline ended, though the capture returns before the deadline', async () => {
+    const store = await setup()
+    vi.spyOn(Date, 'now').mockReturnValue(100_000)
+    const view = await runConfiguredMonitor(store, revision, async () => timedOut(true), 'early-timeout', { deadlineAt: 100_100 })
+    expect(view.runs[0]).toMatchObject({ state: 'expired', deadlineAt: 100_100, error: 'Execution deadline exceeded' })
+    expect(view.events).toEqual([])
+    expect(view.baseline).toBeNull()
+    expect(count('monitor_observations')).toBe(0)
+    expect(count('monitor_assessments')).toBe(0)
+  })
+
+  it('records a lane timeout the deadline did not cause as a completed attempt', async () => {
+    const store = await setup()
+    vi.spyOn(Date, 'now').mockReturnValue(100_000)
+    const view = await runConfiguredMonitor(store, revision, async () => timedOut(false), 'lane-timeout', { deadlineAt: 100_100 })
+    expect(view.runs[0]).toMatchObject({ state: 'completed', quality: 'unknown' })
+    expect(count('monitor_observations')).toBe(1)
+  })
+
   it('renews against the persisted effective deadline even when the caller holds a larger value', async () => {
     const store = await setup()
     vi.spyOn(Date, 'now').mockReturnValue(100_000)
