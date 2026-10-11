@@ -2482,6 +2482,18 @@
           "type": "markdownCountMin",
           "pattern": "\\]\\(https?://",
           "min": 10
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{1,2}\\b"
+        }
+      ],
+      "revisions": [
+        {
+          "date": "2026-10-11",
+          "decidedBy": "Howard",
+          "change": "added the third predicate, an event's date (a month and a day)",
+          "reason": "the header's account menu alone (Sell Tickets, My Tickets, ten links) met the first two: the runs at d24b38a and d9e63044 were verified on it with no event read"
         }
       ],
       "provenance": "expansion",

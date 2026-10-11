@@ -307,7 +307,8 @@ export class CdpVendorTransport implements ProviderTransport {
     const sessionMs = Math.ceil(performance.now() - openedAt)
     let usage: VendorSessionUsage | null = null
     if (released && typeof this.ops.sessionUsage === 'function') {
-      try { usage = await this.ops.sessionUsage(sessionId, Date.now() + 5_000) } catch { usage = null }
+      // Up to six seconds: a provider's figure can come some time after the release (Steel's proxyBytesUsed).
+      try { usage = await this.ops.sessionUsage(sessionId, Date.now() + 6_000) } catch { usage = null }
     }
     this.closed.push({
       sessionMs, released,

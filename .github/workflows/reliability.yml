@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Runner CPU (perf test timings vary by model)
+        run: lscpu
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:

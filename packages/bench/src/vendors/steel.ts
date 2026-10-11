@@ -53,7 +53,18 @@ export interface SteelConfig {
    * grant names `vendor_residential_proxy`; US when absent. Steel's docs: US and GB pools have the highest quality.
    */
   proxyCountry?: string
+  /**
+   * The waits between reads of a released session's `proxyBytesUsed` while it is still 0 under the residential proxy
+   * (Steel fills it some time after the release: 12 of 16 reads right after it got 0 on 2026-10-11, arm A). Default
+   * STEEL_USAGE_READ_WAITS_MS; a test passes short ones.
+   */
+  usageReadWaitsMs?: readonly number[]
 }
+
+/** The waits between reads of a released session's usage, within the transport's deadline for it. */
+export const STEEL_USAGE_READ_WAITS_MS: readonly number[] = [1_500, 1_500, 2_000]
+/** Time a read after a wait is given before the deadline. */
+export const STEEL_USAGE_READ_MARGIN_MS = 500
 
 /** The country asked for when the grant names the residential proxy and none is configured. */
 export const STEEL_DEFAULT_PROXY_COUNTRY = 'US'
@@ -195,13 +206,29 @@ export function steelOps(
      * object (GET /v1/sessions/{id}, its docs: measured on the wire at the proxy, both directions), and the solves on
      * GET /v1/sessions/{id}/captchas/status when solving was granted (a task whose `status` is `solved`; its docs do not
      * say that this count is the billed one, so the record calls it what Steel reported). A figure Steel did not give
-     * is null, never zero.
+     * is null, never zero. Under the residential proxy Steel fills `proxyBytesUsed` some time after the release, so a 0
+     * is read again after each wait in `usageReadWaitsMs` within the deadline, and one still 0 then is null: a page
+     * through a proxy moved bytes, and the ledger prices the unknown at the ceiling's allowance.
      */
     async sessionUsage(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSessionUsage | null> {
-      const res = await api({ method: 'GET', url: `${base}/v1/sessions/${sessionId}`, headers, deadlineMs, signal })
-      if (res.status !== 200) throw new Error(`steel: session read returned ${res.status}`)
-      const json = res.json as { proxyBytesUsed?: unknown } | null
-      const proxyBytes = typeof json?.proxyBytesUsed === 'number' && Number.isFinite(json.proxyBytesUsed) && json.proxyBytesUsed >= 0 ? Math.round(json.proxyBytesUsed) : null
+      const read = async (): Promise<number | null> => {
+        const res = await api({ method: 'GET', url: `${base}/v1/sessions/${sessionId}`, headers, deadlineMs, signal })
+        if (res.status !== 200) throw new Error(`steel: session read returned ${res.status}`)
+        const json = res.json as { proxyBytesUsed?: unknown } | null
+        return typeof json?.proxyBytesUsed === 'number' && Number.isFinite(json.proxyBytesUsed) && json.proxyBytesUsed >= 0 ? Math.round(json.proxyBytesUsed) : null
+      }
+      let proxyBytes = await read()
+      if (residentialEnabled && proxyBytes === 0) {
+        for (const waitMs of config.usageReadWaitsMs ?? STEEL_USAGE_READ_WAITS_MS) {
+          // The wait, and room for the read after it, within the deadline.
+          if (deadlineMs !== undefined && Date.now() + waitMs + STEEL_USAGE_READ_MARGIN_MS >= deadlineMs) break
+          await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
+          if (signal?.aborted) break
+          proxyBytes = await read()
+          if (proxyBytes !== 0) break
+        }
+        if (proxyBytes === 0) proxyBytes = null
+      }
       let solves: number | null = solveEnabled ? null : 0
       if (solveEnabled) {
         try {
