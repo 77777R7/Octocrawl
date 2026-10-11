@@ -246,7 +246,7 @@ describe('Firebase\'s REST API', () => {
     expect(sent.shift()!.body).toEqual({ providerId: 'google.com', continueUri: 'https://octocrawl.dev/__/auth/handler', authFlowType: 'CODE_FLOW', oauthScope: '{"google.com":"openid email profile"}' })
     answers.push({ status: 200, body: { localId: 'uid-000000001', idToken: 't', email: 'ada@example.org', providerId: 'google.com' } })
     expect(await toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=1', 'sid')).toEqual({ uid: 'uid-000000001', email: 'ada@example.org', provider: 'google.com', idToken: 't' })
-    expect(sent[0]).toEqual({ url: 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=AIzaSyTestKey0123456789abcdef', body: { requestUri: 'https://octocrawl.dev/__/auth/handler?code=1', sessionId: 'sid', returnSecureToken: true } })
+    expect(sent[0]).toEqual({ url: 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=AIzaSyTestKey0123456789abcdef', body: { requestUri: 'https://octocrawl.dev/__/auth/handler?code=1', sessionId: 'sid', returnSecureToken: true, returnIdpCredential: true } })
     // Without an ID token (a second factor pending) there is no sign-in.
     answers.push({ status: 200, body: { localId: 'uid-000000001', email: 'ada@example.org', providerId: 'github.com', mfaPendingCredential: 'x' } })
     await expect(toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=3', 'sid')).rejects.toMatchObject({ code: 'invalid' })

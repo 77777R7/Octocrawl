@@ -69,7 +69,7 @@ export class IdentityToolkit implements IdentityProvider {
     return { authUri: body.authUri, sessionId: body.sessionId }
   }
   async signInWithIdp(requestUri: string, sessionId: string): Promise<SignedIn> {
-    const body = await this.call('accounts:signInWithIdp', { requestUri, sessionId, returnSecureToken: true }) as
+    const body = await this.call('accounts:signInWithIdp', { requestUri, sessionId, returnSecureToken: true, returnIdpCredential: true }) as
       { localId?: string; idToken?: string; email?: string; providerId?: string; needConfirmation?: boolean; errorMessage?: string; oauthAccessToken?: string }
     // The address already belongs to an account that signs in another way (Firebase links one account per email). The
     // provider's token comes with the answer, so the way can be linked once the visitor signs in as before.
