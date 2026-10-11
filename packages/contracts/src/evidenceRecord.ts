@@ -119,6 +119,16 @@ export interface EvidencePaidCall {
    */
   sessionMs?: number | null
   /**
+   * Bytes the call's sessions moved through the provider's own proxy, as the provider reported them after release
+   * (ROADMAP PA item 4, the `vendor_residential_proxy` grant); null when it reported none, or the session had no
+   * provider proxy. Added after `sessionMs`.
+   */
+  proxyBytes?: number | null
+  /** CAPTCHA solves the provider reported for the call's sessions; null when it reported none, or solving was not granted. */
+  solves?: number | null
+  /** The country the provider's residential proxy was asked for (ISO 3166-1 alpha-2), when the grant named it; null otherwise. */
+  proxyCountry?: string | null
+  /**
    * What Octocrawl made of the page the call returned, by its own checks (a block page, an empty or unverified read, an
    * identity it did not send): never the provider's word that it succeeded. Null when the call returned no page (it
    * threw, or the deadline cut it).
@@ -370,7 +380,7 @@ export const EVIDENCE_RECORD_KEYS = {
   accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit']),
   accessEgressExit: keysOf<EvidenceAccessEgressExit>()(['ip', 'country', 'observedAt']),
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
-  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'outcome', 'reason', 'answer']),
+  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer']),
   accessGrant: keysOf<EvidenceAccessGrant>()(['sha256', 'tier', 'attestedAt']),
   verification: keysOf<EvidenceVerification>()(['status', 'verifier', 'contractSha256', 'reason', 'failed']),
   readiness: keysOf<EvidenceReadiness>()(['state', 'basis']),
@@ -387,5 +397,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   robotsDecision: ['overrideBasis'],
   access: ['completion', 'egress', 'session', 'paidCalls', 'grant'],
   accessEgress: ['exit'],
-  accessPaidCall: ['sessionMs'],
+  accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry'],
 }

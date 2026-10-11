@@ -507,6 +507,21 @@
           "type": ["integer", "null"],
           "minimum": 0
         },
+        "proxyBytes": {
+          "description": "Bytes the call's sessions moved through the provider's own proxy, as the provider reported them after release; null when it reported none, or the session had no provider proxy. Added after sessionMs: optional here so that earlier records stay valid.",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "solves": {
+          "description": "CAPTCHA solves the provider reported for the call's sessions; null when it reported none, or solving was not granted. Added with proxyBytes.",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "proxyCountry": {
+          "description": "The country the provider's residential proxy was asked for (ISO 3166-1 alpha-2, W2L_VENDOR_PROXY_COUNTRY), when the grant named vendor_residential_proxy; null otherwise. Added with proxyBytes.",
+          "type": ["string", "null"],
+          "pattern": "^[A-Z]{2}$"
+        },
         "outcome": {
           "description": "What Octocrawl made of the page the call returned, by its own checks (a block page, an empty or unverified read, an identity it did not send): never the provider's word that it succeeded. Null when the call returned no page (it threw, or the deadline cut it).",
           "enum": ["success", "partial", "empty_verified", "blocked", "failed", "cancelled", "budget_exceeded", "duplicate", null]

@@ -152,6 +152,7 @@ export const AUTHORIZABLE = [
   { capability: 'egress_sessions', tier: 'standard', thirdPartyCost: false },
   { capability: 'enhanced_browser', tier: 'enhanced', thirdPartyCost: false },
   { capability: 'vendor_remote_browser', tier: 'enhanced', thirdPartyCost: true },
+  { capability: 'vendor_residential_proxy', tier: 'enhanced', thirdPartyCost: true },
   { capability: 'vendor_unlock_html', tier: 'enhanced', thirdPartyCost: true },
   { capability: 'vendor_captcha_solving', tier: 'enhanced', thirdPartyCost: true },
   { capability: 'vendor_stealth', tier: 'enhanced', thirdPartyCost: true },
@@ -208,6 +209,9 @@ export const VENDOR_CAPABILITY_ACCESS: Readonly<Partial<Record<ProviderCapabilit
   fingerprint_spoofing: 'vendor_stealth',
   cdp_patching: 'vendor_stealth',
   captcha_solving: 'vendor_captcha_solving',
+  // The provider's own residential pool (ROADMAP PA item 4, 2026-10-11): its bandwidth is a third party's bill, so a
+  // grant names it, with a per-GB tariff that bounds it, and every session created with it is on the record.
+  residential_proxy: 'vendor_residential_proxy',
   identity_rotation: 'identity_rotation',
 }
 
@@ -273,13 +277,14 @@ export interface PolicyDecision {
 /**
  * Operational policy keys. `session_persistence` and `live_view_handoff`
  * require user authorization per target domain (see governance);
- * `residential_proxy` and `retry_orchestration` are operator choices, also
- * never on by default.
+ * `retry_orchestration` is an operator choice, also never on by default.
+ * `residential_proxy` was one until 2026-10-11: a provider's residential pool
+ * bills bandwidth, so it is now the ADR 0005 grant `vendor_residential_proxy`
+ * (VENDOR_CAPABILITY_ACCESS), under a tariff that bounds it.
  */
 export const OPERATIONAL_POLICY_KEYS = [
   'session_persistence',
   'live_view_handoff',
-  'residential_proxy',
   'retry_orchestration',
 ] as const
 

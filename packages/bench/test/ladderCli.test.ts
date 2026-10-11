@@ -630,6 +630,18 @@ describe('buildChannels + LadderRunner session composition', () => {
     // No session closed, or one unconfirmed: the result is as it was, and the ceiling stays the charge.
     expect(withMeasuredSessions(base, [], byMinute, 0.004)).toBe(base)
     expect(withMeasuredSessions(base, [{ sessionMs: 1_000, released: true }, { sessionMs: 1_000, released: false }], byMinute, 0.004)).toBe(base)
+    // Under a per-GB and a per-solve price the sessions' reported bytes and solves are priced too, a figure the provider
+    // did not give at the ceiling's allowance; the time part stays at most its own ceiling, the rest may pass it.
+    const residential = { ...byMinute, perGbUsd: 10, maxBytesPerCall: 20_000_000, perSolveUsd: 0.003, maxSolvesPerCall: 3 }
+    const ceiling = 0.004 + 0.2 + 0.009
+    const used = withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, usage: { proxyBytes: 5_000_000, solves: 1 } }], residential, ceiling, 'US').usage
+    expect(used).toMatchObject({ vendorSessionMs: 17_000, vendorProxyBytes: 5_000_000, vendorSolves: 1, vendorProxyCountry: 'US' })
+    expect(used.measuredCostUsd).toBeCloseTo(0.002 + 0.05 + 0.003, 9)
+    expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, usage: { proxyBytes: null, solves: null } }], residential, ceiling).usage).toMatchObject({ measuredCostUsd: expect.closeTo(0.002 + 0.2 + 0.009, 9), vendorProxyBytes: null, vendorSolves: null })
+    expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, usage: { proxyBytes: 30_000_000, solves: 0 } }], residential, ceiling).usage.measuredCostUsd).toBeCloseTo(0.002 + 0.3, 9)
+    expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, usage: { proxyBytes: 1_000, solves: 0 } }], byMinute, 0.004).usage).not.toHaveProperty('vendorProxyBytes')
+    // A proxy a plan includes (perGbUsd 0) still has its bytes on the result, and a solve the provider reported is never dropped.
+    expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, usage: { proxyBytes: 1_000, solves: 2 } }], byMinute, 0.004, 'GB').usage).toMatchObject({ vendorProxyBytes: 1_000, vendorSolves: 2, vendorProxyCountry: 'GB' })
   })
 
   it('answers a provider error just before the request\'s deadline as the provider\'s failure, not a thrown error (ROADMAP PA item 4)', async () => {

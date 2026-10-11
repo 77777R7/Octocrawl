@@ -50,7 +50,7 @@ describe('ADR 0005: the three capability classes', () => {
     ])
     expect(AUTHORIZABLE_NAMES).toEqual([
       'compatible_transport', 'egress_sessions', 'enhanced_browser',
-      'vendor_remote_browser', 'vendor_unlock_html', 'vendor_captcha_solving', 'vendor_stealth',
+      'vendor_remote_browser', 'vendor_residential_proxy', 'vendor_unlock_html', 'vendor_captcha_solving', 'vendor_stealth',
       'third_party_captcha_solver',
     ])
     expect(new Set(EVERY_NAME).size).toBe(EVERY_NAME.length)
@@ -179,14 +179,26 @@ describe('evaluateVendorPolicy — capability vs policy split', () => {
     expect(d.unauthorized).toEqual(['live_view_handoff'])
   })
 
-  it('the authorizable surface is the four operational keys plus ADR 0005 class 3', () => {
+  it('the authorizable surface is the three operational keys plus ADR 0005 class 3', () => {
     expect([...AUTHORIZABLE_POLICY_KEYS]).toEqual([
       'session_persistence',
       'live_view_handoff',
-      'residential_proxy',
       'retry_orchestration',
       ...AUTHORIZABLE_NAMES,
     ])
+  })
+
+  it('a provider\'s residential proxy follows the vendor_residential_proxy grant, not the old operational key (ROADMAP PA item 4)', () => {
+    const offers: CapabilityOffer[] = [{ capability: 'residential_proxy', vendorDefaultOn: false, enableKey: 'residential_proxy' }]
+    expect(VENDOR_CAPABILITY_ACCESS.residential_proxy).toBe('vendor_residential_proxy')
+    const old = evaluateVendorPolicy(offers, { authorized: ['residential_proxy'] })
+    expect(old.withheld).toEqual(['residential_proxy'])
+    expect(old.declined).toEqual([expect.objectContaining({ capability: 'residential_proxy', decision: 'unknown' })])
+    const granted = evaluateVendorPolicy(offers, { authorized: ['vendor_residential_proxy'] })
+    expect(granted.enabled).toEqual([{ capability: 'residential_proxy', enableKey: 'vendor_residential_proxy', optOutRequired: false }])
+    // It spends a third party's money: a grant naming it needs a run budget.
+    expect(normalizeAccessGrant({ tier: 'enhanced', capabilities: ['vendor_residential_proxy'], attestation: { principal: 't', at: '2026-10-11T00:00:00Z', statement: 's' } }))
+      .toEqual({ ok: false, problems: [expect.objectContaining({ field: 'budget.perRunUsd', kind: 'budget_required' })] })
   })
 
   it('is a pure function of its inputs', () => {

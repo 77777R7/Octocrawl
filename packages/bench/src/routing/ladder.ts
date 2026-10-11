@@ -945,11 +945,15 @@ export class LadderRunner {
     const measured = reported === null && typeof result.usage.measuredCostUsd === 'number' ? result.usage.measuredCostUsd : null
     const charged = reservation.settle(reported ?? measured)
     const sessionMs = measured === null ? null : result.usage.vendorSessionMs ?? null
-    const call = paidCall(progress, channel, label, ceiling, charged, reported, result, sessionMs)
+    // What the provider reported the sessions used, when the charge is measured: bytes through its proxy, solves.
+    const used = measured === null ? {} : { ...(result.usage.vendorProxyBytes === undefined ? {} : { proxyBytes: result.usage.vendorProxyBytes }), ...(result.usage.vendorSolves === undefined ? {} : { solves: result.usage.vendorSolves }), ...(result.usage.vendorProxyCountry === undefined ? {} : { proxyCountry: result.usage.vendorProxyCountry }) }
+    const call = paidCall(progress, channel, label, ceiling, charged, reported, result, sessionMs, used)
+    // A measured charge above the ceiling: the provider's proxy moved more than the page's count, or it solved more than allowed for.
+    const overCeiling = charged > ceiling + 1e-9
     return {
       ...result,
       usage: { ...result.usage, externalCostChargedUsd: (result.usage.externalCostChargedUsd ?? 0) + charged },
-      trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'spend_settled', detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: reported !== null ? 'reported' : measured !== null ? 'measured' : 'ceiling', ...(sessionMs === null ? {} : { sessionMs }), call } }],
+      trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'spend_settled', detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: reported !== null ? 'reported' : measured !== null ? 'measured' : 'ceiling', ...(sessionMs === null ? {} : { sessionMs }), ...used, ...(overCeiling ? { overCeiling: true } : {}), call } }],
     }
   }
 
@@ -1204,12 +1208,13 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
  * One call the ledger settled, added to the run's charge and to its paid calls: Octocrawl's verdict on the page the call
  * returned (null when it returned none), never the provider's word. Returns the call's number in the run.
  */
-function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceilingUsd: number, chargedUsd: number, reportedCostUsd: number | null, result: FetchResult | null, sessionMs: number | null = null): number {
+function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceilingUsd: number, chargedUsd: number, reportedCostUsd: number | null, result: FetchResult | null, sessionMs: number | null = null, used: { proxyBytes?: number | null; solves?: number | null; proxyCountry?: string } = {}): number {
   progress.charged = (progress.charged ?? 0) + chargedUsd
   progress.grant ??= channel.grant ?? null
   const call = progress.paidCalls.length + 1
   progress.paidCalls.push({
     provider: channel.vendorId ?? channel.id, rung, capabilities: [...(channel.grantCapabilities ?? [])], ceilingUsd, chargedUsd, reportedCostUsd, sessionMs,
+    ...(used.proxyBytes === undefined ? {} : { proxyBytes: used.proxyBytes }), ...(used.solves === undefined ? {} : { solves: used.solves }), ...(used.proxyCountry === undefined ? {} : { proxyCountry: used.proxyCountry }),
     outcome: result?.status ?? null, reason: result === null ? null : result.failureReason ?? result.blockReason ?? result.budgetExceeded ?? null, call,
   })
   return call
