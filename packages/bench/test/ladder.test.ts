@@ -1057,6 +1057,34 @@ describe('LadderRunner — a recorded robots override', () => {
     expect(answered.result).toEqual(own)
   })
 
+  it('goes on to a vendor rung when what was set aside was only a robots.txt that could not be read', async () => {
+    // T076 on 2026-10-11: stackoverflow.com's robots.txt was unreadable for one lookup (a complete disallow), and the
+    // vendor rung, which reads robots.txt itself before it opens a session, was skipped as if the publisher had written a rule.
+    const unreadable: RobotsOverrideApplied = {
+      trace: [
+        { at: 1, lane: 'http', event: 'robots_checked', detail: { decision: 'disallowed', robotsUrl: 'https://example.com/robots.txt', robotsSha256: null, crawlDelayMs: null, unreachable: 'timeout' } },
+        { at: 1, lane: 'http', event: 'robots_disallowed', detail: { url, appliedRules: [], unreachable: 'timeout' } },
+        { at: 1, lane: 'http', event: 'robots_overridden', detail: { url, appliedRules: [], unreachable: 'timeout', ...robotsOverride } },
+      ],
+      warning: { code: 'robots_overridden', message: 'https://example.com/robots.txt could not be read (timeout), which counts as a complete disallow; it was fetched under an override recorded by analyst: The publisher links this report itself.' },
+    }
+    const local: Channel = { id: 'http', identity: COHERENT, fetch: (_url, _session, execution) => { execution?.onRobotsOverride?.(unreadable); return Promise.resolve({ ...blockedResult(url, 'cloudflare_challenge'), trace: unreadable.trace, warnings: [unreadable.warning] }) } }
+    const provider = channel('provider', [contentfulResult(url, 'provider')], 'steel')
+    const run = await new LadderRunner([local, provider], { mode: 'research' }).run(url, undefined, {}, { robotsOverride })
+    expect(provider.calls).toHaveLength(1)
+    expect(run.channelsTried).toEqual(['http', 'provider'])
+    expect(run.result).toMatchObject({ status: 'success', lane: 'provider' })
+    expect(run.ladderTrace).not.toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', channel: 'provider' }))
+
+    // Still unreadable to the provider: it refuses before opening a session, at no cost, and the local answer stands.
+    const refusal: FetchResult = { ...failedResult(url, 'policy_denied'), lane: 'provider', trace: [{ at: 1, lane: 'provider', event: 'provider_refused', detail: { refusal: 'robots_unreachable' } }] }
+    const refusing = channel('provider', [{ ...refusal, usage: { ...refusal.usage, externalCostUsd: 0 } }], 'steel')
+    const refused = await new LadderRunner([local, refusing], { mode: 'research' }).run(url, undefined, {}, { robotsOverride })
+    expect(refused.channelsTried).toEqual(['http', 'provider'])
+    expect(refused.result).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge', lane: 'http' })
+    expect(refused.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_vendor_refused', channel: 'provider' }))
+  })
+
   it('ends at the local rungs once a rule was set aside: no vendor rung runs, and the answer says why', async () => {
     const provider = channel('provider', [contentfulResult(url, 'provider')], 'steel')
     const run = await new LadderRunner([overriding('http', overridden(blockedResult(url, 'cloudflare_challenge'))), provider], { mode: 'research' })
