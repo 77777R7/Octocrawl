@@ -283,11 +283,11 @@ async function zenrowsScrape(task) {
 }
 
 /** The paid provider calls the answer's Evidence Record lists, each as its provider, verdict and role; null when the record says nothing of them. */
-/** The answer's last wait for its task's region (ADR 0007), by counts: whether it held, how long, how many reads it judged. */
+/** The answer's last wait for its task's region (ADR 0007), by counts: whether it held, how long, how many reads it judged, and why it judged none of the checks if so. */
 function regionWaitOf(doc) {
   const waits = (doc?.trace ?? []).filter((t) => t.event === 'region_wait')
   const last = waits.at(-1)?.detail
-  return last === undefined ? null : { ready: last.ready === true, empty: last.empty === true, waitedMs: last.waitedMs ?? null, judged: last.judged ?? null }
+  return last === undefined ? null : { ready: last.ready === true, empty: last.empty === true, waitedMs: last.waitedMs ?? null, judged: last.judged ?? null, ...(typeof last.unjudged === 'string' ? { unjudged: last.unjudged } : {}) }
 }
 
 /** The ladder's reasons for passing a rung over (packages/bench/src/routing/ladder.ts), each by words its sentence carries. */
@@ -466,7 +466,7 @@ if (recordFile !== undefined) {
   // A provider call's provider, what Octocrawl made of its page and whether it is the answer, for runs that recorded them.
   const paidColumn = rows.some((r) => Array.isArray(r.observed.paidCalls) && r.observed.paidCalls.length > 0)
   const readinessColumn = rows.some((r) => r.observed.readiness !== null && r.observed.readiness !== undefined)
-  const readinessCell = (r) => r.observed.readiness === null || r.observed.readiness === undefined ? 'unknown' : `${r.observed.readiness.state}${r.observed.readiness.basis.length === 0 ? '' : ` (${r.observed.readiness.basis.join(', ')})`}${r.observed.regionWait ? `; region ${r.observed.regionWait.ready ? 'held' : 'not held'} in ${r.observed.regionWait.waitedMs} ms` : ''}`
+  const readinessCell = (r) => r.observed.readiness === null || r.observed.readiness === undefined ? 'unknown' : `${r.observed.readiness.state}${r.observed.readiness.basis.length === 0 ? '' : ` (${r.observed.readiness.basis.join(', ')})`}${!r.observed.regionWait ? '' : r.observed.regionWait.unjudged ? `; region not judged (${r.observed.regionWait.unjudged})` : `; region ${r.observed.regionWait.ready ? 'held' : 'not held'} in ${r.observed.regionWait.waitedMs} ms`}`
   const readinessCounts = (temp) => {
     const states = rows.filter((r) => r.temperature === temp).map((r) => r.observed.readiness?.state ?? 'unknown')
     return ['ready', 'not_loaded', 'not_extracted', 'not_served', 'unknown'].map((state) => `${state} ${states.filter((s) => s === state).length}`).join(', ')
@@ -481,6 +481,13 @@ if (recordFile !== undefined) {
     // No attempt with a ladder trace says nothing of skips: not known, not none.
     if (unknown === r.length) return `- Rungs the ladder passed over (${temp}): not known, no attempt carries a ladder trace`
     return `- Rungs the ladder passed over (${temp}, its \`ladder_channel_skipped\` events): ${byRule.size === 0 ? 'none' : [...byRule].map(([rule, at]) => `${rule} on ${at.join(', ')}`).join('; ')}${unknown === 0 ? '' : `; not known on ${unknown} attempt${unknown === 1 ? '' : 's'} without a ladder trace`}`
+  }
+  // The waits that judged the region, and apart from them those whose view could judge none of the checks, with why.
+  const regionCounts = (temp) => {
+    const waits = rows.filter((r) => r.temperature === temp && r.observed.regionWait).map((r) => r.observed.regionWait)
+    const judged = waits.filter((w) => !w.unjudged)
+    const why = [...new Set(waits.filter((w) => w.unjudged).map((w) => w.unjudged))].map((u) => `${u} ${waits.filter((w) => w.unjudged === u).length}`)
+    return `${judged.length} (held on ${judged.filter((w) => w.ready).length})${why.length === 0 ? '' : `; not judged on ${waits.length - judged.length} (${why.join(', ')})`}`
   }
   const paidCell = (calls) => calls === null || calls === undefined ? 'unknown' : calls.map((c) => `${c.provider}: ${c.outcome ?? 'no page'}${c.reason ? `/${c.reason}` : ''}${c.answer ? ' (answer)' : ''}`).join('; ')
   const md = [
@@ -499,7 +506,7 @@ if (recordFile !== undefined) {
     ...Object.entries(totals).map(([temp, t]) => `| ${temp}: ${t.attempts} | ${t.verified} | ${t.falseSuccess} | ${fmt(t.p50Ms)} | ${fmt(t.p95Ms)} | ${fmt(t.externalCostPer1000VerifiedUsd)} | ${fmt(t.egressCostPer1000VerifiedUsd)} |${'credits' in t ? ` ${fmt(t.credits)} | ${fmt(t.creditsPer1000Verified === null ? null : Math.round(t.creditsPer1000Verified))} |` : ''}`), '',
     ...Object.entries(totals).filter(([, t]) => 'paidCalls' in t).map(([temp, t]) => `- Paid provider calls (${temp}): ${fmt(t.paidCalls)}; tasks verified with a paid call's page as the answer: ${fmt(t.verifiedFromPaidCall)}; charged by the spend ledger: ${t.chargedUsd === null ? 'unknown' : `$${t.chargedUsd.toFixed(4)}`} (a provider that states no price is charged its sessions' measured time under the grant's tariff, else its price ceiling: an estimate from the tariff, not its bill)`),
     ...(Object.values(totals).some((t) => 'paidCalls' in t) ? [''] : []),
-    ...(readinessColumn ? [...Object.keys(totals).map((temp) => `- Readiness (${temp}, ADR 0007): ${readinessCounts(temp)}; region waits: ${rows.filter((r) => r.temperature === temp && r.observed.regionWait).length} (held on ${rows.filter((r) => r.temperature === temp && r.observed.regionWait?.ready).length})`), ''] : []),
+    ...(readinessColumn ? [...Object.keys(totals).map((temp) => `- Readiness (${temp}, ADR 0007): ${readinessCounts(temp)}; region waits: ${regionCounts(temp)}`), ''] : []),
     ...(skipsRecorded ? [...Object.keys(totals).map(skipsLine), ''] : []),
     `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}${readinessColumn ? ' Readiness |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}${readinessColumn ? ' --- |' : ''}`,

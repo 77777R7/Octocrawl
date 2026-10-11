@@ -5,6 +5,7 @@
  * every check that view can judge passes on two reads in a row with the same counts, or, for a contract that accepts
  * an empty result, when the list shows no record on three reads in a row of a page that has stopped loading and
  * changing. The wait is bounded; the page is read when it ends, ready or not, and the trace says which (`region_wait`).
+ * A view that can judge none of the checks is not waited on: its one read is recorded too, with why (`unjudged`).
  * The view only judges readiness: the task's verdict is still the contract run on what was extracted.
  */
 
@@ -154,6 +155,13 @@ interface RegionView {
   error?: string
 }
 
+/**
+ * Why the live page could judge none of the contract's checks: its HTML was over MAX_VIEW_HTML for the Markdown checks
+ * (the page sends none past it), or no check reads the live page at all (a `field` on `json`, a list check without the
+ * list format's items and fields).
+ */
+export type RegionUnjudged = 'html_too_large' | 'checks_not_on_page'
+
 /** What the wait saw: whether the region was ready (or an accepted empty list), how long and how many reads, and the checks as last judged, by their counts. */
 export interface RegionOutcome {
   ready: boolean
@@ -170,12 +178,15 @@ export interface RegionOutcome {
   /** The SHA-256 of the contract it judged (ADR 0006's contractSha256), so a stored result is read against its own contract. */
   contractSha256: string
   checks: readonly Pick<VerificationCheck, 'index' | 'type' | 'passed' | 'observedCount'>[]
+  /** Set when the first judged view could judge none of the checks: the wait stopped at that read, and why. */
+  unjudged?: RegionUnjudged
 }
 
 /**
  * The region's state across reads, for a lane that reads the page in its own loop (the my-browser lane): `observe`
  * each view, `ready` once it holds, and `outcome` when the lane reads the page. `judgeable` is false when the first
- * judged view can judge none of the contract's checks (a contract of `json` fields alone): nothing on the page to wait for.
+ * judged view can judge none of the contract's checks (a contract of `json` fields alone): nothing on the page to wait for,
+ * and `unjudged` says why.
  */
 export class RegionTracker {
   private readonly started: number
@@ -190,6 +201,7 @@ export class RegionTracker {
   private converted: { html: string; markdown: string } | null = null
   private last: Omit<RegionOutcome, 'waitedMs' | 'reads' | 'judged' | 'contractSha256'> = { ready: false, empty: false, loading: false, steady: null, checks: [] }
   judgeable = true
+  unjudged: RegionUnjudged | undefined
 
   constructor(private readonly spec: RegionSpec, private readonly now: () => number = Date.now) {
     this.started = now()
@@ -220,7 +232,12 @@ export class RegionTracker {
     const verification = verify(this.spec.contract, verifyView, { partial: true })
     const checks = verification.status === 'not_requested' ? [] : verification.checks.map(({ index, type, passed, observedCount }) => ({ index, type, passed, ...(observedCount === undefined ? {} : { observedCount }) }))
     // The first judged view decides whether the page can judge the contract at all.
-    if (this.judged === 1 && checks.every((check) => check.passed === null)) this.judgeable = false
+    if (this.judged === 1 && checks.every((check) => check.passed === null)) {
+      this.judgeable = false
+      // The Markdown checks went unjudged because the page's HTML was too large to send or convert: the page had one.
+      const tooLarge = this.needsMarkdown && (view.html === null || (typeof view.html === 'string' && view.html.length > MAX_VIEW_HTML))
+      this.unjudged = tooLarge ? 'html_too_large' : 'checks_not_on_page'
+    }
     const key = JSON.stringify(checks.map((check) => [check.passed, check.observedCount ?? null]))
     const steady = this.previousText === undefined ? null : this.previousText === view.text
     const loading = view.loading === true
@@ -244,16 +261,16 @@ export class RegionTracker {
   }
 
   outcome(): RegionOutcome {
-    return { ...this.last, waitedMs: this.now() - this.started, reads: this.reads, judged: this.judged, contractSha256: this.sha }
+    return { ...this.last, waitedMs: this.now() - this.started, reads: this.reads, judged: this.judged, contractSha256: this.sha, ...(this.unjudged === undefined ? {} : { unjudged: this.unjudged }) }
   }
 }
 
 /**
  * Wait for the region on a page a lane drives (browser_local, a provider's browser): read the view every
- * REGION_SAMPLE_MS until it is ready or `maxMs` has passed, at least once. Undefined when the view can judge none of
- * the contract's checks. A read that a navigation cut off starts the comparison afresh.
+ * REGION_SAMPLE_MS until it is ready or `maxMs` has passed, at least once. A view that can judge none of the contract's
+ * checks ends it at that read, with `unjudged`. A read that a navigation cut off starts the comparison afresh.
  */
-export async function waitForRegion(page: SettlePage, spec: RegionSpec, options: { maxMs: number; sampleMs?: number; now?: () => number }): Promise<RegionOutcome | undefined> {
+export async function waitForRegion(page: SettlePage, spec: RegionSpec, options: { maxMs: number; sampleMs?: number; now?: () => number }): Promise<RegionOutcome> {
   const now = options.now ?? Date.now
   const tracker = new RegionTracker(spec, now)
   const expression = tracker.expression()
@@ -269,7 +286,7 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
       json = undefined
     }
     const ready = tracker.observe(json)
-    if (!tracker.judgeable) return undefined
+    if (!tracker.judgeable) return tracker.outcome()
     // A read takes what the last one took (a large page's HTML, its Markdown): none is begun that would end past the bound.
     const readMs = now() - readStarted
     const pause = Math.max(1, Math.min(sampleMs, deadline - now()))
@@ -281,6 +298,6 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
 /** The trace event a region wait leaves: what it saw, by counts, never the page's text. */
 export function regionWaitEvent(outcome: RegionOutcome | undefined, at: number, lane: Lane): TraceEvent | null {
   if (outcome === undefined) return null
-  const { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks } = outcome
-  return { at, lane, event: 'region_wait', detail: { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks } }
+  const { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, unjudged } = outcome
+  return { at, lane, event: 'region_wait', detail: { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, ...(unjudged === undefined ? {} : { unjudged }) } }
 }
