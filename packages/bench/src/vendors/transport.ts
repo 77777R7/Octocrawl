@@ -96,6 +96,12 @@ export interface VendorOps {
    */
   sessionUsage?(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSessionUsage | null>
   /**
+   * What a live session has used so far, for the figures the provider stops answering for once the session is released
+   * (Steel's captchas status answers 404 some time after a release). Asked once, just before the release; a field it
+   * gives here wins over `sessionUsage`'s.
+   */
+  liveUsage?(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<Partial<VendorSessionUsage> | null>
+  /**
    * The bounds a tariff puts on one session (ROADMAP PA item 4): the most bytes its pages may receive before the
    * transport ends it (null: uncounted), and the country its residential proxy was asked for (null: none).
    */
@@ -298,6 +304,11 @@ export class CdpVendorTransport implements ProviderTransport {
    * confirmed release the provider is asked what the session used (bytes through its proxy, solves), when it can say.
    */
   private async release(sessionId: string, openedAt: number, meter: ByteMeter | null = null): Promise<void> {
+    // The figures a provider only answers for while the session lives (Steel's solves), read before the release.
+    let live: Partial<VendorSessionUsage> | null = null
+    if (typeof this.ops.liveUsage === 'function') {
+      try { live = await this.ops.liveUsage(sessionId, Date.now() + 3_000) } catch { live = null }
+    }
     let released = true
     try {
       await this.ops.releaseSession(sessionId, Date.now() + 5_000)
@@ -310,6 +321,7 @@ export class CdpVendorTransport implements ProviderTransport {
       // Up to six seconds: a provider's figure can come some time after the release (Steel's proxyBytesUsed).
       try { usage = await this.ops.sessionUsage(sessionId, Date.now() + 6_000) } catch { usage = null }
     }
+    if (usage !== null && live !== null) usage = { proxyBytes: live.proxyBytes ?? usage.proxyBytes, solves: live.solves ?? usage.solves }
     this.closed.push({
       sessionMs, released,
       ...(typeof this.ops.sessionUsage === 'function' ? { usage } : {}),

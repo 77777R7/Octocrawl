@@ -845,6 +845,10 @@ describe('a provider\'s residential proxy and what a session used (ROADMAP PA it
     const api = session('st_1', {}, [{ pageUrl: 'https://a.example/', tasks: [{ id: 't1', status: 'solved' }, { id: 't2', status: 'failed_to_solve' }] }, { pageUrl: 'https://b.example/', tasks: [{ id: 't3', status: 'solved' }] }])
     const solving = steelOps({ apiKey: 'k' }, api.handler, { authorized: ['vendor_captcha_solving'] })
     expect(await solving.sessionUsage!('st_1')).toEqual({ proxyBytes: 4_200_000, solves: 2 })
+    // The solves are read while the session lives too, since Steel's status is gone some time after the release.
+    expect(await solving.liveUsage!('st_1')).toEqual({ solves: 2 })
+    expect(await steelOps({ apiKey: 'k' }, api.handler).liveUsage!('st_1')).toEqual({ solves: 0 })
+    await expect(steelOps({ apiKey: 'k' }, new FakeApi(() => ({ status: 404, json: {} })).handler, { authorized: ['vendor_captcha_solving'] }).liveUsage!('st_9')).rejects.toThrow('steel: captchas status returned 404')
     // Solving not granted: none could have been bought, so zero; a figure Steel does not give is null, never zero.
     expect(await steelOps({ apiKey: 'k' }, session('st_1', { proxyBytesUsed: undefined }).handler).sessionUsage!('st_1')).toEqual({ proxyBytes: null, solves: 0 })
     await expect(steelOps({ apiKey: 'k' }, new FakeApi(() => ({ status: 404, json: {} })).handler).sessionUsage!('st_9')).rejects.toThrow('steel: session read returned 404')
@@ -874,6 +878,23 @@ describe('a provider\'s residential proxy and what a session used (ROADMAP PA it
     const own = late([0])
     expect(await steelOps({ apiKey: 'k', usageReadWaitsMs: [1] }, own.handler).sessionUsage!('st_1', Date.now() + 5_000)).toEqual({ proxyBytes: 0, solves: 0 })
     expect(own.requests.filter((r) => r.method === 'GET')).toHaveLength(1)
+  })
+
+  it('reads the solves before the release and keeps them when the status is gone after it (arm B, 2026-10-11)', async () => {
+    let released = false
+    const api = new FakeApi((req) => {
+      if (req.method === 'POST' && req.url.endsWith('/v1/sessions')) return { status: 201, json: { id: 'st_1' } }
+      if (req.method === 'POST' && req.url.endsWith('/release')) { released = true; return { status: 200, json: { success: true } } }
+      if (req.url.endsWith('/captchas/status')) return released ? { status: 404, json: { error: 'Not Found' } } : { status: 200, json: [{ tasks: [{ status: 'solved' }] }] }
+      return { status: 200, json: { id: 'st_1', status: 'released', proxySource: null, proxyBytesUsed: 0 } }
+    })
+    const ops = steelOps({ apiKey: 'k' }, api.handler, { authorized: ['vendor_captcha_solving'] })
+    const transport = new CdpVendorTransport(ops, connectorFor(fakeBrowser()).connector)
+    await transport.resolveUserAgent()
+    await transport.close()
+    expect(transport.closedSessions()).toEqual([{ sessionMs: expect.any(Number), released: true, usage: { proxyBytes: 0, solves: 1 } }])
+    // The status was asked before the release, and again after it as the fallback (404 then): the live figure stands.
+    expect(api.requests.map((r) => r.url.split('/').slice(-1)[0])).toEqual(['sessions', 'status', 'release', 'st_1', 'status'])
   })
 
   it('keeps the provider\'s figures with each closed session, and counts what the page received against maxBytesPerCall', async () => {
