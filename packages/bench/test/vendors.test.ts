@@ -851,6 +851,31 @@ describe('a provider\'s residential proxy and what a session used (ROADMAP PA it
     expect(countSolved({ solved: true, items: [{ status: 'solved', nested: { status: 'solved' } }] })).toBe(2)
   })
 
+  it('reads a residential session\'s bytes again while Steel still says 0, and records null when the figure never comes (arm A, 2026-10-11)', async () => {
+    // Steel fills proxyBytesUsed some time after the release: the first reads get 0.
+    const late = (figures: number[]) => {
+      let reads = 0
+      return new FakeApi((req) => req.method === 'GET' && req.url.endsWith('/v1/sessions/st_1')
+        ? { status: 200, json: { id: 'st_1', status: 'released', proxySource: 'steel', proxyBytesUsed: figures[Math.min(reads++, figures.length - 1)] } }
+        : { status: 200, json: {} })
+    }
+    const residential = (api: FakeApi) => steelOps({ apiKey: 'k', usageReadWaitsMs: [1, 1, 1] }, api.handler, { authorized: ['vendor_residential_proxy'] })
+    const came = late([0, 0, 4_200_000])
+    expect(await residential(came).sessionUsage!('st_1', Date.now() + 5_000)).toEqual({ proxyBytes: 4_200_000, solves: 0 })
+    expect(came.requests.filter((r) => r.method === 'GET')).toHaveLength(3)
+    // Still 0 after every wait: unknown, never zero (a page through a proxy moved bytes).
+    const never = late([0])
+    expect(await residential(never).sessionUsage!('st_1', Date.now() + 5_000)).toEqual({ proxyBytes: null, solves: 0 })
+    expect(never.requests.filter((r) => r.method === 'GET')).toHaveLength(4)
+    // No wait past the deadline, and none without the residential proxy, whose 0 is the session's own address.
+    const cut = late([0])
+    expect(await residential(cut).sessionUsage!('st_1', Date.now())).toEqual({ proxyBytes: null, solves: 0 })
+    expect(cut.requests.filter((r) => r.method === 'GET')).toHaveLength(1)
+    const own = late([0])
+    expect(await steelOps({ apiKey: 'k', usageReadWaitsMs: [1] }, own.handler).sessionUsage!('st_1', Date.now() + 5_000)).toEqual({ proxyBytes: 0, solves: 0 })
+    expect(own.requests.filter((r) => r.method === 'GET')).toHaveLength(1)
+  })
+
   it('keeps the provider\'s figures with each closed session, and counts what the page received against maxBytesPerCall', async () => {
     const api = session('st_1')
     const ops = { ...steelOps({ apiKey: 'k', maxBytesPerCall: 1_000 }, api.handler, { authorized: ['vendor_residential_proxy'] }) }
