@@ -505,3 +505,38 @@ describe('htmlToTables', () => {
     expect(htmlToTables(html).map((table) => table.rows)).toEqual([[['a', 'b'], ['c', 'd']]])
   })
 })
+
+describe('a data grid drawn with ARIA roles', () => {
+  // As AG Grid draws Eurostat's data browser (T055): the pinned first column and the scrolled ones in their own containers,
+  // each with its own header rows, put back together by aria-rowindex and aria-colindex.
+  const cell = (role: string, col: number, text: string) => `<div role="${role}" aria-colindex="${col}"><span>${text}</span></div>`
+  const row = (index: number, cells: string) => `<div role="row" aria-rowindex="${index}">${cells}</div>`
+  const AG_GRID = '<main><h1>Population on 1 January</h1><div role="treegrid" aria-rowcount="4" aria-colcount="3">' +
+    `<div role="presentation" class="ag-pinned-left-header">${row(1, cell('columnheader', 1, 'GEO'))}</div>` +
+    `<div role="presentation" class="ag-header-container">${row(1, cell('columnheader', 2, '2025') + cell('columnheader', 3, '2026'))}</div>` +
+    `<div role="rowgroup" class="ag-pinned-left-cols-container">${row(2, cell('gridcell', 1, 'Belgium'))}${row(3, cell('gridcell', 1, '<a href="/bg">Bulgaria</a>'))}</div>` +
+    `<div role="rowgroup" class="ag-center-cols-container">${row(3, cell('gridcell', 2, '6 437 360') + cell('gridcell', 3, '6 423 207'))}${row(2, cell('gridcell', 2, '11 883 495') + cell('gridcell', 3, '11 955 308 (p)'))}</div>` +
+    '</div></main>'
+
+  it('is read as the table it shows, a row split across containers put back together', () => {
+    const markdown = htmlToMarkdown(AG_GRID, { baseUrl: 'https://x.example/' })
+    expect(gfmTables(markdown)).toBe(1)
+    expect(markdown).toContain('| GEO | 2025 | 2026 |')
+    expect(markdown).toContain('| Belgium | 11 883 495 | 11 955 308 (p) |')
+    expect(markdown).toContain('| [Bulgaria](https://x.example/bg) | 6 437 360 | 6 423 207 |')
+    expect(htmlToTables(AG_GRID).map((table) => [table.headerRows, table.rows])).toEqual([[1, [['GEO', '2025', '2026'], ['Belgium', '11 883 495', '11 955 308 (p)'], ['Bulgaria', '6 437 360', '6 423 207']]]])
+  })
+
+  it('reads one without indexes in document order, and leaves alone one of a single row, one with no text and one inside a table', () => {
+    const plain = '<div role="table"><div role="row"><span role="columnheader">Station</span><span role="columnheader">Height</span></div>' +
+      '<div role="row"><span role="cell">Pier</span><span role="cell">4.2</span></div><div role="row"><span role="cell">Quay</span></div></div>'
+    expect(htmlToTables(plain).map((table) => table.rows)).toEqual([[['Station', 'Height'], ['Pier', '4.2'], ['Quay', '']]])
+    const single = '<div role="grid"><div role="row"><div role="gridcell">Only</div><div role="gridcell">row</div></div></div>'
+    const empty = '<div role="grid"><div role="row"><div role="gridcell"> </div></div><div role="row"><div role="gridcell"></div></div></div>'
+    expect(gfmTables(htmlToMarkdown(single + empty))).toBe(0)
+    expect(htmlToMarkdown(single)).toContain('Only')
+    // A grid inside a table's cell is that cell's content, as a table inside a table is.
+    const inTable = `<table><tr><th>Name</th><th>Data</th></tr><tr><td>Pier</td><td>${plain}</td></tr></table>`
+    expect(htmlToTables(inTable).map((table) => table.rows.length)).toEqual([2])
+  })
+})

@@ -17,6 +17,7 @@
  */
 
 import { detachAll, layoutTables, parse } from './dom.js'
+import { tablesFromAriaGrids } from './ariaGrid.js'
 import { namedBy } from './selectors.js'
 import { documentBaseUrl } from './links.js'
 
@@ -1747,6 +1748,8 @@ function convert(html: string, options: MarkdownOptions, tables?: ExtractedTable
   // mainHtml is resolved against the base the caller passes.
   const base = toUrl(whole ? documentBaseUrl(document, options.baseUrl) : options.baseUrl)
   detachAll(namedBy(document, options.exclude ?? []))
+  // A data grid drawn with ARIA roles is read as the table it shows.
+  tablesFromAriaGrids(document as unknown as Document)
   const root =
     document.body && document.body.childNodes.length > 0 ? document.body : (document.documentElement ?? document.body)
   if (!root) {
