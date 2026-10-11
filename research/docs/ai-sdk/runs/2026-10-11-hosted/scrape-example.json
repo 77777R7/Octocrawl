@@ -1,0 +1,84 @@
+{
+  "status": "success",
+  "requestedUrl": "https://example.com/",
+  "finalUrl": "https://example.com/",
+  "httpStatus": 200,
+  "title": "Example Domain",
+  "markdown": "This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.",
+  "truncated": false,
+  "evidenceRecord": {
+    "schemaVersion": "w2l.evidence/1",
+    "requestedUrl": "https://example.com/",
+    "finalUrl": "https://example.com/",
+    "redirectChain": {
+      "urls": [
+        "https://example.com/"
+      ],
+      "complete": true
+    },
+    "fetchedAt": "2026-10-11T06:05:09.043Z",
+    "httpStatus": 200,
+    "status": "success",
+    "reason": null,
+    "lane": "http",
+    "robotsDecision": {
+      "decision": "no_robots",
+      "robotsUrl": "https://example.com/robots.txt",
+      "robotsSha256": null,
+      "unreachable": null,
+      "crawlDelayMs": null,
+      "userOverride": false,
+      "overrideBasis": null
+    },
+    "rawSha256": "25ddf2c883e0d1958ea971d279a7e4f0fd446724ee3db7db19dadabd4a62e484",
+    "contentEncoding": "identity",
+    "outputSha256": {
+      "markdown": "0a080719be9fbb82a86a45b80dc8c2a430fbe17dc93d23758debac092864d00f",
+      "json": null
+    },
+    "extractor": {
+      "name": "extract-tf",
+      "version": "extract-tf/21",
+      "commit": "3cb4c4b4d577cbb459994c70ca6ea93b7a9ccf02"
+    },
+    "fieldEvidence": null,
+    "artifacts": [],
+    "proxy": null,
+    "identity": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      "mode": "standard",
+      "contact": null,
+      "device": "desktop",
+      "requestHeaders": []
+    },
+    "pageActions": null,
+    "access": {
+      "route": "http",
+      "executor": "undici",
+      "executorVersion": null,
+      "profile": null,
+      "externalCostUsd": 0,
+      "completion": "unattended",
+      "egress": {
+        "proxy": null,
+        "source": "direct",
+        "switchedFrom": null,
+        "exit": null
+      },
+      "session": null,
+      "paidCalls": null,
+      "grant": null
+    },
+    "verification": {
+      "status": "not_requested",
+      "verifier": null,
+      "contractSha256": null,
+      "reason": null,
+      "failed": []
+    },
+    "readiness": {
+      "state": "ready",
+      "basis": []
+    }
+  }
+}

@@ -60,14 +60,15 @@ npm test
 
 ## Releasing
 
-The packages are released together, at one version: `octocrawl` and `@octocrawl/cli` (the CLI), `@octocrawl/sdk`, `@octocrawl/mcp` and the Python client `octocrawl-client`.
+The packages are released together, at one version: `octocrawl` and `@octocrawl/cli` (the CLI), `@octocrawl/sdk`, `@octocrawl/mcp`, `@octocrawl/ai-sdk` and the Python client `octocrawl-client`.
 
-1. `node scripts/release-version.mjs set X.Y.Z` writes the version everywhere it lives (the three package manifests, the CLI's, MCP server's and SDK's version constants, the Python client's two) and updates the lockfile; `check` confirms they agree.
+1. `node scripts/release-version.mjs set X.Y.Z` writes the version everywhere it lives (the four package manifests, the CLI's, MCP server's, SDK's and AI SDK tools' version constants, the Python client's two) and updates the lockfile; `check` confirms they agree.
 2. Add the CHANGELOG entry, merge through a PR as usual, then tag the merge: `git tag -s vX.Y.Z` and push the tag.
 3. The `Release` workflow (`.github/workflows/release.yml`) checks that every version says X.Y.Z, runs the type check and the tests, packs the npm packages and installs them in a new project (`scripts/check-packages.mjs`), installs the CLI on Linux, Windows and macOS and scrapes over its native modules, better-sqlite3 and impit (`scripts/check-native-deps.mjs`; the `Native dependencies` workflow runs the same on a pull request that changes what is installed), builds and checks the Python client, then publishes to npm and PyPI through trusted publishing. No token is stored; npm records each package's provenance. A version already published is skipped, so a failed run can be run again.
 
 Set up once, by a maintainer:
-- On npmjs.com, for each of `octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk` and `@octocrawl/mcp`: Settings → Trusted publishing → GitHub Actions, repository `77777R7/Octocrawl`, workflow `release.yml`, environment `release`.
+- On npmjs.com, for each of `octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp` and `@octocrawl/ai-sdk`: Settings → Trusted publishing → GitHub Actions, repository `77777R7/Octocrawl`, workflow `release.yml`, environment `release`.
+- A new package (`@octocrawl/ai-sdk` before its first version) cannot be created through trusted publishing, so the Release workflow skips it with a warning. Publish its first version by hand from the tarball the workflow uploaded (`npm login`, then `npm publish ./octocrawl-ai-sdk-X.Y.Z.tgz --access public` with your one-time password), then add the trusted publisher above; later versions go through the workflow.
 - On pypi.org, for `octocrawl-client`: Manage → Publishing → add a GitHub publisher with the same repository, workflow and environment.
 - On GitHub: Settings → Environments → `release`, with the maintainer as a required reviewer, so nothing is published without their approval.
 

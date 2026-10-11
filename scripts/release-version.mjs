@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The version of what W2L publishes, kept in one place per package but checked
 // together: the CLI (`octocrawl`, `@octocrawl/cli`), `@octocrawl/mcp`,
-// `@octocrawl/sdk` and the Python client `octocrawl-client` are released as one
+// `@octocrawl/sdk`, `@octocrawl/ai-sdk` and the Python client `octocrawl-client` are released as one
 // version. A release tag `vX.Y.Z` publishes only when every place says X.Y.Z.
 //
 // Usage: node scripts/release-version.mjs check [X.Y.Z]   (no version: every place agrees)
@@ -16,11 +16,12 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** Each place a published version is written: its file, how to read it, how to write it. */
 const PLACES = [
-  ...['cli', 'mcp', 'sdk'].map((dir) => jsonVersion(`packages/${dir}/package.json`)),
+  ...['cli', 'mcp', 'sdk', 'ai-sdk'].map((dir) => jsonVersion(`packages/${dir}/package.json`)),
   serverJsonVersion('server.json'),
   textVersion('packages/cli/src/run.ts', /export const CLI_VERSION = '([^']+)'/, (v) => `export const CLI_VERSION = '${v}'`),
   textVersion('packages/mcp/src/server.ts', /const MCP_VERSION = '([^']+)'/, (v) => `const MCP_VERSION = '${v}'`),
   textVersion('packages/sdk/src/version.ts', /export const SDK_VERSION = '([^']+)'/, (v) => `export const SDK_VERSION = '${v}'`),
+  textVersion('packages/ai-sdk/src/version.ts', /export const AI_SDK_VERSION = '([^']+)'/, (v) => `export const AI_SDK_VERSION = '${v}'`),
   textVersion('python/pyproject.toml', /^version = "([^"]+)"$/m, (v) => `version = "${v}"`),
   textVersion('python/src/octocrawl_client/_version.py', /^__version__ = "([^"]+)"$/m, (v) => `__version__ = "${v}"`),
 ]

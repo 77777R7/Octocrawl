@@ -277,7 +277,7 @@ A page view records the referring site's host, the address's `utm_source`, `utm_
 | Where the link is | `utm_source` | `utm_medium` |
 | --- | --- | --- |
 | The repository's README and docs on GitHub | `github` | `readme` (`utm_campaign` names the spot: `nav`, `top`, `quick-start`, `docs`, `mcp`) |
-| npm package pages and their manifests' homepage | `npm` | `readme` (`utm_campaign` = `cli`, `sdk`, `mcp`) or `package` |
+| npm package pages and their manifests' homepage | `npm` | `readme` (`utm_campaign` = `cli`, `sdk`, `mcp`, `ai-sdk`) or `package` |
 | PyPI (`octocrawl-client`) | `pypi` | `readme` or `package` |
 | The MCP Registry entry (`server.json`) and the hosted server card | `mcp-registry`, `mcp-server-card` | `listing` |
 | Hints in hosted API and MCP answers | `hosted` | `hint` |

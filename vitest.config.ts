@@ -48,6 +48,7 @@ export default defineConfig({
       '@w2l/api/structured': resolve(root, 'packages/api/src/structured.ts'),
       '@w2l/api': resolve(root, 'packages/api/src/index.ts'),
       '@w2l/sdk': resolve(root, 'packages/sdk/src/index.ts'),
+      '@w2l/ai-sdk': resolve(root, 'packages/ai-sdk/src/index.ts'),
       '@w2l/mcp': resolve(root, 'packages/mcp/src/index.ts'),
       '@w2l/public-preview': resolve(root, 'packages/public-preview/src/index.ts'),
     },

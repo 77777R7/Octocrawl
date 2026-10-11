@@ -8,6 +8,7 @@
 //   @octocrawl/cli  AGPL-3.0  bin octocrawl, every @w2l/* workspace package bundled in, their third-party dependencies declared
 //   octocrawl       AGPL-3.0  the same CLI under the unscoped name, so `npx octocrawl` runs it
 //   @octocrawl/mcp  AGPL-3.0  bin octocrawl-mcp (stdio; a client of a running Octocrawl API), bundled the same way
+//   @octocrawl/ai-sdk MIT     scrape and map as AI SDK tools, ESM + CJS, the SDK bundled in; ai and zod are peer dependencies
 //
 // The workspace keeps its @w2l/* names; only the published packages carry the Octocrawl names.
 //
@@ -142,6 +143,20 @@ const targets = [
     // mcpName ties the npm package to its entry in the official MCP Registry (server.json at the repository root; the two must agree).
     manifest: () => ({ bin: { 'octocrawl-mcp': './dist/stdio.js' }, engines: { node: '>=20' }, mcpName: MCP_REGISTRY_NAME, dependencies: thirdPartyDependencies(['@w2l/mcp']) }),
   },
+  {
+    name: '@octocrawl/ai-sdk', dir: 'ai-sdk', license: 'MIT', licenseFile: 'packages/ai-sdk/LICENSE',
+    description: 'Octocrawl scrape and map as Vercel AI SDK tools: web pages as Markdown with an Evidence Record. Hosted, no key needed.',
+    keywords: [...KEYWORDS, 'ai-sdk', 'vercel-ai-sdk', 'tools', 'typescript'],
+    entry: { index: 'packages/ai-sdk/src/index.ts' }, formats: ['esm', 'cjs'],
+    types: () => aiSdkTypes(join(out, 'ai-sdk', 'dist', 'types')),
+    manifest: () => ({
+      main: './dist/index.cjs', module: './dist/index.js', types: './dist/types/esm/index.d.ts',
+      exports: { '.': { import: { types: './dist/types/esm/index.d.ts', default: './dist/index.js' }, require: { types: './dist/types/cjs/index.d.ts', default: './dist/index.cjs' } } },
+      // ai 6 and 7 both take these tools; ai 7 needs Node 22, ai 6 runs on 18.
+      sideEffects: false, engines: { node: '>=18.17' }, dependencies: {},
+      peerDependencies: read('packages/ai-sdk/package.json').peerDependencies,
+    }),
+  },
 ]
 
 rmSync(out, { recursive: true, force: true })
@@ -151,7 +166,9 @@ for (const target of targets) {
   const source = read(`packages/${target.dir}/package.json`)
   const dir = join(out, target.dir)
   // Everything the workspace packages may import stays external; the manifest then declares what the bundle does import.
-  const candidates = target.manifest(source.version).dependencies
+  // A peer dependency (ai and zod for the AI SDK tools) is the user's own: never bundled, never declared as a dependency.
+  const peers = target.manifest(source.version).peerDependencies ?? {}
+  const candidates = { ...target.manifest(source.version).dependencies, ...peers }
   const entryFile = Object.values(target.entry)[0]
   await build({
     entry: Object.fromEntries(Object.entries(target.entry).map(([key, path]) => [key, join(root, path)])),
@@ -159,7 +176,7 @@ for (const target of targets) {
     format: target.formats,
     dts: false,
     platform: 'node',
-    target: target.dir === 'sdk' ? 'node18' : 'node22',
+    target: target.dir === 'sdk' || target.dir === 'ai-sdk' ? 'node18' : 'node22',
     splitting: false,
     sourcemap: false,
     clean: true,
@@ -175,8 +192,9 @@ for (const target of targets) {
   const imported = importedPackages(join(dir, 'dist'))
   const unknown = [...imported].filter((name) => !(name in candidates) && !BUILTINS.has(name))
   if (unknown.length > 0) throw new Error(`${target.name} imports ${unknown.join(', ')}, which no bundled workspace package declares`)
-  const dependencies = Object.fromEntries(Object.entries(candidates).filter(([name]) => imported.has(name)))
-  if (target.types) sdkTypes(join(dir, 'dist', 'types'))
+  const dependencies = Object.fromEntries(Object.entries(candidates).filter(([name]) => imported.has(name) && !(name in peers)))
+  if (typeof target.types === 'function') target.types()
+  else if (target.types) sdkTypes(join(dir, 'dist', 'types'))
   const manifest = {
     name: target.name,
     version: source.version,
@@ -237,6 +255,22 @@ function sdkTypes(types) {
   copy(join(root, 'packages', 'sdk', 'dist'), esm, true)
   copy(join(root, 'packages', 'contracts', 'dist'), join(esm, 'contracts'), false)
   for (const file of readdirSync(esm)) if (file.endsWith('.d.ts') && readFileSync(join(esm, file), 'utf8').includes('@w2l/')) throw new Error(`types/esm/${file} still names a workspace package`)
+  cpSync(esm, join(types, 'cjs'), { recursive: true })
+  writeFileSync(join(types, 'cjs', 'package.json'), '{ "type": "commonjs" }\n')
+}
+
+/**
+ * The AI SDK tools' declarations, as tsc emitted them: they name only `ai`, `zod` and their own files (the SDK's types
+ * stay inside), so they are copied as they are, under types/esm and, marked CommonJS, under types/cjs.
+ */
+function aiSdkTypes(types) {
+  const esm = join(types, 'esm')
+  mkdirSync(esm, { recursive: true })
+  for (const file of readdirSync(join(root, 'packages', 'ai-sdk', 'dist')).filter((name) => name.endsWith('.d.ts'))) {
+    const text = readFileSync(join(root, 'packages', 'ai-sdk', 'dist', file), 'utf8')
+    if (text.includes('@w2l/')) throw new Error(`ai-sdk ${file} names a workspace package; its declarations must stand alone`)
+    writeFileSync(join(esm, file), text.replace(/\n\/\/# sourceMappingURL=.*$/m, ''))
+  }
   cpSync(esm, join(types, 'cjs'), { recursive: true })
   writeFileSync(join(types, 'cjs', 'package.json'), '{ "type": "commonjs" }\n')
 }

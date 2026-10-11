@@ -7,6 +7,8 @@
 //                   a PDF, which needs pdfjs-dist's assets), then `octocrawl serve`
 //   @octocrawl/sdk  scrape through that server, imported as ESM and required as CJS
 //   @octocrawl/mcp  `octocrawl-mcp` over stdio: initialize, tools/list, a scrape tool call
+//   @octocrawl/ai-sdk  the scrape tool run by generateText (AI SDK 7, and 6 in a project of its own), map required as CJS,
+//                   its types under TypeScript; the AI SDK's mock model calls the tools, no model provider is reached
 //   octocrawl       the CLI under the unscoped name, in a project of its own
 //                   (both CLI packages install the bin `octocrawl`)
 //
@@ -28,6 +30,7 @@ const tarballs = join(root, '.w2l', 'pack', 'tarballs')
 const version = JSON.parse(readFileSync(join(root, 'packages', 'cli', 'package.json'), 'utf8')).version
 const project = mkdtempSync(join(tmpdir(), 'octocrawl-package-check-'))
 const aliasProject = mkdtempSync(join(tmpdir(), 'octocrawl-unscoped-check-'))
+const aiSdk6Project = mkdtempSync(join(tmpdir(), 'octocrawl-ai-sdk-6-check-'))
 const results = []
 const check = (name, pass, detail) => { results.push({ name, pass, detail }); console.log(`${pass ? 'ok  ' : 'FAIL'} ${name}${detail === undefined ? '' : `: ${detail}`}`) }
 
@@ -93,6 +96,32 @@ try {
     check(`sdk types (${file})`, typesOk, typesDetail)
   }
 
+  // The AI SDK tools: npm installed their peers (ai 7, zod) beside them.
+  writeFileSync(join(project, 'ai-sdk.mjs'), aiSdkScript(api, `${origin}/tides`, 'isStepCount'))
+  const tooled = JSON.parse(await run('node', ['ai-sdk.mjs']))
+  check('ai-sdk generateText (ai 7)', tooled.status === 'success' && tooled.title === 'Tides' && tooled.evidence === 'w2l.evidence/1' && tooled.text === 'done', JSON.stringify(tooled))
+  writeFileSync(join(project, 'ai-sdk.cjs'), `const { mapTool } = require('@octocrawl/ai-sdk')\nmapTool({ baseUrl: '${api}' }).execute({ url: '${origin}/tides' }, { toolCallId: 'c', messages: [] }).then((r) => console.log(JSON.stringify({ status: r.status, links: r.links?.length })))\n`)
+  const mapped = JSON.parse(await run('node', ['ai-sdk.cjs']))
+  check('ai-sdk map cjs', (mapped.status === 'completed' || mapped.status === 'partial') && mapped.links >= 1, JSON.stringify(mapped))
+  writeFileSync(join(project, 'ai-sdk-types.ts'), `import type { ToolSet } from 'ai'\nimport { octocrawlTools, type ScrapeToolResult } from '@octocrawl/ai-sdk'\nconst tools: ToolSet = octocrawlTools({ apiKey: '' })\nconst answer = undefined as unknown as ScrapeToolResult\nconst status: string = answer.status\n// @ts-expect-error the tools are a ToolSet, not a number: an import that resolved to any would make this line pass\nconst wrong: number = octocrawlTools()\nvoid tools; void status; void wrong\n`)
+  writeFileSync(join(project, 'ai-sdk-types.mts'), readFileSync(join(project, 'ai-sdk-types.ts'), 'utf8'))
+  writeFileSync(join(project, 'ai-sdk-types.cts'), readFileSync(join(project, 'ai-sdk-types.ts'), 'utf8'))
+  // ai's own declarations do not pass a library check (they name Node's Buffer and an untyped json-schema), so this one
+  // skips it, as AI SDK projects do; the @ts-expect-error line shows the package's types resolved rather than became any.
+  for (const file of ['ai-sdk-types.mts', 'ai-sdk-types.cts']) {
+    let typesOk = true
+    let typesDetail = 'tsc --noEmit, module nodenext, skipLibCheck'
+    try { execFileSync(join(root, 'node_modules', '.bin', 'tsc'), ['--noEmit', '--strict', '--module', 'nodenext', '--moduleResolution', 'nodenext', '--target', 'es2022', '--skipLibCheck', 'true', file], { cwd: project, encoding: 'utf8' }) } catch (error) { typesOk = false; typesDetail = String(error.stdout).slice(0, 400) }
+    check(`ai-sdk types (${file})`, typesOk, typesDetail)
+  }
+  // AI SDK 6, the other major the peer range admits, in a project of its own.
+  writeFileSync(join(aiSdk6Project, 'package.json'), `${JSON.stringify({ name: 'w2l-ai-sdk-6-check', version: '1.0.0', private: true }, null, 2)}\n`)
+  const aiSdkTarball = all.filter((file) => file.startsWith('octocrawl-ai-sdk-')).map((file) => join(tarballs, file))
+  execFileSync('npm', ['install', '--no-audit', '--no-fund', ...aiSdkTarball, 'ai@^6', 'zod@^4'], { cwd: aiSdk6Project, stdio: 'inherit', env })
+  writeFileSync(join(aiSdk6Project, 'ai-sdk.mjs'), aiSdkScript(api, `${origin}/tides`, 'stepCountIs'))
+  const tooled6 = JSON.parse((await promisify(execFile)('node', ['ai-sdk.mjs'], { cwd: aiSdk6Project, env, encoding: 'utf8' })).stdout)
+  check('ai-sdk generateText (ai 6)', tooled6.status === 'success' && tooled6.title === 'Tides' && /^6\./.test(tooled6.ai), JSON.stringify(tooled6))
+
   const answers = await mcpSession(api)
   check('mcp initialize', answers[0]?.result?.serverInfo?.name !== undefined, answers[0]?.result?.serverInfo?.name)
   check('mcp tools/list', Array.isArray(answers[1]?.result?.tools) && answers[1].result.tools.some((tool) => tool.name === 'scrape'), `${answers[1]?.result?.tools?.length} tools`)
@@ -122,11 +151,33 @@ try {
   await new Promise((done) => site.close(done))
   rmSync(project, { recursive: true, force: true })
   rmSync(aliasProject, { recursive: true, force: true })
+  rmSync(aiSdk6Project, { recursive: true, force: true })
 }
 const failed = results.filter((result) => !result.pass).length
 console.log(`${results.length - failed} of ${results.length} checks passed`)
 // Nothing of this process is worth keeping alive after the summary: a handle a child or a library left open must not hold a CI job.
 process.exit(failed === 0 ? 0 : 1)
+
+/**
+ * A script that has the AI SDK's mock model call the installed scrape tool once, then answer `done`; it prints the
+ * tool's answer in short, with the version of `ai` it ran under. `stop` is the step-count helper of that `ai` major.
+ */
+function aiSdkScript(api, url, stop) {
+  return `import { createRequire } from 'node:module'
+import { generateText, ${stop} } from 'ai'
+import { MockLanguageModelV3 } from 'ai/test'
+import { octocrawlTools } from '@octocrawl/ai-sdk'
+const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } }
+let call = 0
+const model = new MockLanguageModelV3({ doGenerate: async () => (++call === 1
+  ? { content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'scrape', input: JSON.stringify({ url: '${url}' }) }], finishReason: { unified: 'tool-calls', raw: undefined }, usage, warnings: [] }
+  : { content: [{ type: 'text', text: 'done' }], finishReason: { unified: 'stop', raw: undefined }, usage, warnings: [] }) })
+const result = await generateText({ model, tools: octocrawlTools({ baseUrl: '${api}' }), stopWhen: ${stop}(3), prompt: 'Read the page.' })
+const output = result.steps.flatMap((step) => step.toolResults)[0]?.output
+const ai = createRequire(import.meta.url)('ai/package.json').version
+console.log(JSON.stringify({ ai, text: result.text, status: output?.status, title: output?.title, evidence: output?.evidenceRecord?.schemaVersion }))
+`
+}
 
 /** One stdio session with the installed octocrawl-mcp: initialize, tools/list, one scrape call; each answer by its id. */
 async function mcpSession(api) {
