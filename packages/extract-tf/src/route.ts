@@ -822,23 +822,25 @@ function alikeCards(cards: readonly Element[]): number {
  * the rest (a price, a date, a short description) is too short to be prose,
  * so a sparse listing yields no text block at all. A listing here is at
  * least three sibling cards of one template (same tag and class) after the
- * page's lone h1 and outside any header. The region widens to the container
- * the cards share with the h1, so the heading and its introduction stay.
- * Null otherwise: a page whose only structure is navigation, or an
+ * page's lone h1, or anywhere on a page with none (a store's or a ticket
+ * site's home, its sections under h2s: StubHub's on 2026-10-11), and outside
+ * any header. The region widens to the container the cards share with the
+ * h1, so the heading and its introduction stay. Null otherwise, and on a page
+ * with more than one h1: a page whose only structure is navigation, or an
  * application shell, still has no content and escalates.
  */
 export function selectCardList(doc: Document): Element | null {
   const h1s = qsa(doc, 'h1')
-  if (h1s.length !== 1) return null
-  const h1 = h1s[0]!
+  if (h1s.length > 1) return null
+  const h1 = h1s[0] ?? null
   // Document order by index: linkedom's compareDocumentPosition is unreliable
   // across subtrees.
   const all = qsa(doc, '*')
-  const h1At = all.indexOf(h1)
+  const h1At = h1 === null ? -1 : all.indexOf(h1)
   let best: Element | null = null
   let bestCards = 0
   for (const [at, el] of all.entries()) {
-    if (at <= h1At || el.children.length < 3 || h1.contains(el) || !['ul', 'ol', 'div', 'section'].includes(tagOf(el))) continue
+    if (at <= h1At || el.children.length < 3 || h1?.contains(el) === true || !['ul', 'ol', 'div', 'section'].includes(tagOf(el))) continue
     if (el.closest('header') !== null) continue
     const cards = alikeCards(Array.from(el.children).filter(isCard))
     if (cards >= 3 && cards > bestCards) {
@@ -846,7 +848,7 @@ export function selectCardList(doc: Document): Element | null {
       best = el
     }
   }
-  if (best === null) return null
+  if (best === null || h1 === null) return best
   const shared = commonAncestor(best, h1)
   return shared !== null && shared !== doc.body && shared !== doc.documentElement ? shared : best
 }

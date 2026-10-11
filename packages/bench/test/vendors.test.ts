@@ -4,7 +4,7 @@ import { ProviderSubject, type RobotsFetcher } from '../src/subjects/provider.js
 import { scrubSecret, type VendorApi, type VendorApiRequest, type VendorApiResponse } from '../src/vendors/api.js'
 import type { CdpBrowser, CdpConnector, CdpContext, CdpPage, CdpResponse } from '../src/vendors/cdp.js'
 import { browserbaseOps, browserbaseSessionBody } from '../src/vendors/browserbase.js'
-import { steelOps, steelSessionBody } from '../src/vendors/steel.js'
+import { countSolved, steelOps, steelSessionBody } from '../src/vendors/steel.js'
 import { CdpVendorTransport } from '../src/vendors/transport.js'
 import { connectVendor } from '../src/vendors/connect.js'
 
@@ -72,6 +72,8 @@ interface FakeScript {
   loadingSamples?: number
   /** What the region view reads on the page (ADR 0007), one per read, the last from then on. */
   regionViews?: string[]
+  /** The context opens raw CDP sessions, and each navigation reports this many bytes received (Network.loadingFinished). */
+  bytesPerNavigation?: number
 }
 
 interface FakeState {
@@ -85,8 +87,14 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
   const state: FakeState = { navigations: [], pagesOpened: 0, pagesClosed: 0, closed: false }
   const ua = script.userAgent ?? VENDOR_UA
 
+  const listeners: ((params: unknown) => void)[] = []
   const context: CdpContext = {
     pages: () => [],
+    ...(script.bytesPerNavigation === undefined ? {} : {
+      async newCDPSession() {
+        return { async send() { return {} }, on(event: string, handler: (params: unknown) => void) { if (event === 'Network.loadingFinished') listeners.push(handler) }, async detach() {} }
+      },
+    }),
     async newPage(): Promise<CdpPage> {
       state.pagesOpened++
       let current = 'about:blank'
@@ -97,6 +105,7 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
           if (script.gotoError) throw script.gotoError
           state.navigations.push(url)
           current = script.finalUrl ?? url
+          for (const listener of listeners) listener({ requestId: '1', encodedDataLength: script.bytesPerNavigation })
           return {
             status: () => script.status ?? 200,
             headers: () => script.headers ?? { 'Content-Type': 'text/html; charset=utf-8' },
@@ -645,7 +654,7 @@ describe('capability/policy split (transport declares, policy decides)', () => {
     const ops = steelOps({ apiKey: 'k' }, sessionServing('st_1').handler)
     const enabled = ops.decision.enabled.map((c) => c.capability)
     expect(enabled).toEqual(['headless_browser', 'datacenter_proxy'])
-    expect(ops.decision.withheld).toEqual(['captcha_solving', 'fingerprint_spoofing'])
+    expect(ops.decision.withheld).toEqual(['residential_proxy', 'captcha_solving', 'fingerprint_spoofing'])
   })
 
   it('browserbase turns solving and Verified mode on only with their grants', async () => {
@@ -802,5 +811,61 @@ describe('a provider session under a tariff (ROADMAP PA item 4)', () => {
     expect(steelSessionBody(decision, null, 120_000)).toMatchObject({ timeout: 120_000, useProxy: false })
     expect(steelSessionBody(decision, null, 5_000)).toMatchObject({ timeout: 15_000 })
     expect(steelSessionBody(decision, null)).not.toHaveProperty('timeout')
+    // The proxy is said either way, never bought by omission.
+    expect(steelSessionBody(decision, null)).toMatchObject({ useProxy: false })
+  })
+})
+
+describe('a provider\'s residential proxy and what a session used (ROADMAP PA item 4)', () => {
+  const session = (sessionId: string, over: Record<string, unknown> = {}, captchas: unknown = []) => new FakeApi((req) =>
+    req.method === 'POST' && req.url.endsWith('/v1/sessions') ? { status: 201, json: { id: sessionId } }
+      : req.method === 'GET' && req.url.endsWith(`/v1/sessions/${sessionId}/captchas/status`) ? { status: 200, json: captchas }
+        : req.method === 'GET' && req.url.endsWith(`/v1/sessions/${sessionId}`) ? { status: 200, json: { id: sessionId, status: 'released', proxyBytesUsed: 4_200_000, creditsUsed: 0.05, proxySource: 'steel', ...over } }
+          : { status: 200, json: {} })
+
+  it('asks Steel for its residential pool, in the country configured, only under the vendor_residential_proxy grant', async () => {
+    const granted = session('st_1')
+    await steelOps({ apiKey: 'k', proxyCountry: 'GB' }, granted.handler, { authorized: ['vendor_residential_proxy'] }).createSession()
+    expect((granted.requests[0]!.body as { useProxy: unknown }).useProxy).toEqual({ geolocation: { country: 'GB' } })
+    const us = session('st_1')
+    await steelOps({ apiKey: 'k' }, us.handler, { authorized: ['vendor_residential_proxy'] }).createSession()
+    expect((us.requests[0]!.body as { useProxy: unknown }).useProxy).toEqual({ geolocation: { country: 'US' } })
+    // The old operational key is no grant: the browser machine's own address, which bills no bandwidth.
+    const old = session('st_1')
+    const ops = steelOps({ apiKey: 'k', proxyCountry: 'GB' }, old.handler, { authorized: ['residential_proxy'] })
+    await ops.createSession()
+    expect((old.requests[0]!.body as { useProxy: unknown }).useProxy).toBe(false)
+    expect(ops.limits).toEqual({ maxBytesPerCall: null, proxyCountry: null })
+    // The byte bound is the residential proxy's: without the grant a session on the machine's own address is not counted against it.
+    expect(steelOps({ apiKey: 'k', maxBytesPerCall: 1_000 }, old.handler).limits).toEqual({ maxBytesPerCall: null, proxyCountry: null })
+    expect(() => steelOps({ apiKey: 'k', proxyCountry: 'usa' }, old.handler)).toThrow('ISO 3166-1 alpha-2')
+  })
+
+  it('reads what the session used after its release: the bytes through the proxy, and the solves when solving was granted', async () => {
+    const api = session('st_1', {}, [{ pageUrl: 'https://a.example/', tasks: [{ id: 't1', status: 'solved' }, { id: 't2', status: 'failed_to_solve' }] }, { pageUrl: 'https://b.example/', tasks: [{ id: 't3', status: 'solved' }] }])
+    const solving = steelOps({ apiKey: 'k' }, api.handler, { authorized: ['vendor_captcha_solving'] })
+    expect(await solving.sessionUsage!('st_1')).toEqual({ proxyBytes: 4_200_000, solves: 2 })
+    // Solving not granted: none could have been bought, so zero; a figure Steel does not give is null, never zero.
+    expect(await steelOps({ apiKey: 'k' }, session('st_1', { proxyBytesUsed: undefined }).handler).sessionUsage!('st_1')).toEqual({ proxyBytes: null, solves: 0 })
+    await expect(steelOps({ apiKey: 'k' }, new FakeApi(() => ({ status: 404, json: {} })).handler).sessionUsage!('st_9')).rejects.toThrow('steel: session read returned 404')
+    expect(countSolved({ solved: true, items: [{ status: 'solved', nested: { status: 'solved' } }] })).toBe(2)
+  })
+
+  it('keeps the provider\'s figures with each closed session, and counts what the page received against maxBytesPerCall', async () => {
+    const api = session('st_1')
+    const ops = { ...steelOps({ apiKey: 'k', maxBytesPerCall: 1_000 }, api.handler, { authorized: ['vendor_residential_proxy'] }) }
+    const small = new CdpVendorTransport(ops, connectorFor(fakeBrowser({ bytesPerNavigation: 400 })).connector)
+    expect((await small.fetch('https://shop.example/dp/A')).status).toBe(200)
+    await small.close()
+    expect(small.closedSessions()).toEqual([{ sessionMs: expect.any(Number), released: true, usage: { proxyBytes: 4_200_000, solves: 0 }, bytesCounted: 400, bytesCapped: false }])
+    // Past the cap the page is closed and the fetch fails saying so; the session is released and its count recorded.
+    const big = new CdpVendorTransport(ops, connectorFor(fakeBrowser({ bytesPerNavigation: 5_000 })).connector)
+    await expect(big.fetch('https://shop.example/dp/A')).rejects.toThrow('maxBytesPerCall: 5000 bytes received on the page against 1000 allowed')
+    expect(big.closedSessions()).toEqual([expect.objectContaining({ released: true, bytesCounted: 5_000, bytesCapped: true })])
+    // A connector whose context opens no CDP session counts nothing, and says so.
+    const blind = new CdpVendorTransport(ops, connectorFor(fakeBrowser()).connector)
+    await blind.fetch('https://shop.example/dp/A')
+    await blind.close()
+    expect(blind.closedSessions()[0]).toMatchObject({ bytesCounted: 0, bytesCapped: false })
   })
 })

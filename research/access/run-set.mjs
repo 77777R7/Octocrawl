@@ -54,7 +54,9 @@
 //   cold / warm    --warm sends each task a second time right after the first, with maxAge 0 so it
 //                  is not a cache hit; the two attempts are counted apart.
 //   cost           externalCostUsd as the API reports it, null when unknown; egressCostUsd is null
-//                  because nothing measures it yet. A table with any null is reported as unknown.
+//                  because nothing measures it yet. A table with any null is reported as unknown. A paid
+//                  call's proxyBytes and solves are what the provider reported its sessions used (null:
+//                  not reported), under the vendor_residential_proxy and vendor_captcha_solving grants.
 //   denominator    every task in the selected set, including ones the API could not answer.
 //   paid calls     (octocrawl) the provider calls the page's Evidence Record lists (access.paidCalls, ROADMAP PA item 4):
 //                  each one's provider, what Octocrawl made of the page it returned (never the provider's word), and
@@ -305,7 +307,8 @@ function ladderSkipsOf(doc) {
 function paidCallsOf(doc) {
   const access = doc?.evidenceRecord?.access
   if (access === undefined || access === null || !('paidCalls' in access)) return null
-  return (access.paidCalls ?? []).map((c) => ({ provider: c.provider, outcome: c.outcome, reason: c.reason, answer: c.answer, chargedUsd: c.chargedUsd }))
+  // proxyBytes and solves: what the provider reported the call's sessions used (null: not reported); absent on a record from before they were kept.
+  return (access.paidCalls ?? []).map((c) => ({ provider: c.provider, outcome: c.outcome, reason: c.reason, answer: c.answer, chargedUsd: c.chargedUsd, ...('proxyBytes' in c ? { proxyBytes: c.proxyBytes } : {}), ...('solves' in c ? { solves: c.solves } : {}), ...('proxyCountry' in c ? { proxyCountry: c.proxyCountry } : {}) }))
 }
 
 /** What the API's spend ledger charged the scrape: 0 when its record lists no paid call, null when that is not known. */
@@ -447,10 +450,19 @@ const summary = (temp) => {
       // Rows from a run before paid calls were recorded carry neither field: unknown, not none.
       const charged = r.map((x) => x.outcome.chargedUsd ?? null)
       const calls = r.map((x) => x.observed.paidCalls ?? null)
+      // The provider's figures for the calls' sessions: a total only when every call that carried the field reported it.
+      const reported = (field) => {
+        const figures = calls.flatMap((cs) => (cs ?? []).filter((c) => field in c).map((c) => c[field]))
+        return figures.length === 0 ? undefined : figures.some((f) => f === null) ? null : figures.reduce((a, b) => a + b, 0)
+      }
+      const proxyBytes = reported('proxyBytes')
+      const solves = reported('solves')
       return {
         chargedUsd: charged.some((c) => c === null) ? null : charged.reduce((a, b) => a + b, 0),
         paidCalls: calls.some((c) => c === null) ? null : calls.reduce((a, b) => a + b.length, 0),
         verifiedFromPaidCall: calls.some((c) => c === null) ? null : r.filter((x) => x.outcome.verified && x.observed.paidCalls.some((c) => c.answer)).length,
+        ...(proxyBytes === undefined ? {} : { providerProxyBytes: proxyBytes }),
+        ...(solves === undefined ? {} : { providerSolves: solves }),
       }
     })() : (() => { const c = r.map((x) => x.outcome.credits); return { credits: c.some((v) => v === null || v === undefined) ? null : c.reduce((a, b) => a + b, 0), creditsPer1000Verified: c.some((v) => v === null || v === undefined) || verifiedN === 0 ? null : (c.reduce((a, b) => a + b, 0) / verifiedN) * 1000 } })()),
   }
@@ -489,7 +501,8 @@ if (recordFile !== undefined) {
     const why = [...new Set(waits.filter((w) => w.unjudged).map((w) => w.unjudged))].map((u) => `${u} ${waits.filter((w) => w.unjudged === u).length}`)
     return `${judged.length} (held on ${judged.filter((w) => w.ready).length})${why.length === 0 ? '' : `; not judged on ${waits.length - judged.length} (${why.join(', ')})`}`
   }
-  const paidCell = (calls) => calls === null || calls === undefined ? 'unknown' : calls.map((c) => `${c.provider}: ${c.outcome ?? 'no page'}${c.reason ? `/${c.reason}` : ''}${c.answer ? ' (answer)' : ''}`).join('; ')
+  const usedCell = (c) => [...('proxyBytes' in c ? [`${c.proxyBytes === null ? 'unknown' : c.proxyBytes} B${c.proxyCountry ? ` ${c.proxyCountry}` : ''}`] : []), ...('solves' in c ? [`${c.solves === null ? 'unknown' : c.solves} solved`] : [])]
+  const paidCell = (calls) => calls === null || calls === undefined ? 'unknown' : calls.map((c) => `${c.provider}: ${c.outcome ?? 'no page'}${c.reason ? `/${c.reason}` : ''}${usedCell(c).length === 0 ? '' : ` [${usedCell(c).join(', ')}]`}${c.answer ? ' (answer)' : ''}`).join('; ')
   const md = [
     `# Access task set run: ${priorRun?.set ?? setFilter}, ${environment.startedAt.slice(0, 10)}`, '',
     `- Command: \`${command}\``,
@@ -504,7 +517,7 @@ if (recordFile !== undefined) {
     `| Attempts | Verified | False success | p50 ms | p95 ms | External cost per 1,000 verified (USD) | Egress cost per 1,000 verified (USD) |${'credits' in totals.cold ? ' Credits (inferred) | Credits per 1,000 verified |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- |${'credits' in totals.cold ? ' --- | --- |' : ''}`,
     ...Object.entries(totals).map(([temp, t]) => `| ${temp}: ${t.attempts} | ${t.verified} | ${t.falseSuccess} | ${fmt(t.p50Ms)} | ${fmt(t.p95Ms)} | ${fmt(t.externalCostPer1000VerifiedUsd)} | ${fmt(t.egressCostPer1000VerifiedUsd)} |${'credits' in t ? ` ${fmt(t.credits)} | ${fmt(t.creditsPer1000Verified === null ? null : Math.round(t.creditsPer1000Verified))} |` : ''}`), '',
-    ...Object.entries(totals).filter(([, t]) => 'paidCalls' in t).map(([temp, t]) => `- Paid provider calls (${temp}): ${fmt(t.paidCalls)}; tasks verified with a paid call's page as the answer: ${fmt(t.verifiedFromPaidCall)}; charged by the spend ledger: ${t.chargedUsd === null ? 'unknown' : `$${t.chargedUsd.toFixed(4)}`} (a provider that states no price is charged its sessions' measured time under the grant's tariff, else its price ceiling: an estimate from the tariff, not its bill)`),
+    ...Object.entries(totals).filter(([, t]) => 'paidCalls' in t).map(([temp, t]) => `- Paid provider calls (${temp}): ${fmt(t.paidCalls)}; tasks verified with a paid call's page as the answer: ${fmt(t.verifiedFromPaidCall)}; charged by the spend ledger: ${t.chargedUsd === null ? 'unknown' : `$${t.chargedUsd.toFixed(4)}`} (a provider that states no price is charged its sessions' measured time, and the bytes and solves it reported, under the grant's tariff, else its price ceiling: an estimate from the tariff, not its bill)${'providerProxyBytes' in t ? `; bytes through the provider's proxy, as it reported them: ${fmt(t.providerProxyBytes)}` : ''}${'providerSolves' in t ? `; solves it reported: ${fmt(t.providerSolves)}` : ''}`),
     ...(Object.values(totals).some((t) => 'paidCalls' in t) ? [''] : []),
     ...(readinessColumn ? [...Object.keys(totals).map((temp) => `- Readiness (${temp}, ADR 0007): ${readinessCounts(temp)}; region waits: ${regionCounts(temp)}`), ''] : []),
     ...(skipsRecorded ? [...Object.keys(totals).map(skipsLine), ''] : []),

@@ -53,11 +53,14 @@ export function accessGrantRef(grant: AccessGrant): EvidenceAccessGrant {
 }
 
 /**
- * A provider's prices, as its pricing page states them, and the limit that makes a call's cost bounded: a per-hour price
+ * A provider's prices, as its pricing page states them, and the limits that make a call's cost bounded: a per-hour price
  * needs the longest session a call may hold (the vendor lane ends the call and its session there, and asks the provider
- * to end the session then too). `minBilledMs` is the shortest time the provider bills a session for. A per-GB price
- * (a provider's proxy bandwidth) is not taken: the bytes a provider's browser receives across every target it opens
- * cannot be counted from here, so such a cost has no ceiling.
+ * to end the session then too); `minBilledMs` is the shortest time the provider bills a session for. A per-GB price (a
+ * provider's own residential proxy, under the `vendor_residential_proxy` grant) needs `maxBytesPerCall`, the most the
+ * call's session may move: the vendor lane counts the bytes its page receives and ends the session there. A per-solve
+ * price (the provider's built-in CAPTCHA solving) needs `maxSolvesPerCall`, the most solves the ceiling allows for;
+ * the provider solves what appears, so a call that solved more is charged what it solved, above the ceiling, and the
+ * record says so.
  */
 export interface VendorTariff {
   perCallUsd: number
@@ -66,38 +69,56 @@ export interface VendorTariff {
   minBilledMs: number
   /** The step the provider bills time in (a minute, rounded up); 1: exact. */
   billingIncrementMs: number
+  /** The provider's residential proxy price per gigabyte (1e9 bytes), as its pricing page states it; 0: none. */
+  perGbUsd: number
+  /** The most bytes one call's session may move through the provider's proxy; null with no per-GB price. */
+  maxBytesPerCall: number | null
+  /** The provider's price per CAPTCHA solve; 0: none. */
+  perSolveUsd: number
+  /** The solves one call's ceiling allows for; null with no per-solve price. */
+  maxSolvesPerCall: number | null
+}
+
+/** What a call's provider sessions used besides time, when the provider reports it: null is unknown, never zero. */
+export interface VendorSessionUsage {
+  /** Bytes moved through the provider's proxy, as the provider counts them. */
+  proxyBytes: number | null
+  /** CAPTCHA solves the provider made in the session. */
+  solves: number | null
 }
 
 /**
- * The most one call can cost under this tariff, in US dollars: its per-call price, and its longest session (at least the
- * billed minimum and `floorMs`, the shortest session the provider can be told to end at) rounded up to the billing step.
+ * The most one call can cost under this tariff, in US dollars: its per-call price, its longest session (at least the
+ * billed minimum and `floorMs`, the shortest session the provider can be told to end at) rounded up to the billing step,
+ * the most bytes it may move at the per-GB price, and the solves allowed for at the per-solve price.
  */
 export function tariffCeilingUsd(tariff: VendorTariff, floorMs = 0): number {
-  return tariffCostUsd(tariff, Math.max(tariff.maxSessionMs ?? 0, tariff.maxSessionMs === null ? 0 : floorMs))
+  return tariffCostUsd(tariff, Math.max(tariff.maxSessionMs ?? 0, tariff.maxSessionMs === null ? 0 : floorMs), { proxyBytes: null, solves: null })
 }
 
 /**
- * What one call whose session lasted `sessionMs` costs under this tariff, in US dollars: its per-call price, and the
- * session's time (at least the billed minimum) rounded up to the billing step.
+ * What one call whose session lasted `sessionMs` costs under this tariff, in US dollars: its per-call price, the
+ * session's time (at least the billed minimum) rounded up to the billing step, and what the session used at the per-GB
+ * and per-solve prices. A usage the provider did not report (null) is priced at the ceiling's allowance for it.
  */
-export function tariffCostUsd(tariff: VendorTariff, sessionMs: number): number {
+export function tariffCostUsd(tariff: VendorTariff, sessionMs: number, usage: VendorSessionUsage = { proxyBytes: null, solves: null }): number {
   const step = tariff.billingIncrementMs > 0 ? tariff.billingIncrementMs : 1
   const billedMs = Math.ceil(Math.max(sessionMs, tariff.minBilledMs, 0) / step) * step
-  return tariff.perCallUsd + (tariff.perHourUsd * billedMs) / 3_600_000
+  // A tariff read before the per-GB and per-solve prices existed (a saved one, a test's literal) has neither: 0, not NaN.
+  const bytes = usage.proxyBytes ?? tariff.maxBytesPerCall ?? 0
+  const solves = usage.solves ?? tariff.maxSolvesPerCall ?? 0
+  return tariff.perCallUsd + (tariff.perHourUsd * billedMs) / 3_600_000 + ((tariff.perGbUsd ?? 0) * Math.max(bytes, 0)) / 1e9 + (tariff.perSolveUsd ?? 0) * Math.max(solves, 0)
 }
 
-const TARIFF_PRICES = ['perCallUsd', 'perHourUsd'] as const
-const TARIFF_LIMITS = ['maxSessionMs', 'minBilledMs', 'billingIncrementMs'] as const
+const TARIFF_PRICES = ['perCallUsd', 'perHourUsd', 'perGbUsd', 'perSolveUsd'] as const
+const TARIFF_LIMITS = ['maxSessionMs', 'minBilledMs', 'billingIncrementMs', 'maxBytesPerCall', 'maxSolvesPerCall'] as const
 
 /** One provider's tariff from its JSON, or the problems with it. */
 function readTariff(vendor: string, input: unknown, problems: AccessGrantProblem[]): VendorTariff | null {
   const field = `tariffs.${vendor}`
   if (!isRecord(input)) { problems.push({ field, kind: 'invalid', reason: 'a tariff is an object of prices and limits' }); return null }
   const known = new Set<string>([...TARIFF_PRICES, ...TARIFF_LIMITS])
-  if (input.perGbUsd !== undefined || input.maxBytes !== undefined) {
-    problems.push({ field: `${field}.perGbUsd`, kind: 'invalid', reason: 'a per-GB price (a provider\'s proxy bandwidth) has no ceiling: the bytes its browser receives across every target cannot be counted from here; turn the provider\'s proxies off and leave perGbUsd and maxBytes out' })
-  }
-  for (const key of Object.keys(input)) if (!known.has(key) && key !== 'perGbUsd' && key !== 'maxBytes') problems.push({ field: `${field}.${key}`, kind: 'invalid', reason: `unknown tariff field; one of ${[...known].join(', ')}` })
+  for (const key of Object.keys(input)) if (!known.has(key)) problems.push({ field: `${field}.${key}`, kind: 'invalid', reason: `unknown tariff field; one of ${[...known].join(', ')}` })
   const price = (key: (typeof TARIFF_PRICES)[number]): number => {
     const v = input[key]
     if (v === undefined || v === null) return 0
@@ -110,9 +131,14 @@ function readTariff(vendor: string, input: unknown, problems: AccessGrantProblem
     if (typeof v !== 'number' || !Number.isInteger(v) || v <= 0) { problems.push({ field: `${field}.${key}`, kind: 'invalid', reason: 'a positive whole number' }); return null }
     return v
   }
-  const tariff: VendorTariff = { perCallUsd: price('perCallUsd'), perHourUsd: price('perHourUsd'), maxSessionMs: limit('maxSessionMs'), minBilledMs: limit('minBilledMs') ?? 0, billingIncrementMs: limit('billingIncrementMs') ?? 1 }
-  if (TARIFF_PRICES.every((key) => input[key] === undefined || input[key] === null)) problems.push({ field, kind: 'invalid', reason: 'a tariff names at least one price: perCallUsd or perHourUsd' })
+  const tariff: VendorTariff = {
+    perCallUsd: price('perCallUsd'), perHourUsd: price('perHourUsd'), maxSessionMs: limit('maxSessionMs'), minBilledMs: limit('minBilledMs') ?? 0, billingIncrementMs: limit('billingIncrementMs') ?? 1,
+    perGbUsd: price('perGbUsd'), maxBytesPerCall: limit('maxBytesPerCall'), perSolveUsd: price('perSolveUsd'), maxSolvesPerCall: limit('maxSolvesPerCall'),
+  }
+  if (TARIFF_PRICES.every((key) => input[key] === undefined || input[key] === null)) problems.push({ field, kind: 'invalid', reason: 'a tariff names at least one price: perCallUsd, perHourUsd, perGbUsd or perSolveUsd' })
   if (tariff.perHourUsd > 0 && tariff.maxSessionMs === null) problems.push({ field: `${field}.maxSessionMs`, kind: 'invalid', reason: 'a per-hour price needs the longest session a call may hold, or its cost has no ceiling' })
+  if (tariff.perGbUsd > 0 && tariff.maxBytesPerCall === null) problems.push({ field: `${field}.maxBytesPerCall`, kind: 'invalid', reason: 'a per-GB price (the provider\'s proxy bandwidth) needs the most bytes one call may move, or its cost has no ceiling; the vendor lane ends the session there' })
+  if (tariff.perSolveUsd > 0 && tariff.maxSolvesPerCall === null) problems.push({ field: `${field}.maxSolvesPerCall`, kind: 'invalid', reason: 'a per-solve price needs the solves one call\'s ceiling allows for' })
   return tariff
 }
 
@@ -241,6 +267,14 @@ export function normalizeAccessGrant(input: unknown): AccessGrantResult {
     for (const [vendor, value] of Object.entries(tariffsIn)) {
       const tariff = readTariff(vendor, value, problems)
       if (tariff !== null) tariffs[vendor] = tariff
+      // A capability the provider bills apart needs its price stated on every tariff the grant names: 0 when the plan
+      // includes it, else the price and its bound. Left out, the session would buy it with no ceiling and no record.
+      if (!isRecord(value)) continue
+      for (const [capability, price] of [['vendor_residential_proxy', 'perGbUsd'], ['vendor_captcha_solving', 'perSolveUsd']] as const) {
+        if (capabilities.includes(capability) && (value[price] === undefined || value[price] === null)) {
+          problems.push({ field: `tariffs.${vendor}.${price}`, kind: 'invalid', reason: `a grant naming ${capability} states ${price} on every tariff: 0 when the plan includes it, else the provider's price and its bound` })
+        }
+      }
     }
   }
 
