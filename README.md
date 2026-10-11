@@ -35,7 +35,7 @@ npx octocrawl serve                                  # keep it running: the API 
 claude mcp add octocrawl -- npx -y @octocrawl/mcp    # the published stdio server, a client of that API
 ```
 
-The hosted service offers scrape and map. The local server adds crawl, batch, the Amazon.sg product tool and the Monitor tools. [Running Octocrawl](docs/local-setup.md) covers both, plus hosting a server for others.
+The hosted service offers scrape and map. The local server adds crawl, batch, the Amazon.sg product tool and the Monitor tools. [Running Octocrawl](docs/local-setup.md) covers both, plus hosting a server for others. An agent installing Octocrawl for you (Cline, for one) can follow [llms-install.md](llms-install.md).
 
 ## Why this exists
 

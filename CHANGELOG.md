@@ -20,7 +20,9 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- The my-browser lane reads a page that requires Trusted Types, such as Gmail. Since #315 its copy of the page as shown was made with `DOMParser`, which such a page refuses a plain string: every read failed and was tried again until the read's wait ran out (ten minutes by default). The copy is now made in a document from `createHTMLDocument`, reached through `Document.prototype` so that a form named `implementation` cannot shadow it.
 - The ladder reads a page that failed its task contract by its region readiness (ROADMAP PA items 10 and 11, ADR 0007): `readinessOf` is now its classifier. A page read over HTTP, or still loading after the browser's wait, and one whose region never came (or that no live read could judge) go on up the ladder. One whose region held but whose checks failed on what was extracted opens no paid rung, and a provider's page read so does not count as that provider failing. Requests without `verify` run as before.
+- `llms-install.md` at the repository root tells an agent such as Cline how to add Octocrawl: hosted (`https://mcp.octocrawl.dev/mcp`, no key) or on your computer (`npx octocrawl serve` and `npx -y @octocrawl/mcp`), with the Cline CLI command and the settings-file block for each, and a first call to check it. The README links it.
 - The ladder and the job counts read the task contract (ROADMAP PA item 10, PR 3; [ADR 0006](docs/adr/0006-task-verification.md)).
   - With `verify`, each rung's page is judged as it comes, and `ladderTrace` records it (`verification_checked`). A page that passes is the answer, with no quality hop after it. One that fails a check goes on up the ladder within the request's mode, access and budget.
   - A hook for region readiness (PA item 11) sits before that hop. A page it reads as not extracted opens no paid rung.
