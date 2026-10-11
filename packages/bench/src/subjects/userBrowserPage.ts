@@ -18,6 +18,7 @@ import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { classifyGate, sha256Utf8 } from '@w2l/http-core'
 import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown, withListCaveat } from './errorPage.js'
 import { steadyWaitEvents, withStillChangingWarning, withStillLoadingWarning, type SteadyOutcome } from '../browserSettle.js'
+import { regionWaitEvent, type RegionOutcome } from '../regionWait.js'
 
 /** The lanes a page read in the person's browser is recorded on: after a handoff, or on the my-browser lane. */
 export type UserBrowserLane = 'browser_local_authed' | 'my_browser'
@@ -51,6 +52,8 @@ export interface UserBrowserRead {
   browser: string
   /** How the lane waited, once the page was through, for it to stop loading and changing; absent when it did not wait (a handoff read before ADR 0007). */
   settle?: SteadyOutcome
+  /** What the wait for the region the task needs saw (ADR 0007), when the request had a task contract the page could judge. */
+  region?: RegionOutcome
 }
 
 /** The result of a page read in the person's browser: in place of `prior`, the result the check stopped, or, with none, on the my-browser lane. */
@@ -71,6 +74,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     { at: 0, lane: LANE, event: 'identity_unobserved', detail: { reason: `the person's own browser (${read.browser}) sent the request; its headers were not seen` } },
     { at: wallMs, lane: LANE, event: 'user_browser_read', detail: { browser: read.browser, status: read.status, sawGate: read.sawGate, act: read.act, waitedMs: wallMs } },
     ...steadyWaitEvents(read.settle, wallMs, LANE),
+    ...[regionWaitEvent(read.region, wallMs, LANE)].filter((event): event is TraceEvent => event !== null),
   ]
   const base = {
     requestedUrl: read.requestedUrl,

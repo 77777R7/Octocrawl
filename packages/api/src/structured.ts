@@ -1013,8 +1013,8 @@ export async function prepareScrapeResponse(
     metadata: scrapeResponseMetadata(next, scrapeId),
     snapshot: scrapeSnapshot(next),
     evidenceRecord: scrapeEvidenceRecord({ ...result, verification }, req, next),
-    // Read from the full result: a failed page's whole-page evidence is in its Markdown whether or not markdown was asked for.
-    readiness: readinessOf(result),
+    // Read from the full result, with its verification: a contract's verdict and the region wait tell its states apart (ADR 0007).
+    readiness: readinessOf({ ...result, verification }),
     usage: {
       ...next.usage,
       wallMs: totalMs,

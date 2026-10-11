@@ -349,7 +349,7 @@ export interface Readiness {
    * `deadline_exceeded`, `little_text`). Codes only, never the page's text; empty for a page ready by every signal.
    */
   basis: readonly string[]
-  /** How long the lane waited for the page to settle, when it recorded the wait (`loading_wait`, `steady_wait`). */
+  /** How long the lane waited for the page, when it recorded the wait: its last settle wait (`loading_wait`, `steady_wait`) and its region wait (`region_wait`) together. */
   waitedMs?: number
 }
 

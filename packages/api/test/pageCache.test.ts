@@ -85,6 +85,15 @@ async function finished(kind: 'batch' | 'crawl', id: string): Promise<CrawlPage[
 const HOUR = 3_600_000
 
 describe('page cache: scrape', () => {
+  it('keys a stored page without the request\'s task contract, which only bounds the browser\'s wait (ADR 0006, ADR 0007)', async () => {
+    const url = `${origin}/granted?contract`
+    expect((await scrape({ url, maxAge: HOUR })).metadata).toMatchObject({ cacheState: 'miss' })
+    const verified = await scrape({ url, maxAge: HOUR, verify: { checks: [{ type: 'markdownIncludes', text: 'nowhere on this page' }] } })
+    expect(verified.metadata).toMatchObject({ cacheState: 'hit' })
+    // The stored page carries no wait for this contract's region: its readiness does not claim one.
+    expect(verified.readiness.basis).not.toContain('region_ready')
+  })
+
   it('keys a stored page by the access grant too: a page fetched under one grant is not reused under another', async () => {
     const url = `${origin}/granted`
     const first = await scrape({ url, maxAge: HOUR })

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CompactScrapeResponse, FetchResult, JsonFormatRequest, JsonSchema, ProductFacts, ScrapeResponse } from '@w2l/contracts'
 import { extractTf } from '@w2l/extract-tf'
+import { contractSha256 } from '@w2l/runtime'
 import { extractStructured, prepareScrapeResponse } from '../src/structured.js'
 
 const product: ProductFacts = {
@@ -177,6 +178,20 @@ describe('readiness (ADR 0007, ROADMAP PA item 11)', () => {
     const full = await prepareScrapeResponse(missed, { url: result.requestedUrl, formats: ['links'] }, {}, null, performance.now()) as ScrapeResponse
     expect(full.readiness).toEqual({ state: 'not_extracted', basis: ['empty_unverified'] })
     expect(full.evidenceRecord?.readiness).toEqual({ state: 'not_extracted', basis: ['empty_unverified'] })
+  })
+
+  it('reads a request\'s task contract with the region wait: what held on the live page but not in the answer was not extracted (ADR 0007)', async () => {
+    const verify = { checks: [{ type: 'markdownCountMin' as const, pattern: '\\d{1,3}(?:,\\d{3})+\\.\\d{2}', min: 5 }] }
+    const regionWait = (ready: boolean) => ({ at: 1, lane: 'browser_local' as const, event: 'region_wait', detail: { ready, empty: false, waitedMs: 2_000, reads: 5, judged: 5, loading: false, steady: true, contractSha256: contractSha256(verify), checks: [] } })
+    const page = (ready: boolean, markdown: string) => ({ ...result, lane: 'browser_local' as const, markdown, channelsTried: ['browser_local'], ladderTrace: [], summary, trace: [...result.trace, regionWait(ready)] })
+    const missed = await prepareScrapeResponse(page(true, '# Markets\n\nDow'), { url: result.requestedUrl, verify }, {}, null, performance.now()) as ScrapeResponse
+    expect(missed.verification).toMatchObject({ status: 'failed', reason: 'checks_failed' })
+    expect(missed.readiness).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'region_ready'], waitedMs: 2_000 })
+    expect(missed.evidenceRecord?.readiness).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'region_ready'] })
+    const absent = await prepareScrapeResponse(page(false, '# Markets\n\nDow'), { url: result.requestedUrl, verify }, {}, null, performance.now()) as ScrapeResponse
+    expect(absent.readiness).toEqual({ state: 'not_served', basis: ['checks_failed', 'region_absent'], waitedMs: 2_000 })
+    const done = await prepareScrapeResponse(page(true, '42,510.33 18,311.02 5,801.40 2,050.10 1,990.00'), { url: result.requestedUrl, verify }, {}, null, performance.now()) as ScrapeResponse
+    expect(done.readiness).toEqual({ state: 'ready', basis: ['verified'], waitedMs: 2_000 })
   })
 })
 

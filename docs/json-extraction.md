@@ -73,6 +73,13 @@ A fetch can succeed without the data a task asked for: a page of navigation, a s
 - **Counts:** a batch's status (`GET /v1/batches/:id`) and a crawl's (`GET /v1/crawl/:id`) carry `verified` and `verificationFailed` when the job has a contract. They count the pages `succeeded` and `failed` count (a crawl's latest attempt), never a duplicate. `succeeded` keeps its meaning.
 - **Where it is taken:** REST (`verify` in the body), the MCP `scrape`, `batch_scrape` and `crawl` tools (`verify`), the command line (`--verify '<json>'`), the TypeScript SDK (the request types) and the Python client (`verify=` passed through). The command line's `results.csv` and the Python client's rows carry a `verification` column: the status, or empty from a server that does not verify.
 - **The access task runner** sends each task's predicates as its contract and records, beside its own verdict, on how many attempts the product agreed, naming each disagreement (`--no-contract` sends none).
+- **The browser waits for the region the contract needs** ([ADR 0007](adr/0007-region-readiness.md)).
+  - **Where:** on a page read in a browser (the local browser, a provider's, or your own Chrome), once the page has settled and after `waitFor`, `actions` and list steps.
+  - **What:** the contract's checks run on the live page every 0.5 s: the Markdown checks on its whole HTML converted as the result's Markdown is (a pattern written for Markdown, such as a link's `](https://`, matches it; pages over 5 MB of HTML leave them unjudged), `minTables` on the tables it shows (two rows or more) and, with a `list` format that names `itemSelector` and `fields`, the list checks on its records, read as the list format reads them.
+  - **Until:** every check the live page can judge passes on two reads in a row with the same counts, or, under `emptyOk`, the list shows no record on three reads of a settled page. At most 10 s more, within the request's `timeout`; in your own Chrome, within the read's own wait.
+  - **Not waited for:** a contract the live page cannot judge (`field` checks on `json`, list checks without a list format naming its items and fields); a page that did not answer 2xx or shows a check; a request with a `paginate` step, whose result reads every page while the browser holds the last.
+  - **Cost:** on a provider's browser the wait is session time the provider bills.
+  - **Record:** the trace keeps the wait as `region_wait`: whether it held, how long, how many reads it judged, the contract's SHA-256, and each check's `passed` and count, never page text. [`readiness`](scrape-options.md#readiness) reads it. The contract does not enter the page cache's key.
 
 ## The Amazon baseline
 

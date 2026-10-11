@@ -33,12 +33,14 @@ const PAGE =
 
 class CountingTransport implements ProviderTransport {
   calls: string[] = []
+  regions: unknown[] = []
   constructor(
     private readonly response: Partial<ProviderResponse> = {},
     private readonly declaredUa: string | null = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36',
   ) {}
-  async fetch(url: string): Promise<ProviderResponse> {
+  async fetch(url: string, _deadlineMs?: number, _signal?: AbortSignal, region?: unknown): Promise<ProviderResponse> {
     this.calls.push(url)
+    this.regions.push(region)
     return {
       status: 200,
       body: PAGE,
@@ -111,6 +113,20 @@ describe('ProviderSubject robots gate', () => {
     const cleared = await new ProviderSubject(decl(), new CountingTransport({ settle: { loadingSeen: true, stillLoading: false, waitedMs: 2_400 } }), 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')
     expect(cleared.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: { waitedMs: 2_400, cleared: true } }))
     expect(cleared.warnings ?? []).not.toContainEqual(expect.objectContaining({ code: 'page_still_loading' }))
+  })
+
+  it('hands the transport the region a task needs and records what its wait saw (ADR 0007)', async () => {
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const verify = { checks: [{ type: 'markdownIncludes' as const, text: 'Product' }] }
+    const outcome = { ready: true, empty: false, waitedMs: 1_500, reads: 4, loading: false, steady: true, checks: [{ index: 0, type: 'markdownIncludes' as const, passed: true }] }
+    const transport = new CountingTransport({ region: outcome })
+    const out = await new ProviderSubject(decl(), transport, 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, { verify })
+    expect(transport.regions).toEqual([{ contract: verify }])
+    expect(out.trace).toContainEqual(expect.objectContaining({ lane: 'provider', event: 'region_wait', detail: outcome }))
+    // Without a contract the transport is asked for none.
+    const plain = new CountingTransport()
+    await new ProviderSubject(decl(), plain, 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')
+    expect(plain.regions).toEqual([undefined])
   })
 
   it('returns the whole page for onlyMainContent false, with the same evidence', async () => {

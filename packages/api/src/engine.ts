@@ -125,7 +125,7 @@ import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
-import { FileSessionBrokerStore, FileSessionStore, mergeListPages, publicSession, SessionBroker, type SessionStore } from '@w2l/bench'
+import { FileSessionBrokerStore, FileSessionStore, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
 import { BLOCK_REASON, VERIFY_REGEX_CHECK_TYPES, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
@@ -631,7 +631,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * neither looks up nor stores. A request with custom `headers` stores only
    * when it says `storeInCache: true`: their values stay off disk unless the
    * caller asks. The key holds every option the lanes receive except the
-   * deadline, which bounds a fetch but does not shape a successful result,
+   * deadline and the task contract, which bound a fetch and its waits but do
+   * not shape a successful result's content,
    * plus the mode, the rungs the request may use (so a server's channel
    * policy is never crossed), `fastMode`, a recorded robots override and the
    * build that extracts (extractor versions and the declared source commit),
@@ -645,7 +646,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const customHeaders = page.headers !== undefined && Object.keys(page.headers).length > 0
     const store = customHeaders ? page.storeInCache === true : page.storeInCache !== false
     if (!lookup && !store) return null
-    const { timeout: _timeout, ...shape } = fetchOptions(page, formats)
+    // The task contract shapes how long the browser waits for its region, not a successful result's content (ADR 0006).
+    const { timeout: _timeout, verify: _verify, ...shape } = fetchOptions(page, formats)
     const rungs = channels.map((channel) => channel.vendorId === undefined ? channel.id : `${channel.id}(${channel.vendorId})`)
     const build = { extractor: EXTRACTOR_VERSION, pdf: PDF_TEXT_VERSION, file: FILE_TEXT_VERSION, commit: sourceCommitFromEnv() }
     // Absent without a grant, so a server without one keeps every key it had.
@@ -1254,6 +1256,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(fetchOpts.includeTags === undefined ? {} : { includeTags: fetchOpts.includeTags }),
         ...(fetchOpts.excludeTags === undefined ? {} : { excludeTags: fetchOpts.excludeTags }),
         ...(fetchOpts.blockAds === undefined ? {} : { blockAds: fetchOpts.blockAds }),
+        // The region the task needs (ADR 0007): waited for in the person's tab once the page has settled.
+        ...(regionSpecOf(fetchOpts) === undefined ? {} : { region: regionSpecOf(fetchOpts) }),
       })
       return pageFromUserBrowser(read, null, fetchOpts)
     } catch (error) {
@@ -2478,6 +2482,7 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
     ...(screenshot === undefined ? {} : { screenshot }),
     ...(options?.actions === undefined ? {} : { actions: options.actions }),
     ...(list === undefined ? {} : { list }),
+    ...(options?.verify === undefined ? {} : { verify: options.verify }),
   }
 }
 
