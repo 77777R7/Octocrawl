@@ -1,7 +1,7 @@
 name: Release
 
 # Publishes the npm packages (octocrawl, @octocrawl/cli, @octocrawl/sdk,
-# @octocrawl/mcp) and the Python client (octocrawl-client) from a tag vX.Y.Z,
+# @octocrawl/mcp, @octocrawl/ai-sdk) and the Python client (octocrawl-client) from a tag vX.Y.Z,
 # through trusted publishing: no token is stored anywhere, and npm records the
 # packages' provenance (this repository, this workflow, this commit).
 #
@@ -103,13 +103,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # The SDK first, the CLI under both names, then the MCP server.
-          for file in tarballs/octocrawl-sdk-*.tgz tarballs/octocrawl-cli-*.tgz tarballs/octocrawl-[0-9]*.tgz tarballs/octocrawl-mcp-*.tgz; do
+          # The SDK first, the CLI under both names, the MCP server, then the AI SDK tools.
+          for file in tarballs/octocrawl-sdk-*.tgz tarballs/octocrawl-cli-*.tgz tarballs/octocrawl-[0-9]*.tgz tarballs/octocrawl-mcp-*.tgz tarballs/octocrawl-ai-sdk-*.tgz; do
             name=$(tar -xzOf "$file" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).name')
             version=$(tar -xzOf "$file" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version is already published; skipped"
               continue
+            fi
+            # Trusted publishing cannot create a package: its first version is published by a maintainer (CONTRIBUTING.md).
+            # Only npm's own "not found" (E404) skips it; any other failure (the registry unreachable) fails the job, to be run again.
+            if ! lookup=$(npm view "$name" name 2>&1); then
+              if grep -q 'E404' <<<"$lookup"; then
+                echo "::warning::$name is not on npm yet: a maintainer publishes its first version by hand and adds the trusted publisher; skipped"
+                continue
+              fi
+              echo "$lookup" >&2
+              exit 1
             fi
             # ./ in front: without it npm 11 reads tarballs/<name>.tgz as a GitHub owner/repo shorthand and runs git.
             npm publish "./$file" --access public

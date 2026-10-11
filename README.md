@@ -26,6 +26,7 @@ Or run it on your own computer. You need Node.js 22.13+ or 24+:
 npx octocrawl scrape https://example.com --markdown
 pip install octocrawl-client      # the Python client of a running API (npx octocrawl serve)
 npm install @octocrawl/sdk        # the TypeScript client; @octocrawl/mcp is the MCP server
+npm install @octocrawl/ai-sdk     # scrape and map as Vercel AI SDK tools, on hosted Octocrawl by default
 ```
 
 To give your agent every tool, with no daily limit, run the API locally and connect the MCP server to it:
@@ -146,6 +147,7 @@ packages/
   cli/             octocrawl: scrape, crawl, batch, map, serve (AGPL)
   api/             REST server (AGPL)
   sdk/             TypeScript client (MIT)
+  ai-sdk/          scrape and map as Vercel AI SDK tools (MIT)
   mcp/             stdio and restricted Streamable HTTP MCP server (AGPL)
   public-preview/  Server for the public preview at octocrawl.dev
 
@@ -174,7 +176,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details, including how to write docs.
 ## License
 
 Server-side code, the CLI (`@octocrawl/cli`, `octocrawl`) and the MCP server (`@octocrawl/mcp`): [AGPL-3.0](LICENSE)  
-Client libraries: MIT: the TypeScript SDK (`@octocrawl/sdk`, which includes the workspace's `@w2l/contracts`, also MIT) and the Python client (`octocrawl-client`)
+Client libraries: MIT: the TypeScript SDK (`@octocrawl/sdk`, which includes the workspace's `@w2l/contracts`, also MIT), the AI SDK tools (`@octocrawl/ai-sdk`, which include the SDK) and the Python client (`octocrawl-client`)
 
 See [PHASE1_ENGINEERING_NOTES.md §1.3](docs/archive/PHASE1_ENGINEERING_NOTES.md) for the rationale.
 

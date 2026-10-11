@@ -1,0 +1,3 @@
+map {"status":"completed","returned":7,"first":["https://octocrawl.dev/blog/extract-structured-data-from-web-page/","https://octocrawl.dev/blog/find-all-pages-on-a-website/","https://octocrawl.dev/blog/scrape-list-of-urls/"]}
+scrape {"status":"success","finalUrl":"https://example.com/","httpStatus":200,"title":"Example Domain","md":"This domain is for use in documentation ","evidence":"w2l.evidence/1","robots":{"decision":"no_robots","robotsUrl":"https://example.com/robots.txt","robotsSha256":null,"unreachable":null,"crawlDelayMs":null,"userOverride":false,"overrideBasis":null}}
+text done

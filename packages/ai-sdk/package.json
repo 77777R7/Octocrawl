@@ -1,0 +1,29 @@
+{
+  "name": "@w2l/ai-sdk",
+  "version": "0.4.1",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "@w2l/sdk": "*"
+  },
+  "peerDependencies": {
+    "ai": "^6.0.0 || ^7.0.0",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "ai": "^7.0.137",
+    "zod": "^4.1.8"
+  }
+}

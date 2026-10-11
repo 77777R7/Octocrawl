@@ -1,0 +1,15 @@
+{
+  "what": "@octocrawl/ai-sdk (packed, not yet published) against hosted Octocrawl: the AI SDK's MockLanguageModelV3 calls map, then scrape; no model provider is reached",
+  "package": "octocrawl-ai-sdk-0.4.1.tgz from `npm run pack:packages` on branch claude/ai-sdk-tools (base 4d79d96b, packages/ai-sdk as added by the PR carrying this record), sha256 7ceeddf1b0c6d9d3684837320c32495d4997ac3de83405ebf574edae0f0e3783",
+  "install": "npm i <that tarball> in an empty project; npm installed its peers ai 7.0.137 and zod 4.6.5",
+  "commands": [
+    "NODE_USE_ENV_PROXY=1 node live.mjs > live.out 2> live.err",
+    "NODE_USE_ENV_PROXY=1 node one.mjs > scrape-example.json"
+  ],
+  "server": "https://api.octocrawl.dev, keyless (apiKey ''); the hosted revision then live was octocrawl-api-h6pool-3cb4c4b (the Evidence Record's extractor.commit is 3cb4c4b4)",
+  "os": "macOS (Darwin 25.6.0, arm64), Node 26.8.1",
+  "network": "through local proxy 127.0.0.1:7890 (HTTPS_PROXY and HTTP_PROXY set, NODE_USE_ENV_PROXY=1)",
+  "dates": "UTC: live.mjs between started.txt and finished.txt; one.mjs ran a minute earlier, at 2026-10-11T06:05:09Z (its fetchedAt)",
+  "note": "written 2026-10-11 from the session's command log; the scripts wrote live.out, live.err (empty), scrape-example.json and the two timestamps",
+  "source": "packages/ai-sdk as committed in 5634c43a (the run used the same code, packed before that commit); later commits on the branch changed only the zod peer range to ^4.1.8, docs and the package checks"
+}
