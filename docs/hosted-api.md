@@ -40,6 +40,7 @@ Once per project: the TTL policy that deletes a day's counters two days on (`exp
 
 ```sh
 gcloud firestore fields ttls update expireAt --collection-group=hostedQuotas --enable-ttl --project="$W2L_PROJECT_ID"
+gcloud firestore fields ttls update expireAt --collection-group=creditUsage --enable-ttl --project="$W2L_PROJECT_ID"
 ```
 
 Build the image from a clean commit and deploy it without traffic, then move all traffic to it under a new tag; keep the previous tag as the rollback (as the preview's releases):
@@ -112,6 +113,36 @@ node scripts/hosted/issue-key.mjs revoke <digest>
 The script, like `scripts/public-preview/waitlist.mjs`, calls Firestore with Node's `fetch`, which ignores `HTTPS_PROXY`. On a machine that reaches Google only through a proxy, set `NODE_USE_ENV_PROXY=1` (Node 24 and later) so `fetch` uses it; `gcloud` honours the proxy variables on its own. Without it the call ends in `ConnectTimeoutError` against `firestore.googleapis.com` (seen 2026-10-06).
 
 The key is printed once. Keep it somewhere ignored by git, such as `.w2l/hosted/`, with owner-only permissions, until it has been sent.
+
+## Accounts and credits
+
+A key that names an account (`uid` on its `hostedApiKeys` document) spends that account's credits instead of a daily limit. Decided 2026-10-11 (ROADMAP PH); `packages/mcp/src/hostedCredits.ts` holds the rules.
+
+- **The grant.** Every account gets `W2L_MONTHLY_CREDITS` (1,000) credits each month. The grant resets at 00:00 UTC on the 1st and nothing rolls over. It is spent before bought credits.
+- **What a call costs**, settled from its result:
+
+  | Result | Credits |
+  | --- | --- |
+  | A page read over HTTP | 1 |
+  | A page read on a browser lane | 5 |
+  | A page that does not exist (HTTP 404 or 410) | 1 |
+  | A `map` that returned URLs | 1 |
+  | Anything else: blocked by a check, a challenge or robots.txt, nothing read, an invalid request, a server error | 0 |
+
+- **How it is charged.** A call reserves the most it could cost before it runs: 5 when the key may use the browser lane, else 1. When it ends, it gives back what its result did not cost.
+- **Running short.** An account with at least 1 credit but fewer than 5 reads over HTTP alone for that call. With none left it is refused: `429 quota_exhausted`, with `Retry-After` counting down to the 1st.
+- **What the response says.** Each response says `X-Credits-Used` and `X-Credits-Remaining`. An MCP tool call spends the same way, through the same gate.
+- **Firestore.**
+  - `credits/{uid}` holds `month`, `grant` and `purchased`.
+  - A reservation updates that document and the site's daily counter (`hostedQuotas/{day}-site`) in one commit with update-time preconditions, so two instances cannot overspend.
+  - The refund and the day's usage (`creditUsage/{uid}-{day}`: `http`, `browser`, `not_found`, `map`, `unread`, `credits`) are server-side increments. The usage documents expire after 90 days (the TTL policy above).
+- **Logs.** Every call logs `hosted_credits` with the account id, what it was counted as, and what it reserved and spent. A failed settle logs `hosted_credits_settle_failed` with the credits to give back.
+
+Sign-in and the account page come next, on octocrawl.dev. Until then, an account's key can be issued by hand for a test account:
+
+```sh
+node scripts/hosted/issue-key.mjs issue --label 'test account' --uid test-account-1 --browser
+```
 
 ## Read the service
 

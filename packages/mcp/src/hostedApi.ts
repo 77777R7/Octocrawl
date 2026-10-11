@@ -27,6 +27,7 @@ import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION } from './server.js'
 import { TOOLS } from './tools.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
+import { CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type Reservation } from './hostedCredits.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
 export interface HostedKeyRecord {
@@ -36,6 +37,8 @@ export interface HostedKeyRecord {
   /** Whether the browser lane may be used; keyless callers never may. */
   browser: boolean
   label?: string
+  /** The account the key belongs to: its calls spend that account's credits (hostedCredits.ts), not `dailyLimit`. */
+  uid?: string
 }
 
 export interface HostedKeys {
@@ -131,6 +134,8 @@ export interface HostedApiConfig {
   hashKey: string
   keys: HostedKeys
   quota: HostedQuota
+  /** Accounts' credit balances; a key that names an account is refused while this is absent. */
+  credits?: CreditsStore
   /** Shared with the Cloudflare Worker; proves CF-Connecting-IP. Absent: the socket address is the keyless identity. */
   proxySecret?: string
   keylessDaily?: number
@@ -154,6 +159,8 @@ export interface HostedCaller {
   dailyLimit: number
   browser: boolean
   plan: string
+  /** The account whose credits the call spends; absent for keyless callers and keys issued by hand. */
+  uid?: string
 }
 
 /** A Map that forgets its oldest entries past a size, so what callers make it remember stays bounded. */
@@ -267,6 +274,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const id = digest(config.hashKey, 'key', presented)
       const record = await config.keys.lookup(id)
       if (record === null || !record.enabled) return 'unknown_key'
+      if (record.uid !== undefined) return { kind: 'key', id, uid: record.uid, dailyLimit: 0, browser: record.browser, plan: 'account' }
       return { kind: 'key', id, dailyLimit: record.dailyLimit, browser: record.browser, plan: record.plan }
     }
     const internal = headers.get(INTERNAL_SECRET_HEADER)
@@ -304,6 +312,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (retryAfter !== null) return refuse(c, 429, 'rate_limited', `too many requests: at most ${caller.kind === 'key' ? KEY_PER_MINUTE : caller.pool === 'claude' ? CLAUDE_PER_MINUTE : KEYLESS_PER_MINUTE} starts a minute`, [`retry after ${retryAfter} s`], { 'Retry-After': String(retryAfter) })
     const now = new Date()
     const day = utcDay(now)
+    if (caller.uid !== undefined) return accountStart(c, caller, caller.uid, path, `${day}-site`, now, next)
     const quota = await config.quota.consume([{ id: `${day}-site`, limit: siteDaily }, { id: `${day}-${caller.kind}-${caller.id}`, limit: caller.dailyLimit }], now)
     if (!quota.ok) {
       const seconds = secondsToUtcMidnight(now)
@@ -324,6 +333,74 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     }
     return next()
   })
+  /**
+   * A start by an account's key: reserves what the call could cost (five credits where the browser lane may answer, one
+   * for an HTTP page or a map), runs it, then settles at what its result cost and says so in `X-Credits-Used` and
+   * `X-Credits-Remaining`. An account with at least one credit but fewer than five reads over HTTP alone this time.
+   */
+  async function accountStart(c: Context<GateEnv>, caller: HostedCaller, uid: string, path: string, siteId: string, now: Date, next: () => Promise<void>) {
+    const credits = config.credits
+    if (credits === undefined) return c.json({ error: 'account credits are unavailable on this server', code: 'internal_error' }, 503)
+    const site = { id: siteId, limit: siteDaily }
+    const isScrape = path === '/v1/scrape'
+    let browser = isScrape && caller.browser
+    let reserved = await credits.reserve(uid, browser ? CREDITS.browserPage : isScrape ? CREDITS.httpPage : CREDITS.map, site, now)
+    if (!reserved.ok && reserved.limited === 'credits' && browser && reserved.remaining >= CREDITS.httpPage) {
+      browser = false
+      reserved = await credits.reserve(uid, CREDITS.httpPage, site, now)
+    }
+    if (!reserved.ok) {
+      if (reserved.limited === 'site') {
+        const seconds = secondsToUtcMidnight(now)
+        return refuse(c, 429, 'quota_exhausted', `hosted Octocrawl has served its ${reserved.limit} pages for today`, [LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+      }
+      const seconds = secondsToNextGrant(now)
+      return refuse(c, 429, 'quota_exhausted', `this account's credits are used up (${reserved.remaining} left)`,
+        [`the monthly credits come back on the 1st at 00:00 UTC, in ${seconds} s`, LOCAL_HINT], { 'Retry-After': String(seconds), 'X-Credits-Remaining': String(reserved.remaining) })
+    }
+    const reservation: Reservation = reserved.reservation
+    let charge: ReturnType<typeof scrapeCharge> = { credits: 0, kind: 'unread' }
+    const settle = async () => {
+      log(JSON.stringify({ severity: 'INFO', event: 'hosted_credits', uid, kind: charge.kind, used: charge.credits, reserved: reservation.fromGrant + reservation.fromPurchased }))
+      // A settle that fails keeps what was reserved: the call is answered, and the log names the credits to give back.
+      return credits.settle(reservation, charge.credits, charge.kind, now).catch((error: unknown) => {
+        log(JSON.stringify({ severity: 'ERROR', event: 'hosted_credits_settle_failed', uid, reserved: reservation.fromGrant + reservation.fromPurchased, used: charge.credits, message: error instanceof Error ? error.message : String(error) }))
+        return null
+      })
+    }
+    let response: Response
+    try {
+      if (isScrape) {
+        let body: unknown = null
+        let parsed = true
+        try { body = await c.req.json() } catch { parsed = false }
+        if (!parsed) response = c.json({ error: 'the request body must be JSON', code: 'invalid_json' }, 400)
+        else {
+          const pinned = body !== null && typeof body === 'object' && !Array.isArray(body)
+            ? { ...(body as Record<string, unknown>), storeInCache: false, ...(browser ? {} : { fastMode: true }) }
+            : body
+          const result = await engine.scrape(parseScrapeRequest(pinned), { signal: c.req.raw.signal })
+          charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
+          response = c.json(result, 200)
+        }
+      } else {
+        await next()
+        if (c.res.status === 200) charge = mapCharge(await c.res.clone().json().catch(() => ({})) as { status?: unknown })
+        response = new Response(c.res.body, c.res)
+      }
+    } catch (error) {
+      // A refused request, an engine error or a cancelled call cost nothing: everything reserved goes back.
+      charge = { credits: 0, kind: 'unread' }
+      await settle()
+      throw error
+    }
+    const settled = await settle()
+    response.headers.set('X-Credits-Used', String(charge.credits))
+    if (settled !== null) response.headers.set('X-Credits-Remaining', String(settled.remaining))
+    c.res = response
+    return response
+  }
+
   gate.route('/', inner)
   gate.onError((error, c) => {
     if (error instanceof RequestError) return c.json({ error: error.message, code: error.code, ...(error.agentHints && error.agentHints.length > 0 ? { agentHints: error.agentHints } : {}) }, API_ERROR_STATUS[error.code])
@@ -438,6 +515,11 @@ async function metadataAccessToken(fetcher: typeof fetch, signal: AbortSignal): 
   return body.access_token
 }
 
+/** The service identity's access token, for a store outside this file (the credits ledger, hostedCredits.ts). */
+export function serviceAccessToken(fetcher: typeof fetch = fetch): () => Promise<string> {
+  return () => metadataAccessToken(fetcher, AbortSignal.timeout(3_000))
+}
+
 function firestoreBase(projectId: string): { resource: string; endpoint: string } {
   if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(projectId)) throw new Error('W2L_FIRESTORE_PROJECT_ID is invalid')
   const resource = `projects/${projectId}/databases/(default)/documents`
@@ -466,6 +548,7 @@ export class FirestoreHostedKeys implements HostedKeys {
         dailyLimit: Number.isSafeInteger(dailyLimit) && dailyLimit > 0 ? dailyLimit : 0,
         browser: fields.browser?.booleanValue === true,
         ...(fields.label?.stringValue === undefined ? {} : { label: fields.label.stringValue }),
+        ...(fields.uid?.stringValue === undefined ? {} : { uid: fields.uid.stringValue }),
       }
     }
     this.cache.set(keyHash, { at: Date.now(), record })
