@@ -10,6 +10,7 @@ Version 2, updated 2026-09-29, is in git history. What it said below stands unle
 
 - **What Octocrawl is.** It turns a list of URLs into a table where every row traces back to its page. It runs on your machine or as a hosted service.
 - **Now.** Enhanced access ([PA](#pa--enhanced-access)) comes first since 2026-10-09: reaching the pages that block a plain request. Hosted Octocrawl ([PH](#ph--hosted-octocrawl)) phase 1 runs beside it, with P2's remaining items.
+- **Accounts and credits (decided 2026-10-11).** Self-service sign-in and a credits balance per account are built now, beside PA, ahead of P4. Payment follows the two-week cost record. See [PH](#ph--hosted-octocrawl).
 - **PA on 2026-10-09.** Items 1, 2 and 8 are accepted. Item 3 is merged, item 7 is built, and item 4 is under way. Item 5 is built but not adopted. Item 6 is not started. Item 9 has its first window recorded. Items 10 and 11 were added on 2026-10-10, and both were accepted on 2026-10-11.
 - **Next (from 2026-10-11).** Items 10 and 11 were accepted on 2026-10-11. So new paid configurations and item 6 no longer wait: under the 2026-10-10 decision they waited only for those two. They go on in PA's order, and what they add is measured as tasks verified, not pages returned. 0.4.0 and 0.4.1 were published on 2026-10-10.
 - **The bar.** On item 1's frozen task set, reach at least the best competitor's verified completion, with no more false successes.
@@ -252,6 +253,13 @@ Hosted phase 1 uses the API's existing hosted mode, which refuses private addres
 - Keyless: scrape and map over HTTP within a per-IP daily allowance, and 429 with `Retry-After` beyond it. The allowance is about 20 pages a day, under the $50 monthly cap set on 2026-10-06.
 - With a key: 1,000 free credits a month and the browser lane. Paid packs come in Firecrawl's bands (Hobby about 5,000 credits, Standard about 100,000), through a merchant of record.
 - Keys are issued by hand from the waitlist in phase 1; self-service sign-up and purchase are P4.
+- **Changed 2026-10-11 by Howard: accounts and credits come now, before P4.**
+  - Sign-in on octocrawl.dev with GitHub, Google or an email link. It is written in this repository, with no identity vendor, and the site's CSP stays as it is.
+  - An account page shows the balance and usage, and creates and revokes keys. Keys issued by hand keep working on their daily allowance.
+  - Every account gets 1,000 credits a month, email-only accounts included. One grant goes to each GitHub account, Google account and verified email.
+  - A result is charged by what it returned: 1 credit for a page read over HTTP, 5 for a page read on the browser lane, 1 for a `map` call, and 1 for a page that does not exist (404 or 410). A page stopped by a check, a challenge or robots.txt costs nothing, and so does a call that read nothing (a DNS failure, no response, an invalid request, a server error).
+  - Accounts' keys get the browser lane. Keyless use keeps its daily allowances.
+  - Payment stays in P4 and waits for item 3's two-week cost record. Where the seller is registered is not decided yet.
 
 | # | Item | Accepted when |
 | --- | --- | --- |
@@ -284,7 +292,7 @@ Moved after PA on 2026-10-05. A `my-browser` lane over Chrome remote debugging i
 
 ### P4 · Paid launch (weeks 15–16)
 
-- Payments through a merchant of record for hosted credit packs (decided 2026-10-06, in Firecrawl's shape); a key with its credits is issued automatically after purchase, and sign-up gives the free monthly credits without a card.
+- Payments through a merchant of record for hosted credit packs (decided 2026-10-06, in Firecrawl's shape); a key with its credits is issued automatically after purchase, and sign-up gives the free monthly credits without a card. Since 2026-10-11, sign-up and the free monthly credits are built in [PH](#ph--hosted-octocrawl); P4 keeps payment, pricing and the lawyer's review.
 - Pricing page: the free local path, keyless hosted use, the free key, and the credit packs, with what one credit buys on each lane; the academic price and the founding-member places left. The Pro plugin's offline licence (below) is priced only if it ships before hosted credits do.
 - Terms, privacy policy and acceptable-use policy (no bypassing paywalls or access controls, no scraping personal data for marketing), reviewed by a lawyer.
 - Launch to interviewees first, then the Chrome Web Store, Show HN, MCP directories and research mailing lists.
