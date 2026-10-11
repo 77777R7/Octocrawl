@@ -109,7 +109,7 @@ export function summarizeQuotaDocs(names) {
   for (const name of names) {
     const match = /(\d{4}-\d{2}-\d{2})-(key|keyless)-([^/]+)$/.exec(name)
     if (!match) continue
-    const key = `${match[1]} ${match[2]}`
+    const key = `${match[1]} ${match[2] === 'keyless' && match[3] === 'claude' ? 'keyless, Claude pool (many people)' : match[2]}`
     seen.set(key, (seen.get(key) ?? 0) + 1)
   }
   return [...seen].map(([key, callers]) => ({ day: key.slice(0, 10), kind: key.slice(11), callers })).sort((a, b) => a.day.localeCompare(b.day) || a.kind.localeCompare(b.kind))
