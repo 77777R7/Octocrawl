@@ -87,6 +87,15 @@ export interface ResourceUsage {
    * provider billing that tariff charged.
    */
   measuredCostUsd?: number
+  /**
+   * Bytes those sessions moved through the provider's own residential proxy, as the provider reported after release
+   * (the `vendor_residential_proxy` grant); null when it reported none. Absent when no provider proxy was granted.
+   */
+  vendorProxyBytes?: number | null
+  /** CAPTCHA solves the provider reported for those sessions; null when it reported none. Absent when solving was not granted. */
+  vendorSolves?: number | null
+  /** The country the provider's residential proxy was asked for (ISO 3166-1 alpha-2). Absent when none was granted. */
+  vendorProxyCountry?: string
   /** Stage timings use a monotonic clock. Optional for legacy producers. */
   timings?: ResourceTimings
   /**

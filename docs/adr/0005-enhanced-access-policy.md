@@ -84,3 +84,11 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - ADR 0004 的阶梯、身份自洽、"换 IP ≠ 换身份"、挑战页不算成功，全部保留。
 - 对外可以说：默认不求解、不伪装；有明确授权和预算时可以，并且记录在案。不可以说的仍按 0004。
 - 每次使用需 grant 的能力都要写进记录（Evidence Record 的 `access` 块，在后续工作组加入）。
+
+## 修订 2026-10-11：厂商住宅代理进入 grant（ROADMAP PA item 4）
+
+- 第 3 类新增 `vendor_residential_proxy`（最低档位 enhanced，有第三方费用）：厂商自己的住宅代理池（Steel 的 `useProxy`，按 GB 计费）。`VENDOR_CAPABILITY_ACCESS` 把厂商能力 `residential_proxy` 映射到它；运营键里的 `residential_proxy` 随之去掉，只剩 `session_persistence`、`live_view_handoff`、`retry_orchestration` 三个。写旧键不再开启任何东西，决定里记为 `unknown`。
+- 价目表（`VendorTariff`）加 `perGbUsd` 与 `maxBytesPerCall`、`perSolveUsd` 与 `maxSolvesPerCall`，有单价必须有上限，取代此前对按 GB 计价的一律拒绝；grant 列了 `vendor_residential_proxy` 或 `vendor_captcha_solving` 时，它命名的每个价目表都必须写明对应单价（套餐已含则写 0），否则 grant 被拒绝。字节上限由本方在页面上按 CDP 计数执行，结算按厂商释放后报告的数字（Steel 的 `proxyBytesUsed`，代理侧双向计量）；超出上限按实收并在记录里标 `overCeiling`。求解次数厂商侧封不住，同样按报告数结算、超出标记。
+- Steel 的请求体从此始终显式写 `useProxy`：有 grant 时 `{ geolocation: { country } }`，否则 `false`。「本 ADR 合入时的边界」里"没有 grant 时请求体与 `a48c9c4` 逐字相同"一句自此不再成立，差别只有这一个字段；Browserbase 不变。
+- 每次付费调用的记录（`access.paidCalls[]`）加 `proxyBytes`、`solves`、`proxyCountry`。
+

@@ -213,12 +213,19 @@ function paidCalls(trace: readonly TraceEvent[]): { calls: EvidencePaidCall[] | 
   for (const event of trace) {
     if (event.event !== 'paid_calls') continue
     for (const call of Array.isArray(event.detail?.calls) ? (event.detail.calls as Record<string, unknown>[]) : []) {
-      const { provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, sessionMs, outcome, reason, answer } = call
+      const { provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, sessionMs, proxyBytes, solves, proxyCountry, outcome, reason, answer } = call
       if (!text(provider) || !text(rung) || !Array.isArray(capabilities) || !capabilities.every(text) || !usd(ceilingUsd) || !usd(chargedUsd)) continue
       if (!(reportedCostUsd === null || usd(reportedCostUsd)) || !(outcome === null || (RESULT_STATUS as readonly unknown[]).includes(outcome)) || !(reason === null || text(reason)) || typeof answer !== 'boolean') continue
       // A measured session time is a whole number of milliseconds; anything else (a trace from before it was kept) is null.
-      const measured = typeof sessionMs === 'number' && Number.isInteger(sessionMs) && sessionMs >= 0 ? sessionMs : null
-      calls.push({ provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, sessionMs: measured, outcome: outcome as EvidencePaidCall['outcome'], reason: reason as EvidencePaidCall['reason'], answer })
+      const count = (value: unknown): number | null => typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
+      const measured = count(sessionMs)
+      // What the provider reported the sessions used (bytes through its proxy, solves) and the country its proxy was asked for: on the record only when the call carried them.
+      const used = {
+        ...(proxyBytes === undefined ? {} : { proxyBytes: count(proxyBytes) }),
+        ...(solves === undefined ? {} : { solves: count(solves) }),
+        ...(proxyCountry === undefined ? {} : { proxyCountry: typeof proxyCountry === 'string' && /^[A-Z]{2}$/.test(proxyCountry) ? proxyCountry : null }),
+      }
+      calls.push({ provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, sessionMs: measured, ...used, outcome: outcome as EvidencePaidCall['outcome'], reason: reason as EvidencePaidCall['reason'], answer })
     }
     const named = event.detail?.grant as Record<string, unknown> | null | undefined
     if (named != null && text(named.tier) && (named.sha256 === null || (typeof named.sha256 === 'string' && /^[0-9a-f]{64}$/.test(named.sha256))) && (named.attestedAt === null || text(named.attestedAt))) {

@@ -80,20 +80,14 @@ describe('capability refusal', () => {
     expect(verdict.refusedCapabilities).toEqual(['identity_rotation'])
   })
 
-  it('allows the route-changing capabilities', () => {
-    const verdict = evaluateProviderGate(
-      provider({
-        capabilities: [
-          'headless_browser',
-          'datacenter_proxy',
-          'residential_proxy',
-          'retry_orchestration',
-        ],
-      }),
-      AMAZON_SHAPED,
-      '/dp/B0TEST',
-    )
+  it('allows the route-changing capabilities, the residential proxy under its grant', () => {
+    const capabilities = ['headless_browser', 'datacenter_proxy', 'residential_proxy', 'retry_orchestration'] as const
+    const verdict = evaluateProviderGate(provider({ capabilities: [...capabilities], grants: ['vendor_residential_proxy'] }), AMAZON_SHAPED, '/dp/B0TEST')
     expect(verdict.allowed).toBe(true)
+    // The provider's residential pool bills bandwidth (ROADMAP PA item 4): without the grant it is refused like solving.
+    const ungranted = evaluateProviderGate(provider({ capabilities: [...capabilities] }), AMAZON_SHAPED, '/dp/B0TEST')
+    expect(ungranted.refusal).toBe('ungranted_capability')
+    expect(ungranted.refusedCapabilities).toEqual(['residential_proxy'])
   })
 
   it('refuses on capability even where robots would have allowed the path', () => {
