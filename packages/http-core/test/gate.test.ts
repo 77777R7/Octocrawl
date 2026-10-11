@@ -195,8 +195,13 @@ ${'<script>window.__app = "' + 'x'.repeat(70_000) + '"</script>'}${extra}</body>
     expect(classifyGate(res({ body: page(overlay('interstitial')), contentful: true }))).toEqual({ reason: 'bot_detected_generic', signals: ['datadome_interstitial'] })
   })
 
-  it('names its captcha variant a captcha', () => {
+  it('names its captcha variant a captcha, from another subdomain of captcha-delivery.com too', () => {
     expect(classifyGate(res({ body: page(overlay('captcha')), contentful: true }))).toEqual({ reason: 'captcha', signals: ['datadome_captcha'] })
+    const ct = page(overlay('captcha').replace('https://geo.captcha-delivery.com', 'https://ct.captcha-delivery.com'))
+    expect(classifyGate(res({ body: ct, contentful: true }))).toEqual({ reason: 'captcha', signals: ['datadome_captcha'] })
+    // Another host that only ends in the name is not DataDome's.
+    const lookalike = page(overlay('captcha').replace('https://geo.captcha-delivery.com', 'https://geo.notcaptcha-delivery.com'))
+    expect(classifyGate(res({ body: lookalike, contentful: true }))).toBeNull()
   })
 
   it('leaves a page that only loads DataDome\'s tag as content', () => {
