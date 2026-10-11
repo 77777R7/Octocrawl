@@ -47,4 +47,30 @@ describe('htmlToTables', () => {
     // Twice the depth takes about twice the time; it took four times as long when each table measured all it holds.
     expect(largeBest / smallBest).toBeLessThan(3)
   })
+
+  it('reads a grid drawn with ARIA roles in about the time of the same page without the roles, however deep its rows nest or wide it is', () => {
+    // Rows nested in cells, 4,000 deep; and a grid of 20 rows and 4,000 columns, each cell with its aria-colindex.
+    const deep = (n: number) => `<div role="grid">${'<div role="row"><div role="gridcell">x'.repeat(n)}${'</div></div>'.repeat(n)}<div role="row"><div role="gridcell">y</div></div></div>`
+    const wide = (n: number) => `<div role="grid">${Array.from({ length: 20 }, (_, r) => `<div role="row" aria-rowindex="${r + 1}">${Array.from({ length: n }, (_, c) => `<div role="gridcell" aria-colindex="${c + 1}">${r}.${c}</div>`).join('')}</div>`).join('')}</div>`
+    const run = (html: string): number => {
+      const started = performance.now()
+      htmlToMarkdown(html)
+      return performance.now() - started
+    }
+    expect(htmlToTables(wide(3)).map((table) => table.rows[1])).toEqual([['1.0', '1.1', '1.2']])
+    for (const shape of [deep, wide]) {
+      const grid = shape(4_000)
+      // The reference: the same page, its roles taken away, converted at the same moments.
+      const plain = grid.replace(/ role="[a-z]+"/g, '')
+      run(shape(200))
+      let gridBest = Infinity
+      let plainBest = Infinity
+      for (let i = 0; i < 3; i++) {
+        gridBest = Math.min(gridBest, run(grid))
+        plainBest = Math.min(plainBest, run(plain))
+      }
+      // Each row searching its whole subtree, or each column every cell of its row, took ten times the reference or more.
+      expect(gridBest / plainBest, shape.name).toBeLessThan(3)
+    }
+  })
 })

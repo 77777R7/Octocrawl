@@ -505,3 +505,64 @@ describe('htmlToTables', () => {
     expect(htmlToTables(html).map((table) => table.rows)).toEqual([[['a', 'b'], ['c', 'd']]])
   })
 })
+
+describe('a data grid drawn with ARIA roles', () => {
+  // As AG Grid draws Eurostat's data browser (T055): the pinned first column and the scrolled ones in their own containers,
+  // each with its own header rows, put back together by aria-rowindex and aria-colindex.
+  const cell = (role: string, col: number, text: string) => `<div role="${role}" aria-colindex="${col}"><span>${text}</span></div>`
+  const row = (index: number, cells: string) => `<div role="row" aria-rowindex="${index}">${cells}</div>`
+  const AG_GRID = '<main><h1>Population on 1 January</h1><div role="treegrid" aria-rowcount="4" aria-colcount="3">' +
+    `<div role="presentation" class="ag-pinned-left-header">${row(1, cell('columnheader', 1, 'GEO'))}</div>` +
+    `<div role="presentation" class="ag-header-container">${row(1, cell('columnheader', 2, '2025') + cell('columnheader', 3, '2026'))}</div>` +
+    `<div role="rowgroup" class="ag-pinned-left-cols-container">${row(2, cell('gridcell', 1, 'Belgium'))}${row(3, cell('gridcell', 1, '<a href="/bg">Bulgaria</a>'))}</div>` +
+    `<div role="rowgroup" class="ag-center-cols-container">${row(3, cell('gridcell', 2, '6 437 360') + cell('gridcell', 3, '6 423 207'))}${row(2, cell('gridcell', 2, '11 883 495') + cell('gridcell', 3, '11 955 308 (p)'))}</div>` +
+    '</div></main>'
+
+  it('is read as the table it shows, a row split across containers put back together', () => {
+    const markdown = htmlToMarkdown(AG_GRID, { baseUrl: 'https://x.example/' })
+    expect(gfmTables(markdown)).toBe(1)
+    expect(markdown).toContain('| GEO | 2025 | 2026 |')
+    expect(markdown).toContain('| Belgium | 11 883 495 | 11 955 308 (p) |')
+    expect(markdown).toContain('| [Bulgaria](https://x.example/bg) | 6 437 360 | 6 423 207 |')
+    expect(htmlToTables(AG_GRID).map((table) => [table.headerRows, table.rows])).toEqual([[1, [['GEO', '2025', '2026'], ['Belgium', '11 883 495', '11 955 308 (p)'], ['Bulgaria', '6 437 360', '6 423 207']]]])
+  })
+
+  it('reads one without indexes in document order, and leaves alone one of a single row, one with no text and one inside a table', () => {
+    const plain = '<div role="table"><div role="row"><span role="columnheader">Station</span><span role="columnheader">Height</span></div>' +
+      '<div role="row"><span role="cell">Pier</span><span role="cell">4.2</span></div><div role="row"><span role="cell">Quay</span></div></div>'
+    expect(htmlToTables(plain).map((table) => table.rows)).toEqual([[['Station', 'Height'], ['Pier', '4.2'], ['Quay', '']]])
+    const single = '<div role="grid"><div role="row"><div role="gridcell">Only</div><div role="gridcell">row</div></div></div>'
+    const empty = '<div role="grid"><div role="row"><div role="gridcell"> </div></div><div role="row"><div role="gridcell"></div></div></div>'
+    expect(gfmTables(htmlToMarkdown(single + empty))).toBe(0)
+    expect(htmlToMarkdown(single)).toContain('Only')
+    // A grid inside a table's cell is that cell's content, as a table inside a table is.
+    const inTable = `<table><tr><th>Name</th><th>Data</th></tr><tr><td>Pier</td><td>${plain}</td></tr></table>`
+    expect(htmlToTables(inTable).map((table) => table.rows.length)).toEqual([2])
+  })
+
+  it('keeps what each cell is: a link its address, a control and a hidden part still not content', () => {
+    const days = '<div role="grid"><div role="row"><a role="gridcell" href="/e/1">1</a><a role="gridcell" href="/e/2">2</a></div><div role="row"><a role="gridcell" href="/e/8">8</a><a role="gridcell" href="/e/9">9</a></div></div>'
+    expect(htmlToMarkdown(days, { baseUrl: 'https://x.example/' })).toContain('| [1](https://x.example/e/1) | [2](https://x.example/e/2) |')
+    // A toolbar or a date picker's buttons, in cells or as cells: no table of controls.
+    const toolbar = '<div role="grid"><div role="row"><button role="gridcell">Bold</button><button role="gridcell">Italic</button></div><div role="row"><button role="gridcell">Undo</button><button role="gridcell">Redo</button></div></div>'
+    const wrapped = '<div role="grid"><div role="row"><div role="gridcell"><button>Bold</button></div><div role="gridcell"><button>Italic</button></div></div><div role="row"><div role="gridcell"><button>Undo</button></div><div role="gridcell"><select><option>x</option></select></div></div></div>'
+    expect(htmlToMarkdown(toolbar + wrapped)).not.toMatch(/Bold|Italic|Undo|\|/)
+    // A date picker: day names over buttons. No table of empty rows for a task's minTables to find.
+    const picker = '<div role="grid"><div role="row"><span role="columnheader">S</span><span role="columnheader">M</span></div><div role="row"><button role="gridcell">1</button><button role="gridcell">2</button></div><div role="row"><button role="gridcell">8</button><button role="gridcell">9</button></div></div>'
+    expect(htmlToTables(picker)).toEqual([])
+    expect(gfmTables(htmlToMarkdown(picker))).toBe(0)
+    // A cell, a row or a grid the page hides (the capture's marker) stays hidden.
+    const marked = '<div role="table"><div role="row"><span role="cell" data-w2l-hidden="">0001</span><span role="cell">Pier</span></div><div role="row" data-w2l-hidden=""><span role="cell">Gone</span><span role="cell">row</span></div><div role="row"><span role="cell" data-w2l-hidden="">0002</span><span role="cell">Quay</span></div></div>'
+    const markdown = htmlToMarkdown(marked + '<div role="grid" data-w2l-hidden=""><div role="row"><div role="gridcell">Hidden</div></div><div role="row"><div role="gridcell">grid</div></div></div>')
+    expect(markdown).toContain('Pier')
+    expect(markdown).not.toMatch(/0001|0002|Gone|Hidden/)
+    // A row that is a link: the grid stays as it is, and the link with it.
+    expect(htmlToMarkdown('<div role="grid"><a role="row" href="/i/1"><span role="gridcell">Issue one</span></a><a role="row" href="/i/2"><span role="gridcell">Issue two</span></a></div>', { baseUrl: 'https://x.example/' })).toContain('(https://x.example/i/1)')
+  })
+
+  it('leaves a table inside a cell to that cell, its rows not taken for the grid\'s', () => {
+    const html = '<div role="grid"><div role="row"><div role="columnheader">Name</div><div role="columnheader">Detail</div></div>' +
+      '<div role="row"><div role="gridcell">Pier</div><div role="gridcell"><table><tr role="row"><td role="cell">len</td><td role="cell">4.2</td></tr><tr role="row"><td role="cell">wid</td><td role="cell">1.1</td></tr></table></div></div></div>'
+    expect(htmlToTables(html).map((table) => table.rows)).toEqual([[['Name', 'Detail'], ['Pier', 'len 4.2 wid 1.1']]])
+  })
+})

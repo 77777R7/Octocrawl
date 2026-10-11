@@ -131,7 +131,9 @@ export function regionViewExpression(list?: RegionSpec['list'], maxRecords = MIN
     const text = body === null ? '' : (body.innerText ?? '')
     let tableCount = 0
     for (const table of document.querySelectorAll('table')) if (table.rows.length >= 2 && shown(table)) tableCount++
-    for (const grid of document.querySelectorAll('[role="table"], [role="grid"]')) if (grid.tagName !== 'TABLE' && grid.querySelectorAll('[role="row"]').length >= 2 && shown(grid)) tableCount++
+    // A grid drawn with ARIA roles (AG Grid's treegrid), as the extractor reads it: the outermost one, not one inside a table or another grid.
+    const GRIDS = '[role="table"], [role="grid"], [role="treegrid"]'
+    for (const grid of document.querySelectorAll(GRIDS)) if (grid.tagName !== 'TABLE' && grid.parentElement?.closest('table, ' + GRIDS) == null && grid.querySelectorAll('[role="row"]').length >= 2 && shown(grid)) tableCount++
     const view = { loading: ${LOADING_PROBE}, text: text.length, tableCount }${withHtml ? `
     // The page's HTML for the Markdown checks, not sent past MAX_VIEW_HTML: those checks are then not judged.
     const html = document.documentElement ? document.documentElement.outerHTML : ''

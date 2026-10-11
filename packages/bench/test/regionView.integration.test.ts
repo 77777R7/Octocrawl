@@ -20,6 +20,7 @@ const HTML = `<!doctype html><html><head><base href="https://cdn.shop.test/base/
 <table style="display: none"><tr><th>Hidden</th></tr><tr><td>table</td></tr></table>
 <table><tr><th>Name</th></tr><tr><td>Shown</td></tr></table>
 <div role="grid"><div role="row">a</div><div role="row">b</div></div>
+<div role="treegrid"><div role="row"><div role="gridcell">GEO</div></div><div role="row"><div role="gridcell"><div role="grid"><div role="row">inner</div><div role="row">grid</div></div><div role="grid"><div role="row">second</div><div role="row">grid</div></div></div></div></div>
 </body></html>`
 
 let browser: Browser
@@ -52,7 +53,8 @@ describe('the region view of the live page (ADR 0007, ROADMAP PA item 11)', () =
 
   it('counts the tables a page shows of two rows or more, and reads no more records than it is asked for', async () => {
     const live = await view({ itemSelector: 'li.it', fields: [{ name: 'name', selector: 'a' }] }, 2)
-    expect(live.tableCount).toBe(2)
+    // The table shown, the grid, and the treegrid (AG Grid's role, as Eurostat's data browser draws it); not the grids inside it.
+    expect(live.tableCount).toBe(3)
     expect(live.list?.records).toHaveLength(2)
     expect(live.html).toBeUndefined()
     // With the HTML, for the Markdown checks: the whole document, and the address it resolves against.
@@ -65,6 +67,6 @@ describe('the region view of the live page (ADR 0007, ROADMAP PA item 11)', () =
     const live = await view({ itemSelector: 'li[data-x!="none"]', fields: [{ name: 'name' }] })
     expect(live.error).toBeUndefined()
     expect(live.list).toBeUndefined()
-    expect(live.tableCount).toBe(2)
+    expect(live.tableCount).toBe(3)
   })
 })
