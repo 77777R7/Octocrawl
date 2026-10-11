@@ -170,6 +170,9 @@ export interface AuthOptions {
   secret: string
   log?: Logger
   now?: () => Date
+  /** The site's page for an email link (apps/public-web builds /signin/email/), with the form going between its
+   * `<!--w2l:email-finish-->` markers; null, or no markers, gives a plain page. */
+  emailFinishPage?: () => Promise<string | null>
 }
 
 export const SESSION_COOKIE = 'w2l_session'
@@ -287,8 +290,10 @@ export function createAuthRoutes(options: AuthOptions) {
   /** `visitor` is the caller's network address (behind the Worker, CF-Connecting-IP), never a cookie a caller can mint. */
   async function handle(req: IncomingMessage, res: ServerResponse, url: URL, origin: string, sameOrigin: boolean, visitor: string): Promise<boolean> {
     const path = url.pathname
-    const fail = (code: SignInError, provider: string) => {
-      log({ event: 'w2l_auth', step: 'sign_in', provider, outcome: code })
+    const fail = (code: SignInError, provider: string, error?: unknown) => {
+      // Firebase's own message says why (a wrong client secret reads INVALID_IDP_RESPONSE); any email address in it is cut.
+      const reason = error instanceof Error ? error.message.replace(/[^\s@]+@[^\s@]+/g, '<email>').slice(0, 200) : undefined
+      log({ event: 'w2l_auth', step: 'sign_in', provider, outcome: code, ...(reason === undefined ? {} : { reason }) })
       res.writeHead(303, { ...NO_STORE, location: `/signin/?error=${code}` }).end()
     }
 
@@ -318,7 +323,7 @@ export function createAuthRoutes(options: AuthOptions) {
         res.writeHead(303, { ...NO_STORE, location: safeNext(state.n) }).end()
       } catch (error) {
         res.setHeader('set-cookie', clearOauth)
-        fail(error instanceof SignInRefused ? error.code : 'unavailable', state.p)
+        fail(error instanceof SignInRefused ? error.code : 'unavailable', state.p, error)
       }
       return true
     }
@@ -350,11 +355,15 @@ export function createAuthRoutes(options: AuthOptions) {
         const code = url.searchParams.get('oobCode') ?? ''
         if (!/^[A-Za-z0-9_-]{10,400}$/.test(code)) { res.writeHead(303, { ...NO_STORE, location: '/signin/?error=invalid' }).end(); return true }
         // Opening the link signs no one in: a mail scanner that follows it would use the code up. The button does.
+        // Another browser has no record of the address: the visitor types it, as Firebase checks the two belong together.
         const emailField = rememberedEmail === null
-          ? '<p>Enter the email address the link was sent to.</p><p><label>Email <input type="email" name="email" required autocomplete="email"></label></p>'
-          : `<p>Sign in as <strong>${escape(rememberedEmail)}</strong>.</p><input type="hidden" name="email" value="${escape(rememberedEmail)}">`
-        res.writeHead(200, { ...NO_STORE, 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'self'; style-src 'self'; script-src 'none'; form-action 'self'; frame-ancestors 'none'" })
-          .end(page('Sign in to Octocrawl', `<form method="post" action="/auth/email/finish">${emailField}<input type="hidden" name="oobCode" value="${escape(code)}"><p><button type="submit">Sign in</button></p></form>`))
+          ? '<label for="finish-email">The email address the link was sent to<input id="finish-email" type="email" name="email" required autocomplete="email" maxlength="254"></label>'
+          : `<p>Signing in as <strong>${escape(rememberedEmail)}</strong></p><input type="hidden" name="email" value="${escape(rememberedEmail)}">`
+        const form = `<form class="account-form" method="post" action="/auth/email/finish">${emailField}<input type="hidden" name="oobCode" value="${escape(code)}"><button class="account-button" type="submit">Continue to your account</button></form>`
+        const site = await options.emailFinishPage?.().catch(() => null) ?? null
+        const marked = site?.match(/<!--w2l:email-finish-->[\s\S]*?<!--\/w2l:email-finish-->/)
+        res.writeHead(200, { ...NO_STORE, 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'none'" })
+          .end(site && marked ? site.replace(marked[0], () => form) : page('Finish signing in', form))
         return true
       }
       if (req.method !== 'POST') { res.writeHead(405, { allow: 'GET, POST' }).end(); return true }
@@ -369,7 +378,7 @@ export function createAuthRoutes(options: AuthOptions) {
         await startSession(res, origin, user, [cookie(origin, EMAIL_COOKIE, '', '/auth/email', 0)])
         log({ event: 'w2l_auth', step: 'sign_in', provider: 'emailLink', outcome: 'ok' })
         res.writeHead(303, { ...NO_STORE, location: '/account/' }).end()
-      } catch (error) { fail(error instanceof SignInRefused ? error.code : 'unavailable', 'emailLink') }
+      } catch (error) { fail(error instanceof SignInRefused ? error.code : 'unavailable', 'emailLink', error) }
       return true
     }
 
