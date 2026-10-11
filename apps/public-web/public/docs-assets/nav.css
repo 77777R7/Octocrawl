@@ -38,8 +38,6 @@
 .account-link { display: inline-flex; white-space: nowrap; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 10px; color: #fff; font-size: 13px; font-weight: 650; text-decoration: none; }
 .account-link:hover { color: #ffae86; }
 .github-link svg { width: 17px; height: 17px; flex: none; }
-.header-actions .try-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px; border-radius: 10px; color: #081b42; background: #f3683d; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; }
-.header-actions .try-link:hover { background: #ff9365; }
 .nav-toggle { display: none; }
 
 /* Phones and narrow windows: a Menu button opens the navigation as a sheet under the header, menus as sections. It is
@@ -67,9 +65,6 @@
 @media (max-width: 600px) {
   .github-link { width: 44px; padding: 0; justify-content: center; }
   .github-label, .github-link .card-arrow { display: none; }
-}
-@media (max-width: 420px) {
-  .header-actions .try-link { display: none; }
 }
 /* Opening prints the menu like a terminal: the card appears a text line at a time (20 steps, about one line each,
    one step every 15 ms so it never reads as dropped frames) under a dotted print head, its entries appear one after
