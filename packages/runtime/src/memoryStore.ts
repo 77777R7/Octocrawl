@@ -1,5 +1,5 @@
 import type { Attempt, ListPageRead, StepRecord, StepStatus, Task } from '@w2l/contracts'
-import { assertId, cloneJson, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore } from './taskStore.js'
+import { assertId, cloneJson, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore, type VerificationCounts, VERIFICATION_COUNTED_STATUSES } from './taskStore.js'
 
 /**
  * In-memory TaskStore for tests and the benchmark harness (ADR 0003).
@@ -93,6 +93,17 @@ export class MemoryTaskStore implements TaskStore {
       if (step.taskId === taskId && (attemptId === undefined || step.attemptId === attemptId)) counts[step.status] = (counts[step.status] ?? 0) + 1
     }
     return counts
+  }
+
+  async countVerifications(taskId: string, attemptId?: string): Promise<VerificationCounts> {
+    let verified = 0
+    let verificationFailed = 0
+    for (const step of this.steps.values()) {
+      if (step.taskId !== taskId || (attemptId !== undefined && step.attemptId !== attemptId) || !VERIFICATION_COUNTED_STATUSES.includes(step.status)) continue
+      if (step.result?.verification?.status === 'passed') verified++
+      else verificationFailed++
+    }
+    return { verified, verificationFailed }
   }
 
   async countBlockReasons(taskId: string): Promise<Record<string, number>> {

@@ -58,6 +58,11 @@ export interface RoutingHistory {
 
 export interface VendorOutcome {
   contentful: boolean
+  /**
+   * Whether the page did the request's task (ADR 0006): null or absent without a task contract, or when it could not
+   * be judged yet. When known it, not `contentful`, is what the vendor's success rate counts.
+   */
+  verified?: boolean | null
   wallMs: number
   /** Null when the vendor did not state the cost. */
   costUsd: number | null
@@ -86,7 +91,7 @@ const MAX_LATENCY_SAMPLES = 200
  *  cannot drift apart. */
 function applyOutcome(entry: VendorHistoryEntry, outcome: VendorOutcome): void {
   entry.attempts += 1
-  if (outcome.contentful) entry.contentful += 1
+  if (outcome.verified ?? outcome.contentful) entry.contentful += 1
   entry.latencyTotalMs += outcome.wallMs
   entry.latencySamplesMs.push(outcome.wallMs)
   if (entry.latencySamplesMs.length > MAX_LATENCY_SAMPLES) {

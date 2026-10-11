@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
 import type { Attempt, AttemptStatus, CrawlBudget, CrawlMode, FetchResult, Lane, LadderRunAudit, ListPageRead, StepRecord, StepStatus, Task, TaskStatus } from '@w2l/contracts'
-import { assertId, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore } from './taskStore.js'
+import { assertId, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore, type VerificationCounts, VERIFICATION_COUNTED_STATUSES } from './taskStore.js'
 
 export const CHECKPOINT_FILENAME = 'checkpoint.sqlite'
 
@@ -355,6 +355,13 @@ export class SqliteTaskStore implements TaskStore {
       .prepare(`SELECT status, COUNT(*) AS count FROM steps WHERE task_id = ?${attemptId === undefined ? '' : ' AND attempt_id = ?'} GROUP BY status`)
       .all(taskId, ...(attemptId === undefined ? [] : [attemptId])) as Array<{ status: StepStatus; count: number }>
     return Object.fromEntries(rows.map((row) => [row.status, row.count]))
+  }
+
+  async countVerifications(taskId: string, attemptId?: string): Promise<VerificationCounts> {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS counted, COALESCE(SUM(CASE WHEN json_extract(result_json, '$.verification.status') = 'passed' THEN 1 ELSE 0 END), 0) AS verified FROM steps WHERE task_id = ?${attemptId === undefined ? '' : ' AND attempt_id = ?'} AND status IN (${VERIFICATION_COUNTED_STATUSES.map(() => '?').join(', ')})`)
+      .get(taskId, ...(attemptId === undefined ? [] : [attemptId]), ...VERIFICATION_COUNTED_STATUSES) as { counted: number; verified: number }
+    return { verified: row.verified, verificationFailed: row.counted - row.verified }
   }
 
   async countBlockReasons(taskId: string): Promise<Record<string, number>> {
