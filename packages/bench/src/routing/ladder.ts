@@ -576,8 +576,11 @@ export class LadderRunner {
         // A recorded robots override is the caller's decision for a fetch
         // from this machine, and the provider rung takes none. A run that set
         // a rule aside ends at its local rungs: no vendor session is opened
-        // for that URL, and no vendor refusal replaces the local answer.
-        if (channel.vendorId !== undefined && robotsOverrides.length > 0) {
+        // for that URL, and no vendor refusal replaces the local answer. One
+        // that set aside only a robots.txt that could not be read goes on: the
+        // provider reads robots.txt itself before it opens a session, and
+        // refuses, at no cost, if it still cannot read it or it disallows.
+        if (channel.vendorId !== undefined && robotsOverrides.some(setAsideARule)) {
           ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: channel.id, detail: { vendorId: channel.vendorId, reason: 'a local rung set a robots.txt rule aside under a recorded robots override; a vendor rung takes no override' } })
           continue
         }
@@ -601,6 +604,12 @@ export class LadderRunner {
         if (fetched === null) continue
         const result = fetched
         attempts.push(attemptOf(channel, channel.id, result, attempts.length + 1, startedAt))
+        // A vendor rung the run reached after setting aside only an unreadable robots.txt read it itself, and refused the
+        // URL under it before opening a session: that refusal is not the answer, the earlier rung's stands.
+        if (channel.vendorId !== undefined && last !== null && robotsOverrides.length > 0 && refusedUnderRobots(result)) {
+          ladderTrace.push({ at: 0, event: 'ladder_vendor_refused', channel: channel.id, detail: { vendorId: channel.vendorId, reason: 'the vendor rung refused the URL under robots.txt before it opened a session; the earlier answer stands' } })
+          continue
+        }
         // Every rung's page is judged against the task contract, the answer's and the others' alike (ADR 0006).
         const checked = contractVerdict(this.options.verify, result)
         if (checked !== null) ladderTrace.push(verificationCheckedEvent(channel, result, checked))
@@ -1125,6 +1134,17 @@ export class LadderRunner {
       trace: [{ at: 0, lane: 'http', event: 'wait_for_unavailable', detail: { reason, waitFor, skipped } }],
     }
   }
+}
+
+/** Whether a provider refused the URL under robots.txt (a rule, or a robots.txt it could not read) before it called the provider. */
+function refusedUnderRobots(result: FetchResult): boolean {
+  return result.status === 'failed' && result.failureReason === 'policy_denied'
+    && result.trace.some((event) => event.event === 'provider_refused' && (event.detail?.refusal === 'robots_disallowed' || event.detail?.refusal === 'robots_unreachable'))
+}
+
+/** Whether an applied override set aside a rule the publisher wrote, not only a robots.txt that could not be read (its `unreachable`). */
+function setAsideARule(applied: RobotsOverrideApplied): boolean {
+  return applied.trace.some((event) => event.event === 'robots_overridden' && event.detail?.unreachable === undefined)
 }
 
 /**
