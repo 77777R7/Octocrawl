@@ -251,9 +251,9 @@ function unseal(secret: string, value: string | null): string | null {
 }
 export function sessionHash(secret: string, id: string): string { return createHmac('sha256', secret).update(`session:${id}`).digest('hex') }
 
-/** A path on this site to come back to; anything else (another host, `//host`, a backslash) is the account page. */
+/** A path on this site to come back to; anything else (another host, `//host`, a backslash) is the dashboard. */
 export function safeNext(value: string | null | undefined): string {
-  return typeof value === 'string' && /^\/(?![/\\])[\x21-\x5b\x5d-\x7e]{0,300}$/.test(value) ? value : '/account/'
+  return typeof value === 'string' && /^\/(?![/\\])[\x21-\x5b\x5d-\x7e]{0,300}$/.test(value) ? value : '/dashboard/'
 }
 
 function cookie(origin: string, name: string, value: string, path: string, maxAgeSeconds: number): string {
@@ -384,7 +384,7 @@ export function createAuthRoutes(options: AuthOptions) {
         const user = await linkWaiting(req, origin, await options.identity.signInWithIdp(`${origin}${path}${url.search}`, state.s))
         await startSession(res, origin, user, [clearOauth, cookie(origin, LINK_COOKIE, '', '/', 0)])
         log({ event: 'w2l_auth', step: 'sign_in', provider: user.provider, outcome: 'ok' })
-        res.writeHead(303, { ...NO_STORE, location: user.linked ? `/account/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : safeNext(state.n) }).end()
+        res.writeHead(303, { ...NO_STORE, location: user.linked ? `/dashboard/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : safeNext(state.n) }).end()
       } catch (error) {
         if (error instanceof SignInRefused && error.pending) {
           // Kept until the visitor signs in the way they did before; the page says so.
@@ -449,7 +449,7 @@ export function createAuthRoutes(options: AuthOptions) {
         const user = await linkWaiting(req, origin, await options.identity.signInWithEmailLink(email, code))
         await startSession(res, origin, user, [cookie(origin, EMAIL_COOKIE, '', '/auth/email', 0), cookie(origin, LINK_COOKIE, '', '/', 0)])
         log({ event: 'w2l_auth', step: 'sign_in', provider: 'emailLink', outcome: 'ok' })
-        res.writeHead(303, { ...NO_STORE, location: user.linked ? `/account/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : '/account/' }).end()
+        res.writeHead(303, { ...NO_STORE, location: user.linked ? `/dashboard/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : '/dashboard/' }).end()
       } catch (error) { fail(error instanceof SignInRefused ? error.code : 'unavailable', 'emailLink', error) }
       return true
     }

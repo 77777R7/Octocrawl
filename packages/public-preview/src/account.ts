@@ -1,11 +1,12 @@
 /**
- * The account page's data (ROADMAP PH, decided 2026-10-11): what a signed-in person has left this month, what they
- * used, and their API keys. It reads and writes the collections the hosted API keeps (packages/mcp/src/hostedApi.ts and
- * hostedCredits.ts): `credits/{uid}`, `creditUsage/{uid}-{day}` and `hostedApiKeys/{hmac}`. A key is made here the way
+ * The dashboard's data (ROADMAP PH, decided 2026-10-11): what a signed-in person has left this month, what they used,
+ * their API keys and the ways they sign in. It reads and writes the collections the hosted API keeps
+ * (packages/mcp/src/hostedApi.ts and hostedCredits.ts): `credits/{uid}`, `creditUsage/{uid}-{day}` and
+ * `hostedApiKeys/{hmac}`, and reads `users/{uid}`, which sign-in keeps (auth.ts). A key is made here the way
  * scripts/hosted/issue-key.mjs makes one: `oc_` and 32 random bytes, shown once, stored only as its HMAC under
  * W2L_QUOTA_HASH_KEY, with the account's uid so its calls spend the account's credits.
  *
- *   GET  /api/account                     { email, credits, usage, keys }
+ *   GET  /api/account                     { email, providers, credits, usage, keys }
  *   POST /api/account/keys                { label? }  →  { key, id }   (the key, once)
  *   POST /api/account/keys/{id}/revoke    the key stops within a minute (the hosted API caches lookups that long)
  */
@@ -28,6 +29,8 @@ export interface AccountData {
   balance(uid: string): Promise<Balance | null>
   usage(uid: string, since: string): Promise<UsageDay[]>
   keys(uid: string): Promise<KeyView[]>
+  /** The ways the account has signed in (`google.com`, `github.com`, `emailLink`), as sign-in recorded them. */
+  providers(uid: string): Promise<string[]>
   createKey(uid: string, digest: string, record: { label: string; prefix: string; createdAt: string }): Promise<void>
   /** Disables the key if it belongs to the account; false when it does not, or does not exist. */
   revokeKey(uid: string, id: string): Promise<boolean>
@@ -37,11 +40,13 @@ export class MemoryAccountData implements AccountData {
   readonly balances = new Map<string, Balance>()
   readonly usageDays = new Map<string, UsageDay & { uid: string }>()
   readonly keyRecords = new Map<string, KeyView & { uid: string }>()
+  readonly signInMethods = new Map<string, string[]>()
   async balance(uid: string) { return this.balances.get(uid) ?? null }
   async usage(uid: string, since: string) {
     return [...this.usageDays.values()].filter(day => day.uid === uid && day.day >= since).map(({ uid: _uid, ...day }) => day).sort((a, b) => a.day.localeCompare(b.day))
   }
   async keys(uid: string) { return [...this.keyRecords.values()].filter(key => key.uid === uid).map(({ uid: _uid, ...key }) => key) }
+  async providers(uid: string) { return this.signInMethods.get(uid) ?? [] }
   async createKey(uid: string, digest: string, record: { label: string; prefix: string; createdAt: string }) {
     this.keyRecords.set(digest, { id: digest, uid, enabled: true, ...record })
   }
@@ -53,7 +58,7 @@ export class MemoryAccountData implements AccountData {
   }
 }
 
-type Value = { stringValue?: string; integerValue?: string; booleanValue?: boolean; timestampValue?: string }
+type Value = { stringValue?: string; integerValue?: string; booleanValue?: boolean; timestampValue?: string; arrayValue?: { values?: Value[] } }
 interface Doc { name: string; fields?: Record<string, Value> }
 
 export class FirestoreAccountData implements AccountData {
@@ -96,6 +101,13 @@ export class FirestoreAccountData implements AccountData {
       id: doc.name.split('/').pop()!, label: doc.fields?.label?.stringValue ?? '', prefix: doc.fields?.prefix?.stringValue ?? '',
       createdAt: doc.fields?.createdAt?.timestampValue ?? '', enabled: doc.fields?.enabled?.booleanValue === true,
     })).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }
+  async providers(uid: string): Promise<string[]> {
+    const response = await this.request(`${this.resource}/users/${uid}`)
+    if (response.status === 404) return []
+    if (!response.ok) throw new Error(`users read failed (${response.status})`)
+    const doc = await response.json() as Doc
+    return (doc.fields?.providers?.arrayValue?.values ?? []).flatMap(value => typeof value.stringValue === 'string' ? [value.stringValue] : [])
   }
   async createKey(uid: string, digest: string, record: { label: string; prefix: string; createdAt: string }) {
     // The fields the hosted API reads (FirestoreHostedKeys), the account's uid, and a prefix to tell keys apart by.
@@ -162,12 +174,13 @@ export function createAccountRoutes(options: AccountRoutesOptions) {
       if (req.method !== 'GET') { res.writeHead(405, { allow: 'GET' }).end(); return true }
       const month = at.toISOString().slice(0, 7)
       const since = new Date(at.getTime() - (USAGE_DAYS - 1) * 86_400_000).toISOString().slice(0, 10)
-      const [balance, usage, keys] = await Promise.all([options.data.balance(session.uid), options.data.usage(session.uid, since), options.data.keys(session.uid)])
+      const [balance, usage, keys, providers] = await Promise.all([options.data.balance(session.uid), options.data.usage(session.uid, since), options.data.keys(session.uid), options.data.providers(session.uid)])
       // A month the account has not spent in yet has its whole grant: the hosted API resets it on the first call.
       const grant = balance === null || balance.month !== month ? monthly : balance.grant
       const resetsAt = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1)).toISOString()
       send(res, 200, {
         email: session.email,
+        providers,
         credits: { remaining: grant + (balance?.purchased ?? 0), monthly: { left: grant, of: monthly, resetsAt }, purchased: balance?.purchased ?? 0 },
         usage,
         keys,

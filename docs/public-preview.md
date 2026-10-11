@@ -277,7 +277,7 @@ Sign-in (ROADMAP PH, decided 2026-10-11) uses Firebase Authentication on the sam
 | Address | What it does |
 | --- | --- |
 | `GET /auth/github`, `GET /auth/google` (`?next=/path`) | Sends the browser to the provider, with Firebase's session id in a signed 10-minute cookie |
-| `GET /__/auth/handler` | The provider's way back. Firebase checks the answer, a session opens, and the browser goes to `next` (else `/account/`) |
+| `GET /__/auth/handler` | The provider's way back. Firebase checks the answer, a session opens, and the browser goes to `next` (else `/dashboard/`) |
 | `POST /auth/email` (`{ "email" }`) | Firebase emails a sign-in link to `/auth/email/finish`. At most 3 links an hour per network address and per email address, and 100 an hour and 500 a day for the instance, far under Firebase's 25,000 a day |
 | `GET /auth/email/finish` | The link's page: a Sign in button. Opening the link signs no one in, so a mail scanner cannot use the code up |
 | `POST /auth/email/finish` | Signs in with the link's code |
@@ -285,10 +285,11 @@ Sign-in (ROADMAP PH, decided 2026-10-11) uses Firebase Authentication on the sam
 | `GET /api/me` | `{ signedIn: false }` or `{ signedIn: true, uid, email }` |
 
 - **Failures.** A failed sign-in goes to `/signin/?error=<code>`. The codes are `cancelled`, `other_provider` (the address already signs in another way), `link_needed`, `expired`, `invalid` and `unavailable`. A failure's log line carries Firebase's message, with email addresses cut out.
-- **Linking.** Firebase keeps one account per email address, so a GitHub sign-in for an address that already has an account (made with Google or an email link) gets `needConfirmation`. The provider's token is kept in `w2l_link` for 30 minutes (`HttpOnly`, AES-256-GCM under a key derived from `W2L_QUOTA_HASH_KEY`), and the page reads `?error=link_needed&provider=github`. The next sign-in in that browser for the same address links the provider to that account (`signInWithIdp` with the account's ID token) and goes to `/account/?linked=github`. A different address, or a link that fails, still signs in and links nothing. Either way the cookie is deleted.
+- **Linking.** Firebase keeps one account per email address, so a GitHub sign-in for an address that already has an account (made with Google or an email link) gets `needConfirmation`. The provider's token is kept in `w2l_link` for 30 minutes (`HttpOnly`, AES-256-GCM under a key derived from `W2L_QUOTA_HASH_KEY`), and the page reads `?error=link_needed&provider=github`. The next sign-in in that browser for the same address links the provider to that account (`signInWithIdp` with the account's ID token) and goes to `/dashboard/?linked=github`. A different address, or a link that fails, still signs in and links nothing. Either way the cookie is deleted.
 - **Origin check.** POSTs from another site are refused.
 - **Sessions.** A session is a random id in the `w2l_session` cookie (`HttpOnly; Secure; SameSite=Lax`, 30 days). Firestore keeps it under its HMAC (`W2L_QUOTA_HASH_KEY`) in `sessions/{hmac}`, with the account's uid and an `expireAt`.
 - **Accounts.** An account is `users/{uid}`, with its email, first and latest sign-in, and the ways it signed in. The uid is Firebase's, the one the hosted API's credits are kept under (`credits/{uid}`, docs/hosted-api.md).
+- **Dashboard.** `/dashboard/` (Overview), `/dashboard/usage/`, `/dashboard/keys/`, `/dashboard/connect/` and `/dashboard/account/`, built by `apps/public-web/scripts/build-docs.mjs` and filled by `dashboard.js` from `GET /api/account` (`account.ts`: email, sign-in methods, credits, 30 days of usage, keys). Signed out, it goes to `/signin/?next=<page>`. The old `/account/` answers with a 301 to `/dashboard/` (redirects.json).
 
 Set up once:
 

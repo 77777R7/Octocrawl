@@ -46,12 +46,14 @@ describe('the account page\'s data', () => {
     expect((await fetch(`${url}/api/account`)).status).toBe(401)
     // No spending yet this month: the whole grant, with bought credits on top.
     data.balances.set('account-0001', { month: '2026-09', grant: 12, purchased: 40 })
+    data.signInMethods.set('account-0001', ['github.com', 'emailLink'])
     data.usageDays.set('a', { uid: 'account-0001', day: '2026-10-10', http: 3, browser: 1, notFound: 0, map: 1, unread: 2, credits: 9 })
     data.usageDays.set('b', { uid: 'account-0001', day: '2026-08-01', http: 9, browser: 0, notFound: 0, map: 0, unread: 0, credits: 9 })
     data.usageDays.set('c', { uid: 'someone-else', day: '2026-10-10', http: 5, browser: 0, notFound: 0, map: 0, unread: 0, credits: 5 })
     const body = await (await fetch(`${url}/api/account`, { headers: { cookie } })).json()
     expect(body).toEqual({
       email: 'ada@example.org',
+      providers: ['github.com', 'emailLink'],
       credits: { remaining: 1_040, monthly: { left: 1_000, of: 1_000, resetsAt: '2026-11-01T00:00:00.000Z' }, purchased: 40 },
       usage: [{ day: '2026-10-10', http: 3, browser: 1, notFound: 0, map: 1, unread: 2, credits: 9 }],
       keys: [],
