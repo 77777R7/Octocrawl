@@ -1749,7 +1749,7 @@ function convert(html: string, options: MarkdownOptions, tables?: ExtractedTable
   const base = toUrl(whole ? documentBaseUrl(document, options.baseUrl) : options.baseUrl)
   detachAll(namedBy(document, options.exclude ?? []))
   // A data grid drawn with ARIA roles is read as the table it shows.
-  tablesFromAriaGrids(document as unknown as Document)
+  tablesFromAriaGrids(document as unknown as Document, { skipTags: SKIP, hiddenMarker: LAYOUT_MARKERS.hidden })
   const root =
     document.body && document.body.childNodes.length > 0 ? document.body : (document.documentElement ?? document.body)
   if (!root) {
