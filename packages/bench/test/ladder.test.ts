@@ -1076,9 +1076,9 @@ describe('LadderRunner — a recorded robots override', () => {
     expect(run.result).toMatchObject({ status: 'success', lane: 'provider' })
     expect(run.ladderTrace).not.toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', channel: 'provider' }))
 
-    // Still unreadable to the provider: it refuses before opening a session, at no cost, and the local answer stands.
+    // Still unreadable to the provider: it refuses, and the local answer stands.
     const refusal: FetchResult = { ...failedResult(url, 'policy_denied'), lane: 'provider', trace: [{ at: 1, lane: 'provider', event: 'provider_refused', detail: { refusal: 'robots_unreachable' } }] }
-    const refusing = channel('provider', [{ ...refusal, usage: { ...refusal.usage, externalCostUsd: 0 } }], 'steel')
+    const refusing = channel('provider', [refusal], 'steel')
     const refused = await new LadderRunner([local, refusing], { mode: 'research' }).run(url, undefined, {}, { robotsOverride })
     expect(refused.channelsTried).toEqual(['http', 'provider'])
     expect(refused.result).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge', lane: 'http' })
