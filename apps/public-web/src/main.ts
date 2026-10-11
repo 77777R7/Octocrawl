@@ -147,13 +147,13 @@ const urlHelp = document.querySelector<HTMLElement>('#url-help')!
 const quotaNote = document.querySelector<HTMLElement>('#quota-note')!
 const QUOTA_NOTE = quotaNote.textContent ?? ''
 const crawl = mountCrawlView(urlCard, hero)
-const waitlist = mountWaitlist()
-/** After the daily previews run out: a link to the hosted early-access form, saying what a key gives (the hosted
- * API's starting allowance, docs/hosted-api.md) and that keys are issued by hand for now. */
+// The early-access form opens itself from a ?from= link (waitlist.ts); nothing here opens it.
+mountWaitlist()
+/** After the daily previews run out: a link to sign in, saying what an account gives (the hosted API's monthly
+ * credits, docs/hosted-api.md, Accounts and credits). */
 function waitlistLink(className: string): HTMLAnchorElement {
-  const link = textElement('a', 'Need more? Ask for a hosted key: 1,000 pages a day to start, issued by hand ↓', className)
-  link.href = '#waitlist'
-  link.addEventListener('click', event => { event.preventDefault(); waitlist.open('quota') })
+  const link = textElement('a', 'Need more? Sign in for 1,000 free credits a month →', className)
+  link.href = '/signin/'
   return link
 }
 const formatButton = document.querySelector<HTMLButtonElement>('#format-button')!
@@ -372,7 +372,7 @@ function failureAdvice(result: PreviewResponse): string[] {
     failed: [retry],
     timeout: [retry],
     invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
-    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance of five previews resets.', 'For regular use, ask for a hosted key (1,000 pages a day to start, issued by hand for now) and connect your agent to mcp.octocrawl.dev or call api.octocrawl.dev, or run Octocrawl on your own computer with no limit.'],
+    quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance of five previews resets.', 'For regular use, sign in for 1,000 free credits a month and make a key for mcp.octocrawl.dev or api.octocrawl.dev, or run Octocrawl on your own computer with no limit.'],
   })[result.status]
 }
 

@@ -139,7 +139,7 @@ A key that names an account (`uid` on its `hostedApiKeys` document) spends that 
 - **Logs.** Every call that reserved credits logs `hosted_credits` with the account id, what it was counted as, and what it reserved and spent. A reservation or settle that fails logs `hosted_credits_reserve_failed` or `hosted_credits_settle_failed`. A commit that timed out may still have applied, so check `credits/{uid}` and `creditUsage` before giving anything back by hand.
 - **Edge.** A call that runs across 00:00 UTC on the 1st gives its refund to the new month's grant, at most 4 credits over it.
 
-Sign-in and the account page come next, on octocrawl.dev. Until then, an account's key can be issued by hand for a test account:
+Keys for an account are made on octocrawl.dev's account page after sign-in (docs/public-preview.md, Sign-in). One can also be issued by hand, for a test account:
 
 ```sh
 node scripts/hosted/issue-key.mjs issue --label 'test account' --uid test-account-1 --browser

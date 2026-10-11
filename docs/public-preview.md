@@ -270,6 +270,39 @@ node scripts/public-preview/waitlist.mjs --expire   # entries older than 12 mont
 
 To pause anonymous capture without removing the public page, run `gcloud run services update w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --update-env-vars=W2L_PREVIEW_ENABLED=false`. The deployment must not set `W2L_CAPTURE_RAW_DIR` or the local Reddit/X proxy/exception options. Never enable arbitrary-domain browser fallback: the public browser path is restricted to Amazon.sg and its fixed resource hosts; generic pages use the guarded HTTP path.
 
+### Sign-in
+
+Sign-in (ROADMAP PH, decided 2026-10-11) uses Firebase Authentication on the same project, through its REST API from this server (`packages/public-preview/src/auth.ts`). No Firebase script loads in the page, so the CSP is unchanged, and the providers' client secrets stay in Firebase. It is served only when `W2L_FIREBASE_API_KEY` (the project's public web API key) is set.
+
+| Address | What it does |
+| --- | --- |
+| `GET /auth/github`, `GET /auth/google` (`?next=/path`) | Sends the browser to the provider, with Firebase's session id in a signed 10-minute cookie |
+| `GET /__/auth/handler` | The provider's way back. Firebase checks the answer, a session opens, and the browser goes to `next` (else `/account/`) |
+| `POST /auth/email` (`{ "email" }`) | Firebase emails a sign-in link to `/auth/email/finish`. At most 3 links an hour per network address and per email address, and 100 an hour and 500 a day for the instance, far under Firebase's 25,000 a day |
+| `GET /auth/email/finish` | The link's page: a Sign in button. Opening the link signs no one in, so a mail scanner cannot use the code up |
+| `POST /auth/email/finish` | Signs in with the link's code |
+| `POST /auth/logout` | Ends the session |
+| `GET /api/me` | `{ signedIn: false }` or `{ signedIn: true, uid, email }` |
+
+- **Failures.** A failed sign-in goes to `/signin/?error=<code>`. The codes are `cancelled`, `other_provider` (the address already signs in another way), `expired`, `invalid` and `unavailable`.
+- **Origin check.** POSTs from another site are refused.
+- **Sessions.** A session is a random id in the `w2l_session` cookie (`HttpOnly; Secure; SameSite=Lax`, 30 days). Firestore keeps it under its HMAC (`W2L_QUOTA_HASH_KEY`) in `sessions/{hmac}`, with the account's uid and an `expireAt`.
+- **Accounts.** An account is `users/{uid}`, with its email, first and latest sign-in, and the ways it signed in. The uid is Firebase's, the one the hosted API's credits are kept under (`credits/{uid}`, docs/hosted-api.md).
+
+Set up once:
+
+- In Firebase Authentication: enable Google, GitHub and Email link, and add `octocrawl.dev` to the authorized domains.
+- Register both providers' way back, `https://octocrawl.dev/__/auth/handler`:
+  - in the GitHub OAuth App's redirect URIs;
+  - in the Google client "Web client (auto created by Google Service)" under APIs & Services → Credentials.
+- Set the TTL on sessions:
+
+```sh
+gcloud firestore fields ttls update expireAt --collection-group=sessions --enable-ttl --project="$W2L_PROJECT_ID"
+```
+
+Then deploy with `--update-env-vars=W2L_FIREBASE_API_KEY=<the web config's apiKey>`.
+
 ### Tagging links
 
 A page view records the referring site's host, the address's `utm_source`, `utm_medium` and `utm_campaign`, and its `from` tag. Many places strip the referrer (MCP clients, terminals, npm and PyPI pages, some forums), so every link to octocrawl.dev that Octocrawl puts somewhere else carries utm tags, and the weekly report groups visitors by them:
