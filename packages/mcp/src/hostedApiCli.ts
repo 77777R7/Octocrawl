@@ -12,11 +12,13 @@
  *   W2L_KEYLESS_DAILY           keyless pages per address per UTC day (default 20)
  *   W2L_CLAUDE_DAILY            keyless pages per UTC day shared by every call from Claude's egress range (default 200)
  *   W2L_SITE_DAILY              pages for the whole service per UTC day (default 1500)
+ *   W2L_MONTHLY_CREDITS         credits every account gets a month, spent by its keys (default 1000)
  *   W2L_PUBLIC_API_ORIGIN       the public address, for hints (e.g. https://api.octocrawl.dev)
  *   W2L_SOURCE_COMMIT           recorded in the startup line
  */
 import { hostedProxyNotice } from '@w2l/contracts'
-import { createHostedApi, FirestoreHostedKeys, FirestoreHostedQuota, MemoryHostedKeys, MemoryHostedQuota, type HostedKeys, type HostedQuota } from './hostedApi.js'
+import { createHostedApi, FirestoreHostedKeys, FirestoreHostedQuota, MemoryHostedKeys, MemoryHostedQuota, serviceAccessToken, type HostedKeys, type HostedQuota } from './hostedApi.js'
+import { FirestoreCreditsStore, MemoryCreditsStore, type CreditsStore } from './hostedCredits.js'
 
 function positive(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -31,16 +33,20 @@ const port = positive('PORT', 8080)
 const hashKey = (process.env.W2L_QUOTA_HASH_KEY ?? '').trim()
 if (hashKey.length < 32) throw new Error('W2L_QUOTA_HASH_KEY must contain at least 32 characters')
 const store = process.env.W2L_HOSTED_STORE ?? 'firestore'
+const monthlyCredits = positive('W2L_MONTHLY_CREDITS', 1_000)
 let keys: HostedKeys
 let quota: HostedQuota
+let credits: CreditsStore
 if (store === 'memory') {
   keys = new MemoryHostedKeys(new Map())
   quota = new MemoryHostedQuota()
+  credits = new MemoryCreditsStore(monthlyCredits)
 } else if (store === 'firestore') {
   const project = process.env.W2L_FIRESTORE_PROJECT_ID
   if (!project) throw new Error('W2L_FIRESTORE_PROJECT_ID is required (or W2L_HOSTED_STORE=memory for a local run)')
   keys = new FirestoreHostedKeys(project)
   quota = new FirestoreHostedQuota(project)
+  credits = new FirestoreCreditsStore(project, serviceAccessToken(), monthlyCredits)
 } else throw new Error('W2L_HOSTED_STORE must be firestore or memory')
 
 const notice = hostedProxyNotice(process.env)
@@ -48,7 +54,7 @@ if (notice) console.log(`octocrawl-hosted-api: ${notice}`)
 const service = createHostedApi({
   port, host: '0.0.0.0',
   taskRoot: process.env.W2L_TASK_ROOT ?? '/tmp/octocrawl-hosted',
-  hashKey, keys, quota,
+  hashKey, keys, quota, credits,
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
   keylessDaily: positive('W2L_KEYLESS_DAILY', 20),
   claudeDaily: positive('W2L_CLAUDE_DAILY', 200),
@@ -56,4 +62,4 @@ const service = createHostedApi({
   publicOrigin: process.env.W2L_PUBLIC_API_ORIGIN || undefined,
 })
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void service.close().then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) }) })
-console.log(JSON.stringify({ service: 'octocrawl-hosted-api', port, store, keylessDaily: positive('W2L_KEYLESS_DAILY', 20), claudeDaily: positive('W2L_CLAUDE_DAILY', 200), siteDaily: positive('W2L_SITE_DAILY', 1_500), sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
+console.log(JSON.stringify({ service: 'octocrawl-hosted-api', port, store, keylessDaily: positive('W2L_KEYLESS_DAILY', 20), claudeDaily: positive('W2L_CLAUDE_DAILY', 200), siteDaily: positive('W2L_SITE_DAILY', 1_500), monthlyCredits, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))

@@ -10,6 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
 import { createHostedApi, fromClaude, keyDigest, MemoryHostedKeys, MemoryHostedQuota, sweepTaskRoot, type HostedKeyRecord } from '../src/hostedApi.js'
+import { MemoryCreditsStore, type CreditsStore } from '../src/hostedCredits.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
 
 const HASH_KEY = 'h'.repeat(40)
@@ -20,7 +21,8 @@ let site: Server
 let origin: string
 beforeAll(async () => {
   site = createServer((req, res) => {
-    if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n')
+    if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /private\nAllow: /\n')
+    if (req.url === '/missing') return void res.writeHead(404, { 'content-type': 'text/html' }).end('<!doctype html><title>Not found</title><h1>Not found</h1>')
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE)
   })
   site.listen(0, '127.0.0.1'); await once(site, 'listening')
@@ -39,13 +41,14 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; claudeDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord> } = {}) {
+async function start(options: { keylessDaily?: number; claudeDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; credits?: CreditsStore | null } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
   const records = new Map(Object.entries(options.keys ?? {}).map(([key, record]) => [keyDigest(HASH_KEY, key), record]))
   const quota = new MemoryHostedQuota()
   const service = createHostedApi({
     port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: new MemoryHostedKeys(records), quota,
+    ...(options.credits === null ? {} : { credits: options.credits ?? new MemoryCreditsStore() }),
     keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: 100, proxySecret: options.proxySecret,
     networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: () => {},
   })
@@ -188,6 +191,75 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
     const result = await holder.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
     expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject({ status: 'success' })
   } finally { await holder.close() }
+})
+
+it('an account\'s key spends credits by what each result returned, and says what it spent and what is left', async () => {
+  const credits = new MemoryCreditsStore(1_000)
+  const { url, quota } = await start({ credits, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const auth = { authorization: 'Bearer oc_account' }
+  // The browser lane may answer, so five are reserved; the HTTP lane read the page, so one is spent.
+  const page = await post(url, '/v1/scrape', { url: `${origin}/page`, formats: ['markdown'] }, auth)
+  expect(page.status).toBe(200)
+  expect(await page.json()).toMatchObject({ status: 'success', lane: 'http' })
+  expect([page.headers.get('x-credits-used'), page.headers.get('x-credits-remaining')]).toEqual(['1', '999'])
+  // A page that does not exist costs one; one robots.txt keeps out costs nothing; a body that is not JSON costs nothing.
+  const missing = await post(url, '/v1/scrape', { url: `${origin}/missing` }, auth)
+  expect(await missing.json()).toMatchObject({ status: 'failed', failureReason: 'http_error' })
+  expect(missing.headers.get('x-credits-used')).toBe('1')
+  const disallowed = await post(url, '/v1/scrape', { url: `${origin}/private` }, auth)
+  expect(((await disallowed.json()) as { status: string }).status).not.toBe('success')
+  expect([disallowed.headers.get('x-credits-used'), disallowed.headers.get('x-credits-remaining')]).toEqual(['0', '998'])
+  const notJson = await fetch(`${url}/v1/scrape`, { method: 'POST', headers: { 'content-type': 'application/json', ...auth }, body: 'not json' })
+  expect([notJson.status, notJson.headers.get('x-credits-used'), notJson.headers.get('x-credits-remaining')]).toEqual([400, '0', '998'])
+  const invalid = await post(url, '/v1/scrape', { url: 'not a url' }, auth)
+  expect([invalid.status, invalid.headers.get('x-credits-used')]).toEqual([400, null])
+  // A map that returned URLs costs one.
+  const map = await post(url, '/v1/map', { url: `${origin}/page` }, auth)
+  expect(map.status).toBe(200)
+  expect([map.headers.get('x-credits-used'), map.headers.get('x-credits-remaining')]).toEqual(['1', '997'])
+  // A map whose search matched nothing returned no URL and costs nothing.
+  const none = await post(url, '/v1/map', { url: `${origin}/page`, search: 'zzzz-no-match', sitemap: 'skip' }, auth)
+  expect(((await none.json()) as { links: unknown[] }).links).toEqual([])
+  expect(none.headers.get('x-credits-used')).toBe('0')
+  expect(credits.usage.get(`account-1-${new Date().toISOString().slice(0, 10)}`)).toEqual({ http: 1, browser: 0, not_found: 1, map: 1, unread: 4, credits: 3 })
+  // The site's daily total still counts every start; no per-key daily counter is kept for an account.
+  expect([...credits.site.values()]).toEqual([7])
+  expect(quota.counts.size).toBe(0)
+})
+
+it('an account with fewer credits than a browser page reads over HTTP alone, and one without credits is refused until the 1st', async () => {
+  const credits = new MemoryCreditsStore(3)
+  const { url } = await start({ credits, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const auth = { authorization: 'Bearer oc_account' }
+  for (const left of ['2', '1', '0']) {
+    const response = await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)
+    expect(await response.json()).toMatchObject({ status: 'success', lane: 'http' })
+    expect(response.headers.get('x-credits-remaining')).toBe(left)
+  }
+  const spent = await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)
+  expect(spent.status).toBe(429)
+  expect(spent.headers.get('x-credits-remaining')).toBe('0')
+  expect(Number(spent.headers.get('retry-after'))).toBeGreaterThan(0)
+  const refusal = await spent.json() as { code: string; error: string; agentHints: string[] }
+  expect(refusal.code).toBe('quota_exhausted')
+  expect(refusal.error).toContain('credits are used up')
+  expect(refusal.agentHints.join(' ')).toContain('on the 1st')
+})
+
+it('an account\'s MCP tool calls spend its credits through the same gate, and a server without a ledger refuses its key', async () => {
+  const credits = new MemoryCreditsStore(1_000)
+  const { url } = await start({ credits, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: false, uid: 'account-1' } } })
+  const holder = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await holder.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: { authorization: 'Bearer oc_account' } } }))
+    const result = await holder.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject({ status: 'success' })
+  } finally { await holder.close() }
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 999 })
+  await close?.(); close = undefined
+  await rm(root!, { recursive: true, force: true }); root = undefined
+  const bare = await start({ credits: null, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: false, uid: 'account-1' } } })
+  expect((await post(bare.url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_account' })).status).toBe(503)
 })
 
 it('publishes a server card with the tools /mcp lists and no sign-in, and answers 404 for any other /.well-known file', async () => {

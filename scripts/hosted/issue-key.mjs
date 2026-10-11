@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Issues, lists and revokes hosted Octocrawl API keys (ROADMAP PH phase 1; docs/hosted-api.md).
 //
-//   node scripts/hosted/issue-key.mjs issue --label 'name or email' [--plan free] [--daily 1000] [--browser]
+//   node scripts/hosted/issue-key.mjs issue --label 'name or email' [--plan free] [--daily 1000] [--browser] [--uid <account>]
 //   node scripts/hosted/issue-key.mjs list
 //   node scripts/hosted/issue-key.mjs revoke <digest>
 //
@@ -9,7 +9,8 @@
 // only its HMAC-SHA256 under W2L_QUOTA_HASH_KEY (the same secret the service reads), as the document id in Firestore's
 // `hostedApiKeys` collection (packages/mcp/src/hostedApi.ts, keyDigest and FirestoreHostedKeys). The hash key comes from
 // W2L_QUOTA_HASH_KEY, else from Secret Manager (`w2l-quota-hash-key`, latest) through gcloud; the Firestore calls use
-// `gcloud auth print-access-token`. W2L_PROJECT_ID names the project.
+// `gcloud auth print-access-token`. W2L_PROJECT_ID names the project. A key issued with --uid belongs to that account:
+// it spends the account's credits (packages/mcp/src/hostedCredits.ts) and its daily limit is not used.
 import { execFileSync } from 'node:child_process'
 import { createHmac, randomBytes } from 'node:crypto'
 
@@ -52,6 +53,7 @@ const fields = (record) => ({
   browser: { booleanValue: record.browser },
   label: { stringValue: record.label },
   createdAt: { timestampValue: record.createdAt },
+  ...(record.uid === undefined ? {} : { uid: { stringValue: record.uid } }),
 })
 const read = (doc) => ({
   digest: doc.name.split('/').pop(),
@@ -61,6 +63,7 @@ const read = (doc) => ({
   browser: doc.fields?.browser?.booleanValue === true,
   label: doc.fields?.label?.stringValue ?? '',
   createdAt: doc.fields?.createdAt?.timestampValue ?? '',
+  ...(doc.fields?.uid?.stringValue === undefined ? {} : { uid: doc.fields.uid.stringValue }),
 })
 
 if (command === 'issue') {
@@ -68,8 +71,9 @@ if (command === 'issue') {
   if (!label) fail('--label is required: who the key is for')
   const dailyLimit = Number(options.daily ?? 1000)
   if (!Number.isSafeInteger(dailyLimit) || dailyLimit < 1) fail('--daily must be a positive integer')
+  if ('uid' in options && (typeof options.uid !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(options.uid) || /^__.*__$/.test(options.uid))) fail('--uid must be 8 to 128 letters, digits, _ or -, and not of the form __name__')
   const key = `oc_${randomBytes(32).toString('base64url')}`
-  const record = { enabled: true, plan: options.plan ?? 'free', dailyLimit, browser: options.browser === true, label, createdAt: new Date().toISOString() }
+  const record = { enabled: true, plan: options.uid === undefined ? (options.plan ?? 'free') : 'account', dailyLimit, browser: options.browser === true, label, createdAt: new Date().toISOString(), ...(options.uid === undefined ? {} : { uid: options.uid }) }
   const id = digest(key)
   await firestore('PATCH', `/${id}?currentDocument.exists=false`, { fields: fields(record) })
   console.log(JSON.stringify({ issued: true, digest: id, ...record }))
@@ -84,5 +88,5 @@ if (command === 'issue') {
   await firestore('PATCH', `/${id}?updateMask.fieldPaths=enabled&currentDocument.exists=true`, { fields: { enabled: { booleanValue: false } } })
   console.log(JSON.stringify({ revoked: true, digest: id }))
 } else {
-  console.log('usage: issue-key.mjs issue --label <text> [--plan free] [--daily 1000] [--browser] | list | revoke <digest>')
+  console.log('usage: issue-key.mjs issue --label <text> [--plan free] [--daily 1000] [--browser] [--uid <account>] | list | revoke <digest>')
 }
