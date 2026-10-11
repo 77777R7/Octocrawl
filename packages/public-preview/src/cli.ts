@@ -6,6 +6,7 @@ import { firestoreQuotaFromEnv } from './quota.js'
 import { firestoreAmazonGateFromEnv } from './amazonGate.js'
 import { firestoreWaitlistFromEnv } from './waitlist.js'
 import { validateAmazonPublicState } from './preview.js'
+import { createAuthRoutes, FirestoreAccountStore, IdentityToolkit } from './auth.js'
 
 if (process.env.W2L_CAPTURE_RAW_DIR) throw new Error('Anonymous preview cannot persist raw capture artifacts')
 const stateFile = process.env.W2L_AMAZON_PUBLIC_STATE_FILE
@@ -13,6 +14,16 @@ const amazonState = stateFile ? readFileSync(stateFile, 'utf8') : null
 if (amazonState !== null) validateAmazonPublicState(amazonState)
 const port = Number(process.env.PORT ?? '8080')
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error('PORT must be a TCP port')
+// Sign-in needs the project's Firebase web API key; without it the sign-in addresses are not served.
+const firebaseApiKey = process.env.W2L_FIREBASE_API_KEY?.trim()
+const auth = firebaseApiKey
+  ? createAuthRoutes({
+    identity: new IdentityToolkit(firebaseApiKey),
+    accounts: new FirestoreAccountStore(process.env.W2L_FIRESTORE_PROJECT_ID ?? ''),
+    secret: process.env.W2L_QUOTA_HASH_KEY ?? '',
+    log: line => console.log(JSON.stringify({ severity: 'INFO', ...line })),
+  })
+  : undefined
 const server = createPreviewServer({
   quota: firestoreQuotaFromEnv(),
   amazonGate: firestoreAmazonGateFromEnv(),
@@ -27,6 +38,7 @@ const server = createPreviewServer({
   // Shared with the Cloudflare Worker, so only it can name the domain and the visitor's address.
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
   waitlist: firestoreWaitlistFromEnv(),
+  ...(auth === undefined ? {} : { auth }),
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false' }))

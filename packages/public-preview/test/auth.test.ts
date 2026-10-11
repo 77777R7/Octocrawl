@@ -1,0 +1,182 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import type { AddressInfo } from 'node:net'
+import type { Server } from 'node:http'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createPreviewServer } from '../src/server.js'
+import { createAuthRoutes, IdentityToolkit, MemoryAccountStore, safeNext, SignInRefused, type IdentityProvider, type SignedIn } from '../src/auth.js'
+import type { LogLine } from '../src/site.js'
+
+const SECRET = 's'.repeat(40)
+const servers: Server[] = []
+const dirs: string[] = []
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))))
+  await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })))
+})
+
+/** Firebase's Identity Toolkit as this test drives it: what it was asked, and what it answers. */
+function fakeIdentity() {
+  const calls: Array<{ method: string; args: unknown[] }> = []
+  let idp: SignedIn | Error = { uid: 'github-user-0001', email: 'ada@example.org', provider: 'github.com' }
+  let link: SignedIn | Error = { uid: 'email-user-0001', email: 'ada@example.org', provider: 'emailLink' }
+  const identity: IdentityProvider = {
+    async createAuthUri(provider, continueUri) { calls.push({ method: 'createAuthUri', args: [provider, continueUri] }); return { authUri: `https://${provider}/authorize?redirect_uri=${encodeURIComponent(continueUri)}`, sessionId: 'firebase-session-1' } },
+    async signInWithIdp(requestUri, sessionId) { calls.push({ method: 'signInWithIdp', args: [requestUri, sessionId] }); if (idp instanceof Error) throw idp; return idp },
+    async sendEmailLink(email, continueUrl) { calls.push({ method: 'sendEmailLink', args: [email, continueUrl] }) },
+    async signInWithEmailLink(email, oobCode) { calls.push({ method: 'signInWithEmailLink', args: [email, oobCode] }); if (link instanceof Error) throw link; return link },
+  }
+  return { identity, calls, answer: (next: SignedIn | Error) => { idp = next }, linkAnswer: (next: SignedIn | Error) => { link = next } }
+}
+
+async function start() {
+  const dir = await mkdtemp(join(tmpdir(), 'w2l-auth-')); dirs.push(dir)
+  await writeFile(join(dir, '404.html'), '<title>Page not found</title>')
+  const fake = fakeIdentity()
+  const accounts = new MemoryAccountStore()
+  const lines: LogLine[] = []
+  const auth = createAuthRoutes({ identity: fake.identity, accounts, secret: SECRET, log: line => lines.push(line) })
+  const server = createPreviewServer({ quota: { consume: async () => 'ok' }, staticDir: dir, amazonState: null, log: line => lines.push(line), visitorCookieSecret: SECRET, auth })
+  servers.push(server)
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, fake, accounts, lines }
+}
+
+/** The `name=value` pairs a response set, by name. */
+function cookies(response: Response): Record<string, string> {
+  return Object.fromEntries(response.headers.getSetCookie().map(line => line.split(';')[0]!.split('=')).map(([name, ...rest]) => [name!, rest.join('=')]))
+}
+
+describe('signing in with GitHub or Google', () => {
+  it('sends the browser to the provider, then opens a session on the way back and goes where it was going', async () => {
+    const { url, fake, accounts } = await start()
+    const begin = await fetch(`${url}/auth/github?next=/account/keys`, { redirect: 'manual' })
+    expect(begin.status).toBe(302)
+    expect(begin.headers.get('location')).toBe(`https://github.com/authorize?redirect_uri=${encodeURIComponent(`${url}/__/auth/handler`)}`)
+    expect(begin.headers.get('cache-control')).toBe('no-store')
+    const oauth = begin.headers.getSetCookie()[0]!
+    expect(oauth).toMatch(/^w2l_oauth=[^;]+; Path=\/__\/auth; HttpOnly; SameSite=Lax; Max-Age=600$/)
+    const back = await fetch(`${url}/__/auth/handler?code=abc&state=xyz`, { redirect: 'manual', headers: { cookie: oauth.split(';')[0]! } })
+    expect(back.status).toBe(303)
+    expect(back.headers.get('location')).toBe('/account/keys')
+    expect(fake.calls.find(call => call.method === 'signInWithIdp')!.args).toEqual([`${url}/__/auth/handler?code=abc&state=xyz`, 'firebase-session-1'])
+    const session = cookies(back).w2l_session!
+    expect(session).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(back.headers.getSetCookie().find(line => line.startsWith('w2l_session='))).toMatch(/Path=\/; HttpOnly; SameSite=Lax; Max-Age=2592000$/)
+    expect(accounts.users.get('github-user-0001')).toMatchObject({ email: 'ada@example.org', providers: new Set(['github.com']) })
+    const me = await fetch(`${url}/api/me`, { headers: { cookie: `w2l_session=${session}` } })
+    expect(await me.json()).toEqual({ signedIn: true, uid: 'github-user-0001', email: 'ada@example.org' })
+    expect((await (await fetch(`${url}/api/me`)).json())).toEqual({ signedIn: false })
+  })
+
+  it('refuses a way back it did not start, a forged or old state cookie, a cancelled sign-in and an address that signs in another way', async () => {
+    const { url, fake } = await start()
+    const noState = await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual' })
+    expect([noState.status, noState.headers.get('location')]).toEqual([303, '/signin/?error=expired'])
+    const forged = await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: 'w2l_oauth=eyJzIjoieCJ9.bad' } })
+    expect(forged.headers.get('location')).toBe('/signin/?error=expired')
+    const begin = async () => (await fetch(`${url}/auth/google`, { redirect: 'manual' })).headers.getSetCookie()[0]!.split(';')[0]!
+    const cancelled = await fetch(`${url}/__/auth/handler?error=access_denied`, { redirect: 'manual', headers: { cookie: await begin() } })
+    expect(cancelled.headers.get('location')).toBe('/signin/?error=cancelled')
+    fake.answer(new SignInRefused('other_provider', 'linked'))
+    const other = await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: await begin() } })
+    expect(other.headers.get('location')).toBe('/signin/?error=other_provider')
+    expect(cookies(other).w2l_session).toBeUndefined()
+    expect(fake.calls.filter(call => call.method === 'signInWithIdp')).toHaveLength(1)
+  })
+
+  it('keeps the way back on this site: another host or a protocol-relative path is the account page', () => {
+    expect(safeNext('/blog/')).toBe('/blog/')
+    for (const unsafe of ['//evil.example/', 'https://evil.example/', '/\\evil.example', 'blog', null, undefined, '/a b']) expect(safeNext(unsafe), String(unsafe)).toBe('/account/')
+  })
+})
+
+describe('signing in with an email link', () => {
+  it('sends a link, shows a button on the link\'s page instead of signing in, and signs in from the button', async () => {
+    const { url, fake, accounts } = await start()
+    const sent = await fetch(`${url}/auth/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: url }, body: JSON.stringify({ email: ' Ada@Example.org ' }) })
+    expect(sent.status).toBe(200)
+    expect(fake.calls.at(-1)).toEqual({ method: 'sendEmailLink', args: ['ada@example.org', `${url}/auth/email/finish`] })
+    const remembered = cookies(sent).w2l_signin_email!
+    // Opening the link (a person, or a mail scanner) only shows the page.
+    const opened = await fetch(`${url}/auth/email/finish?mode=signIn&oobCode=code-0123456789&apiKey=x`, { headers: { cookie: `w2l_signin_email=${remembered}` } })
+    const html = await opened.text()
+    expect(opened.status).toBe(200)
+    expect(html).toContain('Sign in as <strong>ada@example.org</strong>')
+    expect(html).not.toContain('style=')
+    expect(opened.headers.get('content-security-policy')).toContain("script-src 'none'")
+    expect(fake.calls.some(call => call.method === 'signInWithEmailLink')).toBe(false)
+    // On another device the address is asked for.
+    expect(await (await fetch(`${url}/auth/email/finish?oobCode=code-0123456789`)).text()).toContain('Enter the email address')
+    const signed = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
+    expect([signed.status, signed.headers.get('location')]).toEqual([303, '/account/'])
+    expect(fake.calls.at(-1)).toEqual({ method: 'signInWithEmailLink', args: ['ada@example.org', 'code-0123456789'] })
+    expect(cookies(signed).w2l_session).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(accounts.users.get('email-user-0001')?.providers).toEqual(new Set(['emailLink']))
+  })
+
+  it('refuses another site\'s form, a bad address, a used link, and a fourth link an hour', async () => {
+    const { url, fake } = await start()
+    const send = (email: string, origin = url) => fetch(`${url}/auth/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify({ email }) })
+    expect((await send('ada@example.org', 'https://evil.example')).status).toBe(403)
+    expect((await send('not an address')).status).toBe(400)
+    for (let i = 0; i < 3; i++) expect((await send(`ada${i}@example.org`)).status).toBe(200)
+    expect((await send('ada9@example.org')).status).toBe(429)
+    fake.linkAnswer(new SignInRefused('expired', 'EXPIRED_OOB_CODE'))
+    const used = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
+    expect(used.headers.get('location')).toBe('/signin/?error=expired')
+    const crossSite = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'https://evil.example' }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
+    expect(crossSite.status).toBe(403)
+  })
+})
+
+describe('sessions', () => {
+  it('ends a session on sign-out, and a sign-out from another site is refused', async () => {
+    const { url, accounts } = await start()
+    const begin = (await fetch(`${url}/auth/github`, { redirect: 'manual' })).headers.getSetCookie()[0]!.split(';')[0]!
+    const session = cookies(await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: begin } })).w2l_session!
+    expect(accounts.sessions.size).toBe(1)
+    expect((await fetch(`${url}/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: `w2l_session=${session}`, origin: 'https://evil.example' } })).status).toBe(403)
+    const out = await fetch(`${url}/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: `w2l_session=${session}`, origin: url } })
+    expect([out.status, out.headers.get('location')]).toEqual([303, '/'])
+    expect(out.headers.getSetCookie()[0]).toMatch(/^w2l_session=; Path=\/; HttpOnly; SameSite=Lax; Max-Age=0$/)
+    expect(accounts.sessions.size).toBe(0)
+    expect(await (await fetch(`${url}/api/me`, { headers: { cookie: `w2l_session=${session}` } })).json()).toEqual({ signedIn: false })
+  })
+
+  it('without sign-in configured, its addresses are ordinary paths', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'w2l-auth-off-')); dirs.push(dir)
+    await writeFile(join(dir, '404.html'), '<title>Page not found</title>')
+    const server = createPreviewServer({ quota: { consume: async () => 'ok' }, staticDir: dir, amazonState: null, log: () => {} })
+    servers.push(server)
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    expect((await fetch(`${base}/api/me`)).status).toBe(404)
+    expect((await fetch(`${base}/auth/github`, { redirect: 'manual' })).status).toBe(404)
+  })
+})
+
+describe('Firebase\'s REST API', () => {
+  it('maps Firebase\'s answers and its error messages to sign-in outcomes', async () => {
+    const answers: Array<{ status: number; body: unknown }> = []
+    const sent: Array<{ url: string; body: unknown }> = []
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      sent.push({ url: String(input), body: JSON.parse(String(init?.body)) })
+      const next = answers.shift()!
+      return new Response(JSON.stringify(next.body), { status: next.status })
+    }) as typeof fetch
+    const toolkit = new IdentityToolkit('AIzaSyTestKey0123456789abcdef', fetcher)
+    answers.push({ status: 200, body: { localId: 'uid-000000001', email: 'ada@example.org', providerId: 'google.com' } })
+    expect(await toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=1', 'sid')).toEqual({ uid: 'uid-000000001', email: 'ada@example.org', provider: 'google.com' })
+    expect(sent[0]).toEqual({ url: 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=AIzaSyTestKey0123456789abcdef', body: { requestUri: 'https://octocrawl.dev/__/auth/handler?code=1', sessionId: 'sid', returnSecureToken: true } })
+    answers.push({ status: 200, body: { needConfirmation: true, email: 'ada@example.org', providerId: 'github.com' } })
+    await expect(toolkit.signInWithIdp('https://octocrawl.dev/__/auth/handler?code=2', 'sid')).rejects.toMatchObject({ code: 'other_provider' })
+    answers.push({ status: 400, body: { error: { message: 'EXPIRED_OOB_CODE' } } })
+    await expect(toolkit.signInWithEmailLink('ada@example.org', 'code')).rejects.toMatchObject({ code: 'expired' })
+    answers.push({ status: 400, body: { error: { message: 'INVALID_EMAIL' } } })
+    await expect(toolkit.sendEmailLink('x', 'https://octocrawl.dev/auth/email/finish')).rejects.toMatchObject({ code: 'invalid' })
+    expect(sent.at(-1)!.body).toEqual({ requestType: 'EMAIL_SIGNIN', email: 'x', continueUrl: 'https://octocrawl.dev/auth/email/finish', canHandleCodeInApp: true })
+    expect(() => new IdentityToolkit('bad key!')).toThrow(/malformed/)
+  })
+})
