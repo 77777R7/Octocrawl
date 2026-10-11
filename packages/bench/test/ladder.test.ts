@@ -1455,3 +1455,78 @@ describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', ()
     expect(ledger.reservedUsd).toBe(0)
   })
 })
+
+describe('LadderRunner — a task contract (ADR 0006)', () => {
+  const url = 'https://example.com/p'
+  const page = (lane: FetchResult['lane'], markdown: string): FetchResult => ({ ...contentfulResult(url, lane), markdown })
+  const wants = { checks: [{ type: 'markdownIncludes' as const, text: 'Price' }] }
+  const steps = (run: Awaited<ReturnType<LadderRunner['run']>>, event: string) => run.ladderTrace.filter((t) => t.event === event)
+
+  it('takes a page that passes the contract and goes on up the ladder from one that fails it, judging every rung', async () => {
+    const http = channel('http', [page('http', 'A longer page without the figure the task needs.')])
+    const browser = channel('browser_local', [page('browser_local', 'Price 12')])
+    const run = await new LadderRunner([http, browser], { mode: 'authed' }, null, null, null, { verify: wants }).run(url)
+    expect(run.result.lane).toBe('browser_local')
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(steps(run, 'verification_checked').map((t) => t.detail)).toEqual([
+      { vendorId: null, status: 'failed', reason: 'checks_failed', verdict: 'failed', failed: ['markdownIncludes'], notJudged: 0 },
+      { vendorId: null, status: 'passed', reason: null, verdict: 'passed', failed: [], notJudged: 0 },
+    ])
+    // Until item 11's classifier is given, a failed contract reads as not_served.
+    expect(steps(run, 'ladder_step')[0]?.detail).toMatchObject({ escalate: 'verification_failed', readiness: 'not_served' })
+
+    // Without a contract the first page is the answer, as before.
+    const plain = await new LadderRunner([channel('http', [page('http', 'No figure here.')]), channel('browser_local', [page('browser_local', 'Price 12')])], { mode: 'authed' }).run(url)
+    expect(plain.result.lane).toBe('http')
+    expect(steps(plain, 'verification_checked')).toEqual([])
+  })
+
+  it('answers with the page that passed, with no quality hop after it', async () => {
+    const thin: FetchResult = { ...page('http', 'Price 12'), trace: [{ at: 1, lane: 'http', event: 'quality_low_yield', detail: { confidence: 0.1, contentTokens: 3 } }] }
+    const browser = channel('browser_local', [page('browser_local', 'Price 12 and much more of the page.')])
+    const run = await new LadderRunner([channel('http', [thin]), browser], { mode: 'authed' }, null, null, null, { verify: wants }).run(url)
+    expect(run.result.lane).toBe('http')
+    expect(browser.calls).toEqual([])
+  })
+
+  it('keeps the page with most content when no rung passes', async () => {
+    const http = channel('http', [page('http', 'A longer page without the figure the task needs.')])
+    const browser = channel('browser_local', [page('browser_local', 'Short.')])
+    const run = await new LadderRunner([http, browser], { mode: 'authed' }, null, null, null, { verify: wants }).run(url)
+    expect(run.result.lane).toBe('http')
+    expect(steps(run, 'ladder_best_kept')).toHaveLength(1)
+  })
+
+  it('opens no paid rung after a page the classifier reads as not extracted, and stops where it reads the page as ready', async () => {
+    const vendor = channel('provider', [page('provider', 'Price 12')], 'steel')
+    const run = await new LadderRunner([channel('http', [page('http', 'No figure.')]), channel('browser_local', [page('browser_local', 'Still no figure.')]), vendor], { mode: 'authed' }, null, null, null, { verify: wants, classifyContractFailure: () => 'not_extracted' }).run(url)
+    expect(vendor.calls).toEqual([])
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(steps(run, 'ladder_channel_skipped')[0]?.detail.reason).toContain('not_extracted')
+
+    const browser = channel('browser_local', [page('browser_local', 'Price 12')])
+    const ready = await new LadderRunner([channel('http', [page('http', 'No figure.')]), browser], { mode: 'authed' }, null, null, null, { verify: wants, classifyContractFailure: () => 'ready' }).run(url)
+    expect(ready.result.lane).toBe('http')
+    expect(browser.calls).toEqual([])
+  })
+
+  it('decides nothing on a check the ladder cannot judge yet (one on the JSON a format extracts after the run)', async () => {
+    const browser = channel('browser_local', [page('browser_local', 'Price 12')])
+    const run = await new LadderRunner([channel('http', [page('http', 'No figure.')]), browser], { mode: 'authed' }, null, null, null, { verify: { checks: [{ type: 'field', path: 'json.data.price', present: true }] } }).run(url)
+    expect(run.result.lane).toBe('http')
+    expect(browser.calls).toEqual([])
+    expect(steps(run, 'verification_checked')[0]?.detail).toMatchObject({ verdict: null, notJudged: 1 })
+  })
+
+  it('counts a vendor\'s success by the contract when it has one', async () => {
+    const history = new MemoryRoutingHistory()
+    const blocked = () => channel('http', [blockedResult(url, 'bot_detected_generic')])
+    const steel = channel('provider', [page('provider', 'A page without the figure.')], 'steel')
+    await new LadderRunner([blocked(), steel], { mode: 'authed' }, history, null, null, { verify: wants }).run(url)
+    expect((await history.read('example.com')).vendors.steel).toMatchObject({ attempts: 1, contentful: 0 })
+
+    const bb = channel('provider', [page('provider', 'A page without the figure.')], 'browserbase')
+    await new LadderRunner([blocked(), bb], { mode: 'authed' }, history).run(url)
+    expect((await history.read('example.com')).vendors.browserbase).toMatchObject({ attempts: 1, contentful: 1 })
+  })
+})

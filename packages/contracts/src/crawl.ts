@@ -243,6 +243,13 @@ export interface CrawlReport {
   contentTokensUnknown?: boolean
   /** The latest attempt's link discovery counters; null for a batch and for a crawl stored before they were kept. */
   discovery: CrawlDiscovery | null
+  /**
+   * With a task contract (`verify`, ADR 0006): the pages that passed it, and those that did not, a page not read among
+   * them. They count the pages a crawl's latest attempt read or failed (a batch's `succeeded` and `failed`, every attempt
+   * counted), never a duplicate. Absent without a contract.
+   */
+  verified?: number
+  verificationFailed?: number
   /** Who started the task, as the request said (`origin`, `integration`); absent when it named neither. */
   attribution?: RequestAttribution
   /** The task's webhook and how its deliveries stand; absent when the request set none. */
