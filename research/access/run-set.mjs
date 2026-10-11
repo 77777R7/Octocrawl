@@ -289,11 +289,11 @@ async function zenrowsScrape(task) {
 }
 
 /** The paid provider calls the answer's Evidence Record lists, each as its provider, verdict and role; null when the record says nothing of them. */
-/** The answer's last wait for its task's region (ADR 0007), by counts: whether it held, how long, how many reads it judged, and why it judged none of the checks if so. */
+/** The answer's last wait for its task's region (ADR 0007), by counts: whether it held, how long, how many reads it judged, why it judged none of the checks if so, and how many screens it scrolled. */
 function regionWaitOf(doc) {
   const waits = (doc?.trace ?? []).filter((t) => t.event === 'region_wait')
   const last = waits.at(-1)?.detail
-  return last === undefined ? null : { ready: last.ready === true, empty: last.empty === true, waitedMs: last.waitedMs ?? null, judged: last.judged ?? null, ...(typeof last.unjudged === 'string' ? { unjudged: last.unjudged } : {}) }
+  return last === undefined ? null : { ready: last.ready === true, empty: last.empty === true, waitedMs: last.waitedMs ?? null, judged: last.judged ?? null, ...(typeof last.unjudged === 'string' ? { unjudged: last.unjudged } : {}), ...(typeof last.scrolls === 'number' ? { scrolls: last.scrolls } : {}) }
 }
 
 /** The ladder's reasons for passing a rung over (packages/bench/src/routing/ladder.ts), each by words its sentence carries. */
@@ -502,7 +502,7 @@ if (recordFile !== undefined) {
   // A provider call's provider, what Octocrawl made of its page and whether it is the answer, for runs that recorded them.
   const paidColumn = rows.some((r) => Array.isArray(r.observed.paidCalls) && r.observed.paidCalls.length > 0)
   const readinessColumn = rows.some((r) => r.observed.readiness !== null && r.observed.readiness !== undefined)
-  const readinessCell = (r) => r.observed.readiness === null || r.observed.readiness === undefined ? 'unknown' : `${r.observed.readiness.state}${r.observed.readiness.basis.length === 0 ? '' : ` (${r.observed.readiness.basis.join(', ')})`}${!r.observed.regionWait ? '' : r.observed.regionWait.unjudged ? `; region not judged (${r.observed.regionWait.unjudged})` : `; region ${r.observed.regionWait.ready ? 'held' : 'not held'} in ${r.observed.regionWait.waitedMs} ms`}`
+  const readinessCell = (r) => r.observed.readiness === null || r.observed.readiness === undefined ? 'unknown' : `${r.observed.readiness.state}${r.observed.readiness.basis.length === 0 ? '' : ` (${r.observed.readiness.basis.join(', ')})`}${!r.observed.regionWait ? '' : r.observed.regionWait.unjudged ? `; region not judged (${r.observed.regionWait.unjudged})` : `; region ${r.observed.regionWait.ready ? 'held' : 'not held'} in ${r.observed.regionWait.waitedMs} ms${r.observed.regionWait.scrolls > 0 ? `, ${r.observed.regionWait.scrolls} screen${r.observed.regionWait.scrolls === 1 ? '' : 's'} scrolled` : ''}`}`
   const readinessCounts = (temp) => {
     const states = rows.filter((r) => r.temperature === temp).map((r) => r.observed.readiness?.state ?? 'unknown')
     return ['ready', 'not_loaded', 'not_extracted', 'not_served', 'unknown'].map((state) => `${state} ${states.filter((s) => s === state).length}`).join(', ')
@@ -523,7 +523,8 @@ if (recordFile !== undefined) {
     const waits = rows.filter((r) => r.temperature === temp && r.observed.regionWait).map((r) => r.observed.regionWait)
     const judged = waits.filter((w) => !w.unjudged)
     const why = [...new Set(waits.filter((w) => w.unjudged).map((w) => w.unjudged))].map((u) => `${u} ${waits.filter((w) => w.unjudged === u).length}`)
-    return `${judged.length} (held on ${judged.filter((w) => w.ready).length})${why.length === 0 ? '' : `; not judged on ${waits.length - judged.length} (${why.join(', ')})`}`
+    const scrolled = judged.filter((w) => w.scrolls > 0)
+    return `${judged.length} (held on ${judged.filter((w) => w.ready).length}${scrolled.length === 0 ? '' : `; scrolled on ${scrolled.length}, held on ${scrolled.filter((w) => w.ready).length} of them`})${why.length === 0 ? '' : `; not judged on ${waits.length - judged.length} (${why.join(', ')})`}`
   }
   const usedCell = (c) => [...('proxyBytes' in c ? [`${c.proxyBytes === null ? 'unknown' : c.proxyBytes} B${c.proxyCountry ? ` ${c.proxyCountry}` : ''}`] : []), ...('solves' in c ? [`${c.solves === null ? 'unknown' : c.solves} solved`] : [])]
   // Each disallow by its rules or why robots.txt could not be read, for runs that recorded the verdict.
