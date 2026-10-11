@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createSpendLedger } from '@w2l/http-core'
+import { contractSha256 } from '@w2l/runtime'
 import {
   CONTENTFUL_STATUS,
   identityBundleFrom,
@@ -1472,8 +1473,8 @@ describe('LadderRunner — a task contract (ADR 0006)', () => {
       { vendorId: null, status: 'failed', reason: 'checks_failed', verdict: 'failed', failed: ['markdownIncludes'], notJudged: 0 },
       { vendorId: null, status: 'passed', reason: null, verdict: 'passed', failed: [], notJudged: 0 },
     ])
-    // Until item 11's classifier is given, a failed contract reads as not_served.
-    expect(steps(run, 'ladder_step')[0]?.detail).toMatchObject({ escalate: 'verification_failed', readiness: 'not_served' })
+    // Read without its scripts, the page may hold the data once a browser runs them (region readiness, ADR 0007).
+    expect(steps(run, 'ladder_step')[0]?.detail).toMatchObject({ escalate: 'verification_failed', readiness: 'not_loaded' })
 
     // Without a contract the first page is the answer, as before.
     const plain = await new LadderRunner([channel('http', [page('http', 'No figure here.')]), channel('browser_local', [page('browser_local', 'Price 12')])], { mode: 'authed' }).run(url)
@@ -1508,6 +1509,33 @@ describe('LadderRunner — a task contract (ADR 0006)', () => {
     const ready = await new LadderRunner([channel('http', [page('http', 'No figure.')]), browser], { mode: 'authed' }, null, null, null, { verify: wants, classifyContractFailure: () => 'ready' }).run(url)
     expect(ready.result.lane).toBe('http')
     expect(browser.calls).toEqual([])
+  })
+
+  it('reads a browser page that failed its contract by its region wait: a region that never came goes on to a paid rung, one that held does not', async () => {
+    const waited = (ready: boolean): FetchResult => ({ ...page('browser_local', 'No figure.'), trace: [{ at: 1, lane: 'browser_local', event: 'region_wait', detail: { ready, empty: false, loading: false, steady: true, judged: 3, reads: 3, waitedMs: 2_000, contractSha256: contractSha256(wants), checks: [] } }] })
+    const absent = channel('provider', [page('provider', 'Price 12')], 'steel')
+    const served = await new LadderRunner([channel('http', [page('http', 'No figure.')]), channel('browser_local', [waited(false)]), absent], { mode: 'authed' }, null, null, null, { verify: wants }).run(url)
+    expect(served.result.lane).toBe('provider')
+    expect(steps(served, 'ladder_step').map((t) => t.detail.readiness)).toEqual(['not_loaded', 'not_served', undefined])
+
+    const held = channel('provider', [page('provider', 'Price 12')], 'steel')
+    const extracted = await new LadderRunner([channel('http', [page('http', 'No figure.')]), channel('browser_local', [waited(true)]), held], { mode: 'authed' }, null, null, null, { verify: wants }).run(url)
+    expect(held.calls).toEqual([])
+    expect(steps(extracted, 'ladder_step').map((t) => t.detail.readiness)).toEqual(['not_loaded', 'not_extracted'])
+  })
+
+  it('goes on to a paid rung from a browser page whose region no live read judged, and keeps a vendor whose region held off its failures', async () => {
+    const vendor = channel('provider', [page('provider', 'Price 12')], 'steel')
+    const unjudged = await new LadderRunner([channel('http', [page('http', 'No figure.')]), channel('browser_local', [page('browser_local', 'Still no figure.')]), vendor], { mode: 'authed' }, null, null, null, { verify: wants }).run(url)
+    expect(unjudged.result.lane).toBe('provider')
+    expect(steps(unjudged, 'ladder_step').map((t) => t.detail.readiness)).toEqual(['not_loaded', 'not_served', undefined])
+
+    const history = new MemoryRoutingHistory()
+    const held: FetchResult = { ...page('provider', 'No figure.'), trace: [{ at: 1, lane: 'provider', event: 'region_wait', detail: { ready: true, empty: false, loading: false, steady: true, judged: 3, reads: 3, waitedMs: 2_000, contractSha256: contractSha256(wants), checks: [] } }] }
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), channel('provider', [held], 'steel')], { mode: 'authed' }, history, null, null, { verify: wants }).run(url)
+    expect(steps(run, 'ladder_step').at(-1)?.detail.readiness).toBe('not_extracted')
+    // Written into the history, not counted as the vendor failing (ADR 0007).
+    expect((await history.read('example.com')).vendors.steel).toMatchObject({ attempts: 1, contentful: 1 })
   })
 
   it('decides nothing on a check the ladder cannot judge yet (one on the JSON a format extracts after the run)', async () => {
