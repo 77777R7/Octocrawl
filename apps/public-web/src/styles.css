@@ -89,7 +89,7 @@ a { color: inherit; }
 .brand-mark { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; filter: drop-shadow(0 2px 15px rgba(10, 69, 168, .55)); }
 /* The wordmark is Inter Medium drawn as outlines (assets/octocrawl-wordmark.svg), so it needs no web font. */
 .brand-name { display: block; width: auto; height: 23px; }
-/* The navigation, GitHub and Try it are styled in public/docs-assets/nav.css, shared with the docs pages. */
+/* The navigation, GitHub and Sign in are styled in public/docs-assets/nav.css, shared with the docs pages. */
 @media (max-width: 900px) { .site-header { grid-template-columns: 1fr auto auto; gap: 8px; } }
 
 .hero-cells { position: relative; display: grid; min-height: clamp(340px, 46vh, 500px); min-height: clamp(340px, 46svh, 500px); }
