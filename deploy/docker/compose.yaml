@@ -17,10 +17,11 @@ services:
       # `hosted` refuses private addresses, robots.txt overrides and saved logins, and caps a crawl at 100 pages:
       # for a server other people use. Leave it empty for your own use.
       W2L_API_MODE: ${OCTOCRAWL_MODE:-}
-      # An outbound proxy, if this machine needs one to reach the web.
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-}
+      # An outbound proxy, if this machine needs one to reach the web. Its own names, so a proxy set in the shell that runs
+      # `docker compose` (often 127.0.0.1, which inside the container is the container) does not leak in. Hosted mode ignores it.
+      HTTPS_PROXY: ${OCTOCRAWL_HTTPS_PROXY:-}
+      HTTP_PROXY: ${OCTOCRAWL_HTTP_PROXY:-}
+      NO_PROXY: ${OCTOCRAWL_NO_PROXY:-}
     ports:
       - "${OCTOCRAWL_PORT:-8787}:8787"
     volumes:

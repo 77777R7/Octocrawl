@@ -2,7 +2,7 @@ name: Self-host compose
 
 # Runs deploy/docker/compose.yaml the way docs/self-host-docker.md says, on a clean runner: the image builds from the
 # published `octocrawl` package, the server answers only with its token, reads a page over HTTP, and its Chromium
-# captures a screenshot.
+# captures a screenshot, and a record written before the container is recreated is read back after it.
 on:
   pull_request:
     paths:
@@ -48,13 +48,27 @@ jobs:
           page=$(scrape '{"url":"https://example.com/","formats":["markdown"]}')
           echo "$page" | jq '{status, finalUrl, lane, httpStatus: .evidenceRecord.httpStatus}'
           echo "$page" | jq -e '.status == "success" and .evidenceRecord.httpStatus == 200' > /dev/null
+          echo "$page" | jq -r .scrapeId > scrape-id
           shot=$(scrape '{"url":"https://example.com/","formats":["screenshot"]}')
           echo "$shot" | jq '{status, channelsTried, screenshot: (.screenshot | {width, height, bytes})}'
           echo "$shot" | jq -e '.status == "success" and .channelsTried == ["browser_local"] and .screenshot.width == 1280' > /dev/null
-      - name: Keep the records in the data volume across a restart
+      - name: Keep the records in the data volume when the container is recreated
         run: |
-          docker compose restart octocrawl
-          docker compose exec -T octocrawl sh -c 'ls /data && test -n "$(ls -A /data)"'
+          # down without -v removes the container and keeps the octocrawl-data volume, as an update does.
+          docker compose down
+          docker compose up -d
+          for i in $(seq 1 60); do
+            state=$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose ps -q octocrawl)")
+            echo "health: $state"
+            [ "$state" = healthy ] && break
+            [ "$i" = 60 ] && exit 1
+            sleep 5
+          done
+          token=$(sed -n 's/^OCTOCRAWL_TOKEN=//p' .env)
+          id=$(cat scrape-id)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $token" "http://127.0.0.1:8787/v1/scrapes/$id")
+          echo "scrape $id read back from the new container: $code"
+          [ "$code" = 200 ]
       - name: Server log
         if: always()
         run: docker compose logs --no-color | tail -n 100

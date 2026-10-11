@@ -20,12 +20,13 @@ The two files need nothing else from the repository, so you can copy `Dockerfile
 Send the token as a bearer header. Replace `octocrawl.lan` with your server's address.
 
 ```bash
+export OCTOCRAWL_TOKEN=$(sed -n 's/^OCTOCRAWL_TOKEN=//p' .env)    # the token you wrote to .env
 curl -X POST http://octocrawl.lan:8787/v1/scrape \
   -H "authorization: Bearer $OCTOCRAWL_TOKEN" -H 'content-type: application/json' \
   -d '{"url":"https://example.com/","formats":["markdown"]}'
 ```
 
-The answer is the page as Markdown with its Evidence Record, as from `npx octocrawl serve`. Every route of the [REST API](../apps/public-web/content/reference.md) works the same way.
+The answer is the page as Markdown with its Evidence Record, as from `npx octocrawl serve`. The [REST API](../apps/public-web/content/reference.md)'s routes answer as they do there, apart from the ones that need your own Chrome or saved logins (below).
 
 - **An MCP client** on your laptop runs the stdio server against this one: `npx -y @octocrawl/mcp --base-url http://octocrawl.lan:8787 --token <token>`. For Claude Code, run `claude mcp add octocrawl -- npx -y @octocrawl/mcp --base-url http://octocrawl.lan:8787 --token <token>`.
 - **The TypeScript SDK**: `new W2L({ baseUrl: 'http://octocrawl.lan:8787', token })`.
@@ -48,7 +49,7 @@ Set these in `.env` beside `compose.yaml`:
 | `OCTOCRAWL_VERSION` | `latest` | The npm version to install, for example `0.4.1`. |
 | `OCTOCRAWL_MODE` | empty (your own use) | `hosted` for a server other people use. |
 | `OCTOCRAWL_PORT` | `8787` | The port on your server. |
-| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | empty | An outbound proxy, when your server needs one to reach the web. |
+| `OCTOCRAWL_HTTPS_PROXY`, `OCTOCRAWL_HTTP_PROXY`, `OCTOCRAWL_NO_PROXY` | empty | An outbound proxy, when your server needs one to reach the web, passed to the container as `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`. A proxy on `127.0.0.1` means the container itself, so give the server's address as the container sees it. Hosted mode does not use a proxy. |
 
 Results, task records and the page cache are kept in the `octocrawl-data` volume, mounted at `/data`, so they survive a restart and an update.
 
@@ -67,4 +68,4 @@ With `OCTOCRAWL_VERSION` pinned, change it in `.env` first.
 - **Your own Chrome.** The `my-browser` lane and handoff open pages in the Chrome on your computer, so they do not work from a server.
 - **The Monitor scheduler and delivery worker.** These come from the repository's managed local service, which runs from a checkout of the repository ([Monitor and Delivery through MCP](mcp-first-use.md)).
 
-The `Self-host compose` workflow (`.github/workflows/selfhost-compose.yml`) runs these files on a clean Linux x86-64 machine when they change. It checks that the server refuses a request without the token and reads a page over HTTP. It also checks that Chromium captures a screenshot and that `/data` survives a restart. Other platforms, such as arm64, have not been run.
+The `Self-host compose` workflow (`.github/workflows/selfhost-compose.yml`) runs these files on a clean Linux x86-64 machine when they change. It checks that the server refuses a request without the token and reads a page over HTTP. It also checks that Chromium captures a screenshot, and that a record written before the container is recreated can be read after it. It runs the default mode only: hosted mode and other platforms, such as arm64, have not been run.
