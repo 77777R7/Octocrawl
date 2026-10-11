@@ -571,6 +571,27 @@ describe('buildChannels + LadderRunner session composition', () => {
     await Promise.all(unpriced.map((c) => c.close?.().catch(() => {})))
   })
 
+  it('charges a refusal under robots.txt by the session its connect opened, not at nothing (ROADMAP PA item 4)', async () => {
+    // The vendor's session is opened to measure its User-Agent before robots.txt is read for it: a refusal then has
+    // already cost that session's time. #403 had settled such a refusal at $0.
+    const tariff = { perCallUsd: 0.001, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 }
+    let created = 0
+    const channels = buildChannels('authed', {
+      localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: { steel: { ...fakeVendorOps('steel', () => { created++ }), async releaseSession() {} } },
+      vendorTariffs: { steel: tariff },
+      ...vendorEnv(),
+      robotsFetcher: async () => ({ text: 'User-agent: *\nDisallow: /\n', status: 200, contentType: 'text/plain' }),
+    })
+    const run = await new LadderRunner(channels, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p')
+    expect(created).toBeGreaterThan(0)
+    expect(run.summary.attempts.find((a) => a.channel === 'provider')?.result).toMatchObject({ status: 'failed', failureReason: 'policy_denied' })
+    const call = (run.result.trace.find((e) => e.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }).calls[0]!
+    expect(call.chargedUsd as number).toBeGreaterThanOrEqual(0.001)
+    await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
+  })
+
   it('charges a call under a tariff by its session\'s measured time, and at its ceiling when the release went unconfirmed (ROADMAP PA item 4)', async () => {
     // Steel states no price per call; its dashboard billed 137 browser minutes for 483 sessions, not a minute each.
     const tariff = { perCallUsd: 0.001, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 }

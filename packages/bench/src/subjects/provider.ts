@@ -699,8 +699,9 @@ export class ProviderSubject implements SubjectAdapter {
         attemptCount: 0,
         contentTokens: null,
         browserMs: 0,
-        // Refused before the provider was called: no session was opened, so the ladder settles it at 0, not its ceiling.
-        externalCostUsd: 0,
+        // Unknown, not 0: the vendor's session may already be open (its connect opens one to measure the User-Agent
+        // this gate reads robots.txt for), so the ladder charges its measured session time, else its ceiling.
+        externalCostUsd: null,
       },
       trace,
     }

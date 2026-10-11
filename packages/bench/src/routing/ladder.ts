@@ -579,7 +579,8 @@ export class LadderRunner {
         // for that URL, and no vendor refusal replaces the local answer. One
         // that set aside only a robots.txt that could not be read goes on: the
         // provider reads robots.txt itself before it opens a session, and
-        // refuses, at no cost, if it still cannot read it or it disallows.
+        // refuses if it still cannot read it or it disallows: charged, as any
+        // call, the session its connect opened.
         if (channel.vendorId !== undefined && robotsOverrides.some(setAsideARule)) {
           ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: channel.id, detail: { vendorId: channel.vendorId, reason: 'a local rung set a robots.txt rule aside under a recorded robots override; a vendor rung takes no override' } })
           continue
