@@ -37,7 +37,9 @@ The same pages, the same command with `--contract`, all on 2026-10-11:
 ## Pages not verified
 
 - **L1 (github.com) and L9 (www.amazon.sg):** read `success`, the contract failed, product and script agreeing. Both were verified in round 2 of item 8's final acceptance (`2026-10-09-my-browser-final-round2-b6c7524.md`, before #315).
-  - Their readiness is `not_extracted` (`checks_failed`, `region_ready`): the checks held on the live page's text (region wait, 2 judged reads) and failed on the Markdown extracted from the page as shown.
+  - Their readiness is `not_extracted` (`checks_failed`, `region_ready`): the checks held on the Markdown of the live page's whole document (the region wait, 2 judged reads) and failed on the Markdown extracted from the page as shown.
   - Not isolated.
   - github.com's signed-in home keeping content in a `<main>` it does not show on a wide window is the cost already recorded for #315 (`2026-10-10-pa7-my-browser-13e2174.md`).
-- **L3 (mail.google.com):** has no `region_wait`: the region was not judged on the live page. It was verified on its Markdown. Not isolated.
+- **L3 (mail.google.com):** has no `region_wait`: the region was not judged on the live page. It was verified on its Markdown.
+  - A likely cause, not measured: the region wait does not judge a page whose HTML is over 5,000,000 characters (`MAX_VIEW_HTML`), and records no `region_wait` then.
+  - An error in the region wait's own read would still have left one, with `judged: 0`.
