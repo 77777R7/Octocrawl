@@ -12,16 +12,27 @@
     expired: 'That sign-in link has expired or was used already. Start again.',
     invalid: 'That sign-in did not work. Check the email address and try again.',
     unavailable: 'Sign-in is not available right now. Try again in a few minutes.',
-    link_needed: 'This email address already has an Octocrawl account. Sign in once the way you did before, here in this browser, and PROVIDER is added to it.',
   }
   const PROVIDERS = { github: 'GitHub', google: 'Google' }
+  // A provider whose address already has an account waits to be linked (auth.ts, w2l_link): the page says which ways
+  // are left, hides the one that was just tried, and puts the note above the buttons.
+  const linkNeeded = (provider) => {
+    const others = ['GitHub', 'Google'].filter((name) => name !== PROVIDERS[provider]).concat('an email link')
+    return `Your email address already has an Octocrawl account, made with ${others.join(' or ')}. Sign in that way below, in this browser, within 30 minutes. ${PROVIDERS[provider]} is then added to the account, and next time it signs you in directly.`
+  }
 
   const signin = $('#signin')
   if (signin) {
     const next = safeNext(params.get('next'))
     for (const link of signin.querySelectorAll('[data-provider]')) link.href = `/auth/${link.dataset.provider}?next=${encodeURIComponent(next)}`
     const message = $('#signin-message')
-    if (ERRORS[params.get('error')]) say(message, ERRORS[params.get('error')].replace('PROVIDER', PROVIDERS[params.get('provider')] || 'the new way'), true)
+    const tried = params.get('provider')
+    if (params.get('error') === 'link_needed' && PROVIDERS[tried]) {
+      signin.querySelector(`[data-provider="${tried}"]`).hidden = true
+      say(message, linkNeeded(tried))
+      message.classList.add('is-notice')
+      signin.querySelector('.signin-options').before(message)
+    } else if (ERRORS[params.get('error')]) say(message, ERRORS[params.get('error')], true)
     fetch('/api/me', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((me) => { if (me && me.signedIn) location.replace(next) }).catch(() => {})
     const form = $('#email-form')
     form.addEventListener('submit', async (event) => {
