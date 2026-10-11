@@ -208,7 +208,9 @@ export function steelOps(
      * say that this count is the billed one, so the record calls it what Steel reported). A figure Steel did not give
      * is null, never zero. Under the residential proxy Steel fills `proxyBytesUsed` some time after the release, so a 0
      * is read again after each wait in `usageReadWaitsMs` within the deadline, and one still 0 then is null: a page
-     * through a proxy moved bytes, and the ledger prices the unknown at the ceiling's allowance.
+     * through a proxy moved bytes, and the ledger prices the unknown at the ceiling's allowance. The solves are read
+     * here only as a fallback: the status answers 404 some time after a release (2026-10-11, arm B: 4 of 17 reads), so
+     * the transport asks `liveUsage` for them before the release.
      */
     async sessionUsage(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSessionUsage | null> {
       const read = async (): Promise<number | null> => {
@@ -239,6 +241,14 @@ export function steelOps(
         }
       }
       return { proxyBytes, solves }
+    },
+
+    /** The solves so far, read while the session lives: Steel's captchas status is gone some time after the release. */
+    async liveUsage(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<Partial<VendorSessionUsage> | null> {
+      if (!solveEnabled) return { solves: 0 }
+      const status = await api({ method: 'GET', url: `${base}/v1/sessions/${sessionId}/captchas/status`, headers, deadlineMs, signal })
+      if (status.status !== 200) throw new Error(`steel: captchas status returned ${status.status}`)
+      return { solves: countSolved(status.json) }
     },
   }
 }
