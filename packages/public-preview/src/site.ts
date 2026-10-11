@@ -108,9 +108,11 @@ export const EVENT_BODY_BYTES = 2_048
 const EVENT_NAMES = new Set([
   'page_view', 'example_click', 'view_change', 'result_copy', 'result_download',
   'get_code_open', 'get_code_copy', 'link_click', 'docs_code_copy', 'mcp_client_select', 'example_tab', 'selfhost_tab',
-  'waitlist_open', 'waitlist_submit',
+  'waitlist_open', 'waitlist_submit', 'markdown_mode',
 ])
-const PROP_KEYS = new Set(['path', 'ref', 'utm_source', 'utm_medium', 'utm_campaign', 'from', 'view', 'tab', 'target', 'href', 'client', 'trigger'])
+const PROP_KEYS = new Set(['path', 'ref', 'utm_source', 'utm_medium', 'utm_campaign', 'from', 'view', 'tab', 'target', 'href', 'client', 'trigger', 'mode'])
+/** Properties whose values come from a fixed list on the page. */
+const PROP_VALUES: Record<string, Set<string>> = { mode: new Set(['source', 'preview']) }
 
 export type WebEvent = { name: string; props: Record<string, string | number | boolean> }
 
@@ -125,8 +127,10 @@ export function parseWebEvent(body: unknown): WebEvent | null {
     if (!PROP_KEYS.has(key)) return null
     if (typeof value === 'string') {
       if (value.length > 120 || /[\u0000-\u001f\u007f]/.test(value)) return null
+      if (PROP_VALUES[key] && !PROP_VALUES[key].has(value)) return null
       clean[key] = value
-    } else if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) clean[key] = value
+    } else if (PROP_VALUES[key]) return null
+    else if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) clean[key] = value
     else return null
   }
   return { name, props: clean }
