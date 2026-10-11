@@ -109,9 +109,9 @@
   narrow.addEventListener('change', () => { setSheet(false); closeMenus() })
 })()
 
-// Signed in: the header's Sign in link reads Account. The server sets w2l_account=1 beside the HttpOnly session
-// cookie only as this hint; the account page itself asks the server.
+// Signed in: the header's Sign in link reads Dashboard. The server sets w2l_account=1 beside the HttpOnly session
+// cookie only as this hint; the dashboard itself asks the server.
 ;(() => {
   if (!/(?:^|;\s*)w2l_account=1(?:;|$)/.test(document.cookie)) return
-  for (const link of document.querySelectorAll('.account-link')) { link.textContent = 'Account'; link.href = '/account/' }
+  for (const link of document.querySelectorAll('.account-link')) { link.textContent = 'Dashboard'; link.href = '/dashboard/' }
 })()

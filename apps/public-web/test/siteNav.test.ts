@@ -23,7 +23,7 @@ describe('Top navigation', () => {
       if (path === '/') { expect([href, home.includes(`id="${hash}"`)]).toEqual([href, true]); continue }
       if (path === '/changelog/') { expect(existsSync(app('../../CHANGELOG.md'))).toBe(true); continue }
       if (path === '/llms.txt') continue
-      if (path === '/signin/') continue // built by scripts/build-docs.mjs (sign-in and the account page)
+      if (path === '/signin/') continue // built by scripts/build-docs.mjs (sign-in and the dashboard)
       if (path.startsWith('/blog/')) { expect([href, path === '/blog/' || posts.some(post => blogPath(post) === path)]).toEqual([href, true]); continue }
       const page = pages.find(p => (p.slug ? `/docs/${p.slug}/` : '/docs/') === path)
       expect([href, page?.file]).toEqual([href, expect.any(String)])

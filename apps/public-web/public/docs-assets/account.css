@@ -1,4 +1,4 @@
-/* Sign-in and account pages (scripts/build-docs.mjs, account.js): the docs' reading column and a few white panels.
+/* The sign-in pages (scripts/build-docs.mjs, account.js): the docs' reading column and a white panel.
    Same tokens as docs.css. */
 .doc-layout.account-layout{grid-template-columns:minmax(0,1fr);max-width:820px}
 .account-layout .doc-main{max-width:720px}
@@ -13,33 +13,17 @@
 .signin-or{display:flex;align-items:center;gap:12px;margin:6px 0;color:var(--muted);font:650 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.14em;text-transform:uppercase}
 .signin-or::before,.signin-or::after{content:"";flex:1;border-top:1px dotted #b8c5db}
 .account-form{display:grid;gap:10px}
-.account-form.inline{grid-template-columns:minmax(0,1fr) auto;align-items:end}
 .account-form label{display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:600}
 .account-form input{min-height:46px;padding:0 14px;border:1px solid #c9d4e6;border-radius:6px;background:#fff;color:var(--ink);font:inherit;font-size:15px}
 .account-form input:focus-visible{outline:2px solid var(--orange);outline-offset:1px}
 .account-button{min-height:46px;padding:0 18px;border:0;border-radius:6px;background:var(--ink);color:#fff;font:inherit;font-weight:650;cursor:pointer}
 .account-button:hover{background:#1b3a73}
-.account-button.quiet{min-height:34px;padding:0 12px;border:1px solid #c9d4e6;background:#fff;color:var(--ink);font-size:13px}
-.account-button.quiet:hover{border-color:var(--rust);color:var(--rust)}
 .account-button:disabled{opacity:.55;cursor:default}
 .account-message{min-height:1.5em;margin:12px 0 0;color:var(--text)}
 .account-message.is-error{color:var(--rust)}
 .account-message.is-notice{margin:0 0 18px;padding:12px 14px;border:1px solid #f3c3a8;border-radius:6px;background:#fff6f0;color:var(--ink);line-height:1.55}
 .signin-button[hidden]{display:none}
 .account-small{color:var(--muted);font-size:13px;line-height:1.55}
-.credits-figure{margin:0;color:var(--ink);font:700 44px/1.05 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
-.credits-figure small{margin-left:8px;color:var(--muted);font:600 14px "Helvetica Neue",Helvetica,Arial,sans-serif}
-.credits-detail{margin:10px 0 0;color:var(--muted)}
-.table-scroll{overflow-x:auto}
-.account-table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
-.account-table th,.account-table td{padding:9px 10px;border-bottom:1px solid #e3e9f2;text-align:left;white-space:nowrap}
-.account-table th{color:var(--muted);font-size:12px;font-weight:650}
-.account-table td.num,.account-table th.num{text-align:right}
-.key-reveal{margin:14px 0 0;padding:16px;border-radius:6px;background:#0b1d47;color:#e6eefc}
-.key-reveal p{color:#c8d6f0}
-.doc-article .key-reveal code{display:block;padding:0;border:0;background:none;margin:8px 0 12px;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all;color:#fff}
-.key-reveal .account-button.quiet{background:transparent;color:#e6eefc;border-color:rgba(176,200,240,.4)}
-.account-signout{margin-top:8px}
 /* Sign-in: one narrow column in the middle of the page, the card's buttons and field as wide as the card. */
 .signin-layout .doc-main{width:100%;max-width:460px;margin:0 auto}
 .signin-layout .doc-eyebrow,.signin-layout .account-lead,.signin-layout .account-small,.signin-layout .account-message{text-align:center}
@@ -52,6 +36,4 @@
 @media (max-width:540px){
   .signin-layout .doc-article h1{font-size:32px}
   .account-panel{padding:18px 16px}
-  .account-form.inline{grid-template-columns:minmax(0,1fr)}
-  .credits-figure{font-size:36px}
 }

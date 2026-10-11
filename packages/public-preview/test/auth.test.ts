@@ -52,7 +52,7 @@ function cookies(response: Response): Record<string, string> {
 describe('signing in with GitHub or Google', () => {
   it('sends the browser to the provider, then opens a session on the way back and goes where it was going', async () => {
     const { url, fake, accounts } = await start()
-    const begin = await fetch(`${url}/auth/github?next=/account/keys`, { redirect: 'manual' })
+    const begin = await fetch(`${url}/auth/github?next=/dashboard/keys/`, { redirect: 'manual' })
     expect(begin.status).toBe(302)
     expect(begin.headers.get('location')).toBe(`https://github.com/authorize?redirect_uri=${encodeURIComponent(`${url}/__/auth/handler`)}`)
     expect(begin.headers.get('cache-control')).toBe('no-store')
@@ -60,7 +60,7 @@ describe('signing in with GitHub or Google', () => {
     expect(oauth).toMatch(/^w2l_oauth=[^;]+; Path=\/__\/auth; HttpOnly; SameSite=Lax; Max-Age=600$/)
     const back = await fetch(`${url}/__/auth/handler?code=abc&state=xyz`, { redirect: 'manual', headers: { cookie: oauth.split(';')[0]! } })
     expect(back.status).toBe(303)
-    expect(back.headers.get('location')).toBe('/account/keys')
+    expect(back.headers.get('location')).toBe('/dashboard/keys/')
     expect(fake.calls.find(call => call.method === 'signInWithIdp')!.args).toEqual([`${url}/__/auth/handler?code=abc&state=xyz`, 'firebase-session-1'])
     const session = cookies(back).w2l_session!
     expect(session).toMatch(/^[A-Za-z0-9_-]{43}$/)
@@ -106,13 +106,13 @@ describe('signing in with GitHub or Google', () => {
     // A sign-in as a different address keeps its own account and links nothing.
     fake.answer({ uid: 'google-user-0002', email: 'bob@example.org', provider: 'google.com', idToken: 'bob-token' })
     const other = await fetch(`${url}/__/auth/handler?code=def`, { redirect: 'manual', headers: { cookie: `${await begin('google')}; w2l_link=${waiting}` } })
-    expect(other.headers.get('location')).toBe('/account/')
+    expect(other.headers.get('location')).toBe('/dashboard/')
     expect(fake.calls.some(call => call.method === 'linkIdp')).toBe(false)
     expect(cookies(other).w2l_link).toBe('')
     // The same address, signed in with Google as before: GitHub is linked to that account, and the account page says so.
     fake.answer({ uid: 'google-user-0001', email: 'Ada@example.org', provider: 'google.com', idToken: 'ada-token' })
     const linked = await fetch(`${url}/__/auth/handler?code=ghi`, { redirect: 'manual', headers: { cookie: `${await begin('google')}; w2l_link=${waiting}` } })
-    expect([linked.status, linked.headers.get('location')]).toEqual([303, '/account/?linked=github'])
+    expect([linked.status, linked.headers.get('location')]).toEqual([303, '/dashboard/?linked=github'])
     expect(fake.calls.at(-1)).toEqual({ method: 'linkIdp', args: ['ada-token', pending, `${url}/__/auth/handler`] })
     expect(cookies(linked).w2l_link).toBe('')
     expect(accounts.users.get('google-user-0001')?.providers).toEqual(new Set(['google.com', 'github.com']))
@@ -130,13 +130,13 @@ describe('signing in with GitHub or Google', () => {
     const waiting = cookies(await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: oauth } })).w2l_link!
     fake.linkAnswer({ uid: 'email-user-0001', email: 'ada@example.org', provider: 'emailLink', idToken: 'ada-token' })
     const signed = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url, cookie: `w2l_link=${waiting}` }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
-    expect(signed.headers.get('location')).toBe('/account/?linked=github')
+    expect(signed.headers.get('location')).toBe('/dashboard/?linked=github')
     expect(accounts.users.get('email-user-0001')?.providers).toEqual(new Set(['emailLink', 'github.com']))
   })
 
-  it('keeps the way back on this site: another host or a protocol-relative path is the account page', () => {
+  it('keeps the way back on this site: another host or a protocol-relative path is the dashboard', () => {
     expect(safeNext('/blog/')).toBe('/blog/')
-    for (const unsafe of ['//evil.example/', 'https://evil.example/', '/\\evil.example', 'blog', null, undefined, '/a b', '/é']) expect(safeNext(unsafe), String(unsafe)).toBe('/account/')
+    for (const unsafe of ['//evil.example/', 'https://evil.example/', '/\\evil.example', 'blog', null, undefined, '/a b', '/é']) expect(safeNext(unsafe), String(unsafe)).toBe('/dashboard/')
   })
 })
 
@@ -171,7 +171,7 @@ describe('signing in with an email link', () => {
     // On another device the address is asked for.
     expect(await (await fetch(`${url}/auth/email/finish?oobCode=code-0123456789`)).text()).toContain('The email address the link was sent to')
     const signed = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
-    expect([signed.status, signed.headers.get('location')]).toEqual([303, '/account/'])
+    expect([signed.status, signed.headers.get('location')]).toEqual([303, '/dashboard/'])
     expect(fake.calls.at(-1)).toEqual({ method: 'signInWithEmailLink', args: ['ada@example.org', 'code-0123456789'] })
     expect(cookies(signed).w2l_session).toMatch(/^[A-Za-z0-9_-]{43}$/)
     expect(accounts.users.get('email-user-0001')?.providers).toEqual(new Set(['emailLink']))
