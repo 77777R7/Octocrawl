@@ -1055,9 +1055,9 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
       const never = await subject.fetch(`${url}/delayed`, Date.now() + 6_000, undefined, undefined, { verify: { checks: [{ type: 'markdownIncludes', text: 'never on this page' }] } })
       expect(never.status).toBe('success')
       expect(never.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: false, steady: true, loading: false })
-      // A contract the live page cannot judge (a json field alone) is not waited for.
+      // A contract the live page cannot judge (a json field alone) is not waited for: its one read says why.
       const json = await subject.fetch(`${url}/spa`, undefined, undefined, undefined, { verify: { checks: [{ type: 'field', path: 'json.price', present: true }] } })
-      expect(json.trace.some((event) => event.event === 'region_wait')).toBe(false)
+      expect(json.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: false, reads: 1, unjudged: 'checks_not_on_page' })
       // A check written for Markdown (a link's `](https://`) holds on the live page's HTML converted as the result's is: no wait.
       const linked = await subject.fetch(`${url}/links`, Date.now() + 20_000, undefined, undefined, { verify: { checks: [{ type: 'markdownCountMin', pattern: '\\]\\(https?://', min: 10 }] } })
       expect(linked.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: true, reads: 2, checks: [{ passed: true, observedCount: 20 }] })

@@ -81,10 +81,10 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     expect(await waitForRegion(pending, { contract, list }, { maxMs: 1_000, now: pending.now })).toMatchObject({ ready: false, empty: false, loading: true })
   })
 
-  it('does not wait on a view that can judge none of the checks, and starts afresh after a read a navigation cut off', async () => {
+  it('does not wait on a view that can judge none of the checks, says why, and starts afresh after a read a navigation cut off', async () => {
     const json: VerifyContract = { checks: [{ type: 'field', path: 'json.price', present: true }] }
     const quiet = page([view('A page')])
-    expect(await waitForRegion(quiet, { contract: json }, { maxMs: 10_000 })).toBeUndefined()
+    expect(await waitForRegion(quiet, { contract: json }, { maxMs: 10_000, now: quiet.now })).toMatchObject({ ready: false, reads: 1, judged: 1, unjudged: 'checks_not_on_page', checks: [{ passed: null }] })
     expect(quiet.reads()).toBe(1)
     // A navigation between two passing reads: they are not two in a row.
     const moving = page([view('$1 $2 $3'), new Error('Execution context was destroyed, most likely because of a navigation'), view('$1 $2 $3'), view('$1 $2 $3')])
@@ -119,17 +119,27 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     expect(clock).toBeLessThanOrEqual(1_000)
   })
 
-  it('does not judge the Markdown checks on a page whose HTML the page itself found too large to send', () => {
+  it('does not judge the Markdown checks on a page whose HTML the page itself found too large to send, and says so', async () => {
     const links: VerifyContract = { checks: [{ type: 'markdownCountMin', pattern: '\\]\\(https?://', min: 2 }] }
     const tracker = new RegionTracker({ contract: links })
     tracker.observe(JSON.stringify({ loading: false, text: 9, href: 'https://shop.test/', html: null, tableCount: 0 }))
     expect(tracker.judgeable).toBe(false)
+    expect(tracker.outcome()).toMatchObject({ ready: false, judged: 1, unjudged: 'html_too_large' })
     expect(tracker.expression()).toContain('html.length > 5000000 ? null : html')
+    // The wait stops at that read (Gmail's inbox on 2026-10-11 left no region_wait at all).
+    const large = page([{ loading: false, text: 9, href: 'https://mail.test/', html: null, tableCount: 0 }])
+    expect(await waitForRegion(large, { contract: links }, { maxMs: 10_000, now: large.now })).toMatchObject({ ready: false, reads: 1, unjudged: 'html_too_large' })
+    // A contract with a check the large page can still judge (its tables) is waited on as before, the Markdown one unjudged.
+    const tables = page([{ loading: false, text: 9, href: 'https://mail.test/', html: null, tableCount: 1 }])
+    const both = await waitForRegion(tables, { contract: { checks: [...links.checks, { type: 'minTables', min: 1 }] } }, { maxMs: 10_000, now: tables.now })
+    expect(both).toMatchObject({ ready: true, reads: 2, checks: [{ passed: null }, { passed: true }] })
+    expect(both).not.toHaveProperty('unjudged')
   })
 
   it('records the wait by its counts, never the page\'s text', () => {
     const outcome = { ready: false, empty: false, waitedMs: 4_000, reads: 9, judged: 9, loading: false, steady: true, contractSha256: 'c'.repeat(64), checks: [{ index: 0, type: 'markdownCountMin' as const, passed: false, observedCount: 1 }] }
     expect(regionWaitEvent(outcome, 7, 'browser_local')).toEqual({ at: 7, lane: 'browser_local', event: 'region_wait', detail: outcome })
     expect(regionWaitEvent(undefined, 7, 'browser_local')).toBeNull()
+    expect(regionWaitEvent({ ...outcome, reads: 1, judged: 1, unjudged: 'html_too_large' }, 7, 'my_browser')?.detail).toMatchObject({ judged: 1, unjudged: 'html_too_large' })
   })
 })

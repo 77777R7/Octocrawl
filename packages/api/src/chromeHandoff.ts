@@ -667,7 +667,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       if ((!steady || state.loading === true) && settling) continue
       const settle: SteadyOutcome = { waitedMs: Date.now() - settleSince, loadingSeen, stillLoading: state.loading === true, steady }
       // Settled, the region the task needs is read once a poll until the contract's checks hold, within its bound and the
-      // caller's wait; a view that can judge none of them is not waited for.
+      // caller's wait; a view that can judge none of them is not waited for, and its one read says why (`unjudged`).
       if (options.region !== undefined && regionView !== null) {
         region ??= new RegionTracker(options.region)
         regionSince ??= Date.now()
@@ -682,7 +682,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         const ready = region.observe(view)
         if (!ready && region.judgeable && Date.now() - regionSince < REGION_WAIT_MAX_MS && Date.now() - started + pollMs < waitMs) continue
       }
-      const regionOutcome = region !== null && region.judgeable ? region.outcome() : undefined
+      const regionOutcome = region !== null ? region.outcome() : undefined
       let html = state.html
       let whole: string | undefined
       if (options.shownOnly === true) {
