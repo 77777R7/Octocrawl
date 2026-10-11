@@ -20,9 +20,10 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- The ladder reads a page that failed its task contract by its region readiness (ROADMAP PA items 10 and 11, ADR 0007): `readinessOf` is now its classifier. A page read over HTTP, or still loading after the browser's wait, and one whose region never came go on up the ladder; one whose region held but whose checks failed on what was extracted opens no paid rung. Requests without `verify` run as before.
 - The ladder and the job counts read the task contract (ROADMAP PA item 10, PR 3; [ADR 0006](docs/adr/0006-task-verification.md)).
   - With `verify`, each rung's page is judged as it comes, and `ladderTrace` records it (`verification_checked`). A page that passes is the answer, with no quality hop after it. One that fails a check goes on up the ladder within the request's mode, access and budget.
-  - A hook for region readiness (PA item 11) sits before that hop. Until it is given, a failed contract reads as a page the site did not serve; one it reads as not extracted opens no paid rung.
+  - A hook for region readiness (PA item 11) sits before that hop. A page it reads as not extracted opens no paid rung.
   - A provider's success on a host counts by the contract when there is one.
   - Batch and crawl status carry `verified` and `verificationFailed` beside `succeeded` when the job has a contract.
   - Requests without `verify` run as before.

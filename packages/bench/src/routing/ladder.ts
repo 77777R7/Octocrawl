@@ -29,7 +29,7 @@ import {
   type CrawlPolicy,
   type RoutingFailureClass,
 } from '@w2l/http-core'
-import { verify } from '@w2l/runtime'
+import { readinessOf, verify } from '@w2l/runtime'
 import type { RoutingHistory, VendorOutcome } from './vendorRouter.js'
 import { rankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
@@ -327,7 +327,7 @@ export interface LadderRunnerOptions {
    * cannot be judged on yet (one on the JSON a format extracts after the run) decides nothing here.
    */
   verify?: VerifyContract
-  /** Item 11's classifier. Until it is given, a failed contract is read as `not_served`. */
+  /** Item 11's classifier; by default `readinessOf` (ADR 0007), on the page with the ladder's verification. */
   classifyContractFailure?: ContractFailureClassifier
 }
 
@@ -362,6 +362,13 @@ function verifiedOf(checked: ReturnType<typeof contractVerdict>): boolean | null
   // empty_verified with emptyOk passes with no check run; a page with checks left unjudged is not known yet.
   return checked.verification.status === 'passed' && checked.verification.checks.length === 0 ? true : null
 }
+
+/**
+ * Region readiness (ROADMAP PA item 11, ADR 0007) of a rung's page that failed its contract: never `ready`. A page read
+ * without its scripts, or one still loading, is `not_loaded`; one whose region held on the live page but whose checks
+ * failed on what was extracted is `not_extracted`; one whose region never came, or came empty, is `not_served`.
+ */
+const contractReadiness: ContractFailureClassifier = (result, verification) => readinessOf({ ...result, verification }).state
 
 /** The `verification_checked` event for one rung's page: codes and counts, never the page's text. */
 function verificationCheckedEvent(channel: Channel, result: FetchResult, checked: { verification: JudgedVerification; verdict: 'passed' | 'failed' | null }): LadderRunResult['ladderTrace'][number] {
@@ -679,7 +686,7 @@ export class LadderRunner {
           return finish(withLowContentYield({ ...result, escalations: withImprovement }, channelsTried), false)
         }
         if (checked !== null && !compromised && checked.verdict === 'failed' && channel !== sessionFirst && channel.id !== 'authed_session') {
-          const readiness = this.options.classifyContractFailure?.(result, checked.verification) ?? 'not_served'
+          const readiness = (this.options.classifyContractFailure ?? contractReadiness)(result, checked.verification)
           if (readiness !== 'ready') {
             if (readiness === 'not_extracted') contractNotExtracted = true
             ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_step', channel: channel.id, detail: { vendorId: channel.vendorId ?? null, status: result.status, escalate: 'verification_failed', readiness } })
