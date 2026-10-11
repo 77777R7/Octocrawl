@@ -18,7 +18,7 @@ type State = { href: string; ready?: string; status?: number | null; html: strin
  * one from then on ('closed': the tab is gone). It has no events, as a
  * connection without them: the document's status is the page's own report.
  */
-function fakeChrome(states: Array<State | 'closed' | 'moving'>, navigate: () => unknown = () => ({})) {
+function fakeChrome(states: Array<State | 'closed' | 'moving'>, navigate: () => unknown = () => ({}), slowMs: (read: number) => number = () => 0) {
   const calls: string[] = []
   let read = 0
   let shown = ''
@@ -56,6 +56,8 @@ function fakeChrome(states: Array<State | 'closed' | 'moving'>, navigate: () => 
         if (state === 'closed') throw new ChromeLoginError('Chrome refused the request: Session with given id not found.')
         if (state === 'moving') throw new ChromeLoginError('Chrome refused the request: Inspected target navigated or closed')
         shown = state.href
+        // A read Chrome is slow to answer (a large page's outerHTML).
+        if (slowMs(read) > 0) await new Promise((resolve) => setTimeout(resolve, slowMs(read)))
         // The page's script says it is elsewhere: Chrome's address is the one read.
         return { result: { value: JSON.stringify({ ready: 'complete', status: 200, secret: false, field: null, ...state, href: 'https://forged.test/' }) } }
       }
@@ -188,6 +190,15 @@ describe('the person\'s Chrome', () => {
     expect(plain).toMatchObject({ tabHidden: true })
     expect(plain.hiddenWaitMs).toBeUndefined()
     expect(pageFromUserBrowser(plain, null, {}).warnings?.map((w) => w.code) ?? []).not.toContain('page_read_hidden')
+  })
+
+  it('a tab that comes in front on the read\'s last poll is read then, not lost to the wait', async () => {
+    const page = (extra: Partial<State> = {}) => at('https://site.test/a', PAGE, { text: 80, ...extra })
+    // Hidden on the reads that took the page through; in front on the fourth, which Chrome answers past the read's wait.
+    const late = fakeChrome([page({ hidden: true }), page({ hidden: true }), page({ hidden: true }), page()], undefined, (read) => (read === 4 ? 1_500 : 0))
+    const read = await (await openUserChrome({ userDataDir, connect: late.connect })).read('https://site.test/a', { pollMs: 100, waitMs: 1_500, unattended: true, shownOnly: true })
+    expect(read.html).toContain('<!--as shown-->')
+    expect(read.tabHidden).toBe(false)
   })
 
   it('a page that still shows its check when the wait ends is not read, and its tab is closed', async () => {

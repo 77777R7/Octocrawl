@@ -675,7 +675,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       const settling = Date.now() - settleSince < (options.steadyWaitMs ?? STEADY_WAIT_MAX_MS) && Date.now() - started + pollMs < waitMs
       if ((!steady || state.loading === true) && settling) continue
       // Read as it shows, a page in a tab out of sight may show less than the person sees once it is in front: the tab is
-      // waited for to come in sight, the person told (onHidden). In sight, the page settles again before it is read; still
+      // waited for to come in sight (onHidden tells a caller that listens). In sight, the page settles again before it is read; still
       // out of sight after hiddenWaitMs, or with no poll left, the whole document is read and the result says so.
       if (options.shownOnly === true) {
         if (state.hidden === true) {
@@ -684,11 +684,14 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         } else if (hiddenWaitSince !== null) {
           hiddenWaited = Date.now() - hiddenWaitSince
           hiddenWaitSince = null
-          settleSince = null
-          loadingSeen = false
-          region = null
-          regionSince = null
-          continue
+          // With a poll left, it settles again; with none, it is read now: a page that is through is never lost to the wait.
+          if (Date.now() - started + pollMs < waitMs) {
+            settleSince = null
+            loadingSeen = false
+            region = null
+            regionSince = null
+            continue
+          }
         }
       }
       const readHidden = options.shownOnly === true && state.hidden === true
