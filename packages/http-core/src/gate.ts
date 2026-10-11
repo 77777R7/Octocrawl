@@ -210,6 +210,9 @@ const PX_CAPTCHA_SCRIPT = /\/captcha\/captcha\.js|captcha\.px-(?:cdn|cloud)\.net
 const PX_CAPTCHA_CONTAINER = /<[a-z][^>]*\sid\s*=\s*["']?px-captcha(?=["'\s>/])/i
 
 /** The PerimeterX challenge's signals, or null when the page is not the challenge. */
+/** DataDome's challenge iframe: its interstitial (a device check) or its captcha, by the path its src names. */
+const DATADOME_CHALLENGE = /<iframe\b[^>]*\bsrc\s*=\s*["']?https?:\/\/geo\.captcha-delivery\.com\/(interstitial|captcha)\//i
+
 function perimeterXChallenge(head: string, lower: string): string[] | null {
   if (!lower.includes('_pxappid') || !PX_CAPTCHA_SCRIPT.test(lower)) return null
   const signals = ['px_captcha_script', 'px_app_id']
@@ -329,6 +332,13 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   // widget, not an interstitial a browser clears by running its JS.
   const px = perimeterXChallenge(head, lower)
   if (px !== null) return { reason: 'captcha', signals: px }
+
+  // DataDome's challenge, laid over a page that rendered (StubHub from a Singapore exit, 2026-10-11): its iframe from
+  // geo.captcha-delivery.com sits wherever the script put it, past the head too, so the whole body is read. The
+  // interstitial (a device check the browser runs) is a bot check, the captcha a person's. Its tag alone
+  // (js.datadome.co) is on pages it lets through and decides nothing.
+  const dd = DATADOME_CHALLENGE.exec(res.body)
+  if (dd !== null) return dd[1]!.toLowerCase() === 'captcha' ? { reason: 'captcha', signals: ['datadome_captcha'] } : { reason: 'bot_detected_generic', signals: ['datadome_interstitial'] }
 
   // A short page answered with a 2xx that is only a refusal of automated visitors, read past the head: such walls often
   // sit behind a page's worth of scripts (ROADMAP PA item 4). Decisive on a page read as content; on one that was not, a

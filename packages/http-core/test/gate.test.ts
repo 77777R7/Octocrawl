@@ -182,6 +182,29 @@ describe('classifyGate — captcha widgets are distinct from interstitials', () 
   })
 })
 
+describe('classifyGate — DataDome challenge laid over a page', () => {
+  // StubHub's home read from a Singapore exit on 2026-10-11: the page rendered, its events empty, and DataDome laid
+  // its interstitial over the whole viewport past 90 KB of markup. The local browser answered success with the
+  // navigation alone (T073). The challenge's iframe is decisive wherever it sits on the page.
+  const page = (extra: string) => `<html><head><title>Buy sports, concert and theater tickets on StubHub!</title></head><body>
+<header><a href="/sell">Sell Tickets</a> <a href="/secure/myaccount">My Tickets</a></header><main><h2>Popular events</h2></main>
+${'<script>window.__app = "' + 'x'.repeat(70_000) + '"</script>'}${extra}</body></html>`
+  const overlay = (kind: string) => `<div id="ddChallengeContainer1791739251676" style="height: 100vh; width: 100%; position: fixed; top: 0px; left: 0px; z-index: 2147483647"><iframe src="https://geo.captcha-delivery.com/${kind}/?initialCid=AHrlqAAAAAMA&amp;hash=AF5D&amp;cid=wrNQ" title="DataDome Device Check" width="100%" height="100%"></iframe></div>`
+
+  it('names the interstitial a bot check past the page head, even once extraction found a body', () => {
+    expect(classifyGate(res({ body: page(overlay('interstitial')), contentful: true }))).toEqual({ reason: 'bot_detected_generic', signals: ['datadome_interstitial'] })
+  })
+
+  it('names its captcha variant a captcha', () => {
+    expect(classifyGate(res({ body: page(overlay('captcha')), contentful: true }))).toEqual({ reason: 'captcha', signals: ['datadome_captcha'] })
+  })
+
+  it('leaves a page that only loads DataDome\'s tag as content', () => {
+    const tagged = page('<script src="https://js.datadome.co/tags.js" async></script><script>window.ddjskey = "ABC"</script>')
+    expect(classifyGate(res({ body: tagged, contentful: true }))).toBeNull()
+  })
+})
+
 describe('classifyGate — PerimeterX press-and-hold', () => {
   // Shaped like the page Walmart served with HTTP 200 on 2026-10-05, which the
   // browser lane returned as success. The reason is captcha, not
