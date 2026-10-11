@@ -297,7 +297,14 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
   let scrolls = 0
   let scrolling = false
   let ended = false
-  const outcome = (): RegionOutcome => options.scroll === false ? tracker.outcome() : { ...tracker.outcome(), scrolls }
+  const outcome = async (): Promise<RegionOutcome> => {
+    if (options.scroll === false) return tracker.outcome()
+    // Back to the top once it scrolled: the page is then read, and a screenshot taken, as it was before the wait.
+    if (scrolls > 0) {
+      try { await page.evaluate('window.scrollTo(0, 0)') } catch (error) { if (!isNavigationError(error)) throw error }
+    }
+    return { ...tracker.outcome(), scrolls }
+  }
   for (;;) {
     const readStarted = now()
     let json: unknown
@@ -308,11 +315,11 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
       json = undefined
     }
     const ready = tracker.observe(json)
-    if (!tracker.judgeable) return outcome()
+    if (!tracker.judgeable) return await outcome()
     // A read takes what the last one took (a large page's HTML, its Markdown): none is begun that would end past the bound.
     const readMs = now() - readStarted
     const pause = Math.max(1, Math.min(sampleMs, deadline - now()))
-    if (ready || now() + pause + readMs > deadline) return outcome()
+    if (ready || now() + pause + readMs > deadline) return await outcome()
     // A check failed on a page that has settled: what it needs may load as it comes into view.
     const seen = tracker.outcome()
     const failing = seen.checks.some((check) => check.passed === false)

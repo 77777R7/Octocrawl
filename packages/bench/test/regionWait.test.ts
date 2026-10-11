@@ -86,10 +86,14 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     const lazy = (options: { pricesAfter: number; endAfter: number; loading?: boolean }) => {
       let now = 0
       let scrolled = 0
+      let atTop = true
       return {
         scrolled: () => scrolled,
+        atTop: () => atTop,
         async evaluate(expression: string) {
+          if (expression.includes('scrollTo(0, 0)')) { atTop = true; return undefined }
           if (expression.includes('scrollBy')) {
+            atTop = false
             if (scrolled >= options.endAfter) return JSON.stringify({ moved: false, end: true })
             scrolled++
             return JSON.stringify({ moved: true, end: scrolled >= options.endAfter })
@@ -105,6 +109,8 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     const found = await waitForRegion(grid, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: grid.now })
     expect(found).toMatchObject({ ready: true, scrolls: 3, checks: [{ passed: true, observedCount: 4 }] })
     expect(regionWaitEvent(found, 0, 'browser_local')?.detail).toMatchObject({ ready: true, scrolls: 3 })
+    // Back at the top once it scrolled: the page is read, and a screenshot taken, from where it was.
+    expect(grid.atTop()).toBe(true)
     // Not asked to scroll: the region never comes.
     const still = lazy({ pricesAfter: 3, endAfter: 10 })
     const unscrolled = await waitForRegion(still, { contract: prices }, { maxMs: 3_000, sampleMs: 500, now: still.now, scroll: false })

@@ -40,3 +40,4 @@ This is the run repeated right after the first one (`2026-10-11-pa4-t014-region-
   - Steel's datacenter exit was refused (403).
   - One residential session was refused (the first run).
   - Two residential sessions loaded the page: one opened by hand, and this run's.
+- **About "(working tree had uncommitted changes)" above:** the runner counts any untracked file under `research/access` as a change. The only one then was the first run's record, `2026-10-11-pa4-t014-region-scroll-1604d7c.md`, written moments before and not yet committed. The code run was commit `1604d7cc` as committed, scroll included.

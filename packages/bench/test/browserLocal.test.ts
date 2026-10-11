@@ -1077,6 +1077,12 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
       expect(lazy.markdown).toContain('$249.00')
       expect(lazy.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: true, checks: [{ passed: true, observedCount: 4 }] })
       expect(Number(lazy.trace.find((event) => event.event === 'region_wait')?.detail?.scrolls)).toBeGreaterThan(0)
+      // A screenshot of the same request is the top of the page, as without the contract: the wait scrolled back.
+      const shot = (out: Awaited<ReturnType<typeof subject.fetch>>) => out.screenshot?.base64
+      const plainShot = await subject.fetch(`${url}/lazy-grid`, Date.now() + 30_000, undefined, undefined, { screenshot: {} })
+      const verifiedShot = await subject.fetch(`${url}/lazy-grid`, Date.now() + 30_000, undefined, undefined, { screenshot: {}, verify: { checks: [{ type: 'markdownCountMin', pattern: '\\$\\d', min: 3 }] } })
+      expect(shot(verifiedShot)).toBeDefined()
+      expect(shot(verifiedShot)).toBe(shot(plainShot))
       // Nor is a request without a contract.
       expect((await subject.fetch(`${url}/spa`)).trace.some((event) => event.event === 'region_wait')).toBe(false)
       // Nor a page that shows a check: it is read at once, as blocked.
