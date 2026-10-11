@@ -31,7 +31,7 @@ type Answer = { answer: '' | 'allowed' | 'revoked'; active: boolean } | 'closed'
  * the first `shownFails` times the page has just moved on to another document, and the next `shownMoved` times was read on
  * another address.
  */
-function fakeChrome(answers: Answer[], page: { href?: string; html: string; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number }) {
+function fakeChrome(answers: Answer[], page: { href?: string; html: string; documentStatus?: number; refuseTabs?: boolean; shown?: string; shownFails?: number; shownMoved?: number; hidden?: boolean }) {
   const listeners = new Map<string, (params: Record<string, unknown>) => void>()
   const written: string[] = []
   const created: string[] = []
@@ -98,7 +98,7 @@ function fakeChrome(answers: Answer[], page: { href?: string; html: string; docu
           if ((page.shownMoved ?? 0) > shownMoves++) return { result: { value: JSON.stringify({ href: 'https://site.test/moved', shown: PAGE.replace('Tide ledger', 'Another page') }) } }
           return { result: { value: JSON.stringify({ href: hrefOf(String(sessionId).replace(/^s:/, '')), shown: page.shown ?? page.html }) } }
         }
-        return { result: { value: JSON.stringify({ href: hrefOf(String(sessionId).replace(/^s:/, '')), ready: 'complete', status: 200, html: page.html, secret: false, field: null, hidden: false }) } }
+        return { result: { value: JSON.stringify({ href: hrefOf(String(sessionId).replace(/^s:/, '')), ready: 'complete', status: 200, html: page.html, secret: false, field: null, hidden: page.hidden === true }) } }
       }
       throw new Error(`unexpected ${method}`)
     },
@@ -270,12 +270,12 @@ describe('the my-browser lane in a batch', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean } = {}) {
+  async function setup(chrome: ReturnType<typeof fakeChrome> | null, options: { hosted?: boolean; hiddenWaitMs?: number } = {}) {
     root = await mkdtemp(join(tmpdir(), 'w2l-my-browser-batch-'))
     const userDataDir = join(root, 'chrome')
     await mkdir(userDataDir, { recursive: true })
     await writeFile(join(userDataDir, 'DevToolsActivePort'), '9222\n/devtools/browser/x\n')
-    engine = createApiEngine({ taskRoot: join(root, 'tasks'), ...(options.hosted === true ? { hosted: true } : {}), ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect } }) })
+    engine = createApiEngine({ taskRoot: join(root, 'tasks'), ...(options.hosted === true ? { hosted: true } : {}), ...(chrome === null ? {} : { userChrome: { userDataDir, connect: chrome.connect, ...(options.hiddenWaitMs === undefined ? {} : { hiddenWaitMs: options.hiddenWaitMs }) } }) })
     return createApp(engine)
   }
   const post = async (app: ReturnType<typeof createApp>, body: Record<string, unknown>) => {
@@ -312,6 +312,22 @@ describe('the my-browser lane in a batch', () => {
     // A page read in the person's Chrome is never stored: a later cache-only request finds nothing.
     const later = await app.request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://site.test/a', lockdown: true }) })
     expect(await later.json()).toMatchObject({ status: 'failed', failureReason: 'cache_miss' })
+  }, 30_000)
+
+  it('waits once in a batch for a tab out of sight: the pages after the first are read whole at once', async () => {
+    const chrome = fakeChrome([{ answer: '', active: false }, { answer: 'allowed', active: true }], { html: PAGE, hidden: true })
+    const app = await setup(chrome, { hiddenWaitMs: 300 })
+    const urls = ['https://site.test/a', 'https://site.test/b', 'https://site.test/c']
+    const started = await post(app, { urls, lane: 'my-browser' })
+    const { items } = await settled(app, started.body.id ?? started.body.taskId)
+    const waited = urls.map((url) => {
+      expect(items[url]).toMatchObject({ status: 'success', lane: 'my_browser' })
+      expect(items[url]!.warnings.map((w: { code: string }) => w.code)).toContain('page_read_hidden')
+      return items[url]!.trace.find((e: { event: string }) => e.event === 'user_browser_read').detail
+    })
+    // One page waited the whole wait; the others, read after it, did not wait again.
+    for (const detail of waited) expect(detail).toMatchObject({ tabHidden: true })
+    expect(waited.filter((detail) => detail.hiddenWaitMs >= 300)).toHaveLength(1)
   }, 30_000)
 
   it('says it waits for the person while they have not allowed the sites, and no longer once they have', async () => {

@@ -45,6 +45,8 @@ export interface UserChromeOptions {
   approveTimeoutMs?: number
   /** Opens the connection; a test passes its own. Default a WebSocket. */
   connect?: (endpoint: string, timeoutMs: number, signal?: AbortSignal) => Promise<CdpConnection>
+  /** The default hiddenWaitMs of this Chrome's reads (a test shortens it). Default HIDDEN_WAIT_MS. */
+  hiddenWaitMs?: number
 }
 
 export interface UserChromeReadOptions {
@@ -254,7 +256,7 @@ export async function openUserChrome(options: UserChromeOptions = {}, signal?: A
     // The version is evidence, not a condition: unknown is recorded as `chrome`.
   }
   return {
-    read: (url, readOptions = {}) => readPage(connection, browser, url, readOptions),
+    read: (url, readOptions = {}) => readPage(connection, browser, url, options.hiddenWaitMs === undefined || readOptions.hiddenWaitMs !== undefined ? readOptions : { ...readOptions, hiddenWaitMs: options.hiddenWaitMs }),
     readList: (url, readOptions) => readList(connection, browser, url, readOptions),
     allow: (scope, allowOptions = {}) => allowSites(connection, scope, allowOptions),
     close: () => connection.close(),
