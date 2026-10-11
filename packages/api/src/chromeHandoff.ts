@@ -35,7 +35,7 @@
 
 import { extractTf } from '@w2l/extract-tf'
 import { classifyGate, type GateVerdict } from '@w2l/http-core'
-import { isLoginPath, LOADING_PROBE, sessionCoversHost, STEADY_WAIT_MAX_MS, type SteadyOutcome, type UserBrowserRead } from '@w2l/bench'
+import { isLoginPath, LOADING_PROBE, REGION_WAIT_MAX_MS, RegionTracker, sessionCoversHost, STEADY_WAIT_MAX_MS, type RegionSpec, type SteadyOutcome, type UserBrowserRead } from '@w2l/bench'
 import { chromeEndpoint, chromeUserDataDir, ChromeLoginError, connectCdp, type CdpConnection } from './chromeLogin.js'
 
 export interface UserChromeOptions {
@@ -62,6 +62,8 @@ export interface UserChromeReadOptions {
   hiddenNoticeMs?: number
   /** How long a page that is through is waited for to stop loading and changing before it is read anyway. Default STEADY_WAIT_MAX_MS (8 s). */
   steadyWaitMs?: number
+  /** The region the task needs (ADR 0007): once the page has settled, it is read when the contract's checks hold on it, at most REGION_WAIT_MAX_MS more. */
+  region?: RegionSpec
   /** Ends the wait: the caller went away. The page is not read and its tab is closed. */
   signal?: AbortSignal
   /**
@@ -558,6 +560,10 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
     let steadyReads = 0
     let settleSince: number | null = null
     let loadingSeen = false
+    // Once the page has settled, the wait for the region the task needs: its reads, and since when.
+    let region: RegionTracker | null = null
+    let regionSince: number | null = null
+    const regionView = options.region === undefined ? null : new RegionTracker(options.region).expression()
     // The page's own address and the documents heard of at the last read: the page as it shows must be read on the same one.
     let seen = { href: '', documents: 0 }
     let last: { state: PageState; response: DocumentResponse | null } | null = null
@@ -626,7 +632,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       steadyReads = state.text === lastText ? steadyReads + 1 : 0
       lastText = state.text
       clear = through ? clear + 1 : 0
-      if (clear < CLEAR_READS) { settleSince = null; loadingSeen = false; continue }
+      if (clear < CLEAR_READS) { settleSince = null; loadingSeen = false; region = null; regionSince = null; continue }
       // The person has not acted in the tab: a page clear without them is not read until they click on it, unless its site is one they allowed.
       if (heard.act === null && options.unattended !== true) {
         if (!confirming) { confirming = true; options.onConfirm?.(url) }
@@ -655,6 +661,23 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       const settling = Date.now() - settleSince < (options.steadyWaitMs ?? STEADY_WAIT_MAX_MS) && Date.now() - started + pollMs < waitMs
       if ((!steady || state.loading === true) && settling) continue
       const settle: SteadyOutcome = { waitedMs: Date.now() - settleSince, loadingSeen, stillLoading: state.loading === true, steady }
+      // Settled, the region the task needs is read once a poll until the contract's checks hold, within its bound and the
+      // caller's wait; a view that can judge none of them is not waited for.
+      if (options.region !== undefined && regionView !== null) {
+        region ??= new RegionTracker(options.region)
+        regionSince ??= Date.now()
+        let view: unknown
+        try {
+          view = ((await connection.send('Runtime.evaluate', { expression: regionView, returnByValue: true }, sessionId)) as { result?: { value?: unknown } }).result?.value
+        } catch (error) {
+          const left = gone(error)
+          if (left !== null) throw left
+          view = undefined
+        }
+        const ready = region.observe(view)
+        if (!ready && region.judgeable && Date.now() - regionSince < REGION_WAIT_MAX_MS && Date.now() - started + pollMs < waitMs) continue
+      }
+      const regionOutcome = region !== null && region.judgeable ? region.outcome() : undefined
       let html = state.html
       let whole: string | undefined
       if (options.shownOnly === true) {
@@ -689,6 +712,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         act: heard.act,
         browser,
         settle,
+        ...(regionOutcome === undefined ? {} : { region: regionOutcome }),
       }, tab: { targetId, sessionId, stops } }
     }
     // The check still holding the page when the wait ended: what the read is blocked by, which an earlier response

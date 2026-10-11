@@ -10,7 +10,7 @@ const GATE = '<html><body><div class="g-recaptcha" data-sitekey="k"></div></body
 const PAGE = `<html><body><article><h1>Page</h1>${'<p>Prose long enough to be the page. </p>'.repeat(4)}</article></body></html>`
 
 /** What the tab shows on one read; `active`: the person has clicked or typed on this document (its user activation, which only Chrome sets). */
-type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null; active?: boolean; hidden?: boolean; loading?: boolean; text?: number }
+type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null; active?: boolean; hidden?: boolean; loading?: boolean; text?: number; region?: Record<string, unknown> }
 
 /**
  * A Chrome that shows the tab W2L opens as `states`, one per read, the last
@@ -39,6 +39,11 @@ function fakeChrome(states: Array<State | 'closed' | 'moving'>, navigate: () => 
       if (method === 'Runtime.evaluate' && (params as { contextId?: number }).contextId === 7) {
         const state = states[Math.min(read - 1, states.length - 1)]!
         return { result: { value: typeof state === 'object' && state.active === true } }
+      }
+      // The region view (ADR 0007): what the state last read shows of the task's region, without moving to the next state.
+      if (method === 'Runtime.evaluate' && String((params as { expression?: string }).expression).includes('tableCount')) {
+        const state = states[Math.min(read - 1, states.length - 1)]!
+        return { result: { value: JSON.stringify(typeof state === 'object' ? state.region ?? { loading: false, text: 0, markdown: '', tableCount: 0 } : {}) } }
       }
       if (method === 'Runtime.evaluate') {
         const state = states[Math.min(read++, states.length - 1)]!
@@ -117,7 +122,28 @@ describe('the person\'s Chrome', () => {
     const read = await (await openUserChrome({ userDataDir, connect: fakeChrome(changing).connect })).read('https://site.test/a', { pollMs: 20, waitMs: 1_000 })
     expect(read.html).toBe(PAGE)
     expect(read.settle).toMatchObject({ steady: false })
-    expect(read.wallMs).toBeLessThan(1_000)
+    // Read before the wait's end, give or take the last read itself.
+    expect(read.wallMs).toBeLessThan(1_500)
+  })
+
+  it('reads a settled page once the task\'s region holds on it, and says what it saw (ADR 0007)', async () => {
+    const region = { contract: { checks: [{ type: 'markdownCountMin' as const, pattern: '\\$\\d', min: 3 }] } }
+    const shows = (text: string) => ({ loading: false, text: text.length, href: 'https://site.test/a', html: `<html><body><p>${text}</p></body></html>`, tableCount: 0 })
+    // Through and settled from the first reads; its prices come in on the fifth read and hold on the sixth.
+    const states = [...Array(4).fill(at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('Results') })), at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('$1 $2 $3') })]
+    const read = await (await openUserChrome({ userDataDir, connect: fakeChrome(states).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, region })
+    expect(read.region).toMatchObject({ ready: true, checks: [{ index: 0, type: 'markdownCountMin', passed: true, observedCount: 3 }] })
+    // A region that never holds is waited for within the caller's wait, and the page is read as it is, saying so.
+    const never = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('Results') })]).connect })).read('https://site.test/a', { pollMs: 20, waitMs: 1_000, region })
+    expect(never.html).toBe(PAGE)
+    expect(never.region).toMatchObject({ ready: false, steady: true, checks: [{ passed: false, observedCount: 0 }] })
+    // A page that stops being through (a check comes back) starts the region's reads afresh once it is through again.
+    const back = [...Array(4).fill(at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('Results') })), at('https://site.test/a', GATE, { active: true }), ...Array(3).fill(at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('$1 $2 $3') }))]
+    const again = await (await openUserChrome({ userDataDir, connect: fakeChrome(back).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, region })
+    expect(again.region).toMatchObject({ ready: true, reads: 2 })
+    // A contract the page cannot judge (a json field alone) is not waited for, and no region is reported.
+    const json = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80 })]).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, region: { contract: { checks: [{ type: 'field', path: 'json.price', present: true }] } } })
+    expect(json.region).toBeUndefined()
   })
 
   it('a tab that stays out of sight is pointed out once, while one hidden for a moment is not', async () => {

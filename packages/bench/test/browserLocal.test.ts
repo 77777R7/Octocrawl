@@ -43,6 +43,20 @@ beforeAll(async () => {
           '<!doctype html><html><body><article><h1>Recovered</h1><p>Succeeded on the second attempt.</p></article></body></html>',
         )
       }
+    } else if (req.url === '/links') {
+      // Twenty article links, all in the HTML: what the access tasks count by their Markdown (ADR 0007).
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><main><h1>Latest</h1><ul>' + Array.from({ length: 20 }, (_, i) => `<li><a href="https://news.test/story/${i}">Story ${i}: the council and the harbour, a long enough headline</a></li>`).join('') + '</ul></main></body></html>')
+    } else if (req.url === '/late-records') {
+      // A table and a list of records its script draws 1.5 s after load (ADR 0007).
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><main><h1>Listings</h1><p>Loading…</p><div id="late"></div></main><script>setTimeout(function () {' +
+          'document.querySelector("main p").textContent = "Three listings";' +
+          'document.getElementById("late").innerHTML = "<table><tr><th>Name</th><th>Price</th></tr><tr><td>Alpha</td><td>$10</td></tr><tr><td>Beta</td><td>$20</td></tr></table>" +' +
+          '"<ul>" + [1, 2, 3].map(function (n) { return "<li class=\\"it\\"><a href=\\"/p/" + n + "\\">Listing " + n + "</a> <span class=\\"price\\">$" + n + "0</span></li>" }).join("") + "</ul>"' +
+          '}, 1500)</script></body></html>',
+      )
     } else if (req.url === '/delayed') {
       // Part of the article is in the HTML; the rest arrives two seconds after load.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -1025,4 +1039,54 @@ describe('BrowserLocalSubject in the public preview', () => {
   it('refuses the token outside the standard public browser', () => {
     expect(() => new BrowserLocalSubject('research', null, false, undefined, null, undefined, null, undefined, undefined, null, true)).toThrow(/standard public browser/)
   })
+})
+
+describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', () => {
+  it('reads a page once its task contract holds on the live page, and records the wait by counts', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const verify = { checks: [{ type: 'markdownIncludes' as const, text: 'late paragraph arrives' }] }
+      const out = await subject.fetch(`${url}/delayed`, Date.now() + 20_000, undefined, undefined, { verify })
+      expect(out.markdown).toContain('The late paragraph arrives two seconds after load.')
+      const waited = out.trace.find((event) => event.event === 'region_wait')
+      expect(waited?.detail).toMatchObject({ ready: true, empty: false, checks: [{ index: 0, type: 'markdownIncludes', passed: true }] })
+      expect(Number(waited?.detail?.waitedMs)).toBeGreaterThan(500)
+      // A contract the page never meets is waited for within the request's time, and the page is read as it stands.
+      const never = await subject.fetch(`${url}/delayed`, Date.now() + 6_000, undefined, undefined, { verify: { checks: [{ type: 'markdownIncludes', text: 'never on this page' }] } })
+      expect(never.status).toBe('success')
+      expect(never.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: false, steady: true, loading: false })
+      // A contract the live page cannot judge (a json field alone) is not waited for.
+      const json = await subject.fetch(`${url}/spa`, undefined, undefined, undefined, { verify: { checks: [{ type: 'field', path: 'json.price', present: true }] } })
+      expect(json.trace.some((event) => event.event === 'region_wait')).toBe(false)
+      // A check written for Markdown (a link's `](https://`) holds on the live page's HTML converted as the result's is: no wait.
+      const linked = await subject.fetch(`${url}/links`, Date.now() + 20_000, undefined, undefined, { verify: { checks: [{ type: 'markdownCountMin', pattern: '\\]\\(https?://', min: 10 }] } })
+      expect(linked.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: true, reads: 2, checks: [{ passed: true, observedCount: 20 }] })
+      // Nor is a request without a contract.
+      expect((await subject.fetch(`${url}/spa`)).trace.some((event) => event.event === 'region_wait')).toBe(false)
+      // Nor a page that shows a check: it is read at once, as blocked.
+      const started = Date.now()
+      const gated = await subject.fetch(`${url}/gate`, Date.now() + 20_000, undefined, undefined, { verify })
+      expect(gated.status).toBe('blocked')
+      expect(gated.trace.some((event) => event.event === 'region_wait')).toBe(false)
+      expect(Date.now() - started).toBeLessThan(8_000)
+    } finally {
+      await subject.teardown()
+    }
+  }, 90_000)
+
+  it('counts the tables and the list records the live page shows, with every field', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const verify = { checks: [{ type: 'minTables' as const, min: 1 }, { type: 'recordFields' as const, fields: ['name', 'price'], min: 3 }] }
+      const list = { type: 'list' as const, itemSelector: 'li.it', fields: [{ name: 'name', selector: 'a' }, { name: 'price', selector: '.price' }] }
+      const out = await subject.fetch(`${url}/late-records`, Date.now() + 20_000, undefined, undefined, { verify, list })
+      expect(out.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({
+        ready: true,
+        checks: [{ index: 0, type: 'minTables', passed: true, observedCount: 1 }, { index: 1, type: 'recordFields', passed: true, observedCount: 3 }],
+      })
+      expect(out.list?.records).toHaveLength(3)
+    } finally {
+      await subject.teardown()
+    }
+  }, 60_000)
 })

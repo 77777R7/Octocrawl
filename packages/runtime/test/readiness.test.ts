@@ -99,4 +99,46 @@ describe('readinessOf (ADR 0007, ROADMAP PA item 11)', () => {
     expect(readinessOf(result({ status: 'duplicate' }))).toEqual({ state: 'ready', basis: ['duplicate'] })
     expect(readinessOf(result({ status: 'cancelled', markdown: null }))).toEqual({ state: 'not_loaded', basis: ['cancelled'] })
   })
+
+  it('with a task contract, tells the three apart by the verification and the region wait on the live page (ADR 0007 §3)', () => {
+    const verified = (status: 'passed' | 'failed', reason: 'checks_failed' | 'page_not_read' | 'empty_not_allowed' | null = status === 'passed' ? null : 'checks_failed') =>
+      ({ verification: { status, verifier: 'verify/1', contractSha256: 'c'.repeat(64), reason, checks: [] } }) as Partial<FetchResult>
+    const region = (detail: Record<string, unknown>): TraceEvent => ({ at: 1, lane: 'browser_local', event: 'region_wait', detail: { ready: false, empty: false, waitedMs: 3_000, reads: 7, judged: 7, loading: false, steady: true, contractSha256: 'c'.repeat(64), checks: [], ...detail } })
+    // The task's data was there: ready, whatever page-wide signal there was.
+    expect(readinessOf(result({ ...verified('passed'), warnings: warned('page_still_loading') }))).toEqual({ state: 'ready', basis: ['verified'] })
+    // WSJ through the browser: its checks held on the live page, not in what was extracted.
+    expect(readinessOf(result(verified('failed'), [region({ ready: true })]))).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'region_ready'], waitedMs: 3_000 })
+    // They never held, the page still loading or still changing: not loaded.
+    expect(readinessOf(result(verified('failed'), [region({ loading: true })]))).toEqual({ state: 'not_loaded', basis: ['checks_failed', 'region_not_ready', 'page_still_loading'], waitedMs: 3_000 })
+    expect(readinessOf(result(verified('failed'), [region({ steady: false })]))).toEqual({ state: 'not_loaded', basis: ['checks_failed', 'region_not_ready', 'page_still_changing'], waitedMs: 3_000 })
+    // One judged read, nothing to compare it with: not known whether the page had settled.
+    expect(readinessOf(result(verified('failed'), [region({ steady: null, reads: 1, judged: 1 })]))).toEqual({ state: 'not_loaded', basis: ['checks_failed', 'region_not_ready', 'steady_unknown'], waitedMs: 3_000 })
+    // They never held on a settled page: not served (Tesla's empty inventory, OECD's view without its table).
+    expect(readinessOf(result(verified('failed'), [region({})]))).toEqual({ state: 'not_served', basis: ['checks_failed', 'region_absent'], waitedMs: 3_000 })
+    // The list showed none on a settled page: the site served no records, or the selector names none. Not ready: the contract failed.
+    expect(readinessOf(result(verified('failed'), [region({ ready: true, empty: true })]))).toEqual({ state: 'not_served', basis: ['checks_failed', 'region_empty'], waitedMs: 3_000 })
+    // A wait that judged another contract (a page from the cache), or judged no read, says nothing of this one.
+    expect(readinessOf(result(verified('failed'), [region({ ready: true, contractSha256: 'd'.repeat(64) })]))).toMatchObject({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'] })
+    expect(readinessOf(result(verified('failed'), [region({ ready: true, judged: 0 })]))).toMatchObject({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'] })
+    // No region wait: the http lane did not run the page's scripts; a rendered lane keeps the state its own signals give,
+    // and says the contract failed where nothing on the page was judged (a contract of json fields alone).
+    expect(readinessOf(result({ ...verified('failed'), lane: 'http' }))).toEqual({ state: 'not_loaded', basis: ['checks_failed', 'not_rendered'] })
+    expect(readinessOf(result({ ...verified('failed'), warnings: warned('page_still_loading') }))).toEqual({ state: 'not_loaded', basis: ['page_still_loading', 'checks_failed', 'region_unjudged'] })
+    // A page that had come by every signal, its contract failed on what was extracted: not extracted, since ready is the contract passing.
+    expect(readinessOf(result(verified('failed')))).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'] })
+    // No main content found on a page whose region held on the live page: there, not extracted. Without that, its own signals.
+    const unread = { ...verified('failed', 'page_not_read'), status: 'failed' as const, failureReason: 'empty_unverified' as const, markdown: null }
+    expect(readinessOf(result(unread, [region({ ready: true })]))).toEqual({ state: 'not_extracted', basis: ['empty_unverified', 'region_ready'], waitedMs: 3_000 })
+    expect(readinessOf(result(unread, [region({})])).state).toBe('not_loaded')
+    // Only a page left without main content, and only a region that held with records: a block, or an empty list, is not.
+    expect(readinessOf(result({ ...unread, failureReason: null, status: 'blocked', blockReason: 'captcha' }, [region({ ready: true })]))).toMatchObject({ state: 'not_served', basis: ['captcha'] })
+    expect(readinessOf(result(unread, [region({ ready: true, empty: true })])).state).toBe('not_loaded')
+    // A page proven empty the contract does not accept, and a page not read, which its own status tells.
+    expect(readinessOf(result({ ...verified('failed', 'empty_not_allowed'), status: 'empty_verified', markdown: null }))).toEqual({ state: 'not_served', basis: ['empty_not_allowed'] })
+    expect(readinessOf(result({ ...verified('failed', 'page_not_read'), status: 'blocked', blockReason: 'captcha', markdown: null }))).toEqual({ state: 'not_served', basis: ['captcha'] })
+    // The wait reported is the settle and the region wait together.
+    expect(readinessOf(result(verified('failed'), [loadingWait(true, 1_200), region({})])).waitedMs).toBe(4_200)
+    // Without a contract, the verification is not_requested and the signals speak as before.
+    expect(readinessOf(result({ verification: { status: 'not_requested' } }))).toEqual({ state: 'ready', basis: [] })
+  })
 })

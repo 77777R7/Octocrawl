@@ -181,7 +181,17 @@ The visible text is the extractor's count, recorded as `textChars` on each lane'
 
 The my-browser lane reads a page that is through only once it has settled: no loading indicator, and its text the same length on three reads in a row. It waits at most 8 s, and never past the read's own wait. A page still loading or changing then is read as it is, with `page_still_loading` or `page_still_changing` in `warnings` (`loading_wait` and `steady_wait` in the trace).
 
-For now `readiness` changes nothing the ladder does. A request's task contract will refine it (ROADMAP PA items 10 and 11).
+With a task contract (`verify`, see [JSON extraction](json-extraction.md)), the verification and the browser's wait for the region the contract needs decide first:
+
+- `ready` with `verified` when the contract passed, whatever page-wide signal there was.
+- When it failed (`checks_failed`), the wait for this contract's region on the live page decides, when one judged at least one read:
+  - `not_extracted` with `region_ready`: the checks held on the live page, not in what was extracted.
+  - `not_loaded` with `region_not_ready` and `page_still_loading`, `page_still_changing` or `steady_unknown` (one judged read, nothing to compare): they never held, and the page had not settled.
+  - `not_served` with `region_absent`: they never held on a settled page; with `region_empty`: the list showed no record on a settled page (the site served none, or the selector names none).
+- With no such wait: `not_loaded` with `not_rendered` when the http lane answered without the page's scripts; otherwise the state the page's own signals give, `not_extracted` where they would say `ready` (the page had come, and its contract failed on what was extracted), with `checks_failed` and `region_unjudged` added to the basis (a contract of `json` fields, a wait that had no time, or a page from the cache whose wait judged another contract).
+- `not_served` with `empty_not_allowed`: the page was proven empty and the contract does not accept that.
+
+A page the contract could not judge because it was not read (`page_not_read`) goes by its own signals, as above, except one with no main content (`empty_unverified`) whose region held on the live page for this contract: `not_extracted` with `empty_unverified` and `region_ready`. `waitedMs` is the lane's last settle wait and its region wait together. For now `readiness` changes nothing the ladder does (ROADMAP PA items 10 and 11).
 
 ## agentHints
 

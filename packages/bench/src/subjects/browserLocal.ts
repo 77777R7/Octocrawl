@@ -28,6 +28,7 @@ import type { SubjectAdapter } from '../subject.js'
 import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { dropLastStep, runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, LOADING_WAIT_MAX_MS, loadingWaitEvent, waitForRenderedStability, withStillLoadingWarning } from '../browserSettle.js'
+import { REGION_WAIT_MAX_MS, regionSpecOf, regionWaitEvent, waitForRegion } from '../regionWait.js'
 import { captureLayout } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
@@ -947,6 +948,22 @@ export class BrowserLocalSubject implements SubjectAdapter {
           refuseLanded: (landed) => this.refuseNavigation(landed, identity, execution, relaxedRoutes, overriddenUrl),
           loadedDocuments: () => documents.loaded,
         })
+        throwIfExecutionStopped(execution)
+      }
+      // The region the task needs (ADR 0007): with a task contract, the page is read once its checks hold on the live
+      // page, after the settle, waitFor and the steps, within REGION_WAIT_MAX_MS and the capture's reserve.
+      const region = regionSpecOf(options)
+      // Only on a page that answered and shows no check: a block, a challenge or an error page is not waited on for a
+      // region it will never show. The check is the gate's decisive one, so a page with content is never skipped.
+      const answered = region === undefined ? null : reported(documents.shown() ?? { url: page.url(), response, kind: 'document' }).response
+      const answeredStatus = answered?.status() ?? 0
+      const gated = region !== undefined && (answeredStatus === 0 || isSuccessStatus(answeredStatus))
+        ? classifyGate({ status: answeredStatus || 200, header: (name) => answered?.headers()[name.toLowerCase()] ?? null, body: await page.content().catch(() => ''), contentful: true }) !== null
+        : true
+      if (region !== undefined && !gated) {
+        const maxMs = Math.min(REGION_WAIT_MAX_MS, execution.deadlineAt === undefined ? REGION_WAIT_MAX_MS : execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now())
+        const waited = regionWaitEvent(await raceWithSignal(waitForRegion(shownPage, region, { maxMs }), signal), Date.now() - start, 'browser_local')
+        if (waited !== null) trace.push(waited)
         throwIfExecutionStopped(execution)
       }
       // The screenshot format: the page as it stands after load, stability
