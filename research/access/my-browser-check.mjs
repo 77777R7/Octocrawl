@@ -100,8 +100,8 @@ if (contract) {
     const answer = await call('POST', '/v1/scrape', { url: task.url, ...asked, formats: ['markdown'], verify: { checks: task.predicates }, debug: true })
     const md = typeof answer.json?.markdown === 'string' ? answer.json.markdown : ''
     await writeFile(join(outDir, `${task.id}.md`), md)
-    // How the read waited (its settle, loading and region waits), beside the page in the git-ignored run directory.
-    const waits = (answer.json?.trace ?? []).filter((event) => ['steady_wait', 'loading_wait', 'region_wait'].includes(event.event))
+    // How the read waited (its settle, loading and region waits, and whether its tab was out of sight), beside the page in the git-ignored run directory.
+    const waits = (answer.json?.trace ?? []).filter((event) => ['steady_wait', 'loading_wait', 'region_wait', 'user_browser_read'].includes(event.event))
     await writeFile(join(outDir, `${task.id}.waits.json`), JSON.stringify({ waits, readiness: answer.json?.readiness ?? null, verification: answer.json?.verification ?? null }, null, 2))
     const passed = task.predicates.map((p) => judge(p, md))
     results.push({

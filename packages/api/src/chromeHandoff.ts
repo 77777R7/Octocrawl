@@ -45,6 +45,8 @@ export interface UserChromeOptions {
   approveTimeoutMs?: number
   /** Opens the connection; a test passes its own. Default a WebSocket. */
   connect?: (endpoint: string, timeoutMs: number, signal?: AbortSignal) => Promise<CdpConnection>
+  /** The default hiddenWaitMs of this Chrome's reads (a test shortens it). Default HIDDEN_WAIT_MS. */
+  hiddenWaitMs?: number
 }
 
 export interface UserChromeReadOptions {
@@ -80,9 +82,13 @@ export interface UserChromeReadOptions {
   /**
    * Read the page as it shows: without the elements it does not show (`display: none`, or `visibility: hidden` with
    * nothing shown inside), such as a help panel a sheet keeps hidden beside a grid it draws on a canvas. What is not
-   * shown by nature (a script, a style, a template) stays. Default false: the whole document.
+   * shown by nature (a script, a style, a template) stays. Default false: the whole document. A tab out of sight may
+   * not show what the person sees (github.com's signed-in home folds its `<main>` while hidden): it is waited for to
+   * come in sight, at most hiddenWaitMs, and read whole if it stays out of sight.
    */
   shownOnly?: boolean
+  /** With shownOnly, how long a tab out of sight is waited for to come in sight before the whole document is read. Default HIDDEN_WAIT_MS (30 s). */
+  hiddenWaitMs?: number
   /** The request's includeTags, excludeTags and blockAds: a page is through, or still held by a check, as the read of it then judges it. */
   includeTags?: readonly string[]
   excludeTags?: readonly string[]
@@ -109,6 +115,8 @@ export interface UserBrowserListRead {
 
 /** Reads in a row a page must pass to count as through: about 1.5 s at the default poll. */
 const CLEAR_READS = 3
+/** With shownOnly, how long a page ready to read in a tab out of sight is waited for to come in sight. */
+export const HIDDEN_WAIT_MS = 30_000
 /** Times W2L takes the tab back to the page asked for when the person's way through ended elsewhere on the site (a home page after a sign-in). */
 const RETURNS = 2
 /** A document answered with one of these is a check, whatever its body. */
@@ -248,7 +256,7 @@ export async function openUserChrome(options: UserChromeOptions = {}, signal?: A
     // The version is evidence, not a condition: unknown is recorded as `chrome`.
   }
   return {
-    read: (url, readOptions = {}) => readPage(connection, browser, url, readOptions),
+    read: (url, readOptions = {}) => readPage(connection, browser, url, options.hiddenWaitMs === undefined || readOptions.hiddenWaitMs !== undefined ? readOptions : { ...readOptions, hiddenWaitMs: options.hiddenWaitMs }),
     readList: (url, readOptions) => readList(connection, browser, url, readOptions),
     allow: (scope, allowOptions = {}) => allowSites(connection, scope, allowOptions),
     close: () => connection.close(),
@@ -572,6 +580,9 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
     // The page's own address and the documents heard of at the last read: the page as it shows must be read on the same one.
     let seen = { href: '', documents: 0 }
     let last: { state: PageState; response: DocumentResponse | null } | null = null
+    // With shownOnly, since when a page ready to read has waited for its tab to come in sight, and how long it waited once it did.
+    let hiddenWaitSince: number | null = null
+    let hiddenWaited: number | undefined
     while (Date.now() - started < waitMs) {
       await new Promise((resolve) => setTimeout(resolve, pollMs))
       if (options.signal?.aborted === true) throw new HandoffNotThrough(`the read of ${url} was cancelled before Octocrawl read it`, sawGate, 'cancelled')
@@ -665,6 +676,28 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       const steady = steadyReads >= CLEAR_READS - 1
       const settling = Date.now() - settleSince < (options.steadyWaitMs ?? STEADY_WAIT_MAX_MS) && Date.now() - started + pollMs < waitMs
       if ((!steady || state.loading === true) && settling) continue
+      // Read as it shows, a page in a tab out of sight may show less than the person sees once it is in front: the tab is
+      // waited for to come in sight (onHidden tells a caller that listens). In sight, the page settles again before it is read; still
+      // out of sight after hiddenWaitMs, or with no poll left, the whole document is read and the result says so.
+      if (options.shownOnly === true) {
+        if (state.hidden === true) {
+          hiddenWaitSince ??= Date.now()
+          if (Date.now() - hiddenWaitSince < (options.hiddenWaitMs ?? HIDDEN_WAIT_MS) && Date.now() - started + pollMs < waitMs) continue
+        } else if (hiddenWaitSince !== null) {
+          hiddenWaited = Date.now() - hiddenWaitSince
+          hiddenWaitSince = null
+          // With a poll left, it settles again; with none, it is read now: a page that is through is never lost to the wait.
+          if (Date.now() - started + pollMs < waitMs) {
+            settleSince = null
+            loadingSeen = false
+            region = null
+            regionSince = null
+            continue
+          }
+        }
+      }
+      const readHidden = options.shownOnly === true && state.hidden === true
+      const hiddenWaitMs = readHidden && hiddenWaitSince !== null ? Date.now() - hiddenWaitSince : hiddenWaited
       const settle: SteadyOutcome = { waitedMs: Date.now() - settleSince, loadingSeen, stillLoading: state.loading === true, steady }
       // Settled, the region the task needs is read once a poll until the contract's checks hold, within its bound and the
       // caller's wait; a view that can judge none of them is not waited for, and its one read says why (`unjudged`).
@@ -685,7 +718,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       const regionOutcome = region !== null ? region.outcome() : undefined
       let html = state.html
       let whole: string | undefined
-      if (options.shownOnly === true) {
+      if (options.shownOnly === true && !readHidden) {
         // The page as it shows, read once it is through, beside the whole document the wait last read: a page that moved
         // on between the two (another address, a new document) is read again, as in the wait.
         try {
@@ -718,6 +751,8 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
         browser,
         settle,
         ...(regionOutcome === undefined ? {} : { region: regionOutcome }),
+        tabHidden: state.hidden === true,
+        ...(hiddenWaitMs === undefined ? {} : { hiddenWaitMs }),
       }, tab: { targetId, sessionId, stops } }
     }
     // The check still holding the page when the wait ended: what the read is blocked by, which an earlier response
