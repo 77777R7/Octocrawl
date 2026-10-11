@@ -48,7 +48,7 @@ B003 tesla、B009 allrecipes、T005 etsy、T010 OECD（需要点击）、T012 wa
 
 目标：16 题每题一行归因——厂商、拦截层、证据——或明确写 unknown。
 
-- [ ] **T1.1 保存完整响应**：给 `research/access/run-set.mjs` 加一个开关（例如 `--save-responses`），把每次 `POST /v1/scrape` 的完整响应（含 `evidenceRecord` 与 `trace`）按任务写到 `.w2l/access/runs/<timestamp>/responses/<task>.json`。现有记录的 `gateEvents` 只存事件名，没有 `signals`，归因拿不到依据。不改 `attempts.jsonl` 和 Markdown 记录的形状。
+- [x] **T1.1 保存完整响应**（`--save-responses`，2026-10-12；T001、T047 的冒烟运行里读到了 `gate_detected` 的 `header_cf_mitigated`）：给 `research/access/run-set.mjs` 加一个开关（例如 `--save-responses`），把每次 `POST /v1/scrape` 的完整响应（含 `evidenceRecord` 与 `trace`）按任务写到 `.w2l/access/runs/<timestamp>/responses/<task>.json`。现有记录的 `gateEvents` 只存事件名，没有 `signals`，归因拿不到依据。不改 `attempts.jsonl` 和 Markdown 记录的形状。
   - 验收：一次 `--only T001 --save-responses` 后，对应 JSON 里能读到 `gate_detected` 事件的 `signals` 数组；`npm test` 通过；文件在 `.w2l/` 下，不进仓库。
 - [ ] **T1.2 跑 16 题收集信号**：standard 一轮、enhanced（10-11 grant，Steel 无代理）一轮，都带 `--save-responses`。
   - 命令：`node research/access/run-set.mjs --set all --only T001,T002,T005,T034,T038,T045,T046,T047,T048,T049,T053,T068,T071,T076,B001,B008 [--access '"enhanced"'] --save-responses --record research/access/runs/<date>-pa-gate-signals-<label>-<commit>.md`
