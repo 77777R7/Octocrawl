@@ -32,9 +32,10 @@ Suspected cause: not isolated for any task (a run through the product cannot iso
 The same two tasks under a grant naming `vendor_residential_proxy` (Howard's attestation of 2026-10-11), with Steel's residential proxy asked for in the US. The datacenter run just before is `2026-10-11-pa4-t014-t060-steel-datacenter-ddd3ff0.md`.
 
 - **Results:** neither task was verified. Both answered `success` without their data. The product's verification agreed with the runner on both.
-- **Paid calls:** both record `proxyCountry: "US"` and `proxyBytes: 0`.
-  - Whether the residential proxy carried these sessions is not shown: Steel reported no proxy bytes.
-  - This run cannot tell a proxy left unused from bytes reported later.
-  - So this is not yet a test of a US residential exit.
+- **Paid calls:** both record `proxyCountry: "US"` and `proxyBytes: 0`. The 0 is a reading made too early, not the bytes used.
+  - #388's author: Steel fills a session's `proxyBytesUsed` only some time after its release, and the ledger reads it at once. A fix is to follow.
+  - Steel's session list (`GET /v1/sessions`), read at about 13:45Z: every session created while this run's tasks reached Steel (13:35:18Z to 13:38Z) has `proxySource: steel`, the residential proxy, with 0.4 to 7.2 MB used.
+  - Another run used Steel under a residential grant in the same minutes, so which two sessions are this run's is not attributed, and neither are their bytes.
+  - This run's grant asked for the proxy on every Steel session. So its two sessions went out through Steel's US residential proxy.
 - **T014:** Steel's page is the Drills category landing page, 2,840 characters, the same length as in the 2026-10-11 ladder run. Its readiness is `not_loaded` (`page_still_changing`).
 - **T060:** Steel's page was not the answer. The local browser's page, "Historical Data is currently not available", was kept.
