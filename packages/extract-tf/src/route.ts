@@ -754,9 +754,11 @@ function inSiteChrome(el: Element): boolean {
  * Listing strategy: the ordered/unordered list whose items share a common
  * link-plus-text shape. Returns the list element, or null. A list in the
  * page's footer or navigation is never the listing (inSiteChrome). A
- * container of linked blocks with at least twice the list's linked items is
- * the listing instead: Amazon's home from Singapore on 2026-10-12 put a
- * 6-slide hero list above a deck of 26 category cards in divs.
+ * container whose cards (isCard: a link and text of its own) are at least
+ * twice the list's linked items is the listing instead: Amazon's home from
+ * Singapore on 2026-10-12 put a 6-slide hero list above a deck of 26
+ * category cards in divs. Bare links (a top bar, filters, a pager, a menu)
+ * are not cards, so they never outweigh a list.
  */
 export function selectList(doc: Document): Element | null {
   let best: Element | null = null
@@ -769,24 +771,24 @@ export function selectList(doc: Document): Element | null {
       best = el
     }
   }
-  const container = selectLinkedContainer(doc)
-  if (best === null) return container?.el ?? null
-  return container !== null && container.linkedKids >= bestItems * 2 ? container.el : best
+  if (best === null) return selectLinkedContainer(doc, (kid) => qsa(kid, 'a').length > 0)?.el ?? null
+  const grid = selectLinkedContainer(doc, isCard)
+  return grid !== null && grid.linkedKids >= bestItems * 2 ? grid.el : best
 }
 
 /**
  * Div-based listings: no list markup, but the page's content is a set of
- * link-carrying sibling cards. The container with the most linked children,
- * preferring the DEEPEST qualifying one so the whole page wrapper doesn't win
- * by aggregate link count; null when none has three.
+ * link-carrying sibling cards. The container with the most children that
+ * `counts` (any link, or a card), preferring the DEEPEST qualifying one so the
+ * whole page wrapper doesn't win by aggregate link count; null when none has three.
  */
-function selectLinkedContainer(doc: Document): { el: Element; linkedKids: number } | null {
+function selectLinkedContainer(doc: Document, counts: (kid: Element) => boolean): { el: Element; linkedKids: number } | null {
   let bestDiv: Element | null = null
   let bestDivDepth = -1
   let bestDivLinks = 0
   for (const el of qsa(doc, 'div,section')) {
     const kids = Array.from(el.children)
-    const linkedKids = kids.filter((k) => qsa(k, 'a').length > 0).length
+    const linkedKids = kids.filter(counts).length
     if (linkedKids < 3) continue
     let depth = 0
     for (let p = el.parentElement; p; p = p.parentElement) depth++

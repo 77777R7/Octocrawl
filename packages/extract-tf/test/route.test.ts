@@ -886,6 +886,25 @@ describe('strategies', () => {
         doc.close()
       }
     })
+
+    it('keeps the list over a larger block of bare links: a top bar, filters, a pager, a menu', () => {
+      const bare = (n: number, wrapTag: string, cls: string) =>
+        Array.from({ length: n }, (_, i) => `<${wrapTag} class="${cls}"><a href="/x/${i}">${cls} ${i}</a></${wrapTag}>`).join('')
+      const posts = `<ul id="listing">${Array.from({ length: 8 }, (_, i) => `<li><a href="/p/${i}">Post title ${i}</a> <span>2026-10-0${i}</span></li>`).join('')}</ul>`
+      const results = `<ol id="listing">${Array.from({ length: 6 }, (_, i) => `<li><a href="/r/${i}">Result ${i}</a><p>A snippet about result ${i}.</p></li>`).join('')}</ol>`
+      const ten = `<ul id="listing">${Array.from({ length: 10 }, (_, i) => `<li><a href="/r/${i}">Result ${i}</a> with a note</li>`).join('')}</ul>`
+      const fifteen = `<ul id="listing">${Array.from({ length: 15 }, (_, i) => `<li><a href="/e/${i}">Entry ${i}</a> detail</li>`).join('')}</ul>`
+      for (const page of [
+        `<div class="topbar">${bare(16, 'span', 'lang')}</div><h1>Blog</h1>${posts}`,
+        `<div class="filters">${bare(14, 'div', 'brand')}</div>${results}`,
+        `${ten}<div class="pagination">${bare(20, 'span', 'page')}</div>`,
+        `<div class="header"><div class="menu">${bare(30, 'div', 'category')}</div></div>${fifteen}`,
+      ]) {
+        const doc = parse(wrap(page))
+        expect(selectList(doc.document)?.getAttribute('id'), page.slice(0, 40)).toBe('listing')
+        doc.close()
+      }
+    })
   })
 
   it('selectTable skips layout tables and picks the data table', () => {
