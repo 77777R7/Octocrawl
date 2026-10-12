@@ -750,10 +750,32 @@ function inSiteChrome(el: Element): boolean {
   return false
 }
 
+/** A control that moves a carousel: labelled for a carousel, or for a previous or next slide. */
+const CAROUSEL_CONTROL = /\bcarousel\b|\b(?:previous|prev|next)\s+slide\b/i
+
+/**
+ * Whether the list is a carousel, which shows one slide at a time: it, an item of it, or an ancestor up to three
+ * levels holds `aria-roledescription` "carousel" or "slide" (the WAI-ARIA carousel pattern), or one of those
+ * ancestors has, as a child of its own, a link or button whose label names a carousel or a slide to go to. A control
+ * deeper in the ancestor belongs to another carousel beside the list. Amazon's home puts its hero slides in
+ * `ul#gwm-window`, two levels below `<a aria-label="Carousel previous slide">`, and they are not its listing.
+ */
+function isCarousel(list: Element): boolean {
+  const described = (el: Element) => /^(?:carousel|slide)$/i.test(el.getAttribute('aria-roledescription') ?? '')
+  if (described(list) || qsa(list, ':scope > li').some(described)) return true
+  let e: Element | null = list.parentElement
+  for (let level = 0; level < 3 && e !== null && !['MAIN', 'BODY', 'HTML'].includes(e.tagName); level++, e = e.parentElement) {
+    if (described(e)) return true
+    if (qsa(e, ':scope > a[aria-label], :scope > button[aria-label]').some((c) => CAROUSEL_CONTROL.test(c.getAttribute('aria-label') ?? ''))) return true
+  }
+  return false
+}
+
 /**
  * Listing strategy: the ordered/unordered list whose items share a common
  * link-plus-text shape. Returns the list element, or null. A list in the
- * page's footer or navigation is never the listing (inSiteChrome).
+ * page's footer or navigation (inSiteChrome), or a carousel (isCarousel), is
+ * never the listing.
  */
 export function selectList(doc: Document): Element | null {
   let best: Element | null = null
@@ -761,7 +783,7 @@ export function selectList(doc: Document): Element | null {
   for (const el of qsa(doc, 'ul,ol')) {
     const items = qsa(el, ':scope > li')
     const linked = items.filter((li) => qsa(li, 'a').length > 0).length
-    if (linked >= 3 && linked >= items.length * 0.6 && linked > bestItems && !inSiteChrome(el)) {
+    if (linked >= 3 && linked >= items.length * 0.6 && linked > bestItems && !inSiteChrome(el) && !isCarousel(el)) {
       bestItems = linked
       best = el
     }
