@@ -627,7 +627,8 @@
       for (const link of document.querySelectorAll('.dash-nav a')) { if (link.getAttribute('href') === `/dashboard/${next}/`) link.setAttribute('aria-current', 'page'); else if (/\/dashboard\/(scrape|map)\/$/.test(link.getAttribute('href'))) link.removeAttribute('aria-current') }
       placeMark()
       const [title, lead] = PAGES[next]
-      document.querySelector('.dash-head h1').textContent = title
+      // The page's title decodes into the new mode's name, as the selector's does.
+      if (push) morph(document.querySelector('.dash-head h1'), title); else document.querySelector('.dash-head h1').textContent = title
       const leadLine = document.querySelector('.dash-head .dash-lead')
       if (leadLine) leadLine.textContent = lead
       document.title = `${title} | Octocrawl Dashboard`
