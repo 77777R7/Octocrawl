@@ -460,21 +460,12 @@ function dashboardPageHtml(path, title, lead, body) {
 <nav class="dash-nav" aria-label="Dashboard">${links}</nav>
 <div class="dash-credits"><p><strong id="side-credits">…</strong> credits left</p><progress class="credit-bar" id="side-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress><p class="dash-small" id="side-renews">&nbsp;</p></div>
 <div class="dash-who"><span id="side-email">…</span><a href="/docs/">Docs ↗</a></div></aside>
-<main id="main-content" class="dash-main"><header class="dash-head"><pre class="dash-noise" id="dash-noise"${path === '/dashboard/' ? ' data-wave' : ''} aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1><p class="dash-lead">${lead}</p></header>
+<main id="main-content" class="dash-main"><header class="dash-head"><pre class="dash-noise" id="dash-noise" aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1><p class="dash-lead">${lead}</p></header>
 <p class="dash-message" id="dash-message" role="status" aria-live="polite"></p>
 ${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script><script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
 }
-// The Overview's banner: the Evidence Record, the thing that sets Octocrawl apart. dashboard.js prints the receipt
-// line by line and runs the field behind it; without scripts, or with reduced motion, the receipt is shown whole.
-const EV_RECEIPT = [
-  '┌─ EVIDENCE RECORD ─────────────────────┐',
-  '│ url     developer.mozilla.org/en-US/… │',
-  '│ fetched 2026-10-12T08:14:03Z          │',
-  '│ status  200 · lane http               │',
-  '│ robots  allowed                       │',
-  '│ sha256  9c1e4b07d2…a07f               │',
-  '└───────────────────────────────────────┘',
-].join('\n')
+// The Overview's banner: the Evidence Record, the thing that sets Octocrawl apart, centred between the octopus's arms,
+// which dashboard.js draws in glyphs rising from both bottom corners and keeps swaying.
 /** Clients the Overview links to, each to its setup on the Connect page. Icons are the docs' own; the rest are glyphs. */
 const INTEGRATIONS = [
   ['Claude Code', 'claude', 'claude-code.svg'], ['Codex', 'codex', 'codex.svg'], ['Cursor', 'cursor', 'cursor.svg'], ['OpenCode', 'opencode', 'opencode.svg'],
@@ -482,20 +473,19 @@ const INTEGRATIONS = [
 ]
 const integrationTiles = INTEGRATIONS.map(([name, id, icon]) => `<a class="int-tile" href="/dashboard/connect/#c-${id}"><span class="int-icon">${icon.endsWith('.svg') ? `<img src="/docs-assets/agent-clients/${icon}" width="22" height="22" alt="" />` : escape(icon)}</span><span class="int-name">${escape(name)}</span><span class="int-arrow" aria-hidden="true">↗</span></a>`).join('')
 const overviewBody = `<section class="ev-hero" aria-labelledby="ev-title"><pre class="ev-field" id="ev-field" aria-hidden="true"></pre>
-<div class="ev-copy"><p class="ev-tag">[ Evidence Record ]</p><h2 id="ev-title">Every page comes with its receipt</h2><p>Each answer says which address was read, when, what robots.txt allowed and the SHA-256 of what came back, so your agent can cite it and you can check it.</p><div class="ev-actions"><a class="ev-btn primary" href="/dashboard/connect/">Connect your agent →</a><a class="ev-btn" href="/docs/reference/#evidence-record">What a record holds</a></div></div>
-<pre class="ev-receipt" id="ev-receipt" aria-label="An example Evidence Record">${escape(EV_RECEIPT)}</pre></section>
+<div class="ev-copy"><p class="ev-badge">[ Evidence Record ]</p><h2 id="ev-title">Every page comes with its receipt.</h2><p>Each answer carries an Evidence Record: the address read, when, what robots.txt allowed and the SHA-256 of what came back.</p><div class="ev-actions"><a class="ev-btn primary" href="/dashboard/connect/">Connect your agent <span aria-hidden="true">→</span></a><a class="ev-btn" href="/docs/reference/#evidence-record">What a record holds</a></div></div></section>
 <section class="kpis" aria-label="This month">
 <div class="kpi"><p class="kpi-label">Credits left</p><p class="kpi-value" id="kpi-left">…</p><progress class="credit-bar" id="kpi-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress></div>
 <div class="kpi"><p class="kpi-label">Used this month</p><p class="kpi-value" id="kpi-used">…</p><p class="kpi-sub" id="kpi-used-sub">&nbsp;</p></div>
 <div class="kpi"><p class="kpi-label">Pages read · 30 days</p><p class="kpi-value" id="kpi-pages">…</p><p class="kpi-sub" id="kpi-pages-sub">&nbsp;</p></div>
 <div class="kpi"><p class="kpi-label">Not charged · 30 days</p><p class="kpi-value" id="kpi-free">…</p><p class="kpi-sub">blocked, robots.txt or no answer</p></div>
 </section>
-<div class="dash-grid">
+<div class="dash-grid pair">
 <section class="panel" aria-labelledby="used-title"><div class="panel-head"><div><h2 id="used-title">Credits used</h2><p class="dash-small" id="used-range">Last 7 days (UTC)</p></div><div class="panel-tools"><span class="big-figure" id="used-total">…</span><div class="tabs" role="group" aria-label="Range"><button type="button" aria-pressed="true" data-range="7">7 days</button><button type="button" aria-pressed="false" data-range="30">30 days</button></div></div></div>
 <div class="chart-wrap"><pre class="chart-ascii" id="used-ascii" aria-hidden="true"></pre><div id="used-chart"></div></div><a class="panel-link" href="/dashboard/usage/">Usage →</a></section>
 <section class="panel" aria-labelledby="key-title"><div class="panel-head"><h2 id="key-title">API key</h2><a class="button small" href="/dashboard/keys/">Create key</a></div>
-<ul class="key-list" id="keys-mini"></ul><p class="dash-small" id="keys-mini-empty" hidden>No keys yet. A key spends this account's credits and opens the browser lane.</p>
-<h3>MCP server</h3>${dashCode('ov-mcp', 'https://mcp.octocrawl.dev/mcp')}<h3>On your computer, free</h3>${dashCode('ov-cli', 'npx octocrawl serve')}<a class="panel-link" href="/dashboard/connect/">Set up an agent →</a></section>
+<div class="panel-body"><div><ul class="key-list" id="keys-mini"></ul><p class="dash-small" id="keys-mini-empty" hidden>No keys yet. A key spends this account's credits and opens the browser lane.</p></div>
+<div><h3>MCP server</h3>${dashCode('ov-mcp', 'https://mcp.octocrawl.dev/mcp')}</div><div><h3>On your computer, free</h3>${dashCode('ov-cli', 'npx octocrawl serve')}</div></div><a class="panel-link" href="/dashboard/connect/">Set up an agent →</a></section>
 </div>
 <section class="panel" aria-labelledby="int-title"><div class="panel-head"><h2 id="int-title">Integrations</h2><a href="/dashboard/connect/">All setups →</a></div><div class="integrations">${integrationTiles}</div></section>
 <section class="panel" aria-labelledby="recent-title"><div class="panel-head"><h2 id="recent-title">Recent requests</h2><a href="/dashboard/activity/">Activity →</a></div>${requestTable('recent', 5)}</section>`

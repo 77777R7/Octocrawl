@@ -364,30 +364,40 @@
     })
   }
 
-  // A faint field of glyphs behind the page title. On the Overview (data-wave) it moves like a flag: the left edge is
-  // held, and the field is read further up or down the further right a cell is, so the glyphs ripple in place on the
-  // grid while the field keeps its shape. About 15 frames a second, paused in a hidden tab, still with reduced motion.
+  // A faint field of glyphs behind every page's title, in motion between two forms: a flag (the left edge held, the
+  // field read further up or down the further right a cell is) and rings spreading from the top right corner. The two
+  // are blended cell by cell with a weight that eases from one to the other and back, about every 8 seconds, so the
+  // glyphs change in place on the grid and the field keeps its shape. About 15 frames a second; paused in a hidden tab,
+  // still with reduced motion.
   const noise = $('dash-noise')
   if (noise) {
     const glyphs = ' .:-=+*#%'
     const COLS = 110
     const ROWS = 12
     const field = (x, y) => Math.abs(Math.sin(x * 0.19 + y * 0.8) * Math.cos(x * 0.045 - y * 0.35))
+    const flag = (x, y, t) => {
+      const hold = (x / (COLS - 1)) ** 1.6
+      return field(x, y - hold * (2.4 * Math.sin(x * 0.12 - t * 1.6) + 0.7 * Math.sin(x * 0.27 - t * 2.5 + y * 0.15)))
+    }
+    const rings = (x, y, t) => {
+      const d = Math.hypot((COLS - 1 - x) * 0.5, y)
+      return Math.abs(Math.sin(d * 0.42 - t * 1.8)) * (0.45 + 0.55 * field(x, y))
+    }
     const draw = (t) => {
+      // 0 is all flag, 1 all rings; the cosine eases each change in and out.
+      const w = t === null ? 0 : 0.5 - 0.5 * Math.cos((t / 16) * Math.PI * 2)
       let text = ''
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
-          const hold = (x / (COLS - 1)) ** 1.6
-          const lift = t === null ? 0 : hold * (2.4 * Math.sin(x * 0.12 - t * 1.6) + 0.7 * Math.sin(x * 0.27 - t * 2.5 + y * 0.15))
-          text += glyphs[Math.min(glyphs.length - 1, Math.floor(field(x, y - lift) * (glyphs.length - 1)))]
+          const v = t === null ? field(x, y) : (1 - w) * flag(x, y, t) + w * rings(x, y, t)
+          text += glyphs[Math.min(glyphs.length - 1, Math.floor(v * (glyphs.length - 1)))]
         }
         text += '\n'
       }
       noise.textContent = text
     }
     draw(null)
-    const still = window.matchMedia('(prefers-reduced-motion: reduce)')
-    if ('wave' in noise.dataset && !still.matches) {
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       let last = 0
       const frame = (ms) => {
         if (!document.hidden && ms - last >= 66) { last = ms; draw(ms / 1000) }
@@ -397,51 +407,68 @@
     }
   }
 
-  // The Overview's banner: a field of glyphs on the orange, and an Evidence Record printed line by line, each line
-  // decoded from noise under a print head, then held, then printed again for the next address. Reduced motion, or a
-  // hidden tab, keeps the whole record on screen.
-  const receipt = $('ev-receipt')
-  glyphField($('ev-field'), 160, 22, 5)
-  if (receipt && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    const final = receipt.textContent.split('\n')
-    const examples = [
-      ['developer.mozilla.org/en-US/…', '200 · lane http', 'allowed', '9c1e4b07d2…a07f'],
-      ['docs.python.org/3/library/…', '200 · lane http', 'allowed', '41ad0e9b3c…5e12'],
-      ['www.amazon.sg/dp/B0CHX1W1XY', '200 · lane browser', 'allowed', 'e07b2f8a61…c903'],
-    ]
-    const fill = (line, from, value) => { const start = line.indexOf(from); const room = line.lastIndexOf('│') - start - 1; return `${line.slice(0, start)}${value.padEnd(room).slice(0, room)} │` }
-    const recordFor = (n) => {
-      const [url, status, robots, sha] = examples[n % examples.length]
-      const lines = final.slice()
-      lines[1] = fill(lines[1], 'developer', url)
-      lines[2] = fill(lines[2], '2026', new Date().toISOString().slice(0, 19) + 'Z')
-      lines[3] = fill(lines[3], '200', status)
-      lines[4] = fill(lines[4], 'allowed', robots)
-      lines[5] = fill(lines[5], '9c1e', sha)
-      return lines
+
+  // The Overview's banner: the octopus's arms in glyphs, three rising from each bottom corner and curling back toward
+  // their own edge, thick at the root and thin at the tip, keeping clear of the text in the middle. They sway slowly
+  // (about 8 frames a second); still with reduced motion or in a hidden tab.
+  const field = $('ev-field')
+  if (field) {
+    const RAMP = ' .:-=+*#%@'
+    // Each arm: where its root sits (share of the width from its edge), how long it is (share of the height), and a phase.
+    const ARMS = [[0.03, 0.95, 0.0], [0.11, 1.15, 1.9], [0.2, 0.8, 3.4]]
+    const draw = (t) => {
+      const cols = Math.max(40, Math.ceil(field.clientWidth / 6.6))
+      const rows = Math.max(12, Math.ceil(field.clientHeight / 12))
+      const narrow = cols < 90
+      const density = new Float32Array(cols * rows)
+      const sucker = new Uint8Array(cols * rows)
+      const stamp = (x, y, width) => {
+        const x0 = Math.max(0, Math.floor(x - width * 2 - 1)); const x1 = Math.min(cols - 1, Math.ceil(x + width * 2 + 1))
+        const y0 = Math.max(0, Math.floor(y - width - 1)); const y1 = Math.min(rows - 1, Math.ceil(y + width + 1))
+        for (let cy = y0; cy <= y1; cy++) {
+          for (let cx = x0; cx <= x1; cx++) {
+            const d = Math.hypot((cx - x) * 0.5, cy - y) / width
+            const v = Math.exp(-d * d * 1.8)
+            const at = cy * cols + cx
+            if (v > density[at]) density[at] = v
+          }
+        }
+      }
+      for (const side of [1, -1]) {
+        for (const [root, length, phase] of ARMS) {
+          // Walk the arm from its root: it leans in, bends back toward its own edge and curls over at the tip.
+          let x = side === 1 ? (narrow ? root * 0.5 : root) * cols : (1 - (narrow ? root * 0.5 : root)) * cols
+          let y = rows + 1
+          const steps = 80
+          const step = (length * rows * (narrow ? 0.9 : 1.25)) / steps
+          for (let k = 0; k <= steps; k++) {
+            const s = k / steps
+            const theta = 1.2 + 0.85 * s + 3.4 * s ** 3 + 0.3 * s * Math.sin(t * 0.8 + phase + s * 2.2)
+            const width = 2.4 * (1 - s) ** 1.2 + 0.45
+            stamp(x, y, width)
+            // A sucker every few steps, on the inner side of the curl.
+            if (k % 7 === 3 && s < 0.85) {
+              const sx = Math.round(x - side * Math.sin(theta) * width * 2.2); const sy = Math.round(y - Math.cos(theta) * width * 1.1)
+              if (sx >= 0 && sx < cols && sy >= 0 && sy < rows) sucker[sy * cols + sx] = 1
+            }
+            x += side * Math.cos(theta) * step * 2
+            y -= Math.sin(theta) * step
+          }
+        }
+      }
+      let text = ''
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const at = y * cols + x
+          text += sucker[at] && density[at] > 0.25 ? 'o' : RAMP[Math.min(RAMP.length - 1, Math.floor(density[at] * RAMP.length))]
+        }
+        text += '\n'
+      }
+      field.textContent = text
     }
-    const noise = '.:-=+*#%'
-    let record = recordFor(0)
-    let line = 0
-    let progress = 0
-    let hold = 0
-    let round = 0
-    const tick = () => {
-      if (document.hidden) return
-      if (hold > 0) { hold--; if (hold === 0) { round++; record = recordFor(round); line = 0; progress = 0 } else return }
-      const shown = record.map((text, i) => {
-        if (i < line) return text
-        if (i > line) return ''
-        // The line being printed: what is done, a few cells of noise, the print head.
-        const done = text.slice(0, progress)
-        const fuzz = Array.from(text.slice(progress, progress + 3), (ch) => (ch === ' ' ? ' ' : noise[Math.floor(Math.random() * noise.length)])).join('')
-        return `${done}${fuzz}${progress < text.length ? '▌' : ''}`
-      })
-      receipt.textContent = shown.join('\n')
-      progress += 4
-      if (progress > record[line].length + 2) { line++; progress = 0; if (line >= record.length) { receipt.textContent = record.join('\n'); hold = 60 } }
-    }
-    setInterval(tick, 50)
+    draw(0)
+    if ('ResizeObserver' in window) new ResizeObserver(() => draw(performance.now() / 1000)).observe(field)
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(() => { if (!document.hidden) draw(performance.now() / 1000) }, 125)
   }
 
   load()
