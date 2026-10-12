@@ -222,6 +222,21 @@ it('an account\'s key spends credits by what each result returned, and says what
   expect(((await none.json()) as { links: unknown[] }).links).toEqual([])
   expect(none.headers.get('x-credits-used')).toBe('0')
   expect(credits.usage.get(`account-1-${new Date().toISOString().slice(0, 10)}`)).toEqual({ http: 1, browser: 0, not_found: 1, map: 1, unread: 4, credits: 3 })
+  // Each start leaves one request line, newest first: what was asked for and what came back, never the page's content.
+  const lines = credits.requests.get('account-1')!
+  expect(lines.map(line => [line.endpoint, line.status, line.credits])).toEqual([
+    ['map', 'completed', 0], ['map', 'completed', 1], ['scrape', 'invalid_request', 0], ['scrape', 'invalid_request', 0],
+    ['scrape', expect.not.stringMatching(/^success$/), 0], ['scrape', 'failed', 1], ['scrape', 'success', 1],
+  ])
+  const read = lines.at(-1)!
+  expect(read).toMatchObject({ url: `${origin}/page`, finalUrl: `${origin}/page`, lane: 'http', httpStatus: 200, robots: 'allowed', kind: 'http', links: null })
+  expect(read.sha256).toMatch(/^[0-9a-f]{64}$/)
+  expect(read.keyId).toBe(keyDigest(HASH_KEY, 'oc_account'))
+  expect(lines[4]).toMatchObject({ url: `${origin}/private`, robots: 'disallowed', kind: 'unread' })
+  expect(lines[3]).toMatchObject({ url: '', status: 'invalid_request' })
+  expect(lines[1]!.links).toBeGreaterThan(0)
+  expect(lines[0]!.links).toBe(0)
+  expect(JSON.stringify(lines)).not.toContain('markdown')
   // The site's daily total still counts every start; no per-key daily counter is kept for an account.
   expect([...credits.site.values()]).toEqual([7])
   expect(quota.counts.size).toBe(0)

@@ -41,6 +41,7 @@ Once per project: the TTL policy that deletes a day's counters two days on (`exp
 ```sh
 gcloud firestore fields ttls update expireAt --collection-group=hostedQuotas --enable-ttl --project="$W2L_PROJECT_ID"
 gcloud firestore fields ttls update expireAt --collection-group=creditUsage --enable-ttl --project="$W2L_PROJECT_ID"
+gcloud firestore fields ttls update expireAt --collection-group=requests --enable-ttl --project="$W2L_PROJECT_ID"
 ```
 
 Build the image from a clean commit and deploy it without traffic, then move all traffic to it under a new tag; keep the previous tag as the rollback (as the preview's releases):
@@ -136,6 +137,7 @@ A key that names an account (`uid` on its `hostedApiKeys` document) spends that 
   - `credits/{uid}` holds `month`, `grant` and `purchased`.
   - A reservation updates that document and the site's daily counter (`hostedQuotas/{day}-site`) in one commit with update-time preconditions, so two instances cannot overspend.
   - The refund and the day's usage (`creditUsage/{uid}-{day}`: `http`, `browser`, `not_found`, `map`, `unread`, `credits`) are server-side increments. The usage documents expire after 90 days (the TTL policy above).
+  - The same commit writes the call's request line, `requestLog/{uid}/requests/{id}`: endpoint, key HMAC, the URL asked for and the final URL, lane, status, HTTP status, reason, robots.txt decision, the Evidence Record's `rawSha256`, a map's link count, what it was counted as and its credits. Never the page's content. The id is `9999999999999 − epoch ms` and a random tail, so Firestore's default order lists the newest first without an index. Lines expire 30 days on (`expireAt`, the TTL policy above), and the dashboard reads them through `GET /api/account/activity` (packages/public-preview/src/account.ts).
 - **Logs.** Every call that reserved credits logs `hosted_credits` with the account id, what it was counted as, and what it reserved and spent. A reservation or settle that fails logs `hosted_credits_reserve_failed` or `hosted_credits_settle_failed`. A commit that timed out may still have applied, so check `credits/{uid}` and `creditUsage` before giving anything back by hand.
 - **Edge.** A call that runs across 00:00 UTC on the 1st gives its refund to the new month's grant, at most 4 credits over it.
 

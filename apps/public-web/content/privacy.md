@@ -41,7 +41,7 @@ Calls to `api.octocrawl.dev` and `mcp.octocrawl.dev` pass through Cloudflare and
 - **Your key's record**, if you have one: a hash of the key (never the key), the label you gave when you asked for it, its plan and allowance, and when it was issued.
 - **The result of each call** for ten minutes, so that `GET /v1/scrapes/:id` can return it, then deleted with any file it read. The page you asked for is not kept for reuse by anyone else.
 
-The request log carries the path of the call and, for a scrape, the address you asked for is in its body, which the log does not record.
+The request log carries the path of the call and, for a scrape, the address you asked for is in its body, which the log does not record. A call made with an account's key is also listed for that account, as **Accounts** below says.
 
 ## Accounts
 
@@ -61,6 +61,7 @@ A sign-in link is sent by Firebase. GitHub and Google show you what they share b
 - **Your account:** your email address, when you first and last signed in, and which ways you signed in.
 - **A session for each sign-in:** a keyed hash of the session's id (never the id), your account, your email address and when it ends. It is deleted 30 days on, or when you sign out.
 - **Your credits:** this month's balance, and for each UTC day the number of calls by kind and the credits they cost. Daily counts are deleted after 90 days.
+- **Your requests:** for each call made with one of your keys, a line with the address you asked for and the one finally read, when, which key, the result (status, HTTP status, robots.txt decision, the reading route) and the SHA-256 of what was read, with the credits it cost. Never the page's content. Only you see these lines, on your dashboard's Activity page, and each one is deleted 30 days after the call.
 - **Your API keys:** for each key, a hash (never the key), the name you gave it, its first seven characters and when it was made. Revoking a key stops it, and the record stays so your keys page can show it.
 
 **Cookies.** A sign-in sets `w2l_session`, which holds the session's id. Your browser keeps it for 30 days, and scripts on the page cannot read it. It also sets `w2l_account=1`, which tells the page to show **Dashboard** in place of **Sign in**. While you sign in, two short cookies hold the sign-in's state: one for 10 minutes and one for an hour. If you sign in with GitHub or Google using an email address that already has an account, a third cookie keeps that provider's sign-in for 30 minutes, encrypted. When you then sign in the way you did before, the provider is added to your account and the cookie is deleted.

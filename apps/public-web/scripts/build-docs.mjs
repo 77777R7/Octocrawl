@@ -437,6 +437,7 @@ for (const [path, title, description, body, layout] of [
 // no site header: the logo goes back to the site.
 const DASHBOARD_PAGES = [
   ['/dashboard/', 'Overview', 'Workspace'],
+  ['/dashboard/activity/', 'Activity', 'Workspace'],
   ['/dashboard/usage/', 'Usage', 'Workspace'],
   ['/dashboard/keys/', 'API keys', 'Build'],
   ['/dashboard/connect/', 'Connect', 'Build'],
@@ -444,6 +445,8 @@ const DASHBOARD_PAGES = [
 ]
 const dashCode = (id, text) => `<div class="code"><pre id="${id}">${escape(text)}</pre><button class="copy" type="button" data-copy="${id}">Copy</button></div>`
 const dashLegend = '<p class="chart-legend"><span class="g-http"># page over HTTP · 1 credit</span><span class="g-browser">% page in a browser · 5</span><span class="g-other">+ map or 404 · 1</span></p>'
+/** The request table the Activity page and the Overview share: dashboard.js fills its body from /api/account/activity. */
+const requestTable = (id, rows) => `<div class="table-scroll"><table class="dash-table requests" data-rows="${rows}"><thead><tr><th>Time (UTC)</th><th>Endpoint</th><th>URL</th><th>Lane</th><th>Result</th><th>robots.txt</th><th class="num">Credits</th><th>Evidence</th></tr></thead><tbody id="${id}-body"></tbody></table></div><p class="dash-small" id="${id}-empty" hidden>No requests yet. Each call made with one of your keys shows here, with what it cost.</p>`
 function dashboardPageHtml(path, title, lead, body) {
   let group = ''
   const links = DASHBOARD_PAGES.map(([href, name, section]) => {
@@ -475,10 +478,19 @@ const overviewBody = `<section class="kpis" aria-label="This month">
 <div id="tab-rest" role="tabpanel" hidden>${dashCode('snippet-rest', `curl https://api.octocrawl.dev/v1/scrape \\\n  -H 'authorization: Bearer oc_YOUR_KEY' \\\n  -H 'content-type: application/json' \\\n  -d '{"url":"https://example.com","formats":["markdown"]}'`)}</div>
 <div id="tab-sdk" role="tabpanel" hidden>${dashCode('snippet-sdk', `import { octocrawlTools } from '@octocrawl/ai-sdk'\n\n// Reads OCTOCRAWL_API_KEY from the environment.\nconst tools = octocrawlTools()`)}</div>
 <h3>Your keys</h3><ul class="key-list" id="keys-mini"></ul><p class="dash-small" id="keys-mini-empty" hidden>No keys yet. A key spends this account's credits and opens the browser lane.</p><a class="panel-link" href="/dashboard/keys/">Manage keys →</a></section>
-</div>`
+</div>
+<section class="panel" aria-labelledby="recent-title"><div class="panel-head"><h2 id="recent-title">Recent requests</h2><a href="/dashboard/activity/">Activity →</a></div>${requestTable('recent', 5)}</section>`
+const activityBody = `<section class="panel" aria-labelledby="activity-title"><div class="panel-head"><h2 id="activity-title">Requests</h2><span class="dash-small" id="activity-count">&nbsp;</span></div>
+<form class="filters" id="activity-filters"><label for="f-search">URL contains<input id="f-search" name="search" type="search" autocomplete="off" placeholder="example.com" /></label><label for="f-endpoint">Endpoint<select id="f-endpoint" name="endpoint"><option value="">All</option><option value="scrape">/scrape</option><option value="map">/map</option></select></label><label for="f-key">Key<select id="f-key" name="key"><option value="">All keys</option></select></label><label for="f-result">Result<select id="f-result" name="result"><option value="">All</option><option value="read">Read</option><option value="free">Not charged</option></select></label><button class="button quiet" type="button" id="export-csv">Export CSV</button></form>
+${requestTable('activity', 0)}
+<p class="dash-small">Lines are kept 30 days and only you see them: the URL asked for, what came back and what it cost, with the body's SHA-256 from the Evidence Record. Never the page's content. The page shows the latest 1,000.</p></section>`
 const usageBody = `<section class="panel" aria-labelledby="usage-chart-title"><div class="panel-head"><h2 id="usage-chart-title">Credits per day (UTC)</h2><span class="dash-small" id="usage-total">&nbsp;</span></div><pre class="ascii-chart" id="usage-chart" data-rows="13" aria-describedby="chart-summary"></pre><p class="sr-only" id="chart-summary"></p>${dashLegend}</section>
 <section class="panel" aria-labelledby="usage-table-title"><div class="panel-head"><h2 id="usage-table-title">Day by day</h2></div><div class="table-scroll"><table class="dash-table"><thead><tr><th>Day (UTC)</th><th class="num">HTTP</th><th class="num">Browser</th><th class="num">Not found</th><th class="num">Map</th><th class="num">Not charged</th><th class="num">Credits</th></tr></thead><tbody id="usage-body"></tbody><tfoot id="usage-foot"></tfoot></table></div><p class="dash-small" id="usage-empty" hidden>No calls in the last 30 days.</p>
-<p class="dash-small">A page read over HTTP costs 1 credit, a page read in a browser 5, a page that does not exist 1, and a map 1. A page that was blocked, or a call that read nothing, costs nothing. <a href="/docs/limits/#hosted-api-and-mcp">Limits</a> has the details.</p></section>`
+<p class="dash-small">A page read over HTTP costs 1 credit, a page read in a browser 5, a page that does not exist 1, and a map 1. A page that was blocked, or a call that read nothing, costs nothing. <a href="/docs/limits/#hosted-api-and-mcp">Limits</a> has the details.</p></section>
+<div class="dash-grid even">
+<section class="panel" aria-labelledby="by-key-title"><div class="panel-head"><h2 id="by-key-title">By key</h2><span class="dash-small">from request lines, 30 days</span></div><div class="table-scroll"><table class="dash-table"><thead><tr><th>Key</th><th class="num">Calls</th><th class="num">Pages read</th><th class="num">Credits</th></tr></thead><tbody id="by-key-body"></tbody></table></div><p class="dash-small" id="by-key-empty" hidden>No request lines yet.</p></section>
+<section class="panel" aria-labelledby="by-site-title"><div class="panel-head"><h2 id="by-site-title">By site</h2><span class="dash-small">top 10, 30 days</span></div><div class="table-scroll"><table class="dash-table"><thead><tr><th>Site</th><th class="num">Calls</th><th class="num">Not charged</th><th class="num">Credits</th></tr></thead><tbody id="by-site-body"></tbody></table></div><p class="dash-small" id="by-site-empty" hidden>No request lines yet.</p></section>
+</div>`
 const keysBody = `<section class="panel" aria-labelledby="keys-title"><div class="panel-head"><h2 id="keys-title">API keys</h2><span class="dash-small">At most five active keys</span></div>
 <p>Send a key as <code>Authorization: Bearer &lt;key&gt;</code> to <code>https://api.octocrawl.dev</code> or <code>https://mcp.octocrawl.dev/mcp</code>. Its calls spend this account's credits and may use the browser.</p>
 <form class="dash-form" id="key-form"><label for="key-label">Name (optional)<input id="key-label" name="label" maxlength="60" placeholder="laptop agent" autocomplete="off" /></label><button class="button" type="submit">Create key</button></form>
@@ -501,6 +513,7 @@ const accountBody = `<section class="panel" aria-labelledby="who-title"><div cla
 <section class="panel" aria-labelledby="out-title"><div class="panel-head"><h2 id="out-title">Session and records</h2></div><p>What signing in records is on the <a href="/docs/privacy/">privacy page</a>; credits and keys are covered by the <a href="/docs/terms/">terms</a>.</p><form method="post" action="/auth/logout"><button class="button quiet" type="submit">Sign out</button></form></section>`
 for (const [path, title, lead, body] of [
   ['/dashboard/', 'Overview', 'This month\'s credits, the last 30 days of use, and the lines to connect an agent.', overviewBody],
+  ['/dashboard/activity/', 'Activity', 'Every call made with your keys in the last 30 days: what was asked for, what came back, and what it cost.', activityBody],
   ['/dashboard/usage/', 'Usage', 'What the hosted API and MCP read for this account, day by day, and what it cost.', usageBody],
   ['/dashboard/keys/', 'API keys', 'Keys for agents and code. Each one spends this account\'s credits.', keysBody],
   ['/dashboard/connect/', 'Connect', 'One line for each MCP client, the REST call, and the free local server.', connectBody],

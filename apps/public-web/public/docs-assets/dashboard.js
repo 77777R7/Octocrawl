@@ -1,5 +1,5 @@
-// The dashboard's pages (scripts/build-docs.mjs). They read GET /api/account and make and revoke keys through
-// /api/account/keys (packages/public-preview account.ts); without a session they send the visitor to sign in. Text
+// The dashboard's pages (scripts/build-docs.mjs). They read GET /api/account and GET /api/account/activity, and make
+// and revoke keys through /api/account/keys (packages/public-preview account.ts); without a session they send the visitor to sign in. Text
 // goes in with textContent only, and charts are text, as the site's CSP allows no inline style.
 (() => {
   const $ = (id) => document.getElementById(id)
@@ -126,6 +126,107 @@
     set('usage-total', `${number(days.reduce((sum, d) => sum + d.credits, 0))} credits in 30 days`)
   }
 
+  const READ = new Set(['success', 'partial', 'empty_verified'])
+  const host = (url) => { try { return new URL(url).host } catch { return url || '(no URL)' } }
+  const timeOf = (iso) => (iso ? `${longDay(iso)} ${iso.slice(11, 16)}` : '')
+  /** What a request line shows as its result, and how it is marked: read, not charged, or failed. */
+  const outcome = (line) => {
+    if (line.endpoint === 'map') return line.links !== null && line.links > 0 ? [`${number(line.links)} links`, 'ok'] : [line.status === 'invalid_request' ? 'invalid request' : 'no links', 'warn']
+    if (READ.has(line.status)) return [line.httpStatus ? `${line.httpStatus}` : line.status, 'ok']
+    if (line.status === 'failed' && (line.httpStatus === 404 || line.httpStatus === 410)) return [`${line.httpStatus}`, 'warn']
+    if (line.status === 'invalid_request') return ['invalid request', 'warn']
+    return [line.reason ? `${line.status} · ${line.reason}` : line.status || 'error', 'bad']
+  }
+  const cell = (row, text, className = '') => { const td = document.createElement('td'); if (className) td.className = className; td.textContent = text; row.append(td); return td }
+  const renderRequests = (id, lines, keyNames) => {
+    const body = $(`${id}-body`)
+    if (!body) return
+    body.replaceChildren(...lines.map((line) => {
+      const row = document.createElement('tr')
+      cell(row, timeOf(line.at))
+      cell(row, `/${line.endpoint}`)
+      const url = cell(row, '', 'url')
+      if (/^https?:\/\//.test(line.url)) {
+        const link = document.createElement('a'); link.href = line.url; link.rel = 'noopener noreferrer'; link.target = '_blank'; link.textContent = line.url.replace(/^https?:\/\//, ''); link.title = line.url
+        url.append(link)
+      } else url.textContent = line.url || '(no URL)'
+      cell(row, line.lane ?? '—')
+      const [label, mark] = outcome(line)
+      const result = cell(row, '')
+      const pill = document.createElement('span'); pill.className = `status ${mark}`; pill.textContent = label; result.append(pill)
+      cell(row, line.robots ?? '—')
+      cell(row, number(line.credits), 'num')
+      const hash = cell(row, line.sha256 ? `sha256 ${line.sha256.slice(0, 12)}…` : '—', 'hash')
+      if (line.sha256) hash.title = line.sha256
+      if (keyNames) row.title = `Key: ${keyNames.get(line.keyId) ?? 'a revoked or deleted key'}`
+      return row
+    }))
+    $(`${id}-empty`).hidden = lines.length > 0
+  }
+  /** Rows of [name, calls, second figure, credits], largest credits first. */
+  const tally = (lines, keyOf, second) => {
+    const groups = new Map()
+    for (const line of lines) {
+      const key = keyOf(line)
+      const group = groups.get(key) ?? [key, 0, 0, 0]
+      group[1] += 1; group[2] += second(line) ? 1 : 0; group[3] += line.credits
+      groups.set(key, group)
+    }
+    return [...groups.values()].sort((a, b) => b[3] - a[3] || b[1] - a[1])
+  }
+  const renderTally = (id, rows) => {
+    const body = $(`${id}-body`)
+    if (!body) return
+    body.replaceChildren(...rows.map((values) => { const row = document.createElement('tr'); values.forEach((v, i) => cell(row, i === 0 ? v : number(v), i === 0 ? '' : 'num')); return row }))
+    $(`${id}-empty`).hidden = rows.length > 0
+  }
+  const csvField = (value) => { const text = value === null || value === undefined ? '' : String(value); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text }
+
+  let activity = null
+  let keyNames = new Map()
+  const filters = $('activity-filters')
+  const filtered = () => {
+    if (!activity) return []
+    const form = filters ? new FormData(filters) : new FormData()
+    const search = String(form.get('search') ?? '').trim().toLowerCase()
+    return activity.filter((line) => (!search || line.url.toLowerCase().includes(search))
+      && (!form.get('endpoint') || line.endpoint === form.get('endpoint'))
+      && (!form.get('key') || line.keyId === form.get('key'))
+      && (form.get('result') !== 'read' || outcome(line)[1] === 'ok')
+      && (form.get('result') !== 'free' || line.credits === 0))
+  }
+  const renderActivity = () => {
+    if (!activity) return
+    renderRequests('recent', activity.slice(0, 5))
+    const shown = filtered()
+    renderRequests('activity', shown, keyNames)
+    set('activity-count', `${number(shown.length)} of ${number(activity.length)} in 30 days`)
+    renderTally('by-key', tally(activity, (line) => keyNames.get(line.keyId) ?? 'Revoked or deleted key', (line) => outcome(line)[1] === 'ok' && line.endpoint === 'scrape'))
+    renderTally('by-site', tally(activity, (line) => host(line.url), (line) => line.credits === 0).slice(0, 10))
+  }
+  if (filters) {
+    filters.addEventListener('input', renderActivity)
+    filters.addEventListener('submit', (event) => event.preventDefault())
+    $('export-csv').addEventListener('click', () => {
+      const columns = ['at', 'endpoint', 'url', 'finalUrl', 'lane', 'status', 'httpStatus', 'reason', 'robots', 'links', 'credits', 'sha256', 'keyId']
+      const text = [columns.join(','), ...filtered().map((line) => columns.map((c) => csvField(line[c])).join(','))].join('\n')
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }))
+      link.download = `octocrawl-activity-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000)
+    })
+  }
+  const loadActivity = async () => {
+    if (!$('recent-body') && !$('activity-body') && !$('by-key-body')) return
+    try {
+      const response = await fetch('/api/account/activity', { credentials: 'same-origin' })
+      if (!response.ok) throw new Error(String(response.status))
+      activity = (await response.json()).requests
+      renderActivity()
+    } catch { say('Your requests could not be loaded. Reload the page in a minute.', true) }
+  }
+
   const render = (data, load) => {
     const { monthly } = data.credits
     const days = lastDays(data.usage)
@@ -146,6 +247,10 @@
     chart($('usage-chart'), days)
     renderUsage(days, data.usage)
     renderKeys(data.keys, load)
+    keyNames = new Map(data.keys.map((k) => [k.id, `${k.label} (${k.prefix}…)`]))
+    const keyFilter = $('f-key')
+    if (keyFilter && keyFilter.options.length === 1) for (const key of data.keys) keyFilter.append(new Option(`${key.label} (${key.prefix}…)`, key.id))
+    renderActivity()
 
     set('acct-email', data.email || 'No email address on record')
     const providers = $('acct-providers')
@@ -163,6 +268,7 @@
       if (response.status === 401) { location.replace(`/signin/?next=${encodeURIComponent(location.pathname)}`); return }
       if (!response.ok) throw new Error(String(response.status))
       render(await response.json(), load)
+      if (activity === null) loadActivity()
     } catch { say('Your dashboard could not be loaded. Reload the page in a minute.', true) }
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FirestoreCreditsStore, mapCharge, MemoryCreditsStore, scrapeCharge, secondsToNextGrant } from '../src/hostedCredits.js'
+import { FirestoreCreditsStore, mapCharge, MemoryCreditsStore, requestLineId, scrapeCharge, secondsToNextGrant } from '../src/hostedCredits.js'
 
 const SITE = { id: '2026-10-11-site', limit: 100 }
 const OCT = new Date('2026-10-11T08:00:00Z')
@@ -125,6 +125,30 @@ describe('the Firestore ledger', () => {
     firestore.conflictOnce()
     expect(await store.reserve('account-1', 1, SITE, OCT)).toMatchObject({ ok: true, reservation: { remaining: 998 } })
     expect(firestore.docs.get(`${firestore.resource}/hostedQuotas/${SITE.id}`)!.fields.count).toEqual({ integerValue: '2' })
+  })
+
+  it('writes a call\'s request line in the settle\'s commit, without nulls, to expire in 30 days, newest first by id', async () => {
+    const firestore = fakeFirestore()
+    const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
+    const reserved = await store.reserve('account-1', 5, SITE, OCT)
+    if (!reserved.ok) throw new Error('unreachable')
+    const note = { endpoint: 'scrape' as const, keyId: 'k'.repeat(64), url: `https://example.org/${'a'.repeat(3_000)}`, finalUrl: 'https://example.org/a', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed' as const, sha256: 'f'.repeat(64), links: null }
+    await store.settle(reserved.reservation, 1, 'http', OCT, note)
+    const settled = firestore.commits.at(-1) as { writes: Array<{ update: { name: string; fields: Record<string, Record<string, string>> } }> }
+    expect(settled.writes).toHaveLength(3)
+    const line = settled.writes[2]!.update
+    expect(line.name).toBe(`${firestore.resource}/requestLog/account-1/requests/${line.name.split('/').pop()}`)
+    expect(line.fields).toMatchObject({ uid: { stringValue: 'account-1' }, endpoint: { stringValue: 'scrape' }, status: { stringValue: 'success' }, httpStatus: { integerValue: '200' }, robots: { stringValue: 'allowed' }, kind: { stringValue: 'http' }, credits: { integerValue: '1' }, at: { timestampValue: OCT.toISOString() }, expireAt: { timestampValue: new Date(OCT.getTime() + 30 * 86_400_000).toISOString() } })
+    expect(line.fields.url!.stringValue).toHaveLength(2_048)
+    expect(Object.keys(line.fields)).not.toContain('reason')
+    expect(Object.keys(line.fields)).not.toContain('links')
+    // A settle without a line (no account key's call) writes none.
+    const again = await store.reserve('account-1', 1, SITE, OCT)
+    if (!again.ok) throw new Error('unreachable')
+    await store.settle(again.reservation, 0, 'unread', OCT)
+    expect((firestore.commits.at(-1) as { writes: unknown[] }).writes).toHaveLength(2)
+    // Ids sort newest first in Firestore's default order.
+    expect(requestLineId(new Date(OCT.getTime() + 1_000), 'b') < requestLineId(OCT, 'a')).toBe(true)
   })
 
   it('refuses past the balance or the site\'s day without writing, and rejects a malformed account id', async () => {

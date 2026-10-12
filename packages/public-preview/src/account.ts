@@ -2,11 +2,13 @@
  * The dashboard's data (ROADMAP PH, decided 2026-10-11): what a signed-in person has left this month, what they used,
  * their API keys and the ways they sign in. It reads and writes the collections the hosted API keeps
  * (packages/mcp/src/hostedApi.ts and hostedCredits.ts): `credits/{uid}`, `creditUsage/{uid}-{day}` and
- * `hostedApiKeys/{hmac}`, and reads `users/{uid}`, which sign-in keeps (auth.ts). A key is made here the way
+ * `hostedApiKeys/{hmac}`, and reads `users/{uid}`, which sign-in keeps (auth.ts), and `requestLog/{uid}/requests/{id}`,
+ * one line per call by the account's keys (hostedCredits.ts). A key is made here the way
  * scripts/hosted/issue-key.mjs makes one: `oc_` and 32 random bytes, shown once, stored only as its HMAC under
  * W2L_QUOTA_HASH_KEY, with the account's uid so its calls spend the account's credits.
  *
  *   GET  /api/account                     { email, providers, credits, usage, keys }
+ *   GET  /api/account/activity            { requests, limit, retentionDays }: the latest request lines, newest first
  *   POST /api/account/keys                { label? }  →  { key, id }   (the key, once)
  *   POST /api/account/keys/{id}/revoke    the key stops within a minute (the hosted API caches lookups that long)
  */
@@ -20,10 +22,18 @@ export const DEFAULT_MONTHLY_CREDITS = 1_000
 /** Keys an account may hold at once; a revoked key does not count. */
 export const MAX_ACTIVE_KEYS = 5
 export const USAGE_DAYS = 30
+/** Request lines the Activity page reads at most, and how long the hosted API keeps them. */
+export const ACTIVITY_LIMIT = 1_000
+export const ACTIVITY_DAYS = 30
 
 export interface Balance { month: string; grant: number; purchased: number }
 export interface UsageDay { day: string; http: number; browser: number; notFound: number; map: number; unread: number; credits: number }
 export interface KeyView { id: string; label: string; prefix: string; createdAt: string; enabled: boolean }
+/** One call by one of the account's keys, as the hosted API recorded it (hostedCredits.ts, RequestLine). */
+export interface RequestView {
+  id: string; at: string; endpoint: string; keyId: string; url: string; finalUrl: string | null; lane: string | null; status: string
+  httpStatus: number | null; reason: string | null; robots: string | null; sha256: string | null; links: number | null; kind: string; credits: number
+}
 
 export interface AccountData {
   balance(uid: string): Promise<Balance | null>
@@ -31,6 +41,8 @@ export interface AccountData {
   keys(uid: string): Promise<KeyView[]>
   /** The ways the account has signed in (`google.com`, `github.com`, `emailLink`), as sign-in recorded them. */
   providers(uid: string): Promise<string[]>
+  /** The latest request lines, newest first. */
+  requests(uid: string, limit: number): Promise<RequestView[]>
   createKey(uid: string, digest: string, record: { label: string; prefix: string; createdAt: string }): Promise<void>
   /** Disables the key if it belongs to the account; false when it does not, or does not exist. */
   revokeKey(uid: string, id: string): Promise<boolean>
@@ -41,12 +53,14 @@ export class MemoryAccountData implements AccountData {
   readonly usageDays = new Map<string, UsageDay & { uid: string }>()
   readonly keyRecords = new Map<string, KeyView & { uid: string }>()
   readonly signInMethods = new Map<string, string[]>()
+  readonly requestLines = new Map<string, RequestView[]>()
   async balance(uid: string) { return this.balances.get(uid) ?? null }
   async usage(uid: string, since: string) {
     return [...this.usageDays.values()].filter(day => day.uid === uid && day.day >= since).map(({ uid: _uid, ...day }) => day).sort((a, b) => a.day.localeCompare(b.day))
   }
   async keys(uid: string) { return [...this.keyRecords.values()].filter(key => key.uid === uid).map(({ uid: _uid, ...key }) => key) }
   async providers(uid: string) { return this.signInMethods.get(uid) ?? [] }
+  async requests(uid: string, limit: number) { return (this.requestLines.get(uid) ?? []).slice().sort((a, b) => a.id.localeCompare(b.id)).slice(0, limit) }
   async createKey(uid: string, digest: string, record: { label: string; prefix: string; createdAt: string }) {
     this.keyRecords.set(digest, { id: digest, uid, enabled: true, ...record })
   }
@@ -108,6 +122,26 @@ export class FirestoreAccountData implements AccountData {
     if (!response.ok) throw new Error(`users read failed (${response.status})`)
     const doc = await response.json() as Doc
     return (doc.fields?.providers?.arrayValue?.values ?? []).flatMap(value => typeof value.stringValue === 'string' ? [value.stringValue] : [])
+  }
+  async requests(uid: string, limit: number): Promise<RequestView[]> {
+    // Ids sort newest first (hostedCredits.ts, requestLineId), so the default order needs no index.
+    const response = await this.request(`${this.resource}/requestLog/${uid}:runQuery`, { method: 'POST', body: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: 'requests' }],
+      orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
+      limit,
+    } }) })
+    if (!response.ok) throw new Error(`requestLog query failed (${response.status})`)
+    const rows = await response.json() as Array<{ document?: Doc }>
+    const text = (value: Value | undefined) => (typeof value?.stringValue === 'string' ? value.stringValue : null)
+    const count = (value: Value | undefined) => { const n = Number(value?.integerValue); return value?.integerValue !== undefined && Number.isSafeInteger(n) ? n : null }
+    return rows.flatMap(row => row.document ? [row.document] : []).map(doc => {
+      const f = doc.fields ?? {}
+      return {
+        id: doc.name.split('/').pop()!, at: f.at?.timestampValue ?? '', endpoint: text(f.endpoint) ?? '', keyId: text(f.keyId) ?? '', url: text(f.url) ?? '',
+        finalUrl: text(f.finalUrl), lane: text(f.lane), status: text(f.status) ?? '', httpStatus: count(f.httpStatus), reason: text(f.reason), robots: text(f.robots),
+        sha256: text(f.sha256), links: count(f.links), kind: text(f.kind) ?? '', credits: count(f.credits) ?? 0,
+      }
+    })
   }
   async createKey(uid: string, digest: string, record: { label: string; prefix: string; createdAt: string }) {
     // The fields the hosted API reads (FirestoreHostedKeys), the account's uid, and a prefix to tell keys apart by.
@@ -185,6 +219,15 @@ export function createAccountRoutes(options: AccountRoutesOptions) {
         usage,
         keys,
       })
+      return true
+    }
+
+    if (pathname === '/api/account/activity') {
+      if (req.method !== 'GET') { res.writeHead(405, { allow: 'GET' }).end(); return true }
+      // Firestore's TTL deletes an expired line within a day or so; until then the time here decides.
+      const since = new Date(at.getTime() - ACTIVITY_DAYS * 86_400_000).toISOString()
+      const requests = (await options.data.requests(session.uid, ACTIVITY_LIMIT)).filter(line => line.at >= since)
+      send(res, 200, { requests, limit: ACTIVITY_LIMIT, retentionDays: ACTIVITY_DAYS })
       return true
     }
 

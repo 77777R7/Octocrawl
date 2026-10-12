@@ -65,7 +65,7 @@ a:hover{color:#fff}
 .kpi-sub{margin:8px 0 0;color:var(--muted);font-size:12.5px}
 .kpi .ascii-meter{margin-top:8px}
 
-.dash-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:18px;align-items:start}
+.dash-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:18px;align-items:start;margin-bottom:18px}
 .panel{min-width:0;margin-bottom:18px;padding:16px;border:1px solid var(--rule);border-radius:8px;background:var(--panel)}
 .dash-grid .panel{margin-bottom:0}
 .panel-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px 12px;margin-bottom:12px}
@@ -106,6 +106,19 @@ a:hover{color:#fff}
 .status{font:650 11px/1 var(--mono);padding:3px 6px;border-radius:4px}
 .status.on{color:var(--good);background:rgba(95,211,160,.1)}
 .status.off{color:var(--muted);background:rgba(147,166,203,.12)}
+.status.ok{color:var(--good);background:rgba(95,211,160,.1)}
+.status.warn{color:#ffcf6b;background:rgba(255,207,107,.1)}
+.status.bad{color:var(--bad);background:rgba(255,138,122,.1)}
+.requests td.url{max-width:340px;overflow:hidden;text-overflow:ellipsis}
+.requests td.url a{color:var(--ink);text-decoration:none}
+.requests td.url a:hover{color:var(--orange-soft);text-decoration:underline}
+.requests .hash{color:var(--muted);font:12px var(--mono)}
+.dash-grid.even{grid-template-columns:repeat(2,minmax(0,1fr))}
+.filters{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:end;margin-bottom:12px}
+.filters label{display:grid;gap:5px;color:var(--muted);font-size:12.5px;font-weight:600}
+.filters input,.filters select{min-height:36px;padding:0 10px;border:1px solid var(--rule);border-radius:6px;background:var(--deep);color:var(--ink);font:inherit;font-size:13.5px}
+.filters input{min-width:220px}
+.filters .button{margin-left:auto}
 
 .dash-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;margin-bottom:14px}
 .dash-form label{display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:600}
@@ -132,7 +145,10 @@ a:hover{color:#fff}
   .dash-group{display:none}
   .dash-credits{margin-top:0}
   .dash-main{padding:0 16px 48px}
-  .dash-grid{grid-template-columns:minmax(0,1fr)}
+  .dash-grid,.dash-grid.even{grid-template-columns:minmax(0,1fr)}
+  .filters input{min-width:0;width:100%}
+  .filters label:first-child{flex:1 1 100%}
+  .filters .button{margin-left:0}
   .dash-grid .panel{margin-bottom:0}
   .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
   .kpi:nth-child(3){border-left:0}
