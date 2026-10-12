@@ -962,8 +962,16 @@
         },
         {
           "type": "markdownMatches",
-          "pattern": "schuh",
+          "pattern": "schuh|shoe",
           "flags": "i"
+        }
+      ],
+      "revisions": [
+        {
+          "date": "2026-10-12",
+          "decidedBy": "Howard",
+          "change": "the second predicate also accepts \"shoe\" (schuh|shoe), as Zalando serves this URL in English to Octocrawl's en-US identity",
+          "reason": "every read that came back since 2026-10-06 was Zalando's English listing (\"Men's Shoes\", product links on en.zalando.de) with no \"schuh\" in it, while its prices met the first predicate; at b117b45 the page had 26,269 items and failed only this predicate"
         }
       ],
       "provenance": "expansion",
