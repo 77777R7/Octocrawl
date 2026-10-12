@@ -41,6 +41,9 @@ export interface KeyView { id: string; label: string; prefix: string; createdAt:
 export interface RequestView {
   id: string; at: string; endpoint: string; keyId: string; url: string; finalUrl: string | null; lane: string | null; status: string
   httpStatus: number | null; reason: string | null; robots: string | null; sha256: string | null; links: number | null; kind: string; credits: number
+  /** The formats a scrape asked for (empty: none named) and how long the call took; null on lines written before
+   * the hosted API recorded them (2026-10-12) and, for formats, on a map. */
+  formats: string[] | null; ms: number | null
 }
 
 export interface AccountData {
@@ -148,6 +151,8 @@ export class FirestoreAccountData implements AccountData {
         id: doc.name.split('/').pop()!, at: f.at?.timestampValue ?? '', endpoint: text(f.endpoint) ?? '', keyId: text(f.keyId) ?? '', url: text(f.url) ?? '',
         finalUrl: text(f.finalUrl), lane: text(f.lane), status: text(f.status) ?? '', httpStatus: count(f.httpStatus), reason: text(f.reason), robots: text(f.robots),
         sha256: text(f.sha256), links: count(f.links), kind: text(f.kind) ?? '', credits: count(f.credits) ?? 0,
+        formats: f.formats?.arrayValue ? (f.formats.arrayValue.values ?? []).flatMap(value => typeof value.stringValue === 'string' ? [value.stringValue] : []) : null,
+        ms: count(f.ms),
       }
     })
   }

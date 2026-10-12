@@ -236,7 +236,12 @@ it('an account\'s key spends credits by what each result returned, and says what
   expect(lines[3]).toMatchObject({ url: '', status: 'invalid_request' })
   expect(lines[1]!.links).toBeGreaterThan(0)
   expect(lines[0]!.links).toBe(0)
-  expect(JSON.stringify(lines)).not.toContain('markdown')
+  // The formats a scrape named (none named: an empty list; a map: none at all), and how long each call took.
+  expect(lines.map(line => line.formats)).toEqual([null, null, [], [], [], [], ['markdown']])
+  for (const line of lines) expect(line.ms).toEqual(expect.any(Number))
+  expect(lines.every(line => line.ms! >= 0)).toBe(true)
+  // Never the page's content: its words appear nowhere in the lines.
+  expect(JSON.stringify(lines)).not.toContain('Tides')
   // The site's daily total still counts every start; no per-key daily counter is kept for an account.
   expect([...credits.site.values()]).toEqual([7])
   expect(quota.counts.size).toBe(0)
