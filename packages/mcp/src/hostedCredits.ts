@@ -16,8 +16,8 @@
  * account (`uid`) spend credits. Usage is added up per account and UTC day, for the dashboard.
  *
  * Each call by an account's key also leaves one line in `requestLog/{uid}/requests/{id}`, written in the settle's
- * commit: the URL asked for, what came back (status, HTTP status, lane, robots.txt decision, the body's SHA-256 from the
- * Evidence Record) and what it cost. Never the page's content. Lines expire after 30 days (TTL on `expireAt`), and only
+ * commit: the URL asked for and the formats a scrape named, what came back (status, HTTP status, lane, robots.txt
+ * decision, the body's SHA-256 from the Evidence Record), how long the call took and what it cost. Never the page's content. Lines expire after 30 days (TTL on `expireAt`), and only
  * the account sees them, on the dashboard's Activity page (decided by Howard on 2026-10-12).
  */
 import type { QuotaEntry } from './hostedApi.js'
@@ -48,6 +48,10 @@ export interface RequestNote {
   sha256: string | null
   /** The URLs a map returned. */
   links: number | null
+  /** The formats a scrape asked for, by name (`markdown`, `json`, ...); empty when it named none; null for a map. */
+  formats: string[] | null
+  /** How long the call took, from its start to its answer, in milliseconds. */
+  ms: number | null
 }
 export interface RequestLine extends RequestNote { id: string; at: string; kind: UsageKind; credits: number }
 
@@ -62,7 +66,8 @@ function requestLine(note: RequestNote, id: string, now: Date, kind: UsageKind, 
   const clean = (value: string | null, chars = 200) => (value === null ? null : wellFormed(value.slice(0, chars)))
   return {
     ...note, url: wellFormed(note.url.slice(0, ACTIVITY_URL_CHARS)), finalUrl: clean(note.finalUrl, ACTIVITY_URL_CHARS), lane: clean(note.lane), status: wellFormed(note.status.slice(0, 200)),
-    reason: clean(note.reason), sha256: clean(note.sha256), id, at: now.toISOString(), kind, credits,
+    reason: clean(note.reason), sha256: clean(note.sha256), formats: note.formats === null ? null : note.formats.slice(0, 20).map((name) => wellFormed(name.slice(0, 40))),
+    id, at: now.toISOString(), kind, credits,
   }
 }
 
@@ -199,7 +204,8 @@ function requestLineFields(line: RequestLine, uid: string, now: Date): Record<st
     const value = line[name]
     if (typeof value === 'string') fields[name] = { stringValue: value }
   }
-  for (const name of ['httpStatus', 'links'] as const) {
+  if (line.formats !== null) fields.formats = { arrayValue: line.formats.length ? { values: line.formats.map((stringValue) => ({ stringValue })) } : {} }
+  for (const name of ['httpStatus', 'links', 'ms'] as const) {
     const value = line[name]
     if (typeof value === 'number' && Number.isSafeInteger(value)) fields[name] = { integerValue: String(value) }
   }

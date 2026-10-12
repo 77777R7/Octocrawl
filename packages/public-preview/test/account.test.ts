@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPreviewServer } from '../src/server.js'
 import { createAuthRoutes, MemoryAccountStore, type IdentityProvider } from '../src/auth.js'
-import { createAccountRoutes, MAX_ACTIVE_KEYS, MemoryAccountData, playgroundRequest, type AccountRoutesOptions } from '../src/account.js'
+import { createAccountRoutes, FirestoreAccountData, MAX_ACTIVE_KEYS, MemoryAccountData, playgroundRequest, type AccountRoutesOptions } from '../src/account.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 // The hosted API itself, so the Playground's signed header is checked by the code that serves it.
 import { createHostedApi, MemoryHostedKeys, MemoryHostedQuota } from '../../mcp/src/hostedApi.js'
@@ -76,6 +76,23 @@ describe('the account page\'s data', () => {
     const body = await (await fetch(`${url}/api/account/activity`, { headers: { cookie } })).json() as { requests: Array<{ id: string }>; limit: number; retentionDays: number }
     expect(body.requests.map(r => r.id)).toEqual(['8208-a', '8209-b'])
     expect([body.limit, body.retentionDays]).toEqual([1_000, 30])
+  })
+
+  it('reads a request line\'s formats and duration from Firestore, and leaves them null on a line written before them', async () => {
+    const doc = (id: string, extra: Record<string, unknown>) => ({ document: { name: `projects/p/databases/(default)/documents/requestLog/account-0001/requests/${id}`, fields: {
+      at: { timestampValue: '2026-10-12T10:00:00Z' }, endpoint: { stringValue: 'scrape' }, keyId: { stringValue: 'k'.repeat(64) }, url: { stringValue: 'https://example.org/' },
+      status: { stringValue: 'success' }, kind: { stringValue: 'http' }, credits: { integerValue: '1' }, ...extra,
+    } } })
+    const fetcher = (async (input: string | URL) => {
+      if (String(input).startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
+      return Response.json([
+        doc('1-a', { formats: { arrayValue: { values: [{ stringValue: 'markdown' }, { stringValue: 'json' }] } }, ms: { integerValue: '1834' } }),
+        doc('2-b', { formats: { arrayValue: {} }, ms: { integerValue: '12' } }),
+        doc('3-c', {}),
+      ])
+    }) as typeof fetch
+    const lines = await new FirestoreAccountData('octocrawl-test', fetcher).requests('account-0001', 10)
+    expect(lines.map(line => [line.id, line.formats, line.ms])).toEqual([['1-a', ['markdown', 'json'], 1834], ['2-b', [], 12], ['3-c', null, null]])
   })
 
   it('makes a key the hosted API will find, shows it once, lists it by prefix, and revokes only the account\'s own keys', async () => {
