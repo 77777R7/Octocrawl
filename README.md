@@ -1,16 +1,48 @@
-# Octocrawl — Web-to-LLM Context Extraction
+<p align="center">
+  <a href="https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=logo">
+    <img src="apps/public-web/public/assets/octopus-original.webp" alt="Octocrawl" width="180">
+  </a>
+</p>
 
-[![npm](https://img.shields.io/npm/v/octocrawl?label=npm%20octocrawl)](https://www.npmjs.com/package/octocrawl) [![PyPI](https://img.shields.io/pypi/v/octocrawl-client?label=PyPI%20octocrawl-client)](https://pypi.org/project/octocrawl-client/) [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+<h1 align="center">Octocrawl</h1>
 
-**[Website](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=nav)** · **[Docs](https://octocrawl.dev/docs/?utm_source=github&utm_medium=readme&utm_campaign=nav)** · **[Connect MCP](https://octocrawl.dev/docs/connect-mcp/?utm_source=github&utm_medium=readme&utm_campaign=nav)** · **[Blog](https://octocrawl.dev/blog/?utm_source=github&utm_medium=readme&utm_campaign=nav)** · **[Changelog](https://octocrawl.dev/changelog/?utm_source=github&utm_medium=readme&utm_campaign=nav)**
+<p align="center">
+  <b>One link. Web data, ready.</b><br>
+  Markdown and data from web pages, for AI agents and RAG.<br>
+  Every result records how it was read. Every failure says why.
+</p>
 
-Octocrawl turns web pages into Markdown and data for RAG and agent workflows. It records how it got each page, so every result can be checked.
+<p align="center">
+  <a href="https://www.npmjs.com/package/octocrawl"><img src="https://img.shields.io/npm/v/octocrawl?label=npm%20octocrawl&color=f3683d" alt="npm"></a>
+  <a href="https://pypi.org/project/octocrawl-client/"><img src="https://img.shields.io/pypi/v/octocrawl-client?label=PyPI%20octocrawl-client&color=f3683d" alt="PyPI"></a>
+  <a href="https://www.npmjs.com/package/octocrawl"><img src="https://img.shields.io/npm/dm/octocrawl?color=071b4f" alt="npm downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-071b4f" alt="License: AGPL-3.0"></a>
+  <a href="https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=badge"><img src="https://img.shields.io/badge/try%20it-octocrawl.dev-f3683d" alt="Try it at octocrawl.dev"></a>
+</p>
 
-When a page fails, Octocrawl says so and says why. It does not report a blocked or empty page as a success.
+<p align="center">
+  <a href="https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=nav"><b>Website</b></a> ·
+  <a href="https://octocrawl.dev/docs/?utm_source=github&utm_medium=readme&utm_campaign=nav"><b>Docs</b></a> ·
+  <a href="https://octocrawl.dev/docs/connect-mcp/?utm_source=github&utm_medium=readme&utm_campaign=nav"><b>Connect MCP</b></a> ·
+  <a href="https://octocrawl.dev/blog/?utm_source=github&utm_medium=readme&utm_campaign=nav"><b>Blog</b></a> ·
+  <a href="https://octocrawl.dev/changelog/?utm_source=github&utm_medium=readme&utm_campaign=nav"><b>Changelog</b></a>
+</p>
 
-Try it without installing anything at [octocrawl.dev](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=top), or read the [documentation](https://octocrawl.dev/docs/?utm_source=github&utm_medium=readme&utm_campaign=top).
+---
 
-The web preview reads one page at a time, five a day. Besides Markdown it returns the page's links and metadata, and up to 20 fields read without a model ([how it is deployed](docs/public-preview.md)).
+Try it without installing anything at [octocrawl.dev](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=top). The web preview reads one page at a time, five a day. Besides Markdown it returns the page's links and metadata, and up to 20 fields read without a model ([how it is deployed](docs/public-preview.md)).
+
+If Octocrawl is useful to you, [star the repository](https://github.com/77777R7/Octocrawl); it helps other people find it.
+
+## Why Octocrawl?
+
+- **In your agent in one line:** a hosted MCP server for Claude Code, Cursor, OpenCode and Codex. No key is needed to start.
+- **Failure is a result:** a page comes back `blocked`, `failed` or `empty_verified` with a reason, never as an empty success. An error page keeps its status and Markdown as evidence ([details](docs/scrape-options.md#failure-results)).
+- **Five false-success checks:** challenge text, wrong-page content, missing facts, truncation and too little content.
+- **An Evidence Record on every page:** final URL, redirects, fetch time, status, lane, robots.txt decision, hashes and field evidence, described by a versioned [JSON Schema](packages/contracts/schemas/evidence-record.v1.json) ([reference](apps/public-web/content/reference.md#evidence-record)). An unknown value is null, not zero.
+- **Escalates only when it must:** HTTP first, then a browser, then your login or a proxy. Each attempt is traced and the task's cost is counted.
+- **Measured against ground truth:** a 56-case fixture suite (soft 404s, challenge pages, SPAs, timeouts, zip bombs, tables) measures the false-success rate.
+- **Open source, runs anywhere:** the server, CLI and MCP server are AGPL-3.0; the TypeScript, Python and Vercel AI SDK clients are MIT. Run it with `npx`, self-host it with [Docker Compose](docs/self-host-docker.md), or move over from Firecrawl with the [shim](docs/firecrawl-shim.md).
 
 ## Quick start
 
@@ -38,35 +70,30 @@ claude mcp add octocrawl -- npx -y @octocrawl/mcp    # the published stdio serve
 
 The hosted service offers scrape and map. The local server adds crawl, batch, the Amazon.sg product tool and the Monitor tools. [Running Octocrawl](docs/local-setup.md) covers both, plus hosting a server for others; [Docker Compose](docs/self-host-docker.md) runs one on your own server. An agent installing Octocrawl for you (Cline, for one) can follow [llms-install.md](llms-install.md).
 
-## Why this exists
+## What a failure looks like
 
-Most crawlers report "success" when they return empty pages, challenge screens or the wrong content. Octocrawl makes failure visible and fixable:
+The test page below answers HTTP 200 but shows a Cloudflare check instead of content (fixture `block-challenge-200`). A crawler that trusts the status code counts it as a success. Octocrawl tries plain HTTP, then a browser, and reports the page as blocked, with what to do next:
 
-**Before (typical crawler):**
-```
-✓ Fetched example.com/article
-  Status: 200 OK
-  Content: 953 bytes
+```bash
+npx octocrawl scrape http://127.0.0.1:8799/block/challenge-200
 ```
 
-**After (Octocrawl):**
-```
-✗ Fetched example.com/article
-  Status: blocked (cloudflare_challenge)
-  Lane: http → escalated to browser_local
-   Evidence: artifacts=[] (no screenshot or DOM snapshot was produced)
-  Cost: 847 tokens, 2.3s, $0.0042
-  Fix: needs user login or proxy (tier 1b/2)
+```jsonc
+{
+  "status": "blocked",
+  "blockReason": "cloudflare_challenge",
+  "channelsTried": ["http", "browser_local"],
+  "markdown": null,
+  "snapshot": { "httpStatus": 200, "artifacts": [] },
+  "usage": { "wallMs": 1079, "bytesWire": null, "externalCostUsd": 0 },
+  "agentHints": [
+    "127.0.0.1 gates automated access on the lanes tried (http, browser_local); … a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff) …"
+  ],
+  "evidenceRecord": { "schemaVersion": "w2l.evidence/1", "status": "blocked", "reason": "cloudflare_challenge", "lane": "browser_local", "…": "…" }
+}
 ```
 
-## What's different
-
-1. **Failure is a result.** A page is `empty_verified`, `blocked` or `failed` with a reason, never a silent empty page. An error page keeps its status and Markdown as evidence, not as a success. [Details](docs/scrape-options.md#failure-results).
-2. **Five false-success checks.** Octocrawl checks for challenge text, wrong-page content, missing facts, truncation and too little content.
-3. **Execution ladder.** A request moves from HTTP to a browser, then to your login or a proxy, as needed. Each attempt is traced, and the task's cost is counted.
-4. **Ground-truth benchmark.** A 56-case fixture suite (soft 404s, challenge pages, SPAs, timeouts, zip bombs, tables) measures the false-success rate.
-5. **Honest evidence.** An unknown value is null, not zero. `artifacts: []` means no screenshot or DOM snapshot was made. `bytesWire: null` means wire bytes were not measured.
-6. **One Evidence Record.** Every scrape result, batch item and crawl page carries an `evidenceRecord`. It holds the final URL, redirects, fetch time, status, lane, robots.txt decision, hashes and field evidence. A versioned [JSON Schema](packages/contracts/schemas/evidence-record.v1.json) describes it; see the [reference](apps/public-web/content/reference.md#evidence-record).
+This is real output of `octocrawl` 0.4.1, trimmed (`…`) and rounded, against the repository's fixture server (`FIXTURE_PORT=8799 node --import tsx packages/fixtures/src/cli.ts`). `bytesWire: null` means wire bytes were not measured; `artifacts: []` means no screenshot or DOM snapshot was made.
 
 ## Documentation
 
