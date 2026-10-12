@@ -186,19 +186,18 @@ a:hover{color:#fff}
 .glass-tip dd{margin:0;text-align:right;font:12.5px var(--mono);font-variant-numeric:tabular-nums}
 .glass-tip .total{padding-top:4px;border-top:1px dotted rgba(147,166,203,.3);color:var(--ink)}
 
-/* ---- The Overview's banner: the Evidence Record ---- */
-.ev-hero{position:relative;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:24px;align-items:center;min-height:250px;margin-bottom:18px;padding:30px 32px;border-radius:10px;background:var(--orange);color:#081b42;overflow:hidden}
-.ev-field{position:absolute;inset:0;margin:0;color:#7a2a10;opacity:.28;font:11px/12px var(--mono);pointer-events:none;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 55%);mask-image:linear-gradient(90deg,transparent 0,#000 55%)}
-.ev-copy{position:relative;min-width:0}
-.ev-tag{margin:0 0 10px;font:700 11.5px var(--mono);letter-spacing:.14em;text-transform:uppercase}
-.ev-copy h2{margin:0;font-size:30px;line-height:1.1;letter-spacing:-.02em;font-weight:650;text-wrap:balance}
-.ev-copy p{max-width:52ch;margin:10px 0 0;color:#20304f;font-size:15px}
-.ev-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
-.ev-btn{display:inline-flex;align-items:center;min-height:38px;padding:0 14px;border:1px solid rgba(8,27,66,.45);border-radius:7px;color:#081b42;font-weight:650;font-size:14px;text-decoration:none}
-.ev-btn:hover{background:rgba(8,27,66,.08);color:#081b42}
-.ev-btn.primary{background:#081b42;border-color:#081b42;color:#fff}
-.ev-btn.primary:hover{background:#13306e;color:#fff}
-.ev-receipt{position:relative;justify-self:end;width:min(100%,410px);min-height:146px;margin:0;padding:14px 16px;border-radius:8px;background:var(--deep);color:#ffe3d6;font:12px/1.55 var(--mono);white-space:pre;overflow:hidden;box-shadow:0 18px 40px rgba(8,27,66,.35)}
+/* ---- The Overview's banner: the Evidence Record, centred between two glyph fields ---- */
+.ev-hero{position:relative;display:grid;place-items:center;min-height:300px;margin-bottom:18px;padding:40px 24px;border-radius:10px;background:var(--orange);color:#fff;text-align:center;overflow:hidden}
+.ev-field{position:absolute;inset:0;margin:0;color:#fff3ec;opacity:.82;font:11px/12px var(--mono);white-space:pre;pointer-events:none;overflow:hidden}
+.ev-copy{position:relative;display:grid;justify-items:center;max-width:620px}
+.ev-badge{display:inline-flex;align-items:center;gap:8px;margin:0 0 18px;padding:6px 14px;border:1px solid rgba(255,255,255,.55);border-radius:999px;background:rgba(255,255,255,.1);font-size:14px;font-weight:600}
+.ev-copy h2{margin:0;font-size:40px;line-height:1.08;letter-spacing:-.025em;font-weight:650;text-wrap:balance}
+.ev-copy p{margin:14px 0 0;color:rgba(255,255,255,.88);font-size:16px;line-height:1.55;text-wrap:balance}
+.ev-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-top:24px}
+.ev-btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border:1px solid rgba(255,255,255,.7);border-radius:8px;color:#fff;font-weight:600;font-size:15px;text-decoration:none}
+.ev-btn:hover{background:rgba(255,255,255,.12);color:#fff}
+.ev-btn.primary{background:#fff;border-color:#fff;color:#1a1a1a}
+.ev-btn.primary:hover{background:#ffeee6;color:#1a1a1a}
 
 /* ---- Integrations and the Connect page ---- */
 .integrations{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px dotted var(--rule);border-left:1px dotted var(--rule)}
@@ -242,8 +241,9 @@ a:hover{color:#fff}
   .dash-credits{margin-top:0}
   .dash-main{padding:0 16px 48px}
   .dash-grid,.dash-grid.even{grid-template-columns:minmax(0,1fr)}
-  .ev-hero{grid-template-columns:minmax(0,1fr);padding:24px 18px}
-  .ev-receipt{justify-self:stretch;width:100%;font-size:11px}
+  .ev-hero{min-height:0;padding:34px 18px}
+  .ev-copy h2{font-size:30px}
+  .ev-field{opacity:.7}
   .integrations{grid-template-columns:repeat(2,minmax(0,1fr))}
   .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .summary>div:nth-child(3){border-left:0}

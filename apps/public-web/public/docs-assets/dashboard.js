@@ -397,51 +397,30 @@
     }
   }
 
-  // The Overview's banner: a field of glyphs on the orange, and an Evidence Record printed line by line, each line
-  // decoded from noise under a print head, then held, then printed again for the next address. Reduced motion, or a
-  // hidden tab, keeps the whole record on screen.
-  const receipt = $('ev-receipt')
-  glyphField($('ev-field'), 160, 22, 5)
-  if (receipt && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    const final = receipt.textContent.split('\n')
-    const examples = [
-      ['developer.mozilla.org/en-US/…', '200 · lane http', 'allowed', '9c1e4b07d2…a07f'],
-      ['docs.python.org/3/library/…', '200 · lane http', 'allowed', '41ad0e9b3c…5e12'],
-      ['www.amazon.sg/dp/B0CHX1W1XY', '200 · lane browser', 'allowed', 'e07b2f8a61…c903'],
-    ]
-    const fill = (line, from, value) => { const start = line.indexOf(from); const room = line.lastIndexOf('│') - start - 1; return `${line.slice(0, start)}${value.padEnd(room).slice(0, room)} │` }
-    const recordFor = (n) => {
-      const [url, status, robots, sha] = examples[n % examples.length]
-      const lines = final.slice()
-      lines[1] = fill(lines[1], 'developer', url)
-      lines[2] = fill(lines[2], '2026', new Date().toISOString().slice(0, 19) + 'Z')
-      lines[3] = fill(lines[3], '200', status)
-      lines[4] = fill(lines[4], 'allowed', robots)
-      lines[5] = fill(lines[5], '9c1e', sha)
-      return lines
+  // The Overview's banner: glyphs dense at both edges, thinning to nothing in the middle where the text is, as wide as
+  // the banner. They drift slowly (about 8 frames a second); still with reduced motion or in a hidden tab.
+  const field = $('ev-field')
+  if (field) {
+    const RAMP = ' .:-=+*xo#%WM'
+    const draw = (t) => {
+      const cols = Math.max(40, Math.ceil(field.clientWidth / 6.6))
+      const rows = Math.max(12, Math.ceil(field.clientHeight / 12))
+      const reach = cols * (cols < 90 ? 0.12 : 0.34)
+      let text = ''
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const edge = Math.min(x, cols - 1 - x)
+          const near = Math.max(0, 1 - edge / reach)
+          const grain = 0.72 + 0.28 * Math.sin(x * 0.21 + y * 0.63 + t) * Math.cos(x * 0.05 - y * 0.27 - t * 0.6)
+          text += RAMP[Math.min(RAMP.length - 1, Math.floor(near ** 1.35 * grain * RAMP.length))]
+        }
+        text += '\n'
+      }
+      field.textContent = text
     }
-    const noise = '.:-=+*#%'
-    let record = recordFor(0)
-    let line = 0
-    let progress = 0
-    let hold = 0
-    let round = 0
-    const tick = () => {
-      if (document.hidden) return
-      if (hold > 0) { hold--; if (hold === 0) { round++; record = recordFor(round); line = 0; progress = 0 } else return }
-      const shown = record.map((text, i) => {
-        if (i < line) return text
-        if (i > line) return ''
-        // The line being printed: what is done, a few cells of noise, the print head.
-        const done = text.slice(0, progress)
-        const fuzz = Array.from(text.slice(progress, progress + 3), (ch) => (ch === ' ' ? ' ' : noise[Math.floor(Math.random() * noise.length)])).join('')
-        return `${done}${fuzz}${progress < text.length ? '▌' : ''}`
-      })
-      receipt.textContent = shown.join('\n')
-      progress += 4
-      if (progress > record[line].length + 2) { line++; progress = 0; if (line >= record.length) { receipt.textContent = record.join('\n'); hold = 60 } }
-    }
-    setInterval(tick, 50)
+    draw(0)
+    if ('ResizeObserver' in window) new ResizeObserver(() => draw(performance.now() / 1000)).observe(field)
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(() => { if (!document.hidden) draw(performance.now() / 1000) }, 125)
   }
 
   load()
