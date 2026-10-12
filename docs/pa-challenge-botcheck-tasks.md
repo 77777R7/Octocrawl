@@ -4,6 +4,14 @@
 
 做完一项勾一项，发现新的补上。看进度读这个文件，不翻滚动记录。
 
+## 结论（2026-10-12）
+
+- **归因（G1）**：16 题 = Cloudflare 8、DataDome 7、无厂商头 2；全部在 http 一档就被拦，本地浏览器和 Steel 浏览器同样被拦。
+- **库级探针**：从自备住宅网关出发，13 题对 undici、两种 impit、stock Playwright、Patchright 全部 403；T002 全过（出口信誉）；T053 两个浏览器过、HTTP 客户端全拒。
+- **T053**：imf.org 的 Akamai 拒绝"自称 Google Chrome 的 headless Chromium"，即我们的标准身份；`W2L_BROWSER_IDENTITY=actual`（#431）下 3/3 verified。但 92 题 A/B 里 actual 只多 T053、少 13 题（含 6 题健康组），**不改默认**，开关留作 opt-in，将来是按 host 的路线选项。
+- **该类别**：在 ADR 0005 允许的手段内（出口、兼容传输、真浏览器、Patchright、供应商住宅代理与求解、诚实身份），这批站的 Cloudflare 与 DataDome 都拦得住；竞品靠自带的 stealth 浏览器过，这对我们属暂缓类。**唯一未测的是 Browserbase `verified`（T2.2）**，等 Howard 的 key 与套餐。在那之前，frozen 集上与 Firecrawl 的 12 题差距保持不变。
+- 记录：[signals standard](../research/access/runs/2026-10-12-pa-gate-signals-standard-56f9a0d1.md)、[signals enhanced](../research/access/runs/2026-10-12-pa-gate-signals-enhanced-56f9a0d1.md)、[library probe](../research/access/runs/2026-10-12-library-probe-16-b117b451.md)、[T053 isolation](../research/access/runs/2026-10-12-t053-identity-204c8a76.md)、[actual identity on 16](../research/access/runs/2026-10-12-pa-gate-signals-actual-identity-204c8a76.md)、[A/B declared](../research/access/runs/2026-10-12-identity-ab-declared-2df8207d.md)、[A/B actual](../research/access/runs/2026-10-12-identity-ab-actual-2df8207d.md)。
+
 ## 总原则
 
 - **流程**：每组一个分支、一个 PR，从当前 `origin/main` 拉，在 `.claude/worktrees/` 下开 worktree；分支落后 `main` 不超过一组。
@@ -68,30 +76,30 @@ B003 tesla、B009 allrecipes、T005 etsy、T010 OECD（需要点击）、T012 wa
 
 - [x] **T2.0 对照臂**（T053 产品侧差异已隔离，[记录](../research/access/runs/2026-10-12-t053-identity-204c8a76.md)：imf.org 的 Akamai 拒绝自称 Google Chrome 的 headless Chromium，诚实声明 HeadlessChrome 则 200；开关 `W2L_BROWSER_IDENTITY=actual` 已做（#431），产品实测 T053 3/3 verified、其余 14 题不变，[记录](../research/access/runs/2026-10-12-pa-gate-signals-actual-identity-204c8a76.md)；92 题 A/B 窗口 1 已跑：声明身份 44 verified、actual 32，actual 只多 T053、少 13 题（含 6 题健康组），[declared](../research/access/runs/2026-10-12-identity-ab-declared-2df8207d.md)、[actual](../research/access/runs/2026-10-12-identity-ab-actual-2df8207d.md)，**结论：不改默认，开关留作按 host 的路线选项**）：C 臂配置在 16 题上同日重跑。
   - 验收：记录一份；每题 egress 为 `p.webshare.io:80`。
-- [ ] **T2.1 Patchright 定向重测**（丙类；T1.3 的探针里 Patchright 与 Playwright 在 16 题上无一不同，预期无增益，跑与否由 Howard 定）：C 臂配置 + `W2L_BROWSER_ENGINE=patchright` + grant 加 `enhanced_browser`（tier enhanced，需 attestation）。10-06 的 A/B（[记录](../research/access/runs/2026-10-06-patchright-ab-f052375.md)）只在数据中心出口下做过，结论是无净增益；这次换自备网关出口。
+- [~] **T2.1 Patchright 定向重测**（2026-10-12 不做：T1.3 探针里 Patchright 与 stock Playwright 在 16 题上无一不同，item 5 的状态行已写明）：C 臂配置 + `W2L_BROWSER_ENGINE=patchright` + grant 加 `enhanced_browser`。
   - 验收：记录一份；与 T2.0 逐题对照，列出净增益与退步；T053 要在记录里单独说明（10-06 曾一次过）。
-- [ ] **T2.2 Browserbase `verified` 首次实跑**（丙类，item 4 的"另一家供应商只补它能补的类别"）：适配器已有（`packages/bench/src/vendors/browserbase.ts`），但从未用真实 key 跑过。grant 用 `vendor_remote_browser` + `vendor_stealth`，tariff 按 docs/access.md 的示例（`perHourUsd` 0.12、`maxSessionMs` 120000、`minBilledMs` 60000、`billingIncrementMs` 60000），`proxies: false`。
+- [ ] **T2.2 Browserbase `verified` 首次实跑**（唯一未测的路线；等 Howard 的 key 与套餐，未做）：适配器已有（`packages/bench/src/vendors/browserbase.ts`），但从未用真实 key 跑过。grant 用 `vendor_remote_browser` + `vendor_stealth`，tariff 按 docs/access.md 的示例，`proxies: false`。
   - 前置（Howard）：提供 Browserbase key，并确认 `verified`（Advanced Stealth 的现名）在当前套餐可用；不可用则此项改为"记录原因，跳过"。
   - 验收：记录一份；与 T2.0 对照；按 Browserbase 控制台的 session 用量对账，写明账本与控制台的差。
-- [ ] **T2.3 兼容传输扩 host**（乙类；T1.3 显示 16 题里没有乙类，本项暂无候选）：T1.3 显示 impit 过而 undici 不过的站，加进 `research/access/benefit-hosts.v1.json` 候选，先用 `W2L_COMPAT_HOSTS` 指定跑一遍。
+- [~] **T2.3 兼容传输扩 host**（2026-10-12 关闭：T1.3 显示 16 题里没有乙类，即没有 impit 过而 undici 不过的站）
   - 验收：记录一份；只有在两窗口都 verified、且健康组与 real-site 批次无退步时才改默认列表（item 2 的规则）。
-- [ ] **T2.4 费用与对账**：每臂记录里写清 grant 的 SHA-256、账本费用、供应商侧 session 汇总、余额差（Steel 看 Wallet 的 Activity，Browserbase 看其控制台）。
+- [x] **T2.4 费用与对账**（G1、G2 只有一轮付费：T1.2 enhanced 的 14 次 Steel 调用，$0.0075，写在其记录里；其余各轮 $0）：每臂记录里写清 grant 的 SHA-256、账本费用、供应商侧 session 汇总、余额差。
   - 验收：三个数并排；不一致就写不一致。
 
 ## G3 验收组
 
-- [ ] **T3.1 第二窗口**：G2 里有净增益的配置，在另一天再跑一次 16 题（含 B001、B008）。
+- [~] **T3.1 第二窗口**（2026-10-12 不需要：G2 没有在 14 题目标池上有净增益且不伤健康组的配置；actual 身份只得 T053、在 92 题上少 13 题，不改默认）：G2 里有净增益的配置，在另一天再跑一次 16 题（含 B001、B008）。
   - 验收：同一任务两窗口都 verified 才算；记录一份。
-- [ ] **T3.2 无退步检查**：item 1 的 25 题健康组和 real-site 批次各跑一次（`node research/parity/run-sites.mjs --batch L ...` 按 AGENTS.md）。
+- [~] **T3.2 无退步检查**（同上，没有要改的默认；身份 A/B 的声明臂即当日对照，健康组 24/25）：item 1 的 25 题健康组和 real-site 批次各跑一次。
   - 验收：无可归因退步；假成功按验证结果计，不增加。
-- [ ] **T3.3 路线记忆与 ROADMAP**：通过验收的配置写进路线记忆（当前只有 host × vendor，有效期与地区维度是 item 2 的后续，不在本清单）；ROADMAP 的 PA item 4、5 状态行各加一条日期行，写明增益、费用与"该类别在当前边界内无解"的结论（如果是这个结果，同样合格）。
+- [x] **T3.3 路线记忆与 ROADMAP**（2026-10-12：没有配置进入路线记忆；ROADMAP item 4、5 的状态行写明 G1、G2 的结论与"该类别在当前手段边界内无解，只差 Browserbase verified 未测"）：通过验收的配置写进路线记忆；ROADMAP 的 PA item 4、5 状态行各加一条日期行。
   - 验收：docs PR 一个；状态行链接到各记录。
 
 ## 需要 Howard 的事
 
-- [ ] Browserbase 的 key 与套餐（T2.2 前置）。
-- [ ] 每个 enhanced grant 的 attestation 声明（T2.1、T2.2 各一份）。
-- [ ] 总预算 $5 是否同意；超出先问。
+- [ ] Browserbase 的 key 与套餐（T2.2 前置；仍未提供）。
+- [~] 每个 enhanced grant 的 attestation 声明（T2.1 不做，只剩 T2.2 那一份）。
+- [x] 总预算 $5：实际只花 $0.0075。
 
 ## 遗留与不在范围
 
