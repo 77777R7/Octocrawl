@@ -460,7 +460,7 @@ function dashboardPageHtml(path, title, lead, body) {
 <nav class="dash-nav" aria-label="Dashboard">${links}</nav>
 <div class="dash-credits"><p><strong id="side-credits">…</strong> credits left</p><progress class="credit-bar" id="side-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress><p class="dash-small" id="side-renews">&nbsp;</p></div>
 <div class="dash-who"><span id="side-email">…</span><a href="/docs/">Docs ↗</a></div></aside>
-<main id="main-content" class="dash-main"><header class="dash-head"><pre class="dash-noise" id="dash-noise"${path === '/dashboard/' ? ' data-wave' : ''} aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1><p class="dash-lead">${lead}</p></header>
+<main id="main-content" class="dash-main"><header class="dash-head"><pre class="dash-noise" id="dash-noise" aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1><p class="dash-lead">${lead}</p></header>
 <p class="dash-message" id="dash-message" role="status" aria-live="polite"></p>
 ${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script><script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
 }

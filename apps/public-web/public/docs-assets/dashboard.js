@@ -364,30 +364,40 @@
     })
   }
 
-  // A faint field of glyphs behind the page title. On the Overview (data-wave) it moves like a flag: the left edge is
-  // held, and the field is read further up or down the further right a cell is, so the glyphs ripple in place on the
-  // grid while the field keeps its shape. About 15 frames a second, paused in a hidden tab, still with reduced motion.
+  // A faint field of glyphs behind every page's title, in motion between two forms: a flag (the left edge held, the
+  // field read further up or down the further right a cell is) and rings spreading from the top right corner. The two
+  // are blended cell by cell with a weight that eases from one to the other and back, about every 8 seconds, so the
+  // glyphs change in place on the grid and the field keeps its shape. About 15 frames a second; paused in a hidden tab,
+  // still with reduced motion.
   const noise = $('dash-noise')
   if (noise) {
     const glyphs = ' .:-=+*#%'
     const COLS = 110
     const ROWS = 12
     const field = (x, y) => Math.abs(Math.sin(x * 0.19 + y * 0.8) * Math.cos(x * 0.045 - y * 0.35))
+    const flag = (x, y, t) => {
+      const hold = (x / (COLS - 1)) ** 1.6
+      return field(x, y - hold * (2.4 * Math.sin(x * 0.12 - t * 1.6) + 0.7 * Math.sin(x * 0.27 - t * 2.5 + y * 0.15)))
+    }
+    const rings = (x, y, t) => {
+      const d = Math.hypot((COLS - 1 - x) * 0.5, y)
+      return Math.abs(Math.sin(d * 0.42 - t * 1.8)) * (0.45 + 0.55 * field(x, y))
+    }
     const draw = (t) => {
+      // 0 is all flag, 1 all rings; the cosine eases each change in and out.
+      const w = t === null ? 0 : 0.5 - 0.5 * Math.cos((t / 16) * Math.PI * 2)
       let text = ''
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
-          const hold = (x / (COLS - 1)) ** 1.6
-          const lift = t === null ? 0 : hold * (2.4 * Math.sin(x * 0.12 - t * 1.6) + 0.7 * Math.sin(x * 0.27 - t * 2.5 + y * 0.15))
-          text += glyphs[Math.min(glyphs.length - 1, Math.floor(field(x, y - lift) * (glyphs.length - 1)))]
+          const v = t === null ? field(x, y) : (1 - w) * flag(x, y, t) + w * rings(x, y, t)
+          text += glyphs[Math.min(glyphs.length - 1, Math.floor(v * (glyphs.length - 1)))]
         }
         text += '\n'
       }
       noise.textContent = text
     }
     draw(null)
-    const still = window.matchMedia('(prefers-reduced-motion: reduce)')
-    if ('wave' in noise.dataset && !still.matches) {
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       let last = 0
       const frame = (ms) => {
         if (!document.hidden && ms - last >= 66) { last = ms; draw(ms / 1000) }
@@ -396,6 +406,7 @@
       requestAnimationFrame(frame)
     }
   }
+
 
   // The Overview's banner: glyphs dense at both edges, thinning to nothing in the middle where the text is, as wide as
   // the banner. They drift slowly (about 8 frames a second); still with reduced motion or in a hidden tab.
