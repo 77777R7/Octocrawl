@@ -1,6 +1,6 @@
 /* The dashboard (scripts/build-docs.mjs builds /dashboard/ and its pages; dashboard.js fills them from /api/account).
    One dark look: the site header's navy as the ground, a deeper navy for the sidebar and code, orange only for what
-   matters. Charts and meters are text (ASCII), so nothing needs a style attribute, which the site's CSP drops. */
+   matters. Charts are SVG with classes (dashboard-charts.js), so nothing needs a style attribute, which the site's CSP drops. */
 :root{
   color-scheme:dark;
   --navy:#071b4f;
@@ -39,8 +39,10 @@ a:hover{color:#fff}
 .dash-credits{margin-top:auto;display:grid;gap:6px;padding:12px;border:1px solid var(--rule);border-radius:8px;font-size:13px}
 .dash-credits p{margin:0}
 .dash-credits strong{font:600 15px var(--mono);font-variant-numeric:tabular-nums}
-.ascii-meter{color:var(--orange);font:12px/1 var(--mono);white-space:pre;overflow:hidden}
-.ascii-meter .rest{color:var(--rule)}
+.credit-bar{display:block;width:100%;height:6px;margin:4px 0 2px;border:0;border-radius:3px;background:var(--rule);overflow:hidden;-webkit-appearance:none;appearance:none}
+.credit-bar::-webkit-progress-bar{background:var(--rule);border-radius:3px}
+.credit-bar::-webkit-progress-value{background:var(--orange);border-radius:3px}
+.credit-bar::-moz-progress-bar{background:var(--orange);border-radius:3px}
 .dash-small{color:var(--muted);font-size:12.5px}
 .dash-who{display:flex;justify-content:space-between;gap:8px;padding:0 4px;color:var(--muted);font-size:12.5px}
 .dash-who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -48,6 +50,7 @@ a:hover{color:#fff}
 .dash-main{min-width:0;padding:0 32px 64px}
 .dash-head{position:relative;padding:34px 0 18px;border-bottom:1px dotted var(--rule);margin-bottom:22px}
 .dash-noise{position:absolute;inset:0 0 auto auto;width:min(620px,100%);height:100%;margin:0;overflow:hidden;color:var(--orange);opacity:.13;font:11px/12px var(--mono);pointer-events:none;-webkit-mask-image:linear-gradient(to left,#000,transparent);mask-image:linear-gradient(to left,#000,transparent)}
+.dash-noise[data-wave]{opacity:.18}
 .dash-kicker{position:relative;margin:0 0 10px;color:var(--orange);font:650 11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase}
 .dash-kicker::before{content:"■ "}
 .dash-head h1{position:relative;margin:0;font-size:34px;line-height:1.1;letter-spacing:-.02em;font-weight:600;text-wrap:balance}
@@ -63,7 +66,7 @@ a:hover{color:#fff}
 .kpi-label{margin:0;color:var(--muted);font:650 10.5px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase}
 .kpi-value{margin:10px 0 0;font:600 28px/1 var(--mono);font-variant-numeric:tabular-nums}
 .kpi-sub{margin:8px 0 0;color:var(--muted);font-size:12.5px}
-.kpi .ascii-meter{margin-top:8px}
+.kpi .credit-bar{margin-top:12px}
 
 .dash-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:18px;align-items:start;margin-bottom:18px}
 .panel{min-width:0;margin-bottom:18px;padding:16px;border:1px solid var(--rule);border-radius:8px;background:var(--panel)}
@@ -74,19 +77,11 @@ a:hover{color:#fff}
 .panel p{margin:0 0 10px}
 .panel-head a,.panel-link{font:650 12px var(--mono);text-decoration:none}
 
-.ascii-chart{margin:0;overflow-x:auto;color:var(--rule);font:12px/13px var(--mono)}
-.ascii-chart .g-http{color:var(--orange)}
-.ascii-chart .g-browser{color:var(--orange-soft)}
-.ascii-chart .g-other{color:var(--ink)}
-.ascii-chart .axis{color:var(--muted)}
 .chart-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0 0;color:var(--muted);font:11.5px var(--mono)}
-.chart-legend .g-http{color:var(--orange)}
-.chart-legend .g-browser{color:var(--orange-soft)}
-.chart-legend .g-other{color:var(--ink)}
 
 .tabs{display:flex;flex-wrap:wrap;gap:4px}
 .tabs button{padding:6px 9px;border:1px solid transparent;border-radius:5px;background:none;color:var(--muted);font:650 11.5px/1 var(--mono);cursor:pointer}
-.tabs button[aria-selected="true"]{border-color:var(--rule);background:var(--deep);color:var(--ink)}
+.tabs button[aria-selected="true"],.tabs button[aria-pressed="true"]{border-color:var(--rule);background:var(--deep);color:var(--ink)}
 .code{position:relative;margin:0 0 12px}
 .code pre{margin:0;padding:12px 68px 12px 12px;border-radius:6px;background:var(--deep);color:var(--ink);font:12.5px/1.55 var(--mono);white-space:pre-wrap;word-break:break-all}
 .copy{position:absolute;top:6px;right:6px;padding:5px 8px;border:1px solid var(--rule);border-radius:5px;background:var(--panel);color:var(--muted);font:650 11px/1 var(--mono);cursor:pointer}
@@ -138,6 +133,107 @@ a:hover{color:#fff}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{padding:3px 8px;border:1px solid var(--rule);border-radius:999px;font:12px var(--mono)}
 
+
+/* ---- Charts (dashboard-charts.js): SVG shapes coloured by class ---- */
+.chart{position:relative;min-width:0}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart .grid{stroke:rgba(147,166,203,.14);stroke-width:1}
+.chart .axis{stroke:rgba(147,166,203,.4);stroke-width:1}
+.chart .tick{fill:var(--muted);font:11px var(--mono)}
+.chart .col-hit{fill:transparent}
+.chart .col.hover .col-hit{fill:rgba(147,166,203,.08)}
+.chart .bar{transition:opacity .15s}
+.chart .col.hover .bar{filter:brightness(1.15)}
+.b-http{fill:var(--orange);color:var(--orange)}
+.b-browser{fill:var(--orange-soft);color:var(--orange-soft)}
+.b-404{fill:#8fa3c8;color:#8fa3c8}
+.b-map{fill:#5f86d6;color:#5f86d6}
+.b-free{fill:#33507f;color:#4d6aa0}
+.chart .line{fill:none;stroke:var(--orange);stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round}
+.chart .fill-top{stop-color:var(--orange);stop-opacity:.42}
+.chart .fill-bottom{stop-color:var(--orange);stop-opacity:0}
+.chart .end{fill:var(--orange);stroke:var(--navy);stroke-width:2}
+.chart .dot{fill:var(--navy);stroke:var(--orange);stroke-width:2.5}
+.chart .cursor{stroke:rgba(232,239,253,.55);stroke-width:1;stroke-dasharray:3 3}
+.chart .off{display:none}
+.chart .tile rect{fill:var(--orange);stroke:var(--panel);stroke-width:1;transition:filter .15s}
+.chart .tile.t0 rect{fill-opacity:.22}.chart .tile.t1 rect{fill-opacity:.38}.chart .tile.t2 rect{fill-opacity:.55}.chart .tile.t3 rect{fill-opacity:.75}.chart .tile.t4 rect{fill-opacity:.95}
+.chart .tile.hover rect{filter:brightness(1.2)}
+.chart .tile-name{fill:#fff;font:600 12.5px "Helvetica Neue",Helvetica,Arial,sans-serif;pointer-events:none}
+.chart .tile-value{fill:rgba(255,255,255,.78);font:11px var(--mono);pointer-events:none}
+.chart .t4 .tile-name,.chart .t3 .tile-name{fill:#081b42}.chart .t4 .tile-value,.chart .t3 .tile-value{fill:rgba(8,27,66,.75)}
+.chart-wrap{position:relative;overflow:hidden}
+.chart-ascii{position:absolute;inset:0;margin:0;color:var(--orange);opacity:.07;font:10px/11px var(--mono);pointer-events:none;overflow:hidden}
+.chart-legend .sw,.glass-tip .sw{display:inline-block;width:9px;height:9px;margin-right:7px;border-radius:2px;background:currentColor;vertical-align:-1px}
+.panel-tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.big-figure{font:600 26px/1 var(--mono);font-variant-numeric:tabular-nums}
+.panel-head h2+.dash-small{margin:4px 0 0}
+@media (prefers-reduced-motion:no-preference){
+  .chart svg.enter .bar{transform-box:fill-box;transform-origin:bottom;animation:rise .5s cubic-bezier(.2,.7,.2,1) both}
+  .chart svg.enter .line{stroke-dasharray:1;animation:draw 1.1s ease-out both}
+  .chart svg.enter .area{animation:fade .9s ease-out both}
+  .chart svg.enter .tile rect{animation:fade .5s ease-out both}
+  @keyframes rise{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+  @keyframes draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+}
+
+/* ---- The frosted tooltip ---- */
+.glass-tip{position:fixed;z-index:50;min-width:170px;max-width:280px;padding:10px 12px;border:1px solid rgba(147,166,203,.28);border-radius:10px;background:rgba(10,34,96,.55);-webkit-backdrop-filter:blur(14px) saturate(140%);backdrop-filter:blur(14px) saturate(140%);box-shadow:0 12px 32px rgba(2,8,28,.45);color:var(--ink);font-size:12.5px;pointer-events:none}
+.glass-tip-title{margin:0 0 6px;font:650 11.5px var(--mono);letter-spacing:.04em;color:var(--orange-soft)}
+.glass-tip dl{display:grid;grid-template-columns:1fr auto;gap:3px 14px;margin:0}
+.glass-tip dt{color:var(--muted);white-space:nowrap}
+.glass-tip dd{margin:0;text-align:right;font:12.5px var(--mono);font-variant-numeric:tabular-nums}
+.glass-tip .total{padding-top:4px;border-top:1px dotted rgba(147,166,203,.3);color:var(--ink)}
+
+/* ---- The Overview's banner: the Evidence Record ---- */
+.ev-hero{position:relative;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:24px;align-items:center;min-height:250px;margin-bottom:18px;padding:30px 32px;border-radius:10px;background:var(--orange);color:#081b42;overflow:hidden}
+.ev-field{position:absolute;inset:0;margin:0;color:#7a2a10;opacity:.28;font:11px/12px var(--mono);pointer-events:none;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 55%);mask-image:linear-gradient(90deg,transparent 0,#000 55%)}
+.ev-copy{position:relative;min-width:0}
+.ev-tag{margin:0 0 10px;font:700 11.5px var(--mono);letter-spacing:.14em;text-transform:uppercase}
+.ev-copy h2{margin:0;font-size:30px;line-height:1.1;letter-spacing:-.02em;font-weight:650;text-wrap:balance}
+.ev-copy p{max-width:52ch;margin:10px 0 0;color:#20304f;font-size:15px}
+.ev-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.ev-btn{display:inline-flex;align-items:center;min-height:38px;padding:0 14px;border:1px solid rgba(8,27,66,.45);border-radius:7px;color:#081b42;font-weight:650;font-size:14px;text-decoration:none}
+.ev-btn:hover{background:rgba(8,27,66,.08);color:#081b42}
+.ev-btn.primary{background:#081b42;border-color:#081b42;color:#fff}
+.ev-btn.primary:hover{background:#13306e;color:#fff}
+.ev-receipt{position:relative;justify-self:end;width:min(100%,410px);min-height:146px;margin:0;padding:14px 16px;border-radius:8px;background:var(--deep);color:#ffe3d6;font:12px/1.55 var(--mono);white-space:pre;overflow:hidden;box-shadow:0 18px 40px rgba(8,27,66,.35)}
+
+/* ---- Integrations and the Connect page ---- */
+.integrations{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px dotted var(--rule);border-left:1px dotted var(--rule)}
+.int-tile{display:flex;align-items:center;gap:10px;min-width:0;padding:13px 14px;border-right:1px dotted var(--rule);border-bottom:1px dotted var(--rule);color:var(--ink);text-decoration:none;font-size:14px}
+.int-tile:hover{background:rgba(147,166,203,.08);color:var(--ink)}
+.int-tile:hover .int-arrow{color:var(--orange)}
+.int-icon{display:inline-grid;place-items:center;flex:none;width:28px;height:28px;border-radius:6px;background:rgba(232,239,253,.08);color:var(--orange-soft);font:700 11px var(--mono)}
+.int-icon img{width:20px;height:20px}
+.int-icon:has(img){background:#e8effd}
+.int-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.int-arrow{color:var(--muted);font-size:12px}
+.install-row{border-top:1px dotted var(--rule)}
+.install-row summary{display:flex;align-items:center;gap:12px;padding:12px 2px;cursor:pointer;list-style:none}
+.install-row summary::-webkit-details-marker{display:none}
+.install-row summary strong{flex:1;font-weight:600}
+.install-btn{padding:6px 10px;border:1px solid var(--rule);border-radius:6px;color:var(--muted);font:650 11.5px var(--mono)}
+.install-row[open] .install-btn,.install-row summary:hover .install-btn{border-color:var(--orange);color:var(--orange-soft)}
+.install-body{padding:0 2px 12px}
+.stack{display:grid;gap:18px;min-width:0}
+.stack .panel{margin-bottom:0}
+.kv{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;border-radius:6px;background:var(--deep)}
+.kv code{font:12.5px var(--mono);color:var(--ink)}
+.button.small{display:inline-flex;align-items:center;min-height:32px;padding:0 12px;font-size:13px;text-decoration:none;color:#081b42}
+
+/* ---- Usage: summary and sources ---- */
+.summary{display:grid;grid-template-columns:minmax(0,1.4fr) repeat(3,minmax(0,1fr));margin-bottom:18px;border:1px solid var(--rule);border-radius:8px;background:var(--panel)}
+.summary>div{min-width:0;padding:16px;border-left:1px dotted var(--rule)}
+.summary>div:first-child{border-left:0}
+.summary-figure{margin:8px 0 4px;font:600 34px/1 var(--mono);font-variant-numeric:tabular-nums}
+.summary .credit-bar{margin-top:10px}
+.sources{display:grid;gap:14px;margin:0;padding:0;list-style:none}
+.sources p{display:flex;justify-content:space-between;gap:10px;margin:0 0 6px;font-size:14px}
+.sources .mono{font:12.5px var(--mono);color:var(--muted)}
+.sources .dash-small{margin:4px 0 0}
+
 @media (max-width:900px){
   .dash{grid-template-columns:minmax(0,1fr)}
   .dash-side{position:static;height:auto;gap:12px;border-right:0;border-bottom:1px solid var(--rule)}
@@ -146,6 +242,12 @@ a:hover{color:#fff}
   .dash-credits{margin-top:0}
   .dash-main{padding:0 16px 48px}
   .dash-grid,.dash-grid.even{grid-template-columns:minmax(0,1fr)}
+  .ev-hero{grid-template-columns:minmax(0,1fr);padding:24px 18px}
+  .ev-receipt{justify-self:stretch;width:100%;font-size:11px}
+  .integrations{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .summary>div:nth-child(3){border-left:0}
+  .summary>div:nth-child(n+3){border-top:1px dotted var(--rule)}
   .filters input{min-width:0;width:100%}
   .filters label:first-child{flex:1 1 100%}
   .filters .button{margin-left:0}

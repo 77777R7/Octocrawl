@@ -15,7 +15,7 @@ const assetRoot = join(root, 'public', 'docs-assets')
 // The docs' own stylesheets and script, each versioned by its content. A stylesheet's references to versioned public
 // files (the header's mountain artwork) get their ?v= first and go to dist in that form, so its own version changes
 // when the artwork does.
-const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css', 'account.css', 'account.js', 'dashboard.css', 'dashboard.js'].map(async name => {
+const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css', 'account.css', 'account.js', 'dashboard.css', 'dashboard.js', 'dashboard-charts.js'].map(async name => {
   const source = await readFile(join(assetRoot, name), 'utf8')
   const shipped = name.endsWith('.css') ? versionAssetReferences(source, join(root, 'public')) : source
   if (shipped !== source) await writeFile(join(root, 'dist', 'docs-assets', name), shipped)
@@ -444,7 +444,6 @@ const DASHBOARD_PAGES = [
   ['/dashboard/account/', 'Account', 'Account'],
 ]
 const dashCode = (id, text) => `<div class="code"><pre id="${id}">${escape(text)}</pre><button class="copy" type="button" data-copy="${id}">Copy</button></div>`
-const dashLegend = '<p class="chart-legend"><span class="g-http"># page over HTTP · 1 credit</span><span class="g-browser">% page in a browser · 5</span><span class="g-other">+ map or 404 · 1</span></p>'
 /** The request table the Activity page and the Overview share: dashboard.js fills its body from /api/account/activity. */
 const requestTable = (id, rows) => `<div class="table-scroll"><table class="dash-table requests" data-rows="${rows}"><thead><tr><th>Time (UTC)</th><th>Endpoint</th><th>URL</th><th>Lane</th><th>Result</th><th>robots.txt</th><th class="num">Credits</th><th>Evidence</th></tr></thead><tbody id="${id}-body"></tbody></table></div><p class="dash-small" id="${id}-empty" hidden>No requests yet. Each call made with one of your keys shows here, with what it cost.</p>`
 function dashboardPageHtml(path, title, lead, body) {
@@ -459,51 +458,89 @@ function dashboardPageHtml(path, title, lead, body) {
 <body><a class="skip-link" href="#main-content">Skip to content</a>
 <div class="dash"><aside class="dash-side"><a class="dash-brand" href="/" aria-label="Octocrawl home"><img src="/assets/octopus-160.webp" width="30" height="30" alt="" /><img src="/assets/octocrawl-wordmark.svg" width="116" height="19" alt="" /></a>
 <nav class="dash-nav" aria-label="Dashboard">${links}</nav>
-<div class="dash-credits"><p><strong id="side-credits">…</strong> credits left</p><p class="ascii-meter" id="side-meter" aria-hidden="true">[....................]</p><p class="dash-small" id="side-renews">&nbsp;</p></div>
+<div class="dash-credits"><p><strong id="side-credits">…</strong> credits left</p><progress class="credit-bar" id="side-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress><p class="dash-small" id="side-renews">&nbsp;</p></div>
 <div class="dash-who"><span id="side-email">…</span><a href="/docs/">Docs ↗</a></div></aside>
-<main id="main-content" class="dash-main"><header class="dash-head"><pre class="dash-noise" id="dash-noise" aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1><p class="dash-lead">${lead}</p></header>
+<main id="main-content" class="dash-main"><header class="dash-head"><pre class="dash-noise" id="dash-noise"${path === '/dashboard/' ? ' data-wave' : ''} aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1><p class="dash-lead">${lead}</p></header>
 <p class="dash-message" id="dash-message" role="status" aria-live="polite"></p>
-${body}</main></div><script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
+${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script><script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
 }
-const overviewBody = `<section class="kpis" aria-label="This month">
-<div class="kpi"><p class="kpi-label">Credits left</p><p class="kpi-value" id="kpi-left">…</p><p class="ascii-meter" id="kpi-meter" aria-hidden="true"></p></div>
+// The Overview's banner: the Evidence Record, the thing that sets Octocrawl apart. dashboard.js prints the receipt
+// line by line and runs the field behind it; without scripts, or with reduced motion, the receipt is shown whole.
+const EV_RECEIPT = [
+  '┌─ EVIDENCE RECORD ─────────────────────┐',
+  '│ url     developer.mozilla.org/en-US/… │',
+  '│ fetched 2026-10-12T08:14:03Z          │',
+  '│ status  200 · lane http               │',
+  '│ robots  allowed                       │',
+  '│ sha256  9c1e4b07d2…a07f               │',
+  '└───────────────────────────────────────┘',
+].join('\n')
+/** Clients the Overview links to, each to its setup on the Connect page. Icons are the docs' own; the rest are glyphs. */
+const INTEGRATIONS = [
+  ['Claude Code', 'claude', 'claude-code.svg'], ['Codex', 'codex', 'codex.svg'], ['Cursor', 'cursor', 'cursor.svg'], ['OpenCode', 'opencode', 'opencode.svg'],
+  ['Cline', 'cline', 'CL'], ['Vercel AI SDK', 'sdk', '▲'], ['REST API', 'rest', '{ }'], ['On your computer', 'local', '>_'],
+]
+const integrationTiles = INTEGRATIONS.map(([name, id, icon]) => `<a class="int-tile" href="/dashboard/connect/#c-${id}"><span class="int-icon">${icon.endsWith('.svg') ? `<img src="/docs-assets/agent-clients/${icon}" width="22" height="22" alt="" />` : escape(icon)}</span><span class="int-name">${escape(name)}</span><span class="int-arrow" aria-hidden="true">↗</span></a>`).join('')
+const overviewBody = `<section class="ev-hero" aria-labelledby="ev-title"><pre class="ev-field" id="ev-field" aria-hidden="true"></pre>
+<div class="ev-copy"><p class="ev-tag">[ Evidence Record ]</p><h2 id="ev-title">Every page comes with its receipt</h2><p>Each answer says which address was read, when, what robots.txt allowed and the SHA-256 of what came back, so your agent can cite it and you can check it.</p><div class="ev-actions"><a class="ev-btn primary" href="/dashboard/connect/">Connect your agent →</a><a class="ev-btn" href="/docs/reference/#evidence-record">What a record holds</a></div></div>
+<pre class="ev-receipt" id="ev-receipt" aria-label="An example Evidence Record">${escape(EV_RECEIPT)}</pre></section>
+<section class="kpis" aria-label="This month">
+<div class="kpi"><p class="kpi-label">Credits left</p><p class="kpi-value" id="kpi-left">…</p><progress class="credit-bar" id="kpi-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress></div>
 <div class="kpi"><p class="kpi-label">Used this month</p><p class="kpi-value" id="kpi-used">…</p><p class="kpi-sub" id="kpi-used-sub">&nbsp;</p></div>
 <div class="kpi"><p class="kpi-label">Pages read · 30 days</p><p class="kpi-value" id="kpi-pages">…</p><p class="kpi-sub" id="kpi-pages-sub">&nbsp;</p></div>
 <div class="kpi"><p class="kpi-label">Not charged · 30 days</p><p class="kpi-value" id="kpi-free">…</p><p class="kpi-sub">blocked, robots.txt or no answer</p></div>
 </section>
 <div class="dash-grid">
-<section class="panel" aria-labelledby="chart-title"><div class="panel-head"><h2 id="chart-title">Credits, last 30 days</h2><a href="/dashboard/usage/">Usage →</a></div><pre class="ascii-chart" id="usage-chart" data-rows="9" aria-describedby="chart-summary"></pre><p class="sr-only" id="chart-summary"></p>${dashLegend}</section>
-<section class="panel" aria-labelledby="connect-title"><div class="panel-head"><h2 id="connect-title">Connect</h2><div class="tabs" role="tablist" aria-label="Connect with"><button type="button" role="tab" aria-selected="true" aria-controls="tab-mcp" data-tab="tab-mcp">MCP</button><button type="button" role="tab" aria-selected="false" aria-controls="tab-rest" data-tab="tab-rest">REST</button><button type="button" role="tab" aria-selected="false" aria-controls="tab-sdk" data-tab="tab-sdk">AI SDK</button></div></div>
-<div id="tab-mcp" role="tabpanel">${dashCode('snippet-mcp', 'claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp --header "Authorization: Bearer oc_YOUR_KEY"')}</div>
-<div id="tab-rest" role="tabpanel" hidden>${dashCode('snippet-rest', `curl https://api.octocrawl.dev/v1/scrape \\\n  -H 'authorization: Bearer oc_YOUR_KEY' \\\n  -H 'content-type: application/json' \\\n  -d '{"url":"https://example.com","formats":["markdown"]}'`)}</div>
-<div id="tab-sdk" role="tabpanel" hidden>${dashCode('snippet-sdk', `import { octocrawlTools } from '@octocrawl/ai-sdk'\n\n// Reads OCTOCRAWL_API_KEY from the environment.\nconst tools = octocrawlTools()`)}</div>
-<h3>Your keys</h3><ul class="key-list" id="keys-mini"></ul><p class="dash-small" id="keys-mini-empty" hidden>No keys yet. A key spends this account's credits and opens the browser lane.</p><a class="panel-link" href="/dashboard/keys/">Manage keys →</a></section>
+<section class="panel" aria-labelledby="used-title"><div class="panel-head"><div><h2 id="used-title">Credits used</h2><p class="dash-small" id="used-range">Last 7 days (UTC)</p></div><div class="panel-tools"><span class="big-figure" id="used-total">…</span><div class="tabs" role="group" aria-label="Range"><button type="button" aria-pressed="true" data-range="7">7 days</button><button type="button" aria-pressed="false" data-range="30">30 days</button></div></div></div>
+<div class="chart-wrap"><pre class="chart-ascii" id="used-ascii" aria-hidden="true"></pre><div id="used-chart"></div></div><a class="panel-link" href="/dashboard/usage/">Usage →</a></section>
+<section class="panel" aria-labelledby="key-title"><div class="panel-head"><h2 id="key-title">API key</h2><a class="button small" href="/dashboard/keys/">Create key</a></div>
+<ul class="key-list" id="keys-mini"></ul><p class="dash-small" id="keys-mini-empty" hidden>No keys yet. A key spends this account's credits and opens the browser lane.</p>
+<h3>MCP server</h3>${dashCode('ov-mcp', 'https://mcp.octocrawl.dev/mcp')}<h3>On your computer, free</h3>${dashCode('ov-cli', 'npx octocrawl serve')}<a class="panel-link" href="/dashboard/connect/">Set up an agent →</a></section>
 </div>
+<section class="panel" aria-labelledby="int-title"><div class="panel-head"><h2 id="int-title">Integrations</h2><a href="/dashboard/connect/">All setups →</a></div><div class="integrations">${integrationTiles}</div></section>
 <section class="panel" aria-labelledby="recent-title"><div class="panel-head"><h2 id="recent-title">Recent requests</h2><a href="/dashboard/activity/">Activity →</a></div>${requestTable('recent', 5)}</section>`
 const activityBody = `<section class="panel" aria-labelledby="activity-title"><div class="panel-head"><h2 id="activity-title">Requests</h2><span class="dash-small" id="activity-count">&nbsp;</span></div>
 <form class="filters" id="activity-filters"><label for="f-search">URL contains<input id="f-search" name="search" type="search" autocomplete="off" placeholder="example.com" /></label><label for="f-endpoint">Endpoint<select id="f-endpoint" name="endpoint"><option value="">All</option><option value="scrape">/scrape</option><option value="map">/map</option></select></label><label for="f-key">Key<select id="f-key" name="key"><option value="">All keys</option></select></label><label for="f-result">Result<select id="f-result" name="result"><option value="">All</option><option value="read">Read</option><option value="free">Not charged</option></select></label><button class="button quiet" type="button" id="export-csv">Export CSV</button></form>
 ${requestTable('activity', 0)}
 <p class="dash-small">Lines are kept 30 days and only you see them: the URL asked for, what came back and what it cost, with the body's SHA-256 from the Evidence Record. Never the page's content. The page shows the latest 1,000.</p></section>`
-const usageBody = `<section class="panel" aria-labelledby="usage-chart-title"><div class="panel-head"><h2 id="usage-chart-title">Credits per day (UTC)</h2><span class="dash-small" id="usage-total">&nbsp;</span></div><pre class="ascii-chart" id="usage-chart" data-rows="13" aria-describedby="chart-summary"></pre><p class="sr-only" id="chart-summary"></p>${dashLegend}</section>
-<section class="panel" aria-labelledby="usage-table-title"><div class="panel-head"><h2 id="usage-table-title">Day by day</h2></div><div class="table-scroll"><table class="dash-table"><thead><tr><th>Day (UTC)</th><th class="num">HTTP</th><th class="num">Browser</th><th class="num">Not found</th><th class="num">Map</th><th class="num">Not charged</th><th class="num">Credits</th></tr></thead><tbody id="usage-body"></tbody><tfoot id="usage-foot"></tfoot></table></div><p class="dash-small" id="usage-empty" hidden>No calls in the last 30 days.</p>
-<p class="dash-small">A page read over HTTP costs 1 credit, a page read in a browser 5, a page that does not exist 1, and a map 1. A page that was blocked, or a call that read nothing, costs nothing. <a href="/docs/limits/#hosted-api-and-mcp">Limits</a> has the details.</p></section>
+const usageBody = `<section class="summary" aria-label="Summary">
+<div class="summary-main"><p class="kpi-label">Credits remaining</p><p class="summary-figure" id="sum-left">…</p><p class="dash-small" id="sum-renews">&nbsp;</p><progress class="credit-bar" id="sum-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress></div>
+<div class="summary-cell"><p class="kpi-label">Credits used · 30 days</p><p class="kpi-value" id="sum-used">…</p></div>
+<div class="summary-cell"><p class="kpi-label">Pages read · 30 days</p><p class="kpi-value" id="sum-pages">…</p></div>
+<div class="summary-cell"><p class="kpi-label">Read · calls with a result</p><p class="kpi-value" id="sum-rate">—</p><p class="dash-small" id="sum-rate-sub">from request lines</p></div>
+</section>
+<section class="panel" aria-labelledby="over-time-title"><div class="panel-head"><div><h2 id="over-time-title">Usage over time</h2><p class="dash-small">Per UTC day, last 30 days</p></div><div class="panel-tools"><div class="tabs" role="group" aria-label="Group by"><button type="button" aria-pressed="true" data-group="kind">By kind</button><button type="button" aria-pressed="false" data-group="endpoint">By endpoint</button></div><div class="tabs" role="group" aria-label="Measure"><button type="button" aria-pressed="true" data-measure="credits">Credits</button><button type="button" aria-pressed="false" data-measure="calls">Calls</button></div></div></div>
+<div id="usage-bars"></div><p class="chart-legend" id="usage-legend"></p></section>
 <div class="dash-grid even">
-<section class="panel" aria-labelledby="by-key-title"><div class="panel-head"><h2 id="by-key-title">By key</h2><span class="dash-small">from request lines, 30 days</span></div><div class="table-scroll"><table class="dash-table"><thead><tr><th>Key</th><th class="num">Calls</th><th class="num">Pages read</th><th class="num">Credits</th></tr></thead><tbody id="by-key-body"></tbody></table></div><p class="dash-small" id="by-key-empty" hidden>No request lines yet.</p></section>
-<section class="panel" aria-labelledby="by-site-title"><div class="panel-head"><h2 id="by-site-title">By site</h2><span class="dash-small">top 10, 30 days</span></div><div class="table-scroll"><table class="dash-table"><thead><tr><th>Site</th><th class="num">Calls</th><th class="num">Not charged</th><th class="num">Credits</th></tr></thead><tbody id="by-site-body"></tbody></table></div><p class="dash-small" id="by-site-empty" hidden>No request lines yet.</p></section>
-</div>`
+<section class="panel" aria-labelledby="by-site-title"><div class="panel-head"><h2 id="by-site-title">By site</h2><span class="dash-small">credits, from request lines</span></div><div id="site-map"></div><p class="dash-small" id="by-site-empty" hidden>No request lines yet. Each call made with one of your keys adds to this.</p></section>
+<section class="panel" aria-labelledby="by-key-title"><div class="panel-head"><h2 id="by-key-title">By key</h2><span class="dash-small">credits, from request lines</span></div><ul class="sources" id="by-key-list"></ul><p class="dash-small" id="by-key-empty" hidden>No request lines yet.</p></section>
+</div>
+<section class="panel" aria-labelledby="usage-table-title"><div class="panel-head"><h2 id="usage-table-title">Day by day</h2><span class="dash-small" id="usage-total">&nbsp;</span></div><div class="table-scroll"><table class="dash-table"><thead><tr><th>Day (UTC)</th><th class="num">HTTP</th><th class="num">Browser</th><th class="num">Not found</th><th class="num">Map</th><th class="num">Not charged</th><th class="num">Credits</th></tr></thead><tbody id="usage-body"></tbody><tfoot id="usage-foot"></tfoot></table></div><p class="dash-small" id="usage-empty" hidden>No calls in the last 30 days.</p>
+<p class="dash-small">A page read over HTTP costs 1 credit, a page read in a browser 5, a page that does not exist 1, and a map 1. A page that was blocked, or a call that read nothing, costs nothing. Days are UTC. Totals by site and key come from request lines, kept 30 days. <a href="/docs/limits/#hosted-api-and-mcp">Limits</a> has the details.</p></section>`
 const keysBody = `<section class="panel" aria-labelledby="keys-title"><div class="panel-head"><h2 id="keys-title">API keys</h2><span class="dash-small">At most five active keys</span></div>
 <p>Send a key as <code>Authorization: Bearer &lt;key&gt;</code> to <code>https://api.octocrawl.dev</code> or <code>https://mcp.octocrawl.dev/mcp</code>. Its calls spend this account's credits and may use the browser.</p>
 <form class="dash-form" id="key-form"><label for="key-label">Name (optional)<input id="key-label" name="label" maxlength="60" placeholder="laptop agent" autocomplete="off" /></label><button class="button" type="submit">Create key</button></form>
 <div class="key-reveal" id="key-reveal" hidden><p>Your new key. Copy it now: it is shown only once.</p>${dashCode('new-key', '')}<p class="dash-small">Claude Code:</p>${dashCode('new-key-mcp', '')}</div>
 <div class="table-scroll"><table class="dash-table"><thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Status</th><th><span class="sr-only">Action</span></th></tr></thead><tbody id="keys-body"></tbody></table></div><p class="dash-small" id="keys-empty" hidden>No keys yet.</p></section>`
-const connectBody = `<section class="panel" aria-labelledby="mcp-title"><div class="panel-head"><h2 id="mcp-title">MCP clients</h2><a href="/docs/connect-mcp/">Setup for every client →</a></div>
-<h3>Claude Code</h3>${dashCode('c-claude', 'claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp --header "Authorization: Bearer oc_YOUR_KEY"')}
-<h3>Codex (reads the key from an environment variable)</h3>${dashCode('c-codex', 'export OCTOCRAWL_API_KEY=oc_YOUR_KEY\ncodex mcp add octocrawl --url https://mcp.octocrawl.dev/mcp --bearer-token-env-var OCTOCRAWL_API_KEY')}
-<h3>Cursor (.cursor/mcp.json), and clients that take JSON</h3>${dashCode('c-json', '{ "mcpServers": { "octocrawl": { "url": "https://mcp.octocrawl.dev/mcp", "headers": { "Authorization": "Bearer oc_YOUR_KEY" } } } }')}</section>
+/** One client's setup on the Connect page: a row that opens to its command or config. */
+const installRow = (id, name, icon, note, code) => `<details class="install-row" id="c-${id}"><summary><span class="int-icon">${icon.endsWith('.svg') ? `<img src="/docs-assets/agent-clients/${icon}" width="22" height="22" alt="" />` : escape(icon)}</span><strong>${escape(name)}</strong><span class="install-btn">Show setup</span></summary><div class="install-body"><p class="dash-small">${note}</p>${dashCode(`code-${id}`, code)}</div></details>`
+const connectBody = `<div class="dash-grid even">
+<section class="panel" aria-labelledby="agents-title"><div class="panel-head"><div><h2 id="agents-title">Coding agents</h2><p class="dash-small">Add hosted Octocrawl with one command or one config entry. Put your key where it says <code>oc_YOUR_KEY</code>.</p></div></div>
+${installRow('claude', 'Claude Code', 'claude-code.svg', 'Run in a terminal; add <code>--scope user</code> to have it in every project.', 'claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp --header "Authorization: Bearer oc_YOUR_KEY"')}
+${installRow('codex', 'Codex', 'codex.svg', 'Codex reads the key from an environment variable.', 'export OCTOCRAWL_API_KEY=oc_YOUR_KEY\ncodex mcp add octocrawl --url https://mcp.octocrawl.dev/mcp --bearer-token-env-var OCTOCRAWL_API_KEY')}
+${installRow('cursor', 'Cursor', 'cursor.svg', 'Merge into <code>.cursor/mcp.json</code>; <code>"Bearer ${env:OCTOCRAWL_API_KEY}"</code> reads the key from the environment.', '{ "mcpServers": { "octocrawl": { "url": "https://mcp.octocrawl.dev/mcp", "headers": { "Authorization": "Bearer oc_YOUR_KEY" } } } }')}
+${installRow('opencode', 'OpenCode', 'opencode.svg', 'Merge into the <code>mcp</code> object of <code>opencode.json</code>.', '{ "mcp": { "octocrawl": { "type": "remote", "url": "https://mcp.octocrawl.dev/mcp", "enabled": true, "headers": { "Authorization": "Bearer oc_YOUR_KEY" } } } }')}
+${installRow('cline', 'Cline', 'CL', 'Merge into <code>cline_mcp_settings.json</code> (MCP Servers → Configure), keeping your other servers.', '{ "mcpServers": { "octocrawl": { "type": "streamableHttp", "url": "https://mcp.octocrawl.dev/mcp", "headers": { "Authorization": "Bearer oc_YOUR_KEY" }, "disabled": false } } }')}
+</section>
+<div class="stack">
+<section class="panel" aria-labelledby="mcp-title"><div class="panel-head"><h2 id="mcp-title">MCP</h2><a href="/docs/connect-mcp/">Docs →</a></div><p>Point any MCP client at the hosted server and send your key in the <code>Authorization: Bearer</code> header, never in the URL.</p>
+<h3>URL</h3>${dashCode('mcp-url', 'https://mcp.octocrawl.dev/mcp')}
+<h3>OCTOCRAWL_API_KEY</h3><div class="kv"><code id="conn-key">oc_…</code><a class="panel-link" href="/dashboard/keys/">Create a key →</a></div><p class="dash-small">A key is shown once, when you create it. This page shows the start of your newest key so you can tell them apart.</p></section>
 <section class="panel" aria-labelledby="api-title"><div class="panel-head"><h2 id="api-title">From code</h2><a href="/docs/reference/">API reference →</a></div>
-<h3>REST</h3>${dashCode('c-rest', `curl https://api.octocrawl.dev/v1/scrape \\\n  -H 'authorization: Bearer oc_YOUR_KEY' \\\n  -H 'content-type: application/json' \\\n  -d '{"url":"https://example.com","formats":["markdown"]}'`)}
-<h3>Vercel AI SDK</h3>${dashCode('c-sdk', `npm install @octocrawl/ai-sdk ai zod\n\nimport { octocrawlTools } from '@octocrawl/ai-sdk'\nconst tools = octocrawlTools() // reads OCTOCRAWL_API_KEY`)}</section>
-<section class="panel" aria-labelledby="local-title"><div class="panel-head"><h2 id="local-title">On your own computer</h2></div><p>Free and without limit, with every tool: crawl, batch and Monitor too. No key and no credits.</p>${dashCode('c-local', 'npx octocrawl serve')}</section>`
+<h3 id="c-rest">REST</h3>${dashCode('c-rest-code', `curl https://api.octocrawl.dev/v1/scrape \\\n  -H 'authorization: Bearer oc_YOUR_KEY' \\\n  -H 'content-type: application/json' \\\n  -d '{"url":"https://example.com","formats":["markdown"]}'`)}
+<h3 id="c-sdk">Vercel AI SDK</h3>${dashCode('c-sdk-code', `npm install @octocrawl/ai-sdk ai zod\n\nimport { octocrawlTools } from '@octocrawl/ai-sdk'\nconst tools = octocrawlTools() // reads OCTOCRAWL_API_KEY`)}</section>
+<section class="panel" aria-labelledby="c-local"><div class="panel-head"><h2 id="c-local">On your own computer</h2></div><p>Free and without limit, with every tool: crawl, batch and Monitor too. No key and no credits.</p>${dashCode('c-local-code', 'npx octocrawl serve')}</section>
+</div></div>`
 const accountBody = `<section class="panel" aria-labelledby="who-title"><div class="panel-head"><h2 id="who-title">Signed in</h2></div><dl class="facts">
 <dt>Email</dt><dd id="acct-email">…</dd>
 <dt>Sign-in methods</dt><dd><span class="chips" id="acct-providers"></span></dd>
