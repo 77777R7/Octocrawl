@@ -178,6 +178,8 @@ export function buildChannels(
      * access grant (browserEngineChoice). Default stock Playwright.
      */
     browserEngine?: import('./subjects/browserEngine.js').BrowserEngineName
+    /** Which identity the public browser rung sends (browserIdentityChoice): the declared one, or the browser's own. */
+    browserIdentity?: import('./subjects/browserIdentity.js').BrowserIdentityChoice
     networkPolicy?: import('@w2l/contracts').NetworkPolicy
     originScheduler?: OriginScheduler
     /** Operator-created anonymous marketplace preferences; never a user login. */
@@ -219,7 +221,7 @@ export function buildChannels(
   if (preview && mode !== 'standard') throw new Error(`the preview product token is for standard mode, not ${mode}`)
   const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, fileStore, preview, opts.robotsCache)
   // The public browser alone may run another engine; the saved-login rung below is always stock Playwright.
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright')
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared')
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
   if (opts.compatTransport === true && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('the compatible transport is for a local server, not the hosted preview')
   const compat = opts.compatTransport === true && mode === 'standard' ? new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, undefined, false, fileStore, false, opts.robotsCache, new CompatTransport(opts.networkPolicy ?? defaultNetworkPolicy())) : null

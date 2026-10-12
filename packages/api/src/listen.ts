@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { accessGrantFromText, type AccessGrant } from '@w2l/http-core'
-import { browserEngineChoice, COMPAT_LIBRARY, compatHostsChoice, DEFAULT_COMPAT_PROFILE, type BrowserEngineName } from '@w2l/bench'
+import { browserEngineChoice, browserIdentityChoice, type BrowserIdentityChoice, COMPAT_LIBRARY, compatHostsChoice, DEFAULT_COMPAT_PROFILE, type BrowserEngineName } from '@w2l/bench'
 import { describeEgressProxy, egressProxies, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, withEnvironmentProxy, withOperatorContact, type NetworkPolicy, type ProxyServer } from '@w2l/contracts'
 
 export type ApiMode = 'local' | 'hosted'
@@ -71,6 +71,8 @@ export interface ListenConfig {
    * grant names `enhanced_browser` and Patchright is asked for; a hosted server refuses Patchright.
    */
   browserEngine: BrowserEngineName
+  /** Which identity the public browser rung sends (`W2L_BROWSER_IDENTITY`): the mode's declared one, or the browser's own (`actual`, local only). */
+  browserIdentity: BrowserIdentityChoice
   /**
    * The hosts whose standard-mode pages go over the browser-compatible transport (`W2L_COMPAT_HOSTS`):
    * only with a grant that names `compatible_transport`, never on a hosted server. Empty: none.
@@ -148,6 +150,8 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   const workerCount = parseWorkerCount(env)
   const accessGrant = readAccessGrant(argv, env, hosted)
   const browserEngine = browserEngineChoice(env, accessGrant, hosted)
+  const browserIdentity = browserIdentityChoice(env, hosted)
+  const identityNotice = browserIdentity === 'declared' ? [] : ['browser identity: actual on the public browser rung (W2L_BROWSER_IDENTITY): the browser sends its own User-Agent and client hints, which the record declares; an experiment switch (docs/pa-challenge-botcheck-tasks.md G2)']
   const engineNotice = browserEngine === 'playwright' ? [] : [`browser engine: ${browserEngine} on the public browser rung (ADR 0005 enhanced_browser); saved logins and managed sessions keep stock Playwright`]
   const compatHosts = compatHostsChoice(env, accessGrant, hosted)
   const egressList = readEgressProxies(env, accessGrant, hosted)
@@ -176,6 +180,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       jobStreams: jobStreamsEnabled(env),
       accessGrant,
       browserEngine,
+      browserIdentity,
       compatHosts,
       egressProxies: egressList,
       egressEchoUrl,
@@ -199,12 +204,13 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     mapMaxLimit: MAX_MAP_LIMIT,
     mapMaxTimeoutMs: MAX_MAP_TIMEOUT_MS,
     allowRobotsOverride: true,
-    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)]), ...engineNotice, ...compatNotice, ...egressNotice],
+    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)]), ...engineNotice, ...identityNotice, ...compatNotice, ...egressNotice],
     ...(rateLimit === undefined ? {} : { rateLimit }),
     delivery: deliveryConfig('local', env),
     jobStreams: jobStreamsEnabled(env),
     accessGrant,
     browserEngine,
+    browserIdentity,
     compatHosts,
     egressProxies: egressList,
     egressEchoUrl,

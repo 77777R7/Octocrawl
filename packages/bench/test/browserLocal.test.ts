@@ -240,6 +240,21 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
+  it('sends the browser\'s own identity under W2L_BROWSER_IDENTITY=actual, and declares what it sent (G2, 2026-10-12)', async () => {
+    const subject = new BrowserLocalSubject('standard', null, false, undefined, null, undefined, null, undefined, undefined, null, false, undefined, 'playwright', 'actual')
+    try {
+      const out = await subject.fetch(`${url}/spa`)
+      expect(out.status).toBe('success')
+      const sent = out.compliance!.sentHeaders.headers.find((h) => h.name === 'user-agent')!.value
+      // No Chrome claim: the headless build's own User-Agent went out, and the record declares that very string.
+      expect(sent).toMatch(/HeadlessChrome\//)
+      expect(out.trace.find((t) => t.event === 'identity_declared')?.detail).toMatchObject({ mode: 'standard', identity: 'actual', userAgent: sent })
+      expect(out.trace.filter((t) => t.event === 'identity_mismatch')).toHaveLength(0)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
   it('produces a compliance record whose declared identity is honest', async () => {
     const subject = new BrowserLocalSubject()
     try {

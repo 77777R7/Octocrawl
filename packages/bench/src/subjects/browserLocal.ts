@@ -21,6 +21,7 @@ import {
 } from '@w2l/http-core'
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Download, type Page, type Request, type Response, type Route } from 'playwright'
 import { browserEngineFor, type BrowserEngineName } from './browserEngine.js'
+import type { BrowserIdentityChoice } from './browserIdentity.js'
 import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -233,6 +234,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
   private readonly scheduler: OriginScheduler
   private browser: Browser | null = null
   private browserPromise: Promise<Browser> | null = null
+  /** The browser's own User-Agent (`navigator.userAgent`), read once per subject for the actual identity. */
+  private actualUserAgentPromise: Promise<string> | null = null
   private managedContext: BrowserContext | null = null
   private managedContextPromise: Promise<BrowserContext> | null = null
   /** Per-host last-request timestamp, for honest rate-limit facts. */
@@ -286,6 +289,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
      * point, having checked the access grant, chose Patchright. A managed profile always runs Playwright.
      */
     private readonly browserEngine: BrowserEngineName = 'playwright',
+    /** Which identity the public browser rung sends (browserIdentity.ts): the mode's declared one, or the browser's own. */
+    private readonly browserIdentity: BrowserIdentityChoice = 'declared',
   ) {
     if (browserEngine !== 'playwright' && (access != null || managedProfileDir !== null)) {
       throw new Error('the enhanced browser runs only in the public browser lane, never with a saved login or a managed profile')
@@ -433,11 +438,17 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // Research mode declares its contact in the format the page's host asks
       // for (researchUserAgent); the hosted preview adds its product token.
       const declared = modeIdentity(this.mode, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, this.networkPolicy.contact ?? null, new URL(url).hostname, device)
-      const identity = this.previewProductToken ? previewIdentity(declared) : declared
+      // The browser's own identity (browserIdentity.ts): no User-Agent, hints or CDP override on the context, and the
+      // record declares the User-Agent the browser reports, so the honesty check still holds a declaration against what
+      // was sent. Only the standard and authed desktop identities on an unmanaged context without the preview's token.
+      const actual = this.browserIdentity === 'actual' && (this.mode === 'standard' || this.mode === 'authed') && device === 'desktop' && !this.previewProductToken && managedContext === null
+      const identity = actual
+        ? { ...declared, userAgent: await raceWithSignal(this.actualUserAgent(browser), signal), clientHints: {}, device: undefined }
+        : this.previewProductToken ? previewIdentity(declared) : declared
       assertIdentityBundle(
         identityForRoute(this.mode, this.accessConfig, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, undefined, device),
       )
-      trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'identity_declared', detail: { mode: this.mode, ...(identity.device === undefined ? {} : { device: identity.device }) } })
+      trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'identity_declared', detail: { mode: this.mode, ...(identity.device === undefined ? {} : { device: identity.device }), ...(actual ? { identity: 'actual', userAgent: identity.userAgent } : {}) } })
       const customHeaders = wireHeaders(options.headers)
       if (Object.keys(customHeaders).length > 0) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'request_headers_added', detail: { headers: Object.entries(customHeaders).map(([name, value]) => ({ name, value })) } })
       if (options.skipTlsVerification === true) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'tls_verification_skipped', detail: { host: new URL(url).hostname } })
@@ -573,7 +584,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         })
       }
       const pendingContext = managedContext ? Promise.resolve(managedContext) : browser.newContext({
-        userAgent: identity.userAgent,
+        // The actual identity sets none: the browser sends its own User-Agent, which the record declares.
+        ...(actual ? {} : { userAgent: identity.userAgent }),
         locale: fingerprint.locale,
         timezoneId: fingerprint.timezoneId,
         viewport: window.viewport,
@@ -1611,6 +1623,25 @@ export class BrowserLocalSubject implements SubjectAdapter {
     } catch {
       return url
     }
+  }
+
+  /**
+   * The User-Agent the launched browser reports, read from a page of its own that never leaves about:blank (no
+   * request goes out), once per subject: the actual identity's declaration (browserIdentity.ts).
+   */
+  private actualUserAgent(browser: Browser): Promise<string> {
+    this.actualUserAgentPromise ??= (async () => {
+      const context = await browser.newContext()
+      try {
+        const page = await context.newPage()
+        const ua = await page.evaluate(() => navigator.userAgent)
+        if (typeof ua !== 'string' || ua.trim() === '') throw new Error('the browser reported no navigator.userAgent')
+        return ua
+      } finally {
+        await context.close().catch(() => {})
+      }
+    })().catch((error: unknown) => { this.actualUserAgentPromise = null; throw error })
+    return this.actualUserAgentPromise
   }
 
   private async getBrowser(execution: ExecutionContext): Promise<Browser> {
