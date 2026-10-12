@@ -231,7 +231,8 @@
     const { monthly } = data.credits
     const days = lastDays(data.usage)
     set('side-credits', number(data.credits.remaining))
-    meter($('side-meter'), monthly.left, monthly.of)
+    const bar = $('side-meter')
+    if (bar) { bar.max = Math.max(1, monthly.of); bar.value = Math.max(0, Math.min(monthly.left, monthly.of)) }
     set('side-renews', `of ${number(monthly.of)} this month · renews ${longDay(monthly.resetsAt)} (UTC)`)
     set('side-email', data.email || 'your account')
 
@@ -312,16 +313,37 @@
     })
   }
 
-  // A faint field of glyphs behind the page title, the same on every load.
+  // A faint field of glyphs behind the page title. On the Overview (data-wave) it moves like a flag: the left edge is
+  // held, and the field is read further up or down the further right a cell is, so the glyphs ripple in place on the
+  // grid while the field keeps its shape. About 15 frames a second, paused in a hidden tab, still with reduced motion.
   const noise = $('dash-noise')
   if (noise) {
     const glyphs = ' .:-=+*#%'
-    let text = ''
-    for (let y = 0; y < 12; y++) {
-      for (let x = 0; x < 110; x++) text += glyphs[Math.floor(Math.abs(Math.sin(x * 0.19 + y * 0.8) * Math.cos(x * 0.045 - y * 0.35)) * (glyphs.length - 1))]
-      text += '\n'
+    const COLS = 110
+    const ROWS = 12
+    const field = (x, y) => Math.abs(Math.sin(x * 0.19 + y * 0.8) * Math.cos(x * 0.045 - y * 0.35))
+    const draw = (t) => {
+      let text = ''
+      for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+          const hold = (x / (COLS - 1)) ** 1.6
+          const lift = t === null ? 0 : hold * (2.4 * Math.sin(x * 0.12 - t * 1.6) + 0.7 * Math.sin(x * 0.27 - t * 2.5 + y * 0.15))
+          text += glyphs[Math.min(glyphs.length - 1, Math.floor(field(x, y - lift) * (glyphs.length - 1)))]
+        }
+        text += '\n'
+      }
+      noise.textContent = text
     }
-    noise.textContent = text
+    draw(null)
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)')
+    if ('wave' in noise.dataset && !still.matches) {
+      let last = 0
+      const frame = (ms) => {
+        if (!document.hidden && ms - last >= 66) { last = ms; draw(ms / 1000) }
+        requestAnimationFrame(frame)
+      }
+      requestAnimationFrame(frame)
+    }
   }
 
   load()
