@@ -32,8 +32,20 @@
   const say = (text, error = false) => { message.textContent = text; message.classList.toggle('is-error', error) }
   const PROVIDERS = { 'google.com': 'Google', 'github.com': 'GitHub', emailLink: 'Email link' }
 
+  // This browser's preferences (Settings): the Playground's default format and scope, and whether a call's time shows
+  // in UTC or in this computer's time zone. Kept in localStorage only; a browser that refuses storage keeps the defaults.
+  const PREFS_KEY = 'octocrawl.dashboard.prefs'
+  const PREF_VALUES = { view: ['markdown', 'links', 'info', 'fields', 'json'], scope: ['main', 'whole'], tz: ['utc', 'local'] }
+  const prefs = { view: 'markdown', scope: 'main', tz: 'utc' }
+  try {
+    const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}')
+    for (const [name, allowed] of Object.entries(PREF_VALUES)) if (kept && allowed.includes(kept[name])) prefs[name] = kept[name]
+  } catch { /* The defaults. */ }
+  const savePrefs = () => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); return true } catch { return false } }
+  const zone = () => (prefs.tz === 'local' ? 'local' : 'UTC')
+
   /** A solid bar (a <progress>): value and max are properties, which the CSP allows. */
-  const setBar = (id, part, whole) => { const bar = $(id); if (bar) { bar.max = Math.max(1, whole); bar.value = Math.max(0, Math.min(part, whole)) } }
+  const setBar = (id, part, whole) => { const bar = typeof id === 'string' ? $(id) : id; if (bar) { bar.max = Math.max(1, whole); bar.value = Math.max(0, Math.min(part, whole)) } }
   const charts = window.OctoCharts
   const shortDay = (key) => new Date(`${key}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
   const longDate = (key) => new Date(`${key}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
@@ -236,7 +248,13 @@
 
   const READ = new Set(['success', 'partial', 'empty_verified'])
   const host = (url) => { try { return new URL(url).host } catch { return url || '(no URL)' } }
-  const timeOf = (iso) => (iso ? `${longDay(iso)} ${iso.slice(11, 16)}` : '')
+  const timeOf = (iso) => (!iso ? '' : prefs.tz === 'local'
+    ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    : `${longDay(iso)} ${iso.slice(11, 16)}`)
+  /** What a scrape asked for; a map asks for no format. Lines from before the hosted API kept it say so. */
+  const formatsOf = (line) => (line.endpoint === 'map' ? '—' : !Array.isArray(line.formats) ? 'not recorded' : line.formats.length ? line.formats.join(' + ') : 'default')
+  const durationOf = (line) => (typeof line.ms !== 'number' ? 'not recorded' : line.ms < 1_000 ? `${line.ms} ms` : `${(line.ms / 1_000).toFixed(line.ms < 10_000 ? 1 : 0)} s`)
+  const laneOf = (lane) => (!lane ? '—' : lane === 'http' ? 'HTTP' : lane.startsWith('browser') ? 'Browser' : lane)
   /** What a request line shows as its result, and how it is marked: read, not charged, or failed. */
   const outcome = (line) => {
     if (line.endpoint === 'map') return line.links !== null && line.links > 0 ? [`${number(line.links)} links`, 'ok'] : [line.status === 'invalid_request' ? 'invalid request' : 'no links', 'warn']
@@ -258,11 +276,13 @@
         const link = document.createElement('a'); link.href = line.url; link.rel = 'noopener noreferrer'; link.target = '_blank'; link.textContent = line.url.replace(/^https?:\/\//, ''); link.title = line.url
         url.append(link)
       } else url.textContent = line.url || '(no URL)'
-      cell(row, line.lane ?? '—')
+      cell(row, formatsOf(line))
+      const lane = cell(row, laneOf(line.lane)); if (line.lane) lane.title = line.lane
       const [label, mark] = outcome(line)
       const result = cell(row, '')
       const pill = document.createElement('span'); pill.className = `status ${mark}`; pill.textContent = label; result.append(pill)
       cell(row, line.robots ?? '—')
+      cell(row, durationOf(line), 'num')
       cell(row, number(line.credits), 'num')
       const hash = cell(row, line.sha256 ? `sha256 ${line.sha256.slice(0, 12)}…` : '—', 'hash')
       if (line.sha256) hash.title = line.sha256
@@ -283,6 +303,16 @@
     return [...groups.values()].sort((a, b) => b[3] - a[3] || b[1] - a[1])
   }
   const csvField = (value) => { const text = value === null || value === undefined ? '' : String(value); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text }
+  /** Request lines as a CSV file to save: every field the page has, formats joined with `+`, unknown left empty. */
+  const saveCsv = (lines) => {
+    const columns = ['at', 'endpoint', 'url', 'finalUrl', 'formats', 'lane', 'status', 'httpStatus', 'reason', 'robots', 'links', 'ms', 'credits', 'sha256', 'keyId']
+    const text = [columns.join(','), ...lines.map((line) => columns.map((c) => csvField(c === 'formats' ? (Array.isArray(line.formats) ? line.formats.join('+') : null) : line[c])).join(','))].join('\n')
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }))
+    link.download = `octocrawl-activity-${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000)
+  }
 
   let activity = null
   let activityLimit = Infinity
@@ -301,6 +331,16 @@
       && (form.get('result') !== 'read' || outcome(line)[1] === 'ok')
       && (form.get('result') !== 'free' || line.credits === 0))
   }
+  const shortUrl = (address) => { try { const url = new URL(address); return `${url.host}${url.pathname === '/' ? '' : url.pathname}` } catch { return address } }
+  /** A receipt's result in words: the status and what it means. */
+  const meaning = (line) => {
+    const [label, mark] = outcome(line)
+    if (line.endpoint === 'map') return [label, mark]
+    if (line.status === 'partial') return [`${line.httpStatus ?? ''} · partly read`.replace(/^ · /, ''), 'warn']
+    if (READ.has(line.status)) return [`${line.httpStatus ?? ''} · read`.replace(/^ · /, ''), 'ok']
+    if (line.httpStatus === 404 || line.httpStatus === 410) return [`${line.httpStatus} · not found`, mark]
+    return [label, mark]
+  }
   /** The Playground's recent runs as receipts: what was read, the result, robots.txt, the cost, when, and the hash. */
   let shownReceipts = null
   const renderRuns = (lines) => {
@@ -315,16 +355,29 @@
       again.setAttribute('aria-label', `Run ${line.url} again`); again.textContent = 'again ↺'
       top.append(kind, again)
       const where = document.createElement('p'); where.className = 'receipt-url'; where.title = line.url
-      try { const url = new URL(line.url); where.textContent = `${url.host}${url.pathname === '/' ? '' : url.pathname}` } catch { where.textContent = line.url || '(no URL)' }
+      where.textContent = shortUrl(line.url) || '(no URL)'
+      const parts = [top, where]
+      // Where a redirect led, when it led somewhere else.
+      if (line.finalUrl && line.finalUrl !== line.url) { const moved = document.createElement('p'); moved.className = 'receipt-final'; moved.title = line.finalUrl; moved.textContent = `→ ${shortUrl(line.finalUrl)}`; parts.push(moved) }
       const facts = document.createElement('dl')
-      const [label, mark] = outcome(line)
-      for (const [name, value, className] of [['result', label, mark], ['lane', line.lane ?? '—'], ['robots.txt', line.robots ?? '—'], ['credits', number(line.credits)], ['at (UTC)', timeOf(line.at)]]) {
+      const [label, mark] = meaning(line)
+      const rows = [['result', label, mark], ...(line.endpoint === 'map' ? [] : [['format', formatsOf(line)]]), ['lane', laneOf(line.lane)], ['robots.txt', line.robots ?? '—'], ['duration', durationOf(line)], ['credits', number(line.credits)], [`at (${zone()})`, timeOf(line.at)]]
+      for (const [name, value, className] of rows) {
         const term = document.createElement('dt'); term.textContent = name
         const detail = document.createElement('dd'); detail.textContent = value; if (className) detail.className = className
+        if (value === 'not recorded') { detail.className = 'unknown'; detail.title = 'This call was logged before Octocrawl kept this.' }
+        // A run's formats and its result can be long: they wrap rather than lose their end.
+        if (name === 'format' || name === 'result') detail.classList.add('wrap')
         facts.append(term, detail)
       }
-      const hash = document.createElement('p'); hash.className = 'receipt-hash'; hash.textContent = line.sha256 ? `sha256 ${line.sha256}` : 'nothing read: no hash'
-      receipt.append(top, where, facts, hash)
+      const hash = document.createElement('div'); hash.className = 'receipt-hash'
+      if (line.sha256) {
+        const text = document.createElement('span'); text.textContent = `sha256 ${line.sha256.slice(0, 12)}…${line.sha256.slice(-8)}`; text.title = line.sha256
+        const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'receipt-copy'; copy.dataset.hash = line.sha256; copy.textContent = 'copy'; copy.setAttribute('aria-label', 'Copy the SHA-256')
+        hash.append(text, copy)
+      } else hash.textContent = 'nothing read: no hash'
+      parts.push(facts, hash)
+      receipt.append(...parts)
       return receipt
     }))
     shownReceipts = new Set(lines.map((line) => line.id))
@@ -350,42 +403,75 @@
       const items = top.map(([name, calls, free, credits]) => ({ name, value: credits, rows: [['Calls', number(calls)], ['Not charged', number(free)]] }))
       if (rest.length) items.push({ name: `Other (${rest.length} sites)`, value: rest.reduce((sum, r) => sum + r[3], 0), rows: [['Calls', number(rest.reduce((sum, r) => sum + r[1], 0))]] })
       const charged = items.some((item) => item.value > 0)
-      if (charged) charts.treemap(siteHost, items, { unit: 'credits', label: 'Credits by site, last 30 days' }); else siteHost.replaceChildren()
+      if (charged) charts.treemap(siteHost, items, { unit: 'credits', label: 'Credits by site, last 30 days', height: TREEMAP_HEIGHT }); else siteHost.replaceChildren()
       $('by-site-empty').hidden = charged
     }
-    const keyList = $('by-key-list')
-    if (keyList) {
-      const keys = tally(activity, keyName, () => false)
-      const total = keys.reduce((sum, k) => sum + k[3], 0)
-      keyList.replaceChildren(...keys.map(([name, calls, , credits]) => {
-        const item = document.createElement('li')
-        const head = document.createElement('p')
-        const label = document.createElement('span'); label.textContent = name
-        const figure = document.createElement('span'); figure.className = 'mono'; figure.textContent = `${number(credits)} · ${total ? Math.round((credits / total) * 100) : 0}%`
-        head.append(label, figure)
-        const bar = document.createElement('progress'); bar.className = 'credit-bar'; bar.max = Math.max(1, total); bar.value = credits; bar.setAttribute('aria-label', `${name}: ${credits} credits, ${calls} calls`)
-        const sub = document.createElement('p'); sub.className = 'dash-small'; sub.textContent = `${number(calls)} calls`
-        item.append(head, bar, sub)
-        return item
-      }))
-      $('by-key-empty').hidden = keys.length > 0
+    // By key, as By site: one treemap each, the same height, so the two sit side by side.
+    const keyHost = $('key-map')
+    if (keyHost && charts) {
+      const items = tally(activity, keyName, (line) => line.credits === 0).map(([name, calls, free, credits]) => ({ name, value: credits, rows: [['Calls', number(calls)], ['Not charged', number(free)]] }))
+      const charged = items.some((item) => item.value > 0)
+      if (charged) charts.treemap(keyHost, items, { unit: 'credits', label: 'Credits by key, last 30 days', height: TREEMAP_HEIGHT }); else keyHost.replaceChildren()
+      $('by-key-empty').hidden = charged
     }
+    // Counted from the lines the page holds: all of the last 30 days, or only the latest when there are more.
+    for (const note of document.querySelectorAll('.lines-note')) {
+      note.dataset.base ??= note.textContent
+      note.textContent = activity.length >= activityLimit ? `${note.dataset.base.split(',')[0]}, from the latest ${number(activity.length)} request lines` : note.dataset.base
+    }
+    const scrapes = activity.filter((line) => line.endpoint === 'scrape')
+    const counted = (lines, keyOf) => { const counts = new Map(); for (const line of lines) { const key = keyOf(line); counts.set(key, (counts.get(key) ?? 0) + 1) } return [...counts].sort((a, b) => b[1] - a[1]) }
+    meterList('results', counted(activity, category))
+    // A call kept out by robots.txt or refused as invalid was never sent, which is not the same as no answer.
+    meterList('codes', counted(scrapes, (line) => (line.httpStatus !== null ? String(line.httpStatus) : line.robots === 'disallowed' || line.status === 'invalid_request' ? 'Not requested' : 'No response')))
+    const lanes = ['http', 'browser'].map((kind) => { const lines = activity.filter((line) => line.kind === kind); return [kind === 'http' ? 'HTTP' : 'Browser', lines.length, `${number(lines.reduce((sum, line) => sum + line.credits, 0))} credits`] }).filter(([, calls]) => calls > 0)
+    meterList('lanes', lanes)
+    const hoursHost = $('hours-chart')
+    if (hoursHost && charts) {
+      const hours = Array.from({ length: 24 }, (_, hour) => activity.filter((line) => line.at && Number(line.at.slice(11, 13)) === hour).length)
+      if (activity.length) charts.bars(hoursHost, hours.map((_, hour) => String(hour).padStart(2, '0')), [{ label: 'Calls', cls: 'b-http', values: hours }], { height: 220, unit: 'calls', label: 'Calls by UTC hour, last 30 days', title: (hour) => `${String(hour).padStart(2, '0')}:00 to ${String(hour).padStart(2, '0')}:59 UTC` }); else hoursHost.replaceChildren()
+      $('hours-empty').hidden = activity.length > 0
+    }
+    for (const head of document.querySelectorAll('.time-head')) head.textContent = `Time (${zone()})`
+  }
+  const TREEMAP_HEIGHT = 300
+  /** What a call came to, in words a person would use. */
+  const category = (line) => {
+    if (line.endpoint === 'map') return line.status === 'invalid_request' ? 'Invalid request' : line.links > 0 ? 'Map: URLs found' : 'Map: none found'
+    if (line.status === 'success' || line.status === 'empty_verified') return 'Read'
+    if (line.status === 'partial') return 'Partly read'
+    if (line.robots === 'disallowed') return 'Kept out by robots.txt'
+    if (line.httpStatus === 404 || line.httpStatus === 410) return 'Not found'
+    if (line.status === 'blocked') return 'Blocked by the site'
+    if (line.status === 'invalid_request') return 'Invalid request'
+    if (line.status === 'timeout' || line.reason === 'timeout') return 'Timed out'
+    return 'Failed'
+  }
+  /** A ranked list of [label, count, note?], each with its share as a solid bar. */
+  const meterList = (id, rows) => {
+    const list = $(`${id}-list`)
+    if (!list) return
+    const total = rows.reduce((sum, row) => sum + row[1], 0)
+    list.replaceChildren(...rows.map(([label, count, note], i) => {
+      const item = document.createElement('li')
+      const head = document.createElement('p')
+      const name = document.createElement('span'); name.textContent = label
+      const figure = document.createElement('span'); figure.className = 'mono'; figure.textContent = `${number(count)} · ${Math.round((count / total) * 100)}%${note ? ` · ${note}` : ''}`
+      head.append(name, figure)
+      const bar = document.createElement('progress'); bar.className = 'credit-bar'; bar.setAttribute('aria-label', `${label}: ${count} of ${total}`)
+      setBar(bar, count, total)
+      item.append(head, bar)
+      return item
+    }))
+    $(`${id}-empty`).hidden = rows.length > 0
   }
   if (filters) {
     filters.addEventListener('input', renderActivity)
     filters.addEventListener('submit', (event) => event.preventDefault())
-    $('export-csv').addEventListener('click', () => {
-      const columns = ['at', 'endpoint', 'url', 'finalUrl', 'lane', 'status', 'httpStatus', 'reason', 'robots', 'links', 'credits', 'sha256', 'keyId']
-      const text = [columns.join(','), ...filtered().map((line) => columns.map((c) => csvField(line[c])).join(','))].join('\n')
-      const link = document.createElement('a')
-      link.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }))
-      link.download = `octocrawl-activity-${new Date().toISOString().slice(0, 10)}.csv`
-      link.click()
-      setTimeout(() => URL.revokeObjectURL(link.href), 1000)
-    })
+    $('export-csv').addEventListener('click', () => saveCsv(filtered()))
   }
   const loadActivity = async () => {
-    if (!$('recent-body') && !$('activity-body') && !$('by-key-list') && !$('run-cards') && !$('keys-body')) return
+    if (!$('recent-body') && !$('activity-body') && !$('key-map') && !$('run-cards') && !$('keys-body') && !$('settings-export')) return
     try {
       const usage = accountUsage
       const response = await fetch('/api/account/activity', { credentials: 'same-origin' })
@@ -406,6 +492,8 @@
     setBar('side-meter', monthly.left, monthly.of)
     set('side-renews', `of ${number(monthly.of)} this month · renews ${longDay(monthly.resetsAt)} (UTC)`)
     set('side-email', data.email || 'your account')
+    // The avatar's letters: the first two of the address before the @.
+    set('me-initials', ((data.email || '').split('@')[0].replace(/[^a-z0-9]/gi, '').slice(0, 2) || 'me').toUpperCase())
 
     set('kpi-left', number(data.credits.remaining))
     setBar('kpi-meter', monthly.left, monthly.of)
@@ -426,7 +514,7 @@
     set('sum-used', number(days.reduce((sum, d) => sum + d.credits, 0)))
     set('sum-pages', number(http + browser))
     const newest = data.keys.find((k) => k.enabled)
-    set('conn-key', newest ? `${newest.prefix}…  (${newest.label})` : 'No key yet')
+    set('conn-key', newest ? `${newest.prefix}… (${newest.label})` : 'none yet')
     accountKeys = data.keys
     accountUsage = data.usage
     resetsAt = monthly.resetsAt
@@ -447,6 +535,7 @@
     }
     set('acct-month', `${number(monthly.left)} of ${number(monthly.of)} free credits left, renewed on ${day(monthly.resetsAt)} (UTC)`)
     set('acct-bought', data.credits.purchased ? number(data.credits.purchased) : 'None')
+    set('acct-plan', `Free: ${number(monthly.of)} credits a month`)
     set('play-left', `You have ${number(data.credits.remaining)} left.`)
   }
 
@@ -480,12 +569,76 @@
   const opened = location.hash && document.getElementById(location.hash.slice(1))
   if (opened && opened.tagName === 'DETAILS') opened.open = true
   glyphField($('used-ascii'), 120, 16, 2)
+  // Copy copies the whole text, a key included where the page shows it masked (Connect keeps it in data-full).
   for (const button of document.querySelectorAll('[data-copy]')) {
     button.addEventListener('click', async () => {
       const source = $(button.dataset.copy)
-      try { await navigator.clipboard.writeText(source.textContent); button.textContent = 'Copied'; setTimeout(() => { button.textContent = 'Copy' }, 1500) } catch { getSelection().selectAllChildren(source) }
+      try { await navigator.clipboard.writeText(source.dataset.full ?? source.textContent); button.textContent = 'Copied'; setTimeout(() => { button.textContent = 'Copy' }, 1500) } catch { getSelection().selectAllChildren(source) }
     })
   }
+
+  // Text that decodes from glyph noise, left to right, as the site's menus print theirs (nav.js).
+  // The real text is kept the first time, so a menu reopened mid-decode never keeps the noise.
+  const decodeIn = (element, delay) => {
+    element.dataset.text ??= element.textContent
+    const text = element.dataset.text
+    const noise = '·:+×#'
+    let step = 0
+    setTimeout(function tick() {
+      step += 1
+      element.textContent = step >= 6 ? text : text.replace(/\S/g, (c, i) => (i / text.length < step / 6 ? c : noise[(i + step) % noise.length]))
+      if (step < 6) setTimeout(tick, 32)
+    }, delay)
+  }
+  // The account menu: the avatar at the sidebar's foot opens it upward, printed in row by row with its glyphs decoded.
+  // Arrow keys move through it; Escape, a click elsewhere or Tab closes it.
+  const meButton = $('me-button')
+  const meMenu = $('me-menu')
+  if (meButton && meMenu) {
+    const items = () => [...meMenu.querySelectorAll('[role="menuitem"]')]
+    const closeMenu = (focus) => { if (meMenu.hidden) return; meMenu.hidden = true; meButton.setAttribute('aria-expanded', 'false'); if (focus) meButton.focus() }
+    const openMenu = () => {
+      meMenu.hidden = false
+      meButton.setAttribute('aria-expanded', 'true')
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        meMenu.classList.remove('is-printing'); void meMenu.offsetWidth; meMenu.classList.add('is-printing')
+        ;[...meMenu.children].forEach((row, i) => row.style.setProperty('--row', String(i)))
+        ;[...meMenu.querySelectorAll('.dash-menu-glyph, .dash-menu-kicker')].forEach((element, i) => decodeIn(element, 40 + i * 18))
+        setTimeout(() => meMenu.classList.remove('is-printing'), 700)
+      }
+      items()[0].focus()
+    }
+    meButton.addEventListener('click', () => (meMenu.hidden ? openMenu() : closeMenu(false)))
+    meMenu.addEventListener('keydown', (event) => {
+      const list = items()
+      const at = list.indexOf(document.activeElement)
+      const next = { ArrowDown: (at + 1) % list.length, ArrowUp: (at - 1 + list.length) % list.length, Home: 0, End: list.length - 1 }[event.key]
+      if (next !== undefined) { event.preventDefault(); list[next].focus() } else if (event.key === 'Escape') { event.preventDefault(); closeMenu(true) } else if (event.key === 'Tab') closeMenu(false)
+    })
+    document.addEventListener('click', (event) => { if (!event.target.closest('.dash-me')) closeMenu(false) })
+  }
+
+  // Settings: this browser's preferences, and the request lines as a CSV file.
+  const prefsForm = $('prefs-form')
+  if (prefsForm) {
+    for (const [name, value] of Object.entries(prefs)) prefsForm.elements[name].value = value
+    prefsForm.addEventListener('change', (event) => {
+      if (!(event.target.name in PREF_VALUES) || !PREF_VALUES[event.target.name].includes(event.target.value)) return
+      prefs[event.target.name] = event.target.value
+      set('prefs-note', savePrefs() ? 'Saved in this browser.' : 'This browser does not keep settings, so they last until you leave the page.')
+    })
+  }
+  const exportButton = $('settings-export')
+  if (exportButton) exportButton.addEventListener('click', () => { if (activity) saveCsv(activity); else say('Your request lines are still loading. Try again in a moment.', true) })
+
+  // Connect's From code: one language at a time. An Overview tile's link (#c-rest, #c-sdk) opens its tab.
+  const codeTabs = [...document.querySelectorAll('[data-code-tab]')]
+  const showCode = (id) => {
+    for (const tab of codeTabs) tab.setAttribute('aria-pressed', String(tab.dataset.codeTab === id))
+    for (const pane of document.querySelectorAll('[data-code-pane]')) pane.hidden = pane.dataset.codePane !== id
+  }
+  for (const tab of codeTabs) tab.addEventListener('click', () => showCode(tab.dataset.codeTab))
+  if (opened && opened.dataset.codeTab) { showCode(opened.dataset.codeTab); opened.scrollIntoView({ block: 'center' }) }
 
   const form = $('key-form')
   if (form) {
@@ -509,21 +662,41 @@
   }
 
   // The Connect page's key: pasted, or made here, it goes into every setup in place of oc_YOUR_KEY, so Copy copies a
-  // working line. A key is shown only once (account.ts keeps its HMAC), so the page cannot fill in one made earlier.
-  // The key stays in this page: nothing stores it or sends it on.
+  // working line. The setups show it masked until the eye is pressed; Copy always takes the whole key (data-full). A key
+  // is shown only once (account.ts keeps its HMAC), so the page cannot fill in one made earlier. The key stays in this
+  // page: nothing stores it or sends it on.
   const fill = $('fill-key')
   if (fill) {
     const PLACEHOLDER = 'oc_YOUR_KEY'
     const slots = [...document.querySelectorAll('#main-content pre')].filter((pre) => pre.textContent.includes(PLACEHOLDER)).map((pre) => [pre, pre.textContent])
     const note = $('fill-note')
     const idle = note.textContent
+    const eye = $('fill-eye')
+    let shown = false
+    // A browser that cannot mask a text field shows the key as typed: no eye, so nothing claims it is hidden.
+    if (typeof CSS !== 'undefined' && CSS.supports && !CSS.supports('-webkit-text-security', 'disc') && !CSS.supports('text-security', 'disc')) { fill.classList.remove('masked'); eye.hidden = true; shown = true }
     const apply = () => {
       const key = fill.value.trim()
       const valid = /^oc_[A-Za-z0-9_-]{20,}$/.test(key)
-      for (const [pre, text] of slots) pre.textContent = valid ? text.split(PLACEHOLDER).join(key) : text
-      note.textContent = !key ? idle : valid ? `Every setup below carries ${key.slice(0, 7)}…` : 'That is not an Octocrawl key: a key starts with oc_.'
+      const masked = `${key.slice(0, 7)}${'•'.repeat(12)}`
+      for (const [pre, text] of slots) {
+        if (valid) { pre.dataset.full = text.split(PLACEHOLDER).join(key); pre.textContent = shown ? pre.dataset.full : text.split(PLACEHOLDER).join(masked) } else { delete pre.dataset.full; pre.textContent = text }
+      }
+      note.textContent = !key ? idle : valid ? `Every setup on this page carries ${key.slice(0, 7)}…; Copy takes the whole key.` : 'That is not an Octocrawl key: a key starts with oc_.'
     }
     fill.addEventListener('input', apply)
+    eye.addEventListener('click', () => {
+      shown = !shown
+      fill.classList.toggle('masked', !shown)
+      eye.setAttribute('aria-pressed', String(shown))
+      eye.setAttribute('aria-label', shown ? 'Hide the key' : 'Show the key')
+      apply()
+    })
+    $('fill-copy').addEventListener('click', async () => {
+      const button = $('fill-copy')
+      if (!fill.value.trim()) { fill.focus(); return }
+      try { await navigator.clipboard.writeText(fill.value.trim()); button.textContent = 'Copied'; setTimeout(() => { button.textContent = 'Copy' }, 1500) } catch { fill.select() }
+    })
     $('fill-create').addEventListener('click', async () => {
       const button = $('fill-create')
       button.disabled = true
@@ -533,7 +706,7 @@
           const { key } = await response.json()
           fill.value = key
           apply()
-          note.textContent = `Made a key named Agent setup (${key.slice(0, 7)}…) and put it in every setup below. Copy what you need now: the key is not shown again once you leave.`
+          note.textContent = `Made a key named Agent setup (${key.slice(0, 7)}…) and put it in every setup on this page. Copy what you need now: the key is not shown again once you leave.`
           load()
         } else if (response.status === 409) say('An account holds at most five active keys. Revoke one in API keys first.', true)
         else say('The key could not be created. Try again.', true)
@@ -812,9 +985,11 @@
     const asked = rules.readHandoff(location.search)
     if (asked.url) play.url.value = asked.url
     if (endpoint === 'scrape') {
+      // A hand-off from the home page carries the URL and its choices; without one, this browser's preferences.
+      const handed = new URLSearchParams(location.search).has('url')
       for (const field of asked.fields) addField(field)
-      pick('view', asked.view)
-      pick('scope', asked.onlyMainContent ? 'main' : 'whole')
+      pick('view', handed ? asked.view : prefs.view)
+      pick('scope', handed ? (asked.onlyMainContent ? 'main' : 'whole') : prefs.scope)
     }
     switchTo(endpoint, false)
 
@@ -879,7 +1054,9 @@
     })
 
     // A recent run's card runs it again: its endpoint and URL go back into the form.
-    $('run-cards').addEventListener('click', (event) => {
+    $('run-cards').addEventListener('click', async (event) => {
+      const copy = event.target.closest('[data-hash]')
+      if (copy) { try { await navigator.clipboard.writeText(copy.dataset.hash); copy.textContent = 'copied'; setTimeout(() => { copy.textContent = 'copy' }, 1500) } catch { /* The full hash is in the title. */ } return }
       const again = event.target.closest('[data-again]')
       if (!again) return
       play.url.value = again.dataset.again

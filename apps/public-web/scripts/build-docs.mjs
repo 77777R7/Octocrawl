@@ -380,8 +380,8 @@ ${body}</body></html>`
   }
 }
 // Each docs guide that became an article answers with a 301 to it (packages/public-preview reads this file), and so
-// does the account page, which became the dashboard on 2026-10-12.
-await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify({ ...Object.fromEntries(posts.flatMap(post => [[post.from, blogPath(post)], [`${post.from}index.md`, `${blogPath(post)}index.md`]])), '/account/': '/dashboard/' }, null, 2)}\n`)
+// does the account page, which became the dashboard on 2026-10-12, and the dashboard's Account page, now Settings.
+await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify({ ...Object.fromEntries(posts.flatMap(post => [[post.from, blogPath(post)], [`${post.from}index.md`, `${blogPath(post)}index.md`]])), '/account/': '/dashboard/', '/dashboard/account/': '/dashboard/settings/' }, null, 2)}\n`)
 
 // llms.txt (https://llmstxt.org): what Octocrawl is, and a link to the Markdown copy of every page. llms-full.txt carries
 // all of them in one file.

@@ -13,13 +13,22 @@ export const DASHBOARD_PAGES = [
   ['/dashboard/usage/', 'Usage', 'Workspace'],
   ['/dashboard/scrape/', 'Scrape', 'Playground'],
   ['/dashboard/map/', 'Map', 'Playground'],
-  ['/dashboard/keys/', 'API keys', 'Build'],
-  ['/dashboard/connect/', 'Connect', 'Build'],
-  ['/dashboard/account/', 'Account', 'Account'],
+  ['/dashboard/keys/', 'API keys', 'Account'],
+  ['/dashboard/connect/', 'Connect', 'Account'],
+  ['/dashboard/settings/', 'Settings', 'Account'],
 ]
+/** A solid bar (a <progress>): dashboard.js sets its value and max, which are properties the CSP allows. */
+const creditBar = (id, label) => `<progress class="credit-bar" id="${id}" max="1" value="0" aria-label="${label}"></progress>`
+/** The account menu under the avatar at the foot of the sidebar: it opens upward, printed in as the site's menus are. */
+const ACCOUNT_MENU = [
+  [['#', 'Settings', '/dashboard/settings/'], ['%', 'Usage', '/dashboard/usage/'], ['*', 'API keys', '/dashboard/keys/']],
+  [['¶', 'Documentation', '/docs/'], ['±', 'Changelog', '/changelog/'], ['<>', 'GitHub', 'https://github.com/77777R7/Octocrawl']],
+]
+const accountMenu = `<div class="dash-me"><div class="dash-menu" id="me-menu" role="menu" aria-labelledby="me-button" hidden><p class="dash-menu-kicker">Account</p>${ACCOUNT_MENU.map(group => group.map(([glyph, name, href]) => `<a role="menuitem" href="${href}"${href.startsWith('https://') ? ' target="_blank" rel="noopener noreferrer"' : ''}><span class="dash-menu-glyph" aria-hidden="true">${escape(glyph)}</span>${escape(name)}${href.startsWith('https://') ? '<span class="dash-menu-out" aria-hidden="true">↗</span>' : ''}</a>`).join('')).join('<hr />')}<hr /><form method="post" action="/auth/logout"><button role="menuitem" type="submit"><span class="dash-menu-glyph" aria-hidden="true">&lt;-</span>Sign out</button></form></div>
+<button class="dash-me-button" type="button" id="me-button" aria-haspopup="menu" aria-expanded="false" aria-controls="me-menu"><span class="dash-avatar" id="me-initials" aria-hidden="true">··</span><span class="dash-me-email" id="side-email">…</span><span class="dash-caret" aria-hidden="true">▴</span></button></div>`
 const dashCode = (id, text) => `<div class="code"><pre id="${id}">${escape(text)}</pre><button class="copy" type="button" data-copy="${id}">Copy</button></div>`
 /** The request table the Activity page and the Overview share: dashboard.js fills its body from /api/account/activity. */
-const requestTable = (id, rows, empty = 'No requests yet. Each call made with one of your keys or in the Playground shows here, with what it cost.') => `<div class="table-scroll"><table class="dash-table requests" data-rows="${rows}"><thead><tr><th>Time (UTC)</th><th>Endpoint</th><th>URL</th><th>Lane</th><th>Result</th><th>robots.txt</th><th class="num">Credits</th><th>Evidence</th></tr></thead><tbody id="${id}-body"></tbody></table></div><p class="dash-small" id="${id}-empty" hidden>${empty}</p>`
+const requestTable = (id, rows, empty = 'No requests yet. Each call made with one of your keys or in the Playground shows here, with what it cost.') => `<div class="table-scroll"><table class="dash-table requests" data-rows="${rows}"><thead><tr><th class="time-head">Time (UTC)</th><th>Endpoint</th><th>URL</th><th>Format</th><th>Lane</th><th>Result</th><th>robots.txt</th><th class="num">Duration</th><th class="num">Credits</th><th>Evidence</th></tr></thead><tbody id="${id}-body"></tbody></table></div><p class="dash-small" id="${id}-empty" hidden>${empty}</p>`
 export function dashboardPageHtml(path, title, lead, body, assetVersions) {
   // The Playground's pages keep their header to a line, as Firecrawl's does: the selector and the URL card come first.
   const playground = path === '/dashboard/scrape/' || path === '/dashboard/map/'
@@ -34,8 +43,8 @@ export function dashboardPageHtml(path, title, lead, body, assetVersions) {
 <body><a class="skip-link" href="#main-content">Skip to content</a>
 <div class="dash"><aside class="dash-side"><a class="dash-brand" href="/" aria-label="Octocrawl home"><img src="/assets/octopus-160.webp" width="30" height="30" alt="" /><img src="/assets/octocrawl-wordmark.svg" width="116" height="19" alt="" /></a>
 <nav class="dash-nav" aria-label="Dashboard">${links}</nav>
-<div class="dash-credits"><p><strong id="side-credits">…</strong> credits left</p><progress class="credit-bar" id="side-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress><p class="dash-small" id="side-renews">&nbsp;</p></div>
-<div class="dash-who"><span id="side-email">…</span><a href="/docs/">Docs ↗</a></div></aside>
+<div class="dash-credits"><p><strong id="side-credits">…</strong> credits left</p>${creditBar('side-meter', 'Credits left of this month\'s grant')}<p class="dash-small" id="side-renews">&nbsp;</p></div>
+${accountMenu}</aside>
 <main id="main-content" class="dash-main"><header class="dash-head${playground ? ' compact' : ''}"><pre class="dash-noise" id="dash-noise" aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1>${playground ? '' : `<p class="dash-lead">${lead}</p>`}</header>
 <p class="dash-message" id="dash-message" role="status" aria-live="polite"></p>
 ${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script>${playground ? `<script defer src="/docs-assets/dashboard-octopus.js?v=${assetVersions['dashboard-octopus.js']}"></script><script defer src="/docs-assets/playground-request.js?v=${assetVersions['playground-request.js']}"></script>` : ''}<script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
@@ -51,7 +60,7 @@ const integrationTiles = INTEGRATIONS.map(([name, id, icon]) => `<a class="int-t
 const overviewBody = `<section class="ev-hero" aria-labelledby="ev-title"><pre class="ev-field" id="ev-field" aria-hidden="true"></pre>
 <div class="ev-copy"><p class="ev-badge">[ Evidence Record ]</p><h2 id="ev-title">Every page comes with its receipt.</h2><p>Each answer carries an Evidence Record: the address read, when, what robots.txt allowed and the SHA-256 of what came back.</p><div class="ev-actions"><a class="ev-btn primary" href="/dashboard/connect/">Connect your agent <span aria-hidden="true">→</span></a><a class="ev-btn" href="/docs/reference/#evidence-record">What a record holds</a></div></div></section>
 <section class="kpis" aria-label="This month">
-<div class="kpi"><p class="kpi-label">Credits left</p><p class="kpi-value" id="kpi-left">…</p><progress class="credit-bar" id="kpi-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress></div>
+<div class="kpi"><p class="kpi-label">Credits left</p><p class="kpi-value" id="kpi-left">…</p>${creditBar('kpi-meter', 'Credits left of this month\'s grant')}</div>
 <div class="kpi"><p class="kpi-label">Used this month</p><p class="kpi-value" id="kpi-used">…</p><p class="kpi-sub" id="kpi-used-sub">&nbsp;</p></div>
 <div class="kpi"><p class="kpi-label">Pages read · 30 days</p><p class="kpi-value" id="kpi-pages">…</p><p class="kpi-sub" id="kpi-pages-sub">&nbsp;</p></div>
 <div class="kpi"><p class="kpi-label">Not charged · 30 days</p><p class="kpi-value" id="kpi-free">…</p><p class="kpi-sub">blocked, robots.txt or no answer</p></div>
@@ -70,7 +79,7 @@ const activityBody = `<section class="panel" aria-labelledby="activity-title"><d
 ${requestTable('activity', 0)}
 <p class="dash-small">Lines are kept 30 days and only you see them: the URL asked for, what came back and what it cost, with the body's SHA-256 from the Evidence Record. Never the page's content. The page shows the latest 1,000. Runs in the Playground show under the key Playground.</p></section>`
 const usageBody = `<section class="summary" aria-label="Summary">
-<div class="summary-main"><p class="kpi-label">Credits remaining</p><p class="summary-figure" id="sum-left">…</p><p class="dash-small" id="sum-renews">&nbsp;</p><progress class="credit-bar" id="sum-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress></div>
+<div class="summary-main"><p class="kpi-label">Credits remaining</p><p class="summary-figure" id="sum-left">…</p><p class="dash-small" id="sum-renews">&nbsp;</p>${creditBar('sum-meter', 'Credits left of this month\'s grant')}</div>
 <div class="summary-cell"><p class="kpi-label">Credits used · 30 days</p><p class="kpi-value" id="sum-used">…</p></div>
 <div class="summary-cell"><p class="kpi-label">Pages read · 30 days</p><p class="kpi-value" id="sum-pages">…</p></div>
 <div class="summary-cell"><p class="kpi-label">Read · calls with a result</p><p class="kpi-value" id="sum-rate">—</p><p class="dash-small" id="sum-rate-sub">from request lines</p></div>
@@ -78,8 +87,16 @@ const usageBody = `<section class="summary" aria-label="Summary">
 <section class="panel" aria-labelledby="over-time-title"><div class="panel-head"><div><h2 id="over-time-title">Usage over time</h2><p class="dash-small">Per UTC day, last 30 days</p></div><div class="panel-tools"><div class="tabs" role="group" aria-label="Group by"><button type="button" aria-pressed="true" data-group="kind">By kind</button><button type="button" aria-pressed="false" data-group="endpoint">By endpoint</button></div><div class="tabs" role="group" aria-label="Measure"><button type="button" aria-pressed="true" data-measure="credits">Credits</button><button type="button" aria-pressed="false" data-measure="calls">Calls</button></div></div></div>
 <div id="usage-bars"></div><p class="chart-legend" id="usage-legend"></p></section>
 <div class="dash-grid even">
-<section class="panel" aria-labelledby="by-site-title"><div class="panel-head"><h2 id="by-site-title">By site</h2><span class="dash-small">credits, from request lines</span></div><div id="site-map"></div><p class="dash-small" id="by-site-empty" hidden>No request lines yet. Each call made with one of your keys adds to this.</p></section>
-<section class="panel" aria-labelledby="by-key-title"><div class="panel-head"><h2 id="by-key-title">By key</h2><span class="dash-small">credits, from request lines</span></div><ul class="sources" id="by-key-list"></ul><p class="dash-small" id="by-key-empty" hidden>No request lines yet.</p></section>
+<section class="panel tm-panel" aria-labelledby="by-site-title"><div class="panel-head"><h2 id="by-site-title">By site</h2><span class="dash-small lines-note">credits, from request lines</span></div><div class="tm-host" id="site-map"></div><p class="dash-small" id="by-site-empty" hidden>No request lines yet. Each call made with one of your keys adds to this.</p></section>
+<section class="panel tm-panel" aria-labelledby="by-key-title"><div class="panel-head"><h2 id="by-key-title">By key</h2><span class="dash-small lines-note">credits, from request lines</span></div><div class="tm-host" id="key-map"></div><p class="dash-small" id="by-key-empty" hidden>No request lines yet.</p></section>
+</div>
+<div class="dash-grid even">
+<section class="panel" aria-labelledby="results-title"><div class="panel-head"><h2 id="results-title">Results</h2><span class="dash-small lines-note">calls, from request lines</span></div><ul class="meters" id="results-list"></ul><p class="dash-small" id="results-empty" hidden>No request lines yet.</p></section>
+<section class="panel" aria-labelledby="codes-title"><div class="panel-head"><h2 id="codes-title">HTTP status</h2><span class="dash-small lines-note">calls, from request lines</span></div><ul class="meters" id="codes-list"></ul><p class="dash-small" id="codes-empty" hidden>No request lines yet.</p></section>
+</div>
+<div class="dash-grid even">
+<section class="panel" aria-labelledby="lanes-title"><div class="panel-head"><h2 id="lanes-title">HTTP or browser</h2><span class="dash-small lines-note">pages read, from request lines</span></div><ul class="meters" id="lanes-list"></ul><p class="dash-small" id="lanes-empty" hidden>No page read yet.</p><p class="dash-small">A page read over HTTP costs 1 credit; one that needs a browser costs 5.</p></section>
+<section class="panel" aria-labelledby="hours-title"><div class="panel-head"><h2 id="hours-title">By hour (UTC)</h2><span class="dash-small lines-note">calls, from request lines</span></div><div id="hours-chart"></div><p class="dash-small" id="hours-empty" hidden>No request lines yet.</p></section>
 </div>
 <section class="panel" aria-labelledby="usage-table-title"><div class="panel-head"><h2 id="usage-table-title">Day by day</h2><span class="dash-small" id="usage-total">&nbsp;</span></div><div class="table-scroll"><table class="dash-table"><thead><tr><th>Day (UTC)</th><th class="num">HTTP</th><th class="num">Browser</th><th class="num">Not found</th><th class="num">Map</th><th class="num">Not charged</th><th class="num">Credits</th></tr></thead><tbody id="usage-body"></tbody><tfoot id="usage-foot"></tfoot></table></div><p class="dash-small" id="usage-empty" hidden>No calls in the last 30 days.</p>
 <p class="dash-small">A page read over HTTP costs 1 credit, a page read in a browser 5, a page that does not exist 1, and a map 1. A page that was blocked, or a call that read nothing, costs nothing. Days are UTC. Totals by site and key come from request lines, kept 30 days. <a href="/docs/limits/#hosted-api-and-mcp">Limits</a> has the details.</p></section>`
@@ -88,28 +105,35 @@ const keysBody = `<section class="panel" aria-labelledby="keys-title"><div class
 <form class="dash-form" id="key-form"><label for="key-label">Name (optional)<input id="key-label" name="label" maxlength="60" placeholder="laptop agent" autocomplete="off" /></label><button class="button" type="submit">Create key</button></form>
 <div class="key-reveal" id="key-reveal" hidden><p>Your new key. Copy it now: it is shown only once.</p>${dashCode('new-key', '')}<p class="dash-small">Claude Code:</p>${dashCode('new-key-mcp', '')}</div>
 <div class="table-scroll"><table class="dash-table"><thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Last used</th><th>This month</th><th>Status</th><th><span class="sr-only">Action</span></th></tr></thead><tbody id="keys-body"></tbody></table></div><p class="dash-small" id="keys-empty" hidden>No keys yet.</p></section>`
-/** One client's setup on the Connect page: a row that opens to its command or config. */
-const installRow = (id, name, icon, note, code) => `<details class="install-row" id="c-${id}"><summary><span class="int-icon">${icon.endsWith('.svg') ? `<img src="/docs-assets/agent-clients/${icon}" width="22" height="22" alt="" />` : escape(icon)}</span><strong>${escape(name)}</strong><span class="install-btn">Show setup</span></summary><div class="install-body"><p class="dash-small">${note}</p>${dashCode(`code-${id}`, code)}</div></details>`
-const connectBody = `<section class="panel" aria-labelledby="fill-title"><div class="panel-head"><div><h2 id="fill-title">Your key</h2><p class="dash-small">Paste a key, or make one here, and every setup on this page carries it. A key is shown only once, so this page cannot fill in one you made earlier.</p></div></div>
-<div class="dash-form" id="fill-form"><label for="fill-key">API key<input id="fill-key" maxlength="200" placeholder="oc_…" autocomplete="off" spellcheck="false" /></label><button class="button" type="button" id="fill-create">Create a key</button></div>
-<p class="dash-small" id="fill-note" role="status" aria-live="polite">A key you paste stays in this page: it is not sent anywhere or kept.</p></section>
-<div class="dash-grid even">
-<section class="panel" aria-labelledby="agents-title"><div class="panel-head"><div><h2 id="agents-title">Coding agents</h2><p class="dash-small">Add hosted Octocrawl with one command or one config entry. Each one carries the key set above, or <code>oc_YOUR_KEY</code> until you set one.</p></div></div>
+/** One client's setup on the Connect page: a row whose Install button opens its command or config, printed in. */
+const installRow = (id, name, icon, note, code) => `<details class="install-row" id="c-${id}"><summary><span class="int-icon">${icon.endsWith('.svg') ? `<img src="/docs-assets/agent-clients/${icon}" width="22" height="22" alt="" />` : escape(icon)}</span><strong>${escape(name)}</strong><span class="install-btn">Install <span aria-hidden="true">▾</span></span></summary><div class="install-body"><p class="dash-small">${note}</p>${dashCode(`code-${id}`, code)}</div></details>`
+/** The From code panel's tabs: one call in each language, each carrying the key set on the page. */
+const CODE_TABS = [
+  ['rest', 'REST', `curl https://api.octocrawl.dev/v1/scrape \\\n  -H 'authorization: Bearer oc_YOUR_KEY' \\\n  -H 'content-type: application/json' \\\n  -d '{"url":"https://example.com","formats":["markdown"]}'`],
+  ['sdk', 'AI SDK', `npm install @octocrawl/ai-sdk ai zod\n\n// OCTOCRAWL_API_KEY=oc_YOUR_KEY\nimport { octocrawlTools } from '@octocrawl/ai-sdk'\nconst tools = octocrawlTools()`],
+  ['ts', 'TypeScript', `npm install @octocrawl/sdk\n\nimport { W2L } from '@octocrawl/sdk'\nconst client = new W2L({ baseUrl: 'https://api.octocrawl.dev', token: 'oc_YOUR_KEY' })\nconst page = await client.scrape('https://example.com', { formats: ['markdown'] })`],
+  ['python', 'Python', `pip install octocrawl-client\n\nfrom octocrawl_client import W2L\nclient = W2L(base_url="https://api.octocrawl.dev", token="oc_YOUR_KEY")\npage = client.scrape("https://example.com", formats=["markdown"])`],
+]
+const connectBody = `<div class="connect-grid">
+<section class="panel" aria-labelledby="agents-title"><div class="panel-head"><div><h2 id="agents-title">Coding agents</h2><p class="dash-small">Add hosted Octocrawl to your agent with one command or one config entry.</p></div></div>
 ${installRow('claude', 'Claude Code', 'claude-code.svg', 'Run in a terminal; add <code>--scope user</code> to have it in every project.', 'claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp --header "Authorization: Bearer oc_YOUR_KEY"')}
 ${installRow('codex', 'Codex', 'codex.svg', 'Codex reads the key from an environment variable.', 'export OCTOCRAWL_API_KEY=oc_YOUR_KEY\ncodex mcp add octocrawl --url https://mcp.octocrawl.dev/mcp --bearer-token-env-var OCTOCRAWL_API_KEY')}
 ${installRow('cursor', 'Cursor', 'cursor.svg', 'Merge into <code>.cursor/mcp.json</code>; <code>"Bearer ${env:OCTOCRAWL_API_KEY}"</code> reads the key from the environment.', '{ "mcpServers": { "octocrawl": { "url": "https://mcp.octocrawl.dev/mcp", "headers": { "Authorization": "Bearer oc_YOUR_KEY" } } } }')}
 ${installRow('opencode', 'OpenCode', 'opencode.svg', 'Merge into the <code>mcp</code> object of <code>opencode.json</code>.', '{ "mcp": { "octocrawl": { "type": "remote", "url": "https://mcp.octocrawl.dev/mcp", "enabled": true, "headers": { "Authorization": "Bearer oc_YOUR_KEY" } } } }')}
 ${installRow('cline', 'Cline', 'CL', 'Merge into <code>cline_mcp_settings.json</code> (MCP Servers → Configure), keeping your other servers.', '{ "mcpServers": { "octocrawl": { "type": "streamableHttp", "url": "https://mcp.octocrawl.dev/mcp", "headers": { "Authorization": "Bearer oc_YOUR_KEY" }, "disabled": false } } }')}
 </section>
-<div class="stack">
-<section class="panel" aria-labelledby="mcp-title"><div class="panel-head"><h2 id="mcp-title">MCP</h2><a href="/docs/connect-mcp/">Docs →</a></div><p>Point any MCP client at the hosted server and send your key in the <code>Authorization: Bearer</code> header, never in the URL.</p>
-<h3>URL</h3>${dashCode('mcp-url', 'https://mcp.octocrawl.dev/mcp')}
-<h3>OCTOCRAWL_API_KEY</h3><div class="kv"><code id="conn-key">oc_…</code><a class="panel-link" href="/dashboard/keys/">Create a key →</a></div><p class="dash-small">A key is shown once, when you create it. This page shows the start of your newest key so you can tell them apart.</p></section>
-<section class="panel" aria-labelledby="api-title"><div class="panel-head"><h2 id="api-title">From code</h2><a href="/docs/reference/">API reference →</a></div>
-<h3 id="c-rest">REST</h3>${dashCode('c-rest-code', `curl https://api.octocrawl.dev/v1/scrape \\\n  -H 'authorization: Bearer oc_YOUR_KEY' \\\n  -H 'content-type: application/json' \\\n  -d '{"url":"https://example.com","formats":["markdown"]}'`)}
-<h3 id="c-sdk">Vercel AI SDK</h3>${dashCode('c-sdk-code', `npm install @octocrawl/ai-sdk ai zod\n\nimport { octocrawlTools } from '@octocrawl/ai-sdk'\nconst tools = octocrawlTools() // reads OCTOCRAWL_API_KEY`)}</section>
-<section class="panel" aria-labelledby="c-local"><div class="panel-head"><h2 id="c-local">On your own computer</h2></div><p>Free and without limit, with every tool: crawl, batch and Monitor too. No key and no credits.</p>${dashCode('c-local-code', 'npx octocrawl serve')}</section>
-</div></div>`
+<section class="panel" aria-labelledby="mcp-title"><div class="panel-head"><div><h2 id="mcp-title">MCP</h2><p class="dash-small">Point any MCP client at the hosted server and send your key in the <code>Authorization: Bearer</code> header, never in the URL.</p></div><a href="/docs/connect-mcp/">Docs →</a></div>
+<div class="field-box"><p class="field-label">URL</p>${dashCode('mcp-url', 'https://mcp.octocrawl.dev/mcp')}</div>
+<div class="field-box" id="fill-form"><p class="field-label"><label for="fill-key">OCTOCRAWL_API_KEY</label></p><div class="key-field"><input id="fill-key" class="masked" type="text" maxlength="200" placeholder="Paste a key, or create one" autocomplete="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore /><button class="icon-button" type="button" id="fill-eye" aria-pressed="false" aria-label="Show the key">◉</button><button class="copy" type="button" id="fill-copy">Copy</button></div>
+<div class="key-actions"><button class="button small" type="button" id="fill-create">Create a key</button><span class="dash-small">Your newest key starts <code id="conn-key">oc_…</code></span></div>
+<p class="dash-small" id="fill-note" role="status" aria-live="polite">A key is shown only once, so this page cannot fill in one you made earlier. A key you paste stays in this page: it is not sent anywhere or kept. Every setup here carries it.</p></div></section>
+<section class="panel" aria-labelledby="code-title"><div class="panel-head"><h2 id="code-title">From code</h2><a href="/docs/reference/">API reference →</a></div>
+<div class="tabs code-tabs" role="group" aria-label="Language">${CODE_TABS.map(([id, name], i) => `<button type="button" aria-pressed="${i === 0}" data-code-tab="${id}"${id === 'rest' ? ' id="c-rest"' : id === 'sdk' ? ' id="c-sdk"' : ''}>${escape(name)}</button>`).join('')}</div>
+${CODE_TABS.map(([id, , code], i) => `<div class="code-pane" data-code-pane="${id}"${i === 0 ? '' : ' hidden'}>${dashCode(`c-${id}-code`, code)}</div>`).join('')}</section>
+<section class="panel" aria-labelledby="c-local"><div class="panel-head"><div><h2 id="c-local">On your computer</h2><p class="dash-small">Free and without limit, with every tool: crawl, batch and Monitor too. No key and no credits.</p></div></div>
+<div class="field-box"><p class="field-label">REST API on 127.0.0.1:8787</p>${dashCode('c-local-code', 'npx octocrawl serve')}</div>
+<div class="field-box"><p class="field-label">MCP server over stdio</p>${dashCode('c-local-mcp', 'npx -y @octocrawl/mcp')}</div></section>
+</div>`
 /**
  * A Playground page, laid out as Firecrawl's: a selector on top, the URL card in a band below it, then the result and
  * the account's recent runs. The selector is Octocrawl's own: one button naming the endpoint, which opens a panel of
@@ -164,13 +188,27 @@ const playgroundBody = (endpoint) => {
 <section class="pg-runs" aria-labelledby="runs-title"><pre class="pg-sea" id="pg-sea" aria-hidden="true"></pre><div class="pg-runs-head"><div><p class="pg-kicker">Receipts</p><h2 id="runs-title">Recent runs</h2></div><a href="/dashboard/activity/">Activity →</a></div><div class="receipts" id="run-cards"></div><p class="dash-small pg-runs-empty" id="runs-empty" hidden>No runs here yet. Each run leaves a receipt here and a line on Activity: what was read, what robots.txt allowed, what it cost and the SHA-256 of what came back.</p></section>
 </section>`
 }
-const accountBody = `<section class="panel" aria-labelledby="who-title"><div class="panel-head"><h2 id="who-title">Signed in</h2></div><dl class="facts">
+/** Settings: who is signed in and how, the plan and its credits, the account's data, this browser's preferences. */
+const settingsBody = `<div class="settings-grid">
+<section class="panel" aria-labelledby="profile-title"><div class="panel-head"><h2 id="profile-title">Profile</h2></div><dl class="facts">
 <dt>Email</dt><dd id="acct-email">…</dd>
 <dt>Sign-in methods</dt><dd><span class="chips" id="acct-providers"></span></dd>
+</dl><p class="dash-small">To add GitHub or Google, sign in with it once using this email address. Octocrawl then asks you to sign in a way you already use, and links it.</p></section>
+<section class="panel" aria-labelledby="plan-title"><div class="panel-head"><h2 id="plan-title">Plan and credits</h2><a href="/dashboard/usage/">Usage →</a></div><dl class="facts">
+<dt>Plan</dt><dd id="acct-plan">…</dd>
 <dt>This month</dt><dd id="acct-month">…</dd>
 <dt>Bought credits</dt><dd id="acct-bought">…</dd>
-</dl></section>
-<section class="panel" aria-labelledby="out-title"><div class="panel-head"><h2 id="out-title">Session and records</h2></div><p>What signing in records is on the <a href="/docs/privacy/">privacy page</a>; credits and keys are covered by the <a href="/docs/terms/">terms</a>.</p><form method="post" action="/auth/logout"><button class="button quiet" type="submit">Sign out</button></form></section>`
+</dl><p class="dash-small">Credits and keys are covered by the <a href="/docs/terms/">terms</a>.</p></section>
+<section class="panel" aria-labelledby="data-title"><div class="panel-head"><h2 id="data-title">Data and privacy</h2><a href="/docs/privacy/">Privacy →</a></div>
+<p>Each call made with your keys or in the Playground leaves a request line: the URL asked for, the formats, what came back, how long it took and what it cost, with the SHA-256 of what was read. Never the page's content. Only you see these lines, and each one is deleted 30 days after the call.</p>
+<button class="button quiet" type="button" id="settings-export">Export request lines (CSV)</button></section>
+<section class="panel" aria-labelledby="prefs-title"><div class="panel-head"><h2 id="prefs-title">Preferences</h2><span class="dash-small">kept in this browser only</span></div>
+<form class="prefs" id="prefs-form"><label for="pref-view">Playground format<select id="pref-view" name="view"><option value="markdown">Markdown</option><option value="links">Links</option><option value="info">Page info</option><option value="fields">Fields</option><option value="json">JSON</option></select></label>
+<label for="pref-scope">Playground reads<select id="pref-scope" name="scope"><option value="main">Main content</option><option value="whole">Whole page</option></select></label>
+<label for="pref-tz">Times of calls<select id="pref-tz" name="tz"><option value="utc">UTC</option><option value="local">This computer's time zone</option></select></label></form>
+<p class="dash-small" id="prefs-note" role="status" aria-live="polite">Days on the usage charts stay UTC, as credits are counted.</p></section>
+</div>
+<section class="panel" aria-labelledby="out-title"><div class="panel-head"><h2 id="out-title">Session</h2></div><p>Signing out ends this session in this browser. Your keys keep working.</p><form method="post" action="/auth/logout"><button class="button quiet" type="submit">Sign out</button></form></section>`
 
 /** Each page: its path, title, the line under the title, and its body. */
 export const DASHBOARD_BODIES = [
@@ -180,6 +218,6 @@ export const DASHBOARD_BODIES = [
   ['/dashboard/scrape/', 'Scrape', 'Read one page as Markdown, with its Evidence Record, on this account\'s credits at the API\'s price.', playgroundBody('scrape')],
   ['/dashboard/map/', 'Map', 'List the URLs of a site from its sitemap and links, on this account\'s credits at the API\'s price.', playgroundBody('map')],
   ['/dashboard/keys/', 'API keys', 'Keys for agents and code. Each one spends this account\'s credits.', keysBody],
-  ['/dashboard/connect/', 'Connect', 'One line for each MCP client, the REST call, and the free local server.', connectBody],
-  ['/dashboard/account/', 'Account', 'Who is signed in, how, and this month\'s credits.', accountBody],
+  ['/dashboard/connect/', 'Connect', 'Add Octocrawl to your agent or your code, or run it free on your own computer.', connectBody],
+  ['/dashboard/settings/', 'Settings', 'Your profile, plan and data, and this browser\'s preferences.', settingsBody],
 ]
