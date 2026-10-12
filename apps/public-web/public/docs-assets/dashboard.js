@@ -424,7 +424,37 @@
       map: ['0–1 credit', 'A map that finds URLs costs 1 credit; one that finds none costs nothing.'],
     }
     const LABEL = { scrape: 'Extract page', map: 'Map site' }
-    const goLabel = () => { submit.textContent = `${LABEL[endpoint]} `; const arrow = document.createElement('span'); arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '→'; submit.append(arrow) }
+    const goLabel = (text = LABEL[endpoint]) => { const label = document.createElement('span'); label.id = 'pg-go-label'; label.textContent = text; const arrow = document.createElement('span'); arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '→'; submit.replaceChildren(label, ' ', arrow) }
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    /** Text that turns into other text through glyphs, left to right, as the site's menus decode theirs (nav.js). */
+    const morph = (element, to) => {
+      if (!element) return
+      clearTimeout(element.morphing)
+      if (still) { element.textContent = to; return }
+      const from = element.textContent
+      const noise = '·:+×#'
+      const length = Math.max(from.length, to.length)
+      let step = 0
+      const tick = () => {
+        step += 1
+        const done = step / 8
+        let text = ''
+        for (let i = 0; i < length; i++) {
+          const ahead = i / length < done
+          const target = to[i] ?? ''
+          text += ahead ? target : target === ' ' || from[i] === ' ' ? ' ' : noise[(i + step) % noise.length]
+        }
+        element.textContent = step >= 8 ? to : text.replace(/\s+$/, '')
+        if (step < 8) element.morphing = setTimeout(tick, 32)
+      }
+      tick()
+    }
+    /** The card's toolbar prints in again, as a panel does, when the mode changes what it holds. */
+    const reprint = (element) => {
+      if (still || !element) return
+      element.classList.remove('is-switching'); void element.offsetWidth; element.classList.add('is-switching')
+      setTimeout(() => element.classList.remove('is-switching'), 450)
+    }
     const body = () => {
       const form = new FormData(play)
       const url = String(form.get('url') ?? '').trim()
@@ -490,7 +520,11 @@
       for (const element of document.querySelectorAll('#pg [data-only]')) element.hidden = element.dataset.only !== next
       for (const tile of document.querySelectorAll('#pg .pg-tile[data-endpoint]')) tile.setAttribute('aria-pressed', String(tile.dataset.endpoint === next))
       const pick = { scrape: ['Extract', 'Scrape', '▤'], map: ['Discover', 'Map', '⌗'] }[next]
-      set('pg-picker-kicker', pick[0]); set('pg-picker-name', pick[1]); set('pg-picker-glyph', pick[2])
+      if (push) {
+        morph($('pg-picker-kicker'), pick[0]); morph($('pg-picker-name'), pick[1]); morph($('pg-picker-glyph'), pick[2])
+        reprint(play.querySelector('.pg-toolbar'))
+        if (creature) creature.pulse()
+      } else { set('pg-picker-kicker', pick[0]); set('pg-picker-name', pick[1]); set('pg-picker-glyph', pick[2]) }
       for (const link of document.querySelectorAll('.dash-nav a')) { if (link.getAttribute('href') === `/dashboard/${next}/`) link.setAttribute('aria-current', 'page'); else if (/\/dashboard\/(scrape|map)\/$/.test(link.getAttribute('href'))) link.removeAttribute('aria-current') }
       const [title, lead] = PAGES[next]
       document.querySelector('.dash-head h1').textContent = title
@@ -499,8 +533,8 @@
       document.title = `${title} | Octocrawl Dashboard`
       set('play-cost', COST[next][0])
       $('play-cost').title = COST[next][1]
-      goLabel()
-      close()
+      if (push && $('pg-go-label')) morph($('pg-go-label'), LABEL[next]); else goLabel()
+      if (!push) close()
       $('play-result').hidden = true
       set('play-summary', IDLE_NOTE)
       answer = null
@@ -508,7 +542,13 @@
       if (push) { const url = play.url.value.trim(); history.replaceState(null, '', `/dashboard/${next}/${url ? `?url=${encodeURIComponent(url)}` : ''}`) }
       drawCode()
     }
-    for (const tile of document.querySelectorAll('#pg .pg-tile[data-endpoint]')) tile.addEventListener('click', () => { if (tile.dataset.endpoint !== endpoint) switchTo(tile.dataset.endpoint, true); close(); play.url.focus() })
+    // The highlight moves to the tile picked, the stage changes under the open panel, and the panel closes a moment later.
+    for (const tile of document.querySelectorAll('#pg .pg-tile[data-endpoint]')) {
+      tile.addEventListener('click', () => {
+        if (tile.dataset.endpoint !== endpoint) switchTo(tile.dataset.endpoint, true)
+        setTimeout(() => { close(); play.url.focus({ preventScroll: true }) }, still ? 0 : 220)
+      })
+    }
 
     const linkList = (links) => (Array.isArray(links) ? links.map((link) => (typeof link === 'string' ? link : link && link.url)).filter(Boolean) : null)
     const facts = (record) => {

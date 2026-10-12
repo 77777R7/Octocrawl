@@ -2,7 +2,7 @@
 // on a canvas, and a slow current of glyphs behind the recent runs. Plain script, no bundle: the hero's own octopus is a
 // WebGL renderer tied to the home page. Every glyph stays on its cell; motion changes which glyph a cell shows and how
 // bright it is, never where it is. Still with reduced motion, paused in a hidden tab or off screen.
-// window.OctoGlyphs.octopus(canvas, anchor) → { set(state) } with 'idle' | 'running'; window.OctoGlyphs.current(pre).
+// window.OctoGlyphs.octopus(canvas, anchor) → { set(state), pulse() } with 'idle' | 'running'; window.OctoGlyphs.current(pre).
 // With an anchor (the URL card in front of it), the octopus is drawn wider than the card and centred on it a little
 // high, so its eyes peek over the card's top edge and its arms reach out on both sides.
 (() => {
@@ -118,7 +118,11 @@
       if (reduced) draw(performance.now() / 1000)
     })
     animate(canvas, 14, draw)
-    return { set(next) { if (next !== state) { state = next; stateAt = performance.now() / 1000; if (reduced) draw(stateAt) } } }
+    return {
+      set(next) { if (next !== state) { state = next; stateAt = performance.now() / 1000; if (reduced) draw(stateAt) } },
+      /** One ring out from the head, as a click sends: the stage answering a change of mode. */
+      pulse() { if (!reduced) clicks.push({ x: cols / 2, y: rows * 0.28, at: performance.now() / 1000 }) },
+    }
   }
 
   /** A slow current of glyphs drifting left to right, its crests in orange, as faint as a background should be. */
