@@ -92,3 +92,16 @@ export function mcpPrompt(request: CodeRequest): string {
           : 'its readable Markdown'
   return `Use Octocrawl's scrape tool on ${request.url}${request.onlyMainContent ? '' : ' (the whole page, not only the main content)'} and return ${wanted}.`
 }
+
+/** The dashboard's Playground with the hero's request in its address: the URL, the view, the whole page when asked
+ * for, and each field as `name:type`. public/docs-assets/playground-request.js (readHandoff) reads it back, and
+ * test/playgroundRequest.test.ts holds the two to each other. */
+export function playgroundHref(request: CodeRequest): string {
+  const query = new URLSearchParams()
+  if (request.url) query.set('url', request.url)
+  if (request.view !== 'markdown') query.set('view', request.view)
+  if (!request.onlyMainContent) query.set('scope', 'whole')
+  for (const field of request.fields) query.append('field', `${field.name}:${field.type}`)
+  const search = query.toString()
+  return `/dashboard/scrape/${search ? `?${search}` : ''}`
+}

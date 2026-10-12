@@ -1,7 +1,8 @@
 // What the dashboard's Playground asks for, by the home page's rules: the same five views of one extraction (Markdown,
 // links, page info, fields, the whole result), the same options (main content or the whole page, up to 20 fields) and
 // the same code. restBody, fieldsSchema and isAmazonProduct copy apps/public-web/src/getCode.ts, and runBody copies
-// the home page's previewBody (src/main.ts); apps/public-web/test/playgroundRequest.test.ts holds them to those, so the
+// the home page's previewBody (src/main.ts), and readHandoff reads getCode.ts's playgroundHref;
+// apps/public-web/test/playgroundRequest.test.ts holds them to those, so the
 // Playground cannot drift from the hero. Plain script for the dashboard, which loads no bundle: window.OctoRequest.
 (() => {
   const VIEWS = ['markdown', 'links', 'info', 'fields', 'json']
@@ -61,7 +62,23 @@
     return fields.length > MAX_FIELDS ? `Ask for at most ${MAX_FIELDS} fields.` : null
   }
 
-  const api = { VIEWS, MAX_FIELDS, FIELD_TYPES, PRODUCT_FIELDS, isAmazonProduct, fieldsSchema, restBody, runBody, fieldProblem }
+  /** The request the home page hands over in the Playground's address (src/getCode.ts, playgroundHref): the URL, the
+   * view, main content or the whole page, and up to MAX_FIELDS fields as `name:type`. Anything else is left out. */
+  const readHandoff = (search) => {
+    const query = new URLSearchParams(search)
+    const view = query.get('view')
+    const types = FIELD_TYPES.map(([type]) => type)
+    const fields = []
+    for (const pair of query.getAll('field')) {
+      const at = pair.lastIndexOf(':')
+      const name = (at < 0 ? pair : pair.slice(0, at)).trim().slice(0, 64)
+      const type = at < 0 ? 'string' : pair.slice(at + 1)
+      if (name && types.includes(type) && fields.length < MAX_FIELDS) fields.push({ name, type })
+    }
+    return { url: (query.get('url') ?? '').trim(), view: VIEWS.includes(view) ? view : 'markdown', onlyMainContent: query.get('scope') !== 'whole', fields }
+  }
+
+  const api = { VIEWS, MAX_FIELDS, FIELD_TYPES, PRODUCT_FIELDS, isAmazonProduct, fieldsSchema, restBody, runBody, fieldProblem, readHandoff }
   if (typeof window !== 'undefined') window.OctoRequest = api
   if (typeof globalThis !== 'undefined') globalThis.OctoRequest = api
 })()

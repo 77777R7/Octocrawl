@@ -11,7 +11,7 @@ import { mountWaitlist } from './waitlist'
 import { mountCrawlView } from './crawlView'
 import { readPreview, STAGE_STREAM } from './previewStream'
 import { buildWindow } from './windowBuild'
-import { API_SERVER, fieldsSchema, HOSTED_MCP, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
+import { API_SERVER, fieldsSchema, HOSTED_MCP, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, playgroundHref, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
 type ProductPreview = {
@@ -146,6 +146,8 @@ const heroScrollLabel = document.querySelector<HTMLElement>('#hero-scroll-label'
 const urlHelp = document.querySelector<HTMLElement>('#url-help')!
 const quotaNote = document.querySelector<HTMLElement>('#quota-note')!
 const QUOTA_NOTE = quotaNote.textContent ?? ''
+/** Set when the service says this visitor's previews for today are used up (refreshQuota). */
+let previewsUsedUp = false
 const crawl = mountCrawlView(urlCard, hero)
 // The early-access form opens itself from a ?from= link (waitlist.ts); nothing here opens it.
 mountWaitlist()
@@ -159,12 +161,15 @@ function waitlistLink(className: string): HTMLAnchorElement {
 }
 /** The server sets w2l_account=1 beside the HttpOnly session cookie (nav.js reads it too): a hint, not proof. */
 const signedIn = /(?:^|;\s*)w2l_account=1(?:;|$)/.test(document.cookie)
-/** The dashboard's Playground, which runs the URL typed here on the account's credits (no daily preview limit). */
+/** The hero's request as it stands: the URL typed, the view and the options. */
+const heroRequest = () => ({ url: input.value.trim(), view: outputView, onlyMainContent: mainContent.checked, fields: readFields().fields })
+/** The dashboard's Playground, which runs the URL typed here on the account's credits (no daily preview limit), with
+ * the view and options chosen here. The address is set when the link is about to be used, as the options change. */
 function playgroundLink(className: string, text: string): HTMLAnchorElement {
   const link = textElement('a', text, className)
-  const point = () => { const url = input.value.trim(); link.href = url ? `/dashboard/scrape/?url=${encodeURIComponent(url)}` : '/dashboard/scrape/' }
-  point()
-  input.addEventListener('input', point)
+  link.href = '/dashboard/scrape/'
+  const point = () => { link.href = playgroundHref(heroRequest()) }
+  for (const type of ['pointerenter', 'pointerdown', 'focus', 'click']) link.addEventListener(type, point)
   return link
 }
 if (signedIn) urlHelp.append(' · ', playgroundLink('url-help-link', 'Run with your credits ↗'))
@@ -1144,6 +1149,7 @@ async function refreshQuota(): Promise<void> {
           : `${quota.remaining} of ${quota.limit} free previews left today`
     }
   } catch { /* An unreadable count shows the static note, never an older number. */ }
+  previewsUsedUp = usedUp
   quotaNote.textContent = text
   if (usedUp) quotaNote.append(' · ', waitlistLink('url-help-link'))
 }
@@ -1536,6 +1542,13 @@ form.addEventListener('submit', async (event) => {
   }
   input.value = url
   setInvalid(false)
+  // Signed in, with today's previews used: the run goes to the Playground, which spends the account's credits.
+  if (signedIn && previewsUsedUp) {
+    message.textContent = 'Today’s free previews are used. Opening the Playground, which runs this on your credits.'
+    message.className = 'form-message'
+    location.assign(playgroundHref(heroRequest()))
+    return
+  }
   message.textContent = 'Extracting. This temporary result will not be saved.'
   message.className = 'form-message'
   // Before the form turns busy, so the window can take focus from the button that sent it.
