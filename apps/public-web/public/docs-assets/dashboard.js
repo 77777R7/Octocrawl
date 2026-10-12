@@ -475,6 +475,16 @@
       element.classList.remove('is-switching'); void element.offsetWidth; element.classList.add('is-switching')
       setTimeout(() => element.classList.remove('is-switching'), 450)
     }
+    // The scrape's settings, by the home page's rules (playground-request.js): the view, main content or the whole page,
+    // and the fields. One run returns every view, so the view only picks what is shown and what Get code asks for.
+    const rules = window.OctoRequest
+    const VIEW_NAMES = { markdown: 'Markdown', links: 'Links', info: 'Page info', fields: 'Fields', json: 'JSON', evidence: 'Evidence Record' }
+    const fieldList = $('pg-field-list')
+    const readFields = () => [...fieldList.querySelectorAll('.pg-field')].map((row) => ({ name: row.querySelector('input').value.trim(), type: row.querySelector('select').value })).filter((field) => field.name)
+    const scrapeRequest = () => {
+      const form = new FormData(play)
+      return { url: String(form.get('url') ?? '').trim(), view: String(form.get('view') ?? 'markdown'), onlyMainContent: form.get('scope') !== 'whole', fields: readFields() }
+    }
     const body = () => {
       const form = new FormData(play)
       const url = String(form.get('url') ?? '').trim()
@@ -482,20 +492,89 @@
         const search = String(form.get('search') ?? '').trim()
         return { url, limit: Math.min(5000, Math.max(1, Math.round(Number(form.get('limit')) || 100))), ...(search ? { search } : {}) }
       }
-      return { url, formats: form.getAll('formats').map(String), onlyMainContent: form.get('onlyMainContent') === 'on' }
+      return rules.runBody(scrapeRequest())
     }
     const drawCode = () => {
-      const request = body()
+      const scrape = endpoint === 'scrape'
+      const request = scrape ? scrapeRequest() : body()
       if (!request.url) request.url = 'https://example.com'
-      const json = JSON.stringify(request)
+      // The home page's Get code body for a scrape (getCode.ts, restBody); the map's own.
+      const sent = scrape ? rules.restBody(request) : request
+      const json = JSON.stringify(sent)
       const api = `https://api.octocrawl.dev/v1/${endpoint}`
       set('play-code', lang === 'curl'
         ? `curl ${api} \\\n  -H 'authorization: Bearer oc_YOUR_KEY' \\\n  -H 'content-type: application/json' \\\n  -d '${json.replace(/'/g, "'\\''")}'`
-        : `const response = await fetch('${api}', {\n  method: 'POST',\n  headers: { authorization: 'Bearer oc_YOUR_KEY', 'content-type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(request, null, 2).replace(/\n/g, '\n  ')}),\n})\nconst result = await response.json()`)
-      const formats = body().formats || []
-      const names = { markdown: 'Markdown', links: 'Links', html: 'HTML' }
-      set('pg-format-label', formats.length === 0 ? 'none' : formats.length === 1 ? names[formats[0]] : `${names[formats[0]]} +${formats.length - 1}`)
+        : `const response = await fetch('${api}', {\n  method: 'POST',\n  headers: { authorization: 'Bearer oc_YOUR_KEY', 'content-type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sent, null, 2).replace(/\n/g, '\n  ')}),\n})\nconst result = await response.json()`)
+      if (scrape) {
+        set('pg-format-label', VIEW_NAMES[request.view])
+        // The Options button says what differs from the defaults, as on the home page: the fields, or a dot for the whole page.
+        const badge = $('pg-options-badge')
+        badge.hidden = !request.fields.length && request.onlyMainContent
+        badge.textContent = request.fields.length ? String(request.fields.length) : '•'
+        set('pg-scope-note', request.onlyMainContent ? 'Headers, menus and footers are left out.' : 'The whole page, headers and menus included; a page with no clear main content returns everything.')
+        const count = fieldList.querySelectorAll('.pg-field').length
+        set('pg-fields-count', `${String(request.fields.length).padStart(2, '0')}/${rules.MAX_FIELDS}`)
+        set('pg-fields-error', rules.fieldProblem(request.fields) ?? '')
+        $('pg-field-new').disabled = count >= rules.MAX_FIELDS
+        $('pg-field-add').disabled = count >= rules.MAX_FIELDS
+      }
     }
+
+    // The fields editor, as the home page's: numbered rows of a name and a type, × to remove, a line to add one, and the
+    // product preset.
+    const fieldRow = (field) => {
+      const row = document.createElement('div'); row.className = 'pg-field'; row.setAttribute('role', 'listitem')
+      const index = document.createElement('span'); index.className = 'pg-field-index'; index.setAttribute('aria-hidden', 'true')
+      const name = document.createElement('input'); name.maxLength = 64; name.placeholder = 'field name'; name.value = field.name; name.autocomplete = 'off'; name.spellcheck = false
+      const type = document.createElement('select')
+      for (const [value, label] of rules.FIELD_TYPES) type.append(new Option(label, value))
+      type.value = field.type
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'pg-field-remove'; remove.textContent = '×'
+      remove.addEventListener('click', () => { row.remove(); renumber(); drawCode(); $('pg-field-new').focus() })
+      row.append(index, name, type, remove)
+      return row
+    }
+    const renumber = () => [...fieldList.querySelectorAll('.pg-field')].forEach((row, i) => {
+      row.querySelector('.pg-field-index').textContent = String(i + 1).padStart(2, '0')
+      row.querySelector('input').setAttribute('aria-label', `Field ${i + 1} name`)
+      row.querySelector('select').setAttribute('aria-label', `Field ${i + 1} type`)
+      row.querySelector('.pg-field-remove').setAttribute('aria-label', `Remove field ${i + 1}`)
+    })
+    const addField = (field) => {
+      if (fieldList.querySelectorAll('.pg-field').length >= rules.MAX_FIELDS) return
+      fieldList.append(fieldRow(field)); renumber()
+      // Fields asked for are what the run is for: the view follows, as on the home page.
+      if (play.view.value === 'markdown') play.view.value = 'fields'
+      drawCode()
+    }
+    const addNew = () => { const name = $('pg-field-new').value.trim(); if (!name) return; addField({ name, type: 'string' }); $('pg-field-new').value = ''; $('pg-field-new').focus() }
+    $('pg-field-add').addEventListener('click', addNew)
+    $('pg-field-new').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); addNew() } })
+    $('pg-fields-preset').addEventListener('click', () => { const have = new Set(readFields().map((field) => field.name)); for (const field of rules.PRODUCT_FIELDS) if (!have.has(field.name)) addField(field) })
+
+    // Each format's icon on the home page's glyph grid (src/main.ts, FORMAT_ICONS): lit cells over faint dots.
+    const FORMAT_ICONS = {
+      markdown: ['#####..', '.......', '######.', '#####..', '######.', '.......', '####...'],
+      links: ['...####', '.....##', '....#.#', '...#..#', '..#....', '.#.....', '#......'],
+      info: ['..###..', '.#...#.', '#..#..#', '#.....#', '#..#..#', '.#.#.#.', '..###..'],
+      fields: ['##.####', '.......', '##.###.', '.......', '##.####', '.......', '##.##..'],
+      json: ['..#.#..', '.#...#.', '.#...#.', '#.....#', '.#...#.', '.#...#.', '..#.#..'],
+    }
+    const SVG = 'http://www.w3.org/2000/svg'
+    for (const box of document.querySelectorAll('#pg .tile-icon')) {
+      const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('viewBox', '0 0 49 49'); svg.setAttribute('class', 'glyph-icon')
+      FORMAT_ICONS[box.dataset.icon].forEach((row, y) => [...row].forEach((cell, x) => {
+        const lit = cell === '#'
+        const mark = document.createElementNS(SVG, lit ? 'rect' : 'circle')
+        const attributes = lit ? [['x', x * 7 + 1.2], ['y', y * 7 + 1.2], ['width', 4.6], ['height', 4.6], ['rx', 1]] : [['cx', x * 7 + 3.5], ['cy', y * 7 + 3.5], ['r', 0.9]]
+        for (const [name, value] of attributes) mark.setAttribute(name, String(value))
+        mark.setAttribute('class', lit ? 'on' : 'off')
+        svg.append(mark)
+      }))
+      box.append(svg)
+    }
+    // Picking a format after a run shows that view of the same result; before, it sets what the run is for.
+    play.addEventListener('change', (event) => { if (event.target.name === 'view') { view = event.target.value; if (answer) show(); setTimeout(close, still ? 0 : 160) } })
 
     // Panels: one open at a time, printed in as the site's menus are (nav.js): a reveal in steps, then rows and glyphs.
     const panels = [...document.querySelectorAll('#pg [data-panel]')]
@@ -513,7 +592,7 @@
     const print = (panel) => {
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
       panel.classList.remove('is-printing'); void panel.offsetWidth; panel.classList.add('is-printing')
-      ;[...panel.querySelectorAll('.pg-check, .pg-fields label, .pg-tile, .code, p')].forEach((row, i) => row.style.setProperty('--row', String(i)))
+      ;[...panel.querySelectorAll('.pg-check, .pg-fields label, .pg-tile, .format-tile, .pg-field, .code, p')].forEach((row, i) => row.style.setProperty('--row', String(i)))
       ;[...panel.querySelectorAll('.pg-kicker, code')].forEach((element, i) => { if (!element.closest('pre')) decode(element, 40 + i * 18) })
       setTimeout(() => panel.classList.remove('is-printing'), 700)
     }
@@ -559,7 +638,7 @@
       $('play-result').hidden = true
       set('play-summary', IDLE_NOTE)
       answer = null
-      view = next === 'scrape' ? 'markdown' : 'links'
+      view = next === 'scrape' ? play.view.value : 'links'
       if (push) { const url = play.url.value.trim(); history.replaceState(null, '', `/dashboard/${next}/${url ? `?url=${encodeURIComponent(url)}` : ''}`) }
       drawCode()
     }
@@ -592,15 +671,18 @@
       for (const tab of document.querySelectorAll('[data-view]')) tab.setAttribute('aria-selected', String(tab.dataset.view === view))
       evidence.hidden = view !== 'evidence'
       let text
-      if (view === 'markdown') text = typeof answer.markdown === 'string' ? answer.markdown : 'No Markdown came back. The result and the Evidence Record say why.'
-      else if (view === 'html') text = typeof answer.html === 'string' ? answer.html : 'HTML was not asked for: add it under Format and run again.'
-      else if (view === 'links') { const links = linkList(answer.links); text = links ? (links.length ? links.join('\n') : 'No links came back.') : 'Links were not asked for: add them under Format and run again.' }
+      if (view === 'markdown') text = typeof answer.markdown === 'string' && answer.markdown.trim() ? answer.markdown : 'No Markdown came back. The result and the Evidence Record say why.'
+      else if (view === 'links') { const links = linkList(answer.links); text = links && links.length ? links.join('\n') : 'No links came back.' }
+      // What the page declares about itself, as the home page's Page info shows it.
+      else if (view === 'info') text = JSON.stringify({ url: (answer.evidenceRecord && answer.evidenceRecord.finalUrl) || answer.requestedUrl || answer.url, title: answer.metadata ? answer.metadata.title : null, ...(answer.metadata ? { metadata: answer.metadata } : {}) }, null, 2)
+      else if (view === 'fields') text = answer.json !== undefined && answer.json !== null ? JSON.stringify(answer.json, null, 2) : 'No fields were asked for: add them in Options and run again. The run reads them from the page itself.'
       else if (view === 'evidence') {
         if (answer.evidenceRecord) { facts(answer.evidenceRecord); text = JSON.stringify(answer.evidenceRecord, null, 2) } else { evidence.replaceChildren(); text = 'This answer has no Evidence Record.' }
       } else text = JSON.stringify(answer, null, 2)
       output.textContent = text
     }
-    for (const tab of document.querySelectorAll('[data-view]')) tab.addEventListener('click', () => { view = tab.dataset.view; show() })
+    // A result tab and the format panel are one choice, as on the home page (the Evidence Record has no tile).
+    for (const tab of document.querySelectorAll('[data-view]')) tab.addEventListener('click', () => { view = tab.dataset.view; if (view !== 'evidence') play.view.value = view; show(); drawCode() })
     toggles('lang', (value) => { lang = value; drawCode() })
     play.addEventListener('input', drawCode)
     play.addEventListener('change', drawCode)
@@ -622,7 +704,8 @@
       close()
       const request = body()
       try { if (!/^https?:$/.test(new URL(request.url).protocol)) throw new Error('scheme') } catch { say('Enter a full address that starts with http:// or https://.', true); play.url.focus(); return }
-      if (endpoint === 'scrape' && request.formats.length === 0) { say('Pick at least one format.', true); return }
+      const problem = endpoint === 'scrape' ? rules.fieldProblem(scrapeRequest().fields) : null
+      if (problem) { say(`Check the fields in Options: ${problem}`, true); return }
       say('')
       const ran = endpoint
       submit.disabled = true
@@ -655,7 +738,8 @@
         const where = ran === 'scrape' && record ? [record.finalUrl || record.requestedUrl, record.httpStatus ? `HTTP ${record.httpStatus}` : null, record.lane ? `${record.lane} lane` : null] : [result.url]
         const spent = used === null ? null : `${used} credit${used === '1' ? '' : 's'} used${left === null ? '' : `, ${number(left)} left`}`
         set('play-detail', [...where, spent].filter(Boolean).join(' · '))
-        if (view === 'markdown' && typeof result.markdown !== 'string' && record) view = 'evidence'
+        if (ran === 'scrape') view = play.view.value
+        if (view === 'markdown' && !(typeof result.markdown === 'string' && result.markdown.trim()) && record) view = 'evidence'
         idle()
         $('play-result').hidden = false
         show()

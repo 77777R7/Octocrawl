@@ -312,6 +312,48 @@ a:hover{color:#fff}
 .pg-fields label{display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:600}
 .pg-fields input{min-height:38px;padding:0 10px;border:1px solid var(--rule);border-radius:6px;background:var(--navy);color:var(--ink);font:inherit}
 .pg-fields input[type="number"]{width:110px}
+/* The format tiles and the options, as the home page's sheets draw them (src/styles.css), on the panel's navy. */
+.pg-formats{width:min(760px,calc(100% - 24px))}
+.format-tiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.format-tile{position:relative;display:flex;flex-direction:column;gap:3px;min-width:0;padding:8px 8px 11px;border:1px solid rgba(176,200,240,.14);border-radius:6px;background:rgba(255,255,255,.03);cursor:pointer;transition:border-color .18s,background-color .18s}
+.format-tile:hover{border-color:rgba(176,200,240,.32);background:rgba(255,255,255,.06)}
+.format-tile input{position:absolute;top:12px;left:12px;width:1px;height:1px;margin:0;opacity:0}
+.format-tile:has(input:focus-visible){outline:2px solid #fa935f;outline-offset:2px}
+.tile-icon{display:grid;place-items:center;height:76px;margin-bottom:8px;border-radius:4px;background:rgba(3,13,42,.55)}
+.glyph-icon{width:44px;height:44px;overflow:visible}
+.glyph-icon .off{fill:rgba(176,200,240,.26)}
+.glyph-icon .on{fill:#cfe0ff;transition:fill .18s}
+.tile-name{padding:0 2px;color:#fff;font-size:13.5px;font-weight:650}
+.tile-note{padding:0 2px;color:var(--muted);font-size:12px;line-height:1.4}
+.tile-ext{margin-top:auto;padding:5px 2px 0;color:#7486ad;font:11px var(--mono)}
+.format-tile:has(input:checked){border-color:var(--orange);background:rgba(251,123,76,.1)}
+.format-tile:has(input:checked) .glyph-icon .on{fill:var(--orange)}
+.format-tile:has(input:checked) .tile-ext{color:#fb9b72}
+.format-tile:has(input:checked)::after{content:"";position:absolute;top:14px;right:14px;width:6px;height:6px;background:var(--orange)}
+.pg-badge{display:grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--orange);color:#fff;font:650 10.5px var(--mono)}
+.pg-label{margin:0 0 8px;color:var(--ink);font-size:13px;font-weight:650}
+.pg-read{padding-bottom:12px;border-bottom:1px dotted var(--rule)}
+.pg-scope{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px}
+.pg-scope label{display:flex;align-items:center;gap:7px;padding:7px 12px;border:1px solid var(--rule);border-radius:8px;font-size:13.5px;cursor:pointer}
+.pg-scope label:has(input:checked){border-color:var(--orange);background:rgba(243,104,61,.1)}
+.pg-scope input{accent-color:var(--orange)}
+.pg-fields-editor{display:grid;gap:8px}
+.pg-fields-head{display:flex;align-items:baseline;gap:10px}
+.pg-fields-head .pg-label{margin:0}
+.pg-count{color:var(--muted);font:12px var(--mono)}
+.pg-link{margin-left:auto;padding:0;border:0;background:none;color:var(--orange-soft);font:650 12px var(--mono);cursor:pointer}
+.pg-link:disabled{opacity:.4;cursor:default}
+.pg-field-list{display:grid;gap:4px}
+.pg-field{display:grid;grid-template-columns:2.2ch minmax(0,1fr) auto auto;align-items:center;gap:8px}
+.pg-field-index{color:var(--muted);font:12px var(--mono)}
+.pg-field input,.pg-field select,.pg-field-new input{min-height:32px;padding:0 8px;border:0;border-bottom:1px dotted var(--rule);background:none;color:var(--ink);font:13px var(--mono)}
+.pg-field select{border:1px solid var(--rule);border-radius:5px;background:var(--navy)}
+.pg-field-remove{padding:2px 7px;border:0;background:none;color:var(--muted);font:15px var(--mono);cursor:pointer}
+.pg-field-remove:hover{color:var(--bad)}
+.pg-field-new{display:grid;grid-template-columns:2.2ch minmax(0,1fr) auto;align-items:center;gap:8px;color:var(--orange);font:13px var(--mono)}
+.pg-field-new input:focus,.pg-field input:focus{outline:none;border-bottom-color:var(--orange)}
+.pg-error{margin:0;color:var(--bad);font-size:12.5px}
+.pg-error:empty{display:none}
 .pg-note{position:absolute;z-index:1;left:50%;bottom:14px;transform:translateX(-50%);max-width:calc(100% - 40px);margin:0;padding:4px 10px;border-radius:6px;background:rgba(4,18,58,.85);color:var(--ink);font:12.5px var(--mono);text-align:center}
 .pg-note:empty{display:none}
 .pg-band.is-running .pg-note{color:var(--orange-soft)}
@@ -384,6 +426,7 @@ a:hover{color:#fff}
 @media (max-width:480px){
   .pg-band{padding:96px 12px 56px}
   .pg-tiles{grid-template-columns:minmax(0,1fr)}
+  .format-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
   .pg-picker{min-width:0;width:calc(100% - 24px)}
   .pg-toolbar>.pg-tools:last-child{flex:1 1 100%;justify-content:space-between}
   .pg-runs{padding:14px}

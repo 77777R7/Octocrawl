@@ -11,7 +11,8 @@
  *   GET  /api/account/activity            { requests, limit, retentionDays }: the latest request lines, newest first
  *   POST /api/account/keys                { label? }  →  { key, id }   (the key, once)
  *   POST /api/account/keys/{id}/revoke    the key stops within a minute (the hosted API caches lookups that long)
- *   POST /api/account/run                 { endpoint: scrape|map, url, formats?, onlyMainContent?, search?, limit? }
+ *   POST /api/account/run                 { endpoint: scrape, url, onlyMainContent?, formats? } as the home page's preview
+ *                                         takes it, or { endpoint: map, url, search?, limit? }
  *                                         →  the hosted API's answer, with X-Credits-Used and X-Credits-Remaining
  *
  * The Playground's run is the hosted API's own scrape or map, charged and logged there: this server names the account
@@ -20,6 +21,7 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { HOSTED_MAP_MAX_LIMIT } from '@w2l/contracts'
+import { parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewOptions } from './options.js'
 import { metadataAccessToken } from './quota.js'
 import type { Session } from './auth.js'
 
@@ -191,27 +193,33 @@ export function siteAccountAssertion(hashKey: string, uid: string, now = Date.no
 }
 /** A run waits this long for the hosted API, which gives a request up to two minutes. */
 export const RUN_TIMEOUT_MS = 125_000
-/** The scrape formats the Playground offers; the hosted API accepts more, the page asks for these. */
-export const RUN_FORMATS = ['markdown', 'links', 'html'] as const
-const RUN_BODY_BYTES = 4_096
+const RUN_BODY_BYTES = PREVIEW_BODY_BYTES
 
-/** The hosted API body for a Playground run, or null when the request is not one the Playground makes. */
+/** Amazon.sg /dp/{ASIN}, as the home page tells it (apps/public-web/src/getCode.ts, isAmazonProduct). */
+const amazonProduct = (url: URL) => (url.hostname === 'amazon.sg' || url.hostname === 'www.amazon.sg') && /^\/dp\/[A-Z0-9]{10}\/?$/i.test(url.pathname)
+
+/**
+ * The hosted API body for a Playground run, or null when the request is not one the Playground makes. A scrape is held
+ * to the home page's preview rules (options.ts, parsePreviewRequest): the URL, main content or the whole page, and
+ * Markdown, links and up to 20 fields. Like the preview it is one extraction with every view in it: Markdown and links
+ * unless the fields were asked for too, and for an Amazon.sg product page its checked product JSON.
+ */
 export function playgroundRequest(body: Record<string, unknown>): { endpoint: 'scrape' | 'map'; body: Record<string, unknown> } | null {
-  const endpoint = body.endpoint
+  const { endpoint, ...rest } = body
   if (endpoint !== 'scrape' && endpoint !== 'map') return null
-  if (typeof body.url !== 'string' || body.url.length > 2_048) return null
+  if (typeof rest.url !== 'string' || rest.url.length > 2_048) return null
   let url: URL
-  try { url = new URL(body.url.trim()) } catch { return null }
+  try { url = new URL(rest.url.trim()) } catch { return null }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
   if (endpoint === 'map') {
-    const search = typeof body.search === 'string' ? body.search.trim().slice(0, 200) : ''
-    const limit = typeof body.limit === 'number' && Number.isSafeInteger(body.limit) ? Math.min(Math.max(body.limit, 1), HOSTED_MAP_MAX_LIMIT) : 100
+    const search = typeof rest.search === 'string' ? rest.search.trim().slice(0, 200) : ''
+    const limit = typeof rest.limit === 'number' && Number.isSafeInteger(rest.limit) ? Math.min(Math.max(rest.limit, 1), HOSTED_MAP_MAX_LIMIT) : 100
     return { endpoint, body: { url: url.href, limit, ...(search ? { search } : {}) } }
   }
-  const asked = Array.isArray(body.formats) ? body.formats : ['markdown']
-  const formats = RUN_FORMATS.filter(format => asked.includes(format))
-  if (formats.length === 0 || asked.length !== formats.length) return null
-  return { endpoint, body: { url: url.href, formats, onlyMainContent: body.onlyMainContent !== false } }
+  let options: PreviewOptions
+  try { options = parsePreviewRequest({ ...rest, url: url.href }).options } catch { return null }
+  if (amazonProduct(url)) return { endpoint, body: { url: url.href, formats: ['markdown', 'links', 'json'] } }
+  return { endpoint, body: { url: url.href, formats: options.formats ?? ['markdown', 'links'], ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}) } }
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' }

@@ -15,7 +15,7 @@ const assetRoot = join(root, 'public', 'docs-assets')
 // The docs' own stylesheets and script, each versioned by its content. A stylesheet's references to versioned public
 // files (the header's mountain artwork) get their ?v= first and go to dist in that form, so its own version changes
 // when the artwork does.
-const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css', 'account.css', 'account.js', 'dashboard.css', 'dashboard.js', 'dashboard-charts.js', 'dashboard-octopus.js'].map(async name => {
+const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css', 'account.css', 'account.js', 'dashboard.css', 'dashboard.js', 'dashboard-charts.js', 'dashboard-octopus.js', 'playground-request.js'].map(async name => {
   const source = await readFile(join(assetRoot, name), 'utf8')
   const shipped = name.endsWith('.css') ? versionAssetReferences(source, join(root, 'public')) : source
   if (shipped !== source) await writeFile(join(root, 'dist', 'docs-assets', name), shipped)
@@ -467,7 +467,7 @@ function dashboardPageHtml(path, title, lead, body) {
 <div class="dash-who"><span id="side-email">…</span><a href="/docs/">Docs ↗</a></div></aside>
 <main id="main-content" class="dash-main"><header class="dash-head${playground ? ' compact' : ''}"><pre class="dash-noise" id="dash-noise" aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1>${playground ? '' : `<p class="dash-lead">${lead}</p>`}</header>
 <p class="dash-message" id="dash-message" role="status" aria-live="polite"></p>
-${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script>${playground ? `<script defer src="/docs-assets/dashboard-octopus.js?v=${assetVersions['dashboard-octopus.js']}"></script>` : ''}<script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
+${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script>${playground ? `<script defer src="/docs-assets/dashboard-octopus.js?v=${assetVersions['dashboard-octopus.js']}"></script><script defer src="/docs-assets/playground-request.js?v=${assetVersions['playground-request.js']}"></script>` : ''}<script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
 }
 // The Overview's banner: the Evidence Record, the thing that sets Octocrawl apart, centred between the octopus's arms,
 // which dashboard.js draws in glyphs rising from both bottom corners and keeps swaying.
@@ -545,14 +545,18 @@ ${installRow('cline', 'Cline', 'CL', 'Merge into <code>cline_mcp_settings.json</
  * POST /api/account/run, which the hosted API charges like a key's call; dashboard-octopus.js draws the glyphs.
  */
 const PLAYGROUND_MODES = {
-  scrape: ['Extract', 'Scrape', '▤', 'One page as Markdown, links or HTML, with its Evidence Record.', '1–5 credits'],
+  scrape: ['Extract', 'Scrape', '▤', 'One page as Markdown, links, page info or fields, with its Evidence Record.', '1–5 credits'],
   map: ['Discover', 'Map', '⌗', 'Every URL of a site, from its sitemap and its links.', '0–1 credit'],
 }
+/** The home page's format tiles (src/page.ts), word for word; dashboard.js draws each icon on the same glyph grid. */
+const formatTiles = [['markdown', 'Markdown', 'readable text', '.md'], ['links', 'Links', 'every link on the page', '.links.txt'], ['info', 'Page info', 'title, language; a file\'s pages', '.info.json'], ['fields', 'Fields', 'the fields set in Options', '.fields.json'], ['json', 'JSON', 'the whole result', '.json']]
+  .map(([view, name, note, ext], i) => `<label class="format-tile"><input type="radio" name="view" value="${view}"${i === 0 ? ' checked' : ''} /><span class="tile-icon" data-icon="${view}" aria-hidden="true"></span><span class="tile-name">${name}</span><span class="tile-note">${note}</span><span class="tile-ext">${ext}</span></label>`).join('')
 const playgroundBody = (endpoint) => {
   const only = (which) => `data-only="${which}"${which === endpoint ? '' : ' hidden'}`
   const [kicker, name, glyph] = PLAYGROUND_MODES[endpoint]
   const tile = (which) => { const [k, n, g, about, cost] = PLAYGROUND_MODES[which]; return `<button class="pg-tile" type="button" data-endpoint="${which}" aria-pressed="${which === endpoint}"><span class="pg-tile-glyph" aria-hidden="true">${g}</span><span class="pg-kicker">${k}</span><strong>${n}</strong><span class="pg-tile-about">${about}</span><code>${cost}</code></button>` }
-  const views = [['markdown', 'Markdown', 'scrape'], ['links', 'Links', ''], ['html', 'HTML', 'scrape'], ['evidence', 'Evidence Record', 'scrape'], ['json', 'JSON', '']]
+  // The home page's five views of one extraction (src/page.ts, format tiles), then the Evidence Record the API adds.
+  const views = [['markdown', 'Markdown', 'scrape'], ['links', 'Links', ''], ['info', 'Page info', 'scrape'], ['fields', 'Fields', 'scrape'], ['json', 'JSON', ''], ['evidence', 'Evidence Record', 'scrape']]
     .map(([view, n, which]) => `<button type="button" role="tab" aria-selected="false" data-view="${view}"${which ? ` ${only(which)}` : ''}>${n}</button>`).join('')
   const cross = (where) => `<span class="pg-cross ${where}" aria-hidden="true">+</span>`
   return `<section class="pg" id="pg" data-endpoint="${endpoint}">
@@ -563,12 +567,17 @@ const playgroundBody = (endpoint) => {
 <form class="pg-card" id="play-form" data-endpoint="${endpoint}" novalidate>
 <div class="pg-entry"><label class="pg-chip" for="play-url">URL</label><input id="play-url" name="url" type="url" inputmode="url" required placeholder="Paste a public page URL…" autocomplete="off" spellcheck="false" /></div>
 <div class="pg-toolbar"><div class="pg-tools">
-<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-format" data-panel="pg-format" ${only('scrape')}><span class="pg-glyph" aria-hidden="true">▤</span><span id="pg-format-label">Markdown</span></button>
-<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-options" data-panel="pg-options"><span class="pg-glyph" aria-hidden="true">≡</span>Options</button></div>
+<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-format" data-panel="pg-format" ${only('scrape')}><span class="pg-glyph" aria-hidden="true">▤</span><span class="sr-only">Format: </span><span id="pg-format-label">Markdown</span></button>
+<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-options" data-panel="pg-options"><span class="pg-glyph" aria-hidden="true">≡</span>Options<span class="pg-badge" id="pg-options-badge" hidden></span></button></div>
 <div class="pg-tools"><span class="pg-cost" id="play-cost"></span><button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-code" data-panel="pg-code"><span class="pg-glyph" aria-hidden="true">&lt;/&gt;</span>Get code</button><button class="pg-go" type="submit" id="play-submit"><span id="pg-go-label">${endpoint === 'scrape' ? 'Extract page' : 'Map site'}</span> <span aria-hidden="true">→</span></button></div></div>
-<div class="pg-panel" id="pg-format" hidden><p class="pg-kicker">Format</p><label class="pg-check"><input type="checkbox" name="formats" value="markdown" checked /> Markdown <code>.md</code></label><label class="pg-check"><input type="checkbox" name="formats" value="links" /> Links <code>.txt</code></label><label class="pg-check"><input type="checkbox" name="formats" value="html" /> HTML <code>.html</code></label></div>
-<div class="pg-panel" id="pg-options" hidden><p class="pg-kicker">Options</p>
-<label class="pg-check" ${only('scrape')}><input type="checkbox" name="onlyMainContent" checked /> Main content only <span class="dash-small">leave out navigation, footers and sidebars</span></label>
+<div class="pg-panel wide pg-formats" id="pg-format" hidden><p class="pg-kicker">Format</p><div class="format-tiles" role="radiogroup" aria-label="Format">${formatTiles}</div><p class="dash-small">All from one run, so switching never costs another credit.</p></div>
+<div class="pg-panel wide" id="pg-options" hidden><p class="pg-kicker">Options</p>
+<div class="pg-read" ${only('scrape')}><p class="pg-label" id="pg-read-title">Read</p><div class="pg-scope" role="radiogroup" aria-labelledby="pg-read-title"><label><input type="radio" name="scope" value="main" checked /> Main content</label><label><input type="radio" name="scope" value="whole" /> Whole page</label></div><p class="dash-small" id="pg-scope-note"></p></div>
+<section class="pg-fields-editor" ${only('scrape')} aria-labelledby="pg-fields-title"><div class="pg-fields-head"><p class="pg-label" id="pg-fields-title">Fields</p><span class="pg-count" id="pg-fields-count"></span><button class="pg-link" id="pg-fields-preset" type="button" aria-label="Use the product fields: name, brand, price, currency, availability, SKU, rating and review count">+ product fields</button></div>
+<div class="pg-field-list" id="pg-field-list" role="list" aria-labelledby="pg-fields-title"></div>
+<div class="pg-field-new"><span aria-hidden="true">›</span><input id="pg-field-new" maxlength="64" autocomplete="off" spellcheck="false" aria-label="New field name" placeholder="add a field: type a name, then Enter" /><button class="pg-link" id="pg-field-add" type="button">add</button></div>
+<p class="pg-error" id="pg-fields-error" role="alert"></p>
+<p class="dash-small">Read from the page itself: JSON-LD, microdata, meta tags, tables and a PDF's "Label: value" lines. No AI: a field the page does not state comes back empty, with the reason. Amazon.sg product pages take no options.</p></section>
 <div class="pg-fields" ${only('map')}><label>Search<input name="search" maxlength="200" placeholder="docs" autocomplete="off" /></label><label>Limit<input name="limit" type="number" min="1" max="5000" value="100" /></label></div></div>
 <div class="pg-panel wide" id="pg-code" hidden><div class="panel-head"><p class="pg-kicker">Get code</p><div class="tabs" role="group" aria-label="Language"><button type="button" aria-pressed="true" data-lang="curl">cURL</button><button type="button" aria-pressed="false" data-lang="js">JavaScript</button></div></div>${dashCode('play-code', '')}<p class="dash-small">The same call from your code or agent: put a key from <a href="/dashboard/keys/">API keys</a> where it says <code>oc_YOUR_KEY</code>. It costs what a run here costs.</p></div>
 </form>
