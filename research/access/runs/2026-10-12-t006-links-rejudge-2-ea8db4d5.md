@@ -1,7 +1,7 @@
 # Access task set run: all, 2026-10-12
 
 - Command: `node research/access/run-set.mjs --set all --only T006 --raw-html --record research/access/runs/2026-10-12-t006-home-2-7a35e000.md`
-- Rejudged: 2026-10-12T09:02:38.253Z against tasks.v1.json with SHA-256 `91fe9068674163178cb38b2f9561a59800bffb6d113bba61c99242b925746483` (`node research/access/run-set.mjs --rejudge .w2l/access/runs/2026-10-12T08-23-42-699Z --record research/access/runs/2026-10-12-t006-links-rejudge-2-9a95f0d4.md`); statuses and timings are the run's own
+- Rejudged: 2026-10-12T10:29:36.332Z against tasks.v1.json with SHA-256 `3f267fb969392fc1699cbd5c74e4230a161008a0dc835e4e01555bd4cc46008a` (`node research/access/run-set.mjs --rejudge .w2l/access/runs/2026-10-12T08-23-42-699Z --record research/access/runs/2026-10-12-t006-links-rejudge-2-ea8db4d5.md`); statuses and timings are the run's own
 - Source commit: `7a35e000` (working tree had uncommitted changes)
 - Network: proxied (HTTPS_PROXY=http://127.0.0.1:7890, HTTP_PROXY=http://127.0.0.1:7890, NO_PROXY=[proxy])
 - Target: the local Octocrawl API

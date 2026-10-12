@@ -1,7 +1,7 @@
 # Access task set run: all, 2026-10-12
 
 - Command: `node research/access/run-set.mjs --set all --only T006 --raw-html --record research/access/runs/2026-10-12-t006-home-3-7a35e000.md`
-- Rejudged: 2026-10-12T09:02:38.318Z against tasks.v1.json with SHA-256 `91fe9068674163178cb38b2f9561a59800bffb6d113bba61c99242b925746483` (`node research/access/run-set.mjs --rejudge .w2l/access/runs/2026-10-12T08-24-16-669Z --record research/access/runs/2026-10-12-t006-links-rejudge-3-9a95f0d4.md`); statuses and timings are the run's own
+- Rejudged: 2026-10-12T10:29:36.395Z against tasks.v1.json with SHA-256 `3f267fb969392fc1699cbd5c74e4230a161008a0dc835e4e01555bd4cc46008a` (`node research/access/run-set.mjs --rejudge .w2l/access/runs/2026-10-12T08-24-16-669Z --record research/access/runs/2026-10-12-t006-links-rejudge-3-ea8db4d5.md`); statuses and timings are the run's own
 - Source commit: `7a35e000` (working tree had uncommitted changes)
 - Network: proxied (HTTPS_PROXY=http://127.0.0.1:7890, HTTP_PROXY=http://127.0.0.1:7890, NO_PROXY=[proxy])
 - Target: the local Octocrawl API
@@ -29,8 +29,9 @@
 
 Suspected cause: not isolated for any task (a run through the product cannot isolate it; see the method).
 
-## Notes (T006 with ten shop links, rejudged)
+## Notes (T006 with ten content links into the shop, rejudged)
 
-- **Set-up:** rejudges of the three reads of Amazon's home at `7a35e000` (`2026-10-12-t006-home-{1,2,3}-7a35e000.md`), from their saved Markdown, at `9a95f0d4`. That commit replaces T006's two price predicates with ten links into Amazon's shop and keeps "Amazon". Nothing was fetched again. Statuses, timings, lanes and readiness are the runs' own.
-- **Result:** read 3 is verified, with 35 shop links. Reads 1 and 2 are not: each Markdown held 6 links, the hero carousel's six slides. The page held 26 category cards besides, and the extractor took the carousel (`ul#gwm-window`) for the listing. A separate fix to the extractor addresses that. These two reads are failures of Octocrawl's extraction, which the task should catch.
-- **Why the change:** of 31 reads of this home kept from 2026-10-05 to 2026-10-12, one held five prices with cents. It came from a seasonal deals carousel. The others showed category cards and deal badges with no price, signed out from Singapore, Berkeley or Pittsburgh. With the new predicates, 22 of the 31 reads pass. The nine that fail are the six that held the footer, the one that held the account menu, and the two above.
+- **Set-up:** rejudges of the three reads of Amazon's home at `7a35e000` (`2026-10-12-t006-home-{1,2,3}-7a35e000.md`), from their saved Markdown, at `ea8db4d5`. That commit replaces T006's two price predicates with ten links into Amazon's shop that carry the home's placement parameter (`pf_rd_p`), and keeps "Amazon". Nothing was fetched again. Statuses, timings, lanes and readiness are the runs' own.
+- **Result:** read 3 is verified, with 35 such links. Reads 1 and 2 are not: each Markdown held 6, the hero carousel's six slides. The page held its category cards besides, and the extractor took the carousel (`ul#gwm-window`) for the listing. A separate extractor change addresses that. These two reads are failures of Octocrawl's extraction, which the task should catch.
+- **Why content links:** the region wait judges the checks on the whole live page. Amazon's navigation holds its own shop links (Best Sellers, Today's Deals), and they carry no `pf_rd_p`. A read on 2026-10-12, made with that extractor change and the plain link count, was called ready at 3.9 s with 11 shop links on the whole page and an empty card deck. Six of the 11 carried `pf_rd_p`.
+- **Why the change:** of 31 reads of this home kept from 2026-10-05 to 2026-10-12, one held five prices with cents, from a seasonal deals carousel. With the new predicates, 20 of the 31 pass. The 11 that fail are the six that held the footer, the one that held the account menu, the two above, and two partial reads with five and six such links.
