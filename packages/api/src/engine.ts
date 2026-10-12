@@ -116,7 +116,7 @@ import {
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
-import type { BrowserEngineName, ChannelsFiltered } from '@w2l/bench'
+import type { BrowserEngineName, BrowserIdentityChoice, ChannelsFiltered } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
@@ -375,6 +375,8 @@ export interface ApiEngineOptions {
   accessGrant?: AccessGrant | null
   /** The engine the public browser rung launches, as the server chose it (browserEngineChoice). Default stock Playwright. */
   browserEngine?: BrowserEngineName
+  /** Which identity the public browser rung sends (browserIdentityChoice): the mode's declared one (default), or the browser's own. */
+  browserIdentity?: BrowserIdentityChoice
   /**
    * The operator's egress proxies (`W2L_EGRESS_PROXIES`, ADR 0005 `egress_sessions`): a batch or crawl
    * takes one for its run and switches only when the proxy itself fails its probe (EgressPool); a scrape takes
@@ -852,7 +854,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()

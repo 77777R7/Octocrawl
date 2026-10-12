@@ -51,6 +51,7 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
     workerCount: listen.workerCount,
     accessGrant: listen.accessGrant,
     browserEngine: listen.browserEngine,
+    browserIdentity: listen.browserIdentity,
     compatHosts: listen.compatHosts,
     egressProxies: listen.egressProxies,
     egressEchoUrl: listen.egressEchoUrl,
