@@ -115,6 +115,9 @@ describe('readinessOf (ADR 0007, ROADMAP PA item 11)', () => {
     expect(readinessOf(result(verified('failed'), [region({ steady: null, reads: 1, judged: 1 })]))).toEqual({ state: 'not_loaded', basis: ['checks_failed', 'region_not_ready', 'steady_unknown'], waitedMs: 3_000 })
     // They never held on a settled page: not served (Tesla's empty inventory, OECD's view without its table).
     expect(readinessOf(result(verified('failed'), [region({})]))).toEqual({ state: 'not_served', basis: ['checks_failed', 'region_absent'], waitedMs: 3_000 })
+    // Unless the wait ran out while it scrolled toward them (Costco's grid, T019): not yet in view, not loaded.
+    expect(readinessOf(result(verified('failed'), [region({ scrolls: 2, scrollUnfinished: true })]))).toEqual({ state: 'not_loaded', basis: ['checks_failed', 'region_not_ready', 'scroll_unfinished'], waitedMs: 3_000 })
+    expect(readinessOf(result(verified('failed'), [region({ scrolls: 2 })])).state).toBe('not_served')
     // The list showed none on a settled page: the site served no records, or the selector names none. Not ready: the contract failed.
     expect(readinessOf(result(verified('failed'), [region({ ready: true, empty: true })]))).toEqual({ state: 'not_served', basis: ['checks_failed', 'region_empty'], waitedMs: 3_000 })
     // A wait that judged another contract (a page from the cache), or judged no read, says nothing of this one.

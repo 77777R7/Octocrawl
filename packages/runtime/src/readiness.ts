@@ -78,7 +78,7 @@ function readiness(state: Readiness['state'], basis: readonly string[], result: 
 }
 
 /** The lane's last wait for the region the task needs, as the trace records it, when it judged this contract on at least one read and could judge its checks. */
-function regionWaitOf(result: FetchResult, sha: string): { ready: boolean; empty: boolean; loading: boolean; steady: boolean | null } | undefined {
+function regionWaitOf(result: FetchResult, sha: string): { ready: boolean; empty: boolean; loading: boolean; steady: boolean | null; scrollUnfinished: boolean } | undefined {
   for (let i = result.trace.length - 1; i >= 0; i--) {
     const event = result.trace[i]!
     if (event.event !== 'region_wait') continue
@@ -87,7 +87,7 @@ function regionWaitOf(result: FetchResult, sha: string): { ready: boolean; empty
     if (detail.contractSha256 !== sha || !(Number(detail.judged) > 0)) return undefined
     // A wait whose view could judge none of the checks (a page too large, a contract of json fields) held nothing either way.
     if (detail.unjudged !== undefined) return undefined
-    return { ready: detail.ready === true, empty: detail.empty === true, loading: detail.loading === true, steady: typeof detail.steady === 'boolean' ? detail.steady : null }
+    return { ready: detail.ready === true, empty: detail.empty === true, loading: detail.loading === true, steady: typeof detail.steady === 'boolean' ? detail.steady : null, scrollUnfinished: detail.scrollUnfinished === true }
   }
   return undefined
 }
@@ -125,6 +125,8 @@ function verifiedReadiness(result: FetchResult, verification: Exclude<NonNullabl
     if (region.steady === false) return readiness('not_loaded', ['checks_failed', 'region_not_ready', 'page_still_changing'], result)
     // One judged read, nothing to compare it with: whether the page had settled is not known.
     if (region.steady === null) return readiness('not_loaded', ['checks_failed', 'region_not_ready', 'steady_unknown'], result)
+    // The wait ran out while it scrolled toward a region below what it had reached: not shown absent, not yet in view.
+    if (region.scrollUnfinished) return readiness('not_loaded', ['checks_failed', 'region_not_ready', 'scroll_unfinished'], result)
     return readiness('not_served', ['checks_failed', 'region_absent'], result)
   }
   // Read without its scripts, a page whose checks failed may hold its data once a browser runs them.
