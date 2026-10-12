@@ -480,12 +480,12 @@ const overviewBody = `<section class="ev-hero" aria-labelledby="ev-title"><pre c
 <div class="kpi"><p class="kpi-label">Pages read · 30 days</p><p class="kpi-value" id="kpi-pages">…</p><p class="kpi-sub" id="kpi-pages-sub">&nbsp;</p></div>
 <div class="kpi"><p class="kpi-label">Not charged · 30 days</p><p class="kpi-value" id="kpi-free">…</p><p class="kpi-sub">blocked, robots.txt or no answer</p></div>
 </section>
-<div class="dash-grid">
+<div class="dash-grid pair">
 <section class="panel" aria-labelledby="used-title"><div class="panel-head"><div><h2 id="used-title">Credits used</h2><p class="dash-small" id="used-range">Last 7 days (UTC)</p></div><div class="panel-tools"><span class="big-figure" id="used-total">…</span><div class="tabs" role="group" aria-label="Range"><button type="button" aria-pressed="true" data-range="7">7 days</button><button type="button" aria-pressed="false" data-range="30">30 days</button></div></div></div>
 <div class="chart-wrap"><pre class="chart-ascii" id="used-ascii" aria-hidden="true"></pre><div id="used-chart"></div></div><a class="panel-link" href="/dashboard/usage/">Usage →</a></section>
 <section class="panel" aria-labelledby="key-title"><div class="panel-head"><h2 id="key-title">API key</h2><a class="button small" href="/dashboard/keys/">Create key</a></div>
-<ul class="key-list" id="keys-mini"></ul><p class="dash-small" id="keys-mini-empty" hidden>No keys yet. A key spends this account's credits and opens the browser lane.</p>
-<h3>MCP server</h3>${dashCode('ov-mcp', 'https://mcp.octocrawl.dev/mcp')}<h3>On your computer, free</h3>${dashCode('ov-cli', 'npx octocrawl serve')}<a class="panel-link" href="/dashboard/connect/">Set up an agent →</a></section>
+<div class="panel-body"><div><ul class="key-list" id="keys-mini"></ul><p class="dash-small" id="keys-mini-empty" hidden>No keys yet. A key spends this account's credits and opens the browser lane.</p></div>
+<div><h3>MCP server</h3>${dashCode('ov-mcp', 'https://mcp.octocrawl.dev/mcp')}</div><div><h3>On your computer, free</h3>${dashCode('ov-cli', 'npx octocrawl serve')}</div></div><a class="panel-link" href="/dashboard/connect/">Set up an agent →</a></section>
 </div>
 <section class="panel" aria-labelledby="int-title"><div class="panel-head"><h2 id="int-title">Integrations</h2><a href="/dashboard/connect/">All setups →</a></div><div class="integrations">${integrationTiles}</div></section>
 <section class="panel" aria-labelledby="recent-title"><div class="panel-head"><h2 id="recent-title">Recent requests</h2><a href="/dashboard/activity/">Activity →</a></div>${requestTable('recent', 5)}</section>`

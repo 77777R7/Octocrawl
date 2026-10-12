@@ -178,6 +178,16 @@ a:hover{color:#fff}
   @keyframes fade{from{opacity:0}to{opacity:1}}
 }
 
+/* The Overview's chart and key panels: one height, the chart filling its panel, the key panel's parts spread evenly,
+   both links on the bottom edge. */
+.dash-grid.pair{align-items:stretch}
+.pair .panel{display:flex;flex-direction:column}
+.pair .chart-wrap{flex:1}
+.pair .panel-body{flex:1;display:flex;flex-direction:column;justify-content:space-between;gap:14px}
+.pair .panel-body h3{margin-top:0}
+.pair .panel-body .code{margin-bottom:0}
+.pair .panel-link{margin-top:auto;padding-top:14px}
+
 /* ---- The frosted tooltip ---- */
 .glass-tip{position:fixed;z-index:50;min-width:170px;max-width:280px;padding:10px 12px;border:1px solid rgba(147,166,203,.28);border-radius:10px;background:rgba(10,34,96,.55);-webkit-backdrop-filter:blur(14px) saturate(140%);backdrop-filter:blur(14px) saturate(140%);box-shadow:0 12px 32px rgba(2,8,28,.45);color:var(--ink);font-size:12.5px;pointer-events:none}
 .glass-tip-title{margin:0 0 6px;font:650 11.5px var(--mono);letter-spacing:.04em;color:var(--orange-soft)}
