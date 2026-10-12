@@ -1,6 +1,7 @@
-/** The hero artwork's geometry and glyph kinds, shared by the glyph layer (heroGlyphs.ts), its night sky
+/** The hero artworks' geometry and glyph kinds, shared by the glyph layer (heroGlyphs.ts), its night sky
  * (heroSky.ts), its sea of clouds (heroFog.ts) and the worker that finds the artwork's painted glyphs (heroGlyphsWorker.ts), with the small helpers
- * they share. Coordinates are the artwork's natural pixels. */
+ * they share. The home page's hero shows the mountain; a page can show the coast instead (SCENES). Coordinates are
+ * the artwork's natural pixels. */
 
 export const ART = '/assets/mountain-hero.webp'
 // The ridge of the mountain in the lower right, traced from the artwork: glyphs below it are mountain, above it
@@ -14,12 +15,14 @@ export const RIDGE: ReadonlyArray<readonly [number, number]> = [
 export const BASE = 941
 export const SUMMIT = [1475, 456] as const
 
-// The mountain's sunlit faces, its embers and its blue dots; the sunset clouds; the night sky and the ranges.
+// The land's sunlit faces, its embers and its blue dots; the sunset clouds; the night sky and the ranges; the surf
+// on the coast's sea.
 export const FACE = 0
 export const EMBER = 1
 export const COOL = 2
 export const CLOUD = 3
 export const NIGHT = 4
+export const SURF = 5
 
 export const smooth = (from: number, to: number, value: number): number => {
   const t = Math.max(0, Math.min(1, (value - from) / (to - from)))
@@ -61,6 +64,91 @@ export function onMountain(x: number, y: number): number {
   const ridge = ridgeAt(x)
   return smooth(ridge - 2, ridge + 14, y) * smooth(600, 820, x)
 }
+
+type Line = ReadonlyArray<readonly [number, number]>
+
+/** A point's distance inside a closed outline (negative outside). */
+function inside(points: Line, x: number, y: number): number {
+  let within = false
+  let near = Infinity
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [x0, y0] = points[j]
+    const [x1, y1] = points[i]
+    if (y0 > y !== y1 > y && x < x0 + ((y - y0) * (x1 - x0)) / (y1 - y0)) within = !within
+    const t = Math.max(0, Math.min(1, ((x - x0) * (x1 - x0) + (y - y0) * (y1 - y0)) / Math.max(1, (x1 - x0) ** 2 + (y1 - y0) ** 2)))
+    near = Math.min(near, Math.hypot(x - x0 - t * (x1 - x0), y - y0 - t * (y1 - y0)))
+  }
+  return within ? near : -near
+}
+
+// The coast's two cliffs on the right, traced from the artwork: up the nearer cliff's lit face, along both cliffs'
+// tops, off the artwork and back along the shore at their foot. The surf in front of the nearer cliff is sea.
+const CLIFFS: Line = [
+  [1355, 428], [1400, 415], [1460, 405], [1500, 390], [1515, 365], [1540, 342], [1580, 333], [1620, 326], [1672, 318],
+  [1722, 318], [1722, 991], [1330, 991], [1440, 880], [1490, 800], [1460, 740], [1440, 660], [1430, 640], [1305, 640],
+  [1312, 600], [1325, 540], [1340, 480],
+]
+
+/** How much a point belongs to the coast's cliffs: inside their outline, fading in over its edge. */
+function onCliffs(x: number, y: number): number {
+  return smooth(-2, 14, inside(CLIFFS, x, y))
+}
+
+/** An artwork the hero can show and the lie of its land, in the artwork's natural pixels. */
+export type Scene = {
+  art: string
+  // The land's light rises from the artwork's foot (base) to the summit.
+  base: number
+  summit: readonly [number, number]
+  // The land's left edge and highest point, which bound its light, and the outline that light washes over, fading in
+  // from the left between `fade`'s two x.
+  left: number
+  top: number
+  outline: Line
+  fade?: readonly [number, number]
+  // How much a point belongs to the land.
+  land(x: number, y: number): number
+  // A sea: its horizon, and where the surf breaks on the shore.
+  sea?: { horizon: number; shore: readonly [number, number] }
+  // Where the starry sky ends; without it, a little above the summit.
+  sky?: number
+  // Whether the worker prepares the mountain's sea of clouds (heroFog.ts) and its rising sparks (heroEmbers.ts).
+  fog: boolean
+  sparks: boolean
+}
+
+export type SceneName = 'mountain' | 'coast'
+export const SCENES: Readonly<Record<SceneName, Scene>> = {
+  mountain: {
+    art: ART,
+    base: BASE,
+    summit: SUMMIT,
+    left: RIDGE[0][0],
+    top: Math.min(...RIDGE.map(([, y]) => y)),
+    // Ten px below the ridge, then off the artwork's lower right and back.
+    outline: [...RIDGE.map(([x, y]) => [x, y + 10] as const), [1722, 991], [RIDGE[0][0] - 40, 991]],
+    fade: [600, 820],
+    land: onMountain,
+    fog: true,
+    sparks: true,
+  },
+  coast: {
+    art: '/assets/scene-coast.webp',
+    base: 941,
+    summit: [1540, 345],
+    left: 1305,
+    top: 318,
+    outline: CLIFFS,
+    land: onCliffs,
+    sea: { horizon: 612, shore: [1420, 700] },
+    sky: 470,
+    fog: false,
+    sparks: false,
+  },
+}
+
+/** The scene a hero asks for (its data-art), the mountain unless it names another. */
+export const sceneName = (art: string | undefined): SceneName => (art === 'coast' ? 'coast' : 'mountain')
 
 /** A computed background-position component (its first layer's) as an offset in px: a percentage, a length or a
  * calc() of both. Anything else centres the artwork, as the browser would. */
