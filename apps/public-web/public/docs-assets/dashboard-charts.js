@@ -61,12 +61,15 @@
     if (max <= 0) return { top: 4, step: 1 }
     const raw = max / 4
     const power = 10 ** Math.floor(Math.log10(raw))
-    const step = [1, 2, 2.5, 5, 10].map((m) => m * power).find((s) => s >= raw)
-    return { top: step * 4, step: Math.max(step, Number.EPSILON) }
+    // Credits and calls are whole numbers: a step is never less than one.
+    const step = Math.max(1, [1, 2, 2.5, 5, 10].map((m) => m * power).find((s) => s >= raw))
+    return { top: step * 4, step }
   }
 
-  /** Draws again when the host changes width, and once now. */
+  /** Draws again when the host changes width, and once now. A host keeps one observer: a new draw replaces the old. */
+  const observers = new WeakMap()
   const responsive = (host, draw) => {
+    observers.get(host)?.disconnect()
     let width = 0
     const run = () => {
       const next = Math.round(host.clientWidth)
@@ -74,7 +77,7 @@
       width = next
       draw(width)
     }
-    if ('ResizeObserver' in window) new ResizeObserver(run).observe(host)
+    if ('ResizeObserver' in window) { const observer = new ResizeObserver(run); observer.observe(host); observers.set(host, observer) }
     run()
   }
 
