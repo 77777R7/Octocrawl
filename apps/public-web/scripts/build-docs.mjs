@@ -464,8 +464,8 @@ function dashboardPageHtml(path, title, lead, body) {
 <p class="dash-message" id="dash-message" role="status" aria-live="polite"></p>
 ${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script><script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
 }
-// The Overview's banner: the Evidence Record, the thing that sets Octocrawl apart, centred between two fields of
-// glyphs that dashboard.js draws (dense at the edges, thinning to the middle) and keeps drifting.
+// The Overview's banner: the Evidence Record, the thing that sets Octocrawl apart, centred between the octopus's arms,
+// which dashboard.js draws in glyphs rising from both bottom corners and keeps swaying.
 /** Clients the Overview links to, each to its setup on the Connect page. Icons are the docs' own; the rest are glyphs. */
 const INTEGRATIONS = [
   ['Claude Code', 'claude', 'claude-code.svg'], ['Codex', 'codex', 'codex.svg'], ['Cursor', 'cursor', 'cursor.svg'], ['OpenCode', 'opencode', 'opencode.svg'],
@@ -473,7 +473,7 @@ const INTEGRATIONS = [
 ]
 const integrationTiles = INTEGRATIONS.map(([name, id, icon]) => `<a class="int-tile" href="/dashboard/connect/#c-${id}"><span class="int-icon">${icon.endsWith('.svg') ? `<img src="/docs-assets/agent-clients/${icon}" width="22" height="22" alt="" />` : escape(icon)}</span><span class="int-name">${escape(name)}</span><span class="int-arrow" aria-hidden="true">↗</span></a>`).join('')
 const overviewBody = `<section class="ev-hero" aria-labelledby="ev-title"><pre class="ev-field" id="ev-field" aria-hidden="true"></pre>
-<div class="ev-copy"><p class="ev-badge"><span aria-hidden="true">§</span> Every answer is traceable</p><h2 id="ev-title">Every page comes with its receipt.</h2><p>Each answer carries an Evidence Record: the address read, when, what robots.txt allowed and the SHA-256 of what came back.</p><div class="ev-actions"><a class="ev-btn primary" href="/dashboard/connect/">Connect your agent <span aria-hidden="true">→</span></a><a class="ev-btn" href="/docs/reference/#evidence-record">What a record holds</a></div></div></section>
+<div class="ev-copy"><p class="ev-badge">[ Evidence Record ]</p><h2 id="ev-title">Every page comes with its receipt.</h2><p>Each answer carries an Evidence Record: the address read, when, what robots.txt allowed and the SHA-256 of what came back.</p><div class="ev-actions"><a class="ev-btn primary" href="/dashboard/connect/">Connect your agent <span aria-hidden="true">→</span></a><a class="ev-btn" href="/docs/reference/#evidence-record">What a record holds</a></div></div></section>
 <section class="kpis" aria-label="This month">
 <div class="kpi"><p class="kpi-label">Credits left</p><p class="kpi-value" id="kpi-left">…</p><progress class="credit-bar" id="kpi-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress></div>
 <div class="kpi"><p class="kpi-label">Used this month</p><p class="kpi-value" id="kpi-used">…</p><p class="kpi-sub" id="kpi-used-sub">&nbsp;</p></div>

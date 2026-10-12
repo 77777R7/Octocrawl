@@ -186,18 +186,18 @@ a:hover{color:#fff}
 .glass-tip dd{margin:0;text-align:right;font:12.5px var(--mono);font-variant-numeric:tabular-nums}
 .glass-tip .total{padding-top:4px;border-top:1px dotted rgba(147,166,203,.3);color:var(--ink)}
 
-/* ---- The Overview's banner: the Evidence Record, centred between two glyph fields ---- */
-.ev-hero{position:relative;display:grid;place-items:center;min-height:300px;margin-bottom:18px;padding:40px 24px;border-radius:10px;background:var(--orange);color:#fff;text-align:center;overflow:hidden}
-.ev-field{position:absolute;inset:0;margin:0;color:#fff3ec;opacity:.82;font:11px/12px var(--mono);white-space:pre;pointer-events:none;overflow:hidden}
+/* ---- The Overview's banner: the Evidence Record, centred between the octopus's arms (navy glyphs on orange) ---- */
+.ev-hero{position:relative;display:grid;place-items:center;min-height:300px;margin-bottom:18px;padding:40px 24px;border-radius:10px;background:radial-gradient(120% 140% at 50% 0%,#f67a52 0%,var(--orange) 55%,#e85a2f 100%);color:#081b42;text-align:center;overflow:hidden}
+.ev-field{position:absolute;inset:0;margin:0;color:#081b42;opacity:.55;font:11px/12px var(--mono);white-space:pre;pointer-events:none;overflow:hidden}
 .ev-copy{position:relative;display:grid;justify-items:center;max-width:620px}
-.ev-badge{display:inline-flex;align-items:center;gap:8px;margin:0 0 18px;padding:6px 14px;border:1px solid rgba(255,255,255,.55);border-radius:999px;background:rgba(255,255,255,.1);font-size:14px;font-weight:600}
+.ev-badge{margin:0 0 16px;font:700 12px var(--mono);letter-spacing:.18em;text-transform:uppercase}
 .ev-copy h2{margin:0;font-size:40px;line-height:1.08;letter-spacing:-.025em;font-weight:650;text-wrap:balance}
-.ev-copy p{margin:14px 0 0;color:rgba(255,255,255,.88);font-size:16px;line-height:1.55;text-wrap:balance}
+.ev-copy p{margin:14px 0 0;color:#1d2f55;font-size:16px;line-height:1.55;text-wrap:balance}
 .ev-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-top:24px}
-.ev-btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border:1px solid rgba(255,255,255,.7);border-radius:8px;color:#fff;font-weight:600;font-size:15px;text-decoration:none}
-.ev-btn:hover{background:rgba(255,255,255,.12);color:#fff}
-.ev-btn.primary{background:#fff;border-color:#fff;color:#1a1a1a}
-.ev-btn.primary:hover{background:#ffeee6;color:#1a1a1a}
+.ev-btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;border:1.5px solid #081b42;border-radius:8px;color:#081b42;font-weight:650;font-size:15px;text-decoration:none}
+.ev-btn:hover{background:rgba(8,27,66,.08);color:#081b42}
+.ev-btn.primary{background:#081b42;color:#ffd9c9}
+.ev-btn.primary:hover{background:#13306e;color:#fff}
 
 /* ---- Integrations and the Connect page ---- */
 .integrations{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px dotted var(--rule);border-left:1px dotted var(--rule)}
@@ -243,7 +243,7 @@ a:hover{color:#fff}
   .dash-grid,.dash-grid.even{grid-template-columns:minmax(0,1fr)}
   .ev-hero{min-height:0;padding:34px 18px}
   .ev-copy h2{font-size:30px}
-  .ev-field{opacity:.7}
+  .ev-field{opacity:.3}
   .integrations{grid-template-columns:repeat(2,minmax(0,1fr))}
   .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .summary>div:nth-child(3){border-left:0}

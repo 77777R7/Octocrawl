@@ -408,22 +408,59 @@
   }
 
 
-  // The Overview's banner: glyphs dense at both edges, thinning to nothing in the middle where the text is, as wide as
-  // the banner. They drift slowly (about 8 frames a second); still with reduced motion or in a hidden tab.
+  // The Overview's banner: the octopus's arms in glyphs, three rising from each bottom corner and curling back toward
+  // their own edge, thick at the root and thin at the tip, keeping clear of the text in the middle. They sway slowly
+  // (about 8 frames a second); still with reduced motion or in a hidden tab.
   const field = $('ev-field')
   if (field) {
-    const RAMP = ' .:-=+*xo#%WM'
+    const RAMP = ' .:-=+*#%@'
+    // Each arm: where its root sits (share of the width from its edge), how long it is (share of the height), and a phase.
+    const ARMS = [[0.03, 0.95, 0.0], [0.11, 1.15, 1.9], [0.2, 0.8, 3.4]]
     const draw = (t) => {
       const cols = Math.max(40, Math.ceil(field.clientWidth / 6.6))
       const rows = Math.max(12, Math.ceil(field.clientHeight / 12))
-      const reach = cols * (cols < 90 ? 0.12 : 0.34)
+      const narrow = cols < 90
+      const density = new Float32Array(cols * rows)
+      const sucker = new Uint8Array(cols * rows)
+      const stamp = (x, y, width) => {
+        const x0 = Math.max(0, Math.floor(x - width * 2 - 1)); const x1 = Math.min(cols - 1, Math.ceil(x + width * 2 + 1))
+        const y0 = Math.max(0, Math.floor(y - width - 1)); const y1 = Math.min(rows - 1, Math.ceil(y + width + 1))
+        for (let cy = y0; cy <= y1; cy++) {
+          for (let cx = x0; cx <= x1; cx++) {
+            const d = Math.hypot((cx - x) * 0.5, cy - y) / width
+            const v = Math.exp(-d * d * 1.8)
+            const at = cy * cols + cx
+            if (v > density[at]) density[at] = v
+          }
+        }
+      }
+      for (const side of [1, -1]) {
+        for (const [root, length, phase] of ARMS) {
+          // Walk the arm from its root: it leans in, bends back toward its own edge and curls over at the tip.
+          let x = side === 1 ? (narrow ? root * 0.5 : root) * cols : (1 - (narrow ? root * 0.5 : root)) * cols
+          let y = rows + 1
+          const steps = 80
+          const step = (length * rows * (narrow ? 0.9 : 1.25)) / steps
+          for (let k = 0; k <= steps; k++) {
+            const s = k / steps
+            const theta = 1.2 + 0.85 * s + 3.4 * s ** 3 + 0.3 * s * Math.sin(t * 0.8 + phase + s * 2.2)
+            const width = 2.4 * (1 - s) ** 1.2 + 0.45
+            stamp(x, y, width)
+            // A sucker every few steps, on the inner side of the curl.
+            if (k % 7 === 3 && s < 0.85) {
+              const sx = Math.round(x - side * Math.sin(theta) * width * 2.2); const sy = Math.round(y - Math.cos(theta) * width * 1.1)
+              if (sx >= 0 && sx < cols && sy >= 0 && sy < rows) sucker[sy * cols + sx] = 1
+            }
+            x += side * Math.cos(theta) * step * 2
+            y -= Math.sin(theta) * step
+          }
+        }
+      }
       let text = ''
       for (let y = 0; y < rows; y++) {
         for (let x = 0; x < cols; x++) {
-          const edge = Math.min(x, cols - 1 - x)
-          const near = Math.max(0, 1 - edge / reach)
-          const grain = 0.72 + 0.28 * Math.sin(x * 0.21 + y * 0.63 + t) * Math.cos(x * 0.05 - y * 0.27 - t * 0.6)
-          text += RAMP[Math.min(RAMP.length - 1, Math.floor(near ** 1.35 * grain * RAMP.length))]
+          const at = y * cols + x
+          text += sucker[at] && density[at] > 0.25 ? 'o' : RAMP[Math.min(RAMP.length - 1, Math.floor(density[at] * RAMP.length))]
         }
         text += '\n'
       }
