@@ -59,18 +59,90 @@
     })
   }
 
+  const ago = (iso) => {
+    const minutes = Math.floor((Date.now() - Date.parse(iso)) / 60_000)
+    return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1_440 ? `${Math.floor(minutes / 60)} h ago` : longDay(iso)
+  }
+  /**
+   * Each key's last call and this month's calls and credits, from the request lines (null until they load). The lines
+   * reach back 30 days, to the day the hosted API began writing them, and at most `limit` of them; the claims below are
+   * made from the first whole UTC day they cover. A settle whose commit failed is sent again without its line
+   * (packages/mcp hostedCredits.ts), so each covered day's lines are checked against its usage counts, written in the
+   * same commit: a day with fewer lines than calls makes every figure a lower bound and every "none" unknown.
+   */
+  let keyStats = null
+  // Every hosted API call since this time has a request line: the last call before them (revision h7credits) was at
+  // 2026-10-11 14:04 UTC and the first after (h8activity, #427) at 2026-10-12 07:11 UTC, with none between.
+  const LINES_SINCE = Date.parse('2026-10-12T00:00:00Z')
+  const DAY_MS = 86_400_000
+  const UNKNOWN = 'Some calls in this period have no request line, so this is not known.'
+  const tallyKeys = (lines, limit, resetsAt, usage) => {
+    const start = new Date(resetsAt); start.setUTCMonth(start.getUTCMonth() - 1)
+    const full = lines.length < limit
+    const reach = Math.max(LINES_SINCE, full ? Date.now() - 30 * DAY_MS : Date.parse(lines[lines.length - 1].at))
+    // The first UTC midnight the lines cover whole days from: "none since" a day means none on that day either.
+    const since = Math.ceil(reach / DAY_MS) * DAY_MS
+    const byKey = new Map()
+    const perDay = new Map()
+    for (const line of lines) {
+      if (!line.at) continue
+      const stats = byKey.get(line.keyId) ?? { last: null, calls: 0, credits: 0 }
+      if (!stats.last || line.at > stats.last) stats.last = line.at
+      if (line.at >= start.toISOString()) { stats.calls += 1; stats.credits += line.credits }
+      byKey.set(line.keyId, stats)
+      perDay.set(line.at.slice(0, 10), (perDay.get(line.at.slice(0, 10)) ?? 0) + 1)
+    }
+    const missing = usage.some((d) => Date.parse(`${d.day}T00:00:00Z`) >= since && (perDay.get(d.day) ?? 0) < d.http + d.browser + d.notFound + d.map + d.unread)
+    // A full page of lines all from today leaves no whole day to make a claim from.
+    const why = missing ? UNKNOWN : since > Date.now() ? `The page holds only the latest ${number(limit)} request lines, all from today, so this is not known.` : null
+    return { byKey, since: new Date(since).toISOString(), known: why === null, why, missing, monthWhole: !missing && since <= start.getTime() }
+  }
+  /**
+   * Whether a key's latest line is its latest call. The lines are the newest, so it is unless some call has none: on a
+   * checked day, or on the part day before `since`, which is not checked. A line from that part day more than a day old
+   * shows as its date, which a missing later call on the same day leaves true.
+   */
+  const lastSure = (last) => !keyStats.missing && (last >= keyStats.since || Date.now() - Date.parse(last) >= DAY_MS)
+  /** A key made since the lines' reach has every call it ever made among them, when none is missing. */
+  const wholly = (key) => keyStats.known && Boolean(key.createdAt) && key.createdAt >= keyStats.since
+  const lastUsed = (key) => {
+    if (!keyStats) return ['…', '']
+    const stats = keyStats.byKey.get(key.id)
+    if (stats) return lastSure(stats.last) ? [ago(stats.last), stats.last] : [`${ago(stats.last)} or later`, `The latest request line is from ${stats.last}. ${keyStats.why}`]
+    if (!keyStats.known) return ['Unknown', keyStats.why]
+    if (wholly(key)) return ['Not yet', 'No request line for this key since it was made.']
+    return [`None since ${longDay(keyStats.since)}`, 'No request line for this key since then. Lines are kept 30 days.']
+  }
+  const monthUse = (key) => {
+    if (!keyStats) return ['…', '']
+    const stats = keyStats.byKey.get(key.id) ?? { calls: 0, credits: 0 }
+    const text = `${number(stats.credits)} credits · ${number(stats.calls)} call${stats.calls === 1 ? '' : 's'}`
+    if (keyStats.monthWhole || wholly(key)) return [text, '']
+    return [`at least ${text}`, keyStats.known ? `From the request lines since ${longDay(keyStats.since)}, which do not reach the start of the month.` : keyStats.why]
+  }
+
+  let accountKeys = []
+  let accountUsage = []
+  /** The usage read just before the lines were: a call since then is in neither, so the two compare. */
+  let linesUsage = []
   const renderKeys = (keys, load) => {
     const mini = $('keys-mini')
     if (mini) {
-      const active = keys.filter((k) => k.enabled).slice(0, 3)
-      mini.replaceChildren(...active.map((k) => {
+      const active = keys.filter((k) => k.enabled)
+      mini.replaceChildren(...active.slice(0, 3).map((k) => {
         const item = document.createElement('li')
         const name = document.createElement('span'); name.textContent = k.label
         const prefix = document.createElement('code'); prefix.textContent = `${k.prefix}…`
-        item.append(name, prefix)
+        const [used, title] = lastUsed(k)
+        const when = document.createElement('span'); when.className = 'key-used'; when.textContent = used; if (title) when.title = title
+        item.append(name, prefix, when)
         return item
       }))
       $('keys-mini-empty').hidden = active.length > 0
+      // The account's active keys and its latest call by any of them; the Playground's runs are not a key's.
+      const calls = keyStats ? keys.map((k) => keyStats.byKey.get(k.id)).filter(Boolean).map((stats) => stats.last).sort() : []
+      const latest = !keyStats ? '' : calls.length ? ` · last call ${ago(calls[calls.length - 1])}${lastSure(calls[calls.length - 1]) ? '' : ' or later'}` : keyStats.known ? ` · no calls since ${longDay(keyStats.since)}` : ''
+      set('keys-mini-sub', `${active.length} of 5 active${latest}`)
     }
     const body = $('keys-body')
     if (!body) return
@@ -80,6 +152,10 @@
       for (const [text, tag] of cells) {
         const cell = document.createElement('td')
         if (tag) { const code = document.createElement(tag); code.textContent = text; cell.append(code) } else cell.textContent = text
+        row.append(cell)
+      }
+      for (const [text, title] of [lastUsed(key), monthUse(key)]) {
+        const cell = document.createElement('td'); cell.textContent = text; if (title) cell.title = title
         row.append(cell)
       }
       const status = document.createElement('td')
@@ -209,6 +285,7 @@
   const csvField = (value) => { const text = value === null || value === undefined ? '' : String(value); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text }
 
   let activity = null
+  let activityLimit = Infinity
   let keyNames = new Map()
   /** The Playground's runs carry the key id `playground:{uid}` (hostedApi.ts, SITE_ACCOUNT_HEADER). */
   const fromPlayground = (line) => line.keyId.startsWith('playground:')
@@ -255,6 +332,7 @@
   }
   const renderActivity = () => {
     if (!activity) return
+    if (resetsAt) { keyStats = tallyKeys(activity, activityLimit, resetsAt, linesUsage); renderKeys(accountKeys, load) }
     renderRequests('recent', activity.slice(0, 5))
     renderRuns(activity.filter(fromPlayground).slice(0, 6))
     const shown = filtered()
@@ -307,15 +385,20 @@
     })
   }
   const loadActivity = async () => {
-    if (!$('recent-body') && !$('activity-body') && !$('by-key-list') && !$('run-cards')) return
+    if (!$('recent-body') && !$('activity-body') && !$('by-key-list') && !$('run-cards') && !$('keys-body')) return
     try {
+      const usage = accountUsage
       const response = await fetch('/api/account/activity', { credentials: 'same-origin' })
       if (!response.ok) throw new Error(String(response.status))
-      activity = (await response.json()).requests
+      const answer = await response.json()
+      activity = answer.requests
+      activityLimit = answer.limit
+      linesUsage = usage
       renderActivity()
     } catch { say('Your requests could not be loaded. Reload the page in a minute.', true) }
   }
 
+  let resetsAt = null
   const render = (data, load) => {
     const { monthly } = data.credits
     const days = lastDays(data.usage)
@@ -344,6 +427,9 @@
     set('sum-pages', number(http + browser))
     const newest = data.keys.find((k) => k.enabled)
     set('conn-key', newest ? `${newest.prefix}…  (${newest.label})` : 'No key yet')
+    accountKeys = data.keys
+    accountUsage = data.usage
+    resetsAt = monthly.resetsAt
     renderKeys(data.keys, load)
     keyNames = new Map(data.keys.map((k) => [k.id, `${k.label} (${k.prefix}…)`]))
     const keyFilter = $('f-key')
@@ -367,7 +453,7 @@
   const load = async () => {
     try {
       const response = await fetch('/api/account', { credentials: 'same-origin' })
-      if (response.status === 401) { location.replace(`/signin/?next=${encodeURIComponent(location.pathname)}`); return }
+      if (response.status === 401) { location.replace(`/signin/?next=${encodeURIComponent(location.pathname + location.search)}`); return }
       if (!response.ok) throw new Error(String(response.status))
       render(await response.json(), load)
       if (activity === null) loadActivity()
@@ -417,6 +503,39 @@
           form.reset()
           load()
         } else if (response.status === 409) say('An account holds at most five active keys. Revoke one first.', true)
+        else say('The key could not be created. Try again.', true)
+      } catch { say('The key could not be created. Try again.', true) } finally { button.disabled = false }
+    })
+  }
+
+  // The Connect page's key: pasted, or made here, it goes into every setup in place of oc_YOUR_KEY, so Copy copies a
+  // working line. A key is shown only once (account.ts keeps its HMAC), so the page cannot fill in one made earlier.
+  // The key stays in this page: nothing stores it or sends it on.
+  const fill = $('fill-key')
+  if (fill) {
+    const PLACEHOLDER = 'oc_YOUR_KEY'
+    const slots = [...document.querySelectorAll('#main-content pre')].filter((pre) => pre.textContent.includes(PLACEHOLDER)).map((pre) => [pre, pre.textContent])
+    const note = $('fill-note')
+    const idle = note.textContent
+    const apply = () => {
+      const key = fill.value.trim()
+      const valid = /^oc_[A-Za-z0-9_-]{20,}$/.test(key)
+      for (const [pre, text] of slots) pre.textContent = valid ? text.split(PLACEHOLDER).join(key) : text
+      note.textContent = !key ? idle : valid ? `Every setup below carries ${key.slice(0, 7)}…` : 'That is not an Octocrawl key: a key starts with oc_.'
+    }
+    fill.addEventListener('input', apply)
+    $('fill-create').addEventListener('click', async () => {
+      const button = $('fill-create')
+      button.disabled = true
+      try {
+        const response = await fetch('/api/account/keys', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label: 'Agent setup' }) })
+        if (response.status === 201) {
+          const { key } = await response.json()
+          fill.value = key
+          apply()
+          note.textContent = `Made a key named Agent setup (${key.slice(0, 7)}…) and put it in every setup below. Copy what you need now: the key is not shown again once you leave.`
+          load()
+        } else if (response.status === 409) say('An account holds at most five active keys. Revoke one in API keys first.', true)
         else say('The key could not be created. Try again.', true)
       } catch { say('The key could not be created. Try again.', true) } finally { button.disabled = false }
     })
@@ -479,6 +598,8 @@
     // and the fields. One run returns every view, so the view only picks what is shown and what Get code asks for.
     const rules = window.OctoRequest
     const VIEW_NAMES = { markdown: 'Markdown', links: 'Links', info: 'Page info', fields: 'Fields', json: 'JSON', evidence: 'Evidence Record' }
+    /** Checks the form's radio of that name and value. */
+    const pick = (name, value) => { const radio = play.querySelector(`input[type="radio"][name="${name}"][value="${value}"]`); if (radio) radio.checked = true }
     const fieldList = $('pg-field-list')
     const readFields = () => [...fieldList.querySelectorAll('.pg-field')].map((row) => ({ name: row.querySelector('input').value.trim(), type: row.querySelector('select').value })).filter((field) => field.name)
     const scrapeRequest = () => {
@@ -544,7 +665,7 @@
       if (fieldList.querySelectorAll('.pg-field').length >= rules.MAX_FIELDS) return
       fieldList.append(fieldRow(field)); renumber()
       // Fields asked for are what the run is for: the view follows, as on the home page.
-      if (play.view.value === 'markdown') play.view.value = 'fields'
+      if (play.view.value === 'markdown') pick('view', 'fields')
       drawCode()
     }
     const addNew = () => { const name = $('pg-field-new').value.trim(); if (!name) return; addField({ name, type: 'string' }); $('pg-field-new').value = ''; $('pg-field-new').focus() }
@@ -683,12 +804,18 @@
       output.textContent = text
     }
     // A result tab and the format panel are one choice, as on the home page (the Evidence Record has no tile).
-    for (const tab of document.querySelectorAll('[data-view]')) tab.addEventListener('click', () => { view = tab.dataset.view; if (view !== 'evidence') play.view.value = view; show(); drawCode() })
+    for (const tab of document.querySelectorAll('[data-view]')) tab.addEventListener('click', () => { view = tab.dataset.view; if (view !== 'evidence') pick('view', view); show(); drawCode() })
     toggles('lang', (value) => { lang = value; drawCode() })
     play.addEventListener('input', drawCode)
     play.addEventListener('change', drawCode)
-    const asked = new URLSearchParams(location.search).get('url')
-    if (asked) play.url.value = asked
+    // What the home page handed over (src/getCode.ts, playgroundHref): the URL, and for a scrape the view and options.
+    const asked = rules.readHandoff(location.search)
+    if (asked.url) play.url.value = asked.url
+    if (endpoint === 'scrape') {
+      for (const field of asked.fields) addField(field)
+      pick('view', asked.view)
+      pick('scope', asked.onlyMainContent ? 'main' : 'whole')
+    }
     switchTo(endpoint, false)
 
     const outcomeOf = (result) => {

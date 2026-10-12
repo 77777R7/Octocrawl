@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
-import { fieldsSchema, isAmazonProduct, restBody, type CodeRequest, type OutputView } from '../src/getCode.js'
+import { fieldsSchema, isAmazonProduct, playgroundHref, restBody, type CodeRequest, type OutputView } from '../src/getCode.js'
 import { parsePreviewRequest } from '../../../packages/public-preview/src/options.js'
 
 // The dashboard's Playground reads its rules from a plain script (public/docs-assets/playground-request.js); these
@@ -15,8 +15,9 @@ const context: { OctoRequest?: {
   restBody(request: CodeRequest): unknown
   runBody(request: CodeRequest): Record<string, unknown>
   fieldProblem(fields: CodeRequest['fields']): string | null
+  readHandoff(search: string): CodeRequest
 } } = {}
-runInNewContext(readFileSync(new URL('../public/docs-assets/playground-request.js', import.meta.url), 'utf8'), Object.assign(context, { URL }))
+runInNewContext(readFileSync(new URL('../public/docs-assets/playground-request.js', import.meta.url), 'utf8'), Object.assign(context, { URL, URLSearchParams }))
 const octo = context.OctoRequest!
 
 const VIEWS: OutputView[] = ['markdown', 'links', 'info', 'fields', 'json']
@@ -54,5 +55,18 @@ describe('the Playground asks for what the home page asks for', () => {
     expect(octo.fieldProblem([{ name: '-price', type: 'number' }])).toMatch(/letters, digits/)
     expect(octo.fieldProblem([{ name: 'a', type: 'string' }, { name: 'a', type: 'number' }])).toMatch(/twice/)
     expect(octo.fieldProblem(Array.from({ length: 21 }, (_, i) => ({ name: `f${i}`, type: 'string' as const })))).toMatch(/at most 20/)
+  })
+
+  it('reads back the request the home page hands over in the Playground\'s address', () => {
+    for (const url of ['https://docs.example/a?b=1&c=2#d', '']) for (const view of VIEWS) for (const fields of [...FIELDS, octo.PRODUCT_FIELDS]) for (const onlyMainContent of [true, false]) {
+      const request = { url, view, fields, onlyMainContent }
+      const href = playgroundHref(request)
+      expect(href.startsWith('/dashboard/scrape/')).toBe(true)
+      expect(JSON.parse(JSON.stringify(octo.readHandoff(new URL(href, 'https://octocrawl.dev').search))), href).toEqual(request)
+    }
+    expect(playgroundHref({ url: 'https://docs.example/', view: 'markdown', fields: [], onlyMainContent: true })).toBe('/dashboard/scrape/?url=https%3A%2F%2Fdocs.example%2F')
+    // What the home page never writes is left out.
+    expect(JSON.parse(JSON.stringify(octo.readHandoff('?view=pdf&field=a:date&field=b&field=:number')))).toEqual({ url: '', view: 'markdown', onlyMainContent: true, fields: [{ name: 'b', type: 'string' }] })
+    expect(octo.readHandoff(`?${Array.from({ length: 25 }, (_, i) => `field=f${i}:number`).join('&')}`).fields).toHaveLength(20)
   })
 })

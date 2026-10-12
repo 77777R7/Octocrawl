@@ -96,6 +96,7 @@ a:hover{color:#fff}
 .key-list li{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px dotted var(--rule);font-size:13.5px}
 .key-list li:first-child{border-top:0}
 .key-list code{color:var(--muted);font:12.5px var(--mono)}
+.key-list .key-used{margin-left:auto;color:var(--muted);font-size:12.5px;white-space:nowrap}
 
 .table-scroll{overflow-x:auto}
 .dash-table{width:100%;border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums}
