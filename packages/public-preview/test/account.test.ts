@@ -141,6 +141,52 @@ describe('the account page\'s data', () => {
     expect(lines.map(line => [line.id, line.formats, line.ms])).toEqual([['1-a', ['markdown', 'json'], 1834], ['2-b', [], 12], ['3-c', null, null]])
   })
 
+  it('remembers what was left of the month under the address\'s key, and carries it to a new account only', async () => {
+    const root = 'projects/octocrawl-test/databases/(default)/documents'
+    const key = 'a'.repeat(64)
+    const NOW = new Date('2026-10-20T12:00:00Z')
+    let balance: Record<string, unknown> | null = { month: { stringValue: '2026-10' }, grant: { integerValue: '120' }, purchased: { integerValue: '300' } }
+    let kept: Record<string, unknown> | null = null
+    let commitStatus = 200
+    const commits: unknown[] = []
+    const fetcher = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
+      if (url.endsWith(':commit')) { commits.push(JSON.parse(String(init!.body))); return new Response('{}', { status: commitStatus }) }
+      if (url.endsWith('/credits/account-0001')) return balance ? Response.json({ name: `${root}/credits/account-0001`, fields: balance }) : new Response('{}', { status: 404 })
+      if (url.endsWith(`/creditCarry/${key}`)) return kept ? Response.json({ name: `${root}/creditCarry/${key}`, fields: kept }) : new Response('{}', { status: 404 })
+      throw new Error(`unexpected ${url}`)
+    }) as typeof fetch
+    const data = new FirestoreAccountData('octocrawl-test', fetcher)
+    await data.rememberCredits('account-0001', key, 1_000, NOW)
+    // The month, what was left of the free grant (not the bought credits), and the month's end for the TTL.
+    expect(commits).toEqual([{ writes: [{ update: { name: `${root}/creditCarry/${key}`, fields: { month: { stringValue: '2026-10' }, left: { integerValue: '120' }, expireAt: { timestampValue: '2026-11-01T00:00:00.000Z' } } } }] }])
+    // A month not spent in, a grant given back in full, or no balance: nothing to remember.
+    for (const next of [{ month: { stringValue: '2026-09' }, grant: { integerValue: '5' } }, { month: { stringValue: '2026-10' }, grant: { integerValue: '1000' } }, null]) {
+      balance = next
+      await data.rememberCredits('account-0001', key, 1_000, NOW)
+    }
+    expect(commits).toHaveLength(1)
+    // Carried: a balance made only if the account has none, and the record deleted in the same commit.
+    kept = { month: { stringValue: '2026-10' }, left: { integerValue: '120' } }
+    await data.carryCredits('account-0002', key, NOW)
+    expect(commits.at(-1)).toEqual({ writes: [
+      { update: { name: `${root}/credits/account-0002`, fields: { month: { stringValue: '2026-10' }, grant: { integerValue: '120' }, purchased: { integerValue: '0' } } }, currentDocument: { exists: false } },
+      { delete: `${root}/creditCarry/${key}` },
+    ] })
+    // An account with a balance keeps it (409); another month's record counts for nothing; a broken commit says so.
+    commitStatus = 409
+    await expect(data.carryCredits('account-0002', key, NOW)).resolves.toBeUndefined()
+    const before = commits.length
+    kept = { month: { stringValue: '2026-09' }, left: { integerValue: '3' } }
+    await data.carryCredits('account-0002', key, NOW)
+    expect(commits).toHaveLength(before)
+    kept = { month: { stringValue: '2026-10' }, left: { integerValue: '3' } }
+    commitStatus = 500
+    await expect(data.carryCredits('account-0002', key, NOW)).rejects.toThrow(/credit carry failed/)
+    await expect(data.carryCredits('account-0002', 'not-a-key', NOW)).rejects.toThrow(/malformed/)
+  })
+
   it('makes a key the hosted API will find, shows it once, lists it by prefix, and revokes only the account\'s own keys', async () => {
     const { url, data, cookie } = await start()
     const made = await fetch(`${url}/api/account/keys`, { method: 'POST', headers: { cookie, origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ label: '  laptop   agent ' }) })

@@ -60,7 +60,17 @@ export interface AccountData {
   /** Deletes everything this file keeps for the account: its keys, credits, daily usage and request lines. Safe to run
    * again after a failure part way. */
   erase(uid: string): Promise<void>
+  /** Before an account is deleted: what is left of this month's free credits, if it spent any, kept under its email
+   * address's key until the month ends (`creditCarry/{key}`: month, left, expireAt). */
+  rememberCredits(uid: string, emailKey: string, monthlyGrant: number, now?: Date): Promise<void>
+  /** At sign-in: a new account (no balance yet) whose address has this month remembered starts with what was left,
+   * and the record goes. Anything else is left as it is. */
+  carryCredits(uid: string, emailKey: string, now?: Date): Promise<void>
 }
+
+/** The first moment of the next UTC month: when a remembered month stops counting. */
+const nextMonth = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+const EMAIL_KEY = /^[0-9a-f]{64}$/
 
 export class MemoryAccountData implements AccountData {
   readonly balances = new Map<string, Balance>()
@@ -68,6 +78,7 @@ export class MemoryAccountData implements AccountData {
   readonly keyRecords = new Map<string, KeyView & { uid: string }>()
   readonly signInMethods = new Map<string, string[]>()
   readonly requestLines = new Map<string, RequestView[]>()
+  readonly carried = new Map<string, { month: string; left: number }>()
   async balance(uid: string) { return this.balances.get(uid) ?? null }
   async usage(uid: string, since: string) {
     return [...this.usageDays.values()].filter(day => day.uid === uid && day.day >= since).map(({ uid: _uid, ...day }) => day).sort((a, b) => a.day.localeCompare(b.day))
@@ -83,6 +94,17 @@ export class MemoryAccountData implements AccountData {
     if (!key || key.uid !== uid) return false
     key.enabled = false
     return true
+  }
+  async rememberCredits(uid: string, emailKey: string, monthlyGrant: number, now = new Date()) {
+    const balance = this.balances.get(uid)
+    const month = now.toISOString().slice(0, 7)
+    if (balance && balance.month === month && balance.grant < monthlyGrant) this.carried.set(emailKey, { month, left: balance.grant })
+  }
+  async carryCredits(uid: string, emailKey: string, now = new Date()) {
+    const kept = this.carried.get(emailKey)
+    if (!kept || kept.month !== now.toISOString().slice(0, 7) || this.balances.has(uid)) return
+    this.balances.set(uid, { month: kept.month, grant: kept.left, purchased: 0 })
+    this.carried.delete(emailKey)
   }
   async erase(uid: string) {
     this.balances.delete(uid)
@@ -172,6 +194,36 @@ export class FirestoreAccountData implements AccountData {
       label: { stringValue: record.label }, prefix: { stringValue: record.prefix }, createdAt: { timestampValue: record.createdAt }, uid: { stringValue: uid },
     } }) })
     if (!response.ok) throw new Error(`key write failed (${response.status})`)
+  }
+  async rememberCredits(uid: string, emailKey: string, monthlyGrant: number, now = new Date()): Promise<void> {
+    if (!EMAIL_KEY.test(emailKey)) throw new Error('email key is malformed')
+    const balance = await this.balance(uid)
+    const month = now.toISOString().slice(0, 7)
+    // A month not spent in yet, or spent and given back, leaves the whole grant: nothing to remember.
+    if (balance === null || balance.month !== month || balance.grant >= monthlyGrant) return
+    const response = await this.request(`${this.resource}:commit`, { method: 'POST', body: JSON.stringify({ writes: [{
+      update: { name: `${this.resource}/creditCarry/${emailKey}`, fields: { month: { stringValue: month }, left: { integerValue: String(balance.grant) }, expireAt: { timestampValue: nextMonth(now).toISOString() } } },
+    }] }) })
+    if (!response.ok) throw new Error(`creditCarry write failed (${response.status})`)
+  }
+  async carryCredits(uid: string, emailKey: string, now = new Date()): Promise<void> {
+    if (!EMAIL_KEY.test(emailKey)) throw new Error('email key is malformed')
+    const read = await this.request(`${this.resource}/creditCarry/${emailKey}`)
+    if (read.status === 404) return
+    if (!read.ok) throw new Error(`creditCarry read failed (${read.status})`)
+    const kept = await read.json() as Doc
+    const month = now.toISOString().slice(0, 7)
+    const left = Number(kept.fields?.left?.integerValue)
+    // Another month's record counts for nothing; the TTL deletes it.
+    if (kept.fields?.month?.stringValue !== month || !Number.isSafeInteger(left) || left < 0) return
+    // Only an account with no balance yet: the commit fails, and changes nothing, when it has one.
+    const response = await this.request(`${this.resource}:commit`, { method: 'POST', body: JSON.stringify({ writes: [
+      { update: { name: `${this.resource}/credits/${uid}`, fields: { month: { stringValue: month }, grant: { integerValue: String(left) }, purchased: { integerValue: '0' } } }, currentDocument: { exists: false } },
+      { delete: `${this.resource}/creditCarry/${emailKey}` },
+    ] }) })
+    // 409: the account has a balance already, so it keeps its own.
+    if (response.ok || response.status === 409) return
+    throw new Error(`credit carry failed (${response.status})`)
   }
   async erase(uid: string): Promise<void> {
     if (!/^[A-Za-z0-9_-]{8,128}$/.test(uid) || /^__.*__$/.test(uid)) throw new Error('account id is malformed')

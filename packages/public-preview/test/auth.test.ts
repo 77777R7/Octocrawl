@@ -5,7 +5,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPreviewServer } from '../src/server.js'
-import { createAuthRoutes, FirestoreAccountStore, IdentityToolkit, MemoryAccountStore, safeNext, SignInRefused, type IdentityProvider, type SignedIn } from '../src/auth.js'
+import { MemoryAccountData } from '../src/account.js'
+import { createAuthRoutes, creditCarryKey, FirestoreAccountStore, IdentityToolkit, MemoryAccountStore, safeNext, SignInRefused, type AuthOptions, type IdentityProvider, type SignedIn } from '../src/auth.js'
 import type { LogLine } from '../src/site.js'
 
 const SECRET = 's'.repeat(40)
@@ -32,13 +33,13 @@ function fakeIdentity() {
   return { identity, calls, answer: (next: SignedIn | Error) => { idp = next }, linkAnswer: (next: SignedIn | Error) => { link = next } }
 }
 
-async function start(emailFinishPage?: () => Promise<string | null>, eraseAccountData?: (uid: string) => Promise<void>, now?: () => Date) {
+async function start(emailFinishPage?: () => Promise<string | null>, eraseAccountData?: (uid: string) => Promise<void>, now?: () => Date, creditCarry?: AuthOptions['creditCarry']) {
   const dir = await mkdtemp(join(tmpdir(), 'w2l-auth-')); dirs.push(dir)
   await writeFile(join(dir, '404.html'), '<title>Page not found</title>')
   const fake = fakeIdentity()
   const accounts = new MemoryAccountStore()
   const lines: LogLine[] = []
-  const auth = createAuthRoutes({ identity: fake.identity, accounts, secret: SECRET, log: line => lines.push(line), emailFinishPage, ...(eraseAccountData ? { eraseAccountData } : {}), ...(now ? { now } : {}) })
+  const auth = createAuthRoutes({ identity: fake.identity, accounts, secret: SECRET, log: line => lines.push(line), emailFinishPage, ...(eraseAccountData ? { eraseAccountData } : {}), ...(now ? { now } : {}), ...(creditCarry ? { creditCarry } : {}) })
   const server = createPreviewServer({ quota: { consume: async () => 'ok' }, staticDir: dir, amazonState: null, log: line => lines.push(line), visitorCookieSecret: SECRET, auth })
   servers.push(server)
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -358,6 +359,53 @@ describe('deleting an account', () => {
     const off = await start()
     const session = await signIn(off.url)
     expect((await startDeletion(off.url, session, 'ada@example.org')).status).toBe(503)
+  })
+})
+
+describe('deleting an account and signing up again', () => {
+  const month = new Date().toISOString().slice(0, 7)
+  const setUp = async () => {
+    const data = new MemoryAccountData()
+    const started = await start(undefined, uid => data.erase(uid), undefined, { remember: (uid, key) => data.rememberCredits(uid, key, 1_000), carry: (uid, key) => data.carryCredits(uid, key) })
+    return { ...started, data }
+  }
+  const signInAs = async (url: string, fake: ReturnType<typeof fakeIdentity>, user: SignedIn, extraCookie = '') => {
+    fake.answer(user)
+    const begin = (await fetch(`${url}/auth/github`, { redirect: 'manual' })).headers.getSetCookie()[0]!.split(';')[0]!
+    return fetch(`${url}/__/auth/handler?code=x`, { redirect: 'manual', headers: { cookie: `${begin}${extraCookie}` } })
+  }
+  const deleteAccount = async (url: string, fake: ReturnType<typeof fakeIdentity>, user: SignedIn) => {
+    const session = `w2l_session=${cookies(await signInAs(url, fake, user)).w2l_session}`
+    const started = await fetch(`${url}/auth/delete/start`, { method: 'POST', headers: { cookie: session, origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ confirm: user.email ?? 'DELETE' }) })
+    return signInAs(url, fake, user, `; w2l_delete=${cookies(started).w2l_delete}`)
+  }
+  const ADA = { uid: 'github-user-0001', email: 'Ada@Example.org', provider: 'github.com' as const, idToken: 'id-token-1' }
+
+  it('goes on with what was left of the month, not a new grant, for the same address', async () => {
+    const { url, fake, data } = await setUp()
+    data.balances.set(ADA.uid, { month, grant: 120, purchased: 300 })
+    expect((await deleteAccount(url, fake, ADA)).headers.get('location')).toBe('/signin/?deleted=1')
+    expect(data.balances.has(ADA.uid)).toBe(false)
+    // Kept under the address's key only: no address, no old uid, no bought credits.
+    expect([...data.carried.entries()]).toEqual([[creditCarryKey(SECRET, 'ada@example.org'), { month, left: 120 }]])
+    // The same address, any case, signs up again as a new account.
+    await signInAs(url, fake, { ...ADA, uid: 'github-user-0002', email: ' ada@example.org' })
+    expect(data.balances.get('github-user-0002')).toEqual({ month, grant: 120, purchased: 0 })
+    expect(data.carried.size).toBe(0)
+    // Another address starts with nothing remembered: its first call gets the month's grant (account.ts, a missing balance).
+    await signInAs(url, fake, { ...ADA, uid: 'github-user-0003', email: 'bob@example.org' })
+    expect(data.balances.has('github-user-0003')).toBe(false)
+  })
+
+  it('remembers nothing when the month was not spent in, or the account has no address', async () => {
+    const { url, fake, data } = await setUp()
+    data.balances.set(ADA.uid, { month: '2026-01', grant: 3, purchased: 0 })
+    await deleteAccount(url, fake, ADA)
+    expect(data.carried.size).toBe(0)
+    data.balances.set('github-user-0009', { month, grant: 10, purchased: 0 })
+    const noAddress = await deleteAccount(url, fake, { ...ADA, uid: 'github-user-0009', email: null as unknown as string })
+    expect(noAddress.headers.get('location')).toBe('/signin/?deleted=1')
+    expect(data.carried.size).toBe(0)
   })
 })
 

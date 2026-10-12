@@ -19,6 +19,8 @@ if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error('P
 // Sign-in needs the project's Firebase web API key; without it the sign-in addresses are not served.
 const firebaseApiKey = process.env.W2L_FIREBASE_API_KEY?.trim()
 const staticDir = resolve(process.env.W2L_PUBLIC_WEB_DIST ?? 'apps/public-web/dist')
+const monthlyCredits = Number(process.env.W2L_MONTHLY_CREDITS ?? 1_000)
+if (!Number.isSafeInteger(monthlyCredits) || monthlyCredits < 1) throw new Error('W2L_MONTHLY_CREDITS must be a positive integer')
 // The account's data, read by the dashboard and deleted with the account; only where sign-in is served.
 const accountData = firebaseApiKey ? new FirestoreAccountData(process.env.W2L_FIRESTORE_PROJECT_ID ?? '') : undefined
 const auth = firebaseApiKey && accountData
@@ -31,10 +33,10 @@ const auth = firebaseApiKey && accountData
     emailFinishPage: () => readFile(join(staticDir, 'signin', 'email', 'index.html'), 'utf8'),
     // Deleting an account (Settings) deletes its keys, credits, usage and request lines first.
     eraseAccountData: uid => accountData.erase(uid),
+    // Deleting an account and signing up again with the same address goes on with the month's free credits.
+    creditCarry: { remember: (uid, key) => accountData.rememberCredits(uid, key, monthlyCredits), carry: (uid, key) => accountData.carryCredits(uid, key) },
   })
   : undefined
-const monthlyCredits = Number(process.env.W2L_MONTHLY_CREDITS ?? 1_000)
-if (!Number.isSafeInteger(monthlyCredits) || monthlyCredits < 1) throw new Error('W2L_MONTHLY_CREDITS must be a positive integer')
 const account = auth === undefined || accountData === undefined ? undefined : createAccountRoutes({
   data: accountData,
   hashKey: (process.env.W2L_QUOTA_HASH_KEY ?? '').trim(),

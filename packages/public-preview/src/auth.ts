@@ -233,6 +233,15 @@ export interface AuthOptions {
   /** Deletes the account's data that is not sign-in's own: keys, credits, usage, request lines (account.ts, erase).
    * Without it, accounts cannot be deleted here. */
   eraseAccountData?: (uid: string) => Promise<void>
+  /** This month's free credits, kept across deleting an account and signing up again with the same email address
+   * (account.ts, rememberCredits and carryCredits), so deleting cannot restart the month's grant. Each takes the
+   * account's uid and its email address's key (creditCarryKey). */
+  creditCarry?: { remember(uid: string, emailKey: string): Promise<void>; carry(uid: string, emailKey: string): Promise<void> }
+}
+
+/** The key a remembered month of credits is kept under: a keyed hash of the email address, never the address. */
+export function creditCarryKey(secret: string, email: string): string {
+  return createHmac('sha256', secret).update(`credit-carry:${email.trim().toLowerCase()}`).digest('hex')
 }
 
 export const SESSION_COOKIE = 'w2l_session'
@@ -381,6 +390,12 @@ export function createAuthRoutes(options: AuthOptions) {
     const at = now()
     const expiresAt = new Date(at.getTime() + SESSION_DAYS * 86_400_000)
     await options.accounts.signIn(user, sessionHash(options.secret, id), expiresAt, at)
+    // A new account for an address whose account was deleted this month goes on with that month's free credits.
+    if (options.creditCarry && user.email) {
+      await options.creditCarry.carry(user.uid, creditCarryKey(options.secret, user.email)).catch((error: unknown) => {
+        log({ event: 'w2l_auth', step: 'credit_carry', outcome: 'failed', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })
+      })
+    }
     res.setHeader('set-cookie', [cookie(origin, SESSION_COOKIE, id, '/', SESSION_DAYS * 86_400), hintCookie(origin, true), ...extraCookies])
   }
 
@@ -415,6 +430,8 @@ export function createAuthRoutes(options: AuthOptions) {
     }
     try {
       await options.accounts.forget(user.uid)
+      // Before the balance goes: what is left of this month's free credits, under the address's key.
+      if (options.creditCarry && user.email) await options.creditCarry.remember(user.uid, creditCarryKey(options.secret, user.email))
       await options.eraseAccountData(user.uid)
     } catch (error) {
       log({ event: 'w2l_auth', step: 'delete', outcome: 'failed', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })
