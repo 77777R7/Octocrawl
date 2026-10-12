@@ -772,7 +772,9 @@ export function selectList(doc: Document): Element | null {
     }
   }
   if (best === null) return selectLinkedContainer(doc, (kid) => qsa(kid, 'a').length > 0)?.el ?? null
-  const grid = selectLinkedContainer(doc, isCard)
+  // A row of cards inside the list (a shelf in a list of shelves) is part of it, not a rival.
+  const list = best
+  const grid = selectLinkedContainer(doc, isCard, (el) => list.contains(el))
   return grid !== null && grid.linkedKids >= bestItems * 2 ? grid.el : best
 }
 
@@ -780,13 +782,19 @@ export function selectList(doc: Document): Element | null {
  * Div-based listings: no list markup, but the page's content is a set of
  * link-carrying sibling cards. The container with the most children that
  * `counts` (any link, or a card), preferring the DEEPEST qualifying one so the
- * whole page wrapper doesn't win by aggregate link count; null when none has three.
+ * whole page wrapper doesn't win by aggregate link count, and passing over
+ * those `skip` names; null when none has three.
  */
-function selectLinkedContainer(doc: Document, counts: (kid: Element) => boolean): { el: Element; linkedKids: number } | null {
+function selectLinkedContainer(
+  doc: Document,
+  counts: (kid: Element) => boolean,
+  skip: (el: Element) => boolean = () => false,
+): { el: Element; linkedKids: number } | null {
   let bestDiv: Element | null = null
   let bestDivDepth = -1
   let bestDivLinks = 0
   for (const el of qsa(doc, 'div,section')) {
+    if (skip(el)) continue
     const kids = Array.from(el.children)
     const linkedKids = kids.filter(counts).length
     if (linkedKids < 3) continue

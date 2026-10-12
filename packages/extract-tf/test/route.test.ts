@@ -905,6 +905,14 @@ describe('strategies', () => {
         doc.close()
       }
     })
+
+    it('keeps a list of shelves whole, not one shelf\'s row of cards', () => {
+      const row = (s: number) => `<div id="row${s}" class="row">${Array.from({ length: 12 }, (_, i) => `<div class="card"><a href="/p/${s}-${i}">Item ${s}-${i}</a> $${i}.99</div>`).join('')}</div>`
+      const shelves = `<ul id="shelves">${Array.from({ length: 6 }, (_, s) => `<li class="shelf"><h2><a href="/c/${s}">Shelf ${s}</a></h2>${row(s)}</li>`).join('')}</ul>`
+      const doc = parse(wrap(`<h1>Shop</h1>${shelves}`))
+      expect(selectList(doc.document)?.getAttribute('id')).toBe('shelves')
+      doc.close()
+    })
   })
 
   it('selectTable skips layout tables and picks the data table', () => {
