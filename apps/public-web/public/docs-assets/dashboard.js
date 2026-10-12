@@ -8,6 +8,26 @@
   const day = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : '')
   const longDay = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
   const set = (id, text) => { const element = $(id); if (element) element.textContent = text }
+  // The sidebar's highlight is one block that follows the current page's link: when the Playground switches mode in place
+  // it slides to the other link instead of jumping. Placed through CSSOM (transform, size), which the CSP allows.
+  const nav = document.querySelector('.dash-nav')
+  const mark = nav ? document.createElement('span') : null
+  const placeMark = () => {
+    const current = nav && nav.querySelector('a[aria-current="page"]')
+    if (!mark || !current) return
+    mark.style.width = `${current.offsetWidth}px`
+    mark.style.height = `${current.offsetHeight}px`
+    mark.style.transform = `translate(${current.offsetLeft}px, ${current.offsetTop}px)`
+  }
+  if (mark) {
+    mark.className = 'dash-nav-mark'
+    mark.setAttribute('aria-hidden', 'true')
+    nav.prepend(mark)
+    nav.classList.add('has-mark')
+    placeMark()
+    requestAnimationFrame(() => mark.classList.add('is-ready'))
+    if ('ResizeObserver' in window) new ResizeObserver(placeMark).observe(nav)
+  }
   const message = $('dash-message')
   const say = (text, error = false) => { message.textContent = text; message.classList.toggle('is-error', error) }
   const PROVIDERS = { 'google.com': 'Google', 'github.com': 'GitHub', emailLink: 'Email link' }
@@ -204,10 +224,39 @@
       && (form.get('result') !== 'read' || outcome(line)[1] === 'ok')
       && (form.get('result') !== 'free' || line.credits === 0))
   }
+  /** The Playground's recent runs as receipts: what was read, the result, robots.txt, the cost, when, and the hash. */
+  let shownReceipts = null
+  const renderRuns = (lines) => {
+    const host = $('run-cards')
+    if (!host) return
+    host.replaceChildren(...lines.map((line) => {
+      const receipt = document.createElement('article'); receipt.className = 'receipt'
+      if (shownReceipts && !shownReceipts.has(line.id)) receipt.classList.add('is-new')
+      const top = document.createElement('div'); top.className = 'receipt-top'
+      const kind = document.createElement('span'); kind.textContent = line.endpoint
+      const again = document.createElement('button'); again.type = 'button'; again.className = 'receipt-again'; again.dataset.again = line.url; again.dataset.endpoint = line.endpoint
+      again.setAttribute('aria-label', `Run ${line.url} again`); again.textContent = 'again ↺'
+      top.append(kind, again)
+      const where = document.createElement('p'); where.className = 'receipt-url'; where.title = line.url
+      try { const url = new URL(line.url); where.textContent = `${url.host}${url.pathname === '/' ? '' : url.pathname}` } catch { where.textContent = line.url || '(no URL)' }
+      const facts = document.createElement('dl')
+      const [label, mark] = outcome(line)
+      for (const [name, value, className] of [['result', label, mark], ['lane', line.lane ?? '—'], ['robots.txt', line.robots ?? '—'], ['credits', number(line.credits)], ['at (UTC)', timeOf(line.at)]]) {
+        const term = document.createElement('dt'); term.textContent = name
+        const detail = document.createElement('dd'); detail.textContent = value; if (className) detail.className = className
+        facts.append(term, detail)
+      }
+      const hash = document.createElement('p'); hash.className = 'receipt-hash'; hash.textContent = line.sha256 ? `sha256 ${line.sha256}` : 'nothing read: no hash'
+      receipt.append(top, where, facts, hash)
+      return receipt
+    }))
+    shownReceipts = new Set(lines.map((line) => line.id))
+    $('runs-empty').hidden = lines.length > 0
+  }
   const renderActivity = () => {
     if (!activity) return
     renderRequests('recent', activity.slice(0, 5))
-    renderRequests('runs', activity.filter(fromPlayground).slice(0, 5))
+    renderRuns(activity.filter(fromPlayground).slice(0, 6))
     const shown = filtered()
     renderRequests('activity', shown, keyNames)
     set('activity-count', `${number(shown.length)} of ${number(activity.length)} in 30 days`)
@@ -258,7 +307,7 @@
     })
   }
   const loadActivity = async () => {
-    if (!$('recent-body') && !$('activity-body') && !$('by-key-list') && !$('runs-body')) return
+    if (!$('recent-body') && !$('activity-body') && !$('by-key-list') && !$('run-cards')) return
     try {
       const response = await fetch('/api/account/activity', { credentials: 'same-origin' })
       if (!response.ok) throw new Error(String(response.status))
@@ -373,18 +422,69 @@
     })
   }
 
-  // The Playground (the Scrape and Map pages): the form goes to POST /api/account/run, which the hosted API answers and
-  // charges as it would a key's call. The answer is shown as text in views, the Evidence Record as facts and JSON, and
-  // the same call as code for the visitor's own key.
+  // The Playground (the Scrape and Map pages, one layout): a selector whose panel of tiles picks the endpoint, the URL
+  // card with the octopus behind it (dashboard-octopus.js), whose options, formats and code open as printed panels; the
+  // result; the recent runs as receipts. The card goes to POST /api/account/run, which the hosted API answers and
+  // charges as it would a key's call.
   const play = $('play-form')
   if (play) {
-    const endpoint = play.dataset.endpoint
     const output = $('play-output')
     const evidence = $('play-evidence')
     const submit = $('play-submit')
+    const glyphs = window.OctoGlyphs
+    const creature = glyphs && $('pg-octopus') ? glyphs.octopus($('pg-octopus'), play) : null
+    if (glyphs && $('pg-sea')) glyphs.current($('pg-sea'))
+    let endpoint = play.dataset.endpoint
     let answer = null
-    let view = endpoint === 'scrape' ? 'markdown' : 'links'
+    let view = 'markdown'
     let lang = 'curl'
+    const IDLE_NOTE = ''
+    const COST = {
+      scrape: ['1–5 credits', 'A page read over HTTP costs 1 credit, one that needs a browser 5, and one that is blocked or kept out by robots.txt nothing.'],
+      map: ['0–1 credit', 'A map that finds URLs costs 1 credit; one that finds none costs nothing.'],
+    }
+    const LABEL = { scrape: 'Extract page', map: 'Map site' }
+    const goLabel = (text = LABEL[endpoint]) => { const label = document.createElement('span'); label.id = 'pg-go-label'; label.textContent = text; const arrow = document.createElement('span'); arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '→'; submit.replaceChildren(label, ' ', arrow) }
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    /** Text that turns into other text through glyphs, left to right, as the site's menus decode theirs (nav.js). */
+    const morph = (element, to) => {
+      if (!element) return
+      clearTimeout(element.morphing)
+      if (still) { element.textContent = to; return }
+      const from = element.textContent
+      const noise = '·:+×#'
+      const length = Math.max(from.length, to.length)
+      let step = 0
+      const tick = () => {
+        step += 1
+        const done = step / 8
+        let text = ''
+        for (let i = 0; i < length; i++) {
+          const ahead = i / length < done
+          const target = to[i] ?? ''
+          text += ahead ? target : target === ' ' || from[i] === ' ' ? ' ' : noise[(i + step) % noise.length]
+        }
+        element.textContent = step >= 8 ? to : text.replace(/\s+$/, '')
+        if (step < 8) element.morphing = setTimeout(tick, 32)
+      }
+      tick()
+    }
+    /** The card's toolbar prints in again, as a panel does, when the mode changes what it holds. */
+    const reprint = (element) => {
+      if (still || !element) return
+      element.classList.remove('is-switching'); void element.offsetWidth; element.classList.add('is-switching')
+      setTimeout(() => element.classList.remove('is-switching'), 450)
+    }
+    // The scrape's settings, by the home page's rules (playground-request.js): the view, main content or the whole page,
+    // and the fields. One run returns every view, so the view only picks what is shown and what Get code asks for.
+    const rules = window.OctoRequest
+    const VIEW_NAMES = { markdown: 'Markdown', links: 'Links', info: 'Page info', fields: 'Fields', json: 'JSON', evidence: 'Evidence Record' }
+    const fieldList = $('pg-field-list')
+    const readFields = () => [...fieldList.querySelectorAll('.pg-field')].map((row) => ({ name: row.querySelector('input').value.trim(), type: row.querySelector('select').value })).filter((field) => field.name)
+    const scrapeRequest = () => {
+      const form = new FormData(play)
+      return { url: String(form.get('url') ?? '').trim(), view: String(form.get('view') ?? 'markdown'), onlyMainContent: form.get('scope') !== 'whole', fields: readFields() }
+    }
     const body = () => {
       const form = new FormData(play)
       const url = String(form.get('url') ?? '').trim()
@@ -392,17 +492,165 @@
         const search = String(form.get('search') ?? '').trim()
         return { url, limit: Math.min(5000, Math.max(1, Math.round(Number(form.get('limit')) || 100))), ...(search ? { search } : {}) }
       }
-      return { url, formats: form.getAll('formats').map(String), onlyMainContent: form.get('onlyMainContent') === 'on' }
+      return rules.runBody(scrapeRequest())
     }
     const drawCode = () => {
-      const request = body()
+      const scrape = endpoint === 'scrape'
+      const request = scrape ? scrapeRequest() : body()
       if (!request.url) request.url = 'https://example.com'
-      const json = JSON.stringify(request)
+      // The home page's Get code body for a scrape (getCode.ts, restBody); the map's own.
+      const sent = scrape ? rules.restBody(request) : request
+      const json = JSON.stringify(sent)
       const api = `https://api.octocrawl.dev/v1/${endpoint}`
       set('play-code', lang === 'curl'
         ? `curl ${api} \\\n  -H 'authorization: Bearer oc_YOUR_KEY' \\\n  -H 'content-type: application/json' \\\n  -d '${json.replace(/'/g, "'\\''")}'`
-        : `const response = await fetch('${api}', {\n  method: 'POST',\n  headers: { authorization: 'Bearer oc_YOUR_KEY', 'content-type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(request, null, 2).replace(/\n/g, '\n  ')}),\n})\nconst result = await response.json()`)
+        : `const response = await fetch('${api}', {\n  method: 'POST',\n  headers: { authorization: 'Bearer oc_YOUR_KEY', 'content-type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sent, null, 2).replace(/\n/g, '\n  ')}),\n})\nconst result = await response.json()`)
+      if (scrape) {
+        set('pg-format-label', VIEW_NAMES[request.view])
+        // The Options button says what differs from the defaults, as on the home page: the fields, or a dot for the whole page.
+        const badge = $('pg-options-badge')
+        badge.hidden = !request.fields.length && request.onlyMainContent
+        badge.textContent = request.fields.length ? String(request.fields.length) : '•'
+        set('pg-scope-note', request.onlyMainContent ? 'Headers, menus and footers are left out.' : 'The whole page, headers and menus included; a page with no clear main content returns everything.')
+        const count = fieldList.querySelectorAll('.pg-field').length
+        set('pg-fields-count', `${String(request.fields.length).padStart(2, '0')}/${rules.MAX_FIELDS}`)
+        set('pg-fields-error', rules.fieldProblem(request.fields) ?? '')
+        $('pg-field-new').disabled = count >= rules.MAX_FIELDS
+        $('pg-field-add').disabled = count >= rules.MAX_FIELDS
+      }
     }
+
+    // The fields editor, as the home page's: numbered rows of a name and a type, × to remove, a line to add one, and the
+    // product preset.
+    const fieldRow = (field) => {
+      const row = document.createElement('div'); row.className = 'pg-field'; row.setAttribute('role', 'listitem')
+      const index = document.createElement('span'); index.className = 'pg-field-index'; index.setAttribute('aria-hidden', 'true')
+      const name = document.createElement('input'); name.maxLength = 64; name.placeholder = 'field name'; name.value = field.name; name.autocomplete = 'off'; name.spellcheck = false
+      const type = document.createElement('select')
+      for (const [value, label] of rules.FIELD_TYPES) type.append(new Option(label, value))
+      type.value = field.type
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'pg-field-remove'; remove.textContent = '×'
+      remove.addEventListener('click', () => { row.remove(); renumber(); drawCode(); $('pg-field-new').focus() })
+      row.append(index, name, type, remove)
+      return row
+    }
+    const renumber = () => [...fieldList.querySelectorAll('.pg-field')].forEach((row, i) => {
+      row.querySelector('.pg-field-index').textContent = String(i + 1).padStart(2, '0')
+      row.querySelector('input').setAttribute('aria-label', `Field ${i + 1} name`)
+      row.querySelector('select').setAttribute('aria-label', `Field ${i + 1} type`)
+      row.querySelector('.pg-field-remove').setAttribute('aria-label', `Remove field ${i + 1}`)
+    })
+    const addField = (field) => {
+      if (fieldList.querySelectorAll('.pg-field').length >= rules.MAX_FIELDS) return
+      fieldList.append(fieldRow(field)); renumber()
+      // Fields asked for are what the run is for: the view follows, as on the home page.
+      if (play.view.value === 'markdown') play.view.value = 'fields'
+      drawCode()
+    }
+    const addNew = () => { const name = $('pg-field-new').value.trim(); if (!name) return; addField({ name, type: 'string' }); $('pg-field-new').value = ''; $('pg-field-new').focus() }
+    $('pg-field-add').addEventListener('click', addNew)
+    $('pg-field-new').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); addNew() } })
+    $('pg-fields-preset').addEventListener('click', () => { const have = new Set(readFields().map((field) => field.name)); for (const field of rules.PRODUCT_FIELDS) if (!have.has(field.name)) addField(field) })
+
+    // Each format's icon on the home page's glyph grid (src/main.ts, FORMAT_ICONS): lit cells over faint dots.
+    const FORMAT_ICONS = {
+      markdown: ['#####..', '.......', '######.', '#####..', '######.', '.......', '####...'],
+      links: ['...####', '.....##', '....#.#', '...#..#', '..#....', '.#.....', '#......'],
+      info: ['..###..', '.#...#.', '#..#..#', '#.....#', '#..#..#', '.#.#.#.', '..###..'],
+      fields: ['##.####', '.......', '##.###.', '.......', '##.####', '.......', '##.##..'],
+      json: ['..#.#..', '.#...#.', '.#...#.', '#.....#', '.#...#.', '.#...#.', '..#.#..'],
+    }
+    const SVG = 'http://www.w3.org/2000/svg'
+    for (const box of document.querySelectorAll('#pg .tile-icon')) {
+      const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('viewBox', '0 0 49 49'); svg.setAttribute('class', 'glyph-icon')
+      FORMAT_ICONS[box.dataset.icon].forEach((row, y) => [...row].forEach((cell, x) => {
+        const lit = cell === '#'
+        const mark = document.createElementNS(SVG, lit ? 'rect' : 'circle')
+        const attributes = lit ? [['x', x * 7 + 1.2], ['y', y * 7 + 1.2], ['width', 4.6], ['height', 4.6], ['rx', 1]] : [['cx', x * 7 + 3.5], ['cy', y * 7 + 3.5], ['r', 0.9]]
+        for (const [name, value] of attributes) mark.setAttribute(name, String(value))
+        mark.setAttribute('class', lit ? 'on' : 'off')
+        svg.append(mark)
+      }))
+      box.append(svg)
+    }
+    // Picking a format after a run shows that view of the same result; before, it sets what the run is for.
+    play.addEventListener('change', (event) => { if (event.target.name === 'view') { view = event.target.value; if (answer) show(); setTimeout(close, still ? 0 : 160) } })
+
+    // Panels: one open at a time, printed in as the site's menus are (nav.js): a reveal in steps, then rows and glyphs.
+    const panels = [...document.querySelectorAll('#pg [data-panel]')]
+    const close = () => { for (const button of panels) { button.setAttribute('aria-expanded', 'false'); $(button.dataset.panel).hidden = true } }
+    const decode = (element, delay) => {
+      const text = element.textContent
+      const noise = '·:+×#'
+      let step = 0
+      setTimeout(function tick() {
+        step += 1
+        element.textContent = step >= 6 ? text : text.replace(/\S/g, (c, i) => (i / text.length < step / 6 ? c : noise[(i + step) % noise.length]))
+        if (step < 6) setTimeout(tick, 32)
+      }, delay)
+    }
+    const print = (panel) => {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+      panel.classList.remove('is-printing'); void panel.offsetWidth; panel.classList.add('is-printing')
+      ;[...panel.querySelectorAll('.pg-check, .pg-fields label, .pg-tile, .format-tile, .pg-field, .code, p')].forEach((row, i) => row.style.setProperty('--row', String(i)))
+      ;[...panel.querySelectorAll('.pg-kicker, code')].forEach((element, i) => { if (!element.closest('pre')) decode(element, 40 + i * 18) })
+      setTimeout(() => panel.classList.remove('is-printing'), 700)
+    }
+    for (const button of panels) {
+      button.addEventListener('click', () => {
+        const panel = $(button.dataset.panel)
+        const opening = panel.hidden
+        close()
+        if (!opening) return
+        panel.hidden = false
+        button.setAttribute('aria-expanded', 'true')
+        print(panel)
+      })
+    }
+    document.addEventListener('click', (event) => { if (!event.target.closest('.pg-panel, [data-panel]')) close() })
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') close() })
+
+    // The selector's tiles: the same card, its options and its address change in place.
+    const PAGES = { scrape: ['Scrape', 'Read one page as Markdown, with its Evidence Record, on this account\'s credits at the API\'s price.'], map: ['Map', 'List the URLs of a site from its sitemap and links, on this account\'s credits at the API\'s price.'] }
+    const switchTo = (next, push) => {
+      endpoint = next
+      $('pg').dataset.endpoint = next
+      play.dataset.endpoint = next
+      for (const element of document.querySelectorAll('#pg [data-only]')) element.hidden = element.dataset.only !== next
+      for (const tile of document.querySelectorAll('#pg .pg-tile[data-endpoint]')) tile.setAttribute('aria-pressed', String(tile.dataset.endpoint === next))
+      const pick = { scrape: ['Extract', 'Scrape', '▤'], map: ['Discover', 'Map', '⌗'] }[next]
+      if (push) {
+        morph($('pg-picker-kicker'), pick[0]); morph($('pg-picker-name'), pick[1]); morph($('pg-picker-glyph'), pick[2])
+        reprint(play.querySelector('.pg-toolbar'))
+        if (creature) creature.pulse()
+      } else { set('pg-picker-kicker', pick[0]); set('pg-picker-name', pick[1]); set('pg-picker-glyph', pick[2]) }
+      for (const link of document.querySelectorAll('.dash-nav a')) { if (link.getAttribute('href') === `/dashboard/${next}/`) link.setAttribute('aria-current', 'page'); else if (/\/dashboard\/(scrape|map)\/$/.test(link.getAttribute('href'))) link.removeAttribute('aria-current') }
+      placeMark()
+      const [title, lead] = PAGES[next]
+      // The page's title decodes into the new mode's name, as the selector's does.
+      if (push) morph(document.querySelector('.dash-head h1'), title); else document.querySelector('.dash-head h1').textContent = title
+      const leadLine = document.querySelector('.dash-head .dash-lead')
+      if (leadLine) leadLine.textContent = lead
+      document.title = `${title} | Octocrawl Dashboard`
+      set('play-cost', COST[next][0])
+      $('play-cost').title = COST[next][1]
+      if (push && $('pg-go-label')) morph($('pg-go-label'), LABEL[next]); else goLabel()
+      if (!push) close()
+      $('play-result').hidden = true
+      set('play-summary', IDLE_NOTE)
+      answer = null
+      view = next === 'scrape' ? play.view.value : 'links'
+      if (push) { const url = play.url.value.trim(); history.replaceState(null, '', `/dashboard/${next}/${url ? `?url=${encodeURIComponent(url)}` : ''}`) }
+      drawCode()
+    }
+    // The highlight moves to the tile picked, the stage changes under the open panel, and the panel closes a moment later.
+    for (const tile of document.querySelectorAll('#pg .pg-tile[data-endpoint]')) {
+      tile.addEventListener('click', () => {
+        if (tile.dataset.endpoint !== endpoint) switchTo(tile.dataset.endpoint, true)
+        setTimeout(() => { close(); play.url.focus({ preventScroll: true }) }, still ? 0 : 220)
+      })
+    }
+
     const linkList = (links) => (Array.isArray(links) ? links.map((link) => (typeof link === 'string' ? link : link && link.url)).filter(Boolean) : null)
     const facts = (record) => {
       const rows = [
@@ -424,20 +672,24 @@
       for (const tab of document.querySelectorAll('[data-view]')) tab.setAttribute('aria-selected', String(tab.dataset.view === view))
       evidence.hidden = view !== 'evidence'
       let text
-      if (view === 'markdown') text = typeof answer.markdown === 'string' ? answer.markdown : 'No Markdown came back. The result and the Evidence Record say why.'
-      else if (view === 'html') text = typeof answer.html === 'string' ? answer.html : 'HTML was not asked for: tick HTML and run again.'
-      else if (view === 'links') { const links = linkList(answer.links); text = links ? (links.length ? links.join('\n') : 'No links came back.') : 'Links were not asked for: tick Links and run again.' }
+      if (view === 'markdown') text = typeof answer.markdown === 'string' && answer.markdown.trim() ? answer.markdown : 'No Markdown came back. The result and the Evidence Record say why.'
+      else if (view === 'links') { const links = linkList(answer.links); text = links && links.length ? links.join('\n') : 'No links came back.' }
+      // What the page declares about itself, as the home page's Page info shows it.
+      else if (view === 'info') text = JSON.stringify({ url: (answer.evidenceRecord && answer.evidenceRecord.finalUrl) || answer.requestedUrl || answer.url, title: answer.metadata ? answer.metadata.title : null, ...(answer.metadata ? { metadata: answer.metadata } : {}) }, null, 2)
+      else if (view === 'fields') text = answer.json !== undefined && answer.json !== null ? JSON.stringify(answer.json, null, 2) : 'No fields were asked for: add them in Options and run again. The run reads them from the page itself.'
       else if (view === 'evidence') {
         if (answer.evidenceRecord) { facts(answer.evidenceRecord); text = JSON.stringify(answer.evidenceRecord, null, 2) } else { evidence.replaceChildren(); text = 'This answer has no Evidence Record.' }
       } else text = JSON.stringify(answer, null, 2)
       output.textContent = text
     }
-    for (const tab of document.querySelectorAll('[data-view]')) tab.addEventListener('click', () => { view = tab.dataset.view; show() })
+    // A result tab and the format panel are one choice, as on the home page (the Evidence Record has no tile).
+    for (const tab of document.querySelectorAll('[data-view]')) tab.addEventListener('click', () => { view = tab.dataset.view; if (view !== 'evidence') play.view.value = view; show(); drawCode() })
     toggles('lang', (value) => { lang = value; drawCode() })
     play.addEventListener('input', drawCode)
+    play.addEventListener('change', drawCode)
     const asked = new URLSearchParams(location.search).get('url')
     if (asked) play.url.value = asked
-    drawCode()
+    switchTo(endpoint, false)
 
     const outcomeOf = (result) => {
       if (endpoint === 'map') {
@@ -447,17 +699,24 @@
       const reason = result.failureReason || (result.evidenceRecord && result.evidenceRecord.reason)
       return [reason ? `${result.status} · ${reason}` : result.status, READ.has(result.status) ? 'ok' : result.status === 'partial' ? 'warn' : 'bad']
     }
+    const idle = (note = IDLE_NOTE) => { if (creature) creature.set('idle'); $('pg-stage').classList.remove('is-running'); set('play-summary', note) }
     play.addEventListener('submit', async (event) => {
       event.preventDefault()
+      close()
       const request = body()
       try { if (!/^https?:$/.test(new URL(request.url).protocol)) throw new Error('scheme') } catch { say('Enter a full address that starts with http:// or https://.', true); play.url.focus(); return }
-      if (endpoint === 'scrape' && request.formats.length === 0) { say('Tick at least one format.', true); return }
+      const problem = endpoint === 'scrape' ? rules.fieldProblem(scrapeRequest().fields) : null
+      if (problem) { say(`Check the fields in Options: ${problem}`, true); return }
       say('')
+      const ran = endpoint
       submit.disabled = true
       submit.textContent = 'Running…'
-      set('play-summary', endpoint === 'scrape' ? 'Reading the page. One that needs a browser can take up to a minute.' : 'Reading the site\'s sitemap and links.')
+      $('play-result').hidden = true
+      $('pg-stage').classList.add('is-running')
+      if (creature) creature.set('running')
+      set('play-summary', ran === 'scrape' ? 'Reading the page. One that needs a browser can take up to a minute.' : 'Reading the site\'s sitemap and links.')
       try {
-        const response = await fetch('/api/account/run', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint, ...request }) })
+        const response = await fetch('/api/account/run', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint: ran, ...request }) })
         if (response.status === 401) { location.replace(`/signin/?next=${encodeURIComponent(location.pathname + location.search)}`); return }
         const result = await response.json().catch(() => null)
         if (!response.ok || !result) {
@@ -467,25 +726,40 @@
                 : response.status === 504 ? 'The run took too long and was stopped. Activity shows what it cost, if anything.'
                   : 'The run could not reach hosted Octocrawl. Try again in a minute.'
           say(why.trim(), true)
-          set('play-summary', '')
+          idle()
           return
         }
+        if (ran !== endpoint) { idle(); return }
         answer = result
         const used = response.headers.get('x-credits-used')
         const left = response.headers.get('x-credits-remaining')
         const [label, mark] = outcomeOf(result)
         const pill = $('play-status'); pill.className = `status ${mark}`; pill.textContent = label
         const record = result.evidenceRecord
-        const where = endpoint === 'scrape' && record ? [record.finalUrl || record.requestedUrl, record.httpStatus ? `HTTP ${record.httpStatus}` : null, record.lane ? `${record.lane} lane` : null] : [result.url]
+        const where = ran === 'scrape' && record ? [record.finalUrl || record.requestedUrl, record.httpStatus ? `HTTP ${record.httpStatus}` : null, record.lane ? `${record.lane} lane` : null] : [result.url]
         const spent = used === null ? null : `${used} credit${used === '1' ? '' : 's'} used${left === null ? '' : `, ${number(left)} left`}`
-        set('play-summary', [...where, spent].filter(Boolean).join(' · '))
-        if (view === 'markdown' && typeof result.markdown !== 'string' && record) view = 'evidence'
+        set('play-detail', [...where, spent].filter(Boolean).join(' · '))
+        if (ran === 'scrape') view = play.view.value
+        if (view === 'markdown' && !(typeof result.markdown === 'string' && result.markdown.trim()) && record) view = 'evidence'
+        idle()
         $('play-result').hidden = false
         show()
+        $('play-result').scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
         // The balance and the run's request line changed: read both again.
         activity = null
         load()
-      } catch { say('The run could not reach hosted Octocrawl. Try again in a minute.', true); set('play-summary', '') } finally { submit.disabled = false; submit.textContent = 'Run' }
+      } catch { say('The run could not reach hosted Octocrawl. Try again in a minute.', true); idle() } finally { submit.disabled = false; goLabel() }
+    })
+
+    // A recent run's card runs it again: its endpoint and URL go back into the form.
+    $('run-cards').addEventListener('click', (event) => {
+      const again = event.target.closest('[data-again]')
+      if (!again) return
+      play.url.value = again.dataset.again
+      if (again.dataset.endpoint !== endpoint) switchTo(again.dataset.endpoint, true)
+      drawCode()
+      play.url.focus()
+      $('pg-stage').scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
     })
   }
 

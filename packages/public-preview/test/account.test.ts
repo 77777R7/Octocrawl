@@ -147,14 +147,22 @@ describe('the Playground', () => {
     expect(result.markdown).toContain('Tides')
     expect(result.evidenceRecord).toMatchObject({ requestedUrl: `${api.page}/tides`, robotsDecision: { decision: 'allowed' } })
     expect(result.evidenceRecord.rawSha256).toMatch(/^[0-9a-f]{64}$/)
+    // The fields, as the home page asks for them: one run, read from the page, each with its status.
+    const fields = await run(url, cookie, { endpoint: 'scrape', url: `${api.page}/tides`, formats: ['markdown', 'links', { type: 'json', schema: { type: 'object', properties: { price: { type: ['number', 'null'] } }, required: ['price'], additionalProperties: false } }] })
+    expect([fields.status, fields.headers.get('x-credits-used')]).toEqual([200, '1'])
+    const read = await fields.json() as { markdown: string; links: unknown[]; metadata: { title: string | null }; json: { status: string; data: unknown; schemaSha256: string } }
+    expect(read.markdown).toContain('Tides')
+    expect(Array.isArray(read.links)).toBe(true)
+    expect(read.metadata.title).toBe('Tides')
+    expect(read.json).toMatchObject({ data: { price: null }, schemaSha256: expect.stringMatching(/^[0-9a-f]{64}$/) })
     const map = await run(url, cookie, { endpoint: 'map', url: `${api.page}/tides` })
     expect([map.status, map.headers.get('x-credits-used')]).toEqual([200, '1'])
     expect(((await map.json()) as { links: unknown[] }).links.length).toBeGreaterThan(0)
     // A page robots.txt keeps out costs nothing.
     const kept = await run(url, cookie, { endpoint: 'scrape', url: `${api.page}/private` })
-    expect([kept.status, kept.headers.get('x-credits-used'), kept.headers.get('x-credits-remaining')]).toEqual([200, '0', '998'])
+    expect([kept.status, kept.headers.get('x-credits-used'), kept.headers.get('x-credits-remaining')]).toEqual([200, '0', '997'])
     expect(api.credits.requests.get('account-0001')!.map(line => [line.endpoint, line.keyId, line.credits])).toEqual([
-      ['scrape', 'playground:account-0001', 0], ['map', 'playground:account-0001', 1], ['scrape', 'playground:account-0001', 1],
+      ['scrape', 'playground:account-0001', 0], ['map', 'playground:account-0001', 1], ['scrape', 'playground:account-0001', 1], ['scrape', 'playground:account-0001', 1],
     ])
   })
 
@@ -163,7 +171,7 @@ describe('the Playground', () => {
     const { url, cookie } = await start(new Date(), { origin: api.origin })
     expect((await fetch(`${url}/api/account/run`, { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: '{}' })).status).toBe(401)
     expect((await run(url, cookie, { endpoint: 'scrape', url: `${api.page}/` }, 'https://evil.example')).status).toBe(403)
-    for (const body of [{ endpoint: 'crawl', url: `${api.page}/` }, { endpoint: 'scrape', url: 'ftp://example.org/' }, { endpoint: 'scrape', url: 'not a url' }, { endpoint: 'scrape', url: `${api.page}/`, formats: ['screenshot'] }]) {
+    for (const body of [{ endpoint: 'crawl', url: `${api.page}/` }, { endpoint: 'scrape', url: 'ftp://example.org/' }, { endpoint: 'scrape', url: 'not a url' }, { endpoint: 'scrape', url: `${api.page}/`, formats: ['screenshot'] }, { endpoint: 'scrape', url: `${api.page}/`, formats: ['html'] }]) {
       expect((await run(url, cookie, body)).status, JSON.stringify(body)).toBe(400)
     }
     expect((await run(url, cookie, { endpoint: 'scrape', url: `${api.page}/one` })).headers.get('x-credits-remaining')).toBe('0')
@@ -185,9 +193,19 @@ describe('the Playground', () => {
     expect([answer.status, await answer.json()]).toEqual([502, { error: 'hosted_refused' }])
   })
 
-  it('builds the hosted body from what the page sends', () => {
-    expect(playgroundRequest({ endpoint: 'scrape', url: ' https://example.org/a ', formats: ['links', 'markdown'], onlyMainContent: false })).toEqual({ endpoint: 'scrape', body: { url: 'https://example.org/a', formats: ['markdown', 'links'], onlyMainContent: false } })
+  it('holds a scrape to the home page\'s preview rules: one extraction with every view, and the fields when asked for', () => {
+    // As the preview: Markdown and links by default, the whole page when asked, and up to 20 fields as a JSON Schema.
+    expect(playgroundRequest({ endpoint: 'scrape', url: ' https://example.org/a ' })).toEqual({ endpoint: 'scrape', body: { url: 'https://example.org/a', formats: ['markdown', 'links'] } })
+    expect(playgroundRequest({ endpoint: 'scrape', url: 'https://example.org/a', onlyMainContent: false })).toEqual({ endpoint: 'scrape', body: { url: 'https://example.org/a', formats: ['markdown', 'links'], onlyMainContent: false } })
+    const schema = { type: 'object', properties: { price: { type: ['number', 'null'] } }, required: ['price'], additionalProperties: false }
+    expect(playgroundRequest({ endpoint: 'scrape', url: 'https://example.org/a', formats: ['markdown', 'links', { type: 'json', schema }] })).toEqual({ endpoint: 'scrape', body: { url: 'https://example.org/a', formats: ['markdown', 'links', { type: 'json', schema }] } })
+    // An Amazon.sg product page takes no options and comes with its checked product JSON.
+    expect(playgroundRequest({ endpoint: 'scrape', url: 'https://www.amazon.sg/dp/B0CHX1W1XY' })).toEqual({ endpoint: 'scrape', body: { url: 'https://www.amazon.sg/dp/B0CHX1W1XY', formats: ['markdown', 'links', 'json'] } })
+    // What the preview refuses, the Playground refuses: other formats, an empty list, a model prompt, more than 20 fields.
+    for (const extra of [{ formats: ['html'] }, { formats: [] }, { formats: ['screenshot'] }, { formats: [{ type: 'json', prompt: 'the price' }] }, { actions: [] },
+      { formats: [{ type: 'json', schema: { type: 'object', properties: Object.fromEntries(Array.from({ length: 21 }, (_, i) => [`f${i}`, { type: 'string' }])) } }] }]) {
+      expect(playgroundRequest({ endpoint: 'scrape', url: 'https://example.org/', ...extra }), JSON.stringify(extra)).toBeNull()
+    }
     expect(playgroundRequest({ endpoint: 'map', url: 'https://example.org', limit: 999_999, search: ' docs ' })).toEqual({ endpoint: 'map', body: { url: 'https://example.org/', limit: 5_000, search: 'docs' } })
-    expect(playgroundRequest({ endpoint: 'scrape', url: 'https://example.org/', formats: [] })).toBeNull()
   })
 })

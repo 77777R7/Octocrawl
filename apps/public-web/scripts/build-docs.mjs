@@ -15,7 +15,7 @@ const assetRoot = join(root, 'public', 'docs-assets')
 // The docs' own stylesheets and script, each versioned by its content. A stylesheet's references to versioned public
 // files (the header's mountain artwork) get their ?v= first and go to dist in that form, so its own version changes
 // when the artwork does.
-const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css', 'account.css', 'account.js', 'dashboard.css', 'dashboard.js', 'dashboard-charts.js'].map(async name => {
+const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css', 'account.css', 'account.js', 'dashboard.css', 'dashboard.js', 'dashboard-charts.js', 'dashboard-octopus.js', 'playground-request.js'].map(async name => {
   const source = await readFile(join(assetRoot, name), 'utf8')
   const shipped = name.endsWith('.css') ? versionAssetReferences(source, join(root, 'public')) : source
   if (shipped !== source) await writeFile(join(root, 'dist', 'docs-assets', name), shipped)
@@ -450,6 +450,8 @@ const dashCode = (id, text) => `<div class="code"><pre id="${id}">${escape(text)
 /** The request table the Activity page and the Overview share: dashboard.js fills its body from /api/account/activity. */
 const requestTable = (id, rows, empty = 'No requests yet. Each call made with one of your keys or in the Playground shows here, with what it cost.') => `<div class="table-scroll"><table class="dash-table requests" data-rows="${rows}"><thead><tr><th>Time (UTC)</th><th>Endpoint</th><th>URL</th><th>Lane</th><th>Result</th><th>robots.txt</th><th class="num">Credits</th><th>Evidence</th></tr></thead><tbody id="${id}-body"></tbody></table></div><p class="dash-small" id="${id}-empty" hidden>${empty}</p>`
 function dashboardPageHtml(path, title, lead, body) {
+  // The Playground's pages keep their header to a line, as Firecrawl's does: the selector and the URL card come first.
+  const playground = path === '/dashboard/scrape/' || path === '/dashboard/map/'
   let group = ''
   const links = DASHBOARD_PAGES.map(([href, name, section]) => {
     const heading = section === group ? '' : `<p class="dash-group">${escape(section)}</p>`
@@ -463,9 +465,9 @@ function dashboardPageHtml(path, title, lead, body) {
 <nav class="dash-nav" aria-label="Dashboard">${links}</nav>
 <div class="dash-credits"><p><strong id="side-credits">…</strong> credits left</p><progress class="credit-bar" id="side-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress><p class="dash-small" id="side-renews">&nbsp;</p></div>
 <div class="dash-who"><span id="side-email">…</span><a href="/docs/">Docs ↗</a></div></aside>
-<main id="main-content" class="dash-main"><header class="dash-head"><pre class="dash-noise" id="dash-noise" aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1><p class="dash-lead">${lead}</p></header>
+<main id="main-content" class="dash-main"><header class="dash-head${playground ? ' compact' : ''}"><pre class="dash-noise" id="dash-noise" aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1>${playground ? '' : `<p class="dash-lead">${lead}</p>`}</header>
 <p class="dash-message" id="dash-message" role="status" aria-live="polite"></p>
-${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script><script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
+${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script>${playground ? `<script defer src="/docs-assets/dashboard-octopus.js?v=${assetVersions['dashboard-octopus.js']}"></script><script defer src="/docs-assets/playground-request.js?v=${assetVersions['playground-request.js']}"></script>` : ''}<script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
 }
 // The Overview's banner: the Evidence Record, the thing that sets Octocrawl apart, centred between the octopus's arms,
 // which dashboard.js draws in glyphs rising from both bottom corners and keeps swaying.
@@ -535,30 +537,58 @@ ${installRow('cline', 'Cline', 'CL', 'Merge into <code>cline_mcp_settings.json</
 <section class="panel" aria-labelledby="c-local"><div class="panel-head"><h2 id="c-local">On your own computer</h2></div><p>Free and without limit, with every tool: crawl, batch and Monitor too. No key and no credits.</p>${dashCode('c-local-code', 'npx octocrawl serve')}</section>
 </div></div>`
 /**
- * A Playground page: the form, the result and its views, the code for the same call, and the account's last runs here.
- * dashboard.js sends the form to POST /api/account/run, which the hosted API charges like a key's call.
+ * A Playground page, laid out as Firecrawl's: a selector on top, the URL card in a band below it, then the result and
+ * the account's recent runs. The selector is Octocrawl's own: one button naming the endpoint, which opens a panel of
+ * tiles printed in the site's style (scrape, map, and crawl on your own computer). Behind the card the home page's
+ * octopus, drawn in glyphs, peeks over its top edge and reaches out on both sides; the recent runs are receipts over a
+ * slow current of glyphs. Both pages are one layout: dashboard.js switches between them in place and sends the card to
+ * POST /api/account/run, which the hosted API charges like a key's call; dashboard-octopus.js draws the glyphs.
  */
+const PLAYGROUND_MODES = {
+  scrape: ['Extract', 'Scrape', '▤', 'One page as Markdown, links, page info or fields, with its Evidence Record.', '1–5 credits'],
+  map: ['Discover', 'Map', '⌗', 'Every URL of a site, from its sitemap and its links.', '0–1 credit'],
+}
+/** The home page's format tiles (src/page.ts), word for word; dashboard.js draws each icon on the same glyph grid. */
+const formatTiles = [['markdown', 'Markdown', 'readable text', '.md'], ['links', 'Links', 'every link on the page', '.links.txt'], ['info', 'Page info', 'title, language; a file\'s pages', '.info.json'], ['fields', 'Fields', 'the fields set in Options', '.fields.json'], ['json', 'JSON', 'the whole result', '.json']]
+  .map(([view, name, note, ext], i) => `<label class="format-tile"><input type="radio" name="view" value="${view}"${i === 0 ? ' checked' : ''} /><span class="tile-icon" data-icon="${view}" aria-hidden="true"></span><span class="tile-name">${name}</span><span class="tile-note">${note}</span><span class="tile-ext">${ext}</span></label>`).join('')
 const playgroundBody = (endpoint) => {
-  const scrape = endpoint === 'scrape'
-  const options = scrape
-    ? `<fieldset class="play-options"><legend>Formats</legend><label><input type="checkbox" name="formats" value="markdown" checked /> Markdown</label><label><input type="checkbox" name="formats" value="links" /> Links</label><label><input type="checkbox" name="formats" value="html" /> HTML</label><label class="play-main"><input type="checkbox" name="onlyMainContent" checked /> Main content only</label></fieldset>`
-    : `<fieldset class="play-options"><legend>Options</legend><label>Search<input name="search" maxlength="200" placeholder="docs" autocomplete="off" /></label><label>Limit<input name="limit" type="number" min="1" max="5000" value="100" /></label></fieldset>`
-  const cost = scrape
-    ? 'A page read over HTTP costs 1 credit, one that needs a browser 5. A page that is blocked, or that robots.txt keeps out, costs nothing.'
-    : 'A map that finds URLs costs 1 credit; one that finds none costs nothing.'
-  const views = (scrape ? [['markdown', 'Markdown'], ['links', 'Links'], ['html', 'HTML'], ['evidence', 'Evidence Record'], ['json', 'JSON']] : [['links', 'Links'], ['json', 'JSON']])
-    .map(([view, name], i) => `<button type="button" role="tab" aria-selected="${i === 0}" data-view="${view}">${name}</button>`).join('')
-  return `<section class="panel" aria-labelledby="play-title"><div class="panel-head"><h2 id="play-title">${scrape ? 'Scrape a page' : 'Map a site'}</h2><a href="/docs/reference/">POST /v1/${endpoint} →</a></div>
-<form class="play-form" id="play-form" data-endpoint="${endpoint}" novalidate><label class="play-url" for="play-url">URL<input id="play-url" name="url" type="url" inputmode="url" required placeholder="https://example.com" autocomplete="off" spellcheck="false" /></label>
-${options}
-<div class="play-run"><button class="button" type="submit" id="play-submit">Run</button><p class="dash-small" id="play-cost">${cost} <span id="play-left"></span></p></div></form></section>
-<section class="panel" id="play-result" hidden aria-labelledby="result-title"><div class="panel-head"><div><h2 id="result-title">Result</h2><p class="dash-small" id="play-summary"></p></div><span class="status" id="play-status"></span></div>
+  const only = (which) => `data-only="${which}"${which === endpoint ? '' : ' hidden'}`
+  const [kicker, name, glyph] = PLAYGROUND_MODES[endpoint]
+  const tile = (which) => { const [k, n, g, about, cost] = PLAYGROUND_MODES[which]; return `<button class="pg-tile" type="button" data-endpoint="${which}" aria-pressed="${which === endpoint}"><span class="pg-tile-glyph" aria-hidden="true">${g}</span><span class="pg-kicker">${k}</span><strong>${n}</strong><span class="pg-tile-about">${about}</span><code>${cost}</code></button>` }
+  // The home page's five views of one extraction (src/page.ts, format tiles), then the Evidence Record the API adds.
+  const views = [['markdown', 'Markdown', 'scrape'], ['links', 'Links', ''], ['info', 'Page info', 'scrape'], ['fields', 'Fields', 'scrape'], ['json', 'JSON', ''], ['evidence', 'Evidence Record', 'scrape']]
+    .map(([view, n, which]) => `<button type="button" role="tab" aria-selected="false" data-view="${view}"${which ? ` ${only(which)}` : ''}>${n}</button>`).join('')
+  const cross = (where) => `<span class="pg-cross ${where}" aria-hidden="true">+</span>`
+  return `<section class="pg" id="pg" data-endpoint="${endpoint}">
+<div class="pg-frame">
+<div class="pg-top">${cross('tl')}${cross('tr')}<button class="pg-picker" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="pg-modes" data-panel="pg-modes"><span class="pg-kicker" id="pg-picker-kicker">${kicker}</span><span class="pg-picker-name"><span class="pg-glyph" id="pg-picker-glyph" aria-hidden="true">${glyph}</span><span id="pg-picker-name">${name}</span></span><span class="pg-caret" aria-hidden="true">▾</span></button>
+<div class="pg-panel pg-modes" id="pg-modes" role="dialog" aria-label="What to run" hidden><p class="pg-kicker">What to run</p><div class="pg-tiles">${tile('scrape')}${tile('map')}<a class="pg-tile is-local" href="/dashboard/connect/#c-local"><span class="pg-tile-glyph" aria-hidden="true">&gt;_</span><span class="pg-kicker">On your computer</span><strong>Crawl</strong><span class="pg-tile-about">Crawl, batch and Monitor run on your own machine, free and without limit.</span><code>npx octocrawl serve</code></a></div></div></div>
+<div class="pg-band" id="pg-stage">${cross('bl')}${cross('br')}<div class="pg-depth" aria-hidden="true"><canvas class="pg-octopus" id="pg-octopus"></canvas></div>
+<form class="pg-card" id="play-form" data-endpoint="${endpoint}" novalidate>
+<div class="pg-entry"><label class="pg-chip" for="play-url">URL</label><input id="play-url" name="url" type="url" inputmode="url" required placeholder="Paste a public page URL…" autocomplete="off" spellcheck="false" /></div>
+<div class="pg-toolbar"><div class="pg-tools">
+<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-format" data-panel="pg-format" ${only('scrape')}><span class="pg-glyph" aria-hidden="true">▤</span><span class="sr-only">Format: </span><span id="pg-format-label">Markdown</span></button>
+<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-options" data-panel="pg-options"><span class="pg-glyph" aria-hidden="true">≡</span>Options<span class="pg-badge" id="pg-options-badge" hidden></span></button></div>
+<div class="pg-tools"><span class="pg-cost" id="play-cost"></span><button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-code" data-panel="pg-code"><span class="pg-glyph" aria-hidden="true">&lt;/&gt;</span>Get code</button><button class="pg-go" type="submit" id="play-submit"><span id="pg-go-label">${endpoint === 'scrape' ? 'Extract page' : 'Map site'}</span> <span aria-hidden="true">→</span></button></div></div>
+<div class="pg-panel wide pg-formats" id="pg-format" hidden><p class="pg-kicker">Format</p><div class="format-tiles" role="radiogroup" aria-label="Format">${formatTiles}</div><p class="dash-small">All from one run, so switching never costs another credit.</p></div>
+<div class="pg-panel wide" id="pg-options" hidden><p class="pg-kicker">Options</p>
+<div class="pg-read" ${only('scrape')}><p class="pg-label" id="pg-read-title">Read</p><div class="pg-scope" role="radiogroup" aria-labelledby="pg-read-title"><label><input type="radio" name="scope" value="main" checked /> Main content</label><label><input type="radio" name="scope" value="whole" /> Whole page</label></div><p class="dash-small" id="pg-scope-note"></p></div>
+<section class="pg-fields-editor" ${only('scrape')} aria-labelledby="pg-fields-title"><div class="pg-fields-head"><p class="pg-label" id="pg-fields-title">Fields</p><span class="pg-count" id="pg-fields-count"></span><button class="pg-link" id="pg-fields-preset" type="button" aria-label="Use the product fields: name, brand, price, currency, availability, SKU, rating and review count">+ product fields</button></div>
+<div class="pg-field-list" id="pg-field-list" role="list" aria-labelledby="pg-fields-title"></div>
+<div class="pg-field-new"><span aria-hidden="true">›</span><input id="pg-field-new" maxlength="64" autocomplete="off" spellcheck="false" aria-label="New field name" placeholder="add a field: type a name, then Enter" /><button class="pg-link" id="pg-field-add" type="button">add</button></div>
+<p class="pg-error" id="pg-fields-error" role="alert"></p>
+<p class="dash-small">Read from the page itself: JSON-LD, microdata, meta tags, tables and a PDF's "Label: value" lines. No AI: a field the page does not state comes back empty, with the reason. Amazon.sg product pages take no options.</p></section>
+<div class="pg-fields" ${only('map')}><label>Search<input name="search" maxlength="200" placeholder="docs" autocomplete="off" /></label><label>Limit<input name="limit" type="number" min="1" max="5000" value="100" /></label></div></div>
+<div class="pg-panel wide" id="pg-code" hidden><div class="panel-head"><p class="pg-kicker">Get code</p><div class="tabs" role="group" aria-label="Language"><button type="button" aria-pressed="true" data-lang="curl">cURL</button><button type="button" aria-pressed="false" data-lang="js">JavaScript</button></div></div>${dashCode('play-code', '')}<p class="dash-small">The same call from your code or agent: put a key from <a href="/dashboard/keys/">API keys</a> where it says <code>oc_YOUR_KEY</code>. It costs what a run here costs.</p></div>
+</form>
+<p class="pg-note" id="play-summary" role="status" aria-live="polite"></p></div>
+</div>
+<section class="panel pg-result" id="play-result" hidden aria-labelledby="result-title"><div class="panel-head"><div><h2 id="result-title">Result</h2><p class="dash-small" id="play-detail"></p></div><span class="status" id="play-status"></span></div>
 <div class="tabs play-views" role="tablist" aria-label="Result view">${views}</div>
 <dl class="facts play-evidence" id="play-evidence" hidden></dl>
 <div class="code"><pre class="play-output" id="play-output" tabindex="0"></pre><button class="copy" type="button" data-copy="play-output">Copy</button></div></section>
-<section class="panel" aria-labelledby="code-title"><div class="panel-head"><h2 id="code-title">Get code</h2><div class="tabs" role="group" aria-label="Language"><button type="button" aria-pressed="true" data-lang="curl">cURL</button><button type="button" aria-pressed="false" data-lang="js">JavaScript</button></div></div>
-${dashCode('play-code', '')}<p class="dash-small">The same call from your own code or agent: put a key from <a href="/dashboard/keys/">API keys</a> where it says <code>oc_YOUR_KEY</code>. It costs what a run here costs.</p></section>
-<section class="panel" aria-labelledby="runs-title"><div class="panel-head"><h2 id="runs-title">Recent runs</h2><a href="/dashboard/activity/">Activity →</a></div>${requestTable('runs', 5, 'No runs here yet. Each one shows here, and on Activity, with what it cost.')}</section>`
+<section class="pg-runs" aria-labelledby="runs-title"><pre class="pg-sea" id="pg-sea" aria-hidden="true"></pre><div class="pg-runs-head"><div><p class="pg-kicker">Receipts</p><h2 id="runs-title">Recent runs</h2></div><a href="/dashboard/activity/">Activity →</a></div><div class="receipts" id="run-cards"></div><p class="dash-small pg-runs-empty" id="runs-empty" hidden>No runs here yet. Each run leaves a receipt here and a line on Activity: what was read, what robots.txt allowed, what it cost and the SHA-256 of what came back.</p></section>
+</section>`
 }
 const accountBody = `<section class="panel" aria-labelledby="who-title"><div class="panel-head"><h2 id="who-title">Signed in</h2></div><dl class="facts">
 <dt>Email</dt><dd id="acct-email">…</dd>
@@ -571,8 +601,8 @@ for (const [path, title, lead, body] of [
   ['/dashboard/', 'Overview', 'This month\'s credits, the last 30 days of use, and the lines to connect an agent.', overviewBody],
   ['/dashboard/activity/', 'Activity', 'Every call made with your keys in the last 30 days: what was asked for, what came back, and what it cost.', activityBody],
   ['/dashboard/usage/', 'Usage', 'What the hosted API and MCP read for this account, day by day, and what it cost.', usageBody],
-  ['/dashboard/scrape/', 'Scrape', 'Read one page as Markdown, with its Evidence Record. Runs here spend this account\'s credits, at the API\'s price.', playgroundBody('scrape')],
-  ['/dashboard/map/', 'Map', 'List the URLs of a site from its sitemap and links. Runs here spend this account\'s credits, at the API\'s price.', playgroundBody('map')],
+  ['/dashboard/scrape/', 'Scrape', 'Read one page as Markdown, with its Evidence Record, on this account\'s credits at the API\'s price.', playgroundBody('scrape')],
+  ['/dashboard/map/', 'Map', 'List the URLs of a site from its sitemap and links, on this account\'s credits at the API\'s price.', playgroundBody('map')],
   ['/dashboard/keys/', 'API keys', 'Keys for agents and code. Each one spends this account\'s credits.', keysBody],
   ['/dashboard/connect/', 'Connect', 'One line for each MCP client, the REST call, and the free local server.', connectBody],
   ['/dashboard/account/', 'Account', 'Who is signed in, how, and this month\'s credits.', accountBody],
