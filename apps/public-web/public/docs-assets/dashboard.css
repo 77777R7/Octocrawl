@@ -50,8 +50,27 @@ a:hover{color:#fff}
 .credit-bar::-webkit-progress-value{background:var(--orange);border-radius:3px}
 .credit-bar::-moz-progress-bar{background:var(--orange);border-radius:3px}
 .dash-small{color:var(--muted);font-size:12.5px}
-.dash-who{display:flex;justify-content:space-between;gap:8px;padding:0 4px;color:var(--muted);font-size:12.5px}
-.dash-who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The account menu: the avatar at the sidebar's foot, and the menu it opens upward, printed in as the site's menus are. */
+.dash-me{position:relative}
+.dash-me-button{display:flex;align-items:center;gap:10px;width:100%;padding:8px;border:1px solid transparent;border-radius:8px;background:none;color:var(--ink);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.dash-me-button:hover,.dash-me-button[aria-expanded="true"]{border-color:var(--rule);background:rgba(147,166,203,.08)}
+.dash-avatar{display:grid;place-items:center;flex:none;width:32px;height:32px;border:1px solid rgba(243,104,61,.45);border-radius:8px;background:rgba(243,104,61,.12);color:var(--orange-soft);font:650 12px var(--mono);letter-spacing:.04em}
+.dash-me-email{flex:1;min-width:0;overflow:hidden;color:var(--muted);text-overflow:ellipsis;white-space:nowrap}
+.dash-caret{color:var(--muted);font-size:11px;transition:transform .2s}
+.dash-me-button[aria-expanded="true"] .dash-caret{transform:rotate(180deg)}
+.dash-menu{position:absolute;left:0;right:0;bottom:calc(100% + 8px);z-index:20;padding:8px;border:1px solid var(--rule);border-radius:10px;background:var(--deep);box-shadow:0 18px 40px rgba(2,8,28,.55)}
+.dash-menu-kicker{margin:4px 8px 8px;color:var(--muted);font:650 10.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase}
+.dash-menu a,.dash-menu button{display:flex;align-items:center;gap:10px;width:100%;padding:8px;border:0;border-radius:6px;background:none;color:var(--ink);font:inherit;font-size:14px;text-align:left;text-decoration:none;cursor:pointer}
+.dash-menu a:hover,.dash-menu a:focus-visible,.dash-menu button:hover,.dash-menu button:focus-visible{background:rgba(147,166,203,.12);color:var(--ink);outline:none}
+.dash-menu-glyph{display:inline-block;width:20px;color:var(--orange);font:650 12px var(--mono);text-align:center}
+.dash-menu-out{margin-left:auto;color:var(--muted);font-size:12px}
+.dash-menu hr{margin:6px 4px;border:0;border-top:1px dotted var(--rule)}
+.dash-menu form{margin:0}
+@media (prefers-reduced-motion:no-preference){
+  .dash-menu.is-printing{animation:menu-print .3s steps(14,end) backwards}
+  .dash-menu.is-printing>*{animation:pg-row .01s backwards;animation-delay:calc(var(--row,0)*22ms + 40ms)}
+}
+@keyframes menu-print{from{clip-path:inset(100% 0 0 0 round 10px)}to{clip-path:inset(0 0 0 0 round 10px)}}
 
 .dash-main{min-width:0;padding:0 32px 64px}
 .dash-head{position:relative;padding:34px 0 18px;border-bottom:1px dotted var(--rule);margin-bottom:22px}
@@ -387,7 +406,12 @@ a:hover{color:#fff}
 .receipt dd.ok{color:#17804f}
 .receipt dd.warn{color:#9a6a00}
 .receipt dd.bad{color:#b23a22}
-.receipt-hash{margin:10px 0 0;color:#6d6553;font-size:11px;overflow-wrap:anywhere}
+.receipt-hash{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:10px 0 0;color:#6d6553;font-size:11px;overflow-wrap:anywhere}
+.receipt-copy{flex:none;padding:1px 6px;border:1px solid #c9bea6;border-radius:4px;background:none;color:#1b2747;font:650 10.5px var(--mono);cursor:pointer}
+.receipt-copy:hover{border-color:var(--orange);color:#c4441c}
+.receipt-final{margin:-6px 0 10px;overflow:hidden;color:#6d6553;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
+.receipt dd.unknown{color:#8d846f;font-style:italic}
+.receipt dd.wrap{white-space:normal;overflow-wrap:anywhere}
 @media (prefers-reduced-motion:no-preference){
   .pg-panel.is-printing{animation:pg-print .3s steps(20,end) backwards}
   .pg-panel.is-printing::after{content:"";position:absolute;left:14px;right:14px;top:0;height:2px;background:radial-gradient(circle,var(--orange) 1px,transparent 1.5px) 0 0/6px 2px repeat-x;animation:pg-head .3s steps(20,end) forwards;pointer-events:none}
@@ -400,9 +424,43 @@ a:hover{color:#fff}
 @keyframes pg-row{from{opacity:0}to{opacity:1}}
 @keyframes pg-receipt{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0)}}
 @keyframes pg-toolbar{from{clip-path:inset(0 100% 0 0);opacity:.4}to{clip-path:inset(0);opacity:1}}
+/* Usage: By site and By key side by side, the same height. */
+.tm-panel{display:flex;flex-direction:column}
+.tm-host{min-height:300px}
+.dash-grid.even{align-items:stretch}
+.meters{display:grid;gap:12px;margin:0 0 10px;padding:0;list-style:none}
+.meters p{display:flex;justify-content:space-between;gap:10px;margin:0 0 2px;font-size:14px}
+.meters .mono{font:12.5px var(--mono);color:var(--muted);white-space:nowrap}
+/* Connect: two columns of two panels, each row as tall as its taller panel. */
+.connect-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:stretch;margin-bottom:18px}
+.connect-grid .panel{margin-bottom:0}
+.connect-grid .panel-head>div:first-child,.settings-grid .panel-head>div:first-child{flex:1 1 220px;min-width:0}
+.field-box{margin:0 0 14px;padding:12px;border:1px solid var(--rule);border-radius:8px;background:var(--deep)}
+.field-box .code{margin:0}
+.field-label{margin:0 0 8px;color:var(--muted);font:650 11px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.key-field{display:flex;align-items:center;gap:6px}
+.key-field input{flex:1;min-width:0;min-height:38px;padding:0 10px;border:1px solid var(--rule);border-radius:6px;background:var(--navy);color:var(--ink);font:13px var(--mono)}
+/* Masked without being a password field, so no browser offers to save the key. */
+.key-field input.masked{-webkit-text-security:disc;text-security:disc}
+.key-field .copy{position:static}
+.icon-button{min-width:34px;min-height:34px;padding:0;border:1px solid var(--rule);border-radius:6px;background:none;color:var(--muted);font:14px/1 var(--mono);cursor:pointer}
+.icon-button[aria-pressed="true"]{border-color:var(--orange);color:var(--orange-soft)}
+.key-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:10px 0 8px}
+.key-actions .button.small{border:0;cursor:pointer}
+.code-tabs{margin:0 0 10px}
+.code-pane .code{margin:0}
+/* Settings: two columns of panels, each row as tall as its taller panel. */
+.settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:stretch;margin-bottom:18px}
+.settings-grid .panel{margin-bottom:0}
+.settings-grid .facts{margin-bottom:12px}
+.prefs{display:grid;gap:12px;margin-bottom:10px}
+.prefs label{display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:600}
+.prefs select{min-height:38px;padding:0 10px;border:1px solid var(--rule);border-radius:6px;background:var(--deep);color:var(--ink);font:inherit}
 @media (max-width:900px){
   .dash{grid-template-columns:minmax(0,1fr)}
-  .dash-side{position:static;height:auto;gap:12px;border-right:0;border-bottom:1px solid var(--rule)}
+  .connect-grid,.settings-grid{grid-template-columns:minmax(0,1fr)}
+  .dash-menu{top:calc(100% + 8px);bottom:auto}
+  .dash-side{position:static;height:auto;gap:12px;border-right:0;border-bottom:1px solid var(--rule);overflow:visible}
   .dash-nav{grid-auto-flow:column;grid-auto-columns:max-content;overflow-x:auto}
   .dash-group{display:none}
   .dash-credits{margin-top:0}

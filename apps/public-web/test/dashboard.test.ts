@@ -45,13 +45,18 @@ interface Page { window: Window; $: (id: string) => HTMLElement; calls: Call[] }
 const open: Window[] = []
 afterEach(async () => { await Promise.all(open.splice(0).map(window => window.happyDOM.close())) })
 
-/** A dashboard page at `now`, its API answering from `answers` (path → [status, body]). */
-async function page(path: string, search: string, now: string, answers: Record<string, [number, unknown]>): Promise<Page> {
+/**
+ * A dashboard page at `now`, its API answering from `answers` (path → [status, body]). `width` gives every element that
+ * width, for the charts, which draw nothing in a window without layout; `stored` is this browser's localStorage.
+ */
+async function page(path: string, search: string, now: string, answers: Record<string, [number, unknown]>, options: { width?: number; stored?: Record<string, string> } = {}): Promise<Page> {
   const [, title, lead, body] = DASHBOARD_BODIES.find(([p]) => p === path)!
   const html = dashboardPageHtml(path, title, lead, body, new Proxy({}, { get: () => 'test' })).replace(/<script\b[^>]*><\/script>/g, '')
   const window = new Window({ url: `https://octocrawl.dev${path}${search}`, settings: { disableJavaScriptFileLoading: true, disableCSSFileLoading: true } })
   open.push(window)
   window.document.write(html)
+  if (options.width) Object.defineProperty(window.HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => options.width })
+  for (const [key, value] of Object.entries(options.stored ?? {})) window.localStorage.setItem(key, value)
   const calls: Call[] = []
   const scope = window as unknown as Record<string, unknown>
   scope.fetch = async (url: string, init: { method?: string; body?: string } = {}) => {
@@ -194,25 +199,39 @@ describe('API keys: last used and this month', () => {
 
 describe('Connect fills in a key', () => {
   const KEY = `oc_${'x'.repeat(43)}`
+  const MASKED = `oc_xxxx${'•'.repeat(12)}`
   const setups = (page: Page) => [...page.window.document.querySelectorAll('#main-content pre')].map(pre => pre.textContent ?? '')
+  const copied = (page: Page) => [...page.window.document.querySelectorAll('#main-content pre')].map(pre => (pre as unknown as HTMLElement).dataset.full ?? pre.textContent ?? '')
 
-  it('puts a pasted key in every setup that asks for one, and takes it out again', async () => {
+  it('puts a pasted key in every setup that asks for one, masked until shown, and takes it out again', async () => {
     const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
     const before = setups(connect)
     const asking = before.filter(text => text.includes('oc_YOUR_KEY'))
-    expect(asking.length).toBeGreaterThanOrEqual(6)
+    // Five agents, and the four languages in From code.
+    expect(asking.length).toBe(9)
     const input = connect.$('fill-key') as HTMLInputElement
+    // A text field masked by its class: a password field would have the browser offer to save the key.
+    expect([input.type, input.classList.contains('masked')]).toEqual(['text', true])
     input.value = KEY
     input.dispatchEvent(new connect.window.Event('input') as unknown as Event)
-    const after = setups(connect)
-    expect(after.filter(text => text.includes('oc_YOUR_KEY'))).toEqual([])
-    expect(after.filter(text => text.includes(KEY))).toHaveLength(asking.length)
-    expect(after).toContain(`claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp --header "Authorization: Bearer ${KEY}"`)
-    expect(connect.$('fill-note').textContent).toBe('Every setup below carries oc_xxxx…')
+    // Shown masked; Copy takes the whole key.
+    expect(setups(connect).filter(text => text.includes('oc_YOUR_KEY'))).toEqual([])
+    expect(setups(connect).filter(text => text.includes(KEY))).toEqual([])
+    expect(setups(connect).filter(text => text.includes(MASKED))).toHaveLength(asking.length)
+    expect(copied(connect)).toContain(`claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp --header "Authorization: Bearer ${KEY}"`)
+    expect(copied(connect).filter(text => text.includes(KEY))).toHaveLength(asking.length)
+    expect(connect.$('fill-note').textContent).toBe('Every setup on this page carries oc_xxxx…; Copy takes the whole key.')
+    // The eye shows it, in the field and in every setup, and hides it again.
+    connect.$('fill-eye').click()
+    expect([input.classList.contains('masked'), connect.$('fill-eye').getAttribute('aria-pressed')]).toEqual([false, 'true'])
+    expect(setups(connect).filter(text => text.includes(KEY))).toHaveLength(asking.length)
+    connect.$('fill-eye').click()
+    expect(setups(connect).filter(text => text.includes(KEY))).toEqual([])
     // Not a key: the setups go back to the placeholder, and the page says why.
     input.value = 'sk-something'
     input.dispatchEvent(new connect.window.Event('input') as unknown as Event)
     expect(setups(connect)).toEqual(before)
+    expect(copied(connect)).toEqual(before)
     expect(connect.$('fill-note').textContent).toMatch(/starts with oc_/)
     // The key never left the page.
     expect(connect.calls.map(call => call.path)).toEqual(['/api/account'])
@@ -226,8 +245,9 @@ describe('Connect fills in a key', () => {
     await settle()
     expect(connect.calls.find(call => call.method === 'POST')).toEqual({ method: 'POST', path: '/api/account/keys', body: { label: 'Agent setup' } })
     expect((connect.$('fill-key') as HTMLInputElement).value).toBe(KEY)
-    expect(setups(connect).filter(text => text.includes(KEY)).length).toBeGreaterThanOrEqual(6)
+    expect(copied(connect).filter(text => text.includes(KEY))).toHaveLength(9)
     expect(connect.$('fill-note').textContent).toMatch(/^Made a key named Agent setup \(oc_xxxx…\)/)
+    expect(connect.$('conn-key').textContent).toBe('oc_7fQ2… (laptop agent)')
   })
 
   it('says so when the account already holds five keys', async () => {
@@ -236,6 +256,16 @@ describe('Connect fills in a key', () => {
     await settle()
     expect(connect.$('dash-message').textContent).toBe('An account holds at most five active keys. Revoke one in API keys first.')
     expect(setups(connect).some(text => text.includes('oc_YOUR_KEY'))).toBe(true)
+  })
+
+  it('shows one language at a time in From code, and opens the one an Overview tile links to', async () => {
+    const connect = await page('/dashboard/connect/', '#c-sdk', OCTOBER.now, octoberAnswers())
+    const shown = () => [...connect.window.document.querySelectorAll('[data-code-pane]')].filter(pane => !(pane as unknown as HTMLElement).hidden).map(pane => (pane as unknown as HTMLElement).dataset.codePane)
+    expect(shown()).toEqual(['sdk'])
+    ;(connect.window.document.querySelector('[data-code-tab="python"]') as unknown as HTMLElement).click()
+    expect(shown()).toEqual(['python'])
+    expect(connect.$('c-python-code').textContent).toContain('W2L(base_url="https://api.octocrawl.dev", token="oc_YOUR_KEY")')
+    expect(connect.$('c-ts-code').textContent).toContain("new W2L({ baseUrl: 'https://api.octocrawl.dev', token: 'oc_YOUR_KEY' })")
   })
 })
 
@@ -260,5 +290,152 @@ describe('the Playground takes over what the home page asked for', () => {
     const form = new window.FormData($('play-form') as never)
     expect([form.get('url'), form.get('view'), form.get('scope')]).toEqual(['https://docs.example/', 'markdown', 'main'])
     expect($('play-form').querySelectorAll('.pg-field')).toHaveLength(0)
+  })
+})
+
+describe('the account menu and the credit bars', () => {
+  it('lists the account\'s places and the docs under the avatar, opens and closes from the keyboard', async () => {
+    const { $, window } = await page('/dashboard/', '', OCTOBER.now, octoberAnswers())
+    expect($('me-initials').textContent).toBe('RE')
+    expect($('side-email').textContent).toBe('reader@example.com')
+    const menu = $('me-menu')
+    const items = () => [...menu.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)
+    expect(items()).toEqual(['#Settings', '%Usage', '*API keys', '¶Documentation', '±Changelog', '<>GitHub↗', '<-Sign out'])
+    expect([...menu.querySelectorAll('a')].map(a => a.getAttribute('href'))).toEqual(['/dashboard/settings/', '/dashboard/usage/', '/dashboard/keys/', '/docs/', '/changelog/', 'https://github.com/77777R7/Octocrawl'])
+    expect(menu.querySelector('form')!.getAttribute('action')).toBe('/auth/logout')
+    expect(menu.hidden).toBe(true)
+    $('me-button').click()
+    expect([menu.hidden, $('me-button').getAttribute('aria-expanded'), window.document.activeElement?.textContent]).toEqual([false, 'true', '#Settings'])
+    menu.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }) as unknown as Event)
+    expect(window.document.activeElement?.textContent).toBe('<-Sign out')
+    menu.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }) as unknown as Event)
+    expect([menu.hidden, window.document.activeElement?.id]).toEqual([true, 'me-button'])
+    // A click elsewhere closes it too.
+    $('me-button').click()
+    window.document.body.click()
+    expect(menu.hidden).toBe(true)
+  })
+
+  it('groups API keys, Connect and Settings under Account, and draws credits as solid bars', async () => {
+    const { $, window } = await page('/dashboard/usage/', '', OCTOBER.now, octoberAnswers())
+    const nav = [...window.document.querySelectorAll('.dash-nav > *')].map(element => element.textContent)
+    expect(nav.slice(nav.indexOf('Account'))).toEqual(['Account', 'API keys', 'Connect', 'Settings'])
+    for (const id of ['side-meter', 'sum-meter']) {
+      const bar = $(id) as HTMLProgressElement
+      expect([bar.tagName, bar.value, bar.max]).toEqual(['PROGRESS', 988, 1000])
+    }
+  })
+})
+
+describe('Usage', () => {
+  const lines = () => [
+    line('2026-10-20T11:55:00.000Z', KEY_A, 1), line('2026-10-20T03:10:00.000Z', KEY_A, 5),
+    { ...line('2026-10-19T03:20:00.000Z', 'playground:u1', 0), status: 'blocked', httpStatus: 403, kind: 'unread', sha256: null },
+    { ...line('2026-10-18T09:00:00.000Z', KEY_B, 1), status: 'failed', httpStatus: 404, kind: 'not_found' },
+    { ...line('2026-10-17T09:00:00.000Z', 'playground:u1', 1), endpoint: 'map', httpStatus: null, lane: null, links: 20, kind: 'map', status: 'completed' },
+  ]
+  it('sets By site and By key side by side as treemaps of the same height', async () => {
+    const { $ } = await page('/dashboard/usage/', '', OCTOBER.now, octoberAnswers(lines()), { width: 640 })
+    for (const id of ['site-map', 'key-map']) expect($(id).querySelector('svg')!.getAttribute('height')).toBe('300')
+    expect([...$('key-map').querySelectorAll('.tile-name')].map(name => name.textContent)).toEqual(['laptop agent (oc_7fQ2…)', 'Playground', 'ci (oc_Kd91…)'])
+  })
+
+  it('counts results, HTTP status, lanes and hours from the request lines', async () => {
+    const { $ } = await page('/dashboard/usage/', '', OCTOBER.now, octoberAnswers(lines()), { width: 640 })
+    const list = (id: string) => [...$(id).querySelectorAll('li p')].map(row => row.textContent)
+    expect(list('results-list')).toEqual(['Read2 · 40%', 'Blocked by the site1 · 20%', 'Not found1 · 20%', 'Map: URLs found1 · 20%'])
+    expect(list('codes-list')).toEqual(['2002 · 50%', '4031 · 25%', '4041 · 25%'])
+    expect(list('lanes-list')).toEqual(['HTTP1 · 50% · 1 credits', 'Browser1 · 50% · 5 credits'])
+    const share = $('results-list').querySelector('progress') as HTMLProgressElement
+    expect([share.value, share.max]).toEqual([2, 5])
+    // One bar for each UTC hour with calls: 03 (two), 09 (two) and 11 (one).
+    const bars = [...$('hours-chart').querySelectorAll('rect.bar')].map(bar => Number(bar.getAttribute('height')))
+    expect(bars).toHaveLength(3)
+    expect(bars[0]).toBe(bars[1])
+    expect(bars[2]).toBeLessThan(bars[0]!)
+    expect($('hours-empty').hidden).toBe(true)
+    expect($('results-list').closest('.panel')!.querySelector('.lines-note')!.textContent).toBe('calls, from request lines')
+  })
+
+  it('tells a call that was never sent from one that got no answer', async () => {
+    const shown = [
+      { ...line('2026-10-20T11:00:00.000Z', KEY_A, 0), status: 'failed', httpStatus: null, robots: 'disallowed', kind: 'unread', sha256: null },
+      { ...line('2026-10-20T10:00:00.000Z', KEY_A, 0), status: 'invalid_request', httpStatus: null, robots: null, kind: 'unread', sha256: null },
+      { ...line('2026-10-20T09:00:00.000Z', KEY_A, 0), status: 'failed', reason: 'timeout', httpStatus: null, kind: 'unread', sha256: null },
+    ]
+    const { $ } = await page('/dashboard/usage/', '', OCTOBER.now, octoberAnswers(shown))
+    expect([...$('codes-list').querySelectorAll('li p')].map(row => row.textContent)).toEqual(['Not requested2 · 67%', 'No response1 · 33%'])
+  })
+
+  it('decodes the menu back to its own words even when it is reopened mid-decode', async () => {
+    const { $, window } = await page('/dashboard/', '', OCTOBER.now, octoberAnswers())
+    ;(window as unknown as { matchMedia: unknown }).matchMedia = (media: string) => ({ matches: false, media, addEventListener() {}, removeEventListener() {} })
+    for (let i = 0; i < 3; i++) { $('me-button').click(); await new Promise(resolve => setTimeout(resolve, 40)) }
+    // Every decode the page started has run to its end.
+    await window.happyDOM.waitUntilComplete()
+    expect([...$('me-menu').querySelectorAll('.dash-menu-glyph')].map(glyph => glyph.textContent)).toEqual(['#', '%', '*', '¶', '±', '<>', '<-'])
+    expect($('me-menu').querySelector('.dash-menu-kicker')!.textContent).toBe('Account')
+  })
+
+  it('says when the counts come from only the latest lines', async () => {
+    const shown = lines()
+    const { $ } = await page('/dashboard/usage/', '', OCTOBER.now, { ...octoberAnswers(shown), 'GET /api/account/activity': [200, { requests: shown, limit: 5, retentionDays: 30 }] })
+    expect($('results-list').closest('.panel')!.querySelector('.lines-note')!.textContent).toBe('calls, from the latest 5 request lines')
+  })
+})
+
+describe('Receipts and Activity show the format and the duration', () => {
+  const runs = () => [
+    { ...line('2026-10-20T11:55:00.000Z', 'playground:u1', 1), url: 'https://shop.example/a', finalUrl: 'https://shop.example/b', formats: ['markdown', 'links', 'json'], ms: 1834 },
+    { ...line('2026-10-20T11:00:00.000Z', 'playground:u1', 1), endpoint: 'map', httpStatus: null, lane: null, robots: null, sha256: null, links: 20, kind: 'map', status: 'completed', formats: null, ms: 640 },
+    { ...line('2026-10-20T10:00:00.000Z', 'playground:u1', 5), formats: [], ms: 912 },
+    line('2026-10-11T10:00:00.000Z', 'playground:u1', 1),
+  ]
+  it('writes each receipt\'s result in words, its format, lane, duration and redirect, and "not recorded" for old lines', async () => {
+    const { $ } = await page('/dashboard/scrape/', '', OCTOBER.now, octoberAnswers(runs()))
+    const receipts = [...$('run-cards').querySelectorAll('.receipt')]
+    const facts = (receipt: Element) => Object.fromEntries([...receipt.querySelectorAll('dt')].map(term => [term.textContent, term.nextElementSibling!.textContent]))
+    expect(facts(receipts[0]!)).toEqual({ result: '200 · read', format: 'markdown + links + json', lane: 'HTTP', 'robots.txt': 'allowed', duration: '1.8 s', credits: '1', 'at (UTC)': 'Oct 20 11:55' })
+    expect(receipts[0]!.querySelector('.receipt-final')!.textContent).toBe('→ shop.example/b')
+    expect(receipts[0]!.querySelector('.receipt-hash span')!.textContent).toBe(`sha256 ${'f'.repeat(12)}…${'f'.repeat(8)}`)
+    expect((receipts[0]!.querySelector('[data-hash]') as HTMLElement).dataset.hash).toBe('f'.repeat(64))
+    // A map has no format; a scrape that named none used the default; an old line kept neither.
+    expect(facts(receipts[1]!)).toMatchObject({ result: '20 links', lane: '—', duration: '640 ms' })
+    expect(Object.keys(facts(receipts[1]!))).not.toContain('format')
+    expect(facts(receipts[2]!)).toMatchObject({ format: 'default', lane: 'Browser', duration: '912 ms' })
+    expect(facts(receipts[3]!)).toMatchObject({ format: 'not recorded', duration: 'not recorded' })
+    expect(receipts[3]!.querySelector('dd.unknown')).not.toBeNull()
+    expect(receipts[1]!.querySelector('.receipt-final')).toBeNull()
+  })
+
+  it('adds Format and Duration columns to Activity, and shows times in this computer\'s zone when Settings asks', async () => {
+    const { $, window } = await page('/dashboard/activity/', '', OCTOBER.now, octoberAnswers(runs()), { stored: { 'octocrawl.dashboard.prefs': JSON.stringify({ tz: 'local' }) } })
+    const heads = [...window.document.querySelectorAll('#main-content thead th')].map(head => head.textContent)
+    expect(heads).toEqual(['Time (local)', 'Endpoint', 'URL', 'Format', 'Lane', 'Result', 'robots.txt', 'Duration', 'Credits', 'Evidence'])
+    expect(rowsOf($('activity-body'))[0]!.slice(3, 8)).toEqual(['markdown + links + json', 'HTTP', '200', 'allowed', '1.8 s'])
+    expect(rowsOf($('activity-body'))[0]![0]).toBe(new Date('2026-10-20T11:55:00.000Z').toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }))
+  })
+})
+
+describe('Settings', () => {
+  it('shows the profile and the plan, and keeps preferences in this browser', async () => {
+    const { $, window } = await page('/dashboard/settings/', '', OCTOBER.now, octoberAnswers())
+    expect([$('acct-email').textContent, $('acct-providers').textContent, $('acct-plan').textContent, $('acct-bought').textContent]).toEqual(['reader@example.com', 'GitHub', 'Free: 1,000 credits a month', 'None'])
+    const select = $('pref-view') as HTMLSelectElement
+    expect(select.value).toBe('markdown')
+    select.value = 'links'
+    select.dispatchEvent(new window.Event('change', { bubbles: true }) as unknown as Event)
+    expect(JSON.parse(window.localStorage.getItem('octocrawl.dashboard.prefs')!)).toEqual({ view: 'links', scope: 'main', tz: 'utc' })
+    expect($('prefs-note').textContent).toBe('Saved in this browser.')
+  })
+
+  it('opens the Playground on the preferred format and scope, unless the home page handed over its own', async () => {
+    const stored = { 'octocrawl.dashboard.prefs': JSON.stringify({ view: 'links', scope: 'whole', tz: 'nonsense' }) }
+    const plain = await page('/dashboard/scrape/', '', OCTOBER.now, octoberAnswers(), { stored })
+    const form = new plain.window.FormData(plain.$('play-form') as never)
+    expect([form.get('view'), form.get('scope')]).toEqual(['links', 'whole'])
+    const handed = await page('/dashboard/scrape/', '?url=https%3A%2F%2Fdocs.example%2F', OCTOBER.now, octoberAnswers(), { stored })
+    const chosen = new handed.window.FormData(handed.$('play-form') as never)
+    expect([chosen.get('view'), chosen.get('scope')]).toEqual(['markdown', 'main'])
   })
 })
