@@ -402,9 +402,10 @@
     })
   }
 
-  // The Playground (the Scrape and Map pages, one layout): the octopus (dashboard-octopus.js) behind the URL card, whose
-  // first keys pick the endpoint and whose options, formats and code open as printed panels; the result; the recent runs
-  // as receipts. The card goes to POST /api/account/run, which the hosted API answers and charges as it would a key's call.
+  // The Playground (the Scrape and Map pages, one layout): a selector whose panel of tiles picks the endpoint, the URL
+  // card with the octopus behind it (dashboard-octopus.js), whose options, formats and code open as printed panels; the
+  // result; the recent runs as receipts. The card goes to POST /api/account/run, which the hosted API answers and
+  // charges as it would a key's call.
   const play = $('play-form')
   if (play) {
     const output = $('play-output')
@@ -447,7 +448,7 @@
     }
 
     // Panels: one open at a time, printed in as the site's menus are (nav.js): a reveal in steps, then rows and glyphs.
-    const panels = [...play.querySelectorAll('[data-panel]')]
+    const panels = [...document.querySelectorAll('#pg [data-panel]')]
     const close = () => { for (const button of panels) { button.setAttribute('aria-expanded', 'false'); $(button.dataset.panel).hidden = true } }
     const decode = (element, delay) => {
       const text = element.textContent
@@ -462,7 +463,7 @@
     const print = (panel) => {
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
       panel.classList.remove('is-printing'); void panel.offsetWidth; panel.classList.add('is-printing')
-      ;[...panel.querySelectorAll('.pg-check, .pg-fields label, .code, p')].forEach((row, i) => row.style.setProperty('--row', String(i)))
+      ;[...panel.querySelectorAll('.pg-check, .pg-fields label, .pg-tile, .code, p')].forEach((row, i) => row.style.setProperty('--row', String(i)))
       ;[...panel.querySelectorAll('.pg-kicker, code')].forEach((element, i) => { if (!element.closest('pre')) decode(element, 40 + i * 18) })
       setTimeout(() => panel.classList.remove('is-printing'), 700)
     }
@@ -480,18 +481,21 @@
     document.addEventListener('click', (event) => { if (!event.target.closest('.pg-panel, [data-panel]')) close() })
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape') close() })
 
-    // The endpoint keys: the same card, its options and its address change in place.
+    // The selector's tiles: the same card, its options and its address change in place.
     const PAGES = { scrape: ['Scrape', 'Read one page as Markdown, with its Evidence Record, on this account\'s credits at the API\'s price.'], map: ['Map', 'List the URLs of a site from its sitemap and links, on this account\'s credits at the API\'s price.'] }
     const switchTo = (next, push) => {
       endpoint = next
       $('pg').dataset.endpoint = next
       play.dataset.endpoint = next
       for (const element of document.querySelectorAll('#pg [data-only]')) element.hidden = element.dataset.only !== next
-      for (const key of document.querySelectorAll('#pg [role="radio"][data-endpoint]')) key.setAttribute('aria-checked', String(key.dataset.endpoint === next))
+      for (const tile of document.querySelectorAll('#pg .pg-tile[data-endpoint]')) tile.setAttribute('aria-pressed', String(tile.dataset.endpoint === next))
+      const pick = { scrape: ['Extract', 'Scrape', '▤'], map: ['Discover', 'Map', '⌗'] }[next]
+      set('pg-picker-kicker', pick[0]); set('pg-picker-name', pick[1]); set('pg-picker-glyph', pick[2])
       for (const link of document.querySelectorAll('.dash-nav a')) { if (link.getAttribute('href') === `/dashboard/${next}/`) link.setAttribute('aria-current', 'page'); else if (/\/dashboard\/(scrape|map)\/$/.test(link.getAttribute('href'))) link.removeAttribute('aria-current') }
       const [title, lead] = PAGES[next]
       document.querySelector('.dash-head h1').textContent = title
-      document.querySelector('.dash-head .dash-lead').textContent = lead
+      const leadLine = document.querySelector('.dash-head .dash-lead')
+      if (leadLine) leadLine.textContent = lead
       document.title = `${title} | Octocrawl Dashboard`
       set('play-cost', COST[next][0])
       $('play-cost').title = COST[next][1]
@@ -504,7 +508,7 @@
       if (push) { const url = play.url.value.trim(); history.replaceState(null, '', `/dashboard/${next}/${url ? `?url=${encodeURIComponent(url)}` : ''}`) }
       drawCode()
     }
-    for (const key of document.querySelectorAll('#pg [role="radio"][data-endpoint]')) key.addEventListener('click', () => { if (key.dataset.endpoint !== endpoint) { switchTo(key.dataset.endpoint, true); play.url.focus() } })
+    for (const tile of document.querySelectorAll('#pg .pg-tile[data-endpoint]')) tile.addEventListener('click', () => { if (tile.dataset.endpoint !== endpoint) switchTo(tile.dataset.endpoint, true); close(); play.url.focus() })
 
     const linkList = (links) => (Array.isArray(links) ? links.map((link) => (typeof link === 'string' ? link : link && link.url)).filter(Boolean) : null)
     const facts = (record) => {

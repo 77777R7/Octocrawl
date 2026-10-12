@@ -450,6 +450,8 @@ const dashCode = (id, text) => `<div class="code"><pre id="${id}">${escape(text)
 /** The request table the Activity page and the Overview share: dashboard.js fills its body from /api/account/activity. */
 const requestTable = (id, rows, empty = 'No requests yet. Each call made with one of your keys or in the Playground shows here, with what it cost.') => `<div class="table-scroll"><table class="dash-table requests" data-rows="${rows}"><thead><tr><th>Time (UTC)</th><th>Endpoint</th><th>URL</th><th>Lane</th><th>Result</th><th>robots.txt</th><th class="num">Credits</th><th>Evidence</th></tr></thead><tbody id="${id}-body"></tbody></table></div><p class="dash-small" id="${id}-empty" hidden>${empty}</p>`
 function dashboardPageHtml(path, title, lead, body) {
+  // The Playground's pages keep their header to a line, as Firecrawl's does: the selector and the URL card come first.
+  const playground = path === '/dashboard/scrape/' || path === '/dashboard/map/'
   let group = ''
   const links = DASHBOARD_PAGES.map(([href, name, section]) => {
     const heading = section === group ? '' : `<p class="dash-group">${escape(section)}</p>`
@@ -463,9 +465,9 @@ function dashboardPageHtml(path, title, lead, body) {
 <nav class="dash-nav" aria-label="Dashboard">${links}</nav>
 <div class="dash-credits"><p><strong id="side-credits">…</strong> credits left</p><progress class="credit-bar" id="side-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress><p class="dash-small" id="side-renews">&nbsp;</p></div>
 <div class="dash-who"><span id="side-email">…</span><a href="/docs/">Docs ↗</a></div></aside>
-<main id="main-content" class="dash-main"><header class="dash-head"><pre class="dash-noise" id="dash-noise" aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1><p class="dash-lead">${lead}</p></header>
+<main id="main-content" class="dash-main"><header class="dash-head${playground ? ' compact' : ''}"><pre class="dash-noise" id="dash-noise" aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1>${playground ? '' : `<p class="dash-lead">${lead}</p>`}</header>
 <p class="dash-message" id="dash-message" role="status" aria-live="polite"></p>
-${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script>${path === '/dashboard/scrape/' || path === '/dashboard/map/' ? `<script defer src="/docs-assets/dashboard-octopus.js?v=${assetVersions['dashboard-octopus.js']}"></script>` : ''}<script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
+${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script>${playground ? `<script defer src="/docs-assets/dashboard-octopus.js?v=${assetVersions['dashboard-octopus.js']}"></script>` : ''}<script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
 }
 // The Overview's banner: the Evidence Record, the thing that sets Octocrawl apart, centred between the octopus's arms,
 // which dashboard.js draws in glyphs rising from both bottom corners and keeps swaying.
@@ -535,34 +537,43 @@ ${installRow('cline', 'Cline', 'CL', 'Merge into <code>cline_mcp_settings.json</
 <section class="panel" aria-labelledby="c-local"><div class="panel-head"><h2 id="c-local">On your own computer</h2></div><p>Free and without limit, with every tool: crawl, batch and Monitor too. No key and no credits.</p>${dashCode('c-local-code', 'npx octocrawl serve')}</section>
 </div></div>`
 /**
- * A Playground page: one dark stage where the home page's octopus, drawn in glyphs, rises behind the home page's white
- * URL card. The card's first keys pick scrape or map; its options, formats and code open as panels printed in the site's
- * style. Below come the result and the account's recent runs as receipts over a slow current of glyphs. Both pages are
- * one layout: dashboard.js switches between them in place and sends the card to POST /api/account/run, which the
- * hosted API charges like a key's call; dashboard-octopus.js draws the octopus and the current.
+ * A Playground page, laid out as Firecrawl's: a selector on top, the URL card in a band below it, then the result and
+ * the account's recent runs. The selector is Octocrawl's own: one button naming the endpoint, which opens a panel of
+ * tiles printed in the site's style (scrape, map, and crawl on your own computer). Behind the card the home page's
+ * octopus, drawn in glyphs, peeks over its top edge and reaches out on both sides; the recent runs are receipts over a
+ * slow current of glyphs. Both pages are one layout: dashboard.js switches between them in place and sends the card to
+ * POST /api/account/run, which the hosted API charges like a key's call; dashboard-octopus.js draws the glyphs.
  */
+const PLAYGROUND_MODES = {
+  scrape: ['Extract', 'Scrape', '▤', 'One page as Markdown, links or HTML, with its Evidence Record.', '1–5 credits'],
+  map: ['Discover', 'Map', '⌗', 'Every URL of a site, from its sitemap and its links.', '0–1 credit'],
+}
 const playgroundBody = (endpoint) => {
   const only = (which) => `data-only="${which}"${which === endpoint ? '' : ' hidden'}`
-  const key = (which) => `<button type="button" role="radio" data-endpoint="${which}" aria-checked="${which === endpoint}">${which}</button>`
+  const [kicker, name, glyph] = PLAYGROUND_MODES[endpoint]
+  const tile = (which) => { const [k, n, g, about, cost] = PLAYGROUND_MODES[which]; return `<button class="pg-tile" type="button" data-endpoint="${which}" aria-pressed="${which === endpoint}"><span class="pg-tile-glyph" aria-hidden="true">${g}</span><span class="pg-kicker">${k}</span><strong>${n}</strong><span class="pg-tile-about">${about}</span><code>${cost}</code></button>` }
   const views = [['markdown', 'Markdown', 'scrape'], ['links', 'Links', ''], ['html', 'HTML', 'scrape'], ['evidence', 'Evidence Record', 'scrape'], ['json', 'JSON', '']]
-    .map(([view, name, which]) => `<button type="button" role="tab" aria-selected="false" data-view="${view}"${which ? ` ${only(which)}` : ''}>${name}</button>`).join('')
+    .map(([view, n, which]) => `<button type="button" role="tab" aria-selected="false" data-view="${view}"${which ? ` ${only(which)}` : ''}>${n}</button>`).join('')
+  const cross = (where) => `<span class="pg-cross ${where}" aria-hidden="true">+</span>`
   return `<section class="pg" id="pg" data-endpoint="${endpoint}">
-<div class="pg-stage" id="pg-stage"><div class="pg-depth" aria-hidden="true"><canvas class="pg-octopus" id="pg-octopus"></canvas></div>
+<div class="pg-frame">
+<div class="pg-top">${cross('tl')}${cross('tr')}<button class="pg-picker" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="pg-modes" data-panel="pg-modes"><span class="pg-kicker" id="pg-picker-kicker">${kicker}</span><span class="pg-picker-name"><span class="pg-glyph" id="pg-picker-glyph" aria-hidden="true">${glyph}</span><span id="pg-picker-name">${name}</span></span><span class="pg-caret" aria-hidden="true">▾</span></button>
+<div class="pg-panel pg-modes" id="pg-modes" role="dialog" aria-label="What to run" hidden><p class="pg-kicker">What to run</p><div class="pg-tiles">${tile('scrape')}${tile('map')}<a class="pg-tile is-local" href="/dashboard/connect/#c-local"><span class="pg-tile-glyph" aria-hidden="true">&gt;_</span><span class="pg-kicker">On your computer</span><strong>Crawl</strong><span class="pg-tile-about">Crawl, batch and Monitor run on your own machine, free and without limit.</span><code>npx octocrawl serve</code></a></div></div></div>
+<div class="pg-band" id="pg-stage">${cross('bl')}${cross('br')}<div class="pg-depth" aria-hidden="true"><canvas class="pg-octopus" id="pg-octopus"></canvas></div>
 <form class="pg-card" id="play-form" data-endpoint="${endpoint}" novalidate>
-<div class="pg-entry"><div class="pg-mode" role="radiogroup" aria-label="Endpoint">${key('scrape')}${key('map')}</div><label class="sr-only" for="play-url">URL</label><input id="play-url" name="url" type="url" inputmode="url" required placeholder="Paste a public page URL…" autocomplete="off" spellcheck="false" /></div>
+<div class="pg-entry"><label class="pg-chip" for="play-url">URL</label><input id="play-url" name="url" type="url" inputmode="url" required placeholder="Paste a public page URL…" autocomplete="off" spellcheck="false" /></div>
 <div class="pg-toolbar"><div class="pg-tools">
 <button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-format" data-panel="pg-format" ${only('scrape')}><span class="pg-glyph" aria-hidden="true">▤</span><span id="pg-format-label">Markdown</span></button>
-<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-options" data-panel="pg-options"><span class="pg-glyph" aria-hidden="true">≡</span>Options</button>
-<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-code" data-panel="pg-code"><span class="pg-glyph" aria-hidden="true">&lt;/&gt;</span>Get code</button></div>
-<div class="pg-tools"><span class="pg-cost" id="play-cost"></span><button class="pg-go" type="submit" id="play-submit">${endpoint === 'scrape' ? 'Extract page' : 'Map site'} <span aria-hidden="true">→</span></button></div></div>
+<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-options" data-panel="pg-options"><span class="pg-glyph" aria-hidden="true">≡</span>Options</button></div>
+<div class="pg-tools"><span class="pg-cost" id="play-cost"></span><button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-code" data-panel="pg-code"><span class="pg-glyph" aria-hidden="true">&lt;/&gt;</span>Get code</button><button class="pg-go" type="submit" id="play-submit">${endpoint === 'scrape' ? 'Extract page' : 'Map site'} <span aria-hidden="true">→</span></button></div></div>
 <div class="pg-panel" id="pg-format" hidden><p class="pg-kicker">Format</p><label class="pg-check"><input type="checkbox" name="formats" value="markdown" checked /> Markdown <code>.md</code></label><label class="pg-check"><input type="checkbox" name="formats" value="links" /> Links <code>.txt</code></label><label class="pg-check"><input type="checkbox" name="formats" value="html" /> HTML <code>.html</code></label></div>
 <div class="pg-panel" id="pg-options" hidden><p class="pg-kicker">Options</p>
 <label class="pg-check" ${only('scrape')}><input type="checkbox" name="onlyMainContent" checked /> Main content only <span class="dash-small">leave out navigation, footers and sidebars</span></label>
 <div class="pg-fields" ${only('map')}><label>Search<input name="search" maxlength="200" placeholder="docs" autocomplete="off" /></label><label>Limit<input name="limit" type="number" min="1" max="5000" value="100" /></label></div></div>
 <div class="pg-panel wide" id="pg-code" hidden><div class="panel-head"><p class="pg-kicker">Get code</p><div class="tabs" role="group" aria-label="Language"><button type="button" aria-pressed="true" data-lang="curl">cURL</button><button type="button" aria-pressed="false" data-lang="js">JavaScript</button></div></div>${dashCode('play-code', '')}<p class="dash-small">The same call from your code or agent: put a key from <a href="/dashboard/keys/">API keys</a> where it says <code>oc_YOUR_KEY</code>. It costs what a run here costs.</p></div>
 </form>
-<p class="pg-note" id="play-summary" role="status" aria-live="polite"></p>
-<p class="pg-elsewhere">Crawl, batch and Monitor run on your computer, free: <code>npx octocrawl serve</code> · <a href="/dashboard/connect/#c-local">Connect →</a></p></div>
+<p class="pg-note" id="play-summary" role="status" aria-live="polite"></p></div>
+</div>
 <section class="panel pg-result" id="play-result" hidden aria-labelledby="result-title"><div class="panel-head"><div><h2 id="result-title">Result</h2><p class="dash-small" id="play-detail"></p></div><span class="status" id="play-status"></span></div>
 <div class="tabs play-views" role="tablist" aria-label="Result view">${views}</div>
 <dl class="facts play-evidence" id="play-evidence" hidden></dl>

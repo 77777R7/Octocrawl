@@ -3,8 +3,8 @@
 // WebGL renderer tied to the home page. Every glyph stays on its cell; motion changes which glyph a cell shows and how
 // bright it is, never where it is. Still with reduced motion, paused in a hidden tab or off screen.
 // window.OctoGlyphs.octopus(canvas, anchor) → { set(state) } with 'idle' | 'running'; window.OctoGlyphs.current(pre).
-// With an anchor (the URL card in front of it), the octopus is drawn wider than the card and the stage is sized to it,
-// with the card in the middle: the head rises above the card and the arms reach out on both sides and below it.
+// With an anchor (the URL card in front of it), the octopus is drawn wider than the card and centred on it a little
+// high, so its eyes peek over the card's top edge and its arms reach out on both sides.
 (() => {
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const RAMP = ' .·:+×x#▪'
@@ -53,16 +53,13 @@
       context.setTransform(ratio, 0, 0, ratio, 0, 0)
       cellW = width < 520 ? 4.8 : 5.6
       cellH = cellW * 1.3
-      // Behind an anchor: wider than it, from the stage's top. Else as large as fits, centred. The artwork's width to
-      // height is CROP.w to CROP.h.
-      const across = anchor ? Math.min(width * 0.96, Math.max(anchor.offsetWidth * 1.4, 320), 840) : Math.min(width, (height * CROP.w) / CROP.h) * 0.98
+      // Behind an anchor: wider than it, its eyes (0.42 of the artwork's height down) just over the anchor's top edge.
+      // Else as large as fits, centred. The artwork's width to height is CROP.w to CROP.h.
+      const across = anchor ? Math.min(width * 0.98, Math.max(anchor.offsetWidth * 1.45, 320), 1060) : Math.min(width, (height * CROP.w) / CROP.h) * 0.98
       cols = Math.floor(across / cellW)
       rows = Math.floor((across * CROP.h) / CROP.w / cellH)
       left = (width - cols * cellW) / 2
-      top = anchor ? 14 : (height - rows * cellH) / 2
-      // The stage is as tall as the octopus, less the tips of its lowest curls, which fade out: its --pg-stage-h (CSSOM,
-      // as the CSP allows). The card sits in the middle of it.
-      if (anchor) canvas.closest('.pg-stage')?.style.setProperty('--pg-stage-h', `${Math.round(top + rows * cellH * 0.93)}px`)
+      top = anchor ? anchor.offsetTop - rows * cellH * 0.42 - cellH * 3 : (height - rows * cellH) / 2
       const probe = document.createElement('canvas')
       probe.width = cols
       probe.height = rows
