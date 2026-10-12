@@ -864,6 +864,30 @@ describe('strategies', () => {
     })
   })
 
+  describe('a short list beside a much larger grid of linked cards (ROADMAP PA item 4, T006)', () => {
+    const slides = (n: number) =>
+      `<ul id="gwm-window" class="a-unordered-list a-horizontal">${Array.from({ length: n }, (_, i) => `<li><a href="/s?k=slide${i}">slide ${i}</a></li>`).join('')}</ul>`
+    const cards = (n: number) =>
+      Array.from({ length: n }, (_, i) => `<div class="card"><h2>Card ${i}</h2><a href="/b?node=${i}">See more ${i}</a></div>`).join('')
+
+    it('takes the grid, not the list', () => {
+      // Amazon's home from Singapore on 2026-10-12: a 6-slide hero list above a deck of 26 category cards.
+      const doc = parse(wrap(`${slides(6)}<div id="gwm-Deck-btf">${cards(26)}</div>`))
+      expect(selectList(doc.document)?.getAttribute('id')).toBe('gwm-Deck-btf')
+      doc.close()
+      const out = extractTf.extract(wrap(`${slides(6)}<div id="gwm-Deck-btf">${cards(26)}</div>`))
+      expect(out.mainHtml).toContain('See more 25')
+    })
+
+    it('keeps the list when the grid is not at least twice its size', () => {
+      for (const [items, grid] of [[6, 11], [8, 8], [12, 20]] as const) {
+        const doc = parse(wrap(`${slides(items)}<div id="grid">${cards(grid)}</div>`))
+        expect(selectList(doc.document)?.getAttribute('id'), `${items} items, ${grid} cards`).toBe('gwm-window')
+        doc.close()
+      }
+    })
+  })
+
   it('selectTable skips layout tables and picks the data table', () => {
     const doc = parse(
       wrap('<main><h1>Specs</h1>' +

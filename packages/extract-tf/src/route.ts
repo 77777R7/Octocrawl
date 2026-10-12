@@ -753,7 +753,10 @@ function inSiteChrome(el: Element): boolean {
 /**
  * Listing strategy: the ordered/unordered list whose items share a common
  * link-plus-text shape. Returns the list element, or null. A list in the
- * page's footer or navigation is never the listing (inSiteChrome).
+ * page's footer or navigation is never the listing (inSiteChrome). A
+ * container of linked blocks with at least twice the list's linked items is
+ * the listing instead: Amazon's home from Singapore on 2026-10-12 put a
+ * 6-slide hero list above a deck of 26 category cards in divs.
  */
 export function selectList(doc: Document): Element | null {
   let best: Element | null = null
@@ -766,12 +769,18 @@ export function selectList(doc: Document): Element | null {
       best = el
     }
   }
-  if (best) return best
+  const container = selectLinkedContainer(doc)
+  if (best === null) return container?.el ?? null
+  return container !== null && container.linkedKids >= bestItems * 2 ? container.el : best
+}
 
-  // Div-based listings: no list markup, but the page's content is a set of
-  // link-carrying sibling cards. Pick the container with the most linked
-  // children, preferring the DEEPEST qualifying one so the whole page
-  // wrapper doesn't win by aggregate link count.
+/**
+ * Div-based listings: no list markup, but the page's content is a set of
+ * link-carrying sibling cards. The container with the most linked children,
+ * preferring the DEEPEST qualifying one so the whole page wrapper doesn't win
+ * by aggregate link count; null when none has three.
+ */
+function selectLinkedContainer(doc: Document): { el: Element; linkedKids: number } | null {
   let bestDiv: Element | null = null
   let bestDivDepth = -1
   let bestDivLinks = 0
@@ -787,7 +796,7 @@ export function selectList(doc: Document): Element | null {
       bestDiv = el
     }
   }
-  return bestDiv
+  return bestDiv === null ? null : { el: bestDiv, linkedKids: bestDivLinks }
 }
 
 /** Text of a node outside any link. */
