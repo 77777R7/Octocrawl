@@ -66,7 +66,7 @@ B003 tesla、B009 allrecipes、T005 etsy、T010 OECD（需要点击）、T012 wa
 
 目标：对已归因的类别各做一次有对照的验证，每臂一份记录。对照臂固定为 C 臂配置（`standard` grant：`compatible_transport` + `egress_sessions`，`W2L_EGRESS_PROXIES` 指向自备网关，API 不走 Clash 代理），同日重跑一次作为基线。
 
-- [ ] **T2.0 对照臂**（T053 产品侧差异已隔离，[记录](../research/access/runs/2026-10-12-t053-identity-204c8a76.md)：imf.org 的 Akamai 拒绝自称 Google Chrome 的 headless Chromium，诚实声明 HeadlessChrome 则 200；开关 `W2L_BROWSER_IDENTITY=actual` 已做（#431），产品实测 T053 3/3 verified、其余 14 题不变，[记录](../research/access/runs/2026-10-12-pa-gate-signals-actual-identity-204c8a76.md)；下一步是 92 题与健康组的 A/B 两窗口）：C 臂配置在 16 题上同日重跑。
+- [x] **T2.0 对照臂**（T053 产品侧差异已隔离，[记录](../research/access/runs/2026-10-12-t053-identity-204c8a76.md)：imf.org 的 Akamai 拒绝自称 Google Chrome 的 headless Chromium，诚实声明 HeadlessChrome 则 200；开关 `W2L_BROWSER_IDENTITY=actual` 已做（#431），产品实测 T053 3/3 verified、其余 14 题不变，[记录](../research/access/runs/2026-10-12-pa-gate-signals-actual-identity-204c8a76.md)；92 题 A/B 窗口 1 已跑：声明身份 44 verified、actual 32，actual 只多 T053、少 13 题（含 6 题健康组），[declared](../research/access/runs/2026-10-12-identity-ab-declared-2df8207d.md)、[actual](../research/access/runs/2026-10-12-identity-ab-actual-2df8207d.md)，**结论：不改默认，开关留作按 host 的路线选项**）：C 臂配置在 16 题上同日重跑。
   - 验收：记录一份；每题 egress 为 `p.webshare.io:80`。
 - [ ] **T2.1 Patchright 定向重测**（丙类；T1.3 的探针里 Patchright 与 Playwright 在 16 题上无一不同，预期无增益，跑与否由 Howard 定）：C 臂配置 + `W2L_BROWSER_ENGINE=patchright` + grant 加 `enhanced_browser`（tier enhanced，需 attestation）。10-06 的 A/B（[记录](../research/access/runs/2026-10-06-patchright-ab-f052375.md)）只在数据中心出口下做过，结论是无净增益；这次换自备网关出口。
   - 验收：记录一份；与 T2.0 逐题对照，列出净增益与退步；T053 要在记录里单独说明（10-06 曾一次过）。
