@@ -864,63 +864,60 @@ describe('strategies', () => {
     })
   })
 
-  describe('a short list beside a much larger grid of linked cards (ROADMAP PA item 4, T006)', () => {
+  describe('a carousel is not the listing (ROADMAP PA item 4, T006)', () => {
     const slides = (n: number) =>
-      `<ul id="gwm-window" class="a-unordered-list a-horizontal">${Array.from({ length: n }, (_, i) => `<li><a href="/s?k=slide${i}">slide ${i}</a></li>`).join('')}</ul>`
+      `<ul id="gwm-window" class="a-unordered-list a-horizontal">${Array.from({ length: n }, (_, i) => `<li><a href="/s?k=slide${i}"><h2>Slide ${i}</h2></a></li>`).join('')}</ul>`
+    // Amazon's home on 2026-10-12: the controls sit beside the slides' container, two levels above the list.
+    const hero = (n: number) =>
+      `<div id="gwm-window-container-wrapper"><a href="#" aria-label="Carousel previous slide"></a><div id="gwm-window-container">${slides(n)}</div><a href="#" aria-label="Carousel next slide"></a></div>`
     const cards = (n: number) =>
       Array.from({ length: n }, (_, i) => `<div class="card"><h2>Card ${i}</h2><a href="/b?node=${i}">See more ${i}</a></div>`).join('')
 
-    it('takes the grid, not the list', () => {
-      // Amazon's home from Singapore on 2026-10-12: a 6-slide hero list above a deck of 26 category cards.
-      const doc = parse(wrap(`${slides(6)}<div id="gwm-Deck-btf">${cards(26)}</div>`))
-      expect(selectList(doc.document)?.getAttribute('id')).toBe('gwm-Deck-btf')
-      doc.close()
-      const out = extractTf.extract(wrap(`${slides(6)}<div id="gwm-Deck-btf">${cards(26)}</div>`))
-      expect(out.mainHtml).toContain('See more 25')
+    it('passes over a hero carousel for the deck of cards below it, however many have loaded', () => {
+      for (const n of [26, 9, 4]) {
+        const html = wrap(`${hero(6)}<div id="gwm-Deck-btf">${cards(n)}</div>`)
+        const doc = parse(html)
+        expect(selectList(doc.document)?.getAttribute('id'), `${n} cards`).toBe('gwm-Deck-btf')
+        doc.close()
+        expect(extractTf.extract(html).mainHtml, `${n} cards`).toContain(`See more ${n - 1}`)
+      }
     })
 
-    it('takes the grid while it is half loaded: its cards against slides that are links alone', () => {
-      // The same home on 2026-10-12 read before its lazy cards came in: 9 cards after cleaning, 6 slides.
-      const doc = parse(wrap(`${slides(6)}<div id="gwm-Deck-btf">${cards(9)}</div>`))
-      expect(selectList(doc.document)?.getAttribute('id')).toBe('gwm-Deck-btf')
-      doc.close()
+    it('knows the WAI-ARIA carousel pattern', () => {
+      for (const carousel of [
+        `<section aria-roledescription="carousel">${slides(6)}</section>`,
+        `<ul id="gwm-window">${Array.from({ length: 6 }, (_, i) => `<li aria-roledescription="slide"><a href="/s/${i}">Slide ${i}</a></li>`).join('')}</ul>`,
+        `<div><button aria-label="Next slide"></button>${slides(6)}</div>`,
+      ]) {
+        const doc = parse(wrap(`${carousel}<div id="grid">${cards(4)}</div>`))
+        expect(selectList(doc.document)?.getAttribute('id'), carousel.slice(0, 50)).toBe('grid')
+        doc.close()
+      }
     })
 
-    it('keeps the list when its own cards are not outweighed twice, or the grid has fewer cards than it has items', () => {
+    it('keeps a real list as the listing beside pagers, filters, menus, shelves and recommendations', () => {
       const posts = (n: number) =>
         `<ul id="listing">${Array.from({ length: n }, (_, i) => `<li><a href="/p/${i}">Post ${i}</a> <span>2026-10-0${i % 9}</span></li>`).join('')}</ul>`
-      const bareLinks = (n: number) => `<ul id="listing">${Array.from({ length: n }, (_, i) => `<li><a href="/w/${i}">Page ${i}</a></li>`).join('')}</ul>`
-      for (const [list, grid] of [[posts(6), 11], [posts(8), 8], [posts(12), 20], [bareLinks(40), 9], [bareLinks(10), 9]] as const) {
-        const doc = parse(wrap(`${list}<div id="grid">${cards(grid)}</div>`))
-        expect(selectList(doc.document)?.getAttribute('id'), `${list.slice(0, 60)} vs ${grid} cards`).toBe('listing')
-        doc.close()
-      }
-    })
-
-    it('keeps the list over a larger block of bare links: a top bar, filters, a pager, a menu', () => {
-      const bare = (n: number, wrapTag: string, cls: string) =>
-        Array.from({ length: n }, (_, i) => `<${wrapTag} class="${cls}"><a href="/x/${i}">${cls} ${i}</a></${wrapTag}>`).join('')
-      const posts = `<ul id="listing">${Array.from({ length: 8 }, (_, i) => `<li><a href="/p/${i}">Post title ${i}</a> <span>2026-10-0${i}</span></li>`).join('')}</ul>`
-      const results = `<ol id="listing">${Array.from({ length: 6 }, (_, i) => `<li><a href="/r/${i}">Result ${i}</a><p>A snippet about result ${i}.</p></li>`).join('')}</ol>`
-      const ten = `<ul id="listing">${Array.from({ length: 10 }, (_, i) => `<li><a href="/r/${i}">Result ${i}</a> with a note</li>`).join('')}</ul>`
-      const fifteen = `<ul id="listing">${Array.from({ length: 15 }, (_, i) => `<li><a href="/e/${i}">Entry ${i}</a> detail</li>`).join('')}</ul>`
+      const bare = (n: number, tag: string, cls: string) =>
+        Array.from({ length: n }, (_, i) => `<${tag} class="${cls}"><a href="/x/${i}">${cls} ${i}</a></${tag}>`).join('')
+      const row = (s: number) => `<div class="row">${Array.from({ length: 12 }, (_, i) => `<div class="card"><a href="/p/${s}-${i}">Item ${s}-${i}</a> $${i}.99</div>`).join('')}</div>`
+      const recs = Array.from({ length: 10 }, (_, i) => `<div class="rec"><a href="/p/${i}"><h3>Recommended stainless kettle ${i}</h3></a><span>4.5 stars, 1,234 ratings</span></div>`).join('')
       for (const page of [
-        `<div class="topbar">${bare(16, 'span', 'lang')}</div><h1>Blog</h1>${posts}`,
-        `<div class="filters">${bare(14, 'div', 'brand')}</div>${results}`,
-        `${ten}<div class="pagination">${bare(20, 'span', 'page')}</div>`,
-        `<div class="header"><div class="menu">${bare(30, 'div', 'category')}</div></div>${fifteen}`,
+        // A pager's "Next page" is not a slide control.
+        `<div class="results">${posts(10)}<div class="pager"><a href="?p=1" aria-label="Previous page">‹</a><a href="?p=3" aria-label="Next page">›</a></div></div>`,
+        `<div class="topbar">${bare(16, 'span', 'lang')}</div><h1>Blog</h1>${posts(8)}`,
+        `<div class="filters">${bare(14, 'div', 'brand')}</div>${posts(6)}`,
+        `<div class="header"><div class="menu">${bare(30, 'div', 'category')}</div></div>${posts(15)}`,
+        `<h1>Kettles</h1>${posts(10)}<section><h2>Customers also viewed</h2><div id="recs">${recs}</div></section>`,
+        `${posts(6)}<div id="grid">${cards(26)}</div>`,
       ]) {
         const doc = parse(wrap(page))
-        expect(selectList(doc.document)?.getAttribute('id'), page.slice(0, 40)).toBe('listing')
+        expect(selectList(doc.document)?.getAttribute('id'), page.slice(0, 50)).toBe('listing')
         doc.close()
       }
-    })
-
-    it('keeps a list of shelves whole, not one shelf\'s row of cards', () => {
-      const row = (s: number) => `<div id="row${s}" class="row">${Array.from({ length: 12 }, (_, i) => `<div class="card"><a href="/p/${s}-${i}">Item ${s}-${i}</a> $${i}.99</div>`).join('')}</div>`
-      const shelves = `<ul id="shelves">${Array.from({ length: 6 }, (_, s) => `<li class="shelf"><h2><a href="/c/${s}">Shelf ${s}</a></h2>${row(s)}</li>`).join('')}</ul>`
+      const shelves = `<ul id="listing">${Array.from({ length: 6 }, (_, s) => `<li class="shelf"><h2><a href="/c/${s}">Shelf ${s}</a></h2>${row(s)}</li>`).join('')}</ul>`
       const doc = parse(wrap(`<h1>Shop</h1>${shelves}`))
-      expect(selectList(doc.document)?.getAttribute('id')).toBe('shelves')
+      expect(selectList(doc.document)?.getAttribute('id')).toBe('listing')
       doc.close()
     })
   })

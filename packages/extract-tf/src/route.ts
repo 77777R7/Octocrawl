@@ -750,16 +750,31 @@ function inSiteChrome(el: Element): boolean {
   return false
 }
 
+/** A control that moves a carousel: labelled for a carousel, or for a previous or next slide. */
+const CAROUSEL_CONTROL = /\bcarousel\b|\b(?:previous|prev|next)\s+slide\b/i
+
+/**
+ * Whether the list is a carousel, which shows one slide at a time: it, an item of it, or an ancestor up to three
+ * levels holds `aria-roledescription` "carousel" or "slide" (the WAI-ARIA carousel pattern), or one of those
+ * ancestors holds a link or button whose label names a carousel or a slide to go to. Amazon's home puts its hero
+ * slides in `ul#gwm-window`, beside `<a aria-label="Carousel previous slide">`, and they are not its listing.
+ */
+function isCarousel(list: Element): boolean {
+  const described = (el: Element) => /^(?:carousel|slide)$/i.test(el.getAttribute('aria-roledescription') ?? '')
+  if (described(list) || qsa(list, ':scope > li').some(described)) return true
+  let e: Element | null = list.parentElement
+  for (let level = 0; level < 3 && e !== null && !['MAIN', 'BODY', 'HTML'].includes(e.tagName); level++, e = e.parentElement) {
+    if (described(e)) return true
+    if (qsa(e, 'a[aria-label],button[aria-label]').some((c) => CAROUSEL_CONTROL.test(c.getAttribute('aria-label') ?? ''))) return true
+  }
+  return false
+}
+
 /**
  * Listing strategy: the ordered/unordered list whose items share a common
  * link-plus-text shape. Returns the list element, or null. A list in the
- * page's footer or navigation is never the listing (inSiteChrome). A
- * container outside the list with no fewer cards (isCard: a link and text
- * of its own) than the list has linked items, and twice the list's text, is
- * the listing instead: Amazon's home from Singapore on 2026-10-12 put a
- * 6-slide hero carousel (143 characters) above a deck of 9 to 27 category
- * cards in divs (889 to 3,178), as many as had loaded. Bare links (a top bar,
- * filters, a pager, a menu) are not cards, so they never outweigh a list.
+ * page's footer or navigation (inSiteChrome), or a carousel (isCarousel), is
+ * never the listing.
  */
 export function selectList(doc: Document): Element | null {
   let best: Element | null = null
@@ -767,41 +782,23 @@ export function selectList(doc: Document): Element | null {
   for (const el of qsa(doc, 'ul,ol')) {
     const items = qsa(el, ':scope > li')
     const linked = items.filter((li) => qsa(li, 'a').length > 0).length
-    if (linked >= 3 && linked >= items.length * 0.6 && linked > bestItems && !inSiteChrome(el)) {
+    if (linked >= 3 && linked >= items.length * 0.6 && linked > bestItems && !inSiteChrome(el) && !isCarousel(el)) {
       bestItems = linked
       best = el
     }
   }
-  if (best === null) return selectLinkedContainer(doc, (kid) => qsa(kid, 'a').length > 0)?.el ?? null
-  // A row of cards inside the list (a shelf in a list of shelves) is part of it, not a rival.
-  const list = best
-  const grid = selectLinkedContainer(doc, isCard, (el) => list.contains(el))
-  if (grid === null) return best
-  // The grid needs as many cards as the list has items, and twice its text: a carousel showing one title at a time
-  // loses to a deck still loading its cards, a long index of links to a small grid does not.
-  const text = (el: Element) => textOf(el).replace(/\s+/g, ' ').trim().length
-  return grid.linkedKids >= bestItems && text(grid.el) >= text(best) * 2 ? grid.el : best
-}
+  if (best) return best
 
-/**
- * Div-based listings: no list markup, but the page's content is a set of
- * link-carrying sibling cards. The container with the most children that
- * `counts` (any link, or a card), preferring the DEEPEST qualifying one so the
- * whole page wrapper doesn't win by aggregate link count, and passing over
- * those `skip` names; null when none has three.
- */
-function selectLinkedContainer(
-  doc: Document,
-  counts: (kid: Element) => boolean,
-  skip: (el: Element) => boolean = () => false,
-): { el: Element; linkedKids: number } | null {
+  // Div-based listings: no list markup, but the page's content is a set of
+  // link-carrying sibling cards. Pick the container with the most linked
+  // children, preferring the DEEPEST qualifying one so the whole page
+  // wrapper doesn't win by aggregate link count.
   let bestDiv: Element | null = null
   let bestDivDepth = -1
   let bestDivLinks = 0
   for (const el of qsa(doc, 'div,section')) {
-    if (skip(el)) continue
     const kids = Array.from(el.children)
-    const linkedKids = kids.filter(counts).length
+    const linkedKids = kids.filter((k) => qsa(k, 'a').length > 0).length
     if (linkedKids < 3) continue
     let depth = 0
     for (let p = el.parentElement; p; p = p.parentElement) depth++
@@ -811,7 +808,7 @@ function selectLinkedContainer(
       bestDiv = el
     }
   }
-  return bestDiv === null ? null : { el: bestDiv, linkedKids: bestDivLinks }
+  return bestDiv
 }
 
 /** Text of a node outside any link. */
