@@ -910,6 +910,9 @@ describe('strategies', () => {
         `<div class="header"><div class="menu">${bare(30, 'div', 'category')}</div></div>${posts(15)}`,
         `<h1>Kettles</h1>${posts(10)}<section><h2>Customers also viewed</h2><div id="recs">${recs}</div></section>`,
         `${posts(6)}<div id="grid">${cards(26)}</div>`,
+        // A carousel beside the list, under a wrapper they share, does not make the list one.
+        `<div id="app"><section class="hero"><a href="#" aria-label="Carousel next slide"></a><div class="slides">${bare(3, 'div', 's')}</div></section><div id="main"><h1>Latest posts</h1>${posts(10)}</div></div>`,
+        `<div id="page"><div class="col"><div class="deals-strip"><h2>Top picks for you</h2><a href="#" aria-label="Previous slide"></a><div class="track">${bare(5, 'div', 'tile')}</div><a href="#" aria-label="Next slide"></a></div>${posts(10)}</div></div>`,
       ]) {
         const doc = parse(wrap(page))
         expect(selectList(doc.document)?.getAttribute('id'), page.slice(0, 50)).toBe('listing')

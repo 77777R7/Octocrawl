@@ -756,8 +756,9 @@ const CAROUSEL_CONTROL = /\bcarousel\b|\b(?:previous|prev|next)\s+slide\b/i
 /**
  * Whether the list is a carousel, which shows one slide at a time: it, an item of it, or an ancestor up to three
  * levels holds `aria-roledescription` "carousel" or "slide" (the WAI-ARIA carousel pattern), or one of those
- * ancestors holds a link or button whose label names a carousel or a slide to go to. Amazon's home puts its hero
- * slides in `ul#gwm-window`, beside `<a aria-label="Carousel previous slide">`, and they are not its listing.
+ * ancestors has, as a child of its own, a link or button whose label names a carousel or a slide to go to. A control
+ * deeper in the ancestor belongs to another carousel beside the list. Amazon's home puts its hero slides in
+ * `ul#gwm-window`, two levels below `<a aria-label="Carousel previous slide">`, and they are not its listing.
  */
 function isCarousel(list: Element): boolean {
   const described = (el: Element) => /^(?:carousel|slide)$/i.test(el.getAttribute('aria-roledescription') ?? '')
@@ -765,7 +766,7 @@ function isCarousel(list: Element): boolean {
   let e: Element | null = list.parentElement
   for (let level = 0; level < 3 && e !== null && !['MAIN', 'BODY', 'HTML'].includes(e.tagName); level++, e = e.parentElement) {
     if (described(e)) return true
-    if (qsa(e, 'a[aria-label],button[aria-label]').some((c) => CAROUSEL_CONTROL.test(c.getAttribute('aria-label') ?? ''))) return true
+    if (qsa(e, ':scope > a[aria-label], :scope > button[aria-label]').some((c) => CAROUSEL_CONTROL.test(c.getAttribute('aria-label') ?? ''))) return true
   }
   return false
 }
