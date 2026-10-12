@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import type { VerifyCheck, VerifyContract } from '@w2l/contracts'
+import { unsafeRegexReason, type VerifyCheck, type VerifyContract } from '@w2l/contracts'
 import { contractSha256, verify, VERIFIER_VERSION } from '../src/verify.js'
 // The access task runner's own judgement (research/access/run-set.mjs), which a task sent as a contract must match.
 import { isData, judge } from '../../../research/access/judge.mjs'
@@ -48,6 +48,13 @@ describe('the task verifier (ADR 0006)', () => {
     // Each type the set uses passed and failed somewhere, so agreement is not two verifiers failing alike.
     expect([...seen.keys()].sort()).toEqual(['markdownCountMin', 'markdownMatches', 'minTables'])
     for (const [type, tally] of seen) expect(tally.pass > 0 && tally.fail > 0, type).toBe(true)
+  })
+
+  it('sends only patterns the API accepts: no task pattern is one unsafeRegexReason refuses', () => {
+    // run-set.mjs sends each task's predicates as its verify contract, and the API answers 400 to a refused pattern.
+    const patterns = tasks.flatMap((task) => task.predicates.flatMap((p) => ('pattern' in p && typeof p.pattern === 'string' ? [{ id: task.id, type: p.type, pattern: p.pattern }] : [])))
+    expect(patterns.length).toBeGreaterThan(0)
+    expect(patterns.map(({ id, type, pattern }) => ({ id, type, pattern, refused: unsafeRegexReason(pattern) })).filter((p) => p.refused !== null)).toEqual([])
   })
 
   it("judges field and listRecordsMin as the runner does, on the result's own fields", () => {
