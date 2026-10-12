@@ -251,6 +251,19 @@
           "type": "markdownMatches",
           "pattern": "Amazon",
           "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "[$€£]\\s?\\d[\\d,]*\\.\\d{2}\\b",
+          "min": 5
+        }
+      ],
+      "revisions": [
+        {
+          "date": "2026-10-12",
+          "decidedBy": "Howard",
+          "change": "added the third predicate, five prices with cents ($12.99), as Octocrawl's Markdown writes Amazon's product prices",
+          "reason": "three card titles each written twice (\"Apparel under $25\", \"Shoes Under $50\", \"New home arrivals under $50\") met the first predicate's five on a home that showed no product price (a local read on 2026-10-12; the run at b117b45 kept no HTML)"
         }
       ],
       "provenance": "harvest: canary tier 2",
