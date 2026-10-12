@@ -249,10 +249,10 @@ a:hover{color:#fff}
 .pg [hidden]{display:none!important}
 .pg-kicker{margin:0;color:var(--muted);font:650 10.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase}
 .pg-kicker::before{content:"■ ";color:var(--orange)}
-.pg-stage{position:relative;display:grid;justify-items:center;align-content:start;gap:14px;padding:var(--pg-lift,300px) 20px 26px;border:1px solid var(--rule);border-radius:16px;background:radial-gradient(120% 90% at 50% 0%,#0c2a74 0%,var(--navy) 55%,var(--deep) 100%)}
+.pg-stage{position:relative;display:grid;place-items:center;min-height:max(var(--pg-stage-h,620px),460px);padding:70px 20px;border:1px solid var(--rule);border-radius:16px;background:radial-gradient(120% 90% at 50% 0%,#0c2a74 0%,var(--navy) 55%,var(--deep) 100%)}
 .pg-depth{position:absolute;inset:0;overflow:hidden;border-radius:16px;pointer-events:none}
-.pg-octopus{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:auto;-webkit-mask-image:linear-gradient(to bottom,#000 70%,transparent);mask-image:linear-gradient(to bottom,#000 70%,transparent)}
-.pg-card{position:relative;z-index:2;width:min(660px,100%);border-radius:14px;background:#fff;color:#14254a;box-shadow:0 24px 70px rgba(1,8,30,.55),0 0 0 1px rgba(255,255,255,.6)}
+.pg-octopus{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:auto;-webkit-mask-image:linear-gradient(to bottom,#000 78%,transparent);mask-image:linear-gradient(to bottom,#000 78%,transparent)}
+.pg-card{position:relative;z-index:2;width:min(600px,100%);border-radius:14px;background:#fff;color:#14254a;box-shadow:0 24px 70px rgba(1,8,30,.55),0 0 0 1px rgba(255,255,255,.6)}
 .pg-entry{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #e3e8f2}
 .pg-mode{display:flex;flex:none;padding:3px;border-radius:8px;background:#eef2f9}
 .pg-mode button{min-height:30px;padding:0 11px;border:0;border-radius:6px;background:none;color:#6b7c9e;font:650 12px var(--mono);letter-spacing:.04em;cursor:pointer}
@@ -280,12 +280,12 @@ a:hover{color:#fff}
 .pg-fields label{display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:600}
 .pg-fields input{min-height:38px;padding:0 10px;border:1px solid var(--rule);border-radius:6px;background:var(--navy);color:var(--ink);font:inherit}
 .pg-fields input[type="number"]{width:110px}
-.pg-note{position:relative;z-index:1;margin:0;padding:4px 10px;border-radius:6px;background:rgba(4,18,58,.85);color:var(--ink);font:12.5px var(--mono);text-align:center;text-shadow:0 1px 8px var(--deep)}
+.pg-note{position:absolute;z-index:1;left:50%;bottom:58px;transform:translateX(-50%);max-width:calc(100% - 40px);margin:0;padding:4px 10px;border-radius:6px;background:rgba(4,18,58,.85);color:var(--ink);font:12.5px var(--mono);text-align:center;text-shadow:0 1px 8px var(--deep)}
 .pg-note:empty{display:none}
 .pg-stage.is-running .pg-note{color:var(--orange-soft)}
 .pg-stage.is-running .pg-note::after{content:"";display:inline-block;width:3ch;text-align:left;animation:pg-dots 1.2s steps(4) infinite}
 @keyframes pg-dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
-.pg-elsewhere{position:relative;z-index:1;margin:0;padding:6px 12px;border:1px solid var(--rule);border-radius:999px;background:rgba(4,18,58,.88);color:var(--muted);font-size:12.5px;text-align:center}
+.pg-elsewhere{position:absolute;z-index:1;left:50%;bottom:16px;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);margin:0;padding:6px 12px;border:1px solid var(--rule);border-radius:999px;background:rgba(4,18,58,.88);color:var(--muted);font-size:12.5px;text-align:center}
 .pg-elsewhere code{color:var(--ink);font:12px var(--mono)}
 .pg-elsewhere a{font:650 12px var(--mono);text-decoration:none}
 .pg-result{margin:0}
@@ -351,7 +351,9 @@ a:hover{color:#fff}
   .dash-head h1{font-size:28px}
 }
 @media (max-width:480px){
-  .pg-stage{padding-left:12px;padding-right:12px}
+  .pg-stage{min-height:0;padding:130px 12px 104px}
+  .pg-elsewhere{border-radius:12px}
+  .pg-note{bottom:76px}
   .pg-entry{flex-wrap:wrap}
   .pg-entry input{flex-basis:100%}
   .pg-toolbar>.pg-tools:last-child{flex:1 1 100%;justify-content:space-between}
