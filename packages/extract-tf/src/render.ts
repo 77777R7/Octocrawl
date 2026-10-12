@@ -16,6 +16,7 @@
 
 import type { RenderMarker, RenderReason, RenderSignals } from '@w2l/contracts'
 import { qsa, textOf } from './dom.js'
+import { visibleText } from './invisible.js'
 
 export interface RawRenderSignals {
   /** Characters of inline script in the raw document. */
@@ -66,7 +67,7 @@ const LIST_MAX_NAMES = 500
 const LIST_MAX_LISTS = 50
 
 function collapsed(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
+  return visibleText(text)
 }
 
 /** The passages of text in parsed hydration JSON (see hydrationShown), walked without recursion. */

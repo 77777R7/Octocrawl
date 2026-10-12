@@ -1,5 +1,5 @@
 import type { AttributeExtraction, FetchOptions, FetchResult, FetchWarning, Lane, ListExtraction, PageTable, TraceEvent } from '@w2l/contracts'
-import { collectImages, collectLinks, extractAttributes, extractListRecords, extractTf, listExtraction, resolveListSpec, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, htmlToMarkdown, htmlToTables, wholePageBody, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
+import { collectImages, collectLinks, extractAttributes, extractListRecords, extractTf, listExtraction, resolveListSpec, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, htmlToMarkdown, htmlToTables, wholePageBody, visibleText, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
 import { sha256Utf8 } from '@w2l/http-core'
 
 /**
@@ -55,7 +55,8 @@ export function errorPageEvidence(status: number | null, contentType: string | n
  */
 export function wholePageMarkdown(html: string, url: string, options: FetchOptions = {}): string | null {
   const markdown = htmlToMarkdown(html, { baseUrl: url, exclude: options.excludeTags, ...markdownOptions(options) })
-  return markdown.trim() === '' ? null : markdown
+  // A page of zero-width characters alone shows nothing: no answer, as an empty one (Temu's verification page, T031).
+  return visibleText(markdown) === '' ? null : markdown
 }
 
 /**

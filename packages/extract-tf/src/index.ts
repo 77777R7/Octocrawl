@@ -19,6 +19,7 @@ export {
 export { routePage, pageSignalsFor, selectCardList, selectList, selectTable, selectMinimal } from './route.js'
 export type { RouteDecision } from './route.js'
 export { htmlToMarkdown, htmlToTables, LAYOUT_MARKERS } from './markdown.js'
+export { INVISIBLE_CHARS, visibleText } from './invisible.js'
 export type { ExtractedTable } from './markdown.js'
 export type { MarkdownOptions } from './markdown.js'
 export { detectRenderSignals, rawSignals, countEmptyTables } from './render.js'
