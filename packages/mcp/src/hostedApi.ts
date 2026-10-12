@@ -27,7 +27,7 @@ import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION } from './server.js'
 import { TOOLS } from './tools.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
-import { CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type Reservation } from './hostedCredits.js'
+import { CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
 export interface HostedKeyRecord {
@@ -148,6 +148,27 @@ export interface HostedApiConfig {
   workerCount?: number
   env?: NodeJS.ProcessEnv
   log?: (line: string) => void
+}
+
+/** The URL a scrape or map body asked for, as the request line keeps it; empty when the body named none. */
+function requestedUrl(body: unknown): string {
+  const url = body !== null && typeof body === 'object' ? (body as { url?: unknown }).url : undefined
+  return typeof url === 'string' ? url : ''
+}
+
+/** A scrape result's outcome on its request line, from the result and its Evidence Record: never the page's content. */
+function noteScrape(note: RequestNote, result: unknown): void {
+  const r = (result ?? {}) as { status?: unknown; lane?: unknown; failureReason?: unknown; evidenceRecord?: { finalUrl?: unknown; httpStatus?: unknown; reason?: unknown; robotsDecision?: { decision?: unknown } | null; rawSha256?: unknown } }
+  const evidence = r.evidenceRecord ?? {}
+  const text = (value: unknown) => (typeof value === 'string' ? value : null)
+  note.status = text(r.status) ?? 'error'
+  note.lane = text(r.lane)
+  note.finalUrl = text(evidence.finalUrl)
+  note.httpStatus = typeof evidence.httpStatus === 'number' ? evidence.httpStatus : null
+  note.reason = text(evidence.reason) ?? text(r.failureReason)
+  const robots = evidence.robotsDecision?.decision
+  note.robots = robots === 'allowed' || robots === 'disallowed' || robots === 'no_robots' ? robots : null
+  note.sha256 = text(evidence.rawSha256)
 }
 
 export interface HostedCaller {
@@ -365,10 +386,12 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     }
     const reservation: Reservation = reserved.reservation
     let charge: ReturnType<typeof scrapeCharge> = { credits: 0, kind: 'unread' }
+    // The call's line for the dashboard's Activity page: what was asked for, then what came back.
+    const note: RequestNote = { endpoint: isScrape ? 'scrape' : 'map', keyId: caller.id, url: '', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null }
     const settle = async () => {
       log(JSON.stringify({ severity: 'INFO', event: 'hosted_credits', uid, kind: charge.kind, used: charge.credits, reserved: reservation.fromGrant + reservation.fromPurchased }))
       // A settle that fails keeps what was reserved: the call is answered, and the log names the credits to give back.
-      return credits.settle(reservation, charge.credits, charge.kind, now).catch((error: unknown) => {
+      return credits.settle(reservation, charge.credits, charge.kind, now, note).catch((error: unknown) => {
         log(JSON.stringify({ severity: 'ERROR', event: 'hosted_credits_settle_failed', uid, reserved: reservation.fromGrant + reservation.fromPurchased, used: charge.credits, message: error instanceof Error ? error.message : String(error) }))
         return null
       })
@@ -379,23 +402,29 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
         let body: unknown = null
         let parsed = true
         try { body = await c.req.json() } catch { parsed = false }
-        if (!parsed) response = c.json({ error: 'the request body must be JSON', code: 'invalid_json' }, 400)
-        else {
+        note.url = requestedUrl(body)
+        if (!parsed) { note.status = 'invalid_request'; response = c.json({ error: 'the request body must be JSON', code: 'invalid_json' }, 400) } else {
           const pinned = body !== null && typeof body === 'object' && !Array.isArray(body)
             ? { ...(body as Record<string, unknown>), storeInCache: false, ...(browser ? {} : { fastMode: true }) }
             : body
           const result = await engine.scrape(parseScrapeRequest(pinned), { signal: c.req.raw.signal })
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
+          noteScrape(note, result)
           response = c.json(result, 200)
         }
       } else {
+        note.url = requestedUrl(await c.req.raw.clone().json().catch(() => null))
         await next()
-        if (c.res.status === 200) charge = mapCharge(await c.res.clone().json().catch(() => ({})) as { status?: unknown; links?: unknown })
+        const answer = await c.res.clone().json().catch(() => ({})) as { status?: unknown; links?: unknown }
+        if (c.res.status === 200) charge = mapCharge(answer)
+        note.status = c.res.status === 200 && typeof answer.status === 'string' ? answer.status : c.res.status >= 500 ? 'error' : 'invalid_request'
+        note.links = Array.isArray(answer.links) ? answer.links.length : null
         response = new Response(c.res.body, c.res)
       }
     } catch (error) {
       // A refused request, an engine error or a cancelled call cost nothing: everything reserved goes back.
       charge = { credits: 0, kind: 'unread' }
+      note.status = error instanceof RequestError ? 'invalid_request' : 'error'
       await settle()
       throw error
     }

@@ -289,7 +289,7 @@ Sign-in (ROADMAP PH, decided 2026-10-11) uses Firebase Authentication on the sam
 - **Origin check.** POSTs from another site are refused.
 - **Sessions.** A session is a random id in the `w2l_session` cookie (`HttpOnly; Secure; SameSite=Lax`, 30 days). Firestore keeps it under its HMAC (`W2L_QUOTA_HASH_KEY`) in `sessions/{hmac}`, with the account's uid and an `expireAt`.
 - **Accounts.** An account is `users/{uid}`, with its email, first and latest sign-in, and the ways it signed in. The uid is Firebase's, the one the hosted API's credits are kept under (`credits/{uid}`, docs/hosted-api.md).
-- **Dashboard.** `/dashboard/` (Overview), `/dashboard/usage/`, `/dashboard/keys/`, `/dashboard/connect/` and `/dashboard/account/`, built by `apps/public-web/scripts/build-docs.mjs` and filled by `dashboard.js` from `GET /api/account` (`account.ts`: email, sign-in methods, credits, 30 days of usage, keys). Signed out, it goes to `/signin/?next=<page>`. The old `/account/` answers with a 301 to `/dashboard/` (redirects.json).
+- **Dashboard.** `/dashboard/` (Overview), `/dashboard/activity/` (each call by the account's keys, from `GET /api/account/activity`, with filters and a CSV export), `/dashboard/usage/` (with totals by key and by site from the same lines), `/dashboard/keys/`, `/dashboard/connect/` and `/dashboard/account/`, built by `apps/public-web/scripts/build-docs.mjs` and filled by `dashboard.js` from `GET /api/account` (`account.ts`: email, sign-in methods, credits, 30 days of usage, keys). Signed out, it goes to `/signin/?next=<page>`. The old `/account/` answers with a 301 to `/dashboard/` (redirects.json).
 
 Set up once:
 

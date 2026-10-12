@@ -13,7 +13,12 @@
  *                                        an invalid request; a server error)
  *
  * Keyless callers and keys issued by hand keep their daily allowances (hostedApi.ts); only keys that name an
- * account (`uid`) spend credits. Usage is added up per account and UTC day, for the account page.
+ * account (`uid`) spend credits. Usage is added up per account and UTC day, for the dashboard.
+ *
+ * Each call by an account's key also leaves one line in `requestLog/{uid}/requests/{id}`, written in the settle's
+ * commit: the URL asked for, what came back (status, HTTP status, lane, robots.txt decision, the body's SHA-256 from the
+ * Evidence Record) and what it cost. Never the page's content. Lines expire after 30 days (TTL on `expireAt`), and only
+ * the account sees them, on the dashboard's Activity page (decided by Howard on 2026-10-12).
  */
 import type { QuotaEntry } from './hostedApi.js'
 
@@ -21,6 +26,45 @@ export const DEFAULT_MONTHLY_CREDITS = 1_000
 export const CREDITS = { httpPage: 1, browserPage: 5, notFound: 1, map: 1 } as const
 /** Usage records are kept this long, for the account page and questions about a charge. */
 export const USAGE_RETENTION_DAYS = 90
+/** Request lines are kept this long. */
+export const ACTIVITY_RETENTION_DAYS = 30
+/** The longest URL a request line keeps; a longer one is cut. */
+const ACTIVITY_URL_CHARS = 2_048
+
+/** What the API knows of a call by an account's key when it settles: the request line, before its cost. */
+export interface RequestNote {
+  endpoint: 'scrape' | 'map'
+  /** The key's HMAC: the id the dashboard lists keys by. */
+  keyId: string
+  url: string
+  finalUrl: string | null
+  lane: string | null
+  /** The result's status (`success`, `blocked`, ...) or the map's; `invalid_request` or `error` when nothing ran. */
+  status: string
+  httpStatus: number | null
+  reason: string | null
+  robots: 'allowed' | 'disallowed' | 'no_robots' | null
+  /** The Evidence Record's `rawSha256`. */
+  sha256: string | null
+  /** The URLs a map returned. */
+  links: number | null
+}
+export interface RequestLine extends RequestNote { id: string; at: string; kind: UsageKind; credits: number }
+
+/** A request line's id: newest first in Firestore's default (ascending) order, which needs no index, then a random tail. */
+export function requestLineId(now: Date, random = Math.random().toString(36).slice(2, 10)): string {
+  return `${String(9_999_999_999_999 - now.getTime()).padStart(13, '0')}-${random.replace(/[^a-z0-9]/g, '').slice(0, 12) || '0'}`
+}
+/** A half of a surrogate pair with no other half (a caller's body, or a cut at the length limit) becomes U+FFFD:
+ * Firestore takes only well-formed text, and a refused line must not refuse the charge it is written with. */
+const wellFormed = (text: string) => text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD')
+function requestLine(note: RequestNote, id: string, now: Date, kind: UsageKind, credits: number): RequestLine {
+  const clean = (value: string | null, chars = 200) => (value === null ? null : wellFormed(value.slice(0, chars)))
+  return {
+    ...note, url: wellFormed(note.url.slice(0, ACTIVITY_URL_CHARS)), finalUrl: clean(note.finalUrl, ACTIVITY_URL_CHARS), lane: clean(note.lane), status: wellFormed(note.status.slice(0, 200)),
+    reason: clean(note.reason), sha256: clean(note.sha256), id, at: now.toISOString(), kind, credits,
+  }
+}
 
 /** What a settled call is counted as on the account page. */
 export type UsageKind = 'http' | 'browser' | 'not_found' | 'map' | 'unread'
@@ -75,8 +119,9 @@ export interface CreditsStore {
    * site's daily counter, in one atomic commit; refuses, taking nothing, when either would go past its limit.
    */
   reserve(uid: string, amount: number, site: QuotaEntry, now?: Date): Promise<ReserveResult>
-  /** Gives back what the call did not cost and adds it to the account's usage for the day; returns the balance after. */
-  settle(reservation: Reservation, used: number, kind: UsageKind, now?: Date): Promise<{ remaining: number }>
+  /** Gives back what the call did not cost and adds it to the account's usage for the day, with the call's request line
+   * when there is one; returns the balance after. */
+  settle(reservation: Reservation, used: number, kind: UsageKind, now?: Date, note?: RequestNote): Promise<{ remaining: number }>
 }
 
 export function utcMonth(now: Date): string { return now.toISOString().slice(0, 7) }
@@ -107,6 +152,7 @@ export class MemoryCreditsStore implements CreditsStore {
   readonly balances = new Map<string, { month: string; grant: number; purchased: number }>()
   readonly site = new Map<string, number>()
   readonly usage = new Map<string, Record<UsageKind | 'credits', number>>()
+  readonly requests = new Map<string, RequestLine[]>()
   constructor(private readonly monthlyGrant = DEFAULT_MONTHLY_CREDITS) {}
   async reserve(uid: string, amount: number, site: QuotaEntry, now = new Date()): Promise<ReserveResult> {
     const month = utcMonth(now)
@@ -119,9 +165,10 @@ export class MemoryCreditsStore implements CreditsStore {
     this.site.set(site.id, (this.site.get(site.id) ?? 0) + 1)
     return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased } }
   }
-  async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date()): Promise<{ remaining: number }> {
+  async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date(), note?: RequestNote): Promise<{ remaining: number }> {
     const refund = Math.max(0, reservation.fromGrant + reservation.fromPurchased - used)
     const back = giveBack(refund, reservation)
+    if (note) this.requests.set(reservation.uid, [requestLine(note, requestLineId(now), now, kind, used), ...(this.requests.get(reservation.uid) ?? [])])
     const balance = this.balances.get(reservation.uid)!
     balance.grant += back.toGrant
     balance.purchased += back.toPurchased
@@ -143,6 +190,21 @@ interface CommitResponse { writeResults?: Array<{ transformResults?: Value[] }> 
 const UID = /^[A-Za-z0-9_-]{8,128}$/
 /** An account id usable as a Firestore document id: Firestore reserves ids of the form __name__. */
 export function validAccountId(uid: string): boolean { return UID.test(uid) && !/^__.*__$/.test(uid) }
+
+/** A request line as Firestore fields; nulls are left out, and it expires ACTIVITY_RETENTION_DAYS after it was made. */
+function requestLineFields(line: RequestLine, uid: string, now: Date): Record<string, unknown> {
+  const expireAt = new Date(now.getTime() + ACTIVITY_RETENTION_DAYS * 86_400_000).toISOString()
+  const fields: Record<string, unknown> = { uid: { stringValue: uid }, at: { timestampValue: line.at }, expireAt: { timestampValue: expireAt }, kind: { stringValue: line.kind }, credits: { integerValue: String(line.credits) } }
+  for (const name of ['endpoint', 'keyId', 'url', 'finalUrl', 'lane', 'status', 'reason', 'robots', 'sha256'] as const) {
+    const value = line[name]
+    if (typeof value === 'string') fields[name] = { stringValue: value }
+  }
+  for (const name of ['httpStatus', 'links'] as const) {
+    const value = line[name]
+    if (typeof value === 'number' && Number.isSafeInteger(value)) fields[name] = { integerValue: String(value) }
+  }
+  return fields
+}
 
 export class FirestoreCreditsStore implements CreditsStore {
   private readonly resource: string
@@ -193,15 +255,16 @@ export class FirestoreCreditsStore implements CreditsStore {
     throw new Error('credits contention exceeded retry budget')
   }
 
-  async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date()): Promise<{ remaining: number }> {
+  async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date(), note?: RequestNote): Promise<{ remaining: number }> {
     const refund = Math.max(0, reservation.fromGrant + reservation.fromPurchased - used)
     const back = giveBack(refund, reservation)
     const day = now.toISOString().slice(0, 10)
+    // The id is fixed before the first attempt, so a retried commit writes the same line again rather than a second one.
+    const line = note ? requestLine(note, requestLineId(now), now, kind, used) : null
     const expireAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + USAGE_RETENTION_DAYS)).toISOString()
     const increment = (fieldPath: string, by: number) => ({ fieldPath, increment: { integerValue: String(by) } })
     // Increments need no read, so a refused commit is retried as it is; one that timed out may have applied (see the log line).
-    let response: CommitResponse | 'retry' = 'retry'
-    for (let attempt = 0; attempt < 3 && response === 'retry'; attempt++) response = await this.commit(await this.token(), [
+    const writes = (withLine: boolean) => [
       {
         update: { name: `${this.resource}/credits/${reservation.uid}`, fields: {} },
         updateMask: { fieldPaths: [] },
@@ -213,7 +276,18 @@ export class FirestoreCreditsStore implements CreditsStore {
         updateMask: { fieldPaths: ['uid', 'day', 'expireAt'] },
         updateTransforms: [increment(kind, 1), increment('credits', used)],
       },
-    ])
+      ...(line === null || !withLine ? [] : [{ update: { name: `${this.resource}/requestLog/${reservation.uid}/requests/${line.id}`, fields: requestLineFields(line, reservation.uid, now) } }]),
+    ]
+    let response: CommitResponse | 'retry' = 'retry'
+    for (let attempt = 0; attempt < 3 && response === 'retry'; attempt++) {
+      try {
+        response = await this.commit(await this.token(), writes(line !== null))
+      } catch (error) {
+        // The request line is the only part a caller shapes: a commit Firestore refuses with it is sent once more without it.
+        if (line === null) throw error
+        response = await this.commit(await this.token(), writes(false))
+      }
+    }
     if (response === 'retry') throw new Error('credits settle was refused')
     const results = response.writeResults?.[0]?.transformResults ?? []
     const grant = Number(results[0]?.integerValue)
