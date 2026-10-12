@@ -793,6 +793,77 @@ describe('strategies', () => {
     doc.close()
   })
 
+  describe('a list in the page\'s footer or navigation (ROADMAP PA item 4, T006)', () => {
+    const links = (n: number, path: string) =>
+      `<ul>${Array.from({ length: n }, (_, i) => `<li><a href="/${path}/${i}">${path} link ${i}</a></li>`).join('')}</ul>`
+    // The page's own text outweighs its footer, as on a real page.
+    const content = `<p>${'Today\'s deals on kitchen, home and garden, picked for you. '.repeat(8)}</p><div class="results">${links(4, 'item')}</div>`
+
+    it('is not the listing, though it has more linked items', () => {
+      for (const chrome of [
+        `<footer>${links(8, 'foot')}</footer>`,
+        `<nav>${links(8, 'foot')}</nav>`,
+        `<div role="contentinfo">${links(8, 'foot')}</div>`,
+        `<div role="navigation">${links(8, 'foot')}</div>`,
+        // Amazon's home: its "Make Money with Us" links, in a div named for the footer.
+        `<div id="navFooter" class="navLeftFooter"><div class="navFooterVerticalColumn">${links(8, 'foot')}</div></div>`,
+        `<div class="site-footer__links">${links(8, 'foot')}</div>`,
+        `<div class="global-footer"><div class="footer-columns">${links(8, 'foot')}</div></div>`,
+        `<div class="Footer_root__x1y2">${links(8, 'foot')}</div>`,
+      ]) {
+        const doc = parse(wrap(`<h1>Deals</h1>${content}${chrome}`))
+        expect(selectList(doc.document)?.textContent, chrome).toContain('item link 0')
+        doc.close()
+      }
+    })
+
+    it('is not the listing when it is the page\'s only list', () => {
+      const doc = parse(wrap(`<h1>Deals</h1><p>Nothing listed.</p><footer>${links(8, 'foot')}</footer>`))
+      expect(selectList(doc.document)).toBeNull()
+      doc.close()
+    })
+
+    it('still lets a list be the listing in a page that merely has a footer, or under <main>', () => {
+      for (const page of [
+        `<div class="layout has-footer"><h1>Deals</h1>${links(4, 'item')}</div><footer><p>Contact</p></footer>`,
+        `<div class="layout has-fixed-footer">${links(4, 'item')}</div>`,
+        `<div class="Layout_hasFooter__3kd9">${links(4, 'item')}</div>`,
+        `<div class="with-sticky-footer">${links(4, 'item')}</div>`,
+        // An element named for a footer but holding the page's heading or its <main> is not its footer.
+        `<div class="page-footer"><h1>Deals</h1>${links(4, 'item')}</div>`,
+        `<div id="footer"><main>${links(4, 'item')}</main></div>`,
+        // The walk stops at <main>, whatever its classes say.
+        `<main class="site-footer"><h2>Deals</h2>${links(4, 'item')}</main>`,
+        `<div class="footnotes">${links(4, 'item')}</div>`,
+      ]) {
+        const doc = parse(wrap(page))
+        expect(selectList(doc.document)?.textContent, page).toContain('item link 0')
+        doc.close()
+      }
+    })
+
+    it('leaves a link-only listing in a wrapper whose name says how the page lays out its footer read as a list', () => {
+      // A title band and a menu outside the wrapper outweigh the listing's own text.
+      const menu = `<header>${[0, 1, 2, 3].map((c) => links(6, `menu/${c}`)).join('')}</header>`
+      const intro = `<div class="page-head"><h1>All brands</h1><p>${'Browse every brand we carry, from small workshops to household names. '.repeat(3)}</p></div>`
+      const listing = (wrapper: string) =>
+        wrap(`${menu}${intro}<div class="${wrapper}"><h2>Directory</h2><ul>${Array.from({ length: 12 }, (_, i) => `<li><a href="/dir/${i}">dir link ${i}</a></li>`).join('')}</ul></div>`)
+      for (const wrapper of ['layout has-fixed-footer', 'Layout_hasFooter__3kd9', 'page without-footer', 'content footer-fixed', 'footer--sticky', 'hide-footer', 'main-content pb-footer', 'isFooterVisible']) {
+        const out = extractTf.extract(listing(wrapper))
+        expect(out.strategy, wrapper).toBe('list')
+        expect(out.mainHtml, wrapper).toContain('dir link 11')
+      }
+    })
+
+    it('is not taken for a div-based listing either', () => {
+      const cards = (n: number, path: string) =>
+        Array.from({ length: n }, (_, i) => `<div><a href="/${path}/${i}">${path} card ${i}</a></div>`).join('')
+      const doc = parse(wrap(`<h1>Deals</h1><div class="grid">${cards(4, 'item')}</div><footer><div class="cols">${cards(8, 'foot')}</div></footer>`))
+      expect(selectList(doc.document)?.textContent).toContain('item card 0')
+      doc.close()
+    })
+  })
+
   it('selectTable skips layout tables and picks the data table', () => {
     const doc = parse(
       wrap('<main><h1>Specs</h1>' +

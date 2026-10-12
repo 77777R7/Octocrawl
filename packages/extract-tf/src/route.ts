@@ -721,9 +721,39 @@ export function routePage(doc: Document, signals: PageSignals = collectPageSigna
 /** The article cascade: blocks -> semantic/container scoring (unchanged). */
 export { selectMain } from './main.js'
 
+/** Elements that are a page's chrome around its content by what they are: its footer and its navigation. */
+const SITE_CHROME = 'footer,nav,[role="contentinfo"],[role="navigation"]'
+/**
+ * A class or id that names an element the page's footer: `footer` as the name's head word, alone, after a word for
+ * whose footer it is (`site-footer`, `page-footer`, Amazon's `navFooter`), or before a part of it (`footer-links`,
+ * `footer__inner`, `Footer_root__x`). A name that says how the page lays out its footer (`has-fixed-footer`,
+ * `footer-fixed`, `footer--sticky`, `pb-footer`) is a wrapper's or a state's, and a footer it misses is read as before.
+ */
+const FOOTER_NAME =
+  /^(?:(?:site|page|global|main|app|nav|bottom)[-_]?)?[Ff]ooter(?:$|[-_](?:links?|nav|menu|wrap(?:per)?|container|inner|content|columns?|cols?|top|bottom|main)$|(?:Links?|Nav|Menu|Wrap(?:per)?|Container|Inner|Content|Columns?)$|__|_[A-Za-z0-9]+__)/
+
+/** Whether the element is the page's footer by its class or id (FOOTER_NAME) and holds no `<h1>` or `<main>`. */
+function namedFooter(el: Element): boolean {
+  const names = `${el.getAttribute('id') ?? ''} ${el.getAttribute('class') ?? ''}`.split(/\s+/)
+  return names.some((name) => FOOTER_NAME.test(name)) && el.querySelector('h1,main') === null
+}
+
+/**
+ * Whether the element sits in the page's footer or navigation: an ancestor up to `<main>` or `<body>` (not those, whose
+ * classes may name a footer the page merely has) that is one by its tag or role, or by its name (namedFooter). Amazon's
+ * home keeps its "Make Money with Us" links in `div#navFooter`, a list a listing must not take for the page.
+ */
+function inSiteChrome(el: Element): boolean {
+  for (let e: Element | null = el; e !== null && !['MAIN', 'BODY', 'HTML'].includes(e.tagName); e = e.parentElement) {
+    if (e.matches(SITE_CHROME) || namedFooter(e)) return true
+  }
+  return false
+}
+
 /**
  * Listing strategy: the ordered/unordered list whose items share a common
- * link-plus-text shape. Returns the list element, or null.
+ * link-plus-text shape. Returns the list element, or null. A list in the
+ * page's footer or navigation is never the listing (inSiteChrome).
  */
 export function selectList(doc: Document): Element | null {
   let best: Element | null = null
@@ -731,7 +761,7 @@ export function selectList(doc: Document): Element | null {
   for (const el of qsa(doc, 'ul,ol')) {
     const items = qsa(el, ':scope > li')
     const linked = items.filter((li) => qsa(li, 'a').length > 0).length
-    if (linked >= 3 && linked >= items.length * 0.6 && linked > bestItems) {
+    if (linked >= 3 && linked >= items.length * 0.6 && linked > bestItems && !inSiteChrome(el)) {
       bestItems = linked
       best = el
     }
@@ -751,7 +781,7 @@ export function selectList(doc: Document): Element | null {
     if (linkedKids < 3) continue
     let depth = 0
     for (let p = el.parentElement; p; p = p.parentElement) depth++
-    if (linkedKids > bestDivLinks || (linkedKids === bestDivLinks && depth > bestDivDepth)) {
+    if ((linkedKids > bestDivLinks || (linkedKids === bestDivLinks && depth > bestDivDepth)) && !inSiteChrome(el)) {
       bestDivLinks = linkedKids
       bestDivDepth = depth
       bestDiv = el
