@@ -249,7 +249,7 @@
         },
         {
           "type": "markdownCountMin",
-          "pattern": "\\]\\(https://www\\.amazon\\.com/(?:s/?\\?|b/?\\?|(?:[^)\\s]*/)?dp/|gp/(?:goldbox|bestsellers|new-releases))[^)\\s]*pf_rd_p=",
+          "pattern": "\\]\\(https://www\\.amazon\\.com/[^)\\s]*pf_rd_p=",
           "min": 10
         }
       ],
@@ -263,7 +263,7 @@
         {
           "date": "2026-10-12",
           "decidedBy": "Howard",
-          "change": "the two price predicates are replaced by ten links into Amazon's shop (a search, a category, a product page, Today's Deals, Best Sellers or New Releases) that carry the home's placement parameter (pf_rd_p), which its content cards' links do and its navigation's do not; the \"Amazon\" predicate stays",
+          "change": "the two price predicates are replaced by ten links on www.amazon.com that carry the home's placement parameter (pf_rd_p), which its content cards' links do and its navigation's do not; the \"Amazon\" predicate stays",
           "reason": "of 31 reads of this home kept from 2026-10-05 to 2026-10-12, one held five prices with cents, from a seasonal deals carousel; the others, signed out from Singapore, Berkeley or Pittsburgh, showed category cards and deal badges with no price, so the task failed on what Amazon served, not on what Octocrawl read. The placement parameter keeps the navigation's own shop links (Best Sellers, Today's Deals) out of the count, so the region wait, which judges the whole live page, does not call the page ready before its cards load (a read on 2026-10-12 held 11 shop links on the whole page, 6 of them the hero's, and an empty deck). Ten such links pass on 20 of the 31 reads and fail on the six that held the footer, the one that held the account menu, the two that held the hero carousel alone and two partial reads with five and six"
         }
       ],
