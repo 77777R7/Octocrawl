@@ -208,7 +208,11 @@ const settingsBody = `<div class="settings-grid">
 <label for="pref-tz">Times of calls<select id="pref-tz" name="tz"><option value="utc">UTC</option><option value="local">This computer's time zone</option></select></label></form>
 <p class="dash-small" id="prefs-note" role="status" aria-live="polite">Days on the usage charts stay UTC, as credits are counted.</p></section>
 </div>
-<section class="panel" aria-labelledby="out-title"><div class="panel-head"><h2 id="out-title">Session</h2></div><p>Signing out ends this session in this browser. Your keys keep working.</p><form method="post" action="/auth/logout"><button class="button quiet" type="submit">Sign out</button></form></section>`
+<section class="panel" aria-labelledby="out-title"><div class="panel-head"><h2 id="out-title">Session</h2></div><p>Signing out ends this session in this browser. Your keys keep working.</p><form method="post" action="/auth/logout"><button class="button quiet" type="submit">Sign out</button></form></section>
+<section class="panel danger" aria-labelledby="delete-title"><div class="panel-head"><h2 id="delete-title">Delete account</h2></div>
+<p>Deleting your account deletes, at once and for good: your API keys (they stop working within a minute), your credits, bought ones included, your daily usage, your request lines, and your sign-in record and sessions. Service logs that name the account's id are deleted with the rest of the logs, 30 days on, as the <a href="/docs/privacy/">privacy page</a> says.</p>
+<p>To confirm, type your email address, then sign in once more the way you usually do. The account is deleted as soon as you are signed in.</p>
+<div class="dash-form delete-form"><label for="delete-confirm"><span id="delete-label">Your email address</span><input id="delete-confirm" autocomplete="off" spellcheck="false" /></label><button class="button danger-button" type="button" id="delete-start" disabled>Delete account</button></div></section>`
 
 /** Each page: its path, title, the line under the title, and its body. */
 export const DASHBOARD_BODIES = [

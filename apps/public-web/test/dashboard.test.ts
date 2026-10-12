@@ -429,6 +429,30 @@ describe('Settings', () => {
     expect($('prefs-note').textContent).toBe('Saved in this browser.')
   })
 
+  it('starts deleting the account only once its own address is typed, and says why when it cannot', async () => {
+    const { $, window, calls } = await page('/dashboard/settings/', '', OCTOBER.now, { ...octoberAnswers(), 'POST /auth/delete/start': [400, { error: 'confirm_mismatch' }] })
+    const input = $('delete-confirm') as HTMLInputElement
+    const button = $('delete-start') as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    input.value = 'someone@example.com'
+    input.dispatchEvent(new window.Event('input') as unknown as Event)
+    expect(button.disabled).toBe(true)
+    input.value = ' Reader@Example.com '
+    input.dispatchEvent(new window.Event('input') as unknown as Event)
+    expect(button.disabled).toBe(false)
+    button.click()
+    await settle()
+    expect(calls.find(call => call.method === 'POST')).toEqual({ method: 'POST', path: '/auth/delete/start', body: { confirm: 'Reader@Example.com' } })
+    expect($('dash-message').textContent).toBe('That is not this account\'s email address.')
+  })
+
+  it('says on Settings when a deletion did not finish, or another account signed in', async () => {
+    const failed = await page('/dashboard/settings/', '?delete=failed', OCTOBER.now, octoberAnswers())
+    expect(failed.$('dash-message').textContent).toMatch(/^Deleting the account did not finish, and some of its data may already be gone/)
+    const other = await page('/dashboard/settings/', '?delete=other_account', OCTOBER.now, octoberAnswers())
+    expect(other.$('dash-message').textContent).toMatch(/^You signed in as another account, so nothing was deleted/)
+  })
+
   it('opens the Playground on the preferred format and scope, unless the home page handed over its own', async () => {
     const stored = { 'octocrawl.dashboard.prefs': JSON.stringify({ view: 'links', scope: 'whole', tz: 'nonsense' }) }
     const plain = await page('/dashboard/scrape/', '', OCTOBER.now, octoberAnswers(), { stored })

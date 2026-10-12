@@ -456,6 +456,12 @@ a:hover{color:#fff}
 .prefs{display:grid;gap:12px;margin-bottom:10px}
 .prefs label{display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:600}
 .prefs select{min-height:38px;padding:0 10px;border:1px solid var(--rule);border-radius:6px;background:var(--deep);color:var(--ink);font:inherit}
+/* Delete account: the one red panel. */
+.panel.danger{border-color:rgba(255,138,122,.45)}
+.panel.danger h2{color:var(--bad)}
+.delete-form{max-width:640px;margin:6px 0 0}
+.button.danger-button{background:var(--bad);color:#2a0b06}
+.button.danger-button:disabled{opacity:.45;cursor:not-allowed}
 @media (max-width:900px){
   .dash{grid-template-columns:minmax(0,1fr)}
   .connect-grid,.settings-grid{grid-template-columns:minmax(0,1fr)}

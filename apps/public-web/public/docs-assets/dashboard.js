@@ -485,6 +485,8 @@
   }
 
   let resetsAt = null
+  /** Parts of a page that wait for the account's data (Settings' deletion needs its address). */
+  const accountReady = []
   const render = (data, load) => {
     const { monthly } = data.credits
     const days = lastDays(data.usage)
@@ -536,6 +538,7 @@
     set('acct-month', `${number(monthly.left)} of ${number(monthly.of)} free credits left, renewed on ${day(monthly.resetsAt)} (UTC)`)
     set('acct-bought', data.credits.purchased ? number(data.credits.purchased) : 'None')
     set('acct-plan', `Free: ${number(monthly.of)} credits a month`)
+    for (const ready of accountReady) ready(data)
     set('play-left', `You have ${number(data.credits.remaining)} left.`)
   }
 
@@ -628,6 +631,32 @@
       set('prefs-note', savePrefs() ? 'Saved in this browser.' : 'This browser does not keep settings, so they last until you leave the page.')
     })
   }
+  // Deleting the account: the address typed (or DELETE for an account without one), then a fresh sign-in (auth.ts).
+  const deleteInput = $('delete-confirm')
+  if (deleteInput) {
+    let expected = null
+    const deleteButton = $('delete-start')
+    const check = () => { deleteButton.disabled = expected === null || (expected === 'DELETE' ? deleteInput.value.trim() : deleteInput.value.trim().toLowerCase()) !== expected }
+    accountReady.push((data) => {
+      expected = data.email ? data.email.toLowerCase() : 'DELETE'
+      set('delete-label', data.email ? 'Your email address' : 'Type DELETE')
+      check()
+    })
+    deleteInput.addEventListener('input', check)
+    deleteButton.addEventListener('click', async () => {
+      deleteButton.disabled = true
+      try {
+        const response = await fetch('/auth/delete/start', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: deleteInput.value.trim() }) })
+        const answer = await response.json().catch(() => ({}))
+        if (response.ok && typeof answer.next === 'string' && answer.next.startsWith('/signin/')) { location.assign(answer.next); return }
+        say(response.status === 400 ? 'That is not this account\'s email address.' : 'The account could not be deleted right now. Try again in a few minutes.', true)
+      } catch { say('The account could not be deleted right now. Try again in a few minutes.', true) }
+      check()
+    })
+    const outcome = { failed: 'Deleting the account did not finish, and some of its data may already be gone. Delete it again to finish; if that fails too, email hello@octocrawl.dev.', other_account: 'You signed in as another account, so nothing was deleted. Sign in as the account you want to delete and start again.' }[new URLSearchParams(location.search).get('delete')]
+    if (outcome) { say(outcome, true); history.replaceState(null, '', location.pathname) }
+  }
+
   const exportButton = $('settings-export')
   if (exportButton) exportButton.addEventListener('click', () => { if (activity) saveCsv(activity); else say('Your request lines are still loading. Try again in a moment.', true) })
 

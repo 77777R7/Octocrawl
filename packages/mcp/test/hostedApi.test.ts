@@ -242,6 +242,16 @@ it('an account\'s key spends credits by what each result returned, and says what
   expect(quota.counts.size).toBe(0)
 })
 
+it('a key whose account was deleted, still in the key cache, is 401 and starts nothing', async () => {
+  const credits = new MemoryCreditsStore(1_000)
+  credits.reserve = async () => ({ ok: false, limited: 'account' })
+  const { url } = await start({ credits, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const refused = await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_account' })
+  expect(refused.status).toBe(401)
+  expect(await refused.json()).toMatchObject({ code: 'unauthorized', error: "this key's account no longer exists" })
+  expect(credits.requests.size).toBe(0)
+})
+
 it('the site\'s signed account header spends that account\'s credits as a key would, and a forged or stale one is 401', async () => {
   const credits = new MemoryCreditsStore(1_000)
   const { url } = await start({ credits })

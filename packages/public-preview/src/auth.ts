@@ -10,7 +10,16 @@
  *   GET  /auth/email/finish           the link's page: a button, so a mail scanner that opens links signs no one in
  *   POST /auth/email/finish           signs in with the link's code
  *   POST /auth/logout                 ends the session
+ *   POST /auth/delete/start           { confirm }: the signed-in account's own email address (or DELETE for one without);
+ *                                     marks the account for deletion in a short signed cookie and asks for a sign-in
  *   GET  /api/me                      who is signed in, if anyone
+ *
+ * Deleting an account takes a fresh sign-in (decided by Howard on 2026-10-13): a stolen session cookie alone cannot
+ * delete it, and the sign-in's ID token lets Firebase delete its own account without an admin role. When a sign-in
+ * completes with the deletion cookie for the same account, the account's record and sessions go first (so a key the hosted
+ * API still has cached cannot start a new balance: hostedCredits.ts, reserve), then its data (credits, keys, usage,
+ * request lines), then the Firebase account. A failure before the last step leaves the Firebase account, so signing in
+ * and deleting again finishes the job; a failure of the last step signs no one in, as the account may be gone.
  *
  * Firebase keeps one account per email address. A GitHub sign-in whose address already has an account (made with
  * Google or an email link) is not refused for good: its credential waits, encrypted in a short cookie, until the visitor
@@ -31,7 +40,7 @@ export interface SignedIn {
   uid: string
   email: string | null
   provider: Provider
-  /** Firebase's ID token for this sign-in, used only to link a waiting way of signing in to the account. */
+  /** Firebase's ID token for this sign-in, used only to link a waiting way of signing in to the account, or to delete it. */
   idToken?: string
   /** Ways of signing in linked to the account during this sign-in, recorded with `provider`. */
   linked?: Provider[]
@@ -54,6 +63,8 @@ export interface IdentityProvider {
   signInWithEmailLink(email: string, oobCode: string): Promise<SignedIn>
   /** Adds a provider's credential to the account the ID token belongs to. */
   linkIdp(idToken: string, link: PendingLink, requestUri: string): Promise<void>
+  /** Deletes the account the ID token belongs to. */
+  deleteAccount(idToken: string): Promise<void>
 }
 
 /** Firebase Authentication's REST API with the project's web API key (public: Firebase puts it in every web page). */
@@ -97,6 +108,9 @@ export class IdentityToolkit implements IdentityProvider {
     const body = await this.call('accounts:signInWithIdp', { idToken, postBody, requestUri, returnSecureToken: true }) as { localId?: string; needConfirmation?: boolean }
     if (!body.localId || body.needConfirmation) throw new SignInRefused('invalid', 'Firebase did not link the provider')
   }
+  async deleteAccount(idToken: string) {
+    await this.call('accounts:delete', { idToken })
+  }
   private async call(method: string, payload: unknown): Promise<unknown> {
     const response = await this.fetcher(`https://identitytoolkit.googleapis.com/v1/${method}?key=${this.apiKey}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000),
@@ -120,6 +134,8 @@ export interface AccountStore {
   signIn(user: SignedIn, sessionHash: string, expiresAt: Date, now: Date): Promise<void>
   session(sessionHash: string, now: Date): Promise<Session | null>
   endSession(sessionHash: string): Promise<void>
+  /** Deletes the account's record and every session it has. */
+  forget(uid: string): Promise<void>
 }
 
 export class MemoryAccountStore implements AccountStore {
@@ -135,6 +151,10 @@ export class MemoryAccountStore implements AccountStore {
     return found && found.expiresAt > now ? { uid: found.uid, email: found.email } : null
   }
   async endSession(sessionHash: string) { this.sessions.delete(sessionHash) }
+  async forget(uid: string) {
+    this.users.delete(uid)
+    for (const [hash, session] of this.sessions) if (session.uid === uid) this.sessions.delete(hash)
+  }
 }
 
 /** `users/{uid}` and `sessions/{hmac}` in Firestore; a session document expires (TTL on `expireAt`) when its cookie does. */
@@ -185,6 +205,19 @@ export class FirestoreAccountStore implements AccountStore {
     const response = await this.fetcher(`https://firestore.googleapis.com/v1/${this.resource}/sessions/${sessionHash}`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5_000) })
     if (!response.ok && response.status !== 404) throw new Error(`session delete failed (${response.status})`)
   }
+  async forget(uid: string) {
+    if (!/^[A-Za-z0-9_-]{8,128}$/.test(uid) || /^__.*__$/.test(uid)) throw new Error('account id is malformed')
+    const token = await metadataAccessToken(this.fetcher, AbortSignal.timeout(3_000))
+    const call = async (path: string, body: unknown) => {
+      const response = await this.fetcher(`https://firestore.googleapis.com/v1/${this.resource}${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(8_000) })
+      if (!response.ok) throw new Error(`account delete failed (${response.status})`)
+      return response.json() as Promise<unknown>
+    }
+    // The account's sessions by its uid (a single-field equality, no composite index), deleted with its record.
+    const rows = await call(':runQuery', { structuredQuery: { from: [{ collectionId: 'sessions' }], where: { fieldFilter: { field: { fieldPath: 'uid' }, op: 'EQUAL', value: { stringValue: uid } } }, limit: 500 } }) as Array<{ document?: { name: string } }>
+    const names = [`${this.resource}/users/${uid}`, ...rows.flatMap(row => row.document ? [row.document.name] : [])]
+    await call(':commit', { writes: names.map(name => ({ delete: name })) })
+  }
 }
 
 export interface AuthOptions {
@@ -197,6 +230,9 @@ export interface AuthOptions {
   /** The site's page for an email link (apps/public-web builds /signin/email/), with the form going between its
    * `<!--w2l:email-finish-->` markers; null, or no markers, gives a plain page. */
   emailFinishPage?: () => Promise<string | null>
+  /** Deletes the account's data that is not sign-in's own: keys, credits, usage, request lines (account.ts, erase).
+   * Without it, accounts cannot be deleted here. */
+  eraseAccountData?: (uid: string) => Promise<void>
 }
 
 export const SESSION_COOKIE = 'w2l_session'
@@ -204,6 +240,9 @@ const OAUTH_COOKIE = 'w2l_oauth'
 const EMAIL_COOKIE = 'w2l_signin_email'
 const ACCOUNT_HINT_COOKIE = 'w2l_account'
 const LINK_COOKIE = 'w2l_link'
+const DELETE_COOKIE = 'w2l_delete'
+/** How long a deletion waits for its sign-in. */
+const DELETE_SECONDS = 600
 /** How long a waiting credential is kept: time to sign in the other way, or to ask for and open an email link. */
 const LINK_SECONDS = 1_800
 export const SESSION_DAYS = 30
@@ -345,6 +384,56 @@ export function createAuthRoutes(options: AuthOptions) {
     res.setHeader('set-cookie', [cookie(origin, SESSION_COOKIE, id, '/', SESSION_DAYS * 86_400), hintCookie(origin, true), ...extraCookies])
   }
 
+  /** The account a deletion is waiting to delete, from its signed cookie; null when there is none or it is old. */
+  function pendingDeletion(req: IncomingMessage): string | null {
+    const raw = verify(options.secret, 'delete', cookieValue(req, DELETE_COOKIE))
+    if (raw === null) return null
+    try {
+      const { u, e } = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as { u?: unknown; e?: unknown }
+      return typeof u === 'string' && typeof e === 'number' && e > now().getTime() ? u : null
+    } catch { return null }
+  }
+
+  /**
+   * Where a sign-in ends: a session and the way on, or, when a deletion is waiting for this account, the deletion. A
+   * deletion that fails before Firebase's step signs the visitor in and says so on Settings, so they can try again; one
+   * that fails at Firebase's step signs no one in. `clear` are the sign-in's own cookies to remove either way.
+   */
+  async function finishSignIn(req: IncomingMessage, res: ServerResponse, origin: string, user: SignedIn, clear: string[], next: string): Promise<void> {
+    const deleting = pendingDeletion(req)
+    if (deleting === null) {
+      await startSession(res, origin, user, clear)
+      res.writeHead(303, { ...NO_STORE, location: next }).end()
+      return
+    }
+    const clearDelete = cookie(origin, DELETE_COOKIE, '', '/', 0)
+    if (deleting !== user.uid || !user.idToken || options.eraseAccountData === undefined) {
+      log({ event: 'w2l_auth', step: 'delete', outcome: deleting !== user.uid ? 'other_account' : 'unavailable' })
+      await startSession(res, origin, user, [...clear, clearDelete])
+      res.writeHead(303, { ...NO_STORE, location: `/dashboard/settings/?delete=${deleting !== user.uid ? 'other_account' : 'failed'}` }).end()
+      return
+    }
+    try {
+      await options.accounts.forget(user.uid)
+      await options.eraseAccountData(user.uid)
+    } catch (error) {
+      log({ event: 'w2l_auth', step: 'delete', outcome: 'failed', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })
+      await startSession(res, origin, user, [...clear, clearDelete])
+      res.writeHead(303, { ...NO_STORE, location: '/dashboard/settings/?delete=failed' }).end()
+      return
+    }
+    try { await options.identity.deleteAccount(user.idToken) } catch (error) {
+      // Firebase may have deleted the account and not said so in time: a new session would write a record for an
+      // account that may be gone. Signing in again shows which: an account still there signs in, and deleting it again
+      // finishes the job.
+      log({ event: 'w2l_auth', step: 'delete', outcome: 'firebase_failed', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })
+      res.writeHead(303, { ...NO_STORE, location: '/signin/?error=delete_unfinished', 'set-cookie': [...clear, clearDelete, cookie(origin, SESSION_COOKIE, '', '/', 0), hintCookie(origin, false)] }).end()
+      return
+    }
+    log({ event: 'w2l_auth', step: 'delete', outcome: 'ok' })
+    res.writeHead(303, { ...NO_STORE, location: '/signin/?deleted=1', 'set-cookie': [...clear, clearDelete, cookie(origin, SESSION_COOKIE, '', '/', 0), hintCookie(origin, false)] }).end()
+  }
+
   async function current(req: IncomingMessage): Promise<Session | null> {
     const id = cookieValue(req, SESSION_COOKIE)
     if (id === null || !/^[A-Za-z0-9_-]{43}$/.test(id)) return null
@@ -382,9 +471,8 @@ export function createAuthRoutes(options: AuthOptions) {
       if (url.searchParams.has('error')) { res.setHeader('set-cookie', clearOauth); fail('cancelled', state.p); return true }
       try {
         const user = await linkWaiting(req, origin, await options.identity.signInWithIdp(`${origin}${path}${url.search}`, state.s))
-        await startSession(res, origin, user, [clearOauth, cookie(origin, LINK_COOKIE, '', '/', 0)])
         log({ event: 'w2l_auth', step: 'sign_in', provider: user.provider, outcome: 'ok' })
-        res.writeHead(303, { ...NO_STORE, location: user.linked ? `/dashboard/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : safeNext(state.n) }).end()
+        await finishSignIn(req, res, origin, user, [clearOauth, cookie(origin, LINK_COOKIE, '', '/', 0)], user.linked ? `/dashboard/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : safeNext(state.n))
       } catch (error) {
         if (error instanceof SignInRefused && error.pending) {
           // Kept until the visitor signs in the way they did before; the page says so.
@@ -447,9 +535,8 @@ export function createAuthRoutes(options: AuthOptions) {
       if (!EMAIL.test(email) || !/^[A-Za-z0-9_-]{10,400}$/.test(code)) { fail('invalid', 'emailLink'); return true }
       try {
         const user = await linkWaiting(req, origin, await options.identity.signInWithEmailLink(email, code))
-        await startSession(res, origin, user, [cookie(origin, EMAIL_COOKIE, '', '/auth/email', 0), cookie(origin, LINK_COOKIE, '', '/', 0)])
         log({ event: 'w2l_auth', step: 'sign_in', provider: 'emailLink', outcome: 'ok' })
-        res.writeHead(303, { ...NO_STORE, location: user.linked ? `/dashboard/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : '/dashboard/' }).end()
+        await finishSignIn(req, res, origin, user, [cookie(origin, EMAIL_COOKIE, '', '/auth/email', 0), cookie(origin, LINK_COOKIE, '', '/', 0)], user.linked ? `/dashboard/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : '/dashboard/')
       } catch (error) { fail(error instanceof SignInRefused ? error.code : 'unavailable', 'emailLink', error) }
       return true
     }
@@ -459,7 +546,28 @@ export function createAuthRoutes(options: AuthOptions) {
       if (!sameOrigin) { res.writeHead(403, NO_STORE).end(); return true }
       const id = cookieValue(req, SESSION_COOKIE)
       if (id !== null && /^[A-Za-z0-9_-]{43}$/.test(id)) await options.accounts.endSession(sessionHash(options.secret, id)).catch(() => {})
-      res.writeHead(303, { ...NO_STORE, location: '/', 'set-cookie': [cookie(origin, SESSION_COOKIE, '', '/', 0), hintCookie(origin, false)] }).end()
+      // Signing out also drops a deletion still waiting for its sign-in, so a later sign-in cannot delete by surprise.
+      const pending = cookieValue(req, DELETE_COOKIE) === null ? [] : [cookie(origin, DELETE_COOKIE, '', '/', 0)]
+      res.writeHead(303, { ...NO_STORE, location: '/', 'set-cookie': [cookie(origin, SESSION_COOKIE, '', '/', 0), hintCookie(origin, false), ...pending] }).end()
+      return true
+    }
+
+    if (path === '/auth/delete/start') {
+      if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }).end(); return true }
+      if (!sameOrigin) { res.writeHead(403, NO_STORE).end(); return true }
+      const json = (status: number, body: unknown, extra: Record<string, string> = {}) => res.writeHead(status, { ...NO_STORE, 'content-type': 'application/json', ...extra }).end(JSON.stringify(body))
+      if (options.eraseAccountData === undefined) { json(503, { error: 'unavailable' }); return true }
+      let session: Session | null
+      try { session = await current(req) } catch { json(503, { error: 'unavailable' }); return true }
+      if (session === null) { json(401, { error: 'signed_out' }); return true }
+      let confirm = ''
+      try { confirm = (await readForm(req)).get('confirm')?.trim() ?? '' } catch { confirm = '' }
+      // The account's own address, typed; an account Firebase gave no address confirms with the word DELETE.
+      const expected = session.email === null ? 'DELETE' : session.email.toLowerCase()
+      if ((session.email === null ? confirm : confirm.toLowerCase()) !== expected) { json(400, { error: 'confirm_mismatch' }); return true }
+      const marked = sign(options.secret, 'delete', Buffer.from(JSON.stringify({ u: session.uid, e: now().getTime() + DELETE_SECONDS * 1_000 })).toString('base64url'))
+      log({ event: 'w2l_auth', step: 'delete', outcome: 'started' })
+      json(200, { next: '/signin/?reauth=delete' }, { 'set-cookie': cookie(origin, DELETE_COOKIE, marked, '/', DELETE_SECONDS) })
       return true
     }
 

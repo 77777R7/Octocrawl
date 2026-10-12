@@ -54,6 +54,9 @@ export interface AccountData {
   createKey(uid: string, digest: string, record: { label: string; prefix: string; createdAt: string }): Promise<void>
   /** Disables the key if it belongs to the account; false when it does not, or does not exist. */
   revokeKey(uid: string, id: string): Promise<boolean>
+  /** Deletes everything this file keeps for the account: its keys, credits, daily usage and request lines. Safe to run
+   * again after a failure part way. */
+  erase(uid: string): Promise<void>
 }
 
 export class MemoryAccountData implements AccountData {
@@ -77,6 +80,12 @@ export class MemoryAccountData implements AccountData {
     if (!key || key.uid !== uid) return false
     key.enabled = false
     return true
+  }
+  async erase(uid: string) {
+    this.balances.delete(uid)
+    for (const [id, day] of this.usageDays) if (day.uid === uid) this.usageDays.delete(id)
+    for (const [id, key] of this.keyRecords) if (key.uid === uid) this.keyRecords.delete(id)
+    this.requestLines.delete(uid)
   }
 }
 
@@ -158,6 +167,38 @@ export class FirestoreAccountData implements AccountData {
       label: { stringValue: record.label }, prefix: { stringValue: record.prefix }, createdAt: { timestampValue: record.createdAt }, uid: { stringValue: uid },
     } }) })
     if (!response.ok) throw new Error(`key write failed (${response.status})`)
+  }
+  async erase(uid: string): Promise<void> {
+    if (!/^[A-Za-z0-9_-]{8,128}$/.test(uid) || /^__.*__$/.test(uid)) throw new Error('account id is malformed')
+    const remove = async (names: string[]) => {
+      // A commit takes at most 500 writes.
+      for (let at = 0; at < names.length; at += 500) {
+        const response = await this.request(`${this.resource}:commit`, { method: 'POST', body: JSON.stringify({ writes: names.slice(at, at + 500).map(name => ({ delete: name })) }) })
+        if (!response.ok) throw new Error(`erase commit failed (${response.status})`)
+      }
+    }
+    // The balance first: a call already under way then cannot settle (its commit needs the balance), so it writes no
+    // usage or request line after these are gone.
+    await remove([`${this.resource}/credits/${uid}`])
+    // Keys and daily usage by the account's uid, a page at a time until none is left; the keys stop working within a
+    // minute, as a revoked one does (the hosted API caches lookups that long).
+    for (const collection of ['hostedApiKeys', 'creditUsage']) {
+      for (let pass = 0; ; pass++) {
+        const docs = await this.byUid(collection, uid)
+        if (docs.length === 0) break
+        if (pass >= 50) throw new Error(`${collection} did not empty`)
+        await remove(docs.map(doc => doc.name))
+      }
+    }
+    // The request lines, a page of names at a time.
+    for (let pass = 0; ; pass++) {
+      const response = await this.request(`${this.resource}/requestLog/${uid}/requests?pageSize=300&mask.fieldPaths=at`)
+      if (!response.ok) throw new Error(`requestLog list failed (${response.status})`)
+      const names = ((await response.json() as { documents?: Doc[] }).documents ?? []).map(doc => doc.name)
+      if (names.length === 0) break
+      if (pass >= 200) throw new Error('requestLog did not empty')
+      await remove(names)
+    }
   }
   async revokeKey(uid: string, id: string): Promise<boolean> {
     const read = await this.request(`${this.resource}/hostedApiKeys/${id}`)

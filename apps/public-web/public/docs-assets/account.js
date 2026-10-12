@@ -12,6 +12,7 @@
     expired: 'That sign-in link has expired or was used already. Start again.',
     invalid: 'That sign-in did not work. Check the email address and try again.',
     unavailable: 'Sign-in is not available right now. Try again in a few minutes.',
+    delete_unfinished: 'Your keys, credits, usage and request lines are deleted, but the sign-in account may not be. Sign in again: if you can, delete the account once more to finish.',
   }
   const PROVIDERS = { github: 'GitHub', google: 'Google' }
   // A provider whose address already has an account waits to be linked (auth.ts, w2l_link): the page says which ways
@@ -23,7 +24,11 @@
 
   const signin = $('#signin')
   if (signin) {
-    const next = safeNext(params.get('next'))
+    // Deleting an account asks for a fresh sign-in (auth.ts, /auth/delete/start): the visitor is still signed in, so the
+    // page stays instead of going on, and a sign-in that fails part way lands on Settings.
+    const reauth = params.get('reauth') === 'delete'
+    const deleted = params.get('deleted') === '1'
+    const next = reauth ? '/dashboard/settings/' : safeNext(params.get('next'))
     for (const link of signin.querySelectorAll('[data-provider]')) link.href = `/auth/${link.dataset.provider}?next=${encodeURIComponent(next)}`
     const message = $('#signin-message')
     const tried = params.get('provider')
@@ -33,7 +38,12 @@
       message.classList.add('is-notice')
       signin.querySelector('.signin-options').before(message)
     } else if (ERRORS[params.get('error')]) say(message, ERRORS[params.get('error')], true)
-    fetch('/api/me', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((me) => { if (me && me.signedIn) location.replace(next) }).catch(() => {})
+    else if (reauth) {
+      say(message, 'To delete your account, sign in again below the way you usually do, in this browser, within 10 minutes. The account is deleted as soon as you are signed in.')
+      message.classList.add('is-notice')
+      signin.querySelector('.signin-options').before(message)
+    } else if (deleted) say(message, 'Your Octocrawl account is deleted: its keys, credits, usage and request lines are gone. Thank you for trying Octocrawl.')
+    if (!reauth && !deleted) fetch('/api/me', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((me) => { if (me && me.signedIn) location.replace(next) }).catch(() => {})
     const form = $('#email-form')
     form.addEventListener('submit', async (event) => {
       event.preventDefault()
