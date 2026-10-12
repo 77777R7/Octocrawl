@@ -341,16 +341,17 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
     // A check failed on a page that has settled: what it needs may load as it comes into view.
     const seen = tracker.outcome()
     const failing = seen.checks.some((check) => check.passed === false)
-    if (!scrolling && options.scroll !== false && seen.steady === true && !seen.loading && failing) {
-      scrolling = true
-      // The scrolling's own time, from its first screen, within the request's.
-      if (options.scrollMs !== undefined) deadline = Math.min(limit, Math.max(deadline, now() + options.scrollMs))
-    }
+    scrolling ||= options.scroll !== false && seen.steady === true && !seen.loading && failing
     // Once the checks hold, the next read confirms them where they are.
     if (scrolling && failing && !ended && scrolls < MAX_REGION_SCROLLS) {
       try {
         const moved = JSON.parse(String(await page.evaluate(SCROLL_SCREEN))) as { moved?: boolean; end?: boolean }
-        if (moved.moved === true) scrolls++
+        if (moved.moved === true) {
+          scrolls++
+          // The scrolling's own time, from its first screen that moved, within the request's: a page that cannot scroll
+          // keeps the shared bound (T010, T060 and B003 waited past it without a screen on 2026-10-12).
+          if (scrolls === 1 && options.scrollMs !== undefined) deadline = Math.min(limit, Math.max(deadline, now() + options.scrollMs))
+        }
         ended = moved.end === true || moved.moved !== true
       } catch (error) {
         if (!isNavigationError(error)) throw error

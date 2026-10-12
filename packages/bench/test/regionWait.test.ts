@@ -176,6 +176,10 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     const settling = costco({ changingReads: 99, pricesAfter: 1, endAfter: 30 })
     await waitForRegion(settling, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: settling.now, scrollMs: REGION_SCROLL_MAX_MS })
     expect(settling.now()).toBeLessThanOrEqual(10_000)
+    // A settled page that does not scroll at all keeps the shared bound too.
+    const stuck = costco({ changingReads: 2, pricesAfter: 99, endAfter: 0 })
+    expect(await waitForRegion(stuck, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: stuck.now, scrollMs: REGION_SCROLL_MAX_MS })).toMatchObject({ ready: false, scrolls: 0 })
+    expect(stuck.now()).toBeLessThanOrEqual(10_000)
     // A page longer than the wait can scroll, its region never come: the rest of it was not read, so not known absent.
     const long = costco({ changingReads: 2, pricesAfter: 99, endAfter: 99 })
     const unread = await waitForRegion(long, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: long.now })
