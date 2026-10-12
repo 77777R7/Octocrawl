@@ -124,6 +124,23 @@ describe('the account page\'s data', () => {
       .toEqual([['account-0002'], ['account-0002'], ['account-0002'], ['account-0002']])
   })
 
+  it('reads a request line\'s formats and duration from Firestore, and leaves them null on a line written before them', async () => {
+    const doc = (id: string, extra: Record<string, unknown>) => ({ document: { name: `projects/p/databases/(default)/documents/requestLog/account-0001/requests/${id}`, fields: {
+      at: { timestampValue: '2026-10-12T10:00:00Z' }, endpoint: { stringValue: 'scrape' }, keyId: { stringValue: 'k'.repeat(64) }, url: { stringValue: 'https://example.org/' },
+      status: { stringValue: 'success' }, kind: { stringValue: 'http' }, credits: { integerValue: '1' }, ...extra,
+    } } })
+    const fetcher = (async (input: string | URL) => {
+      if (String(input).startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
+      return Response.json([
+        doc('1-a', { formats: { arrayValue: { values: [{ stringValue: 'markdown' }, { stringValue: 'json' }] } }, ms: { integerValue: '1834' } }),
+        doc('2-b', { formats: { arrayValue: {} }, ms: { integerValue: '12' } }),
+        doc('3-c', {}),
+      ])
+    }) as typeof fetch
+    const lines = await new FirestoreAccountData('octocrawl-test', fetcher).requests('account-0001', 10)
+    expect(lines.map(line => [line.id, line.formats, line.ms])).toEqual([['1-a', ['markdown', 'json'], 1834], ['2-b', [], 12], ['3-c', null, null]])
+  })
+
   it('makes a key the hosted API will find, shows it once, lists it by prefix, and revokes only the account\'s own keys', async () => {
     const { url, data, cookie } = await start()
     const made = await fetch(`${url}/api/account/keys`, { method: 'POST', headers: { cookie, origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ label: '  laptop   agent ' }) })

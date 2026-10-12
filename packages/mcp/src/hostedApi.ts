@@ -186,6 +186,15 @@ function requestedUrl(body: unknown): string {
   return typeof url === 'string' ? url : ''
 }
 
+/** The formats a scrape body named, by name (a string, or an object's `type`), as the caller wrote them; empty when it
+ * named none. The line keeps at most 20 names of 40 characters (hostedCredits.ts). */
+function requestedFormats(body: unknown): string[] {
+  const formats = body !== null && typeof body === 'object' ? (body as { formats?: unknown }).formats : undefined
+  if (!Array.isArray(formats)) return []
+  return formats.flatMap((format: unknown) => typeof format === 'string' ? [format]
+    : format !== null && typeof format === 'object' && typeof (format as { type?: unknown }).type === 'string' ? [(format as { type: string }).type] : [])
+}
+
 /** A scrape result's outcome on its request line, from the result and its Evidence Record: never the page's content. */
 function noteScrape(note: RequestNote, result: unknown): void {
   const r = (result ?? {}) as { status?: unknown; lane?: unknown; failureReason?: unknown; evidenceRecord?: { finalUrl?: unknown; httpStatus?: unknown; reason?: unknown; robotsDecision?: { decision?: unknown } | null; rawSha256?: unknown } }
@@ -429,8 +438,11 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const reservation: Reservation = reserved.reservation
     let charge: ReturnType<typeof scrapeCharge> = { credits: 0, kind: 'unread' }
     // The call's line for the dashboard's Activity page: what was asked for, then what came back.
-    const note: RequestNote = { endpoint: isScrape ? 'scrape' : 'map', keyId: caller.id, url: '', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null }
+    const note: RequestNote = { endpoint: isScrape ? 'scrape' : 'map', keyId: caller.id, url: '', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: null, ms: null }
+    // From the call's arrival at the gate, so the reservation's round trip counts too.
+    const started = now.getTime()
     const settle = async () => {
+      note.ms = Date.now() - started
       log(JSON.stringify({ severity: 'INFO', event: 'hosted_credits', uid, kind: charge.kind, used: charge.credits, reserved: reservation.fromGrant + reservation.fromPurchased }))
       // A settle that fails keeps what was reserved: the call is answered, and the log names the credits to give back.
       return credits.settle(reservation, charge.credits, charge.kind, now, note).catch((error: unknown) => {
@@ -445,6 +457,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
         let parsed = true
         try { body = await c.req.json() } catch { parsed = false }
         note.url = requestedUrl(body)
+        note.formats = requestedFormats(body)
         if (!parsed) { note.status = 'invalid_request'; response = c.json({ error: 'the request body must be JSON', code: 'invalid_json' }, 400) } else {
           const pinned = body !== null && typeof body === 'object' && !Array.isArray(body)
             ? { ...(body as Record<string, unknown>), storeInCache: false, ...(browser ? {} : { fastMode: true }) }

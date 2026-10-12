@@ -150,7 +150,7 @@ describe('the Firestore ledger', () => {
     const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
     const reserved = await store.reserve('account-1', 5, SITE, OCT)
     if (!reserved.ok) throw new Error('unreachable')
-    const note = { endpoint: 'scrape' as const, keyId: 'k'.repeat(64), url: `https://example.org/${'a'.repeat(3_000)}`, finalUrl: 'https://example.org/a', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed' as const, sha256: 'f'.repeat(64), links: null }
+    const note = { endpoint: 'scrape' as const, keyId: 'k'.repeat(64), url: `https://example.org/${'a'.repeat(3_000)}`, finalUrl: 'https://example.org/a', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed' as const, sha256: 'f'.repeat(64), links: null, formats: ['markdown', 'json'], ms: 1_234 }
     await store.settle(reserved.reservation, 1, 'http', OCT, note)
     const settled = firestore.commits.at(-1) as { writes: Array<{ update: { name: string; fields: Record<string, Record<string, string>> } }> }
     expect(settled.writes).toHaveLength(3)
@@ -160,6 +160,15 @@ describe('the Firestore ledger', () => {
     expect(line.fields.url!.stringValue).toHaveLength(2_048)
     expect(Object.keys(line.fields)).not.toContain('reason')
     expect(Object.keys(line.fields)).not.toContain('links')
+    // What the scrape asked for and how long it took; a scrape that named no format keeps an empty list, a map none.
+    expect(line.fields.formats).toEqual({ arrayValue: { values: [{ stringValue: 'markdown' }, { stringValue: 'json' }] } })
+    expect(line.fields.ms).toEqual({ integerValue: '1234' })
+    for (const [formats, written] of [[[], { arrayValue: {} }], [null, undefined]] as const) {
+      const next = await store.reserve('account-1', 1, SITE, OCT)
+      if (!next.ok) throw new Error('unreachable')
+      await store.settle(next.reservation, 0, 'unread', OCT, { ...note, formats: formats === null ? null : [...formats] })
+      expect((firestore.commits.at(-1) as { writes: Array<{ update: { fields: Record<string, unknown> } }> }).writes[2]!.update.fields.formats).toEqual(written)
+    }
     // A settle without a line (no account key's call) writes none.
     const again = await store.reserve('account-1', 1, SITE, OCT)
     if (!again.ok) throw new Error('unreachable')
