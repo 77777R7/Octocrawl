@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
-import { createHostedApi, fromClaude, keyDigest, MemoryHostedKeys, MemoryHostedQuota, sweepTaskRoot, type HostedKeyRecord } from '../src/hostedApi.js'
+import { createHostedApi, fromClaude, keyDigest, MemoryHostedKeys, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore } from '../src/hostedCredits.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
 
@@ -240,6 +240,35 @@ it('an account\'s key spends credits by what each result returned, and says what
   // The site's daily total still counts every start; no per-key daily counter is kept for an account.
   expect([...credits.site.values()]).toEqual([7])
   expect(quota.counts.size).toBe(0)
+})
+
+it('the site\'s signed account header spends that account\'s credits as a key would, and a forged or stale one is 401', async () => {
+  const credits = new MemoryCreditsStore(1_000)
+  const { url } = await start({ credits })
+  const signed = { [SITE_ACCOUNT_HEADER]: siteAccountAssertion(HASH_KEY, 'account-1') }
+  const page = await post(url, '/v1/scrape', { url: `${origin}/page`, formats: ['markdown'] }, signed)
+  expect(page.status).toBe(200)
+  expect(await page.json()).toMatchObject({ status: 'success', lane: 'http', markdown: expect.stringContaining('Tides') })
+  expect([page.headers.get('x-credits-used'), page.headers.get('x-credits-remaining')]).toEqual(['1', '999'])
+  const map = await post(url, '/v1/map', { url: `${origin}/page` }, { [SITE_ACCOUNT_HEADER]: siteAccountAssertion(HASH_KEY, 'account-1') })
+  expect([map.status, map.headers.get('x-credits-used')]).toEqual([200, '1'])
+  // The request lines name the Playground, not a key.
+  expect(credits.requests.get('account-1')!.map(line => [line.endpoint, line.keyId])).toEqual([['map', 'playground:account-1'], ['scrape', 'playground:account-1']])
+  // Signed with another secret, for another account, expired or too far ahead: refused before any work, nothing spent.
+  const now = Date.now()
+  const valid = siteAccountAssertion(HASH_KEY, 'account-1', now)
+  for (const value of [siteAccountAssertion('x'.repeat(40), 'account-1'), valid.replace('account-1', 'account-2'), siteAccountAssertion(HASH_KEY, 'account-1', now - SITE_ACCOUNT_TTL_MS - 1_000), 'account-1', '']) {
+    const refused = await post(url, '/v1/scrape', { url: `${origin}/page` }, { [SITE_ACCOUNT_HEADER]: value })
+    expect(refused.status, value).toBe(401)
+    expect(((await refused.json()) as { code: string }).code).toBe('unauthorized')
+  }
+  expect(verifySiteAccount(HASH_KEY, valid, now)).toBe('account-1')
+  expect(verifySiteAccount(HASH_KEY, valid, now + SITE_ACCOUNT_TTL_MS + 1)).toBeNull()
+  // The site's clock a few seconds ahead of this one is not a forgery.
+  expect(verifySiteAccount(HASH_KEY, siteAccountAssertion(HASH_KEY, 'account-1', now + 5_000), now)).toBe('account-1')
+  expect(verifySiteAccount(HASH_KEY, siteAccountAssertion(HASH_KEY, 'account-1', now + 10 * SITE_ACCOUNT_TTL_MS), now)).toBeNull()
+  expect(() => siteAccountAssertion(HASH_KEY, 'a/b')).toThrow()
+  expect(credits.requests.get('account-1')).toHaveLength(2)
 })
 
 it('an account with fewer credits than a browser page reads over HTTP alone, and one without credits is refused until the 1st', async () => {

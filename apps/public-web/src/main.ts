@@ -152,10 +152,22 @@ mountWaitlist()
 /** After the daily previews run out: a link to sign in, saying what an account gives (the hosted API's monthly
  * credits, docs/hosted-api.md, Accounts and credits). */
 function waitlistLink(className: string): HTMLAnchorElement {
+  if (signedIn) return playgroundLink(className, 'Need more? Run it in your dashboard with your credits →')
   const link = textElement('a', 'Need more? Sign in for 1,000 free credits a month →', className)
   link.href = '/signin/'
   return link
 }
+/** The server sets w2l_account=1 beside the HttpOnly session cookie (nav.js reads it too): a hint, not proof. */
+const signedIn = /(?:^|;\s*)w2l_account=1(?:;|$)/.test(document.cookie)
+/** The dashboard's Playground, which runs the URL typed here on the account's credits (no daily preview limit). */
+function playgroundLink(className: string, text: string): HTMLAnchorElement {
+  const link = textElement('a', text, className)
+  const point = () => { const url = input.value.trim(); link.href = url ? `/dashboard/scrape/?url=${encodeURIComponent(url)}` : '/dashboard/scrape/' }
+  point()
+  input.addEventListener('input', point)
+  return link
+}
+if (signedIn) urlHelp.append(' · ', playgroundLink('url-help-link', 'Run with your credits ↗'))
 const formatButton = document.querySelector<HTMLButtonElement>('#format-button')!
 const formatLabel = document.querySelector<HTMLElement>('#format-label')!
 const formatPanel = document.querySelector<HTMLElement>('#format-panel')!

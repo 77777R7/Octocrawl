@@ -36,6 +36,8 @@ const account = auth === undefined ? undefined : createAccountRoutes({
   hashKey: (process.env.W2L_QUOTA_HASH_KEY ?? '').trim(),
   current: auth.current,
   monthlyCredits,
+  // The Playground's runs: the hosted API, which charges and logs them (account.ts, /api/account/run).
+  hostedApi: { origin: process.env.W2L_HOSTED_API_URL?.trim() || 'https://api.octocrawl.dev' },
 })
 const server = createPreviewServer({
   quota: firestoreQuotaFromEnv(),

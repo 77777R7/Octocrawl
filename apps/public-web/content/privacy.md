@@ -2,7 +2,7 @@
 
 This page covers the public Octocrawl page and its preview service. When you run Octocrawl on your own computer, none of it applies: requests, results and logs stay on your machine.
 
-Last updated 11 October 2026.
+Last updated 12 October 2026.
 
 ## What you submit
 
@@ -61,7 +61,7 @@ A sign-in link is sent by Firebase. GitHub and Google show you what they share b
 - **Your account:** your email address, when you first and last signed in, and which ways you signed in.
 - **A session for each sign-in:** a keyed hash of the session's id (never the id), your account, your email address and when it ends. It is deleted 30 days on, or when you sign out.
 - **Your credits:** this month's balance, and for each UTC day the number of calls by kind and the credits they cost. Daily counts are deleted after 90 days.
-- **Your requests:** for each call made with one of your keys, a line with the address you asked for and the one finally read, when, which key, the result (status, HTTP status, robots.txt decision, the reading route) and the SHA-256 of what was read, with the credits it cost. Never the page's content. Only you see these lines, on your dashboard's Activity page, and each one is deleted 30 days after the call.
+- **Your requests:** for each call made with one of your keys or in your dashboard's Playground, a line with the address you asked for and the one finally read, when, which key (or the Playground), the result (status, HTTP status, robots.txt decision, the reading route) and the SHA-256 of what was read, with the credits it cost. Never the page's content. Only you see these lines, on your dashboard's Activity page, and each one is deleted 30 days after the call.
 - **Your API keys:** for each key, a hash (never the key), the name you gave it, its first seven characters and when it was made. Revoking a key stops it, and the record stays so your keys page can show it.
 
 **Cookies.** A sign-in sets `w2l_session`, which holds the session's id. Your browser keeps it for 30 days, and scripts on the page cannot read it. It also sets `w2l_account=1`, which tells the page to show **Dashboard** in place of **Sign in**. While you sign in, two short cookies hold the sign-in's state: one for 10 minutes and one for an hour. If you sign in with GitHub or Google using an email address that already has an account, a third cookie keeps that provider's sign-in for 30 minutes, encrypted. When you then sign in the way you did before, the provider is added to your account and the cookie is deleted.
