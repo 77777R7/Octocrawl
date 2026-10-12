@@ -20,6 +20,7 @@ import { detectLists } from './detectList.js'
 import { commonAncestor, layoutTables, outerHtml, qsa, tagOf, textOf } from './dom.js'
 import { hasRecommendationToken, isRecommendationHeading } from './prune.js'
 import { visiblePrices } from './product.js'
+import { visibleText } from './invisible.js'
 
 interface RouterCounts {
   li: number
@@ -114,7 +115,7 @@ function ownPriceAfterTitle(doc: Document, names: readonly string[]): boolean {
 }
 
 function countAll(doc: Document): RouterCounts {
-  const textLength = (el: Element | null): number => (el?.textContent ?? '').replace(/\s+/g, ' ').trim().length
+  const textLength = (el: Element | null): number => visibleText(el?.textContent ?? '').length
   const textChars = textLength(doc.body)
   const a = qsa(doc, 'a').length
   return {

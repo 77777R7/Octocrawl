@@ -124,6 +124,10 @@ beforeAll(async () => {
       else if (req.url === '/client/loop/a' || req.url === '/client/loop/b') res.writeHead(302, { location: req.url.endsWith('a') ? '/client/loop/b' : '/client/loop/a' }).end()
       else if (page === undefined) res.writeHead(404).end()
       else res.writeHead(page[0], { 'content-type': page[1] }).end(`<!doctype html><html><body>${page[2]}</body></html>`)
+    } else if (req.url === '/zero-width') {
+      // As Temu's verification page (T031, 2026-10-12): 300 zero-width spaces and no other text, its dialog not yet drawn.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><head><title> </title></head><body><div id="verification">' + '<span>\u200b</span>'.repeat(300) + '</div></body></html>')
     } else if (req.url === '/nav-only') {
       // Navigation and a footer, no main block: the extractor finds no content.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -550,6 +554,19 @@ describe('BrowserLocalSubject transport', () => {
       expect(full.usage.contentTokens).toBeGreaterThan(0)
       expect(full.evidence.rawBodySha256).toBe(main.evidence.rawBodySha256)
       expect(full.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true, onlyMainContent: false }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('reads a page of zero-width characters alone as a page with no text, not content, for onlyMainContent false too', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const full = await subject.fetch(`${url}/zero-width`, undefined, undefined, undefined, { onlyMainContent: false })
+      expect(full).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: null })
+      expect(full.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true, textChars: 0 }) }))
+      const main = await subject.fetch(`${url}/zero-width`)
+      expect(main).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
     } finally {
       await subject.teardown()
     }
