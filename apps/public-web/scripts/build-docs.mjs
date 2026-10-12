@@ -433,19 +433,22 @@ for (const [path, title, description, body, layout] of [
   await writeFile(join(root, 'dist', path.slice(1), 'index.html'), versionPublicAssets(accountPageHtml(path, title, description, body, layout), join(root, 'public')))
 }
 
-// The dashboard: one sidebar, five pages, all filled by dashboard.js from GET /api/account. A dark page of its own, with
+// The dashboard: one sidebar, eight pages, all filled by dashboard.js from GET /api/account; the Playground's two run
+// through POST /api/account/run. A dark page of its own, with
 // no site header: the logo goes back to the site.
 const DASHBOARD_PAGES = [
   ['/dashboard/', 'Overview', 'Workspace'],
   ['/dashboard/activity/', 'Activity', 'Workspace'],
   ['/dashboard/usage/', 'Usage', 'Workspace'],
+  ['/dashboard/scrape/', 'Scrape', 'Playground'],
+  ['/dashboard/map/', 'Map', 'Playground'],
   ['/dashboard/keys/', 'API keys', 'Build'],
   ['/dashboard/connect/', 'Connect', 'Build'],
   ['/dashboard/account/', 'Account', 'Account'],
 ]
 const dashCode = (id, text) => `<div class="code"><pre id="${id}">${escape(text)}</pre><button class="copy" type="button" data-copy="${id}">Copy</button></div>`
 /** The request table the Activity page and the Overview share: dashboard.js fills its body from /api/account/activity. */
-const requestTable = (id, rows) => `<div class="table-scroll"><table class="dash-table requests" data-rows="${rows}"><thead><tr><th>Time (UTC)</th><th>Endpoint</th><th>URL</th><th>Lane</th><th>Result</th><th>robots.txt</th><th class="num">Credits</th><th>Evidence</th></tr></thead><tbody id="${id}-body"></tbody></table></div><p class="dash-small" id="${id}-empty" hidden>No requests yet. Each call made with one of your keys shows here, with what it cost.</p>`
+const requestTable = (id, rows, empty = 'No requests yet. Each call made with one of your keys or in the Playground shows here, with what it cost.') => `<div class="table-scroll"><table class="dash-table requests" data-rows="${rows}"><thead><tr><th>Time (UTC)</th><th>Endpoint</th><th>URL</th><th>Lane</th><th>Result</th><th>robots.txt</th><th class="num">Credits</th><th>Evidence</th></tr></thead><tbody id="${id}-body"></tbody></table></div><p class="dash-small" id="${id}-empty" hidden>${empty}</p>`
 function dashboardPageHtml(path, title, lead, body) {
   let group = ''
   const links = DASHBOARD_PAGES.map(([href, name, section]) => {
@@ -492,7 +495,7 @@ const overviewBody = `<section class="ev-hero" aria-labelledby="ev-title"><pre c
 const activityBody = `<section class="panel" aria-labelledby="activity-title"><div class="panel-head"><h2 id="activity-title">Requests</h2><span class="dash-small" id="activity-count">&nbsp;</span></div>
 <form class="filters" id="activity-filters"><label for="f-search">URL contains<input id="f-search" name="search" type="search" autocomplete="off" placeholder="example.com" /></label><label for="f-endpoint">Endpoint<select id="f-endpoint" name="endpoint"><option value="">All</option><option value="scrape">/scrape</option><option value="map">/map</option></select></label><label for="f-key">Key<select id="f-key" name="key"><option value="">All keys</option></select></label><label for="f-result">Result<select id="f-result" name="result"><option value="">All</option><option value="read">Read</option><option value="free">Not charged</option></select></label><button class="button quiet" type="button" id="export-csv">Export CSV</button></form>
 ${requestTable('activity', 0)}
-<p class="dash-small">Lines are kept 30 days and only you see them: the URL asked for, what came back and what it cost, with the body's SHA-256 from the Evidence Record. Never the page's content. The page shows the latest 1,000.</p></section>`
+<p class="dash-small">Lines are kept 30 days and only you see them: the URL asked for, what came back and what it cost, with the body's SHA-256 from the Evidence Record. Never the page's content. The page shows the latest 1,000. Runs in the Playground show under the key Playground.</p></section>`
 const usageBody = `<section class="summary" aria-label="Summary">
 <div class="summary-main"><p class="kpi-label">Credits remaining</p><p class="summary-figure" id="sum-left">…</p><p class="dash-small" id="sum-renews">&nbsp;</p><progress class="credit-bar" id="sum-meter" max="1" value="0" aria-label="Credits left of this month's grant"></progress></div>
 <div class="summary-cell"><p class="kpi-label">Credits used · 30 days</p><p class="kpi-value" id="sum-used">…</p></div>
@@ -531,6 +534,32 @@ ${installRow('cline', 'Cline', 'CL', 'Merge into <code>cline_mcp_settings.json</
 <h3 id="c-sdk">Vercel AI SDK</h3>${dashCode('c-sdk-code', `npm install @octocrawl/ai-sdk ai zod\n\nimport { octocrawlTools } from '@octocrawl/ai-sdk'\nconst tools = octocrawlTools() // reads OCTOCRAWL_API_KEY`)}</section>
 <section class="panel" aria-labelledby="c-local"><div class="panel-head"><h2 id="c-local">On your own computer</h2></div><p>Free and without limit, with every tool: crawl, batch and Monitor too. No key and no credits.</p>${dashCode('c-local-code', 'npx octocrawl serve')}</section>
 </div></div>`
+/**
+ * A Playground page: the form, the result and its views, the code for the same call, and the account's last runs here.
+ * dashboard.js sends the form to POST /api/account/run, which the hosted API charges like a key's call.
+ */
+const playgroundBody = (endpoint) => {
+  const scrape = endpoint === 'scrape'
+  const options = scrape
+    ? `<fieldset class="play-options"><legend>Formats</legend><label><input type="checkbox" name="formats" value="markdown" checked /> Markdown</label><label><input type="checkbox" name="formats" value="links" /> Links</label><label><input type="checkbox" name="formats" value="html" /> HTML</label><label class="play-main"><input type="checkbox" name="onlyMainContent" checked /> Main content only</label></fieldset>`
+    : `<fieldset class="play-options"><legend>Options</legend><label>Search<input name="search" maxlength="200" placeholder="docs" autocomplete="off" /></label><label>Limit<input name="limit" type="number" min="1" max="5000" value="100" /></label></fieldset>`
+  const cost = scrape
+    ? 'A page read over HTTP costs 1 credit, one that needs a browser 5. A page that is blocked, or that robots.txt keeps out, costs nothing.'
+    : 'A map that finds URLs costs 1 credit; one that finds none costs nothing.'
+  const views = (scrape ? [['markdown', 'Markdown'], ['links', 'Links'], ['html', 'HTML'], ['evidence', 'Evidence Record'], ['json', 'JSON']] : [['links', 'Links'], ['json', 'JSON']])
+    .map(([view, name], i) => `<button type="button" role="tab" aria-selected="${i === 0}" data-view="${view}">${name}</button>`).join('')
+  return `<section class="panel" aria-labelledby="play-title"><div class="panel-head"><h2 id="play-title">${scrape ? 'Scrape a page' : 'Map a site'}</h2><a href="/docs/reference/">POST /v1/${endpoint} →</a></div>
+<form class="play-form" id="play-form" data-endpoint="${endpoint}" novalidate><label class="play-url" for="play-url">URL<input id="play-url" name="url" type="url" inputmode="url" required placeholder="https://example.com" autocomplete="off" spellcheck="false" /></label>
+${options}
+<div class="play-run"><button class="button" type="submit" id="play-submit">Run</button><p class="dash-small" id="play-cost">${cost} <span id="play-left"></span></p></div></form></section>
+<section class="panel" id="play-result" hidden aria-labelledby="result-title"><div class="panel-head"><div><h2 id="result-title">Result</h2><p class="dash-small" id="play-summary"></p></div><span class="status" id="play-status"></span></div>
+<div class="tabs play-views" role="tablist" aria-label="Result view">${views}</div>
+<dl class="facts play-evidence" id="play-evidence" hidden></dl>
+<div class="code"><pre class="play-output" id="play-output" tabindex="0"></pre><button class="copy" type="button" data-copy="play-output">Copy</button></div></section>
+<section class="panel" aria-labelledby="code-title"><div class="panel-head"><h2 id="code-title">Get code</h2><div class="tabs" role="group" aria-label="Language"><button type="button" aria-pressed="true" data-lang="curl">cURL</button><button type="button" aria-pressed="false" data-lang="js">JavaScript</button></div></div>
+${dashCode('play-code', '')}<p class="dash-small">The same call from your own code or agent: put a key from <a href="/dashboard/keys/">API keys</a> where it says <code>oc_YOUR_KEY</code>. It costs what a run here costs.</p></section>
+<section class="panel" aria-labelledby="runs-title"><div class="panel-head"><h2 id="runs-title">Recent runs</h2><a href="/dashboard/activity/">Activity →</a></div>${requestTable('runs', 5, 'No runs here yet. Each one shows here, and on Activity, with what it cost.')}</section>`
+}
 const accountBody = `<section class="panel" aria-labelledby="who-title"><div class="panel-head"><h2 id="who-title">Signed in</h2></div><dl class="facts">
 <dt>Email</dt><dd id="acct-email">…</dd>
 <dt>Sign-in methods</dt><dd><span class="chips" id="acct-providers"></span></dd>
@@ -542,6 +571,8 @@ for (const [path, title, lead, body] of [
   ['/dashboard/', 'Overview', 'This month\'s credits, the last 30 days of use, and the lines to connect an agent.', overviewBody],
   ['/dashboard/activity/', 'Activity', 'Every call made with your keys in the last 30 days: what was asked for, what came back, and what it cost.', activityBody],
   ['/dashboard/usage/', 'Usage', 'What the hosted API and MCP read for this account, day by day, and what it cost.', usageBody],
+  ['/dashboard/scrape/', 'Scrape', 'Read one page as Markdown, with its Evidence Record. Runs here spend this account\'s credits, at the API\'s price.', playgroundBody('scrape')],
+  ['/dashboard/map/', 'Map', 'List the URLs of a site from its sitemap and links. Runs here spend this account\'s credits, at the API\'s price.', playgroundBody('map')],
   ['/dashboard/keys/', 'API keys', 'Keys for agents and code. Each one spends this account\'s credits.', keysBody],
   ['/dashboard/connect/', 'Connect', 'One line for each MCP client, the REST call, and the free local server.', connectBody],
   ['/dashboard/account/', 'Account', 'Who is signed in, how, and this month\'s credits.', accountBody],

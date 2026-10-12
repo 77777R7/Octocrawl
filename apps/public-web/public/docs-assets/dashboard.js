@@ -1,5 +1,6 @@
 // The dashboard's pages (scripts/build-docs.mjs). They read GET /api/account and GET /api/account/activity, and make
-// and revoke keys through /api/account/keys (packages/public-preview account.ts); without a session they send the visitor to sign in. Text
+// and revoke keys through /api/account/keys, and the Playground runs through POST /api/account/run (packages/public-preview
+// account.ts); without a session they send the visitor to sign in. Text
 // goes in with textContent only; the charts are SVG from dashboard-charts.js (window.OctoCharts).
 (() => {
   const $ = (id) => document.getElementById(id)
@@ -169,7 +170,7 @@
       cell(row, number(line.credits), 'num')
       const hash = cell(row, line.sha256 ? `sha256 ${line.sha256.slice(0, 12)}…` : '—', 'hash')
       if (line.sha256) hash.title = line.sha256
-      if (keyNames) row.title = `Key: ${keyNames.get(line.keyId) ?? 'a revoked or deleted key'}`
+      if (keyNames) row.title = `Key: ${keyName(line)}`
       return row
     }))
     $(`${id}-empty`).hidden = lines.length > 0
@@ -189,6 +190,9 @@
 
   let activity = null
   let keyNames = new Map()
+  /** The Playground's runs carry the key id `playground:{uid}` (hostedApi.ts, SITE_ACCOUNT_HEADER). */
+  const fromPlayground = (line) => line.keyId.startsWith('playground:')
+  const keyName = (line) => (fromPlayground(line) ? 'Playground' : keyNames.get(line.keyId) ?? 'Revoked or deleted key')
   const filters = $('activity-filters')
   const filtered = () => {
     if (!activity) return []
@@ -196,13 +200,14 @@
     const search = String(form.get('search') ?? '').trim().toLowerCase()
     return activity.filter((line) => (!search || line.url.toLowerCase().includes(search))
       && (!form.get('endpoint') || line.endpoint === form.get('endpoint'))
-      && (!form.get('key') || line.keyId === form.get('key'))
+      && (!form.get('key') || (form.get('key') === 'playground' ? fromPlayground(line) : line.keyId === form.get('key')))
       && (form.get('result') !== 'read' || outcome(line)[1] === 'ok')
       && (form.get('result') !== 'free' || line.credits === 0))
   }
   const renderActivity = () => {
     if (!activity) return
     renderRequests('recent', activity.slice(0, 5))
+    renderRequests('runs', activity.filter(fromPlayground).slice(0, 5))
     const shown = filtered()
     renderRequests('activity', shown, keyNames)
     set('activity-count', `${number(shown.length)} of ${number(activity.length)} in 30 days`)
@@ -223,7 +228,7 @@
     }
     const keyList = $('by-key-list')
     if (keyList) {
-      const keys = tally(activity, (line) => keyNames.get(line.keyId) ?? 'Revoked or deleted key', () => false)
+      const keys = tally(activity, keyName, () => false)
       const total = keys.reduce((sum, k) => sum + k[3], 0)
       keyList.replaceChildren(...keys.map(([name, calls, , credits]) => {
         const item = document.createElement('li')
@@ -253,7 +258,7 @@
     })
   }
   const loadActivity = async () => {
-    if (!$('recent-body') && !$('activity-body') && !$('by-key-list')) return
+    if (!$('recent-body') && !$('activity-body') && !$('by-key-list') && !$('runs-body')) return
     try {
       const response = await fetch('/api/account/activity', { credentials: 'same-origin' })
       if (!response.ok) throw new Error(String(response.status))
@@ -293,7 +298,10 @@
     renderKeys(data.keys, load)
     keyNames = new Map(data.keys.map((k) => [k.id, `${k.label} (${k.prefix}…)`]))
     const keyFilter = $('f-key')
-    if (keyFilter && keyFilter.options.length === 1) for (const key of data.keys) keyFilter.append(new Option(`${key.label} (${key.prefix}…)`, key.id))
+    if (keyFilter && keyFilter.options.length === 1) {
+      for (const key of data.keys) keyFilter.append(new Option(`${key.label} (${key.prefix}…)`, key.id))
+      keyFilter.append(new Option('Playground', 'playground'))
+    }
     renderActivity()
 
     set('acct-email', data.email || 'No email address on record')
@@ -304,6 +312,7 @@
     }
     set('acct-month', `${number(monthly.left)} of ${number(monthly.of)} free credits left, renewed on ${day(monthly.resetsAt)} (UTC)`)
     set('acct-bought', data.credits.purchased ? number(data.credits.purchased) : 'None')
+    set('play-left', `You have ${number(data.credits.remaining)} left.`)
   }
 
   const load = async () => {
@@ -361,6 +370,122 @@
         } else if (response.status === 409) say('An account holds at most five active keys. Revoke one first.', true)
         else say('The key could not be created. Try again.', true)
       } catch { say('The key could not be created. Try again.', true) } finally { button.disabled = false }
+    })
+  }
+
+  // The Playground (the Scrape and Map pages): the form goes to POST /api/account/run, which the hosted API answers and
+  // charges as it would a key's call. The answer is shown as text in views, the Evidence Record as facts and JSON, and
+  // the same call as code for the visitor's own key.
+  const play = $('play-form')
+  if (play) {
+    const endpoint = play.dataset.endpoint
+    const output = $('play-output')
+    const evidence = $('play-evidence')
+    const submit = $('play-submit')
+    let answer = null
+    let view = endpoint === 'scrape' ? 'markdown' : 'links'
+    let lang = 'curl'
+    const body = () => {
+      const form = new FormData(play)
+      const url = String(form.get('url') ?? '').trim()
+      if (endpoint === 'map') {
+        const search = String(form.get('search') ?? '').trim()
+        return { url, limit: Math.min(5000, Math.max(1, Math.round(Number(form.get('limit')) || 100))), ...(search ? { search } : {}) }
+      }
+      return { url, formats: form.getAll('formats').map(String), onlyMainContent: form.get('onlyMainContent') === 'on' }
+    }
+    const drawCode = () => {
+      const request = body()
+      if (!request.url) request.url = 'https://example.com'
+      const json = JSON.stringify(request)
+      const api = `https://api.octocrawl.dev/v1/${endpoint}`
+      set('play-code', lang === 'curl'
+        ? `curl ${api} \\\n  -H 'authorization: Bearer oc_YOUR_KEY' \\\n  -H 'content-type: application/json' \\\n  -d '${json.replace(/'/g, "'\\''")}'`
+        : `const response = await fetch('${api}', {\n  method: 'POST',\n  headers: { authorization: 'Bearer oc_YOUR_KEY', 'content-type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(request, null, 2).replace(/\n/g, '\n  ')}),\n})\nconst result = await response.json()`)
+    }
+    const linkList = (links) => (Array.isArray(links) ? links.map((link) => (typeof link === 'string' ? link : link && link.url)).filter(Boolean) : null)
+    const facts = (record) => {
+      const rows = [
+        ['Requested URL', record.requestedUrl], ['Final URL', record.finalUrl], ['Fetched at (UTC)', record.fetchedAt], ['HTTP status', record.httpStatus],
+        ['Result', record.reason ? `${record.status} · ${record.reason}` : record.status], ['Lane', record.lane],
+        ['robots.txt', record.robotsDecision ? record.robotsDecision.decision : null], ['Body SHA-256', record.rawSha256],
+        ['Markdown SHA-256', record.outputSha256 ? record.outputSha256.markdown : null],
+        ['Extractor', record.extractor ? `${record.extractor.name} ${record.extractor.version}` : null],
+      ]
+      evidence.replaceChildren(...rows.flatMap(([name, value]) => {
+        const term = document.createElement('dt'); term.textContent = name
+        const detail = document.createElement('dd'); detail.textContent = value === null || value === undefined || value === '' ? '—' : String(value)
+        if (/SHA-256/.test(name)) detail.className = 'mono'
+        return [term, detail]
+      }))
+    }
+    const show = () => {
+      if (!answer) return
+      for (const tab of document.querySelectorAll('[data-view]')) tab.setAttribute('aria-selected', String(tab.dataset.view === view))
+      evidence.hidden = view !== 'evidence'
+      let text
+      if (view === 'markdown') text = typeof answer.markdown === 'string' ? answer.markdown : 'No Markdown came back. The result and the Evidence Record say why.'
+      else if (view === 'html') text = typeof answer.html === 'string' ? answer.html : 'HTML was not asked for: tick HTML and run again.'
+      else if (view === 'links') { const links = linkList(answer.links); text = links ? (links.length ? links.join('\n') : 'No links came back.') : 'Links were not asked for: tick Links and run again.' }
+      else if (view === 'evidence') {
+        if (answer.evidenceRecord) { facts(answer.evidenceRecord); text = JSON.stringify(answer.evidenceRecord, null, 2) } else { evidence.replaceChildren(); text = 'This answer has no Evidence Record.' }
+      } else text = JSON.stringify(answer, null, 2)
+      output.textContent = text
+    }
+    for (const tab of document.querySelectorAll('[data-view]')) tab.addEventListener('click', () => { view = tab.dataset.view; show() })
+    toggles('lang', (value) => { lang = value; drawCode() })
+    play.addEventListener('input', drawCode)
+    const asked = new URLSearchParams(location.search).get('url')
+    if (asked) play.url.value = asked
+    drawCode()
+
+    const outcomeOf = (result) => {
+      if (endpoint === 'map') {
+        const links = linkList(result.links) ?? []
+        return [`${number(links.length)} URLs · ${result.status}`, links.length ? 'ok' : 'warn']
+      }
+      const reason = result.failureReason || (result.evidenceRecord && result.evidenceRecord.reason)
+      return [reason ? `${result.status} · ${reason}` : result.status, READ.has(result.status) ? 'ok' : result.status === 'partial' ? 'warn' : 'bad']
+    }
+    play.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const request = body()
+      try { if (!/^https?:$/.test(new URL(request.url).protocol)) throw new Error('scheme') } catch { say('Enter a full address that starts with http:// or https://.', true); play.url.focus(); return }
+      if (endpoint === 'scrape' && request.formats.length === 0) { say('Tick at least one format.', true); return }
+      say('')
+      submit.disabled = true
+      submit.textContent = 'Running…'
+      set('play-summary', endpoint === 'scrape' ? 'Reading the page. One that needs a browser can take up to a minute.' : 'Reading the site\'s sitemap and links.')
+      try {
+        const response = await fetch('/api/account/run', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint, ...request }) })
+        if (response.status === 401) { location.replace(`/signin/?next=${encodeURIComponent(location.pathname + location.search)}`); return }
+        const result = await response.json().catch(() => null)
+        if (!response.ok || !result) {
+          const why = response.status === 429 && result ? `${result.error}. ${(result.agentHints || [])[0] ?? ''}`
+            : response.status === 400 ? (result && result.error && result.error !== 'invalid_request' ? result.error : 'That request could not be run: check the address and the options.')
+              : response.status === 503 ? 'The Playground is not available right now. Try again later.'
+                : response.status === 504 ? 'The run took too long and was stopped. Activity shows what it cost, if anything.'
+                  : 'The run could not reach hosted Octocrawl. Try again in a minute.'
+          say(why.trim(), true)
+          set('play-summary', '')
+          return
+        }
+        answer = result
+        const used = response.headers.get('x-credits-used')
+        const left = response.headers.get('x-credits-remaining')
+        const [label, mark] = outcomeOf(result)
+        const pill = $('play-status'); pill.className = `status ${mark}`; pill.textContent = label
+        const record = result.evidenceRecord
+        const where = endpoint === 'scrape' && record ? [record.finalUrl || record.requestedUrl, record.httpStatus ? `HTTP ${record.httpStatus}` : null, record.lane ? `${record.lane} lane` : null] : [result.url]
+        const spent = used === null ? null : `${used} credit${used === '1' ? '' : 's'} used${left === null ? '' : `, ${number(left)} left`}`
+        set('play-summary', [...where, spent].filter(Boolean).join(' · '))
+        if (view === 'markdown' && typeof result.markdown !== 'string' && record) view = 'evidence'
+        $('play-result').hidden = false
+        show()
+        // The balance and the run's request line changed: read both again.
+        activity = null
+        load()
+      } catch { say('The run could not reach hosted Octocrawl. Try again in a minute.', true); set('play-summary', '') } finally { submit.disabled = false; submit.textContent = 'Run' }
     })
   }
 

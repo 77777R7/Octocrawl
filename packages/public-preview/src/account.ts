@@ -11,9 +11,15 @@
  *   GET  /api/account/activity            { requests, limit, retentionDays }: the latest request lines, newest first
  *   POST /api/account/keys                { label? }  →  { key, id }   (the key, once)
  *   POST /api/account/keys/{id}/revoke    the key stops within a minute (the hosted API caches lookups that long)
+ *   POST /api/account/run                 { endpoint: scrape|map, url, formats?, onlyMainContent?, search?, limit? }
+ *                                         →  the hosted API's answer, with X-Credits-Used and X-Credits-Remaining
+ *
+ * The Playground's run is the hosted API's own scrape or map, charged and logged there: this server names the account
+ * in a header signed with W2L_QUOTA_HASH_KEY (hostedApi.ts, SITE_ACCOUNT_HEADER), so no key changes hands.
  */
 import { createHmac, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { HOSTED_MAP_MAX_LIMIT } from '@w2l/contracts'
 import { metadataAccessToken } from './quota.js'
 import type { Session } from './auth.js'
 
@@ -171,6 +177,41 @@ export interface AccountRoutesOptions {
   current: (req: IncomingMessage) => Promise<Session | null>
   monthlyCredits?: number
   now?: () => Date
+  /** Where the Playground's runs go: the hosted API's origin (W2L_HOSTED_API_URL). Absent: /api/account/run answers 503. */
+  hostedApi?: { origin: string; fetcher?: typeof fetch; timeoutMs?: number }
+}
+
+/** The header and its form are hostedApi.ts's (SITE_ACCOUNT_HEADER, siteAccountAssertion), which verifies them. */
+export const SITE_ACCOUNT_HEADER = 'x-w2l-site-account'
+const SITE_ACCOUNT_TTL_MS = 120_000
+export function siteAccountAssertion(hashKey: string, uid: string, now = Date.now()): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw new Error('the account id cannot be signed')
+  const expires = now + SITE_ACCOUNT_TTL_MS
+  return `${uid}.${expires}.${createHmac('sha256', hashKey).update(`site-account:${uid}:${expires}`).digest('hex')}`
+}
+/** A run waits this long for the hosted API, which gives a request up to two minutes. */
+export const RUN_TIMEOUT_MS = 125_000
+/** The scrape formats the Playground offers; the hosted API accepts more, the page asks for these. */
+export const RUN_FORMATS = ['markdown', 'links', 'html'] as const
+const RUN_BODY_BYTES = 4_096
+
+/** The hosted API body for a Playground run, or null when the request is not one the Playground makes. */
+export function playgroundRequest(body: Record<string, unknown>): { endpoint: 'scrape' | 'map'; body: Record<string, unknown> } | null {
+  const endpoint = body.endpoint
+  if (endpoint !== 'scrape' && endpoint !== 'map') return null
+  if (typeof body.url !== 'string' || body.url.length > 2_048) return null
+  let url: URL
+  try { url = new URL(body.url.trim()) } catch { return null }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+  if (endpoint === 'map') {
+    const search = typeof body.search === 'string' ? body.search.trim().slice(0, 200) : ''
+    const limit = typeof body.limit === 'number' && Number.isSafeInteger(body.limit) ? Math.min(Math.max(body.limit, 1), HOSTED_MAP_MAX_LIMIT) : 100
+    return { endpoint, body: { url: url.href, limit, ...(search ? { search } : {}) } }
+  }
+  const asked = Array.isArray(body.formats) ? body.formats : ['markdown']
+  const formats = RUN_FORMATS.filter(format => asked.includes(format))
+  if (formats.length === 0 || asked.length !== formats.length) return null
+  return { endpoint, body: { url: url.href, formats, onlyMainContent: body.onlyMainContent !== false } }
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' }
@@ -244,6 +285,44 @@ export function createAccountRoutes(options: AccountRoutesOptions) {
       const digest = createHmac('sha256', options.hashKey).update(`key:${key}`).digest('hex')
       await options.data.createKey(session.uid, digest, { label: label || 'API key', prefix: key.slice(0, 7), createdAt: at.toISOString() })
       send(res, 201, { key, id: digest })
+      return true
+    }
+
+    if (pathname === '/api/account/run') {
+      if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }).end(); return true }
+      let body: Record<string, unknown>
+      try { body = await readJson(req, RUN_BODY_BYTES) } catch { send(res, 400, { error: 'invalid_request' }); return true }
+      const run = playgroundRequest(body)
+      if (run === null) { send(res, 400, { error: 'invalid_request' }); return true }
+      const hosted = options.hostedApi
+      if (hosted === undefined) { send(res, 503, { error: 'playground_unavailable' }); return true }
+      // A visitor who leaves stops the run: the hosted API gives back what it reserved for a cancelled call.
+      const controller = new AbortController()
+      const left = () => { if (!res.writableEnded) controller.abort() }
+      res.once('close', left)
+      const timer = setTimeout(() => controller.abort(), hosted.timeoutMs ?? RUN_TIMEOUT_MS)
+      try {
+        const response = await (hosted.fetcher ?? fetch)(`${hosted.origin.replace(/\/+$/, '')}/v1/${run.endpoint}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json', [SITE_ACCOUNT_HEADER]: siteAccountAssertion(options.hashKey, session.uid, at.getTime()) },
+          body: JSON.stringify(run.body),
+          signal: controller.signal,
+        })
+        const text = await response.text()
+        let answer: unknown
+        try { answer = JSON.parse(text) } catch { send(res, 502, { error: 'hosted_unavailable' }); return true }
+        // The hosted API refusing the site's header is this server's fault, not the visitor's session: never a 401 here,
+        // which the page reads as signed out.
+        if (response.status === 401) { send(res, 502, { error: 'hosted_refused' }); return true }
+        const headers: Record<string, string> = { ...JSON_HEADERS }
+        for (const name of ['x-credits-used', 'x-credits-remaining', 'retry-after']) { const value = response.headers.get(name); if (value !== null) headers[name] = value }
+        res.writeHead(response.status, headers).end(JSON.stringify(answer))
+      } catch {
+        if (!res.writableEnded && !res.destroyed) send(res, controller.signal.aborted ? 504 : 502, { error: controller.signal.aborted ? 'timeout' : 'hosted_unavailable' })
+      } finally {
+        clearTimeout(timer)
+        res.off('close', left)
+      }
       return true
     }
 

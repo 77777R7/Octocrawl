@@ -122,6 +122,36 @@ export function hostedServerCard() {
   }
 }
 const PROXY_SECRET_HEADER = 'x-w2l-proxy-secret'
+/**
+ * The dashboard's Playground (packages/public-preview account.ts) runs a scrape or a map for the signed-in account: the
+ * site's server names the account in this header, signed with W2L_QUOTA_HASH_KEY, which both services hold. The call
+ * then spends that account's credits and leaves its request line as a key's call does, under the key id
+ * `playground:{uid}`, without a key the person would have to hold or count against their five.
+ */
+export const SITE_ACCOUNT_HEADER = 'x-w2l-site-account'
+/** How long a signed account header is good for; the site signs one per call. */
+export const SITE_ACCOUNT_TTL_MS = 120_000
+/** How far ahead of this clock the site's may run: a header is not refused for a few seconds' difference between the two. */
+const SITE_CLOCK_SKEW_MS = 30_000
+const SITE_UID = /^[A-Za-z0-9_-]{1,128}$/
+function siteAccountSignature(hashKey: string, uid: string, expires: number): string {
+  return createHmac('sha256', hashKey).update(`site-account:${uid}:${expires}`).digest('hex')
+}
+/** The header's value for an account, good until `SITE_ACCOUNT_TTL_MS` from `now`: `{uid}.{expires ms}.{HMAC}`. */
+export function siteAccountAssertion(hashKey: string, uid: string, now = Date.now()): string {
+  if (!SITE_UID.test(uid)) throw new Error('the account id cannot be signed')
+  const expires = now + SITE_ACCOUNT_TTL_MS
+  return `${uid}.${expires}.${siteAccountSignature(hashKey, uid, expires)}`
+}
+/** The account a signed header names, or null when its signature, form or time is wrong. */
+export function verifySiteAccount(hashKey: string, value: string, now = Date.now()): string | null {
+  const match = /^([A-Za-z0-9_-]{1,128})\.(\d{13})\.([0-9a-f]{64})$/.exec(value)
+  if (!match) return null
+  const [, uid, at, signature] = match
+  const expires = Number(at)
+  if (expires < now || expires > now + SITE_ACCOUNT_TTL_MS + SITE_CLOCK_SKEW_MS) return null
+  return sameSecret(signature, siteAccountSignature(hashKey, uid!, expires)) ? uid! : null
+}
 const INTERNAL_CLIENT_HEADER = 'x-w2l-hosted-client'
 const INTERNAL_SECRET_HEADER = 'x-w2l-hosted-internal'
 const BODY_LIMIT = 262_144
@@ -321,10 +351,20 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (!starts && !reads) {
       return refuse(c, 403, 'hosted_unavailable', `${method} ${path} is not served by hosted Octocrawl: scrape and map only (POST /v1/scrape, POST /v1/map)`, [LOCAL_HINT, 'batch, crawl and Monitor are hosted in a later phase of the roadmap'])
     }
-    // Every request counts against its address first, before any lookup, so a flood of made-up keys reaches no store.
-    const addressWait = addressLimiter.retryAfterSeconds(digest(config.hashKey, 'ip', c.env.socketAddress))
-    if (addressWait !== null) return refuse(c, 429, 'rate_limited', `too many requests from this address: at most ${ADDRESS_PER_MINUTE} a minute`, [`retry after ${addressWait} s`], { 'Retry-After': String(addressWait) })
-    const caller = await identify(c.req.raw.headers, c.env.socketAddress)
+    // The site's signed header is checked without a store, and every Playground call comes from the site's few addresses,
+    // so it is not counted per address; the account's own rate below still applies.
+    const signed = c.req.header(SITE_ACCOUNT_HEADER)
+    let caller: HostedCaller | 'unknown_key'
+    if (signed !== undefined) {
+      const uid = verifySiteAccount(config.hashKey, signed)
+      if (uid === null) return refuse(c, 401, 'unauthorized', 'the site\'s account header is not valid, or it expired', ['sign in again at https://octocrawl.dev/dashboard/'])
+      caller = { kind: 'key', id: `playground:${uid}`, uid, dailyLimit: 0, browser: true, plan: 'account' }
+    } else {
+      // Every request counts against its address first, before any lookup, so a flood of made-up keys reaches no store.
+      const addressWait = addressLimiter.retryAfterSeconds(digest(config.hashKey, 'ip', c.env.socketAddress))
+      if (addressWait !== null) return refuse(c, 429, 'rate_limited', `too many requests from this address: at most ${ADDRESS_PER_MINUTE} a minute`, [`retry after ${addressWait} s`], { 'Retry-After': String(addressWait) })
+      caller = await identify(c.req.raw.headers, c.env.socketAddress)
+    }
     if (caller === 'unknown_key') return refuse(c, 401, 'unauthorized', 'this key is not one Octocrawl issued, or it was revoked', ['send no Authorization header to use the keyless allowance, or ask for a key at https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint'])
     c.set('caller', caller)
     if (!starts) return next()
