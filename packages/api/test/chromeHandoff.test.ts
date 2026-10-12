@@ -391,7 +391,8 @@ describe('a list the person pages on through, in the tab W2L kept', () => {
     await mkdir(userDataDir, { recursive: true })
     await writeFile(join(userDataDir, 'DevToolsActivePort'), '9222\n/devtools/browser/x\n')
   })
-  afterEach(async () => { await rm(userDataDir, { recursive: true, force: true }) })
+  // A test on fake timers that times out never reaches its finally: the next test gets real ones all the same.
+  afterEach(async () => { vi.useRealTimers(); await rm(userDataDir, { recursive: true, force: true }) })
 
   const LIST = (n: number) => `<html><body>${[1, 2, 3].map((i) => `<div class="card"><a class="name" href="/p/${n * 10 + i}">Item ${n * 10 + i}</a></div>`).join('')}<a class="next" href="/list/${n + 1}">Next</a></body></html>`
   const page = (n: number, extra: Partial<State> & { key?: string; next?: string } = {}) => at(`https://site.test/list/${n}`, LIST(n), { active: true, key: `k${n}`, next: 'usable', ...extra })
