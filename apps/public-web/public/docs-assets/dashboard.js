@@ -8,6 +8,26 @@
   const day = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : '')
   const longDay = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
   const set = (id, text) => { const element = $(id); if (element) element.textContent = text }
+  // The sidebar's highlight is one block that follows the current page's link: when the Playground switches mode in place
+  // it slides to the other link instead of jumping. Placed through CSSOM (transform, size), which the CSP allows.
+  const nav = document.querySelector('.dash-nav')
+  const mark = nav ? document.createElement('span') : null
+  const placeMark = () => {
+    const current = nav && nav.querySelector('a[aria-current="page"]')
+    if (!mark || !current) return
+    mark.style.width = `${current.offsetWidth}px`
+    mark.style.height = `${current.offsetHeight}px`
+    mark.style.transform = `translate(${current.offsetLeft}px, ${current.offsetTop}px)`
+  }
+  if (mark) {
+    mark.className = 'dash-nav-mark'
+    mark.setAttribute('aria-hidden', 'true')
+    nav.prepend(mark)
+    nav.classList.add('has-mark')
+    placeMark()
+    requestAnimationFrame(() => mark.classList.add('is-ready'))
+    if ('ResizeObserver' in window) new ResizeObserver(placeMark).observe(nav)
+  }
   const message = $('dash-message')
   const say = (text, error = false) => { message.textContent = text; message.classList.toggle('is-error', error) }
   const PROVIDERS = { 'google.com': 'Google', 'github.com': 'GitHub', emailLink: 'Email link' }
@@ -526,6 +546,7 @@
         if (creature) creature.pulse()
       } else { set('pg-picker-kicker', pick[0]); set('pg-picker-name', pick[1]); set('pg-picker-glyph', pick[2]) }
       for (const link of document.querySelectorAll('.dash-nav a')) { if (link.getAttribute('href') === `/dashboard/${next}/`) link.setAttribute('aria-current', 'page'); else if (/\/dashboard\/(scrape|map)\/$/.test(link.getAttribute('href'))) link.removeAttribute('aria-current') }
+      placeMark()
       const [title, lead] = PAGES[next]
       document.querySelector('.dash-head h1').textContent = title
       const leadLine = document.querySelector('.dash-head .dash-lead')
