@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { VerifyContract } from '@w2l/contracts'
-import { MAX_REGION_SCROLLS, RegionTracker, regionSpecOf, regionWaitEvent, waitForRegion } from '../src/regionWait.js'
+import { MAX_REGION_SCROLLS, REGION_SCROLL_MAX_MS, RegionTracker, regionSpecOf, regionWaitEvent, waitForRegion } from '../src/regionWait.js'
 
 /** A page whose region view is `views[n]` on its nth read (the last from then on), with a clock the waits move. */
 function page(views: unknown[]) {
@@ -164,6 +164,18 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     const held = await waitForRegion(early, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: early.now })
     expect(held).toMatchObject({ ready: true, scrolls: 9 })
     expect(held.scrollUnfinished).toBeUndefined()
+    // With time of its own for the scrolling, the page that settled late reaches its grid; never past the request's limit.
+    const budgeted = costco({ changingReads: 15, pricesAfter: 9, endAfter: 30 })
+    expect(await waitForRegion(budgeted, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: budgeted.now, scrollMs: REGION_SCROLL_MAX_MS })).toMatchObject({ ready: true, scrolls: 9 })
+    expect(budgeted.now()).toBeGreaterThan(10_000)
+    const capped = costco({ changingReads: 15, pricesAfter: 9, endAfter: 30 })
+    const short = await waitForRegion(capped, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: capped.now, scrollMs: REGION_SCROLL_MAX_MS, limitMs: 11_000 })
+    expect(short).toMatchObject({ ready: false, scrollUnfinished: true })
+    expect(capped.now()).toBeLessThanOrEqual(11_000)
+    // A page that never scrolls keeps the shared bound: the scrolling's time is not the settle's.
+    const settling = costco({ changingReads: 99, pricesAfter: 1, endAfter: 30 })
+    await waitForRegion(settling, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: settling.now, scrollMs: REGION_SCROLL_MAX_MS })
+    expect(settling.now()).toBeLessThanOrEqual(10_000)
     // A page longer than the wait can scroll, its region never come: the rest of it was not read, so not known absent.
     const long = costco({ changingReads: 2, pricesAfter: 99, endAfter: 99 })
     const unread = await waitForRegion(long, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: long.now })

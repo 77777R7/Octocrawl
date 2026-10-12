@@ -273,8 +273,11 @@ export async function navigateOnce(
     const answered = response?.status() ?? 0
     const gated = region === undefined || answered < 200 || answered >= 300
       || classifyGate({ status: answered, header: (name) => response?.headers()[name.toLowerCase()] ?? null, body: await raceWithSignal(page.content(), scope.signal), contentful: true }) !== null
+    const regionLimitMs = deadlineMs === undefined ? undefined : deadlineMs - 1_000 - Date.now()
     const regionOutcome = gated ? undefined : await raceWithSignal(waitForRegion(page, region!, {
-      maxMs: deadlineMs === undefined ? REGION_WAIT_MAX_MS : Math.min(REGION_WAIT_MAX_MS, deadlineMs - 1_000 - Date.now()),
+      maxMs: regionLimitMs === undefined ? REGION_WAIT_MAX_MS : Math.min(REGION_WAIT_MAX_MS, regionLimitMs),
+      scrollMs: REGION_SCROLL_MAX_MS,
+      ...(regionLimitMs === undefined ? {} : { limitMs: regionLimitMs }),
     }), scope.signal)
     throwIfExecutionStopped(scope)
     // The settle and the region wait also fetched: past the cap here, the page is not read.
@@ -321,4 +324,4 @@ export async function navigateOnce(
   }
 }
 import { LOADING_WAIT_MAX_MS, waitForRenderedStability, type SettleOutcome } from '../browserSettle.js'
-import { REGION_WAIT_MAX_MS, waitForRegion, type RegionOutcome, type RegionSpec } from '../regionWait.js'
+import { REGION_SCROLL_MAX_MS, REGION_WAIT_MAX_MS, waitForRegion, type RegionOutcome, type RegionSpec } from '../regionWait.js'
