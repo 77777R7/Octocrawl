@@ -211,7 +211,7 @@ const settingsBody = `<div class="settings-grid">
 <section class="panel" aria-labelledby="out-title"><div class="panel-head"><h2 id="out-title">Session</h2></div><p>Signing out ends this session in this browser. Your keys keep working.</p><form method="post" action="/auth/logout"><button class="button quiet" type="submit">Sign out</button></form></section>
 <section class="panel danger" aria-labelledby="delete-title"><div class="panel-head"><h2 id="delete-title">Delete account</h2></div>
 <p>Deleting your account deletes, at once and for good: your API keys (they stop working within a minute), your credits, bought ones included, your daily usage, your request lines, and your sign-in record and sessions. Service logs that name the account's id are deleted with the rest of the logs, 30 days on, as the <a href="/docs/privacy/">privacy page</a> says.</p>
-<p>To confirm, type your email address, then sign in once more the way you usually do. The account is deleted as soon as you are signed in.</p>
+<p>To confirm, type your email address, then sign in once more the way you usually do: that sign-in deletes the account instead of opening it. You can make a new account with the same email address later; it starts empty.</p>
 <div class="dash-form delete-form"><label for="delete-confirm"><span id="delete-label">Your email address</span><input id="delete-confirm" autocomplete="off" spellcheck="false" /></label><button class="button danger-button" type="button" id="delete-start" disabled>Delete account</button></div></section>`
 
 /** Each page: its path, title, the line under the title, and its body. */

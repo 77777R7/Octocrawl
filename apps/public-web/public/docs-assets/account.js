@@ -39,10 +39,15 @@
       signin.querySelector('.signin-options').before(message)
     } else if (ERRORS[params.get('error')]) say(message, ERRORS[params.get('error')], true)
     else if (reauth) {
-      say(message, 'To delete your account, sign in again below the way you usually do, in this browser, within 10 minutes. The account is deleted as soon as you are signed in.')
+      say(message, 'To delete your account, sign in again below the way you usually do, in this browser, within 10 minutes. This sign-in deletes the account instead of opening it. You can make a new account with the same email address later.')
       message.classList.add('is-notice')
       signin.querySelector('.signin-options').before(message)
-    } else if (deleted) say(message, 'Your Octocrawl account is deleted: its keys, credits, usage and request lines are gone. Thank you for trying Octocrawl.')
+    } else if (deleted) {
+      // Deleted is not banned: the page says, above the buttons, that signing in again starts a new, empty account.
+      say(message, 'Your Octocrawl account is deleted, with its keys, credits, usage and request lines. You can still use Octocrawl: sign in below with the same email address to start a new, empty account, or use it without an account.')
+      message.classList.add('is-notice')
+      signin.querySelector('.signin-options').before(message)
+    }
     if (!reauth && !deleted) fetch('/api/me', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((me) => { if (me && me.signedIn) location.replace(next) }).catch(() => {})
     const form = $('#email-form')
     form.addEventListener('submit', async (event) => {
