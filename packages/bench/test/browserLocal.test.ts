@@ -250,6 +250,10 @@ describe('BrowserLocalSubject transport', () => {
       expect(sent).toMatch(/HeadlessChrome\//)
       expect(out.trace.find((t) => t.event === 'identity_declared')?.detail).toMatchObject({ mode: 'standard', identity: 'actual', userAgent: sent })
       expect(out.trace.filter((t) => t.event === 'identity_mismatch')).toHaveLength(0)
+      // A screenshot's viewport is checked against the declared bundle's geometry, not refused for the browser's own User-Agent.
+      const shot = await subject.fetch(`${url}/spa`, Date.now() + 30_000, undefined, undefined, { screenshot: { viewport: { width: 800, height: 600 } } })
+      expect(shot.trace.find((t) => t.event === 'screenshot_viewport')?.detail).toMatchObject({ viewport: { width: 800, height: 600 } })
+      expect(shot.trace.find((t) => t.event === 'screenshot_viewport')?.detail).not.toHaveProperty('refused')
     } finally {
       await subject.teardown()
     }

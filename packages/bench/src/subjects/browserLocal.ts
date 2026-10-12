@@ -573,7 +573,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // screen, the scale factor and everything else stay as declared; a
       // managed profile's context already exists and keeps its own window.
       const window = managedContext === null
-        ? screenshotViewport(options.screenshot, identity, fingerprint)
+        // The viewport check is on the declared bundle's geometry; the actual identity's User-Agent is the browser's own, not a bundle to check.
+        ? screenshotViewport(options.screenshot, actual ? declared : identity, fingerprint)
         : { viewport: fingerprint.viewport, issues: options.screenshot?.viewport === undefined ? [] : ['a managed profile keeps the window of its own context'] }
       if (options.screenshot?.viewport !== undefined) {
         trace.push({
