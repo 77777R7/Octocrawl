@@ -53,9 +53,9 @@ B003 tesla、B009 allrecipes、T005 etsy、T010 OECD（需要点击）、T012 wa
 - [x] **T1.2 跑 16 题收集信号**（2026-10-12，[standard](../research/access/runs/2026-10-12-pa-gate-signals-standard-56f9a0d1.md)、[enhanced](../research/access/runs/2026-10-12-pa-gate-signals-enhanced-56f9a0d1.md)：Cloudflare 8、DataDome 7、无厂商头 2）：standard 一轮、enhanced（10-11 grant，Steel 无代理）一轮，都带 `--save-responses`。
   - 命令：`node research/access/run-set.mjs --set all --only T001,T002,T005,T034,T038,T045,T046,T047,T048,T049,T053,T068,T071,T076,B001,B008 [--access '"enhanced"'] --save-responses --record research/access/runs/<date>-pa-gate-signals-<label>-<commit>.md`
   - 验收：两份记录；每题的 `signals` 列出来（`cf-mitigated`、`cf_interstitial_text`、`header_x_datadome`、`px-captcha`、`akamai_reference`、`header_x_kasada`、`header_x_iinfo_imperva` 等，见 `packages/http-core/src/gate.ts`）。
-- [ ] **T1.3 库级差分**：把 `research/access/probe.mjs` 的臂扩到四个——undici、impit chrome、本地 Playwright（stock）、Patchright——同一出口（自备网关）各打一次，记下每题在哪一层开始被拦：HTTP 层（undici/impit 都 403）还是渲染后（HTTP 200 但浏览器里出挑战）。标签 `library_probe`，只写进 `suspected`，不作路线依据。
+- [x] **T1.3 库级差分**（2026-10-12，[记录](../research/access/runs/2026-10-12-library-probe-16-b117b451.md)：13 题五臂全拦，Patchright 与 Playwright 无一题不同；T002 全过；T053 两个浏览器臂过而产品的浏览器一档不过）：把 `research/access/probe.mjs` 的臂扩到四个——undici、impit chrome、本地 Playwright（stock）、Patchright——同一出口（自备网关）各打一次，记下每题在哪一层开始被拦：HTTP 层（undici/impit 都 403）还是渲染后（HTTP 200 但浏览器里出挑战）。标签 `library_probe`，只写进 `suspected`，不作路线依据。
   - 验收：一份 `research/access/runs/<date>-library-probe-<commit>.md`，表格为任务 × 四臂 × 结果；impit 不进仓库依赖，照 probe.mjs 头部的做法在 scratch 目录装。
-- [ ] **T1.4 归因表**：汇总 T1.2、T1.3，写成一份 dated record：任务 × 厂商（Cloudflare managed challenge / Turnstile / IP 信誉；DataDome / PerimeterX / Akamai / Kasada / Imperva / 未知）× 拦截层 × 证据。每题末尾写明属于下面哪一类：
+- [x] **T1.4 归因表**（同一份记录的 Attribution 节：甲 1、乙 0、丙 1、丁 13，另 B008 归入丁）：汇总 T1.2、T1.3，写成一份 dated record：任务 × 厂商（Cloudflare managed challenge / Turnstile / IP 信誉；DataDome / PerimeterX / Akamai / Kasada / Imperva / 未知）× 拦截层 × 证据。每题末尾写明属于下面哪一类：
   - 甲：IP 信誉型（换出口即过，如 T002）→ 已有 C 臂配置覆盖，不进验证组；
   - 乙：HTTP 层指纹型（impit 过、undici 不过）→ G2 的 T2.3；
   - 丙：渲染后的 JS 挑战或 headless 检测型 → G2 的 T2.1、T2.2；
@@ -66,14 +66,14 @@ B003 tesla、B009 allrecipes、T005 etsy、T010 OECD（需要点击）、T012 wa
 
 目标：对已归因的类别各做一次有对照的验证，每臂一份记录。对照臂固定为 C 臂配置（`standard` grant：`compatible_transport` + `egress_sessions`，`W2L_EGRESS_PROXIES` 指向自备网关，API 不走 Clash 代理），同日重跑一次作为基线。
 
-- [ ] **T2.0 对照臂**：C 臂配置在 16 题上同日重跑。
+- [ ] **T2.0 对照臂**（先做 T1.3 发现的 T053 产品侧差异：同一网关下探针的 stock Playwright 过、产品的 browser_local 不过，对比两者发出的身份与等待，不花钱）：C 臂配置在 16 题上同日重跑。
   - 验收：记录一份；每题 egress 为 `p.webshare.io:80`。
-- [ ] **T2.1 Patchright 定向重测**（丙类）：C 臂配置 + `W2L_BROWSER_ENGINE=patchright` + grant 加 `enhanced_browser`（tier enhanced，需 attestation）。10-06 的 A/B（[记录](../research/access/runs/2026-10-06-patchright-ab-f052375.md)）只在数据中心出口下做过，结论是无净增益；这次换自备网关出口。
+- [ ] **T2.1 Patchright 定向重测**（丙类；T1.3 的探针里 Patchright 与 Playwright 在 16 题上无一不同，预期无增益，跑与否由 Howard 定）：C 臂配置 + `W2L_BROWSER_ENGINE=patchright` + grant 加 `enhanced_browser`（tier enhanced，需 attestation）。10-06 的 A/B（[记录](../research/access/runs/2026-10-06-patchright-ab-f052375.md)）只在数据中心出口下做过，结论是无净增益；这次换自备网关出口。
   - 验收：记录一份；与 T2.0 逐题对照，列出净增益与退步；T053 要在记录里单独说明（10-06 曾一次过）。
 - [ ] **T2.2 Browserbase `verified` 首次实跑**（丙类，item 4 的"另一家供应商只补它能补的类别"）：适配器已有（`packages/bench/src/vendors/browserbase.ts`），但从未用真实 key 跑过。grant 用 `vendor_remote_browser` + `vendor_stealth`，tariff 按 docs/access.md 的示例（`perHourUsd` 0.12、`maxSessionMs` 120000、`minBilledMs` 60000、`billingIncrementMs` 60000），`proxies: false`。
   - 前置（Howard）：提供 Browserbase key，并确认 `verified`（Advanced Stealth 的现名）在当前套餐可用；不可用则此项改为"记录原因，跳过"。
   - 验收：记录一份；与 T2.0 对照；按 Browserbase 控制台的 session 用量对账，写明账本与控制台的差。
-- [ ] **T2.3 兼容传输扩 host**（乙类）：T1.3 显示 impit 过而 undici 不过的站，加进 `research/access/benefit-hosts.v1.json` 候选，先用 `W2L_COMPAT_HOSTS` 指定跑一遍。
+- [ ] **T2.3 兼容传输扩 host**（乙类；T1.3 显示 16 题里没有乙类，本项暂无候选）：T1.3 显示 impit 过而 undici 不过的站，加进 `research/access/benefit-hosts.v1.json` 候选，先用 `W2L_COMPAT_HOSTS` 指定跑一遍。
   - 验收：记录一份；只有在两窗口都 verified、且健康组与 real-site 批次无退步时才改默认列表（item 2 的规则）。
 - [ ] **T2.4 费用与对账**：每臂记录里写清 grant 的 SHA-256、账本费用、供应商侧 session 汇总、余额差（Steel 看 Wallet 的 Activity，Browserbase 看其控制台）。
   - 验收：三个数并排；不一致就写不一致。
