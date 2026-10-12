@@ -48,9 +48,9 @@ B003 tesla、B009 allrecipes、T005 etsy、T010 OECD（需要点击）、T012 wa
 
 目标：16 题每题一行归因——厂商、拦截层、证据——或明确写 unknown。
 
-- [ ] **T1.1 保存完整响应**：给 `research/access/run-set.mjs` 加一个开关（例如 `--save-responses`），把每次 `POST /v1/scrape` 的完整响应（含 `evidenceRecord` 与 `trace`）按任务写到 `.w2l/access/runs/<timestamp>/responses/<task>.json`。现有记录的 `gateEvents` 只存事件名，没有 `signals`，归因拿不到依据。不改 `attempts.jsonl` 和 Markdown 记录的形状。
+- [x] **T1.1 保存完整响应**（`--save-responses`，2026-10-12；T001、T047 的冒烟运行里读到了 `gate_detected` 的 `header_cf_mitigated`）：给 `research/access/run-set.mjs` 加一个开关（例如 `--save-responses`），把每次 `POST /v1/scrape` 的完整响应（含 `evidenceRecord` 与 `trace`）按任务写到 `.w2l/access/runs/<timestamp>/responses/<task>.json`。现有记录的 `gateEvents` 只存事件名，没有 `signals`，归因拿不到依据。不改 `attempts.jsonl` 和 Markdown 记录的形状。
   - 验收：一次 `--only T001 --save-responses` 后，对应 JSON 里能读到 `gate_detected` 事件的 `signals` 数组；`npm test` 通过；文件在 `.w2l/` 下，不进仓库。
-- [ ] **T1.2 跑 16 题收集信号**：standard 一轮、enhanced（10-11 grant，Steel 无代理）一轮，都带 `--save-responses`。
+- [x] **T1.2 跑 16 题收集信号**（2026-10-12，[standard](../research/access/runs/2026-10-12-pa-gate-signals-standard-56f9a0d1.md)、[enhanced](../research/access/runs/2026-10-12-pa-gate-signals-enhanced-56f9a0d1.md)：Cloudflare 8、DataDome 7、无厂商头 2）：standard 一轮、enhanced（10-11 grant，Steel 无代理）一轮，都带 `--save-responses`。
   - 命令：`node research/access/run-set.mjs --set all --only T001,T002,T005,T034,T038,T045,T046,T047,T048,T049,T053,T068,T071,T076,B001,B008 [--access '"enhanced"'] --save-responses --record research/access/runs/<date>-pa-gate-signals-<label>-<commit>.md`
   - 验收：两份记录；每题的 `signals` 列出来（`cf-mitigated`、`cf_interstitial_text`、`header_x_datadome`、`px-captcha`、`akamai_reference`、`header_x_kasada`、`header_x_iinfo_imperva` 等，见 `packages/http-core/src/gate.ts`）。
 - [ ] **T1.3 库级差分**：把 `research/access/probe.mjs` 的臂扩到四个——undici、impit chrome、本地 Playwright（stock）、Patchright——同一出口（自备网关）各打一次，记下每题在哪一层开始被拦：HTTP 层（undici/impit 都 403）还是渲染后（HTTP 200 但浏览器里出挑战）。标签 `library_probe`，只写进 `suspected`，不作路线依据。

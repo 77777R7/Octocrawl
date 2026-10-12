@@ -5,7 +5,8 @@
 // .w2l/access/runs/<timestamp>/ and, with --record, a Markdown summary that is the committed record.
 //
 // Usage: node research/access/run-set.mjs [--set frozen|healthy|blind|candidate|all] [--only T01,T02] [--warm]
-//          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--no-contract] [--raw-html] [--record research/access/runs/<date>-<label>-<commit>.md]
+//          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--no-contract] [--raw-html] [--save-responses]
+//          [--record research/access/runs/<date>-<label>-<commit>.md]
 //        node research/access/run-set.mjs --rejudge .w2l/access/runs/<timestamp> [--record research/access/runs/<new file>.md]
 //   --target     who fetches the pages (ROADMAP PA item 9, the competitor baseline). octocrawl (the default) is the local
 //                API. firecrawl is Firecrawl Cloud's POST /v2/scrape with FIRECRAWL_API_KEY: the task's own formats,
@@ -31,6 +32,12 @@
 //                git-ignored pages/ (<task>-<attempt>.html), never in the record: the page as the lane read it, for a
 //                page whose Markdown leaves a question (a shell with no data: a block, or data that never came). An
 //                answer that carries no rawHtml (a failed one) saves none. The task's own formats are kept.
+//   --save-responses
+//                saves each answer as the API or the competitor gave it, under the run's git-ignored responses/
+//                (<task>-<attempt>.json), never in the record: the Evidence Record, the trace with its gate_detected
+//                signals, the paid calls, the readiness. The page's own Markdown and rawHtml are left out (pages/ has
+//                them). Written through scrub(), so a proxy value or a URL's credentials in it is replaced. For the
+//                attribution of a block to its vendor and layer (docs/pa-challenge-botcheck-tasks.md, G1).
 //   --rejudge re-evaluates a finished run's saved Markdown against the current predicates in
 //   tasks.v1.json, without fetching. The run's own attempts.jsonl and summary.json are never
 //   rewritten: the new verdicts go to attempts.rejudged-<time>.jsonl and summary.rejudged-<time>.json
@@ -113,6 +120,7 @@ const only = flag('--only')?.split(',').map((s) => s.trim())
 const warm = args.includes('--warm')
 const sendContract = !args.includes('--no-contract')
 const saveRawHtml = args.includes('--raw-html')
+const saveResponses = args.includes('--save-responses')
 const access = flag('--access') === undefined ? undefined : JSON.parse(flag('--access'))
 const recordFile = flag('--record')
 const rejudgeDir = flag('--rejudge')
@@ -228,6 +236,7 @@ const outbound = target === 'octocrawl' || !environment.proxied ? undefined : ne
 environment.target = target
 const runDir = rejudgeDir === undefined ? join(repo, '.w2l/access/runs', environment.startedAt.replace(/[:.]/g, '-')) : join(repo, rejudgeDir)
 await mkdir(join(runDir, 'pages'), { recursive: true })
+if (saveResponses) await mkdir(join(runDir, 'responses'), { recursive: true })
 const linesFile = join(runDir, 'attempts.jsonl')
 
 
@@ -367,6 +376,11 @@ async function attempt(task, temperature) {
   // The page's own Markdown, as the API gave it (a rejudge reads it back): not scrubbed, which would change the site's text.
   if (typeof doc?.markdown === 'string') await writeRaw(join(runDir, 'pages', `${task.id}-${temperature}.md`), doc.markdown)
   if (saveRawHtml && typeof doc?.rawHtml === 'string') await writeRaw(join(runDir, 'pages', `${task.id}-${temperature}.html`), doc.rawHtml)
+  // The whole answer but the page's text (pages/ has it), for a block's attribution; scrubbed like every other file.
+  if (saveResponses && doc !== null && typeof doc === 'object') {
+    const { markdown: _markdown, rawHtml: _rawHtml, ...rest } = doc
+    await writeFile(join(runDir, 'responses', `${task.id}-${temperature}.json`), JSON.stringify({ apiStatus, ...(error === null ? {} : { error }), response: rest }, null, 2) + '\n')
+  }
   const results = doc === null ? [] : task.predicates.map((p) => ({ p, pass: (() => { try { return judge(p, doc) } catch { return false } })() }))
   const answered = doc !== null && (doc.status === 'success' || doc.status === 'partial')
   const verified = answered && results.every((r) => r.pass)
