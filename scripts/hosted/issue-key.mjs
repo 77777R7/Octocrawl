@@ -9,8 +9,9 @@
 // only its HMAC-SHA256 under W2L_QUOTA_HASH_KEY (the same secret the service reads), as the document id in Firestore's
 // `hostedApiKeys` collection (packages/mcp/src/hostedApi.ts, keyDigest and FirestoreHostedKeys). The hash key comes from
 // W2L_QUOTA_HASH_KEY, else from Secret Manager (`w2l-quota-hash-key`, latest) through gcloud; the Firestore calls use
-// `gcloud auth print-access-token`. W2L_PROJECT_ID names the project. A key issued with --uid belongs to that account:
-// it spends the account's credits (packages/mcp/src/hostedCredits.ts) and its daily limit is not used.
+// `gcloud auth print-access-token`. W2L_PROJECT_ID names the project. A key issued with --uid belongs to that account,
+// which must have signed in on octocrawl.dev once (users/{uid}) before its first call. The key spends the account's
+// credits (packages/mcp/src/hostedCredits.ts) and its daily limit is not used.
 import { execFileSync } from 'node:child_process'
 import { createHmac, randomBytes } from 'node:crypto'
 

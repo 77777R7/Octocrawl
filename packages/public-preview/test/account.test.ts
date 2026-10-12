@@ -28,6 +28,7 @@ const identity: IdentityProvider = {
   async sendEmailLink() {},
   async signInWithEmailLink() { return { uid: 'account-0001', email: 'ada@example.org', provider: 'emailLink' } },
   async linkIdp() {},
+  async deleteAccount() {},
 }
 
 async function start(now = new Date('2026-10-11T08:00:00Z'), hostedApi?: AccountRoutesOptions['hostedApi']) {
@@ -76,6 +77,51 @@ describe('the account page\'s data', () => {
     const body = await (await fetch(`${url}/api/account/activity`, { headers: { cookie } })).json() as { requests: Array<{ id: string }>; limit: number; retentionDays: number }
     expect(body.requests.map(r => r.id)).toEqual(['8208-a', '8209-b'])
     expect([body.limit, body.retentionDays]).toEqual([1_000, 30])
+  })
+
+  it('erases the account\'s keys, daily usage, request lines and credits from Firestore, a page at a time', async () => {
+    const root = 'projects/octocrawl-test/databases/(default)/documents'
+    const deleted: string[] = []
+    const left: Record<string, string[]> = {
+      hostedApiKeys: ['k1', 'k2'].map(id => `${root}/hostedApiKeys/${id}`),
+      creditUsage: ['account-0001-2026-10-12', 'account-0001-2026-10-13'].map(id => `${root}/creditUsage/${id}`),
+      requests: Array.from({ length: 450 }, (_, i) => `${root}/requestLog/account-0001/requests/${String(i).padStart(4, '0')}`),
+    }
+    const fetcher = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
+      if (url.endsWith(':runQuery')) {
+        const body = JSON.parse(String(init!.body)) as { structuredQuery: { from: Array<{ collectionId: string }>; where: { fieldFilter: { value: { stringValue: string } } } } }
+        expect(body.structuredQuery.where.fieldFilter.value.stringValue).toBe('account-0001')
+        return Response.json(left[body.structuredQuery.from[0]!.collectionId]!.slice(0, 200).map(name => ({ document: { name } })))
+      }
+      if (url.includes('/requestLog/account-0001/requests?')) return Response.json({ documents: left.requests!.slice(0, 300).map(name => ({ name })) })
+      if (url.endsWith(':commit')) {
+        const names = (JSON.parse(String(init!.body)) as { writes: Array<{ delete: string }> }).writes.map(write => write.delete)
+        expect(names.length).toBeLessThanOrEqual(500)
+        deleted.push(...names)
+        for (const list of Object.values(left)) for (const name of names) { const at = list.indexOf(name); if (at >= 0) list.splice(at, 1) }
+        return Response.json({})
+      }
+      throw new Error(`unexpected ${url}`)
+    }) as typeof fetch
+    await new FirestoreAccountData('octocrawl-test', fetcher).erase('account-0001')
+    expect(Object.values(left).flat()).toEqual([])
+    expect(deleted).toHaveLength(2 + 2 + 450 + 1)
+    // The balance first: a call under way cannot then settle and write usage back.
+    expect(deleted[0]).toBe(`${root}/credits/account-0001`)
+    await expect(new FirestoreAccountData('octocrawl-test', fetcher).erase('__x__')).rejects.toThrow(/malformed/)
+    // In memory, as the routes' tests use it: nothing of the account is left, another account's things are.
+    const memory = new MemoryAccountData()
+    for (const uid of ['account-0001', 'account-0002']) {
+      memory.balances.set(uid, { month: '2026-10', grant: 900, purchased: 0 })
+      memory.usageDays.set(`${uid}-2026-10-12`, { uid, day: '2026-10-12', http: 1, browser: 0, notFound: 0, map: 0, unread: 0, credits: 1 })
+      memory.keyRecords.set(`key-${uid}`, { uid, id: `key-${uid}`, label: 'k', prefix: 'oc_x', createdAt: '2026-10-12T00:00:00Z', enabled: true })
+      memory.requestLines.set(uid, [])
+    }
+    await memory.erase('account-0001')
+    expect([[...memory.balances.keys()], [...memory.usageDays.values()].map(day => day.uid), [...memory.keyRecords.values()].map(key => key.uid), [...memory.requestLines.keys()]])
+      .toEqual([['account-0002'], ['account-0002'], ['account-0002'], ['account-0002']])
   })
 
   it('reads a request line\'s formats and duration from Firestore, and leaves them null on a line written before them', async () => {

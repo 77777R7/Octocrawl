@@ -66,10 +66,12 @@ describe('the in-memory ledger', () => {
   })
 })
 
-/** A Firestore REST stand-in: documents with update times, commits checked against their preconditions. */
-function fakeFirestore() {
+/** A Firestore REST stand-in: documents with update times, commits checked against their preconditions. `accounts`
+ * have a `users/{uid}` record, as sign-in writes it. */
+function fakeFirestore(accounts: string[] = ['account-1']) {
   const resource = 'projects/octocrawl-test/databases/(default)/documents'
   const docs = new Map<string, { fields: Record<string, Record<string, string>>; updateTime: string }>()
+  for (const uid of accounts) docs.set(`${resource}/users/${uid}`, { fields: { createdAtMs: { integerValue: '1760000000000' } }, updateTime: '2026-10-10T00:00:00Z' })
   const commits: unknown[] = []
   let clock = 0
   let conflicts = 0
@@ -78,7 +80,7 @@ function fakeFirestore() {
   const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
     if (url.endsWith(':commit')) {
-      const body = JSON.parse(String(init?.body)) as { writes: Array<{ update: { name: string; fields: Record<string, Record<string, string>> }; updateMask?: { fieldPaths: string[] }; updateTransforms?: Array<{ fieldPath: string; increment: { integerValue: string } }>; currentDocument?: { exists?: boolean; updateTime?: string } }> }
+      const body = JSON.parse(String(init?.body)) as { writes: Array<{ update: { name: string; fields: Record<string, Record<string, string>> }; updateMask?: { fieldPaths: string[] }; updateTransforms?: Array<{ fieldPath: string; increment?: { integerValue: string }; minimum?: { integerValue: string } }>; currentDocument?: { exists?: boolean; updateTime?: string } }> }
       commits.push(body)
       if (conflicts > 0) { conflicts--; return new Response(JSON.stringify({ error: { status: 'FAILED_PRECONDITION' } }), { status: 400 }) }
       if (refusal !== null) { const status = refusal; refusal = null; return new Response(JSON.stringify({ error: { status: 'INVALID_ARGUMENT' } }), { status }) }
@@ -93,7 +95,8 @@ function fakeFirestore() {
         const doc = docs.get(write.update.name) ?? { fields: {}, updateTime: '' }
         const fields = write.updateMask === undefined ? { ...write.update.fields } : { ...doc.fields, ...Object.fromEntries(write.updateMask.fieldPaths.map((path) => [path, write.update.fields[path]!])) }
         const transformResults = (write.updateTransforms ?? []).map((transform) => {
-          const value = String(Number(fields[transform.fieldPath]?.integerValue ?? 0) + Number(transform.increment.integerValue))
+          const had = Number(fields[transform.fieldPath]?.integerValue ?? 0)
+          const value = String(transform.minimum ? Math.min(fields[transform.fieldPath] ? had : Infinity, Number(transform.minimum.integerValue)) : had + Number(transform.increment!.integerValue))
           fields[transform.fieldPath] = { integerValue: value }
           return { integerValue: value }
         })
@@ -111,13 +114,26 @@ function fakeFirestore() {
 }
 
 describe('the Firestore ledger', () => {
+  it('starts no balance for an account without its record: a deleted account\'s key the API still has cached', async () => {
+    const firestore = fakeFirestore([])
+    const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
+    expect(await store.reserve('account-1', 1, SITE, OCT)).toEqual({ ok: false, limited: 'account' })
+    expect(firestore.docs.has(`${firestore.resource}/credits/account-1`)).toBe(false)
+    expect(firestore.docs.has(`${firestore.resource}/hostedQuotas/${SITE.id}`)).toBe(false)
+    // An account that already has a balance is not asked for its record (keys issued by hand before sign-in existed).
+    firestore.docs.set(`${firestore.resource}/credits/account-2`, { fields: { month: { stringValue: '2026-10' }, grant: { integerValue: '10' }, purchased: { integerValue: '0' } }, updateTime: '2026-10-10T00:00:00Z' })
+    expect(await store.reserve('account-2', 1, SITE, OCT)).toMatchObject({ ok: true, reservation: { remaining: 9 } })
+  })
+
   it('creates a balance on first use, spends with preconditions, retries a conflict and settles with server-side increments', async () => {
     const firestore = fakeFirestore()
     const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
     const first = await store.reserve('account-1', 5, SITE, OCT)
     expect(first).toMatchObject({ ok: true, reservation: { fromGrant: 5, remaining: 995 } })
     const [created] = firestore.commits as Array<{ writes: Array<{ currentDocument: unknown }> }>
-    expect(created!.writes.map((write) => write.currentDocument)).toEqual([{ exists: false }, { exists: false }])
+    // The account's record must exist for its first balance; the write leaves it as it was.
+    expect(created!.writes.map((write) => write.currentDocument)).toEqual([{ exists: true }, { exists: false }, { exists: false }])
+    expect(firestore.docs.get(`${firestore.resource}/users/account-1`)!.fields.createdAtMs).toEqual({ integerValue: '1760000000000' })
     if (!first.ok) throw new Error('unreachable')
     expect(await store.settle(first.reservation, 1, 'http', OCT)).toEqual({ remaining: 999 })
     expect(firestore.docs.get(`${firestore.resource}/credits/account-1`)!.fields).toMatchObject({ month: { stringValue: '2026-10' }, grant: { integerValue: '999' }, purchased: { integerValue: '0' } })

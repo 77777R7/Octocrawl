@@ -27,7 +27,7 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 - Credits have no cash value and cannot be transferred. A month's free credits do not roll over. The amount and the costs may change, and this site says what applies.
 - One person, one account. Making accounts to collect more free credits, or sharing a key to get around a limit, may get the accounts suspended and their keys revoked.
 - Keep your keys secret. A key's calls spend its account's credits, whoever makes them.
-- We may suspend an account or revoke a key that breaks these terms or the [acceptable use policy](/docs/acceptable-use/). You can close your account at any time by email.
+- We may suspend an account or revoke a key that breaks these terms or the [acceptable use policy](/docs/acceptable-use/). You can delete your account at any time, in your dashboard's Settings or by email. Deleting it ends its keys and its credits, bought ones included.
 
 ## Results
 

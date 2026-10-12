@@ -425,6 +425,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       reserved = await reserve(CREDITS.httpPage)
     }
     if (!reserved.ok) {
+      // A key the API still had cached for a minute after its account was deleted (public-preview auth.ts).
+      if (reserved.limited === 'account') return refuse(c, 401, 'unauthorized', 'this key\'s account no longer exists', [])
       if (reserved.limited === 'site') {
         const seconds = secondsToUtcMidnight(now)
         return refuse(c, 429, 'quota_exhausted', `hosted Octocrawl has served its ${reserved.limit} pages for today`, [LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })

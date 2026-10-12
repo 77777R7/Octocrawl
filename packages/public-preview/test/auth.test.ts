@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPreviewServer } from '../src/server.js'
-import { createAuthRoutes, IdentityToolkit, MemoryAccountStore, safeNext, SignInRefused, type IdentityProvider, type SignedIn } from '../src/auth.js'
+import { createAuthRoutes, FirestoreAccountStore, IdentityToolkit, MemoryAccountStore, safeNext, SignInRefused, type IdentityProvider, type SignedIn } from '../src/auth.js'
 import type { LogLine } from '../src/site.js'
 
 const SECRET = 's'.repeat(40)
@@ -27,17 +27,18 @@ function fakeIdentity() {
     async sendEmailLink(email, continueUrl) { calls.push({ method: 'sendEmailLink', args: [email, continueUrl] }) },
     async signInWithEmailLink(email, oobCode) { calls.push({ method: 'signInWithEmailLink', args: [email, oobCode] }); if (link instanceof Error) throw link; return link },
     async linkIdp(idToken, pending, requestUri) { calls.push({ method: 'linkIdp', args: [idToken, pending, requestUri] }) },
+    async deleteAccount(idToken) { calls.push({ method: 'deleteAccount', args: [idToken] }) },
   }
   return { identity, calls, answer: (next: SignedIn | Error) => { idp = next }, linkAnswer: (next: SignedIn | Error) => { link = next } }
 }
 
-async function start(emailFinishPage?: () => Promise<string | null>) {
+async function start(emailFinishPage?: () => Promise<string | null>, eraseAccountData?: (uid: string) => Promise<void>, now?: () => Date) {
   const dir = await mkdtemp(join(tmpdir(), 'w2l-auth-')); dirs.push(dir)
   await writeFile(join(dir, '404.html'), '<title>Page not found</title>')
   const fake = fakeIdentity()
   const accounts = new MemoryAccountStore()
   const lines: LogLine[] = []
-  const auth = createAuthRoutes({ identity: fake.identity, accounts, secret: SECRET, log: line => lines.push(line), emailFinishPage })
+  const auth = createAuthRoutes({ identity: fake.identity, accounts, secret: SECRET, log: line => lines.push(line), emailFinishPage, ...(eraseAccountData ? { eraseAccountData } : {}), ...(now ? { now } : {}) })
   const server = createPreviewServer({ quota: { consume: async () => 'ok' }, staticDir: dir, amazonState: null, log: line => lines.push(line), visitorCookieSecret: SECRET, auth })
   servers.push(server)
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -230,6 +231,136 @@ describe('sessions', () => {
   })
 })
 
+describe('deleting an account', () => {
+  /** Signs in with GitHub (the fake's answer) and returns the session cookie. */
+  const signIn = async (url: string) => {
+    const begin = (await fetch(`${url}/auth/github`, { redirect: 'manual' })).headers.getSetCookie()[0]!.split(';')[0]!
+    return `w2l_session=${cookies(await fetch(`${url}/__/auth/handler?code=abc`, { redirect: 'manual', headers: { cookie: begin } })).w2l_session!}`
+  }
+  const startDeletion = (url: string, session: string, confirm: string, headers: Record<string, string> = { origin: url }) =>
+    fetch(`${url}/auth/delete/start`, { method: 'POST', headers: { cookie: session, 'content-type': 'application/json', ...headers }, body: JSON.stringify({ confirm }) })
+  /** Signs in again through GitHub with the deletion cookie, as the sign-in page sends the visitor. */
+  const signInAgain = async (url: string, deletion: string) => {
+    const begin = (await fetch(`${url}/auth/github?next=/dashboard/settings/`, { redirect: 'manual' })).headers.getSetCookie()[0]!.split(';')[0]!
+    return fetch(`${url}/__/auth/handler?code=again`, { redirect: 'manual', headers: { cookie: `${begin}; w2l_delete=${deletion}` } })
+  }
+
+  it('needs a session, the site\'s own request and the account\'s own address, then asks for a sign-in', async () => {
+    const erased: string[] = []
+    const { url } = await start(undefined, async uid => { erased.push(uid) })
+    const session = await signIn(url)
+    expect((await startDeletion(url, '', 'ada@example.org')).status).toBe(401)
+    expect((await startDeletion(url, session, 'ada@example.org', { origin: 'https://evil.example' })).status).toBe(403)
+    const wrong = await startDeletion(url, session, 'eve@example.org')
+    expect([wrong.status, await wrong.json()]).toEqual([400, { error: 'confirm_mismatch' }])
+    const started = await startDeletion(url, session, ' ADA@example.org ')
+    expect([started.status, await started.json()]).toEqual([200, { next: '/signin/?reauth=delete' }])
+    expect(started.headers.getSetCookie()[0]).toMatch(/^w2l_delete=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=600$/)
+    // Starting deletes nothing: the sign-in does.
+    expect(erased).toEqual([])
+  })
+
+  it('deletes the account when the same account signs in again: its record and sessions, its data, then Firebase\'s account', async () => {
+    const order: string[] = []
+    const { url, fake, accounts, lines } = await start(undefined, async uid => { order.push(`erase ${uid}`) })
+    fake.answer({ uid: 'github-user-0001', email: 'ada@example.org', provider: 'github.com', idToken: 'id-token-1' })
+    const session = await signIn(url)
+    const deletion = cookies(await startDeletion(url, session, 'ada@example.org')).w2l_delete!
+    const forget = accounts.forget.bind(accounts)
+    accounts.forget = async uid => { order.push(`forget ${uid}`); await forget(uid) }
+    const deleteAccount = fake.identity.deleteAccount.bind(fake.identity)
+    fake.identity.deleteAccount = async token => { order.push(`firebase ${token}`); await deleteAccount(token) }
+    const done = await signInAgain(url, deletion)
+    expect([done.status, done.headers.get('location')]).toEqual([303, '/signin/?deleted=1'])
+    // The record first, so a cached key cannot start a new balance (hostedCredits.ts); Firebase's account last.
+    expect(order).toEqual(['forget github-user-0001', 'erase github-user-0001', 'firebase id-token-1'])
+    expect(accounts.users.has('github-user-0001')).toBe(false)
+    expect(accounts.sessions.size).toBe(0)
+    // Signed out, and the deletion cookie is gone.
+    const set = cookies(done)
+    expect([set.w2l_session, set.w2l_account, set.w2l_delete]).toEqual(['', '', ''])
+    expect(await (await fetch(`${url}/api/me`, { headers: { cookie: session } })).json()).toEqual({ signedIn: false })
+    expect(lines.filter(line => line.step === 'delete').map(line => line.outcome)).toEqual(['started', 'ok'])
+  })
+
+  it('deletes nothing when another account signs in, or a forged or old cookie comes back, and says so on Settings', async () => {
+    const erased: string[] = []
+    let clock = Date.now()
+    const { url, fake } = await start(undefined, async uid => { erased.push(uid) }, () => new Date(clock))
+    fake.answer({ uid: 'github-user-0001', email: 'ada@example.org', provider: 'github.com', idToken: 'id-token-1' })
+    const deletion = cookies(await startDeletion(url, await signIn(url), 'ada@example.org')).w2l_delete!
+    fake.answer({ uid: 'github-user-0002', email: 'bob@example.org', provider: 'github.com', idToken: 'id-token-2' })
+    const other = await signInAgain(url, deletion)
+    expect([other.status, other.headers.get('location')]).toEqual([303, '/dashboard/settings/?delete=other_account'])
+    expect(cookies(other).w2l_session).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(cookies(other).w2l_delete).toBe('')
+    // A cookie this server did not sign is no deletion at all: an ordinary sign-in.
+    fake.answer({ uid: 'github-user-0001', email: 'ada@example.org', provider: 'github.com', idToken: 'id-token-1' })
+    const forged = await signInAgain(url, `${deletion.slice(0, -4)}AAAA`)
+    expect(forged.headers.get('location')).toBe('/dashboard/settings/')
+    // Nor is one more than ten minutes old.
+    const old = cookies(await startDeletion(url, await signIn(url), 'ada@example.org')).w2l_delete!
+    clock += 601_000
+    expect((await signInAgain(url, old)).headers.get('location')).toBe('/dashboard/settings/')
+    expect(erased).toEqual([])
+    expect(fake.calls.some(call => call.method === 'deleteAccount')).toBe(false)
+  })
+
+  it('signs the visitor in and says so when the deletion fails part way, keeping Firebase\'s account so it can run again', async () => {
+    let fail = true
+    const { url, fake } = await start(undefined, async () => { if (fail) throw new Error('commit failed (503)') })
+    fake.answer({ uid: 'github-user-0001', email: 'ada@example.org', provider: 'github.com', idToken: 'id-token-1' })
+    const deletion = cookies(await startDeletion(url, await signIn(url), 'ada@example.org')).w2l_delete!
+    const failed = await signInAgain(url, deletion)
+    expect([failed.status, failed.headers.get('location')]).toEqual([303, '/dashboard/settings/?delete=failed'])
+    expect(cookies(failed).w2l_session).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(fake.calls.some(call => call.method === 'deleteAccount')).toBe(false)
+    // Again, and this time it goes through.
+    fail = false
+    const again = cookies(await startDeletion(url, `w2l_session=${cookies(failed).w2l_session}`, 'ada@example.org')).w2l_delete!
+    expect((await signInAgain(url, again)).headers.get('location')).toBe('/signin/?deleted=1')
+  })
+
+  it('signs no one in when Firebase\'s own deletion does not answer, as the account may be gone', async () => {
+    const { url, fake, accounts } = await start(undefined, async () => {})
+    fake.answer({ uid: 'github-user-0001', email: 'ada@example.org', provider: 'github.com', idToken: 'id-token-1' })
+    const deletion = cookies(await startDeletion(url, await signIn(url), 'ada@example.org')).w2l_delete!
+    fake.identity.deleteAccount = async () => { throw new SignInRefused('unavailable', 'timeout') }
+    const done = await signInAgain(url, deletion)
+    expect([done.status, done.headers.get('location')]).toEqual([303, '/signin/?error=delete_unfinished'])
+    expect([cookies(done).w2l_session, cookies(done).w2l_delete]).toEqual(['', ''])
+    expect([accounts.users.has('github-user-0001'), accounts.sessions.size]).toEqual([false, 0])
+  })
+
+  it('drops a waiting deletion on sign-out, so a later sign-in deletes nothing', async () => {
+    const erased: string[] = []
+    const { url, fake } = await start(undefined, async uid => { erased.push(uid) })
+    fake.answer({ uid: 'github-user-0001', email: 'ada@example.org', provider: 'github.com', idToken: 'id-token-1' })
+    const session = await signIn(url)
+    const deletion = cookies(await startDeletion(url, session, 'ada@example.org')).w2l_delete!
+    const out = await fetch(`${url}/auth/logout`, { method: 'POST', redirect: 'manual', headers: { cookie: `${session}; w2l_delete=${deletion}`, origin: url } })
+    expect(out.headers.getSetCookie()).toContain('w2l_delete=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
+    // Without the cookie (as the browser now has it), signing in again is just signing in.
+    const begin = (await fetch(`${url}/auth/github`, { redirect: 'manual' })).headers.getSetCookie()[0]!.split(';')[0]!
+    expect((await fetch(`${url}/__/auth/handler?code=x`, { redirect: 'manual', headers: { cookie: begin } })).headers.get('location')).toBe('/dashboard/')
+    expect(erased).toEqual([])
+  })
+
+  it('deletes after an email-link sign-in too, and answers 503 where accounts cannot be deleted', async () => {
+    const erased: string[] = []
+    const { url, fake } = await start(undefined, async uid => { erased.push(uid) })
+    fake.linkAnswer({ uid: 'email-user-0001', email: 'ada@example.org', provider: 'emailLink', idToken: 'id-token-e' })
+    const signed = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
+    const deletion = cookies(await startDeletion(url, `w2l_session=${cookies(signed).w2l_session}`, 'ada@example.org')).w2l_delete!
+    const done = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url, cookie: `w2l_delete=${deletion}` }, body: 'email=ada%40example.org&oobCode=code-9876543210' })
+    expect(done.headers.get('location')).toBe('/signin/?deleted=1')
+    expect([erased, fake.calls.at(-1)]).toEqual([['email-user-0001'], { method: 'deleteAccount', args: ['id-token-e'] }])
+    const off = await start()
+    const session = await signIn(off.url)
+    expect((await startDeletion(off.url, session, 'ada@example.org')).status).toBe(503)
+  })
+})
+
 describe('Firebase\'s REST API', () => {
   it('maps Firebase\'s answers and its error messages to sign-in outcomes', async () => {
     const answers: Array<{ status: number; body: unknown }> = []
@@ -268,5 +399,26 @@ describe('Firebase\'s REST API', () => {
     await expect(toolkit.sendEmailLink('x', 'https://octocrawl.dev/auth/email/finish')).rejects.toMatchObject({ code: 'invalid' })
     expect(sent.at(-1)!.body).toEqual({ requestType: 'EMAIL_SIGNIN', email: 'x', continueUrl: 'https://octocrawl.dev/auth/email/finish', canHandleCodeInApp: true })
     expect(() => new IdentityToolkit('bad key!')).toThrow(/malformed/)
+    // Deleting the account is the account's own call, with its ID token.
+    answers.push({ status: 200, body: { kind: 'identitytoolkit#DeleteAccountResponse' } })
+    await toolkit.deleteAccount('id-token-1')
+    expect(sent.at(-1)).toEqual({ url: 'https://identitytoolkit.googleapis.com/v1/accounts:delete?key=AIzaSyTestKey0123456789abcdef', body: { idToken: 'id-token-1' } })
+    answers.push({ status: 400, body: { error: { message: 'CREDENTIAL_TOO_OLD_LOGIN_AGAIN' } } })
+    await expect(toolkit.deleteAccount('id-token-1')).rejects.toMatchObject({ code: 'unavailable' })
+  })
+
+  it('forgets an account in Firestore: its record and every session it has, in one commit', async () => {
+    const sent: Array<{ url: string; body: unknown }> = []
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
+      sent.push({ url, body: JSON.parse(String(init?.body)) })
+      if (url.endsWith(':runQuery')) return Response.json([{ document: { name: 'projects/octocrawl-test/databases/(default)/documents/sessions/h1' } }, { document: { name: 'projects/octocrawl-test/databases/(default)/documents/sessions/h2' } }, { readTime: 'x' }])
+      return Response.json({})
+    }) as typeof fetch
+    await new FirestoreAccountStore('octocrawl-test', fetcher).forget('github-user-0001')
+    expect(sent[0]!.body).toMatchObject({ structuredQuery: { from: [{ collectionId: 'sessions' }], where: { fieldFilter: { field: { fieldPath: 'uid' }, op: 'EQUAL', value: { stringValue: 'github-user-0001' } } } } })
+    expect(sent[1]!.body).toEqual({ writes: ['users/github-user-0001', 'sessions/h1', 'sessions/h2'].map(path => ({ delete: `projects/octocrawl-test/databases/(default)/documents/${path}` })) })
+    await expect(new FirestoreAccountStore('octocrawl-test', fetcher).forget('../x')).rejects.toThrow(/malformed/)
   })
 })

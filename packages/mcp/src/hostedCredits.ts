@@ -117,6 +117,8 @@ export type ReserveResult =
   | { ok: true; reservation: Reservation }
   | { ok: false; limited: 'credits'; remaining: number }
   | { ok: false; limited: 'site'; limit: number }
+  /** The account has no `users/{uid}`: it was deleted (a key the API still had cached), or never signed in. */
+  | { ok: false; limited: 'account' }
 
 export interface CreditsStore {
   /**
@@ -244,7 +246,18 @@ export class FirestoreCreditsStore implements CreditsStore {
       const { fromGrant, fromPurchased } = take(amount, have)
       const left = { grant: have.grant - fromGrant, purchased: have.purchased - fromPurchased }
       const siteExpireAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2)).toISOString()
+      // An account's first balance needs the account: `users/{uid}`, which sign-in writes and deleting the account removes
+      // first (packages/public-preview auth.ts). A key the hosted API still has cached for a minute after its account was
+      // deleted cannot bring the balance back. The write changes nothing: the smaller of the first sign-in time and the
+      // largest safe number is the first sign-in time, which every sign-in sets; it is there for its precondition.
+      const accountExists = balanceDoc === null ? [{
+        update: { name: `${this.resource}/users/${uid}`, fields: {} },
+        updateMask: { fieldPaths: [] },
+        updateTransforms: [{ fieldPath: 'createdAtMs', minimum: { integerValue: String(Number.MAX_SAFE_INTEGER) } }],
+        currentDocument: { exists: true },
+      }] : []
       const committed = await this.commit(token, [
+        ...accountExists,
         {
           update: { name: `${this.resource}/credits/${uid}`, fields: { month: { stringValue: month }, grant: { integerValue: String(left.grant) }, purchased: { integerValue: String(left.purchased) } } },
           updateMask: { fieldPaths: ['month', 'grant', 'purchased'] },
@@ -254,7 +267,13 @@ export class FirestoreCreditsStore implements CreditsStore {
           update: { name: `${this.resource}/hostedQuotas/${site.id}`, fields: { count: { integerValue: String(siteCount + 1) }, expireAt: { timestampValue: siteExpireAt } } },
           currentDocument: siteDoc === null ? { exists: false } : { updateTime: siteDoc.updateTime },
         },
-      ])
+      ], true)
+      if (committed === 'missing') {
+        // A document that had to exist is gone: the account's record (deleted), or a balance or counter deleted since it
+        // was read. Which, the record says; anything else is read again.
+        if (await this.read(`users/${uid}`, token) === null) return { ok: false, limited: 'account' }
+        continue
+      }
       if (committed === 'retry') continue
       return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased } }
     }
@@ -311,12 +330,16 @@ export class FirestoreCreditsStore implements CreditsStore {
     return doc
   }
 
-  private async commit(token: string, writes: unknown[]): Promise<CommitResponse | 'retry'> {
+  /** `missing` (only when asked for) is a write whose document had to exist and does not: Firestore answers 404. */
+  private async commit(token: string, writes: unknown[]): Promise<CommitResponse | 'retry'>
+  private async commit(token: string, writes: unknown[], allowMissing: true): Promise<CommitResponse | 'retry' | 'missing'>
+  private async commit(token: string, writes: unknown[], allowMissing = false): Promise<CommitResponse | 'retry' | 'missing'> {
     const response = await this.fetcher(`${this.endpoint}:commit`, {
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
       body: JSON.stringify({ writes }),
     })
     if (response.ok) return await response.json() as CommitResponse
+    if (allowMissing && response.status === 404) return 'missing'
     if (response.status === 409 || response.status === 412) return 'retry'
     if (response.status === 400) {
       const error = await response.json().catch(() => null) as { error?: { status?: string } } | null
