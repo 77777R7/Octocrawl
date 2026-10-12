@@ -73,6 +73,7 @@ function fakeFirestore() {
   const commits: unknown[] = []
   let clock = 0
   let conflicts = 0
+  let refusal: number | null = null
   const tick = () => `2026-10-11T00:00:${String(++clock).padStart(2, '0')}Z`
   const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
@@ -80,6 +81,7 @@ function fakeFirestore() {
       const body = JSON.parse(String(init?.body)) as { writes: Array<{ update: { name: string; fields: Record<string, Record<string, string>> }; updateMask?: { fieldPaths: string[] }; updateTransforms?: Array<{ fieldPath: string; increment: { integerValue: string } }>; currentDocument?: { exists?: boolean; updateTime?: string } }> }
       commits.push(body)
       if (conflicts > 0) { conflicts--; return new Response(JSON.stringify({ error: { status: 'FAILED_PRECONDITION' } }), { status: 400 }) }
+      if (refusal !== null) { const status = refusal; refusal = null; return new Response(JSON.stringify({ error: { status: 'INVALID_ARGUMENT' } }), { status }) }
       for (const write of body.writes) {
         const existing = docs.get(write.update.name)
         const pre = write.currentDocument
@@ -105,7 +107,7 @@ function fakeFirestore() {
     if (!doc) return new Response('{}', { status: 404 })
     return new Response(JSON.stringify({ name, fields: doc.fields, updateTime: doc.updateTime }), { status: 200 })
   }) as typeof fetch
-  return { resource, docs, commits, fetcher, conflictOnce: () => { conflicts = 1 } }
+  return { resource, docs, commits, fetcher, conflictOnce: () => { conflicts = 1 }, refuseNextWith: (status: number) => { refusal = status } }
 }
 
 describe('the Firestore ledger', () => {
@@ -146,6 +148,14 @@ describe('the Firestore ledger', () => {
     const again = await store.reserve('account-1', 1, SITE, OCT)
     if (!again.ok) throw new Error('unreachable')
     await store.settle(again.reservation, 0, 'unread', OCT)
+    expect((firestore.commits.at(-1) as { writes: unknown[] }).writes).toHaveLength(2)
+    // A half surrogate (a caller's body, or a cut at 2,048) is written as U+FFFD; a line Firestore still refuses is dropped, not the charge.
+    const third = await store.reserve('account-1', 5, SITE, OCT)
+    if (!third.ok) throw new Error('unreachable')
+    firestore.refuseNextWith(400)
+    expect(await store.settle(third.reservation, 0, 'unread', OCT, { ...note, url: 'https://example.org/\ud83d' })).toEqual({ remaining: 999 })
+    const refused = firestore.commits.at(-2) as { writes: Array<{ update: { fields: Record<string, Record<string, string>> } }> }
+    expect(refused.writes[2]!.update.fields.url!.stringValue).toBe('https://example.org/\ufffd')
     expect((firestore.commits.at(-1) as { writes: unknown[] }).writes).toHaveLength(2)
     // Ids sort newest first in Firestore's default order.
     expect(requestLineId(new Date(OCT.getTime() + 1_000), 'b') < requestLineId(OCT, 'a')).toBe(true)

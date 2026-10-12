@@ -55,8 +55,15 @@ export interface RequestLine extends RequestNote { id: string; at: string; kind:
 export function requestLineId(now: Date, random = Math.random().toString(36).slice(2, 10)): string {
   return `${String(9_999_999_999_999 - now.getTime()).padStart(13, '0')}-${random.replace(/[^a-z0-9]/g, '').slice(0, 12) || '0'}`
 }
+/** A half of a surrogate pair with no other half (a caller's body, or a cut at the length limit) becomes U+FFFD:
+ * Firestore takes only well-formed text, and a refused line must not refuse the charge it is written with. */
+const wellFormed = (text: string) => text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD')
 function requestLine(note: RequestNote, id: string, now: Date, kind: UsageKind, credits: number): RequestLine {
-  return { ...note, url: note.url.slice(0, ACTIVITY_URL_CHARS), finalUrl: note.finalUrl === null ? null : note.finalUrl.slice(0, ACTIVITY_URL_CHARS), id, at: now.toISOString(), kind, credits }
+  const clean = (value: string | null, chars = 200) => (value === null ? null : wellFormed(value.slice(0, chars)))
+  return {
+    ...note, url: wellFormed(note.url.slice(0, ACTIVITY_URL_CHARS)), finalUrl: clean(note.finalUrl, ACTIVITY_URL_CHARS), lane: clean(note.lane), status: wellFormed(note.status.slice(0, 200)),
+    reason: clean(note.reason), sha256: clean(note.sha256), id, at: now.toISOString(), kind, credits,
+  }
 }
 
 /** What a settled call is counted as on the account page. */
@@ -257,8 +264,7 @@ export class FirestoreCreditsStore implements CreditsStore {
     const expireAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + USAGE_RETENTION_DAYS)).toISOString()
     const increment = (fieldPath: string, by: number) => ({ fieldPath, increment: { integerValue: String(by) } })
     // Increments need no read, so a refused commit is retried as it is; one that timed out may have applied (see the log line).
-    let response: CommitResponse | 'retry' = 'retry'
-    for (let attempt = 0; attempt < 3 && response === 'retry'; attempt++) response = await this.commit(await this.token(), [
+    const writes = (withLine: boolean) => [
       {
         update: { name: `${this.resource}/credits/${reservation.uid}`, fields: {} },
         updateMask: { fieldPaths: [] },
@@ -270,8 +276,18 @@ export class FirestoreCreditsStore implements CreditsStore {
         updateMask: { fieldPaths: ['uid', 'day', 'expireAt'] },
         updateTransforms: [increment(kind, 1), increment('credits', used)],
       },
-      ...(line === null ? [] : [{ update: { name: `${this.resource}/requestLog/${reservation.uid}/requests/${line.id}`, fields: requestLineFields(line, reservation.uid, now) } }]),
-    ])
+      ...(line === null || !withLine ? [] : [{ update: { name: `${this.resource}/requestLog/${reservation.uid}/requests/${line.id}`, fields: requestLineFields(line, reservation.uid, now) } }]),
+    ]
+    let response: CommitResponse | 'retry' = 'retry'
+    for (let attempt = 0; attempt < 3 && response === 'retry'; attempt++) {
+      try {
+        response = await this.commit(await this.token(), writes(line !== null))
+      } catch (error) {
+        // The request line is the only part a caller shapes: a commit Firestore refuses with it is sent once more without it.
+        if (line === null) throw error
+        response = await this.commit(await this.token(), writes(false))
+      }
+    }
     if (response === 'retry') throw new Error('credits settle was refused')
     const results = response.writeResults?.[0]?.transformResults ?? []
     const grant = Number(results[0]?.integerValue)
