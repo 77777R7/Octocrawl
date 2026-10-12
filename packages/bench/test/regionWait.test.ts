@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { VerifyContract } from '@w2l/contracts'
-import { RegionTracker, regionSpecOf, regionWaitEvent, waitForRegion } from '../src/regionWait.js'
+import { MAX_REGION_SCROLLS, RegionTracker, regionSpecOf, regionWaitEvent, waitForRegion } from '../src/regionWait.js'
 
 /** A page whose region view is `views[n]` on its nth read (the last from then on), with a clock the waits move. */
 function page(views: unknown[]) {
@@ -121,8 +121,59 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     const busy = lazy({ pricesAfter: 1, endAfter: 10, loading: true })
     expect(await waitForRegion(busy, { contract: prices }, { maxMs: 3_000, sampleMs: 500, now: busy.now })).toMatchObject({ ready: false, scrolls: 0 })
     const short = lazy({ pricesAfter: 99, endAfter: 2 })
-    expect(await waitForRegion(short, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: short.now })).toMatchObject({ ready: false, scrolls: 2 })
+    const ended = await waitForRegion(short, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: short.now })
+    expect(ended).toMatchObject({ ready: false, scrolls: 2 })
     expect(short.scrolled()).toBe(2)
+    // It reached the page's end: nothing further down was left unread.
+    expect(ended.scrollUnfinished).toBeUndefined()
+    expect(regionWaitEvent(ended, 0, 'browser_local')?.detail).not.toHaveProperty('scrollUnfinished')
+  })
+
+  it('says when the wait ran out while it was still scrolling toward the region, and not when it ended otherwise', async () => {
+    // As Costco's laptops page (T019, 2026-10-12): the page changes for most of the wait, settles, and the wait has
+    // time for 2 screens of a grid further down before it ends.
+    const costco = (options: { changingReads: number; pricesAfter: number; endAfter: number }) => {
+      let now = 0
+      let reads = 0
+      let scrolled = 0
+      return {
+        async evaluate(expression: string) {
+          if (expression.includes('scrollTo(0, 0)')) return undefined
+          if (expression.includes('scrollBy')) {
+            if (scrolled >= options.endAfter) return JSON.stringify({ moved: false, end: true })
+            scrolled++
+            return JSON.stringify({ moved: true, end: scrolled >= options.endAfter })
+          }
+          reads++
+          // Its text grows on each read until it settles; then the grid's prices come only once scrolled to.
+          const text = reads <= options.changingReads ? `Laptops ${'x'.repeat(reads)}` : scrolled >= options.pricesAfter ? 'Laptops $699 $899 $1299' : 'Laptops'
+          return JSON.stringify(view(text))
+        },
+        async waitForTimeout(ms: number) { now += ms; await new Promise((resolve) => setTimeout(resolve, 0)) },
+        now: () => now,
+      }
+    }
+    const late = costco({ changingReads: 15, pricesAfter: 9, endAfter: 30 })
+    const cut = await waitForRegion(late, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: late.now })
+    expect(cut).toMatchObject({ ready: false, steady: true, scrollUnfinished: true })
+    expect(cut.scrolls).toBeGreaterThan(0)
+    expect(cut.scrolls).toBeLessThan(9)
+    expect(regionWaitEvent(cut, 0, 'browser_local')?.detail).toMatchObject({ ready: false, scrollUnfinished: true })
+    // Settled early, the same page scrolls to its grid in time: ready, nothing unfinished.
+    const early = costco({ changingReads: 2, pricesAfter: 9, endAfter: 30 })
+    const held = await waitForRegion(early, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: early.now })
+    expect(held).toMatchObject({ ready: true, scrolls: 9 })
+    expect(held.scrollUnfinished).toBeUndefined()
+    // A page longer than the wait can scroll, its region never come: the rest of it was not read, so not known absent.
+    const long = costco({ changingReads: 2, pricesAfter: 99, endAfter: 99 })
+    const unread = await waitForRegion(long, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: long.now })
+    expect(unread).toMatchObject({ ready: false, steady: true, scrollUnfinished: true })
+    expect(unread.scrolls).toBeLessThan(MAX_REGION_SCROLLS)
+    // A page that never settled was never scrolled: its wait is told by `steady`, not by an unfinished scroll.
+    const restless = costco({ changingReads: 99, pricesAfter: 1, endAfter: 30 })
+    const changing = await waitForRegion(restless, { contract: prices }, { maxMs: 10_000, sampleMs: 500, now: restless.now })
+    expect(changing).toMatchObject({ ready: false, steady: false, scrolls: 0 })
+    expect(changing.scrollUnfinished).toBeUndefined()
   })
 
   it('does not wait on a view that can judge none of the checks, says why, and starts afresh after a read a navigation cut off', async () => {

@@ -193,6 +193,13 @@ export interface RegionOutcome {
   unjudged?: RegionUnjudged
   /** Screens the wait scrolled down for a region that loads as it comes into view; absent from a lane that does not scroll (the my-browser lane: the person's own tab). */
   scrolls?: number
+  /**
+   * Set when the wait ran out while it was scrolling toward the region, before the page ended (or MAX_REGION_SCROLLS,
+   * which REGION_WAIT_MAX_MS at REGION_SAMPLE_MS does not reach): the region may lie further down, not yet in view
+   * (Costco's laptops grid, T019, on 2026-10-12: a page that changed for most of the wait, then scrolled 2 screens).
+   * A page longer than the wait can scroll is not known to lack the region either. Absent otherwise.
+   */
+  scrollUnfinished?: true
 }
 
 /**
@@ -286,7 +293,7 @@ export class RegionTracker {
  * A region that loads as it comes into view (Home Depot's product grid below its category links, T014) is scrolled
  * to: once a judged check fails on a page that has settled (its text steady, no loading indicator), the wait scrolls
  * one screen down before each read after, until the region is ready, the page ends or MAX_REGION_SCROLLS, all within
- * `maxMs`. `scroll: false` waits without scrolling.
+ * `maxMs`; a wait that `maxMs` ends first says so (`scrollUnfinished`). `scroll: false` waits without scrolling.
  */
 export async function waitForRegion(page: SettlePage, spec: RegionSpec, options: { maxMs: number; sampleMs?: number; now?: () => number; scroll?: boolean }): Promise<RegionOutcome> {
   const now = options.now ?? Date.now
@@ -303,7 +310,9 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
     if (scrolls > 0) {
       try { await page.evaluate('window.scrollTo(0, 0)') } catch (error) { if (!isNavigationError(error)) throw error }
     }
-    return { ...tracker.outcome(), scrolls }
+    const seen = tracker.outcome()
+    const unfinished = !seen.ready && scrolling && !ended && scrolls < MAX_REGION_SCROLLS
+    return { ...seen, scrolls, ...(unfinished ? { scrollUnfinished: true as const } : {}) }
   }
   for (;;) {
     const readStarted = now()
@@ -341,6 +350,6 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
 /** The trace event a region wait leaves: what it saw, by counts, never the page's text. */
 export function regionWaitEvent(outcome: RegionOutcome | undefined, at: number, lane: Lane): TraceEvent | null {
   if (outcome === undefined) return null
-  const { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, unjudged, scrolls } = outcome
-  return { at, lane, event: 'region_wait', detail: { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, ...(unjudged === undefined ? {} : { unjudged }), ...(scrolls === undefined ? {} : { scrolls }) } }
+  const { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, unjudged, scrolls, scrollUnfinished } = outcome
+  return { at, lane, event: 'region_wait', detail: { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, ...(unjudged === undefined ? {} : { unjudged }), ...(scrolls === undefined ? {} : { scrolls }), ...(scrollUnfinished === true ? { scrollUnfinished } : {}) } }
 }
