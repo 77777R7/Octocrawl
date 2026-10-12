@@ -204,10 +204,39 @@
       && (form.get('result') !== 'read' || outcome(line)[1] === 'ok')
       && (form.get('result') !== 'free' || line.credits === 0))
   }
+  /** The Playground's recent runs as receipts: what was read, the result, robots.txt, the cost, when, and the hash. */
+  let shownReceipts = null
+  const renderRuns = (lines) => {
+    const host = $('run-cards')
+    if (!host) return
+    host.replaceChildren(...lines.map((line) => {
+      const receipt = document.createElement('article'); receipt.className = 'receipt'
+      if (shownReceipts && !shownReceipts.has(line.id)) receipt.classList.add('is-new')
+      const top = document.createElement('div'); top.className = 'receipt-top'
+      const kind = document.createElement('span'); kind.textContent = line.endpoint
+      const again = document.createElement('button'); again.type = 'button'; again.className = 'receipt-again'; again.dataset.again = line.url; again.dataset.endpoint = line.endpoint
+      again.setAttribute('aria-label', `Run ${line.url} again`); again.textContent = 'again ↺'
+      top.append(kind, again)
+      const where = document.createElement('p'); where.className = 'receipt-url'; where.title = line.url
+      try { const url = new URL(line.url); where.textContent = `${url.host}${url.pathname === '/' ? '' : url.pathname}` } catch { where.textContent = line.url || '(no URL)' }
+      const facts = document.createElement('dl')
+      const [label, mark] = outcome(line)
+      for (const [name, value, className] of [['result', label, mark], ['lane', line.lane ?? '—'], ['robots.txt', line.robots ?? '—'], ['credits', number(line.credits)], ['at (UTC)', timeOf(line.at)]]) {
+        const term = document.createElement('dt'); term.textContent = name
+        const detail = document.createElement('dd'); detail.textContent = value; if (className) detail.className = className
+        facts.append(term, detail)
+      }
+      const hash = document.createElement('p'); hash.className = 'receipt-hash'; hash.textContent = line.sha256 ? `sha256 ${line.sha256}` : 'nothing read: no hash'
+      receipt.append(top, where, facts, hash)
+      return receipt
+    }))
+    shownReceipts = new Set(lines.map((line) => line.id))
+    $('runs-empty').hidden = lines.length > 0
+  }
   const renderActivity = () => {
     if (!activity) return
     renderRequests('recent', activity.slice(0, 5))
-    renderRequests('runs', activity.filter(fromPlayground).slice(0, 5))
+    renderRuns(activity.filter(fromPlayground).slice(0, 6))
     const shown = filtered()
     renderRequests('activity', shown, keyNames)
     set('activity-count', `${number(shown.length)} of ${number(activity.length)} in 30 days`)
@@ -258,7 +287,7 @@
     })
   }
   const loadActivity = async () => {
-    if (!$('recent-body') && !$('activity-body') && !$('by-key-list') && !$('runs-body')) return
+    if (!$('recent-body') && !$('activity-body') && !$('by-key-list') && !$('run-cards')) return
     try {
       const response = await fetch('/api/account/activity', { credentials: 'same-origin' })
       if (!response.ok) throw new Error(String(response.status))
@@ -373,18 +402,28 @@
     })
   }
 
-  // The Playground (the Scrape and Map pages): the form goes to POST /api/account/run, which the hosted API answers and
-  // charges as it would a key's call. The answer is shown as text in views, the Evidence Record as facts and JSON, and
-  // the same call as code for the visitor's own key.
+  // The Playground (the Scrape and Map pages, one layout): the octopus (dashboard-octopus.js) behind the URL card, whose
+  // first keys pick the endpoint and whose options, formats and code open as printed panels; the result; the recent runs
+  // as receipts. The card goes to POST /api/account/run, which the hosted API answers and charges as it would a key's call.
   const play = $('play-form')
   if (play) {
-    const endpoint = play.dataset.endpoint
     const output = $('play-output')
     const evidence = $('play-evidence')
     const submit = $('play-submit')
+    const glyphs = window.OctoGlyphs
+    const creature = glyphs && $('pg-octopus') ? glyphs.octopus($('pg-octopus'), play) : null
+    if (glyphs && $('pg-sea')) glyphs.current($('pg-sea'))
+    let endpoint = play.dataset.endpoint
     let answer = null
-    let view = endpoint === 'scrape' ? 'markdown' : 'links'
+    let view = 'markdown'
     let lang = 'curl'
+    const IDLE_NOTE = ''
+    const COST = {
+      scrape: ['1–5 credits', 'A page read over HTTP costs 1 credit, one that needs a browser 5, and one that is blocked or kept out by robots.txt nothing.'],
+      map: ['0–1 credit', 'A map that finds URLs costs 1 credit; one that finds none costs nothing.'],
+    }
+    const LABEL = { scrape: 'Extract page', map: 'Map site' }
+    const goLabel = () => { submit.textContent = `${LABEL[endpoint]} `; const arrow = document.createElement('span'); arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = '→'; submit.append(arrow) }
     const body = () => {
       const form = new FormData(play)
       const url = String(form.get('url') ?? '').trim()
@@ -402,7 +441,71 @@
       set('play-code', lang === 'curl'
         ? `curl ${api} \\\n  -H 'authorization: Bearer oc_YOUR_KEY' \\\n  -H 'content-type: application/json' \\\n  -d '${json.replace(/'/g, "'\\''")}'`
         : `const response = await fetch('${api}', {\n  method: 'POST',\n  headers: { authorization: 'Bearer oc_YOUR_KEY', 'content-type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(request, null, 2).replace(/\n/g, '\n  ')}),\n})\nconst result = await response.json()`)
+      const formats = body().formats || []
+      const names = { markdown: 'Markdown', links: 'Links', html: 'HTML' }
+      set('pg-format-label', formats.length === 0 ? 'none' : formats.length === 1 ? names[formats[0]] : `${names[formats[0]]} +${formats.length - 1}`)
     }
+
+    // Panels: one open at a time, printed in as the site's menus are (nav.js): a reveal in steps, then rows and glyphs.
+    const panels = [...play.querySelectorAll('[data-panel]')]
+    const close = () => { for (const button of panels) { button.setAttribute('aria-expanded', 'false'); $(button.dataset.panel).hidden = true } }
+    const decode = (element, delay) => {
+      const text = element.textContent
+      const noise = '·:+×#'
+      let step = 0
+      setTimeout(function tick() {
+        step += 1
+        element.textContent = step >= 6 ? text : text.replace(/\S/g, (c, i) => (i / text.length < step / 6 ? c : noise[(i + step) % noise.length]))
+        if (step < 6) setTimeout(tick, 32)
+      }, delay)
+    }
+    const print = (panel) => {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+      panel.classList.remove('is-printing'); void panel.offsetWidth; panel.classList.add('is-printing')
+      ;[...panel.querySelectorAll('.pg-check, .pg-fields label, .code, p')].forEach((row, i) => row.style.setProperty('--row', String(i)))
+      ;[...panel.querySelectorAll('.pg-kicker, code')].forEach((element, i) => { if (!element.closest('pre')) decode(element, 40 + i * 18) })
+      setTimeout(() => panel.classList.remove('is-printing'), 700)
+    }
+    for (const button of panels) {
+      button.addEventListener('click', () => {
+        const panel = $(button.dataset.panel)
+        const opening = panel.hidden
+        close()
+        if (!opening) return
+        panel.hidden = false
+        button.setAttribute('aria-expanded', 'true')
+        print(panel)
+      })
+    }
+    document.addEventListener('click', (event) => { if (!event.target.closest('.pg-panel, [data-panel]')) close() })
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') close() })
+
+    // The endpoint keys: the same card, its options and its address change in place.
+    const PAGES = { scrape: ['Scrape', 'Read one page as Markdown, with its Evidence Record, on this account\'s credits at the API\'s price.'], map: ['Map', 'List the URLs of a site from its sitemap and links, on this account\'s credits at the API\'s price.'] }
+    const switchTo = (next, push) => {
+      endpoint = next
+      $('pg').dataset.endpoint = next
+      play.dataset.endpoint = next
+      for (const element of document.querySelectorAll('#pg [data-only]')) element.hidden = element.dataset.only !== next
+      for (const key of document.querySelectorAll('#pg [role="radio"][data-endpoint]')) key.setAttribute('aria-checked', String(key.dataset.endpoint === next))
+      for (const link of document.querySelectorAll('.dash-nav a')) { if (link.getAttribute('href') === `/dashboard/${next}/`) link.setAttribute('aria-current', 'page'); else if (/\/dashboard\/(scrape|map)\/$/.test(link.getAttribute('href'))) link.removeAttribute('aria-current') }
+      const [title, lead] = PAGES[next]
+      document.querySelector('.dash-head h1').textContent = title
+      document.querySelector('.dash-head .dash-lead').textContent = lead
+      document.title = `${title} | Octocrawl Dashboard`
+      set('play-cost', COST[next][0])
+      $('play-cost').title = COST[next][1]
+      goLabel()
+      close()
+      $('play-result').hidden = true
+      set('play-summary', IDLE_NOTE)
+      answer = null
+      view = next === 'scrape' ? 'markdown' : 'links'
+      if (push) { const url = play.url.value.trim(); history.replaceState(null, '', `/dashboard/${next}/${url ? `?url=${encodeURIComponent(url)}` : ''}`) }
+      drawCode()
+    }
+    for (const key of document.querySelectorAll('#pg [role="radio"][data-endpoint]')) key.addEventListener('click', () => { if (key.dataset.endpoint !== endpoint) { switchTo(key.dataset.endpoint, true); play.url.focus() } })
+
     const linkList = (links) => (Array.isArray(links) ? links.map((link) => (typeof link === 'string' ? link : link && link.url)).filter(Boolean) : null)
     const facts = (record) => {
       const rows = [
@@ -425,8 +528,8 @@
       evidence.hidden = view !== 'evidence'
       let text
       if (view === 'markdown') text = typeof answer.markdown === 'string' ? answer.markdown : 'No Markdown came back. The result and the Evidence Record say why.'
-      else if (view === 'html') text = typeof answer.html === 'string' ? answer.html : 'HTML was not asked for: tick HTML and run again.'
-      else if (view === 'links') { const links = linkList(answer.links); text = links ? (links.length ? links.join('\n') : 'No links came back.') : 'Links were not asked for: tick Links and run again.' }
+      else if (view === 'html') text = typeof answer.html === 'string' ? answer.html : 'HTML was not asked for: add it under Format and run again.'
+      else if (view === 'links') { const links = linkList(answer.links); text = links ? (links.length ? links.join('\n') : 'No links came back.') : 'Links were not asked for: add them under Format and run again.' }
       else if (view === 'evidence') {
         if (answer.evidenceRecord) { facts(answer.evidenceRecord); text = JSON.stringify(answer.evidenceRecord, null, 2) } else { evidence.replaceChildren(); text = 'This answer has no Evidence Record.' }
       } else text = JSON.stringify(answer, null, 2)
@@ -435,9 +538,10 @@
     for (const tab of document.querySelectorAll('[data-view]')) tab.addEventListener('click', () => { view = tab.dataset.view; show() })
     toggles('lang', (value) => { lang = value; drawCode() })
     play.addEventListener('input', drawCode)
+    play.addEventListener('change', drawCode)
     const asked = new URLSearchParams(location.search).get('url')
     if (asked) play.url.value = asked
-    drawCode()
+    switchTo(endpoint, false)
 
     const outcomeOf = (result) => {
       if (endpoint === 'map') {
@@ -447,17 +551,23 @@
       const reason = result.failureReason || (result.evidenceRecord && result.evidenceRecord.reason)
       return [reason ? `${result.status} · ${reason}` : result.status, READ.has(result.status) ? 'ok' : result.status === 'partial' ? 'warn' : 'bad']
     }
+    const idle = (note = IDLE_NOTE) => { if (creature) creature.set('idle'); $('pg-stage').classList.remove('is-running'); set('play-summary', note) }
     play.addEventListener('submit', async (event) => {
       event.preventDefault()
+      close()
       const request = body()
       try { if (!/^https?:$/.test(new URL(request.url).protocol)) throw new Error('scheme') } catch { say('Enter a full address that starts with http:// or https://.', true); play.url.focus(); return }
-      if (endpoint === 'scrape' && request.formats.length === 0) { say('Tick at least one format.', true); return }
+      if (endpoint === 'scrape' && request.formats.length === 0) { say('Pick at least one format.', true); return }
       say('')
+      const ran = endpoint
       submit.disabled = true
       submit.textContent = 'Running…'
-      set('play-summary', endpoint === 'scrape' ? 'Reading the page. One that needs a browser can take up to a minute.' : 'Reading the site\'s sitemap and links.')
+      $('play-result').hidden = true
+      $('pg-stage').classList.add('is-running')
+      if (creature) creature.set('running')
+      set('play-summary', ran === 'scrape' ? 'Reading the page. One that needs a browser can take up to a minute.' : 'Reading the site\'s sitemap and links.')
       try {
-        const response = await fetch('/api/account/run', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint, ...request }) })
+        const response = await fetch('/api/account/run', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint: ran, ...request }) })
         if (response.status === 401) { location.replace(`/signin/?next=${encodeURIComponent(location.pathname + location.search)}`); return }
         const result = await response.json().catch(() => null)
         if (!response.ok || !result) {
@@ -467,25 +577,39 @@
                 : response.status === 504 ? 'The run took too long and was stopped. Activity shows what it cost, if anything.'
                   : 'The run could not reach hosted Octocrawl. Try again in a minute.'
           say(why.trim(), true)
-          set('play-summary', '')
+          idle()
           return
         }
+        if (ran !== endpoint) { idle(); return }
         answer = result
         const used = response.headers.get('x-credits-used')
         const left = response.headers.get('x-credits-remaining')
         const [label, mark] = outcomeOf(result)
         const pill = $('play-status'); pill.className = `status ${mark}`; pill.textContent = label
         const record = result.evidenceRecord
-        const where = endpoint === 'scrape' && record ? [record.finalUrl || record.requestedUrl, record.httpStatus ? `HTTP ${record.httpStatus}` : null, record.lane ? `${record.lane} lane` : null] : [result.url]
+        const where = ran === 'scrape' && record ? [record.finalUrl || record.requestedUrl, record.httpStatus ? `HTTP ${record.httpStatus}` : null, record.lane ? `${record.lane} lane` : null] : [result.url]
         const spent = used === null ? null : `${used} credit${used === '1' ? '' : 's'} used${left === null ? '' : `, ${number(left)} left`}`
-        set('play-summary', [...where, spent].filter(Boolean).join(' · '))
+        set('play-detail', [...where, spent].filter(Boolean).join(' · '))
         if (view === 'markdown' && typeof result.markdown !== 'string' && record) view = 'evidence'
+        idle()
         $('play-result').hidden = false
         show()
+        $('play-result').scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
         // The balance and the run's request line changed: read both again.
         activity = null
         load()
-      } catch { say('The run could not reach hosted Octocrawl. Try again in a minute.', true); set('play-summary', '') } finally { submit.disabled = false; submit.textContent = 'Run' }
+      } catch { say('The run could not reach hosted Octocrawl. Try again in a minute.', true); idle() } finally { submit.disabled = false; goLabel() }
+    })
+
+    // A recent run's card runs it again: its endpoint and URL go back into the form.
+    $('run-cards').addEventListener('click', (event) => {
+      const again = event.target.closest('[data-again]')
+      if (!again) return
+      play.url.value = again.dataset.again
+      if (again.dataset.endpoint !== endpoint) switchTo(again.dataset.endpoint, true)
+      drawCode()
+      play.url.focus()
+      $('pg-stage').scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
     })
   }
 

@@ -15,7 +15,7 @@ const assetRoot = join(root, 'public', 'docs-assets')
 // The docs' own stylesheets and script, each versioned by its content. A stylesheet's references to versioned public
 // files (the header's mountain artwork) get their ?v= first and go to dist in that form, so its own version changes
 // when the artwork does.
-const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css', 'account.css', 'account.js', 'dashboard.css', 'dashboard.js', 'dashboard-charts.js'].map(async name => {
+const assetVersions = Object.fromEntries(await Promise.all(['docs.css', 'docs-mobile.css', 'docs.js', 'blog.css', 'account.css', 'account.js', 'dashboard.css', 'dashboard.js', 'dashboard-charts.js', 'dashboard-octopus.js'].map(async name => {
   const source = await readFile(join(assetRoot, name), 'utf8')
   const shipped = name.endsWith('.css') ? versionAssetReferences(source, join(root, 'public')) : source
   if (shipped !== source) await writeFile(join(root, 'dist', 'docs-assets', name), shipped)
@@ -465,7 +465,7 @@ function dashboardPageHtml(path, title, lead, body) {
 <div class="dash-who"><span id="side-email">…</span><a href="/docs/">Docs ↗</a></div></aside>
 <main id="main-content" class="dash-main"><header class="dash-head"><pre class="dash-noise" id="dash-noise" aria-hidden="true"></pre><p class="dash-kicker">Octocrawl / Dashboard</p><h1>${escape(title)}</h1><p class="dash-lead">${lead}</p></header>
 <p class="dash-message" id="dash-message" role="status" aria-live="polite"></p>
-${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script><script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
+${body}</main></div><script defer src="/docs-assets/dashboard-charts.js?v=${assetVersions['dashboard-charts.js']}"></script>${path === '/dashboard/scrape/' || path === '/dashboard/map/' ? `<script defer src="/docs-assets/dashboard-octopus.js?v=${assetVersions['dashboard-octopus.js']}"></script>` : ''}<script defer src="/docs-assets/dashboard.js?v=${assetVersions['dashboard.js']}"></script></body></html>`
 }
 // The Overview's banner: the Evidence Record, the thing that sets Octocrawl apart, centred between the octopus's arms,
 // which dashboard.js draws in glyphs rising from both bottom corners and keeps swaying.
@@ -535,30 +535,40 @@ ${installRow('cline', 'Cline', 'CL', 'Merge into <code>cline_mcp_settings.json</
 <section class="panel" aria-labelledby="c-local"><div class="panel-head"><h2 id="c-local">On your own computer</h2></div><p>Free and without limit, with every tool: crawl, batch and Monitor too. No key and no credits.</p>${dashCode('c-local-code', 'npx octocrawl serve')}</section>
 </div></div>`
 /**
- * A Playground page: the form, the result and its views, the code for the same call, and the account's last runs here.
- * dashboard.js sends the form to POST /api/account/run, which the hosted API charges like a key's call.
+ * A Playground page: one dark stage where the home page's octopus, drawn in glyphs, rises behind the home page's white
+ * URL card. The card's first keys pick scrape or map; its options, formats and code open as panels printed in the site's
+ * style. Below come the result and the account's recent runs as receipts over a slow current of glyphs. Both pages are
+ * one layout: dashboard.js switches between them in place and sends the card to POST /api/account/run, which the
+ * hosted API charges like a key's call; dashboard-octopus.js draws the octopus and the current.
  */
 const playgroundBody = (endpoint) => {
-  const scrape = endpoint === 'scrape'
-  const options = scrape
-    ? `<fieldset class="play-options"><legend>Formats</legend><label><input type="checkbox" name="formats" value="markdown" checked /> Markdown</label><label><input type="checkbox" name="formats" value="links" /> Links</label><label><input type="checkbox" name="formats" value="html" /> HTML</label><label class="play-main"><input type="checkbox" name="onlyMainContent" checked /> Main content only</label></fieldset>`
-    : `<fieldset class="play-options"><legend>Options</legend><label>Search<input name="search" maxlength="200" placeholder="docs" autocomplete="off" /></label><label>Limit<input name="limit" type="number" min="1" max="5000" value="100" /></label></fieldset>`
-  const cost = scrape
-    ? 'A page read over HTTP costs 1 credit, one that needs a browser 5. A page that is blocked, or that robots.txt keeps out, costs nothing.'
-    : 'A map that finds URLs costs 1 credit; one that finds none costs nothing.'
-  const views = (scrape ? [['markdown', 'Markdown'], ['links', 'Links'], ['html', 'HTML'], ['evidence', 'Evidence Record'], ['json', 'JSON']] : [['links', 'Links'], ['json', 'JSON']])
-    .map(([view, name], i) => `<button type="button" role="tab" aria-selected="${i === 0}" data-view="${view}">${name}</button>`).join('')
-  return `<section class="panel" aria-labelledby="play-title"><div class="panel-head"><h2 id="play-title">${scrape ? 'Scrape a page' : 'Map a site'}</h2><a href="/docs/reference/">POST /v1/${endpoint} →</a></div>
-<form class="play-form" id="play-form" data-endpoint="${endpoint}" novalidate><label class="play-url" for="play-url">URL<input id="play-url" name="url" type="url" inputmode="url" required placeholder="https://example.com" autocomplete="off" spellcheck="false" /></label>
-${options}
-<div class="play-run"><button class="button" type="submit" id="play-submit">Run</button><p class="dash-small" id="play-cost">${cost} <span id="play-left"></span></p></div></form></section>
-<section class="panel" id="play-result" hidden aria-labelledby="result-title"><div class="panel-head"><div><h2 id="result-title">Result</h2><p class="dash-small" id="play-summary"></p></div><span class="status" id="play-status"></span></div>
+  const only = (which) => `data-only="${which}"${which === endpoint ? '' : ' hidden'}`
+  const key = (which) => `<button type="button" role="radio" data-endpoint="${which}" aria-checked="${which === endpoint}">${which}</button>`
+  const views = [['markdown', 'Markdown', 'scrape'], ['links', 'Links', ''], ['html', 'HTML', 'scrape'], ['evidence', 'Evidence Record', 'scrape'], ['json', 'JSON', '']]
+    .map(([view, name, which]) => `<button type="button" role="tab" aria-selected="false" data-view="${view}"${which ? ` ${only(which)}` : ''}>${name}</button>`).join('')
+  return `<section class="pg" id="pg" data-endpoint="${endpoint}">
+<div class="pg-stage" id="pg-stage"><div class="pg-depth" aria-hidden="true"><canvas class="pg-octopus" id="pg-octopus"></canvas></div>
+<form class="pg-card" id="play-form" data-endpoint="${endpoint}" novalidate>
+<div class="pg-entry"><div class="pg-mode" role="radiogroup" aria-label="Endpoint">${key('scrape')}${key('map')}</div><label class="sr-only" for="play-url">URL</label><input id="play-url" name="url" type="url" inputmode="url" required placeholder="Paste a public page URL…" autocomplete="off" spellcheck="false" /></div>
+<div class="pg-toolbar"><div class="pg-tools">
+<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-format" data-panel="pg-format" ${only('scrape')}><span class="pg-glyph" aria-hidden="true">▤</span><span id="pg-format-label">Markdown</span></button>
+<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-options" data-panel="pg-options"><span class="pg-glyph" aria-hidden="true">≡</span>Options</button>
+<button class="pg-tool" type="button" aria-expanded="false" aria-controls="pg-code" data-panel="pg-code"><span class="pg-glyph" aria-hidden="true">&lt;/&gt;</span>Get code</button></div>
+<div class="pg-tools"><span class="pg-cost" id="play-cost"></span><button class="pg-go" type="submit" id="play-submit">${endpoint === 'scrape' ? 'Extract page' : 'Map site'} <span aria-hidden="true">→</span></button></div></div>
+<div class="pg-panel" id="pg-format" hidden><p class="pg-kicker">Format</p><label class="pg-check"><input type="checkbox" name="formats" value="markdown" checked /> Markdown <code>.md</code></label><label class="pg-check"><input type="checkbox" name="formats" value="links" /> Links <code>.txt</code></label><label class="pg-check"><input type="checkbox" name="formats" value="html" /> HTML <code>.html</code></label></div>
+<div class="pg-panel" id="pg-options" hidden><p class="pg-kicker">Options</p>
+<label class="pg-check" ${only('scrape')}><input type="checkbox" name="onlyMainContent" checked /> Main content only <span class="dash-small">leave out navigation, footers and sidebars</span></label>
+<div class="pg-fields" ${only('map')}><label>Search<input name="search" maxlength="200" placeholder="docs" autocomplete="off" /></label><label>Limit<input name="limit" type="number" min="1" max="5000" value="100" /></label></div></div>
+<div class="pg-panel wide" id="pg-code" hidden><div class="panel-head"><p class="pg-kicker">Get code</p><div class="tabs" role="group" aria-label="Language"><button type="button" aria-pressed="true" data-lang="curl">cURL</button><button type="button" aria-pressed="false" data-lang="js">JavaScript</button></div></div>${dashCode('play-code', '')}<p class="dash-small">The same call from your code or agent: put a key from <a href="/dashboard/keys/">API keys</a> where it says <code>oc_YOUR_KEY</code>. It costs what a run here costs.</p></div>
+</form>
+<p class="pg-note" id="play-summary" role="status" aria-live="polite"></p>
+<p class="pg-elsewhere">Crawl, batch and Monitor run on your computer, free: <code>npx octocrawl serve</code> · <a href="/dashboard/connect/#c-local">Connect →</a></p></div>
+<section class="panel pg-result" id="play-result" hidden aria-labelledby="result-title"><div class="panel-head"><div><h2 id="result-title">Result</h2><p class="dash-small" id="play-detail"></p></div><span class="status" id="play-status"></span></div>
 <div class="tabs play-views" role="tablist" aria-label="Result view">${views}</div>
 <dl class="facts play-evidence" id="play-evidence" hidden></dl>
 <div class="code"><pre class="play-output" id="play-output" tabindex="0"></pre><button class="copy" type="button" data-copy="play-output">Copy</button></div></section>
-<section class="panel" aria-labelledby="code-title"><div class="panel-head"><h2 id="code-title">Get code</h2><div class="tabs" role="group" aria-label="Language"><button type="button" aria-pressed="true" data-lang="curl">cURL</button><button type="button" aria-pressed="false" data-lang="js">JavaScript</button></div></div>
-${dashCode('play-code', '')}<p class="dash-small">The same call from your own code or agent: put a key from <a href="/dashboard/keys/">API keys</a> where it says <code>oc_YOUR_KEY</code>. It costs what a run here costs.</p></section>
-<section class="panel" aria-labelledby="runs-title"><div class="panel-head"><h2 id="runs-title">Recent runs</h2><a href="/dashboard/activity/">Activity →</a></div>${requestTable('runs', 5, 'No runs here yet. Each one shows here, and on Activity, with what it cost.')}</section>`
+<section class="pg-runs" aria-labelledby="runs-title"><pre class="pg-sea" id="pg-sea" aria-hidden="true"></pre><div class="pg-runs-head"><div><p class="pg-kicker">Receipts</p><h2 id="runs-title">Recent runs</h2></div><a href="/dashboard/activity/">Activity →</a></div><div class="receipts" id="run-cards"></div><p class="dash-small pg-runs-empty" id="runs-empty" hidden>No runs here yet. Each run leaves a receipt here and a line on Activity: what was read, what robots.txt allowed, what it cost and the SHA-256 of what came back.</p></section>
+</section>`
 }
 const accountBody = `<section class="panel" aria-labelledby="who-title"><div class="panel-head"><h2 id="who-title">Signed in</h2></div><dl class="facts">
 <dt>Email</dt><dd id="acct-email">…</dd>
@@ -571,8 +581,8 @@ for (const [path, title, lead, body] of [
   ['/dashboard/', 'Overview', 'This month\'s credits, the last 30 days of use, and the lines to connect an agent.', overviewBody],
   ['/dashboard/activity/', 'Activity', 'Every call made with your keys in the last 30 days: what was asked for, what came back, and what it cost.', activityBody],
   ['/dashboard/usage/', 'Usage', 'What the hosted API and MCP read for this account, day by day, and what it cost.', usageBody],
-  ['/dashboard/scrape/', 'Scrape', 'Read one page as Markdown, with its Evidence Record. Runs here spend this account\'s credits, at the API\'s price.', playgroundBody('scrape')],
-  ['/dashboard/map/', 'Map', 'List the URLs of a site from its sitemap and links. Runs here spend this account\'s credits, at the API\'s price.', playgroundBody('map')],
+  ['/dashboard/scrape/', 'Scrape', 'Read one page as Markdown, with its Evidence Record, on this account\'s credits at the API\'s price.', playgroundBody('scrape')],
+  ['/dashboard/map/', 'Map', 'List the URLs of a site from its sitemap and links, on this account\'s credits at the API\'s price.', playgroundBody('map')],
   ['/dashboard/keys/', 'API keys', 'Keys for agents and code. Each one spends this account\'s credits.', keysBody],
   ['/dashboard/connect/', 'Connect', 'One line for each MCP client, the REST call, and the free local server.', connectBody],
   ['/dashboard/account/', 'Account', 'Who is signed in, how, and this month\'s credits.', accountBody],

@@ -243,24 +243,89 @@ a:hover{color:#fff}
 .sources .mono{font:12.5px var(--mono);color:var(--muted)}
 .sources .dash-small{margin:4px 0 0}
 
-/* The Playground: a URL, its options, Run with what it costs; the result's views and the Evidence Record's facts. */
-.play-form{display:grid;gap:14px}
-.play-url{display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:600}
-.play-url input,.play-options input:not([type="checkbox"]){min-height:42px;padding:0 12px;border:1px solid var(--rule);border-radius:6px;background:var(--deep);color:var(--ink);font:inherit}
-.play-url input{font-family:var(--mono);font-size:14px}
-.play-options{display:flex;flex-wrap:wrap;align-items:end;gap:10px 18px;margin:0;padding:0;border:0}
-.play-options legend{margin-bottom:8px;padding:0;color:var(--muted);font:650 10.5px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase}
-.play-options label{display:flex;align-items:center;gap:7px;font-size:13.5px}
-.play-options label:has(input:not([type="checkbox"])){display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:600}
-.play-options input[type="checkbox"]{accent-color:var(--orange)}
-.play-options input[type="number"]{width:110px}
-.play-run{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
-.play-run p{flex:1 1 280px;margin:0}
+/* The Playground: one dark stage where the octopus in glyphs (dashboard-octopus.js) rises behind the home page's white
+   URL card; panels printed in the site's style; the result; the recent runs as receipts over a current of glyphs. */
+.pg{display:grid;gap:22px}
+.pg [hidden]{display:none!important}
+.pg-kicker{margin:0;color:var(--muted);font:650 10.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase}
+.pg-kicker::before{content:"■ ";color:var(--orange)}
+.pg-stage{position:relative;display:grid;justify-items:center;align-content:start;gap:14px;padding:var(--pg-lift,300px) 20px 26px;border:1px solid var(--rule);border-radius:16px;background:radial-gradient(120% 90% at 50% 0%,#0c2a74 0%,var(--navy) 55%,var(--deep) 100%)}
+.pg-depth{position:absolute;inset:0;overflow:hidden;border-radius:16px;pointer-events:none}
+.pg-octopus{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:auto;-webkit-mask-image:linear-gradient(to bottom,#000 70%,transparent);mask-image:linear-gradient(to bottom,#000 70%,transparent)}
+.pg-card{position:relative;z-index:2;width:min(660px,100%);border-radius:14px;background:#fff;color:#14254a;box-shadow:0 24px 70px rgba(1,8,30,.55),0 0 0 1px rgba(255,255,255,.6)}
+.pg-entry{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #e3e8f2}
+.pg-mode{display:flex;flex:none;padding:3px;border-radius:8px;background:#eef2f9}
+.pg-mode button{min-height:30px;padding:0 11px;border:0;border-radius:6px;background:none;color:#6b7c9e;font:650 12px var(--mono);letter-spacing:.04em;cursor:pointer}
+.pg-mode button:hover{color:#14254a}
+.pg-mode button[aria-checked="true"]{background:#14254a;color:#fff;box-shadow:0 1px 0 rgba(0,0,0,.25)}
+.pg-entry input{flex:1;min-width:0;min-height:40px;padding:0;border:0;background:none;color:#14254a;font:15px var(--mono);outline:none}
+.pg-entry input::placeholder{color:#8a98b5}
+.pg-toolbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px}
+.pg-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.pg-tool{display:flex;align-items:center;gap:7px;min-height:36px;padding:0 11px;border:1px solid #d9e0ec;border-radius:8px;background:#fff;color:#14254a;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.pg-tool:hover,.pg-tool[aria-expanded="true"]{border-color:var(--orange);color:#c4441c}
+.pg-glyph{color:var(--orange);font:650 12px var(--mono)}
+.pg-cost{color:#6b7c9e;font:12px var(--mono);cursor:help}
+.pg-go{display:flex;align-items:center;gap:10px;min-height:40px;padding:0 18px;border:0;border-radius:8px;background:var(--orange);color:#fff;font:inherit;font-weight:700;cursor:pointer}
+.pg-go:hover{background:#e2552a}
+.pg-go:disabled{opacity:.6;cursor:default}
+.pg-panel{position:absolute;top:calc(100% + 8px);left:12px;z-index:5;width:min(340px,calc(100% - 24px));display:grid;gap:10px;padding:16px;border:1px solid var(--rule);border-radius:14px;background:var(--deep);color:var(--ink);box-shadow:0 22px 60px rgba(1,8,30,.6)}
+.pg-panel.wide{width:min(620px,calc(100% - 24px))}
+.pg-panel .panel-head,.pg-panel .code,.pg-panel p{margin:0}
+.pg-check{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:14px}
+.pg-check input{accent-color:var(--orange)}
+.pg-check code{color:var(--muted);font:12px var(--mono)}
+.pg-check .dash-small{flex-basis:100%;margin-left:22px}
+.pg-fields{display:flex;flex-wrap:wrap;gap:10px}
+.pg-fields label{display:grid;gap:6px;color:var(--muted);font-size:13px;font-weight:600}
+.pg-fields input{min-height:38px;padding:0 10px;border:1px solid var(--rule);border-radius:6px;background:var(--navy);color:var(--ink);font:inherit}
+.pg-fields input[type="number"]{width:110px}
+.pg-note{position:relative;z-index:1;margin:0;padding:4px 10px;border-radius:6px;background:rgba(4,18,58,.85);color:var(--ink);font:12.5px var(--mono);text-align:center;text-shadow:0 1px 8px var(--deep)}
+.pg-note:empty{display:none}
+.pg-stage.is-running .pg-note{color:var(--orange-soft)}
+.pg-stage.is-running .pg-note::after{content:"";display:inline-block;width:3ch;text-align:left;animation:pg-dots 1.2s steps(4) infinite}
+@keyframes pg-dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+.pg-elsewhere{position:relative;z-index:1;margin:0;padding:6px 12px;border:1px solid var(--rule);border-radius:999px;background:rgba(4,18,58,.88);color:var(--muted);font-size:12.5px;text-align:center}
+.pg-elsewhere code{color:var(--ink);font:12px var(--mono)}
+.pg-elsewhere a{font:650 12px var(--mono);text-decoration:none}
+.pg-result{margin:0}
 .play-views{margin-bottom:12px}
 .play-evidence{margin:0 0 14px;padding:14px;border:1px dashed rgba(243,104,61,.5);border-radius:6px;background:var(--deep)}
-.play-evidence[hidden]{display:none}
 .play-evidence .mono{font:12.5px var(--mono)}
 .play-output{max-height:560px;overflow:auto}
+.pg-runs{position:relative;overflow:hidden;padding:22px;border:1px solid var(--rule);border-radius:16px;background:var(--deep)}
+.pg-sea{position:absolute;inset:0;margin:0;overflow:hidden;color:var(--orange);opacity:.26;font:12px/13px var(--mono);white-space:pre;pointer-events:none}
+.pg-runs-head{position:relative;display:flex;justify-content:space-between;align-items:end;gap:10px;margin-bottom:18px}
+.pg-runs-head h2{margin:8px 0 0;font-size:20px;font-weight:600}
+.pg-runs-head a{font:650 12px var(--mono);text-decoration:none}
+.pg-runs-empty{position:relative;max-width:62ch;margin:0}
+/* A receipt: paper, mono, dotted rules, a torn bottom edge; the paper is the octopus's cream. */
+.receipts{position:relative;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:18px;align-items:start}
+.receipt{min-width:0;padding:16px 16px 22px;background:#f6efe0;color:#1b2747;font:12.5px/1.5 var(--mono);box-shadow:0 14px 30px rgba(1,8,30,.45);-webkit-mask:radial-gradient(6px at 50% 100%,transparent 98%,#000) 50% 100%/12px 100% repeat-x;mask:radial-gradient(6px at 50% 100%,transparent 98%,#000) 50% 100%/12px 100% repeat-x}
+.receipt:nth-child(3n+2){transform:rotate(.6deg)}
+.receipt:nth-child(3n){transform:rotate(-.5deg)}
+.receipt-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:11px}
+.receipt-top span::before{content:"■ ";color:var(--orange)}
+.receipt-again{padding:2px 7px;border:1px solid #c9bea6;border-radius:5px;background:none;color:#1b2747;font:650 11px var(--mono);cursor:pointer}
+.receipt-again:hover{border-color:var(--orange);color:#c4441c}
+.receipt-url{margin:0 0 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px;font-weight:700}
+.receipt dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:3px 14px;margin:0;padding:10px 0;border-top:1px dashed #b9ad93;border-bottom:1px dashed #b9ad93}
+.receipt dt{color:#6d6553}
+.receipt dd{margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.receipt dd.ok{color:#17804f}
+.receipt dd.warn{color:#9a6a00}
+.receipt dd.bad{color:#b23a22}
+.receipt-hash{margin:10px 0 0;color:#6d6553;font-size:11px;overflow-wrap:anywhere}
+@media (prefers-reduced-motion:no-preference){
+  .pg-panel.is-printing{animation:pg-print .3s steps(20,end) backwards}
+  .pg-panel.is-printing::after{content:"";position:absolute;left:14px;right:14px;top:0;height:2px;background:radial-gradient(circle,var(--orange) 1px,transparent 1.5px) 0 0/6px 2px repeat-x;animation:pg-head .3s steps(20,end) forwards;pointer-events:none}
+  .pg-panel.is-printing>*,.pg-panel.is-printing .pg-check{animation:pg-row .01s backwards;animation-delay:calc(var(--row,0)*22ms + 40ms)}
+  .receipt.is-new{animation:pg-receipt .45s steps(9,end) backwards}
+}
+@keyframes pg-print{from{clip-path:inset(0 0 100% 0 round 14px)}to{clip-path:inset(0 0 0 0 round 14px)}}
+@keyframes pg-head{from{top:0;opacity:1}to{top:100%;opacity:0}}
+@keyframes pg-row{from{opacity:0}to{opacity:1}}
+@keyframes pg-receipt{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0)}}
 @media (max-width:900px){
   .dash{grid-template-columns:minmax(0,1fr)}
   .dash-side{position:static;height:auto;gap:12px;border-right:0;border-bottom:1px solid var(--rule)}
@@ -286,6 +351,11 @@ a:hover{color:#fff}
   .dash-head h1{font-size:28px}
 }
 @media (max-width:480px){
+  .pg-stage{padding-left:12px;padding-right:12px}
+  .pg-entry{flex-wrap:wrap}
+  .pg-entry input{flex-basis:100%}
+  .pg-toolbar>.pg-tools:last-child{flex:1 1 100%;justify-content:space-between}
+  .pg-runs{padding:14px}
   .dash-form{grid-template-columns:minmax(0,1fr)}
   .facts{grid-template-columns:minmax(0,1fr);gap:2px}
   .facts dd{margin-bottom:10px}
