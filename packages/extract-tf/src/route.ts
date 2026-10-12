@@ -754,11 +754,12 @@ function inSiteChrome(el: Element): boolean {
  * Listing strategy: the ordered/unordered list whose items share a common
  * link-plus-text shape. Returns the list element, or null. A list in the
  * page's footer or navigation is never the listing (inSiteChrome). A
- * container whose cards (isCard: a link and text of its own) are at least
- * twice the list's linked items is the listing instead: Amazon's home from
- * Singapore on 2026-10-12 put a 6-slide hero list above a deck of 26
- * category cards in divs. Bare links (a top bar, filters, a pager, a menu)
- * are not cards, so they never outweigh a list.
+ * container outside the list with no fewer cards (isCard: a link and text
+ * of its own) than the list has linked items, and twice the list's text, is
+ * the listing instead: Amazon's home from Singapore on 2026-10-12 put a
+ * 6-slide hero carousel (143 characters) above a deck of 9 to 27 category
+ * cards in divs (889 to 3,178), as many as had loaded. Bare links (a top bar,
+ * filters, a pager, a menu) are not cards, so they never outweigh a list.
  */
 export function selectList(doc: Document): Element | null {
   let best: Element | null = null
@@ -775,7 +776,11 @@ export function selectList(doc: Document): Element | null {
   // A row of cards inside the list (a shelf in a list of shelves) is part of it, not a rival.
   const list = best
   const grid = selectLinkedContainer(doc, isCard, (el) => list.contains(el))
-  return grid !== null && grid.linkedKids >= bestItems * 2 ? grid.el : best
+  if (grid === null) return best
+  // The grid needs as many cards as the list has items, and twice its text: a carousel showing one title at a time
+  // loses to a deck still loading its cards, a long index of links to a small grid does not.
+  const text = (el: Element) => textOf(el).replace(/\s+/g, ' ').trim().length
+  return grid.linkedKids >= bestItems && text(grid.el) >= text(best) * 2 ? grid.el : best
 }
 
 /**

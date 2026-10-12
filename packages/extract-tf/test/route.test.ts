@@ -879,10 +879,20 @@ describe('strategies', () => {
       expect(out.mainHtml).toContain('See more 25')
     })
 
-    it('keeps the list when the grid is not at least twice its size', () => {
-      for (const [items, grid] of [[6, 11], [8, 8], [12, 20]] as const) {
-        const doc = parse(wrap(`${slides(items)}<div id="grid">${cards(grid)}</div>`))
-        expect(selectList(doc.document)?.getAttribute('id'), `${items} items, ${grid} cards`).toBe('gwm-window')
+    it('takes the grid while it is half loaded: its cards against slides that are links alone', () => {
+      // The same home on 2026-10-12 read before its lazy cards came in: 9 cards after cleaning, 6 slides.
+      const doc = parse(wrap(`${slides(6)}<div id="gwm-Deck-btf">${cards(9)}</div>`))
+      expect(selectList(doc.document)?.getAttribute('id')).toBe('gwm-Deck-btf')
+      doc.close()
+    })
+
+    it('keeps the list when its own cards are not outweighed twice, or the grid has fewer cards than it has items', () => {
+      const posts = (n: number) =>
+        `<ul id="listing">${Array.from({ length: n }, (_, i) => `<li><a href="/p/${i}">Post ${i}</a> <span>2026-10-0${i % 9}</span></li>`).join('')}</ul>`
+      const bareLinks = (n: number) => `<ul id="listing">${Array.from({ length: n }, (_, i) => `<li><a href="/w/${i}">Page ${i}</a></li>`).join('')}</ul>`
+      for (const [list, grid] of [[posts(6), 11], [posts(8), 8], [posts(12), 20], [bareLinks(40), 9], [bareLinks(10), 9]] as const) {
+        const doc = parse(wrap(`${list}<div id="grid">${cards(grid)}</div>`))
+        expect(selectList(doc.document)?.getAttribute('id'), `${list.slice(0, 60)} vs ${grid} cards`).toBe('listing')
         doc.close()
       }
     })
