@@ -49,7 +49,7 @@ beforeEach(() => { requests = [] })
 
 const capture = (path: string) => {
   const url = { url: `${origin}${path}`, amazonAsin: null }
-  return capturePreview(url, new AbortController().signal, Date.now() + 20_000).then(outcome => ({ outcome, response: mapPreviewResult(url.url, url, outcome, 0) }))
+  return capturePreview(url, new AbortController().signal, Date.now() + 20_000, null).then(outcome => ({ outcome, response: mapPreviewResult(url.url, url, outcome, 0) }))
 }
 
 describe('the public preview identifies itself as OctoCrawl', () => {

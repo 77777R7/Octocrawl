@@ -28,7 +28,7 @@ describe('octocrawl login', () => {
     const calls: Parameters<typeof importChromeLogin>[0][] = []
     const fake: typeof importChromeLogin = async (options) => {
       calls.push(options)
-      return { domain: 'example.com', cookieCount: 4, sessionSha256: 'a'.repeat(64), sessionsFile: options.sessionsFile }
+      return { domain: 'example.com', cookieCount: 4, localStorage: null, localStorageRead: false, localStorageUnread: [], localStorageUnreadReasons: [], sessionSha256: 'a'.repeat(64), sessionsFile: options.sessionsFile }
     }
     const code = await login(['import', 'example.com', '--timeout', '30', '--chrome-user-data-dir', join(root, 'Chrome')], io(), fake)
     expect(code).toBe(0)

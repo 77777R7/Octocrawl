@@ -11,7 +11,7 @@ const GATE = '<html><body><div class="g-recaptcha" data-sitekey="k"></div></body
 const PAGE = `<html><body><article><h1>Page</h1>${'<p>Prose long enough to be the page. </p>'.repeat(4)}</article></body></html>`
 
 /** What the tab shows on one read; `active`: the person has clicked or typed on this document (its user activation, which only Chrome sets). */
-type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null; active?: boolean; hidden?: boolean; loading?: boolean; text?: number; region?: Record<string, unknown> }
+type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null; active?: boolean; hidden?: boolean; loading?: boolean; text?: number; region?: Record<string, unknown>; key?: string; next?: string }
 
 /**
  * A Chrome that shows the tab W2L opens as `states`, one per read, the last
@@ -108,9 +108,13 @@ describe('the person\'s Chrome', () => {
     const shown = await (await openUserChrome({ userDataDir, connect: fakeChrome(loading).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })
     expect(shown.html).toBe(PAGE)
     expect(shown.settle).toMatchObject({ loadingSeen: true, stillLoading: false, steady: true })
-    // A page settled at its first clear reads is read then, with no wait.
-    const still = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80 })]).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })
-    expect(still.settle).toMatchObject({ waitedMs: 0, loadingSeen: false, steady: true })
+    // A page settled at its first clear reads is read then, with no wait: on its third poll, with less than a poll counted
+    // as waited (the settle wait starts and ends on that poll, so a clock tick between the two may make it 1 ms, not 0).
+    const settled = fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80 })])
+    const still = await (await openUserChrome({ userDataDir, connect: settled.connect })).read('https://site.test/a', { pollMs: 200, waitMs: 5_000 })
+    expect(settled.calls.filter((call) => call === 'Target.getTargetInfo')).toHaveLength(3)
+    expect(still.settle).toMatchObject({ loadingSeen: false, steady: true })
+    expect(still.settle!.waitedMs).toBeLessThan(200)
   })
 
   it('reads a page still loading or changing when its settle wait ends as it is, and says so (ADR 0007)', async () => {
@@ -358,7 +362,7 @@ describe('the person\'s Chrome', () => {
     }
     const late = fakeChrome([])
     const controller = new AbortController()
-    const opening = openUserChrome({ userDataDir, connect: async (...args) => { controller.abort(); return late.connect(...(args as [])) } }, controller.signal)
+    const opening = openUserChrome({ userDataDir, connect: async () => { controller.abort(); return late.connect() } }, controller.signal)
     await expect(opening).rejects.toThrow('cancelled')
     expect(late.calls).toEqual(['close'])
   })

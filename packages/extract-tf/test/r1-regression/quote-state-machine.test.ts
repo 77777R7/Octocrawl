@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import allFailuresClassified from './all-failures-classified.json'
+import allFailuresClassified from './all-failures-classified.json' with { type: 'json' }
 
 /**
  * R1-C: Quote state machine regression tests

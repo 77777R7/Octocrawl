@@ -486,8 +486,8 @@ export interface CrawlStartRequest extends PageOptions, RequestAttribution {
   ignoreRobotsTxt?: boolean
 }
 
-/** What the parser hands the engine: the request plus, from the `/fc` shim, the payload shape its receiver expects. */
-export type ParsedCrawlStartRequest = CrawlStartRequest & { webhookPayloadFormat?: WebhookPayloadFormat }
+/** What the parser hands the engine: the request with its webhook read (a URL string as `{ url }`, null as none) plus, from the `/fc` shim, the payload shape its receiver expects. */
+export type ParsedCrawlStartRequest = Omit<CrawlStartRequest, 'webhook'> & { webhook?: WebhookConfig; webhookPayloadFormat?: WebhookPayloadFormat }
 
 /** A map's `limit` when the request names none, and the largest it may name: Firecrawl's documented default and maximum (read 2026-10-03). */
 export const DEFAULT_MAP_LIMIT = 5_000
@@ -653,8 +653,8 @@ export interface BatchStartRequest extends PageOptions, RequestAttribution {
   webhook?: WebhookOption
 }
 
-/** What the parser hands the engine: the request plus, when `ignoreInvalidURLs` was on, the entries it skipped (possibly none), and from a shim the payload shape its receiver expects. */
-export type ParsedBatchStartRequest = BatchStartRequest & { invalidURLs?: readonly string[]; webhookPayloadFormat?: WebhookPayloadFormat }
+/** What the parser hands the engine: the request with its webhook read (a URL string as `{ url }`, null as none) plus, when `ignoreInvalidURLs` was on, the entries it skipped (possibly none), and from a shim the payload shape its receiver expects. */
+export type ParsedBatchStartRequest = Omit<BatchStartRequest, 'webhook'> & { webhook?: WebhookConfig; invalidURLs?: readonly string[]; webhookPayloadFormat?: WebhookPayloadFormat }
 
 /**
  * `POST /v1/batches` 202: the task id and, when `ignoreInvalidURLs` was on,
@@ -2033,7 +2033,7 @@ export function parseScrapeRequest(body: unknown): ScrapeRequest {
   return req
 }
 
-export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
+export function parseCrawlStartRequest(body: unknown): ParsedCrawlStartRequest {
   const rec = asRecord(body)
   rejectUnknownKeys(rec, CRAWL_KEYS)
   const useCached = rec.useCached
@@ -2066,7 +2066,7 @@ export function parseCrawlStartRequest(body: unknown): CrawlStartRequest {
   const webhook = readWebhook(rec.webhook)
   const ignoreRobotsTxt = readBoolean(rec.ignoreRobotsTxt, 'ignoreRobotsTxt')
   const { access } = readAccessChoice(rec, false)
-  const req: CrawlStartRequest = {
+  const req: ParsedCrawlStartRequest = {
     url: readUrl(rec.url),
     mode,
     ...(access === undefined ? {} : { access: access as Exclude<AccessChoice, 'my-browser'> }),

@@ -272,7 +272,7 @@ describe('crawl lifecycle', () => {
     expect(data.filter((page) => page.metadata.error === undefined)).toHaveLength(page1.completed)
     expect((await second.getCrawl(taskId))?.discovery).toMatchObject({ duplicateContent: 1 })
     // The native page list leaves it out too, unless asked for.
-    const pathsOf = (items: Array<{ url: string }>) => items.map((item) => new URL(item.url).pathname).sort()
+    const pathsOf = (items: ReadonlyArray<{ url: string }>) => items.map((item) => new URL(item.url).pathname).sort()
     expect(pathsOf((await second.getCrawlPages(taskId, { limit: 10 }))!.items)).toEqual(['/', '/a', '/b', ...DOCUMENTS].sort())
     expect(pathsOf((await second.getCrawlPages(taskId, { limit: 10, includeDuplicates: true }))!.items)).toEqual(['/', ...LETTERS.filter((path) => path !== '/c'), ...DOCUMENTS].sort())
   })

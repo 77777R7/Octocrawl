@@ -131,7 +131,7 @@ describe('toEvidenceRecord', () => {
     // Another lane's events do not answer for this one.
     expect(access('http', [{ ...pool, lane: 'browser_local' }]).egress).toEqual({ proxy: null, source: 'direct', switchedFrom: null, exit: null })
     // A lane that stopped before any page request (robots, an address check) says nothing about the egress: unknown, not direct.
-    const stopped = (lane: FetchResult['lane'], trace: TraceEvent[]) => toEvidenceRecord(result({ lane, status: 'blocked', blockReason: 'robots_disallowed', evidence: { ...result().evidence, httpStatus: null } }, [ran('http'), ...trace]), { mode: 'standard' }, {}, { sourceCommit: null }).access
+    const stopped = (lane: FetchResult['lane'], trace: TraceEvent[]) => toEvidenceRecord(result({ lane, status: 'failed', failureReason: 'policy_denied', evidence: { ...result().evidence, httpStatus: null } }, [ran('http'), ...trace]), { mode: 'standard' }, {}, { sourceCommit: null }).access
     expect(stopped('http', [])).toMatchObject({ route: 'http', egress: null, session: null, paidCalls: null, grant: null })
   })
 

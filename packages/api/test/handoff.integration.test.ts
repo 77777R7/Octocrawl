@@ -4,11 +4,12 @@ import type { AddressInfo } from 'node:net'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium, type BrowserContext, type Page } from 'playwright'
+import type { BrowserContext, Page } from 'playwright'
 import { buildChannels } from '@w2l/bench'
 import { localNetworkPolicy, type CrawlPage } from '@w2l/contracts'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
 import { openUserChrome } from '../src/chromeHandoff.js'
+import { launchDebuggingChrome } from './debuggingChrome.js'
 
 /**
  * The handoff end to end: a batch stopped at a check, handed to "the person"
@@ -118,7 +119,7 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   root = await mkdtemp(join(tmpdir(), 'w2l-handoff-'))
   // "The person's Chrome": remote debugging on, so Chrome writes DevToolsActivePort in its user data directory.
-  chrome = await chromium.launchPersistentContext(join(root, 'chrome'), { args: ['--remote-debugging-port=0'] })
+  chrome = await launchDebuggingChrome(join(root, 'chrome'))
 }, 60_000)
 
 afterAll(async () => {
@@ -142,7 +143,7 @@ async function batchOf(engine: ApiEngine, paths: string[]): Promise<string> {
   throw new Error('batch did not finish')
 }
 
-async function itemsOf(engine: ApiEngine, taskId: string): Promise<CrawlPage[]> {
+async function itemsOf(engine: ApiEngine, taskId: string): Promise<readonly CrawlPage[]> {
   return (await engine.getBatchItems(taskId, { limit: 50, debug: true }))!.items
 }
 
@@ -557,7 +558,7 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
   }, 120_000)
 
   it('a Chrome that quits during the wait ends the handoff, and the batch can be handed over again', async () => {
-    const quitting = await chromium.launchPersistentContext(join(root, 'chrome-quits'), { args: ['--remote-debugging-port=0'] })
+    const quitting = await launchDebuggingChrome(join(root, 'chrome-quits'))
     const engine = engineFor(join(root, 'tasks-4'), join(root, 'chrome-quits'))
     try {
       const taskId = await batchOf(engine, ['/gate', '/dd'])

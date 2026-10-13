@@ -30,7 +30,7 @@ function scripted(steps: Array<ResilientResponseLike | Error>): ResilientFetcher
     if (!step) throw new Error(`scripted fetcher exhausted at ${url}`)
     if (step instanceof Error) throw step
     return step
-  }) as ResilientFetcher & { calls: string[] }
+  }) as ResilientFetcher as ResilientFetcher & { calls: string[] }
   fetcher.calls = calls
   return fetcher
 }

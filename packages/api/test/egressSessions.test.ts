@@ -94,7 +94,7 @@ async function batch(capabilities: string[], extra: Record<string, unknown> = {}
     report = await engine.getBatch(taskId)
   }
   const items = (await engine.getBatchItems(taskId, { limit: 10, debug: true }))!.items
-  return { report, items: Object.fromEntries(items.map((item) => [new URL(item.url).pathname, item])) as Record<string, Record<string, unknown> & { status: string; trace?: { event: string; detail?: Record<string, unknown> }[] }> }
+  return { report, items: Object.fromEntries(items.map((item) => [new URL(item.url).pathname, item])) }
 }
 
 describe('egress_sessions: a batch keeps its cookies for its site', () => {

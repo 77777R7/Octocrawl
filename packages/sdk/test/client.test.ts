@@ -419,7 +419,7 @@ describe('W2L SDK', () => {
     expect(posts.map((call) => (call.body as { urls: string[] }).urls.length)).toEqual([1000, 1000, 500])
     expect(posts[0]?.body).toMatchObject({ formats: ['markdown'], origin: SDK_ORIGIN })
     expect(calls.slice(0, 3).map((call) => call.line)).toEqual(['POST /v1/batches', 'GET /v1/batches/batch-0', 'GET /v1/batches/batch-0/items?limit=50'])
-    expect(calls.findIndex((call) => call.line === 'GET /v1/batches/batch-1')).toBeGreaterThan(calls.findLastIndex((call) => call.line.startsWith('GET /v1/batches/batch-0/items')))
+    expect(calls.findIndex((call) => call.line === 'GET /v1/batches/batch-1')).toBeGreaterThan(Math.max(...calls.map((call, index) => call.line.startsWith('GET /v1/batches/batch-0/items') ? index : -1)))
     expect(calls.filter((call) => call.line.startsWith('GET /v1/batches/batch-0/items'))).toHaveLength(20)
     // An append is a different call; a job that never completes surfaces the wait's error, naming the job.
     await expect(client.batchScrapeChunked(urls, { appendToId: 'batch-1' } as unknown as Record<string, never>)).rejects.toThrow('batchScrapeChunked cannot append; use appendToBatch')

@@ -63,7 +63,7 @@ function scrape(partial: Partial<FetchResult> & Pick<FetchResult, 'status' | 're
   const result = page(partial)
   const { creditsUsed: _credits, ...facts } = CALL_FACTS
   return {
-    ...result, ...extra, scrapeId: SCRAPE_ID, channelsTried: ['http'], ladderTrace: [],
+    ...result, ...extra, scrapeId: SCRAPE_ID, readiness: { state: 'ready', basis: [] }, channelsTried: ['http'], ladderTrace: [],
     summary: { channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: null, externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 0, unknown: true }, artifacts: [] },
     metadata: {
       title: null, description: null, language: null, keywords: null, robots: null, favicon: null, canonicalUrl: null, ...result.metadata,
@@ -406,6 +406,9 @@ describe('Firecrawl v1 shim snapshot 2026-09-18', () => {
       cachedPages: 0,
       budgetExceeded: null,
       loopDetected: false,
+      wallMs: 0,
+      costUsd: null,
+      contentTokens: null,
       discovery: null,
     }
     const steps: StepRecord[] = [

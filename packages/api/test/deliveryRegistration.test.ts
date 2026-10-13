@@ -26,7 +26,7 @@ describe('atomic delivery destination registration', () => {
     const outcome: ScrapeOutcome = { result: { requestedUrl: revision.url, status: 'success', failureReason: null, blockReason: null, budgetExceeded: null, lane: 'http', escalations: [], markdown: '# Product\n\n## Price\n10.00', truncated: false, truncatedAt: null, compliance: null, evidence: { finalUrl: revision.url, httpStatus: 200, redirectChain: [], contentType: 'text/html', rawBodySha256: 'sample', artifacts: [] }, usage: { wallMs: 1, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 1, browserMs: 0, externalCostUsd: null }, trace: [] }, links: [] }
     const initial = await runConfiguredMonitor(monitor, revision, async () => outcome, 'historical-event')
     expect(initial.events).toHaveLength(1)
-    const db = new Database(dbPath); cleanups.push(() => db.close())
+    const db = new Database(dbPath); cleanups.push(() => { db.close() })
     db.exec("CREATE TRIGGER reject_historical_delivery BEFORE INSERT ON webhook_deliveries BEGIN SELECT RAISE(ABORT,'injected historical enqueue failure'); END")
     const app = createApp(engine)
     const body = JSON.stringify({ id: 'atomic-receiver', monitorId: revision.monitorId, url: 'https://receiver.example/webhook' })

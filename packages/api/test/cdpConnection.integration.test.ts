@@ -2,8 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium, type BrowserContext } from 'playwright'
+import type { BrowserContext } from 'playwright'
 import { chromeEndpoint, connectCdp, type CdpConnection } from '../src/chromeLogin.js'
+import { launchDebuggingChrome } from './debuggingChrome.js'
 
 /**
  * The connection to the person's Chrome, in real Chromium, when a tab W2L
@@ -18,7 +19,7 @@ let connection: CdpConnection
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), 'w2l-cdp-'))
-  chrome = await chromium.launchPersistentContext(join(root, 'chrome'), { args: ['--remote-debugging-port=0'] })
+  chrome = await launchDebuggingChrome(join(root, 'chrome'))
   connection = await connectCdp(await chromeEndpoint(join(root, 'chrome')), 10_000)
 }, 60_000)
 

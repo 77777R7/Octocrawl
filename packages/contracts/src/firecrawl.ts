@@ -314,7 +314,7 @@ export function parseFirecrawlCrawlRequest(body: unknown): ParsedCrawlStartReque
   // Firecrawl's webhook (a string, or { url, headers, metadata, events }) is the native option; the native parser checks it, and the receiver gets Firecrawl's payload shape.
   if (rec.webhook !== undefined) native.webhook = rec.webhook
   const parsed = parseCrawlStartRequest(native)
-  return parsed.webhook === undefined || parsed.webhook === null ? parsed : { ...parsed, webhookPayloadFormat: 'firecrawl' }
+  return parsed.webhook === undefined ? parsed : { ...parsed, webhookPayloadFormat: 'firecrawl' }
 }
 
 /** What `/fc/v1/map` takes: Firecrawl's v1 MapParams and the v2 names it maps; anything else is refused by name (useIndex, location, ignoreCache, threatProtection, auditMetadata, ...). */

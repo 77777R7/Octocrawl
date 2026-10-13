@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { evaluateHostname } from '@w2l/contracts'
 import { createLocalService, localConfigFromEnv } from '../src/localHost.js'
 
@@ -70,7 +71,7 @@ it('serves all tools on loopback and preserves Monitor state across MCP connecti
   const second=await connect()
   try {
     const view=await second.callTool({name:'get_monitor',arguments:{id:'firecrawl-introduction'}})
-    const item=view.content?.find(entry=>entry.type==='text')
+    const item=(view.content as CallToolResult['content']|undefined)?.find(entry=>entry.type==='text')
     expect(item?.type).toBe('text')
     if(item?.type==='text')expect(JSON.parse(item.text)).toMatchObject({enabled:false})
   } finally {await second.close()}

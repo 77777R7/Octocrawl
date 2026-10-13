@@ -48,19 +48,19 @@ describe('the compatible transport keeps the lane timeouts', () => {
   it('reads a body that keeps arriving for longer than both timeouts together', async () => {
     const transport = new CompatTransport(localNetworkPolicy())
     const res = await transport.fetch(`${origin}/trickle`, { headersTimeoutMs: 300, bodyTimeoutMs: 600, capFor: () => 1_000_000 })
-    expect((await res.bodyBytes()).byteLength).toBe(1500)
+    expect((await res.bodyBytes!()).byteLength).toBe(1500)
   })
 
   it("hands the caller's deadline to impit, whose own limit would otherwise be 30 s", async () => {
     const transport = new CompatTransport(localNetworkPolicy())
     // impit's limit is the deadline plus 1 s (2 s here); the body takes 4 s.
     const res = await transport.fetch(`${origin}/trickle-long`, { headersTimeoutMs: 300, bodyTimeoutMs: 600, capFor: () => 1_000_000, deadlineAt: Date.now() + 1000 })
-    await expect(res.bodyBytes()).rejects.toMatchObject({ name: 'BodyTimeoutError' })
+    await expect(res.bodyBytes!()).rejects.toMatchObject({ name: 'BodyTimeoutError' })
   })
 
   it('reports a body that stops arriving as a body timeout', async () => {
     const transport = new CompatTransport(localNetworkPolicy())
     const res = await transport.fetch(`${origin}/trickle`, { headersTimeoutMs: 300, bodyTimeoutMs: 50, capFor: () => 1_000_000 })
-    await expect(res.bodyBytes()).rejects.toMatchObject({ name: 'BodyTimeoutError' })
+    await expect(res.bodyBytes!()).rejects.toMatchObject({ name: 'BodyTimeoutError' })
   })
 })

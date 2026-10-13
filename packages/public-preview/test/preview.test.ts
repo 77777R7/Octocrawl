@@ -49,7 +49,7 @@ describe('anonymous preview contract', () => {
       ['https://www.amazon.sg/dp/B0D4DHBFFH', 'amazon_sg_product', 'browser_local'],
       ['https://x.com/alice/status/222', 'x_public_post', 'http'],
       ['https://www.reddit.com/r/test/comments/abc123/story/', 'reddit_public_post', 'http'],
-    ]) {
+    ] as const) {
       const response = await fetch(`${url}/api/capability?url=${encodeURIComponent(input)}`)
       expect(response.status).toBe(200)
       expect(response.headers.get('set-cookie')).toBeNull()
@@ -369,7 +369,7 @@ describe('anonymous preview contract', () => {
   it('distinguishes a directly observed substitute subject from an unverified quote', () => {
     const target = normalizePreviewUrl('https://www.amazon.sg/dp/B0D4DHBFFH')
     const outcome = fixture(target.url, true)
-    const json: StructuredExtractionResult = { status: 'incomplete', data: { asin: 'B0D4DHBFFH', currency: 'SGD', deliveryLocation: 'Singapore 238823' }, evidence: [], issues: [{ code: 'missing', path: '/price', message: 'missing' }] }
+    const json: StructuredExtractionResult = { status: 'incomplete', data: { asin: 'B0D4DHBFFH', currency: 'SGD', deliveryLocation: 'Singapore 238823' }, evidence: [], issues: [{ code: 'field_unavailable', path: '/price', message: 'missing' }] }
     expect(mapPreviewResult(target.url, target, { ...outcome, json }, 20).diagnostic).toMatchObject({ code: 'quote_unverified', stage: 'field' })
     expect(mapPreviewResult(target.url, target, { ...outcome, selectedAsin: 'B000000000', json }, 20)).toMatchObject({ status: 'incomplete', diagnostic: { code: 'subject_mismatch', evidence: 'observed' }, product: { data: null } })
   })

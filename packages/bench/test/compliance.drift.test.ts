@@ -98,7 +98,7 @@ describe('compliance structural subsets match the contract', () => {
             path: '/',
             httpOnly: true,
             secure: true,
-            sameSite: 'lax',
+            sameSite: 'Lax',
           },
         ],
       },

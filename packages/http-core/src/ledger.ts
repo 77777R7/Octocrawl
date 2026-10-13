@@ -22,10 +22,15 @@ import { buildComplianceRecord, type ComplianceMode, type ComplianceRecord, type
 // Structural subset of @w2l/contracts ComplianceLedger (see compliance.ts).
 // ---------------------------------------------------------------------------
 
+/** A built record, signed afterwards or not: the signature is not hashed, so a signed record verifies the same. */
+export type LedgerRecordShape = Omit<ComplianceRecord, 'signature'> & {
+  signature: { scheme: string; keyId: string; value: string } | null
+}
+
 export interface ComplianceLedgerShape {
   runId: string
   mode: ComplianceMode
-  records: readonly ComplianceRecord[]
+  records: readonly LedgerRecordShape[]
 }
 
 /**

@@ -135,7 +135,7 @@ describe('the my-browser lane', () => {
   }
   const schema = JSON.parse(readFileSync(fileURLToPath(new URL('../../contracts/schemas/evidence-record.v1.json', import.meta.url)), 'utf8'))
   const valid = (record: unknown) => {
-    const check = new Ajv2020({ strict: false }).compile(schema)
+    const check = new (Ajv2020 as unknown as new (options: object) => { compile(schema: object): ((data: unknown) => boolean) & { errors?: unknown } })({ strict: false }).compile(schema)
     expect(check(record), JSON.stringify(check.errors)).toBe(true)
     return record as Record<string, any>
   }
@@ -289,7 +289,7 @@ describe('the my-browser lane in a batch', () => {
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
     const items = (await (await app.request(`/v1/batches/${id}/items?debug=true`)).json() as { items: Array<Record<string, any>> }).items
-    return { report: await (await app.request(`/v1/batches/${id}`)).json() as Record<string, any>, items: Object.fromEntries(items.map((item) => [item.url, item])) }
+    return { report: await (await app.request(`/v1/batches/${id}`)).json() as Record<string, any>, items: Object.fromEntries(items.map((item) => [String(item.url), item] as const)) }
   }
 
   it('asks the person once for every site of the batch, then reads each page in their Chrome, one at a time', async () => {

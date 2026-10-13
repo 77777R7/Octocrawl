@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import Ajv2020 from 'ajv/dist/2020.js'
-import { localNetworkPolicy, type CrawlPage, type EvidenceRecord, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
+import { localNetworkPolicy, type CrawlPage, type EvidenceRecord, type FetchResult, type JsonFormatRequest, type NetworkPolicy } from '@w2l/contracts'
 import { FILE_TEXT_VERSION, PDF_TEXT_VERSION } from '@w2l/extract-tf'
 import { textPdf } from '@w2l/fixtures'
 import { sha256Utf8 } from '@w2l/http-core'
@@ -139,7 +139,7 @@ describe('file download on scrape', () => {
   })
 
   it('reads JSON fields from Label: value lines of the PDF with their page, and never asks a model', async () => {
-    const format = { type: 'json' as const, schema: { type: 'object', properties: { portfolioPue: { type: 'number' }, reportingYear: { type: 'integer' }, owner: { type: 'string' } }, required: ['portfolioPue', 'owner'] } }
+    const format: JsonFormatRequest = { type: 'json', schema: { type: 'object', properties: { portfolioPue: { type: 'number' }, reportingYear: { type: 'integer' }, owner: { type: 'string' } }, required: ['portfolioPue', 'owner'] } }
     const body = await scrape({ url: `${origin}/report.pdf`, formats: [format] })
     expect(body.json).toMatchObject({ status: 'incomplete', data: { portfolioPue: 1.32, reportingYear: 2024 }, issues: [{ code: 'missing_required', path: '/owner' }] })
     expect(valid(body.evidenceRecord).fieldEvidence).toEqual({
