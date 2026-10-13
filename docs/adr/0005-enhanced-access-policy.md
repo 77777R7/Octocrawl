@@ -56,6 +56,7 @@ Patchright 与 `own_fingerprint_patches` 的区别：Patchright 是维护中的�
 | `compatible_transport` | standard | 否 | 浏览器兼容的 HTTP 传输（impit） |
 | `egress_sessions` | standard | 否 | 用户自己的代理组成的会话：出口、cookie、profile 绑定，有界切换 |
 | `enhanced_browser` | enhanced | 否 | Patchright，只用于 Octocrawl 自有的浏览器实例和 profile |
+| `installed_chrome` | enhanced | 否 | 本机已安装的 Google Chrome，按 nodriver 的方式启动，通过原生 CDP 驱动（不经 Playwright），每个任务一个新的临时 profile；只在本地运行、有窗口（见修订 2026-10-13） |
 | `vendor_remote_browser` | enhanced | 是 | 远程浏览器厂商（Browserbase、Steel） |
 | `vendor_unlock_html` | enhanced | 是 | 只返回 HTML 的解锁类厂商 |
 | `vendor_captcha_solving` | enhanced | 是 | 厂商内置的验证码求解 |
@@ -91,4 +92,32 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - 价目表（`VendorTariff`）加 `perGbUsd` 与 `maxBytesPerCall`、`perSolveUsd` 与 `maxSolvesPerCall`，有单价必须有上限，取代此前对按 GB 计价的一律拒绝；grant 列了 `vendor_residential_proxy` 或 `vendor_captcha_solving` 时，它命名的每个价目表都必须写明对应单价（套餐已含则写 0），否则 grant 被拒绝。字节上限由本方在页面上按 CDP 计数执行，结算按厂商释放后报告的数字（Steel 的 `proxyBytesUsed`，代理侧双向计量）；超出上限按实收并在记录里标 `overCeiling`。求解次数厂商侧封不住，同样按报告数结算、超出标记。
 - Steel 的请求体从此始终显式写 `useProxy`：有 grant 时 `{ geolocation: { country } }`，否则 `false`。「本 ADR 合入时的边界」里"没有 grant 时请求体与 `a48c9c4` 逐字相同"一句自此不再成立，差别只有这一个字段；Browserbase 不变。
 - 每次付费调用的记录（`access.paidCalls[]`）加 `proxyBytes`、`solves`、`proxyCountry`。
+
+## 修订 2026-10-13：本机 Chrome 经原生 CDP 进入 grant（ROADMAP PA item 5）
+
+**背景。** 2026-10-12，PA 的 16 道挑战页题（8 道 Cloudflare、7 道 DataDome，另有 2 道没有厂商头）在本 ADR 允许的全部手段内都没有通过：undici、impit、Playwright、Patchright、Steel 的浏览器、住宅出口、Steel 的求解。Browserbase `verified` 只有企业版有。2026-10-13 的三份库级探测都只用于测量，不是产品运行：
+
+- [Camoufox 与 nodriver](../../research/access/runs/2026-10-13-library-probe-stealth-16-8c91ac43.md)
+- [Node 原生 CDP](../../research/access/runs/2026-10-13-library-probe-cdp-16-b8d4efaa.md)
+- [重跑](../../research/access/runs/2026-10-13-library-probe-cdp-repeat-44e9498e.md)
+
+它们发现，用 Node 启动本机已安装的 Chrome，按 nodriver 0.50.6 的参数（`--remote-debugging-host=127.0.0.1` 加固定端口，以及它的默认参数），通过原生 CDP（`Page.navigate`、`Runtime.evaluate`，不发 `Runtime.enable`、不用 Network 域，不经 Playwright）驱动，在产品自己的机房出口上：
+
+- 有窗口时，两次分别有 13 道和 11 道通过数据检查，两次都过的有 11 道；
+- 无头时只过 1 道；
+- 同样有窗口的原版 Playwright 只过 1 道；
+- 用 `--remote-debugging-port=0` 启动时，Cloudflare 在 9 次变体里都没放行，即使全程没有 CDP 连接；原因没有查清。
+
+**分类。** 这条路线不改指纹，也不打 CDP 补丁：浏览器是原版 Chrome，参数是公开的启动参数，区别只在驱动方式。所以它不属于第 2 类的 `own_fingerprint_patches` 或 `own_browser_engine`，也不是 `camoufox`。它和 Patchright 一样进入第 3 类，能力名 `installed_chrome`，最低档位 enhanced，没有第三方费用，必须带 attestation。
+
+**使用条件。** 实现时必须满足：
+
+- **只在本地运行。** 托管服务拒绝它，和 `enhanced_browser` 一样。托管场景需要虚拟显示（Xvfb），未经测量之前不开放。
+- **有窗口。** 它会在使用者的机器上打开 Chrome 窗口，grant 的 attestation 要写明这一点。无头模式不作为这条路线提供，因为测量显示无效。
+- **每个任务一个新的临时 profile，放在 Octocrawl 的任务目录下，用完删除。** 永远不用使用者自己的 Chrome profile。读取使用者自己的 Chrome 是 `my-browser` 通道；修改它属于第 1 类 `patch_user_chrome`，仍然永不做。
+- **启动参数固定为测量过的那一组**，不加入自研的指纹或补丁。改参数要先在 16 道题上重新测量。
+- **与其他浏览器 rung 走同一套规则：** URL 检查、robots.txt、限速、预算、Evidence Record。记录里写明路线、Chrome 版本、有窗口，以及启动方式。
+- **不做请求拦截。** 一份 DataDome 报告把拦截列为检测信号，所以先不做。
+
+**本修订合入时的边界。** 只有能力名和规则进入代码（`AUTHORIZABLE` 加 `installed_chrome`）：grant 可以列它，但还没有任何 rung 使用它，列了也不会改变行为。路线的实现、它在 Evidence Record `access` 块里的路线名，以及验收（产品在 16 道题上至少跑两次，并且健康组和真实站点批次不退步）属于后续工作。`camoufox` 仍然暂缓：它在同样 16 道题上只过 7 道，这条路线更好，也更便宜。
 

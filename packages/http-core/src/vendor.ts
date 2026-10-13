@@ -151,6 +151,8 @@ export const AUTHORIZABLE = [
   { capability: 'compatible_transport', tier: 'standard', thirdPartyCost: false },
   { capability: 'egress_sessions', tier: 'standard', thirdPartyCost: false },
   { capability: 'enhanced_browser', tier: 'enhanced', thirdPartyCost: false },
+  // The installed Chrome, launched as nodriver launches it and driven over raw CDP, headed, local only (ADR 0005, 2026-10-13).
+  { capability: 'installed_chrome', tier: 'enhanced', thirdPartyCost: false },
   { capability: 'vendor_remote_browser', tier: 'enhanced', thirdPartyCost: true },
   { capability: 'vendor_residential_proxy', tier: 'enhanced', thirdPartyCost: true },
   { capability: 'vendor_unlock_html', tier: 'enhanced', thirdPartyCost: true },

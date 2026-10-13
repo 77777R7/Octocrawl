@@ -108,6 +108,15 @@ describe('normalizeAccessGrant', () => {
     expect(r).toEqual({ ok: false, problems: [expect.objectContaining({ field: 'attestation', kind: 'attestation_required' })] })
   })
 
+  it('takes installed_chrome as an enhanced, attested capability with no budget (ADR 0005, 2026-10-13)', () => {
+    expect(normalizeAccessGrant({ tier: 'standard', capabilities: ['installed_chrome'], attestation: ATTESTATION }))
+      .toEqual({ ok: false, problems: [expect.objectContaining({ field: 'capabilities.installed_chrome', kind: 'tier_too_low' })] })
+    expect(normalizeAccessGrant({ tier: 'enhanced', capabilities: ['installed_chrome'] }))
+      .toEqual({ ok: false, problems: [expect.objectContaining({ field: 'attestation', kind: 'attestation_required' })] })
+    const ok = normalizeAccessGrant({ tier: 'enhanced', capabilities: ['installed_chrome'], attestation: ATTESTATION })
+    expect(ok.ok && ok.grant.capabilities).toEqual(['installed_chrome'])
+  })
+
   it('reports every problem, not just the first', () => {
     const r = normalizeAccessGrant({
       tier: 'premium',
