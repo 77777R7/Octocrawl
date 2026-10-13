@@ -203,7 +203,9 @@ async function waitOutChallenge(page: Page, documents: MainFrameDocuments, respo
     const body = await page.content().catch(() => null)
     // A page in the middle of loading the next document is not judged: it is read again on the next poll.
     if (body === null) return undefined
-    return classifyGate({ status: answered?.status() || 200, header: (name) => answered?.headers()[name.toLowerCase()] ?? null, body })
+    // Only decisive evidence (a vendor's challenge header or plumbing, its widget, a wall): a page that merely loads a
+    // captcha script for a form, or says "please wait", is no check to wait out, and would never stop looking like one.
+    return classifyGate({ status: answered?.status() || 200, header: (name) => answered?.headers()[name.toLowerCase()] ?? null, body, contentful: true })
   }
   const first = await raceWithSignal(gateNow(), signal)
   if (first === undefined || first === null || !WAITABLE_GATES.has(first.reason)) return null

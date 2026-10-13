@@ -22,6 +22,7 @@ beforeAll(async () => {
   server = await startFixtureServer()
   attacker = createServer((req, res) => {
     if (req.url?.startsWith('/clears') && (req.headers.cookie ?? '').includes('cleared=1')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ARTICLE); return }
+    if (req.url?.startsWith('/widget')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ARTICLE.replace('</main>', '</main><script src="https://www.google.com/recaptcha/api.js?render=abc"></script><noscript>Please enable JavaScript</noscript><p>Please wait</p>')); return }
     if (req.url?.startsWith('/clears') || req.url?.startsWith('/holds')) {
       const script = req.url.startsWith('/clears') ? `<script>setTimeout(() => { document.cookie = 'cleared=1; path=/'; location.reload() }, 1500)</script>` : ''
       res.writeHead(403, { 'content-type': 'text/html', 'cf-mitigated': 'challenge' }); res.end(CHALLENGE + script); return
@@ -121,6 +122,12 @@ describe('installed_chrome: the browser lane on it', () => {
       expect(held).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge' })
       expect(held.trace).toContainEqual(expect.objectContaining({ event: 'challenge_wait', detail: expect.objectContaining({ outcome: 'still_gated' }) }))
       expect(Date.now() - started).toBeLessThan(12_000)
+      // An ordinary page that loads a captcha script for a form, or says "please wait", is not waited on.
+      const widgetStarted = Date.now()
+      const widget = await subject.fetch(`${attackerUrl}widget`)
+      expect(widget.status).toBe('success')
+      expect(widget.trace.some((event) => event.event === 'challenge_wait')).toBe(false)
+      expect(Date.now() - widgetStarted).toBeLessThan(15_000)
     } finally {
       await subject.teardown()
     }
