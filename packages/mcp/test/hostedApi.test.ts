@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
-import { createHostedApi, fromClaude, keyDigest, MemoryHostedKeys, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord } from '../src/hostedApi.js'
+import { BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, fromClaude, keyDigest, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore } from '../src/hostedCredits.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
 
@@ -23,6 +23,7 @@ beforeAll(async () => {
   site = createServer((req, res) => {
     if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /private\nAllow: /\n')
     if (req.url === '/missing') return void res.writeHead(404, { 'content-type': 'text/html' }).end('<!doctype html><title>Not found</title><h1>Not found</h1>')
+    if (req.url === '/slow') return void setTimeout(() => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE), 1_500)
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE)
   })
   site.listen(0, '127.0.0.1'); await once(site, 'listening')
@@ -41,16 +42,16 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; claudeDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; credits?: CreditsStore | null } = {}) {
+async function start(options: { keylessDaily?: number; claudeDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
   const records = new Map(Object.entries(options.keys ?? {}).map(([key, record]) => [keyDigest(HASH_KEY, key), record]))
   const quota = new MemoryHostedQuota()
   const service = createHostedApi({
-    port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: new MemoryHostedKeys(records), quota,
+    port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: options.keyStore ?? new MemoryHostedKeys(records), quota, leases: options.leases,
     ...(options.credits === null ? {} : { credits: options.credits ?? new MemoryCreditsStore() }),
     keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: 100, proxySecret: options.proxySecret,
-    networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: () => {},
+    networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: options.log ?? (() => {}),
   })
   close = service.close
   if (!service.server.listening) await once(service.server, 'listening')
@@ -245,6 +246,124 @@ it('an account\'s key spends credits by what each result returned, and says what
   // The site's daily total still counts every start; no per-key daily counter is kept for an account.
   expect([...credits.site.values()]).toEqual([7])
   expect(quota.counts.size).toBe(0)
+})
+
+it('a key revoked while its lookup is cached stops at its next start; reading a result still uses the cache', async () => {
+  // A store that answers from its cache unless asked for a fresh read, as FirestoreHostedKeys does.
+  const stored = new Map<string, HostedKeyRecord>([[keyDigest(HASH_KEY, 'oc_soon_off'), { enabled: true, plan: 'free', dailyLimit: 5, browser: false }]])
+  const cache = new Map<string, HostedKeyRecord | null>()
+  const asked: boolean[] = []
+  const keyStore: HostedKeys = {
+    async lookup(hash, options) {
+      asked.push(options?.fresh === true)
+      if (options?.fresh !== true && cache.has(hash)) return cache.get(hash)!
+      const record = stored.get(hash) ?? null
+      cache.set(hash, record)
+      return record
+    },
+  }
+  const { url } = await start({ keyStore })
+  const first = await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_soon_off' })
+  expect(first.status).toBe(200)
+  const { scrapeId } = await first.json() as { scrapeId: string }
+  stored.set(keyDigest(HASH_KEY, 'oc_soon_off'), { enabled: false, plan: 'free', dailyLimit: 5, browser: false })
+  expect((await fetch(`${url}/v1/scrapes/${scrapeId}`, { headers: { authorization: 'Bearer oc_soon_off' } })).status).toBe(200)
+  const revoked = await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_soon_off' })
+  expect(revoked.status).toBe(401)
+  expect(asked).toEqual([true, false, true])
+})
+
+it('a key runs one browser-lane scrape at a time; a second waits with Retry-After, fastMode does not, and the lease is freed after', async () => {
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ leases, keys: { oc_browser: { enabled: true, plan: 'free', dailyLimit: 20, browser: true } } })
+  const auth = { authorization: 'Bearer oc_browser' }
+  const running = post(url, '/v1/scrape', { url: `${origin}/slow` }, auth)
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  const busy = await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)
+  expect(busy.status).toBe(429)
+  expect(Number(busy.headers.get('retry-after'))).toBeGreaterThanOrEqual(1)
+  expect(Number(busy.headers.get('retry-after'))).toBeLessThanOrEqual(BROWSER_BUSY_RETRY_MAX_S)
+  expect(await busy.json()).toMatchObject({ code: 'browser_busy' })
+  // Over HTTP alone the same key is not held back, and map never is.
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page`, fastMode: true }, auth)).status).toBe(200)
+  expect((await post(url, '/v1/map', { url: `${origin}/page` }, auth)).status).toBe(200)
+  expect((await running).status).toBe(200)
+  expect(leases.held.size).toBe(0)
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)).status).toBe(200)
+})
+
+it('logs each key start per key and UTC day by the digest\'s prefix, never the key, and nothing for keyless calls', async () => {
+  const lines: string[] = []
+  const { url } = await start({ log: (line) => lines.push(line), keys: { oc_logged_key: { enabled: true, plan: 'trial', dailyLimit: 5, browser: false } } })
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_logged_key' })).status).toBe(200)
+  expect((await post(url, '/v1/map', { url: `${origin}/page` }, { authorization: 'Bearer oc_logged_key' })).status).toBe(200)
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` })).status).toBe(200)
+  const usage = lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.event === 'hosted_usage')
+  const day = new Date().toISOString().slice(0, 10)
+  expect(usage).toEqual([
+    { severity: 'INFO', event: 'hosted_usage', key: keyDigest(HASH_KEY, 'oc_logged_key').slice(0, 16), plan: 'trial', endpoint: 'scrape', day },
+    { severity: 'INFO', event: 'hosted_usage', key: keyDigest(HASH_KEY, 'oc_logged_key').slice(0, 16), plan: 'trial', endpoint: 'map', day },
+  ])
+  expect(lines.join('\n')).not.toContain('oc_logged_key')
+})
+
+/** A Firestore REST stand-in: documents by name, reads, and commits whose preconditions are checked, as the service's stores use them. */
+function fakeFirestore() {
+  const docs = new Map<string, { fields: Record<string, unknown>; updateTime: string }>()
+  let clock = 0
+  const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+    const href = String(input)
+    if (href.startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token', expires_in: 3600 })
+    if (href.endsWith(':commit')) {
+      const { writes } = JSON.parse(String(init?.body)) as { writes: { update?: { name: string; fields: Record<string, unknown> }; delete?: string; currentDocument?: { exists?: boolean; updateTime?: string } }[] }
+      for (const write of writes) {
+        const name = write.update?.name ?? write.delete!
+        const doc = docs.get(name)
+        const pre = write.currentDocument
+        if (pre?.exists === false && doc !== undefined) return Response.json({ error: { status: 'FAILED_PRECONDITION' } }, { status: 400 })
+        if (pre?.updateTime !== undefined && doc?.updateTime !== pre.updateTime) return Response.json({ error: { status: 'FAILED_PRECONDITION' } }, { status: 400 })
+      }
+      const writeResults = writes.map((write) => {
+        const updateTime = `2026-10-13T00:00:${String(++clock).padStart(2, '0')}Z`
+        if (write.delete !== undefined) docs.delete(write.delete); else docs.set(write.update!.name, { fields: write.update!.fields, updateTime })
+        return { updateTime }
+      })
+      return Response.json({ writeResults })
+    }
+    const name = href.replace('https://firestore.googleapis.com/v1/', '')
+    const doc = docs.get(name)
+    return doc === undefined ? new Response('{}', { status: 404 }) : Response.json({ name, fields: doc.fields, updateTime: doc.updateTime })
+  }) as typeof fetch
+  return { docs, fetcher }
+}
+
+it('Firestore leases: one holder at a time, an expired lease is taken over, and release deletes only the holder\'s own write', async () => {
+  const { docs, fetcher } = fakeFirestore()
+  const leases = new FirestoreHostedLeases('project-1', fetcher)
+  const t0 = new Date('2026-10-13T01:00:00Z')
+  const first = await leases.acquire('browser-k1', 130_000, t0)
+  expect(first.ok).toBe(true)
+  const second = await leases.acquire('browser-k1', 130_000, new Date(t0.getTime() + 125_000))
+  expect(second).toEqual({ ok: false, retryAfterSeconds: 5 })
+  expect(await leases.acquire('browser-k2', 130_000, t0)).toMatchObject({ ok: true })
+  // Past its expiry the lease is taken over; the first holder's late release then leaves the new one in place.
+  const later = await leases.acquire('browser-k1', 130_000, new Date(t0.getTime() + 131_000))
+  expect(later.ok).toBe(true)
+  if (first.ok) await first.release()
+  expect([...docs.keys()].filter((name) => name.endsWith('/browser-k1'))).toHaveLength(1)
+  if (later.ok) await later.release()
+  expect([...docs.keys()].filter((name) => name.endsWith('/browser-k1'))).toHaveLength(0)
+})
+
+it('Firestore keys: a lookup is cached for a minute, and a fresh one reads past the cache', async () => {
+  const { docs, fetcher } = fakeFirestore()
+  const keys = new FirestoreHostedKeys('project-1', fetcher)
+  const name = 'projects/project-1/databases/(default)/documents/hostedApiKeys/digest-1'
+  docs.set(name, { fields: { enabled: { booleanValue: true }, plan: { stringValue: 'free' }, dailyLimit: { integerValue: '5' }, browser: { booleanValue: true } }, updateTime: 't' })
+  expect(await keys.lookup('digest-1')).toMatchObject({ enabled: true })
+  docs.set(name, { fields: { enabled: { booleanValue: false }, plan: { stringValue: 'free' }, dailyLimit: { integerValue: '5' }, browser: { booleanValue: true } }, updateTime: 't2' })
+  expect(await keys.lookup('digest-1')).toMatchObject({ enabled: true })
+  expect(await keys.lookup('digest-1', { fresh: true })).toMatchObject({ enabled: false })
 })
 
 it('a key whose account was deleted, still in the key cache, is 401 and starts nothing', async () => {
