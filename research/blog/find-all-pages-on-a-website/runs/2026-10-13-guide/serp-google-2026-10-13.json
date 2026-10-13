@@ -1,0 +1,19 @@
+{
+ "query": "how to find all pages on a website",
+ "url": "https://www.google.com/search?q=how+to+find+all+pages+on+a+website&hl=en&gl=us&pws=0",
+ "read": "2026-10-13 ~07:40 UTC, Claude desktop app built-in browser, through local proxy 127.0.0.1:7890 (exit location not recorded)",
+ "aiOverview": true,
+ "organic": [
+  {"rank": 1, "title": "Get a list of URLs from a site [closed]", "url": "https://stackoverflow.com/questions/857653/get-a-list-of-urls-from-a-site"},
+  {"rank": 2, "title": "Tool or service to find all webpages within a website?", "url": "https://www.reddit.com/r/cybersecurity/comments/u8ljud/tool_or_service_to_find_all_webpages_within_a/"},
+  {"rank": 3, "title": "URL Finder - Find All URLs on a Website", "url": "https://scrappey.com/tools/url-finder"},
+  {"rank": 4, "title": "Free URL Extractor — Extract All Links from Any Website ...", "url": "https://simplescraper.io/extracturls"},
+  {"rank": 5, "title": "4 Best Methods To Find All The URLs on A Domain's ...", "url": "https://medium.com/@darshankhandelwal12/4-best-methods-to-find-all-the-urls-on-a-domains-website-updated-14c86e827c8c"},
+  {"rank": 6, "title": "Free Website Page Counter | Find All Pages on a ... - Natiad", "url": "https://natiad.com/tools/website-page-counter"},
+  {"rank": 7, "title": "Find All Pages on a Website in 4 Easy Steps", "url": "https://www.orbitmedia.com/blog/list-all-pages-website/"},
+  {"rank": 8, "title": "How to find all pages on a website: 7 methods", "url": "https://exa.ai/blog/how-to-find-all-pages-on-a-website"}
+ ],
+ "peopleAlsoAsk": ["How do I get all pages from a website?", "How do I find the pages of a website?", "How to find total pages of a website?", "Is there a way to find hidden pages on a website?"],
+ "videos": ["How to Find All Pages on a Website (YouTube, SEO PowerSuite, 2023-04-18)", "How To Find All Pages On A Website? [in 2025] (YouTube, ROI Hacks, 2023-01-29)", "How to Find All Pages on a Website Using These 9 Ways (YouTube, Eduard Dziak, 2022-05-26)"],
+ "note": "Ranks are the order of organic result titles (#search a h3) on the first page as read; ads, the AI Overview and video results are not counted."
+}

@@ -1,0 +1,173 @@
+{
+ "checkedAt": "2026-10-13T07:37:01.108Z",
+ "rows": [
+  {
+   "url": "https://octocrawl.dev/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-12T05:28:01Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/scrape/",
+   "verdict": "NEUTRAL",
+   "coverageState": "URL is unknown to Google",
+   "lastCrawlTime": null,
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/blog/find-all-pages-on-a-website/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-10T04:39:49Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/blog/scrape-list-of-urls/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-10T08:23:10Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/guides/monitor-webhook/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-13T07:23:33Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/blog/scrape-website-with-login/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-10T03:28:35Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/reference/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-13T06:08:34Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/connect-mcp/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-10T14:48:53Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/tools/url-to-markdown/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-13T07:06:36Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-10T12:18:53Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/guides/amazon-product/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-06T19:57:08Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/integrations/ai-sdk/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-11T20:58:03Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/limits/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-03T09:02:43Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/llms.txt",
+   "verdict": "NEUTRAL",
+   "coverageState": "URL is unknown to Google",
+   "lastCrawlTime": null,
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/blog/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-10T05:34:47Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/changelog/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-12T07:09:27Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/signin/",
+   "verdict": "NEUTRAL",
+   "coverageState": "URL is unknown to Google",
+   "lastCrawlTime": null,
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/blog/extract-structured-data-from-web-page/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-10T09:48:54Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/privacy/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-12T00:45:06Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/terms/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-06T04:32:24Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/acceptable-use/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-11T23:30:06Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/docs/contact/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-12T02:58:00Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/blog/claude-code-web-scraping/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-10T10:03:38Z",
+   "error": null
+  },
+  {
+   "url": "https://octocrawl.dev/blog/web-scraping-for-rag/",
+   "verdict": "PASS",
+   "coverageState": "Submitted and indexed",
+   "lastCrawlTime": "2026-10-13T04:53:45Z",
+   "error": null
+  }
+ ]
+}

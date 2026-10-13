@@ -1,0 +1,19 @@
+{
+ "purpose": "Evidence for the 2026-10-13 rewrite of /blog/find-all-pages-on-a-website/ into a methods guide (brief-2026-10-13.md).",
+ "sourceCommit": "ebaabe3a (origin/main when the runs were made)",
+ "dates": "UTC; started.txt 2026-10-13T07:25Z, finished.txt after the Google reads",
+ "runs": {
+  "mcp-robots.txt, mcp-sitemap.xml": "curl https://modelcontextprotocol.io/robots.txt and /sitemap.xml, 2026-10-13T07:25Z, through proxy 127.0.0.1:7890",
+  "hosted-map-mcp-root.json": "POST https://api.octocrawl.dev/v1/map {\"url\":\"https://modelcontextprotocol.io\"} 2026-10-13T07:25:55Z, proxied",
+  "hosted-map-mcp-links-only.json": "same with \"sitemap\":\"skip\", 07:25:56Z, proxied",
+  "hosted-map-octocrawl-dev.json": "POST /v1/map {\"url\":\"https://octocrawl.dev\"} 07:25:57Z, proxied",
+  "hosted-health.json": "GET https://api.octocrawl.dev/health; it names no revision, so the hosted revision is not recorded here",
+  "wayback-cdx-mcp.txt": "GET https://web.archive.org/cdx/search/cdx?url=modelcontextprotocol.io/*&fl=original,timestamp,statuscode,mimetype&collapse=urlkey&filter=statuscode:200&filter=mimetype:text/html, 07:27:16Z, proxied",
+  "commoncrawl-mcp.jsonl": "GET https://index.commoncrawl.org/CC-MAIN-2026-39-index?url=modelcontextprotocol.io/*&output=json&fl=url,status,mime&filter=status:200, 07:27:25Z, proxied",
+  "compare-mcp.json": "node compare.mjs <this folder>: URLs normalised (host modelcontextprotocol.io only, no query or fragment, no trailing slash, decoded path limited to [\\w-/.])",
+  "status-archive-only-mcp.json": "node status.mjs <this folder>: GET with redirect manual, user agent w2l-research/0.1, 3 at a time, 250 ms apart, 20 s timeout. Node fetch without NODE_USE_ENV_PROXY, so these requests went DIRECT, not through the proxy. /_next/ URLs (disallowed by robots.txt) were not requested.",
+  "gsc-url-inspection-octocrawl-dev.json": "Search Console URL Inspection API for each of the 24 URLs in hosted-map-octocrawl-dev.json, operator's ADC login, quota project octopus-w2l-20260924-7r7, proxied",
+  "gsc-performance-article.json": "Search Console searchAnalytics for the article page, 2026-10-01..2026-10-13, dataState all, proxied",
+  "serp-google-2026-10-13.json, site-search-2026-10-13.json": "Google read in the Claude desktop app's built-in browser, hl=en&gl=us&pws=0, proxied; result counts copied from the page"
+ }
+}

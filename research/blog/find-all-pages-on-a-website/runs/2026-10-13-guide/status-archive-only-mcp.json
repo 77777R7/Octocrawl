@@ -1,0 +1,2247 @@
+{
+ "checkedAt": "2026-10-13T07:30:17.827Z",
+ "skippedNextData": 11,
+ "byStatus": {
+  "200": 256,
+  "404": 94,
+  "3xx": 96,
+  "error": 1
+ },
+ "rows": [
+  {
+   "url": "https://modelcontextprotocol.io/2025/03/26/streamable-http-transport.html",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/39",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/A2",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/about",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/about/index",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/best-practices",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/blog",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/cdn-cgi/l/email-protection",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/clients",
+   "status": 308,
+   "location": "/docs/2026-07-28/getting-started/intro"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/clientsAccessed",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/CODE_OF_CONDUCT",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/file-uploads/charter",
+   "status": 308,
+   "location": "/community/working-groups/file-uploads"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/inspector-v2/charter",
+   "status": 308,
+   "location": "/community/working-groups/inspector-v2"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/interceptors/charter",
+   "status": 308,
+   "location": "/community/working-groups/interceptors"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/interest-groups/enterprise.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/interest-groups/financial-services.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/sdk/charter",
+   "status": 308,
+   "location": "/community/working-groups/sdk"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/sep-guidelines.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps",
+   "status": 308,
+   "location": "/seps"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1024-mcp-client-security-requirements-for-local-server-",
+   "status": 308,
+   "location": "/seps/1024-mcp-client-security-requirements-for-local-server-"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1034--support-default-values-for-all-primitive-types-in",
+   "status": 308,
+   "location": "/seps/1034--support-default-values-for-all-primitive-types-in"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1036-url-mode-elicitation-for-secure-out-of-band-intera",
+   "status": 308,
+   "location": "/seps/1036-url-mode-elicitation-for-secure-out-of-band-intera"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1046-support-oauth-client-credentials-flow-in-authoriza",
+   "status": 308,
+   "location": "/seps/1046-support-oauth-client-credentials-flow-in-authoriza"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1302-formalize-working-groups-and-interest-groups-in-mc",
+   "status": 308,
+   "location": "/seps/1302-formalize-working-groups-and-interest-groups-in-mc"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1303-input-validation-errors-as-tool-execution-errors",
+   "status": 308,
+   "location": "/seps/1303-input-validation-errors-as-tool-execution-errors"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1319-decouple-request-payload-from-rpc-methods-definiti",
+   "status": 308,
+   "location": "/seps/1319-decouple-request-payload-from-rpc-methods-definiti"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1330-elicitation-enum-schema-improvements-and-standards",
+   "status": 308,
+   "location": "/seps/1330-elicitation-enum-schema-improvements-and-standards"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1577--sampling-with-tools",
+   "status": 308,
+   "location": "/seps/1577--sampling-with-tools"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1613-establish-json-schema-2020-12-as-default-dialect-f",
+   "status": 308,
+   "location": "/seps/1613-establish-json-schema-2020-12-as-default-dialect-f"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1686-tasks",
+   "status": 308,
+   "location": "/seps/1686-tasks"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1699-support-sse-polling-via-server-side-disconnect",
+   "status": 308,
+   "location": "/seps/1699-support-sse-polling-via-server-side-disconnect"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1730-sdks-tiering-system",
+   "status": 308,
+   "location": "/seps/1730-sdks-tiering-system"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1850-pr-based-sep-workflow",
+   "status": 308,
+   "location": "/seps/1850-pr-based-sep-workflow"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp",
+   "status": 308,
+   "location": "/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/2085-governance-succession-and-amendment",
+   "status": 308,
+   "location": "/seps/2085-governance-succession-and-amendment"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/2133-extensions",
+   "status": 308,
+   "location": "/seps/2133-extensions"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/932-model-context-protocol-governance",
+   "status": 308,
+   "location": "/seps/932-model-context-protocol-governance"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/973-expose-additional-metadata-for-implementations-res",
+   "status": 308,
+   "location": "/seps/973-expose-additional-metadata-for-implementations-res"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/985-align-oauth-20-protected-resource-metadata-with-rf",
+   "status": 308,
+   "location": "/seps/985-align-oauth-20-protected-resource-metadata-with-rf"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/986-specify-format-for-tool-names",
+   "status": 308,
+   "location": "/seps/986-specify-format-for-tool-names"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/990-enable-enterprise-idp-policy-controls-during-mcp-o",
+   "status": 308,
+   "location": "/seps/990-enable-enterprise-idp-policy-controls-during-mcp-o"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/991-enable-url-based-client-registration-using-oauth-c",
+   "status": 308,
+   "location": "/seps/991-enable-url-based-client-registration-using-oauth-c"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/seps/994-shared-communication-practicesguidelines",
+   "status": 308,
+   "location": "/seps/994-shared-communication-practicesguidelines"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/server-card/charter",
+   "status": 308,
+   "location": "/community/working-groups/server-card"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/skills-over-mcp/charter",
+   "status": 308,
+   "location": "/community/working-groups/skills-over-mcp"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/triggers-events/charter",
+   "status": 308,
+   "location": "/community/working-groups/triggers-events"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/working-groups/agents.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/working-groups/transports.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/community/working-interest-groups.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/concepts/tools",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/Cypher",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/Cypherquery",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/development/contributing",
+   "status": 308,
+   "location": "/community/contributing"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/development/roadmap.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/development/updates",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/discover/what-is-model-context-protocol",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/do",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/develop/build-client.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/develop/build-server.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/develop/build-with-agent-skills.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/develop/clients/client-best-practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/develop/connect-local-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/develop/connect-remote-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/getting-started/intro.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/learn/architecture.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/learn/client-concepts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/learn/server-concepts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/learn/versioning.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/sdk.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/tools/debugging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/tools/inspector.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/tutorials/security/authorization.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2024-11-05/tutorials/security/security_best_practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/develop/build-client.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/develop/build-server.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/develop/build-with-agent-skills.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/develop/clients/client-best-practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/develop/connect-local-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/develop/connect-remote-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/getting-started/intro.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/learn/architecture.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/learn/client-concepts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/learn/server-concepts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/learn/versioning.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/sdk.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/tools/debugging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/tools/inspector.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-03-26/tutorials/security/security_best_practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/develop/build-client.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/develop/build-server.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/develop/build-with-agent-skills.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/develop/clients/client-best-practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/develop/connect-local-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/develop/connect-remote-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/getting-started/intro.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/learn/architecture.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/learn/client-concepts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/learn/server-concepts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/learn/versioning.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/sdk.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/tools/debugging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/tools/inspector.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/tutorials/security/authorization.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-06-18/tutorials/security/security_best_practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/develop/build-client.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/develop/build-server.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/develop/build-with-agent-skills.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/develop/clients/client-best-practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/develop/connect-local-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/develop/connect-remote-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/getting-started/intro.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/learn/architecture.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/learn/client-concepts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/learn/server-concepts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/learn/versioning.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/sdk.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/tools/debugging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/tools/inspector.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/authorization.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2026-07-28/develop/build-with-agent-skills.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2026-07-28/develop/connect-remote-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2026-07-28/learn/architecture.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/security_best_practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/apps",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/best-practices",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/building/mcp-server-guide",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/architecture",
+   "status": 308,
+   "location": "/docs/2026-07-28/learn/architecture"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/authentication",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/clients",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/completion",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/elicitation",
+   "status": 308,
+   "location": "/specification/2026-07-28/client/elicitation"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/performance",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/prompts",
+   "status": 308,
+   "location": "/specification/2026-07-28/server/prompts"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/resources",
+   "status": 308,
+   "location": "/specification/2026-07-28/server/resources"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/roots",
+   "status": 308,
+   "location": "/specification/2026-07-28/client/roots"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/sampling",
+   "status": 308,
+   "location": "/specification/latest/client/sampling"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/servers",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/tools",
+   "status": 308,
+   "location": "/specification/2026-07-28/server/tools"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/transports",
+   "status": 308,
+   "location": "/specification/2026-07-28/basic/transports"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/transportsno",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/develop/build",
+   "status": 307,
+   "location": "/docs/2026-07-28/develop/build"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/develop/build-client",
+   "status": 307,
+   "location": "/docs/2026-07-28/develop/build-client"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/develop/build-server",
+   "status": 307,
+   "location": "/docs/2026-07-28/develop/build-server"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/develop/build-with-agent-skills",
+   "status": 307,
+   "location": "/docs/2026-07-28/develop/build-with-agent-skills"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/develop/clients/client-best-practices",
+   "status": 307,
+   "location": "/docs/2026-07-28/develop/clients/client-best-practices"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/develop/connect-local-servers",
+   "status": 307,
+   "location": "/docs/2026-07-28/develop/connect-local-servers"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/develop/connect-remote-servers",
+   "status": 307,
+   "location": "/docs/2026-07-28/develop/connect-remote-servers"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/develop/build-client.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/develop/build-server.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/develop/build-with-agent-skills.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/develop/clients/client-best-practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/develop/connect-local-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/develop/connect-remote-servers.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/getting-started/intro.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/learn/architecture.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/learn/client-concepts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/learn/server-concepts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/learn/versioning.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/sdk.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tools/debugging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tools/inspector.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tools/inspector/authorization.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tools/inspector/cli.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tools/inspector/configuration.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tools/inspector/protocol-eras.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tools/inspector/recipes.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tools/inspector/tui.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tools/inspector/web.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tutorials/security/authorization.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/draft/tutorials/security/security_best_practices.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/examples/servers",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/extensions/apps",
+   "status": 308,
+   "location": "/extensions/apps/overview"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/extensions/overview",
+   "status": 308,
+   "location": "/extensions/overview"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/first-server/python",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/first-server/typescript",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/For",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/get",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/getti...",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/getting",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/getting-",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/getting-starte",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/getting-started/intro",
+   "status": 307,
+   "location": "/docs/2026-07-28/getting-started/intro"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/getting-started/intro2",
+   "status": 307,
+   "location": "/docs/2026-07-28/getting-started/intro2"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/getting-started/introclients",
+   "status": 307,
+   "location": "/docs/2026-07-28/getting-started/introclients"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/guides/building-servers",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/learn/architecture",
+   "status": 307,
+   "location": "/docs/2026-07-28/learn/architecture"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/learn/architectureFig",
+   "status": 307,
+   "location": "/docs/2026-07-28/learn/architectureFig"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/learn/client-concepts",
+   "status": 307,
+   "location": "/docs/2026-07-28/learn/client-concepts"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/learn/server-concepts",
+   "status": 307,
+   "location": "/docs/2026-07-28/learn/server-concepts"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/learn/server-concepts.Jones",
+   "status": 307,
+   "location": "/docs/2026-07-28/learn/server-concepts.Jones"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/learn/versioning",
+   "status": 307,
+   "location": "/docs/2026-07-28/learn/versioning"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/mcp-protocol",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/protocol-spec",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/sdk",
+   "status": 307,
+   "location": "/docs/2026-07-28/sdk"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/sdks",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/security",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/servers/everything",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/servers/fetch",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/servers/filesystem",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/servers/git",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/servers/memory",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/servers/sequentialthinking",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/servers/time",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/specification",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/specification/authorization",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/specification/overview",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/specification/security",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tools/building-tools",
+   "status": 307,
+   "location": "/docs/2026-07-28/tools/building-tools"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tools/debugging",
+   "status": 307,
+   "location": "/docs/2026-07-28/tools/debugging"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tools/inspector",
+   "status": 307,
+   "location": "/docs/2026-07-28/tools/inspector"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tools/python-sdk",
+   "status": 307,
+   "location": "/docs/2026-07-28/tools/python-sdk"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tools/typescript-sdk",
+   "status": 307,
+   "location": "/docs/2026-07-28/tools/typescript-sdk"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tutorials/security/authorization",
+   "status": 307,
+   "location": "/docs/2026-07-28/tutorials/security/authorization"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices",
+   "status": 307,
+   "location": "/docs/2026-07-28/tutorials/security/security_best_practices"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tutorials/use-remote-mcp-server",
+   "status": 308,
+   "location": "/docs/2026-07-28/develop/connect-remote-servers"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/ecosystem",
+   "status": "error",
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/examples.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/extensions/apps/build.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/faqs",
+   "status": 308,
+   "location": "/docs/2026-07-28/getting-started/intro"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/inspector",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/integrations",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/intro...",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/introduction",
+   "status": 308,
+   "location": "/docs/2026-07-28/getting-started/intro"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/introduction_",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/introduction.1Author",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/introduction.Search",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/introduction/introduction",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/introduction/www.wayfinder.ai",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/introduction/www.wayfinder.ai/Available",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/introductiondecision",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/introductionl",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/introductionMCP",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/l",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/architecture",
+   "status": 308,
+   "location": "/specification/latest/architecture"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/prompts",
+   "status": 308,
+   "location": "/specification/latest/server/prompts"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/resources",
+   "status": 308,
+   "location": "/specification/latest/server/resources"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/sampling",
+   "status": 308,
+   "location": "/specification/latest/client/sampling"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/tools",
+   "status": 308,
+   "location": "/specification/latest/server/tools"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/transpo",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/transports",
+   "status": 308,
+   "location": "/specification/latest/basic/transports"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/tools/debugging",
+   "status": 308,
+   "location": "/docs/2026-07-28/tools/debugging"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/tools/inspector",
+   "status": 308,
+   "location": "/docs/2026-07-28/tools/inspector"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/Manuscript",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/overview",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/quickstart",
+   "status": 308,
+   "location": "/docs/2026-07-28/develop/build-server"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/quickstart/client",
+   "status": 308,
+   "location": "/docs/2026-07-28/develop/build-client"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/quickstart/server",
+   "status": 308,
+   "location": "/docs/2026-07-28/develop/build-server"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/quickstart/user",
+   "status": 308,
+   "location": "/docs/2026-07-28/develop/connect-local-servers"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/registry",
+   "status": 307,
+   "location": "/registry/about"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/registry/about.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/registry/authentication.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/registry/faq.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/registry/github-actions.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/registry/package-types.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/registry/quickstart.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/registry/terms-of-service.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/robots.txt",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/schemas/draft/2025-10-",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/schemas/draft/2025-10-11/server-registry-openapi",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/sdk",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/sdk/java/mcp-client",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/sdk/java/mcp-overview",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/sdk/java/mcp-server",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/sdks",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/1024-mcp-client-security-requirements-for-local-server-.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/1302-formalize-working-groups-and-interest-groups-in-mc.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/1319-decouple-request-payload-from-rpc-methods-definiti.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/1330-elicitation-enum-schema-improvements-and-standards.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/1686-tasks.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/1699-support-sse-polling-via-server-side-disconnect.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/1730-sdks-tiering-system.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/1850-pr-based-sep-workflow.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/2085-governance-succession-and-amendment.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/2106-json-schema-2020-12.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/2149-working-group-charter-template.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/2207-oidc-refresh-token-guidance.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/2243-http-standardization.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/2260-Require-Server-requests-to-be-associated-with-Client-requests.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/2484-conformance-tests-required-for-final-seps.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/2549-TTL-for-list-results.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/2577-deprecate-roots-sampling-and-logging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/2663-tasks-extension.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/990-enable-enterprise-idp-policy-controls-during-mcp-o.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/seps/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/spec",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/speci",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specific",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/architecture/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/architecture/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/basic/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/basic/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/basic/lifecycle.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/basic/messages.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/basic/transports.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/basic/utilities/cancellation.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/basic/utilities/ping.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/basic/utilities/progress.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/client/roots.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/client/sampling.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/server/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/server/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/server/prompts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/server/resources.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/server/tools.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/server/utilities/completion.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/server/utilities/logging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2024-11-05/server/utilities/pagination.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/architecture/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/architecture/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/basic/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/basic/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/basic/lifecycle.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/basic/transports.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/cancellation.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/ping.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/basic/utilities/progress.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/changelog.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/client/roots.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/client/sampling.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/server/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/server/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/server/prompts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/server/resources.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/server/tools.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/server/utilities/completion.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/server/utilities/logging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-03-26/server/utilities/pagination.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-1",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/architecture/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/architecture/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices",
+   "status": 308,
+   "location": "/docs/2025-11-25/tutorials/security/security_best_practices"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/cancellation.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/ping.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/progress.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/changelog.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/client/roots.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/client/sampling.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/schema__",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/schema.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/serve",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/authentication",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/prompts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/resources.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/tools.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/utilities/completion.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/utilities/logging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/utilities/pagination.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-06-18fine-tuning",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/architecture/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/architecture/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices",
+   "status": 308,
+   "location": "/docs/2025-11-25/tutorials/security/security_best_practices"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/transports.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/cancellation.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/progress.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/client/roots.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/prompts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/resources.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2025...-",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2026-07-28/architecture/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2026-07-28/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/2026-07-28/server/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/basic/transports",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/contributing",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/architecture/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/architecture/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/authorization/authorization-server-discovery.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/authorization/client-registration.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/authorization/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/authorization/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/authorization/security-considerations.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/lifecycle",
+   "status": 308,
+   "location": "/specification/draft/basic/versioning"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/patterns/cancellation.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/patterns/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/patterns/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/patterns/mrtr.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/patterns/progress.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/patterns/subscriptions.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/secu-",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/secu-rity_best_practices",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/security",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/security_best_practices",
+   "status": 308,
+   "location": "/docs/draft/tutorials/security/security_best_practices"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/security_best_practices21",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/transports/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/transports/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/transports/stdio.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/transports/streamable-http.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/utilities/cancellation",
+   "status": 308,
+   "location": "/specification/draft/basic/patterns/cancellation"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/utilities/ping",
+   "status": 308,
+   "location": "/specification/draft/changelog"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/utilities/progress",
+   "status": 308,
+   "location": "/specification/draft/basic/patterns/progress"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/utilities/tasks",
+   "status": 308,
+   "location": "/extensions/tasks/overview"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/basic/versioning.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/changelog.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/client/elicitation.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/client/roots.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/client/sampling.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/deprecated.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/schema.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/server/discover.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/server/index",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/server/index.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/server/prompts.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/server/resources.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/server/tools.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/server/utilities/caching.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/server/utilities/completion.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/server/utilities/logging.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/draft/server/utilities/pagination.md",
+   "status": 200,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/specification/versioning",
+   "status": 308,
+   "location": "/docs/2026-07-28/learn/versioning"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/tools/debugging",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/tools/inspector",
+   "status": 404,
+   "location": null
+  },
+  {
+   "url": "https://modelcontextprotocol.io/tutorials/building-a-client",
+   "status": 308,
+   "location": "/docs/2026-07-28/develop/build-client"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/tutorials/building-a-client-node",
+   "status": 308,
+   "location": "/docs/2026-07-28/develop/build-client"
+  },
+  {
+   "url": "https://modelcontextprotocol.io/tutorials/building-mcp-with-llms",
+   "status": 308,
+   "location": "/docs/2026-07-28/develop/build-with-agent-skills"
+  }
+ ]
+}
