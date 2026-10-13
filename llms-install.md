@@ -68,7 +68,7 @@ Call the `scrape` tool with:
 { "url": "https://example.com", "formats": ["markdown"] }
 ```
 
-The result should contain the page's Markdown (a heading "Example Domain") and an `evidenceRecord` with the final URL and HTTP status 200. A page that cannot be read comes back with a reason such as `blocked` or `timeout`, not an invented page.
+The result should contain the page's Markdown (its one paragraph, "This domain is for use in documentation examples…"), its title "Example Domain", and an `evidenceRecord` with the final URL and HTTP status 200. A page that cannot be read comes back with a reason such as `blocked` or `timeout`, not an invented page.
 
 ## More
 
