@@ -414,6 +414,28 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     }
   }
 
+  it('says when the browser rung could not start because no browser is installed, and not for any other failure', async () => {
+    const url = 'https://example.com/p'
+    const noBrowser: FetchResult = { ...failedResult(url, 'connection_error'), lane: 'browser_local', trace: [{ at: 1, lane: 'browser_local', event: 'browser_unavailable', detail: { install: 'npx playwright install chromium' } }] }
+    // A thin client-rendered http page stays the answer, with the warning that names the install.
+    const thin = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), channel('browser_local', [noBrowser])], { mode: 'authed' }).run(url)
+    expect(thin.result).toMatchObject({ status: 'success', lane: 'http' })
+    expect(thin.result.warnings).toContainEqual({ code: 'browser_not_installed', message: 'the browser lane could not start: Chromium is not installed where Octocrawl runs; run npx playwright install chromium once' })
+    // An http page with no main content kept as evidence carries it too.
+    const evidence = { ...emptyUnverified(url), markdown: 'NAV ONLY', evidence: { ...emptyUnverified(url).evidence, httpStatus: 200 } }
+    const kept = await new LadderRunner([channel('http', [evidence]), channel('browser_local', [noBrowser])], { mode: 'authed' }).run(url)
+    expect(kept.result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http' })
+    expect(kept.result.warnings?.filter((warning) => warning.code === 'browser_not_installed')).toHaveLength(1)
+    // A browser that started and failed to connect is not a missing browser.
+    const offline = { ...noBrowser, trace: [] }
+    const other = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), channel('browser_local', [offline])], { mode: 'authed' }).run(url)
+    expect(other.result.warnings?.some((warning) => warning.code === 'browser_not_installed') ?? false).toBe(false)
+    // Patchright's browser is its own build: the warning names Patchright's command, as the rung's trace did.
+    const noPatchright = { ...noBrowser, trace: [{ at: 1, lane: 'browser_local' as const, event: 'browser_unavailable', detail: { engine: 'patchright', install: 'npx patchright install chromium' } }] }
+    const patched = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), channel('browser_local', [noPatchright])], { mode: 'authed' }).run(url)
+    expect(patched.result.warnings).toContainEqual({ code: 'browser_not_installed', message: 'the browser lane could not start: Chromium is not installed where Octocrawl runs; run npx patchright install chromium once' })
+  })
+
   it('offers a client-rendered http success to the browser and keeps whichever answer holds more', async () => {
     const url = 'https://example.com/p'
     const rendered = { ...contentfulResult(url, 'browser_local'), usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 800 } }

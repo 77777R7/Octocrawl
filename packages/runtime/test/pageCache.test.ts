@@ -47,6 +47,14 @@ describe('PageCache', () => {
     cache.close()
   })
 
+  it('leaves a browser_not_installed warning out of what it stores: it was about the machine, not the page', () => {
+    const cache = cacheAt({ now: T0 + 1_000 })
+    const warnings = [{ code: 'client_rendered_suspected', message: 'shell' }, { code: 'browser_not_installed', message: 'no browser' }]
+    expect(cache.store('k', result({ warnings }))).toBe(true)
+    expect(cache.lookup('k', { minAgeMs: 0, maxAgeMs: null })?.result.warnings).toEqual([{ code: 'client_rendered_suspected', message: 'shell' }])
+    cache.close()
+  })
+
   it('stores only a success with a fetch time, keeps the latest per key and leaves its own events out', () => {
     const clock = { now: T0 }
     const cache = cacheAt(clock)

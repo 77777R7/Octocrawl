@@ -67,6 +67,8 @@ npm install @octocrawl/sdk        # the TypeScript client; @octocrawl/mcp is the
 npm install @octocrawl/ai-sdk     # scrape and map as Vercel AI SDK tools, on hosted Octocrawl by default
 ```
 
+Pages are read over HTTP first. For pages that only appear in a browser, install Chromium once with `npx playwright install chromium`; until then such a page comes back with a `browser_not_installed` warning that names the command.
+
 To give your agent every tool, with no daily limit, run the API locally and connect the MCP server to it:
 
 ```bash

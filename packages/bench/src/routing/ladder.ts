@@ -30,6 +30,7 @@ import {
   type RoutingFailureClass,
 } from '@w2l/http-core'
 import { readinessOf, verify } from '@w2l/runtime'
+import { BROWSER_INSTALL_COMMAND } from '../browserInstall.js'
 import type { RoutingHistory, VendorOutcome } from './vendorRouter.js'
 import { rankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
@@ -239,6 +240,22 @@ function lowContentYieldWarning(result: FetchResult, browserTried: boolean): Fet
  * browser lane: a contentful one, or the whole page it kept as evidence when
  * it found no main content. Any other answer is returned as it is.
  */
+/**
+ * The warning a run carries when its browser rung could not start because no browser is installed where Octocrawl runs
+ * (`browser_unavailable` in that rung's trace): a new install that has not run the install command. The answer is
+ * whatever another rung gave, often a thin http page, so the warning says what the browser lane needs.
+ */
+export function browserNotInstalledWarning(command: string = BROWSER_INSTALL_COMMAND): FetchWarning {
+  return { code: 'browser_not_installed', message: `the browser lane could not start: Chromium is not installed where Octocrawl runs; run ${command} once` }
+}
+
+function withBrowserNotInstalled(result: FetchResult, attempts: readonly { result: FetchResult }[]): FetchResult {
+  const missing = attempts.flatMap((attempt) => attempt.result.trace).find((event) => event.event === 'browser_unavailable')
+  if (missing === undefined || result.warnings?.some((warning) => warning.code === 'browser_not_installed') === true) return result
+  const command = typeof missing.detail?.install === 'string' ? missing.detail.install : BROWSER_INSTALL_COMMAND
+  return { ...result, warnings: [...(result.warnings ?? []), browserNotInstalledWarning(command)] }
+}
+
 function withLowContentYield(result: FetchResult, channelsTried: readonly string[]): FetchResult {
   if (result.lane !== 'http') return withRenderedLowYield(result)
   if (qualityEscalationEvent(result) === null) return result
@@ -463,7 +480,8 @@ export class LadderRunner {
     const { startedAt, channelsTried, ladderTrace, attempts, robotsOverrides } = progress
     throwIfExecutionStopped(execution)
     const decision = evaluateGovernance(url, this.policy)
-    const finish = (result: FetchResult, handoffRequested: boolean): LadderRunResult => {
+    const finish = (answer: FetchResult, handoffRequested: boolean): LadderRunResult => {
+      const result = withBrowserNotInstalled(answer, attempts)
       const summary = summarize(channelsTried, attempts)
       return {
         result,
