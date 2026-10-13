@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import { fileURLToPath } from 'node:url'
 import { faqJsonLd, pageMarkup } from './src/page'
+import { toolJsonLd, toolPageMarkup } from './src/tools/urlToMarkdown'
 import { versionAssetReferences, versionPublicAssets } from './scripts/publicAssetVersions.mjs'
 
 const publicDir = fileURLToPath(new URL('./public', import.meta.url))
@@ -10,9 +11,13 @@ export default defineConfig({
   plugins: [{
     // Prerender: index.html ships with the page's markup, and main.ts only brings it to life.
     name: 'w2l-prerender-page',
-    transformIndexHtml(html) {
+    transformIndexHtml(html, context) {
       const slot = '<div id="app"></div>'
       if (!html.includes(slot)) throw new Error('index.html must contain an empty #app element')
+      // A free tool page (tools/url-to-markdown/index.html) carries its own markup and its structured data.
+      if (context.path.startsWith('/tools/url-to-markdown/')) {
+        return versionPublicAssets(html.replace('</head>', `  ${toolJsonLd()}\n  </head>`).replace(slot, `<div id="app">${toolPageMarkup()}</div>`), publicDir)
+      }
       // The FAQ's structured data goes in the head, from the same list the FAQ section shows.
       const withFaq = html.replace('</head>', `  ${faqJsonLd()}\n  </head>`)
       return versionPublicAssets(withFaq.replace(slot, `<div id="app">${pageMarkup()}</div>`), publicDir)
@@ -31,6 +36,8 @@ export default defineConfig({
     },
   }],
   build: {
+    // The home page and each free tool page: the same hero and script (src/page.ts heroMarkup, src/main.ts).
+    rollupOptions: { input: { main: fileURLToPath(new URL('./index.html', import.meta.url)), urlToMarkdown: fileURLToPath(new URL('./tools/url-to-markdown/index.html', import.meta.url)) } },
     // The hero octopus chunk (three.js and the ASCII renderer) is about 500 kB, lazy and decorative: it loads only
     // on wide desktops with motion allowed, after the page works. The limit still flags anything that grows past it.
     chunkSizeWarningLimit: 560,

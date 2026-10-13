@@ -24,6 +24,8 @@ describe('Top navigation', () => {
       if (path === '/changelog/') { expect(existsSync(app('../../CHANGELOG.md'))).toBe(true); continue }
       if (path === '/llms.txt') continue
       if (path === '/signin/') continue // built by scripts/build-docs.mjs (sign-in and the dashboard)
+      // A free tool page: its own entry, which Vite builds (vite.config.ts lists it).
+      if (path.startsWith('/tools/')) { expect([href, existsSync(app(`${path.slice(1)}index.html`)) && readFileSync(app('vite.config.ts'), 'utf8').includes(`./${path.slice(1)}index.html`)]).toEqual([href, true]); continue }
       if (path.startsWith('/blog/')) { expect([href, path === '/blog/' || posts.some(post => blogPath(post) === path)]).toEqual([href, true]); continue }
       const page = pages.find(p => (p.slug ? `/docs/${p.slug}/` : '/docs/') === path)
       expect([href, page?.file]).toEqual([href, expect.any(String)])

@@ -1,16 +1,17 @@
 /** Finds the hero artwork's painted glyphs off the main thread, where the pixel work can take as long as it
  * needs without costing the page a frame. The artwork is hand-drawn, so its glyphs drift off any regular
  * lattice; each is found where its contrast with the local ground peaks, and classed by where it sits and what it
- * looks like. Replies with [x, y, kind, weight] per glyph, with the sea of clouds' pixel work (heroFog.ts) and the
- * embers a rising spark would show above (those with dark ground three to eight cells up). */
-import { CLOUD, COOL, EMBER, FACE, NIGHT, onMountain } from './heroArtwork'
+ * looks like. Replies with [x, y, kind, weight] per glyph, with the mountain's sea of clouds' pixel work (heroFog.ts) and
+ * the embers a rising spark would show above (those with dark ground three to eight cells up). */
+import { CLOUD, COOL, EMBER, FACE, NIGHT, SCENES, SURF, type Scene, type SceneName } from './heroArtwork'
 import { fogTransfer, prepareFog, type FogPrep } from './heroFog'
 import { darkAt } from './heroMarks'
 
 // The artwork's glyph cell (natural px).
 const CELL = 12.5
 
-export type Analysis = { found: Float32Array; fog: FogPrep; sparks: Int32Array }
+export type Analysis = { found: Float32Array; fog?: FogPrep; sparks: Int32Array }
+export type Request = { bitmap: ImageBitmap; scene: SceneName }
 
 // Rows are read in bands to keep the working set small. The blurs and the peak search reach 12 rows, so each band
 // reads 16 more on either side.
@@ -45,7 +46,7 @@ function separable(source: Float32Array, w: number, h: number, r: number, max: b
   return out
 }
 
-function analyse(bitmap: ImageBitmap): Float32Array {
+function analyse(bitmap: ImageBitmap, scene: Scene): Float32Array {
   const w = bitmap.width
   const h = bitmap.height
   const context = new OffscreenCanvas(w, STRIP + MARGIN * 2).getContext('2d', { willReadFrequently: true })
@@ -89,12 +90,13 @@ function analyse(bitmap: ImageBitmap): Float32Array {
         for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) warm += data[(i + dx + dy * w) * 4] - data[(i + dx + dy * w) * 4 + 2]
         warm /= 81
         const [r, g, b] = [data[best * 4], data[best * 4 + 1], data[best * 4 + 2]]
-        const mountain = onMountain(x, ay)
-        // Sunset clouds: a warm ground, or warm marks on the blue at their edges.
+        const land = scene.land(x, ay)
+        // Sunset clouds: a warm ground, or warm marks on the blue at their edges. Below a sea's horizon they are its surf.
         let kind = (warm > 25 && ground[i] > 70) || (r - b > 40 && lum[best] > 110) ? CLOUD : NIGHT
-        if (mountain >= 0.5) kind = ground[i] > 100 && warm > 50 ? FACE : r > 1.2 * g && r > 100 ? EMBER : COOL
+        if (kind === CLOUD && scene.sea && ay > scene.sea.horizon) kind = SURF
+        if (land >= 0.5) kind = ground[i] > 100 && warm > 50 ? FACE : r > 1.2 * g && r > 100 ? EMBER : COOL
         near.set(cx + cy * 1024, found.length)
-        found.push(x, ay, kind, kind === FACE || kind === EMBER || kind === COOL ? mountain : 1 - mountain)
+        found.push(x, ay, kind, kind === FACE || kind === EMBER || kind === COOL ? land : 1 - land)
       }
     }
   }
@@ -102,11 +104,17 @@ function analyse(bitmap: ImageBitmap): Float32Array {
 }
 
 const scope = self as unknown as {
-  onmessage: ((event: MessageEvent<ImageBitmap>) => void) | null
+  onmessage: ((event: MessageEvent<Request>) => void) | null
   postMessage(message: Analysis, transfer: Transferable[]): void
 }
-scope.onmessage = ({ data: bitmap }) => {
-  const found = analyse(bitmap)
+scope.onmessage = ({ data: { bitmap, scene: name } }) => {
+  const scene = SCENES[name]
+  const found = analyse(bitmap, scene)
+  if (!scene.fog && !scene.sparks) {
+    bitmap.close()
+    scope.postMessage({ found, sparks: new Int32Array(0) }, [found.buffer])
+    return
+  }
   const context = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d', { willReadFrequently: true })
   if (!context) throw new Error('No 2D context')
   context.drawImage(bitmap, 0, 0)
@@ -114,7 +122,7 @@ scope.onmessage = ({ data: bitmap }) => {
   bitmap.close()
   const glyphs: Array<{ x: number; y: number; kind: number }> = []
   for (let i = 0; i < found.length; i += 4) glyphs.push({ x: found[i], y: found[i + 1], kind: found[i + 2] })
-  const fog = prepareFog(image, glyphs)
-  const sparks = Int32Array.from(glyphs.flatMap((g, i) => (g.kind === EMBER && [3, 4, 5, 6, 7, 8].every((k) => darkAt(image, g.x, g.y - k * CELL)) ? [i] : [])))
-  scope.postMessage({ found, fog, sparks }, [found.buffer, sparks.buffer, ...fogTransfer(fog)])
+  const fog = scene.fog ? prepareFog(image, glyphs) : undefined
+  const sparks = Int32Array.from(scene.sparks ? glyphs.flatMap((g, i) => (g.kind === EMBER && [3, 4, 5, 6, 7, 8].every((k) => darkAt(image, g.x, g.y - k * CELL)) ? [i] : [])) : [])
+  scope.postMessage({ found, fog, sparks }, [found.buffer, sparks.buffer, ...(fog ? fogTransfer(fog) : [])])
 }

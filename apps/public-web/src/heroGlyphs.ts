@@ -3,11 +3,15 @@
  * let a spark rise (heroEmbers.ts), and a band of alpenglow rises. Every so often light climbs the mountain to its
  * summit and the octopus answers it (w2l:summit). Above them runs the night sky of heroSky.ts: stars, flares and
  * meteors. Only glyphs that light up are drawn, over their painted twins, so at rest
- * the artwork shows exactly as painted; the page's text and the octopus keep calm ground behind them. */
-import { ART, BASE, CLOUD, COOL, EMBER, FACE, RIDGE, SUMMIT, between, hash, position, smooth } from './heroArtwork'
+ * the artwork shows exactly as painted; the page's text and the octopus keep calm ground behind them.
+ *
+ * A hero with data-art="coast" shows the coast instead (heroArtwork.ts, SCENES): the same sky, clouds and light on
+ * its cliffs, and in place of the sea of clouds and the sparks, sets of swell roll in along the painted surf towards
+ * the cliffs and break in a spray of light at their foot. */
+import { CLOUD, COOL, EMBER, FACE, SCENES, SURF, between, hash, position, sceneName, smooth, type Scene, type SceneName } from './heroArtwork'
 import { createEmbers, type Embers } from './heroEmbers'
 import { createFog, type Fog, type FogPrep } from './heroFog'
-import type { Analysis } from './heroGlyphsWorker'
+import type { Analysis, Request } from './heroGlyphsWorker'
 import { createSky } from './heroSky'
 
 // The artwork's glyph cell (natural px); its hand-drawn spacing drifts between about 12 and 13 px.
@@ -73,11 +77,25 @@ const SLOW_LIMIT = 12
 // How strongly the alpenglow lights each of the mountain's kinds: the sunlit faces most, its blue dots barely.
 const BAND_GAIN = [0.95, 0.75, 0.3]
 // The share of each kind that twinkles on its own clock, how brightly, and in which colours. The painted sky
-// twinkles least: the stars are its light.
-const BLINK_SHARE = [0.22, 0.7, 0.1, 0.18, 0.1]
-const BLINK_GAIN = [0.65, 0.9, 0.5, 0.65, 0.6]
-const BLINK_RAMP = [GOLD, ORANGE, ICE, GOLD, ICE]
-const POINTER_RAMP = [GOLD, ORANGE, ORANGE, GOLD, ICE]
+// twinkles least: the stars are its light. The surf glints often.
+const BLINK_SHARE = [0.22, 0.7, 0.1, 0.18, 0.1, 0.4]
+const BLINK_GAIN = [0.65, 0.9, 0.5, 0.65, 0.6, 0.7]
+const BLINK_RAMP = [GOLD, ORANGE, ICE, GOLD, ICE, PEACH]
+const POINTER_RAMP = [GOLD, ORANGE, ORANGE, GOLD, ICE, GOLD]
+// On the coast, a set of SWELL_CRESTS crests SWELL_GAP apart rolls in along the surf, from the open sea on the left
+// and the horizon towards the cliffs and the shore below, in SWELL_TRAVEL, then rests for a while. A glyph's place
+// on its way (0 to 1) is mostly its x across the artwork and partly its depth below the horizon. Each crest that
+// reaches the cliffs' foot breaks there: a spray of light spreads through the surf around it at SPRAY_SPEED px a
+// ms for SPRAY_MS.
+const SWELL_TRAVEL = 9000
+const SWELL_REST = [1500, 4500] as const
+const SWELL_WIDTH = 0.035
+const SWELL_GAP = 0.13
+const SWELL_CRESTS = 3
+const SWELL_DEPTH = 0.25
+const SPRAY_MS = 1100
+const SPRAY_SPEED = 0.2
+const SPRAY_WIDTH = 34
 // A click sends a ring of cool light through the artwork's glyphs (gold through the clouds): it spreads RIPPLE_SPEED
 // px a ms for RIPPLE_MS, fading as it goes.
 const RIPPLE_MS = 900
@@ -95,30 +113,36 @@ type Glyph = {
   // On the mountain, its height from the artwork's foot (0) to the summit (1), how far ahead of or behind a
   // climbing light it lights, so the light's edge follows no ruler, and how far it has risen out of the dark
   // foreground (0 to 1), where passing light would only speckle the ground; elsewhere its x across the artwork (0 to
-  // 1).
+  // 1), and at sea its place on the swell's way in (0 to 1).
   along: number
   lead: number
   rise: number
   across: number
+  swell: number
   peak: number
   blink: number
   phase: number
   period: number
 }
 // The sea of clouds' pixel work and the embers that may let sparks go come from the same worker.
-type Artwork = { width: number; height: number; glyphs: Glyph[]; fog: FogPrep; sparks: Int32Array }
+type Artwork = { width: number; height: number; glyphs: Glyph[]; fog?: FogPrep; sparks: Int32Array }
 type Box = { l: number; t: number; r: number; b: number }
 type Zone = Box & { strength: number; header: boolean }
 /** start() prepares the layer when the octopus first draws; enter() lights it up when the octopus wakes. */
 export type HeroGlyphs = { start(): void; enter(): void; dispose(): void }
 
-function glyphsFrom(found: Float32Array, width: number): Glyph[] {
+/** Where a point lies on the swell's way in from the open sea (0) to the shore (1). */
+const swellPlace = (scene: Scene, x: number, y: number, width: number): number =>
+  (x / width) * (1 - SWELL_DEPTH) + smooth(scene.sea?.horizon ?? 0, scene.base, y) * SWELL_DEPTH
+
+function glyphsFrom(found: Float32Array, width: number, scene: Scene): Glyph[] {
+  const { base, summit } = scene
   const glyphs: Glyph[] = []
   for (let i = 0; i < found.length; i += 4) {
     const x = found[i]
     const y = found[i + 1]
     const kind = found[i + 2]
-    const along = (BASE - y) / (BASE - SUMMIT[1])
+    const along = (base - y) / (base - summit[1])
     glyphs.push({
       x,
       y,
@@ -128,7 +152,8 @@ function glyphsFrom(found: Float32Array, width: number): Glyph[] {
       lead: (hash(x + 7, y + 3) - 0.5) * 0.04,
       rise: smooth(0.16, 0.4, along),
       across: x / width,
-      peak: Math.hypot(x - SUMMIT[0], y - SUMMIT[1]),
+      swell: swellPlace(scene, x, y, width),
+      peak: Math.hypot(x - summit[0], y - summit[1]),
       // Whether a glyph twinkles and when are separate draws, so the twinkles never start in step.
       blink: hash(x, y) < BLINK_SHARE[kind] ? BLINK_GAIN[kind] : 0,
       phase: hash(y + 31, x + 17),
@@ -141,28 +166,31 @@ function glyphsFrom(found: Float32Array, width: number): Glyph[] {
 // The glyphs have made their first entrance on this page.
 let introduced = false
 
-let analysis: Promise<Artwork> | undefined
+const analyses = new Map<SceneName, Promise<Artwork>>()
 /** Decodes the artwork off the main thread and finds its glyphs in a worker, once per page, so the page never
  * pays a frame for it. A failure is not kept: a later mount tries again. Without workers, OffscreenCanvas or
  * createImageBitmap the painted artwork simply stays as it is. */
-function load(): Promise<Artwork> {
+function load(name: SceneName): Promise<Artwork> {
+  let analysis = analyses.get(name)
   if (!analysis) {
+    const scene = SCENES[name]
     analysis = (async () => {
-      const bitmap = await createImageBitmap(await (await fetch(ART)).blob())
+      const bitmap = await createImageBitmap(await (await fetch(scene.art)).blob())
       const { width, height } = bitmap
       const worker = new Worker(new URL('./heroGlyphsWorker.ts', import.meta.url), { type: 'module' })
       try {
         const { found, fog, sparks } = await new Promise<Analysis>((resolve, reject) => {
           worker.onmessage = (event: MessageEvent<Analysis>) => resolve(event.data)
           worker.onerror = () => reject(new Error('Glyph analysis failed'))
-          worker.postMessage(bitmap, [bitmap])
+          worker.postMessage({ bitmap, scene: name } satisfies Request, [bitmap])
         })
-        return { width, height, glyphs: glyphsFrom(found, width), fog, sparks }
+        return { width, height, glyphs: glyphsFrom(found, width, scene), fog, sparks }
       } finally {
         worker.terminate()
       }
     })()
-    analysis.catch(() => { analysis = undefined })
+    analyses.set(name, analysis)
+    analysis.catch(() => { analyses.delete(name) })
   }
   return analysis
 }
@@ -170,7 +198,9 @@ function load(): Promise<Artwork> {
 /** Draws nothing until start(). The artwork's analysis starts at once, off the main thread, and is shared by
  * later mounts. */
 export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyphs {
-  const ready = load()
+  const name = sceneName(hero.dataset.art)
+  const scene = SCENES[name]
+  const ready = load(name)
   const canvas = document.createElement('canvas')
   canvas.className = 'hero-glyphs-canvas'
   const context = canvas.getContext('2d')
@@ -198,6 +228,11 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
   let low = 0
   let high = 0
   let mountain: Box = { l: 0, t: 0, r: 0, b: 0 }
+  // On the coast, where the surf breaks (css px), how far along the swell's way that is, and the sprays breaking
+  // there now, when each began on the glyphs' clock.
+  let shore = { x: 0, y: 0 }
+  let shoreSwell = 0
+  const sprays: number[] = []
   // The canvas's top left on the page, for pointer positions.
   let origin = { x: 0, y: 0 }
   let size = CELL
@@ -227,6 +262,8 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
   let bandAt = between([0, 800])
   let cloudAt = between([300, 1500])
   let climbAt = between([900, 1500])
+  let swellAt = between([0, 1200])
+  let broken = 0
   let summitSent = false
   const pointer = { x: 0, y: 0, active: false }
   // Recent clicks (canvas css px), when each was on the glyphs' clock.
@@ -277,9 +314,14 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     canvas.width = Math.round(width * ratio)
     canvas.height = Math.round(height * ratio)
     size = CELL * scale
-    low = sy(BASE)
-    high = sy(SUMMIT[1])
-    mountain = { l: Math.max(0, sx(RIDGE[0][0]) - 40), t: Math.max(0, Math.min(...RIDGE.map(([, y]) => sy(y)))), r: width, b: height }
+    low = sy(scene.base)
+    high = sy(scene.summit[1])
+    mountain = { l: Math.max(0, sx(scene.left) - 40), t: Math.max(0, sy(scene.top)), r: width, b: height }
+    if (scene.sea) {
+      const [x, y] = scene.sea.shore
+      shore = { x: sx(x), y: sy(y) }
+      shoreSwell = swellPlace(scene, x, y, artwork.width)
+    }
     const box = hero.getBoundingClientRect()
     origin = { x: box.left + window.scrollX, y: box.top + window.scrollY }
     // The page's own content keeps calm ground: text stays legible and the octopus keeps its silhouette.
@@ -311,11 +353,12 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
       ys[i] = y
       calm[i] = x > -size && x < width + size && y > -size && y < height + size ? calmAt(x, y) : 0
     })
-    // The night sky ends a little above the summit; the sunset clouds cover part of it.
-    skyline = Math.max(0, Math.min(height * STAR_SKY, high - 24))
+    // The night sky ends a little above the summit (or where the artwork's dark sky does); the sunset clouds and the
+    // land cover part of it.
+    skyline = Math.max(0, scene.sky === undefined ? Math.min(height * STAR_SKY, high - 24) : sy(scene.sky))
     clouds = new Set()
     glyphs.forEach((g, i) => {
-      if (g.kind === CLOUD && ys[i] < skyline + CLOUD_CELL) clouds.add(Math.floor(xs[i] / CLOUD_CELL) * 4096 + Math.floor(ys[i] / CLOUD_CELL))
+      if ((g.kind === CLOUD || g.kind <= COOL) && ys[i] < skyline + CLOUD_CELL) clouds.add(Math.floor(xs[i] / CLOUD_CELL) * 4096 + Math.floor(ys[i] / CLOUD_CELL))
     })
     sky.layout({ width, height, skyline, cell: size, calmAt, cloudAt: (x, y) => Math.min(1, clouded(x, y) / 3) })
     fog?.layout({ width, height, ix, iy, scale, cell: size, calmAt })
@@ -327,8 +370,8 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
       sources: sparkSources.flatMap((i) => (calm[i] > 0.9 && xs[i] > 0 && xs[i] < width && ys[i] > 0 && ys[i] < height * 0.8 ? [{ i, period: glyphs[i].period, phase: glyphs[i].phase }] : [])),
       calmAt,
     })
-    // The mountain's glow washes over the mountain only: below the ridge, fading in from the left, and clear of
-    // the calm zones.
+    // The mountain's glow washes over the mountain only: below the ridge (inside the land's outline), fading in from
+    // the left, and clear of the calm zones.
     mask.width = Math.max(1, Math.ceil(width / MASK_SCALE))
     mask.height = Math.max(1, Math.ceil(height / MASK_SCALE))
     const m = mask.getContext('2d')
@@ -337,18 +380,18 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
       m.filter = `blur(${Math.max(1, Math.round((10 * scale) / MASK_SCALE))}px)`
       m.fillStyle = '#fff'
       m.beginPath()
-      for (const [x, y] of RIDGE) m.lineTo(sx(x), sy(y + 10))
-      m.lineTo(width + 40, height + 40)
-      m.lineTo(sx(RIDGE[0][0]) - 40, height + 40)
+      for (const [x, y] of scene.outline) m.lineTo(sx(x), sy(y))
       m.closePath()
       m.fill()
       m.filter = 'none'
-      m.globalCompositeOperation = 'destination-in'
-      const fade = m.createLinearGradient(sx(600), 0, sx(820), 0)
-      fade.addColorStop(0, 'rgba(255,255,255,0)')
-      fade.addColorStop(1, '#fff')
-      m.fillStyle = fade
-      m.fillRect(0, 0, width, height)
+      if (scene.fade) {
+        m.globalCompositeOperation = 'destination-in'
+        const fade = m.createLinearGradient(sx(scene.fade[0]), 0, sx(scene.fade[1]), 0)
+        fade.addColorStop(0, 'rgba(255,255,255,0)')
+        fade.addColorStop(1, '#fff')
+        m.fillStyle = fade
+        m.fillRect(0, 0, width, height)
+      }
       m.globalCompositeOperation = 'destination-out'
       m.filter = `blur(${Math.round(24 / MASK_SCALE)}px)`
       for (const z of zones) {
@@ -459,6 +502,7 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     const reach = since >= 0 && since < CLIMB_MS * 2 ? (since / CLIMB_MS) * 1.3 - 0.15 : -9
     // The entrance's ring: how far it has spread, easing out, or -1 once it has passed the hero's corners.
     const spread = (clock - revealAt) / revealMs
+    const swell = swellFront()
     const ring = spread < 1 ? (1 - (1 - Math.max(0, spread)) ** 2) * ringSpan : -1
     context.lineCap = 'round'
     wash(context, band, reach)
@@ -499,6 +543,28 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
             ramp = GOLD
           }
         }
+      } else if (kind === SURF) {
+        // Each crest of the swell: gold at its heart, rose ahead of it, orange behind, the later ones fainter. Where
+        // one breaks at the cliffs' foot, its spray spreads through the surf in pale gold.
+        for (let k = 0; k < SWELL_CRESTS; k++) {
+          const off = g.swell - swell + k * SWELL_GAP
+          if (off < -SWELL_WIDTH * 3 || off > SWELL_WIDTH * 3) continue
+          const glow = Math.exp(-((off / SWELL_WIDTH) ** 2)) * (0.9 - k * 0.18)
+          if (glow > light) {
+            light = glow
+            ramp = off > 0.012 ? ROSE : off < -0.012 ? ORANGE : GOLD
+          }
+        }
+        for (const at of sprays) {
+          const age = clock - at
+          const off = Math.hypot(xs[i] - shore.x, ys[i] - shore.y) - age * SPRAY_SPEED
+          if (off < -SPRAY_WIDTH * 3 || off > SPRAY_WIDTH * 3) continue
+          const spray = Math.exp(-((off / SPRAY_WIDTH) ** 2)) * (1 - age / SPRAY_MS) ** 1.2
+          if (spray > light) {
+            light = spray
+            ramp = PEACH
+          }
+        }
       } else if (kind === CLOUD) {
         // Light drifts through the clouds from right to left: rose ahead, gold at its heart, peach behind.
         const off = g.across - cloud
@@ -522,13 +588,13 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
         const wave = Math.exp(-((off / RIPPLE_WIDTH) ** 2)) * (1 - age / RIPPLE_MS) ** 1.3
         if (wave > light) {
           light = wave
-          ramp = kind === CLOUD ? GOLD : ICE
+          ramp = kind === CLOUD || kind === SURF ? GOLD : ICE
         }
       }
       light *= g.weight * gain * open
       if (light < 0.08) continue
       const step = Math.min(STEPS - 1, Math.floor(light * STEPS))
-      shapes[i] = kind === FACE || kind === CLOUD
+      shapes[i] = kind === FACE || kind === CLOUD || kind === SURF
         ? (step < 3 ? CROSS : STAR)
         : kind === EMBER ? (step < 2 ? FOUR : step < 5 ? CROSS : STAR)
         : kind === COOL ? (step < 3 ? FOUR : CROSS)
@@ -562,6 +628,12 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     }
   }
 
+  /** Where the swell's leading crest is on its way in (0 to 1), or far off while the sea rests. */
+  function swellFront(): number {
+    if (!scene.sea) return -9
+    return ((clock - swellAt) / SWELL_TRAVEL) * (1.3 + SWELL_GAP * (SWELL_CRESTS - 1)) - 0.2
+  }
+
   function frame(now: number): void {
     raf = requestAnimationFrame(frame)
     // About 30 fps is plenty for twinkles and slow light.
@@ -588,6 +660,19 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
       hero.dispatchEvent(new CustomEvent('w2l:summit'))
     }
     while (clicks.length && clock - clicks[0]!.at > RIPPLE_MS) clicks.shift()
+    if (scene.sea) {
+      if (clock - swellAt > SWELL_TRAVEL) {
+        swellAt = clock + between(SWELL_REST)
+        broken = 0
+      }
+      // Each crest that reaches the cliffs' foot breaks there.
+      const front = swellFront()
+      while (broken < SWELL_CRESTS && front - broken * SWELL_GAP >= shoreSwell) {
+        sprays.push(clock)
+        broken++
+      }
+      while (sprays.length && clock - sprays[0]! > SPRAY_MS) sprays.shift()
+    }
     sky.step(clock)
     fog?.step(clock)
     if (embers) {
@@ -659,7 +744,7 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
         if (disposed) return
         artwork = { width: result.width, height: result.height }
         glyphs = result.glyphs
-        fog = createFog(result.fog)
+        fog = result.fog && createFog(result.fog)
         embers = createEmbers()
         // Only embers that twinkle let sparks go, at the height of a twinkle.
         sparkSources = Array.from(result.sparks).filter((i) => glyphs[i].blink > 0)

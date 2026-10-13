@@ -20,6 +20,8 @@ export const VERSIONED_PUBLIC_FILES = [
   '/assets/octopus-original.webp',
   // The same octopus at 720 px for the faint copy behind the hero on narrow screens (src/styles.css .hero-octopus-static).
   '/assets/octopus-ghost.webp',
+  // The free tool pages' hero backdrop (src/styles.css, .hero[data-art='coast']).
+  '/assets/scene-coast.webp',
   // The client logos on Connect MCP.
   '/docs-assets/agent-clients/claude-code.svg',
   '/docs-assets/agent-clients/codex.svg',

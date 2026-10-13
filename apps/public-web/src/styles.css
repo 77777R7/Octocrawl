@@ -61,6 +61,8 @@ a { color: inherit; }
 .hero-backdrop,
 .hero-shade { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .hero-backdrop { z-index: -3; background: url('/assets/mountain-hero.webp') center 58% / cover no-repeat; }
+/* A free tool page's hero shows the coast (page.ts, heroMarkup), its cliffs kept in view on narrow screens too. */
+.hero[data-art='coast'] .hero-backdrop { background-image: url('/assets/scene-coast.webp'); background-position: 74% 58%; }
 /* The single column's faint octopus, centred on the headline group: the column's top padding puts that group's
    middle at 47% of the screen, and at least 347 px down (319 px on phones). Its two cream eyes are painted over with the source's
    ground (they sit at .447/.548 × .447 of the source, drawn at 140% of the box height): as specks they would land
@@ -601,6 +603,8 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .step-number { padding-top: 4px; color: #b8461d; font: 680 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .how-step h3 { margin: 0; color: #14254a; font-size: 17px; line-height: 1.35; letter-spacing: -.02em; }
 .how-step p { margin: 5px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; text-wrap: pretty; }
+/* A free tool page's rows can hold a whole command: it wraps rather than running past a phone's edge. */
+.tool-section .how-step code { overflow-wrap: anywhere; }
 .how-links { display: flex; flex-wrap: wrap; gap: 0 24px; margin: 18px 0 0; }
 .how-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #1d64ac; font-size: 14px; font-weight: 650; text-underline-offset: 3px; }
 .how-links a:hover { color: #b8461d; }
@@ -786,6 +790,7 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 
 @media (max-width: 600px) {
   .hero-backdrop { background-position: 54% center; filter: brightness(.68); }
+  .hero[data-art='coast'] .hero-backdrop { background-position: 88% center; }
   .hero-shade { background: linear-gradient(180deg, rgba(3, 14, 45, .43), rgba(3, 14, 45, .4) 49%, rgba(3, 14, 45, .58) 67%, rgba(3, 14, 45, .79)); }
   .hero > main { padding-top: max(0px, 47vh - 319px); padding-top: max(0px, 47svh - 319px); }
   .hero-octopus-static { width: 630px; height: 630px; top: calc(max(319px, 47vh) - 315px); top: calc(max(319px, 47svh) - 315px); right: -120px; background-position: 271.6px 271.6px, 343px 271.6px, center; background-size: 12px 12px, 12px 12px, auto 112%; opacity: .14; }

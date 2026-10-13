@@ -27,6 +27,11 @@ export const NAV_CLIENTS = [
   { glyph: '↔', title: 'REST API', text: 'api.octocrawl.dev or your own', href: '/docs/reference/#rest-and-sdk' },
 ]
 
+/** Free tools: one task each, in the browser, on the home page's daily previews. */
+export const NAV_TOOLS = [
+  { glyph: '↓', title: 'URL to Markdown', text: 'Any public page as clean Markdown', href: '/tools/url-to-markdown/' },
+]
+
 /** The docs menu: the guide groups as the sidebar has them; the project pages (privacy, terms) stay in the footer. */
 export const NAV_DOC_GROUPS = ['Get started', 'Guides', 'Reference']
 
@@ -43,7 +48,7 @@ export function siteNavMarkup(current = '') {
             <ul class="nav-list">
               <li class="nav-item"><details class="nav-drop"><summary>Product<span class="nav-caret" aria-hidden="true">▾</span></summary><div class="nav-panel nav-product">
                 <div class="nav-col"><p class="nav-kicker">What it does</p><ul>${NAV_CAPABILITIES.map(item).join('')}</ul></div>
-                <div class="nav-col"><p class="nav-kicker">Use it from</p><ul>${NAV_CLIENTS.map(item).join('')}</ul></div>
+                <div class="nav-col"><p class="nav-kicker">Use it from</p><ul>${NAV_CLIENTS.map(item).join('')}</ul><p class="nav-kicker">Free tools</p><ul>${NAV_TOOLS.map(item).join('')}</ul></div>
                 <a class="nav-feature" href="/docs/connect-mcp/"><span class="nav-feature-tag">MCP</span> <span class="nav-feature-title">Connect your agent in one line</span> <code>claude mcp add \\\n  --transport http octocrawl \\\n  https://mcp.octocrawl.dev/mcp</code> <span class="nav-feature-note">No account, 20 pages a day. Setup for every client <span aria-hidden="true">→</span></span></a>
               </div></details></li>
               <li class="nav-item"><details class="nav-drop"><summary${current === 'docs' ? ' aria-current="page"' : ''}>Docs<span class="nav-caret" aria-hidden="true">▾</span></summary><div class="nav-panel nav-docs">${docs}</div></details></li>
