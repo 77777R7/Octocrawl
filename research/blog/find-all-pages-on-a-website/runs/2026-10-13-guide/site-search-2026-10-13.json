@@ -1,0 +1,9 @@
+{
+ "read": "2026-10-13 ~07:45 UTC, Claude desktop app built-in browser, Google hl=en&gl=us&pws=0, through local proxy 127.0.0.1:7890",
+ "searches": [
+  {"query": "site:modelcontextprotocol.io", "resultStats": "About 4,310 results", "firstResults": ["https://blog.modelcontextprotocol.io/", "https://ts.sdk.modelcontextprotocol.io/", "https://php.sdk.modelcontextprotocol.io/", "https://ruby.sdk.modelcontextprotocol.io/", "https://blog.modelcontextprotocol.io/posts/"], "note": "site: includes subdomains; the first five results are all on subdomains"},
+  {"query": "site:modelcontextprotocol.io/specification", "resultStats": "About 192 results"},
+  {"query": "site:octocrawl.dev", "resultStats": "About 26 results", "firstPage": 10, "hasNextPage": true}
+ ],
+ "note": "Google's result count is an estimate it prints, not a count of indexed pages."
+}

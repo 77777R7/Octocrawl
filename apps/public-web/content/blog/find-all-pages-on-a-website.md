@@ -1,20 +1,64 @@
-# How to find all pages on a website, and see where each URL came from
+# How to find all pages on a website: 6 ways, and how to check the list
 
-To find all pages on a website, read the sitemaps it declares and the links on its start page, then filter the URLs to the site and the section you care about. A site map tool does that in one call: it lists a website's page URLs without opening each page, and records where it found every one.
+To find all pages on a website, read its sitemap (robots.txt says where it is), search Google with `site:`, check Search Console if the site is yours, run a crawler, map the site with one API call, or look the domain up in the Wayback Machine. Each finds a different part of the site, so the last step is to check the list.
 
-Octocrawl's `map` is that call, and it also counts what it left out and why. On 2026-10-09 it listed 358 URLs for modelcontextprotocol.io in about a second, and 11 when we asked only for pages about transports. Here is how to run it and how to read the answer.
+[**Paste a URL, get every page and where it was found →**](/tools/link-extractor/?from=blog-find-all-pages)
 
-## How do you list every page of a site?
+On 2026-10-13 we tried five of them on modelcontextprotocol.io and on our own site, octocrawl.dev; for the crawler we read its documentation. The sitemap listed 357 pages, Google said "about 4,310 results", and two web archives held 458 addresses that a map of the site didn't. Here is what each way finds, which to use, and how we found out which of those 458 were real pages.
 
-Hosted Octocrawl maps a site with no key. A map counts as one page of the [daily allowance](/docs/limits/#hosted-api-and-mcp), 20 a day per address.
+## 1. Read the sitemap, found from robots.txt
+
+Most sites publish a sitemap: an XML file that lists the pages they want search engines to find, described by the [sitemaps protocol](https://www.sitemaps.org/protocol.html). Its address is usually written in the site's robots.txt, on a `Sitemap:` line. Open `https://example.com/robots.txt` and look for it:
+
+![modelcontextprotocol.io's robots.txt ends with the line Sitemap: https://modelcontextprotocol.io/sitemap.xml, and counting the loc entries in that sitemap gives 357](/blog-assets/find-all-pages-on-a-website/robots-sitemap.webp "curl on 2026-10-13 07:25 UTC: the robots.txt names the sitemap, and the sitemap lists 357 URLs.")
+
+That is modelcontextprotocol.io's robots.txt, and its sitemap lists 357 URLs. When robots.txt names no sitemap, try `/sitemap.xml` and `/sitemap_index.xml`. A sitemap index lists other sitemaps, so open each one it names.
+
+**Finds:** the pages the site wants found. **Misses:** pages the owner left out, and on many small sites there is no sitemap at all.
+
+## 2. Search Google with site:
+
+Type `site:` and the domain into Google:
+
+```text
+site:modelcontextprotocol.io
+```
+
+Google answered "About 4,310 results", and its first five results were on other hosts: `blog.`, `ts.sdk.`, `php.sdk.` and `ruby.sdk.modelcontextprotocol.io`. `site:` includes subdomains, so add a path to stay in one part of a site. `site:modelcontextprotocol.io/specification` said about 192, where the sitemap lists 142 pages under `/specification`.
+
+![Google's site: estimates next to sitemap counts: about 4,310 against 357 for modelcontextprotocol.io, about 192 against 142 for its /specification section, about 26 against 22 for octocrawl.dev](/blog-assets/find-all-pages-on-a-website/site-search.webp "Read in Google on 2026-10-13. The counts are Google's estimates as printed.")
+
+The number is an estimate, not a count. Google's own [documentation of `site:`](https://developers.google.com/search/docs/monitor-debug/search-operators/all-search-site) says the list "is not always exhaustive". Use `site:` to see what Google shows for a site, and to check whether one page is in Google. Don't use it to count pages.
+
+**Finds:** pages Google has indexed, on any site. **Misses:** pages Google hasn't indexed, and the count can't be trusted.
+
+## 3. Check Search Console (your own site only)
+
+If you own the site, [Google Search Console](https://search.google.com/search-console) says which of your pages Google knows. The [Pages report](https://support.google.com/webmasters/answer/7440203) lists indexed and not-indexed pages with a reason, up to 1,000 example URLs for each. URL Inspection checks one address.
+
+We inspected the 24 URLs a map of our own site found. 21 were "Submitted and indexed". Three were "URL is unknown to Google": `/scrape/`, a page we had published that day, `/llms.txt` and `/signin/`. Search Console is the only method here that tells you what Google thinks of each page, not just whether it exists.
+
+![Search Console URL Inspection for the 24 URLs on octocrawl.dev: 21 submitted and indexed, 3 unknown to Google, namely /scrape/, /llms.txt and /signin/](/blog-assets/find-all-pages-on-a-website/search-console.webp "The URL Inspection API on 2026-10-13, one call per URL.")
+
+**Finds:** what Google has found and indexed on your site, with a reason for the rest. **Misses:** pages Google has never found. It only works on a site you've verified.
+
+## 4. Run a crawler
+
+A crawler, such as [Screaming Frog SEO Spider](https://www.screamingfrog.co.uk/seo-spider/), starts at the home page, opens every page and follows every link, the way a search engine does. It reports each page's status code, title and links. Screaming Frog's free version crawls up to 500 URLs at a time and doesn't render JavaScript; a licence removes both limits.
+
+**Finds:** every page that a link reaches, with its status code. **Misses:** pages nothing links to. It's also the slowest method, because it opens every page.
+
+## 5. Map the site with one call
+
+A site map tool reads the sitemaps and the links on the start page, without opening every page, and returns one list. Octocrawl's `map` does that, and says where it found each URL. Hosted Octocrawl takes no key. A map counts as one page of the [daily allowance](/docs/limits/#hosted-api-and-mcp), 20 a day per address:
 
 ```bash
 curl -s https://api.octocrawl.dev/v1/map \
   -H 'content-type: application/json' \
-  -d '{"url": "https://modelcontextprotocol.io", "search": "transports"}'
+  -d '{"url": "https://modelcontextprotocol.io"}'
 ```
 
-On your own computer, with no daily limit, the CLI does the same:
+It returned 359 URLs in 2.5 seconds: 357 from the sitemap and 18 from links on the start page. Two were not in the sitemap at all: the home page and `/llms.txt`. On your own computer, with no daily limit, the CLI does the same:
 
 ```bash
 npx octocrawl map https://modelcontextprotocol.io --search transports --limit 3
@@ -22,56 +66,23 @@ npx octocrawl map https://modelcontextprotocol.io --search transports --limit 3
 
 ![The CLI map of modelcontextprotocol.io with search "transports", limited to 3 URLs](/blog-assets/find-all-pages-on-a-website/cli-map.webp "npx octocrawl@0.3.2 map with --search transports --limit 3: three URLs, each found in the sitemap, and the counts of what was left out. Rendered from the saved output, 2026-10-09 19:48 UTC.")
 
-From an agent, ask for it in plain words, as in our [Claude Code walkthrough](/blog/claude-code-web-scraping/): "Use Octocrawl map on https://modelcontextprotocol.io with search "streamable http"". The SDKs call the same route: `new W2L({ baseUrl }).map(url, options)` in TypeScript and `W2L(...).map(url, **options)` in Python.
-
-## Where does each URL in the list come from?
-
-From two places, and the answer says which one for every URL:
-
-- **The sitemaps the site declares.** Octocrawl reads the `Sitemap:` lines of the site's robots.txt, or `/sitemap.xml` when there are none, and follows a sitemap index one level down. The [sitemaps protocol](https://www.sitemaps.org/protocol.html) is what makes these lists possible.
-- **The links on the start page.** Only the start page is read, which is why a map takes seconds.
-
-The hosted curl above returned 11 URLs in 1.2 seconds. Here are its first two links and the counts:
+Every URL in the answer says where it came from:
 
 ```json
 {
-  "status": "completed",
-  "links": [
-    {
-      "url": "https://modelcontextprotocol.io/community/working-groups/transports",
-      "via": ["sitemap"],
-      "sitemapFile": "https://modelcontextprotocol.io/sitemap.xml",
-      "lastmod": "2026-08-26T03:23:04.413Z",
-      "robots": "allowed"
-    },
-    {
-      "url": "https://modelcontextprotocol.io/specification/2024-11-05/basic/transports",
-      "via": ["sitemap"],
-      "sitemapFile": "https://modelcontextprotocol.io/sitemap.xml",
-      "lastmod": "2026-10-08T12:58:40.318Z",
-      "robots": "allowed"
-    }
-  ],
-  "sources": { "sitemap": { "sources": ["robots"], "listed": 356, "accepted": 11 } },
-  "refused": { "duplicate": 18, "hostDenied": 8, "searchFiltered": 347 },
-  "elapsedMs": 1200
+  "url": "https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro",
+  "via": ["link", "sitemap"],
+  "sitemapFile": "https://modelcontextprotocol.io/sitemap.xml",
+  "lastmod": "2026-10-11T01:32:35.369Z",
+  "robots": "allowed"
 }
 ```
 
-`via` is `start`, `link` or `sitemap`, and a URL found both ways lists both. `sitemapFile` and `lastmod` name the sitemap that listed the URL and the date it gave. A `title`, when there is one, comes from the start page's `<title>`, a link's text or a news sitemap. A map never opens a page to fetch its title.
+`via` is `start`, `link` or `sitemap`, and a URL found both ways lists both. `sitemapFile` and `lastmod` name the sitemap that listed it and the date it gave. What the map left out is counted in `refused`: here 18 entries repeated a URL already seen (17 sitemap entries for pages already found as links) and 8 links pointed to other hosts, such as `github.com` and `blog.modelcontextprotocol.io`.
 
 ![How map builds the list: start-page links and sitemap entries go through the scope, robots.txt and search filters, and every URL left out is counted by reason](/blog-assets/find-all-pages-on-a-website/sources.webp "Two sources in, one list out, and a count for every reason a URL was left out.")
 
-## Why are some pages missing from the list?
-
-Because something left them out, and `refused` says what. In the run above, 347 URLs didn't match `search`, 18 repeated a URL already seen, and 8 were on other hosts (among them `blog.modelcontextprotocol.io`, `github.com` and `discord.gg`). The other common reasons:
-
-- **The path.** A map stays inside the start URL's path. Starting at `https://modelcontextprotocol.io/docs` returned 117 URLs, all under `/docs`, and counted 248 links and sitemap entries elsewhere on the site as `subtreeDenied`. Starting at the root returned 358. Start at the root, or set `crawlEntireDomain`, to list everything.
-- **robots.txt.** URLs that robots.txt disallows are counted in `refused.robots` and not listed. Hosted Octocrawl always obeys it, as described in [RFC 9309](https://www.rfc-editor.org/rfc/rfc9309).
-- **No sitemap.** Then the list is only the start page's links. Reading further means a crawl, which reads every page it finds (`npx octocrawl crawl` on your computer).
-- **Links built by JavaScript.** A map doesn't run scripts. The answer flags `start_page_client_rendered`, and a scrape with `formats: ["links"]` in a real browser gets them.
-
-## How do you narrow the list?
+Options narrow the list:
 
 | Option | What it does |
 | --- | --- |
@@ -82,30 +93,89 @@ Because something left them out, and `refused` says what. In the run above, 347 
 | `crawlEntireDomain` | Keeps URLs outside the start URL's path. |
 | `includePaths`, `excludePaths` | Regular expressions on the path. An exclude wins. |
 
-A map that reaches `limit` is `completed` with `stoppedBy: "limit"`, as the CLI run above shows. A map that hits its `timeout` (60 seconds by default) returns what it found, as `partial`.
+A map stays inside the start URL's path: starting at `/docs` lists only pages under `/docs`. Start at the root to list everything.
 
-## When is a map not enough?
+[**Try it on any site, no sign-up →**](/tools/link-extractor/?from=blog-find-all-pages)
 
-- **You need every page's content.** A map lists URLs. To read them, [scrape the list](/blog/scrape-list-of-urls/) in a batch.
-- **You need each page's status code**, as in an SEO audit. A map doesn't request the pages it lists, so it can't tell you which ones return 404.
-- **The site has no sitemap and few links.** Use a crawl on your computer instead.
+**Finds:** everything the site declares and links from its start page, in seconds, with the source of each URL. **Misses:** pages that are neither in a sitemap nor linked from the start page. It doesn't open the pages, so it can't give status codes.
+
+## 6. Look the domain up in web archives
+
+The Wayback Machine and Common Crawl keep copies of pages they have visited over the years. Both can list every address they hold for a domain. The Wayback Machine's CDX API:
+
+```text
+https://web.archive.org/cdx/search/cdx?url=modelcontextprotocol.io/*&collapse=urlkey&filter=statuscode:200&filter=mimetype:text/html&fl=original
+```
+
+returned 582 page addresses for modelcontextprotocol.io, after we dropped query strings, duplicates and malformed addresses such as `/introduction)`, copied from text with the bracket still on. Common Crawl's latest index that day (CC-MAIN-2026-39) held 411. Together they had 458 addresses that the map didn't.
+
+**Finds:** pages that exist now or used to, including old ones nothing links to. **Misses:** pages the archives never visited. Many of the addresses are gone, as the next section shows.
+
+## Which way should you use?
+
+| Your situation | Use |
+| --- | --- |
+| You want a list in seconds, for any site | Map it (5), or read the sitemap (1) |
+| The site is yours | Search Console (3), then compare it with the sitemap |
+| You need status codes, titles, broken links | A crawler (4) |
+| You're checking one page is in Google | `site:` with the page's address (2) |
+| You want pages that used to exist | Web archives (6) |
+| The site has no sitemap | A crawler (4), or a map, which falls back to start-page links |
+
+## How do you check the list is complete?
+
+Compare two sources, then check the addresses that only one of them has. A longer list isn't a more complete one until you do.
+
+The archives gave us 458 addresses the map didn't have. We requested each one, except 11 under `/_next/`, which the site's robots.txt disallows, and followed every redirect that didn't land on a page the map listed:
+
+![Four sources in: sitemap 357, start-page links 18, Wayback Machine 582, Common Crawl 411. The map's list has 359; the archives have 458 addresses not in it. Of the 447 requested, 95 are gone, 96 redirect, 203 are Markdown copies, 52 are the same page at another address and 1 is robots.txt. Live pages the map missed: 0 of 447](/blog-assets/find-all-pages-on-a-website/check-list.webp "modelcontextprotocol.io on 2026-10-13: every archive-only address requested and sorted.")
+
+| What came back | Addresses |
+| --- | --- |
+| 404, the page is gone | 95 |
+| A redirect: 88 to a page the map listed, 8 to a page that answers 404 | 96 |
+| 200, a Markdown copy of a listed page (`…/intro.md`) | 203 |
+| 200, the same page under another address (`…/index`) or a copy of that | 52 |
+| 200, `robots.txt` | 1 |
+
+None of the 447 we requested was a live page the map had missed. The extra length was old pages, redirects and copies. On another site the same check could find real pages, which is why it's worth doing.
+
+The same goes for your own site: compare the sitemap with Search Console. Pages in the sitemap that Google doesn't know need a link or a request to index them. Pages Google knows that aren't in the sitemap are either missing from it or shouldn't exist.
+
+## Which pages won't any method find?
+
+- **Orphan pages.** A page that no sitemap lists, no page links to and no archive visited can't be found from outside. If the site is yours, your server logs or CMS still have it.
+- **Pages behind a login.** Crawlers and maps see what a visitor sees.
+- **Links built by JavaScript.** A map and most crawlers read the HTML as the server sends it. When the start page builds its links in the browser, the map's answer says `start_page_client_rendered`, and a scrape in a real browser gets them.
 
 ## FAQ
 
 ### How do I find all pages on a website for free?
 
-Map it with hosted Octocrawl, which takes no key and counts each map as one of 20 free pages a day. On your computer, `npx octocrawl map` has no daily limit.
+All six ways are free to start. The quickest is to read the sitemap or map the site: hosted Octocrawl maps a site with no key, 20 a day per address, and `npx octocrawl map` on your computer has no daily limit.
+
+### How many pages does a website have?
+
+Count the URLs in its sitemap or map, then check them as above. Google's `site:` count is an estimate and includes subdomains: it said 4,310 for a site whose sitemap lists 357 pages.
+
+### How do I find all subpages of a website?
+
+Start from the section's address. A map that starts at `https://example.com/docs` lists only pages under `/docs`, and `site:example.com/docs` searches only that path.
+
+### Why isn't every page in the sitemap?
+
+The site's owner chose what to list. Sign-in pages, search results and old pages are often left out on purpose, and some sitemaps are simply out of date. Links and archives find the rest.
 
 ### How do I find hidden pages on a website?
 
-A page that no sitemap lists and no page links to can't be found from outside. A map shows what the site publishes, and the counts show what it left out.
+Check the archives for old addresses and the robots.txt for paths the site asks crawlers to skip, then request what you find. A page that nothing lists, links to or archived can't be found from outside.
 
 ### Can I get all URLs from a sitemap only?
 
-Yes. Set `sitemap: "only"` (`--sitemap only` on the CLI) to skip the start page and list just the sitemap entries.
+Yes. Open the sitemap in a browser, or map with `sitemap: "only"` (`--sitemap only` on the CLI) to list just its entries.
 
 ### Why does my list stop at 5,000 URLs?
 
-That's the default `limit` and the hosted maximum. On your computer, raise `limit` up to 100,000.
+That's the map's default `limit` and the hosted maximum. On your computer, raise `limit` up to 100,000.
 
-The 358 URLs for modelcontextprotocol.io each came with where they were found, and the ones left out came with a reason. That's the difference between a list and a list you can trust. For using the list in a pipeline, see [web scraping for RAG](/blog/web-scraping-for-rag/).
+Once you have the list, you can [scrape the list](/blog/scrape-list-of-urls/) to read every page, or feed it to a pipeline as in [web scraping for RAG](/blog/web-scraping-for-rag/).

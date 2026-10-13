@@ -1,0 +1,133 @@
+{
+ "checkedAt": "2026-10-13T07:50:23.025Z",
+ "rows": [
+  {
+   "url": "https://modelcontextprotocol.io/docs/concepts/sampling",
+   "firstStatus": 308,
+   "location": "/specification/latest/client/sampling",
+   "status": 200,
+   "finalUrl": "https://modelcontextprotocol.io/specification/2026-07-28/client/sampling",
+   "finalInMap": true
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/develop/build",
+   "firstStatus": 307,
+   "location": "/docs/2026-07-28/develop/build",
+   "status": 404,
+   "finalUrl": "https://modelcontextprotocol.io/docs/2026-07-28/develop/build",
+   "finalInMap": false
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/getting-started/intro2",
+   "firstStatus": 307,
+   "location": "/docs/2026-07-28/getting-started/intro2",
+   "status": 404,
+   "finalUrl": "https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro2",
+   "finalInMap": false
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/getting-started/introclients",
+   "firstStatus": 307,
+   "location": "/docs/2026-07-28/getting-started/introclients",
+   "status": 404,
+   "finalUrl": "https://modelcontextprotocol.io/docs/2026-07-28/getting-started/introclients",
+   "finalInMap": false
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/learn/architectureFig",
+   "firstStatus": 307,
+   "location": "/docs/2026-07-28/learn/architectureFig",
+   "status": 404,
+   "finalUrl": "https://modelcontextprotocol.io/docs/2026-07-28/learn/architectureFig",
+   "finalInMap": false
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/learn/server-concepts.Jones",
+   "firstStatus": 307,
+   "location": "/docs/2026-07-28/learn/server-concepts.Jones",
+   "status": 404,
+   "finalUrl": "https://modelcontextprotocol.io/docs/2026-07-28/learn/server-concepts.Jones",
+   "finalInMap": false
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tools/building-tools",
+   "firstStatus": 307,
+   "location": "/docs/2026-07-28/tools/building-tools",
+   "status": 404,
+   "finalUrl": "https://modelcontextprotocol.io/docs/2026-07-28/tools/building-tools",
+   "finalInMap": false
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tools/python-sdk",
+   "firstStatus": 307,
+   "location": "/docs/2026-07-28/tools/python-sdk",
+   "status": 404,
+   "finalUrl": "https://modelcontextprotocol.io/docs/2026-07-28/tools/python-sdk",
+   "finalInMap": false
+  },
+  {
+   "url": "https://modelcontextprotocol.io/docs/tools/typescript-sdk",
+   "firstStatus": 307,
+   "location": "/docs/2026-07-28/tools/typescript-sdk",
+   "status": 404,
+   "finalUrl": "https://modelcontextprotocol.io/docs/2026-07-28/tools/typescript-sdk",
+   "finalInMap": false
+  },
+  {
+   "url": "https://modelcontextprotocol.io/ecosystem",
+   "firstStatus": "error",
+   "location": null,
+   "status": 404,
+   "finalUrl": "https://modelcontextprotocol.io/ecosystem",
+   "finalInMap": false
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/architecture",
+   "firstStatus": 308,
+   "location": "/specification/latest/architecture",
+   "status": 200,
+   "finalUrl": "https://modelcontextprotocol.io/specification/2026-07-28/architecture",
+   "finalInMap": true
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/prompts",
+   "firstStatus": 308,
+   "location": "/specification/latest/server/prompts",
+   "status": 200,
+   "finalUrl": "https://modelcontextprotocol.io/specification/2026-07-28/server/prompts",
+   "finalInMap": true
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/resources",
+   "firstStatus": 308,
+   "location": "/specification/latest/server/resources",
+   "status": 200,
+   "finalUrl": "https://modelcontextprotocol.io/specification/2026-07-28/server/resources",
+   "finalInMap": true
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/sampling",
+   "firstStatus": 308,
+   "location": "/specification/latest/client/sampling",
+   "status": 200,
+   "finalUrl": "https://modelcontextprotocol.io/specification/2026-07-28/client/sampling",
+   "finalInMap": true
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/tools",
+   "firstStatus": 308,
+   "location": "/specification/latest/server/tools",
+   "status": 200,
+   "finalUrl": "https://modelcontextprotocol.io/specification/2026-07-28/server/tools",
+   "finalInMap": true
+  },
+  {
+   "url": "https://modelcontextprotocol.io/legacy/concepts/transports",
+   "firstStatus": 308,
+   "location": "/specification/latest/basic/transports",
+   "status": 200,
+   "finalUrl": "https://modelcontextprotocol.io/specification/2026-07-28/basic/transports",
+   "finalInMap": true
+  }
+ ]
+}
