@@ -14,6 +14,10 @@
   "status-archive-only-mcp.json": "node status.mjs <this folder>: GET with redirect manual, user agent w2l-research/0.1, 3 at a time, 250 ms apart, 20 s timeout. Node fetch without NODE_USE_ENV_PROXY, so these requests went DIRECT, not through the proxy. /_next/ URLs (disallowed by robots.txt) were not requested.",
   "gsc-url-inspection-octocrawl-dev.json": "Search Console URL Inspection API for each of the 24 URLs in hosted-map-octocrawl-dev.json, operator's ADC login, quota project octopus-w2l-20260924-7r7, proxied",
   "gsc-performance-article.json": "Search Console searchAnalytics for the article page, 2026-10-01..2026-10-13, dataState all, proxied",
-  "serp-google-2026-10-13.json, site-search-2026-10-13.json": "Google read in the Claude desktop app's built-in browser, hl=en&gl=us&pws=0, proxied; result counts copied from the page"
- }
+  "serp-google-2026-10-13.json, site-search-2026-10-13.json": "Google read in the Claude desktop app's built-in browser, hl=en&gl=us&pws=0, proxied; result counts copied from the page",
+  "followup-redirects-mcp.json": "node followup.mjs <this folder>, after review: the 15 archive-only redirects whose target the map did not list, and /ecosystem (error in status.mjs), requested again following redirects; NODE_USE_ENV_PROXY=1, so proxied. 7 end on a page the map listed, 8 on a 404; /ecosystem answered 404.",
+  "commoncrawl-collinfo.json": "GET https://index.commoncrawl.org/collinfo.json after review, to record that CC-MAIN-2026-39 was the newest index listed (first entry); proxied",
+  "sources-read.md": "vendor and documentation pages read 2026-10-13 for the article's outside claims"
+ },
+ "notTried": "Method 4 (a crawler such as Screaming Frog) was not run; the article cites the vendor page only."
 }
