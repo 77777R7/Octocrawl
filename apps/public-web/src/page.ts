@@ -120,7 +120,7 @@ ${waitlist ? `      ${waitlistMarkup()}\n` : ''}      <div class="band band-dark
       </div>
       <div class="band band-dark">
         <nav class="frame footer-columns" aria-label="Footer">
-          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try Octocrawl</a></li><li><a href="${home}#how-it-works">How it works</a></li><li><a href="${home}#what-it-does">What it does</a></li><li><a href="${home}#get-started">Get started</a></li><li><a href="${home}#free-tiers">Free tiers</a></li><li><a href="${home}#faq">FAQ</a></li><li><a href="/blog/">Blog</a></li><li><a href="/changelog/">Changelog</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try Octocrawl</a></li><li><a href="${home}#how-it-works">How it works</a></li><li><a href="${home}#what-it-does">What it does</a></li><li><a href="${home}#get-started">Get started</a></li><li><a href="${home}#free-tiers">Free tiers</a></li><li><a href="/tools/">Free tools</a></li><li><a href="${home}#faq">FAQ</a></li><li><a href="/blog/">Blog</a></li><li><a href="/changelog/">Changelog</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Docs</p><ul><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/guides/monitor-webhook/">Monitor to HTTPS Webhook</a></li><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li><li><a href="/llms.txt">llms.txt</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Legal</p><ul><li><a href="/docs/terms/">Terms of use</a></li><li><a href="/docs/acceptable-use/">Acceptable use</a></li><li><a href="/docs/privacy/">Privacy</a></li><li><a href="https://github.com/77777R7/Octocrawl/blob/main/LICENSE">AGPL-3.0 license ↗</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Contact</p><ul><li><a href="mailto:hello@octocrawl.dev">hello@octocrawl.dev</a></li><li><a href="https://github.com/77777R7/Octocrawl/issues">GitHub issues ↗</a></li><li><a href="https://github.com/77777R7/Octocrawl">GitHub repository ↗</a></li><li><a href="/docs/contact/">Contact page</a></li><li><a href="#top">Back to top ↑</a></li></ul></div>
@@ -148,7 +148,16 @@ export function siteHeaderMarkup(): string {
 
 /** The hero's words: what the page is for, and where its scroll cue leads before the first run; and the artwork
  * behind it, the mountain unless it names another (heroArtwork.ts, SCENES). */
-export interface HeroCopy { title: string; description: string; next: string; nextLabel: string; art?: 'coast' }
+export interface HeroCopy {
+  title: string
+  description: string
+  next: string
+  nextLabel: string
+  art?: 'coast'
+  // A free tool's page: a short strip of the artwork with the tool's name under a breadcrumb (`crumb`), and the card
+  // right below it, without the home page's full-screen artwork, octopus and glyph light.
+  tool?: { crumb: string }
+}
 const HOME_HERO: HeroCopy = {
   title: 'One link.<br /><em>Web data, ready.</em>',
   description: 'Readable Markdown and checked fields from public pages, ready for an AI&nbsp;agent, a RAG pipeline or a&nbsp;citation. When a page can’t be read, you get the reason.',
@@ -159,23 +168,30 @@ const HOME_HERO: HeroCopy = {
 /** The hero (the URL card, its panels, the crawl window) and the results under it: the home page's, and each free
  * tool page's with its own words (src/tools/*.ts). main.ts runs them on either page. */
 export function heroMarkup(copy: HeroCopy): string {
-  return `    <div class="hero" id="top"${copy.art ? ` data-art="${copy.art}"` : ''}>
-      <div class="hero-backdrop" aria-hidden="true"></div>
+  const decoration = copy.tool ? '' : `
       <div class="hero-glyphs" id="hero-glyphs" aria-hidden="true"></div>
-      <div class="hero-octopus-static" aria-hidden="true"></div>
-      <div class="hero-shade" aria-hidden="true"></div>
-      <div class="hero-click-spark" id="hero-click-spark" aria-hidden="true"></div>
-
-${siteHeaderMarkup()}
-      <main aria-labelledby="hero-title">
-        <div class="band band-dark">
+      <div class="hero-octopus-static" aria-hidden="true"></div>`
+  const heading = copy.tool ? `
+          <div class="frame hero-tool-head">
+            <nav class="tool-crumbs" aria-label="Breadcrumb"><a href="/tools/">Free tools</a><span aria-hidden="true">/</span><span aria-current="page">${copy.tool.crumb}</span></nav>
+            <h1 id="hero-title">${copy.title}</h1>
+            <p class="hero-description">${copy.description}</p>
+          </div>` : `
           <div class="frame hero-cells">
             <div class="hero-octopus-cell" id="hero-ascii" data-calm="#hero-title, .hero-description" data-reach=".url-card" aria-hidden="true"></div>
             <div class="hero-cell hero-copy">
               <h1 id="hero-title">${copy.title}</h1>
               <p class="hero-description">${copy.description}</p>
             </div>
-          </div>
+          </div>`
+  return `    <div class="hero${copy.tool ? ' is-tool' : ''}" id="top"${copy.art ? ` data-art="${copy.art}"` : ''}>
+      <div class="hero-backdrop" aria-hidden="true"></div>${decoration}
+      <div class="hero-shade" aria-hidden="true"></div>${copy.tool ? '' : `
+      <div class="hero-click-spark" id="hero-click-spark" aria-hidden="true"></div>`}
+
+${siteHeaderMarkup()}
+      <main aria-labelledby="hero-title">
+        <div class="band band-dark">${heading}
         </div>
         <div class="band band-dark">
           <div class="frame hero-form-row">
@@ -294,8 +310,8 @@ ${siteHeaderMarkup()}
       </main>
     </div>
 
-    <div class="glyph-band" aria-hidden="true"><pre>${glyphBand()}</pre></div>
-
+${copy.tool ? '' : `    <div class="glyph-band" aria-hidden="true"><pre>${glyphBand()}</pre></div>
+`}
     <section class="runs-section" id="result-section" aria-labelledby="runs-title" hidden>
       <div class="band">
         <div class="frame runs-head">
