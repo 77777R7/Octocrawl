@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { chromium, type BrowserContext } from 'playwright'
 import { buildChannels, FileSessionStore } from '@w2l/bench'
 import { chromeEndpoint, importChromeLogin } from '../src/chromeLogin.js'
+import { launchDebuggingChrome } from './debuggingChrome.js'
 
 /**
  * A site that keeps its login in localStorage (a token its script reads), in
@@ -37,7 +38,7 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   root = await mkdtemp(join(tmpdir(), 'w2l-storage-login-'))
   // "The person's Chrome": remote debugging on, so Chrome writes DevToolsActivePort in its user data directory.
-  chrome = await chromium.launchPersistentContext(join(root, 'chrome'), { args: ['--remote-debugging-port=0'] })
+  chrome = await launchDebuggingChrome(join(root, 'chrome'))
 }, 60_000)
 
 afterAll(async () => {
