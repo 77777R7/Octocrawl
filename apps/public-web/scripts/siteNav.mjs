@@ -30,6 +30,7 @@ export const NAV_CLIENTS = [
 
 /** Free tools: one task each, in the browser, on the home page's daily previews. */
 export const NAV_TOOLS = [
+  { glyph: '⌗', title: 'All free tools', text: 'No sign-up, five a day', href: '/tools/' },
   { glyph: '↓', title: 'URL to Markdown', text: 'Any public page as clean Markdown', href: '/tools/url-to-markdown/' },
 ]
 

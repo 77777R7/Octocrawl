@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { blogPath, posts } from '../scripts/blogPosts.mjs'
+import { DASHBOARD_PAGES } from '../scripts/dashboardPages.mjs'
 import { pages } from '../scripts/docsPages.mjs'
 import { SCENES, sceneName } from '../src/heroArtwork'
 import { pageMarkup } from '../src/page'
@@ -30,7 +31,10 @@ describe('the URL to Markdown page', () => {
   })
 
   it('shows the coast behind its hero, and the home page keeps the mountain', () => {
-    expect(markup).toContain('<div class="hero" id="top" data-art="coast">')
+    expect(markup).toContain('<div class="hero is-tool" id="top" data-art="coast">')
+    // A strip of the coast, not the home page's full-screen artwork: no octopus, glyph light or click sparks.
+    for (const id of ['hero-ascii', 'hero-glyphs', 'hero-click-spark']) expect(markup).not.toContain(`id="${id}"`)
+    expect(markup).toContain('<nav class="tool-crumbs" aria-label="Breadcrumb"><a href="/tools/">Free tools</a>')
     expect(pageMarkup()).toContain('<div class="hero" id="top">')
     expect([sceneName('coast'), sceneName(undefined), sceneName('elsewhere')]).toEqual(['coast', 'mountain', 'mountain'])
     // The backdrop, its preload and the glyph layer's fetch name one file (versioned alike at build time).
@@ -46,7 +50,7 @@ describe('the URL to Markdown page', () => {
   })
 
   it('names its task in the heading, and links only to places that exist', () => {
-    expect(markup).toContain('<h1 id="hero-title">URL to <em>Markdown.</em></h1>')
+    expect(markup).toContain('<h1 id="hero-title">Free URL to <em>Markdown</em> converter</h1>')
     expect(markup).not.toContain('One link.')
     expect(markup).not.toContain('style=')
     expect(markup.match(/<details class="faq-item">/g)).toHaveLength(TOOL_FAQ.length)
@@ -59,7 +63,9 @@ describe('the URL to Markdown page', () => {
     const sections = markup.slice(markup.indexOf('id="how"'), markup.indexOf('<footer'))
     for (const [, href] of sections.matchAll(/href="(\/[^"]*)"/g)) {
       const path = href!.split('#')[0]!
-      expect([path, docs.has(path) || blog.has(path)]).toEqual([path, true])
+      // A docs page, a blog article, the sign-in or a dashboard page, or a page Vite builds (the hub, the product pages).
+      const built = existsSync(app(`${path.slice(1)}index.html`))
+      expect([path, docs.has(path) || blog.has(path) || path === '/signin/' || DASHBOARD_PAGES.some(([page]) => page === path) || built]).toEqual([path, true])
     }
     expect(existsSync(app('tools/url-to-markdown/index.html'))).toBe(true)
   })

@@ -1,4 +1,5 @@
 import './styles.css'
+import './tools/tools.css'
 import { mountHeroAscii } from './ascii'
 import { mountHeroClick } from './heroClick'
 import { mountGlyphRipple } from './glyphRipple'
@@ -110,8 +111,12 @@ const dropFragment = () => { if (location.hash) history.replaceState(history.sta
 addEventListener('hashchange', dropFragment)
 if (document.readyState === 'complete') dropFragment()
 else addEventListener('load', dropFragment, { once: true })
-mountHeroAscii(document.querySelector<HTMLElement>('#hero-ascii')!, document.querySelector<HTMLElement>('#hero-glyphs')!, hero)
-mountHeroClick(document.querySelector<HTMLElement>('#hero-click-spark')!, hero)
+// The home page's artwork comes alive (the octopus, the glyph light, the click sparks); a free tool page has a still strip.
+const heroAscii = document.querySelector<HTMLElement>('#hero-ascii')
+const heroGlyphLayer = document.querySelector<HTMLElement>('#hero-glyphs')
+if (heroAscii && heroGlyphLayer) mountHeroAscii(heroAscii, heroGlyphLayer, hero)
+const heroSpark = document.querySelector<HTMLElement>('#hero-click-spark')
+if (heroSpark) mountHeroClick(heroSpark, hero)
 // The replay of recorded runs is the home page's own; a free tool page has none.
 const howReplay = document.querySelector<HTMLElement>('#how-replay')
 if (howReplay) mountHowReplay(howReplay)
@@ -158,6 +163,13 @@ mountWaitlist()
 function waitlistLink(className: string): HTMLAnchorElement {
   if (signedIn) return playgroundLink(className, 'Need more? Run it in your dashboard with your credits →')
   const link = textElement('a', 'Need more? Sign in for 1,000 free credits a month →', className)
+  link.href = '/signin/'
+  return link
+}
+/** A page that needs a browser: the Playground reads it on the account's credits; first, an account. */
+function browserLink(className: string): HTMLAnchorElement {
+  if (signedIn) return playgroundLink(className, 'Read it in a browser in your dashboard →')
+  const link = textElement('a', 'Sign in to read it in a browser (1,000 free credits a month) →', className)
   link.href = '/signin/'
   return link
 }
@@ -382,6 +394,9 @@ function failureAdvice(result: PreviewResponse): string[] {
   if (code === 'login_required') return ['Try a page that anyone can open without signing in. Octocrawl does not bypass login walls.']
   if (code === 'challenge') return ['Try a different public page. Octocrawl does not solve verification challenges.']
   if (code === 'policy_denied') return ['Use a public http:// or https:// address that anyone can open.']
+  // An empty shell over HTTP (preview.ts words it "Extraction failed (empty_unverified)."): the page likely draws its
+  // content with JavaScript, which the preview does not run; an account's key reads it in a browser.
+  if (needsBrowser(result)) return ['This page seems to draw its content with JavaScript, which this free preview does not run.', 'With a free account, the hosted API reads it in a browser for 5 credits.']
   // A service-side failure carries no capture diagnostic; its reason already says to retry later.
   if (result.status === 'failed' && code !== 'capture_failed') return []
   return ({
@@ -393,6 +408,12 @@ function failureAdvice(result: PreviewResponse): string[] {
     invalid_url: ['Use a public http:// or https:// address that anyone can open.'],
     quota_exceeded: ['Try again after 00:00 UTC, when the daily allowance of five previews resets.', 'For regular use, sign in for 1,000 free credits a month and make a key for mcp.octocrawl.dev or api.octocrawl.dev, or run Octocrawl on your own computer with no limit.'],
   })[result.status]
+}
+
+/** An HTTP read of a web page that found only an empty shell, which a browser may fill. A file (a scanned PDF without
+ * text) fails the same way, but a browser adds no text to it, so it is left out. */
+function needsBrowser(result: PreviewResponse): boolean {
+  return result.status === 'failed' && result.file === undefined && (result.reason ?? '').includes('(empty_unverified)')
 }
 
 /** Failed captures get one explanation and next steps instead of an empty content panel. */
@@ -426,6 +447,7 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
   docs.href = result.status === 'quota_exceeded' ? 'https://github.com/77777R7/Octocrawl' : '/docs/limits/'
   actions.append(json, docs)
   if (result.status === 'quota_exceeded') actions.append(waitlistLink('guidance-link'))
+  if (needsBrowser(result)) actions.append(browserLink('guidance-link'))
   panel.append(actions)
   return panel
 }
@@ -1004,6 +1026,19 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
   for (const note of notes) output.append(textElement('p', note, 'window-note'))
   output.append(body, foot)
   content.append(output)
+  // On a free tool page, one quiet line under the page's content: the same call from code. It follows the panel,
+  // which is built again when the view changes.
+  if (hero.classList.contains('is-tool') && isPageRead(result)) {
+    let next = content.querySelector<HTMLElement>('.result-next')
+    if (!next) {
+      next = textElement('p', 'Need this for many pages, or inside your agent? ', 'result-next')
+      const open = textElement('button', 'Get the same call as code →', 'result-next-link')
+      open.type = 'button'
+      open.addEventListener('click', () => codeButton.click())
+      next.append(open)
+    }
+    content.append(next)
+  }
   if (build === 'none') return
   const lead = [...body.querySelectorAll<HTMLElement>('.source-line')].slice(0, 48)
   if (build === 'body') buildWindow(body, lead, 260)
