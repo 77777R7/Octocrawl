@@ -267,6 +267,7 @@ a[aria-current=page] .doc-nav-mark{background:var(--orange)}
 .doc-adjacent small{color:var(--rust);font:700 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.12em;text-transform:uppercase}
 .doc-footer{margin-top:44px;padding-top:18px;display:flex;justify-content:space-between;gap:20px;color:#7488a6;font-size:12px;background:radial-gradient(circle,#b4c3d8 1px,transparent 1.45px) 0 0/8px 3px repeat-x}
 .doc-footer a{color:#1d5f9f;white-space:nowrap}
+.doc-footer-links{display:flex;gap:16px}
 
 /* On this page: the sections, the one being read marked in orange. */
 .doc-toc nav{position:sticky;top:28px}

@@ -7,7 +7,7 @@ import { FIELDS, HARD, LINKS, MARKDOWN, MISSING, PAGE, RUN, TABLE, WHOLE_EXTRA }
  * reader scrolls (scrapePipeline.ts). vite.config.ts prerenders this markup into scrape/index.html. */
 
 export const SCRAPE_PATH = '/scrape/'
-export const SCRAPE_TITLE = 'Web Scraping API: Any Page to Markdown and Checked Fields | Octocrawl'
+export const SCRAPE_TITLE = 'Web Scraping API: Markdown and Checked Fields | Octocrawl'
 export const SCRAPE_DESCRIPTION = 'Turn any web page into Markdown, links, tables and source-checked fields, with an Evidence Record for every result. A page that is blocked or refused comes back with the reason, and costs nothing.'
 
 const esc = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')

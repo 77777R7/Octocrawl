@@ -36,8 +36,13 @@ describe('the free tools’ pages', () => {
         const entry = readFileSync(app(`${path.slice(1)}index.html`), 'utf8')
         expect(entry).toContain('<script type="module" src="/src/main.ts"></script>')
         expect(entry).toContain(`<title>${page.docTitle}</title>`)
+        // Whole in a search result: about 60 characters fit.
+        expect(page.docTitle.length).toBeLessThanOrEqual(60)
         expect(entry).toContain(`<meta name="description" content="${page.description}" />`)
         expect(entry).toContain(`<link rel="canonical" href="__W2L_ORIGIN__${path}" />`)
+        // Its own link preview, a 1200×630 picture of its top.
+        expect(entry).toContain(`<meta property="og:image" content="__W2L_ORIGIN__/assets/og-${page.slug}.jpg" />`)
+        expect(existsSync(app(`public/assets/og-${page.slug}.jpg`))).toBe(true)
         expect(readFileSync(app('scripts/build-docs.mjs'), 'utf8')).toContain(`['${path}', '`)
         expect(NAV_TOOLS.some(item => item.href === path)).toBe(true)
       })

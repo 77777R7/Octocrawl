@@ -47,7 +47,7 @@ const item = ({ glyph, title, text, href }) => `<li><a href="${href}"><span clas
  * item as the page being read: 'docs', 'blog' or 'changelog'. */
 export function siteNavMarkup(current = '') {
   const docs = NAV_DOC_GROUPS.map(group => `<div class="nav-col"><p class="nav-kicker">${esc(group)}</p><ul>${pages.filter(page => page.group === group).map(page => `<li><a href="${pathFor(page)}"><span class="nav-title">${esc(page.title)}</span></a></li>`).join('')}${group === 'Reference' ? '<li><a href="/llms.txt"><span class="nav-title">llms.txt</span></a></li>' : ''}</ul></div>`).join('')
-  return `<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="nav-toggle-mark" aria-hidden="true">≡</span>Menu</button>
+  return `<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="nav-toggle-mark" aria-hidden="true">≡</span><span class="nav-toggle-text">Menu</span></button>
           <nav class="site-nav" id="site-nav" aria-label="Main navigation">
             <ul class="nav-list">
               <li class="nav-item"><details class="nav-drop"><summary>Product<span class="nav-caret" aria-hidden="true">▾</span></summary><div class="nav-panel nav-product">

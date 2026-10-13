@@ -6,7 +6,7 @@ import { UNREAD } from './toolSections'
 export const WEBSITE_TO_TEXT: ToolPage = {
   slug: 'website-to-text',
   name: 'Website to Text',
-  docTitle: 'Free Website to Text Converter: Extract Text from a Web Page | Octocrawl',
+  docTitle: 'Free Website to Text Converter | Octocrawl',
   description: 'Extract the readable text of any public web page, free and without sign-up: the article, not the menus, without the markup, to copy or download as a .txt file.',
   hero: {
     title: 'Free <em>Website to Text</em> converter',
