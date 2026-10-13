@@ -121,11 +121,11 @@ function renderMarkdown(source, toc = []) {
 }
 
 const REMOTE_MCP_URL = 'https://mcp.octocrawl.dev/mcp'
-/** Two client lists: the hosted URL (verified 2026-10-06 from Claude Code, Cursor and OpenCode against mcp.octocrawl.dev) and the stdio server on the reader's computer. */
+/** Two client lists: the hosted URL (verified 2026-10-13 from Claude Code 2.1.296, Cursor CLI 2026.08.25-3e8eec8, OpenCode 1.18.26 and Codex 0.162.1 against mcp.octocrawl.dev, research/hosted/2026-10-13-mcp-clients.md) and the stdio server on the reader's computer. */
 const mcpClients = {
   remote: [
     {
-      id: 'claude', name: 'Claude Code', mode: 'Run in terminal', status: 'Verified 2026-10-06',
+      id: 'claude', name: 'Claude Code', mode: 'Run in terminal', status: 'Verified 2026-10-13',
       icon: 'claude-code.svg',
       intro: 'Add hosted Octocrawl to Claude Code over HTTP. Run this in the project where you use Claude Code; --scope user adds it everywhere.',
       code: `claude mcp add --transport http octocrawl ${REMOTE_MCP_URL}`, language: 'bash',
@@ -133,7 +133,7 @@ const mcpClients = {
       source: 'https://code.claude.com/docs/en/mcp',
     },
     {
-      id: 'cursor', name: 'Cursor', mode: 'Copy config', status: 'Verified 2026-10-06',
+      id: 'cursor', name: 'Cursor', mode: 'Copy config', status: 'Verified 2026-10-13',
       icon: 'cursor.svg',
       intro: 'Merge this server into your project .cursor/mcp.json (or your user-level ~/.cursor/mcp.json). Keep existing servers.',
       code: `{\n  "mcpServers": {\n    "octocrawl": {\n      "url": "${REMOTE_MCP_URL}"\n    }\n  }\n}`, language: 'json',
@@ -141,7 +141,7 @@ const mcpClients = {
       source: 'https://cursor.com/docs/mcp',
     },
     {
-      id: 'opencode', name: 'OpenCode', mode: 'Copy config', status: 'Verified 2026-10-06',
+      id: 'opencode', name: 'OpenCode', mode: 'Copy config', status: 'Verified 2026-10-13',
       icon: 'opencode.svg',
       intro: 'For OpenCode 1.x, merge this entry into the mcp object in opencode.json. Keep your existing settings and servers.',
       code: `{\n  "mcp": {\n    "octocrawl": {\n      "type": "remote",\n      "url": "${REMOTE_MCP_URL}",\n      "enabled": true\n    }\n  }\n}`, language: 'json',
@@ -149,7 +149,7 @@ const mcpClients = {
       source: 'https://opencode.ai/docs/mcp-servers',
     },
     {
-      id: 'codex', name: 'Codex', mode: 'Run in terminal', status: 'Follows the Codex docs; not run here yet',
+      id: 'codex', name: 'Codex', mode: 'Run in terminal', status: 'Verified 2026-10-13',
       icon: 'codex.svg',
       intro: 'Add hosted Octocrawl to Codex as a Streamable HTTP server.',
       code: `codex mcp add octocrawl --url ${REMOTE_MCP_URL}`, language: 'bash',
