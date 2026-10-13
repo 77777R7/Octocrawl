@@ -15,7 +15,7 @@ const STOPPED = {
 } as unknown as FetchResult
 
 const read = (html: string, extra: Partial<UserBrowserRead> = {}): UserBrowserRead => ({
-  requestedUrl: 'https://site.test/members', finalUrl: 'https://site.test/members', status: 200, contentType: 'text/html; charset=utf-8', html, fetchedAt: '2026-10-04T01:00:00.000Z', wallMs: 42_000, sawGate: 'captcha', browser: 'Chrome/144.0', ...extra,
+  requestedUrl: 'https://site.test/members', finalUrl: 'https://site.test/members', status: 200, contentType: 'text/html; charset=utf-8', html, fetchedAt: '2026-10-04T01:00:00.000Z', wallMs: 42_000, sawGate: 'captcha', browser: 'Chrome/144.0', act: null, ...extra,
 })
 
 describe('a page read in the person\'s browser', () => {

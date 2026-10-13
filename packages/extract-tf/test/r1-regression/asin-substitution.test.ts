@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { amazonAsin } from '../../src/amazon.js'
-import asinSubstitutionCases from './asin-substitution-cases.json'
+import asinSubstitutionCases from './asin-substitution-cases.json' with { type: 'json' }
 
 /**
  * R1-B: ASIN substitution regression tests

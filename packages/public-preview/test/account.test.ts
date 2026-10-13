@@ -71,7 +71,7 @@ describe('the account page\'s data', () => {
   it('lists the account\'s request lines newest first, only its own and only the last 30 days', async () => {
     const { url, data, cookie } = await start()
     expect((await fetch(`${url}/api/account/activity`)).status).toBe(401)
-    const line = (id: string, at: string, extra = {}) => ({ id, at, endpoint: 'scrape', keyId: 'k'.repeat(64), url: 'https://example.org/', finalUrl: 'https://example.org/', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed', sha256: 'f'.repeat(64), links: null, kind: 'http', credits: 1, ...extra })
+    const line = (id: string, at: string, extra = {}) => ({ id, at, endpoint: 'scrape', keyId: 'k'.repeat(64), url: 'https://example.org/', finalUrl: 'https://example.org/', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed', sha256: 'f'.repeat(64), links: null, kind: 'http', credits: 1, formats: null, ms: null, ...extra })
     data.requestLines.set('account-0001', [line('8209-b', '2026-10-10T08:00:00.000Z'), line('8208-a', '2026-10-11T07:00:00.000Z', { endpoint: 'map', links: 12 }), line('8300-old', '2026-09-01T00:00:00.000Z')])
     data.requestLines.set('someone-else', [line('8000-x', '2026-10-11T07:30:00.000Z')])
     const body = await (await fetch(`${url}/api/account/activity`, { headers: { cookie } })).json() as { requests: Array<{ id: string }>; limit: number; retentionDays: number }

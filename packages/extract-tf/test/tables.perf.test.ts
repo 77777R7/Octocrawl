@@ -22,7 +22,7 @@ describe('htmlToTables', () => {
     // ~900 KB: 30,000 rows in a <div> in a table 4,000 elements deep.
     const html = `${'<div>'.repeat(4000)}<table><div>${'<tr><td>a</td><td>b</td></tr>'.repeat(30_000)}</div></table>${'</div>'.repeat(4000)}`
     const started = Date.now()
-    expect(htmlToTables(html, { onlyMainContent: false })[0]!.rows).toHaveLength(30_000)
+    expect(htmlToTables(html)[0]!.rows).toHaveLength(30_000)
     expect(Date.now() - started).toBeLessThan(5_000)
   })
 

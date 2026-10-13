@@ -76,7 +76,7 @@ function providerErrorResult(url: string, vendorId: string): FetchResult {
 
 function channel(
   id: string,
-  responses: readonly FetchResult[],
+  responses: FetchResult[],
   vendorId?: string,
   identity: IdentityBundle | undefined = COHERENT,
 ): Channel & { calls: string[] } {
@@ -97,7 +97,7 @@ function channel(
   }
 }
 
-const ALLOWED_ALL: Parameters<typeof LadderRunner.prototype.run>['1'] = { mode: 'authed', allowlistedDomains: ['example.com', '*.example.net'] }
+const ALLOWED_ALL: ConstructorParameters<typeof LadderRunner>[1] = { mode: 'authed', allowlistedDomains: ['example.com', '*.example.net'] }
 
 describe('LadderRunner', () => {
   it('stops at http when http is contentful — no escalation is cheaper', async () => {

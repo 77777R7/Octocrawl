@@ -240,7 +240,7 @@ describe('structured JSON extraction', () => {
     const response = {
       ...result, channelsTried: ['http'], ladderTrace: [], summary: { attempts: [], totalMs: 10 },
     } as unknown as ScrapeResponse
-    const good = await prepareScrapeResponse(response, { url: result.requestedUrl, debug: false }, {}, null, performance.now())
+    const good = await prepareScrapeResponse(response, { url: result.requestedUrl, debug: false }, {}, null, performance.now()) as CompactScrapeResponse
     expect(good.formats).toEqual(['json'])
     expect(good.json?.status).toBe('complete')
     expect(good).not.toHaveProperty('markdown')
@@ -249,7 +249,7 @@ describe('structured JSON extraction', () => {
     const bad = await prepareScrapeResponse({
       ...response,
       document: { ...response.document!, adapterValidation: { valid: false, issues: ['subject_id_unverified'] } },
-    }, { url: result.requestedUrl, debug: false }, {}, null, performance.now())
+    }, { url: result.requestedUrl, debug: false }, {}, null, performance.now()) as CompactScrapeResponse
     expect(bad.formats).toEqual(['json'])
     expect(bad.json?.status).toBe('incomplete')
     expect(bad.json?.issues[0]?.code).toBe('subject_unverified')

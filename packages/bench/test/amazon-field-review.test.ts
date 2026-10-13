@@ -33,13 +33,13 @@ it('keeps accuracy, coverage, and subject leakage as separate acceptance conditi
         value: name === 'asin' ? `B${String(index).padStart(9, '0')}` : 'visible value', location: '#subject' },
     }])),
   }))
-  entries[0]!.fields.title.output = 'different title'
+  entries[0]!.fields.title!.output = 'different title'
   const oneMismatch = score(entries)
   expect(oneMismatch.accuracy.rate).toBeGreaterThan(0.98)
   expect(oneMismatch.coverage.rate).toBe(1)
   expect(oneMismatch.passed).toBe(true)
 
-  for (let index = 0; index < 10; index++) entries[index]!.fields.price.output = ''
+  for (let index = 0; index < 10; index++) entries[index]!.fields.price!.output = ''
   const missingVisible = score(entries)
   expect(missingVisible.coverage.rate).toBeLessThan(0.98)
   expect(missingVisible.passed).toBe(false)

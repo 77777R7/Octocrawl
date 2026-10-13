@@ -763,13 +763,13 @@ describe('vendor first-use persistence', () => {
     )
 
     const denied = browserbaseOps({ apiKey: 'k' }, api.handler)
-    expect(await denied.ensurePersistence()).toBeNull()
+    expect(await denied.ensurePersistence!()).toBeNull()
     expect(contexts).toEqual([])
 
     const authorized = browserbaseOps({ apiKey: 'k' }, api.handler, {
       authorized: ['session_persistence'],
     })
-    const resume = await authorized.ensurePersistence()
+    const resume = await authorized.ensurePersistence!()
     expect(resume).toEqual({ browserbaseContextId: 'ctx-42' })
     expect(contexts).toHaveLength(1)
 
@@ -787,7 +787,7 @@ describe('vendor first-use persistence', () => {
     const ops = steelOps({ apiKey: 'k' }, withProfile.handler, {
       authorized: ['session_persistence'],
     })
-    expect(await ops.ensurePersistence()).toBeNull()
+    expect(await ops.ensurePersistence!()).toBeNull()
     const session = await ops.createSession()
     // The resume material comes from the session itself, saved by the ladder
     // after a contentful fetch.

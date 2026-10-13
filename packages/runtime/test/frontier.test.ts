@@ -5,7 +5,7 @@ import { Frontier } from '../src/frontier.js'
 // The seed is the site's root: by default a crawl stays in the seed's path subtree (see the subtree test).
 const SEED = 'https://fixture.test/'
 
-function seeded(overrides: ConstructorParameters<typeof Frontier>[0] = { seedUrl: SEED }): Frontier {
+function seeded(overrides: Partial<ConstructorParameters<typeof Frontier>[0]> = {}): Frontier {
   const frontier = new Frontier({ seedUrl: SEED, ...overrides })
   const result = frontier.seed()
   expect(result.accepted).toBe(true)

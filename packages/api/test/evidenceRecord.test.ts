@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import Ajv2020 from 'ajv/dist/2020.js'
-import { identityForRoute, localNetworkPolicy, modeIdentity, type EvidenceRecord, type FetchOptions, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
+import { identityForRoute, localNetworkPolicy, modeIdentity, type EvidenceRecord, type FetchOptions, type JsonSchema, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
 import { buildChannels, ProviderSubject, robotsFetcherVia, type Channel, type ProviderTransport } from '@w2l/bench'
 import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
 import { accessGrantFromText, sha256Utf8 } from '@w2l/http-core'
@@ -34,7 +34,7 @@ const ARTICLE = `<!doctype html><html lang="en"><head><title>Tide report</title>
 const PRODUCT = '<!doctype html><html lang="en"><head><title>Cobalt ash kettle</title>' +
   '<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Cobalt ash kettle","offers":{"@type":"Offer","price":"84.00","priceCurrency":"USD"}}</script></head>' +
   `<body><main><article><h1>Cobalt ash kettle</h1><p>${PROSE}</p><table><tr><th>UPC</th><td>a897fe39b1053632</td></tr><tr><th>Number of reviews</th><td>12</td></tr></table></article></main></body></html>`
-const PRODUCT_SCHEMA = { type: 'object', properties: { name: { type: 'string' }, price: { type: 'number' }, upc: { type: 'string' }, numberOfReviews: { type: 'integer' } }, required: ['name', 'price', 'upc'] }
+const PRODUCT_SCHEMA: JsonSchema = { type: 'object', properties: { name: { type: 'string' }, price: { type: 'number' }, upc: { type: 'string' }, numberOfReviews: { type: 'integer' } }, required: ['name', 'price', 'upc'] }
 
 const PAGES: Record<string, { status?: number; headers?: Record<string, string>; body: string }> = {
   '/robots.txt': { headers: { 'content-type': 'text/plain' }, body: ROBOTS },
@@ -329,7 +329,8 @@ describe('Evidence Record: provider lane', () => {
     const transport: ProviderTransport = {
       async fetch(url) {
         const res = await fetch(url, { headers: { 'user-agent': VENDOR_UA } })
-        return { status: res.status, body: await res.text(), finalUrl: res.url, headers: Object.fromEntries(res.headers), sentUserAgent: VENDOR_UA }
+        const headers: Record<string, string> = {}; res.headers.forEach((value, name) => { headers[name] = value })
+        return { status: res.status, body: await res.text(), finalUrl: res.url, headers, sentUserAgent: VENDOR_UA }
       },
     }
     const subject = new ProviderSubject({ id: 'fixture', declaredUserAgent: VENDOR_UA, capabilities: ['headless_browser'], honoursCallerUserAgent: false }, transport, 'research', null, robotsFetcherVia())

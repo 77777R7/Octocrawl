@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import type { ListFormatRequest } from '@w2l/contracts'
+import type { ListSpec } from '@w2l/contracts'
 import { extractListRecords, listExtraction } from '../src/index.js'
 
 const PAGE = `<!doctype html><html><head><title>Shop</title></head><body><main>
@@ -11,7 +11,7 @@ const PAGE = `<!doctype html><html><head><title>Shop</title></head><body><main>
 </article>
 </main></body></html>`
 
-const SPEC: ListFormatRequest = {
+const SPEC: ListSpec = {
   type: 'list',
   itemSelector: 'article.card',
   fields: [
@@ -67,7 +67,7 @@ describe('extractListRecords, as a reader sees the page', () => {
 
   it('stops at its limits and says it was cut', () => {
     const html = `<ul>${'<li>x</li>'.repeat(30)}</ul>`
-    const spec: ListFormatRequest = { type: 'list', itemSelector: 'li', fields: [{ name: 't' }] }
+    const spec: ListSpec = { type: 'list', itemSelector: 'li', fields: [{ name: 't' }] }
     const byCount = extractListRecords(html, 'https://x.test/', spec, 1, { records: 10, chars: 1_000 })
     expect([byCount.length, byCount.cut]).toEqual([10, true])
     const byChars = extractListRecords(html, 'https://x.test/', spec, 1, { records: 100, chars: 5 })

@@ -103,7 +103,7 @@ describe('MonitorStore B1/B2 slice', () => {
     store.createOrGetRevision({ monitorId: FIRECRAWL_MONITOR_ID, revision: 1, url: FIRECRAWL_INTRO_URL, ruleVersion: DOCUMENT_RULE_VERSION, intervalMs: 1000, staleAfterMs: 2000, createdAt: now })
     const run = store.startRun(FIRECRAWL_MONITOR_ID, 'slot:rollback', now)
     store.recordObservation({ id: 'obs-rollback', runId: run.id, attemptId: run.attemptId!, observedAt: now, clientWallMs: 1, markdownSha256: 'h1', outcome: outcome as never, error: null }, 'assessment-rollback', assessment)
-    expect(() => store.commit(run.id, 'obs-rollback', 'assessment-rollback', assessment, now + 1)).toThrow(/injected commit failure/)
+    expect(() => store!.commit(run.id, 'obs-rollback', 'assessment-rollback', assessment, now + 1)).toThrow(/injected commit failure/)
     const view = store.view(FIRECRAWL_MONITOR_ID, now + 1)
     expect(view.baseline).toBeNull()
     expect(view.events).toHaveLength(0)
@@ -120,7 +120,7 @@ describe('MonitorStore B1/B2 slice', () => {
     expect(recovered.id).toBe(old.id)
     expect(recovered.attemptId).not.toBe(old.attemptId)
     expect(store.attempts(old.id).find((attempt) => attempt.id === old.attemptId)?.state).toBe('interrupted')
-    expect(() => store.recordObservation({ id: 'stale', runId: old.id, attemptId: old.attemptId!, observedAt: now + 300_002, clientWallMs: 1, markdownSha256: null, outcome: null, error: null }, 'stale-assessment', { ...assessment, quality: 'unknown', fields: null, reasons: ['stale'] })).toThrow(/stale observation attempt/)
+    expect(() => store!.recordObservation({ id: 'stale', runId: old.id, attemptId: old.attemptId!, observedAt: now + 300_002, clientWallMs: 1, markdownSha256: null, outcome: null, error: null }, 'stale-assessment', { ...assessment, quality: 'unknown', fields: null, reasons: ['stale'] })).toThrow(/stale observation attempt/)
   })
 
   it('allows only one active run across two independent SQLite connections', async () => {

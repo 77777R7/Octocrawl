@@ -104,7 +104,7 @@ describe('the compatible transport', () => {
     expect(await res.bodyText()).toBe(ARTICLE)
     // The compressed body is far under 200 bytes; the page it decodes to is not.
     const small = await transport.fetch(`${origin}/gzip`, { ...options, capFor: () => 200 })
-    await expect(small.bodyBytes()).rejects.toBeInstanceOf(BodyTooLargeError)
+    await expect(small.bodyBytes!()).rejects.toBeInstanceOf(BodyTooLargeError)
   })
 
   it('leaves a coding impit does not decode, and a response without a body, to the lane with their header', async () => {
@@ -117,11 +117,11 @@ describe('the compatible transport', () => {
     expect(decoded).toEqual([])
     for (const [path, coding] of [['/corrupt', 'gzip'], ['/br-corrupt', 'br'], ['/gzip-truncated', 'gzip'], ['/br-truncated', 'br']] as const) {
       const bad = await transport.fetch(`${origin}${path}`, options)
-      await expect(bad.bodyBytes()).rejects.toMatchObject({ name: 'ContentDecodingError', contentEncoding: coding })
+      await expect(bad.bodyBytes!()).rejects.toMatchObject({ name: 'ContentDecodingError', contentEncoding: coding })
     }
     // A connection that breaks inside a gzip body is a broken connection, not a coding that did not decode.
     const reset = await transport.fetch(`${origin}/gzip-reset`, options)
-    await expect(reset.bodyBytes()).rejects.toMatchObject({ name: 'SocketError' })
+    await expect(reset.bodyBytes!()).rejects.toMatchObject({ name: 'SocketError' })
   })
 
   it("sets impit's own request limit past the caller's deadline, and to a ceiling without one", () => {
@@ -133,9 +133,9 @@ describe('the compatible transport', () => {
   it('refuses a declared length over the cap unread, and does not download a type the lane does not read', async () => {
     const transport = new CompatTransport(localNetworkPolicy())
     const big = await transport.fetch(`${origin}/big`, { ...options, capFor: () => 1000 })
-    await expect(big.bodyBytes()).rejects.toMatchObject({ name: 'BodyTooLargeError', maxBytes: 1000, declaredBytes: 5000 })
+    await expect(big.bodyBytes!()).rejects.toMatchObject({ name: 'BodyTooLargeError', maxBytes: 1000, declaredBytes: 5000 })
     const image = await transport.fetch(`${origin}/image`, { ...options, capFor: (type) => (type === 'image/png' ? null : 1000) })
-    expect((await image.bodyBytes()).byteLength).toBe(0)
+    expect((await image.bodyBytes!()).byteLength).toBe(0)
   })
 
   it('hands a redirect to the lane, which follows it itself', async () => {

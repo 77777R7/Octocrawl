@@ -107,7 +107,7 @@ afterEach(async () => {
 
 type Item = { url: string; status: string; failureReason?: string | null; evidenceRecord?: { proxy: string | null; access?: { egress?: { exit?: unknown } | null; session?: unknown } } | null; trace?: { event: string; detail?: Record<string, unknown> }[] }
 
-type Channels = NonNullable<Parameters<typeof createApiEngine>[0]['channelsFor']>
+type Channels = NonNullable<NonNullable<Parameters<typeof createApiEngine>[0]>['channelsFor']>
 const httpOnly = (policy: ReturnType<typeof localNetworkPolicy>): Channels => (mode, egress) => buildChannels(mode, { networkPolicy: egress?.policy ?? policy }).filter((channel) => channel.id === 'http')
 
 async function batch(pool: ProxyServer[], paths: string[], options: { channels?: Channels; maxConcurrency?: number; during?: () => Promise<void>; request?: Record<string, unknown>; echoUrl?: string } = {}): Promise<{ status: string | undefined; items: Record<string, Item> }> {

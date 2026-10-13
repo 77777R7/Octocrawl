@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import type { FetchOptions, FetchResult } from '@w2l/contracts'
+import type { FetchOptions, FetchResult, JsonFormatRequest } from '@w2l/contracts'
 import { buildChannels } from '@w2l/bench'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngineOptions } from '../src/engine.js'
@@ -318,7 +318,7 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     vi.stubEnv('W2L_EXTRACT_MODEL', 'slow-model')
     const { origin, engine } = await setup(unreachableBrowser)
     // The page has no SKU, so the model is asked for it.
-    const formats = [{ type: 'json' as const, schema: { type: 'object', properties: { sku: { type: 'string' } }, required: ['sku'] }, modelFallback: true }]
+    const formats: JsonFormatRequest[] = [{ type: 'json', schema: { type: 'object', properties: { sku: { type: 'string' } }, required: ['sku'] }, modelFallback: true }]
     const batch = { start: () => engine.startBatch({ urls: [`${origin}/chrome`], formats, timeout: 2_000 }), status: (id: string) => engine.getBatch(id), pages: (id: string) => engine.getBatchItems(id) }
     const crawl = { start: () => engine.startCrawl({ url: `${origin}/chrome`, maxPages: 1, formats, timeout: 2_000 }), status: (id: string) => engine.getCrawl(id), pages: (id: string) => engine.getCrawlPages(id) }
     for (const task of [batch, crawl]) {

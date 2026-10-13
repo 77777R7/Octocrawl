@@ -336,8 +336,8 @@ describe('persistent URL-array batch', () => {
     const byUrl = new Map(errors.errors.map(item => [item.url, item]))
     expect([...byUrl.keys()].sort()).toEqual([urls[2], urls[3]].sort())
     // The 404 page is the http lane's own failure with its status; the robots refusal names the rule.
-    expect(byUrl.get(urls[3])).toEqual({ id: expect.any(String), timestamp: expect.any(String), url: urls[3], status: 'failed', code: 'http_error', error: 'failed: http_error (HTTP 404)', httpStatus: 404 })
-    expect(byUrl.get(urls[2])).toEqual({ id: expect.any(String), timestamp: expect.any(String), url: urls[2], status: 'failed', code: 'policy_denied', error: 'failed: policy_denied — robots.txt rule /private', httpStatus: null })
+    expect(byUrl.get(urls[3]!)).toEqual({ id: expect.any(String), timestamp: expect.any(String), url: urls[3], status: 'failed', code: 'http_error', error: 'failed: http_error (HTTP 404)', httpStatus: 404 })
+    expect(byUrl.get(urls[2]!)).toEqual({ id: expect.any(String), timestamp: expect.any(String), url: urls[2], status: 'failed', code: 'policy_denied', error: 'failed: policy_denied — robots.txt rule /private', httpStatus: null })
     const items = (await w2l.getBatchItems(accepted.taskId, { limit: 10 })).items
     for (const error of errors.errors) expect(items.find(item => item.id === error.id)).toMatchObject({ url: error.url, createdAt: error.timestamp, failureReason: error.code })
     // Pages of one, with the robots list whole on each page; the limit stops at 1000.
@@ -645,7 +645,7 @@ describe('persistent URL-array batch', () => {
 
   it("caps a batch's third-party spend with the access grant's run budget, and local pages, which cost nothing, never trip it", async () => {
     const f = await fixture()
-    const engine = f.engine({ accessGrant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: 1 }, scope: { hosts: null }, attestation: null } })
+    const engine = f.engine({ accessGrant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: 1 }, scope: { hosts: null }, attestation: null, tariffs: {} } })
     cleanup.push(() => engine.close())
     const { client: w2l } = client(engine)
     const urls = [1, 2, 3].map(n => `${f.origin}/item/${n}`)
@@ -665,7 +665,7 @@ describe('persistent URL-array batch', () => {
       ...channel,
       fetch: async (...args: Parameters<typeof channel.fetch>) => { if (String(args[0]).endsWith('/item/2')) throw new Error('scrape broke'); return channel.fetch(...args) },
     }))
-    const engine = f.engine({ channelsFor: throwing, accessGrant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: 1 }, scope: { hosts: null }, attestation: null } })
+    const engine = f.engine({ channelsFor: throwing, accessGrant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: 1 }, scope: { hosts: null }, attestation: null, tariffs: {} } })
     cleanup.push(() => engine.close())
     const { client: w2l } = client(engine)
     const { taskId } = await w2l.batchScrape([1, 2, 3, 4].map(n => `${f.origin}/item/${n}`))
@@ -689,7 +689,7 @@ describe('persistent URL-array batch', () => {
     const { taskId } = await client(before).client.batchScrape([`${f.origin}/item/1`])
     expect(await client(before).client.waitBatch(taskId)).toMatchObject({ status: 'completed', completed: 1 })
     await before.close()
-    const granted = f.engine({ channelsFor: unpriced, accessGrant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: 1 }, scope: { hosts: null }, attestation: null } })
+    const granted = f.engine({ channelsFor: unpriced, accessGrant: { tier: 'standard', capabilities: [], budget: { perRequestUsd: null, perRunUsd: 1 }, scope: { hosts: null }, attestation: null, tariffs: {} } })
     cleanup.push(() => granted.close())
     const { client: w2l } = client(granted)
     await w2l.appendToBatch(taskId, [`${f.origin}/item/2`, `${f.origin}/item/3`])
