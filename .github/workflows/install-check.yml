@@ -14,6 +14,7 @@ on:
     paths:
       - .github/workflows/install-check.yml
       - scripts/install-check.mjs
+      - scripts/install-check-browser.mjs
 
 permissions:
   contents: read
@@ -42,6 +43,32 @@ jobs:
       - name: npx octocrawl scrape, from an empty cache, within 5 minutes
         shell: bash
         run: node scripts/install-check.mjs --version "${{ inputs.version || 'latest' }}" --url https://example.com --limit-ms 300000
+
+  # A page that needs the browser, on a machine with no browser for Playwright: the answer names the missing browser and
+  # its install command (from the version that does), the command installs it, and the page is then read in the browser.
+  browser:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/install-check-browser.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Header of the summary
+        shell: bash
+        run: |
+          echo '| Platform | Node | Installed | URL | First answer | Install | Second answer | Time | Result |' >> "$GITHUB_STEP_SUMMARY"
+          echo '| --- | --- | --- | --- | --- | --- | --- | --- | --- |' >> "$GITHUB_STEP_SUMMARY"
+      - name: npx octocrawl scrape a page that needs the browser, install it as told, scrape again, within 5 minutes
+        shell: bash
+        run: node scripts/install-check-browser.mjs --version "${{ inputs.version || 'latest' }}" --url https://quotes.toscrape.com/js/ --expect Einstein --hint-since 0.4.2 --limit-ms 300000
 
   pip:
     strategy:
