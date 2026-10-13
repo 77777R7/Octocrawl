@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { buildChannels, formatScrapeReport, parseArgs, USAGE, withMeasuredSessions } from '../src/ladderCli.js'
-import { identityBundleFrom, modeIdentity, PREVIEW_PRODUCT_TOKEN, type ExecutionContext, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { identityBundleFrom, modeIdentity, PREVIEW_PRODUCT_TOKEN, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { LadderRunner } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
 import { MemorySessionStore } from '../src/routing/sessionStore.js'
@@ -196,6 +196,30 @@ describe('buildChannels', () => {
     for (const mode of ['research', 'authed'] as const) {
       expect(() => buildChannels(mode, { previewProductToken: true }), mode).toThrow(/standard mode/)
     }
+  })
+
+  it('builds the installed_chrome rung after browser_local only for enhanced access under a grant that names it, in standard mode, never for the preview', async () => {
+    const granted = { vendorPolicy: { authorized: ['installed_chrome'] as const } }
+    const built = buildChannels('standard', { ...granted, installedChrome: true, enhanced: true })
+    expect(built.map((c) => c.id)).toEqual(['http', 'browser_local', 'installed_chrome'])
+    expect(buildChannels('standard', { ...granted, installedChrome: true }).map((c) => c.id)).toEqual(['http', 'browser_local'])
+    expect(buildChannels('standard', { vendorPolicy: { authorized: [] }, installedChrome: true, enhanced: true }).map((c) => c.id)).toEqual(['http', 'browser_local'])
+    expect(buildChannels('standard', { ...granted, enhanced: true }).map((c) => c.id)).toEqual(['http', 'browser_local'])
+    expect(buildChannels('research', { ...granted, installedChrome: true, enhanced: true }).map((c) => c.id)).not.toContain('installed_chrome')
+    expect(() => buildChannels('standard', { ...granted, installedChrome: true, enhanced: true, previewProductToken: true })).toThrow(/not the hosted preview/)
+    expect(() => buildChannels('standard', { ...granted, installedChrome: true, enhanced: true, browserAllowedHosts: ['example.com'] })).toThrow(/not the hosted preview/)
+    // The Chrome reads the page as it opened it: no actions, screenshot, phone identity, added headers or relaxed certificates.
+    const rung = built.find((c) => c.id === 'installed_chrome')!
+    const url = 'https://example.com/'
+    expect(rung.waitsFor).toBe(true)
+    expect(rung.serves!(url, {})).toBe(true)
+    expect(rung.serves!(url, { waitFor: 2_000, headers: {} })).toBe(true)
+    expect(rung.serves!(url, { actions: [{ type: 'wait', milliseconds: 10 }] })).toBe(false)
+    expect(rung.serves!(url, { screenshot: { fullPage: false } } as FetchOptions)).toBe(false)
+    expect(rung.serves!(url, { mobile: true })).toBe(false)
+    expect(rung.serves!(url, { headers: { 'x-a': 'b' } })).toBe(false)
+    expect(rung.serves!(url, { skipTlsVerification: true })).toBe(false)
+    for (const c of built) await c.close!()
   })
 
   it('every channel exposes close() so the owner can release resources', () => {

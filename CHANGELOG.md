@@ -21,6 +21,16 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- The `installed_chrome` access route (ADR 0005, enhanced). A grant that names `installed_chrome` adds a rung after the browser lane for requests with `access: "enhanced"`.
+  - **The launch.** The rung launches the Google Chrome installed on the machine the way it was measured to get through checks the bundled Chromium did not: headed, a fresh temporary profile per page, and the DevTools port on `127.0.0.1`, closed to pages.
+  - **How it reads.** Playwright drives that Chrome over CDP and reads in Chrome's own window with Chrome's own identity.
+  - **Where it applies.** It is for a local server only, in standard mode. It never takes `actions`, screenshots, `mobile`, custom headers or `skipTlsVerification`.
+  - **Limits.** At most two windows are open at once. A proxy that needs a login is refused.
+  - **When Chrome is missing.** The answer says so with a `browser_not_installed` warning that names where to get it, or `W2L_CHROME_PATH`.
+  - **On the record.** Evidence Records name the route `installed_chrome`, with Chrome's version and the launch's flag set.
+  - **The measurement behind it.** With Playwright over CDP, Chrome held 12 of the 16 challenge tasks in each of two runs, against 12 and 13 over raw CDP with the same launch ([record](research/access/runs/2026-10-14-library-probe-pwcdp.md)).
+  - **Still to come.** The product's own acceptance runs.
+
 ## 0.4.2 — 2026-10-13
 
 The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `@octocrawl/ai-sdk`, `octocrawl-client`) at 0.4.2. It holds everything below since 0.4.1 on 2026-10-10. Entries about the hosted service (api. and mcp.octocrawl.dev) and octocrawl.dev describe what is already live there; the packages' own changes are the extraction, verification, readiness and browser-lane ones.

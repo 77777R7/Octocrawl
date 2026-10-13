@@ -31,6 +31,7 @@ import {
 } from '@w2l/http-core'
 import { readinessOf, verify } from '@w2l/runtime'
 import { BROWSER_INSTALL_COMMAND } from '../browserInstall.js'
+import { INSTALLED_CHROME_INSTALL } from '../subjects/installedChrome.js'
 import type { RoutingHistory, VendorOutcome } from './vendorRouter.js'
 import { rankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
@@ -246,14 +247,18 @@ function lowContentYieldWarning(result: FetchResult, browserTried: boolean): Fet
  * whatever another rung gave, often a thin http page, so the warning says what the browser lane needs.
  */
 export function browserNotInstalledWarning(command: string = BROWSER_INSTALL_COMMAND): FetchWarning {
+  // The installed_chrome rung (ADR 0005) needs Google Chrome itself, which no npx command installs.
+  if (command === INSTALLED_CHROME_INSTALL) return { code: 'browser_not_installed', message: `the installed_chrome rung could not start: Google Chrome is not installed where Octocrawl runs; ${command}` }
   return { code: 'browser_not_installed', message: `the browser lane could not start: Chromium is not installed where Octocrawl runs; run ${command} once` }
 }
 
 function withBrowserNotInstalled(result: FetchResult, attempts: readonly { result: FetchResult }[]): FetchResult {
-  const missing = attempts.flatMap((attempt) => attempt.result.trace).find((event) => event.event === 'browser_unavailable')
-  if (missing === undefined || result.warnings?.some((warning) => warning.code === 'browser_not_installed') === true) return result
-  const command = typeof missing.detail?.install === 'string' ? missing.detail.install : BROWSER_INSTALL_COMMAND
-  return { ...result, warnings: [...(result.warnings ?? []), browserNotInstalledWarning(command)] }
+  // One warning per missing browser: the bundled Chromium and the installed_chrome rung's Google Chrome are told apart.
+  const commands = [...new Set(attempts.flatMap((attempt) => attempt.result.trace).filter((event) => event.event === 'browser_unavailable')
+    .map((event) => typeof event.detail?.install === 'string' ? event.detail.install : BROWSER_INSTALL_COMMAND))]
+  const added = commands.map((command) => browserNotInstalledWarning(command))
+    .filter((warning) => result.warnings?.some((held) => held.code === warning.code && held.message === warning.message) !== true)
+  return added.length === 0 ? result : { ...result, warnings: [...(result.warnings ?? []), ...added] }
 }
 
 function withLowContentYield(result: FetchResult, channelsTried: readonly string[]): FetchResult {
@@ -1318,7 +1323,7 @@ function deadlineFailure(url: string, lane: Lane, wallMs: number): FetchResult {
 }
 
 function laneOf(channelId: string | null): Lane {
-  return channelId === 'provider' ? 'provider' : channelId === 'authed_session' ? 'browser_local_authed' : channelId === 'browser_local' ? 'browser_local' : 'http'
+  return channelId === 'provider' ? 'provider' : channelId === 'authed_session' ? 'browser_local_authed' : channelId === 'browser_local' || channelId === 'installed_chrome' ? 'browser_local' : 'http'
 }
 
 /**

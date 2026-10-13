@@ -14,8 +14,13 @@
  */
 
 import { chromium, type Browser, type LaunchOptions } from 'playwright'
+import { launchInstalledChrome } from './installedChrome.js'
 
-export type BrowserEngineName = 'playwright' | 'patchright'
+/**
+ * `installed_chrome` (ADR 0005, installedChrome.ts) is not chosen here: it is a rung of its own, which the ladder builds
+ * only for a grant that names it and a request for enhanced access, and its subject launches one Chrome per fetch.
+ */
+export type BrowserEngineName = 'playwright' | 'patchright' | 'installed_chrome'
 
 export interface BrowserEngine {
   name: BrowserEngineName
@@ -75,7 +80,10 @@ export async function loadPatchrightEngine(): Promise<BrowserEngine & { version:
   return { name: 'patchright', version, launch: async (options) => await chromiumApi.launch(options) as Browser }
 }
 
+/** The person's installed Google Chrome, launched as ADR 0005 measured it (installedChrome.ts). */
+export const INSTALLED_CHROME_ENGINE: BrowserEngine = { name: 'installed_chrome', launch: (options) => launchInstalledChrome(options) }
+
 /** The engine for a name: Playwright at once, Patchright loaded on first use. */
 export async function browserEngineFor(name: BrowserEngineName): Promise<BrowserEngine & { version?: string | null }> {
-  return name === 'patchright' ? await loadPatchrightEngine() : PLAYWRIGHT_ENGINE
+  return name === 'patchright' ? await loadPatchrightEngine() : name === 'installed_chrome' ? INSTALLED_CHROME_ENGINE : PLAYWRIGHT_ENGINE
 }

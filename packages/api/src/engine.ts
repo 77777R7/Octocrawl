@@ -116,7 +116,7 @@ import {
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
-import type { BrowserEngineName, BrowserIdentityChoice, ChannelsFiltered } from '@w2l/bench'
+import type { BrowserEngineName, BrowserIdentityChoice, ChannelsFiltered, InstalledChromeTestSeams } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
@@ -396,6 +396,8 @@ export interface ApiEngineOptions {
   compatHosts?: readonly string[]
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => Channel[]
+  /** Test seams of the installed_chrome rung (installedChrome.ts): a stand-in Chromium, headless where no display exists. */
+  installedChromeSeams?: InstalledChromeTestSeams
   /** Restrict a hosted public-document pilot to the HTTP rung. */
   httpOnly?: boolean
   /** Server-owned acquisition rule; callers cannot disable it per request. */
@@ -580,6 +582,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   if (egressProxyList.length > 0 && options.hosted === true) throw new Error('egress proxies are refused on a hosted engine (ADR 0005)')
   if (egressProxyList.length > 0 && !egressSessions) throw new Error('egress proxies need an access grant that names egress_sessions (ADR 0005)')
   if (compatHosts.length > 0 && options.hosted === true) throw new Error('the compatible transport is refused on a hosted engine (ADR 0005)')
+  /** ADR 0005 `installed_chrome`: the machine's own Google Chrome, a rung for requests that choose access enhanced. Local only. */
+  const installedChrome = (accessGrant?.capabilities ?? []).includes('installed_chrome')
+  if (installedChrome && options.hosted === true) throw new Error('installed_chrome is refused on a hosted engine (ADR 0005: it launches the Google Chrome of the machine Octocrawl runs on)')
   if (compatHosts.length > 0 && !(accessGrant?.capabilities ?? []).includes('compatible_transport')) throw new Error('the compatible transport needs an access grant that names compatible_transport (ADR 0005)')
   /** Why a request's options keep it off the compatible transport, which sends its profile's headers alone; null when they do not. */
   const compatOptionsRefusal = (page: { headers?: Readonly<Record<string, string>>; mobile?: boolean }): string | null => {
@@ -854,7 +859,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}) })
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}), ...(installedChrome ? { installedChrome, ...(options.installedChromeSeams === undefined ? {} : { installedChromeSeams: options.installedChromeSeams }) } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()

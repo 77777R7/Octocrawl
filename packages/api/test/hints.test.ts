@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, lowContentYieldHint, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
+import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, lowContentYieldHint, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -111,6 +112,10 @@ describe('agent hints', () => {
     // The hint names the command the warning names: Patchright's own browser under that engine.
     const noPatchright = { ...shell, warnings: [...shell.warnings!, { code: 'browser_not_installed', message: 'the browser lane could not start: Chromium is not installed where Octocrawl runs; run npx patchright install chromium once' }] }
     expect(hints(noPatchright, ['http', 'browser_local'])[0]).toBe('Chromium is not installed where Octocrawl runs, so the browser lane could not start; run npx patchright install chromium once, then scrape again')
+    // No Google Chrome for the installed_chrome rung: its own hint, and the browser lane before it still counts as tried.
+    const noChrome = { ...shell, warnings: [...shell.warnings!, { code: 'browser_not_installed', message: `the installed_chrome rung could not start: Google Chrome is not installed where Octocrawl runs; ${INSTALLED_CHROME_INSTALL}` }] }
+    expect(hints(noChrome, ['http', 'browser_local', 'installed_chrome'])).toEqual([INSTALLED_CHROME_MISSING_HINT, 'the page fills its data with JavaScript; the browser lane was tried', lowContentYieldHint(true)])
+    expect(INSTALLED_CHROME_MISSING_HINT).toContain('install Google Chrome')
     const file = (kind: 'pdf' | 'csv' | 'xlsx', markdownFrom: 'pdf_text' | 'text' | null, path: string | null) => result({ file: { kind, detectedBy: 'content_type', contentType: null, declaredBytes: null, maxBytes: 10, bytes: 10, sha256: 'a'.repeat(64), path, markdownFrom, encoding: null, warnings: [], pdf: null } as unknown as NonNullable<HintedResult['file']> })
     expect(hints(file('pdf', 'pdf_text', 'files/aaa.pdf'))).toEqual(['the response was a pdf file kept at files/aaa.pdf; markdown is its text layer'])
     expect(hints(file('csv', 'text', 'files/aaa.csv'))).toEqual(['the response was a csv file kept at files/aaa.csv; markdown is its text as received'])

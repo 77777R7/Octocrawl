@@ -210,6 +210,14 @@ export function buildChannels(
      * for the hosts it was given); with both, the ladder tries `http` first.
      */
     compatTransport?: boolean
+    /**
+     * A local server that may launch the person's installed Google Chrome (ADR 0005 `installed_chrome`): an
+     * `installed_chrome` rung after `browser_local`, built only in standard mode, for a request that chose access
+     * enhanced, under a grant that names the capability. Never on the hosted preview.
+     */
+    installedChrome?: boolean
+    /** Test seams of the installed_chrome rung (installedChrome.ts): a stand-in Chromium, headless where no display exists. */
+    installedChromeSeams?: import('./subjects/installedChrome.js').InstalledChromeTestSeams
   } = {},
 ): Channel[] {
   // One subject per channel for the life of the run. A fresh Chromium per
@@ -224,6 +232,10 @@ export function buildChannels(
   const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared')
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
   if (opts.compatTransport === true && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('the compatible transport is for a local server, not the hosted preview')
+  if (opts.installedChrome === true && (preview || opts.browserAllowedHosts !== undefined || opts.localPreviewProxyUrl !== undefined)) throw new Error('installed_chrome is for a local server, not the hosted preview (ADR 0005)')
+  const installedChrome = opts.installedChrome === true && mode === 'standard' && opts.enhanced === true && (opts.vendorPolicy?.authorized ?? []).includes('installed_chrome')
+    ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', opts.installedChromeSeams ?? {})
+    : null
   const compat = opts.compatTransport === true && mode === 'standard' ? new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, undefined, false, fileStore, false, opts.robotsCache, new CompatTransport(opts.networkPolicy ?? defaultNetworkPolicy())) : null
 
   // ----------------------------------------------------------------------
@@ -291,6 +303,19 @@ export function buildChannels(
         await opts.localSubjects?.browser_local?.teardown?.()
       },
     },
+    ...(installedChrome === null ? [] : [{
+      id: 'installed_chrome',
+      // The browser's own identity: the record declares the User-Agent Chrome reports (browserIdentity.ts).
+      identity: declared,
+      waitsFor: true,
+      // The Chrome reads the page as it opened it (ADR 0005): no actions, screenshot, phone identity, added headers or
+      // relaxed certificate check, each of which would drive or dress the window beyond what was measured.
+      serves: (_url: string, options: FetchOptions) => (options.actions?.length ?? 0) === 0 && options.screenshot === undefined && options.mobile !== true
+        && Object.keys(options.headers ?? {}).length === 0 && options.skipTlsVerification !== true,
+      fetch: (url: string, _session: SessionSnapshot | null | undefined, execution?: ExecutionContext, options?: FetchOptions) =>
+        installedChrome.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume }),
+      close: () => installedChrome.teardown(),
+    } satisfies Channel]),
   ]
 
   if (mode === 'authed') {

@@ -100,5 +100,7 @@ export function evaluateGovernance(url: string, policy: CrawlPolicy): Governance
     return { allowed: false, permittedChannels: [], reason: `unknown mode: ${policy.mode}` }
   }
 
-  return { allowed: true, permittedChannels: policy.enhanced === true && !permitted.includes('provider') ? [...permitted, 'provider'] : permitted, reason: null }
+  // Enhanced access also permits the installed_chrome rung of a local server (ADR 0005), built only under a grant that names it.
+  const enhanced = policy.enhanced === true ? [...(permitted.includes('provider') ? [] : ['provider']), ...(permitted.includes('browser_local') ? ['installed_chrome'] : [])] : []
+  return { allowed: true, permittedChannels: enhanced.length === 0 ? permitted : [...permitted, ...enhanced], reason: null }
 }

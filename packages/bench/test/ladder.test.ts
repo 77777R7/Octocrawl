@@ -13,6 +13,7 @@ import {
   type RobotsOverrideApplied,
 } from '@w2l/contracts'
 import { LadderRunner, sessionRejection, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
+import { INSTALLED_CHROME_INSTALL } from '../src/subjects/installedChrome.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
 import { loadSessionForHost, MemorySessionStore, sessionCoversHost, type SessionSnapshot } from '../src/routing/sessionStore.js'
 
@@ -434,6 +435,14 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     const noPatchright = { ...noBrowser, trace: [{ at: 1, lane: 'browser_local' as const, event: 'browser_unavailable', detail: { engine: 'patchright', install: 'npx patchright install chromium' } }] }
     const patched = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), channel('browser_local', [noPatchright])], { mode: 'authed' }).run(url)
     expect(patched.result.warnings).toContainEqual({ code: 'browser_not_installed', message: 'the browser lane could not start: Chromium is not installed where Octocrawl runs; run npx patchright install chromium once' })
+    // The installed_chrome rung, after a browser lane the page blocked, needs Google Chrome itself: its warning says so.
+    const noChrome = { ...noBrowser, trace: [{ at: 1, lane: 'browser_local' as const, event: 'browser_unavailable', detail: { engine: 'installed_chrome', install: INSTALLED_CHROME_INSTALL } }] }
+    const gated = { ...blockedResult(url, 'cloudflare_challenge'), lane: 'browser_local' as const }
+    const chromeRun = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), channel('browser_local', [gated]), channel('installed_chrome', [noChrome])], { mode: 'standard', enhanced: true }).run(url)
+    expect(chromeRun.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome'])
+    expect(chromeRun.result.warnings?.filter((warning) => warning.code === 'browser_not_installed')).toEqual([
+      { code: 'browser_not_installed', message: `the installed_chrome rung could not start: Google Chrome is not installed where Octocrawl runs; ${INSTALLED_CHROME_INSTALL}` },
+    ])
   })
 
   it('offers a client-rendered http success to the browser and keeps whichever answer holds more', async () => {

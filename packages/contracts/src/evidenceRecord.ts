@@ -42,10 +42,11 @@ export type EvidenceArtifactKind = (typeof EVIDENCE_ARTIFACT_KINDS)[number]
 /**
  * The route that produced a result (ADR 0005): `http` (W2L's HTTP client, undici), `http_compat` (the
  * browser-compatible HTTP transport, impit), `browser` (the local headless browser), `enhanced_browser`
- * (the local browser on Patchright), `authed_browser` (the local browser with the user's saved login),
- * `user_browser` (the person's own browser after a handoff), `vendor` (a third-party browser service).
+ * (the local browser on Patchright), `installed_chrome` (the Google Chrome installed on the machine, launched by Octocrawl
+ * with a temporary profile), `authed_browser` (the local browser with the user's saved login), `user_browser` (the
+ * person's own browser after a handoff), `vendor` (a third-party browser service).
  */
-export const ACCESS_ROUTES = ['http', 'http_compat', 'browser', 'enhanced_browser', 'authed_browser', 'user_browser', 'vendor'] as const
+export const ACCESS_ROUTES = ['http', 'http_compat', 'browser', 'enhanced_browser', 'installed_chrome', 'authed_browser', 'user_browser', 'vendor'] as const
 export type AccessRoute = (typeof ACCESS_ROUTES)[number]
 
 /**
