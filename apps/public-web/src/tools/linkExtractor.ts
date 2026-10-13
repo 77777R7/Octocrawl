@@ -7,7 +7,7 @@ import { UNREAD } from './toolSections'
 export const LINK_EXTRACTOR: ToolPage = {
   slug: 'link-extractor',
   name: 'Link Extractor',
-  docTitle: 'Free Link Extractor: Find All Pages on a Website | Octocrawl',
+  docTitle: 'Link Extractor: Find All Pages on a Website | Octocrawl',
   description: 'Find all pages on a website, free and without sign-up: every URL in its sitemap and on its start page, and where each was found. Or extract every link from one page. Copy or download a CSV.',
   hero: {
     title: 'Free <em>Link Extractor</em>: find all pages on a website',

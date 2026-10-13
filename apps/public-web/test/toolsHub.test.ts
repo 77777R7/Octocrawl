@@ -16,6 +16,8 @@ describe('the free tools hub', () => {
     expect(entry).toContain('<script type="module" src="/src/tools/hubMain.ts"></script>')
     expect(entry).toContain(`<title>${HUB_TITLE}</title>`)
     expect(entry).toContain('<link rel="preload" as="image" href="/assets/scene-coast.webp" />')
+    expect(entry).toContain('<meta property="og:image" content="__W2L_ORIGIN__/assets/og-tools.jpg" />')
+    expect(existsSync(app('public/assets/og-tools.jpg'))).toBe(true)
     expect(readFileSync(app('vite.config.ts'), 'utf8')).toContain('./tools/index.html')
     expect(readFileSync(app('scripts/build-docs.mjs'), 'utf8')).toContain(`const TOOLS_HUB_PATH = '${TOOLS_PATH}'`)
     expect(NAV_TOOLS[0]).toMatchObject({ title: 'All free tools', href: TOOLS_PATH })

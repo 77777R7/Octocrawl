@@ -67,6 +67,24 @@
 @media (max-width: 600px) {
   .github-link { width: 44px; padding: 0; justify-content: center; }
   .github-label, .github-link .card-arrow { display: none; }
+  /* A phone's header holds the brand, GitHub, Sign in or Dashboard and the menu: the menu button keeps its icon and
+     its name for screen readers, the account link its word. */
+  :root .nav-toggle { width: 44px; padding: 0; justify-content: center; }
+  .nav-toggle-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .account-link { padding: 0 8px; }
+}
+/* The narrowest phones (320 to 400 px) leave GitHub to the footer (every page's has it: the home page's and the docs'
+   doc-footer), so the account link and the menu stay on screen. */
+@media (max-width: 400px) {
+  .header-actions .github-link { display: none; }
+  .header-actions { gap: 4px; }
+}
+/* Below 360 px the wordmark and the header's margins shrink a little too, so the menu keeps a margin at 320. */
+@media (max-width: 359px) {
+  :root .site-header { padding-inline: 4px; }
+  :root .site-header .brand-name { height: 15px; }
+  :root .doc-wordmark { height: 16px; }
+  :root .doc-header-inner { padding: 0 8px; }
 }
 /* Opening prints the menu like a terminal: the card appears a text line at a time (20 steps, about one line each,
    one step every 15 ms so it never reads as dropped frames) under a dotted print head, its entries appear one after

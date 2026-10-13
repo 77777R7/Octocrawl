@@ -15,6 +15,12 @@ export const VERSIONED_PUBLIC_FILES = [
   '/assets/octocrawl-wordmark.svg',
   '/assets/octopus-160.webp',
   '/assets/og-card.jpg',
+  // Each free tool page's and product page's link preview (tools/**/index.html, scrape/index.html).
+  '/assets/og-tools.jpg',
+  '/assets/og-url-to-markdown.jpg',
+  '/assets/og-link-extractor.jpg',
+  '/assets/og-website-to-text.jpg',
+  '/assets/og-scrape.jpg',
   // The home page's first-screen artwork: its hero backdrop and, on narrow screens, its largest paint.
   '/assets/mountain-hero.webp',
   '/assets/octopus-original.webp',
