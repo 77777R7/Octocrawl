@@ -102,7 +102,7 @@ function console_(): string {
               <div class="pd-tabs" role="tablist" aria-label="Formats">${tab('markdown', 'Markdown')}${tab('links', 'Links', String(LINKS.length))}${tab('table', 'Table', '1')}${tab('fields', 'Fields', String(FIELDS.length))}${tab('evidence', 'Evidence')}</div>
               <div class="pd-panes">
                 ${pane('markdown', `<ol class="pd-code" role="list">${markdown}</ol>`, false)}
-                ${pane('links', `<ol class="pd-code" role="list">${links}</ol><p class="pd-pane-note">The main content keeps the breadcrumb’s links. Ask for the whole page to keep every link on it.</p>`)}
+                ${pane('links', `<ol class="pd-code" role="list">${links}</ol><p class="pd-pane-note">Every link on the page, each once, as absolute URLs. On this page they are the site header’s and the breadcrumb’s.</p>`)}
                 ${pane('table', `<table class="pd-grid"><tbody>${table}</tbody></table><p class="pd-pane-note">1 table · 7 rows × 2 columns · also as CSV</p>`)}
                 ${pane('fields', `<ol class="pd-code" role="list">${fields}</ol><p class="pd-pane-note">Read from the page without a model. Each value names where it was read.</p>`)}
                 ${pane('evidence', `<ol class="pd-code" role="list">${evidence}</ol><p class="pd-pane-note">An excerpt of the Evidence Record that came with this result.</p>`)}

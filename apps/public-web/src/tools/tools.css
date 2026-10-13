@@ -91,3 +91,10 @@
 @media (prefers-reduced-motion: reduce) {
   .hub-link, .tl-chip { transition: none; }
 }
+
+/* URL Extractor: this site's links or the others, and the list as CSV. */
+.link-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; }
+.link-filter { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.link-filter-button { padding: 6px 10px; border: 0; border-radius: 7px; color: var(--muted); background: none; font: 600 12.5px/1 var(--tl-mono); cursor: pointer; }
+.link-filter-button[aria-pressed="true"] { color: #fff; background: #142a57; }
+.ledger[data-show="own"] .is-away, .ledger[data-show="away"] .is-own { display: none; }

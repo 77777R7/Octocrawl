@@ -12,6 +12,7 @@ import { mountWaitlist } from './waitlist'
 import { mountCrawlView } from './crawlView'
 import { readPreview, STAGE_STREAM } from './previewStream'
 import { buildWindow } from './windowBuild'
+import { markdownToText } from './markdownText'
 import { API_SERVER, fieldsSchema, HOSTED_MCP, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, playgroundHref, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
@@ -209,6 +210,9 @@ let outputView: OutputView = 'markdown'
 let capabilityTimer: number | undefined
 let capabilityRequest: AbortController | undefined
 const VIEW_NAMES: Record<OutputView, string> = { markdown: 'Markdown', links: 'Links', info: 'Page info', fields: 'Fields', json: 'JSON' }
+/** Website to Text (page.ts, heroMarkup `tool.text`) shows a page's Markdown as plain text, and names that view Text. */
+const toolText = document.querySelector<HTMLElement>('.hero')?.dataset.toolText === 'on'
+const viewName = (view: OutputView): string => (toolText && view === 'markdown' ? 'Text' : VIEW_NAMES[view])
 
 function downloadFile(content: string, name: string, type: string): void {
   const objectUrl = URL.createObjectURL(new Blob([content], { type }))
@@ -221,7 +225,7 @@ function downloadFile(content: string, name: string, type: string): void {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
 }
 
-function resultFilename(result: PreviewResponse, extension: 'md' | 'links.txt' | 'info.json' | 'fields.json' | 'json'): string {
+function resultFilename(result: PreviewResponse, extension: ViewText['extension'] | 'links.csv'): string {
   let name = 'page'
   try {
     const url = new URL(result.finalUrl ?? result.requestedUrl)
@@ -234,7 +238,8 @@ function resultFilename(result: PreviewResponse, extension: 'md' | 'links.txt' |
 
 document.querySelector<HTMLButtonElement>('#example-button')!.addEventListener('click', () => {
   track('example_click')
-  input.value = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'
+  // A free tool's page has an example of its own (page.ts, heroMarkup `tool.example`).
+  input.value = hero.dataset.toolExample ?? 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'
   // Focus stays on the button (Extract page is the next stop), so the hero keeps moving: nothing is being typed.
   message.textContent = 'Example URL added. Select “Extract page” to begin.'
   message.className = 'form-message'
@@ -397,6 +402,8 @@ function failureAdvice(result: PreviewResponse): string[] {
   // An empty shell over HTTP (preview.ts words it "Extraction failed (empty_unverified)."): the page likely draws its
   // content with JavaScript, which the preview does not run; an account's key reads it in a browser.
   if (needsBrowser(result)) return ['This page seems to draw its content with JavaScript, which this free preview does not run.', 'With a free account, the hosted API reads it in a browser for 5 credits.']
+  // The same empty read of a file: a PDF without a text layer, which no browser fills.
+  if (result.status === 'failed' && result.file !== undefined && (result.reason ?? '').includes('(empty_unverified)')) return ['This file seems to have no text to read: a scanned PDF, for example. Octocrawl reads a PDF’s text layer and does no OCR.']
   // A service-side failure carries no capture diagnostic; its reason already says to retry later.
   if (result.status === 'failed' && code !== 'capture_failed') return []
   return ({
@@ -806,11 +813,41 @@ function renderLinks(result: PreviewResponse): HTMLElement {
     list.append(item)
   })
   frame.append(list)
+  // On a free tool page (URL Extractor): show this site's links or the others, and take them as CSV.
+  if (hero.classList.contains('is-tool')) {
+    const tools = document.createElement('div')
+    tools.className = 'link-tools'
+    const filter = document.createElement('div')
+    filter.className = 'link-filter'
+    filter.setAttribute('role', 'group')
+    filter.setAttribute('aria-label', 'Show links')
+    const choices = [['all', `All ${rows.length.toLocaleString()}`], ['own', `This site ${own.toLocaleString()}`], ['away', `Elsewhere ${(rows.length - own).toLocaleString()}`]] as const
+    for (const [show, label] of choices) {
+      const button = textElement('button', label, 'link-filter-button')
+      button.type = 'button'
+      button.setAttribute('aria-pressed', String(show === 'all'))
+      button.addEventListener('click', () => {
+        frame.dataset.show = show
+        for (const other of filter.querySelectorAll('button')) other.setAttribute('aria-pressed', String(other === button))
+      })
+      filter.append(button)
+    }
+    const csv = textElement('button', '↓ .csv', 'download-button link-csv')
+    csv.type = 'button'
+    csv.setAttribute('aria-label', 'Download the links as CSV')
+    csv.addEventListener('click', () => {
+      track('result_download', { view: 'links-csv' })
+      const cell = (value: string): string => (/[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
+      downloadFile(`url,where\n${rows.map((row) => `${cell(row.link)},${row.own ? 'this site' : 'elsewhere'}`).join('\n')}\n`, resultFilename(result, 'links.csv'), 'text/csv;charset=utf-8')
+    })
+    tools.append(filter, csv)
+    box.append(tools)
+  }
   box.append(frame)
   return box
 }
 
-type ViewText = { kicker: string; title: string; copy: string; download: string; extension: 'md' | 'links.txt' | 'info.json' | 'fields.json' | 'json'; type: string }
+type ViewText = { kicker: string; title: string; copy: string; download: string; extension: 'md' | 'txt' | 'links.txt' | 'info.json' | 'fields.json' | 'json'; type: string }
 const VIEW_TEXT: Record<OutputView, ViewText> = {
   fields: { kicker: 'EXTRACTED CONTENT / FIELDS', title: 'Fields', copy: 'Copy fields', download: '↓ Download fields', extension: 'fields.json', type: 'application/json;charset=utf-8' },
   markdown: { kicker: 'EXTRACTED CONTENT / MARKDOWN', title: 'Readable content', copy: 'Copy content', download: '↓ Download Markdown', extension: 'md', type: 'text/markdown;charset=utf-8' },
@@ -818,6 +855,8 @@ const VIEW_TEXT: Record<OutputView, ViewText> = {
   info: { kicker: 'EXTRACTED CONTENT / PAGE INFO', title: 'Page info', copy: 'Copy info', download: '↓ Download info', extension: 'info.json', type: 'application/json;charset=utf-8' },
   json: { kicker: 'EXTRACTED RESULT / JSON', title: 'Result JSON', copy: 'Copy JSON', download: '↓ Download JSON', extension: 'json', type: 'application/json;charset=utf-8' },
 }
+/** The Markdown view shown as plain text (markdownText.ts). */
+const TEXT_VIEW: ViewText = { kicker: 'EXTRACTED CONTENT / TEXT', title: 'Plain text', copy: 'Copy text', download: '↓ Download text', extension: 'txt', type: 'text/plain;charset=utf-8' }
 
 function viewPayload(result: PreviewResponse, view: OutputView): string {
   if (view === 'links') return result.links?.length ? `${result.links.join('\n')}\n` : ''
@@ -893,7 +932,7 @@ function jsonTint(line: string, into: HTMLElement): void {
 }
 
 /** How the Markdown view shows the text: as received (the default, what Copy copies) or rendered. Kept for the visit. */
-let markdownMode: 'source' | 'preview' = 'source'
+let markdownMode: 'source' | 'preview' | 'text' = toolText ? 'text' : 'source'
 const MARKDOWN_PREVIEW_LIMIT = 150_000
 
 /** The result as a window: its views as tabs, Copy and Download beside them, the content scrolling inside the
@@ -906,8 +945,9 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
   const views = availableViews(result)
   // A view this result does not have (links of a file, say) falls back to the first it has; the choice stays.
   const view = views.includes(outputView) ? outputView : views[0]!
-  const text = VIEW_TEXT[view]
-  const payload = viewPayload(result, view)
+  const asText = view === 'markdown' && markdownMode === 'text'
+  const text = asText ? TEXT_VIEW : VIEW_TEXT[view]
+  const payload = asText ? markdownToText(viewPayload(result, view)) : viewPayload(result, view)
   const output = document.createElement('section')
   output.className = 'output-panel result-window'
   output.setAttribute('aria-labelledby', 'content-title')
@@ -921,7 +961,7 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
   tabs.setAttribute('role', 'tablist')
   tabs.setAttribute('aria-label', 'Output format')
   const tabButtons = views.map((option) => {
-    const tab = textElement('button', VIEW_NAMES[option], 'window-tab')
+    const tab = textElement('button', viewName(option), 'window-tab')
     tab.type = 'button'
     tab.id = `window-tab-${option}`
     tab.dataset.view = option
@@ -992,6 +1032,7 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
   else if (view === 'links') body.append(renderLinks(result))
   else if (view === 'info') body.append(renderPageInfo(result))
   else if (!payload.trim()) body.append(textElement('p', 'No readable Markdown was returned. Switch to JSON to inspect the status and reason.', 'empty-content'))
+  else if (asText) body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), (line, into) => tinted(into, line)))
   else if (markdownMode === 'preview') body.append(renderMarkdown(payload))
   else body.append(sourceView(payload.slice(0, MARKDOWN_PREVIEW_LIMIT), markdownTint()))
 
@@ -1005,8 +1046,9 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
     const modes = document.createElement('div')
     modes.className = 'window-modes'
     modes.setAttribute('role', 'group')
-    modes.setAttribute('aria-label', 'Show the Markdown')
-    for (const [mode, label] of [['source', 'Source'], ['preview', 'Preview']] as const) {
+    modes.setAttribute('aria-label', toolText ? 'Show the text' : 'Show the Markdown')
+    const choices = toolText ? [['text', 'Text'], ['source', 'Markdown']] as const : [['source', 'Source'], ['preview', 'Preview']] as const
+    for (const [mode, label] of choices) {
       const button = textElement('button', label, 'window-mode')
       button.type = 'button'
       button.setAttribute('aria-pressed', String(markdownMode === mode))
@@ -1049,7 +1091,7 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
  * selected run: every view comes from the same extraction. */
 function setOutputView(view: OutputView, build: 'body' | 'none' = 'none'): void {
   outputView = view
-  formatLabel.textContent = VIEW_NAMES[view]
+  formatLabel.textContent = viewName(view)
   const radio = formatPanel.querySelector<HTMLInputElement>(`input[value="${view}"]`)
   if (radio) radio.checked = true
   const run = runs.find((candidate) => candidate.id === selectedRunId)
@@ -1086,7 +1128,7 @@ function runStatus(run: Run): { text: string; tone: 'loading' | 'success' | 'par
 const VIEW_SHORT: Record<OutputView, string> = { markdown: 'Markdown', links: 'Links', info: 'Info', fields: 'Fields', json: 'JSON' }
 function outputLabel(run: Run): string {
   if (!run.result) return '—'
-  return availableViews(run.result).map((view) => VIEW_SHORT[view]).join(' · ')
+  return availableViews(run.result).map((view) => (toolText && view === 'markdown' ? 'Text' : VIEW_SHORT[view])).join(' · ')
 }
 
 function renderRuns(): void {
@@ -1460,6 +1502,15 @@ fieldsList.addEventListener('change', (event) => {
 })
 // A single radio unchecked by its neighbour fires no change of its own: listen on the group.
 contentScope.addEventListener('change', syncOptions)
+// A free tool's page starts the card as its tool needs it: the whole page (URL Extractor), or another view.
+if (hero.dataset.toolScope === 'whole') {
+  const whole = document.querySelector<HTMLInputElement>('#content-whole')
+  if (whole) {
+    whole.checked = true
+    whole.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+}
+if (hero.dataset.toolView) setOutputView(hero.dataset.toolView as OutputView)
 // Enter never submits the form around the panel: on the add line it adds the field, in a field's name it moves to
 // the add line.
 optionsPanel.addEventListener('keydown', (event) => {

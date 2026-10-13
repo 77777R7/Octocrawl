@@ -156,7 +156,15 @@ export interface HeroCopy {
   art?: 'coast'
   // A free tool's page: a short strip of the artwork with the tool's name under a breadcrumb (`crumb`), and the card
   // right below it, without the home page's full-screen artwork, octopus and glyph light.
-  tool?: { crumb: string }
+  tool?: {
+    crumb: string
+    // What the card starts with on this tool's page: a view, the whole page rather than its main content, an example
+    // URL for Try an example, and (Website to Text) the Markdown shown as plain text.
+    view?: 'links' | 'info' | 'fields' | 'json'
+    whole?: boolean
+    example?: string
+    text?: boolean
+  }
 }
 const HOME_HERO: HeroCopy = {
   title: 'One link.<br /><em>Web data, ready.</em>',
@@ -184,7 +192,8 @@ export function heroMarkup(copy: HeroCopy): string {
               <p class="hero-description">${copy.description}</p>
             </div>
           </div>`
-  return `    <div class="hero${copy.tool ? ' is-tool' : ''}" id="top"${copy.art ? ` data-art="${copy.art}"` : ''}>
+  const presets = copy.tool ? `${copy.tool.view ? ` data-tool-view="${copy.tool.view}"` : ''}${copy.tool.whole ? ' data-tool-scope="whole"' : ''}${copy.tool.example ? ` data-tool-example="${copy.tool.example}"` : ''}${copy.tool.text ? ' data-tool-text="on"' : ''}` : ''
+  return `    <div class="hero${copy.tool ? ' is-tool' : ''}" id="top"${copy.art ? ` data-art="${copy.art}"` : ''}${presets}>
       <div class="hero-backdrop" aria-hidden="true"></div>${decoration}
       <div class="hero-shade" aria-hidden="true"></div>${copy.tool ? '' : `
       <div class="hero-click-spark" id="hero-click-spark" aria-hidden="true"></div>`}
@@ -204,7 +213,7 @@ ${siteHeaderMarkup()}
                 </div>
                 <div class="url-toolbar">
                   <div class="url-tools">
-                    <button class="tool-button" id="format-button" type="button" popovertarget="format-panel" aria-haspopup="dialog"><span class="tool-icon tool-icon-format" aria-hidden="true"></span><span class="visually-hidden">Output format: </span><span id="format-label">Markdown</span><span class="tool-caret" aria-hidden="true"></span></button>
+                    <button class="tool-button" id="format-button" type="button" popovertarget="format-panel" aria-haspopup="dialog"><span class="tool-icon tool-icon-format" aria-hidden="true"></span><span class="visually-hidden">Output format: </span><span id="format-label">${copy.tool?.text ? 'Text' : 'Markdown'}</span><span class="tool-caret" aria-hidden="true"></span></button>
                     <button class="tool-button" id="options-button" type="button" popovertarget="options-panel" aria-haspopup="dialog"><span class="tool-icon tool-icon-options" aria-hidden="true"></span><span class="tool-text">Options</span><span class="tool-badge" id="options-badge" hidden></span></button>
                   </div>
                   <button class="tool-button" id="code-button" type="button" aria-haspopup="dialog"><span class="tool-icon tool-icon-code" aria-hidden="true">&lt;/&gt;</span><span class="tool-text">Get code</span></button>
@@ -236,7 +245,7 @@ ${siteHeaderMarkup()}
                 </div>
                 <div class="sheet-scroll">
                   <div class="format-tiles" role="radiogroup" aria-labelledby="format-title">
-                    <label class="format-tile"><input type="radio" name="output-view" value="markdown" checked /><span class="tile-icon" data-icon="markdown" aria-hidden="true"></span><span class="tile-name">Markdown</span><span class="tile-note">readable text</span><span class="tile-ext">.md</span></label>
+                    <label class="format-tile"><input type="radio" name="output-view" value="markdown" checked /><span class="tile-icon" data-icon="markdown" aria-hidden="true"></span>${copy.tool?.text ? '<span class="tile-name">Text</span><span class="tile-note">plain text, or Markdown</span><span class="tile-ext">.txt</span>' : '<span class="tile-name">Markdown</span><span class="tile-note">readable text</span><span class="tile-ext">.md</span>'}</label>
                     <label class="format-tile"><input type="radio" name="output-view" value="links" /><span class="tile-icon" data-icon="links" aria-hidden="true"></span><span class="tile-name">Links</span><span class="tile-note">every link, up to 500</span><span class="tile-ext">.links.txt</span></label>
                     <label class="format-tile"><input type="radio" name="output-view" value="info" /><span class="tile-icon" data-icon="info" aria-hidden="true"></span><span class="tile-name">Page info</span><span class="tile-note">title, language; a file's pages</span><span class="tile-ext">.info.json</span></label>
                     <label class="format-tile"><input type="radio" name="output-view" value="fields" /><span class="tile-icon" data-icon="fields" aria-hidden="true"></span><span class="tile-name">Fields</span><span class="tile-note">the fields set in Options</span><span class="tile-ext">.fields.json</span></label>
