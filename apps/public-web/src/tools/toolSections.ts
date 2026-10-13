@@ -11,7 +11,7 @@ export const TOOLS: readonly Tool[] = [
   { slug: 'website-to-text', name: 'Website to Text', glyph: '¶', text: 'A page’s readable text without the markup, to copy or download as a .txt file.', live: true },
   // The whole-site Link Extractor (map: the site's sitemaps and the start page's links); its path is linked from the
   // blog's find-all-pages article, so it stays.
-  { slug: 'link-extractor', name: 'Link Extractor', glyph: '⇢', text: 'Every page of a site, and where each was found: its sitemap or its links. Or just one page’s links.', live: false },
+  { slug: 'link-extractor', name: 'Link Extractor', glyph: '⇢', text: 'Every page of a site, and where each was found: its sitemap or its links. Or just one page’s links.', live: true },
 ]
 export const toolPath = (tool: Tool): string => `${TOOLS_PATH}${tool.slug}/`
 
@@ -44,15 +44,15 @@ export const UNREAD: ReadonlyArray<readonly [string, string, string]> = [
 ]
 
 /** What a tool's page asks the API for in its code: Markdown (Website to Text strips it), or links. */
-export type CodeFormat = 'markdown' | 'links'
+export type CodeFormat = 'markdown' | 'links' | 'map'
 
 /** The same thing from code: four ways in, each with a real line to copy. */
 export function fromCodeCards(format: CodeFormat = 'markdown'): string {
   const cards: Array<[string, string, string, string, string]> = [
-    ['REST API', 'Hosted, no key for 20 pages a day; a free account’s key for 1,000 credits a month.', `curl https://api.octocrawl.dev/v1/scrape -H 'content-type: application/json' -d '{"url":"https://example.com","formats":["${format}"]}'`, '/docs/reference/#rest-and-sdk', 'API reference'],
+    ['REST API', 'Hosted, no key for 20 pages a day; a free account’s key for 1,000 credits a month.', format === 'map' ? `curl https://api.octocrawl.dev/v1/map -H 'content-type: application/json' -d '{"url":"https://example.com","limit":5000}'` : `curl https://api.octocrawl.dev/v1/scrape -H 'content-type: application/json' -d '{"url":"https://example.com","formats":["${format}"]}'`, '/docs/reference/#rest-and-sdk', 'API reference'],
     ['MCP', 'Claude Code, Cursor, Codex and OpenCode read pages through Octocrawl’s tools.', 'claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp', '/docs/connect-mcp/', 'Connect MCP'],
-    ['CLI', 'On your own computer, with no daily limit, plus crawl and batch.', format === 'links' ? 'npx octocrawl scrape https://example.com --formats links' : 'npx octocrawl scrape https://example.com --markdown', '/docs/reference/', 'Advanced reference'],
-    ['Playground', 'Signed in, run any page on your credits, read in a browser when it needs one.', 'octocrawl.dev/dashboard/scrape/', '/dashboard/scrape/', 'Open the Playground'],
+    ['CLI', 'On your own computer, with no daily limit, plus crawl and batch.', format === 'map' ? 'npx octocrawl map https://example.com' : format === 'links' ? 'npx octocrawl scrape https://example.com --formats links' : 'npx octocrawl scrape https://example.com --markdown', '/docs/reference/', 'Advanced reference'],
+    format === 'map' ? ['Playground', 'Signed in, list up to 5,000 URLs of a site on your credits: 1 credit a map that finds some.', 'octocrawl.dev/dashboard/map/', '/dashboard/map/', 'Open the Playground'] : ['Playground', 'Signed in, run any page on your credits, read in a browser when it needs one.', 'octocrawl.dev/dashboard/scrape/', '/dashboard/scrape/', 'Open the Playground'],
   ]
   return `<ul class="tl-code-cards" role="list">${cards.map(([head, text, code, href, link]) => `<li class="tl-code-card"><h3>${head}</h3><p>${text}</p><code>${code.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</code><a href="${href}">${link} <span aria-hidden="true">→</span></a></li>`).join('')}</ul>`
 }

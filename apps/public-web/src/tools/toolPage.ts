@@ -19,6 +19,8 @@ export type ToolPage = {
   unread: { title: string; lead: string; cards: Cards }
   code: { title: string; format: CodeFormat }
   faq: ReadonlyArray<readonly [question: string, answer: string]>
+  // Markup right under the card, before the results (Link Extractor's whole-site results).
+  afterHero?: string
 }
 
 export const toolPagePath = (page: ToolPage): string => `/tools/${page.slug}/`
@@ -32,7 +34,7 @@ export function toolPageJsonLd(page: ToolPage): string {
 export function toolPageMarkup(page: ToolPage): string {
   return `
   <div class="page-shell tool-page">
-${heroMarkup({ title: page.hero.title, description: page.hero.description, next: '#how', nextLabel: 'See how it works', art: 'coast', tool: page.hero.tool })}${toolSection('how', 'HOW IT WORKS', page.steps.title, toolCards(page.steps.cards))}${toolSection('uses', 'WHO IT IS FOR', page.uses.title, toolCards(page.uses.cards), page.uses.lead)}${toolSection('unread', 'WHEN A PAGE CAN’T BE READ', page.unread.title, toolCards(page.unread.cards, page.unread.cards.length === 4 ? 'is-four' : ''), page.unread.lead)}${toolSection('from-code', 'FROM YOUR CODE OR AGENT', page.code.title, fromCodeCards(page.code.format), 'Every answer carries its <a href="/docs/reference/#evidence-record">Evidence Record</a>: where the page came from, when, and hashes of what was read.')}${toolSection('more-tools', 'MORE FREE TOOLS', 'Other things to take from a page.', moreToolsChips(page.slug))}
+${heroMarkup({ title: page.hero.title, description: page.hero.description, next: '#how', nextLabel: 'See how it works', art: 'coast', tool: page.hero.tool })}${page.afterHero ?? ''}${toolSection('how', 'HOW IT WORKS', page.steps.title, toolCards(page.steps.cards))}${toolSection('uses', 'WHO IT IS FOR', page.uses.title, toolCards(page.uses.cards), page.uses.lead)}${toolSection('unread', 'WHEN A PAGE CAN’T BE READ', page.unread.title, toolCards(page.unread.cards, page.unread.cards.length === 4 ? 'is-four' : ''), page.unread.lead)}${toolSection('from-code', 'FROM YOUR CODE OR AGENT', page.code.title, fromCodeCards(page.code.format), 'Every answer carries its <a href="/docs/reference/#evidence-record">Evidence Record</a>: where the page came from, when, and hashes of what was read.')}${toolSection('more-tools', 'MORE FREE TOOLS', 'Other things to take from a page.', moreToolsChips(page.slug))}
     <section class="faq-section" id="faq" aria-labelledby="faq-title">
       <div class="band">
         <div class="frame faq-grid">

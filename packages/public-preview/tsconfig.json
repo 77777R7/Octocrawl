@@ -6,6 +6,8 @@
     { "path": "../api" },
     { "path": "../bench" },
     { "path": "../contracts" },
-    { "path": "../http-core" }
+    { "path": "../extract-tf" },
+    { "path": "../http-core" },
+    { "path": "../runtime" }
   ]
 }
