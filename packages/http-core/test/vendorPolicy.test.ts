@@ -49,7 +49,7 @@ describe('ADR 0005: the three capability classes', () => {
       'own_browser_engine', 'own_fingerprint_patches', 'own_captcha_model', 'own_residential_network', 'camoufox', 'hosted_browser_cluster',
     ])
     expect(AUTHORIZABLE_NAMES).toEqual([
-      'compatible_transport', 'egress_sessions', 'enhanced_browser',
+      'compatible_transport', 'egress_sessions', 'enhanced_browser', 'installed_chrome',
       'vendor_remote_browser', 'vendor_residential_proxy', 'vendor_unlock_html', 'vendor_captcha_solving', 'vendor_stealth',
       'third_party_captcha_solver',
     ])
