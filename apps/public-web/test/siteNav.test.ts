@@ -35,6 +35,8 @@ describe('Top navigation', () => {
 
   it('lists what the home page says Octocrawl does, and every guide and reference page', () => {
     expect(NAV_CAPABILITIES).toHaveLength(CAPABILITIES.length)
+    // Scraping a page leads where it can be tried at once: the free tool page, which runs the home page's card.
+    expect(NAV_CAPABILITIES.find(item => item.title === 'Scrape a page')?.href).toBe('/tools/url-to-markdown/')
     const nav = siteNavMarkup()
     for (const page of pages.filter(p => p.group !== 'Project')) expect(nav).toContain(`>${page.title}<`)
   })

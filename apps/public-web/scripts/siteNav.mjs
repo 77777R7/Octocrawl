@@ -8,9 +8,10 @@ import { pages } from './docsPages.mjs'
 const esc = text => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const pathFor = page => page.slug ? `/docs/${page.slug}/` : '/docs/'
 
-/** What Octocrawl does, as on the home page's What it does section, each with where to read more. */
+/** What Octocrawl does, as on the home page's What it does section, each with where to read more; scraping a page,
+ * where to try it at once, on the free tool page. */
 export const NAV_CAPABILITIES = [
-  { glyph: '▤', title: 'Scrape a page', text: 'Markdown, tables and fields from one URL', href: '/blog/extract-structured-data-from-web-page/' },
+  { glyph: '▤', title: 'Scrape a page', text: 'Markdown, tables and fields from one URL', href: '/tools/url-to-markdown/' },
   { glyph: '├', title: 'Map a site', text: 'Every URL in its sitemap and links', href: '/blog/find-all-pages-on-a-website/' },
   { glyph: '»', title: 'Crawl and batch', text: 'Follow links, or read up to 1,000 URLs', href: '/blog/scrape-list-of-urls/' },
   { glyph: '◷', title: 'Watch a page', text: 'What changed, to your HTTPS webhook', href: '/docs/guides/monitor-webhook/' },
