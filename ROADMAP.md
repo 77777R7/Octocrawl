@@ -256,6 +256,10 @@ Decided 2026-10-05: enhanced fetching as a product capability, built on maintain
     - Headed alone does not explain it. Which of nodriver's differences does is not isolated.
     - Headless, repeat runs and a Node implementation are not shown.
     - Whether to build the raw-CDP approach into the product touches ADR 0005's deferred "second stealth engine" and is Howard's decision.
+  - 2026-10-13, later: the same approach from Node, the installed Chrome over raw CDP with no dependency ([record](research/access/runs/2026-10-13-library-probe-cdp-16-b8d4efaa.md)), through the Clash exit.
+    - It reached **13 of 16 headed** (T048 crunchbase included, never reached before) and 1 of 16 headless. Only T005, T045 and T068 held headed.
+    - Chrome must be launched as nodriver launches it (`--remote-debugging-host=127.0.0.1` and a fixed port): with `--remote-debugging-port=0` Cloudflare's challenge held on T002 in 9 tries, with no CDP connected. The cause is not isolated.
+    - A hosted run would need a virtual display (Xvfb), which is not tried.
 - 6: the first step, the provider's built-in solving under `vendor_captcha_solving`, was measured on 2026-10-11 (item 4's arm B): it solved nothing on the 23 candidate tasks, whose blocks are challenge pages and bot checks rather than CAPTCHAs its solver takes. The own solver adapter is not started, as the item says: item 1's set does not show CAPTCHAs as a leading cause.
 - 7: built (#259). `standard` and `enhanced` were checked on real pages, on one server holding a Steel grant, with ten tasks: six the provider had verified, and four healthy controls.
   - `standard`: 4 verified, no paid call, no provider rung tried ([record](research/access/runs/2026-10-09-pa7-standard-4870528c.md)).
