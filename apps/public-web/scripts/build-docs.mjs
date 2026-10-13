@@ -393,11 +393,11 @@ await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify({ ...Obj
 
 // llms.txt (https://llmstxt.org): what Octocrawl is, and a link to the Markdown copy of every page. llms-full.txt carries
 // all of them in one file.
-const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. It is open source (AGPL-3.0). Hosted Octocrawl serves scrape and map at https://api.octocrawl.dev and https://mcp.octocrawl.dev/mcp, keyless within a daily allowance; the published packages (npx octocrawl) run everything on your own computer through REST, a TypeScript SDK, a Python client or MCP.'
+const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. Connect an agent to hosted Octocrawl at https://mcp.octocrawl.dev/mcp (MCP) or call https://api.octocrawl.dev (REST): scrape and map, keyless within a daily allowance; a key from an account adds 1,000 credits a month and the browser lane. The published packages run everything on your own computer (npx octocrawl serve: REST, a TypeScript SDK, a Python client or MCP, with crawl, batch and Monitor), and npx octocrawl serve --hosted --token serves other machines. It is open source (AGPL-3.0).'
 const groups = [...new Set(pages.map(page => page.group))]
 const llms = [
   '# Octocrawl', '', `> ${summary}`, '',
-  `Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/Octocrawl.`, '',
+  `Connect MCP: claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp (other clients: ${ORIGIN}/docs/connect-mcp/index.md). Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/Octocrawl.`, '',
   ...groups.flatMap(group => [`## ${group}`, '', ...pages.filter(page => page.group === group).map(page => `- [${page.title}](${ORIGIN}${pathFor(page)}index.md): ${page.description}`), '']),
   '## Blog', '', ...posts.map(post => `- [${post.title}](${ORIGIN}${blogPath(post)}index.md): ${post.description}`), '',
   '## Optional', '', `- [All documentation in one file](${ORIGIN}/llms-full.txt)`, `- [Changelog](${ORIGIN}${CHANGELOG_PATH}index.md): what changed, version by version`, '',
