@@ -1,6 +1,12 @@
 # installed_chrome product acceptance, 2026-10-14
 
-Label: `product`. This is the ADR 0005 acceptance of the `installed_chrome` rung (#492): the product on the 16 challenge tasks at least twice, and no regression on the full task set or the real-site batch. The first runs showed the rung as merged fell far short of the probe it was built from. Two fixes in this PR closed most of the gap, and the acceptance runs are of the fixed commit.
+Label: `product`. This is the ADR 0005 acceptance of the `installed_chrome` rung (#492): the product on the 16 challenge tasks at least twice, and no regression on the full task set or the real-site batch. The first runs showed the rung as merged fell far short of the probe it was built from. Three fixes in this PR closed most of the gap:
+
+- a wait for a check that clears itself;
+- a gate classifier fix;
+- a review fix, so the wait looks only at decisive evidence.
+
+The last two runs are of the final commit, `7b56397b`.
 
 ## How it was run
 
@@ -15,27 +21,27 @@ Label: `product`. This is the ADR 0005 acceptance of the `installed_chrome` rung
 
 ## The 16 tasks
 
-| Task | main `ebbea3d6` (as merged) | + challenge wait `d34ea24b`, run 1 | run 2 | **+ classifier fix `0080ff3d`, run 1** | **run 2** | Probe: Playwright over CDP, run 1 | run 2 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| T001 | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| T002 | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✓ |
-| T005 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ success, data checks failed | ✗ bot_detected_generic | ✗ | ✗ |
-| T034 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✓ | ✗ bot_detected_generic | ✓ | ✓ |
-| T038 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✓ | ✓ |
-| T045 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ | ✗ |
-| T046 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✓ | ✓ |
-| T047 | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| T048 | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✗ cloudflare_challenge | ✗ | ✗ |
-| T049 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✓ | ✓ | ✓ | ✓ |
-| T053 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| T068 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ | ✗ |
-| T071 | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| T076 | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✓ |
-| B001 | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✓ |
-| B008 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Verified** | **2** | **6** | **6** | **11** | **9** | **12** | **12** |
-| False success | 0 | 0 | 0 | 1 (T005) | 0 | | |
-| p50 / p95 ms | 4697 / 25650 | 23509 / 25509 | 22734 / 29264 | 10951 / 26693 | 22027 / 23756 | | |
+| Task | main `ebbea3d6` (as merged) | + challenge wait `d34ea24b`, run 1 | run 2 | + classifier fix `0080ff3d`, run 1 | run 2 | **Final `7b56397b`, run 1** | **run 2** | Probe: Playwright over CDP, run 1 | run 2 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T001 | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| T002 | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✗ cloudflare_challenge | ✓ | ✓ |
+| T005 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ success, data checks failed | ✗ bot_detected_generic | ✗ success, data checks failed | ✗ bot_detected_generic | ✗ | ✗ |
+| T034 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✓ | ✗ bot_detected_generic | ✓ | ✗ bot_detected_generic | ✓ | ✓ |
+| T038 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✓ | ✓ |
+| T045 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ | ✗ |
+| T046 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✓ | ✓ |
+| T047 | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| T048 | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✗ cloudflare_challenge | ✓ | ✗ cloudflare_challenge | ✗ | ✗ |
+| T049 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| T053 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| T068 | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ | ✗ |
+| T071 | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| T076 | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| B001 | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✗ cloudflare_challenge | ✓ | ✓ | ✓ | ✗ cloudflare_challenge | ✓ | ✓ |
+| B008 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Verified** | **2** | **6** | **6** | **11** | **9** | **11** | **7** | **12** | **12** |
+| False success | 0 | 0 | 0 | 1 (T005) | 0 | 1 (T005) | 0 | | |
+| p50 / p95 ms | 4697 / 25650 | 23509 / 25509 | 22734 / 29264 | 10951 / 26693 | 22027 / 23756 | 13062 / 25339 | 22044 / 23488 | | |
 
 Run directories:
 
@@ -46,6 +52,8 @@ Run directories:
 | challenge wait, run 2 | `ic-wait` | `2026-10-13T17-58-32-978Z` |
 | classifier fix, run 1 | `ic-wait` | `2026-10-13T18-47-53-075Z` |
 | classifier fix, run 2 | `ic-wait` | `2026-10-13T18-51-50-039Z` |
+| final, run 1 | `ic-wait` | `2026-10-13T19-27-31-444Z` |
+| final, run 2 | `ic-wait` | `2026-10-13T19-31-28-096Z` |
 
 The probe columns are from [the Playwright-over-CDP record](2026-10-14-library-probe-pwcdp.md).
 
@@ -88,7 +96,20 @@ Results:
   - T038 was blocked again in both runs. In the direct look above the same page cleared to its real content; whether the 20 s wait or the exit decides it is not isolated.
   - T046, T045 and T068 were genuine DataDome blocks. The probe also failed T045 and T068.
 
-**Against the probe: 11 and 9, against 12 and 12.** The rung is within run-to-run variance of the probe on the Cloudflare tasks. It is behind on two DataDome tasks (T038, T046) that the probe passed in both runs.
+### 4. Final commit: 11 and 7
+
+After review, the wait looks only at decisive evidence (`contentful: true`): a vendor's challenge header or plumbing, its widget, or a wall. An ordinary page that loads a captcha script for a form, or says "please wait", is not waited on.
+
+- **Run 1: 11 tasks, the same set as run 1 of `0080ff3d`.**
+- **Run 2: 7 tasks.** Compared with run 1, it lost T002, B001, T048 and T034.
+  - On all four, Chrome waited the full 19 s and the page was still a real 403 challenge:
+    - T002 and B001: `cf-mitigated`;
+    - T048: Cloudflare's "attention required";
+    - T034: DataDome's 403.
+  - So the sites did not let this Chrome through this time. It was not a misreading.
+  - By then this exit had carried six rounds of the 16 tasks and two rounds of the 92 within about 1.5 hours. Whether the exit's standing with these sites is what changed is not shown.
+
+**Against the probe: 11 and 9, then 11 and 7, against 12 and 12.** The rung is within run-to-run variance of the probe on the Cloudflare tasks. It is behind on two DataDome tasks (T038, T046) that the probe passed in both runs.
 
 ## No regression elsewhere
 
@@ -114,5 +135,5 @@ Four tasks differ:
 
 - The Webshare exit.
 - Other Chrome versions.
-- More than two runs per commit.
+- More than two runs per commit, and runs spread over time rather than back to back on one exit.
 - Why the stand-in Chromium of the integration tests once could not reach a loopback server for a stretch of runs on this Mac. It recovered after orphaned test browsers were killed; the cause is not confirmed.
