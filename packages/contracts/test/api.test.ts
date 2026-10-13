@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { API_ERROR_CODES, API_ERROR_STATUS, cacheLookupRequested, cacheStateOf, CRAWL_MODES, MAX_CACHE_AGE_MS, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
-import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse, WebhookConfig } from '../src/index.js'
+import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
   try { fn() } catch (error) { return error }
@@ -584,7 +584,7 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
   it('takes webhook.headers within their bounds, lower-cases their names, and refuses reserved and malformed ones by name', () => {
     const url = 'https://example.com/'
     const hook = 'https://receiver.example/hook'
-    const parse = (headers: unknown) => (parseCrawlStartRequest({ url, webhook: { url: hook, headers } }).webhook as WebhookConfig | undefined)?.headers
+    const parse = (headers: unknown) => parseCrawlStartRequest({ url, webhook: { url: hook, headers } }).webhook?.headers
     expect(parse({ Authorization: 'Bearer test', 'X-Run': 'wh3' })).toEqual({ authorization: 'Bearer test', 'x-run': 'wh3' })
     for (const name of ['Content-Type', 'content-length', 'Host', 'connection', 'transfer-encoding', 'x-w2l-event-id', 'X-W2L-Anything']) expect(() => parse({ [name]: 'v' }), name).toThrow(`webhook.headers: ${name.toLowerCase()} is reserved`)
     expect(() => parse({ 'x test': 'v' })).toThrow('webhook.headers: x test is not a valid HTTP header name')
@@ -593,15 +593,15 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     for (const headers of [[], 'x', null, { 'x-run': 1 }, Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`x-${i}`, 'v']))]) expect(() => parse(headers), JSON.stringify(headers)).toThrow('webhook.headers must be an object of at most 32 string values')
     expect(() => parse({ 'x-big': 'a'.repeat(8192) })).toThrow('webhook.headers must be at most 8192 bytes')
     expect(parse({ 'x-big': 'a'.repeat(8192 - 'x-big'.length) })?.['x-big']).toHaveLength(8187)
-    expect((parseBatchStartRequest({ urls: [url], webhook: { url: hook, headers: { 'X-Run': 'b' } } }).webhook as WebhookConfig | undefined)?.headers).toEqual({ 'x-run': 'b' })
+    expect(parseBatchStartRequest({ urls: [url], webhook: { url: hook, headers: { 'X-Run': 'b' } } }).webhook?.headers).toEqual({ 'x-run': 'b' })
   })
 
   it('takes webhook.metadata as at most 32 strings of at most 1000 characters within 8 KiB, and refuses the rest', () => {
     const url = 'https://example.com/'
     const hook = 'https://receiver.example/hook'
-    const parse = (metadata: unknown) => (parseBatchStartRequest({ urls: [url], webhook: { url: hook, metadata } }).webhook as WebhookConfig | undefined)?.metadata
+    const parse = (metadata: unknown) => parseBatchStartRequest({ urls: [url], webhook: { url: hook, metadata } }).webhook?.metadata
     expect(parse({ run: 'wh4', team: 'parity' })).toEqual({ run: 'wh4', team: 'parity' })
-    expect((parseCrawlStartRequest({ url, webhook: { url: hook, metadata: { long: 'a'.repeat(1000) } } }).webhook as WebhookConfig | undefined)?.metadata?.long).toHaveLength(1000)
+    expect(parseCrawlStartRequest({ url, webhook: { url: hook, metadata: { long: 'a'.repeat(1000) } } }).webhook?.metadata?.long).toHaveLength(1000)
     expect(parse(Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, 'a'.repeat(1000)])))).toHaveProperty('k7')
     const message = 'webhook.metadata must be an object of at most 32 string values of at most 1000 characters'
     const tooMany = Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`k${i}`, 'v']))
