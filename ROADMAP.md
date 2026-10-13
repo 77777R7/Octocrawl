@@ -244,6 +244,18 @@ Decided 2026-10-05: enhanced fetching as a product capability, built on maintain
       - No gain is set down to the change, so it was not merged (#450 closed). It is to be tested again when a full run shows `scroll_unfinished`.
     - Two runs whose code differed only in readiness labels, `48fd6e17` at 11:55Z (53) and A at 14:29Z (56), differ by as much as the A/B did. The variance between days noted above shows within a day too.
 - 5: built and opt-in (#224); the A/B showed no reproducible gain (#229), so it is not adopted. Rechecked on 2026-10-12 through the operator's residential gateway, as a library probe on the 16 challenge and bot-check tasks: Patchright's answer matched stock Playwright's on every one ([record](research/access/runs/2026-10-12-library-probe-16-b117b451.md)), so the product run (the task list's T2.1) was not made.
+  - 2026-10-13: other browsers, as a library probe on the same 16 tasks, headed, through the Clash data-centre exit and the Webshare residential gateway ([record](research/access/runs/2026-10-13-library-probe-stealth-16-8c91ac43.md)). Tasks whose data checks held:
+
+    | Browser | Clash | Webshare |
+    | --- | --- | --- |
+    | nodriver: the installed Chrome over raw CDP; AGPL and Python, a measurement oracle only | 11 | 8 |
+    | Camoufox: Firefox, npm `camoufox` | 7 | 7, a different seven |
+    | Headed stock Playwright, the control | 1 | 3 |
+
+    - 12 of 16 were reached by some arm. T005, T045, T048 and T068 held against all.
+    - Headed alone does not explain it. Which of nodriver's differences does is not isolated.
+    - Headless, repeat runs and a Node implementation are not shown.
+    - Whether to build the raw-CDP approach into the product touches ADR 0005's deferred "second stealth engine" and is Howard's decision.
 - 6: the first step, the provider's built-in solving under `vendor_captcha_solving`, was measured on 2026-10-11 (item 4's arm B): it solved nothing on the 23 candidate tasks, whose blocks are challenge pages and bot checks rather than CAPTCHAs its solver takes. The own solver adapter is not started, as the item says: item 1's set does not show CAPTCHAs as a leading cause.
 - 7: built (#259). `standard` and `enhanced` were checked on real pages, on one server holding a Steel grant, with ten tasks: six the provider had verified, and four healthy controls.
   - `standard`: 4 verified, no paid call, no provider rung tried ([record](research/access/runs/2026-10-09-pa7-standard-4870528c.md)).
