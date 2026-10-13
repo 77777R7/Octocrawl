@@ -33,6 +33,7 @@ function result(over: Partial<FetchResult> = {}): FetchResult {
     markdown: 'A page body.',
     truncated: false,
     truncatedAt: null,
+    compliance: null,
     evidence: {
       finalUrl: 'http://x.test/page',
       httpStatus: 200,

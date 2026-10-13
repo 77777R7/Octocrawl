@@ -52,7 +52,7 @@ describe('PageCache', () => {
     const cache = cacheAt(clock)
     expect(cache.store('k', result({ status: 'partial' }))).toBe(false)
     expect(cache.store('k', result({ status: 'failed', failureReason: 'http_error' }))).toBe(false)
-    expect(cache.store('k', result({ evidence: { ...result().evidence, fetchedAt: null } }))).toBe(false)
+    expect(cache.store('k', result({ evidence: { ...result().evidence, fetchedAt: undefined } }))).toBe(false)
     expect(cache.lookup('k', { minAgeMs: 0, maxAgeMs: null })).toBeNull()
 
     const looked = withCacheMiss(result(), { minAgeMs: 0, maxAgeMs: 1000 })

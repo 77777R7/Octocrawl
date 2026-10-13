@@ -10,7 +10,7 @@
     "apps/*"
   ],
   "scripts": {
-    "typecheck": "tsc --build",
+    "typecheck": "tsc --build && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:live": "vitest run --config vitest.live.config.ts",
     "build:public": "tsc --build && npm run build --workspace @w2l/public-web",

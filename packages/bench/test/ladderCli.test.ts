@@ -8,7 +8,7 @@ import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
 import { MemorySessionStore } from '../src/routing/sessionStore.js'
 import { evaluateVendorPolicy } from '@w2l/http-core'
 import type { SessionSnapshot } from '../src/routing/sessionStore.js'
-import type { CdpBrowser } from '../src/vendors/cdp.js'
+import type { CdpBrowser, CdpConnector } from '../src/vendors/cdp.js'
 import type { VendorOps, VendorSession } from '../src/vendors/transport.js'
 
 // A real server for the authed-session rung test: proves the REAL
@@ -523,7 +523,7 @@ describe('buildChannels + LadderRunner session composition', () => {
       localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
       vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { steel: fakeVendorOps('steel', () => created.push('steel')) },
-      vendorTariffs: { steel: { perCallUsd: 0, perHourUsd: 0, maxSessionMs: null, minBilledMs: 0, billingIncrementMs: 1 } },
+      vendorTariffs: { steel: { perCallUsd: 0, perHourUsd: 0, maxSessionMs: null, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null } },
       ...vendorEnv(),
     })
     const runner = new LadderRunner(channels, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore())
@@ -548,7 +548,7 @@ describe('buildChannels + LadderRunner session composition', () => {
       ...(tariffs === undefined ? {} : { vendorTariffs: tariffs }),
       ...vendorEnv(),
     })
-    const channels = build({ steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 } })
+    const channels = build({ steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null } })
     const provider = channels.find((c) => c.vendorId === 'steel')!
     expect(provider.priceCeilingUsd).toBeCloseTo(0.01 + 0.002)
     const runner = new LadderRunner(channels, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore())
@@ -574,7 +574,7 @@ describe('buildChannels + LadderRunner session composition', () => {
   it('charges a refusal under robots.txt by the session its connect opened, not at nothing (ROADMAP PA item 4)', async () => {
     // The vendor's session is opened to measure its User-Agent before robots.txt is read for it: a refusal then has
     // already cost that session's time. #403 had settled such a refusal at $0.
-    const tariff = { perCallUsd: 0.001, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 }
+    const tariff = { perCallUsd: 0.001, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null }
     let created = 0
     const channels = buildChannels('authed', {
       localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
@@ -594,7 +594,7 @@ describe('buildChannels + LadderRunner session composition', () => {
 
   it('charges a call under a tariff by its session\'s measured time, and at its ceiling when the release went unconfirmed (ROADMAP PA item 4)', async () => {
     // Steel states no price per call; its dashboard billed 137 browser minutes for 483 sessions, not a minute each.
-    const tariff = { perCallUsd: 0.001, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 }
+    const tariff = { perCallUsd: 0.001, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null }
     const build = (release: () => void) => buildChannels('authed', {
       localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
       vendorPolicy: { authorized: ['vendor_remote_browser'] },
@@ -643,7 +643,7 @@ describe('buildChannels + LadderRunner session composition', () => {
     expect(timed.chargedUsd).toBeCloseTo(0.001 + (0.12 * (timed.sessionMs as number)) / 3_600_000, 9)
     await Promise.all(slow.map((c) => c.close?.().catch(() => {})))
     // Each session is billed on its own, by the tariff's minimum and step; the whole is at most the ceiling.
-    const byMinute = { perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 120_000, minBilledMs: 60_000, billingIncrementMs: 60_000 }
+    const byMinute = { perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 120_000, minBilledMs: 60_000, billingIncrementMs: 60_000, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null }
     const base = run.result
     expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true }, { sessionMs: 5_000, released: true }], byMinute, 0.004).usage).toMatchObject({ vendorSessionMs: 22_000, measuredCostUsd: 0.004 })
     expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true }], byMinute, 0.004).usage.measuredCostUsd).toBeCloseTo(0.002, 9)
@@ -680,7 +680,7 @@ describe('buildChannels + LadderRunner session composition', () => {
       localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
       vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { steel: late() },
-      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 } },
+      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null } },
       ...vendorEnv(),
     })
     const deadlineAt = Date.now() + 400
@@ -701,7 +701,7 @@ describe('buildChannels + LadderRunner session composition', () => {
       localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
       vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { steel: hung() },
-      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 } },
+      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null } },
       ...vendorEnv(),
     })
     const provider = channels.find((c) => c.vendorId === 'steel')!
@@ -719,7 +719,7 @@ describe('buildChannels + LadderRunner session composition', () => {
     const unready = buildChannels('authed', {
       vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { steel: { ...hung(), async ensurePersistence() { throw new Error('steel: profile setup with key steel-key-123 returned 503') } } },
-      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1 } },
+      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null } },
       ...vendorEnv(),
     })
     const setup = await unready.find((c) => c.vendorId === 'steel')!.fetch('https://example.com/p')
@@ -728,11 +728,11 @@ describe('buildChannels + LadderRunner session composition', () => {
     await Promise.all(unready.map((c) => c.close?.().catch(() => {})))
     // A CDP connect, or a robots.txt fetch, that runs out the session's time before the request's own is the
     // provider's timeout, not an error: the session's time is the tariff's, not the request's.
-    const capped = (connector: typeof vendorEnv extends () => infer E ? E extends { vendorConnector: infer C } ? C : never : never, robotsFetcher?: () => Promise<never>, maxSessionMs = 300) => buildChannels('authed', {
+    const capped = (connector: CdpConnector, robotsFetcher?: () => Promise<never>, maxSessionMs = 300) => buildChannels('authed', {
       localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
       vendorPolicy: { authorized: ['vendor_remote_browser'] },
       vendorOps: { steel: fakeVendorOps('steel', () => {}) },
-      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs, minBilledMs: 0, billingIncrementMs: 1 } },
+      vendorTariffs: { steel: { perCallUsd: 0.01, perHourUsd: 0.12, maxSessionMs, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null } },
       ...vendorEnv(),
       vendorConnector: connector,
       ...(robotsFetcher === undefined ? {} : { robotsFetcher }),

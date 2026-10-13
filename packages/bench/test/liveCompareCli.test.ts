@@ -85,7 +85,7 @@ describe('w2l-live-compare resource handling', () => {
     const teardowns: string[] = []
     const hang = async () => {
       await new Promise((resolve) => setTimeout(resolve, 60_000))
-      return okResult('https://a.example/1')
+      return { fetch: async (url: string) => okResult(url) }
     }
     const bb = countingFactory(teardowns)
     const steel = countingFactory(teardowns)

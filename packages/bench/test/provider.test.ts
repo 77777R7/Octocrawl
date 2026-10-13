@@ -118,7 +118,7 @@ describe('ProviderSubject robots gate', () => {
   it('hands the transport the region a task needs and records what its wait saw (ADR 0007)', async () => {
     const { fetcher } = robotsServing(AMAZON_SHAPED)
     const verify = { checks: [{ type: 'markdownIncludes' as const, text: 'Product' }] }
-    const outcome = { ready: true, empty: false, waitedMs: 1_500, reads: 4, loading: false, steady: true, checks: [{ index: 0, type: 'markdownIncludes' as const, passed: true }] }
+    const outcome = { ready: true, empty: false, waitedMs: 1_500, reads: 4, judged: 4, loading: false, steady: true, contractSha256: '0'.repeat(64), checks: [{ index: 0, type: 'markdownIncludes' as const, passed: true }] }
     const transport = new CountingTransport({ region: outcome })
     const out = await new ProviderSubject(decl(), transport, 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, { verify })
     expect(transport.regions).toEqual([{ contract: verify }])

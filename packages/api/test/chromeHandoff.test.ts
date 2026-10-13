@@ -11,7 +11,7 @@ const GATE = '<html><body><div class="g-recaptcha" data-sitekey="k"></div></body
 const PAGE = `<html><body><article><h1>Page</h1>${'<p>Prose long enough to be the page. </p>'.repeat(4)}</article></body></html>`
 
 /** What the tab shows on one read; `active`: the person has clicked or typed on this document (its user activation, which only Chrome sets). */
-type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null; active?: boolean; hidden?: boolean; loading?: boolean; text?: number; region?: Record<string, unknown> }
+type State = { href: string; ready?: string; status?: number | null; html: string; secret?: boolean; field?: string | null; active?: boolean; hidden?: boolean; loading?: boolean; text?: number; region?: Record<string, unknown>; key?: string; next?: string }
 
 /**
  * A Chrome that shows the tab W2L opens as `states`, one per read, the last
@@ -358,7 +358,7 @@ describe('the person\'s Chrome', () => {
     }
     const late = fakeChrome([])
     const controller = new AbortController()
-    const opening = openUserChrome({ userDataDir, connect: async (...args) => { controller.abort(); return late.connect(...(args as [])) } }, controller.signal)
+    const opening = openUserChrome({ userDataDir, connect: async () => { controller.abort(); return late.connect() } }, controller.signal)
     await expect(opening).rejects.toThrow('cancelled')
     expect(late.calls).toEqual(['close'])
   })

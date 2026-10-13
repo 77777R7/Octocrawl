@@ -20,15 +20,15 @@ describe('normalizeAccessGrant', () => {
     expect(tariffCeilingUsd(grant.tariffs.browserbase!)).toBeCloseTo(0.004)
     expect(tariffCeilingUsd(grant.tariffs.flat!)).toBeCloseTo(0.01)
     // A session billed for at least a minute: the floor counts when it is above the longest session.
-    expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 10_000, minBilledMs: 60_000, billingIncrementMs: 1 })).toBeCloseTo(0.002)
+    expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 10_000, minBilledMs: 60_000, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null })).toBeCloseTo(0.002)
     // Billed by the minute, rounded up: 90 s bills two minutes.
-    expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 90_000, minBilledMs: 0, billingIncrementMs: 60_000 })).toBeCloseTo(0.004)
+    expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 90_000, minBilledMs: 0, billingIncrementMs: 60_000, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null })).toBeCloseTo(0.004)
     // A provider that cannot be told to end a session before 60 s bills up to then when a release fails.
-    expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 20_000, minBilledMs: 0, billingIncrementMs: 1 }, 60_000)).toBeCloseTo(0.002)
+    expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 20_000, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null }, 60_000)).toBeCloseTo(0.002)
   })
 
   it('prices a session by its measured time under the tariff (ROADMAP PA item 4)', () => {
-    const steel = { perCallUsd: 0, perHourUsd: 0.1, maxSessionMs: 120_000, minBilledMs: 60_000, billingIncrementMs: 60_000 }
+    const steel = { perCallUsd: 0, perHourUsd: 0.1, maxSessionMs: 120_000, minBilledMs: 60_000, billingIncrementMs: 60_000, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null }
     // A 17 s session billed by the minute, at least one, is a minute; 61 s is two.
     expect(tariffCostUsd(steel, 17_000)).toBeCloseTo(0.1 / 60, 9)
     expect(tariffCostUsd(steel, 61_000)).toBeCloseTo(0.2 / 60, 9)

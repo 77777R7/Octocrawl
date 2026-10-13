@@ -40,7 +40,7 @@ describe('scrape tool', () => {
     vi.stubEnv('OCTOCRAWL_API_KEY', '')
     vi.stubEnv('OCTOCRAWL_API_URL', '')
     const { fetch, sent } = fakeFetch({ body: PAGE })
-    const result = await scrapeTool({ fetch }).execute!({ url: 'https://example.com/' }, { toolCallId: 't1', messages: [] })
+    const result = await scrapeTool({ fetch }).execute!({ url: 'https://example.com/' }, { toolCallId: 't1', messages: [], context: {} })
     expect(sent).toHaveLength(1)
     expect(sent[0]!.url).toBe(`${HOSTED_API_URL}/v1/scrape`)
     expect(sent[0]!.method).toBe('POST')
@@ -54,7 +54,7 @@ describe('scrape tool', () => {
 
   it('sends a key as a bearer header and calls the server it is given, from options or the environment', async () => {
     const first = fakeFetch({ body: PAGE })
-    await scrapeTool({ fetch: first.fetch, apiKey: 'oc_test', baseUrl: 'http://127.0.0.1:8787/' }).execute!({ url: 'https://example.com/', formats: ['links', 'tables'], onlyMainContent: false }, { toolCallId: 't', messages: [] })
+    await scrapeTool({ fetch: first.fetch, apiKey: 'oc_test', baseUrl: 'http://127.0.0.1:8787/' }).execute!({ url: 'https://example.com/', formats: ['links', 'tables'], onlyMainContent: false }, { toolCallId: 't', messages: [], context: {} })
     expect(first.sent[0]!.url).toBe('http://127.0.0.1:8787/v1/scrape')
     expect(first.sent[0]!.headers.get('authorization')).toBe('Bearer oc_test')
     expect(first.sent[0]!.body).toMatchObject({ formats: ['links', 'tables'], onlyMainContent: false })
@@ -62,7 +62,7 @@ describe('scrape tool', () => {
     vi.stubEnv('OCTOCRAWL_API_KEY', 'oc_env')
     vi.stubEnv('OCTOCRAWL_API_URL', 'https://octocrawl.internal.test')
     const second = fakeFetch({ body: PAGE })
-    await scrapeTool({ fetch: second.fetch }).execute!({ url: 'https://example.com/' }, { toolCallId: 't', messages: [] })
+    await scrapeTool({ fetch: second.fetch }).execute!({ url: 'https://example.com/' }, { toolCallId: 't', messages: [], context: {} })
     expect(second.sent[0]!.url).toBe('https://octocrawl.internal.test/v1/scrape')
     expect(second.sent[0]!.headers.get('authorization')).toBe('Bearer oc_env')
   })
@@ -70,7 +70,7 @@ describe('scrape tool', () => {
   it('keeps a page that could not be read as that status, with its reason', async () => {
     const blocked = { ...PAGE, status: 'blocked', blockReason: 'challenge', markdown: null, warning: 'a challenge page', agentHints: ['retry later'] }
     const { fetch } = fakeFetch({ body: blocked })
-    const result = await scrapeTool({ fetch }).execute!({ url: 'https://example.com/' }, { toolCallId: 't', messages: [] })
+    const result = await scrapeTool({ fetch }).execute!({ url: 'https://example.com/' }, { toolCallId: 't', messages: [], context: {} })
     expect(result).toMatchObject({ status: 'blocked', blockReason: 'challenge', markdown: null, warning: 'a challenge page', agentHints: ['retry later'] })
     expect(result).not.toHaveProperty('failureReason')
   })
@@ -81,7 +81,7 @@ describe('scrape tool', () => {
       body: { error: 'the keyless allowance of 20 pages a day is used up', code: 'quota_exhausted', agentHints: ['a key raises the allowance', 'the allowance resets at 00:00 UTC, in 3600 s'] },
       headers: { 'retry-after': '3600' },
     })
-    const result = await scrapeTool({ fetch }).execute!({ url: 'https://example.com/' }, { toolCallId: 't', messages: [] })
+    const result = await scrapeTool({ fetch }).execute!({ url: 'https://example.com/' }, { toolCallId: 't', messages: [], context: {} })
     expect(result).toEqual({
       status: 'refused', httpStatus: 429, code: 'quota_exhausted', error: 'the keyless allowance of 20 pages a day is used up',
       agentHints: ['a key raises the allowance', 'the allowance resets at 00:00 UTC, in 3600 s'], retryAfterSeconds: 3600,
@@ -90,13 +90,13 @@ describe('scrape tool', () => {
 
   it('throws what is not an API answer (a network failure), and passes the call\'s abort signal on', async () => {
     const failing = vi.fn(async () => { throw new TypeError('fetch failed') }) as unknown as typeof fetch
-    await expect(scrapeTool({ fetch: failing }).execute!({ url: 'https://example.com/' }, { toolCallId: 't', messages: [] })).rejects.toThrow('fetch failed')
+    await expect(scrapeTool({ fetch: failing }).execute!({ url: 'https://example.com/' }, { toolCallId: 't', messages: [], context: {} })).rejects.toThrow('fetch failed')
 
     const { fetch, sent } = fakeFetch({ body: PAGE })
     const seen: Array<AbortSignal | null | undefined> = []
     const watching = (async (input: string | URL | Request, init?: RequestInit) => { seen.push(init?.signal); return fetch(input, init) }) as typeof globalThis.fetch
     const controller = new AbortController()
-    await scrapeTool({ fetch: watching }).execute!({ url: 'https://example.com/' }, { toolCallId: 't', messages: [], abortSignal: controller.signal })
+    await scrapeTool({ fetch: watching }).execute!({ url: 'https://example.com/' }, { toolCallId: 't', messages: [], context: {}, abortSignal: controller.signal })
     expect(sent).toHaveLength(1)
     controller.abort()
     expect(seen[0]?.aborted).toBe(true)
@@ -106,7 +106,7 @@ describe('scrape tool', () => {
 describe('map tool', () => {
   it('lists a site\'s URLs with the options given, compactly, with what was left out counted', async () => {
     const { fetch, sent } = fakeFetch({ body: MAP })
-    const result = await mapTool({ fetch }).execute!({ url: 'https://example.com/', search: 'docs', limit: 50, sitemap: 'only' }, { toolCallId: 't', messages: [] })
+    const result = await mapTool({ fetch }).execute!({ url: 'https://example.com/', search: 'docs', limit: 50, sitemap: 'only' }, { toolCallId: 't', messages: [], context: {} })
     expect(sent[0]!.url).toBe(`${HOSTED_API_URL}/v1/map`)
     expect(sent[0]!.body).toEqual({ url: 'https://example.com/', search: 'docs', limit: 50, sitemap: 'only', origin: AI_SDK_ORIGIN })
     expect(result).toEqual({

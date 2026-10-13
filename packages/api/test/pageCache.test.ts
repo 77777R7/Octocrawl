@@ -100,7 +100,7 @@ describe('page cache: scrape', () => {
     expect(first.metadata).toMatchObject({ cacheState: 'miss' })
     const granted = createApiEngine({
       taskRoot, networkPolicy: policy,
-      accessGrant: { tier: 'standard', capabilities: ['compatible_transport'], budget: { perRequestUsd: null, perRunUsd: null }, scope: { hosts: null }, attestation: null },
+      accessGrant: { tier: 'standard', capabilities: ['compatible_transport'], budget: { perRequestUsd: null, perRunUsd: null }, scope: { hosts: null }, attestation: null, tariffs: {} },
       channelsFor: mode => buildChannels(mode, { networkPolicy: policy }).filter(channel => channel.id === 'http'),
     })
     try {

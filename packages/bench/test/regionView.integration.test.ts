@@ -43,7 +43,7 @@ describe('the region view of the live page (ADR 0007, ROADMAP PA item 11)', () =
   it('reads the records the list format reads: nested items, first matches, text CSS hides, attributes and their URLs', async () => {
     const fields = [{ name: 'name', selector: 'a' }, { name: 'price', selector: '.price' }, { name: 'url', selector: 'a', attribute: 'href' }, { name: 'srcset', selector: 'img', attribute: 'srcset' }]
     const live = await view({ itemSelector: 'li.it', fields })
-    const served = extractListRecords(HTML, PAGE_URL, { itemSelector: 'li.it', fields })
+    const served = extractListRecords(HTML, PAGE_URL, { type: 'list', itemSelector: 'li.it', fields })
     expect(live.list?.records).toEqual(served.map(({ values, missing }) => ({ values, missing })))
     // What the comparison covers, spelled out.
     expect(live.list?.records.map((record) => record.values.name)).toEqual(['Alpha (wide)', 'Beta4.5', 'Gamma Delta', null])

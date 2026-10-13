@@ -12,7 +12,7 @@ import { createApiEngine, type ApiEngine } from '../src/engine.js'
 
 const LIST: ListExtraction = {
   itemSelector: 'li', fields: ['name'], records: [{ values: { name: 'One' }, missing: [], source: { url: 'https://example.test/', page: 1, index: 0 } }],
-  pages: 1, incomplete: 0, csv: 'name,source_url,page,index\r\nOne,https://example.test/,1,0\r\n', csvSha256: 'b'.repeat(64),
+  pages: 1, incomplete: 0, truncated: false, csv: 'name,source_url,page,index\r\nOne,https://example.test/,1,0\r\n', csvSha256: 'b'.repeat(64),
 }
 
 describe('the list format in the API', () => {

@@ -6,7 +6,7 @@ const BASE = 'http://127.0.0.1:8787'
 
 /** A compact page as the items routes list it, as far as the watcher reads it. */
 function page(id: string, url = `https://example.com/${id}`): CrawlPage {
-  return { id, url, canonicalUrl: url, depth: 0, status: 'success', lane: 'http', markdown: `# ${id}`, failureReason: null, blockReason: null, budgetExceeded: null, evidence: null, evidenceRecord: null, trace: [], cached: false, contentHash: null, createdAt: `2026-10-02T00:00:0${id.length}.000Z`, updatedAt: '2026-10-02T00:00:00.000Z' }
+  return { id, url, canonicalUrl: url, depth: 0, status: 'success', lane: 'http', markdown: `# ${id}`, failureReason: null, blockReason: null, budgetExceeded: null, evidence: null, evidenceRecord: null, readiness: null, trace: [], cached: false, contentHash: null, createdAt: `2026-10-02T00:00:0${id.length}.000Z`, updatedAt: '2026-10-02T00:00:00.000Z' }
 }
 
 function report(status: string, extra: Record<string, unknown> = {}) {
@@ -29,7 +29,7 @@ function fakeFetch(answer: (url: URL, init: RequestInit | undefined) => Response
     const url = new URL(String(input))
     calls.push({ url, init })
     return answer(url, init) ?? json({ error: `no fake for ${url.pathname}`, code: 'not_found' }, 404)
-  }) as typeof fetch
+  }) as typeof globalThis.fetch
   return { fetch, calls, paths: () => calls.map((call) => `${call.url.pathname}${call.url.search}`) }
 }
 

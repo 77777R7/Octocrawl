@@ -142,7 +142,7 @@ async function batchOf(engine: ApiEngine, paths: string[]): Promise<string> {
   throw new Error('batch did not finish')
 }
 
-async function itemsOf(engine: ApiEngine, taskId: string): Promise<CrawlPage[]> {
+async function itemsOf(engine: ApiEngine, taskId: string): Promise<readonly CrawlPage[]> {
   return (await engine.getBatchItems(taskId, { limit: 50, debug: true }))!.items
 }
 
