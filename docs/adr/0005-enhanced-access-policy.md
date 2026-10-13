@@ -143,8 +143,12 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - **代理。** 需要登录的代理会被拒绝，并说明原因：Chrome 的命令行不能带代理凭据，而代答代理认证的质询要拦截请求。
 - **找不到 Chrome 时。** 结果带 `browser_not_installed` 警告，提示安装 Google Chrome 或设置 `W2L_CHROME_PATH`。
 - **记录里写什么。** Evidence Record 的 `access.route` 是 `installed_chrome`，`executor` 是 `chrome`，`executorVersion` 是 Chrome 的版本，`profile` 是检测类参数那一组的标识（`nodriver-0.50.6-no-allow-origins`）。
+- **验收（2026-10-14）。** 产品在 16 道题上跑了两次，分别过 11 道和 9 道；探针用 Playwright 接管时两次都是 12 道（[记录](../../research/access/runs/2026-10-14-installed-chrome-acceptance-0080ff3d.md)）。
+  - 能达到这个数，是因为验收中补了两处：等挑战页自己放行；门检测不再把 DataDome 的 `x-datadome: protected` 响应头和 Cloudflare 的 `precursor` 脚本当成被拦，DataDome 和 Cloudflare 在放行后的正常页面上也带这两样东西。
+  - 刚合入时只过 2 道。
+  - 回归对比：在同一台机器、同一个出口上，全部 92 道题 main 过 43 道、修复后过 42 道；真实站点 L 批次两边都是 12/12。差异逐题查过：多出的 1 道是 DataDome 修复的效果，少的 2 道是站点当时真的发了 Cloudflare 挑战。
+  - 仍落后探针的是两道 DataDome 题（T038、T046）。
 - **仍是后续工作。**
-  - 验收：产品在 16 道题上至少跑两次，健康组和真实站点批次不退步。
   - 每周重测。
   - 浏览器通道自带的一些步骤在测量里没有，验收时一起看。其中一项是用 `Network.setBlockedURLs` 屏蔽广告域名。
 
