@@ -56,7 +56,7 @@ Patchright 与 `own_fingerprint_patches` 的区别：Patchright 是维护中的�
 | `compatible_transport` | standard | 否 | 浏览器兼容的 HTTP 传输（impit） |
 | `egress_sessions` | standard | 否 | 用户自己的代理组成的会话：出口、cookie、profile 绑定，有界切换 |
 | `enhanced_browser` | enhanced | 否 | Patchright，只用于 Octocrawl 自有的浏览器实例和 profile |
-| `installed_chrome` | enhanced | 否 | 本机已安装的 Google Chrome，按 nodriver 的方式启动，通过原生 CDP 驱动（不经 Playwright），每个任务一个新的临时 profile；只在本地运行、有窗口（见修订 2026-10-13） |
+| `installed_chrome` | enhanced | 否 | 本机已安装的 Google Chrome，按测量过的方式启动（调试端口不对网页开放），通过原生 CDP 驱动（不经 Playwright），每个任务一个新的临时 profile；只在本地运行、有窗口（见修订 2026-10-13） |
 | `vendor_remote_browser` | enhanced | 是 | 远程浏览器厂商（Browserbase、Steel） |
 | `vendor_unlock_html` | enhanced | 是 | 只返回 HTML 的解锁类厂商 |
 | `vendor_captcha_solving` | enhanced | 是 | 厂商内置的验证码求解 |
@@ -115,9 +115,18 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - **只在本地运行。** 托管服务拒绝它，和 `enhanced_browser` 一样。托管场景需要虚拟显示（Xvfb），未经测量之前不开放。
 - **有窗口。** 它会在使用者的机器上打开 Chrome 窗口，grant 的 attestation 要写明这一点。无头模式不作为这条路线提供，因为测量显示无效。
 - **每个任务一个新的临时 profile，放在 Octocrawl 的任务目录下，用完删除。** 永远不用使用者自己的 Chrome profile。读取使用者自己的 Chrome 是 `my-browser` 通道；修改它属于第 1 类 `patch_user_chrome`，仍然永不做。
-- **启动参数固定为测量过的那一组**，不加入自研的指纹或补丁。改参数要先在 16 道题上重新测量。
-- **与其他浏览器 rung 走同一套规则：** URL 检查、robots.txt、限速、预算、Evidence Record。记录里写明路线、Chrome 版本、有窗口，以及启动方式。
+- **调试端口只对驱动开放，不对网页开放。**
+  - 不带 `--remote-allow-origins`。nodriver 默认带 `--remote-allow-origins=*`，在这种情况下，被访问的网页只要知道调试 WebSocket 的地址，就能打开它并控制浏览器，比如读取 `file://`。临时 profile 挡不住这一点。2026-10-14 实测：带 `*` 时，页面里的脚本拿到地址后能连上；不带时 Chrome 拒绝页面的连接；Node 自带的 WebSocket 不发 Origin 头，驱动自己的连接照常可用（[记录](../../research/access/runs/2026-10-14-library-probe-cdp-safe-launch.md)）。
+  - 调试端口每次启动由驱动向操作系统要一个空闲端口，连同 `--remote-debugging-host=127.0.0.1` 显式传给 Chrome。端口不写死，并避开本机已经占用的端口（例如 8791）。不用 `--remote-debugging-port=0`，即不让 Chrome 自己选端口：2026-10-13 在这种方式下 Cloudflare 一直没放行，原因没有查清；由驱动挑好端口显式传入则能通过。
+  - 收窄后的启动在 16 道题上跑了两次，分别通过 12 道和 13 道，测量时的启动方式是 13 道和 11 道，通过率没有下降。驱动只连 `127.0.0.1`。
+- **启动参数分两类。**
+  - 出口和代理参数（`--proxy-server`、`--proxy-bypass-list`），以及 Octocrawl 自己的运行参数（profile 目录、调试端口），属于正常使用，可以随任务和出口变化，不需要重新测量。
+  - 会影响指纹或检测的参数，包括语言、时区、窗口、功能开关（例如 `--lang`、`--disable-features`），只能用测量过的那一组，不加入自研的指纹或补丁。改这一类参数之前，要先在 16 道题上至少跑两次，并且结果不低于当前基线。
+- **定期重测。** 用的是本机会自动升级的 Chrome，版本不受 Octocrawl 控制，效果可能在某次升级后变差。所以每次使用都记录 Chrome 版本，并且每周在 16 道题上重跑一次，Chrome 大版本变化时也重跑，就像 install-check 那样。结果低于验收基线时写进记录，并停止默认推荐这条路线，直到重新测量过。
+- **一次最多开 2 个窗口。** 每个任务会在使用者屏幕上打开一个窗口，所以 batch 和 crawl 在这条路线上的并发上限是 2。
+- **没装 Chrome 时说清楚。** 找不到 Google Chrome 时，结果要明确说缺的是什么、去哪里装，就像 `browser_not_installed`（#479）那样，不能报一个看不懂的错误。
+- **与其他浏览器 rung 走同一套规则：** URL 检查、robots.txt、限速、预算、Evidence Record。记录里写明路线、Chrome 版本、有窗口，以及启动方式（检测类参数那一组的标识）。
 - **不做请求拦截。** 一份 DataDome 报告把拦截列为检测信号，所以先不做。
 
-**本修订合入时的边界。** 只有能力名和规则进入代码（`AUTHORIZABLE` 加 `installed_chrome`）：grant 可以列它，但还没有任何 rung 使用它，列了也不会改变行为。路线的实现、它在 Evidence Record `access` 块里的路线名，以及验收（产品在 16 道题上至少跑两次，并且健康组和真实站点批次不退步）属于后续工作。`camoufox` 仍然暂缓：它在同样 16 道题上只过 7 道，这条路线更好，也更便宜。
+**本修订合入时的边界。** 只有能力名和规则进入代码（`AUTHORIZABLE` 加 `installed_chrome`）：grant 可以列它，但还没有任何 rung 使用它，列了也不会改变行为。路线的实现、它在 Evidence Record `access` 块里的路线名、每周重测，以及验收（产品在 16 道题上至少跑两次，并且健康组和真实站点批次不退步）属于后续工作。实现时用上面收窄后的启动方式，不用测量时带 `--remote-allow-origins=*` 的那一组。`camoufox` 仍然暂缓：它在同样 16 道题上只过 7 道，这条路线更好，也更便宜。
 

@@ -6,6 +6,12 @@
 // Knobs (2026-10-13, research/access/runs/2026-10-13-library-probe-cdp-16-*.md):
 //   HEADLESS=1          adds --headless=new
 //   PROBE_PROXY=url     Chrome's --proxy-server (no credentials; probe-forward.mjs adds a gateway's login), else --no-proxy-server
+//   ALLOW_ORIGINS=none  no --remote-allow-origins (default '*', as nodriver): a page then cannot open the DevTools
+//                       WebSocket, and Node's own connection, which sends no Origin, still can (2026-10-14)
+//   RANDOM_PORT=1       a free port the OS hands out, chosen here and passed as a fixed port with the host flag,
+//                       never one of AVOID_PORTS (default 8787,8791,8792,8794,8795,8797,8798,8812-8814)
+//   ATTACK_TEST=1       from the read page: can it open the browser's DevTools WebSocket knowing its URL, and read
+//                       /json/version? (pageCanConnect in the output)
 //   FIXED_PORT_BASE=n   --remote-debugging-host=127.0.0.1 and --remote-debugging-port=n, n+1, ... per launch, as nodriver
 //                       launches. Without it the port is 0 (Chrome picks one, read from DevToolsActivePort); on 2026-10-13
 //                       Cloudflare's challenge on T002 held with port 0 and cleared with this, the cause not isolated.
@@ -15,11 +21,12 @@
 //   NAV=argv            Chrome opens the URL from its command line instead of Page.navigate; NAV_DELAY_MS delays connecting
 //   CLEAN_ENV=1         Chrome gets HOME, PATH, LANG and TMPDIR only
 //   CHROME=path         another Chrome binary (default: /Applications/Google Chrome.app)
-// Usage: FIXED_PORT_BASE=9400 PROBE_PROXY=http://127.0.0.1:7890 [HEADLESS=1] node probe-cdp.mjs input.json out.json
+// Usage: ALLOW_ORIGINS=none RANDOM_PORT=1 PROBE_PROXY=http://127.0.0.1:7890 [HEADLESS=1] node probe-cdp.mjs input.json out.json
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:net'
 const [inFile, outFile] = process.argv.slice(2)
 const tasks = JSON.parse(await readFile(inFile, 'utf8'))
 const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -28,7 +35,7 @@ const WAIT_MS = Number(process.env.WAIT_MS ?? 20000)
 const PROXY = process.env.PROBE_PROXY
 const CHALLENGE = /just a moment|checking your browser|verify you are human|access denied|captcha|attention required|press & hold|are you a robot|unusual activity/i
 // nodriver 0.50.6's defaults (core/config.py), so the two differ in the driver, not the launch.
-const ARGS = ['--remote-allow-origins=*', '--no-first-run', '--no-service-autorun', '--no-default-browser-check', '--homepage=about:blank', '--no-pings',
+const ARGS = [...(process.env.ALLOW_ORIGINS === 'none' ? [] : [`--remote-allow-origins=${process.env.ALLOW_ORIGINS ?? '*'}`]), '--no-first-run', '--no-service-autorun', '--no-default-browser-check', '--homepage=about:blank', '--no-pings',
   '--password-store=basic', '--disable-infobars', '--disable-breakpad', '--disable-dev-shm-usage', '--disable-session-crashed-bubble',
   '--disable-search-engine-choice-screen', '--disable-features=IsolateOrigins,site-per-process']
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -67,10 +74,19 @@ function connect(url) {
 }
 
 let launches = 0
+// RANDOM_PORT=1: a free port the OS hands out, chosen here and passed to Chrome as a fixed port (never one in AVOID_PORTS).
+const AVOID = new Set((process.env.AVOID_PORTS ?? '8787,8791,8792,8794,8795,8797,8798,8812,8813,8814').split(',').map(Number))
+async function freePort() {
+  for (;;) {
+    const port = await new Promise((resolve, reject) => { const srv = createServer(); srv.once('error', reject); srv.listen(0, '127.0.0.1', () => { const p = srv.address().port; srv.close(() => resolve(p)) }) })
+    if (!AVOID.has(port)) return port
+  }
+}
 async function look(task) {
   const started = Date.now()
   // FIXED_PORT is the first of a run of ports, one per launch, so a Chrome still exiting never holds the next one's.
   if (process.env.FIXED_PORT_BASE) process.env.FIXED_PORT = String(Number(process.env.FIXED_PORT_BASE) + launches++)
+  if (process.env.RANDOM_PORT === '1') process.env.FIXED_PORT = String(await freePort())
   const profile = await mkdtemp(join(tmpdir(), 'probe-cdp-'))
   const args = [...ARGS, `--user-data-dir=${profile}`, ...(process.env.NO_HOST === '1' ? [] : process.env.FIXED_PORT || process.env.HOST_ONLY === '1' ? ['--remote-debugging-host=127.0.0.1'] : []), `--remote-debugging-port=${process.env.FIXED_PORT ?? 0}`, ...(HEADLESS ? ['--headless=new'] : []), ...(PROXY ? [`--proxy-server=${PROXY}`] : ['--no-proxy-server']), process.env.NAV === 'argv' ? task.url : 'about:blank']
   // CLEAN_ENV=1: Chrome gets only HOME, PATH and the user's locale, not this shell's proxy variables and the like.
@@ -105,8 +121,17 @@ async function look(task) {
     const challenge = CHALLENGE.test(html.slice(0, 200000))
     const title = await evaluate('document.title').catch(() => '')
     const finalUrl = await evaluate('location.href').catch(() => '')
+    // ATTACK_TEST=1: can the page itself open this browser's DevTools WebSocket (knowing its address)? opened / refused.
+    let pageCanConnect = null
+    if (process.env.ATTACK_TEST === '1') {
+      const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()
+      const target = JSON.stringify(version.webSocketDebuggerUrl)
+      pageCanConnect = await (await cdp.send('Runtime.evaluate', { awaitPromise: true, returnByValue: true, expression: `new Promise((resolve) => { try { const ws = new WebSocket(${target}); ws.onopen = () => { ws.close(); resolve('opened') }; ws.onerror = () => resolve('refused'); setTimeout(() => resolve('timeout'), 5000) } catch (e) { resolve('threw ' + e.name) } })` })).result?.value ?? null
+      const blind = await (await cdp.send('Runtime.evaluate', { awaitPromise: true, returnByValue: true, expression: `fetch('http://127.0.0.1:${port}/json/version').then((r) => r.text()).then((t) => 'read ' + t.length + ' bytes', (e) => 'blocked: ' + e.name)` })).result?.value ?? null
+      pageCanConnect = { websocketWithKnownUrl: pageCanConnect, readJsonVersion: blind }
+    }
     cdp.close()
-    return { bytes: html.length, textChars: text.length, title: String(title).slice(0, 80), challenge, pass: html.length > 2000 && !challenge, data: checks(task, text), finalUrl, ms: Date.now() - started }
+    return { ...(pageCanConnect === null ? {} : { pageCanConnect }), port, bytes: html.length, textChars: text.length, title: String(title).slice(0, 80), challenge, pass: html.length > 2000 && !challenge, data: checks(task, text), finalUrl, ms: Date.now() - started }
   } finally {
     chrome.kill('SIGKILL')
     await sleep(300)
