@@ -108,9 +108,13 @@ describe('the person\'s Chrome', () => {
     const shown = await (await openUserChrome({ userDataDir, connect: fakeChrome(loading).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })
     expect(shown.html).toBe(PAGE)
     expect(shown.settle).toMatchObject({ loadingSeen: true, stillLoading: false, steady: true })
-    // A page settled at its first clear reads is read then, with no wait.
-    const still = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80 })]).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000 })
-    expect(still.settle).toMatchObject({ waitedMs: 0, loadingSeen: false, steady: true })
+    // A page settled at its first clear reads is read then, with no wait: on its third poll, with less than a poll counted
+    // as waited (the settle wait starts and ends on that poll, so a clock tick between the two may make it 1 ms, not 0).
+    const settled = fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80 })])
+    const still = await (await openUserChrome({ userDataDir, connect: settled.connect })).read('https://site.test/a', { pollMs: 200, waitMs: 5_000 })
+    expect(settled.calls.filter((call) => call === 'Target.getTargetInfo')).toHaveLength(3)
+    expect(still.settle).toMatchObject({ loadingSeen: false, steady: true })
+    expect(still.settle!.waitedMs).toBeLessThan(200)
   })
 
   it('reads a page still loading or changing when its settle wait ends as it is, and says so (ADR 0007)', async () => {
