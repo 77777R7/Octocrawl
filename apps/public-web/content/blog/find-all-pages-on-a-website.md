@@ -10,15 +10,9 @@ On 2026-10-13 we tried five of them on modelcontextprotocol.io and on our own si
 
 Most sites publish a sitemap: an XML file that lists the pages they want search engines to find, described by the [sitemaps protocol](https://www.sitemaps.org/protocol.html). Its address is usually written in the site's robots.txt, on a `Sitemap:` line. Open `https://example.com/robots.txt` and look for it:
 
-```text
-User-agent: *
-Disallow: /cdn-cgi/
-Allow: /_next/image
-Disallow: /_next/
-Sitemap: https://modelcontextprotocol.io/sitemap.xml
-```
+![modelcontextprotocol.io's robots.txt ends with the line Sitemap: https://modelcontextprotocol.io/sitemap.xml, and counting the loc entries in that sitemap gives 357](/blog-assets/find-all-pages-on-a-website/robots-sitemap.webp "curl on 2026-10-13 07:25 UTC: the robots.txt names the sitemap, and the sitemap lists 357 URLs.")
 
-That is modelcontextprotocol.io's robots.txt, with one line left out. Its sitemap lists 357 URLs. When robots.txt names no sitemap, try `/sitemap.xml` and `/sitemap_index.xml`. A sitemap index lists other sitemaps, so open each one it names.
+That is modelcontextprotocol.io's robots.txt, and its sitemap lists 357 URLs. When robots.txt names no sitemap, try `/sitemap.xml` and `/sitemap_index.xml`. A sitemap index lists other sitemaps, so open each one it names.
 
 **Finds:** the pages the site wants found. **Misses:** pages the owner left out, and on many small sites there is no sitemap at all.
 
@@ -32,6 +26,8 @@ site:modelcontextprotocol.io
 
 Google answered "About 4,310 results", and its first five results were on other hosts: `blog.`, `ts.sdk.`, `php.sdk.` and `ruby.sdk.modelcontextprotocol.io`. `site:` includes subdomains, so add a path to stay in one part of a site. `site:modelcontextprotocol.io/specification` said about 192, where the sitemap lists 142 pages under `/specification`.
 
+![Google's site: estimates next to sitemap counts: about 4,310 against 357 for modelcontextprotocol.io, about 192 against 142 for its /specification section, about 26 against 22 for octocrawl.dev](/blog-assets/find-all-pages-on-a-website/site-search.webp "Read in Google on 2026-10-13. The counts are Google's estimates as printed.")
+
 The number is an estimate, not a count. Google's own [documentation of `site:`](https://developers.google.com/search/docs/monitor-debug/search-operators/all-search-site) says the list "is not always exhaustive". Use `site:` to see what Google shows for a site, and to check whether one page is in Google. Don't use it to count pages.
 
 **Finds:** pages Google has indexed, on any site. **Misses:** pages Google hasn't indexed, and the count can't be trusted.
@@ -41,6 +37,8 @@ The number is an estimate, not a count. Google's own [documentation of `site:`](
 If you own the site, [Google Search Console](https://search.google.com/search-console) says which of your pages Google knows. The [Pages report](https://support.google.com/webmasters/answer/7440203) lists indexed and not-indexed pages with a reason, up to 1,000 example URLs for each. URL Inspection checks one address.
 
 We inspected the 24 URLs a map of our own site found. 21 were "Submitted and indexed". Three were "URL is unknown to Google": `/scrape/`, a page we had published that day, `/llms.txt` and `/signin/`. Search Console is the only method here that tells you what Google thinks of each page, not just whether it exists.
+
+![Search Console URL Inspection for the 24 URLs on octocrawl.dev: 21 submitted and indexed, 3 unknown to Google, namely /scrape/, /llms.txt and /signin/](/blog-assets/find-all-pages-on-a-website/search-console.webp "The URL Inspection API on 2026-10-13, one call per URL.")
 
 **Finds:** what Google has found and indexed on your site, with a reason for the rest. **Misses:** pages Google has never found. It only works on a site you've verified.
 
@@ -129,6 +127,8 @@ returned 582 page addresses for modelcontextprotocol.io, after we dropped query 
 Compare two sources, then check the addresses that only one of them has. A longer list isn't a more complete one until you do.
 
 The archives gave us 458 addresses the map didn't have. We requested each one, except 11 under `/_next/`, which the site's robots.txt disallows, and followed every redirect that didn't land on a page the map listed:
+
+![Four sources in: sitemap 357, start-page links 18, Wayback Machine 582, Common Crawl 411. The map's list has 359; the archives have 458 addresses not in it. Of the 447 requested, 95 are gone, 96 redirect, 203 are Markdown copies, 52 are the same page at another address and 1 is robots.txt. Live pages the map missed: 0 of 447](/blog-assets/find-all-pages-on-a-website/check-list.webp "modelcontextprotocol.io on 2026-10-13: every archive-only address requested and sorted.")
 
 | What came back | Addresses |
 | --- | --- |
