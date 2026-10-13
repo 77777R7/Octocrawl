@@ -7,6 +7,7 @@ import { pages } from '../scripts/docsPages.mjs'
 import { NAV_TOOLS } from '../scripts/siteNav.mjs'
 import { SCENES, sceneName } from '../src/heroArtwork'
 import { pageMarkup } from '../src/page'
+import { csvCell } from '../src/tools/mapResults'
 import { TOOL_PAGES } from '../src/tools/pages'
 import { toolPageJsonLd, toolPageMarkup, toolPagePath } from '../src/tools/toolPage'
 import { TOOLS, toolPath } from '../src/tools/toolSections'
@@ -73,6 +74,21 @@ describe('the free tools’ pages', () => {
       })
     })
   }
+
+  it('give Link Extractor a Whole site / This page switch and a place for the site’s pages, at the path the blog links to', () => {
+    const page = TOOL_PAGES.find(tool => tool.slug === 'link-extractor')!
+    expect(toolPagePath(page)).toBe('/tools/link-extractor/')
+    const markup = toolPageMarkup(page)
+    expect(markup).toContain('data-tool-map="site"')
+    expect(markup).toContain('<button type="button" role="radio" aria-checked="true" data-map-mode="site">Whole site</button>')
+    expect(markup).toContain('<section class="map-section" id="map-section" aria-labelledby="map-title" hidden>')
+    expect(markup.indexOf('id="map-section"')).toBeLessThan(markup.indexOf('id="how"'))
+    expect(markup).toContain('href="/blog/find-all-pages-on-a-website/"')
+    expect(main).toContain('if (hero.dataset.toolMap) mountMapResults(hero, form, input, normalizeUrl')
+    expect(readFileSync(app('src/tools/mapResults.ts'), 'utf8')).toContain("fetch('/api/map'")
+    // A title a site wrote reaches the CSV as text: never a formula a spreadsheet would run.
+    expect(['=HYPERLINK("https://evil/","x")', '+1', '-1', '@sum', 'a,b', 'plain'].map(csvCell)).toEqual([`"'=HYPERLINK(""https://evil/"",""x"")"`, "'+1", "'-1", "'@sum", '"a,b"', 'plain'])
+  })
 
   it('leave the home page its mountain, and paint the coast from one file', () => {
     expect(pageMarkup()).toContain('<div class="hero" id="top">')

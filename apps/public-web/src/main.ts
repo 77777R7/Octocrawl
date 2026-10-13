@@ -13,6 +13,7 @@ import { mountCrawlView } from './crawlView'
 import { readPreview, STAGE_STREAM } from './previewStream'
 import { buildWindow } from './windowBuild'
 import { markdownToText } from './markdownText'
+import { mountMapResults } from './tools/mapResults'
 import { API_SERVER, fieldsSchema, HOSTED_MCP, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, playgroundHref, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
@@ -323,7 +324,7 @@ function setBusy(busy: boolean): void {
   // The options of a run in flight are already sent.
   optionsButton.disabled = busy
   if (busy && optionsPanel.matches(':popover-open')) optionsPanel.hidePopover()
-  submitLabel.textContent = busy ? 'Extracting' : 'Extract page'
+  submitLabel.textContent = busy ? 'Extracting' : hero.dataset.toolMap ? 'Extract links' : 'Extract page'
   submit.classList.toggle('is-busy', busy)
   form.setAttribute('aria-busy', String(busy))
 }
@@ -1511,6 +1512,8 @@ if (hero.dataset.toolScope === 'whole') {
   }
 }
 if (hero.dataset.toolView) setOutputView(hero.dataset.toolView as OutputView)
+// Link Extractor: Whole site reads the site's pages (/api/map, one of the five a day); This page is the card's own run.
+if (hero.dataset.toolMap) mountMapResults(hero, form, input, normalizeUrl, () => void refreshQuota())
 // Enter never submits the form around the panel: on the add line it adds the field, in a field's name it moves to
 // the add line.
 optionsPanel.addEventListener('keydown', (event) => {

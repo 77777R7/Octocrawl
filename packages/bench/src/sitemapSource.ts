@@ -51,6 +51,9 @@ export interface HttpSitemapSourceOptions {
   robots?: RobotsOriginCache
   /** Read a file robots.txt disallows, or whose robots.txt could not be read (a crawl or map started with ignoreRobotsTxt); its verdict is still recorded. Default false: such a file is refused. */
   ignoreRobotsTxt?: boolean
+  /** Request the files under the public preview's identity: the standard one with the preview's product token
+   * (`OctoCrawl-Preview/1.0`), as the preview's own pages are (`previewProductToken` of buildChannels). Default false. */
+  previewProductToken?: boolean
 }
 
 /** Default waits for a sitemap response's headers and for each chunk of its body, as the http lane's without a caller's timeout. */
@@ -75,6 +78,7 @@ export class HttpSitemapSource implements SitemapSource {
   private readonly robots: RobotsOriginCache
   private readonly ownRobots: boolean
   private readonly ignoreRobotsTxt: boolean
+  private readonly preview: boolean
   /** The Crawl-delay of each origin whose robots.txt a file of this source was judged by (the strictest one seen). */
   private readonly crawlDelays = new Map<string, number>()
   /** When this source's last request to each origin left (monotonic). */
@@ -90,6 +94,7 @@ export class HttpSitemapSource implements SitemapSource {
     this.route = new EgressRoute(this.policy, this.routes)
     this.ownRobots = options.robots === undefined
     this.ignoreRobotsTxt = options.ignoreRobotsTxt === true
+    this.preview = options.previewProductToken === true
     this.robots = options.robots ?? new RobotsOriginCache(this.policy, (url) => this.route.dispatcherFor(url))
   }
 
@@ -164,7 +169,7 @@ export class HttpSitemapSource implements SitemapSource {
 
   /** The crawl mode's declared identity for a host (research mode declares SEC's own format to SEC.gov, as the http lane does). */
   private identityFor(hostname: string): { userAgent: string; headers: Record<string, string> } {
-    const prepared = prepareHttpIdentity(this.mode, this.policy.contact ?? null, hostname, this.device)
+    const prepared = prepareHttpIdentity(this.mode, this.policy.contact ?? null, hostname, this.device, undefined, this.preview)
     return { userAgent: prepared.identity.userAgent, headers: prepared.identityHeaders }
   }
 

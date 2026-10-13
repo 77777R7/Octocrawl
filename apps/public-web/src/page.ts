@@ -164,6 +164,8 @@ export interface HeroCopy {
     whole?: boolean
     example?: string
     text?: boolean
+    // Link Extractor: a Whole site / This page switch over the card; whole site reads the site's pages (/api/map).
+    map?: boolean
   }
 }
 const HOME_HERO: HeroCopy = {
@@ -183,7 +185,8 @@ export function heroMarkup(copy: HeroCopy): string {
           <div class="frame hero-tool-head">
             <nav class="tool-crumbs" aria-label="Breadcrumb"><a href="/tools/">Free tools</a><span aria-hidden="true">/</span><span aria-current="page">${copy.tool.crumb}</span></nav>
             <h1 id="hero-title">${copy.title}</h1>
-            <p class="hero-description">${copy.description}</p>
+            <p class="hero-description">${copy.description}</p>${copy.tool.map ? `
+            <div class="map-mode" role="radiogroup" aria-label="What to read"><button type="button" role="radio" aria-checked="true" data-map-mode="site">Whole site</button><button type="button" role="radio" aria-checked="false" data-map-mode="page">This page</button></div>` : ''}
           </div>` : `
           <div class="frame hero-cells">
             <div class="hero-octopus-cell" id="hero-ascii" data-calm="#hero-title, .hero-description" data-reach=".url-card" aria-hidden="true"></div>
@@ -192,7 +195,7 @@ export function heroMarkup(copy: HeroCopy): string {
               <p class="hero-description">${copy.description}</p>
             </div>
           </div>`
-  const presets = copy.tool ? `${copy.tool.view ? ` data-tool-view="${copy.tool.view}"` : ''}${copy.tool.whole ? ' data-tool-scope="whole"' : ''}${copy.tool.example ? ` data-tool-example="${copy.tool.example}"` : ''}${copy.tool.text ? ' data-tool-text="on"' : ''}` : ''
+  const presets = copy.tool ? `${copy.tool.view ? ` data-tool-view="${copy.tool.view}"` : ''}${copy.tool.whole ? ' data-tool-scope="whole"' : ''}${copy.tool.example ? ` data-tool-example="${copy.tool.example}"` : ''}${copy.tool.text ? ' data-tool-text="on"' : ''}${copy.tool.map ? ' data-tool-map="site"' : ''}` : ''
   return `    <div class="hero${copy.tool ? ' is-tool' : ''}" id="top"${copy.art ? ` data-art="${copy.art}"` : ''}${presets}>
       <div class="hero-backdrop" aria-hidden="true"></div>${decoration}
       <div class="hero-shade" aria-hidden="true"></div>${copy.tool ? '' : `

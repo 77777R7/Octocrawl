@@ -7,6 +7,7 @@ import { VISITOR_DAILY_PREVIEWS, type PreviewQuota, type QuotaDecision, type Quo
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
 import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse, type PreviewStage } from './preview.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
+import { mapPreview, type PreviewMap, type PreviewMapper } from './map.js'
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
 import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, INTERNAL_COOKIE, internalVisit, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
   requestOrigin, stdoutLogger, targetHost, type Logger } from './site.js'
@@ -20,6 +21,8 @@ export interface PreviewServerOptions {
   staticDir: string
   amazonState?: string | null
   capture?: PreviewCapture
+  /** The Link Extractor's whole-site read (/api/map); mapPreview by default. A test seam, as capture is. */
+  mapper?: PreviewMapper
   enabled?: boolean
   deadlineMs?: number
   visitorCookieSecret?: string
@@ -87,6 +90,17 @@ const QUOTA_LOOKUPS_PER_MINUTE = 120
 const PROXY_SECRET_HEADER = 'x-w2l-proxy-secret'
 /** A capability request holds one address of at most 2,048 characters. */
 const CAPABILITY_BODY_BYTES = 4_096
+/** The whole-site read's request: one url. */
+const MAP_BODY_BYTES = 4_096
+
+/** What /api/map answers: the map when one ran, else the reason, in the preview's own states. */
+export type MapPreviewResponse = {
+  status: 'success' | 'blocked' | 'failed' | 'timeout' | 'quota_exceeded' | 'invalid_url'
+  requestedUrl: string
+  reason: string | null
+  totalMs: number
+  map?: PreviewMap
+}
 
 function nextUtcMidnight(now = new Date()): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
@@ -401,6 +415,62 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       if (!event) { if (!res.destroyed) res.writeHead(400, { 'cache-control': 'no-store' }).end(); return }
       if (!optedOut(req)) log({ event: 'w2l_web_event', name: event.name, props: event.props, vid: visitorId(req), automated: looksAutomated(req), ...(internalVisit(req) ? { internal: true } : {}) })
       res.writeHead(204, { 'cache-control': 'no-store' }).end()
+      return
+    }
+    if (pathname === '/api/map') {
+      // The Link Extractor's whole-site read: the same origin check, visitor allowance, deadline and logging as a
+      // preview, and one of the visitor's five a day.
+      if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }).end(); return }
+      let url = ''
+      const reply = (status: number, body: MapPreviewResponse, headers?: Record<string, string>): void => {
+        body.totalMs = Math.max(0, Math.round(performance.now() - started))
+        if (!optedOut(req)) log({
+          event: 'w2l_map', status: body.status, http: status, host: targetHost(url), links: body.map?.links.length ?? null,
+          stoppedBy: body.map?.stoppedBy ?? null, totalMs: body.totalMs, vid: visitorId(req), automated: looksAutomated(req), ...(internalVisit(req) ? { internal: true } : {}),
+        })
+        if (!res.destroyed) sendJson(res, status, body, headers)
+      }
+      const refuse = (status: number, state: MapPreviewResponse['status'], reason: string, headers?: Record<string, string>): void =>
+        reply(status, { status: state, requestedUrl: url, reason, totalMs: 0 }, headers)
+      if (!requestOriginAllowed(req, siteHost(req, publicOrigin)) || req.headers['sec-fetch-site'] === 'cross-site') { refuse(403, 'failed', 'Submit links from this site only.'); return }
+      try {
+        const body = await readRequestBody(req, MAP_BODY_BYTES)
+        const keys = body !== null && typeof body === 'object' && !Array.isArray(body) ? Object.keys(body) : []
+        const value = (body as { url?: unknown } | null)?.url
+        if (keys.length !== 1 || typeof value !== 'string') throw new Error('Send a JSON object with one url.')
+        url = value
+        const target = normalizePreviewUrl(url)
+        url = target.url
+        if (isPreviewTargetStaticallyDenied(target.url)) { refuse(200, 'blocked', 'Private or reserved network targets are not available in the public preview.'); return }
+        if (options.enabled === false) { refuse(503, 'failed', 'The public preview is temporarily unavailable.'); return }
+        const abort = new AbortController()
+        res.once('close', () => { if (!res.writableEnded) abort.abort(new DOMException('Client disconnected', 'AbortError')) })
+        let quota: QuotaDecision
+        try { quota = await options.quota.consume(visitorKey(req, options.visitorCookieSecret), undefined, { signal: abort.signal, deadlineAt }) }
+        catch (error) {
+          const interrupted = abort.signal.aborted || Date.now() >= deadlineAt || error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+          if (interrupted) refuse(200, 'timeout', 'The site did not answer within the time limit.')
+          else refuse(503, 'failed', 'The preview quota service is temporarily unavailable.')
+          return
+        }
+        if (quota !== 'ok') {
+          refuse(429, 'quota_exceeded', quota === 'global_limited' ? 'The public preview has reached its daily limit.' : `You have used your ${VISITOR_DAILY_PREVIEWS} free runs for today.`,
+            { 'retry-after': String(Math.max(1, Math.ceil((nextUtcMidnight() - Date.now()) / 1_000))) })
+          return
+        }
+        try {
+          const map = await (options.mapper ?? mapPreview)(target.url, abort.signal, deadlineAt)
+          const startStatus = map.sources.startPage?.status
+          const robotsRefused = map.links.length === 0 && map.refused.robots > 0
+          const state: MapPreviewResponse['status'] = map.status === 'failed' ? (robotsRefused ? 'blocked' : startStatus === 'blocked' ? 'blocked' : map.stoppedBy === 'timeout' ? 'timeout' : 'failed') : 'success'
+          reply(200, { status: state, requestedUrl: url, reason: state === 'success' ? null : robotsRefused ? 'This site’s robots.txt does not allow automated reading of these pages.' : startStatus === 'blocked' ? 'The site blocked this request.' : state === 'timeout' ? 'The site did not answer within the time limit.' : 'No pages could be found: the start page could not be read and the site has no readable sitemap.', totalMs: 0, map })
+        } catch (error) {
+          const timeout = error instanceof Error && error.name === 'TimeoutError'
+          refuse(200, timeout || abort.signal.aborted ? 'timeout' : 'failed', timeout ? 'The site did not answer within the time limit.' : abort.signal.aborted ? 'This run was interrupted.' : 'We could not list this site’s pages right now.')
+        }
+      } catch (error) {
+        refuse(400, 'invalid_url', error instanceof Error ? error.message : 'Invalid request.')
+      }
       return
     }
     if (pathname !== '/api/preview') {
