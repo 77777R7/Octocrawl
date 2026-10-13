@@ -56,7 +56,7 @@ Patchright 与 `own_fingerprint_patches` 的区别：Patchright 是维护中的�
 | `compatible_transport` | standard | 否 | 浏览器兼容的 HTTP 传输（impit） |
 | `egress_sessions` | standard | 否 | 用户自己的代理组成的会话：出口、cookie、profile 绑定，有界切换 |
 | `enhanced_browser` | enhanced | 否 | Patchright，只用于 Octocrawl 自有的浏览器实例和 profile |
-| `installed_chrome` | enhanced | 否 | 本机已安装的 Google Chrome，按测量过的方式启动（调试端口不对网页开放），通过原生 CDP 驱动（不经 Playwright），每个任务一个新的临时 profile；只在本地运行、有窗口（见修订 2026-10-13） |
+| `installed_chrome` | enhanced | 否 | 本机已安装的 Google Chrome，按测量过的方式启动（调试端口不对网页开放），每个任务一个新的临时 profile；只在本地运行、有窗口（见修订 2026-10-13）。测量时用原生 CDP 驱动；实现用 Playwright 通过 CDP 接管同样启动的 Chrome（见实现 2026-10-14） |
 | `vendor_remote_browser` | enhanced | 是 | 远程浏览器厂商（Browserbase、Steel） |
 | `vendor_unlock_html` | enhanced | 是 | 只返回 HTML 的解锁类厂商 |
 | `vendor_captcha_solving` | enhanced | 是 | 厂商内置的验证码求解 |
@@ -114,7 +114,7 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 
 - **只在本地运行。** 托管服务拒绝它，和 `enhanced_browser` 一样。托管场景需要虚拟显示（Xvfb），未经测量之前不开放。
 - **有窗口。** 它会在使用者的机器上打开 Chrome 窗口，grant 的 attestation 要写明这一点。无头模式不作为这条路线提供，因为测量显示无效。
-- **每个任务一个新的临时 profile，放在 Octocrawl 的任务目录下，用完删除。** 永远不用使用者自己的 Chrome profile。读取使用者自己的 Chrome 是 `my-browser` 通道；修改它属于第 1 类 `patch_user_chrome`，仍然永不做。
+- **每个任务一个新的临时 profile，放在系统临时目录下，用完删除。** 永远不用使用者自己的 Chrome profile。读取使用者自己的 Chrome 是 `my-browser` 通道；修改它属于第 1 类 `patch_user_chrome`，仍然永不做。
 - **调试端口只对驱动开放，不对网页开放。**
   - 不带 `--remote-allow-origins`。nodriver 默认带 `--remote-allow-origins=*`，在这种情况下，被访问的网页只要知道调试 WebSocket 的地址，就能打开它并控制浏览器，比如读取 `file://`。临时 profile 挡不住这一点。2026-10-14 实测：带 `*` 时，页面里的脚本拿到地址后能连上；不带时 Chrome 拒绝页面的连接；Node 自带的 WebSocket 不发 Origin 头，驱动自己的连接照常可用（[记录](../../research/access/runs/2026-10-14-library-probe-cdp-safe-launch.md)）。
   - 调试端口每次启动由驱动向操作系统要一个空闲端口，连同 `--remote-debugging-host=127.0.0.1` 显式传给 Chrome。端口不写死，并避开本机已经占用的端口（例如 8791）。不用 `--remote-debugging-port=0`，即不让 Chrome 自己选端口：2026-10-13 在这种方式下 Cloudflare 一直没放行，原因没有查清；由驱动挑好端口显式传入则能通过。
@@ -128,5 +128,22 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - **与其他浏览器 rung 走同一套规则：** URL 检查、robots.txt、限速、预算、Evidence Record。记录里写明路线、Chrome 版本、有窗口，以及启动方式（检测类参数那一组的标识）。
 - **不做请求拦截。** 一份 DataDome 报告把拦截列为检测信号，所以先不做。
 
-**本修订合入时的边界。** 只有能力名和规则进入代码（`AUTHORIZABLE` 加 `installed_chrome`）：grant 可以列它，但还没有任何 rung 使用它，列了也不会改变行为。路线的实现、它在 Evidence Record `access` 块里的路线名、每周重测，以及验收（产品在 16 道题上至少跑两次，并且健康组和真实站点批次不退步）属于后续工作。实现时用上面收窄后的启动方式，不用测量时带 `--remote-allow-origins=*` 的那一组。`camoufox` 仍然暂缓：它在同样 16 道题上只过 7 道，这条路线更好，也更便宜。
+**本修订合入时的边界（2026-10-13，已由下面的实现取代）。** 只有能力名和规则进入代码（`AUTHORIZABLE` 加 `installed_chrome`）：grant 可以列它，但还没有任何 rung 使用它，列了也不会改变行为。路线的实现、它在 Evidence Record `access` 块里的路线名、每周重测，以及验收（产品在 16 道题上至少跑两次，并且健康组和真实站点批次不退步）属于后续工作。实现时用上面收窄后的启动方式，不用测量时带 `--remote-allow-origins=*` 的那一组。`camoufox` 仍然暂缓：它在同样 16 道题上只过 7 道，这条路线更好，也更便宜。
+
+**实现 2026-10-14。** `installed_chrome` 有了自己的 rung，排在 `browser_local` 之后、provider 之前。
+
+- **什么时候有这个 rung。** 三个条件同时满足才建：grant 列了 `installed_chrome`；请求选了 `access: "enhanced"`；模式是 standard。服务是托管的、grant 里又列了它时，引擎启动就报错。
+- **驱动方式。** 先按上面收窄后的方式启动 Chrome，再由 Playwright 用 `connectOverCDP` 接管，在 Chrome 自己打开的窗口和默认上下文里读页面。这样 robots.txt、限速、预算和 Evidence Record 都沿用浏览器通道的，不再另写一个 CDP 驱动。
+  - 同样启动、由 Playwright 接管时，16 道题两次各过 12 道；原生 CDP 是 12 和 13（[记录](../../research/access/runs/2026-10-14-library-probe-pwcdp.md)）。
+  - 两次都不同的只有 T048，验收时再看。
+- **不做的事。** 不设 User-Agent、语言、时区、窗口大小，也不注入客户端提示。记录声明的是 Chrome 自己报的 User-Agent（`identity: actual`）。
+- **不接的请求。** 带 actions、截图、`mobile`、自定义请求头或 `skipTlsVerification` 的请求，这个 rung 不接，因为它们都要在测量之外驱动或改动窗口。
+- **每次抓取的生命周期。** 每次抓取启动一个 Chrome，抓完关掉，同时删除临时 profile。整个进程最多同时开 2 个窗口。
+- **代理。** 需要登录的代理会被拒绝，并说明原因：Chrome 的命令行不能带代理凭据，而代答代理认证的质询要拦截请求。
+- **找不到 Chrome 时。** 结果带 `browser_not_installed` 警告，提示安装 Google Chrome 或设置 `W2L_CHROME_PATH`。
+- **记录里写什么。** Evidence Record 的 `access.route` 是 `installed_chrome`，`executor` 是 `chrome`，`executorVersion` 是 Chrome 的版本，`profile` 是检测类参数那一组的标识（`nodriver-0.50.6-no-allow-origins`）。
+- **仍是后续工作。**
+  - 验收：产品在 16 道题上至少跑两次，健康组和真实站点批次不退步。
+  - 每周重测。
+  - 浏览器通道自带的一些步骤在测量里没有，验收时一起看。其中一项是用 `Network.setBlockedURLs` 屏蔽广告域名。
 

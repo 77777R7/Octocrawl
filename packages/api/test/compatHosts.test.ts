@@ -106,4 +106,10 @@ describe('the compatible transport for listed hosts', () => {
     expect(() => createApiEngine({ taskRoot: join(root, 'a'), compatHosts: ['shop.test'] })).toThrow(/names compatible_transport/)
     expect(() => createApiEngine({ taskRoot: join(root, 'b'), compatHosts: ['shop.test'], accessGrant: GRANT, hosted: true })).toThrow(/refused on a hosted engine/)
   })
+
+  it('refuses a grant that names installed_chrome on a hosted engine (ADR 0005: local only)', async () => {
+    root = await mkdtemp(join(tmpdir(), 'w2l-compat-'))
+    const chrome = accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['installed_chrome'], attestation: { principal: 'operator@example.test', at: '2026-10-14T00:00:00Z', statement: 'I accept the terms.' } }))
+    expect(() => createApiEngine({ taskRoot: join(root, 'c'), accessGrant: chrome, hosted: true })).toThrow(/installed_chrome is refused on a hosted engine/)
+  })
 })

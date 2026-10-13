@@ -9,7 +9,7 @@
  */
 
 import { DEFAULT_SCRAPE_TIMEOUT_MS, isOctocrawlRobotsGroup, MAX_WAIT_FOR_MS, type Evidence, type FetchResult, type LadderRunAudit, type MapResponse, type ScrapeRequest } from '@w2l/contracts'
-import { HTTP_CHANNELS } from '@w2l/bench'
+import { HTTP_CHANNELS, INSTALLED_CHROME_INSTALL } from '@w2l/bench'
 
 /** The hint a `fastMode` scrape carries when the http lane asked for the browser lane it was denied. */
 export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane; fastMode declined it; retry without fastMode'
@@ -27,6 +27,9 @@ export function browserNotInstalledHint(command = 'npx playwright install chromi
   return `Chromium is not installed where Octocrawl runs, so the browser lane could not start; run ${command} once, then scrape again`
 }
 export const BROWSER_NOT_INSTALLED_HINT = browserNotInstalledHint()
+
+/** The hint the installed_chrome rung's `browser_not_installed` warning carries (ADR 0005): it needs Google Chrome itself. */
+export const INSTALLED_CHROME_MISSING_HINT = `Google Chrome is not installed where Octocrawl runs, so the installed_chrome rung could not start; ${INSTALLED_CHROME_INSTALL}, then scrape again`
 
 /** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */
 export const SCREENSHOT_UNAVAILABLE_HINT = "the screenshot could not be captured, so screenshot is null while the page result stands; the trace's screenshot_failed event names the error; a viewport capture (fullPage false) is the lighter request, and a longer timeout gives a slow page more time"
@@ -196,9 +199,13 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
   // Under fastMode the one hint below says what was declined; otherwise the page's caveat says whether the browser lane had its turn.
   const fastModeDeclined = req.fastMode === true && result.lane === 'http' && httpLaneAskedForBrowser(result)
   // A browser lane that could not start (no browser installed) was not tried in any sense that matters to the caller.
-  const missingWarning = result.warnings?.find((warning) => warning.code === 'browser_not_installed')
+  const missingWarnings = result.warnings?.filter((warning) => warning.code === 'browser_not_installed') ?? []
+  // The installed_chrome rung's (ADR 0005) is its own: the browser lane before it may well have run.
+  const chromeMissing = missingWarnings.some((warning) => warning.message.startsWith('the installed_chrome rung'))
+  const missingWarning = missingWarnings.find((warning) => !warning.message.startsWith('the installed_chrome rung'))
   const browserMissing = missingWarning !== undefined
   if (missingWarning !== undefined) hints.push(browserNotInstalledHint(/run (npx [\w@.-]+ install chromium)/.exec(missingWarning.message)?.[1]))
+  if (chromeMissing) hints.push(INSTALLED_CHROME_MISSING_HINT)
   const browserTried = !browserMissing && run.channelsTried.some((channel) => !HTTP_CHANNELS.has(channel))
   if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'client_rendered_suspected')) {
     hints.push(`the page fills its data with JavaScript; the browser lane ${browserTried ? 'was tried' : browserMissing ? 'could not start' : 'was not tried'}`)

@@ -21,6 +21,7 @@ import {
 } from '@w2l/http-core'
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Download, type Page, type Request, type Response, type Route } from 'playwright'
 import { browserEngineFor, type BrowserEngineName } from './browserEngine.js'
+import { DETECTION_FLAGS_ID, launchInstalledChrome, type InstalledChromeTestSeams } from './installedChrome.js'
 import type { BrowserIdentityChoice } from './browserIdentity.js'
 import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
 import type { FileStore } from '../fileStore.js'
@@ -185,6 +186,19 @@ function contextCookie(c: { name: string; value: string; domain: string; path: s
   return { name: c.name, value: c.value, domain: c.domain, path: c.path, expires: c.expires, httpOnly: c.httpOnly, secure: c.secure, sameSite: c.sameSite }
 }
 
+/**
+ * installed_chrome's User-Agent, read from the window Chrome opened on about:blank (no request goes out): a context of
+ * its own would open a second window on the person's screen (ADR 0005: at most 2), and Chrome's own window is the one
+ * the page is read in.
+ */
+async function openedWindowUserAgent(browser: Browser): Promise<string> {
+  const opened = browser.contexts()[0]?.pages()[0]
+  if (opened === undefined) throw new Error('the installed Chrome opened no window')
+  const ua = await opened.evaluate(() => navigator.userAgent)
+  if (typeof ua !== 'string' || ua.trim() === '') throw new Error('the browser reported no navigator.userAgent')
+  return ua
+}
+
 async function closeWithin(closing: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   const settled = closing.then(() => true, () => true)
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -292,9 +306,15 @@ export class BrowserLocalSubject implements SubjectAdapter {
     private readonly browserEngine: BrowserEngineName = 'playwright',
     /** Which identity the public browser rung sends (browserIdentity.ts): the mode's declared one, or the browser's own. */
     private readonly browserIdentity: BrowserIdentityChoice = 'declared',
+    /** installed_chrome's test seams (installedChrome.ts): a stand-in Chromium and headless where no display exists. */
+    private readonly installedChromeSeams: InstalledChromeTestSeams = {},
   ) {
     if (browserEngine !== 'playwright' && (access != null || managedProfileDir !== null)) {
       throw new Error('the enhanced browser runs only in the public browser lane, never with a saved login or a managed profile')
+    }
+    // ADR 0005 installed_chrome: the browser's own identity on the standard public lane, nothing of the hosted preview.
+    if (browserEngine === 'installed_chrome' && (mode !== 'standard' || browserIdentity !== 'actual' || publicPreferenceState !== null || previewProductToken || browserAllowedHosts !== undefined)) {
+      throw new Error('installed_chrome runs only as the standard public browser with its own identity, never on a hosted preview')
     }
     if (publicPreferenceState !== null && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
       throw new Error('anonymous public preference state is only available to the standard public browser')
@@ -402,9 +422,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
     /** The page's own CDP session, open for the page's lifetime: the user-agent metadata override and the custom-header gate live as long as it. */
     let session: CDPSession | undefined
     let headerGate: CustomHeaderGate | null = null
+    // installed_chrome's Chrome, launched for this fetch alone and closed with it (its profile goes with it).
+    let ownBrowser: Browser | null = null
+    let ownBrowserPending: Promise<Browser> | null = null
     const onAbort = () => {
       void page?.close().catch(() => {})
-      if (context !== this.managedContext) void context?.close().catch(() => {})
+      if (context !== this.managedContext && ownBrowser === null) void context?.close().catch(() => {})
+      void ownBrowser?.close().catch(() => {})
     }
     signal?.addEventListener('abort', onAbort, { once: true })
     // The robots.txt lookup of a fetch that relaxed certificate verification
@@ -424,9 +448,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
       const managedContext = this.managedProfileDir === null ? null : await raceWithSignal(this.getManagedContext(execution), signal)
-      const browser = managedContext?.browser() ?? await raceWithSignal(this.getBrowser(execution), signal)
-      // Only a run on another engine says so: a default run's trace is what it always was.
-      if (this.browserEngine !== 'playwright') trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_engine', detail: { engine: this.browserEngine, version: this.engineVersion } })
+      if (this.browserEngine === 'installed_chrome') {
+        ownBrowserPending = launchInstalledChrome({ timeout: 30_000, ...chromiumProxyLaunchOptions(this.envProxy) }, this.installedChromeSeams, signal)
+        void ownBrowserPending.then(launched => { if (signal?.aborted) void launched.close().catch(() => {}) }, () => {})
+        ownBrowser = await raceWithSignal(ownBrowserPending, signal)
+      }
+      const browser = ownBrowser ?? managedContext?.browser() ?? await raceWithSignal(this.getBrowser(execution), signal)
+      // Only a run on another engine says so: a default run's trace is what it always was. installed_chrome names the
+      // Chrome it ran and the detection flags it launched with (ADR 0005: the record says which Chrome was measured).
+      if (this.browserEngine === 'installed_chrome') trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_engine', detail: { engine: this.browserEngine, version: browser.version(), flags: DETECTION_FLAGS_ID } })
+      else if (this.browserEngine !== 'playwright') trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_engine', detail: { engine: this.browserEngine, version: this.engineVersion } })
       throwIfExecutionStopped(execution)
       // Real Chromium major, not the floor constant: declaring a Chrome
       // version we are not running is an inconsistency, not a feature.
@@ -444,7 +475,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // was sent. Only the standard and authed desktop identities on an unmanaged context without the preview's token.
       const actual = this.browserIdentity === 'actual' && (this.mode === 'standard' || this.mode === 'authed') && device === 'desktop' && !this.previewProductToken && managedContext === null
       const identity = actual
-        ? { ...declared, userAgent: await raceWithSignal(this.actualUserAgent(browser), signal), clientHints: {}, device: undefined }
+        ? { ...declared, userAgent: await raceWithSignal(ownBrowser !== null ? openedWindowUserAgent(ownBrowser) : this.actualUserAgent(browser), signal), clientHints: {}, device: undefined }
         : this.previewProductToken ? previewIdentity(declared) : declared
       assertIdentityBundle(
         identityForRoute(this.mode, this.accessConfig, Number.isFinite(major) ? major : CHROME_MAJOR_FLOOR, undefined, device),
@@ -585,7 +616,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
           detail: { requested: options.screenshot.viewport, viewport: window.viewport, declared: fingerprint.viewport, screen: fingerprint.screen, deviceScaleFactor: fingerprint.deviceScaleFactor, ...(window.issues.length === 0 ? {} : { refused: [...window.issues] }) },
         })
       }
-      const pendingContext = managedContext ? Promise.resolve(managedContext) : browser.newContext({
+      // installed_chrome reads in the window Chrome opened, as measured: its own User-Agent, window, locale and timezone,
+      // the egress given at launch. Its default context, which the fetch never closes: the Chrome goes with the fetch.
+      const ownContext = ownBrowser?.contexts()[0]
+      if (ownBrowser !== null && ownContext === undefined) throw new Error('the installed Chrome opened no browser context')
+      const pendingContext = managedContext ? Promise.resolve(managedContext) : ownContext !== undefined ? Promise.resolve(ownContext) : browser.newContext({
         // The actual identity sets none: the browser sends its own User-Agent, which the record declares.
         ...(actual ? {} : { userAgent: identity.userAgent }),
         locale: fingerprint.locale,
@@ -623,7 +658,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
             }
           : this.envProxy === null ? {} : { proxy: this.envProxy.proxy }),
       })
-      void pendingContext.then(created => { if (signal?.aborted && created !== this.managedContext) void created.close().catch(() => {}) }, () => {})
+      void pendingContext.then(created => { if (signal?.aborted && created !== this.managedContext && created !== ownContext) void created.close().catch(() => {}) }, () => {})
       context = await raceWithSignal(pendingContext, signal)
       let deniedResources = 0
       // Requests to ad-serving hosts aborted under blockAds (default true), and the distinct hosts (first 20) for the trace.
@@ -709,7 +744,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         taskCookies = { session: execution.cookieSession, startedWith }
       }
       throwIfExecutionStopped(execution)
-      const pendingPage = context.newPage()
+      const pendingPage = ownContext?.pages()[0] !== undefined ? Promise.resolve(ownContext.pages()[0]!) : context.newPage()
       void pendingPage.then(created => { if (signal?.aborted) void created.close().catch(() => {}) }, () => {})
       page = await raceWithSignal(pendingPage, signal)
       throwIfExecutionStopped(execution)
@@ -1364,7 +1399,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
       }
     } finally {
       signal?.removeEventListener('abort', onAbort)
-      if (page !== undefined) await closePage(page)
+      // installed_chrome's page is its Chrome's only window: closing it would quit Chrome on Linux and Windows before the
+      // cookies below are read. The Chrome is closed whole further down.
+      if (page !== undefined && ownBrowser === null) await closePage(page)
       // What the page left in the context goes back to the task's session, values unrecorded; a context that does not answer in time keeps them.
       if (taskCookies !== null && context !== undefined) {
         const held = await Promise.race([context.cookies().catch(() => null), new Promise<null>((done) => setTimeout(() => done(null), PAGE_CLOSE_MS))])
@@ -1378,7 +1415,10 @@ export class BrowserLocalSubject implements SubjectAdapter {
       if (context !== undefined && requestRoute !== null) await context.unroute(routeMatch, requestRoute).catch(() => {})
       if (context !== undefined && actionsRoute !== null) await context.unroute(routeMatch, actionsRoute).catch(() => {})
       if (context !== undefined && popupCloser !== null) context.off('page', popupCloser)
-      if (context !== this.managedContext && context !== undefined) await closeWithin(context.close(), PAGE_CLOSE_MS)
+      if (context !== this.managedContext && context !== undefined && ownBrowser === null) await closeWithin(context.close(), PAGE_CLOSE_MS)
+      // The Chrome of this fetch, its process and its profile; one still starting when the fetch gave up is closed when it starts.
+      if (ownBrowser !== null) await closeWithin(ownBrowser.close(), PAGE_CLOSE_MS)
+      else if (ownBrowserPending !== null) void ownBrowserPending.then(launched => launched.close(), () => {})
       await relaxedRoutes?.close()
     }
   }

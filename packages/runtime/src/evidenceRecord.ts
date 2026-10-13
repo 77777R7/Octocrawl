@@ -145,7 +145,7 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
   const externalCostUsd = hit === undefined ? result.usage.externalCostUsd ?? null : typeof stored === 'number' ? stored : null
   const read = READ_STATUSES.has(result.status)
   // W2L's own lanes record the proxy they leave through and the task session they read with; a vendor and the person's browser do not say.
-  const own = (r: EvidenceAccess['route']) => r === 'http' || r === 'http_compat' || r === 'browser' || r === 'enhanced_browser' || r === 'authed_browser'
+  const own = (r: EvidenceAccess['route']) => r === 'http' || r === 'http_compat' || r === 'browser' || r === 'enhanced_browser' || r === 'installed_chrome' || r === 'authed_browser'
   const laneEvent = (name: string) => [...result.trace].reverse().find((e) => e.event === name && sameLaneFamily(e.lane, result.lane))?.detail
   const egress = (r: EvidenceAccess['route']): EvidenceAccessEgress | null => {
     if (!own(r)) return null
@@ -184,6 +184,7 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
     case 'browser_proxy': {
       const engine = event('browser_engine')
       if (event('session_attached') !== undefined) return route('authed_browser', 'playwright', null, null, 'authorized_session')
+      if (engine !== undefined && engine.engine === 'installed_chrome') return route('installed_chrome', 'chrome', text(engine.version), text(engine.flags))
       return engine !== undefined && engine.engine === 'patchright' ? route('enhanced_browser', 'patchright', text(engine.version)) : route('browser', 'playwright')
     }
     case 'browser_local_authed': {

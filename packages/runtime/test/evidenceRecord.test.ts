@@ -81,6 +81,9 @@ describe('toEvidenceRecord', () => {
     expect(access({ ...zero, lane: 'browser_local' })).toEqual({ route: 'browser', executor: 'playwright', executorVersion: null, profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null }, session: null, paidCalls: null, grant: null })
     expect(access({ ...zero, lane: 'browser_local' }, [{ at: 0, lane: 'browser_local', event: 'browser_engine', detail: { engine: 'patchright', version: '1.63.0' } }]))
       .toEqual({ route: 'enhanced_browser', executor: 'patchright', executorVersion: '1.63.0', profile: null, externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null }, session: null, paidCalls: null, grant: null })
+    // installed_chrome (ADR 0005): the machine's Google Chrome, its version and the launch's detection flag set.
+    expect(access({ ...zero, lane: 'browser_local' }, [{ at: 0, lane: 'browser_local', event: 'browser_engine', detail: { engine: 'installed_chrome', version: '141.0.7390.66', flags: 'nodriver-0.50.6-no-allow-origins' } }]))
+      .toEqual({ route: 'installed_chrome', executor: 'chrome', executorVersion: '141.0.7390.66', profile: 'nodriver-0.50.6-no-allow-origins', externalCostUsd: 0, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null }, session: null, paidCalls: null, grant: null })
     expect(access({ ...zero, lane: 'browser_local_authed' })).toMatchObject({ route: 'authed_browser', executor: 'playwright', completion: 'authorized_session' })
     expect(access({ ...zero, lane: 'browser_local_authed' }, [{ at: 9, lane: 'browser_local_authed', event: 'user_browser_read', detail: { browser: 'Google Chrome' } }]))
       .toMatchObject({ route: 'user_browser', executor: 'Google Chrome', completion: 'handed_to_person' })
