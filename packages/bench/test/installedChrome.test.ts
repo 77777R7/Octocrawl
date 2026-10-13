@@ -52,6 +52,8 @@ describe('installed_chrome: the narrowed launch (ADR 0005, 2026-10-13 revision)'
     const direct = installedChromeArgs('/p', 1, { args: ['--proxy-server=direct://', '--disable-gpu'] })
     expect(direct).toContain('--proxy-server=direct://')
     expect(direct).not.toContain('--disable-gpu')
+    // Never the operating system's proxy: no egress given is a direct connection.
+    expect(installedChromeArgs('/p', 1, {})).toContain('--proxy-server=direct://')
   })
 
   it('refuses a proxy that needs a login, by name, rather than answering its challenge', () => {

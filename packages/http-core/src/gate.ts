@@ -194,6 +194,11 @@ const GATE_SHAPED_STATUS: readonly number[] = [403, 429, 503]
  * path (the challenge's own `/h/.../orchestrate`) is.
  */
 const CF_JSD_PATH = '/cdn-cgi/challenge-platform/scripts/jsd/'
+/**
+ * Cloudflare's precursor script, which it also serves on the page a visitor gets once through the challenge
+ * (ember-energy.org and stackoverflow.com in the installed Chrome, 2026-10-14): like jsd, no challenge of its own.
+ */
+const CF_PRECURSOR_PATH = '/cdn-cgi/challenge-platform/scripts/precursor/'
 
 /**
  * PerimeterX (HUMAN) answers a page it refuses with its press-and-hold
@@ -226,7 +231,7 @@ function perimeterXChallenge(head: string, lower: string): string[] | null {
 function challengePlatformBeyondJsd(lower: string): boolean {
   const marker = '/cdn-cgi/challenge-platform'
   for (let at = lower.indexOf(marker); at !== -1; at = lower.indexOf(marker, at + marker.length)) {
-    if (!lower.startsWith(CF_JSD_PATH, at)) return true
+    if (!lower.startsWith(CF_JSD_PATH, at) && !lower.startsWith(CF_PRECURSOR_PATH, at)) return true
   }
   return false
 }
@@ -288,6 +293,11 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
 
   // --- vendor headers: decisive, no body evidence needed ------------------
   for (const [name, reason, signal] of VENDOR_HEADERS) {
+    // DataDome sends `x-datadome: protected` on every page of a site it guards, the pages it lets through too (etsy.com
+    // and tripadvisor.com in the installed Chrome, 2026-10-14). Its block is a 403 with x-datadome-cid and x-dd-b, so the
+    // header alone names a block only on an answer that is not a success; a 2xx is judged by its body, which still names
+    // DataDome's interstitial or captcha (DATADOME_CHALLENGE). A 202 meets its own rule below.
+    if (name === 'x-datadome' && res.status >= 200 && res.status < 300) continue
     if (res.header(name) !== null) return { reason, signals: [signal] }
   }
 

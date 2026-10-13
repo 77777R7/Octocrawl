@@ -100,6 +100,8 @@ export function installedChromeArgs(profile: string, port: number, launch: Pick<
   const egress = launch.proxy !== undefined
     ? [`--proxy-server=${launch.proxy.server}`, ...(launch.proxy.bypass ? [`--proxy-bypass-list=${launch.proxy.bypass}`] : [])]
     : (launch.args ?? []).filter((arg) => arg.startsWith('--proxy-server=') || arg.startsWith('--proxy-bypass-list=') || arg.startsWith('--host-resolver-rules='))
+  // Never the operating system's proxy (a proxy app may have set one): with no egress given, Chrome connects directly.
+  if (!egress.some((arg) => arg.startsWith('--proxy-server='))) egress.unshift('--proxy-server=direct://')
   return [...DETECTION_FLAGS, `--user-data-dir=${profile}`, '--remote-debugging-host=127.0.0.1', `--remote-debugging-port=${port}`, ...egress, 'about:blank']
 }
 

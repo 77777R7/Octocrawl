@@ -81,6 +81,14 @@ describe('classifyGate — vendor headers are decisive', () => {
     expect(v?.signals).toContain('header_x_datadome')
   })
 
+  it('does not take x-datadome alone on a success for a block: DataDome sends it on the pages it lets through', () => {
+    expect(classifyGate(withHeaders({ 'x-datadome': 'protected' }, { status: 200, body: `<html><body><article>${ARTICLE}</article></body></html>` }))).toBeNull()
+    // Its block names itself: a 403, or its id header, or its challenge in the body.
+    expect(classifyGate(withHeaders({ 'x-datadome': 'protected', 'x-datadome-cid': 'AHrl' }, { status: 200 }))?.signals).toContain('header_x_datadome_cid')
+    expect(classifyGate(withHeaders({ 'x-datadome': 'protected' }, { status: 200, body: `<iframe src="https://geo.captcha-delivery.com/captcha/?initialCid=x"></iframe>` }))?.reason).toBe('captcha')
+    expect(classifyGate(withHeaders({ 'x-datadome': 'protected' }, { status: 202, body: '' }))?.reason).toBe('bot_detected_generic')
+  })
+
   it('matches vendor headers case-insensitively', () => {
     const v = classifyGate(withHeaders({ 'X-IInfo': '1-2-3' }, { status: 403 }))
     expect(v?.reason).toBe('bot_detected_generic')
@@ -102,6 +110,9 @@ describe('classifyGate — Cloudflare interstitial', () => {
       `<script>(function(){var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';window.__CF$cv$params={r:'8c',t:'MTcy'};document.head.appendChild(a)})();</script></body></html>`
     expect(classifyGate(res({ status: 200, body: page }))).toBeNull()
     expect(classifyGate(res({ status: 200, body: page, contentful: true }))).toBeNull()
+    // Its precursor script, also on the page past the challenge, is no challenge either.
+    const precursor = page.replace('/scripts/jsd/main.js', '/scripts/precursor/main.js')
+    expect(classifyGate(res({ status: 200, body: precursor }))).toBeNull()
     // The challenge's own plumbing beside it still names Cloudflare.
     expect(classifyGate(res({ status: 403, body: `<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>${page}` }))?.reason).toBe('cloudflare_challenge')
   })
