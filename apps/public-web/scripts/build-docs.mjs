@@ -10,8 +10,8 @@ import { BLOG_AUTHOR, BLOG_CATEGORIES, BLOG_UPDATED, blogPath, categoryPath, pos
 import { siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
 import { DASHBOARD_BODIES, dashboardPageHtml } from './dashboardPages.mjs'
 // The free tool pages, built by Vite (vite.config.ts) and listed in the sitemap here.
-const TOOL_PATH = '/tools/url-to-markdown/'
-const TOOL_UPDATED = '2026-10-13'
+// The free tools' pages (apps/public-web/src/tools/pages.ts), with the day each last changed.
+const TOOL_LOCATIONS = [['/tools/url-to-markdown/', '2026-10-13'], ['/tools/website-to-text/', '2026-10-13']]
 const TOOLS_HUB_PATH = '/tools/'
 const TOOLS_HUB_UPDATED = '2026-10-13'
 // The product pages (src/product/), with the day each last changed.
@@ -452,6 +452,6 @@ for (const [path, title, lead, body] of DASHBOARD_BODIES) {
 // its articles, and the changelog.
 await writeFile(join(root, 'dist', 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${ORIGIN}/sitemap.xml\n`)
 // The changelog changes with almost every merge, so it carries no lastmod rather than a day that is soon wrong.
-const locations = [['/', HOME_UPDATED], [TOOLS_HUB_PATH, TOOLS_HUB_UPDATED], [TOOL_PATH, TOOL_UPDATED], [SCRAPE_PATH, SCRAPE_UPDATED], ...pages.map(page => [pathFor(page), page.updated]), [BLOG_PATH, BLOG_UPDATED], ...posts.map(post => [blogPath(post), post.updatedDate ?? post.pubDate]), [CHANGELOG_PATH, null]]
+const locations = [['/', HOME_UPDATED], [TOOLS_HUB_PATH, TOOLS_HUB_UPDATED], ...TOOL_LOCATIONS, [SCRAPE_PATH, SCRAPE_UPDATED], ...pages.map(page => [pathFor(page), page.updated]), [BLOG_PATH, BLOG_UPDATED], ...posts.map(post => [blogPath(post), post.updatedDate ?? post.pubDate]), [CHANGELOG_PATH, null]]
 await writeFile(join(root, 'dist', 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locations.map(([path, updated]) => `  <url><loc>${ORIGIN}${path}</loc>${updated ? `<lastmod>${updated}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>\n`)
 console.log(`Built ${pages.length} Octocrawl documentation pages in ${output} and ${posts.length} blog articles, with Markdown copies, the changelog, llms.txt, 404.html, robots.txt, sitemap.xml and redirects.json`)
