@@ -15,9 +15,26 @@ Version 2, updated 2026-09-29, is in git history. What it said below stands unle
 - **Next (from 2026-10-11).** Items 10 and 11 were accepted on 2026-10-11. So new paid configurations and item 6 no longer wait: under the 2026-10-10 decision they waited only for those two. They go on in PA's order, and what they add is measured as tasks verified, not pages returned. 0.4.0 and 0.4.1 were published on 2026-10-10.
 - **The bar.** On item 1's frozen task set, reach at least the best competitor's verified completion, with no more false successes.
 - **Success at week 16 (2027-01-17).** Three paying users or ten weekly active users.
+- **Outside trial gate (decided 2026-10-13).** A person other than the author uses Octocrawl on a task of their own by **2026-10-17**. See [the gate](#outside-trial-gate).
 - **Paused.** An own browser engine or residential IP network, an in-house CAPTCHA model, a second stealth engine, a hosted browser cluster, more Amazon.sg work and Firecrawl features outside the core. See [Paused](#paused).
 
 ## Current phase: PA enhanced access, the first priority, with P2's remaining items
+
+### Outside trial gate
+
+**Decided 2026-10-13.** By **2026-10-17**, the end of week 3, a person other than the author uses Octocrawl on a task of their own. Hosted (`https://mcp.octocrawl.dev/mcp`, or an account's key) or local (`npx octocrawl`) both count.
+
+- **What the gate takes precedence over:** PA, PH or the site does not delay it. PA's open challenge-page gap (12 frozen tasks behind Cloudflare and DataDome) is not a reason to wait.
+- **After the trial starts:** each problem the person meets is recorded in `research/trials/` with the date and what they ran. Fixing what they hit comes before new features.
+- **If the date passes without a trial:** the work stops and the reason is written here. Nothing else counts as progress until the trial starts. A trial the person installs unaided also counts toward P2's exit.
+- **Ready on 2026-10-13:** every path a new user takes was run that day on the published 0.4.2 and the live services.
+  - The site, sign-in through GitHub and Google, and the dashboard.
+  - The keyless hosted MCP from Claude Code, Cursor, OpenCode and Codex.
+  - The hosted REST API, keyless and with a key (browser lane, credits, revocation, one browser scrape at a time).
+  - `@octocrawl/sdk`, `@octocrawl/ai-sdk` and the Python client against the hosted API. `batch` is refused there by design, with a clear message.
+  - `npx octocrawl serve` with the Python client's `batch` and the local MCP's 38 tools.
+  - The one-line install on clean macOS, Windows and Ubuntu, a page that needs the browser included.
+  - Not run that day: the hosted MCP with a key inside a client, which is the gate the REST check passed through.
 
 **From 2026-10-09: enhanced access is the first priority.** Decided by Howard: without reaching the pages that block a plain request, Octocrawl has nothing that sets it apart from the products it competes with. When [PA](#pa--enhanced-access) and other work (PH, P2's remaining items, the public site) compete for time, PA goes first. The way there is the roadmap's own:
 
