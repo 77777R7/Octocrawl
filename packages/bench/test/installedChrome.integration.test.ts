@@ -8,7 +8,8 @@ import { DETECTION_FLAGS_ID, INSTALLED_CHROME_WINDOWS, installedChromeLaunchOf, 
 
 // Playwright's own Chromium stands in for the installed Google Chrome, headless because CI has no display: the test
 // proves the launch, the closed DevTools port, the profile's removal and the lane's wiring, not Chrome's detection.
-const seams = { executable: chromium.executablePath(), headless: true }
+// A CI runner on Linux forbids Chromium's sandbox, so the stand-in runs without it there, as Playwright's own launch does.
+const seams = { executable: chromium.executablePath(), headless: true, ...(process.platform === 'linux' ? { extraArgs: ['--no-sandbox'] } : {}) }
 
 let server: FixtureServer
 /** A page of another origin that tries to open the browser's DevTools WebSocket, as a hostile page would. */

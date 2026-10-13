@@ -141,8 +141,12 @@ export interface InstalledChromeLaunch { executable: string; port: number; profi
 const LAUNCHES = new WeakMap<Browser, InstalledChromeLaunch>()
 export function installedChromeLaunchOf(browser: Browser): InstalledChromeLaunch | undefined { return LAUNCHES.get(browser) }
 
-/** Test seams: another executable (a stand-in Chromium) and headless where no display exists. Never set by the product. */
-export interface InstalledChromeTestSeams { executable?: string; headless?: boolean }
+/**
+ * Test seams: another executable (a stand-in Chromium), headless where no display exists, and flags a CI runner needs
+ * (`--no-sandbox` where the runner forbids Chromium's sandbox, as Playwright's own launch adds on Linux). Never set by
+ * the product.
+ */
+export interface InstalledChromeTestSeams { executable?: string; headless?: boolean; extraArgs?: readonly string[] }
 
 /**
  * The Chromes and profiles still open, ended and deleted if the process exits first (Ctrl-C, process.exit): Playwright's
@@ -159,13 +163,14 @@ function onExitCleanUp(): void {
 
 const aborted = () => new DOMException('installed_chrome launch abandoned', 'AbortError')
 
-async function waitForDebugging(port: number, child: ChildProcess, timeoutMs: number, signal?: AbortSignal): Promise<void> {
+async function waitForDebugging(port: number, child: ChildProcess, timeoutMs: number, signal?: AbortSignal, said: () => string = () => ''): Promise<void> {
   const until = Date.now() + timeoutMs
+  const tail = () => { const text = said().trim(); return text === '' ? '' : `; Chrome said: ${text.slice(-400)}` }
   for (;;) {
     if (signal?.aborted) throw aborted()
-    if (child.exitCode !== null) throw new Error(`Chrome exited before it opened its debugging port (exit ${child.exitCode})`)
+    if (child.exitCode !== null) throw new Error(`Chrome exited before it opened its debugging port (exit ${child.exitCode})${tail()}`)
     try { const response = await fetch(`http://127.0.0.1:${port}/json/version`); if (response.ok) return } catch {}
-    if (Date.now() > until) throw new Error(`Chrome did not open its debugging port within ${timeoutMs} ms`)
+    if (Date.now() > until) throw new Error(`Chrome did not open its debugging port within ${timeoutMs} ms${tail()}`)
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
 }
@@ -200,14 +205,19 @@ export async function launchInstalledChrome(options: LaunchOptions, seams: Insta
     if (signal?.aborted) throw aborted()
     const port = await freeDebuggingPort()
     const args = installedChromeArgs(profile, port, options)
-    child = spawn(executable, seams.headless === true ? [...args.slice(0, -1), '--headless=new', 'about:blank'] : args, { stdio: 'ignore' })
+    const seamArgs = [...(seams.headless === true ? ['--headless=new'] : []), ...(seams.extraArgs ?? [])]
+    child = spawn(executable, seamArgs.length === 0 ? args : [...args.slice(0, -1), ...seamArgs, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] })
     live.child = child
     const launched = child
+    // The last of what Chrome writes to stderr, for a launch that fails; read throughout so the pipe never fills.
+    let stderr = ''
+    launched.stderr?.setEncoding('utf8')
+    launched.stderr?.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-2_000) })
     await new Promise<void>((resolve, reject) => {
       launched.once('error', (error: NodeJS.ErrnoException) => reject(error.code === 'ENOENT' ? new InstalledChromeMissingError(`${executable} could not be run`) : error))
       launched.once('spawn', () => resolve())
     })
-    await waitForDebugging(port, launched, options.timeout ?? 30_000, signal)
+    await waitForDebugging(port, launched, options.timeout ?? 30_000, signal, () => stderr)
     // An abort during the connect kills Chrome, which ends the connect at once.
     const stopConnect = () => { if (launched.exitCode === null) launched.kill('SIGKILL') }
     signal?.addEventListener('abort', stopConnect, { once: true })
