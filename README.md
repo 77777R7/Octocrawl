@@ -62,7 +62,7 @@ Or run it on your own computer. You need Node.js 22.13+ or 24+:
 
 ```bash
 npx octocrawl scrape https://example.com --markdown
-pip install octocrawl-client      # the Python client of a running API (npx octocrawl serve)
+pip install 'octocrawl-client[pandas]'   # the Python client of a running API (npx octocrawl serve); [pandas] for to_pandas()
 npm install @octocrawl/sdk        # the TypeScript client; @octocrawl/mcp is the MCP server
 npm install @octocrawl/ai-sdk     # scrape and map as Vercel AI SDK tools, on hosted Octocrawl by default
 ```
