@@ -30,7 +30,7 @@
 
 ---
 
-Try it without installing anything at [octocrawl.dev](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=top). The web preview reads one page at a time, five a day. Besides Markdown it returns the page's links and metadata, and up to 20 fields read without a model ([how it is deployed](docs/public-preview.md)).
+Connect your agent without installing anything: hosted Octocrawl is one MCP URL, `https://mcp.octocrawl.dev/mcp`, and one REST API, `https://api.octocrawl.dev`, with no key needed to start ([Quick start](#quick-start)). Or try one page in the browser at [octocrawl.dev](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=top): the web preview reads one page at a time, five a day, and besides Markdown returns the page's links and metadata, and up to 20 fields read without a model ([how it is deployed](docs/public-preview.md)).
 
 If Octocrawl is useful to you, [star the repository](https://github.com/77777R7/Octocrawl); it helps other people find it.
 
@@ -52,6 +52,12 @@ Connect your agent to hosted Octocrawl. No key is needed to start ([steps for Cl
 claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp
 ```
 
+Without a key it reads 20 pages a day over HTTP. For more, [sign in](https://octocrawl.dev/signin/?utm_source=github&utm_medium=readme&utm_campaign=key) and make a key: an account gets 1,000 credits a month and the browser lane. The key goes in a header, never in the URL:
+
+```bash
+claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp --header "Authorization: Bearer oc_…"
+```
+
 Or run it on your own computer. You need Node.js 22.13+ or 24+:
 
 ```bash
@@ -68,7 +74,7 @@ npx octocrawl serve                                  # keep it running: the API 
 claude mcp add octocrawl -- npx -y @octocrawl/mcp    # the published stdio server, a client of that API
 ```
 
-The hosted service offers scrape and map. The local server adds crawl, batch, the Amazon.sg product tool and the Monitor tools. [Running Octocrawl](docs/local-setup.md) covers both, plus hosting a server for others; [Docker Compose](docs/self-host-docker.md) runs one on your own server. An agent installing Octocrawl for you (Cline, for one) can follow [llms-install.md](llms-install.md).
+The hosted service offers scrape and map. The local server adds crawl, batch, the Amazon.sg product tool and the Monitor tools. To serve other machines yourself, `npx octocrawl serve --hosted --token <token>` refuses private addresses, robots overrides and saved logins as the hosted service does. [Running Octocrawl](docs/local-setup.md) covers all three; [Docker Compose](docs/self-host-docker.md) runs one on your own server. An agent installing Octocrawl for you (Cline, for one) can follow [llms-install.md](llms-install.md).
 
 ## What a failure looks like
 
