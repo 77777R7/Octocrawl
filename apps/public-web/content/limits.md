@@ -12,6 +12,7 @@ Hosted Octocrawl (`https://api.octocrawl.dev`, `https://mcp.octocrawl.dev/mcp`) 
 | Allowance | 20 pages a day per address | The account's credits: 1,000 a month | The key's pages a day |
 | Lane | HTTP only: no screenshot, no `scrape_product` | HTTP, then the browser | HTTP, then the browser when the key allows it |
 | Starts a minute | 10 | 60 | 60 |
+| Browser-lane scrapes at once | none | 1 per key | 1 per key |
 
 [Sign in](/signin/) to make keys for your account. An account's call costs what it returned:
 

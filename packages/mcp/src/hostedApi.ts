@@ -42,8 +42,39 @@ export interface HostedKeyRecord {
 }
 
 export interface HostedKeys {
-  /** The record under the key's HMAC, or null for a key no one issued. */
-  lookup(keyHash: string): Promise<HostedKeyRecord | null>
+  /**
+   * The record under the key's HMAC, or null for a key no one issued. `fresh` reads the store past any cache: every start
+   * asks for it, so a key revoked by the script stops at its next start (ROADMAP PH item 2).
+   */
+  lookup(keyHash: string, options?: { fresh?: boolean }): Promise<HostedKeyRecord | null>
+}
+
+/**
+ * One browser-lane scrape at a time per key (ROADMAP PH item 1): a lease named for the key, held for the call and
+ * released after it, with an expiry so a lease an instance never released (a crash) frees itself.
+ */
+export interface HostedLeases {
+  /** Takes the lease `id` for at most `ttlMs`, or says in how many seconds to try again. */
+  acquire(id: string, ttlMs: number, now?: Date): Promise<{ ok: true; release: () => Promise<void> } | { ok: false; retryAfterSeconds: number }>
+}
+
+/** Seconds a refused browser-lane start is told to wait at most: the running call usually ends sooner than its lease. */
+export const BROWSER_BUSY_RETRY_MAX_S = 10
+
+function busyFor(until: number, now: number): number {
+  return Math.max(1, Math.min(BROWSER_BUSY_RETRY_MAX_S, Math.ceil((until - now) / 1000)))
+}
+
+/** Leases in this process: a local run, and the tests. */
+export class MemoryHostedLeases implements HostedLeases {
+  readonly held = new Map<string, number>()
+  async acquire(id: string, ttlMs: number, now = new Date()): Promise<{ ok: true; release: () => Promise<void> } | { ok: false; retryAfterSeconds: number }> {
+    const until = this.held.get(id)
+    if (until !== undefined && until > now.getTime()) return { ok: false, retryAfterSeconds: busyFor(until, now.getTime()) }
+    const mine = now.getTime() + ttlMs
+    this.held.set(id, mine)
+    return { ok: true, release: async () => { if (this.held.get(id) === mine) this.held.delete(id) } }
+  }
 }
 
 export interface QuotaEntry { id: string; limit: number }
@@ -56,7 +87,7 @@ export interface HostedQuota {
 
 export class MemoryHostedKeys implements HostedKeys {
   constructor(private readonly records: ReadonlyMap<string, HostedKeyRecord>) {}
-  async lookup(keyHash: string): Promise<HostedKeyRecord | null> { return this.records.get(keyHash) ?? null }
+  async lookup(keyHash: string, _options?: { fresh?: boolean }): Promise<HostedKeyRecord | null> { return this.records.get(keyHash) ?? null }
 }
 
 export class MemoryHostedQuota implements HostedQuota {
@@ -89,6 +120,8 @@ export const DEFAULT_SITE_DAILY = 1_500
 /** Requests per minute a caller may start, so a loop cannot spend a day's allowance in a second. */
 export const KEYLESS_PER_MINUTE = 10
 export const KEY_PER_MINUTE = 60
+/** How long a browser-lane lease is held at most: the request timeout (120 s) and a margin, so a lease left by a crash frees itself. */
+export const BROWSER_LEASE_MS = 130_000
 /** Requests of any kind per minute from one address, counted before the key lookup, so unknown keys cannot drive the key store. */
 export const ADDRESS_PER_MINUTE = 120
 /** A file (PDF, CSV, ...) a hosted call may read: the preview's cap. Files land under the task root, which Cloud Run keeps in memory. */
@@ -164,6 +197,8 @@ export interface HostedApiConfig {
   hashKey: string
   keys: HostedKeys
   quota: HostedQuota
+  /** One browser-lane scrape at a time per key; in this process when absent (a local run). */
+  leases?: HostedLeases
   /** Accounts' credit balances; a key that names an account is refused while this is absent. */
   credits?: CreditsStore
   /** Shared with the Cloudflare Worker; proves CF-Connecting-IP. Absent: the socket address is the keyless identity. */
@@ -313,6 +348,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const inner = createApp(engine, { exposeInternalErrors: false, jobStreams: false })
   // A process-local secret lets the MCP handler hand the gate a keyless caller's identity; no outside request can present it.
   const internalSecret = randomBytes(32).toString('hex')
+  const leases = config.leases ?? new MemoryHostedLeases()
   const keylessLimiter = new SlidingWindowLimiter(KEYLESS_PER_MINUTE)
   const keyLimiter = new SlidingWindowLimiter(KEY_PER_MINUTE)
   const claudeLimiter = new SlidingWindowLimiter(CLAUDE_PER_MINUTE)
@@ -325,14 +361,14 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     return c.json({ error: message, code, agentHints: hints }, status)
   }
 
-  /** Who is calling: a key holder, a keyless caller, or neither (an unknown key). */
-  const identify = async (headers: Headers, socketAddress: string): Promise<HostedCaller | 'unknown_key'> => {
+  /** Who is calling: a key holder, a keyless caller, or neither (an unknown key). A start reads the key fresh. */
+  const identify = async (headers: Headers, socketAddress: string, fresh = false): Promise<HostedCaller | 'unknown_key'> => {
     const authorization = headers.get('authorization') ?? ''
     if (authorization.toLowerCase().startsWith('bearer ')) {
       const presented = authorization.slice(7).trim()
       if (presented.length === 0 || presented.length > 256) return 'unknown_key'
       const id = digest(config.hashKey, 'key', presented)
-      const record = await config.keys.lookup(id)
+      const record = await config.keys.lookup(id, { fresh })
       if (record === null || !record.enabled) return 'unknown_key'
       if (record.uid !== undefined) return { kind: 'key', id, uid: record.uid, dailyLimit: 0, browser: record.browser, plan: 'account' }
       return { kind: 'key', id, dailyLimit: record.dailyLimit, browser: record.browser, plan: record.plan }
@@ -372,7 +408,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       // Every request counts against its address first, before any lookup, so a flood of made-up keys reaches no store.
       const addressWait = addressLimiter.retryAfterSeconds(digest(config.hashKey, 'ip', c.env.socketAddress))
       if (addressWait !== null) return refuse(c, 429, 'rate_limited', `too many requests from this address: at most ${ADDRESS_PER_MINUTE} a minute`, [`retry after ${addressWait} s`], { 'Retry-After': String(addressWait) })
-      caller = await identify(c.req.raw.headers, c.env.socketAddress)
+      caller = await identify(c.req.raw.headers, c.env.socketAddress, starts)
     }
     if (caller === 'unknown_key') return refuse(c, 401, 'unauthorized', 'this key is not one Octocrawl issued, or it was revoked', ['send no Authorization header to use the keyless allowance, or ask for a key at https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint'])
     c.set('caller', caller)
@@ -382,6 +418,37 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (retryAfter !== null) return refuse(c, 429, 'rate_limited', `too many requests: at most ${caller.kind === 'key' ? KEY_PER_MINUTE : caller.pool === 'claude' ? CLAUDE_PER_MINUTE : KEYLESS_PER_MINUTE} starts a minute`, [`retry after ${retryAfter} s`], { 'Retry-After': String(retryAfter) })
     const now = new Date()
     const day = utcDay(now)
+    // A key's scrape that may use the browser lane holds the key's lease for its run: a second one waits (ROADMAP PH item 1).
+    // A request that asks for the HTTP lane alone (fastMode) needs none.
+    let lease: { release: () => Promise<void> } | null = null
+    if (path === '/v1/scrape' && caller.kind === 'key' && caller.browser && !(await asksHttpOnly(c))) {
+      const taken = await leases.acquire(`browser-${caller.id}`, BROWSER_LEASE_MS, now)
+      if (!taken.ok) {
+        return refuse(c, 429, 'browser_busy', 'this key already has a scrape running on the browser lane: one at a time per key', [`retry after ${taken.retryAfterSeconds} s, when the running call ends`, 'or send fastMode: true to read this page over HTTP alone'], { 'Retry-After': String(taken.retryAfterSeconds) })
+      }
+      lease = taken
+    }
+    try {
+      return await keyedStart(c, caller, path, day, now, next)
+    } finally {
+      await lease?.release().catch((error: unknown) => log(JSON.stringify({ severity: 'WARNING', event: 'hosted_lease_release_failed', message: error instanceof Error ? error.message : String(error) })))
+    }
+  })
+
+  /** Whether a scrape body asks for the HTTP lane alone; a body that is not JSON does not (it is refused later). */
+  async function asksHttpOnly(c: Context<GateEnv>): Promise<boolean> {
+    const body = await c.req.json().catch(() => null) as { fastMode?: unknown } | null
+    return body !== null && typeof body === 'object' && body.fastMode === true
+  }
+
+  /** The day's usage line for a key's start, counted per key (its digest's first 16 characters, never the key) and per UTC day. */
+  function logUsage(caller: HostedCaller, path: string, day: string): void {
+    if (caller.kind !== 'key') return
+    log(JSON.stringify({ severity: 'INFO', event: 'hosted_usage', key: caller.id.slice(0, 16), plan: caller.plan, ...(caller.uid === undefined ? {} : { uid: caller.uid }), endpoint: path === '/v1/scrape' ? 'scrape' : 'map', day }))
+  }
+
+  /** A start that passed the rate limits: an account's key spends credits, any other caller its daily allowance. */
+  async function keyedStart(c: Context<GateEnv>, caller: HostedCaller, path: string, day: string, now: Date, next: () => Promise<void>) {
     if (caller.uid !== undefined) return accountStart(c, caller, caller.uid, path, `${day}-site`, now, next)
     const quota = await config.quota.consume([{ id: `${day}-site`, limit: siteDaily }, { id: `${day}-${caller.kind}-${caller.id}`, limit: caller.dailyLimit }], now)
     if (!quota.ok) {
@@ -390,6 +457,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served its ${quota.limit} pages for today` : caller.pool === 'claude' ? `the ${quota.limit} pages a day that every Claude connector without a key shares are used up` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
         [caller.kind === 'keyless' && caller.pool !== 'claude' && !site ? 'a key raises the allowance: https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint' : LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
     }
+    logUsage(caller, path, day)
     if (path === '/v1/scrape') {
       // The scrape route runs here with the request pinned: nothing is stored for reuse (the page cache would grow with every
       // caller's pages), and a caller without the browser lane reads over HTTP alone (`fastMode`). The inner app serves map and the reads.
@@ -401,8 +469,9 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const req = parseScrapeRequest(pinned)
       return c.json(await engine.scrape(req, { signal: c.req.raw.signal }), 200)
     }
-    return next()
-  })
+    await next()
+    return c.res
+  }
   /**
    * A start by an account's key: reserves what the call could cost (five credits where the browser lane may answer, one
    * for an HTTP page or a map), runs it, then settles at what its result cost and says so in `X-Credits-Used` and
@@ -435,6 +504,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       return refuse(c, 429, 'quota_exhausted', `this account's credits are used up (${reserved.remaining} left)`,
         [`the monthly credits come back on the 1st at 00:00 UTC, in ${seconds} s`, LOCAL_HINT], { 'Retry-After': String(seconds), 'X-Credits-Remaining': String(reserved.remaining) })
     }
+    logUsage(caller, path, siteId.slice(0, 10))
     const reservation: Reservation = reserved.reservation
     let charge: ReturnType<typeof scrapeCharge> = { credits: 0, kind: 'unread' }
     // The call's line for the dashboard's Activity page: what was asked for, then what came back.
@@ -615,14 +685,17 @@ function firestoreBase(projectId: string): { resource: string; endpoint: string 
   return { resource, endpoint: `https://firestore.googleapis.com/v1/${resource}` }
 }
 
-/** Key records under `hostedApiKeys/{hmac}`: enabled, plan, dailyLimit, browser, label. A lookup is cached for a minute. */
+/**
+ * Key records under `hostedApiKeys/{hmac}`: enabled, plan, dailyLimit, browser, label. A lookup is cached for a minute for
+ * what starts no work (the MCP tool list, reading a result); a start reads the record fresh, so a revoked key stops there.
+ */
 export class FirestoreHostedKeys implements HostedKeys {
   private readonly base: { resource: string; endpoint: string }
   private readonly cache = new BoundedMap<string, { at: number; record: HostedKeyRecord | null }>(REMEMBERED_CALLERS)
   constructor(projectId: string, private readonly fetcher: typeof fetch = fetch, private readonly cacheMs = 60_000) { this.base = firestoreBase(projectId) }
-  async lookup(keyHash: string): Promise<HostedKeyRecord | null> {
+  async lookup(keyHash: string, options: { fresh?: boolean } = {}): Promise<HostedKeyRecord | null> {
     const cached = this.cache.get(keyHash)
-    if (cached && Date.now() - cached.at < this.cacheMs) return cached.record
+    if (options.fresh !== true && cached && Date.now() - cached.at < this.cacheMs) return cached.record
     const token = await metadataAccessToken(this.fetcher, AbortSignal.timeout(3_000))
     const response = await this.fetcher(`${this.base.endpoint}/hostedApiKeys/${keyHash}`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5_000) })
     let record: HostedKeyRecord | null = null
@@ -642,6 +715,63 @@ export class FirestoreHostedKeys implements HostedKeys {
     }
     this.cache.set(keyHash, { at: Date.now(), record })
     return record
+  }
+}
+
+/**
+ * Browser-lane leases under `hostedLeases/{id}`: `expireAt` and the holder's token, taken in a commit with an update-time
+ * precondition (one instance wins a race), deleted on release only while the holder's own write stands. A lease whose
+ * `expireAt` has passed is taken over; `expireAt` also suits a Firestore TTL policy.
+ */
+export class FirestoreHostedLeases implements HostedLeases {
+  private readonly base: { resource: string; endpoint: string }
+  constructor(projectId: string, private readonly fetcher: typeof fetch = fetch) { this.base = firestoreBase(projectId) }
+  async acquire(id: string, ttlMs: number, now = new Date()): Promise<{ ok: true; release: () => Promise<void> } | { ok: false; retryAfterSeconds: number }> {
+    const name = `${this.base.resource}/hostedLeases/${id}`
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const token = await metadataAccessToken(this.fetcher, AbortSignal.timeout(3_000))
+      const read = await this.fetcher(`https://firestore.googleapis.com/v1/${name}`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5_000) })
+      let updateTime: string | null = null
+      if (read.status !== 404) {
+        if (!read.ok) throw new Error(`lease read failed (${read.status})`)
+        const doc = await read.json() as { updateTime?: string; fields?: { expireAt?: { timestampValue?: string } } }
+        const until = Date.parse(doc.fields?.expireAt?.timestampValue ?? '')
+        if (Number.isFinite(until) && until > now.getTime()) return { ok: false, retryAfterSeconds: busyFor(until, now.getTime()) }
+        updateTime = doc.updateTime ?? null
+        if (updateTime === null) throw new Error('lease document is malformed')
+      }
+      const holder = randomBytes(12).toString('hex')
+      const commit = await this.fetcher(`${this.base.endpoint}:commit`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
+        body: JSON.stringify({ writes: [{
+          update: { name, fields: { holder: { stringValue: holder }, expireAt: { timestampValue: new Date(now.getTime() + ttlMs).toISOString() } } },
+          currentDocument: updateTime === null ? { exists: false } : { updateTime },
+        }] }),
+      })
+      if (commit.status === 409 || commit.status === 412) continue
+      if (commit.status === 400) {
+        const error = await commit.json().catch(() => null) as { error?: { status?: string } } | null
+        if (error?.error?.status === 'FAILED_PRECONDITION' || error?.error?.status === 'ABORTED') continue
+        throw new Error('lease commit failed (400)')
+      }
+      if (!commit.ok) throw new Error(`lease commit failed (${commit.status})`)
+      const written = (await commit.json() as { writeResults?: { updateTime?: string }[] }).writeResults?.[0]?.updateTime
+      return {
+        ok: true,
+        release: async () => {
+          if (written === undefined) return
+          const releaseToken = await metadataAccessToken(this.fetcher, AbortSignal.timeout(3_000))
+          // Deleted only while our write stands: a lease that expired and was taken over is the new holder's.
+          const response = await this.fetcher(`${this.base.endpoint}:commit`, {
+            method: 'POST', headers: { authorization: `Bearer ${releaseToken}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
+            body: JSON.stringify({ writes: [{ delete: name, currentDocument: { updateTime: written } }] }),
+          })
+          if (!response.ok && response.status !== 400 && response.status !== 409 && response.status !== 412) throw new Error(`lease release failed (${response.status})`)
+        },
+      }
+    }
+    // Lost every race for the lease: someone else holds it now.
+    return { ok: false, retryAfterSeconds: 1 }
   }
 }
 
