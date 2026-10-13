@@ -138,6 +138,7 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
   - 两次都不同的只有 T048，验收时再看。
 - **不做的事。** 不设 User-Agent、语言、时区、窗口大小，也不注入客户端提示。记录声明的是 Chrome 自己报的 User-Agent（`identity: actual`）。
 - **不接的请求。** 带 actions、截图、`mobile`、自定义请求头或 `skipTlsVerification` 的请求，这个 rung 不接，因为它们都要在测量之外驱动或改动窗口。
+- **等挑战页自己放行（2026-10-14 补）。** 测量时探针遇到挑战页会每秒重读一次，最多等 20 秒；产品 rung 起初没有这一步，看到 Cloudflare 挑战页就立刻返回 blocked（T002 冒烟测试）。现在 rung 遇到 `cloudflare_challenge`、`bot_detected_generic` 或 `captcha` 时，也每秒重读一次页面，最多 20 秒，且不占用截止时间前的抓取余量。只读不动：不点击、不输入、不解题。页面换成不是挑战的文档就照常读取；到时仍是挑战就照常报 blocked。trace 里记 `challenge_wait`，写明结果和等了多久。
 - **每次抓取的生命周期。** 每次抓取启动一个 Chrome，抓完关掉，同时删除临时 profile。整个进程最多同时开 2 个窗口。
 - **代理。** 需要登录的代理会被拒绝，并说明原因：Chrome 的命令行不能带代理凭据，而代答代理认证的质询要拦截请求。
 - **找不到 Chrome 时。** 结果带 `browser_not_installed` 警告，提示安装 Google Chrome 或设置 `W2L_CHROME_PATH`。

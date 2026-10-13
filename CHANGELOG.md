@@ -21,6 +21,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- The `installed_chrome` rung waits for a check that clears itself, as the route was measured. A Cloudflare challenge or bot check is re-read once a second for up to 20 s, never clicked, and the page it gives way to is read. Before this, the rung answered `blocked` as soon as it saw the challenge, which the probe it was built from never did. The trace event `challenge_wait` records the outcome.
+
 - The `installed_chrome` access route (ADR 0005, enhanced). A grant that names `installed_chrome` adds a rung after the browser lane for requests with `access: "enhanced"`.
   - **The launch.** The rung launches the Google Chrome installed on the machine the way it was measured to get through checks the bundled Chromium did not: headed, a fresh temporary profile per page, and the DevTools port on `127.0.0.1`, closed to pages.
   - **How it reads.** Playwright drives that Chrome over CDP and reads in Chrome's own window with Chrome's own identity.
