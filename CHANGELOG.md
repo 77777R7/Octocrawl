@@ -8,7 +8,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 | Version | Date | What changed |
 | --- | --- | --- |
-| Unreleased | | Task verification apart from the fetch status (`verify`); a provider's residential proxy and solving under a tariff that bounds them; React-streamed pages put together over HTTP; paid provider calls charged by measured time; lighter images on octocrawl.dev for phones; docs titles worded for search |
+| Unreleased | | |
+| 0.4.2 | 2026-10-13 | Task verification apart from the fetch status (`verify`) and region readiness; a missing browser named, with the command to install it; a page of zero-width characters is not content; carousels and footers are not a page's listing |
 | 0.4.1 | 2026-10-10 | Fix: a request on a kept-alive connection was reset; two main-content fixes |
 | 0.4.0 | 2026-10-10 | Better block and listing detection; a Blog and new guides on octocrawl.dev |
 | 0.3.2 | 2026-10-09 | The `my-browser` lane; lists continued in your Chrome; paid provider calls on a spend ledger |
@@ -19,6 +20,10 @@ Releases are listed newest first, by date. Each release opens with what matters 
 | 0.1.0 | 2026-09-18 | First cut of the identity ladder |
 
 ## Unreleased
+
+## 0.4.2 — 2026-10-13
+
+The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `@octocrawl/ai-sdk`, `octocrawl-client`) at 0.4.2. It holds everything below since 0.4.1 on 2026-10-10. Entries about the hosted service (api. and mcp.octocrawl.dev) and octocrawl.dev describe what is already live there; the packages' own changes are the extraction, verification, readiness and browser-lane ones.
 
 - A browser lane that cannot start because no browser is installed now says so (ROADMAP P1, one-line install). On a clean machine without `npx playwright install chromium`, a page that fills its data with JavaScript came back from `npx octocrawl@0.4.1 scrape` as `failed`/`empty_unverified` with hints that "the browser lane was tried" and to retry "with the browser lane available", and no word of the missing browser. Playwright's "Executable doesn't exist" now adds `browser_unavailable` to the browser rung's trace, the answer carries a `browser_not_installed` warning, and its first hint is to run `npx playwright install chromium` once (`npx patchright install chromium` under `W2L_BROWSER_ENGINE=patchright`, whose browser is its own build). The failure reason stays `connection_error`. The page cache stores a result without that warning, so a hit after the browser was installed does not ask for it again.
 - Hosted Octocrawl: a key runs one scrape at a time that may use the browser lane, a revoked key stops at its next start, and every key's start is logged per key and day (ROADMAP PH items 1 and 2). A second such scrape with the same key is `429 browser_busy` with `Retry-After` (at most 10 s); `fastMode: true` and map are not held back. The bound holds across instances through a lease in Firestore (`hostedLeases`), freed after the call or 130 s after it was taken. A start now reads the key's record fresh rather than from the minute's cache, so revoking a key no longer leaves it working for up to a minute. The `hosted_usage` log line names the key by its HMAC's first 16 characters, never the key.
