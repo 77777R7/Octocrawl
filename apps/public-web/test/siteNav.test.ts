@@ -6,6 +6,7 @@ import { pages } from '../scripts/docsPages.mjs'
 import { NAV_CAPABILITIES, siteActionsMarkup, siteNavMarkup } from '../scripts/siteNav.mjs'
 import { CAPABILITIES } from '../src/featureSections.js'
 import { pageMarkup } from '../src/page.js'
+import { TOOL_PAGES } from '../src/tools/pages'
 
 const app = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url))
 // The heading ids build-docs.mjs gives a page's sections.
@@ -25,7 +26,13 @@ describe('Top navigation', () => {
       if (path === '/llms.txt') continue
       if (path === '/signin/') continue // built by scripts/build-docs.mjs (sign-in and the dashboard)
       // A free tool page: its own entry, which Vite builds (vite.config.ts lists it).
-      if (path.startsWith('/tools/') || path === '/scrape/') { expect([href, existsSync(app(`${path.slice(1)}index.html`)) && readFileSync(app('vite.config.ts'), 'utf8').includes(`./${path.slice(1)}index.html`)]).toEqual([href, true]); continue }
+      // The tools' hub, a free tool's page (built from TOOL_PAGES) or a product page: an entry Vite builds.
+      if (path.startsWith('/tools/') || path === '/scrape/') {
+        const vite = readFileSync(app('vite.config.ts'), 'utf8')
+        const built = path === '/tools/' || path === '/scrape/' ? vite.includes(`./${path.slice(1)}index.html`) : TOOL_PAGES.some(page => `/tools/${page.slug}/` === path)
+        expect([href, existsSync(app(`${path.slice(1)}index.html`)) && built]).toEqual([href, true])
+        continue
+      }
       if (path.startsWith('/blog/')) { expect([href, path === '/blog/' || posts.some(post => blogPath(post) === path)]).toEqual([href, true]); continue }
       const page = pages.find(p => (p.slug ? `/docs/${p.slug}/` : '/docs/') === path)
       expect([href, page?.file]).toEqual([href, expect.any(String)])

@@ -32,6 +32,8 @@ export const NAV_CLIENTS = [
 export const NAV_TOOLS = [
   { glyph: '⌗', title: 'All free tools', text: 'No sign-up, five a day', href: '/tools/' },
   { glyph: '↓', title: 'URL to Markdown', text: 'Any public page as clean Markdown', href: '/tools/url-to-markdown/' },
+  { glyph: '⇢', title: 'Link Extractor', text: 'Find all pages on a website', href: '/tools/link-extractor/' },
+  { glyph: '¶', title: 'Website to Text', text: 'A page’s readable text', href: '/tools/website-to-text/' },
 ]
 
 /** The docs menu: the guide groups as the sidebar has them; the project pages (privacy, terms) stay in the footer. */

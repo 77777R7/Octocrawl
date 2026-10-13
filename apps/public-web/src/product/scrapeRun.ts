@@ -107,7 +107,7 @@ export const MARKDOWN: readonly MarkdownLine[] = [
   ]),
 ]
 
-/** The links the main content keeps: the breadcrumb's. */
+/** The page's links, each once: the site header's (the same as Home) and the breadcrumb's. */
 export const LINKS: ReadonlyArray<{ href: string; src: string }> = [
   { href: 'https://books.toscrape.com/index.html', src: 'crumb-0' },
   { href: 'https://books.toscrape.com/catalogue/category/books_1/index.html', src: 'crumb-1' },

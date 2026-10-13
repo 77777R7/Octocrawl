@@ -91,3 +91,52 @@
 @media (prefers-reduced-motion: reduce) {
   .hub-link, .tl-chip { transition: none; }
 }
+
+/* URL Extractor: this site's links or the others, and the list as CSV. */
+.link-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; }
+.link-filter { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.link-filter-button { padding: 6px 10px; border: 0; border-radius: 7px; color: var(--muted); background: none; font: 600 12.5px/1 var(--tl-mono); cursor: pointer; }
+.link-filter-button[aria-pressed="true"] { color: #fff; background: #142a57; }
+.ledger[data-show="own"] .is-away, .ledger[data-show="away"] .is-own { display: none; }
+
+/* Link Extractor: Whole site or This page over the card, and the site's pages under it. */
+.map-mode { display: inline-flex; gap: 2px; margin-top: 20px; padding: 3px; border: 1px solid rgba(183, 200, 230, .3); border-radius: 11px; background: rgba(6, 22, 54, .55); }
+.map-mode button { padding: 8px 16px; border: 0; border-radius: 8px; color: var(--on-navy-2); background: none; font: 600 13px/1 var(--tl-mono); cursor: pointer; }
+.map-mode button[aria-checked="true"] { color: #071b4f; background: #fff; }
+.map-section { position: relative; color: var(--text); background: var(--page); }
+.map-frame { padding: 56px 24px 32px; }
+.map-frame h2 { margin: 14px 0 0; color: #142a57; font-size: clamp(26px, 2.6vw, 36px); font-weight: 500; letter-spacing: -.035em; outline: none; }
+.map-loading, .map-summary { margin: 10px 0 0; color: var(--muted); font-size: 14.5px; }
+.map-refused { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0; padding: 0; list-style: none; }
+.map-refused li { padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-soft); background: #fff; font: 12px/1.3 var(--tl-mono); }
+.map-refused li.is-more { border-color: rgba(243, 104, 61, .45); color: var(--orange-ink); }
+.map-warning { margin: 12px 0 0; padding: 10px 14px; border-left: 3px solid #ff9b5f; color: #5e4e39; background: #fff6ec; font-size: 14px; line-height: 1.55; }
+.map-upsell { margin: 12px 0 0; padding: 12px 16px; border: 1px solid rgba(243, 104, 61, .35); border-radius: 12px; color: var(--ink-soft); background: #fff8f3; font-size: 14px; line-height: 1.55; }
+.map-upsell a, .map-next a { color: var(--link); font-weight: 650; }
+.map-guidance { margin-top: 18px; padding: 22px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+.map-reason { margin: 8px 0 0; color: var(--text); font-size: 16px; }
+.map-next { margin: 12px 0 0; }
+.map-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 20px 0 10px; }
+.map-filter { flex: 1 1 240px; min-width: 0; height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: #fff; font: 14px/1 var(--tl-mono); }
+.map-actions { display: flex; gap: 6px; }
+.map-list { max-height: 640px; margin: 0; padding: 6px 0; overflow: auto; border: 1px solid var(--line); border-radius: 14px; background: #fff; list-style: none; }
+.map-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 8px 16px; border-bottom: 1px dotted #e3e9f2; font: 13px/1.5 var(--tl-mono); }
+.map-row:last-child { border-bottom: 0; }
+.map-row .link-index { color: var(--orange-ink); }
+.map-main { display: flex; flex-direction: column; min-width: 0; }
+.map-url { color: #142a57; text-decoration: none; overflow-wrap: anywhere; }
+.map-url:hover .link-path { text-decoration: underline; }
+.map-url .link-host { color: var(--muted); }
+.map-title { color: var(--muted); font: 12.5px/1.45 "Helvetica Neue", Helvetica, Arial, sans-serif; }
+.map-via { display: flex; gap: 4px; }
+.map-via span { padding: 2px 7px; border-radius: 6px; font-size: 11px; white-space: nowrap; }
+.via-sitemap { color: #1d5c3c; background: #e5f5ec; }
+.via-link { color: #1d4f8a; background: #e8f1fc; }
+.via-start { color: var(--orange-ink); background: #fff1ea; }
+@media (max-width: 700px) {
+  .map-frame { padding: 40px 16px 24px; }
+  .map-row { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 10px 12px; }
+  .map-row .link-index { display: none; }
+}
+/* Whole site takes a URL alone: the card's format, options and one-page code don't apply (the code is further down). */
+.hero[data-tool-map="site"] .url-tools, .hero[data-tool-map="site"] #code-button { display: none; }

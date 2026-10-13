@@ -327,6 +327,10 @@ export interface FetchWarning {
    * lane's, which the browser lane did not improve on or was not offered,
    * or a rendered one (the browser or a provider lane's) its own extraction
    * found thin and low-confidence.
+   * `browser_not_installed`: a browser rung could not start because no
+   * browser is installed where Octocrawl runs (`browser_unavailable` in that
+   * rung's trace); the answer is another rung's, and
+   * `npx playwright install chromium` lets the browser lane start.
    * `screenshot_unavailable`: the `screenshot` format was asked for and the
    * browser lane rendered the page but could not capture it
    * (`screenshot_failed` in the trace); `screenshot` is null and the page

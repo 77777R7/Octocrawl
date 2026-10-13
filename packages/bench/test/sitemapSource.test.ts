@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { gzipSync } from 'node:zlib'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { localNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
+import { localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type NetworkPolicy } from '@w2l/contracts'
 import { prepareHttpIdentity } from '../src/httpIdentity.js'
 import { RobotsOriginCache } from '../src/robotsLookup.js'
 import { HttpSitemapSource } from '../src/sitemapSource.js'
@@ -94,6 +94,26 @@ describe('HttpSitemapSource', () => {
       expect(loaded.files.find((file) => file.url.startsWith('http://169.254.169.254'))).toMatchObject({ kind: 'unreadable', error: 'ssrf_denied' })
     } finally {
       await source.close()
+    }
+  })
+
+  it('requests robots.txt and every file under the preview\'s identity when asked, and the standard one otherwise', async () => {
+    const preview = new HttpSitemapSource({ networkPolicy: policy, previewProductToken: true })
+    try {
+      const loaded = await preview.load({ seedUrl: `${origin}/`, maxUrls: 50, maxFiles: 3 })
+      expect(loaded.identity.userAgent).toBe(`${prepareHttpIdentity('standard').identity.userAgent} ${PREVIEW_PRODUCT_TOKEN}`)
+      expect(requests.length).toBeGreaterThan(1)
+      for (const request of requests) expect([request.path, request.headers['user-agent']]).toEqual([request.path, loaded.identity.userAgent])
+    } finally {
+      await preview.close()
+    }
+    requests = []
+    const plain = new HttpSitemapSource({ networkPolicy: policy })
+    try {
+      await plain.load({ seedUrl: `${origin}/`, maxUrls: 50, maxFiles: 2 })
+      for (const request of requests) expect(request.headers['user-agent']).not.toContain(PREVIEW_PRODUCT_TOKEN)
+    } finally {
+      await plain.close()
     }
   })
 

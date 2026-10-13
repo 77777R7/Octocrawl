@@ -10,8 +10,8 @@ import { BLOG_AUTHOR, BLOG_CATEGORIES, BLOG_UPDATED, blogPath, categoryPath, pos
 import { siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
 import { DASHBOARD_BODIES, dashboardPageHtml } from './dashboardPages.mjs'
 // The free tool pages, built by Vite (vite.config.ts) and listed in the sitemap here.
-const TOOL_PATH = '/tools/url-to-markdown/'
-const TOOL_UPDATED = '2026-10-13'
+// The free tools' pages (apps/public-web/src/tools/pages.ts), with the day each last changed.
+const TOOL_LOCATIONS = [['/tools/url-to-markdown/', '2026-10-13'], ['/tools/link-extractor/', '2026-10-13'], ['/tools/website-to-text/', '2026-10-13']]
 const TOOLS_HUB_PATH = '/tools/'
 const TOOLS_HUB_UPDATED = '2026-10-13'
 // The product pages (src/product/), with the day each last changed.
@@ -393,11 +393,11 @@ await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify({ ...Obj
 
 // llms.txt (https://llmstxt.org): what Octocrawl is, and a link to the Markdown copy of every page. llms-full.txt carries
 // all of them in one file.
-const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. It is open source (AGPL-3.0). Hosted Octocrawl serves scrape and map at https://api.octocrawl.dev and https://mcp.octocrawl.dev/mcp, keyless within a daily allowance; the published packages (npx octocrawl) run everything on your own computer through REST, a TypeScript SDK, a Python client or MCP.'
+const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. Connect an agent to hosted Octocrawl at https://mcp.octocrawl.dev/mcp (MCP) or call https://api.octocrawl.dev (REST): scrape and map, keyless within a daily allowance; a key from an account adds 1,000 credits a month and the browser lane. The published packages run everything on your own computer (npx octocrawl serve: REST, a TypeScript SDK, a Python client or MCP, with crawl, batch and Monitor), and npx octocrawl serve --hosted --token serves other machines. It is open source (AGPL-3.0).'
 const groups = [...new Set(pages.map(page => page.group))]
 const llms = [
   '# Octocrawl', '', `> ${summary}`, '',
-  `Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/Octocrawl.`, '',
+  `Connect MCP: claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp (other clients: ${ORIGIN}/docs/connect-mcp/index.md). Try one public page in the browser at ${ORIGIN}/ (five previews a day). The source code is at https://github.com/77777R7/Octocrawl.`, '',
   ...groups.flatMap(group => [`## ${group}`, '', ...pages.filter(page => page.group === group).map(page => `- [${page.title}](${ORIGIN}${pathFor(page)}index.md): ${page.description}`), '']),
   '## Blog', '', ...posts.map(post => `- [${post.title}](${ORIGIN}${blogPath(post)}index.md): ${post.description}`), '',
   '## Optional', '', `- [All documentation in one file](${ORIGIN}/llms-full.txt)`, `- [Changelog](${ORIGIN}${CHANGELOG_PATH}index.md): what changed, version by version`, '',
@@ -452,6 +452,6 @@ for (const [path, title, lead, body] of DASHBOARD_BODIES) {
 // its articles, and the changelog.
 await writeFile(join(root, 'dist', 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${ORIGIN}/sitemap.xml\n`)
 // The changelog changes with almost every merge, so it carries no lastmod rather than a day that is soon wrong.
-const locations = [['/', HOME_UPDATED], [TOOLS_HUB_PATH, TOOLS_HUB_UPDATED], [TOOL_PATH, TOOL_UPDATED], [SCRAPE_PATH, SCRAPE_UPDATED], ...pages.map(page => [pathFor(page), page.updated]), [BLOG_PATH, BLOG_UPDATED], ...posts.map(post => [blogPath(post), post.updatedDate ?? post.pubDate]), [CHANGELOG_PATH, null]]
+const locations = [['/', HOME_UPDATED], [TOOLS_HUB_PATH, TOOLS_HUB_UPDATED], ...TOOL_LOCATIONS, [SCRAPE_PATH, SCRAPE_UPDATED], ...pages.map(page => [pathFor(page), page.updated]), [BLOG_PATH, BLOG_UPDATED], ...posts.map(post => [blogPath(post), post.updatedDate ?? post.pubDate]), [CHANGELOG_PATH, null]]
 await writeFile(join(root, 'dist', 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locations.map(([path, updated]) => `  <url><loc>${ORIGIN}${path}</loc>${updated ? `<lastmod>${updated}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>\n`)
 console.log(`Built ${pages.length} Octocrawl documentation pages in ${output} and ${posts.length} blog articles, with Markdown copies, the changelog, llms.txt, 404.html, robots.txt, sitemap.xml and redirects.json`)
