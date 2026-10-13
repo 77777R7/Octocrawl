@@ -152,7 +152,7 @@ Throughout P1:
 - **Real-site test set.** About 40 sites in [research/parity/sites.md](research/parity/sites.md). The first 12 URLs are the audit's first live batch in [real-site-test-set.md](research/parity/real-site-test-set.md); all of them pass, and blocked sites report `blocked` honestly. The seed user's URLs are the second batch.
 - **Evidence Record correctness.** `status` / `reason`, `httpStatus`, `finalUrl`, `lane` and the hashes come out the same way in every lane ([Evidence Record](#evidence-record)). This is part of P1, not a new feature.
 - **One-line install.** `npx octocrawl@latest scrape <url>` gives a result within 5 minutes on clean macOS and Windows.
-- **Week 6 calibration.** Record the actual P1 time against the audit's 34-working-day estimate for its M1 and rescale P2–P4 by that ratio.
+- **Week 6 calibration.** Record the actual P1 time against the audit's 34-working-day estimate for its M1 and rescale P2–P4 by that ratio. **Recorded 2026-10-13** ([calibration](docs/roadmap/week6-calibration-2026-10-13.md)): M1 took 2–3 working days against 34 (ratio 0.06–0.09), M1 to M3 about 6 against 142.5. The ratio holds for code, not for real-site verification, which PA showed takes 1–3 days an item, nor for exits that wait on people. Rescaling the phase table is proposed there and not adopted.
 
 **Exit:** the first 12 URLs all pass. 21 of the core 29 are solid: the 17 in M1, the 3 solid at the audit, and basic proxy. At least 70% of the seed user's URLs succeed, and the rest report their reason honestly.
 
