@@ -130,6 +130,22 @@ ${waitlist ? `      ${waitlistMarkup()}\n` : ''}      <div class="band band-dark
 `
 }
 
+/** The site's header band (brand, navigation, GitHub and Sign in), at the top of the home page, the free tool pages and
+ * the product pages. */
+export function siteHeaderMarkup(): string {
+  return `      <div class="band band-dark band-header">
+        <header class="frame site-header">
+          <a class="brand" href="/" aria-label="Octocrawl home">
+            <img class="brand-mark" src="/assets/octopus-160.webp" alt="" width="50" height="50" />
+            <img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="140" height="23" />
+          </a>
+          ${siteNavMarkup()}
+          ${siteActionsMarkup()}
+        </header>
+      </div>
+`
+}
+
 /** The hero's words: what the page is for, and where its scroll cue leads before the first run; and the artwork
  * behind it, the mountain unless it names another (heroArtwork.ts, SCENES). */
 export interface HeroCopy { title: string; description: string; next: string; nextLabel: string; art?: 'coast' }
@@ -150,17 +166,7 @@ export function heroMarkup(copy: HeroCopy): string {
       <div class="hero-shade" aria-hidden="true"></div>
       <div class="hero-click-spark" id="hero-click-spark" aria-hidden="true"></div>
 
-      <div class="band band-dark band-header">
-        <header class="frame site-header">
-          <a class="brand" href="/" aria-label="Octocrawl home">
-            <img class="brand-mark" src="/assets/octopus-160.webp" alt="" width="50" height="50" />
-            <img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="140" height="23" />
-          </a>
-          ${siteNavMarkup()}
-          ${siteActionsMarkup()}
-        </header>
-      </div>
-
+${siteHeaderMarkup()}
       <main aria-labelledby="hero-title">
         <div class="band band-dark">
           <div class="frame hero-cells">

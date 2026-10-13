@@ -1616,3 +1616,21 @@ form.addEventListener('submit', async (event) => {
     void refreshQuota()
   }
 })
+
+// A product page hands a reader's URL over in the address (?url=, src/product/scrapeFeatures.ts): it fills the card,
+// and runs once when this tab's session storage says the reader asked for it there, so a link from elsewhere only fills
+// the box and spends no preview.
+{
+  const handed = new URLSearchParams(window.location.search).get('url')
+  if (handed) {
+    input.value = handed
+    let asked = false
+    try {
+      asked = sessionStorage.getItem('w2l:handoff') === handed
+      sessionStorage.removeItem('w2l:handoff')
+    } catch { /* Fill only. */ }
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`)
+    if (asked) form.requestSubmit()
+    else input.focus()
+  }
+}
