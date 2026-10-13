@@ -22,6 +22,12 @@ export function lowContentYieldHint(browserTried: boolean): string {
 /** The hint a `low_content_yield` warning on a rendered answer carries: the page was rendered and still held little. */
 export const RENDERED_LOW_YIELD_HINT = `the rendered page's main content was thin and the extraction unsure of it; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) when its data loads late, actions (a click, a scroll, a wait for a selector) when it appears after an interaction, or onlyMainContent: false for the whole page`
 
+/** The hint a `browser_not_installed` warning carries: the one command that lets the browser lane start, as the warning names it. */
+export function browserNotInstalledHint(command = 'npx playwright install chromium'): string {
+  return `Chromium is not installed where Octocrawl runs, so the browser lane could not start; run ${command} once, then scrape again`
+}
+export const BROWSER_NOT_INSTALLED_HINT = browserNotInstalledHint()
+
 /** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */
 export const SCREENSHOT_UNAVAILABLE_HINT = "the screenshot could not be captured, so screenshot is null while the page result stands; the trace's screenshot_failed event names the error; a viewport capture (fullPage false) is the lighter request, and a longer timeout gives a slow page more time"
 
@@ -189,9 +195,13 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
   }
   // Under fastMode the one hint below says what was declined; otherwise the page's caveat says whether the browser lane had its turn.
   const fastModeDeclined = req.fastMode === true && result.lane === 'http' && httpLaneAskedForBrowser(result)
-  const browserTried = run.channelsTried.some((channel) => !HTTP_CHANNELS.has(channel))
+  // A browser lane that could not start (no browser installed) was not tried in any sense that matters to the caller.
+  const missingWarning = result.warnings?.find((warning) => warning.code === 'browser_not_installed')
+  const browserMissing = missingWarning !== undefined
+  if (missingWarning !== undefined) hints.push(browserNotInstalledHint(/run (npx [\w@.-]+ install chromium)/.exec(missingWarning.message)?.[1]))
+  const browserTried = !browserMissing && run.channelsTried.some((channel) => !HTTP_CHANNELS.has(channel))
   if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'client_rendered_suspected')) {
-    hints.push(`the page fills its data with JavaScript; the browser lane ${browserTried ? 'was tried' : 'was not tried'}`)
+    hints.push(`the page fills its data with JavaScript; the browser lane ${browserTried ? 'was tried' : browserMissing ? 'could not start' : 'was not tried'}`)
   }
   // A thin http answer the browser lane did not improve on, or could not be offered to; or a thin rendered answer.
   if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'low_content_yield')) hints.push(result.lane === 'http' ? lowContentYieldHint(browserTried) : RENDERED_LOW_YIELD_HINT)

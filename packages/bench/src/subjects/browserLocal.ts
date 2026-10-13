@@ -41,6 +41,7 @@ import { MainFrameDocuments, reported, type MainFrameEntry } from './browserDocu
 import { AD_HOSTS, isAdHost } from './adHosts.js'
 import { wireHeaders } from '../httpIdentity.js'
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
+import { browserInstallCommand, browserNotInstalled } from '../browserInstall.js'
 import {
   CHROME_MAJOR_FLOOR,
   assertIdentityBundle,
@@ -1326,6 +1327,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
         event: 'navigate_failed',
         detail: { error: err instanceof Error ? err.message.slice(0, 200) : String(err) },
       })
+      // No browser to start: a new install that has not run `npx playwright install chromium`. Still a connection_error
+      // (no page was read), and the ladder tells the caller what to run (browserNotInstalledWarning).
+      if (browserNotInstalled(err)) trace.push({ at: wallMs, lane: 'browser_local', event: 'browser_unavailable', detail: { engine: this.browserEngine, install: browserInstallCommand(this.browserEngine) } })
       return {
         requestedUrl: url,
         status: 'failed',

@@ -78,13 +78,17 @@ export class PageCache {
    * Store `result` as the latest of `key` when it is a `success` with a
    * parseable `evidence.fetchedAt`, replacing a stored result fetched no
    * later (a slower, older fetch never replaces a newer one); the cache's
-   * own trace events are left out. True when it was written.
+   * own trace events and a `browser_not_installed` warning are left out.
+   * True when it was written.
    */
   store(key: string, result: FetchResult): boolean {
     if (result.status !== 'success') return false
     const fetchedAtMs = Date.parse(result.evidence.fetchedAt ?? '')
     if (!Number.isFinite(fetchedAtMs)) return false
-    const stored: FetchResult = { ...result, trace: result.trace.filter((event) => !CACHE_TRACE_EVENTS.has(event.event)) }
+    // `browser_not_installed` describes this machine when the page was read, not the page: a hit after the browser was
+    // installed must not tell the caller to install it again.
+    const warnings = result.warnings?.filter((warning) => warning.code !== 'browser_not_installed')
+    const stored: FetchResult = { ...result, ...(warnings === undefined ? {} : { warnings }), trace: result.trace.filter((event) => !CACHE_TRACE_EVENTS.has(event.event)) }
     const written = this.db.prepare(`INSERT INTO entries (key, url, fetched_at_ms, stored_at, result_json) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET url = excluded.url, fetched_at_ms = excluded.fetched_at_ms, stored_at = excluded.stored_at, result_json = excluded.result_json
       WHERE excluded.fetched_at_ms >= entries.fetched_at_ms`)

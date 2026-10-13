@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentHintsFor, FAST_MODE_DECLINED_HINT, lowContentYieldHint, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, lowContentYieldHint, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -104,6 +104,13 @@ describe('agent hints', () => {
     // A shell carries the client-rendered sentence first, then the thin-content one.
     const shell = result({ status: 'failed', failureReason: 'empty_unverified', warnings: [{ code: 'client_rendered_suspected', message: 'shell' }, { code: 'low_content_yield', message: 'thin' }], trace: [{ at: 1, lane: 'http', event: 'quality_client_rendered' }] })
     expect(hints(shell, ['http'])).toEqual(['the page fills its data with JavaScript; the browser lane was not tried', lowContentYieldHint(false)])
+    // The browser rung could not start, no browser installed (a new install): the command first, and never "was tried".
+    const noBrowser = { ...shell, warnings: [...shell.warnings!, { code: 'browser_not_installed', message: 'no browser' }] }
+    expect(hints(noBrowser, ['http', 'browser_local'])).toEqual([BROWSER_NOT_INSTALLED_HINT, 'the page fills its data with JavaScript; the browser lane could not start', lowContentYieldHint(false)])
+    expect(BROWSER_NOT_INSTALLED_HINT).toContain('npx playwright install chromium')
+    // The hint names the command the warning names: Patchright's own browser under that engine.
+    const noPatchright = { ...shell, warnings: [...shell.warnings!, { code: 'browser_not_installed', message: 'the browser lane could not start: Chromium is not installed where Octocrawl runs; run npx patchright install chromium once' }] }
+    expect(hints(noPatchright, ['http', 'browser_local'])[0]).toBe('Chromium is not installed where Octocrawl runs, so the browser lane could not start; run npx patchright install chromium once, then scrape again')
     const file = (kind: 'pdf' | 'csv' | 'xlsx', markdownFrom: 'pdf_text' | 'text' | null, path: string | null) => result({ file: { kind, detectedBy: 'content_type', contentType: null, declaredBytes: null, maxBytes: 10, bytes: 10, sha256: 'a'.repeat(64), path, markdownFrom, encoding: null, warnings: [], pdf: null } as unknown as NonNullable<HintedResult['file']> })
     expect(hints(file('pdf', 'pdf_text', 'files/aaa.pdf'))).toEqual(['the response was a pdf file kept at files/aaa.pdf; markdown is its text layer'])
     expect(hints(file('csv', 'text', 'files/aaa.csv'))).toEqual(['the response was a csv file kept at files/aaa.csv; markdown is its text as received'])
