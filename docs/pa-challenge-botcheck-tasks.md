@@ -9,7 +9,7 @@
 - **归因（G1）**：16 题 = Cloudflare 8、DataDome 7、无厂商头 2；全部在 http 一档就被拦，本地浏览器和 Steel 浏览器同样被拦。
 - **库级探针**：从自备住宅网关出发，13 题对 undici、两种 impit、stock Playwright、Patchright 全部 403；T002 全过（出口信誉）；T053 两个浏览器过、HTTP 客户端全拒。
 - **T053**：imf.org 的 Akamai 拒绝"自称 Google Chrome 的 headless Chromium"，即我们的标准身份；`W2L_BROWSER_IDENTITY=actual`（#431）下 3/3 verified。但 92 题 A/B 里 actual 只多 T053、少 13 题（含 6 题健康组），**不改默认**，开关留作 opt-in，将来是按 host 的路线选项。
-- **该类别**：在 ADR 0005 允许的手段内（出口、兼容传输、真浏览器、Patchright、供应商住宅代理与求解、诚实身份），这批站的 Cloudflare 与 DataDome 都拦得住；竞品靠自带的 stealth 浏览器过，这对我们属暂缓类。**唯一未测的是 Browserbase `verified`（T2.2）**，等 Howard 的 key 与套餐。在那之前，frozen 集上与 Firecrawl 的 12 题差距保持不变。
+- **该类别**：在 ADR 0005 允许的手段内（出口、兼容传输、真浏览器、Patchright、供应商住宅代理与求解、诚实身份），这批站的 Cloudflare 与 DataDome 都拦得住；竞品靠自带的 stealth 浏览器过，这对我们属暂缓类。唯一未测的 Browserbase `verified`（T2.2）在 2026-10-13 确认测不了：Howard 的 free plan 上它被拒（403，只有 Enterprise plan 有），见 [记录](../research/access/runs/2026-10-13-t22-browserbase-verified-3d6b661c.md)。frozen 集上与 Firecrawl 的 12 题差距保持不变，除非买 Enterprise plan。
 - 记录：[signals standard](../research/access/runs/2026-10-12-pa-gate-signals-standard-56f9a0d1.md)、[signals enhanced](../research/access/runs/2026-10-12-pa-gate-signals-enhanced-56f9a0d1.md)、[library probe](../research/access/runs/2026-10-12-library-probe-16-b117b451.md)、[T053 isolation](../research/access/runs/2026-10-12-t053-identity-204c8a76.md)、[actual identity on 16](../research/access/runs/2026-10-12-pa-gate-signals-actual-identity-204c8a76.md)、[A/B declared](../research/access/runs/2026-10-12-identity-ab-declared-2df8207d.md)、[A/B actual](../research/access/runs/2026-10-12-identity-ab-actual-2df8207d.md)。
 
 ## 总原则
@@ -78,7 +78,7 @@ B003 tesla、B009 allrecipes、T005 etsy、T010 OECD（需要点击）、T012 wa
   - 验收：记录一份；每题 egress 为 `p.webshare.io:80`。
 - [~] **T2.1 Patchright 定向重测**（2026-10-12 不做：T1.3 探针里 Patchright 与 stock Playwright 在 16 题上无一不同，item 5 的状态行已写明）：C 臂配置 + `W2L_BROWSER_ENGINE=patchright` + grant 加 `enhanced_browser`。
   - 验收：记录一份；与 T2.0 逐题对照，列出净增益与退步；T053 要在记录里单独说明（10-06 曾一次过）。
-- [ ] **T2.2 Browserbase `verified` 首次实跑**（唯一未测的路线；等 Howard 的 key 与套餐，未做）：适配器已有（`packages/bench/src/vendors/browserbase.ts`），但从未用真实 key 跑过。grant 用 `vendor_remote_browser` + `vendor_stealth`，tariff 按 docs/access.md 的示例，`proxies: false`。
+- [~] **T2.2 Browserbase `verified` 首次实跑**（2026-10-13 跳过：free plan 上 `verified` 被拒，403 "Verified mode is only available on the Enterprise plan"；不带 `verified` 的会话能建，key 有效；[记录](../research/access/runs/2026-10-13-t22-browserbase-verified-3d6b661c.md)）：适配器已有（`packages/bench/src/vendors/browserbase.ts`），但从未用真实 key 跑过。grant 用 `vendor_remote_browser` + `vendor_stealth`，tariff 按 docs/access.md 的示例，`proxies: false`。
   - 前置（Howard）：提供 Browserbase key，并确认 `verified`（Advanced Stealth 的现名）在当前套餐可用；不可用则此项改为"记录原因，跳过"。
   - 验收：记录一份；与 T2.0 对照；按 Browserbase 控制台的 session 用量对账，写明账本与控制台的差。
 - [~] **T2.3 兼容传输扩 host**（2026-10-12 关闭：T1.3 显示 16 题里没有乙类，即没有 impit 过而 undici 不过的站）
@@ -97,8 +97,8 @@ B003 tesla、B009 allrecipes、T005 etsy、T010 OECD（需要点击）、T012 wa
 
 ## 需要 Howard 的事
 
-- [ ] Browserbase 的 key 与套餐（T2.2 前置；仍未提供）。
-- [~] 每个 enhanced grant 的 attestation 声明（T2.1 不做，只剩 T2.2 那一份）。
+- [x] Browserbase 的 key 与套餐（2026-10-13 提供：free plan，不含 `verified`；T2.2 因此跳过）。
+- [~] 每个 enhanced grant 的 attestation 声明（T2.1 不做；T2.2 跳过，没写 grant）。
 - [x] 总预算 $5：实际只花 $0.0075。
 
 ## 遗留与不在范围
