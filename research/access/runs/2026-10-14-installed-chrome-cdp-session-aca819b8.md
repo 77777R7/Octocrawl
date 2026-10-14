@@ -61,3 +61,10 @@ No run had a false success.
 
 - Other exits or days.
 - Whether the challenge wait's early stop costs T001.
+
+## Corrections
+
+- 2026-10-15: the question this record left open, whether the challenge wait gives up early on T001, is answered: it does not ([T001 challenge watch](2026-10-15-t001-challenge-watch.md)).
+  - Cloudflare's challenge clears in about 4 s, as the wait said.
+  - The 403 after it is studylib.net's own captcha page ("Security Check", its own widget). It stayed unchanged for nearly a minute of watching, so waiting on would not have let T001 through.
+
