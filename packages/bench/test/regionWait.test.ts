@@ -194,6 +194,35 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     expect(tracker.outcome()).toMatchObject({ reads: 1, judged: 0, steady: null })
   })
 
+  it('judges a read the whole page would end on again on the answer\'s Markdown, and only that read', () => {
+    // The page's prices are outside what the answer will hold (a header's deals strip, T005's variant).
+    let made = 0
+    const answer = (prices: string) => () => { made++; return `# Shop${prices}` }
+    const tracker = new RegionTracker({ contract: prices, answerMarkdown: answer('') })
+    const page = JSON.stringify(view('Deals $5 $10 $12'))
+    expect(tracker.observe(page)).toBe(false)
+    expect(made).toBe(0)
+    // The whole page holds on two reads in a row: the answer is judged, fails, and the wait goes on with its counts.
+    expect(tracker.observe(page)).toBe(false)
+    expect(made).toBe(1)
+    expect(tracker.outcome().checks).toEqual([{ index: 0, type: 'markdownCountMin', passed: false, observedCount: 0 }])
+    // An answer that holds ends the wait.
+    const held = new RegionTracker({ contract: prices, answerMarkdown: answer(' $1 $2 $3') })
+    held.observe(page)
+    expect(held.observe(page)).toBe(true)
+    // An answer the lane cannot tell (no main content found) keeps the whole page's verdict.
+    const unknown = new RegionTracker({ contract: prices, answerMarkdown: () => null })
+    unknown.observe(page)
+    expect(unknown.observe(page)).toBe(true)
+    // A page past MAX_ANSWER_HTML keeps it too, unextracted.
+    const large = JSON.stringify(view(`Deals $5 $10 $12 ${'x'.repeat(1_000_001)}`))
+    made = 0
+    const big = new RegionTracker({ contract: prices, answerMarkdown: answer('') })
+    big.observe(large)
+    expect(big.observe(large)).toBe(true)
+    expect(made).toBe(0)
+  })
+
   it('judges a check written for Markdown on the live page\'s HTML converted as the result\'s Markdown is', async () => {
     // Links counted as the access tasks count them: by their Markdown, which the page's plain text does not have.
     const links: VerifyContract = { checks: [{ type: 'markdownCountMin', pattern: '\\]\\(https?://', min: 2 }] }

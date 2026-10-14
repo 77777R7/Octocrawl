@@ -1053,7 +1053,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
       }
       // The region the task needs (ADR 0007): with a task contract, the page is read once its checks hold on the live
       // page, after the settle, waitFor and the steps, within REGION_WAIT_MAX_MS and the capture's reserve.
-      const region = regionSpecOf(options)
+      // The answer's Markdown is the page's main content unless the request asks for the whole page, a selection or a
+      // list: the wait then judges its checks on that too, not only on the whole page (regionWait.ts, answerMarkdown).
+      const regionAsked = regionSpecOf(options)
+      const region = regionAsked === undefined || wholePageAsked(options) || selectionAsked(options) || options.list !== undefined ? regionAsked : {
+        ...regionAsked,
+        answerMarkdown: (html: string, href: string) => {
+          const main = extractTf.extract(html, { url: href, pruneSelectors: options.excludeTags, blockAds: options.blockAds })
+          return main.escalate ? null : htmlToMarkdown(main.mainHtml, { baseUrl: main.baseUrl, ...markdownOptions(options) })
+        },
+      }
       // Only on a page that answered and shows no check: a block, a challenge or an error page is not waited on for a
       // region it will never show. The check is the gate's decisive one, so a page with content is never skipped.
       const answered = region === undefined ? null : reported(documents.shown() ?? { url: page.url(), response, kind: 'document' }).response

@@ -33,6 +33,12 @@ const MIN_VIEW_RECORDS = 2_000
 const EMPTY_READS = 3
 /** The largest live page whose Markdown the view converts; past it, the Markdown checks are not judged on the live page. */
 const MAX_VIEW_HTML = 5_000_000
+/**
+ * The largest live page the answer's Markdown is made from (RegionSpec.answerMarkdown): main-content extraction runs in
+ * line with the read and grows faster than the page (about 50 ms for Etsy's 0.46 MB home page, seconds past 2 MB), so a
+ * larger page keeps the whole page's verdict.
+ */
+const MAX_ANSWER_HTML = 1_000_000
 /** The checks that read the Markdown: on the live page, they read the page's whole HTML converted as the result's Markdown is. */
 const MARKDOWN_CHECKS: ReadonlySet<string> = new Set(['markdownIncludes', 'markdownMatches', 'markdownCountMin'])
 
@@ -40,6 +46,13 @@ const MARKDOWN_CHECKS: ReadonlySet<string> = new Set(['markdownIncludes', 'markd
 export interface RegionSpec {
   contract: VerifyContract
   list?: { itemSelector: string; fields: readonly ListField[] }
+  /**
+   * The Markdown the answer will hold, made from the live page's HTML as the lane makes it (its main content, by
+   * default); null when it cannot tell (no main content found). Set by a lane whose answer is not the whole page: the
+   * Markdown checks, once they hold on the whole page, must hold on this too, so a wait does not end on data the answer
+   * leaves out (T005, 2026-10-14: six prices on the page, none in its main content).
+   */
+  answerMarkdown?: (html: string, href: string) => string | null
 }
 
 /**
@@ -219,6 +232,8 @@ export class RegionTracker {
   private readonly needsMarkdown: boolean
   /** The last HTML converted and its Markdown: a page that did not change is not converted again. */
   private converted: { html: string; markdown: string } | null = null
+  /** The same for the answer's Markdown (spec.answerMarkdown). */
+  private answered: { html: string; markdown: string | null } | null = null
   private last: Omit<RegionOutcome, 'waitedMs' | 'reads' | 'judged' | 'contractSha256'> = { ready: false, empty: false, loading: false, steady: null, checks: [] }
   judgeable = true
   unjudged: RegionUnjudged | undefined
@@ -263,13 +278,28 @@ export class RegionTracker {
     const loading = view.loading === true
     // Reads in a row with the same counts and the same text, this one included.
     this.sameReads = key === this.previousKey && steady === true ? this.sameReads + 1 : 1
-    const passed = verification.status === 'passed' && key === this.previousKey
+    let passed = verification.status === 'passed' && key === this.previousKey
+    let reported = checks
+    // A read the whole page would end the wait on is judged again on what the answer will hold (spec.answerMarkdown):
+    // only such reads, as extraction is not cheap, and only on a page up to MAX_ANSWER_HTML; its time counts in the read's,
+    // which the wait's deadline allows for. Held there too, the wait ends; not, it goes on (and scrolls), with the
+    // answer's counts reported. The next read is compared by the whole page's counts as before.
+    if (passed && markdown !== undefined) {
+      const answerMarkdown = this.answerMarkdownOf(view)
+      if (answerMarkdown !== undefined && answerMarkdown !== null) {
+        const answer = verify(this.spec.contract, { ...verifyView, markdown: answerMarkdown }, { partial: true })
+        if (answer.status !== 'passed') {
+          passed = false
+          if (answer.status !== 'not_requested') reported = answer.checks.map(({ index, type, passed: held, observedCount }) => ({ index, type, passed: held, ...(observedCount === undefined ? {} : { observedCount }) }))
+        }
+      }
+    }
     const emptyList = this.spec.contract.emptyOk === true && view.list !== undefined && view.list.records.length === 0 && !loading
     // An empty list is the page's empty state only on a page that has settled: the same text and counts on EMPTY_READS reads.
     const empty = !passed && emptyList && this.sameReads >= EMPTY_READS
     this.previousKey = key
     this.previousText = view.text
-    this.last = { ready: passed || empty, empty, loading, steady, checks }
+    this.last = { ready: passed || empty, empty, loading, steady, checks: reported }
     return passed || empty
   }
 
@@ -278,6 +308,13 @@ export class RegionTracker {
     if (!this.needsMarkdown || typeof view.html !== 'string' || view.html.length > MAX_VIEW_HTML) return undefined
     if (this.converted?.html !== view.html) this.converted = { html: view.html, markdown: htmlToMarkdown(view.html, { baseUrl: view.href }) }
     return this.converted.markdown
+  }
+
+  /** The answer's Markdown of the live page (spec.answerMarkdown); undefined when the lane gave none or the page is too large. */
+  private answerMarkdownOf(view: RegionView): string | null | undefined {
+    if (this.spec.answerMarkdown === undefined || typeof view.html !== 'string' || view.html.length > MAX_ANSWER_HTML) return undefined
+    if (this.answered?.html !== view.html) this.answered = { html: view.html, markdown: this.spec.answerMarkdown(view.html, view.href ?? '') }
+    return this.answered.markdown
   }
 
   outcome(): RegionOutcome {
