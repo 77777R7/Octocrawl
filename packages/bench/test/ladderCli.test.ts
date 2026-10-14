@@ -212,13 +212,13 @@ describe('buildChannels', () => {
     const rung = built.find((c) => c.id === 'installed_chrome')!
     const url = 'https://example.com/'
     expect(rung.waitsFor).toBe(true)
-    expect(rung.serves!(url, {})).toBe(true)
-    expect(rung.serves!(url, { waitFor: 2_000, headers: {} })).toBe(true)
-    expect(rung.serves!(url, { actions: [{ type: 'wait', milliseconds: 10 }] })).toBe(false)
-    expect(rung.serves!(url, { screenshot: { fullPage: false } } as FetchOptions)).toBe(false)
-    expect(rung.serves!(url, { mobile: true })).toBe(false)
-    expect(rung.serves!(url, { headers: { 'x-a': 'b' } })).toBe(false)
-    expect(rung.serves!(url, { skipTlsVerification: true })).toBe(false)
+    expect(rung.refusal!(url, {})).toBeNull()
+    expect(rung.refusal!(url, { waitFor: 2_000, headers: {} })).toBeNull()
+    expect(rung.refusal!(url, { actions: [{ type: 'wait', milliseconds: 10 }] })).toMatch(/takes no actions/)
+    expect(rung.refusal!(url, { screenshot: { fullPage: false } } as FetchOptions)).toMatch(/takes no screenshot/)
+    expect(rung.refusal!(url, { mobile: true })).toMatch(/takes no mobile/)
+    expect(rung.refusal!(url, { headers: { 'x-a': 'b' } })).toMatch(/takes no headers/)
+    expect(rung.refusal!(url, { skipTlsVerification: true, mobile: true })).toMatch(/takes no mobile, skipTlsVerification/)
     for (const c of built) await c.close!()
   })
 

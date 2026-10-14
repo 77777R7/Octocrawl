@@ -7,12 +7,13 @@ import {
   modeIdentity,
   QUALITY_ESCALATION_MAX_CONFIDENCE,
   RENDERED_LOW_YIELD_MAX_TOKENS,
+  type FetchOptions,
   type FetchResult,
   type HandoffRequest,
   type IdentityBundle,
   type RobotsOverrideApplied,
 } from '@w2l/contracts'
-import { LadderRunner, sessionRejection, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
+import { egressProxyRefusedWarning, LadderRunner, sessionRejection, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
 import { INSTALLED_CHROME_INSTALL } from '../src/subjects/installedChrome.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
 import { loadSessionForHost, MemorySessionStore, sessionCoversHost, type SessionSnapshot } from '../src/routing/sessionStore.js'
@@ -73,6 +74,11 @@ function providerErrorResult(url: string, vendorId: string): FetchResult {
     lane: 'provider',
     trace: [{ at: 0, lane: 'provider', event: 'provider_failed', detail: { vendor: vendorId } }],
   }
+}
+
+/** The ladder's decisions, without the `ladder_channel_started` event each rung's start adds. */
+function decisions<T extends { event: string }>(trace: readonly T[]): T[] {
+  return trace.filter((event) => event.event !== 'ladder_channel_started')
 }
 
 function channel(
@@ -445,6 +451,43 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     ])
   })
 
+  it('records when each rung started with the run\'s time left, and why a rung that says so was left out', async () => {
+    const url = 'https://example.com/p'
+    const gated = { ...blockedResult(url, 'cloudflare_challenge'), lane: 'browser_local' as const }
+    const chrome = { ...channel('installed_chrome', [contentfulResult(url, 'browser_local')]), refusal: (_u: string, options: FetchOptions) => options.mobile === true ? 'takes no mobile' : null }
+    const deadlineAt = Date.now() + 60_000
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [gated]), chrome], { mode: 'standard', enhanced: true }).run(url, null, { deadlineAt })
+    const started = run.ladderTrace.filter((event) => event.event === 'ladder_channel_started')
+    expect(started.map((event) => event.channel)).toEqual(['http', 'browser_local', 'installed_chrome'])
+    for (const event of started) expect(event.detail?.remainingMs).toBeGreaterThan(50_000)
+    expect(run.ladderTrace.some((event) => event.event === 'ladder_channel_not_served')).toBe(false)
+    const mobile = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), { ...chrome, calls: [] }], { mode: 'standard', enhanced: true }).run(url, null, {}, { mobile: true })
+    expect(mobile.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_not_served', channel: 'installed_chrome', detail: { reason: 'takes no mobile' } }))
+    expect(mobile.channelsTried).toEqual(['http'])
+    // A provider rung passed over for want of a price ceiling was never called, so it is not counted as started.
+    const unpriced = { ...channel('provider', [contentfulResult(url, 'provider')], 'acme'), priceCeilingUsd: undefined }
+    const passed = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), unpriced], { mode: 'research' }).run(url)
+    expect(passed.ladderTrace.filter((event) => event.event === 'ladder_channel_started').map((event) => event.channel)).toEqual(['http'])
+    // Without a deadline the time left is not known.
+    expect(mobile.ladderTrace.find((event) => event.event === 'ladder_channel_started')?.detail?.remainingMs).toBeNull()
+  })
+
+  it('says the egress proxy refused the connection when no page was read, and not when one was', async () => {
+    const url = 'https://example.com/p'
+    const refused = (lane: 'http' | 'browser_local', status: number | null): FetchResult => ({ ...failedResult(url, 'connection_error'), lane, trace: [{ at: 1, lane, event: 'egress_proxy_refused', detail: { status } }] })
+    const both = await new LadderRunner([channel('http', [refused('http', 402)]), channel('browser_local', [refused('browser_local', null)])], { mode: 'standard' }).run(url)
+    expect(both.result.status).toBe('failed')
+    expect(both.result.warnings).toContainEqual(egressProxyRefusedWarning(402))
+    expect(egressProxyRefusedWarning(402).message).toContain('(HTTP 402)')
+    // A rung that failed on its own (a provider on its own network that timed out) is not the proxy's failure.
+    const own = await new LadderRunner([channel('http', [refused('http', 402)]), channel('browser_local', [{ ...failedResult(url, 'timeout'), lane: 'browser_local' }])], { mode: 'standard' }).run(url)
+    expect(own.result.warnings?.some((warning) => warning.code === 'egress_proxy_refused') ?? false).toBe(false)
+    // A page read by another rung stands, without the warning.
+    const read = await new LadderRunner([channel('http', [refused('http', 407)]), channel('browser_local', [contentfulResult(url, 'browser_local')])], { mode: 'standard' }).run(url)
+    expect(read.result.status).toBe('success')
+    expect(read.result.warnings?.some((warning) => warning.code === 'egress_proxy_refused') ?? false).toBe(false)
+  })
+
   it('offers a client-rendered http success to the browser and keeps whichever answer holds more', async () => {
     const url = 'https://example.com/p'
     const rendered = { ...contentfulResult(url, 'browser_local'), usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 800 } }
@@ -453,7 +496,7 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     expect(better.result).toMatchObject({ status: 'success', lane: 'browser_local' })
     expect(better.result.warnings).toBeUndefined()
     expect(better.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_client_rendered', improved: true }])
-    expect(better.ladderTrace[0]).toMatchObject({ event: 'ladder_step', channel: 'http', detail: { status: 'success', escalate: 'quality_client_rendered' } })
+    expect(decisions(better.ladderTrace)[0]).toMatchObject({ event: 'ladder_step', channel: 'http', detail: { status: 'success', escalate: 'quality_client_rendered' } })
 
     // The browser found less: the http page stays the answer, warning and all, and the hop did not pay off.
     const thinner = { ...contentfulResult(url, 'browser_local'), markdown: 'LESS', usage: { ...contentfulResult(url, 'browser_local').usage, contentTokens: 3 } }
@@ -726,8 +769,8 @@ describe('LadderRunner — an answer without content', () => {
       const blocked = { ...blockedResult(url, reason), lane: 'browser_local' as const }
       const run = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [blocked])], { mode: 'standard' }).run(url)
       expect(run.result).toMatchObject({ status: 'blocked', blockReason: reason, lane: 'browser_local', markdown: null })
-      expect(run.ladderTrace.map((event) => [event.event, event.channel])).toEqual([['ladder_step', 'http'], ['ladder_empty_answer_dropped', 'http'], ['ladder_step', 'browser_local']])
-      expect(run.ladderTrace[1]!.detail).toEqual({ dropped: 'http', blockedAt: 'browser_local', blockReason: reason })
+      expect(decisions(run.ladderTrace).map((event) => [event.event, event.channel])).toEqual([['ladder_step', 'http'], ['ladder_empty_answer_dropped', 'http'], ['ladder_step', 'browser_local']])
+      expect(decisions(run.ladderTrace)[1]!.detail).toEqual({ dropped: 'http', blockedAt: 'browser_local', blockReason: reason })
     }
     // A vendor rung that then reads the page answers, as after any block; content the HTTP rung did produce stays the answer.
     const blocked = { ...blockedResult(url, 'cloudflare_challenge'), lane: 'browser_local' as const }
@@ -746,7 +789,7 @@ describe('LadderRunner — an answer without content', () => {
     expect(run.channelsTried).toEqual(['http', 'browser_local'])
     expect(run.result).toMatchObject({ status: 'success', lane: 'http', markdown: '' })
     expect(run.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_low_yield', improved: false }])
-    expect(run.ladderTrace[1]).toMatchObject({ event: 'ladder_step', channel: 'browser_local', detail: { status: 'success', escalate: null, confirmsEmpty: 'http' } })
+    expect(decisions(run.ladderTrace)[1]).toMatchObject({ event: 'ladder_step', channel: 'browser_local', detail: { status: 'success', escalate: null, confirmsEmpty: 'http' } })
     expect([...browserbase.calls, ...steel.calls]).toEqual([])
   })
 

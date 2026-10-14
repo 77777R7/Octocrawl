@@ -293,6 +293,21 @@ describe('resilientFetch: transport errors', () => {
     expect((await aborted).deadlineExceeded).toBeUndefined()
   })
 
+  it('says the egress proxy refused the tunnel apart from the site, with the proxy\'s status', async () => {
+    const refused = Object.assign(new Error('Proxy response (402) !== 200 when HTTP Tunneling'), { name: 'ProxyConnectError' })
+    const out = await resilientFetch(U, scripted([refused]))
+    expect(out.failureReason).toBe('connection_error')
+    expect(out.trace).toContainEqual(expect.objectContaining({ event: 'egress_proxy_refused', detail: { status: 402 } }))
+    // A proxy's 5xx can be its failing to reach the site: not said to be the proxy's refusal.
+    const unreachable = await resilientFetch(U, scripted([Object.assign(new Error('Proxy response (502) !== 200 when HTTP Tunneling'), { name: 'ProxyConnectError' })]))
+    expect(unreachable.trace.some((event) => event.event === 'egress_proxy_refused')).toBe(false)
+    const login = await resilientFetch(U, scripted([Object.assign(new Error('Proxy response (407) !== 200 when HTTP Tunneling'), { name: 'ProxyConnectError' })]))
+    expect(login.trace).toContainEqual(expect.objectContaining({ event: 'egress_proxy_refused', detail: { status: 407 } }))
+    // Any other connection failure is not the proxy's.
+    const other = await resilientFetch(U, scripted([Object.assign(new Error('socket hang up'), { name: 'SocketError' })]))
+    expect(other.trace.some((event) => event.event === 'egress_proxy_refused')).toBe(false)
+  })
+
   it('maps other thrown errors to connection_error', async () => {
     const f = scripted([new Error('ECONNREFUSED')])
     const out = await resilientFetch(U, f)

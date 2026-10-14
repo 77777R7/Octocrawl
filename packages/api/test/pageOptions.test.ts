@@ -187,8 +187,8 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     const url = `${origin}/nav-only`
     const blocked = (await post('/v1/scrape', { url, formats: ['markdown', 'html'], includeTags: ['table'] })).body
     expect(blocked).toMatchObject({ status: 'blocked', blockReason: 'login_wall', lane: 'browser_local', markdown: null, html: null, channelsTried: ['http', 'browser_local'] })
-    expect(blocked.ladderTrace.map((event: { event: string; channel: string }) => [event.event, event.channel])).toEqual([['ladder_step', 'http'], ['ladder_empty_answer_dropped', 'http'], ['ladder_step', 'browser_local']])
-    expect(blocked.ladderTrace[1].detail).toEqual({ dropped: 'http', blockedAt: 'browser_local', blockReason: 'login_wall' })
+    expect(blocked.ladderTrace.filter((event: { event: string }) => event.event !== 'ladder_channel_started').map((event: { event: string; channel: string }) => [event.event, event.channel])).toEqual([['ladder_step', 'http'], ['ladder_empty_answer_dropped', 'http'], ['ladder_step', 'browser_local']])
+    expect(blocked.ladderTrace.filter((event: { event: string }) => event.event !== 'ladder_channel_started')[1].detail).toEqual({ dropped: 'http', blockedAt: 'browser_local', blockReason: 'login_wall' })
     expect((await post('/v1/scrape', { url, formats: ['markdown'], includeTags: ['table'], debug: false })).body).toMatchObject({ status: 'blocked', blockReason: 'login_wall', markdown: null })
     expect((await post('/fc/v1/scrape', { url, includeTags: ['table'] })).body).toMatchObject({ success: false, error: 'blocked: login_wall', data: { markdown: null } })
     // A page that reads well keeps its empty answer without asking the browser rung at all.

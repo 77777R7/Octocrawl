@@ -56,6 +56,10 @@
 //   falseSuccess   the API answered `success` and a data predicate failed: content was claimed
 //                  that the task's target data does not support.
 //   observed       HTTP status, status, reason, lane, channels tried, gate-related trace events.
+//   rungs          (octocrawl) each rung the ladder started, with the run's time left at its start; the local rungs it
+//                  left out and why; whether the egress proxy itself refused a connection; the route that delivered
+//                  the answer. The record sums them up. Three attempts in a row the proxy refused stop the run, and the
+//                  record says so: a spent plan or a dead proxy is not the sites' failure.
 //   intervention   what the run asked for (--access, cold or warm) and the lane and egress the
 //                  answer recorded.
 //   suspected      always { cause: 'unknown', confidence: 'not_isolated' } here. A run through the
@@ -322,6 +326,26 @@ function ladderSkipsOf(doc) {
   })
 }
 
+/**
+ * Where the answer's time went by rung, and who answered: each rung the ladder started with the run's time it had left
+ * (`ladder_channel_started`), each local rung it left out with why (`ladder_channel_not_served`), whether the egress
+ * proxy itself refused a connection (`egress_proxy_refused`) and the route that delivered the answer. Null fields when
+ * the answer carries no ladder trace (an API before these events).
+ */
+function rungsOf(doc) {
+  const ladder = Array.isArray(doc?.ladderTrace) ? doc.ladderTrace : null
+  // The answer's trace is its last rung's alone; the ladder's warning covers every rung, so either says it.
+  const refused = (doc?.trace ?? []).filter((t) => t.event === 'egress_proxy_refused')
+  const warned = (doc?.warnings ?? []).some((w) => w?.code === 'egress_proxy_refused')
+  const warnedStatus = Number(/\(HTTP (\d{3})\)/.exec((doc?.warnings ?? []).find((w) => w?.code === 'egress_proxy_refused')?.message ?? '')?.[1])
+  return {
+    rungs: ladder === null ? null : ladder.filter((t) => t.event === 'ladder_channel_started').map((t) => ({ channel: t.channel, remainingMs: t.detail?.remainingMs ?? null })),
+    notServed: ladder === null ? null : ladder.filter((t) => t.event === 'ladder_channel_not_served').map((t) => ({ channel: t.channel, reason: t.detail?.reason ?? null })),
+    proxyRefused: refused.length === 0 && !warned ? null : { count: refused.length, status: refused.map((t) => t.detail?.status).find((v) => typeof v === 'number') ?? (Number.isInteger(warnedStatus) ? warnedStatus : null) },
+    deliveredBy: doc?.evidenceRecord?.access?.route ?? null,
+  }
+}
+
 /** The answer's robots.txt verdict, and with a disallow its rules or why robots.txt could not be read; null when it records no robots check. */
 function robotsOf(doc) {
   const events = [...(doc?.trace ?? []), ...(doc?.ladderTrace ?? [])]
@@ -398,7 +422,7 @@ async function attempt(task, temperature) {
       gateEvents: events.filter((e) => /gate|blocked|challenge|quality|client_rendered|identity|robots/.test(e)),
       markdownChars: typeof doc?.markdown === 'string' ? doc.markdown.length : null,
       ...(doc?.requestCost === undefined ? {} : { requestCost: doc.requestCost }),
-      ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc), ladderSkips: ladderSkipsOf(doc), robots: robotsOf(doc) } : {}),
+      ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc), ladderSkips: ladderSkipsOf(doc), robots: robotsOf(doc), ...rungsOf(doc) } : {}),
       // The product's own verdict on the task's contract (ADR 0006); null when none was sent or the answer has none.
       productVerification: typeof doc?.verification?.status === 'string' && doc.verification.status !== 'not_requested' ? doc.verification.status : null,
       // Whether the page was ready for its task (ADR 0007), and the browser's last wait for its region; null when the answer has none.
@@ -466,14 +490,26 @@ if (rejudgeDir !== undefined) {
   environment.tasksSha256 = prior.environment.tasksSha256
   priorRun = prior
 }
-for (const task of rejudgeDir === undefined ? tasks : []) {
+// Three attempts in a row that the egress proxy itself refused stop the run: a spent plan or a dead proxy would
+// otherwise write every later task down as the site's failure (2026-10-14, Webshare's 402 bandwidthlimit).
+const PROXY_REFUSED_STOP = 3
+let proxyRefusedInARow = 0
+let stoppedEarly = null
+tasksLoop: for (const task of rejudgeDir === undefined ? tasks : []) {
   for (const temperature of warm ? ['cold', 'warm'] : ['cold']) {
     const row = await attempt(task, temperature)
     rows.push(row)
     await appendFile(linesFile, JSON.stringify(row) + '\n')
-    console.log(scrub(`${task.id} ${temperature} ${row.outcome.verified ? 'verified' : 'not verified'} ${row.observed.status ?? '-'} ${row.observed.reason ?? ''}`))
+    console.log(scrub(`${task.id} ${temperature} ${row.outcome.verified ? 'verified' : 'not verified'} ${row.observed.status ?? '-'} ${row.observed.reason ?? ''}${row.observed.proxyRefused ? ` (egress proxy refused${row.observed.proxyRefused.status === null ? '' : `, ${row.observed.proxyRefused.status}`})` : ''}`))
+    proxyRefusedInARow = row.observed.proxyRefused && !row.outcome.verified ? proxyRefusedInARow + 1 : 0
+    if (proxyRefusedInARow >= PROXY_REFUSED_STOP) {
+      stoppedEarly = `the egress proxy refused ${PROXY_REFUSED_STOP} attempts in a row (last ${task.id}); the run stopped after ${rows.length} of ${tasks.length * (warm ? 2 : 1)} attempts`
+      console.log(stoppedEarly)
+      break tasksLoop
+    }
   }
 }
+if (stoppedEarly !== null) environment.stoppedEarly = stoppedEarly
 
 // The product judged each attempt by the predicates sent with it, so it is compared with the
 // runner's verdict on those same predicates: the run's own, not a rejudge's.
@@ -549,6 +585,29 @@ if (recordFile !== undefined) {
     return `${judged.length} (held on ${judged.filter((w) => w.ready).length}${scrolled.length === 0 ? '' : `; scrolled on ${scrolled.length}, held on ${scrolled.filter((w) => w.ready).length} of them`})${why.length === 0 ? '' : `; not judged on ${waits.length - judged.length} (${why.join(', ')})`}`
   }
   const usedCell = (c) => [...('proxyBytes' in c ? [`${c.proxyBytes === null ? 'unknown' : c.proxyBytes} B${c.proxyCountry ? ` ${c.proxyCountry}` : ''}`] : []), ...('solves' in c ? [`${c.solves === null ? 'unknown' : c.solves} solved`] : [])]
+  // Where each rung began with how much of the run's time left, who delivered, which rung was left out and why, and the
+  // proxy's own refusals, for runs whose answers carry the ladder's events.
+  const rungsRecorded = rows.some((r) => Array.isArray(r.observed.rungs))
+  const rungLines = (temp) => {
+    const r = rows.filter((x) => x.temperature === temp && Array.isArray(x.observed.rungs))
+    const median = (xs) => { const s = xs.filter((v) => typeof v === 'number').sort((a, b) => a - b); return s.length === 0 ? null : s[Math.floor((s.length - 1) / 2)] }
+    const channels = [...new Set(r.flatMap((x) => x.observed.rungs.map((g) => g.channel)))]
+    const entered = channels.map((c) => {
+      const left = r.flatMap((x) => x.observed.rungs.filter((g) => g.channel === c).map((g) => g.remainingMs))
+      const known = left.filter((v) => typeof v === 'number')
+      return `${c} on ${left.length}${known.length === 0 ? '' : ` (time left at its start: median ${median(known)} ms, least ${Math.min(...known)} ms)`}`
+    })
+    const delivered = new Map()
+    for (const x of r) if (x.outcome.verified) delivered.set(x.observed.deliveredBy ?? 'unknown', (delivered.get(x.observed.deliveredBy ?? 'unknown') ?? 0) + 1)
+    const notServed = r.flatMap((x) => (x.observed.notServed ?? []).map((n) => `${x.taskId} (${n.channel}: ${n.reason})`))
+    const refused = r.filter((x) => x.observed.proxyRefused).map((x) => `${x.taskId}${x.observed.proxyRefused.status === null ? '' : ` (${x.observed.proxyRefused.status})`}`)
+    return [
+      `- Rungs started (${temp}, the ladder's \`ladder_channel_started\`): ${entered.length === 0 ? 'none' : entered.join('; ')}`,
+      `- Verified answers by the route that delivered them (${temp}): ${delivered.size === 0 ? 'none' : [...delivered].map(([route, n]) => `${route} ${n}`).join(', ')}`,
+      `- Local rungs left out (${temp}, \`ladder_channel_not_served\`): ${notServed.length === 0 ? 'none' : notServed.join('; ')}`,
+      `- Egress proxy refused a connection (${temp}, \`egress_proxy_refused\`): ${refused.length === 0 ? 'none' : refused.join(', ')}`,
+    ]
+  }
   // Each disallow by its rules or why robots.txt could not be read, for runs that recorded the verdict.
   const robotsRecorded = rows.some((r) => r.observed.robots !== undefined && r.observed.robots !== null)
   const robotsLine = (temp) => {
@@ -577,6 +636,8 @@ if (recordFile !== undefined) {
     ...(Object.values(totals).some((t) => 'paidCalls' in t) ? [''] : []),
     ...(readinessColumn ? [...Object.keys(totals).map((temp) => `- Readiness (${temp}, ADR 0007): ${readinessCounts(temp)}; region waits: ${regionCounts(temp)}`), ''] : []),
     ...(skipsRecorded ? [...Object.keys(totals).map(skipsLine), ''] : []),
+    ...(rungsRecorded ? [...Object.keys(totals).flatMap(rungLines), ''] : []),
+    ...(environment.stoppedEarly ? [`- **Stopped early:** ${environment.stoppedEarly}. The attempts not run are not in the denominator.`, ''] : []),
     ...(robotsRecorded ? [...Object.keys(totals).map(robotsLine), ''] : []),
     `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}${readinessColumn ? ' Readiness |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}${readinessColumn ? ' --- |' : ''}`,
