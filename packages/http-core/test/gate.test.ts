@@ -180,6 +180,21 @@ describe('classifyGate — captcha widgets are distinct from interstitials', () 
     ).toBe('captcha')
   })
 
+  it('classifies a captcha the site serves itself, by its own widget script and its ask, as captcha', () => {
+    // As studylib.net's "Security Check" (2026-10-15): a 403 past Cloudflare's challenge, the site's own widget.
+    const page = (script: string, text: string) => `<html><head><title>Security Check</title>${script}</head><body><h1>${text}</h1>` +
+      '<p>We have detected unusual traffic from your network. Please complete the security check to continue.</p><div id="captcha"></div></body></html>'
+    const script = '<script src="https://site.test/captcha/assets/widget.js"></script>'
+    expect(classifyGate(res({ status: 403, body: page(script, 'Please Verify You Are Human') }))).toEqual({
+      reason: 'captcha', signals: ['site_captcha_script', 'text_verify_you_are_human', 'text_complete_the_security_check'],
+    })
+    // The ask without the site's widget stays a bot gate; the widget's script without an ask is no captcha page.
+    expect(classifyGate(res({ status: 403, body: page('', 'Please Verify You Are Human') }))?.reason).toBe('bot_detected_generic')
+    expect(classifyGate(res({ status: 403, body: `<html><head>${script}</head><body><h1>Contact us</h1></body></html>` }))?.reason).not.toBe('captcha')
+    // Judged as the challenge wait judges (decisive evidence only), it is unchanged.
+    expect(classifyGate(res({ status: 403, body: page(script, 'Please Verify You Are Human'), contentful: true }))).toBeNull()
+  })
+
   it('prefers the Cloudflare verdict when a managed challenge also embeds Turnstile', () => {
     // Vendor plumbing wins over the widget: the interstitial is the gate, and
     // its escalation path (run the JS) differs from a widget needing a person.
