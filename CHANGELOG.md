@@ -21,6 +21,16 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- A page DataDome or Cloudflare let through is no longer read as a block.
+  - DataDome sends `x-datadome: protected` on every page of a site it guards, the pages it lets through included. That header alone now names a block only on an answer that is not a success. DataDome's real block (a 403 with `x-datadome-cid` and `x-dd-b`) and its interstitial and captcha pages are still caught.
+  - Cloudflare's `precursor` script, which it serves on the page past its challenge, no longer counts as a challenge, the same as its `jsd` script already did.
+  - This affects every lane. On the full 92-task set, main verified 43 and this change 42; the real-site batch L was 12/12 on both. The tasks that differ are explained in the [acceptance record](research/access/runs/2026-10-14-installed-chrome-acceptance-7b56397b.md).
+- The `installed_chrome` acceptance on the 16 challenge tasks:
+  - The final commit verified 11 and 7 in two runs, and the commit before it 11 and 9. The probe the route was built from verified 12 and 12. As merged, before the fixes here, the rung verified 2.
+  - In the run of 7, the four tasks it lost all showed the sites' real 403 challenge after the full wait.
+  - [Record](research/access/runs/2026-10-14-installed-chrome-acceptance-7b56397b.md).
+- The `installed_chrome` rung waits for a check that clears itself, as the route was measured. A page with decisive challenge evidence (a vendor's challenge header or plumbing, its widget, a wall) is re-read once a second for up to 20 s and never clicked, and the page it gives way to is read. A page that only loads a captcha script for a form is not waited on. Before this, the rung answered `blocked` as soon as it saw the challenge, which the probe it was built from never did. The trace event `challenge_wait` records the outcome.
+
 - The `installed_chrome` access route (ADR 0005, enhanced). A grant that names `installed_chrome` adds a rung after the browser lane for requests with `access: "enhanced"`.
   - **The launch.** The rung launches the Google Chrome installed on the machine the way it was measured to get through checks the bundled Chromium did not: headed, a fresh temporary profile per page, and the DevTools port on `127.0.0.1`, closed to pages.
   - **How it reads.** Playwright drives that Chrome over CDP and reads in Chrome's own window with Chrome's own identity.

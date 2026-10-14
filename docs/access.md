@@ -80,6 +80,7 @@ octocrawl serve --access-grant grant.json
   - **How Chrome is launched.** As it was measured: a window of its own and a fresh temporary profile, deleted after the page. Its DevTools port listens on `127.0.0.1` only and refuses pages (no `--remote-allow-origins`). Your own Chrome profile is never used.
   - **How it reads.** Playwright drives Chrome over that port and reads in the window Chrome opened. It sends Chrome's own User-Agent and sets no locale, timezone or window size.
   - **Where it runs.** Standard mode, on a local server only; a hosted server refuses a grant that names it.
+  - **A check that clears itself.** When the page shows a challenge or bot check, the rung re-reads it once a second for up to 20 s, as the route was measured, and never clicks or types. If the check gives way to the page, that page is read; if not, the answer is `blocked` as usual. The trace's `challenge_wait` says which, and how long it waited.
   - **What it does not take.** Requests with `actions`, a screenshot, `mobile`, custom `headers` or `skipTlsVerification` stay off it.
   - **Limits.** At most two of its windows are open at once. A proxy that needs a login is refused, since Chrome takes no proxy credentials on its command line.
   - **Finding Chrome.** It looks where Google Chrome installs on macOS, Windows and Linux; `W2L_CHROME_PATH` names another executable. Without Chrome, the answer carries a `browser_not_installed` warning that says to install it.

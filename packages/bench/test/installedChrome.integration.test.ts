@@ -15,9 +15,20 @@ let server: FixtureServer
 /** A page of another origin that tries to open the browser's DevTools WebSocket, as a hostile page would. */
 let attacker: Server
 let attackerUrl = ''
+const ARTICLE = `<!doctype html><title>Tide tables</title><main><h1>Tide tables</h1>${'<p>The harbour office records tide height, wind and visibility for every hour of the day, and the ledger is kept for the whole year.</p>'.repeat(6)}</main>`
+/** A Cloudflare-style managed challenge: 403 with cf-mitigated until its script sets a cookie and reloads (/clears), or for ever (/holds). */
+const CHALLENGE = `<!doctype html><title>Just a moment...</title><p>Checking your browser before accessing the site.</p>`
 beforeAll(async () => {
   server = await startFixtureServer()
-  attacker = createServer((_req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html><title>attacker</title><p>page</p>') })
+  attacker = createServer((req, res) => {
+    if (req.url?.startsWith('/clears') && (req.headers.cookie ?? '').includes('cleared=1')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ARTICLE); return }
+    if (req.url?.startsWith('/widget')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ARTICLE.replace('</main>', '</main><script src="https://www.google.com/recaptcha/api.js?render=abc"></script><noscript>Please enable JavaScript</noscript><p>Please wait</p>')); return }
+    if (req.url?.startsWith('/clears') || req.url?.startsWith('/holds')) {
+      const script = req.url.startsWith('/clears') ? `<script>setTimeout(() => { document.cookie = 'cleared=1; path=/'; location.reload() }, 1500)</script>` : ''
+      res.writeHead(403, { 'content-type': 'text/html', 'cf-mitigated': 'challenge' }); res.end(CHALLENGE + script); return
+    }
+    res.writeHead(200, { 'content-type': 'text/html' }); res.end('<!doctype html><title>attacker</title><p>page</p>')
+  })
   await new Promise<void>((resolve) => attacker.listen(0, '127.0.0.1', resolve))
   const address = attacker.address()
   attackerUrl = `http://127.0.0.1:${typeof address === 'object' && address !== null ? address.port : 0}/`
@@ -94,6 +105,29 @@ describe('installed_chrome: the browser lane on it', () => {
       const again = await subject.fetch(`${server.url}/static/article`)
       expect(again.status).toBe('success')
       expect(again.trace.filter((event) => event.event === 'browser_engine')).toHaveLength(1)
+    } finally {
+      await subject.teardown()
+    }
+  }, 90_000)
+
+  it('waits out a check that clears itself, reading the page it then shows, and stops waiting at the deadline for one that does not', async () => {
+    const subject = new BrowserLocalSubject('standard', null, true, undefined, null, undefined, null, undefined, undefined, null, false, undefined, 'installed_chrome', 'actual', seams)
+    try {
+      const cleared = await subject.fetch(`${attackerUrl}clears`)
+      expect(cleared).toMatchObject({ status: 'success', evidence: { httpStatus: 200 } })
+      expect(cleared.markdown).toContain('Tide tables')
+      expect(cleared.trace).toContainEqual(expect.objectContaining({ event: 'challenge_wait', detail: expect.objectContaining({ blockReason: 'cloudflare_challenge', outcome: 'cleared' }) }))
+      const started = Date.now()
+      const held = await subject.fetch(`${attackerUrl}holds`, Date.now() + 9_000)
+      expect(held).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge' })
+      expect(held.trace).toContainEqual(expect.objectContaining({ event: 'challenge_wait', detail: expect.objectContaining({ outcome: 'still_gated' }) }))
+      expect(Date.now() - started).toBeLessThan(12_000)
+      // An ordinary page that loads a captcha script for a form, or says "please wait", is not waited on.
+      const widgetStarted = Date.now()
+      const widget = await subject.fetch(`${attackerUrl}widget`)
+      expect(widget.status).toBe('success')
+      expect(widget.trace.some((event) => event.event === 'challenge_wait')).toBe(false)
+      expect(Date.now() - widgetStarted).toBeLessThan(15_000)
     } finally {
       await subject.teardown()
     }

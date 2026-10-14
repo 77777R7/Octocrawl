@@ -186,6 +186,40 @@ function contextCookie(c: { name: string; value: string; domain: string; path: s
   return { name: c.name, value: c.value, domain: c.domain, path: c.path, expires: c.expires, httpOnly: c.httpOnly, secure: c.secure, sameSite: c.sameSite }
 }
 
+/** The checks a real Chrome may get through by waiting: they run their own script and load the page (ADR 0005). */
+const WAITABLE_GATES: ReadonlySet<string> = new Set(['cloudflare_challenge', 'bot_detected_generic', 'captcha'])
+/** How long installed_chrome waits for such a check, as measured (research/access/probe-cdp.mjs read for 20 s). */
+export const CHALLENGE_WAIT_MAX_MS = 20_000
+const CHALLENGE_POLL_MS = 1_000
+
+/**
+ * Wait for the check the page shows to clear by itself: the page is read once a second, never clicked or typed into,
+ * until the document it shows is no check, CHALLENGE_WAIT_MAX_MS at most and never into the capture's reserve. Null
+ * when the page shows no check worth waiting for.
+ */
+async function waitOutChallenge(page: Page, documents: MainFrameDocuments, response: Response | null, execution: ExecutionContext, signal: AbortSignal | undefined): Promise<{ blockReason: string; outcome: 'cleared' | 'still_gated'; ms: number } | null> {
+  const gateNow = async () => {
+    const answered = reported(documents.shown() ?? { url: page.url(), response, kind: 'document' }).response
+    const body = await page.content().catch(() => null)
+    // A page in the middle of loading the next document is not judged: it is read again on the next poll.
+    if (body === null) return undefined
+    // Only decisive evidence (a vendor's challenge header or plumbing, its widget, a wall): a page that merely loads a
+    // captcha script for a form, or says "please wait", is no check to wait out, and would never stop looking like one.
+    return classifyGate({ status: answered?.status() || 200, header: (name) => answered?.headers()[name.toLowerCase()] ?? null, body, contentful: true })
+  }
+  const first = await raceWithSignal(gateNow(), signal)
+  if (first === undefined || first === null || !WAITABLE_GATES.has(first.reason)) return null
+  const started = Date.now()
+  const until = Math.min(started + CHALLENGE_WAIT_MAX_MS, execution.deadlineAt === undefined ? Number.POSITIVE_INFINITY : execution.deadlineAt - CAPTURE_RESERVE_MS - CHALLENGE_POLL_MS)
+  while (Date.now() + CHALLENGE_POLL_MS <= until) {
+    await abortableSleep(CHALLENGE_POLL_MS, signal)
+    throwIfExecutionStopped(execution)
+    const now = await raceWithSignal(gateNow(), signal)
+    if (now === null) return { blockReason: first.reason, outcome: 'cleared', ms: Date.now() - started }
+  }
+  return { blockReason: first.reason, outcome: 'still_gated', ms: Date.now() - started }
+}
+
 /**
  * installed_chrome's User-Agent, read from the window Chrome opened on about:blank (no request goes out): a context of
  * its own would open a second window on the person's screen (ADR 0005: at most 2), and Chrome's own window is the one
@@ -907,6 +941,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
               trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'amazon_variant_followup', detail: { selectedAsin: variant.selectedAsin, requestedAsin: requestedAmazonAsin, url: followupUrl } })
               continue
             }
+          }
+        }
+        // installed_chrome (ADR 0005): a check that clears itself in a real Chrome (Cloudflare's managed challenge, a bot
+        // check whose script runs and reloads the page) is waited out, as the route was measured. The page is only read
+        // again, never touched; what it shows when the wait ends is read as any page is.
+        if (this.browserEngine === 'installed_chrome') {
+          const waited = await waitOutChallenge(page, documents, response, execution, signal)
+          if (waited !== null) {
+            trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'challenge_wait', detail: waited })
+            if (waited.outcome === 'cleared') await settle(remainingTimeout(execution, 1_500))
           }
         }
         break
