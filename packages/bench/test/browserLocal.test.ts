@@ -68,6 +68,15 @@ beforeAll(async () => {
           'document.getElementById("grid").insertAdjacentHTML("beforeend", "<ul><li>Drill one $99.00</li><li>Drill two $149.00</li><li>Drill three $199.00</li><li>Drill four $249.00</li></ul>") }).observe(document.getElementById("grid"))</script>' +
           '</body></html>',
       )
+    } else if (req.url === '/fetching-below') {
+      // A results list still fetching, its message one can see below a tall header, filled 2.5 s after load: still loading.
+      const items = Array.from({ length: 6 }, (_, i) => `<li>Result ${i + 1}: a drill with a price of $${(i + 1) * 20}</li>`).join('')
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><main><h1>Search results</h1><div style="height:1400px">Filters and sorting for the query.</div>' +
+          '<div id="results"><span>Search Results Fetching...</span></div></main>' +
+          `<script>setTimeout(function () { document.getElementById("results").innerHTML = "<ul>${items}</ul>" }, 2500)</script></body></html>`,
+      )
     } else if (req.url === '/lazy-skeleton') {
       // As Etsy's home page (T005): little text on the first screen, and below it carousels whose placeholders say
       // "Loading" to screen readers until they are scrolled to, when their prices load.
@@ -493,6 +502,10 @@ describe('BrowserLocalSubject transport', () => {
         expect(loaded.trace, path).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
         expect(loaded.warnings ?? [], path).not.toContainEqual(expect.objectContaining({ code: 'page_still_loading' }))
       }
+      // A loader one can see below the screen is still waited for: the page is not read before its list arrives.
+      const below = await subject.fetch(`${url}/fetching-below`)
+      expect(below.markdown).toContain('Result 6: a drill with a price of $120')
+      expect(below.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
       // Loading words and signs on a finished page, and a loader left on a page with plenty of text, are not waited for.
       for (const path of ['/not-loading', '/rich-loader']) {
         const done = await subject.fetch(`${url}${path}`)

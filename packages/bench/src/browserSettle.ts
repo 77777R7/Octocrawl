@@ -42,10 +42,11 @@ export const LOADING_PROBE = `(() => {
     const shown = (el) => {
       const box = el.getBoundingClientRect()
       if (box.width < 1 || box.height < 1 || box.right <= 0 || box.bottom <= 0) return false
-      // Wholly below the screen: a placeholder that loads when it is scrolled to (Etsy's home carousels say "Loading" to
-      // screen readers until then, T005 on 2026-10-14), not the page loading what it shows. Counting it, the region wait
-      // waited for it and never scrolled.
-      if (box.top >= window.innerHeight) return false
+      // A screen-reader-only text (1 px square) wholly below the screen: a placeholder that loads when it is scrolled to
+      // (Etsy's home carousels say "Loading" so until then, T005 on 2026-10-14), not the page loading what it shows.
+      // Counting it, the region wait waited for it and never scrolled. A loader one can see stays one, below the screen
+      // too (a results list still fetching under a tall header), and so does a screen-reader text in view (a spinner's).
+      if (box.width <= 1 && box.height <= 1 && box.top >= window.innerHeight) return false
       if (typeof el.checkVisibility === 'function') return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
       const style = getComputedStyle(el)
       return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
