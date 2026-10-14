@@ -74,3 +74,9 @@ Label: `product`. The [acceptance record](2026-10-14-installed-chrome-acceptance
 - More than two runs per exit, or runs spread over a day.
 - A pinned (sticky) residential exit per page.
 - Other Chrome versions.
+
+## Corrections
+
+- 2026-10-14: "Its address was 103.142.140.136" names one address, and the record reads as if Clash had a single exit. It does not: four later runs left from four addresses in 103.142.140.0/24 ([Clash stability record](2026-10-14-installed-chrome-clash-stability-aad87f9f.md)).
+  - The comparison is between a data-centre pool and a residential gateway that rotates per connection, not a fixed exit and a rotating one.
+  - The per-guard pattern this record found does not depend on that.
