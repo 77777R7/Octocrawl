@@ -28,6 +28,8 @@
 //                `verification` is recorded beside the runner's own verdict: the record says on how many attempts they
 //                agreed and names each one where they did not. --no-contract sends none (an API before task verification
 //                refuses the key). A competitor is never sent one.
+//   --request    (octocrawl) a JSON object of request options added to every task's own, for an A/B on one option
+//                (e.g. '{"blockAds":false}'); the summary and the record name it. A competitor is never sent it.
 //   --raw-html   (octocrawl) asks each answer for its `rawHtml` too and saves it beside its Markdown, under the run's
 //                git-ignored pages/ (<task>-<attempt>.html), never in the record: the page as the lane read it, for a
 //                page whose Markdown leaves a question (a shell with no data: a block, or data that never came). An
@@ -126,6 +128,8 @@ const sendContract = !args.includes('--no-contract')
 const saveRawHtml = args.includes('--raw-html')
 const saveResponses = args.includes('--save-responses')
 const access = flag('--access') === undefined ? undefined : JSON.parse(flag('--access'))
+const extraRequest = flag('--request') === undefined ? null : JSON.parse(flag('--request'))
+if (extraRequest !== null && (typeof extraRequest !== 'object' || Array.isArray(extraRequest))) throw new Error('--request is a JSON object of request options')
 const recordFile = flag('--record')
 const rejudgeDir = flag('--rejudge')
 const api = process.env.W2L_API_URL ?? 'http://127.0.0.1:8787'
@@ -133,6 +137,7 @@ const target = flag('--target') ?? 'octocrawl'
 const TARGETS = { octocrawl: 'the local Octocrawl API', firecrawl: 'Firecrawl Cloud, POST /v2/scrape (proxy auto, maxAge 0, storeInCache false)', zenrows: 'ZenRows Fetch API, GET /v1/ (mode=auto, response_type=markdown)' }
 if (!(target in TARGETS)) throw new Error(`--target must be one of ${Object.keys(TARGETS).join(', ')}`)
 if (target !== 'octocrawl' && flag('--access') !== undefined) throw new Error('--access is an Octocrawl option; a competitor runs with its own strongest route')
+if (target !== 'octocrawl' && extraRequest !== null) throw new Error('--request is an Octocrawl option')
 
 
 const taskText = await readFile(join(here, 'tasks.v1.json'), 'utf8')
@@ -383,7 +388,7 @@ function chargedOf(doc) {
 async function attempt(task, temperature) {
   const formats = task.request?.formats ?? ['markdown']
   const asked = target === 'octocrawl' && saveRawHtml && !formats.includes('rawHtml') ? { ...(task.request ?? {}), formats: [...formats, 'rawHtml'] } : task.request ?? {}
-  const body = { url: task.url, ...asked, maxAge: 0, ...(access === undefined ? {} : { access }), ...(target === 'octocrawl' && sendContract ? { verify: { checks: task.predicates } } : {}) }
+  const body = { url: task.url, ...asked, ...(extraRequest ?? {}), maxAge: 0, ...(access === undefined ? {} : { access }), ...(target === 'octocrawl' && sendContract ? { verify: { checks: task.predicates } } : {}) }
   const started = Date.now()
   let doc = null, apiStatus = null, error = null, waitedMs = 0
   try {
@@ -553,7 +558,7 @@ const finishedAt = priorRun?.finishedAt ?? new Date().toISOString()
 const command = priorRun?.command ?? `node research/access/run-set.mjs ${args.join(' ')}`
 const hasWarm = rows.some((r) => r.temperature === 'warm')
 const totals = { cold: summary('cold'), ...(hasWarm ? { warm: summary('warm') } : {}) }
-await writeFile(join(runDir, rejudgeDir === undefined ? 'summary.json' : `summary.rejudged-${rejudgeStamp}.json`), JSON.stringify({ command, environment, finishedAt, set: priorRun?.set ?? setFilter, access: priorRun?.access ?? access ?? null, totals, ...(rejudged === null ? {} : { rejudged }) }, null, 2))
+await writeFile(join(runDir, rejudgeDir === undefined ? 'summary.json' : `summary.rejudged-${rejudgeStamp}.json`), JSON.stringify({ command, environment, finishedAt, set: priorRun?.set ?? setFilter, access: priorRun?.access ?? access ?? null, request: priorRun?.request ?? extraRequest, totals, ...(rejudged === null ? {} : { rejudged }) }, null, 2))
 
 if (recordFile !== undefined) {
   const fmt = (v) => (v === null ? 'unknown' : String(v))
@@ -625,7 +630,7 @@ if (recordFile !== undefined) {
     `- Source commit: \`${environment.commit}\`${environment.dirty ? ' (working tree had uncommitted changes)' : ''}`,
     `- Network: ${environment.proxied ? `proxied (HTTPS_PROXY=${environment.proxyEnv.HTTPS_PROXY ?? ''}, HTTP_PROXY=${environment.proxyEnv.HTTP_PROXY ?? ''}, NO_PROXY=${environment.proxyEnv.NO_PROXY ?? ''}${environment.proxyCredentialsRemoved.length === 0 ? '' : `; credentials and query of ${environment.proxyCredentialsRemoved.join(', ')} not recorded`})` : 'direct'}`,
     `- Target: ${TARGETS[environment.target ?? 'octocrawl']}${(environment.target ?? 'octocrawl') === 'octocrawl' ? '' : ' (the network line is the driver\'s way to its API; the provider fetches from its own cloud)'}`,
-    `- API: ${(environment.target ?? 'octocrawl') === 'octocrawl' ? environment.api : 'the provider\'s'}; access option: ${(priorRun === null ? access ?? null : priorRun.access) === null ? 'none' : `\`${JSON.stringify(priorRun === null ? access : priorRun.access)}\``}`,
+    `- API: ${(environment.target ?? 'octocrawl') === 'octocrawl' ? environment.api : 'the provider\'s'}; access option: ${(priorRun === null ? access ?? null : priorRun.access) === null ? 'none' : `\`${JSON.stringify(priorRun === null ? access : priorRun.access)}\``}${(priorRun === null ? extraRequest : priorRun.request ?? null) === null ? '' : `; request options added to every task: \`${JSON.stringify(priorRun === null ? extraRequest : priorRun.request)}\``}`,
     `- Exit address: ${environment.exitIp ?? 'not recorded'}`,
     `- Run: ${environment.startedAt} → ${finishedAt}`,
     `- Tasks: ${rows.filter((r) => r.temperature === 'cold').length} (set \`${priorRun?.set ?? setFilter}\`${only ? `, only ${only.join(', ')}` : ''}); task file SHA-256 at fetch time: ${environment.tasksSha256 === undefined ? 'not recorded (run before the hash was added)' : `\`${environment.tasksSha256}\``}; method in the header of run-set.mjs`, '',
