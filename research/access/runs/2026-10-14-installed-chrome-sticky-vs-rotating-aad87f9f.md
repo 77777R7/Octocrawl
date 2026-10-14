@@ -64,3 +64,9 @@ A task-level fixed exit (an "egress lease") is not, on this evidence, a way to g
 - More than two rounds per mode, or rounds on other days.
 - Sticky sessions on Cloud Run.
 - The bandwidth used. Webshare's dashboard has it; this record does not.
+
+## Corrections
+
+- 2026-10-14: The opening calls Clash "the fixed Clash exit". It is not one fixed address. Four runs the same afternoon left from four addresses in 103.142.140.0/24 ([Clash stability record](2026-10-14-installed-chrome-clash-stability-aad87f9f.md)).
+  - So the contrast that motivated this test, a rotating gateway against a fixed exit, was weaker than stated.
+  - The test itself, sticky against rotating on the same gateway, and its result stand.

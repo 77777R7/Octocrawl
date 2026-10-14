@@ -48,7 +48,7 @@ Label: `product`. The final commit of #493 verified 11 and then 7 of the 16 chal
 - **Six runs of this code on Clash now give 11, 7, 10, 10, 11 and 8: a mean of 9.5 of 16, and a spread of 7 to 11.** The run of 7 in the acceptance record was the low end of this spread, not a broken exit.
 - **The tasks fall into three groups:**
   - **Six held every time:** T001, T034, T047, T049, T053, B008.
-  - **Five held sometimes:** T002, T046, T076, B001 three times; T071 twice; T038 once. All the variance between runs comes from these, and from which of Cloudflare's or DataDome's checks let this run's address through.
+  - **Six held sometimes:** T002, T046, T076, B001 three times; T071 twice; T038 once. The run-to-run differences in the total come from these six. On each failure, the page showed Cloudflare's or DataDome's check. These runs do not show why the same task met a check in one run and not in another.
   - **Four never held:** T005, T045, T048 and T068.
 - **T005 is a false success every time.** Etsy's home page comes back `success` while its data checks fail; the product's own `verification` says `failed` each time.
   - It is the one repeatable false success in this set. A candidate fix is to give the region wait more time once a check has cleared: in the acceptance runs, the wait reached its 10 s limit while the page was still loading.
@@ -59,3 +59,9 @@ Label: `product`. The final commit of #493 verified 11 and then 7 of the 16 chal
 - Different times of day or days. Runs 3 and 4 were back to back.
 - Whether the Clash address changes within a run.
 - The bandwidth used.
+
+## Corrections
+
+- 2026-10-14:
+  - "Five held sometimes" corrected to "Six"; the list always named six tasks.
+  - The sentence after it said all the variance came from which checks let "this run's address" through. That claimed a cause the runs do not show, and it now says only what they show.
