@@ -89,6 +89,20 @@ beforeAll(async () => {
           'document.getElementById("placeholder").outerHTML = "<ul><li>Mug $18.00</li><li>Scarf $32.00</li><li>Lamp $64.00</li><li>Ring $85.00</li><li>Print $12.00</li></ul>" }).observe(document.getElementById("grid"))</script>' +
           '</body></html>',
       )
+    } else if (req.url === '/nav-prices') {
+      // As one variant of Etsy's home page (T005, 2026-10-14): prices on the first screen outside the main content (here a
+      // deals strip in the header), and the listing's own prices further down, loaded as it comes into view.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><header><nav><ul><li><a href="/d1">Deals from $5</a></li><li><a href="/d2">Gifts under $10</a></li><li><a href="/d3">Mugs from $12</a></li>' +
+          '<li><a href="/d4">Prints from $15</a></li><li><a href="/d5">Rings from $20</a></li><li><a href="/d6">Lamps from $25</a></li></ul></nav></header>' +
+          '<main><article><h1>Shop the season</h1><p>Find handmade gifts, vintage pieces and custom work from independent makers, picked for the season and for everyone on your list.</p>' +
+          '<p>Every piece below is made by a small shop, and many can be personalised before they ship.</p>' +
+          '<div style="height: 3000px"></div><section id="grid"><h2>Popular right now</h2></section></article></main>' +
+          '<script>new IntersectionObserver(function (entries, observer) { if (!entries[0].isIntersecting) return; observer.disconnect(); ' +
+          'document.getElementById("grid").insertAdjacentHTML("beforeend", "<ul><li>Stoneware mug $18.00</li><li>Wool scarf $32.00</li><li>Brass lamp $64.00</li><li>Signet ring $85.00</li><li>Botanical print $12.00</li></ul>") }).observe(document.getElementById("grid"))</script>' +
+          '</body></html>',
+      )
     } else if (req.url === '/delayed') {
       // Part of the article is in the HTML; the rest arrives two seconds after load.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -1146,6 +1160,11 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
       expect(skeleton.markdown).toContain('$85.00')
       expect(skeleton.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: true, loading: false, checks: [{ passed: true, observedCount: 5 }] })
       expect(Number(skeleton.trace.find((event) => event.event === 'region_wait')?.detail?.scrolls)).toBeGreaterThan(0)
+      // Prices outside the main content (a deals strip in the header) do not end the wait: it judges the main content the
+      // answer will hold too, scrolls on, and the answer has the listing's own prices (T005's variant).
+      const nav = await subject.fetch(`${url}/nav-prices`, Date.now() + 30_000, undefined, undefined, { verify: { checks: [{ type: 'markdownCountMin', pattern: '\\$\\d', min: 5 }] } })
+      expect(nav.markdown).toContain('$85.00')
+      expect(Number(nav.trace.find((event) => event.event === 'region_wait')?.detail?.scrolls)).toBeGreaterThan(0)
       // A screenshot of the same request is the top of the page, as without the contract: the wait scrolled back.
       const shot = (out: Awaited<ReturnType<typeof subject.fetch>>) => out.screenshot?.base64
       const plainShot = await subject.fetch(`${url}/lazy-grid`, Date.now() + 30_000, undefined, undefined, { screenshot: {} })

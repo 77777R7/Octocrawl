@@ -40,6 +40,13 @@ const MARKDOWN_CHECKS: ReadonlySet<string> = new Set(['markdownIncludes', 'markd
 export interface RegionSpec {
   contract: VerifyContract
   list?: { itemSelector: string; fields: readonly ListField[] }
+  /**
+   * The Markdown the answer will hold, made from the live page's HTML as the lane makes it (its main content, by
+   * default); null when it cannot tell (no main content found). Set by a lane whose answer is not the whole page: the
+   * Markdown checks, once they hold on the whole page, must hold on this too, so a wait does not end on data the answer
+   * leaves out (T005, 2026-10-14: six prices on the page, none in its main content).
+   */
+  answerMarkdown?: (html: string, href: string) => string | null
 }
 
 /**
@@ -219,6 +226,8 @@ export class RegionTracker {
   private readonly needsMarkdown: boolean
   /** The last HTML converted and its Markdown: a page that did not change is not converted again. */
   private converted: { html: string; markdown: string } | null = null
+  /** The same for the answer's Markdown (spec.answerMarkdown). */
+  private answered: { html: string; markdown: string | null } | null = null
   private last: Omit<RegionOutcome, 'waitedMs' | 'reads' | 'judged' | 'contractSha256'> = { ready: false, empty: false, loading: false, steady: null, checks: [] }
   judgeable = true
   unjudged: RegionUnjudged | undefined
@@ -249,7 +258,12 @@ export class RegionTracker {
     this.judged++
     const markdown = this.markdownOf(view)
     const verifyView: VerifyView = { status: 'success', tableCount: view.tableCount ?? 0, ...(markdown === undefined ? {} : { markdown }), ...(view.list === undefined ? {} : { list: view.list }) }
-    const verification = verify(this.spec.contract, verifyView, { partial: true })
+    let verification = verify(this.spec.contract, verifyView, { partial: true })
+    // Held on the whole page: judged again on what the answer will hold, and its counts are the ones the wait reports.
+    if (verification.status === 'passed' && markdown !== undefined) {
+      const answerMarkdown = this.answerMarkdownOf(view)
+      if (answerMarkdown !== undefined && answerMarkdown !== null) verification = verify(this.spec.contract, { ...verifyView, markdown: answerMarkdown }, { partial: true })
+    }
     const checks = verification.status === 'not_requested' ? [] : verification.checks.map(({ index, type, passed, observedCount }) => ({ index, type, passed, ...(observedCount === undefined ? {} : { observedCount }) }))
     // The first judged view decides whether the page can judge the contract at all.
     if (this.judged === 1 && checks.every((check) => check.passed === null)) {
@@ -278,6 +292,13 @@ export class RegionTracker {
     if (!this.needsMarkdown || typeof view.html !== 'string' || view.html.length > MAX_VIEW_HTML) return undefined
     if (this.converted?.html !== view.html) this.converted = { html: view.html, markdown: htmlToMarkdown(view.html, { baseUrl: view.href }) }
     return this.converted.markdown
+  }
+
+  /** The answer's Markdown of the live page (spec.answerMarkdown); undefined when the lane gave none or the page is too large. */
+  private answerMarkdownOf(view: RegionView): string | null | undefined {
+    if (this.spec.answerMarkdown === undefined || typeof view.html !== 'string' || view.html.length > MAX_VIEW_HTML) return undefined
+    if (this.answered?.html !== view.html) this.answered = { html: view.html, markdown: this.spec.answerMarkdown(view.html, view.href ?? '') }
+    return this.answered.markdown
   }
 
   outcome(): RegionOutcome {
