@@ -19,7 +19,7 @@ for (const attempt of attempts) {
       if (rung && event.event === 'gate_detected') detail.gate = `${event.detail.status}:${(event.detail.signals ?? []).join(',')}`
       if (rung && event.event === 'navigate_failed') detail.error = String(event.detail?.error ?? '').slice(0, 160)
     }
-    detail = { ...detail, status: doc.status, route: doc.evidenceRecord?.access?.route ?? null, tried: doc.channelsTried, wallMs: Math.round(doc.usage?.wallMs ?? 0) }
+    detail = { ...detail, status: doc.status, reason: doc.failureReason ?? doc.blockReason ?? null, route: doc.evidenceRecord?.access?.route ?? null, tried: doc.channelsTried, wallMs: Math.round(doc.usage?.wallMs ?? 0), ...(attempt.observed?.proxyRefused ? { proxyRefused: attempt.observed.proxyRefused } : {}), ...(attempt.observed?.rungs ? { rungs: attempt.observed.rungs } : {}) }
   } catch (error) { detail.read = String(error).slice(0, 120) }
   console.log(JSON.stringify({ id, verified: attempt.outcome?.verified === true, falseSuccess: attempt.outcome?.falseSuccess === true, ...detail }))
 }

@@ -331,6 +331,11 @@ export interface FetchWarning {
    * browser is installed where Octocrawl runs (`browser_unavailable` in that
    * rung's trace); the answer is another rung's, and
    * `npx playwright install chromium` lets the browser lane start.
+   * `egress_proxy_refused`: no page was read and a rung's connection was
+   * refused by the egress proxy itself (`egress_proxy_refused` in its trace:
+   * a spent plan, a bad login, a proxy that is down), not by the site; the
+   * HTTP rung names the proxy's status (402, 403 or 407), a browser only its
+   * proxy error; said only when every rung that ran was refused so.
    * `screenshot_unavailable`: the `screenshot` format was asked for and the
    * browser lane rendered the page but could not capture it
    * (`screenshot_failed` in the trace); `screenshot` is null and the page

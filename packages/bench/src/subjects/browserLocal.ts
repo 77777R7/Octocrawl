@@ -233,6 +233,14 @@ async function openedWindowUserAgent(browser: Browser): Promise<string> {
   return ua
 }
 
+/**
+ * The Chrome network error that says the egress proxy itself failed (unreachable, or its login), or null for any other
+ * failure. ERR_TUNNEL_CONNECTION_FAILED is not one: Chrome gives it too when the proxy could not reach the site.
+ */
+export function chromeProxyError(err: unknown): string | null {
+  return err instanceof Error ? /net::(ERR_PROXY_CONNECTION_FAILED|ERR_PROXY_AUTH_UNSUPPORTED|ERR_PROXY_AUTH_REQUESTED|ERR_NO_SUPPORTED_PROXIES)\b/.exec(err.message)?.[1] ?? null : null
+}
+
 async function closeWithin(closing: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   const settled = closing.then(() => true, () => true)
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -1408,6 +1416,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
       })
       // No browser to start: a new install that has not run `npx playwright install chromium`. Still a connection_error
       // (no page was read), and the ladder tells the caller what to run (browserNotInstalledWarning).
+      // Chrome names a proxy that failed or refused its login, not the proxy's status: said apart from the site's failures.
+      const proxyError = chromeProxyError(err)
+      if (proxyError !== null) trace.push({ at: wallMs, lane: 'browser_local', event: 'egress_proxy_refused', detail: { status: null, error: proxyError } })
       if (browserNotInstalled(err)) trace.push({ at: wallMs, lane: 'browser_local', event: 'browser_unavailable', detail: { engine: this.browserEngine, install: browserInstallCommand(this.browserEngine) } })
       return {
         requestedUrl: url,

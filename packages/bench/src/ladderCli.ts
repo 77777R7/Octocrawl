@@ -310,8 +310,14 @@ export function buildChannels(
       waitsFor: true,
       // The Chrome reads the page as it opened it (ADR 0005): no actions, screenshot, phone identity, added headers or
       // relaxed certificate check, each of which would drive or dress the window beyond what was measured.
-      serves: (_url: string, options: FetchOptions) => (options.actions?.length ?? 0) === 0 && options.screenshot === undefined && options.mobile !== true
-        && Object.keys(options.headers ?? {}).length === 0 && options.skipTlsVerification !== true,
+      refusal: (_url: string, options: FetchOptions) => {
+        const asked = [
+          ...((options.actions?.length ?? 0) > 0 ? ['actions'] : []), ...(options.screenshot !== undefined ? ['screenshot'] : []),
+          ...(options.mobile === true ? ['mobile'] : []), ...(Object.keys(options.headers ?? {}).length > 0 ? ['headers'] : []),
+          ...(options.skipTlsVerification === true ? ['skipTlsVerification'] : []),
+        ]
+        return asked.length === 0 ? null : `installed_chrome reads the page as Chrome opened it and takes no ${asked.join(', ')} (ADR 0005)`
+      },
       fetch: (url: string, _session: SessionSnapshot | null | undefined, execution?: ExecutionContext, options?: FetchOptions) =>
         installedChrome.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume }),
       close: () => installedChrome.teardown(),

@@ -68,6 +68,11 @@ export interface Channel {
    */
   serves?(url: string, options: FetchOptions): boolean
   /**
+   * Why this rung does not take this URL with these options, or null when it does; preferred over `serves` when both
+   * are set. The ladder records it (`ladder_channel_not_served`), so a run says why a rung never ran.
+   */
+  refusal?(url: string, options: FetchOptions): string | null
+  /**
    * Run the channel against url, optionally with a user session attached. A
    * channel that sets a robots.txt rule aside (`options.robotsOverride`) says
    * so through `execution.onRobotsOverride` before its request goes out.
@@ -250,6 +255,25 @@ export function browserNotInstalledWarning(command: string = BROWSER_INSTALL_COM
   // The installed_chrome rung (ADR 0005) needs Google Chrome itself, which no npx command installs.
   if (command === INSTALLED_CHROME_INSTALL) return { code: 'browser_not_installed', message: `the installed_chrome rung could not start: Google Chrome is not installed where Octocrawl runs; ${command}` }
   return { code: 'browser_not_installed', message: `the browser lane could not start: Chromium is not installed where Octocrawl runs; run ${command} once` }
+}
+
+/**
+ * The warning a run carries when a rung's connection was refused by the egress proxy itself (`egress_proxy_refused` in
+ * its trace) and no page was read: a spent plan, a bad login or a proxy that is down, not the site. HTTP rungs name the
+ * proxy's status; a browser names only its tunnel error.
+ */
+export function egressProxyRefusedWarning(status: number | null): FetchWarning {
+  return { code: 'egress_proxy_refused', message: `the egress proxy refused the connection${status === null ? '' : ` (HTTP ${status})`}, so no page was read: this failure is the proxy's, not the site's; check the proxy (its login, its plan or its bandwidth)` }
+}
+
+function withEgressProxyRefused(result: FetchResult, attempts: readonly { result: FetchResult }[]): FetchResult {
+  if (result.status !== 'failed' || result.markdown !== null || result.warnings?.some((warning) => warning.code === 'egress_proxy_refused') === true) return result
+  // Only when every rung that ran was refused by the proxy: a rung that failed on its own (a provider on its own
+  // network, a site that timed out) is not the proxy's failure.
+  if (attempts.length === 0 || !attempts.every((attempt) => attempt.result.trace.some((event) => event.event === 'egress_proxy_refused'))) return result
+  const refused = attempts.flatMap((attempt) => attempt.result.trace).filter((event) => event.event === 'egress_proxy_refused')
+  const status = refused.map((event) => event.detail?.status).find((value): value is number => typeof value === 'number') ?? null
+  return { ...result, warnings: [...(result.warnings ?? []), egressProxyRefusedWarning(status)] }
 }
 
 function withBrowserNotInstalled(result: FetchResult, attempts: readonly { result: FetchResult }[]): FetchResult {
@@ -486,7 +510,7 @@ export class LadderRunner {
     throwIfExecutionStopped(execution)
     const decision = evaluateGovernance(url, this.policy)
     const finish = (answer: FetchResult, handoffRequested: boolean): LadderRunResult => {
-      const result = withBrowserNotInstalled(answer, attempts)
+      const result = withEgressProxyRefused(withBrowserNotInstalled(answer, attempts), attempts)
       const summary = summarize(channelsTried, attempts)
       return {
         result,
@@ -550,7 +574,15 @@ export class LadderRunner {
 
     const permitted = new Set(decision.permittedChannels)
     // Local lanes first, in declaration order, then providers (history-ranked).
-    const local = this.channels.filter((c) => c.vendorId === undefined && permitted.has(c.id) && (c.serves?.(url, options) ?? true))
+    // A local rung that does not take this URL with these options is left out. One that says why (`refusal`) is named
+    // in the trace; the http/http_compat pair, which split every host between them (`serves`), is not.
+    const local = this.channels.filter((c) => {
+      if (c.vendorId !== undefined || !permitted.has(c.id)) return false
+      if (c.refusal === undefined) return c.serves?.(url, options) ?? true
+      const refused = c.refusal(url, options)
+      if (refused !== null) ladderTrace.push({ at: 0, event: 'ladder_channel_not_served', channel: c.id, detail: { reason: refused } })
+      return refused === null
+    })
     const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id))
 
     let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers), execution.signal))]
@@ -624,7 +656,12 @@ export class LadderRunner {
           return finish(identityBlock, false)
         }
         const startedAt = new Date().toISOString()
-        const fetched = await this.paidFetch(channel, channel.id, url, effectiveSession, execution, options, progress, () => channelsTried.push(channel.id))
+        // When each rung was called and how much of the run's time it had left: a rung reached late fails for want of time.
+        // Said as the call goes out, so a provider rung passed over for its price or budget is not counted as started.
+        const fetched = await this.paidFetch(channel, channel.id, url, effectiveSession, execution, options, progress, () => {
+          channelsTried.push(channel.id)
+          ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_channel_started', channel: channel.id, detail: { vendorId: channel.vendorId ?? null, remainingMs: execution.deadlineAt === undefined ? null : Math.max(0, execution.deadlineAt - Date.now()) } })
+        })
         if (fetched === null) continue
         const result = fetched
         attempts.push(attemptOf(channel, channel.id, result, attempts.length + 1, startedAt))

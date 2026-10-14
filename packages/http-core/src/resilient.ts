@@ -23,6 +23,9 @@ import { abortableSleep, createExecutionScope, raceWithSignal, remainingTimeout,
  * maxAttempts 2 means exactly one retry — matching this definition.
  */
 
+/** A proxy's own answers to CONNECT that say it refused the tunnel, not that it could not reach the site. */
+const PROXY_REFUSAL_STATUSES: ReadonlySet<number> = new Set([402, 403, 407])
+
 export type UrlGuard = (url: string) => Promise<void>
 
 /** Undici may wrap a connector rejection as the cause of its socket error. */
@@ -306,6 +309,12 @@ export async function resilientFetch(
                     : 'connection_error'
         const code = errorCode(err)
         trace.push({ at, event: 'request_failed', detail: { reason, error: name || String(err), ...(code === null ? {} : { code }) } })
+        // The egress proxy itself refused the tunnel: a spent plan (402), a bad login (407) or a refusal of its own (403),
+        // said apart from the site's failures. A 5xx can be the proxy failing to reach the site, so it is not said.
+        if (name === 'ProxyConnectError' && err instanceof Error) {
+          const status = Number(/Proxy response \((\d{3})\)/.exec(err.message)?.[1])
+          if (PROXY_REFUSAL_STATUSES.has(status)) trace.push({ at, event: 'egress_proxy_refused', detail: { status } })
+        }
         return {
           kind: 'failure',
           status: null,

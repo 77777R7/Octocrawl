@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
 import { browserNotInstalled, browserInstallCommand } from '../src/browserInstall.js'
+import { chromeProxyError } from '../src/subjects/browserLocal.js'
 import {
   AVOID_PORTS, chromeCandidates, DETECTION_FLAGS, findInstalledChrome, freeDebuggingPort, INSTALLED_CHROME_INSTALL,
   InstalledChromeMissingError, installedChromeArgs, WindowGate,
@@ -65,6 +66,16 @@ describe('installed_chrome: the narrowed launch (ADR 0005, 2026-10-13 revision)'
     expect(port).toBeGreaterThan(0)
     expect(AVOID_PORTS.has(port)).toBe(false)
     expect(AVOID_PORTS.has(8791)).toBe(true)
+  })
+})
+
+describe('the egress proxy refusing Chrome', () => {
+  it('is told by Chrome\'s tunnel and proxy errors alone', () => {
+    expect(chromeProxyError(new Error('page.goto: net::ERR_PROXY_CONNECTION_FAILED at https://example.com/'))).toBe('ERR_PROXY_CONNECTION_FAILED')
+    // Chrome gives the tunnel error too when the proxy could not reach the site: not said to be the proxy's.
+    expect(chromeProxyError(new Error('page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://example.com/'))).toBeNull()
+    expect(chromeProxyError(new Error('page.goto: net::ERR_CONNECTION_REFUSED at https://example.com/'))).toBeNull()
+    expect(chromeProxyError('net::ERR_TUNNEL_CONNECTION_FAILED')).toBeNull()
   })
 })
 
