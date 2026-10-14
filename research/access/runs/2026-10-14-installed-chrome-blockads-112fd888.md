@@ -54,3 +54,11 @@ Label: `product`. The probe the installed_chrome route was built from (12 and 12
 
 - Other exits, other days, more than four runs per arm.
 - Which CDP call, if any, DataDome reacts to.
+
+## Corrections
+
+- 2026-10-14: the lead above did not hold. A follow-up A/B tested what this record left as the one remaining difference: ad blocking off in both arms, a CDP session with `Network.enable` forced in one ([record](2026-10-14-installed-chrome-cdp-session-aca819b8.md)). It found no effect, 35 of 64 in each arm.
+  - That run's B configuration was the same as this record's B. It verified 35 of 64 two hours later, against 47 here, and T046 went from 3 of 4 to 0 of 4.
+  - B's lead here is therefore best read as run-to-run variation, not an effect of ad blocking or of the session.
+  - The next step this record proposed was done. Neither default changes.
+
