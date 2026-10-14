@@ -42,6 +42,8 @@ describe('Top navigation', () => {
 
   it('lists what the home page says Octocrawl does, and every guide and reference page', () => {
     expect(NAV_CAPABILITIES).toHaveLength(CAPABILITIES.length)
+    // Mapping a site leads where it can be tried at once: the Link Extractor, which lists a site's pages.
+    expect(NAV_CAPABILITIES.find(item => item.title === 'Map a site')?.href).toBe('/tools/link-extractor/')
     const nav = siteNavMarkup()
     for (const page of pages.filter(p => p.group !== 'Project')) expect(nav).toContain(`>${page.title}<`)
   })

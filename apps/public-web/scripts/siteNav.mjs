@@ -8,11 +8,11 @@ import { pages } from './docsPages.mjs'
 const esc = text => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const pathFor = page => page.slug ? `/docs/${page.slug}/` : '/docs/'
 
-/** What Octocrawl does, as on the home page's What it does section, each with where to read more: its product page
- * where it has one (scraping: /scrape/), otherwise a guide. */
+/** What Octocrawl does, as on the home page's What it does section, each with where to read more or try it: its
+ * product page or free tool where it has one (scraping: /scrape/; mapping: the Link Extractor), otherwise a guide. */
 export const NAV_CAPABILITIES = [
   { glyph: '▤', title: 'Scrape a page', text: 'Markdown, tables and fields from one URL', href: '/scrape/' },
-  { glyph: '├', title: 'Map a site', text: 'Every URL in its sitemap and links', href: '/blog/find-all-pages-on-a-website/' },
+  { glyph: '├', title: 'Map a site', text: 'Find all pages on a website', href: '/tools/link-extractor/' },
   { glyph: '»', title: 'Crawl and batch', text: 'Follow links, or read up to 1,000 URLs', href: '/blog/scrape-list-of-urls/' },
   { glyph: '◷', title: 'Watch a page', text: 'What changed, to your HTTPS webhook', href: '/docs/guides/monitor-webhook/' },
   { glyph: '●', title: 'Your own Chrome', text: 'Pages signed in as you, checks you pass', href: '/blog/scrape-website-with-login/' },
