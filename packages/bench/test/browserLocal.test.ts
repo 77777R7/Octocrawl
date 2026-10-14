@@ -68,6 +68,18 @@ beforeAll(async () => {
           'document.getElementById("grid").insertAdjacentHTML("beforeend", "<ul><li>Drill one $99.00</li><li>Drill two $149.00</li><li>Drill three $199.00</li><li>Drill four $249.00</li></ul>") }).observe(document.getElementById("grid"))</script>' +
           '</body></html>',
       )
+    } else if (req.url === '/lazy-skeleton') {
+      // As Etsy's home page (T005): little text on the first screen, and below it carousels whose placeholders say
+      // "Loading" to screen readers until they are scrolled to, when their prices load.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><main><h1>Shop gifts</h1><p>Set the scene for the season with decor, gifts and finds from independent makers.</p>' +
+          '<div style="height: 3000px"></div><section id="grid"><h2>Popular right now</h2>' +
+          '<div id="placeholder"><div style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">Loading</div></div></section></main>' +
+          '<script>new IntersectionObserver(function (entries, observer) { if (!entries[0].isIntersecting) return; observer.disconnect(); ' +
+          'document.getElementById("placeholder").outerHTML = "<ul><li>Mug $18.00</li><li>Scarf $32.00</li><li>Lamp $64.00</li><li>Ring $85.00</li><li>Print $12.00</li></ul>" }).observe(document.getElementById("grid"))</script>' +
+          '</body></html>',
+      )
     } else if (req.url === '/delayed') {
       // Part of the article is in the HTML; the rest arrives two seconds after load.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -189,6 +201,8 @@ beforeAll(async () => {
           '<p>For forty years our crew has been loading trucks and fetching...</p>' +
           '<div role="progressbar" aria-valuenow="40" style="width:100px;height:8px;background:#ccc"></div>' +
           '<div class="skeleton" style="height:10px"></div><div class="skeleton" style="height:10px"></div><div class="skeleton" style="height:10px"></div>' +
+          // Below the screen, a placeholder telling screen readers it is loading, 1 px square, as Etsy's home carousels do (T005).
+          '<div style="margin-top:3000px"><div style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">Loading</div></div>' +
           '</main></body></html>',
       )
     } else if (req.url === '/rich-loader') {
@@ -1113,6 +1127,12 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
       expect(lazy.markdown).toContain('$249.00')
       expect(lazy.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: true, checks: [{ passed: true, observedCount: 4 }] })
       expect(Number(lazy.trace.find((event) => event.event === 'region_wait')?.detail?.scrolls)).toBeGreaterThan(0)
+      // A carousel whose placeholder says "Loading" to screen readers below the screen (T005) is scrolled to as well: the
+      // placeholder is not the page loading, so the wait does not stand waiting for it.
+      const skeleton = await subject.fetch(`${url}/lazy-skeleton`, Date.now() + 30_000, undefined, undefined, { verify: { checks: [{ type: 'markdownCountMin', pattern: '\\$\\d', min: 5 }] } })
+      expect(skeleton.markdown).toContain('$85.00')
+      expect(skeleton.trace.find((event) => event.event === 'region_wait')?.detail).toMatchObject({ ready: true, loading: false, checks: [{ passed: true, observedCount: 5 }] })
+      expect(Number(skeleton.trace.find((event) => event.event === 'region_wait')?.detail?.scrolls)).toBeGreaterThan(0)
       // A screenshot of the same request is the top of the page, as without the contract: the wait scrolled back.
       const shot = (out: Awaited<ReturnType<typeof subject.fetch>>) => out.screenshot?.base64
       const plainShot = await subject.fetch(`${url}/lazy-grid`, Date.now() + 30_000, undefined, undefined, { screenshot: {} })
