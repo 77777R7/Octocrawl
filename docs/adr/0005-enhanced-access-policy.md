@@ -152,6 +152,10 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
   - 刚合入时只过 2 道。
   - 回归对比：在同一台机器、同一个出口上，全部 92 道题 main 过 43 道、修复后过 42 道；真实站点 L 批次两边都是 12/12。差异逐题查过：多出的 1 道是 DataDome 修复的效果，少的 2 道是站点当时真的发了 Cloudflare 挑战。
   - 仍落后探针的是两道 DataDome 题（T038、T046）。
+  - **换 Webshare 住宅出口（2026-10-14）：** 两次分别过 10 道和 8 道，Clash 机房出口是 11 道和 7 道（[记录](../../research/access/runs/2026-10-14-installed-chrome-exits-3dd497ef.md)）。
+    - 两个出口输在不同的检测上：DataDome 放行住宅出口、拦机房出口，T038 和 T046 在 Webshare 上两次都过了；Cloudflare 正相反，T047、T048、B001 在 Webshare 上两次都被拦。
+    - 两个出口合起来，16 道里有 14 道至少过过一次。
+    - 按检测类型选出口还没做，这几次也没有测它。
 - **仍是后续工作。**
   - 每周重测。
   - 浏览器通道自带的一些步骤在测量里没有，验收时一起看。其中一项是用 `Network.setBlockedURLs` 屏蔽广告域名。
