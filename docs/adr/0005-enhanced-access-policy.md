@@ -113,6 +113,10 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 **使用条件。** 实现时必须满足：
 
 - **只在本地运行。** 托管服务拒绝它，和 `enhanced_browser` 一样。托管场景需要虚拟显示（Xvfb），未经测量之前不开放。
+  - **2026-10-14 在 Cloud Run 上用 Xvfb 测了一次：** 16 道只过 2 道（[记录](../../research/access/runs/2026-10-14-installed-chrome-cloudrun-xvfb-ee53419e.md)）。
+    - Chrome 每道题都正常启动并读到了页面：Xvfb 下有头运行，非 root 用户下沙箱照开。所以显示不是障碍。
+    - 失败几乎全是站点对 Cloud Run 出口地址（Google Cloud）的 403 拦截，连本地两个出口都能过的 T053 也被拒。
+    - 托管要开放，需要换一个非 Cloud Run 的出口再测，在那之前仍只在本地运行。
 - **有窗口。** 它会在使用者的机器上打开 Chrome 窗口，grant 的 attestation 要写明这一点。无头模式不作为这条路线提供，因为测量显示无效。
 - **每个任务一个新的临时 profile，放在系统临时目录下，用完删除。** 永远不用使用者自己的 Chrome profile。读取使用者自己的 Chrome 是 `my-browser` 通道；修改它属于第 1 类 `patch_user_chrome`，仍然永不做。
 - **调试端口只对驱动开放，不对网页开放。**
