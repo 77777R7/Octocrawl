@@ -2,6 +2,8 @@
 
 Hosted Octocrawl is one URL, no account: `https://mcp.octocrawl.dev/mcp`. It reads public pages (`scrape`) and lists a site's URLs (`map`) over HTTP, 20 pages a day per address; a key gives more pages a day and the browser lane. The same packages run everything on your own computer, free and without limit: crawl, batch and Monitor too. Every answer carries an Evidence Record either way.
 
+To see what `map` finds before connecting a client, try the [free online Link Extractor](/tools/link-extractor/). The guide to [finding all pages on a website](/blog/find-all-pages-on-a-website/) explains which URLs a sitemap, crawler or web archive can find and how to check the list.
+
 {{MCP_CLIENT_PICKER:remote}}
 
 ## Add a key for more
