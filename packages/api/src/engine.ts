@@ -128,7 +128,7 @@ import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlI
 import { FileSessionBrokerStore, FileSessionStore, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
 import { BLOCK_REASON, VERIFY_REGEX_CHECK_TYPES, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
-import { attributesFormat, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
+import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
 
 export interface CrawlWithSteps {
   report: CrawlReport
@@ -1728,6 +1728,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     checkSelectors(req)
     checkAttributeSelectors(req.formats)
     checkListSelectors(req.formats)
+    checkVerificationFormats(req)
     checkRobotsOverride('robotsOverride', req.robotsOverride)
     checkHostedOptions(req)
     const overallStart = performance.now()
@@ -1943,6 +1944,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkSelectors(req)
       checkAttributeSelectors(req.formats)
       checkListSelectors(req.formats)
+      checkVerificationFormats(req)
       checkHostedOptions(req)
       checkAccessChoice(req)
       const webhookConfig = jobWebhooks.check(req.webhook)
@@ -2035,6 +2037,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       checkSelectors(req)
       checkAttributeSelectors(req.formats)
       checkListSelectors(req.formats)
+      checkVerificationFormats(req)
       checkRobotsOverride('robotsOverrides', req.robotsOverrides)
       checkHostedOptions(req)
       checkAccessChoice(req)

@@ -28,7 +28,7 @@ import type {
   StructuredModelUsage,
 } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
-import { browserFingerprintFor, cacheStateOf, CONTENTFUL_STATUS, defaultApiMode, warningOf } from '@w2l/contracts'
+import { browserFingerprintFor, cacheStateOf, CONTENTFUL_STATUS, defaultApiMode, RequestError, warningOf } from '@w2l/contracts'
 import { compilePathFilter, readinessOf, toEvidenceRecord, verify } from '@w2l/runtime'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
@@ -900,14 +900,28 @@ export async function extractStructured(
   return { status: 'incomplete', data, schemaSha256, evidence, issues: [...readIssues, ...missingIssues], modelUsage: null }
 }
 
+/** minTables counts Markdown tables too; neither it nor a Markdown field check validates an omitted format. */
+function checksMarkdown(req: Pick<ScrapeRequest, 'verify'>): boolean {
+  return req.verify?.checks.some(check => check.type === 'markdownIncludes' || check.type === 'markdownMatches' ||
+    check.type === 'markdownCountMin' || check.type === 'minTables' || check.type === 'field' && check.path === 'markdown') === true
+}
+
+/** Reject an explicit response shape that discards the data its Markdown checks claim to verify. */
+export function checkVerificationFormats(req: Pick<ScrapeRequest, 'formats' | 'verify'>): void {
+  if (req.formats !== undefined && checksMarkdown(req) && !hasFormat(req.formats, 'markdown')) {
+    throw new RequestError('formats must include markdown when verify checks Markdown (minTables also checks Markdown tables); include markdown or remove those checks')
+  }
+}
+
 function requestedFormats(req: ScrapeRequest, result?: ScrapeRun): readonly ScrapeFormat[] {
   if (req.formats !== undefined) return req.formats
   // MCP marks its compact request with debug=false. Keep REST/SDK legacy
   // defaults, while returning adapter JSON (including incomplete identity
   // failures) on the simple MCP path.
   if (req.debug === false) {
-    return result?.document?.adapter.id !== undefined && result.document.adapter.id !== 'generic'
-      ? ['json'] : ['markdown']
+    const adapterJson = result?.document?.adapter.id !== undefined && result.document.adapter.id !== 'generic'
+    if (adapterJson) return checksMarkdown(req) ? ['json', 'markdown'] : ['json']
+    return ['markdown']
   }
   return ['markdown', 'links']
 }
@@ -980,6 +994,7 @@ export async function prepareScrapeResponse(
   overallStart: number,
   scrapeId: string = crypto.randomUUID(),
 ): Promise<ScrapeResponse | CompactScrapeResponse> {
+  checkVerificationFormats(req)
   const formats = requestedFormats(req, result)
   const modelStart = performance.now()
   const json = hasFormat(formats, 'json')

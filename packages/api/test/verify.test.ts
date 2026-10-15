@@ -27,6 +27,7 @@ const PAGES: Record<string, string> = {
 let server: Server
 let origin: string
 let taskRoot: string
+let articleReads = 0
 const engines: ApiEngine[] = []
 const policy: NetworkPolicy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
 
@@ -34,6 +35,7 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     if (req.url === '/robots.txt') { res.writeHead(404).end(); return }
     const body = PAGES[req.url ?? '']
+    if (req.url === '/article') articleReads++
     if (body === undefined) { res.writeHead(404, { 'content-type': 'text/html' }).end('<!doctype html><html><body><h1>Not found</h1></body></html>'); return }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(body)
   })
@@ -63,6 +65,34 @@ const passing = { checks: [{ type: 'markdownIncludes', text: 'High water' }, { t
 const failing = { checks: [{ type: 'markdownIncludes', text: 'High water' }, { type: 'minTables', min: 1 }] }
 
 describe('task verification on a request (ADR 0006)', () => {
+  it('refuses Markdown checks when explicit formats omit their data, before fetching or creating a job', async () => {
+    const engine = engineWith()
+    const before = articleReads
+    for (const [path, target] of [
+      ['/v1/scrape', { url: `${origin}/article` }],
+      ['/v1/batches', { urls: [`${origin}/article`] }],
+      ['/v1/crawl', { url: `${origin}/article`, maxPages: 1 }],
+    ] as const) {
+      const response = await call(engine, 'POST', path, { ...target, formats: ['links'], verify: passing })
+      expect(response.status).toBe(400)
+      expect(response.json.error).toContain('formats must include markdown')
+    }
+    expect(articleReads).toBe(before)
+  })
+
+  it('also requires delivered Markdown for minTables and a field check on Markdown', async () => {
+    const engine = engineWith()
+    for (const check of [{ type: 'minTables', min: 1 }, { type: 'field', path: 'markdown', present: true }]) {
+      const response = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['tables'], verify: { checks: [check] } })
+      expect(response.status).toBe(400)
+      expect(response.json.error).toContain('formats must include markdown')
+    }
+    const plain = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['links'] })
+    expect(plain.status).toBe(200)
+    expect(plain.json.markdown ?? null).toBeNull()
+    expect(plain.json.verification.status).toBe('not_requested')
+  })
+
   it('answers with a verification beside an unchanged status, in the full and compact responses and the Evidence Record', async () => {
     const engine = engineWith()
     const passed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })
@@ -74,10 +104,10 @@ describe('task verification on a request (ADR 0006)', () => {
     expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/1', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [] })
 
     // The fetch succeeded and the task was not done: the status says the first, the verification the second.
-    const failed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: failing, formats: ['links'], debug: false })
+    const failed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: failing, formats: ['markdown', 'links'], debug: false })
     expect(failed.json).toMatchObject({ status: 'success', verification: { status: 'failed', reason: 'checks_failed', checks: [{ passed: true }, { type: 'minTables', passed: false, observedCount: 0, asked: 1, observed: '0 tables, at least 1 asked' }] } })
-    // Judged on the whole page although the response leaves its Markdown out.
-    expect(failed.json.markdown ?? null).toBeNull()
+    // The Markdown checks read is also delivered, even when a check fails.
+    expect(failed.json.markdown).toContain('High water')
     expect(validate(failed.json.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
     expect(failed.json.evidenceRecord.verification).toMatchObject({ status: 'failed', reason: 'checks_failed', failed: ['minTables'] })
 
