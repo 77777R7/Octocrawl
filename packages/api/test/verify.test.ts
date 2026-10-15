@@ -23,6 +23,7 @@ const PROSE = 'The harbour office records tide height, wind and visibility for e
 const PAGES: Record<string, string> = {
   '/blank-table': `<!doctype html><html><head><title>Historical data</title></head><body><main><h1>Historical data</h1><p>${PROSE}</p><table><thead><tr><th>Date</th><th>Close</th></tr></thead><tbody><tr><td> </td><td> </td></tr><tr><td> </td><td> </td></tr></tbody></table></main></body></html>`,
   '/filled-table': `<!doctype html><html><head><title>Historical data</title></head><body><main><h1>Historical data</h1><p>${PROSE}</p><table><thead><tr><th>Date</th><th>Close</th></tr></thead><tbody><tr><td>2026-01</td><td>0</td></tr><tr><td>2026-02</td><td>2.5</td></tr></tbody></table></main></body></html>`,
+  '/media-feed': '<!doctype html><html><head><title>Video feed</title></head><body><nav><a href="/help">Help menu</a></nav><main><div><article class="clip"><video src="/a.mp4"></video><a href="/Ada">Ada</a><p>Glass sculpture</p></article><article class="clip"><video src="/b.mp4"></video><a href="/Bo">Bo</a><p>Clay carving</p></article></div></main></body></html>',
   '/article': `<!doctype html><html lang="en"><head><title>Tide report</title></head><body><main><article><h1>Tide report</h1><p>${PROSE}</p><p>High water at 06:12, low water at 12:30.</p></article></main></body></html>`,
 }
 
@@ -92,6 +93,18 @@ describe('task verification on a request (ADR 0006)', () => {
       }
     }
     expect(articleReads).toBe(before)
+  })
+
+  it('delivers a sparse video feed through the default HTTP extraction path without an explicit list selector', async () => {
+    const response = await call(engineWith(), 'POST', '/v1/scrape', {
+      url: `${origin}/media-feed`, formats: ['markdown'], debug: false,
+      verify: { checks: [{ type: 'markdownIncludes', text: 'Glass sculpture' }, { type: 'markdownIncludes', text: 'Clay carving' }] },
+    })
+    expect(response.status).toBe(200)
+    expect(response.json.verification.status).toBe('passed')
+    expect(response.json.markdown).toContain('Glass sculpture')
+    expect(response.json.markdown).toContain('Clay carving')
+    expect(response.json.markdown).not.toContain('Help menu')
   })
 
   it('refuses Markdown checks when explicit formats omit their data, before fetching or creating a job', async () => {
