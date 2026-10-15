@@ -11,6 +11,7 @@ import { track, trackLinkClicks, trackPageView } from './analytics'
 import { mountWaitlist } from './waitlist'
 import { mountCrawlView } from './crawlView'
 import { readPreview, STAGE_STREAM } from './previewStream'
+import { taskStatus, type TaskState } from './taskStatus'
 import { buildWindow } from './windowBuild'
 import { markdownToText } from './markdownText'
 import { mountMapResults } from './tools/mapResults'
@@ -37,7 +38,7 @@ type PreviewFile = {
   pdf: { pageCount: number | null; pagesRead: number } | null
   warnings: Array<{ code: string; message: string }>
 }
-type PreviewResponse = {
+type PreviewResponse = TaskState & {
   status: PreviewStatus
   requestedUrl: string
   finalUrl: string | null
@@ -349,7 +350,8 @@ function formatDuration(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`
 }
 
-function statusText(status: PreviewStatus, product?: ProductPreview, diagnostic?: PreviewResponse['diagnostic']): string {
+function statusText(result: PreviewResponse): string {
+  const { status, product, diagnostic } = result
   if (diagnostic?.code === 'subject_mismatch') return 'Different product selected'
   if (diagnostic?.code === 'subject_conflicting') return 'Conflicting product identity'
   if (diagnostic?.code === 'quote_unverified') return 'Quote not verified'
@@ -361,7 +363,8 @@ function statusText(status: PreviewStatus, product?: ProductPreview, diagnostic?
   if (diagnostic?.code === 'challenge') return 'Verification page'
   if (status === 'success' && product?.status === 'incomplete') return 'Page read · Product fields need review'
   if (status === 'success' && product?.status === 'invalid') return 'Page read · Product fields invalid'
-  return ({ success: 'Extraction complete', incomplete: 'Partial result', blocked: 'Blocked by site', failed: 'Extraction failed', timeout: 'Timed out', invalid_url: 'Invalid URL', quota_exceeded: 'Daily limit reached' })[status]
+  if (isPageRead(result)) return taskStatus(result).label
+  return ({ success: 'Page read · Task unverified', incomplete: 'Partial result', blocked: 'Blocked by site', failed: 'Extraction failed', timeout: 'Timed out', invalid_url: 'Invalid URL', quota_exceeded: 'Daily limit reached' })[status]
 }
 
 function statusDetail(status: PreviewStatus, reason: string | null): string {
@@ -1122,8 +1125,8 @@ function runType(run: Run): string {
 function runStatus(run: Run): { text: string; tone: 'loading' | 'success' | 'partial' | 'error' } {
   const result = run.result
   if (!result) return { text: 'Extracting…', tone: 'loading' }
-  const tone = !isPageRead(result) ? 'error' : result.status === 'incomplete' || result.product && result.product.status !== 'complete' ? 'partial' : 'success'
-  return { text: statusText(result.status, result.product, result.diagnostic), tone }
+  const tone = !isPageRead(result) ? 'error' : result.status === 'incomplete' || result.product && result.product.status !== 'complete' || result.diagnostic ? 'partial' : taskStatus(result).tone
+  return { text: statusText(result), tone }
 }
 
 const VIEW_SHORT: Record<OutputView, string> = { markdown: 'Markdown', links: 'Links', info: 'Info', fields: 'Fields', json: 'JSON' }
@@ -1208,6 +1211,7 @@ function renderDetail(run: Run): void {
   else if (result.reason || result.status === 'incomplete' && !result.product) {
     content.append(textElement('p', statusDetail(result.status, result.reason), 'result-note'))
   }
+  if (isPageRead(result)) content.append(textElement('p', taskStatus(result).detail, 'result-note'))
   if (result.product) content.append(renderProduct(result.product))
   renderOutputPanel(result, 'window')
 }
@@ -1662,7 +1666,7 @@ form.addEventListener('submit', async (event) => {
     finishRun(run, result, started, !crawling)
     if (!crawling) return
     const hadFocus = await crawl.finish({
-      read: isPageRead(result), title: result.title, markdown: result.markdown, label: statusText(result.status, result.product, result.diagnostic),
+      read: isPageRead(result), title: result.title, markdown: result.markdown, label: statusText(result),
       reason: result.reason, skipScene: result.status === 'quota_exceeded' || result.status === 'invalid_url',
     })
     setBusy(false)

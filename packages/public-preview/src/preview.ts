@@ -1,5 +1,5 @@
 import { buildChannels, isLocalPreviewProxyTarget, LadderRunner, OriginScheduler } from '@w2l/bench'
-import { hostedNetworkPolicy, type FetchResult, type JsonValue, type NetworkPolicy, type PageMetadata, type StructuredExtractionResult, type TraceEvent } from '@w2l/contracts'
+import { hostedNetworkPolicy, type FetchResult, type JsonValue, type NetworkPolicy, type PageMetadata, type Readiness, type StructuredExtractionResult, type TraceEvent } from '@w2l/contracts'
 import { createExecutionScope } from '@w2l/http-core'
 import { extractStructured } from '@w2l/api/structured'
 import { parseHTML } from 'linkedom'
@@ -53,6 +53,10 @@ export interface PreviewFields {
 
 export interface PreviewResponse {
   status: PreviewStatus
+  /** Actual capture checks and readiness, when supplied; never inferred from fetch or JSON status. */
+  verification?: FetchResult['verification']
+  readiness?: Readiness
+  warnings?: FetchResult['warnings']
   requestedUrl: string
   finalUrl: string | null
   title: string | null
@@ -113,7 +117,7 @@ export function normalizePreviewUrl(input: unknown): NormalizedPreviewUrl {
 }
 
 export interface CaptureOutcome {
-  result: FetchResult
+  result: FetchResult & { readiness?: Readiness }
   json?: StructuredExtractionResult
   /** The fields a visitor asked for, never with a model. */
   fields?: StructuredExtractionResult
@@ -407,7 +411,7 @@ export function mapPreviewResult(requestedUrl: string, normalized: NormalizedPre
   let reason = status === 'success' ? null
     : status === 'blocked' ? robotsUnreachable ? 'This site\'s robots.txt could not be read, so W2L did not fetch the page.'
       : robotsDenied ? 'This site does not allow automated preview of this page.'
-      : result.blockReason === 'bot_detected_generic' ? 'The site returned a verification page instead of the requested content.'
+      : result.blockReason === 'bot_detected_generic' || result.blockReason === 'captcha' ? 'The site returned a verification page instead of the requested content.'
         : result.blockReason === 'login_wall' ? 'The page requires a login.'
           : 'The website blocked this request.'
       : status === 'timeout' ? 'The page did not finish loading within the preview time limit.'
@@ -420,7 +424,7 @@ export function mapPreviewResult(requestedUrl: string, normalized: NormalizedPre
     : robotsUnreachable ? { code: 'robots_unreachable', stage: 'policy', evidence: 'observed' }
     : robotsDenied ? { code: 'robots_disallowed', stage: 'policy', evidence: 'observed' }
       : result.blockReason === 'login_wall' ? { code: 'login_required', stage: 'acquisition', evidence: 'observed' }
-        : result.blockReason === 'bot_detected_generic' ? { code: 'challenge', stage: 'acquisition', evidence: 'observed' }
+        : result.blockReason === 'bot_detected_generic' || result.blockReason === 'captcha' ? { code: 'challenge', stage: 'acquisition', evidence: 'observed' }
           : result.failureReason === 'policy_denied' ? { code: 'policy_denied', stage: 'policy', evidence: 'observed' }
             : status === 'timeout' ? { code: 'timeout', stage: 'acquisition', evidence: 'unobserved' }
               : status === 'failed' ? { code: 'capture_failed', stage: 'acquisition', evidence: 'unobserved' }
@@ -451,6 +455,9 @@ export function mapPreviewResult(requestedUrl: string, normalized: NormalizedPre
     : null
   return {
     status,
+    ...(result.verification === undefined ? {} : { verification: result.verification }),
+    ...(result.readiness === undefined ? {} : { readiness: result.readiness }),
+    ...(result.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings }),
     requestedUrl,
     // A capture refused before any request (robots.txt, DNS, policy) still carries the requested URL as its final
     // URL; it was never requested, so there is none (the same rule as runtime/src/evidenceRecord.ts).
