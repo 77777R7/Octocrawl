@@ -129,6 +129,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   trace.push(...contentSelectionEvent(options, LANE, wallMs, body.length))
   const links = collectLinks(body, finalUrl)
   trace.push({ at: wallMs, lane: LANE, event: 'extract', detail: { pageType: extracted.pageType, strategy: extracted.strategy, confidence: extracted.confidence, escalate: extracted.escalate, linkCount: links.length, ...(extracted.render === undefined ? {} : { textChars: extracted.render.textChars }), ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}), ...tagOptions(options) } })
+  const sourceWarnings = sourceDataWarnings(body, finalUrl)
   let wholePage: string | null = null
   let listPage = false
   // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
@@ -138,7 +139,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     wholePage = wholePageMarkdown(body, finalUrl, options)
     listPage = listRecordsFound(body, finalUrl, options)
     if ((options.onlyMainContent !== false && !listPage) || wholePage === null) {
-      return { ...base, status: 'failed', failureReason: 'empty_unverified', blockReason: null, budgetExceeded: null, lane: LANE, escalations: [], markdown: wholePage, ...(wholePage === null ? {} : { links }) }
+      return { ...base, status: 'failed', failureReason: 'empty_unverified', blockReason: null, budgetExceeded: null, lane: LANE, escalations: [], markdown: wholePage, ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}), ...(wholePage === null ? {} : { links }) }
     }
   }
   const decisive = classifyGate({ status, header: () => null, body: whole, contentful: true })
@@ -146,7 +147,6 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, body.length))
     ? wholePage ?? htmlToMarkdown(body, { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) })
     : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
-  const sourceWarnings = sourceDataWarnings(body, finalUrl)
   const extra = extraFormats(body, finalUrl, options, trace, LANE, wallMs)
   const tables = tablesFormat(wholePageAsked(options)
     ? { html: body, options: { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }

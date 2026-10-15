@@ -19,6 +19,18 @@ const read = (html: string, extra: Partial<UserBrowserRead> = {}): UserBrowserRe
 })
 
 describe('a page read in the person\'s browser', () => {
+  it('keeps the publisher error when an empty rendered page exits before content formatting', () => {
+    const state = { page: '/browse/[...seo]', query: { seo: ['electronics', 'laptops', '123'] }, props: { pageProps: { initialData: {
+      searchResult: { itemStacks: [] }, pageMetadata: { pageContext: { browseContext: { errorResponse: { errors: [{ errorType: 'FATAL', statusCode: 'POLARIS_1001', statusMsg: 'INVALID_CAT_ID' }] } } } },
+    } } } }
+    const html = `<html><head><title>Laptops</title><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(state)}</script></head><body><nav><a href="/help">Help</a></nav><main></main></body></html>`
+    const url = 'https://www.walmart.com/browse/electronics/laptops/123'
+    const result = pageFromUserBrowser(read(html, { requestedUrl: url, finalUrl: url }), null, {})
+    expect(result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
+    expect(result.warnings).toContainEqual(expect.objectContaining({ code: 'source_data_error' }))
+    expect(readinessOf(result)).toEqual({ state: 'not_served', basis: ['source_data_error'] })
+  })
+
   it('reports a publisher-declared invalid category instead of treating it as a ready product page', () => {
     const state = { page: '/browse/[...seo]', query: { seo: ['electronics', 'laptops', '123'] }, props: { pageProps: { initialData: {
       searchResult: { itemStacks: [] }, pageMetadata: { pageContext: { browseContext: { errorResponse: { errors: [{ errorType: 'FATAL', statusCode: 'POLARIS_1001', statusMsg: 'INVALID_CAT_ID' }] } } } },

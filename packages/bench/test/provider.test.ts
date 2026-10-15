@@ -83,6 +83,17 @@ function decl(over: Partial<ProviderDeclaration> = {}): ProviderDeclaration {
 }
 
 describe('ProviderSubject robots gate', () => {
+  it('retains the source error on a provider capture with no extracted main content', async () => {
+    const state = { page: '/browse/[...seo]', query: { seo: ['electronics', 'laptops', '123'] }, props: { pageProps: { initialData: {
+      searchResult: { itemStacks: [] }, pageMetadata: { pageContext: { browseContext: { errorResponse: { errors: [{ errorType: 'FATAL', statusCode: 'POLARIS_1001', statusMsg: 'INVALID_CAT_ID' }] } } } },
+    } } } }
+    const body = `<html><head><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(state)}</script></head><body><nav><a href="/help">Help</a></nav><main></main></body></html>`
+    const { fetcher } = robotsServing('User-agent: *\nAllow: /')
+    const out = await new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher).fetch('https://www.walmart.com/browse/electronics/laptops/123')
+    expect(out).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
+    expect(out.warnings).toContainEqual(expect.objectContaining({ code: 'source_data_error' }))
+  })
+
   it('reads an explicit list task from its items even when the article cascade finds nothing', async () => {
     const body = '<html><body><nav><a href="/">Navigation</a></nav><main>' +
       [1, 2].map(n => `<div class="video"><a href="/@${n}">Author ${n}</a><span>Caption ${n}</span></div>`).join('') + '</main></body></html>'

@@ -543,6 +543,7 @@ export class ProviderSubject implements SubjectAdapter {
       },
     })
 
+    const sourceWarnings = sourceDataWarnings(res.body, res.finalUrl)
     // No main content: the whole page stays on the failed result as evidence,
     // never content. onlyMainContent: false asks for the whole page, so there
     // it is the answer; so is what includeTags names, on any page that is not
@@ -561,6 +562,7 @@ export class ProviderSubject implements SubjectAdapter {
         lane: 'provider',
         escalations: [],
         markdown: wholePage,
+        ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
         ...(wholePage === null ? {} : { links }),
       }
     }
@@ -599,7 +601,6 @@ export class ProviderSubject implements SubjectAdapter {
     }
 
     // The images and attributes formats read the page the vendor returned, like links.
-    const sourceWarnings = sourceDataWarnings(res.body, res.finalUrl)
     const extra = extraFormats(res.body, res.finalUrl, options, trace, 'provider', wallMs)
     // The tables format reads what the Markdown was written from, with the same options.
     const tables = tablesFormat(wholePageAsked(options)

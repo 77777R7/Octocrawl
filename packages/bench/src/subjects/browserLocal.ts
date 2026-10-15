@@ -1331,6 +1331,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         },
       })
 
+      const sourceWarnings = sourceDataWarnings(body, pageUrl)
       // No main content: the whole rendered page stays on the failed result
       // as evidence, never content. onlyMainContent: false asks for the whole
       // page, not the main content, so there it is the answer; so is what
@@ -1354,6 +1355,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           lane: 'browser_local',
           escalations: [],
           markdown: wholePage,
+          ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
           ...(wholePage === null ? {} : { links }),
           ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
         }
@@ -1373,7 +1375,6 @@ export class BrowserLocalSubject implements SubjectAdapter {
         ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl, exclude: options.excludeTags, ...markdownOptions(options) })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
       // The images and attributes formats read the rendered DOM as received, like links.
-      const sourceWarnings = sourceDataWarnings(body, pageUrl)
       const extra = extraFormats(body, pageUrl, options, trace, 'browser_local', wallMs)
       // The tables format reads what the Markdown was written from, with the same options.
       const tables = tablesFormat(wholePageAsked(options)
