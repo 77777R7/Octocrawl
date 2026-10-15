@@ -102,7 +102,8 @@ describe('JSON and explicit list subject agreement', () => {
     const out = await scrape(['markdown', list, 'json'], { excludeTags: ['.price'] })
     expect(out.json.status).toBe('incomplete')
     expect(out.json.data.records.every((r: any) => r.values.price === null)).toBe(true)
-    expect(JSON.stringify(out.json.data)).not.toContain('99')
+    expect(out.json.data.records.map((r: any) => r.missing)).toEqual([['price'], ['price']])
+    expect(out.json.data.records.every((r: any) => r.source.url === `${origin}/products`)).toBe(true)
   })
 
   it('keeps original match positions when a preceding record was excluded', async () => {
