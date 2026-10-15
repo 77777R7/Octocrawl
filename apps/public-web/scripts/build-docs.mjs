@@ -127,6 +127,14 @@ const REMOTE_MCP_URL = 'https://mcp.octocrawl.dev/mcp'
 const mcpClients = {
   remote: [
     {
+      id: 'codex', name: 'Codex', mode: 'Run in terminal', status: 'Verified 2026-10-13',
+      icon: 'codex.svg',
+      intro: 'Add hosted Octocrawl to Codex as a Streamable HTTP server.',
+      code: `codex mcp add octocrawl --url ${REMOTE_MCP_URL}`, language: 'bash',
+      verify: 'Run codex mcp list, open a new Codex task, then use /mcp to check that the scrape tool is available.',
+      source: 'https://learn.chatgpt.com/docs/extend/mcp',
+    },
+    {
       id: 'claude', name: 'Claude Code', mode: 'Run in terminal', status: 'Verified 2026-10-13',
       icon: 'claude-code.svg',
       intro: 'Add hosted Octocrawl to Claude Code over HTTP. Run this in the project where you use Claude Code; --scope user adds it everywhere.',
@@ -150,16 +158,16 @@ const mcpClients = {
       verify: 'Run opencode mcp list: octocrawl shows as connected. Then ask for the first task below.',
       source: 'https://opencode.ai/docs/mcp-servers',
     },
+  ],
+  local: [
     {
-      id: 'codex', name: 'Codex', mode: 'Run in terminal', status: 'Verified 2026-10-13',
+      id: 'codex', name: 'Codex', mode: 'Run in terminal', status: 'Follows the Codex docs; not run here yet',
       icon: 'codex.svg',
-      intro: 'Add hosted Octocrawl to Codex as a Streamable HTTP server.',
-      code: `codex mcp add octocrawl --url ${REMOTE_MCP_URL}`, language: 'bash',
+      intro: 'Add the stdio server to Codex.',
+      code: 'codex mcp add octocrawl -- npx -y @octocrawl/mcp', language: 'bash',
       verify: 'Run codex mcp list, open a new Codex task, then use /mcp to check that the scrape tool is available.',
       source: 'https://learn.chatgpt.com/docs/extend/mcp',
     },
-  ],
-  local: [
     {
       id: 'claude', name: 'Claude Code', mode: 'Run in terminal', status: 'Verified 2026-10-06',
       icon: 'claude-code.svg',
@@ -183,14 +191,6 @@ const mcpClients = {
       code: '{\n  "mcp": {\n    "octocrawl": {\n      "type": "local",\n      "command": ["npx", "-y", "@octocrawl/mcp"],\n      "enabled": true\n    }\n  }\n}', language: 'json',
       verify: 'Run opencode mcp list: octocrawl shows as connected. Then ask for the first task.',
       source: 'https://opencode.ai/docs/mcp-servers',
-    },
-    {
-      id: 'codex', name: 'Codex', mode: 'Run in terminal', status: 'Follows the Codex docs; not run here yet',
-      icon: 'codex.svg',
-      intro: 'Add the stdio server to Codex.',
-      code: 'codex mcp add octocrawl -- npx -y @octocrawl/mcp', language: 'bash',
-      verify: 'Run codex mcp list, open a new Codex task, then use /mcp to check that the scrape tool is available.',
-      source: 'https://learn.chatgpt.com/docs/extend/mcp',
     },
   ],
 }
