@@ -12,7 +12,8 @@ COPY research/amazon-product-schema.v1.json ./research/amazon-product-schema.v1.
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 # Chromium: the browser lane for key holders (keyless callers read over HTTP alone).
-RUN npm ci && npx playwright install --with-deps chromium && npm run typecheck
+# Compile production workspaces; test sources/configuration are excluded from this image.
+RUN npm ci && npx playwright install --with-deps chromium && npx tsc --build
 
 ENV NODE_ENV=production
 ENV PORT=8080
