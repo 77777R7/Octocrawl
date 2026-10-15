@@ -1,3 +1,4 @@
+import { sourceDataWarnings } from './sourceData.js'
 import { mergeListPages } from './listMerge.js'
 import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type ListRun, type PageAction, fileByteCap, proxyFor, type ContextCookie, type CookieSession, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
@@ -1372,6 +1373,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl, exclude: options.excludeTags, ...markdownOptions(options) })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
       // The images and attributes formats read the rendered DOM as received, like links.
+      const sourceWarnings = sourceDataWarnings(body, pageUrl)
       const extra = extraFormats(body, pageUrl, options, trace, 'browser_local', wallMs)
       // The tables format reads what the Markdown was written from, with the same options.
       const tables = tablesFormat(wholePageAsked(options)
@@ -1389,6 +1391,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         links,
         ...extra,
         ...tables,
+        ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
         metadata: extracted.metadata,
         document: {
           title: extracted.title,

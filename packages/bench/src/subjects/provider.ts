@@ -1,3 +1,4 @@
+import { sourceDataWarnings } from './sourceData.js'
 import { estimateTokens, vendorIdentityIssues, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import {
@@ -598,6 +599,7 @@ export class ProviderSubject implements SubjectAdapter {
     }
 
     // The images and attributes formats read the page the vendor returned, like links.
+    const sourceWarnings = sourceDataWarnings(res.body, res.finalUrl)
     const extra = extraFormats(res.body, res.finalUrl, options, trace, 'provider', wallMs)
     // The tables format reads what the Markdown was written from, with the same options.
     const tables = tablesFormat(wholePageAsked(options)
@@ -613,6 +615,7 @@ export class ProviderSubject implements SubjectAdapter {
       escalations: [],
       markdown,
       links,
+      ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
       metadata: extracted.metadata,
       document: {
         title: extracted.title,

@@ -1,3 +1,4 @@
+import { sourceDataWarnings } from './sourceData.js'
 /**
  * A page a person opened in their own browser, after W2L was stopped at a
  * check it does not pass (a captcha, a challenge, a login wall): read there,
@@ -145,6 +146,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, body.length))
     ? wholePage ?? htmlToMarkdown(body, { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) })
     : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
+  const sourceWarnings = sourceDataWarnings(body, finalUrl)
   const extra = extraFormats(body, finalUrl, options, trace, LANE, wallMs)
   const tables = tablesFormat(wholePageAsked(options)
     ? { html: body, options: { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
@@ -161,6 +163,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     links,
     ...extra,
     ...tables,
+    ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
     metadata: extracted.metadata,
     document: {
       title: extracted.title,
