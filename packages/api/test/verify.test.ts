@@ -21,6 +21,8 @@ const validate = new AjvClass({ allErrors: true, allowUnionTypes: true }).compil
 
 const PROSE = 'The harbour office records tide height, wind and visibility for every hour of the day and publishes them each morning. '.repeat(4)
 const PAGES: Record<string, string> = {
+  '/blank-table': `<!doctype html><html><head><title>Historical data</title></head><body><main><h1>Historical data</h1><p>${PROSE}</p><table><thead><tr><th>Date</th><th>Close</th></tr></thead><tbody><tr><td> </td><td> </td></tr><tr><td> </td><td> </td></tr></tbody></table></main></body></html>`,
+  '/filled-table': `<!doctype html><html><head><title>Historical data</title></head><body><main><h1>Historical data</h1><p>${PROSE}</p><table><thead><tr><th>Date</th><th>Close</th></tr></thead><tbody><tr><td>2026-01</td><td>0</td></tr><tr><td>2026-02</td><td>2.5</td></tr></tbody></table></main></body></html>`,
   '/article': `<!doctype html><html lang="en"><head><title>Tide report</title></head><body><main><article><h1>Tide report</h1><p>${PROSE}</p><p>High water at 06:12, low water at 12:30.</p></article></main></body></html>`,
 }
 
@@ -65,6 +67,33 @@ const passing = { checks: [{ type: 'markdownIncludes', text: 'High water' }, { t
 const failing = { checks: [{ type: 'markdownIncludes', text: 'High water' }, { type: 'minTables', min: 1 }] }
 
 describe('task verification on a request (ADR 0006)', () => {
+  it('checks required cells in the delivered table, rejecting blank data rows without changing the fetch status', async () => {
+    const engine = engineWith()
+    const verify = { checks: [{ type: 'tableRowsMin', tableIndex: 0, columns: [0, 1], min: 2 }] }
+    for (const [page, status, observedCount] of [['blank-table', 'failed', 0], ['filled-table', 'passed', 2]] as const) {
+      for (const debug of [false, true]) {
+        const response = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/${page}`, onlyMainContent: false, formats: ['tables'], verify, debug })
+        expect(response.status).toBe(200)
+        expect(response.json).toMatchObject({ status: 'success', tables: [{ tableIndex: 0, headerRows: 1 }], verification: { status, checks: [{ type: 'tableRowsMin', passed: status === 'passed', observedCount, asked: 2 }] } })
+        expect(response.json.tables[0].rows).toHaveLength(3)
+        expect(validate(response.json.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
+      }
+    }
+  })
+
+  it('requires explicit delivered tables for tableRowsMin before fetching or creating a job', async () => {
+    const engine = engineWith()
+    const before = articleReads
+    for (const [path, target] of [['/v1/scrape', { url: `${origin}/article` }], ['/v1/batches', { urls: [`${origin}/article`] }], ['/v1/crawl', { url: `${origin}/article`, maxPages: 1 }]] as const) {
+      for (const formats of [undefined, ['markdown']]) {
+        const response = await call(engine, 'POST', path, { ...target, formats, verify: { checks: [{ type: 'tableRowsMin', tableIndex: 0, columns: [0, 1], min: 1 }] } })
+        expect(response.status).toBe(400)
+        expect(response.json.error).toContain('formats must include tables')
+      }
+    }
+    expect(articleReads).toBe(before)
+  })
+
   it('refuses Markdown checks when explicit formats omit their data, before fetching or creating a job', async () => {
     const engine = engineWith()
     const before = articleReads
@@ -98,10 +127,10 @@ describe('task verification on a request (ADR 0006)', () => {
     const passed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })
     expect(passed.status).toBe(200)
     expect(passed.json.status).toBe('success')
-    expect(passed.json.verification).toMatchObject({ status: 'passed', verifier: 'verify/1', reason: null, checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true }, { index: 1, type: 'markdownCountMin', passed: true, observedCount: 2, asked: 2 }] })
+    expect(passed.json.verification).toMatchObject({ status: 'passed', verifier: 'verify/2', reason: null, checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true }, { index: 1, type: 'markdownCountMin', passed: true, observedCount: 2, asked: 2 }] })
     expect(passed.json.verification.contractSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(validate(passed.json.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
-    expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/1', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [] })
+    expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/2', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [] })
 
     // The fetch succeeded and the task was not done: the status says the first, the verification the second.
     const failed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: failing, formats: ['markdown', 'links'], debug: false })
@@ -172,7 +201,7 @@ describe('task verification on a request (ADR 0006)', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
     const [item] = (await call(engine, 'GET', `/v1/batches/${id}/items?debug=true`)).json.items as Record<string, any>[]
-    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/1', reason: 'page_not_read', checks: [] } })
+    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/2', reason: 'page_not_read', checks: [] } })
     expect(validate(item!.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
     expect(item!.evidenceRecord.verification).toMatchObject({ status: 'failed', reason: 'page_not_read', contractSha256: item!.verification.contractSha256 })
   })

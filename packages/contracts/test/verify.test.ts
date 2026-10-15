@@ -15,6 +15,7 @@ describe('a task contract on a request (verify, ADR 0006)', () => {
         { type: 'markdownCountMin', pattern: '\\$\\d', min: 5 },
         { type: 'markdownIncludes', text: 'Add to cart' },
         { type: 'minTables', min: 1 },
+        { type: 'tableRowsMin', tableIndex: 0, columns: [0, 2], min: 3 },
         { type: 'listRecordsMin', min: 10 },
         { type: 'recordFields', fields: ['name', 'price', 'url'], min: 5 },
         { type: 'field', path: 'json.data.price', min: 0 },
@@ -35,6 +36,16 @@ describe('a task contract on a request (verify, ADR 0006)', () => {
     expect(refused({ checks: Array.from({ length: MAX_VERIFY_CHECKS + 1 }, () => ({ type: 'minTables', min: 1 })) })).toContain(`1 to ${MAX_VERIFY_CHECKS} checks`)
     expect(refused([{ type: 'minTables', min: 1 }])).toContain('verify must be an object')
     expect(refused({ checks: [{ type: 'minTables', min: 1 }], emptyOk: 'yes' })).toContain('verify.emptyOk must be a boolean')
+  })
+
+  it('requires an explicit table and 1–50 distinct, bounded column indexes for tableRowsMin', () => {
+    const check = { type: 'tableRowsMin', tableIndex: 0, columns: [0, 2], min: 1 }
+    for (const columns of [[], [0, 0], [1.5], [-1], [1_000_001], ['1'], Array.from({ length: 51 }, (_, i) => i)]) {
+      expect(refused({ checks: [{ ...check, columns }] })).toContain('.columns')
+    }
+    for (const tableIndex of [undefined, -1, 1.5, 1_000_001]) expect(refused({ checks: [{ ...check, tableIndex }] })).toContain('.tableIndex')
+    expect(refused({ checks: [{ ...check, min: -1 }] })).toContain('.min')
+    expect(refused({ checks: [{ ...check, path: 'tables' }] })).toContain('.path')
   })
 
   it('compiles each pattern, takes flags from i, m, s, u and y, and refuses a pattern that can backtrack catastrophically', () => {
