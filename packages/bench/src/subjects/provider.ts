@@ -568,6 +568,7 @@ export class ProviderSubject implements SubjectAdapter {
       status: res.status,
       header: (name) => res.headers[name.toLowerCase()] ?? null,
       body: res.body,
+      finalUrl: res.finalUrl,
       contentful: true,
     })
     if (decisive !== null) return blocked(decisive)

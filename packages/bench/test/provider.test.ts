@@ -83,6 +83,15 @@ function decl(over: Partial<ProviderDeclaration> = {}): ProviderDeclaration {
 }
 
 describe('ProviderSubject robots gate', () => {
+  it('keeps the final challenge URL when judging extractable Skyscanner verification text', async () => {
+    const body = '<html><body><h1>Are you a person or a robot?</h1><p>Please don’t take this personally - some scripts and bots are remarkably lifelike these days!</p><div id="px-captcha"><iframe title="Human verification challenge"></iframe></div></body></html>'
+    const { fetcher } = robotsServing('User-agent: *\nAllow: /')
+    const transport = new CountingTransport({ body, finalUrl: 'https://www.skyscanner.net/sttc/px/captcha-v2/index.html?url=L3JvdXRlcw==' })
+    const out = await new ProviderSubject(decl(), transport, 'standard', null, fetcher).fetch('https://www.skyscanner.net/routes/lond/pari/london-to-paris.html')
+    expect(out).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+    expect(transport.calls).toHaveLength(1)
+  })
+
   it('reads an explicit list task from its items even when the article cascade finds nothing', async () => {
     const body = '<html><body><nav><a href="/">Navigation</a></nav><main>' +
       [1, 2].map(n => `<div class="video"><a href="/@${n}">Author ${n}</a><span>Caption ${n}</span></div>`).join('') + '</main></body></html>'
