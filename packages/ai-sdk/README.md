@@ -34,6 +34,10 @@ With `ai` 6, use `stepCountIs(5)` in place of `isStepCount(5)`. The tools need `
 
 `scrape` returns `status`, `requestedUrl`, `finalUrl`, `httpStatus`, `title`, the formats asked for (`markdown` by default), `warning` and `agentHints` when there are any, and `evidenceRecord`. Only `success` and `partial` carry the page's content. For the other statuses, `failureReason` or `blockReason` says why.
 
+`scrape` accepts the API's optional `verify` contract and preserves `verification` and `readiness` when the server supplies them. Ask for the formats a check reads, for example `formats: ['tables']` and `verify: { checks: [{ type: 'tableRowsMin', tableIndex: 0, columns: [0, 1], min: 1 }] }`. Output formats are unchanged; this tool does not offer list selectors or JSON extraction.
+
+Read `verification.status` separately from fetch `status`: `passed` means only the configured checks passed, `failed` needs the failed checks, readiness and access reason examined, and `not_requested` or a missing field means the task has not been verified. A successful navigation-only page is not a completed product task. Neither `success` nor extraction confidence proves field accuracy. Login walls, captchas and unavailable source data are not instructions to retry automatically. `emptyOk` permits an already verified empty result, not an unknown or unavailable one. The server enforces contract validation; hosted Octocrawl refuses regex checks and their refusal is returned without retrying.
+
 `map` returns `status`, `links` (`url`, with `title` and `description` when known), and `counts` of the URLs returned and of those left out: outside the site, disallowed by robots.txt, repeated, filtered by `search` or past `limit`.
 
 When the API refuses a call, the tool answers `{ status: 'refused', httpStatus, code, error, agentHints, retryAfterSeconds }` instead of throwing, so the model can read what to do next. A refusal can be the daily allowance used up (`quota_exhausted`, reset at 00:00 UTC), a rate limit or an invalid key. A network failure still throws.

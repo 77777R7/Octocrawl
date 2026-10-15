@@ -31,6 +31,21 @@ export interface OctocrawlToolsOptions {
 /** The scrape tool's answer: the page, how it was read, and its Evidence Record; or the API's refusal. */
 export type ScrapeToolResult = ScrapedPage | OctocrawlRefusal
 
+/** The server's task checks, not an independent accuracy verdict. Kept inline for the standalone package types. */
+export type TaskVerification = { status: 'not_requested' } | {
+  status: 'passed' | 'failed'
+  verifier: string
+  contractSha256: string
+  reason: string | null
+  checks: readonly { index: number; type: string; data: boolean; passed: boolean | null; observed: string; observedCount?: number; asked?: number }[]
+}
+
+export interface TaskReadiness {
+  state: 'ready' | 'not_loaded' | 'not_extracted' | 'not_served'
+  basis: readonly string[]
+  waitedMs?: number
+}
+
 export interface ScrapedPage {
   /** The read's outcome. Only `success` and `partial` carry the page's content; for the others failureReason or blockReason says why. */
   status: 'success' | 'partial' | 'empty_verified' | 'blocked' | 'failed' | 'cancelled' | 'budget_exceeded' | (string & {})
@@ -48,6 +63,9 @@ export interface ScrapedPage {
   warning?: string
   /** What to change next time, when the API has a suggestion. */
   agentHints?: readonly string[]
+  /** Missing on older servers; neither missing nor not_requested is verified completion. */
+  verification?: TaskVerification
+  readiness?: TaskReadiness
   truncated: boolean
   /** Evidence Record v1 (schema `w2l.evidence/1`): final URL, fetch time, HTTP status, robots.txt decision and hashes. */
   evidenceRecord: Record<string, unknown>
@@ -78,12 +96,33 @@ export interface OctocrawlRefusal {
   retryAfterSeconds: number | null
 }
 
+// Same wire checks and bounds as contracts/verify.ts and readVerify; the server remains the authority on
+// comparisons, safe regexes, format conflicts and hosted restrictions. Do not strip unknown check keys.
+const verifyText = z.string().min(1).max(1_000)
+const verifyCount = z.number().int().min(0).max(1_000_000)
+const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()])
+const pattern = { pattern: verifyText, flags: z.string().regex(/^[imsuy]*$/).optional() }
+const verifyInput = z.object({
+  checks: z.array(z.discriminatedUnion('type', [
+    z.object({ type: z.literal('markdownIncludes'), text: verifyText }).strict(),
+    z.object({ type: z.literal('markdownMatches'), ...pattern }).strict(),
+    z.object({ type: z.literal('markdownCountMin'), ...pattern, min: verifyCount }).strict(),
+    z.object({ type: z.literal('minTables'), min: verifyCount }).strict(),
+    z.object({ type: z.literal('tableRowsMin'), tableIndex: verifyCount, columns: z.array(verifyCount).min(1).max(50), min: verifyCount }).strict(),
+    z.object({ type: z.literal('listRecordsMin'), min: verifyCount, path: verifyText.optional() }).strict(),
+    z.object({ type: z.literal('recordFields'), fields: z.array(verifyText).min(1).max(50), min: verifyCount }).strict(),
+    z.object({ type: z.literal('field'), path: verifyText, equals: scalar.optional(), in: z.array(scalar).min(1).max(32).optional(), present: z.boolean().optional(), min: z.number().optional(), max: z.number().optional() }).strict(),
+  ])).min(1).max(32),
+  emptyOk: z.boolean().optional(),
+}).strict()
+
 const scrapeInput = z.object({
   url: z.string().describe('The http(s) URL of the page to read.'),
   formats: z.array(z.enum(['markdown', 'links', 'html', 'tables'])).optional()
     .describe('What to return; default ["markdown"]. html is the cleaned main-content HTML; tables gives each data table with its rows and CSV.'),
   onlyMainContent: z.boolean().optional()
     .describe('Default true: the main content without navigation, header and footer. false keeps the whole page body.'),
+  verify: verifyInput.optional().describe('Optional task checks on delivered data. passed covers only these checks, not field accuracy. emptyOk permits an already verified empty result, not missing or unavailable data. The server validates comparisons and format requirements; hosted refuses regex checks.'),
 })
 
 const mapInput = z.object({
@@ -107,7 +146,7 @@ export function octocrawlTools(options: OctocrawlToolsOptions = {}): { scrape: T
 /** Read one web page as Markdown (or links, HTML, tables), with an Evidence Record. */
 export function scrapeTool(options: OctocrawlToolsOptions = {}): Tool<ScrapeToolInput, ScrapeToolResult> {
   return tool({
-    description: 'Read one web page with Octocrawl and return it as Markdown (or links, cleaned HTML, tables), with its Evidence Record: the final URL, HTTP status, robots.txt decision and hashes of what was read. A page that is blocked, empty or not the page asked for comes back with that status and the reason, not as content. Cite finalUrl and the Evidence Record when you use the page.',
+    description: 'Read one web page with Octocrawl as Markdown (or links, cleaned HTML, tables), with its Evidence Record. status describes the fetch, not task completion: read verification.status and readiness. passed covers only configured checks, not independent field accuracy; not_requested or missing verification is unverified. On failed checks examine failureReason, blockReason and readiness; do not automatically retry login walls, captchas or unavailable data. confidence is not an accuracy probability. Cite finalUrl and the Evidence Record when using content.',
     inputSchema: scrapeInput,
     execute: async (input, { abortSignal }) => {
       const client = clientOf(options)
@@ -115,6 +154,7 @@ export function scrapeTool(options: OctocrawlToolsOptions = {}): Tool<ScrapeTool
         const response = await client.scrape(input.url, {
           formats: input.formats ?? ['markdown'],
           ...(input.onlyMainContent === undefined ? {} : { onlyMainContent: input.onlyMainContent }),
+          ...(input.verify === undefined ? {} : { verify: input.verify }),
           debug: false,
           origin: AI_SDK_ORIGIN,
         }, abortSignal === undefined ? {} : { signal: abortSignal })
@@ -159,6 +199,8 @@ interface CompactScrape {
   blockReason?: string | null
   warning?: string
   agentHints?: readonly string[]
+  verification?: TaskVerification
+  readiness?: TaskReadiness
   truncated?: boolean
   evidenceRecord: Record<string, unknown>
 }
@@ -209,6 +251,8 @@ function compactPage(response: CompactScrape): ScrapedPage {
     ...(response.blockReason == null ? {} : { blockReason: response.blockReason }),
     ...(response.warning === undefined ? {} : { warning: response.warning }),
     ...(response.agentHints === undefined || response.agentHints.length === 0 ? {} : { agentHints: response.agentHints }),
+    ...(response.verification === undefined ? {} : { verification: response.verification }),
+    ...(response.readiness === undefined ? {} : { readiness: response.readiness }),
     truncated: response.truncated === true,
     evidenceRecord: response.evidenceRecord,
   }

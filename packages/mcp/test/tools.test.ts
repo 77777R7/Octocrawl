@@ -708,6 +708,13 @@ describe('MCP tools', () => {
     expect(bodies.map((body) => body.verify)).toEqual([verify, verify, verify])
   })
 
+  it.each(['passed', 'failed', 'not_requested'])('keeps %s verification and readiness in a default MCP scrape response', async status => {
+    const verification = status === 'not_requested' ? { status } : { status, verifier: 'verify/4', contractSha256: 'contract', reason: status === 'failed' ? 'checks_failed' : null, checks: [] }
+    const response = { status: 'success', markdown: 'Navigation only', verification, readiness: { state: 'not_served', basis: ['source_data_error'] } }
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: async () => json(response) })
+    expect(await callTool(client, 'scrape', { url: 'https://example.test' })).toEqual(response)
+  })
+
   it('names scrape and scrape_product, and claims read-only only where no call can act on a page', () => {
     // scrape takes page actions and an authed mode on a server on the person's machine, so it is not read-only here.
     expect(TOOLS.find((t) => t.name === 'scrape')).toMatchObject({ annotations: { title: 'Scrape a page', openWorldHint: true } })

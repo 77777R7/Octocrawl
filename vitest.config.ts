@@ -22,6 +22,7 @@ const PERF = TESTS.map((glob) => glob.replace(/\.test\.ts$/, '.perf.test.ts'))
  */
 const TIMED = [
   'packages/*/test/**/*.integration.test.ts',
+  'apps/public-web/test/taskCompletion.integration.test.ts',
   'packages/api/test/chromeHandoff.test.ts',
   'packages/api/test/chromeLogin.test.ts',
   'packages/api/test/handoffRoute.test.ts',

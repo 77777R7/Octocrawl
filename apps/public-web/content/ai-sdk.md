@@ -56,6 +56,10 @@ Only `success` and `partial` carry the page's content. For the other statuses (`
 
 ## When a call is refused
 
+The scrape tool also accepts an optional `verify` contract, using the API's existing checks. Request the formats those checks read: for example, `formats: ['tables']` with `verify: { checks: [{ type: 'tableRowsMin', tableIndex: 0, columns: [0, 1], min: 1 }] }`.
+
+Current source preserves the server's `verification` and `readiness` beside fetch `status`; the dated response above records the older package's output. `passed` covers only configured checks, not independent field accuracy. `failed` needs its reason and readiness examined. `not_requested` or missing verification is unverified. Do not treat `success` or confidence as task completion, or automatically retry a login wall, captcha or unavailable-data page. `emptyOk` permits an already verified empty result; it does not make missing data valid. Hosted servers refuse regex checks. Check the installed package version before relying on these added fields; updating this guide does not publish a package.
+
 When the API refuses a call, the tool returns the refusal instead of throwing, so the model can read what to do next. Once the daily allowance is used up, the answer has this shape:
 
 ```json

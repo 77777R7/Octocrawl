@@ -38,6 +38,44 @@ async function endpoint(quota: PreviewQuota, capture: NonNullable<Parameters<typ
 }
 
 describe('anonymous preview contract', () => {
+  it('preserves actual task verification and readiness in the serialized preview', async () => {
+    const verification = { status: 'failed' as const, verifier: 'verify/4', contractSha256: 'contract', reason: 'checks_failed' as const, checks: [] }
+    const readiness = { state: 'not_served' as const, basis: ['source_data_error'] }
+    const base = await endpoint({ consume: async () => 'ok' }, async target => {
+      const out = fixture(target.url)
+      out.result.verification = verification
+      out.result.readiness = readiness
+      return out
+    })
+    const response = await fetch(`${base}/api/preview`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://example.test' }) })
+    expect(await response.json()).toMatchObject({ status: 'success', verification, readiness })
+  })
+
+  it('does not invent verification or readiness from a readable preview', () => {
+    const normalized = normalizePreviewUrl('https://example.test')
+    const out = mapPreviewResult(normalized.url, normalized, fixture(normalized.url), 1)
+    expect(out).not.toHaveProperty('verification')
+    expect(out).not.toHaveProperty('readiness')
+  })
+
+  it('preserves an existing structured source warning without deriving a new readiness verdict', () => {
+    const normalized = normalizePreviewUrl('https://example.test')
+    const capture = fixture(normalized.url)
+    capture.result.warnings = [{ code: 'source_data_error', message: 'Publisher reports unavailable data' }]
+    const out = mapPreviewResult(normalized.url, normalized, capture, 1)
+    expect(out.warnings).toEqual(capture.result.warnings)
+    expect(out).not.toHaveProperty('readiness')
+    expect(out).not.toHaveProperty('verification')
+  })
+
+  it('shows an existing captcha classification as a challenge without a generic blocked explanation', () => {
+    const normalized = normalizePreviewUrl('https://example.test')
+    const capture = fixture(normalized.url)
+    capture.result.status = 'blocked'
+    capture.result.blockReason = 'captcha'
+    expect(mapPreviewResult(normalized.url, normalized, capture, 1)).toMatchObject({ status: 'blocked', diagnostic: { code: 'challenge' }, reason: 'The site returned a verification page instead of the requested content.' })
+  })
+
   it('preflights a planned route without capture, quota, or a visitor cookie', async () => {
     let captures = 0
     let quotaCalls = 0

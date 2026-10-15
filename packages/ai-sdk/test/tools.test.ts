@@ -48,7 +48,7 @@ describe('scrape tool', () => {
     expect(sent[0]!.body).toEqual({ url: 'https://example.com/', formats: ['markdown'], debug: false, origin: AI_SDK_ORIGIN })
     expect(result).toEqual({
       status: 'success', requestedUrl: 'https://example.com/', finalUrl: 'https://example.com/', httpStatus: 200, title: 'Example Domain',
-      markdown: '# Example Domain', truncated: false, evidenceRecord: EVIDENCE,
+      markdown: '# Example Domain', truncated: false, evidenceRecord: EVIDENCE, verification: PAGE.verification, readiness: PAGE.readiness,
     })
   })
 
@@ -140,6 +140,7 @@ describe('with the AI SDK', () => {
     expect(toolResults[0]).toMatchObject({ toolName: 'scrape', output: { status: 'success', title: 'Example Domain', markdown: '# Example Domain' } })
     // The second model call saw the tool's answer.
     expect(JSON.stringify(prompts[1])).toContain('Example Domain')
+    expect(JSON.stringify(prompts[1])).toContain('not_requested')
   })
 
   it('offers each tool a JSON schema the model can fill in', async () => {
@@ -154,6 +155,6 @@ describe('with the AI SDK', () => {
     expect(seen.map((entry) => entry.name).sort()).toEqual(['map', 'scrape'])
     const scrape = seen.find((entry) => entry.name === 'scrape')!.inputSchema as { required?: string[]; properties?: Record<string, unknown> }
     expect(scrape.required).toEqual(['url'])
-    expect(Object.keys(scrape.properties ?? {})).toEqual(['url', 'formats', 'onlyMainContent'])
+    expect(Object.keys(scrape.properties ?? {})).toEqual(['url', 'formats', 'onlyMainContent', 'verify'])
   })
 })
