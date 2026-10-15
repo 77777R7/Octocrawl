@@ -54,7 +54,7 @@ A fetch can succeed without the data a task asked for: a page of navigation, a s
 - **Checks:**
   - `markdownIncludes` (`text`), `markdownMatches` (`pattern`, `flags`) and `markdownCountMin` (`pattern`, `flags`, `min`): on the page's Markdown.
   - `minTables` (`min`): GFM tables in the Markdown.
-  - `listRecordsMin` (`min`) and `recordFields` (`fields`, `min`): records of the `list` format; `recordFields` counts the records that hold every field named.
+  - `listRecordsMin` (`min`) and `recordFields` (`fields`, `min`, optional `uniqueBy`): records of the `list` format; `recordFields` counts the records that hold every field named. With `uniqueBy: ["url", "sku"]`, it counts distinct tuples of those explicitly extracted identity fields. Missing identity does not count, and duplicate records remain in the output with their evidence. Choose identity fields that represent the task entity; identical titles or prices alone do not establish identity. Existing checks without `uniqueBy` keep counting all complete records.
   - `field` (`path`, and one of `equals`, `in`, `present`, or `min`/`max`): a value of the result, such as `json.data.price`.
   - `emptyOk: true` passes an empty result (`empty_verified`), such as a search with no hits.
 - **Limits:** at most 32 checks. Patterns take the flags `i`, `m`, `s`, `u` and `y`, must compile, and are refused when they can backtrack catastrophically. A hosted server refuses `markdownMatches` and `markdownCountMin`, since a regular expression cannot be bounded in time there.
