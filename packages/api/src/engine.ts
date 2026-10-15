@@ -1418,7 +1418,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                 const read = listRun === null ? await readThrough(chrome, step.url, step.result!, fetchOpts, req.waitMs, hooks, signal) : await continueList(chrome, step, listRun, selection, fetchOpts, req.waitMs, hooks, signal)
                 if ('reason' in read) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: read.reason }); continue }
                 const result = read.result
-                const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv()) : undefined
+                const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv(), listFormat(formats)) : undefined
                 const stored = verifiedJobResult(task, {
                   ...result,
                   markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
@@ -1541,7 +1541,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           const outcome: ScrapeOutcome = answer.kind === 'fetch'
             ? await (myBrowser !== null ? myBrowser.scrape(url, context) : lane.ladder.scrape(url, page)).then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
             : { result: answer.result, links: answer.result.links ?? [], cached: answer.kind === 'hit' }
-          const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv()) : undefined
+          const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv(), listFormat(formats)) : undefined
           return { outcome, json }
         })().finally(() => page.dispose())
         // The stored audit repeats no page body; a screenshot's base64 is stored once, on the result, and its attempt copy says null; what actions produced is stored once, on the result.

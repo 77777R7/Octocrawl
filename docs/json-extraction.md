@@ -2,6 +2,10 @@
 
 Send a JSON Schema in `formats` and Octocrawl fills it from what the page itself says. A model is called only when you turn on `modelFallback`.
 
+When a `list` format names `itemSelector`, JSON reads that selected list instead of whole-page product facts. With the plain `json` format, `json.data.records` preserves the list's `values`, `missing` and `source` records. A custom schema can name one array of record objects (at the root or in a single property), or a flat object when exactly one record was selected; property names match list field names exactly. Ambiguous shapes stay incomplete. Each evidence locator names the original source URL, page, selector, match index and field selector or attribute. Prices and dates stay as source strings unless the schema asks for numeric conversion; missing fields stay null or unavailable, and currency is not inferred from a symbol.
+
+This mapping covers one captured page, including fields chosen in `detected.fields` for an explicit selector. Empty, missing or truncated records are reported incomplete. It does not merge records or call a model, including for an unsupported schema with `modelFallback`. The extra JSON representation is limited to 2,000 records and a 1,000,000-character source/evidence budget, with no additional DOM parse; at the limit it returns incomplete and leaves the original list intact. Automatic region selection and combining multiple captured pages are outside this mapping.
+
 Request deterministic structured data with a JSON Schema alongside, or instead of, Markdown:
 
 ```ts
