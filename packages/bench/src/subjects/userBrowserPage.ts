@@ -112,7 +112,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     },
     trace,
   }
-  const gate = classifyGate({ status, header: () => null, body: whole })
+  const gate = classifyGate({ status, header: () => null, body: whole, finalUrl })
   const errorPage = errorPageEvidence(status, read.contentType, body, finalUrl, options)
   const errorPageFields = { markdown: errorPage?.markdown ?? null, ...(errorPage === null ? {} : { links: errorPage.links }) }
   const blocked = (verdict: NonNullable<typeof gate>): FetchResult => {

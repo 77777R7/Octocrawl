@@ -447,6 +447,7 @@ export class ProviderSubject implements SubjectAdapter {
       status: res.status,
       header: (name) => res.headers[name.toLowerCase()] ?? null,
       body: res.body,
+      finalUrl: res.finalUrl,
     })
     // An error status is never content, but its page is what the origin
     // said: the failed or blocked result keeps it as evidence.
