@@ -1255,6 +1255,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         status,
         header: (name) => documentHeaders[name.toLowerCase()] ?? null,
         body,
+        finalUrl,
       })
       // An error status is never content, but its page is what the server
       // said: the failed or blocked result keeps it as evidence.

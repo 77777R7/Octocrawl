@@ -607,6 +607,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       status: out.status,
       header: (name) => out.headers?.get(name) ?? null,
       body,
+      finalUrl: out.finalUrl,
     })
     // An error status is never content, but its page is what the server
     // said: the failed or blocked result keeps it as evidence.

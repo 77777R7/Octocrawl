@@ -59,6 +59,8 @@ export interface GateResponse {
   header: (name: string) => string | null
   /** Response body text. May be empty. */
   body: string
+  /** The document actually answered, when the caller knows it. Never inferred from links in the body. */
+  finalUrl?: string
   /**
    * True when extraction already found a main body. Only decisive challenge
    * evidence (vendor header / CF plumbing / interstitial copy pair) may
@@ -383,6 +385,8 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   if (siteCaptchaText.length > 0 && SITE_CAPTCHA_SCRIPT.test(head)) {
     return { reason: 'captcha', signals: ['site_captcha_script', ...siteCaptchaText] }
   }
+  const interaction = interactivePage(res.body, res.finalUrl)
+  if (interaction !== null) return interaction
 
   // --- login wall ---------------------------------------------------------
   const headings = headingTexts(head).map((h) => h.toLowerCase())
@@ -451,6 +455,38 @@ const HIDDEN_ELEMENTS: ReadonlySet<string> = new Set(['script', 'style', 'noscri
 /** Elements whose text names the page. */
 const HEADING_ELEMENTS: ReadonlySet<string> = new Set(['h1', 'h2', 'h3', 'title'])
 
+/** Bound the additional scan, which reads controls past script-heavy heads. */
+const INTERACTION_MAX_HTML = 1_000_000
+const INTERACTION_MAX_TEXT = 4_000
+const AUTOCOMPLETE_ATTRIBUTE = /\sautocomplete\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+const ARIA_LABEL_ATTRIBUTE = /\saria-label\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+const ROLE_ATTRIBUTE = /\srole\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+
+function attributeText(tag: string, pattern: RegExp): string {
+  const match = pattern.exec(tag)
+  return decodeEntities(match?.[1] ?? match?.[2] ?? match?.[3] ?? '').toLowerCase()
+}
+
+/** The final URL, a primary heading and real controls must agree; prose or script strings alone are not a gate. */
+function interactivePage(body: string, finalUrl: string | undefined): GateVerdict | null {
+  if (finalUrl === undefined || body.length > INTERACTION_MAX_HTML || !/webauthn|security\s+verification/i.test(body)) return null
+  let path: string
+  try { path = new URL(finalUrl).pathname } catch { return null }
+  const auth = /(?:^|\/)(?:login|signin|sign-in|auth)(?:[./_-]|$)/i.test(path)
+  const verification = /(?:^|[/_-])verif(?:ication|y)(?:[./_-]|$)/i.test(path)
+  if (!auth && !verification) return null
+  const page = pageText(body, INTERACTION_MAX_TEXT, true)
+  if (page === null) return null
+  if (auth && page.primaryHeadings.some(heading => BARE_LOGIN_HEADING.test(heading) || /^register\s*\/\s*sign\s*-?\s*in\s*$/i.test(heading)) && page.controls.webauthn && page.controls.passkey) {
+    return { reason: 'login_wall', signals: ['auth_url', 'heading_sign_in', 'input_webauthn', 'button_passkey'] }
+  }
+  if (verification && page.primaryHeadings.some(heading => /^security\s+verification$/i.test(heading)) &&
+    page.text.toLowerCase().includes('fill each box with the required number of objects indicated') && page.controls.button && page.controls.image) {
+    return { reason: 'captcha', signals: ['verification_url', 'heading_security_verification', 'object_count_instruction', 'interactive_image'] }
+  }
+  return null
+}
+
 /**
  * The signals of a short page, answered with a 2xx, that is only a refusal of automated visitors, or null. Two such pages
  * were read as content in the PA 4 Steel runs: Autotrader's Akamai page, whose text carries Akamai's reference to the
@@ -490,12 +526,14 @@ function shortWallPage(body: string): GateVerdict | null {
  * found once, from where the last one ended, and an end that is missing ends the reading there (a page cut off, or one
  * built to make a scanner search again and again).
  */
-function pageText(body: string): { text: string; headings: string[] } | null {
+function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = false): { text: string; headings: string[]; primaryHeadings: string[]; controls: { webauthn: boolean; passkey: boolean; button: boolean; image: boolean } } | null {
   // Positions are the body's own: a lowercased copy can be longer ("İ" lowercases to two characters), so tags are matched
   // case-insensitively in place.
   const visible: string[] = []
   let visibleLength = 0
   const headings: string[] = []
+  const primaryHeadings: string[] = []
+  const controls = { webauthn: false, passkey: false, button: false, image: false }
   let heading: { name: string; parts: string[] } | null = null
   let inHead = false
   let at = 0
@@ -512,7 +550,7 @@ function pageText(body: string): { text: string; headings: string[] } | null {
     text(body.slice(at, open))
     // Entities shorten the text once decoded, a few times at most: past four times the bound the page is long; the exact
     // bound is checked on the decoded text.
-    if (visibleLength > WALL_PAGE_MAX_TEXT * 4) return null
+    if (visibleLength > maxText * 4) return null
     if (body.startsWith('<!--', open)) {
       const close = body.indexOf('-->', open + 4)
       if (close < 0) break
@@ -530,8 +568,23 @@ function pageText(body: string): { text: string; headings: string[] } | null {
     if (name === 'body') { inHead = false; continue }
     if (HEADING_ELEMENTS.has(name)) {
       if (closing === '') heading = { name, parts: [] }
-      else if (heading !== null && heading.name === name) { headings.push(collapse(decodeEntities(heading.parts.join(' ')))); heading = null }
+      else if (heading !== null && heading.name === name) {
+        const shown = collapse(decodeEntities(heading.parts.join(' ')))
+        headings.push(shown)
+        if (name === 'title' || name === 'h1') primaryHeadings.push(shown)
+        heading = null
+      }
       continue
+    }
+    if (readControls && closing === '' && !inHead && !HIDDEN_ELEMENTS.has(name)) {
+      const tagText = body.slice(open, Math.min(end + 1, open + 2_000))
+      if (name === 'input') {
+        const autocomplete = attributeText(tagText, AUTOCOMPLETE_ATTRIBUTE).split(/\s+/)
+        if (autocomplete.includes('username') && autocomplete.includes('webauthn')) controls.webauthn = true
+      }
+      if (name === 'button' && /\bpasskey\b/.test(attributeText(tagText, ARIA_LABEL_ATTRIBUTE))) controls.passkey = true
+      if (name === 'button' || attributeText(tagText, ROLE_ATTRIBUTE) === 'button') controls.button = true
+      if (name === 'img') controls.image = true
     }
     if (closing === '' && HIDDEN_ELEMENTS.has(name) && body[end - 1] !== '/') {
       const closer = new RegExp(`</${name}`, 'gi')
@@ -544,7 +597,7 @@ function pageText(body: string): { text: string; headings: string[] } | null {
     }
   }
   const visibleText = collapse(decodeEntities(visible.join(' ')))
-  return visibleText.length > WALL_PAGE_MAX_TEXT ? null : { text: visibleText, headings }
+  return visibleText.length > maxText ? null : { text: visibleText, headings, primaryHeadings, controls }
 }
 
 function collapse(text: string): string {

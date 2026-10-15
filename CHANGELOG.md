@@ -47,6 +47,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
   - **The measurement behind it.** With Playwright over CDP, Chrome held 12 of the 16 challenge tasks in each of two runs, against 12 and 13 over raw CDP with the same launch ([record](research/access/runs/2026-10-14-library-probe-pwcdp.md)).
   - **Still to come.** The product's own acceptance runs.
 
+- Passwordless WebAuthn login pages and image object-count verification pages can now be named `login_wall` and `captcha` when their final URL, primary heading and actual controls agree, including controls beyond the first 64 KB. The added scan is bounded and does not override a page already judged contentful. This changes failure classification, not task completion.
+
 ## 0.4.2 — 2026-10-13
 
 The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `@octocrawl/ai-sdk`, `octocrawl-client`) at 0.4.2. It holds everything below since 0.4.1 on 2026-10-10. Entries about the hosted service (api. and mcp.octocrawl.dev) and octocrawl.dev describe what is already live there; the packages' own changes are the extraction, verification, readiness and browser-lane ones.
