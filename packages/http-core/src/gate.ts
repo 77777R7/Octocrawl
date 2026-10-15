@@ -313,7 +313,17 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     // header alone names a block only on an answer that is not a success; a 2xx is judged by its body, which still names
     // DataDome's interstitial or captcha (DATADOME_CHALLENGE). A 202 meets its own rule below.
     if (name === 'x-datadome' && res.status >= 200 && res.status < 300) continue
-    if (res.header(name) !== null) return { reason, signals: [signal] }
+    if (res.header(name) !== null) {
+      // These headers name DataDome, but its actual captcha iframe says what the person must do.
+      // Keep the header as evidence without letting its generic verdict hide the specific gate.
+      if (name === 'x-datadome' || name === 'x-datadome-cid') {
+        const challenge = DATADOME_CHALLENGE.exec(res.body)
+        if (challenge?.[1]?.toLowerCase() === 'captcha') {
+          return { reason: 'captcha', signals: [signal, 'datadome_captcha'] }
+        }
+      }
+      return { reason, signals: [signal] }
+    }
   }
 
   // --- Cloudflare managed challenge --------------------------------------

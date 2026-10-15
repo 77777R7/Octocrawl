@@ -12,6 +12,12 @@ beforeAll(async () => {
     if (req.url === '/robots.txt') { res.writeHead(404).end(); return }
     if (req.url === '/start-login') { res.writeHead(302, { location: '/login.html' }).end(); return }
     if (req.url === '/start-verification') { res.writeHead(302, { location: '/security_verification.html' }).end(); return }
+    if (req.url?.startsWith('/datadome/')) {
+      const kind = req.url.endsWith('/captcha') ? 'captcha' : 'interstitial'
+      res.writeHead(403, { 'content-type': 'text/html', 'x-datadome': 'protected', 'x-datadome-cid': 'example' })
+      res.end(`<html><body><iframe src="https://geo.captcha-delivery.com/${kind}/?initialCid=example"></iframe></body></html>`)
+      return
+    }
     res.writeHead(200, { 'content-type': 'text/html' })
     res.end(req.url === '/login.html'
       ? `<html><head><title>Shop</title>${padding}</head><body><h1>Register/Sign in</h1><input autocomplete="username webauthn"><button aria-label="passkey">Passkey</button></body></html>`
@@ -23,6 +29,25 @@ beforeAll(async () => {
 afterAll(async () => { await new Promise<void>(resolve => server.close(() => resolve())) })
 
 describe('interactive gate classification in the lane', () => {
+  it.each([
+    ['captcha', 'captcha', 'datadome_captcha'],
+    ['interstitial', 'bot_detected_generic', 'header_x_datadome'],
+  ])('classifies the DataDome %s behind its vendor headers', async (kind, reason, signal) => {
+    const http = new ResilientHttpSubject('standard')
+    try {
+      const result = await http.fetch(`${origin}/datadome/${kind}`)
+      expect(result.status).toBe('blocked')
+      expect(result.blockReason).toBe(reason)
+      expect(result.escalations).toContainEqual({
+        from: 'http', to: kind === 'captcha' ? 'browser_local_authed' : 'browser_local',
+        trigger: `blocked:${reason}`, improved: null,
+      })
+      expect(result.evidence.httpStatus).toBe(403)
+      expect(readinessOf(result).state).toBe('not_served')
+      expect(result.trace.find(event => event.event === 'gate_detected')?.detail?.signals).toContain(signal)
+    } finally { await http.teardown() }
+  })
+
   it.each([
     ['/start-login', '/login.html', 'login_wall'],
     ['/start-verification', '/security_verification.html', 'captcha'],
