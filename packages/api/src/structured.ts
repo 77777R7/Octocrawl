@@ -908,6 +908,12 @@ function checksMarkdown(req: Pick<ScrapeRequest, 'verify'>): boolean {
 
 /** Require the formats each check actually reads; do not verify data the response discards. */
 export function checkVerificationFormats(req: Pick<ScrapeRequest, 'formats' | 'verify'>): void {
+  for (const check of req.verify?.checks ?? []) {
+    const path = check.type === 'field' ? check.path : check.type === 'listRecordsMin' ? check.path : undefined
+    if (path !== undefined && /^(verification|readiness|evidenceRecord)(?:\.|$)/.test(path)) {
+      throw new RequestError('verify cannot check verification, readiness or evidenceRecord: these fields are produced from the verification result; check source data instead')
+    }
+  }
   if (req.verify?.checks.some(check => check.type === 'tableRowsMin') && (req.formats === undefined || !hasFormat(req.formats, 'tables'))) {
     throw new RequestError('formats must include tables when verify uses tableRowsMin; include tables or remove that check')
   }
@@ -1004,8 +1010,6 @@ export async function prepareScrapeResponse(
     ? await extractStructured(extractionInput(result), customJsonFormat(formats), execution, modelConfig ?? structuredModelConfigFromEnv())
     : undefined
   const modelMs = json?.modelUsage ? Math.max(0, performance.now() - modelStart) : 0
-  // The task's contract judged on the whole result, before the response leaves out what was not asked for.
-  const verification = verify(req.verify, { ...result, ...(json === undefined ? {} : { json }) })
   const serializeStart = performance.now()
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
   const warning = warningOf(result.warnings)
@@ -1020,7 +1024,6 @@ export async function prepareScrapeResponse(
     ...(hasFormat(formats, 'rawHtml') ? { rawHtml: result.rawHtml ?? null } : {}),
     ...(hasFormat(formats, 'screenshot') ? { screenshot: result.screenshot ?? null } : {}),
     ...(json === undefined ? {} : { json }),
-    verification,
     summary: withoutRepeatedBodies(result.summary, req.debug === true),
   }
   const serializeMs = Math.max(0, performance.now() - serializeStart)
@@ -1030,9 +1033,7 @@ export async function prepareScrapeResponse(
     scrapeId,
     metadata: scrapeResponseMetadata(next, scrapeId),
     snapshot: scrapeSnapshot(next),
-    evidenceRecord: scrapeEvidenceRecord({ ...result, verification }, req, next),
-    // Read from the full result, with its verification: a contract's verdict and the region wait tell its states apart (ADR 0007).
-    readiness: readinessOf({ ...result, verification }),
+    readiness: readinessOf(result),
     usage: {
       ...next.usage,
       wallMs: totalMs,
@@ -1040,8 +1041,16 @@ export async function prepareScrapeResponse(
     },
     summary: { ...next.summary, totalMs },
   }
-  if (req.debug !== false) return withTiming
-  return compactScrapeResponse(withTiming, req, formats, totalMs)
+  // Judge the exact data projection delivered, including the compact document and requested formats.
+  // Otherwise a price/entity discarded below could still make a task pass (ADR 0006).
+  const delivered = req.debug === false ? compactScrapeData(withTiming, req, formats, totalMs) : withTiming
+  const verification = verify(req.verify, { ...delivered })
+  return {
+    ...delivered,
+    verification,
+    readiness: readinessOf({ ...result, verification }),
+    evidenceRecord: scrapeEvidenceRecord({ ...result, verification }, req, next),
+  }
 }
 
 /**
@@ -1131,21 +1140,17 @@ export function scrapeSnapshot(result: FetchResult): CompactScrapeResponse['snap
   }
 }
 
-export function compactScrapeResponse(
+function compactScrapeData(
   next: ScrapeResponse,
   req: ScrapeRequest,
   formats: readonly ScrapeFormat[] = requestedFormats(req, next),
   totalMs = next.summary.totalMs ?? next.usage.wallMs,
-): CompactScrapeResponse {
+): Omit<CompactScrapeResponse, 'evidenceRecord'> {
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
   return {
     requestedUrl: next.requestedUrl,
     finalUrl: next.evidence.finalUrl,
     snapshot: scrapeSnapshot(next),
-    evidenceRecord: next.evidenceRecord ?? scrapeEvidenceRecord(next, req, {
-      markdown: hasFormat(formats, 'markdown') ? next.markdown : null,
-      ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
-    }),
     status: next.status,
     failureReason: next.failureReason,
     blockReason: next.blockReason,
@@ -1200,5 +1205,20 @@ export function compactScrapeResponse(
     truncatedAt: next.truncatedAt,
     usage: { ...next.usage, totalMs },
     channelsTried: next.channelsTried,
+  }
+}
+
+export function compactScrapeResponse(
+  next: ScrapeResponse,
+  req: ScrapeRequest,
+  formats: readonly ScrapeFormat[] = requestedFormats(req, next),
+  totalMs = next.summary.totalMs ?? next.usage.wallMs,
+): CompactScrapeResponse {
+  return {
+    ...compactScrapeData(next, req, formats, totalMs),
+    evidenceRecord: next.evidenceRecord ?? scrapeEvidenceRecord(next, req, {
+      markdown: hasFormat(formats, 'markdown') ? next.markdown : null,
+      ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
+    }),
   }
 }

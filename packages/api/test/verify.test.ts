@@ -68,6 +68,34 @@ const passing = { checks: [{ type: 'markdownIncludes', text: 'High water' }, { t
 const failing = { checks: [{ type: 'markdownIncludes', text: 'High water' }, { type: 'minTables', min: 1 }] }
 
 describe('task verification on a request (ADR 0006)', () => {
+
+  it('checks the delivered scrape projection and its snapshot metadata', async () => {
+    const engine = engineWith()
+    const checks = [{ type: 'field', path: 'evidence.httpStatus', equals: 200 }]
+    const compact = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['markdown'], debug: false, verify: { checks } })
+    expect(compact.status).toBe(200)
+    expect(compact.json).not.toHaveProperty('evidence')
+    expect(compact.json.verification.status).toBe('failed')
+    expect(compact.json.evidenceRecord.verification.status).toBe('failed')
+    const full = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['markdown'], debug: true, verify: { checks } })
+    expect(full.json.evidence.httpStatus).toBe(200)
+    expect(full.json.verification.status).toBe('passed')
+    const delivered = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['markdown'], debug: false, verify: { checks: [{ type: 'field', path: 'snapshot.httpStatus', equals: 200 }] } })
+    expect(delivered.json.snapshot.httpStatus).toBe(200)
+    expect(delivered.json.verification.status).toBe('passed')
+  })
+
+  it('rejects self-referential verdict checks before fetching', async () => {
+    const engine = engineWith()
+    const before = articleReads
+    for (const path of ['verification.status', 'readiness.state', 'evidenceRecord.verification.status']) {
+      const response = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: { checks: [{ type: 'field', path, present: true }] } })
+      expect(response.status).toBe(400)
+      expect(response.json.error).toContain('check source data instead')
+    }
+    expect(articleReads).toBe(before)
+  })
+
   it('checks required cells in the delivered table, rejecting blank data rows without changing the fetch status', async () => {
     const engine = engineWith()
     const verify = { checks: [{ type: 'tableRowsMin', tableIndex: 0, columns: [0, 1], min: 2 }] }
@@ -140,10 +168,10 @@ describe('task verification on a request (ADR 0006)', () => {
     const passed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })
     expect(passed.status).toBe(200)
     expect(passed.json.status).toBe('success')
-    expect(passed.json.verification).toMatchObject({ status: 'passed', verifier: 'verify/2', reason: null, checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true }, { index: 1, type: 'markdownCountMin', passed: true, observedCount: 2, asked: 2 }] })
+    expect(passed.json.verification).toMatchObject({ status: 'passed', verifier: 'verify/3', reason: null, checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true }, { index: 1, type: 'markdownCountMin', passed: true, observedCount: 2, asked: 2 }] })
     expect(passed.json.verification.contractSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(validate(passed.json.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
-    expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/2', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [] })
+    expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/3', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [] })
 
     // The fetch succeeded and the task was not done: the status says the first, the verification the second.
     const failed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: failing, formats: ['markdown', 'links'], debug: false })
@@ -214,7 +242,7 @@ describe('task verification on a request (ADR 0006)', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
     const [item] = (await call(engine, 'GET', `/v1/batches/${id}/items?debug=true`)).json.items as Record<string, any>[]
-    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/2', reason: 'page_not_read', checks: [] } })
+    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/3', reason: 'page_not_read', checks: [] } })
     expect(validate(item!.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
     expect(item!.evidenceRecord.verification).toMatchObject({ status: 'failed', reason: 'page_not_read', contractSha256: item!.verification.contractSha256 })
   })

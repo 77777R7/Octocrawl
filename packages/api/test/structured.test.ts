@@ -122,6 +122,32 @@ const openAiEndpoint = (answer: unknown, requests: Array<Record<string, any>>) =
 }) as typeof fetch
 
 describe('scrape response metadata', () => {
+  it('judges a field on the delivered compact document rather than discarded product facts', async () => {
+    const run = { ...result, channelsTried: ['http'], ladderTrace: [], summary: {
+      channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null,
+      externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [],
+    } }
+    const verify = { checks: [{ type: 'field' as const, path: 'document.product.price.value', equals: '1299.00' }] }
+    const compact = await prepareScrapeResponse(run, { url: run.requestedUrl, debug: false, formats: ['markdown'], verify }, {}, null, performance.now()) as CompactScrapeResponse
+    expect(compact.document).not.toHaveProperty('product')
+    expect(compact.verification.status).toBe('failed')
+    expect(compact.readiness.state).not.toBe('ready')
+    expect(compact.evidenceRecord?.verification?.status).toBe('failed')
+    const full = await prepareScrapeResponse(run, { url: run.requestedUrl, debug: true, formats: ['markdown'], verify }, {}, null, performance.now()) as ScrapeResponse
+    expect(full.document?.product?.price?.value).toBe('1299.00')
+    expect(full.verification?.status).toBe('passed')
+  })
+
+  it('does not count normalized entities removed from a compact response as delivered records', async () => {
+    const run = { ...result, channelsTried: ['http'], ladderTrace: [], summary: {
+      channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null,
+      externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [],
+    } }
+    const response = await prepareScrapeResponse(run, { url: run.requestedUrl, debug: false, formats: ['markdown'], verify: { checks: [{ type: 'listRecordsMin', path: 'document.entities', min: 1 }] } }, {}, null, performance.now()) as CompactScrapeResponse
+    expect(response.document).not.toHaveProperty('entities')
+    expect(response.verification.status).toBe('failed')
+  })
+
   it('delivers Markdown a contract checks when an omitted compact format would otherwise choose only adapter JSON', async () => {
     const run = { ...result, channelsTried: ['http'], ladderTrace: [], summary: {
       channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null,
