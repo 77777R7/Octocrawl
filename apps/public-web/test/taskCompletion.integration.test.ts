@@ -20,6 +20,7 @@ const passed = { ...failed, status: 'passed', reason: null, checks: [] }
 describe('rendered task completion', () => {
   it.each([
     { name: 'older response', extra: {}, label: 'Page read · Task unverified', detail: 'not been verified' },
+    { name: 'long URL on phone', extra: { finalUrl: 'https://www.walmart.com/browse/electronics/laptops/3944_3951_1089430_132960' }, label: 'Page read · Task unverified', detail: 'not been verified' },
     { name: 'not requested', extra: { verification: { status: 'not_requested' } }, label: 'Page read · Task unverified', detail: 'not been verified' },
     { name: 'complete JSON without task checks', extra: { json: { status: 'complete', data: { title: 'Captured page' }, evidence: [], issues: [] } }, label: 'Page read · Task unverified', detail: 'not been verified' },
     { name: 'verified empty allowed', extra: { status: 'incomplete', markdown: '', verification: passed }, label: 'Configured checks passed', detail: 'independent field accuracy' },
@@ -32,7 +33,7 @@ describe('rendered task completion', () => {
     { name: 'captcha', extra: { status: 'blocked', diagnostic: { code: 'challenge', stage: 'acquisition', evidence: 'observed' }, reason: 'A captcha is required.' }, label: 'Verification page', detail: 'does not solve verification challenges' },
     { name: 'existing quote diagnosis', extra: { status: 'incomplete', diagnostic: { code: 'quote_conflicting', stage: 'field', evidence: 'observed' }, reason: 'Conflicting quotes.' }, label: 'Conflicting quote evidence', detail: 'Conflicting quotes.' },
   ])('$name', async ({ extra, label, detail }) => {
-    const page = await browser.newPage({ reducedMotion: 'reduce' })
+    const page = await browser.newPage({ reducedMotion: 'reduce', viewport: { width: 390, height: 844 } })
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
     try {
@@ -49,6 +50,8 @@ describe('rendered task completion', () => {
       await page.locator('#submit-button').click()
       await page.waitForFunction(() => document.querySelector('.run-status') && !document.querySelector('.run-status')!.classList.contains('tone-loading'))
       expect(await page.locator('.run-status').innerText()).toBe(label)
+      const bounds = await page.locator('.run-status').evaluate(element => ({ right: element.getBoundingClientRect().right, cardRight: element.closest('.run-card')!.getBoundingClientRect().right }))
+      expect(bounds.right).toBeLessThanOrEqual(bounds.cardRight)
       expect(await page.locator('#run-detail').innerText()).toContain(detail)
       expect(await page.locator('#run-detail').innerText()).not.toContain('Please try again later')
       expect(errors).toEqual([])

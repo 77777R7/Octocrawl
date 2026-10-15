@@ -432,7 +432,7 @@ input:checked + .row-mark { background: var(--orange); transform: scale(.875); }
 .runs-next a:hover { color: #b8461d; }
 .runs-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 16px; padding: 0 32px; }
 /* Each card spans six shared rows so Type/Status/… line up across cards even when a value wraps. */
-.run-card { display: grid; grid-row: span 6; grid-template-rows: subgrid; row-gap: 0; min-width: 0; margin-bottom: 16px; padding: 0; overflow: hidden; border: 1px solid #dbe3ee; border-radius: 14px; color: inherit; background: #fff; text-align: left; box-shadow: 0 16px 46px rgba(17, 46, 96, .035); }
+.run-card { display: grid; grid-row: span 6; grid-template-rows: subgrid; grid-template-columns: minmax(0, 1fr); row-gap: 0; min-width: 0; margin-bottom: 16px; padding: 0; overflow: hidden; border: 1px solid #dbe3ee; border-radius: 14px; color: inherit; background: #fff; text-align: left; box-shadow: 0 16px 46px rgba(17, 46, 96, .035); }
 .run-card:hover { border-color: #b9cbe2; }
 .run-card[aria-pressed="true"] { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange), 0 16px 46px rgba(17, 46, 96, .05); }
 .run-card-head { display: flex; align-items: center; gap: 12px; padding: 20px 24px; border-bottom: 1px solid var(--line); }
