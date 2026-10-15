@@ -1,6 +1,6 @@
 # Octocrawl SEO first local batch — 2026-10-16
 
-首轮可执行的本地修改与验证已完成。比较稿仍是条件草稿，账号/平台和历史覆盖缺口保留在下表；不代表完整产品准确性验收或任何增长效果。
+首轮本地修改与验证已完成，随后按用户指示补做 SEO-06/08/01。限定版本迁移稿已具备内容审阅证据；Google AI Mode 单轮12题已完成；Cloudflare事件可读但完整规则配置仍受限。以下状态已更新；不代表完整产品准确性验收或增长效果。
 
 ## 工作位置与边界
 
@@ -18,14 +18,14 @@
 | ID | 状态 | 首轮结果 / 剩余边界 |
 | --- | --- | --- |
 | SEO-00 | done | 独立主线分支；源码→构建→Cloudflare/Cloud Run 链与生产完整 SHA 已定位；原有工作未变 |
-| SEO-01 | done | 完成 25 URL 公开 HTTP 检查、8 页渲染、robots/sitemap、GSC索引/sitemap/重点URL只读检查；Cloudflare verified-bot 日志子项 blocked，根因/爬虫影响未知，未改规则 |
+| SEO-01 | done | 完成 25 URL 公开 HTTP 检查、8 页渲染、robots/sitemap、GSC索引/sitemap/重点URL只读检查；后续通过现有OAuth读到Security Events，4个旧Ray匹配BIC，另有10条verified AI Assistant BIC block；完整配置读取403、Google/Bing影响未知，提案未应用 |
 | SEO-02 | done | 导出相邻28天 GSC Web/AI报告、读取实际第一方日志、指标字典与最小埋点修补；历史不足/归因/任务正确性不可测部分明确，未编造完整漏斗 |
 | SEO-03 | done | 25 URL角色/重点页面意图映射、有限搜索及官方竞品资料复核；固定地区 Google SERP 被验证页阻挡，保留 backend 搜索发现且不声称排名 |
 | SEO-04 | done | 已检查元数据、H1、canonical、Schema、robots、sitemap、noindex、内链；未复现需重建的技术模板缺陷，保留现有基础；随实质内容更改 lastmod |
 | SEO-05 | done | 收紧3工具页相关承诺，增加2种格式同输入示例；补MCP验收与RAG保守导入；校正首页隐私FAQ；现有API/其他文章无须全面重写 |
-| SEO-06 | conditional | 形成一篇独立可读 Firecrawl v1迁移本地稿；官方资料与24合同fixture支持范围表。缺当前Firecrawl SDK/服务同条件迁移运行，不标可发布/兼容/性能领先 |
+| SEO-06 | done | 官方firecrawl-js4.42.0真实调用本地API；公开目标正反对照、10个可复现受控目标用例、24合同fixture通过。v1范围稿进入内容审阅；v2直接替换失败，不主张全面兼容/服务性能领先 |
 | SEO-07 | done | 完成4个合成HTTP200/任务状态最小案例及确切复现命令；明确仅显示判定fixture，非实站抓取质量胜率 |
-| SEO-08 | done | 实际GSC AI Beta报告2次展示；12个固定问题与记录模板；网站/GitHub/npm资料核对。ChatGPT/Perplexity/Google回答逐题采样 deferred；PyPI/目录刷新 deferred，无外部写入 |
+| SEO-08 | done | 实际GSC AI Beta报告2次展示；12个固定问题与记录模板；网站/GitHub/npm资料核对。后续Google AI Mode单轮12/12回答、6名称出现、0官方正文引用；ChatGPT模型错误/Perplexity登录门槛保留，另两平台其余题未测；PyPI/目录刷新 deferred |
 | SEO-09 | done | 构建/typecheck/153项聚焦测试、实际本地HTTP接收、桌面/窄屏、正反对照、截图、diff与原工作边界检查完成 |
 
 ## 审阅顺序
@@ -33,7 +33,7 @@
 1. [基线与访问证据](audit-baseline.md)：生产、源码、GSC与未知项分别记录。
 2. [页面意图与选择](page-intent-map.md)：为何改这些页面、为何不重写其他页面。
 3. [衡量字典与真实计数](measurement.md)：原始数据粒度/覆盖、少量测试访问、事件能力边界。
-4. [AI可见性](ai-visibility.md)：真实Beta报告和未执行的逐题采样分别标记。
+4. [AI可见性](ai-visibility.md) 与 [12题实际回答](ai-answer-sample-2026-10-16.md)：GSC Beta与平台抽样分别记录。另见[客户端验证](firecrawl-client-verification.md)、[Cloudflare日志与提案](cloudflare-access-2026-10-16.md)。
 5. [迁移草稿](drafts/firecrawl-migration.md)、[质量案例草稿](drafts/http-200-task-completion.md)：未注册路由，未加入 sitemap/llms，无生产可访问副本。
 6. [事实证据表](claim-evidence.md)：逐项能力、版本、模式、时间和限制。
 
@@ -80,7 +80,17 @@ W2L_PUBLIC_PREVIEW_PORT=18876 npm run public:preview:local
 - 本轮变更：本地；本地提交后用 `git log -1` 查看交付commit，`git diff bc47bf0..HEAD` 审阅全部改动。
 - Push：未执行。PR：未创建。Merge：未执行。Deploy/发布：未执行。生产Cloudflare/GSC/Cloud Run设置：未修改。
 - 索引：本轮改动尚未上线，不能有其索引结果；基线24 indexed / 工具URL已索引属于原生产状态。
-- AI引用：GSC Beta基线2次展示，不代表本轮效果或稳定回答引用；逐题回答未测。
+- AI引用：GSC Beta基线2次展示，与后续Google AI Mode单轮12题独立；该轮6次名称出现、0次Octocrawl官方正文引用，不代表稳定推荐或变更效果。
 - 没有购买、付费运行、联系外部人员或创建定时任务。
 
-审阅后若继续：先决定是否接受这批本地网页/埋点变更；任何推送、PR或发布需用户后续明确授权。迁移稿只有完成实际目标客户端调用验证后才考虑注册公开路由；Cloudflare只在拿到实际规则与verified-bot证据后提最小改动。发布后的观测从真实T0开始，不从今天开始计增长。
+审阅后若继续：先决定是否接受这批本地网页/埋点变更；任何推送、PR或发布需用户后续明确授权。迁移稿已完成限定版本实际客户端核验，可审阅收紧后的v1稿；尚未注册公开路由。Cloudflare已有verified-category阻挡证据与最小提案，但完整配置/顺序仍需只读复核，生产修改另等授权。发布后的观测从真实T0开始，不从今天开始计增长。
+
+## 同日追加：SEO-06 / SEO-08 / SEO-01
+
+- 当前工作仍属同一SEO审阅批次，在原独立分支继续；新一轮 `git fetch origin main` 仍为bc47bf0e，未引入主线漂移或其他窗口变更。
+- 新增可维护 `scripts/seo/verify-firecrawl-client.mjs`；官方SDK装在/tmp，未改仓库依赖。真实API→合成目标10/10符合预期，含v2/JSON/未知参数/skip拒绝；先前公开目标SDK调用的成功、真实404及错误改写完整保留。脚本不mock SDK/engine，不将负例PASS记成能力支持。
+- 聚焦验证：脚本语法检查通过；真实SDK集成10/10；既有Firecrawl合同24/24。此轮没有应用源代码改动，因此未重复首轮整站构建/153项套件，前述首轮通过记录仍标原范围。
+- Google AI Mode 12个固定问题各新问题采一次，保存原回答/实际href/AX/DOM与截图；ChatGPT B1显示Model not found，Perplexity B1要求注册。没有重写问题刷答案、登录新账号或执行生成代码。
+- 现有Wrangler OAuth可读Cloudflare事件；七天77条，10条AI Assistant BIC block；与首轮4个CF-RAY精确匹配。rulesets/Bot Management GET403和GraphQL失败查询均保留；没有扩大授权范围。
+- 本轮追加原始证据在 `.w2l/seo-20261016/followup/`，私有/忽略；77份追加证据的SHA-256清单与validation-summary.json已保存；只提交可审阅文档、草稿和复现脚本，未提交日志/截图/客户端依赖。
+- 新API仅loopback供测试，检查后停止；原18876网页预览保留。所有网站/规则/SDK兼容范围结论均按实测边界，未推送、开PR、部署、发布或改生产配置。

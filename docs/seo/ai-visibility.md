@@ -8,7 +8,7 @@ Original ZIP and CSVs retained under `.w2l/seo-20261016/gsc-ai/`. This is an obs
 
 ## Fixed questions for answer sampling
 
-English; target United States; new chat per question; logged-in platform/model and search mode recorded explicitly. Browser egress was not established as US. Run once, then a second independent sample on a later date with identical settings; preserve raw answers and actual cited URLs. These questions are **not yet sampled** on ChatGPT, Perplexity or Google AI answers; GSC aggregate impressions do not answer them.
+English; target United States; new chat per question; logged-in platform/model and search mode recorded explicitly. Browser egress was not established as US. Run once, then a second independent sample on a later date with identical settings; preserve raw answers and actual cited URLs. Follow-up: all **12 were sampled once in Google AI Mode**; [question-by-question results](ai-answer-sample-2026-10-16.md) preserve answers, actual inline URLs, settings and limitations. ChatGPT B1 failed with `Model not found`; Perplexity B1 required sign-up. Remaining questions on those two platforms are not_tested. GSC aggregate impressions do not answer these questions.
 
 | ID | Type | Exact question | Intended source |
 | --- | --- | --- | --- |
@@ -41,4 +41,4 @@ Google’s [AI-features guidance](https://developers.google.com/search/docs/appe
 | [npm SDK](https://www.npmjs.com/package/@octocrawl/sdk) registry | 0.4.2, MIT, same repository | Keep package-specific license distinctions; do not call every package AGPL |
 | PyPI / external directories | Not freshly verified in this batch | Refresh actual entries before proposing exact external edits; no outreach authorized |
 
-No new profiles, endorsements, submissions, purchases, messages, recurring monitors or external edits were made. Answer-platform sampling remains deferred; the local question set and observed GSC evidence are usable now.
+No new profiles, endorsements, submissions, purchases, messages, recurring monitors or external edits were made. One Google AI Mode sample is complete: 6/12 name mentions, 0/12 Octocrawl official inline citations, with material entity/setup/hosted-limit errors. This is one observed signed-in sample, not a stable citation rate. ChatGPT/Perplexity completion and an independent later repeat remain pending.

@@ -55,3 +55,9 @@ Local `built-audit.json`: 39 HTML files; 25 sitemap URLs; zero duplicate titles/
 ## Gaps
 
 Cloudflare verified-bot logs, complete prior-period history, target correctness in historical event logs, stable cross-day attribution and platform-by-platform AI answer sampling remain unavailable or unmeasured. See `measurement.md` and `ai-visibility.md`. No growth, conversion or stable recommendation conclusion follows from these observations.
+
+## Read-only follow-up — 16 October 2026, after first-batch baseline
+
+The first-batch Cloudflare unknown is partly resolved: existing Wrangler OAuth can read Security Events. All four saved urllib CF-RAY IDs correlate to BIC block403. A seven-day event query returned77 rows (limit1000, all sampleInterval1), including10 `verifiedBotCategory:AI Assistant` BIC blocks. Full rulesets/settings reads still return403, so rule configuration/order remains unreviewed and Google/Bing impact remains unestablished. [Exact evidence, window and unapplied narrow proposal](cloudflare-access-2026-10-16.md). No production settings changed.
+
+[Google AI Mode's 12-question sample](ai-answer-sample-2026-10-16.md) is now complete; other-platform gates and repeat sampling remain explicit gaps. Earlier statements above describe the first-batch observation, not this later access result.
