@@ -507,6 +507,101 @@ function partialPage(result: FetchResult): StructuredExtractionIssue[] {
   }]
 }
 
+/** A second representation of explicitly selected records, bounded independently of the list's own limits. */
+const LIST_JSON_MAX_RECORDS = 2_000
+const LIST_JSON_MAX_CHARS = 1_000_000
+const pointerPart = (key: string): string => key.replace(/~/g, '~0').replace(/\//g, '~1')
+
+function selectedListJson(result: FetchResult, request: ListFormatRequest, format?: JsonFormatRequest): StructuredExtractionResult {
+  const schemaSha256 = format === undefined ? undefined : sha256Utf8(JSON.stringify(format.schema))
+  const incomplete = (message: string, code: StructuredExtractionIssue['code'] = 'field_unavailable'): StructuredExtractionResult => ({ status: 'incomplete', data: null, ...(schemaSha256 === undefined ? {} : { schemaSha256 }), evidence: [], issues: [{ code, message }], modelUsage: null })
+  const pageIssue = unsuccessfulPage(result)
+  if (pageIssue !== null) return { ...incomplete(pageIssue.message, pageIssue.code), issues: [pageIssue] }
+  const list = result.list
+  const fields = request.fields ?? list?.detected?.fields
+  if (list === undefined || list.itemSelector !== request.itemSelector || fields === undefined || fields.length === 0 ||
+    list.fields.length !== fields.length || fields.some((field, index) => field.name !== list.fields[index])) return incomplete('the explicitly selected list and its field specification were not captured; page-wide facts were not substituted')
+  if (list.pages !== 1 || list.records.some(record => record.source.page !== 1 || ![result.requestedUrl, result.evidence.finalUrl].includes(record.source.url))) return incomplete('selected-list JSON covers one captured page; records from multiple or unrelated pages were not combined')
+  if (list.records.length > LIST_JSON_MAX_RECORDS) return incomplete('selected-list JSON exceeded its 2000-record limit; the list output retains its records')
+  const namedFields = new Map(fields.map(field => [field.name, field]))
+  const location = (index: number, name: string): string => {
+    const record = list.records[index]!
+    const field = namedFields.get(name)!
+    return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index} ${field.selector ?? ':scope'} ${field.attribute === undefined ? 'text' : `@${field.attribute}`}`
+  }
+  let chars = 0
+  for (const [index, record] of list.records.entries()) {
+    if (Object.keys(record.values).some(name => !namedFields.has(name))) return incomplete('captured list fields differ from the selected field specification; unrelated fields were not copied')
+    chars += record.source.url.length + 32
+    for (const field of fields) chars += field.name.length + (record.values[field.name]?.length ?? 4) + location(index, field.name).length
+    if (chars > LIST_JSON_MAX_CHARS) return incomplete('selected-list JSON exceeded its 1000000-character source/evidence budget; the list output retains its records')
+  }
+  const issues = [...partialPage(result)]
+  if (list.truncated) issues.push({ code: 'field_unavailable', message: 'the selected list was truncated; JSON retains only the captured records and cannot be complete' })
+  if (list.incomplete > 0) issues.push({ code: 'field_unavailable', message: 'selected records have missing requested fields; their nulls are retained and the JSON cannot be complete' })
+  if (list.records.length === 0) issues.push({ code: 'field_unavailable', message: 'no selected records were captured; an empty result was not inferred to satisfy the task' })
+  const evidence: StructuredFieldEvidence[] = []
+  const missing = (path: string): void => { issues.push({ code: 'field_unavailable', path, message: `selected record has no value at ${path}; no value from another record or the page was substituted` }) }
+  if (format === undefined) {
+    const records = list.records.map((record, index) => {
+      for (const field of fields) {
+        const path = `/records/${index}/values/${pointerPart(field.name)}`
+        if (record.values[field.name] === null || record.values[field.name] === undefined || record.missing.includes(field.name)) missing(path)
+        else evidence.push({ path, source: 'dom', evidencePath: location(index, field.name) })
+      }
+      return { values: { ...record.values }, missing: [...record.missing], source: { ...record.source } }
+    })
+    return { status: issues.length === 0 ? 'complete' : 'incomplete', data: { records }, evidence, issues, modelUsage: null }
+  }
+  let validate: ValidateFunction
+  try { validate = compile(format.schema) } catch (error) {
+    return { status: 'invalid', data: null, schemaSha256, evidence: [], issues: [{ code: 'schema_invalid', message: error instanceof Error ? error.message : String(error) }], modelUsage: null }
+  }
+  const root = effective(format.schema, format.schema)
+  const recordValue = (schema: JsonSchema, index: number, path: string): JsonValue => {
+    const record = list.records[index]!
+    const out: Record<string, JsonValue> = {}
+    for (const [name, child] of Object.entries(effective(format.schema, schema).properties ?? {})) {
+      const valuePath = `${path}/${pointerPart(name)}`
+      const field = namedFields.get(name)
+      const raw = field === undefined || record.missing.includes(name) ? null : record.values[name] ?? null
+      const target = effective(format.schema, child)
+      if (raw === null) {
+        if (schemaTypes(target).includes('null')) Object.defineProperty(out, name, { value: null, enumerable: true, configurable: true })
+        missing(valuePath)
+        continue
+      }
+      const value = coerce(raw, target)
+      if (value === undefined) {
+        if (schemaTypes(target).includes('null')) Object.defineProperty(out, name, { value: null, enumerable: true, configurable: true })
+        issues.push({ code: 'field_unavailable', path: valuePath, message: `the source text ${JSON.stringify(raw)} could not be read as the requested type; it remains on the list record` })
+        continue
+      }
+      Object.defineProperty(out, name, { value, enumerable: true, configurable: true })
+      evidence.push({ path: valuePath, source: 'dom', evidencePath: location(index, name), ...(typeof value === 'number' ? { text: raw } : {}) })
+    }
+    return out
+  }
+  let data: JsonValue
+  if (schemaTypes(root).includes('array') && root.items !== undefined) {
+    data = list.records.map((_record, index) => recordValue(root.items!, index, `/${index}`))
+  } else {
+    const arrays = Object.entries(root.properties ?? {}).filter(([, schema]) => schemaTypes(effective(format.schema, schema)).includes('array'))
+    if (arrays.length === 1) {
+      const [name, schema] = arrays[0]!
+      const items = effective(format.schema, schema).items
+      if (items === undefined) return incomplete('the selected-record array schema needs an object items schema')
+      data = Object.fromEntries([[name, list.records.map((_record, index) => recordValue(items, index, `/${pointerPart(name)}/${index}`))]])
+    } else if (arrays.length === 0 && list.records.length === 1 && (schemaTypes(root).includes('object') || root.properties !== undefined)) data = recordValue(root, 0, '')
+    else return incomplete('multiple selected records require one record-array schema; a single page-wide object or ambiguous arrays were not filled', 'field_ambiguous')
+  }
+  const missingPaths = requiredMissing(format.schema, format.schema, data)
+  issues.push(...missingPaths.map(path => ({ code: 'missing_required' as const, path, message: `required selected-record field unavailable: ${path}` })))
+  const valid = validate(data)
+  if (!valid) issues.push({ code: 'field_unavailable', message: validationMessage(validate.errors) })
+  return { status: valid && issues.length === 0 ? 'complete' : 'incomplete', data, schemaSha256, evidence, issues, modelUsage: null }
+}
+
 function canonicalStructured(result: FetchResult): StructuredExtractionResult {
   const document = result.document
   const pageIssue = unsuccessfulPage(result)
@@ -768,7 +863,9 @@ export async function extractStructured(
   format?: JsonFormatRequest,
   execution: ExecutionContext = {},
   modelConfig: StructuredModelConfig | null = structuredModelConfigFromEnv(),
+  selectedList?: ListFormatRequest,
 ): Promise<StructuredExtractionResult> {
+  if (selectedList?.itemSelector !== undefined) return selectedListJson(result, selectedList, format)
   if (format === undefined) return canonicalStructured(result)
   const schemaSha256 = sha256Utf8(JSON.stringify(format.schema))
   const pageIssue = unsuccessfulPage(result)
@@ -1001,7 +1098,7 @@ export async function prepareScrapeResponse(
   const formats = requestedFormats(req, result)
   const modelStart = performance.now()
   const json = hasFormat(formats, 'json')
-    ? await extractStructured(extractionInput(result), customJsonFormat(formats), execution, modelConfig ?? structuredModelConfigFromEnv())
+    ? await extractStructured(extractionInput(result), customJsonFormat(formats), execution, modelConfig ?? structuredModelConfigFromEnv(), listFormat(formats))
     : undefined
   const modelMs = json?.modelUsage ? Math.max(0, performance.now() - modelStart) : 0
   // The task's contract judged on the whole result, before the response leaves out what was not asked for.
