@@ -59,9 +59,12 @@ A fetch can succeed without the data a task asked for: a page of navigation, a s
   - `emptyOk: true` passes an empty result (`empty_verified`), such as a search with no hits.
 - **Limits:** at most 32 checks. Patterns take the flags `i`, `m`, `s`, `u` and `y`, must compile, and are refused when they can backtrack catastrophically. A hosted server refuses `markdownMatches` and `markdownCountMin`, since a regular expression cannot be bounded in time there.
 - **The answer:** `verification.status` is `passed`, `failed` or `not_requested` (no contract).
+  - `passed` means the configured checks passed, not that every field, unit, date or entity association has been independently proven correct. Extraction `confidence` is not a calibrated probability of accuracy.
+  - `not_requested` permits delivery of content but makes no verified-completion claim. For `failed`, inspect its reason and readiness; a login wall, human verification or unavailable data is not an instruction to retry or wait automatically.
   - When failed, `reason` is `checks_failed` (the page was read and a check failed), `page_not_read` (no check ran) or `empty_not_allowed`.
   - Each check carries `passed` and a sentence of what was seen; count checks also carry `observedCount` and `asked`.
   - The Evidence Record carries `verification` too: status, verifier version (`verify/1`), the contract's SHA-256, and the checks that failed.
+- **Markdown checks and response formats:** explicit `formats` must include `markdown` when the contract uses `markdownIncludes`, `markdownMatches`, `markdownCountMin`, `minTables` (which counts GFM Markdown tables) or a `field` check on `markdown`. Otherwise scrape, batch and crawl return HTTP 400 before fetching or creating a job; add `markdown` or remove those checks. When `formats` is omitted, compact adapter responses include the checked Markdown beside their default JSON. This guards Markdown delivery, not arbitrary `field` paths into internal diagnostics or a general field-accuracy guarantee.
 - The checks are those of the access task runner (`research/access/run-set.mjs`), judged the same way, so its tasks can be sent unchanged.
 - **How it steers the fetch:** each rung of the ladder's page is judged as it comes (the `verification_checked` events of `ladderTrace` with `debug: true`).
   - A page that passes every check is the answer, with no hop to a stronger lane after it.

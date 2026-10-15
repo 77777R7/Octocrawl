@@ -122,6 +122,22 @@ const openAiEndpoint = (answer: unknown, requests: Array<Record<string, any>>) =
 }) as typeof fetch
 
 describe('scrape response metadata', () => {
+  it('delivers Markdown a contract checks when an omitted compact format would otherwise choose only adapter JSON', async () => {
+    const run = { ...result, channelsTried: ['http'], ladderTrace: [], summary: {
+      channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null,
+      externalCost: { knownSubtotal: 0, unknown: true }, contentTokenMeter: { knownSubtotal: 10, unknown: false }, artifacts: [],
+    } }
+    const response = await prepareScrapeResponse(run, { url: run.requestedUrl, debug: false, verify: { checks: [{ type: 'markdownIncludes', text: 'Subject headphones' }] } }, {}, null, performance.now()) as CompactScrapeResponse
+    expect(response.verification.status).toBe('passed')
+    expect(response.markdown).toContain('Subject headphones')
+    expect(response.formats).toContain('markdown')
+    expect(response.formats).toContain('json')
+    const jsonOnly = await prepareScrapeResponse(run, { url: run.requestedUrl, debug: false, formats: [json({ price: { type: 'number' } }, ['price'])], verify: { checks: [{ type: 'field', path: 'json.data.price', equals: 1299 }] } }, {}, null, performance.now()) as CompactScrapeResponse
+    expect(jsonOnly.verification.status).toBe('passed')
+    expect(jsonOnly.markdown).toBeUndefined()
+    expect(jsonOnly.formats).toEqual(['json'])
+  })
+
   it('carries the Open Graph and article fields the page states beside the seven base fields and the call facts, on the compact response too', async () => {
     const metadata = { title: 'Report', description: null, language: 'en', keywords: null, robots: null, favicon: null, canonicalUrl: null, ogTitle: 'Report card', ogImage: 'https://example.test/og.png', articleTag: ['energy'] }
     const run = {
