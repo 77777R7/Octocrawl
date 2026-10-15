@@ -21,6 +21,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- A single-page list request with an explicit `itemSelector` now chooses those items for Markdown, HTML and tables, rather than a neighbouring article or the whole page. An explicit region still takes precedence, and explicit list records respect region exclusions; original record positions and base URLs are retained. Whole-page requests, auto-detected lists and pagination keep their content-selection behaviour.
+
 - A captcha page a site serves itself is now judged `captcha`, not `bot_detected_generic`. A page counts as one when it has both:
   - its own widget script, on a `/captcha/` path;
   - an ask to prove the visitor is human.

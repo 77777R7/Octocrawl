@@ -12,7 +12,7 @@
 import { createHash } from 'node:crypto'
 import type { ListDetection, ListExtraction, ListFormatRequest, ListRecord, ListSpec } from '@w2l/contracts'
 import { detectFields, detectLists } from './detectList.js'
-import { parse, qsa } from './dom.js'
+import { detachAll, parse, qsa } from './dom.js'
 import { documentBaseUrl } from './links.js'
 import { namedBy } from './selectors.js'
 
@@ -28,7 +28,7 @@ const URL_ATTRIBUTES: ReadonlySet<string> = new Set(['href', 'src', 'data-src', 
  * (1 when one page is read). At most `budget.records` records and
  * `budget.chars` characters of values; `cut` says when the page had more.
  */
-export function extractListRecords(html: string, url: string, spec: ListSpec, page = 1, budget: { records: number; chars: number } = { records: MAX_LIST_RECORDS, chars: MAX_LIST_VALUE_CHARS }): ListRecord[] & { cut?: boolean; itemText?: string } {
+export function extractListRecords(html: string, url: string, spec: ListSpec, page = 1, budget: { records: number; chars: number } = { records: MAX_LIST_RECORDS, chars: MAX_LIST_VALUE_CHARS }, scope: { includeSelectors?: readonly string[]; excludeSelectors?: readonly string[] } = {}): ListRecord[] & { cut?: boolean; itemText?: string } {
   const doc = parse(html)
   const document = doc.document
   // Links resolve as the page resolves them: against its <base href> when it has one.
@@ -40,11 +40,23 @@ export function extractListRecords(html: string, url: string, spec: ListSpec, pa
   // A record inside another record is part of it.
   const items = [...matched].filter((el) => !hasAncestorIn(el, matched)).sort(order)
   const fieldMatches = spec.fields.map((field) => (field.selector === undefined ? null : namedBy(document, [field.selector])))
+  // Match against the original tree, so an item selector such as `main > .card`
+  // keeps its context. A user's selection bounds records too; exclusions must
+  // not come back as record fields after they were removed from the answer.
+  const included = scope.includeSelectors?.length ? namedBy(document, scope.includeSelectors) : null
+  const excluded = namedBy(document, scope.excludeSelectors ?? [])
+  const kept = new Set(items.filter(item =>
+    !excluded.has(item) && !hasAncestorIn(item, excluded) &&
+    (included === null || included.has(item) || hasAncestorIn(item, included))))
+  detachAll(excluded)
   const records: ListRecord[] & { cut?: boolean; itemText?: string } = []
   // The whole text of every item, not only the fields asked for: what tells this page's records from another page's.
-  Object.defineProperty(records, 'itemText', { value: items.map((item) => textOf(item) ?? '').join('\u0000'), enumerable: false })
+  Object.defineProperty(records, 'itemText', { value: items.filter(item => kept.has(item)).map((item) => textOf(item) ?? '').join('\u0000'), enumerable: false })
   let chars = 0
   for (const [index, item] of items.entries()) {
+    // Keep the original match index as its evidence position, even when a
+    // preceding record was outside the selection or explicitly excluded.
+    if (!kept.has(item)) continue
     if (records.length >= budget.records) { records.cut = true; break }
     const descendants = qsa(item, '*')
     const values: Record<string, string | null> = {}

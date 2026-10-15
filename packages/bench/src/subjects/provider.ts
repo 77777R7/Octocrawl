@@ -24,7 +24,7 @@ import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '
 import type { SubjectAdapter } from '../subject.js'
 import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
-import { errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { contentSelectors, contentSelectionEvent, listSelectionAsked, listRecordsFound, errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import { loadingWaitEvent, withStillLoadingWarning, type SettleOutcome } from '../browserSettle.js'
 import { regionSpecOf, regionWaitEvent, type RegionOutcome, type RegionSpec } from '../regionWait.js'
@@ -521,7 +521,8 @@ export class ProviderSubject implements SubjectAdapter {
       }
     }
 
-    const extracted = extractTf.extract(res.body, { url: res.finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
+    trace.push(...contentSelectionEvent(options, 'provider', wallMs, res.body.length))
+    const extracted = extractTf.extract(res.body, { url: res.finalUrl, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, res.body.length), blockAds: options.blockAds })
     const links = collectLinks(res.body, res.finalUrl)
     trace.push({
       at: wallMs,
@@ -547,7 +548,7 @@ export class ProviderSubject implements SubjectAdapter {
     let wholePage: string | null = null
     // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
     if ((extracted.escalate || extracted.lastResort === true) && gate !== null) return blocked(gate)
-    if (extracted.escalate && !selectionAsked(options)) {
+    if (extracted.escalate && !selectionAsked(options) && !(listSelectionAsked(options, res.body.length) && listRecordsFound(res.body, res.finalUrl, options))) {
       wholePage = wholePageMarkdown(res.body, res.finalUrl, options)
       if (options.onlyMainContent !== false || wholePage === null) return {
         ...base,
