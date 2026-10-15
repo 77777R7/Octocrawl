@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { verifyLedger, type ProviderDeclaration } from '@w2l/http-core'
+import { identityBundleFrom, modeIdentity } from '@w2l/contracts'
+import { LadderRunner } from '../src/routing/ladder.js'
 import {
   ProviderSubject,
   robotsFetcherVia,
@@ -376,6 +378,72 @@ describe('ProviderSubject robots gate', () => {
       vi.useRealTimers()
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('DataDome classification and human handoff', () => {
+  const url = 'https://shop.example/dp/B0TEST'
+  const liveView = 'https://live.example/datadome'
+  const response = (kind = 'captcha'): Partial<ProviderResponse> => ({
+    status: 403,
+    headers: { 'content-type': 'text/html', 'x-datadome': 'protected', 'x-datadome-cid': 'example' },
+    body: `<html><body><iframe src="https://geo.captcha-delivery.com/${kind}/?initialCid=example"></iframe></body></html>`,
+    handoffUrl: liveView,
+  })
+
+  it('offers a live-session handoff for the captcha, but not for the device check', async () => {
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    for (const kind of ['captcha', 'interstitial']) {
+      const out = await new ProviderSubject(decl(), new CountingTransport(response(kind)), 'authed', null, fetcher).fetch(url)
+      expect(out.status).toBe('blocked')
+      expect(out.blockReason).toBe(kind === 'captcha' ? 'captcha' : 'bot_detected_generic')
+      if (kind === 'captcha') {
+        expect(out.handoff).toMatchObject({ reason: 'captcha_required', liveViewUrl: liveView })
+        expect(out.escalations).toContainEqual({ from: 'provider', to: 'browser_local_authed', trigger: 'blocked:captcha', improved: null })
+      } else expect(out.handoff).toBeNull()
+    }
+  })
+
+  it.each(['standard', 'authed'] as const)('respects %s mode when the human declines a captcha handoff', async (mode) => {
+    const transport = new CountingTransport(response())
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl(), transport, mode, null, fetcher)
+    const takeOver = vi.fn(async () => null)
+    const runner = new LadderRunner([{
+      id: 'provider', vendorId: 'browserbase', priceCeilingUsd: 0,
+      identity: identityBundleFrom(modeIdentity(mode)), fetch: target => subject.fetch(target),
+    }], { mode, enhanced: true }, null, { takeOver })
+    const run = await runner.run(url)
+    expect(run.result).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+    expect(run.handoffRequested).toBe(mode === 'authed')
+    expect(takeOver).toHaveBeenCalledTimes(mode === 'authed' ? 1 : 0)
+    expect(transport.calls).toEqual([url])
+    if (mode === 'authed') expect(takeOver).toHaveBeenCalledWith(url, expect.objectContaining({ reason: 'captcha_required', liveViewUrl: liveView }), expect.anything())
+  })
+
+  it('retries the same provider once with the human session after a DataDome captcha', async () => {
+    const state = response()
+    const transport = new CountingTransport(state)
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const subject = new ProviderSubject(decl(), transport, 'authed', null, fetcher)
+    const receivedSessions: unknown[] = []
+    const session = { domain: 'shop.example', vendor: 'browserbase', attestedBy: 'test', attestedAt: '2026-10-15T00:00:00.000Z' }
+    const takeOver = vi.fn(async () => {
+      Object.assign(state, { status: 200, headers: { 'content-type': 'text/html' }, body: PAGE, handoffUrl: null })
+      return session
+    })
+    const runner = new LadderRunner([{
+      id: 'provider', vendorId: 'browserbase', priceCeilingUsd: 0,
+      identity: identityBundleFrom(modeIdentity('authed')),
+      fetch: (target, snapshot) => { receivedSessions.push(snapshot); return subject.fetch(target) },
+    }], { mode: 'authed' }, null, { takeOver })
+    const run = await runner.run(url)
+    expect(takeOver).toHaveBeenCalledTimes(1)
+    expect(receivedSessions).toEqual([null, session])
+    expect(transport.calls).toEqual([url, url])
+    expect(run.channelsTried).toEqual(['provider', 'provider(retry)'])
+    expect(run.result.status).toBe('success')
+    expect(run.handoffRequested).toBe(false)
   })
 })
 

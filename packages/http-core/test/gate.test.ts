@@ -81,6 +81,40 @@ describe('classifyGate — vendor headers are decisive', () => {
     expect(v?.signals).toContain('header_x_datadome')
   })
 
+  it.each([
+    [{ 'x-datadome': 'protected' }, 403, 'header_x_datadome'],
+    [{ 'x-datadome-cid': 'example' }, 403, 'header_x_datadome_cid'],
+    [{ 'x-datadome': 'protected', 'x-datadome-cid': 'example' }, 403, 'header_x_datadome'],
+    [{ 'x-datadome-cid': 'example' }, 200, 'header_x_datadome_cid'],
+  ] as const)('refines DataDome headers %j on %i with the actual captcha', (headers, status, signal) => {
+    // T038/T046: the header named the vendor before the classifier reached its captcha iframe.
+    const body = '<html><body><iframe src="https://geo.captcha-delivery.com/captcha/?initialCid=example"></iframe></body></html>'
+    expect(classifyGate(withHeaders(headers, { status, body, contentful: true }))).toEqual({
+      reason: 'captcha', signals: [signal, 'datadome_captcha'],
+    })
+  })
+
+  it.each([
+    '<iframe src="https://geo.captcha-delivery.com/interstitial/?initialCid=example"></iframe>',
+    '<iframe src="https://geo.notcaptcha-delivery.com/captcha/"></iframe>',
+    '<script src="https://ct.captcha-delivery.com/c.js"></script>',
+    '<link rel="preconnect" href="https://geo.captcha-delivery.com/captcha/">',
+  ])('does not infer a DataDome captcha from other evidence: %s', (body) => {
+    expect(classifyGate(withHeaders({ 'x-datadome': 'protected' }, { status: 403, body, contentful: true }))).toEqual({
+      reason: 'bot_detected_generic', signals: ['header_x_datadome'],
+    })
+  })
+
+  it('keeps rate limits and explicit Cloudflare challenges ahead of DataDome refinement', () => {
+    const body = '<iframe src="https://geo.captcha-delivery.com/captcha/"></iframe>'
+    expect(classifyGate(withHeaders({ 'x-datadome': 'protected' }, { status: 429, body }))).toEqual({
+      reason: 'rate_limit', signals: ['status_429'],
+    })
+    expect(classifyGate(withHeaders({ 'cf-mitigated': 'challenge', 'x-datadome': 'protected' }, { status: 403, body }))).toEqual({
+      reason: 'cloudflare_challenge', signals: ['header_cf_mitigated'],
+    })
+  })
+
   it('does not take x-datadome alone on a success for a block: DataDome sends it on the pages it lets through', () => {
     expect(classifyGate(withHeaders({ 'x-datadome': 'protected' }, { status: 200, body: `<html><body><article>${ARTICLE}</article></body></html>` }))).toBeNull()
     // Its block names itself: a 403, or its id header, or its challenge in the body.
