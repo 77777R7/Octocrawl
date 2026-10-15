@@ -879,8 +879,10 @@ function alikeCards(cards: readonly Element[]): number {
  * site's home, its sections under h2s: StubHub's on 2026-10-11), and outside
  * any header. The region widens to the container the cards share with the
  * h1, so the heading and its introduction stay. Null otherwise, and on a page
- * with more than one h1: a page whose only structure is navigation, or an
- * application shell, still has no content and escalates.
+ * with more than one h1. A heading-less <main> may instead hold two distinct
+ * sibling <article> cards with a sourced video each: a sparse media feed
+ * has neither a third card nor article prose. Ordinary pairs, duplicate
+ * cards and carousels do not relax the three-card rule.
  */
 export function selectCardList(doc: Document): Element | null {
   const h1s = qsa(doc, 'h1')
@@ -893,10 +895,16 @@ export function selectCardList(doc: Document): Element | null {
   let best: Element | null = null
   let bestCards = 0
   for (const [at, el] of all.entries()) {
-    if (at <= h1At || el.children.length < 3 || h1?.contains(el) === true || !['ul', 'ol', 'div', 'section'].includes(tagOf(el))) continue
+    if (at <= h1At || el.children.length < 2 || h1?.contains(el) === true || !['ul', 'ol', 'div', 'section'].includes(tagOf(el))) continue
+    // Do not scan every two-child layout wrapper as a new candidate.
+    if (el.children.length === 2 && !Array.from(el.children).every(child => tagOf(child) === 'article')) continue
     if (el.closest('header') !== null) continue
-    const cards = alikeCards(Array.from(el.children).filter(isCard))
-    if (cards >= 3 && cards > bestCards) {
+    const items = Array.from(el.children).filter(isCard)
+    const cards = alikeCards(items)
+    const mediaPair = cards === 2 && items.length === 2 && h1 === null && el.closest('main') !== null && !inSiteChrome(el) && !isCarousel(el) &&
+      items.every(item => tagOf(item) === 'article' && qsa(item, 'video[src],video source[src]').some(video => (video.getAttribute('src') ?? '').trim() !== '')) &&
+      new Set(items.map(item => textOf(item).replace(/\s+/g, ' ').trim())).size === 2
+    if ((cards >= 3 || mediaPair) && cards > bestCards) {
       bestCards = cards
       best = el
     }
