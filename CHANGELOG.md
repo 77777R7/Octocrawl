@@ -21,6 +21,12 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- A captcha page a site serves itself is now judged `captcha`, not `bot_detected_generic`. A page counts as one when it has both:
+  - its own widget script, on a `/captcha/` path;
+  - an ask to prove the visitor is human.
+
+  For example, studylib.net's "Security Check", seen after Cloudflare's challenge clears. The page needs a person, so a local server can now offer it to one (handoff) rather than report a generic block. Whether a task passes does not change.
+
 - A page DataDome or Cloudflare let through is no longer read as a block.
   - DataDome sends `x-datadome: protected` on every page of a site it guards, the pages it lets through included. That header alone now names a block only on an answer that is not a success. DataDome's real block (a 403 with `x-datadome-cid` and `x-dd-b`) and its interstitial and captcha pages are still caught.
   - Cloudflare's `precursor` script, which it serves on the page past its challenge, no longer counts as a challenge, the same as its `jsd` script already did.

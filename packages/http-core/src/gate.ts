@@ -123,6 +123,18 @@ const CAPTCHA_MARKERS: readonly (readonly [marker: string, signal: string])[] = 
   ['activate and hold the button', 'text_activate_and_hold'],
 ]
 
+/**
+ * A captcha a site serves itself: its own widget script (a `/captcha/` path) on a page that asks the visitor to prove
+ * they are human (studylib.net's "Security Check", 2026-10-15). Both, so a page that only loads such a script for a form
+ * is not one; a page read as content never reaches this check.
+ */
+const SITE_CAPTCHA_SCRIPT = /<script\b[^>]{0,500}?\bsrc\s*=\s*["']?[^"'\s>]*\/captcha\/[^"'\s>]*/i
+const SITE_CAPTCHA_PHRASES: readonly (readonly [phrase: string, signal: string])[] = [
+  ['verify you are human', 'text_verify_you_are_human'],
+  ['complete the security check', 'text_complete_the_security_check'],
+  ['prove you are human', 'text_prove_you_are_human'],
+]
+
 /** Phrases that make a login the page's purpose rather than one of its widgets. */
 const LOGIN_INTENT_PHRASES: readonly string[] = [
   'sign in to continue',
@@ -366,6 +378,10 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   const captcha = matched(lower, CAPTCHA_MARKERS)
   if (captcha.length > 0) {
     return { reason: 'captcha', signals: captcha }
+  }
+  const siteCaptchaText = matched(lower, SITE_CAPTCHA_PHRASES)
+  if (siteCaptchaText.length > 0 && SITE_CAPTCHA_SCRIPT.test(head)) {
+    return { reason: 'captcha', signals: ['site_captcha_script', ...siteCaptchaText] }
   }
 
   // --- login wall ---------------------------------------------------------
