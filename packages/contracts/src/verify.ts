@@ -10,6 +10,8 @@ export type VerifyCheck =
   | { type: 'markdownMatches'; pattern: string; flags?: string }
   | { type: 'markdownCountMin'; pattern: string; flags?: string; min: number }
   | { type: 'minTables'; min: number }
+  /** Rows after headers with a letter or number in every named column of one delivered table; not field truth. */
+  | { type: 'tableRowsMin'; tableIndex: number; columns: readonly number[]; min: number }
   | { type: 'listRecordsMin'; min: number; path?: string }
   | { type: 'recordFields'; fields: readonly string[]; min: number }
   | { type: 'field'; path: string; equals?: string | number | boolean | null; in?: readonly (string | number | boolean | null)[]; present?: boolean; min?: number; max?: number }
@@ -21,7 +23,7 @@ export interface VerifyContract {
 }
 
 export type VerifyCheckType = VerifyCheck['type']
-export const VERIFY_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownIncludes', 'markdownMatches', 'markdownCountMin', 'minTables', 'listRecordsMin', 'recordFields', 'field']
+export const VERIFY_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownIncludes', 'markdownMatches', 'markdownCountMin', 'minTables', 'tableRowsMin', 'listRecordsMin', 'recordFields', 'field']
 /** Checks whose patterns are JavaScript regular expressions, which cannot be bounded in time: a hosted server refuses them. */
 export const VERIFY_REGEX_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownMatches', 'markdownCountMin']
 export const MAX_VERIFY_CHECKS = 32
@@ -47,7 +49,7 @@ export interface VerificationCheck {
   passed: boolean | null
   /** What was seen, in a sentence, for a person; never the page's text. */
   observed: string
-  /** For the count checks (`markdownCountMin`, `minTables`, `listRecordsMin`, `recordFields`): the number seen and the number asked. */
+  /** For the count checks: the number seen and the number asked. */
   observedCount?: number
   asked?: number
 }
@@ -56,7 +58,7 @@ export type Verification =
   | { status: 'not_requested' }
   | {
     status: 'passed' | 'failed'
-    /** The verifier's version (`verify/1`): it changes when a check is judged differently. */
+    /** The verifier's version: it changes when checks are added or judged differently. */
     verifier: string
     contractSha256: string
     reason: VerificationReason | null
@@ -69,6 +71,7 @@ export const VERIFY_CHECK_KEYS: Readonly<Record<VerifyCheckType, readonly string
   markdownMatches: ['type', 'pattern', 'flags'],
   markdownCountMin: ['type', 'pattern', 'flags', 'min'],
   minTables: ['type', 'min'],
+  tableRowsMin: ['type', 'tableIndex', 'columns', 'min'],
   listRecordsMin: ['type', 'min', 'path'],
   recordFields: ['type', 'fields', 'min'],
   field: ['type', 'path', 'equals', 'in', 'present', 'min', 'max'],

@@ -906,8 +906,11 @@ function checksMarkdown(req: Pick<ScrapeRequest, 'verify'>): boolean {
     check.type === 'markdownCountMin' || check.type === 'minTables' || check.type === 'field' && check.path === 'markdown') === true
 }
 
-/** Reject an explicit response shape that discards the data its Markdown checks claim to verify. */
+/** Require the formats each check actually reads; do not verify data the response discards. */
 export function checkVerificationFormats(req: Pick<ScrapeRequest, 'formats' | 'verify'>): void {
+  if (req.verify?.checks.some(check => check.type === 'tableRowsMin') && (req.formats === undefined || !hasFormat(req.formats, 'tables'))) {
+    throw new RequestError('formats must include tables when verify uses tableRowsMin; include tables or remove that check')
+  }
   if (req.formats !== undefined && checksMarkdown(req) && !hasFormat(req.formats, 'markdown')) {
     throw new RequestError('formats must include markdown when verify checks Markdown (minTables also checks Markdown tables); include markdown or remove those checks')
   }

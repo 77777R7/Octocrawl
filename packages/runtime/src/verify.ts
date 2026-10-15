@@ -10,8 +10,8 @@ import { isDataCheck, type JsonValue, type Verification, type VerificationCheck,
 import { sha256Utf8 } from '@w2l/http-core'
 import { canonicalJson } from './evidenceRecord.js'
 
-/** Changes when any check is judged differently, as EXTRACTOR_VERSION does for the Markdown. */
-export const VERIFIER_VERSION = 'verify/1'
+/** Changes when checks are added or judged differently, as EXTRACTOR_VERSION does for the Markdown. */
+export const VERIFIER_VERSION = 'verify/2'
 
 /**
  * What the checks read: the result's own fields (status, markdown, list, tables, json and any other a `field` check
@@ -65,6 +65,21 @@ function judge(check: VerifyCheck, view: VerifyView, partial: boolean): Judged {
     case 'minTables':
       if (partial && !hasMarkdown && view.tableCount === undefined) return unavailable
       return counted(view.tableCount ?? gfmTableCount(md), check.min, 'table')
+    case 'tableRowsMin': {
+      if (partial && !Array.isArray(view.tables)) return unavailable
+      const table = Array.isArray(view.tables) ? view.tables.find((value: unknown) => value !== null && typeof value === 'object' && (value as Record<string, unknown>).tableIndex === check.tableIndex) as Record<string, unknown> | undefined : undefined
+      if (table === undefined || table.omitted !== undefined || !Array.isArray(table.rows) || !Number.isSafeInteger(table.headerRows) || (table.headerRows as number) < 0) {
+        return { passed: false, observedCount: 0, asked: check.min, observed: `no available table at index ${check.tableIndex}, at least ${check.min} rows asked` }
+      }
+      // Use the delivered rows without another HTML parse. Headers, blanks and punctuation-only placeholders
+      // cannot make a row; unknown values, units, dates and availability still need task-specific checks.
+      let rows = 0
+      for (let i = table.headerRows as number; i < table.rows.length; i++) {
+        const row: unknown = table.rows[i]
+        if (Array.isArray(row) && check.columns.every(column => typeof row[column] === 'string' && /[\p{L}\p{N}]/u.test(row[column] as string))) rows++
+      }
+      return counted(rows, check.min, 'row', ` with every required cell in table ${check.tableIndex}`)
+    }
     case 'listRecordsMin': {
       const path = check.path ?? 'list.records'
       if (partial && !(path.split('.')[0]! in view)) return unavailable
