@@ -68,6 +68,33 @@ const passing = { checks: [{ type: 'markdownIncludes', text: 'High water' }, { t
 const failing = { checks: [{ type: 'markdownIncludes', text: 'High water' }, { type: 'minTables', min: 1 }] }
 
 describe('task verification on a request (ADR 0006)', () => {
+  it('checks the delivered scrape projection and its snapshot metadata', async () => {
+    const engine = engineWith()
+    const checks = [{ type: 'field', path: 'evidence.httpStatus', equals: 200 }]
+    const compact = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['markdown'], debug: false, verify: { checks } })
+    expect(compact.status).toBe(200)
+    expect(compact.json).not.toHaveProperty('evidence')
+    expect(compact.json.verification.status).toBe('failed')
+    expect(compact.json.evidenceRecord.verification.status).toBe('failed')
+    const full = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['markdown'], debug: true, verify: { checks } })
+    expect(full.json.evidence.httpStatus).toBe(200)
+    expect(full.json.verification.status).toBe('passed')
+    const delivered = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['markdown'], debug: false, verify: { checks: [{ type: 'field', path: 'snapshot.httpStatus', equals: 200 }] } })
+    expect(delivered.json.snapshot.httpStatus).toBe(200)
+    expect(delivered.json.verification.status).toBe('passed')
+  })
+
+  it('rejects self-referential verdict checks before fetching', async () => {
+    const engine = engineWith()
+    const before = articleReads
+    for (const path of ['verification.status', 'readiness.state', 'evidenceRecord.verification.status']) {
+      const response = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: { checks: [{ type: 'field', path, present: true }] } })
+      expect(response.status).toBe(400)
+      expect(response.json.error).toContain('check source data instead')
+    }
+    expect(articleReads).toBe(before)
+  })
+
   it('checks required cells in the delivered table, rejecting blank data rows without changing the fetch status', async () => {
     const engine = engineWith()
     const verify = { checks: [{ type: 'tableRowsMin', tableIndex: 0, columns: [0, 1], min: 2 }] }
