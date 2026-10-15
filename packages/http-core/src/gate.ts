@@ -76,8 +76,9 @@ export interface GateVerdict {
 }
 
 /**
- * Only the head of the body is inspected. Gate pages are small and put their
- * markers early; this bounds the cost of lower-casing a multi-megabyte body.
+ * Common markers inspect only the head, bounding the cost of lower-casing a
+ * multi-megabyte body. The bounded short-wall and interactive-page checks
+ * below separately read visible text and controls beyond a script-heavy head.
  */
 const HEAD_BYTES = 65_536
 
