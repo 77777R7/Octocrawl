@@ -1084,9 +1084,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         kind,
         ...(query?.includeDuplicates === undefined ? {} : { includeDuplicates: query.includeDuplicates }),
       })
-      const includeLinks = linksRequested(task)
       return {
-        items: page.steps.map((step) => toCrawlPage(step, includeLinks, task, userChrome !== null && task.batch !== undefined && offersHandoff(task))),
+        items: page.steps.map((step) => toCrawlPage(step, task, userChrome !== null && task.batch !== undefined && offersHandoff(task))),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       }
@@ -1420,13 +1419,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                 if ('reason' in read) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: read.reason }); continue }
                 const result = read.result
                 const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv()) : undefined
-                const stored: FetchResult = {
+                const stored = verifiedJobResult(task, {
                   ...result,
                   markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
                   links: hasFormat(formats, 'links') || selection.includeLinks === true ? result.links : [],
                   ...(json === undefined ? {} : { json }),
-                  verification: verify(selection.verify, { ...result, ...(json === undefined ? {} : { json }) }),
-                }
+                })
                 // An engine shutting down writes nothing more.
                 if (shutdownController.signal.aborted || handoffClosing.signal.aborted) {
                   items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: 'Octocrawl shut down before the page was stored' })
@@ -1557,15 +1555,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             })),
           },
         }
-        return { ...outcome, ...(audit === undefined ? {} : { audit }), result: {
+        return { ...outcome, ...(audit === undefined ? {} : { audit }), result: verifiedJobResult(task, {
           ...outcome.result,
           markdown: wants('markdown') ? outcome.result.markdown : null,
           // A crawl stores every page's links: its frontier and resume follow them. Output filters them.
           links: task.batch === undefined || wants('links') || selection.includeLinks === true ? outcome.result.links : [],
           ...(json === undefined ? {} : { json }),
-          // The task's contract judged on the whole page, before the stored result leaves out what was not asked for.
-          verification: verify(selection.verify, { ...outcome.result, ...(json === undefined ? {} : { json }) }),
-        } }
+        }) }
       },
       close: closeLadders,
     }
@@ -2819,35 +2815,15 @@ function askedHtmlFormats(task: Task, result: FetchResult | null): Pick<CrawlPag
   }
 }
 
-/** A step as the items routes list it by default and as a job event carries it: no routing audit, an empty trace. */
-function compactPage(step: StepRecord, task: Task): CrawlPage {
-  const { audit: _audit, ...page } = toCrawlPage(step, linksRequested(task), task)
-  return { ...page, trace: [] }
-}
-
-function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task, handoffOffered = false): CrawlPage {
-  // A page whose fetch threw was stored without passing the verifier: it is judged here, against the task's contract.
-  const result = step.result === null || step.result.verification !== undefined ? step.result : { ...step.result, verification: verify((task.batch ?? task.crawl)?.verify, { ...step.result }) }
-  const handoff = handoffOffered && handoffNeededIn(task, step) ? handoffRequestOf(step) : null
-  const mode = task.mode
-  // The same hints a scrape of this page would carry, from its stored result and routing audit.
-  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary, ladderTrace: step.audit.ladderTrace }) })
+/** Source data shared by job items, page events and webhooks; internal extraction and discovery data stay private. */
+function jobPageContent(task: Task, result: FetchResult | null) {
   return {
-    id: step.id,
-    url: step.url,
-    canonicalUrl: step.canonicalUrl,
-    depth: step.depth,
-    status: step.status,
-    lane: step.lane,
     markdown: result?.markdown ?? null,
     ...askedHtmlFormats(task, result),
     ...(result?.warnings === undefined || result.warnings.length === 0 ? {} : { warnings: result.warnings, warning: warningOf(result.warnings) }),
-    ...(agentHints.length === 0 ? {} : { agentHints }),
-    ...(handoff === null ? {} : { handoff }),
-    ...(includeLinks ? { links: result?.links ?? [] } : {}),
+    ...(linksRequested(task) ? { links: result?.links ?? [] } : {}),
     ...(result?.metadata === undefined ? {} : { metadata: result.metadata }),
     ...(result?.json === undefined ? {} : { json: result.json }),
-    ...(result === null ? {} : { verification: result.verification! }),
     ...(result?.file === undefined ? {} : { file: result.file }),
     ...(result?.actions === undefined ? {} : { actions: result.actions }),
     ...(result?.list === undefined ? {} : { list: result.list }),
@@ -2855,10 +2831,43 @@ function toCrawlPage(step: StepRecord, includeLinks: boolean, task: Task, handof
     blockReason: result?.blockReason ?? null,
     budgetExceeded: result?.budgetExceeded ?? null,
     evidence: result?.evidence ?? null,
+    usage: result?.usage ?? null,
+  }
+}
+
+/** Store one verdict for the delivered data, so counts and all page representations use the same check scope. */
+function verifiedJobResult(task: Task, result: FetchResult): FetchResult {
+  const verification = verify((task.batch ?? task.crawl)?.verify, { status: result.status, lane: result.lane, ...jobPageContent(task, result) })
+  return { ...result, verification }
+}
+
+/** A step as the items routes list it by default and as a job event carries it: no routing audit, an empty trace. */
+function compactPage(step: StepRecord, task: Task): CrawlPage {
+  const { audit: _audit, ...page } = toCrawlPage(step, task)
+  return { ...page, trace: [] }
+}
+
+function toCrawlPage(step: StepRecord, task: Task, handoffOffered = false): CrawlPage {
+  // A page whose fetch threw was stored without passing the verifier: it is judged here, against the task's contract.
+  const result = step.result === null || step.result.verification !== undefined ? step.result : verifiedJobResult(task, step.result)
+  const handoff = handoffOffered && handoffNeededIn(task, step) ? handoffRequestOf(step) : null
+  const mode = task.mode
+  // The same hints a scrape of this page would carry, from its stored result and routing audit.
+  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary, ladderTrace: step.audit.ladderTrace }) })
+  return {
+    ...jobPageContent(task, result),
+    id: step.id,
+    url: step.url,
+    canonicalUrl: step.canonicalUrl,
+    depth: step.depth,
+    status: step.status,
+    lane: step.lane,
+    ...(agentHints.length === 0 ? {} : { agentHints }),
+    ...(handoff === null ? {} : { handoff }),
+    ...(result === null ? {} : { verification: result.verification! }),
     // The stored result is the full one, trace included, with only the formats the task asked for.
     evidenceRecord: result === null ? null : toEvidenceRecord(result, { mode }, { markdown: result.markdown, ...(result.json === undefined ? {} : { json: result.json }) }),
     readiness: result === null ? null : readinessOf(result),
-    usage: result?.usage ?? null,
     trace: result?.trace ?? [],
     audit: step.audit,
     cached: step.cached,
