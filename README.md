@@ -30,19 +30,36 @@
 
 ---
 
-Connect your agent without installing anything: hosted Octocrawl is one MCP URL, `https://mcp.octocrawl.dev/mcp`, and one REST API, `https://api.octocrawl.dev`, with no key needed to start ([Quick start](#quick-start)). Or try one page in the browser at [octocrawl.dev](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=top): the web preview reads one page at a time, five a day, and besides Markdown returns the page's links and metadata, and up to 20 fields read without a model ([how it is deployed](docs/public-preview.md)).
+**Scrape pages. Crawl websites. Turn web content into usable data.**
 
-If Octocrawl is useful to you, [star the repository](https://github.com/77777R7/Octocrawl); it helps other people find it.
+Octocrawl is an open-source web scraping and crawling toolkit for AI agents, RAG and research. Collect documentation for a knowledge base, extract product details for comparison, or turn web tables and listings into data for analysis. Each page comes with a source record.
+
+[Try a page in your browser](https://octocrawl.dev/?utm_source=github&utm_medium=readme&utm_campaign=top), or [connect your agent](#quick-start) through hosted MCP or the [REST API](https://api.octocrawl.dev). No installation or API key is needed to try the hosted service.
+
+## What can you do with Octocrawl?
+
+| Capability | What you get |
+| --- | --- |
+| **Scrape a page** | Readable Markdown for LLM context, plus HTML, links, image URLs and page metadata. Request a screenshot on the browser lane. |
+| **Map a website** | Discover URLs from sitemaps and page links, and filter them by a search term to find the pages you need. |
+| **Crawl a site or section** · local | Follow links from a starting URL and collect each page's content, with path filters, depth and page limits. |
+| **Scrape a list of URLs** · local | Submit a batch, retrieve results as they arrive, and keep the outcome of every URL, including failures. |
+| **Extract structured data** | Get tables and repeated listings as JSON and CSV, or pass a JSON Schema for supported fields such as product names, prices and page labels. [Extraction guide](docs/json-extraction.md). |
+| **Read dynamic pages** · local actions | Render JavaScript, click controls, scroll, load more items and follow pagination before extracting content. [Browser actions](docs/scrape-options.md#actions). |
+| **Read PDF reports** | Extract a PDF's text layer with page markers for citations. CSV, JSON and plain-text URLs also return their text. [File support](docs/files.md). |
+| **Revisit sources on a schedule** · local workers | Run Monitors and send their events to an HTTPS endpoint with retried delivery. [Monitor setup](docs/monitors.md). |
+
+Hosted Octocrawl offers **scrape and map**; keyless requests use HTTP, and an account key enables the browser lane. Run locally for crawl, batch, page actions and Monitors; see [Running Octocrawl](docs/local-setup.md) for setup and self-hosting options. The [web preview](docs/public-preview.md) is a single-page trial, with five pages a day and up to 20 named fields.
 
 ## Why Octocrawl?
 
-- **In your agent in one line:** a hosted MCP server for Claude Code, Cursor, OpenCode and Codex. No key is needed to start.
-- **Failure is a result:** a page comes back `blocked`, `failed` or `empty_verified` with a reason, never as an empty success. An error page keeps its status and Markdown as evidence ([details](docs/scrape-options.md#failure-results)).
-- **Five false-success checks:** challenge text, wrong-page content, missing facts, truncation and too little content.
-- **An Evidence Record on every page:** final URL, redirects, fetch time, status, lane, robots.txt decision, hashes and field evidence, described by a versioned [JSON Schema](packages/contracts/schemas/evidence-record.v1.json) ([reference](apps/public-web/content/reference.md#evidence-record)). An unknown value is null, not zero.
-- **Escalates only when it must:** HTTP first, then a browser, then your login or a proxy. Each attempt is traced and the task's cost is counted.
-- **Measured against ground truth:** a 56-case fixture suite (soft 404s, challenge pages, SPAs, timeouts, zip bombs, tables) measures the false-success rate.
-- **Open source, runs anywhere:** the server, CLI and MCP server are AGPL-3.0; the TypeScript, Python and Vercel AI SDK clients are MIT. Run it with `npx`, self-host it with [Docker Compose](docs/self-host-docker.md), or move over from Firecrawl with the [shim](docs/firecrawl-shim.md).
+- **Web data inside your agent.** Connect Claude Code, Cursor, OpenCode or Codex through MCP, or build with REST, TypeScript, Python and the Vercel AI SDK.
+- **Structured fields without a model by default.** Read supported values from the page itself, with field evidence and explicit missing values. Model fallback is opt-in.
+- **Know when a scrape fell short.** Checks flag challenge pages, wrong content, missing facts, truncation and too little content. Blocked and failed results carry a reason; fetched error pages keep their status and Markdown. [Result states](docs/scrape-options.md#failure-results).
+- **Trace results back to their sources.** Each page carries an [Evidence Record](apps/public-web/content/reference.md#evidence-record) with its URL, fetch time, status and extraction evidence. Unobserved values stay `null`.
+- **Run it where you need it.** Use the hosted service, run with `npx`, or self-host with [Docker Compose](docs/self-host-docker.md). The server is AGPL-3.0; the client libraries are MIT.
+
+If Octocrawl helps your work, [give the repository a star](https://github.com/77777R7/Octocrawl).
 
 ## Quick start
 
