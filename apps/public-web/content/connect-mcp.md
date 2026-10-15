@@ -32,6 +32,17 @@ Use Octocrawl's scrape tool on https://developer.mozilla.org/en-US/docs/Web/HTTP
 
 The answer carries the page's Markdown and an Evidence Record: final URL, fetch time, HTTP status, the robots.txt decision and hashes of what was read. A page that could not be read comes back as a result with a reason (`blocked`, `incomplete`, `timeout`), not as an invented page. Over the daily allowance the tool answers with the time until it resets (00:00 UTC) and how to get a key. For a walk-through of a real task in Claude Code, from finding the page with `map` to citing its Evidence Record, see [Claude Code web scraping](/blog/claude-code-web-scraping/).
 
+### Check the first result before continuing
+
+A connected server and a listed tool establish the connection. To assess the task, inspect the actual tool result:
+
+- Compare the returned Markdown with the heading or content you asked for. HTTP 200 and nonempty text can also describe a navigation shell or an error page.
+- Keep the fetch `status` separate from `verification.status`. `not_requested` means no task contract was checked. `passed` means the configured checks passed; it does not establish independent field accuracy.
+- Inspect `readiness` when present. `not_loaded`, `not_extracted` and `not_served` need different next steps. A missing readiness field is unknown.
+- Keep incomplete results and failures visible. Do not convert missing content to a zero value or retry paid access automatically.
+
+If the client lists no tools, check the selected server's connection error. If the tool returns a quota or access refusal, follow that reason. Changing the MCP client does not establish that the target content can be read. See [result states](/docs/limits/) and the [Evidence Record reference](/docs/reference/#evidence-record).
+
 ## What hosted Octocrawl does not do
 
 - `crawl`, `batch_scrape` and the Monitor tools: on your computer (below), where they run without limit. The hosted answer names this.

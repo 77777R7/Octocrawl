@@ -6,7 +6,7 @@ We ran the whole path on 2026-10-09, then ran it again two hours later, hosted a
 
 ## Why Markdown, and not HTML, for a RAG pipeline?
 
-An HTML page is mostly markup, scripts and menus. Markdown keeps what a model needs (headings, lists, tables, code) and drops the rest, so the same page costs fewer tokens and the headings give you natural places to split.
+Markdown represents headings, lists, tables and code without their surrounding HTML. Headings give a retrieval pipeline places to split. Compare the extracted sections with the source and measure token use with your embedding model’s tokenizer; the best format depends on the task.
 
 We read the Python `json` module docs through hosted Octocrawl with no account:
 
@@ -84,7 +84,13 @@ with W2L() as client:  # http://127.0.0.1:8787, where `npx octocrawl serve` list
 
 with open("chunks.jsonl", "w") as out:
     for item in job.items:
-        if item["status"] not in ("success", "partial"):
+        # Conservative ingestion: send partial results for review separately.
+        verification = item.get("verification") or {}
+        readiness = item.get("readiness") or {}
+        if (item["status"] != "success"
+                or not (item.get("markdown") or "").strip()
+                or verification.get("status") == "failed"
+                or readiness.get("state") in ("not_loaded", "not_extracted", "not_served")):
             print("skipped", item["url"], item["status"], item.get("failureReason"))
             continue
         evidence = item["evidenceRecord"]
@@ -100,7 +106,7 @@ with open("chunks.jsonl", "w") as out:
             }) + "\n")
 ```
 
-Run against the same 6 URLs with `octocrawl-client` 0.3.2, it wrote 47 chunks, from 1 for the shortest page to 19 for the longest. One of them:
+The original version of this example ran against the same 6 URLs with `octocrawl-client` 0.3.2 on 2026-10-09 and wrote 47 chunks, from 1 for the shortest page to 19 for the longest. The guard above was tightened on 2026-10-16 and checked on synthetic results; those historical URLs and counts were not rerun for this update. One historical chunk:
 
 ```json
 {
@@ -120,7 +126,7 @@ Compare `outputSha256.markdown` with the hash you stored last time, and skip the
 
 ## What about pages that fail?
 
-Filter on `status`, not on whether there's Markdown. Only `success` and `partial` carry the page's content. Another status may still carry Markdown kept as evidence, such as the body of an error page. When we added an address that answers 404 to the list, the script above printed `skipped https://docs.python.org/3/tutorial/does-not-exist.html failed http_error` and wrote the same 47 chunks from the other six pages.
+Keep fetch status, readiness and task verification separate. The example skips `partial` results for review, empty Markdown, failed contract checks and explicit unreadiness. A `success` with `verification.status: "not_requested"` remains unverified: check that the needed content is present or define a task contract before treating it as complete. Missing verification or readiness is unknown. Another fetch status may still carry Markdown kept as evidence, such as an error page. In the original 2026-10-09 run, adding an address that answers 404 made the original script print `skipped https://docs.python.org/3/tutorial/does-not-exist.html failed http_error` and write the same 47 chunks from the other six pages. A failed URL stays in the batch record even though it produces no chunks.
 
 ## When isn't this the right setup?
 

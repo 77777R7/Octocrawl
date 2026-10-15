@@ -998,9 +998,9 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
   copy.title = text.copy
   copy.disabled = !payload
   copy.addEventListener('click', async () => {
-    track('result_copy', { view })
     try {
       await navigator.clipboard.writeText(payload)
+      track('result_copy', { view })
       copy.textContent = 'Copied ✓'
       window.setTimeout(() => { copy.textContent = 'Copy' }, 2200)
     } catch { copy.textContent = 'Copy failed. Select the text manually.' }
@@ -1606,9 +1606,9 @@ codeDialog.querySelector('#code-close')!.addEventListener('click', () => codeDia
 codeDialog.addEventListener('click', (event) => { if (event.target === codeDialog) codeDialog.close() })
 codeDialog.addEventListener('close', () => codeButton.focus())
 codeCopy.addEventListener('click', async () => {
-  track('get_code_copy', { tab: codeTab })
   try {
     await navigator.clipboard.writeText(codeTexts[codeTab])
+    track('get_code_copy', { tab: codeTab })
     codeCopy.textContent = 'Copied ✓'
     codeStatus.textContent = 'Copied to the clipboard.'
     window.setTimeout(() => { codeCopy.textContent = 'Copy' }, 2200)

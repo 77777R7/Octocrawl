@@ -11,9 +11,9 @@ import { siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
 import { DASHBOARD_BODIES, dashboardPageHtml } from './dashboardPages.mjs'
 // The free tool pages, built by Vite (vite.config.ts) and listed in the sitemap here.
 // The free tools' pages (apps/public-web/src/tools/pages.ts), with the day each last changed.
-const TOOL_LOCATIONS = [['/tools/url-to-markdown/', '2026-10-13'], ['/tools/link-extractor/', '2026-10-13'], ['/tools/website-to-text/', '2026-10-13']]
+const TOOL_LOCATIONS = [['/tools/url-to-markdown/', '2026-10-16'], ['/tools/link-extractor/', '2026-10-16'], ['/tools/website-to-text/', '2026-10-16']]
 const TOOLS_HUB_PATH = '/tools/'
-const TOOLS_HUB_UPDATED = '2026-10-13'
+const TOOLS_HUB_UPDATED = '2026-10-16'
 // The product pages (src/product/), with the day each last changed.
 const SCRAPE_PATH = '/scrape/'
 const SCRAPE_UPDATED = '2026-10-13'

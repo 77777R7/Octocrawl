@@ -1,4 +1,5 @@
 import type { ToolPage } from './toolPage'
+import { conversionExample } from './conversionExample'
 import { UNREAD } from './toolSections'
 
 /** /tools/website-to-text/: a page's readable text without the markup (the preview's Markdown, made plain in the
@@ -13,6 +14,7 @@ export const WEBSITE_TO_TEXT: ToolPage = {
     description: 'Paste a public page and get its readable text: the article, not the menus, without the markup. Copy it or download a <code>.txt</code> file. Free, no sign-up.',
     tool: { crumb: 'Website to Text', text: true },
   },
+  afterHero: conversionExample('text'),
   steps: { title: 'From a page to plain text.', cards: [
     ['01', 'Paste a public URL', 'Any page anyone can open without signing in: an article, documentation, a product page, a PDF. Five a day, no account.'],
     ['02', 'Octocrawl keeps the content', 'It reads the site’s robots.txt first, then the page, and keeps its main content, leaving out menus, headers and footers. Options can keep the whole page.'],
@@ -23,7 +25,7 @@ export const WEBSITE_TO_TEXT: ToolPage = {
     ['▤', 'Word counts and analysis', 'Feed a page’s text to a word counter, a readability check or your own script.'],
     ['⇢', 'Prompts and notes', 'Paste a page’s text into a chat or a note. For structure a model can use, <a href="/tools/url-to-markdown/">URL to Markdown</a> keeps the headings and tables.'],
   ] },
-  unread: { title: 'An empty file is not an answer.', lead: 'Many text extractors return a blank file and say nothing. Octocrawl says what happened.', cards: UNREAD },
+  unread: { title: 'An empty file is not an answer.', lead: 'Review the result state and the returned text before using it. A page read is not proof that your task is complete.', cards: UNREAD },
   code: { title: 'The same text, from your own tools.', format: 'markdown' },
   faq: [
     ['Is it free? Do I need an account?', 'Yes, and no. You get five pages a day without signing up (at most 150 a day for the whole site), reset at 00:00 UTC. A free account gets 1,000 credits a month for the hosted API, MCP and the Playground, and Octocrawl on your own computer has no limit.'],
