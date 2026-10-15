@@ -83,6 +83,20 @@ function decl(over: Partial<ProviderDeclaration> = {}): ProviderDeclaration {
 }
 
 describe('ProviderSubject robots gate', () => {
+  it('reads an explicit list task from its items even when the article cascade finds nothing', async () => {
+    const body = '<html><body><nav><a href="/">Navigation</a></nav><main>' +
+      [1, 2].map(n => `<div class="video"><a href="/@${n}">Author ${n}</a><span>Caption ${n}</span></div>`).join('') + '</main></body></html>'
+    const { fetcher } = robotsServing('User-agent: *\nAllow: /')
+    const out = await new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher).fetch('https://feed.test/', undefined, undefined, undefined, {
+      list: { type: 'list', itemSelector: '.video', fields: [{ name: 'caption', selector: 'span' }] }, includeHtml: true,
+    })
+    expect(out.status).toBe('success')
+    expect(out.list?.records.map(record => record.values.caption)).toEqual(['Caption 1', 'Caption 2'])
+    expect(out.markdown).toContain('Caption 1')
+    expect(out.markdown).not.toContain('Navigation')
+    expect(out.html).not.toContain('Navigation')
+  })
+
   it('fetches through the provider when robots allows its UA', async () => {
     const transport = new CountingTransport()
     const { fetcher } = robotsServing(AMAZON_SHAPED)

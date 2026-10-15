@@ -78,7 +78,7 @@ export function extraFormats(raw: string, url: string, options: FetchOptions, tr
   const out: { images?: readonly string[]; attributes?: readonly AttributeExtraction[]; list?: ListExtraction } = {}
   if (options.list !== undefined) {
     const { spec, detected } = resolveListSpec(raw, options.list)
-    const records = spec === null ? [] : extractListRecords(raw, url, spec)
+    const records = spec === null ? [] : extractListRecords(raw, url, spec, 1, undefined, listScope(options))
     const list = listExtraction(spec, records, 1, 'cut' in records && records.cut === true, detected)
     trace.push({ at, lane, event: 'list_extracted', detail: { records: list.records.length, incomplete: list.incomplete, truncated: list.truncated, ...(detected === undefined ? {} : { detected: list.itemSelector }) } })
     out.list = list
@@ -140,7 +140,36 @@ export function listRecordsFound(raw: string, url: string, options: FetchOptions
   // A record with a value read: elements that matched but hold nothing (a loading skeleton) are not content.
   if (options.list === undefined) return false
   const { spec } = resolveListSpec(raw, options.list)
-  return spec !== null && extractListRecords(raw, url, spec).some((record) => record.missing.length < spec.fields.length)
+  return spec !== null && extractListRecords(raw, url, spec, 1, undefined, listScope(options)).some((record) => record.missing.length < spec.fields.length)
+}
+
+/** The first task content candidate: explicitly named list items, unless the caller chose a region or the whole page.
+ * Pagination keeps its existing per-page capture/merge path; its records span more than the final capture.
+ */
+export const MAX_TASK_SELECTION_HTML = 1_000_000
+
+export function listSelectionAsked(options: FetchOptions, htmlLength = 0): boolean {
+  return !selectionAsked(options) && options.onlyMainContent !== false && options.list?.itemSelector !== undefined &&
+    !(options.actions ?? []).some(action => action.type === 'paginate') && htmlLength <= MAX_TASK_SELECTION_HTML
+}
+
+/** Explicit regions win; otherwise the list task, rather than page-type inference, names the content to deliver. */
+export function contentSelectors(options: FetchOptions, htmlLength = 0): readonly string[] | undefined {
+  return selectionAsked(options) ? options.includeTags : listSelectionAsked(options, htmlLength) ? [options.list!.itemSelector!] : undefined
+}
+
+/** Bound explicit list records without reparsing a selected fragment and losing ancestor selectors or the base URL. */
+function listScope(options: FetchOptions): { includeSelectors?: readonly string[]; excludeSelectors?: readonly string[] } {
+  return options.list?.itemSelector === undefined || (options.actions ?? []).some(action => action.type === 'paginate')
+    ? {} : { includeSelectors: options.includeTags, excludeSelectors: options.excludeTags }
+}
+
+/** Audit the task candidate separately from the extractor's page-type/confidence heuristics. */
+export function contentSelectionEvent(options: FetchOptions, lane: Lane, at: number, htmlLength = 0): TraceEvent[] {
+  if (!listSelectionAsked(options)) return []
+  return htmlLength > MAX_TASK_SELECTION_HTML
+    ? [{ at, lane, event: 'content_selection_skipped', detail: { basis: 'list_items', reason: 'html_too_large', htmlLength, limit: MAX_TASK_SELECTION_HTML } }]
+    : [{ at, lane, event: 'content_selected', detail: { basis: 'list_items', itemSelector: options.list!.itemSelector, candidates: 1 } }]
 }
 
 /**

@@ -47,6 +47,16 @@ describe('extractListRecords', () => {
     expect(extractListRecords('<ul><li>a</li><li> b  c </li></ul>', 'https://x.test/', { type: 'list', itemSelector: 'li', fields: [{ name: 'text' }] }).map((record) => record.values.text)).toEqual(['a', 'b c'])
     expect(extractListRecords(PAGE, 'https://x.test/', { ...SPEC, itemSelector: 'li.none' })).toEqual([])
   })
+
+  it('bounds explicit records to the named region, keeping original selector context, base URL and evidence index', () => {
+    const html = '<html><head><base href="https://cdn.test/items/"></head><body><main>' +
+      '<section class="other"><div class="card"><a href="one">Other</a></div></section>' +
+      '<section id="chosen"><div class="card"><a href="two">Chosen</a><span class="price">12</span></div></section></main></body></html>'
+    const spec: ListSpec = { type: 'list', itemSelector: 'main .card', fields: [{ name: 'name', selector: 'a' }, { name: 'url', selector: 'a', attribute: 'href' }, { name: 'price', selector: '.price' }] }
+    const records = extractListRecords(html, 'https://page.test/', spec, 1, undefined, { includeSelectors: ['#chosen'], excludeSelectors: ['#chosen .price'] })
+    expect(records).toEqual([{ values: { name: 'Chosen', url: 'https://cdn.test/items/two', price: null }, missing: ['price'], source: { url: 'https://page.test/', page: 1, index: 1 } }])
+    expect(extractListRecords(html, 'https://page.test/', spec, 1, undefined, { includeSelectors: ['#missing'] })).toEqual([])
+  })
 })
 
 describe('extractListRecords, as a reader sees the page', () => {

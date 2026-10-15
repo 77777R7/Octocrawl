@@ -16,7 +16,7 @@
 import { estimateTokens, givenUpPaidCalls, type BlockReason, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { classifyGate, sha256Utf8 } from '@w2l/http-core'
-import { errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown, withListCaveat } from './errorPage.js'
+import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown, withListCaveat } from './errorPage.js'
 import { steadyWaitEvents, withStillChangingWarning, withStillLoadingWarning, type SteadyOutcome } from '../browserSettle.js'
 import { regionWaitEvent, type RegionOutcome } from '../regionWait.js'
 
@@ -124,13 +124,14 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   if (nonOk && !isSuccessStatus(status)) return { ...base, status: 'failed', failureReason: 'http_error', blockReason: null, budgetExceeded: null, lane: LANE, escalations: [], ...errorPageFields }
   if (isNoContentStatus(status)) return { ...base, status: 'empty_verified', failureReason: null, blockReason: null, budgetExceeded: null, lane: LANE, escalations: [], markdown: null }
 
-  const extracted = extractTf.extract(body, { url: finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
+  const extracted = extractTf.extract(body, { url: finalUrl, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, body.length), blockAds: options.blockAds })
+  trace.push(...contentSelectionEvent(options, LANE, wallMs, body.length))
   const links = collectLinks(body, finalUrl)
   trace.push({ at: wallMs, lane: LANE, event: 'extract', detail: { pageType: extracted.pageType, strategy: extracted.strategy, confidence: extracted.confidence, escalate: extracted.escalate, linkCount: links.length, ...(extracted.render === undefined ? {} : { textChars: extracted.render.textChars }), ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}), ...tagOptions(options) } })
   let wholePage: string | null = null
   let listPage = false
   // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
-  const judged = whole === body || gate === null ? extracted : extractTf.extract(whole, { url: finalUrl, pruneSelectors: options.excludeTags, includeSelectors: options.includeTags, blockAds: options.blockAds })
+  const judged = whole === body || gate === null ? extracted : extractTf.extract(whole, { url: finalUrl, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, whole.length), blockAds: options.blockAds })
   if ((judged.escalate || judged.lastResort === true) && gate !== null) return blocked(gate)
   if (extracted.escalate && !selectionAsked(options)) {
     wholePage = wholePageMarkdown(body, finalUrl, options)
@@ -141,7 +142,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   }
   const decisive = classifyGate({ status, header: () => null, body: whole, contentful: true })
   if (decisive !== null) return blocked(decisive)
-  const markdown = wholePageAsked(options) || listPage
+  const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, body.length))
     ? wholePage ?? htmlToMarkdown(body, { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) })
     : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
   const extra = extraFormats(body, finalUrl, options, trace, LANE, wallMs)

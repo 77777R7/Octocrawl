@@ -26,6 +26,7 @@ beforeAll(async () => {
     const url = req.url ?? ''
     if (url === '/robots.txt') { res.writeHead(404); res.end(); return }
     if (url === '/cards') return html(Array.from({ length: 12 }, (_, i) => card(i + 1)).join(''))
+    if (url === '/task-cards') return html(`<article><h1>Introduction only</h1>${'<p>This introduction explains the catalogue; the requested records are in a separate region.</p>'.repeat(8)}</article><section id="records">${card(1)}${card(2)}</section>`)
     // A loading page: three empty card placeholders and nothing else.
     if (url === '/skeleton') return html('<div class="card skeleton"></div>'.repeat(3) + '<div id="app"></div>')
     // A paginator that answers every page past the last with the last one.
@@ -87,6 +88,22 @@ async function browser(path: string, options: FetchOptions): Promise<FetchResult
 }
 
 describe('list format', () => {
+  it('uses the explicit task region for Markdown and HTML on both HTTP and browser lanes', async () => {
+    const http = new ResilientHttpSubject('standard')
+    const options: FetchOptions = { list: LIST, includeHtml: true }
+    try {
+      for (const result of [await http.fetch(`${base}/task-cards`, undefined, undefined, {}, undefined, options), await browser('/task-cards', options)]) {
+        expect(result.status).toBe('success')
+        expect(result.list?.records.map(record => record.values.price)).toEqual(['1.00', '2.00'])
+        expect(result.markdown).toContain('Item 1')
+        expect(result.markdown).not.toContain('Introduction only')
+        expect(result.html).not.toContain('Introduction only')
+      }
+    } finally {
+      await http.teardown()
+    }
+  })
+
   it('a page of records is read as its records, not failed as having no main content', async () => {
     const plain = await browser('/cards', {})
     const listed = await browser('/cards', { list: LIST })
