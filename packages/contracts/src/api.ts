@@ -1824,6 +1824,12 @@ function readVerifyCheck(value: unknown, at: string): VerifyCheck {
     case 'markdownMatches': return { type, ...verifyPattern(rec, at) }
     case 'markdownCountMin': return { type, ...verifyPattern(rec, at), min: verifyCount(rec.min, `${at}.min`) }
     case 'minTables': return { type, min: verifyCount(rec.min, `${at}.min`) }
+    case 'tableRowsMin': {
+      if (!Array.isArray(rec.columns) || rec.columns.length === 0 || rec.columns.length > 50) throw new RequestError(`${at}.columns must be a list of 1 to 50 column indexes`)
+      const columns = rec.columns.map((column, i) => verifyCount(column, `${at}.columns[${i}]`))
+      if (new Set(columns).size !== columns.length) throw new RequestError(`${at}.columns must not contain duplicate indexes`)
+      return { type, tableIndex: verifyCount(rec.tableIndex, `${at}.tableIndex`), columns, min: verifyCount(rec.min, `${at}.min`) }
+    }
     case 'listRecordsMin': return { type, min: verifyCount(rec.min, `${at}.min`), ...(rec.path === undefined ? {} : { path: verifyText(rec.path, `${at}.path`) }) }
     case 'recordFields': {
       if (!Array.isArray(rec.fields) || rec.fields.length === 0 || rec.fields.length > MAX_RECORD_FIELDS) throw new RequestError(`${at}.fields must be a list of 1 to ${MAX_RECORD_FIELDS} field names`)
