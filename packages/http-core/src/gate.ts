@@ -475,7 +475,7 @@ function attributeText(tag: string, pattern: RegExp): string {
   return decodeEntities(match?.[1] ?? match?.[2] ?? match?.[3] ?? '').toLowerCase()
 }
 
-/** A scoped challenge route plus real heading, container and frame; never quoted article copy. */
+/** A scoped challenge route plus real heading, container and loading/rendered widget; never quoted article copy. */
 function skyscannerChallenge(body: string, finalUrl: string | undefined): GateVerdict | null {
   if (finalUrl === undefined || !finalUrl.includes('/sttc/px/captcha-v2/') || body.length > INTERACTION_MAX_HTML) return null
   let url: URL
@@ -483,8 +483,8 @@ function skyscannerChallenge(body: string, finalUrl: string | undefined): GateVe
   if (!['skyscanner.net', 'www.skyscanner.net'].includes(url.hostname) || url.pathname !== '/sttc/px/captcha-v2/index.html') return null
   const page = pageText(body, WALL_PAGE_MAX_TEXT, true)
   if (page === null || !page.primaryHeadings.some(heading => /^are you a person or a robot\?$/i.test(heading)) ||
-    !page.controls.pxCaptcha || !page.controls.humanChallengeFrame) return null
-  return { reason: 'captcha', signals: ['skyscanner_challenge_url', 'heading_person_or_robot', 'px_captcha_container', 'human_challenge_frame'] }
+    !page.controls.pxCaptcha || !(page.controls.humanChallengeFrame || page.controls.pxLoader)) return null
+  return { reason: 'captcha', signals: ['skyscanner_challenge_url', 'heading_person_or_robot', 'px_captcha_container', page.controls.humanChallengeFrame ? 'human_challenge_frame' : 'px_challenge_loader'] }
 }
 
 /** The final URL, a primary heading and real controls must agree; prose or script strings alone are not a gate. */
@@ -546,14 +546,14 @@ function shortWallPage(body: string): GateVerdict | null {
  * found once, from where the last one ended, and an end that is missing ends the reading there (a page cut off, or one
  * built to make a scanner search again and again).
  */
-function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = false): { text: string; headings: string[]; primaryHeadings: string[]; controls: { webauthn: boolean; passkey: boolean; button: boolean; image: boolean; pxCaptcha: boolean; humanChallengeFrame: boolean } } | null {
+function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = false): { text: string; headings: string[]; primaryHeadings: string[]; controls: { webauthn: boolean; passkey: boolean; button: boolean; image: boolean; pxCaptcha: boolean; humanChallengeFrame: boolean; pxLoader: boolean } } | null {
   // Positions are the body's own: a lowercased copy can be longer ("İ" lowercases to two characters), so tags are matched
   // case-insensitively in place.
   const visible: string[] = []
   let visibleLength = 0
   const headings: string[] = []
   const primaryHeadings: string[] = []
-  const controls = { webauthn: false, passkey: false, button: false, image: false, pxCaptcha: false, humanChallengeFrame: false }
+  const controls = { webauthn: false, passkey: false, button: false, image: false, pxCaptcha: false, humanChallengeFrame: false, pxLoader: false }
   let heading: { name: string; parts: string[] } | null = null
   let inHead = false
   let at = 0
@@ -606,6 +606,7 @@ function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = fal
       if (name === 'button' || attributeText(tagText, ROLE_ATTRIBUTE) === 'button') controls.button = true
       if (name === 'img') controls.image = true
       if (name === 'div' && attributeText(tagText, ID_ATTRIBUTE) === 'px-captcha') controls.pxCaptcha = true
+      if (name === 'div' && attributeText(tagText, ID_ATTRIBUTE) === 'px-loader') controls.pxLoader = true
       if (name === 'iframe' && attributeText(tagText, TITLE_ATTRIBUTE) === 'human verification challenge') controls.humanChallengeFrame = true
     }
     if (closing === '' && HIDDEN_ELEMENTS.has(name) && body[end - 1] !== '/') {

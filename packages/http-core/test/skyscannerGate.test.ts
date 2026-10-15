@@ -13,6 +13,15 @@ describe('Skyscanner dedicated human challenge', () => {
     for (const contentful of [false, true]) expect(verdict(page(), url, contentful)).toMatchObject({ reason: 'captcha' })
   })
 
+  it('keeps the real challenge blocked while its widget loader has not produced an iframe', () => {
+    const loader = '<div id="px-captcha"><div id="px-loader" class="px-loader-wrapper"><div class="px-loading-area"></div></div></div>'
+    for (const contentful of [false, true]) expect(verdict(page(heading + loader), url, contentful)).toMatchObject({ reason: 'captcha' })
+    expect(verdict(page(loader))).toBeNull()
+    expect(verdict(page(heading + '<div id="px-loader"></div>'))).toBeNull()
+    expect(verdict(page(heading + loader), 'https://www.skyscanner.net/routes/lond/pari/london-to-paris.html')).toBeNull()
+    for (const quoted of [`<!--${loader}-->`, `<script>const sample = '${loader}'</script>`, `<template>${loader}</template>`, '&lt;div id="px-captcha"&gt;&lt;div id="px-loader"&gt;']) expect(verdict(page(heading + quoted))).toBeNull()
+  })
+
   it('does not classify the ordinary route, another host, copy or a component alone', () => {
     expect(verdict(page(), 'https://www.skyscanner.net/routes/lond/pari/london-to-paris.html')).toBeNull()
     expect(verdict(page(), 'https://example.com/sttc/px/captcha-v2/index.html')).toBeNull()
