@@ -11,7 +11,7 @@ import { sha256Utf8 } from '@w2l/http-core'
 import { canonicalJson } from './evidenceRecord.js'
 
 /** Changes when checks are added or judged differently, as EXTRACTOR_VERSION does for the Markdown. */
-export const VERIFIER_VERSION = 'verify/4'
+export const VERIFIER_VERSION = 'verify/8'
 
 /**
  * What the checks read: the result's own fields (status, markdown, list, tables, json and any other a `field` check
@@ -27,7 +27,9 @@ export interface VerifyOptions {
 
 const READ = new Set(['success', 'partial'])
 
-const get = (obj: unknown, path: string): unknown => path.split('.').reduce<unknown>((v, k) => (v === undefined || v === null ? undefined : (v as Record<string, unknown>)[k]), obj)
+/** Preserve own JSON keys (even constructor/__proto__) without reading a prototype's values. */
+const own = (obj: unknown, key: string): unknown => obj === undefined || obj === null || !Object.hasOwn(Object(obj), key) ? undefined : (obj as Record<string, unknown>)[key]
+const get = (obj: unknown, path: string): unknown => path.split('.').reduce<unknown>((v, k) => own(v, k), obj)
 const gfmTableCount = (md: string): number => (md.match(/^\|.*\|\s*\n\|\s*:?-{3,}/gm) ?? []).length
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -82,26 +84,40 @@ function judge(check: VerifyCheck, view: VerifyView, partial: boolean): Judged {
     }
     case 'listRecordsMin': {
       const path = check.path ?? 'list.records'
-      if (partial && !(path.split('.')[0]! in view)) return unavailable
+      if (partial && !Object.hasOwn(view, path.split('.')[0]!)) return unavailable
       const records = get(view, path)
       // No list at all fails, as the runner judges it, even when the minimum is 0.
       if (!Array.isArray(records)) return { passed: false, observedCount: 0, asked: check.min, observed: `no records at ${path}, at least ${check.min} asked` }
       return counted(records.length, check.min, 'record')
     }
     case 'recordFields': {
-      if (partial && !('list' in view)) return unavailable
+      if (partial && !Object.hasOwn(view, 'list')) return unavailable
       const records = get(view, 'list.records')
       // No list at all fails, as listRecordsMin does, even when the minimum is 0.
       if (!Array.isArray(records)) return { passed: false, observedCount: 0, asked: check.min, observed: `no records at list.records, at least ${check.min} asked` }
       const whole = records.filter((record) => {
-        const values = (record as { values?: Record<string, unknown> } | null)?.values ?? {}
-        const missing = (record as { missing?: unknown } | null)?.missing
-        return check.fields.every((field) => !(Array.isArray(missing) && missing.includes(field)) && values[field] !== undefined && values[field] !== null && values[field] !== '')
-      }).length
-      return counted(whole, check.min, 'record', ' with every field')
+        const values = own(record, 'values')
+        const missing = own(record, 'missing')
+        return check.fields.every((field) => {
+          const value = own(values, field)
+          return !(Array.isArray(missing) && missing.includes(field)) && value !== undefined && value !== null && value !== ''
+        })
+      })
+      if (check.uniqueBy === undefined) return counted(whole.length, check.min, 'record', ' with every field')
+      const keys = new Set<string>()
+      for (const record of whole) {
+        const values = own(record, 'values')
+        const missing = own(record, 'missing')
+        const identity = check.uniqueBy.map(field => own(values, field))
+        // Missing identity never falls back to a title, price or text guessed by the verifier.
+        if (check.uniqueBy.some(field => Array.isArray(missing) && missing.includes(field)) || identity.some(value =>
+          typeof value === 'string' ? value.trim() === '' : typeof value === 'number' ? !Number.isFinite(value) : typeof value !== 'boolean')) continue
+        keys.add(JSON.stringify(identity))
+      }
+      return counted(keys.size, check.min, 'distinct record', ' with every field and identity key')
     }
     case 'field': {
-      if (partial && !(check.path.split('.')[0]! in view)) return unavailable
+      if (partial && !Object.hasOwn(view, check.path.split('.')[0]!)) return unavailable
       const value = get(view, check.path)
       const passed = check.equals !== undefined ? value === check.equals
         : check.in !== undefined ? check.in.includes(value as string | number | boolean | null)

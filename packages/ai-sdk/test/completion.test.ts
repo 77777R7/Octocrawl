@@ -10,6 +10,26 @@ const page = { status: 'success', requestedUrl: 'https://example.test', finalUrl
 const context = { toolCallId: 'completion', messages: [], context: {} }
 
 describe('task completion through the AI SDK adapter', () => {
+  it.each(['snapshot.httpStatus', 'document.title', 'metadata.sourceURL', 'usage.requestCount', 'httpStatus', 'title', 'failureReason', 'agentHints', 'verification.status', 'readiness.state', 'evidenceRecord.httpStatus'])('refuses the non-preserved path %s before calling the API', async path => {
+    let calls = 0
+    const tool = scrapeTool({ fetch: async () => { calls++; return Response.json(page) } })
+    const out = await tool.execute!({ url: page.requestedUrl, verify: { checks: [{ type: 'field', path, present: true }] } }, context)
+    expect(out).toMatchObject({ status: 'refused', httpStatus: 400, code: 'invalid_request' })
+    expect(JSON.stringify(out)).toContain(path)
+    expect(calls).toBe(0)
+  })
+
+  it.each([
+    { type: 'recordFields' as const, fields: ['name'], min: 1 },
+    { type: 'listRecordsMin' as const, min: 1 },
+    { type: 'listRecordsMin' as const, path: 'json.data.records', min: 1 },
+  ])('refuses implicit or removed record paths before calling the API: %j', async check => {
+    let calls = 0
+    const out = await scrapeTool({ fetch: async () => { calls++; return Response.json(page) } }).execute!({ url: page.requestedUrl, verify: { checks: [check] } }, context)
+    expect(out).toMatchObject({ status: 'refused', httpStatus: 400, code: 'invalid_request' })
+    expect(calls).toBe(0)
+  })
+
   it('preserves failed task checks and readiness on a successful navigation-only read', async () => {
     const tool = scrapeTool({ fetch: async () => Response.json(page) })
     const out = await tool.execute!({ url: page.requestedUrl }, context)
@@ -45,7 +65,7 @@ describe('task completion through the AI SDK adapter', () => {
     expect(calls).toBe(1)
   })
 
-  it('offers every existing check without stripping its fields or changing the contract', () => {
+  it('parses wire checks without stripping fields; execution separately bounds the tool paths', () => {
     const checks: VerifyCheck[] = [
       { type: 'markdownIncludes', text: 'Revenue' }, { type: 'markdownMatches', pattern: 'Revenue', flags: 'i' },
       { type: 'markdownCountMin', pattern: '\\d', min: 1 }, { type: 'minTables', min: 1 },

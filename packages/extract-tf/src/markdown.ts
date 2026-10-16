@@ -1181,6 +1181,36 @@ function walkInline(first: InlineLevel, ctx: Context): void {
   }
 }
 
+/**
+ * A percent-change component can put its minus in an empty font caret.
+ * Read that sign only with the component's signed sort value as corroboration;
+ * sorting arrows, colour and arbitrary metadata alone are not numeric signs.
+ * Keep rounded zero and literal signs as written, and never substitute the
+ * unrounded sort value for the page's displayed magnitude.
+ */
+function downwardPercent(el: Element, ctx: Context): string | null {
+  if (el.getAttribute('data-percent-change-target') !== 'percent') return null
+  const cell = el.parentElement
+  if (cell?.localName !== 'td' || cell.getAttribute('data-percent-change-sort') !== 'true') return null
+  const sort = cell.getAttribute('data-sort')?.trim() ?? ''
+  if (!/^-\d+(?:\.\d+)?$/.test(sort) || !Number.isFinite(Number(sort)) || Number(sort) >= 0) return null
+  let icon: Element | null = null
+  let text = ''
+  // Only one empty caret plus a literal percentage; no nested widgets/links.
+  for (let child = el.firstChild; child !== null; child = child.nextSibling) {
+    if (child.nodeType === TEXT_NODE) text += (child as Text).data
+    else if (child.nodeType === ELEMENT_NODE && icon === null) {
+      icon = child as Element
+      if (icon.localName !== 'i' || icon.firstChild !== null || skipped(icon, ctx) || cssBlock(icon, ctx)) return null
+      const classes = (icon.getAttribute('class') ?? '').split(/\s+/)
+      if (!classes.includes('fa-caret-down') || classes.includes('fa-caret-up')) return null
+    } else return null
+  }
+  const value = text.trim()
+  if (icon === null || !/^\d+(?:\.\d+)?%$/.test(value) || !Number.isFinite(Number(value.slice(0, -1))) || Number(value.slice(0, -1)) === 0) return null
+  return text.replace(value, `-${value}`)
+}
+
 /** Starts an element written as inline content: what it writes before its children, and the level of those, or null when it has none to write. */
 function openInline(el: Element, out: Inline, ctx: Context, marks: Marks): InlineLevel | null {
   const tag = el.localName
@@ -1190,6 +1220,12 @@ function openInline(el: Element, out: Inline, ctx: Context, marks: Marks): Inlin
   // their boundaries become spaces.
   const block = BLOCK.has(tag) || cssBlock(el, ctx)
   if (block) out.space()
+  const percent = downwardPercent(el, ctx)
+  if (percent !== null) {
+    out.text(percent)
+    if (block) out.space()
+    return null
+  }
   // Its children, written to `inner`, then `done` and a block's closing space. (No closure where nothing is to be done.)
   const children = (inner: Inline, innerMarks: Marks, done?: () => void): InlineLevel => ({
     next: el.firstChild,
