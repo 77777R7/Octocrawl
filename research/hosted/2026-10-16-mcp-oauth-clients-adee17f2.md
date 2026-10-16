@@ -61,3 +61,49 @@ Why the registration attempt came first, and why it was refused, is not known. T
 | ChatGPT (custom MCP server / developer mode) | not run |
 | claude.ai custom connector | not run; also the test of whether Cloudflare's browser integrity check or security level challenges Claude's egress `160.79.104.0/21` (task list D3) |
 | Cursor | not run |
+
+## claude.ai custom connector and ChatGPT custom MCP server (added later the same day)
+
+Run 16:03–16:16Z, with Howard working each client's UI himself. Claude guided the steps and read Cloud Logging. Services: `octocrawl-api` `h17oauthrs`; `w2l-public-preview` `r92connect` (main `9db14102`). Whether Howard's browser traffic went through the proxy was not checked; the clients' own server-side requests come from Anthropic's and OpenAI's servers.
+
+### claude.ai
+
+Added under Settings › Connectors › Add custom connector, URL `https://mcp.octocrawl.dev/mcp-oauth`, OAuth client fields left empty. The claude.ai web app's version is not shown in its UI and was not recorded.
+
+| Time (Z) | What happened |
+| --- | --- |
+| 16:03:39–16:03:57 | Authorization server metadata read by `python-httpx/0.28.1`, 200 (Claude's servers). |
+| 16:03:58 | `GET /oauth/authorize` with `client_id=https://claude.ai/oauth/mcp-oauth-client-metadata`: **CIMD**, Claude's published identity. No registration request. |
+| 16:04:01–02 | Consent `allowed`; `POST /oauth/token` 200 from `python-httpx/0.28.1` (0.16 s). |
+| 16:04:03–08 | `POST /mcp-oauth` from `Claude-User`: initialize 200 after one 400, `tools/list` 200. The connector showed three tools: Map a site, Scrape a page, Amazon.sg product JSON. |
+| 16:05:50 | Scrape of `https://example.com`, `formats: ["markdown"]`, asked in a claude.ai chat. Claude answered `status` `success`, `httpStatus` 200, `finalUrl` `https://example.com`. The hosted API logged `hosted_usage` under key `oauth_nZBLMEkdH2…` and charged 1 credit (`http`). |
+| 16:08:20 | Disconnect on `/dashboard/keys/`: `POST /api/account/connections/<grant>/revoke` 204. |
+| 16:09:21 | Next call (asked again in the chat): `POST /mcp-oauth` from `Claude-User` **401**. 16:09:22 `POST /oauth/token` 400 from `python-httpx/0.28.1` (its refresh token was deleted). claude.ai showed "Reconnect a connector to keep using it". |
+
+Cloudflare: every request from Claude's servers above reached the services, so the browser integrity check and the `medium` security level did not challenge them on this run. That settles the D3 point for this run; it says nothing about other IPs in the range or other days.
+
+### ChatGPT
+
+Added at chatgpt.com/plugins › + › Add custom MCP server, URL `https://mcp.octocrawl.dev/mcp-oauth`, authentication OAuth. ChatGPT's toast read "Primary is now connected"; the plugin appears under Personal › Created by you. The ChatGPT web app's version is not shown in its UI and was not recorded.
+
+| Time (Z) | What happened |
+| --- | --- |
+| 16:11:03–05 | `POST /mcp-oauth` 401 from `Python/3.14 aiohttp/3.14.4`, then `GET /.well-known/oauth-protected-resource/mcp-oauth` 200: ChatGPT used the path-suffixed metadata URL from the challenge; no request for the root `/.well-known/oauth-protected-resource` reached the service. It read `/.well-known/oauth-authorization-server` 200 and also tried `/.well-known/openid-configuration`, 404, without effect. |
+| 16:11:28 | `GET /oauth/authorize` with `client_id=https://chatgpt.com/oauth/client.json` and `redirect_uri=https://chatgpt.com/connector_platform_oauth_redirect`: **CIMD**. No registration request. |
+| 16:11:29–33 | Consent `allowed`; `POST /oauth/token` 200 from `openai-connectors-oauth/1.0` (0.15 s). The server advertises only `none`; whether ChatGPT also sent a `client_assertion` is not logged. |
+| 16:11:35–36 | `POST /mcp-oauth` from `openai-mcp/1.0.0`: initialize 200 after one 400, `tools/list` 200; `GET` 405. |
+| 16:12:49 | Scrape of `https://example.com`, `formats: ["markdown"]`, asked in a ChatGPT chat with the plugin selected: `status` `success`, `httpStatus` 200, `finalUrl` `https://example.com`. `hosted_usage` under key `oauth_lsYm1uIHVt…`, 1 credit (`http`). |
+| 16:13:58 | Disconnect on `/dashboard/keys/`: revoke 204. |
+| 16:15:44 | Next call: `POST /mcp-oauth` from `openai-mcp/1.0.0` **401**. 16:15:46 `POST /oauth/token` 400 from `openai-connectors-oauth/1.0`. ChatGPT showed "Your Octocrawl connection has expired. Reconnect it before ChatGPT can use it for this request." |
+
+### Status after these runs
+
+| Client | Flow | Scrape | Disconnect → 401 |
+| --- | --- | --- | --- |
+| Claude Code CLI 2.1.301 | CIMD | yes | yes, 22 s |
+| Claude Code in the Claude desktop app 2.1.295 | CIMD, after one refused registration | yes | not repeated |
+| claude.ai | CIMD (`claude.ai/oauth/mcp-oauth-client-metadata`) | yes | yes, the first call 61 s after |
+| ChatGPT | CIMD (`chatgpt.com/oauth/client.json`) | yes | yes, the first call 106 s after |
+| Cursor | not run | | |
+
+The table above under "Not run yet" is as it stood before these runs. Cost of these runs: 2 credits from Howard's account.
