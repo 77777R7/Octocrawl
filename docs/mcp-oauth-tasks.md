@@ -155,4 +155,4 @@ PR ①（#534）、PR ②（#537）、PR ③（#538）已合并，都在 77777R7
 
 **已部署（2026-10-16）**：public-preview 从 main `adee17f2`（含 #537–#539）构建镜像，部署为 revision `w2l-public-preview-oauth-adee17f2`，tag `r90oauth`，100% 流量；回滚用 `r89identity`。之后做了 `purge_everything`，`favicon.ico` 和 `oauth.css` 都是 MISS。线上检查：授权服务 metadata 返回 200 和 `no-store`；`mcp.octocrawl.dev/mcp-oauth` 返回 401，`WWW-Authenticate` 带 PRM；未登录访问 `/oauth/authorize` 会 303 到 `/signin/?next=…`（这一步之前服务器已经成功读取并校验了 ChatGPT 线上的 CIMD 文档）；用假 code 请求 `/oauth/token` 返回 `invalid_grant`；文档小节和 dashboard 的连接区块都已上线。hosted API 仍是 `h17oauthrs`。
 
-下一步是 D4：用真实客户端各连一次，然后发版（`server.json` 进 Registry）。两步都等 Howard 说开始。
+**D4 进行中**：Claude Code 已于 2026-10-16 连通。全程走的是 CIMD；通过连接跑了一次 scrape，用的是这个连接自己的 key，扣 1 个 credit；在 dashboard 断开 22 秒后，客户端收到 401。记录在 `research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md`。ChatGPT、claude.ai、Cursor 由 Howard 自己连，连完把结果补进同一份记录。四个都连过之后，ROADMAP PH item 6 的状态行引用这份记录，然后发版（`server.json` 进 Registry），发版要 Howard 批准。
