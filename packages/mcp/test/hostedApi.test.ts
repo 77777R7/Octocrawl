@@ -254,20 +254,23 @@ it('an account\'s key spends credits by what each result returned, and says what
 it('a caller without the browser lane is told why a shell was read over HTTP alone, never to retry without fastMode', async () => {
   const credits = new MemoryCreditsStore(3)
   const { url } = await start({ keylessDaily: 10, credits, keys: { oc_http: { enabled: true, plan: 'free', dailyLimit: 5, browser: false }, oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
-  const hintsOf = async (response: Response) => {
-    const body = await response.json() as { status: string; failureReason: string; lane: string; agentHints?: string[] }
-    expect(body).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http' })
-    expect(body.agentHints?.join(' ')).not.toContain('retry without fastMode')
-    return body.agentHints?.join(' ') ?? ''
+  const hintsOf = async (body: unknown, headers: Record<string, string> = {}) => {
+    const answer = await (await post(url, '/v1/scrape', body, headers)).json() as { scrapeId: string; status: string; failureReason: string; lane: string; agentHints?: string[] }
+    expect(answer).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http' })
+    expect(answer.agentHints?.join(' ')).not.toContain('retry without fastMode')
+    // The stored record, read back by GET /v1/scrapes/:id and get_scrape, carries the same hints as the answer.
+    const record = await (await fetch(`${url}/v1/scrapes/${answer.scrapeId}`, { headers })).json() as { agentHints?: string[] }
+    expect(record.agentHints).toEqual(answer.agentHints)
+    return answer.agentHints?.join(' ') ?? ''
   }
   // Keyless, whether fastMode is left out or sent as false: the gate pins it, and the hint says what opens the browser lane.
   for (const body of [{ url: `${origin}/shell` }, { url: `${origin}/shell`, fastMode: false }]) {
-    const hints = await hintsOf(await post(url, '/v1/scrape', body))
+    const hints = await hintsOf(body)
     expect(hints).toContain('without a key')
     expect(hints).toContain('https://octocrawl.dev/docs/connect-mcp/')
   }
-  expect(await hintsOf(await post(url, '/v1/scrape', { url: `${origin}/shell` }, { authorization: 'Bearer oc_http' }))).toContain('this key has no browser lane')
-  expect(await hintsOf(await post(url, '/v1/scrape', { url: `${origin}/shell` }, { authorization: 'Bearer oc_account' }))).toContain('fewer credits than a browser page')
+  expect(await hintsOf({ url: `${origin}/shell` }, { authorization: 'Bearer oc_http' })).toContain('this key has no browser lane')
+  expect(await hintsOf({ url: `${origin}/shell` }, { authorization: 'Bearer oc_account' })).toContain('fewer credits than a browser page')
   // A page the HTTP lane reads in full carries no such hint, unless the caller asked for the browser lane by sending fastMode: false.
   const page = await (await post(url, '/v1/scrape', { url: `${origin}/page` })).json() as { status: string; agentHints?: string[] }
   expect(page.status).toBe('success')

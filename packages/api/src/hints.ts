@@ -64,6 +64,21 @@ export type HintedRun = Pick<LadderRunAudit, 'channelsTried'> & Partial<Pick<Lad
 /** The most hints one result carries; the table's order decides which stay. */
 export const MAX_AGENT_HINTS = 5
 
+/** A fastMode the scrape's caller pinned, not the person asking (the hosted gate, for a caller without the browser lane). */
+export interface FastModePin {
+  /** Why the browser lane was closed: said in place of "retry without fastMode", since a retry is pinned the same way. */
+  reason: string
+  /** The person sent fastMode: false, so the reason is said even when the http lane did not ask for the browser lane. */
+  askedOff: boolean
+}
+
+/** A pinned scrape's hints: the pin's reason in place of the fastMode hint, kept within the cap in place of the last line when full. */
+export function pinnedFastModeHints(hints: readonly string[], pin: FastModePin): readonly string[] {
+  if (!pin.askedOff && !hints.includes(FAST_MODE_DECLINED_HINT)) return hints
+  const others = hints.filter((line) => line !== FAST_MODE_DECLINED_HINT).slice(0, MAX_AGENT_HINTS - 1)
+  return [...others, pin.askedOff ? `fastMode: false was not honoured: ${pin.reason}` : pin.reason]
+}
+
 /** The lanes that render a page. */
 const BROWSER_LANES: ReadonlySet<string> = new Set(['browser_local', 'browser_local_authed', 'browser_proxy', 'my_browser'])
 

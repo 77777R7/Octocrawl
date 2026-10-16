@@ -21,7 +21,7 @@ import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
-import { closeIdleOnlyWhenUnread, createApp, createApiEngine, FAST_MODE_DECLINED_HINT, MAX_AGENT_HINTS, type ApiEngine } from '@w2l/api'
+import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION } from './server.js'
@@ -331,14 +331,9 @@ const HTTP_ONLY_HINTS = {
   credits: `this account has fewer credits than a browser page (${CREDITS.browserPage}), so hosted Octocrawl read the page over HTTP alone; the monthly credits come back on the 1st, or ${LOCAL_HINT}`,
 } as const
 
-/** A pinned scrape's answer with the gate's reason in place of the fastMode hint, and said outright to a caller that sent fastMode: false. */
-function withHttpOnlyHint<T extends { agentHints?: readonly string[] }>(result: T, body: unknown, hint: string): T {
-  const hints = result.agentHints ?? []
-  const askedOff = (body as { fastMode?: unknown }).fastMode === false
-  if (!askedOff && !hints.includes(FAST_MODE_DECLINED_HINT)) return result
-  // The gate's line is kept within the engine's cap, in place of the engine's last one when the answer is full.
-  const others = hints.filter((line) => line !== FAST_MODE_DECLINED_HINT).slice(0, MAX_AGENT_HINTS - 1)
-  return { ...result, agentHints: [...others, askedOff ? `fastMode: false was not honoured: ${hint}` : hint] }
+/** The scrape context that tells the engine the gate pinned fastMode: the answer and the stored record then say why, outright to a caller that sent fastMode: false. */
+function httpOnlyPin(body: unknown, reason: string): { fastModePin: { reason: string; askedOff: boolean } } {
+  return { fastModePin: { reason, askedOff: (body as { fastMode?: unknown }).fastMode === false } }
 }
 
 export function createHostedApi(config: HostedApiConfig): { server: HttpServer; engine: ApiEngine; close: () => Promise<void> } {
@@ -484,8 +479,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
         ? { ...(body as Record<string, unknown>), storeInCache: false, ...(caller.browser ? {} : { fastMode: true }) }
         : body
       const req = parseScrapeRequest(pinned)
-      const result = await engine.scrape(req, { signal: c.req.raw.signal })
-      return c.json(caller.browser ? result : withHttpOnlyHint(result, body, HTTP_ONLY_HINTS[caller.kind]), 200)
+      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
     }
     await next()
     return c.res
@@ -550,10 +544,10 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const pinned = body !== null && typeof body === 'object' && !Array.isArray(body)
             ? { ...(body as Record<string, unknown>), storeInCache: false, ...(browser ? {} : { fastMode: true }) }
             : body
-          const result = await engine.scrape(parseScrapeRequest(pinned), { signal: c.req.raw.signal })
+          const result = await engine.scrape(parseScrapeRequest(pinned), { signal: c.req.raw.signal, ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
           noteScrape(note, result)
-          response = c.json(browser ? result : withHttpOnlyHint(result, body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key), 200)
+          response = c.json(result, 200)
         }
       } else {
         note.url = requestedUrl(await c.req.raw.clone().json().catch(() => null))

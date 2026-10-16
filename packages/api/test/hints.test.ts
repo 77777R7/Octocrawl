@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, lowContentYieldHint, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -90,6 +90,17 @@ describe('agent hints', () => {
     expect(hints(result({ lane: 'browser_local' }), ['http', 'browser_local'], { fastMode: true })).toEqual([])
     // Several hints keep the table's order: the block before the wait, the wait before the cut.
     expect(hints(result({ status: 'blocked', blockReason: 'rate_limit', markdown: null, retryAt: Date.UTC(2026, 0, 1), truncated: true, truncatedAt: 10 })).map((hint) => hint.split(' ')[0])).toEqual(['wait', 'the'])
+  })
+
+  it('says a pinned fastMode\'s reason in place of the fastMode hint, within the cap, and outright to a caller that sent fastMode: false', () => {
+    const pin = { reason: 'the gate read it over HTTP alone', askedOff: false }
+    expect(pinnedFastModeHints([FAST_MODE_DECLINED_HINT], pin)).toEqual([pin.reason])
+    expect(pinnedFastModeHints(['other'], pin)).toEqual(['other'])
+    expect(pinnedFastModeHints([], { ...pin, askedOff: true })).toEqual([`fastMode: false was not honoured: ${pin.reason}`])
+    // A full answer gives up its last line for the reason.
+    const full = [...Array.from({ length: MAX_AGENT_HINTS - 1 }, (_, index) => `line ${index}`), FAST_MODE_DECLINED_HINT]
+    expect(pinnedFastModeHints([...full.slice(0, -1), 'last'], { ...pin, askedOff: true })).toHaveLength(MAX_AGENT_HINTS)
+    expect(pinnedFastModeHints(full, pin)).toEqual([...full.slice(0, -1), pin.reason])
   })
 
   it('suggests waitFor or a longer timeout for a thin http answer the browser lane did not improve or could not be offered to, and says what a file\'s markdown is', () => {
