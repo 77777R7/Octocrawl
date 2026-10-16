@@ -100,11 +100,11 @@ describe('Page markup', () => {
   it('marks as hosted only what hosted Octocrawl serves: scrape and map, each with its Evidence Record', () => {
     const hostedApi = readFileSync(new URL('../../../packages/mcp/src/hostedApi.ts', import.meta.url), 'utf8')
     expect(hostedApi).toContain('is not served by hosted Octocrawl: scrape and map only')
-    expect(CAPABILITIES.filter(c => c.hosted).map(c => c.key)).toEqual(['scrape', 'map', 'evidence'])
+    expect(CAPABILITIES.filter(c => c.hosted).map(c => c.key)).toEqual(['scrape', 'map'])
     const page = pageMarkup()
-    expect(page.match(/<li class="can-cell" data-hosted="true">/g)).toHaveLength(3)
-    expect(page.match(/<li class="can-cell" data-hosted="false">/g)).toHaveLength(3)
-    expect(page).toContain('Hosted <span class="can-count">3</span>')
+    expect(page.match(/<li class="can-cell" data-hosted="true">/g)).toHaveLength(2)
+    expect(page.match(/<li class="can-cell" data-hosted="false">/g)).toHaveLength(4)
+    expect(page).toContain('Hosted <span class="can-count">2</span>')
   })
 
   it('says what each capability does in a few short points', () => {

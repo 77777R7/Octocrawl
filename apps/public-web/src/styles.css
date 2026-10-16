@@ -1470,3 +1470,12 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .is-story .tier-panel, .tier-hint { transition: none; }
   .can-cell, .can-cell::after, .can-art b, .can-cell h3, .can-points li, .can-points li::before, .can-where > span, .can-art, .can-filter label, .can-bracket, .tier-head::before, .tier-n, .tier-row { transition: none; }
 }
+
+/* Product identity copy shares the existing section rhythm. */
+.hero-agent-link { margin: 18px 0 0; font-size: 15px; }
+.hero-agent-link a { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; color: #e0eafb; text-underline-offset: 4px; }
+.start-scope, .start-identity { max-width: 76ch; margin: 20px auto; color: var(--ink-soft); font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+.start-scope a, .start-identity a, .start-lead a, .can-evidence a { color: inherit; text-underline-offset: 3px; }
+.can-evidence { max-width: 76ch; margin-top: 32px; }
+.can-evidence h3 { margin: 0 0 12px; font-size: 22px; }
+.can-evidence p { margin: 0; color: var(--ink-soft); font-size: 15px; line-height: 1.65; }

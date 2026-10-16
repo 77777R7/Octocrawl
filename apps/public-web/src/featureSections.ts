@@ -30,7 +30,7 @@ type Capability = { key: string, hosted: boolean, title: string, points: readonl
 export const CAPABILITIES: readonly Capability[] = [
   {
     key: 'scrape', hosted: true, title: 'Scrape a page',
-    points: ['Markdown, links, tables and fields', 'From one URL', 'Over HTTP, or in a browser when the page needs one'],
+    points: ['Markdown, links, metadata and structured fields', 'From one public URL', 'Hosted browser lane requires an account key'],
     art: [
       '┌──────────┐',
       '│ ░▒░░▒▒░░ │    # Overview',
@@ -51,48 +51,24 @@ export const CAPABILITIES: readonly Capability[] = [
     ],
   },
   {
-    key: 'jobs', hosted: false, title: 'Crawl and batch',
-    points: ['Follow a site’s links', 'Or read a list of up to 1,000 URLs', 'A crawl that stops resumes where it left off'],
-    art: [
-      '[{×××××××××}·······]',
-      ' ✓ page 1   ✓ page 5',
-      ' ✓ page 2   ✓ page 6',
-      ' ✓ page 3   · page 7',
-      ' ✓ page 4   {»} resume',
-    ],
+    key: 'crawl', hosted: false, title: 'Crawl a site',
+    points: ['Follow links across a site or section', 'Set page, depth and path limits', 'Resume a crawl where it left off'],
+    art: ['site.example', ' ├─ /docs {─›} /docs/start', ' ├─ /blog {─›} /blog/post', ' └─ page limit ✓', '    depth limit ✓'],
   },
   {
-    key: 'monitor', hosted: false, title: 'Watch a page',
-    points: ['A Monitor re-reads a page', 'Sends what changed to your HTTPS webhook, signed with your secret', 'Timed re-runs need a repository checkout'],
-    art: [
-      ' run ·──·──·──{×}──·',
-      '              │',
-      '           changed',
-      '              └─{›} POST /webhook',
-      '                 signed ✓',
-    ],
+    key: 'batch', hosted: false, title: 'Scrape a batch',
+    points: ['Scrape a list of URLs', 'Keep each result, including failures', 'Export content and per-URL outcomes'],
+    art: ['[URL 1, URL 2, URL 3]', '        {│}', '   ✓ Markdown', '   × blocked', '   ✓ Markdown'],
   },
   {
-    key: 'chrome', hosted: false, title: 'Your own Chrome',
-    points: ['Read pages signed in as you', 'A page that stops at a check goes to your Chrome', 'You get past it yourself'],
-    art: [
-      '┌ your Chrome ─────────┐',
-      '│ {●} signed in as you   │',
-      '│ ▲ a check: you pass  │',
-      '│ › Octocrawl reads on │',
-      '└──────────────────────┘',
-    ],
+    key: 'actions', hosted: false, title: 'Browser actions',
+    points: ['Click, scroll and load content before extracting it', 'Run browser actions on your computer', 'Install Chromium for the browser lane'],
+    art: ['┌ browser ───────────┐', '│ click {›} scroll     │', '│ load more content │', '│ {↓} extract         │', '└───────────────────┘'],
   },
   {
-    key: 'evidence', hosted: true, title: 'An Evidence Record',
-    points: ['Every result says where it came from', 'The final URL, HTTP status and robots.txt decision', 'A hash of what was read'],
-    art: [
-      'finalUrl       https://example.com',
-      'httpStatus     {200}',
-      'robots         no_robots',
-      'rawBodySha256  25dd…e484',
-      '',
-    ],
+    key: 'monitor', hosted: false, title: 'Monitor a page',
+    points: ['Revisit sources on a schedule with local workers', 'Deliver events to your HTTPS webhook', 'Timed re-runs need a repository checkout'],
+    art: [' run ·──·──·──{×}──·', '              │', '           changed', '              └─{›} POST /webhook', '                 signed ✓'],
   },
 ]
 
@@ -256,10 +232,12 @@ export function startMarkup(bar: string): string {
           <div class="start-head">
             <pre class="glyph-cloud" data-cols="150" data-rows="30" data-seed="11" data-weather aria-hidden="true">${glyphCloud(150, 30, 11)}</pre>
             <p class="section-kicker"><span class="kicker-square"></span> GET STARTED</p>
-            <h2 id="start-title">One line in,<br />clean pages <em>out.</em></h2>
-            <p class="start-lead">Use Octocrawl from your terminal, your code or your AI agent. Pick the one that fits how you work.</p>
+            <h2 id="start-title">Start in your browser.<br />Build with your agent <em>or code.</em></h2>
+            <p class="start-lead">Try a single page at <a href="https://octocrawl.dev/">octocrawl.dev</a>. Connect through MCP, use the REST API, or work with the TypeScript and Python clients.</p>
             <button class="sea-play" type="button" hidden><span aria-hidden="true">( </span>play with the octopus<span aria-hidden="true"> )</span></button>
           </div>
+          <p class="start-scope">Hosted Octocrawl supports scrape and map. Run locally for crawl, batch, browser actions and scheduled monitoring with local workers. <a href="/docs/limits/#hosted-api-and-mcp">See hosted limits</a>.</p>
+          <p class="start-identity">Octocrawl is an open-source web scraping tool for AI agents and developers. Its official website is <a href="https://octocrawl.dev/">octocrawl.dev</a>, and its source code is maintained at <a href="https://github.com/77777R7/Octocrawl">github.com/77777R7/Octocrawl</a>. The local MCP package is <code>@octocrawl/mcp</code>; the API, SDK and hosted MCP examples are below.</p>
           ${clientPanels()}
         </div>
       </div>
@@ -276,8 +254,8 @@ export function capabilitiesMarkup(bar: string): string {
           <div class="can-head">
             <div class="can-intro">
               <p class="section-kicker"><span class="kicker-square"></span> WHAT IT DOES</p>
-              <h2 id="can-title">One link is<br />only the <em>start.</em></h2>
-              <p class="can-lead">The preview reads one page. The same engine maps whole sites, runs batches, watches pages for changes and reads with your own logins, and every result carries its Evidence Record.</p>
+              <h2 id="can-title">From one page to<br />a repeatable <em>workflow.</em></h2>
+              <p class="can-lead">Read a page, discover URLs, collect content across a site, or revisit sources on a schedule. Each capability below shows where it runs.</p>
             </div>
             <fieldset class="can-filter" hidden>
               <legend class="visually-hidden">Show what runs where</legend>
@@ -289,6 +267,10 @@ export function capabilitiesMarkup(bar: string): string {
           <ul class="can-grid" id="can-grid" role="list">
               ${CAPABILITIES.map(capabilityCell).join('\n              ')}
           </ul>
+          <div class="can-evidence">
+            <h3>Keep the source with the result.</h3>
+            <p>Scrape results include an Evidence Record describing the capture: the final URL, fetch time, HTTP status and access decision. Inspect separate <a href="/docs/limits/#interpret-the-status">verification results</a> when your task needs checked fields.</p>
+          </div>
           <p class="visually-hidden" id="can-status" role="status"></p>
         </div>
       </div>

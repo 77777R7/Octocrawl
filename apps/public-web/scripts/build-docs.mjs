@@ -262,7 +262,7 @@ function header(current = 'docs') {
  * and Docs. JSON escaping keeps a title or description from closing the script element. */
 function articleData(page) {
   const article = { '@context': 'https://schema.org', '@type': 'TechArticle', headline: page.title, description: page.description,
-    url: `${ORIGIN}${pathFor(page)}`, inLanguage: 'en', isPartOf: { '@type': 'WebSite', name: 'Octocrawl', url: `${ORIGIN}/` } }
+    url: `${ORIGIN}${pathFor(page)}`, inLanguage: 'en', publisher: { '@id': `${ORIGIN}/#organization` }, about: { '@id': `${ORIGIN}/#software` }, isPartOf: { '@type': 'WebSite', '@id': `${ORIGIN}/#website`, name: 'Octocrawl', url: `${ORIGIN}/` } }
   const trail = [['Octocrawl', '/'], ['Docs', '/docs/'], ...(page.slug ? [[page.title, pathFor(page)]] : [])]
   const breadcrumbs = { '@context': 'https://schema.org', '@type': 'BreadcrumbList',
     itemListElement: trail.map(([name, path], index) => ({ '@type': 'ListItem', position: index + 1, name, item: `${ORIGIN}${path}` })) }
@@ -327,7 +327,7 @@ const coverPath = (post, name) => `/blog-assets/${post.cover ?? post.slug}/${nam
 const coverSrcset = post => `${versioned(coverPath(post, 'card.webp'))} 836w, ${versioned(coverPath(post, 'cover-1254.webp'))} 1254w, ${versioned(coverPath(post, 'cover.webp'))} 1672w`
 const jsonLd = data => `<script type="application/ld+json">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`
 const blogCrumbs = trail => ({ '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: trail.map(([name, path], index) => ({ '@type': 'ListItem', position: index + 1, name, item: `${ORIGIN}${path}` })) })
-const PUBLISHER = { '@type': 'Organization', name: 'Octocrawl', url: `${ORIGIN}/`, logo: { '@type': 'ImageObject', url: `${ORIGIN}/assets/favicon-192.png` } }
+const PUBLISHER = { '@type': 'Organization', '@id': `${ORIGIN}/#organization`, name: 'Octocrawl', url: `${ORIGIN}/`, logo: { '@type': 'ImageObject', url: `${ORIGIN}/assets/favicon-192.png` } }
 const bySlug = Object.fromEntries(posts.map(post => [post.slug, post]))
 const blogCard = (post, heading = 'h2') => `<a class="blog-card" href="${blogPath(post)}"><img src="${versioned(coverPath(post, 'card.webp'))}" alt="" width="836" height="470" loading="lazy" decoding="async" /><span class="blog-card-body"><span class="blog-card-meta"><span>${escape(BLOG_CATEGORIES.find(category => category.slug === post.category)?.name ?? '')}</span><time datetime="${post.pubDate}">${longDate(post.pubDate)}</time></span><${heading}>${escape(post.title)}</${heading}><p>${escape(post.description)}</p></span></a>`
 const blogFooter = '<footer class="doc-footer"><span>Try a page in the browser here, connect your agent to mcp.octocrawl.dev, or run Octocrawl on your computer with npx.</span><span class="doc-footer-links"><a href="/">Try a page ↗</a><a href="https://github.com/77777R7/Octocrawl">GitHub ↗</a></span></footer>'

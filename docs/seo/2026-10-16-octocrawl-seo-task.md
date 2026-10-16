@@ -307,19 +307,21 @@ Howard 希望你根据本文件推进 Octocrawl 的 SEO 优化。先读当前适
 - [x] 逐项审计首页 title/description/keywords、正文开头、现有 FAQ、文档入口及已有 Organization/SoftwareApplication/sameAs；不先假定缺 Schema、索引或权威度。
 - [x] 把确认事实、最有依据的解释、待验证假设分开。名字相似、类别重叠、召回偏移是候选解释；没有 Google 内部检索记录就不声称知道算法权重或唯一原因。AI Assistant 被 BIC 阻挡不能冒充 Googlebot/AI Mode 特定抓取失败。
 
-**B. 在现有承接页实施（todo；本次仅补计划，不称已修复）**
+**B. 在现有承接页实施（2026-10-16 文案已审阅，本地验收通过；用户已授权 PR、CI、合并、部署和线上核验，实际结果另记）**
 
-- [ ] 首页和文档介绍增加简洁、可独立理解的产品定义与官方身份锚点：Octocrawl、`octocrawl.dev`、`github.com/77777R7/Octocrawl`、REST/SDK/MCP、公共网页内容与数据、Hosted/本地边界。优先在现有页面补足，不新造一组同义品牌页。
-- [ ] 依据页面实际能力调整泛化的 no-code 搜索表述；审查并移除没有独立比较内容支持的 competitor/alias 关键词。不得把 Octoparse、OpenClaw、Octolens、同名 Python 项目写成 alternateName 或 sameAs。
+- [x] 首页和文档介绍增加简洁、可独立理解的产品定义与官方身份锚点：Octocrawl、`octocrawl.dev`、`github.com/77777R7/Octocrawl`、REST/SDK/MCP、公共网页内容与数据、Hosted/本地边界。优先在现有页面补足，不新造一组同义品牌页。
+- [x] 依据页面实际能力调整泛化的 no-code 搜索表述；审查并移除没有独立比较内容支持的 competitor/alias 关键词。不得把 Octoparse、OpenClaw、Octolens、同名 Python 项目写成 alternateName 或 sameAs。
 - [ ] 如用户确有混淆，在现有 FAQ/介绍中用短说明解答，并链接可核验身份；避免在每页重复竞品名或发布未经证实的归属/商标指控。
-- [ ] 已有 Schema 只修真实缺口：必要时给 Organization、WebSite、SoftwareApplication 与 publisher 关联使用稳定一致的 @id；sameAs/codeRepository 只指向可验证官方资料，和可见正文一致。Schema/llms.txt/FAQ 均不作为 Google 纠错或引用保证。
+- [x] 已有 Schema 只修真实缺口：必要时给 Organization、WebSite、SoftwareApplication 与 publisher 关联使用稳定一致的 @id；sameAs/codeRepository 只指向可验证官方资料，和可见正文一致。Schema/llms.txt/FAQ 均不作为 Google 纠错或引用保证。
 - [ ] 统一官网、README、GitHub、npm/PyPI 与已发现目录的品牌、官方域名、包名、入口、当前版本和部署限制。先列出具体错项与建议文字；本任务不自动改外部条目或联系第三方。
-- [ ] 针对 S1/B3/B2/C1 的具体误述，复用现有 MCP/limits/reference/迁移页的准确入口与短答案，连回身份锚点；不改变抓取内核或扩大能力。
+- [x] 针对 S1/B3/B2/C1 的具体误述，复用现有 MCP/limits/reference/迁移页的准确入口与短答案，连回身份锚点；不改变抓取内核或扩大能力。
 - [ ] 访问问题交 SEO-01：规则配置、verified 身份、具体路径和回滚证据充分后，再提出最小生产改动；生产规则授权单列。
+
+本地实施：沿用现有首页能力/接入区域，补入已审阅的产品文案、官方域名/仓库、REST/SDK/MCP 入口及 Hosted/本地标记。将 Evidence Record 说明与独立 verification 检查分开；定时 Monitor 明确需要本地 workers 和仓库配置。首页删除竞品 keywords，不新增竞品别名 FAQ。外部平台条目、Cloudflare 规则和 Google 回答尚未变更；不把本地文案验收视为实体混淆已纠正。当前发布批次仅含本站文案、入口、元数据和 Schema；不发布 npm/PyPI 包，不改生产安全规则。
 
 **C. 复测与效果边界**
 
-- [ ] 技术验收：构建与实际渲染后，身份定义、官方链接、Hosted/本地限制、meta/Schema 一致；内链/锚点正常，相关包名/命令按实际配置核验。
+- [x] 本地技术验收：构建、类型检查及 11 个相关测试文件（86 项）通过；首页/介绍/MCP 在 1440px 与 390px 实际渲染，无页面横向溢出。272 处本地链接/资源引用及锚点无缺失，JSON-LD 可解析，meta/Schema 与可见正文一致。包名/命令对照打包配置与现有接入示例；本轮未安装新版本或重跑外部客户端，不声称已完成线上验收。
 - [ ] 保持原12题基线不变；品牌+官方域名/仓库的诊断题单列，不混进前后分母。记录自动附加网页上下文、模型、登录/地区/个性化差异；不能把提示词变明确后的回答改善当作网站修复效果。
 - [ ] 每题分别判定：正确实体、能力边界、域名/包/端点正确、官方正文引用。提到品牌不能替代实体正确；引用真实页面不能替代答案有据。
 - [ ] T0后约7天核对新版本实际公开、抓取/索引状态；后约28天及另一个独立日期在匹配设置下重采。窗口/状态不足则记录，不伪造Google纠错完成或稳定引用增长；不自动创建定时任务。

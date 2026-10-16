@@ -1,8 +1,37 @@
 # Introduction to Octocrawl
 
-Octocrawl turns a public web page into readable content and, on supported pages, fields you can check against the source. [Try a page now](/), then use these guides when you need a durable task or an MCP connection.
+Octocrawl is an open-source web scraping tool for AI agents and developers. Extract public web pages as Markdown or structured data, discover site URLs, and run crawling, batch and monitoring workflows locally.
 
-> **Availability:** Try the page preview at the URL where you are reading this. Octocrawl also runs on your own computer from the published packages (`npx octocrawl`) and connects to Claude Code, Cursor, OpenCode and Codex over MCP; see [Connect MCP](/docs/connect-mcp/). Hosted Octocrawl serves scrape and map at `https://api.octocrawl.dev` and `https://mcp.octocrawl.dev/mcp`, keyless within a daily allowance and with a key for more; crawl, batch and Monitor run on your computer for now.
+Start with a page in your browser, connect an agent through MCP, or call the REST API from your application.
+
+## Get started
+
+- [Try a page](/): extract a public web page in your browser without installing anything.
+- [Connect your agent](/docs/connect-mcp/): set up Octocrawl in Claude Code, Cursor, OpenCode or Codex.
+- [Build with the API](/docs/reference/#rest-and-sdk): call REST or use the TypeScript SDK and Python client.
+
+## Official project and connections
+
+The official website is [octocrawl.dev](https://octocrawl.dev/). The official source repository is [github.com/77777R7/Octocrawl](https://github.com/77777R7/Octocrawl).
+
+| Connection | Address or package | What it does |
+| --- | --- | --- |
+| Hosted REST API | `https://api.octocrawl.dev` | `POST /v1/scrape` for one page and `POST /v1/map` for site URLs. |
+| Hosted MCP | `https://mcp.octocrawl.dev/mcp` | Connect your agent to hosted scrape and map. An account key enables the browser lane and Amazon.sg `scrape_product`, subject to limits. |
+| TypeScript SDK | `@octocrawl/sdk` | Call an Octocrawl API with an explicit base URL. |
+| Python client | `octocrawl-client` | Call an Octocrawl API with an explicit base URL. |
+| Local API | `npx octocrawl serve` | Start the API on `http://127.0.0.1:8787`. |
+| Local MCP package | `@octocrawl/mcp` | Connect an MCP client to the running local API. |
+
+## Hosted or local?
+
+Hosted Octocrawl supports single-page scraping and site URL mapping. Keyless requests use HTTP within a daily allowance. An account key enables the browser lane, subject to credits and service limits.
+
+Run Octocrawl locally for site crawling, URL batches, browser actions, saved login sessions and monitoring workflows. Browser actions require browser setup; scheduled monitoring requires local workers from a repository checkout. See [Connect MCP](/docs/connect-mcp/#run-it-on-your-computer) and the [Monitor guide](/docs/guides/monitor-webhook/).
+
+Installing an SDK or connecting an MCP client does not expand the capabilities of the server it uses. The website preview is a single-page trial with its own limits. See [Limits and result states](/docs/limits/) for the differences.
+
+Scrape results include an Evidence Record describing the capture. A successful capture means page content was read. Check any separate verification result before treating structured fields as verified.
 
 ## Try Octocrawl
 
@@ -44,5 +73,5 @@ The preview did not return readable feed content in this result. A separate X re
 ## Choose your next step
 
 - [Extract structured data from a web page](/blog/extract-structured-data-from-web-page/), in the browser or over the API.
-- [Connect MCP](/docs/connect-mcp/) to scrape, map, crawl and batch pages from Claude Code, Cursor, OpenCode or Codex.
+- [Connect MCP](/docs/connect-mcp/) to scrape and map from your agent, or connect a local server for crawl and batch.
 - [Check Amazon.sg product JSON](/docs/guides/amazon-product/) when subject identity, region, and currency matter.
