@@ -123,8 +123,8 @@ W2L_PUBLIC_PREVIEW_PORT=18876 npm run public:preview:local
 
 | 子项 | 状态 | 缺少什么 / 下一个动作 | 证据 |
 | --- | --- | --- | --- |
-| Cloudflare完整规则、顺序和配置 | blocked | 既有只读请求403；取得规则导出/可用读取权限后复核；当前事件不能证明Google/Bing影响 | [访问记录与未应用提案](cloudflare-access-2026-10-16.md) |
-| 生产BIC例外应用 | conditional | 先通过完整规则/表达式适用性/顺序复核，再获得单列生产授权；本批未改规则 | 同上 |
+| Cloudflare相关配置、顺序及效果 | in_progress | 控制台已读相关zone配置，单条例外已Active；Wrangler接口仍403，真实verified命中/放行及Google/Bing影响待核验 | [追加访问及应用记录](cloudflare-access-2026-10-16.md) |
+| 生产BIC例外应用 | done | 相关配置复核、精确dry-run和用户单列授权完成；15:25:32应用并逐字段回读，日志开启，仅跳过BIC；效果验收仍在上一项 | 同上 |
 | 固定地区Google SERP | blocked | 验证页阻挡；保留backend搜索发现，不能标受控地区排名完成 | [意图映射](page-intent-map.md) |
 | 两个完整观察28天窗口 | conditional | 已导出相邻日历窗，但历史覆盖不足；等待可比数据，无法补造前窗历史 | [衡量字典](measurement.md) |
 | ChatGPT / Perplexity完整抽样 | blocked | B1分别Model not found/注册门槛；各余11题未测，不以零代替 | [原始AI样本](ai-answer-sample-2026-10-16.md) |
@@ -141,3 +141,20 @@ W2L_PUBLIC_PREVIEW_PORT=18876 npm run public:preview:local
 - 从 `origin/main@b063b69f7854907451dd8a4513a8d5e55f432f97` 建立本地分支 `codex/seo-task-status-20261016`。
 - 维护本执行日志，并把同一份v1.2 task写入本checkout与 `/Users/howard07/Code/w2l/docs/seo/2026-10-16-octocrawl-seo-task.md`；其他历史报告/草稿保留原时点。
 - 原dirty checkout的根 `task.md`、tracked diff和其他未跟踪文件保留。状态回填完成时尚未提交、推送、创建PR或部署；用户随后已授权这批文档的提交与合并，实际提交状态以Git/PR为准。上述网站发布状态只属于#526/#527。
+
+## 15:25:32追加：SEO-01单条BIC例外已应用
+
+- 状态回填文档已在[PR #529](https://github.com/77777R7/Octocrawl/pull/529)于15:09:18合并，merge `0c27a7bf912ae43d4511c3c2dabb07972a7a6b33`；4项CI均通过，没有网站部署。此次记录分支 `codex/seo01-bic-exception-20261016` 从该最新主线建立。
+- 用户登录控制台后，相关zone配置读取可用；Wrangler OAuth安全配置接口仍403。单独授权精确例外后，先再次对原JSON执行服务器dry-run，HTTP200/success，随后部署一次。
+- 15:25:32应用：ruleset `1d4beb2b55e5423db6b756069d64f2d3` v1，rule `82f36f42e92a4ab0aa74e34608de6411` v1。回读全部获批字段一致，Active、products=[bic]、logging.enabled=true，列表1/5。全局BIC仍on，Bot Management前后响应相同。只新增这一条规则，未扩大路径、类别、方法或跳过产品。
+- 回滚入口已只读确认：该规则自己的Menu > Disable，未执行。保留应用前无custom entrypoint的404、真实PUT200及新GET200，规则/版本与截图可定位。不删除整套规则，不关闭全局BIC。
+- 应用后约2分钟的GraphQL窗口返回0条事件；这不是零访问或零命中结论。9次reference-fetch被工具私网地址校验挡在网站检索之前；另3次web工具报告不可访问，无ray/状态/身份，不归因为Cloudflare。真实verified AI Assistant命中及成功正文、Google/Bing影响仍未验收；没有伪装UA或关闭工具保护。
+- 15:32:02普通urllib默认UA请求robots仍403/1010，新ray `a4b55e12ac89d3dd-KIX`已在截至15:34:05的后续GraphQL窗口精确关联：bic/block/403、verified类别为空、sampleInterval1。该窗口共返回这一条事件，未返回新skip规则事件；此负例不代替真实AI Assistant成功验收或零流量结论。
+- [完整访问记录](cloudflare-access-2026-10-16.md)、[本地应用manifest](../../.w2l/seo-task-status-20261016/cloudflare/application/manifest.json)。原12题及历史基线不变；task升级v1.3并同步原入口。应用阶段这3份文档仅在本地；用户随后授权这批记录提交、PR并在CI通过后合并，实际Git/PR状态另列，原dirty checkout其他工作保留。
+
+## 15:50–15:54追加：真实AI客户端读取通过，身份/规则关联仍待验收
+
+- Codex通过已安装Firecrawl MCP读取MCP介绍与文档介绍两页，请求maxAge=0/basic、HTML及Markdown，无UA伪装或stealth回退。两次均返回目标statusCode200、完整正文、正确主标题和官方MCP/仓库入口；交付URL与带标记的请求URL一致。分别保存17,375/10,353字符Markdown、34,329/20,231字符HTML及哈希、scrapeId；各报告1 credit。
+- 返回数据没有CF-RAY或verified身份。15:50:03至15:54:31的GraphQL窗口HTTP200、无错误、返回0条事件，不能关联新规则ID/身份/响应，SEO-01继续in_progress。不能把MCP成功读取解释为Cloudflare识别了AI Assistant，或归因给该例外。
+- OpenAI web工具两次精确URL读取不可访问；独立Google AI Mode精确URL访问探针遇unusual-traffic/reCAPTCHA，未取得回答，不解验证码、不再生回答。它不是原12题复测，原题/答案/计数/独立日期安排均未更改。
+- [客户端验收manifest](../../.w2l/seo-task-status-20261016/cloudflare/acceptance/manifest.json)包含完整交付、响应检查、GraphQL窗口和受阻记录。本轮只提交既有task、Cloudflare报告和本执行日志3份文档；不提交原始日志/截图，不再改生产规则或部署网站。
