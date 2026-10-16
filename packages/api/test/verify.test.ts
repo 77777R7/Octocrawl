@@ -24,6 +24,7 @@ const PAGES: Record<string, string> = {
   '/blank-table': `<!doctype html><html><head><title>Historical data</title></head><body><main><h1>Historical data</h1><p>${PROSE}</p><table><thead><tr><th>Date</th><th>Close</th></tr></thead><tbody><tr><td> </td><td> </td></tr><tr><td> </td><td> </td></tr></tbody></table></main></body></html>`,
   '/filled-table': `<!doctype html><html><head><title>Historical data</title></head><body><main><h1>Historical data</h1><p>${PROSE}</p><table><thead><tr><th>Date</th><th>Close</th></tr></thead><tbody><tr><td>2026-01</td><td>0</td></tr><tr><td>2026-02</td><td>2.5</td></tr></tbody></table></main></body></html>`,
   '/media-feed': '<!doctype html><html><head><title>Video feed</title></head><body><nav><a href="/help">Help menu</a></nav><main><div><article class="clip"><video src="/a.mp4"></video><a href="/Ada">Ada</a><p>Glass sculpture</p></article><article class="clip"><video src="/b.mp4"></video><a href="/Bo">Bo</a><p>Clay carving</p></article></div></main></body></html>',
+  '/duplicate-list': '<html><body><main><div class="card" data-id="a"><a class="name">Glass vase</a><span class="price">12</span></div><div class="card" data-id="a"><a class="name">Glass vase</a><span class="price">12</span></div><div class="card" data-id="b"><a class="name">Clay bowl</a><span class="price">9</span></div></main></body></html>',
   '/article': `<!doctype html><html lang="en"><head><title>Tide report</title></head><body><main><article><h1>Tide report</h1><p>${PROSE}</p><p>High water at 06:12, low water at 12:30.</p></article></main></body></html>`,
 }
 
@@ -68,6 +69,51 @@ const passing = { checks: [{ type: 'markdownIncludes', text: 'High water' }, { t
 const failing = { checks: [{ type: 'markdownIncludes', text: 'High water' }, { type: 'minTables', min: 1 }] }
 
 describe('task verification on a request (ADR 0006)', () => {
+  it('checks the delivered scrape projection and its snapshot metadata', async () => {
+    const engine = engineWith()
+    const checks = [{ type: 'field', path: 'evidence.httpStatus', equals: 200 }]
+    const compact = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['markdown'], debug: false, verify: { checks } })
+    expect(compact.status).toBe(200)
+    expect(compact.json).not.toHaveProperty('evidence')
+    expect(compact.json.verification.status).toBe('failed')
+    expect(compact.json.evidenceRecord.verification.status).toBe('failed')
+    const full = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['markdown'], debug: true, verify: { checks } })
+    expect(full.json.evidence.httpStatus).toBe(200)
+    expect(full.json.verification.status).toBe('passed')
+    const delivered = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['markdown'], debug: false, verify: { checks: [{ type: 'field', path: 'snapshot.httpStatus', equals: 200 }] } })
+    expect(delivered.json.snapshot.httpStatus).toBe(200)
+    expect(delivered.json.verification.status).toBe('passed')
+  })
+
+  it('rejects self-referential verdict checks before fetching', async () => {
+    const engine = engineWith()
+    const before = articleReads
+    for (const [endpoint, target] of [['/v1/scrape', { url: `${origin}/article` }], ['/v1/batches', { urls: [`${origin}/article`] }], ['/v1/crawl', { url: `${origin}/article`, maxPages: 1 }]] as const) {
+      for (const path of ['verification', 'verification.status', 'readiness.state', 'evidenceRecord.verification.status']) {
+        for (const check of [{ type: 'field', path, present: true }, { type: 'listRecordsMin', path, min: 1 }]) {
+          const response = await call(engine, 'POST', endpoint, { ...target, verify: { checks: [check] } })
+          expect(response.status).toBe(400)
+          expect(response.json.error).toContain('check source data instead')
+        }
+      }
+    }
+    expect(articleReads).toBe(before)
+  })
+
+  it('counts distinct complete records while keeping all source records in the delivered list', async () => {
+    const engine = engineWith()
+    const list = { type: 'list', itemSelector: '.card', fields: [{ name: 'id', attribute: 'data-id' }, { name: 'name', selector: '.name' }, { name: 'price', selector: '.price' }] }
+    const request = { url: `${origin}/duplicate-list`, formats: ['markdown', list], debug: false }
+    const legacy = await call(engine, 'POST', '/v1/scrape', { ...request, verify: { checks: [{ type: 'recordFields', fields: ['name', 'price'], min: 3 }] } })
+    expect(legacy.json.verification.status).toBe('passed')
+    const distinct = await call(engine, 'POST', '/v1/scrape', { ...request, verify: { checks: [{ type: 'recordFields', fields: ['name', 'price'], min: 3, uniqueBy: ['id'] }] } })
+    expect(distinct.status).toBe(200)
+    expect(distinct.json.list.records).toHaveLength(3)
+    expect(distinct.json.list.records.map((r: any) => r.source.index)).toEqual([0, 1, 2])
+    expect(distinct.json.verification).toMatchObject({ status: 'failed', checks: [{ observedCount: 2, asked: 3 }] })
+    expect(distinct.json.evidenceRecord.verification.status).toBe('failed')
+  })
+
   it('checks required cells in the delivered table, rejecting blank data rows without changing the fetch status', async () => {
     const engine = engineWith()
     const verify = { checks: [{ type: 'tableRowsMin', tableIndex: 0, columns: [0, 1], min: 2 }] }
@@ -140,10 +186,10 @@ describe('task verification on a request (ADR 0006)', () => {
     const passed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })
     expect(passed.status).toBe(200)
     expect(passed.json.status).toBe('success')
-    expect(passed.json.verification).toMatchObject({ status: 'passed', verifier: 'verify/4', reason: null, checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true }, { index: 1, type: 'markdownCountMin', passed: true, observedCount: 2, asked: 2 }] })
+    expect(passed.json.verification).toMatchObject({ status: 'passed', verifier: 'verify/7', reason: null, checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true }, { index: 1, type: 'markdownCountMin', passed: true, observedCount: 2, asked: 2 }] })
     expect(passed.json.verification.contractSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(validate(passed.json.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
-    expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/4', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [] })
+    expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/7', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [] })
 
     // The fetch succeeded and the task was not done: the status says the first, the verification the second.
     const failed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: failing, formats: ['markdown', 'links'], debug: false })
@@ -214,7 +260,7 @@ describe('task verification on a request (ADR 0006)', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
     const [item] = (await call(engine, 'GET', `/v1/batches/${id}/items?debug=true`)).json.items as Record<string, any>[]
-    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/4', reason: 'page_not_read', checks: [] } })
+    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/7', reason: 'page_not_read', checks: [] } })
     expect(validate(item!.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
     expect(item!.evidenceRecord.verification).toMatchObject({ status: 'failed', reason: 'page_not_read', contractSha256: item!.verification.contractSha256 })
   })
