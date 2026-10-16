@@ -125,6 +125,12 @@
   - octocrawl.dev 的 Cloudflare bot 防护不挡 Claude 的出口 `160.79.104.0/21`；
   - public-preview 冷启动能否在 Claude 的 10 秒超时内响应（查 min-instances）；
   - 给 `oauthClients`、`oauthGrants`、`oauthCodes`、`oauthTokens`、`oauthRefresh`、`oauthNonces` 在 Firestore 上配 `expireAt` 的 TTL 策略（PR ② 只写了字段，没有配策略）。
+- D3 只读检查结果（2026-10-16，main `adee17f2`；只读，没有改任何配置）：
+  - **Worker 缓存：没问题。** 两个 Worker（`cloudflare/public-preview-proxy`、`cloudflare/hosted-api-proxy`）都只是用 `fetch()` 原样转发，没有用缓存 API。Cloudflare 默认只按扩展名缓存静态文件，OAuth 的路径都没有扩展名，响应也都带 `no-store`。线上实测：`octocrawl.dev/.well-known/oauth-authorization-server`、`/oauth/authorize` 和 `mcp.octocrawl.dev` 的 PRM 各请求两次，都是 `cf-cache-status: DYNAMIC`；对照组 `/docs-assets/docs.css` 是 `MISS`（`max-age=14400`，会进缓存）。所以新加的 `/docs-assets/oauth.css` 和以前的静态文件一样，部署后要 `purge_everything`。
+  - **Claude 网段的 bot 防护：配置上没有会拦它的东西，但没能从它的网段实测（未核实）。** `cf bot-management get`：Bot Fight Mode、JS 检测、AI bot 防护都关着。自定义防火墙规则只有一条，是给 AI Assistant 类已验证 bot 在几个公开页面上跳过 BIC 的例外，没有拦截规则。BIC 开着，安全级别 medium。从本机出口用不带 User-Agent、`curl`、`python-httpx`、`node`、`Claude-User` 分别请求两个主机，都没有被挑战。medium 安全级别按 IP 信誉判断，要等 D4 由 claude.ai 实际连一次才能确认。如果想事先排除风险，可以给 `160.79.104.0/21` 在 `/oauth/*`、`/.well-known/oauth-*` 和 `mcp.octocrawl.dev` 上加一条跳过规则，这要 Howard 决定。
+  - **冷启动：在 10 秒以内，但余量没算准。** 两个服务都没设 `minScale`（空闲时缩到 0），开了 startup CPU boost，`maxScale` 是 3（hosted API）和 2（public-preview）。public-preview 当天每 30 到 60 分钟就起一次新实例。从 Cloud Logging 看了 6 次冷启动，触发新实例的那一个请求耗时 3.76 到 4.70 秒，之后的请求都是几毫秒；其中 3.76 秒那次就落在 `/.well-known/oauth-authorization-server` 上。冷实例上的 `/oauth/token` 还要再加几次串行的 Firestore 往返，这部分没测，估计仍在 Claude 的 10 秒以内。要留更多余量，可以给 public-preview 设 `min-instances=1`，但会多花钱，这要 Howard 决定。
+  - **Firestore TTL：6 个集合都还没有。** `gcloud firestore fields ttls list` 列出的 7 个策略都在别的集合上（`creditCarry`、`creditUsage`、`hostedLeases`、`hostedQuotas`、`publicPreviewQuotas`、`requests`、`sessions`）。部署前要为 `oauthClients`、`oauthGrants`、`oauthCodes`、`oauthTokens`、`oauthRefresh`、`oauthNonces` 各执行一次 `gcloud firestore fields ttls update expireAt --collection-group=<集合> --enable-ttl --project=octopus-w2l-20260924-7r7`。**2026-10-16 已按 Howard 的同意执行**（带 `--async`），6 个策略都已提交，状态见下面的“下次从这里继续”。
+  - **另外发现：资源服务已经上线了。** hosted API 现在跑的是 `octocrawl-api-oauthrs-9c97175`（tag `h17oauthrs`），2026-10-16 09:26 UTC 从 main 的 `9c971756`（#535）部署，是别的窗口做的，不是这个窗口。所以 `mcp.octocrawl.dev/mcp-oauth` 已经会回 401 并给出 PRM，但 octocrawl.dev 上的授权服务还没部署（public-preview 是 `r89identity`），OAuth 客户端现在会在发现授权服务那一步失败。文档也还没上线，不会有人被引导过去。等 public-preview 带着 #537、#538、#539 部署，两边就对齐了。
 - [ ] **D4** 部署之后用真实客户端各连一次：ChatGPT developer mode、claude.ai custom connector、Claude Code（`/mcp` 登录）、Cursor；能做的话加上 VS Code、Codex。每个都要做两件事：一次 `scrape`，然后去 dashboard 断开，确认之后返回 401。记录写到 `research/hosted/<YYYY-MM-DD>-mcp-oauth-clients-<commit>.md`，写明客户端版本、走的是 CIMD 还是 DCR、代理还是直连、命令、commit。
 - 验收：ROADMAP PH item 6 的状态行引用这份记录。
 
@@ -145,4 +151,8 @@
 
 ## 下次从这里继续
 
-PR ①（#534）、PR ②（#537）、PR ③（#538）已合并，都在 77777R7/Octocrawl。PR ④ 的 D1、D2 在分支 `claude/mcp-oauth-docs` 上做完（合并前以 PR 页为准）。剩下 D3（部署前检查，含 6 个集合的 TTL 策略和 10 秒超时）、部署本身、D4 真实客户端验收和发版，都要 Howard 点头才开始。部署时 hosted API 和 public-preview 两个服务要一起上，见上面的“上线顺序”。
+PR ①（#534）、PR ②（#537）、PR ③（#538）已合并，都在 77777R7/Octocrawl。PR ④ 的 D1、D2 已合并（#539）。D3 的只读检查已做完，结果见 D3 下面。6 个 OAuth 集合的 `expireAt` TTL 已于 2026-10-16 开启，状态为 ACTIVE。Howard 决定暂不加 Claude 网段的 BIC 跳过规则，也暂不设 `min-instances`。
+
+**已部署（2026-10-16）**：public-preview 从 main `adee17f2`（含 #537–#539）构建镜像，部署为 revision `w2l-public-preview-oauth-adee17f2`，tag `r90oauth`，100% 流量；回滚用 `r89identity`。之后做了 `purge_everything`，`favicon.ico` 和 `oauth.css` 都是 MISS。线上检查：授权服务 metadata 返回 200 和 `no-store`；`mcp.octocrawl.dev/mcp-oauth` 返回 401，`WWW-Authenticate` 带 PRM；未登录访问 `/oauth/authorize` 会 303 到 `/signin/?next=…`（这一步之前服务器已经成功读取并校验了 ChatGPT 线上的 CIMD 文档）；用假 code 请求 `/oauth/token` 返回 `invalid_grant`；文档小节和 dashboard 的连接区块都已上线。hosted API 仍是 `h17oauthrs`。
+
+**D4 进行中**：Claude Code 已于 2026-10-16 连通。全程走的是 CIMD；通过连接跑了一次 scrape，用的是这个连接自己的 key，扣 1 个 credit；在 dashboard 断开 22 秒后，客户端收到 401。记录在 `research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md`。ChatGPT、claude.ai、Cursor 由 Howard 自己连，连完把结果补进同一份记录。四个都连过之后，ROADMAP PH item 6 的状态行引用这份记录，然后发版（`server.json` 进 Registry），发版要 Howard 批准。
