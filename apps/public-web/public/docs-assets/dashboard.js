@@ -724,7 +724,7 @@
     })
   }
 
-  // The Connect page's key: pasted, or made here, it goes into every setup in place of oc_YOUR_KEY, so Copy copies a
+  // The Connect page's key: pasted, or made here, it goes into every key setup in place of oc_YOUR_KEY, so Copy copies a
   // working line. The setups show it masked until the eye is pressed; Copy always takes the whole key (data-full). A key
   // is shown only once (account.ts keeps its HMAC), so the page cannot fill in one made earlier. The key stays in this
   // page: nothing stores it or sends it on.
@@ -745,7 +745,7 @@
       for (const [pre, text] of slots) {
         if (valid) { pre.dataset.full = text.split(PLACEHOLDER).join(key); pre.textContent = shown ? pre.dataset.full : text.split(PLACEHOLDER).join(masked) } else { delete pre.dataset.full; pre.textContent = text }
       }
-      note.textContent = !key ? idle : valid ? `Every setup on this page carries ${key.slice(0, 7)}…; Copy takes the whole key.` : 'That is not an Octocrawl key: a key starts with oc_.'
+      note.textContent = !key ? idle : valid ? `Every key setup on this page carries ${key.slice(0, 7)}…; Copy takes the whole key.` : 'That is not an Octocrawl key: a key starts with oc_.'
     }
     fill.addEventListener('input', apply)
     eye.addEventListener('click', () => {
@@ -769,7 +769,7 @@
           const { key } = await response.json()
           fill.value = key
           apply()
-          note.textContent = `Made a key named Agent setup (${key.slice(0, 7)}…) and put it in every setup on this page. Copy what you need now: the key is not shown again once you leave.`
+          note.textContent = `Made a key named Agent setup (${key.slice(0, 7)}…) and put it in every key setup on this page. Copy what you need now: the key is not shown again once you leave.`
           load()
         } else if (response.status === 409) say('An account holds at most five active keys. Revoke one in API keys first.', true)
         else say('The key could not be created. Try again.', true)

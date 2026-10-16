@@ -249,6 +249,52 @@ describe('MCP connections', () => {
   })
 })
 
+describe('Connect leads with sign-in', () => {
+  const AGENTS = ['claude', 'codex', 'cursor', 'opencode', 'cline']
+  const text = (page: Page, selector: string) => [...page.window.document.querySelectorAll(selector)].map(node => node.textContent ?? '')
+
+  it('gives each agent the sign-in URL first, with no key, and folds the key setup under "Use an API key instead"', async () => {
+    const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
+    for (const id of AGENTS) {
+      const first = text(connect, `#c-${id} .install-body > .code pre`)
+      expect(first.join('\n'), id).toContain('https://mcp.octocrawl.dev/mcp-oauth')
+      expect(first.join('\n'), id).not.toContain('oc_YOUR_KEY')
+      const alternative = connect.window.document.querySelector(`#c-${id} details.key-alt`) as unknown as HTMLDetailsElement
+      expect(alternative, id).not.toBeNull()
+      expect(alternative.open, id).toBe(false)
+      expect(alternative.querySelector('summary')!.textContent, id).toBe('Use an API key instead')
+      const keyed = text(connect, `#c-${id} details.key-alt pre`).join('\n')
+      expect(keyed, id).toContain('oc_YOUR_KEY')
+      expect(keyed, id).toContain('https://mcp.octocrawl.dev/mcp')
+      expect(keyed, id).not.toContain('/mcp-oauth')
+    }
+    // Claude Code: add, then sign in from /mcp.
+    expect(text(connect, '#c-claude .install-body > .code pre')[0]).toBe('claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp-oauth')
+  })
+
+  it('lists coding agents only: no chat-app cards', async () => {
+    const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
+    expect([...connect.window.document.querySelectorAll('.install-row')].map(row => row.id)).toEqual(AGENTS.map(id => `c-${id}`))
+  })
+
+  it('says which sign-ins have been checked with the real client, and which only follow its docs', async () => {
+    const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
+    expect(connect.$('c-claude').querySelector('.client-status')!.textContent).toBe('Sign-in checked with Claude Code on 2026-10-16')
+    expect(connect.$('c-claude').querySelector('.client-status')!.classList.contains('is-verified')).toBe(true)
+    for (const id of ['codex', 'cursor', 'opencode', 'cline']) {
+      const status = connect.$(`c-${id}`).querySelector('.client-status')!
+      expect(status.textContent, id).toMatch(/^Sign-in not checked with .+ yet: these steps follow its docs$/)
+      expect(status.classList.contains('is-verified'), id).toBe(false)
+    }
+  })
+
+  it('names both MCP URLs: sign-in, and keyless or a key', async () => {
+    const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
+    expect(connect.$('mcp-url-oauth').textContent).toBe('https://mcp.octocrawl.dev/mcp-oauth')
+    expect(connect.$('mcp-url').textContent).toBe('https://mcp.octocrawl.dev/mcp')
+  })
+})
+
 describe('Connect fills in a key', () => {
   const KEY = `oc_${'x'.repeat(43)}`
   const MASKED = `oc_xxxx${'•'.repeat(12)}`
@@ -272,7 +318,7 @@ describe('Connect fills in a key', () => {
     expect(setups(connect).filter(text => text.includes(MASKED))).toHaveLength(asking.length)
     expect(copied(connect)).toContain(`claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp --header "Authorization: Bearer ${KEY}"`)
     expect(copied(connect).filter(text => text.includes(KEY))).toHaveLength(asking.length)
-    expect(connect.$('fill-note').textContent).toBe('Every setup on this page carries oc_xxxx…; Copy takes the whole key.')
+    expect(connect.$('fill-note').textContent).toBe('Every key setup on this page carries oc_xxxx…; Copy takes the whole key.')
     // The eye shows it, in the field and in every setup, and hides it again.
     connect.$('fill-eye').click()
     expect([input.classList.contains('masked'), connect.$('fill-eye').getAttribute('aria-pressed')]).toEqual([false, 'true'])

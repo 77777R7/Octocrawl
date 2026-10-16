@@ -252,6 +252,12 @@ a:hover{color:#fff}
 .install-btn{padding:6px 10px;border:1px solid var(--rule);border-radius:6px;color:var(--muted);font:650 11.5px var(--mono)}
 .install-row[open] .install-btn,.install-row summary:hover .install-btn{border-color:var(--orange);color:var(--orange-soft)}
 .install-body{padding:0 2px 12px}
+/* Connect: whether a client's sign-in was checked with the real client, and its key setup folded under it. */
+.client-status{margin:8px 0 0;color:var(--muted);font:650 11px/1.5 var(--mono)}
+.client-status.is-verified{color:var(--good)}
+.key-alt{margin-top:10px;border-top:1px dotted var(--rule)}
+.key-alt summary{padding:8px 0 4px;color:var(--muted);font:650 11.5px var(--mono);cursor:pointer}
+.key-alt summary:hover,.key-alt[open] summary{color:var(--orange-soft)}
 .stack{display:grid;gap:18px;min-width:0}
 .stack .panel{margin-bottom:0}
 .kv{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;border-radius:6px;background:var(--deep)}
