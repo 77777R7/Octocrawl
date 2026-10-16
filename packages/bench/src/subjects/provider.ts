@@ -1,3 +1,4 @@
+import { sourceDataWarnings } from './sourceData.js'
 import { estimateTokens, vendorIdentityIssues, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import {
@@ -542,6 +543,7 @@ export class ProviderSubject implements SubjectAdapter {
       },
     })
 
+    const sourceWarnings = sourceDataWarnings(res.body, res.finalUrl)
     // No main content: the whole page stays on the failed result as evidence,
     // never content. onlyMainContent: false asks for the whole page, so there
     // it is the answer; so is what includeTags names, on any page that is not
@@ -560,6 +562,7 @@ export class ProviderSubject implements SubjectAdapter {
         lane: 'provider',
         escalations: [],
         markdown: wholePage,
+        ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
         ...(wholePage === null ? {} : { links }),
       }
     }
@@ -613,6 +616,7 @@ export class ProviderSubject implements SubjectAdapter {
       escalations: [],
       markdown,
       links,
+      ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
       metadata: extracted.metadata,
       document: {
         title: extracted.title,
