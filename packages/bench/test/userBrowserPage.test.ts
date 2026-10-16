@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FetchResult } from '@w2l/contracts'
-import { toEvidenceRecord } from '@w2l/runtime'
+import { readinessOf, toEvidenceRecord } from '@w2l/runtime'
 import { pageFromUserBrowser, type UserBrowserRead } from '../src/subjects/userBrowserPage.js'
 
 const PAGE = `<html><head><title>Members</title></head><body><article><h1>Members</h1>${'<p>The page behind the check, long enough to be read as an article. </p>'.repeat(4)}</article></body></html>`
@@ -19,6 +19,30 @@ const read = (html: string, extra: Partial<UserBrowserRead> = {}): UserBrowserRe
 })
 
 describe('a page read in the person\'s browser', () => {
+  it('keeps the publisher error when an empty rendered page exits before content formatting', () => {
+    const state = { page: '/browse/[...seo]', query: { seo: ['electronics', 'laptops', '123'] }, props: { pageProps: { initialData: {
+      searchResult: { itemStacks: [] }, pageMetadata: { pageContext: { browseContext: { errorResponse: { errors: [{ errorType: 'FATAL', statusCode: 'POLARIS_1001', statusMsg: 'INVALID_CAT_ID' }] } } } },
+    } } } }
+    const html = `<html><head><title>Laptops</title><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(state)}</script></head><body><nav><a href="/help">Help</a></nav><main></main></body></html>`
+    const url = 'https://www.walmart.com/browse/electronics/laptops/123'
+    const result = pageFromUserBrowser(read(html, { requestedUrl: url, finalUrl: url }), null, {})
+    expect(result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
+    expect(result.warnings).toContainEqual(expect.objectContaining({ code: 'source_data_error' }))
+    expect(readinessOf(result)).toEqual({ state: 'not_served', basis: ['source_data_error'] })
+  })
+
+  it('reports a publisher-declared invalid category instead of treating it as a ready product page', () => {
+    const state = { page: '/browse/[...seo]', query: { seo: ['electronics', 'laptops', '123'] }, props: { pageProps: { initialData: {
+      searchResult: { itemStacks: [] }, pageMetadata: { pageContext: { browseContext: { errorResponse: { errors: [{ errorType: 'FATAL', statusCode: 'POLARIS_1001', statusMsg: 'INVALID_CAT_ID' }] } } } },
+    } } } }
+    const html = PAGE.replace('</head>', `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(state)}</script></head>`)
+    const url = 'https://www.walmart.com/browse/electronics/laptops/123'
+    const result = pageFromUserBrowser(read(html, { requestedUrl: url, finalUrl: url }), null, {})
+    expect(result.status).toBe('success') // The HTTP document came; this is a data-availability caveat.
+    expect(result.warnings).toContainEqual(expect.objectContaining({ code: 'source_data_error' }))
+    expect(readinessOf(result)).toEqual({ state: 'not_served', basis: ['source_data_error'] })
+  })
+
   it('is read as the browser lane reads a rendered page, recorded as theirs: mode authed, its headers unseen, the stopped fetch\'s robots decision', () => {
     const result = pageFromUserBrowser(read(PAGE), STOPPED, {})
     expect(result).toMatchObject({ status: 'success', lane: 'browser_local_authed', compliance: null, blockReason: null, evidence: { finalUrl: 'https://site.test/members', httpStatus: 200, contentType: 'text/html; charset=utf-8', redirectChainComplete: false, fetchedAt: '2026-10-04T01:00:00.000Z' } })

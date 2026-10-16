@@ -18,6 +18,14 @@ const warned = (...codes: string[]) => codes.map((code) => ({ code, message: cod
 const loadingWait = (cleared: boolean, waitedMs = 8_000): TraceEvent => ({ at: 1, lane: 'browser_local', event: 'loading_wait', detail: { waitedMs, cleared } })
 
 describe('readinessOf (ADR 0007, ROADMAP PA item 11)', () => {
+  it('distinguishes explicit missing source data from an unrendered loading shell', () => {
+    const page = result({ lane: 'http', warnings: warned('source_data_error', 'client_rendered_suspected') })
+    expect(readinessOf(page)).toEqual({ state: 'not_served', basis: ['source_data_error'] })
+    expect(readinessOf({ ...page, verification: { status: 'failed', verifier: 'test', contractSha256: 'x', reason: 'checks_failed', checks: [] } })).toEqual({ state: 'not_served', basis: ['source_data_error'] })
+    // A contract explicitly satisfied (for example, asking for the error page itself) still means just that.
+    expect(readinessOf({ ...page, verification: { status: 'passed', verifier: 'test', contractSha256: 'x', reason: null, checks: [] } })).toEqual({ state: 'ready', basis: ['verified'] })
+  })
+
   it('reads a page with content and no sign of loading as ready', () => {
     expect(readinessOf(result())).toEqual({ state: 'ready', basis: [] })
     expect(readinessOf(result({ status: 'partial' }))).toEqual({ state: 'ready', basis: [] })
