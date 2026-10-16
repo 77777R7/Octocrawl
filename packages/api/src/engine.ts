@@ -118,7 +118,7 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, BrowserIdentityChoice, ChannelsFiltered, InstalledChromeTestSeams } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
-import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints } from './hints.js'
+import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, pinnedFastModeHints, type FastModePin } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
@@ -157,6 +157,11 @@ export class LoginsUnavailableError extends Error {
 /** Managed sessions keep a browser profile on the server and drive a browser with it: a hosted server keeps none. */
 export class SessionsUnavailableError extends Error {
   override readonly name = 'SessionsUnavailableError'
+}
+
+/** A scrape's context, and a fastMode its caller pinned: the answer and the scrape record then say the pin's reason. */
+export interface ScrapeContext extends ExecutionContext {
+  fastModePin?: FastModePin
 }
 
 /** What a handoff tells its caller while it waits, and what ends it. */
@@ -201,7 +206,7 @@ interface Submission<T extends CrawlAccepted> {
 
 export interface ApiEngine {
   /** One page; with `handoff`, a page a check stopped is handed to the person in their Chrome (`hooks` tell the caller what they are to do). */
-  scrape(req: ScrapeRequest, context?: ExecutionContext, hooks?: HandoffHooks): Promise<ScrapeResponse | CompactScrapeResponse>
+  scrape(req: ScrapeRequest, context?: ScrapeContext, hooks?: HandoffHooks): Promise<ScrapeResponse | CompactScrapeResponse>
   /** The record of one scrape call (`scrapes/<scrapeId>.json` under the task root); null for an id this server has no record of. */
   getScrape(scrapeId: string): Promise<ScrapeRecord | null>
   /**
@@ -1716,7 +1721,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * Monitor's capture mints an id for its response but leaves no record: a
    * preview persists nothing, and a run's observation is the Monitor's own.
    */
-  async function runScrape(req: ScrapeRequest, context: ExecutionContext, record: boolean, hooks: HandoffHooks = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
+  async function runScrape(req: ScrapeRequest, context: ScrapeContext, record: boolean, hooks: HandoffHooks = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
     checkHandoff(req)
     checkAccessChoice(req)
     checkMyBrowser(req)
@@ -1753,7 +1758,10 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const robotsOverride = req.robotsOverride ?? (record ? namedUrlOverride : undefined)
     const plan = record ? cachePlanFor(req.url, mode, req, req.formats, rungs.channels, req.robotsOverride, robotsOverride !== undefined) : null
     /** The shaped response and, for an API call, the scrape record, written before the response is sent. */
-    const deliver = async (full: ScrapeRun, shapeScope: ReturnType<typeof createExecutionScope>, fetched: boolean): Promise<ScrapeResponse | CompactScrapeResponse> => {
+    const deliver = async (run: ScrapeRun, shapeScope: ReturnType<typeof createExecutionScope>, fetched: boolean): Promise<ScrapeResponse | CompactScrapeResponse> => {
+      // A pinned fastMode's reason replaces the engine's "retry without fastMode" in the answer and the record alike.
+      const pinned = context.fastModePin === undefined ? [] : pinnedFastModeHints(run.agentHints ?? [], context.fastModePin)
+      const full: ScrapeRun = pinned.length === 0 ? run : { ...run, agentHints: pinned }
       const shaped = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
       // An answer the cache gave fetched nothing: its usage is this call's, its evidence the original fetch's.
       const response = fetched ? shaped : withoutFetchUsage(shaped)
