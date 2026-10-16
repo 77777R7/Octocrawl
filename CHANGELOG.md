@@ -9,6 +9,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 | Version | Date | What changed |
 | --- | --- | --- |
 | Unreleased | | |
+| 0.5.0 | 2026-10-17 | MCP sign-in by OAuth at `mcp.octocrawl.dev/mcp-oauth`; the `installed_chrome` route; `tableRowsMin` and `verify/2`; a contract that checks Markdown needs it in `formats`; an explicit list drives Markdown, tables and JSON |
 | 0.4.2 | 2026-10-13 | Task verification apart from the fetch status (`verify`) and region readiness; a missing browser named, with the command to install it; a page of zero-width characters is not content; carousels and footers are not a page's listing |
 | 0.4.1 | 2026-10-10 | Fix: a request on a kept-alive connection was reset; two main-content fixes |
 | 0.4.0 | 2026-10-10 | Better block and listing detection; a Blog and new guides on octocrawl.dev |
@@ -21,6 +22,37 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+## 0.5.0 — 2026-10-17
+
+The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `@octocrawl/ai-sdk`, `octocrawl-client`) at 0.5.0. It holds everything below since 0.4.2 on 2026-10-13. It is a minor version because one change refuses requests 0.4.2 accepted: a task contract that checks Markdown, sent with explicit `formats` that leave Markdown out, is now refused before fetching. Entries about the hosted service (api. and mcp.octocrawl.dev) and octocrawl.dev describe what is already live there. The Python client is unchanged apart from its version.
+
+Highlights:
+
+- **MCP sign-in by OAuth** (hosted, already live). `https://mcp.octocrawl.dev/mcp-oauth` serves the same tools as `/mcp` to clients that sign in to an Octocrawl account instead of sending a key. Claude Code, claude.ai, ChatGPT and Cursor were each connected and recorded on 2026-10-16. The MCP Registry entry (`server.json`) lists it as a second remote from this release.
+- **Task verification:** a new `tableRowsMin` check (`verify/2`); batch and crawl contracts judged on the data they deliver; the AI SDK's `scrape` tool takes `verify` and returns `verification` and `readiness`.
+- **Explicit lists:** an `itemSelector` now chooses the items for Markdown, HTML, tables and JSON alike.
+- **Access:** the `installed_chrome` route, with a challenge wait. Pages DataDome or Cloudflare let through are no longer read as blocks, and a site's own captcha or DataDome's is judged `captcha`.
+- **Extraction:** `extract-tf/28`. Two sibling video cards without prose are content, which TikTok-style feeds needed.
+
+All changes:
+
+- MCP connections by OAuth (ROADMAP PH item 6; hosted and octocrawl.dev, already live).
+  - `POST https://mcp.octocrawl.dev/mcp-oauth` answers a call without a valid access token with 401 and Protected Resource Metadata (RFC 9728) at `/.well-known/oauth-protected-resource/mcp-oauth`.
+  - octocrawl.dev is the authorization server: OAuth 2.1 with PKCE S256 only, public clients, Client ID Metadata Documents or dynamic registration, and `iss` in every answer.
+  - The consent page names the client, the host it returns to and the account's credits left. Access tokens last an hour and are bound to `/mcp-oauth`; refresh tokens rotate, and one used twice ends the connection.
+  - Each connection is an account key of its own: its calls spend the account's credits and show under its name in Activity. It does not count against the five keys; an account holds at most ten connections. API keys lists them, and Disconnect ends one. Its next tool call gets 401 at once, so the client asks to sign in again. A connection also ends after 90 days unused.
+  - `/mcp` is unchanged: keyless within a daily allowance, or a key.
+  - The dashboard's Connect page leads each coding agent with the sign-in setup and folds the key setup under "Use an API key instead"; Connect MCP gains a sign-in section.
+  - `server.json` lists `https://mcp.octocrawl.dev/mcp-oauth` as a second remote, so the MCP Registry shows it from this release.
+- Verification: a `tableRowsMin {tableIndex, columns, min}` check counts the data rows of a delivered table (`formats` must include `tables`) whose required columns all hold a letter or number. `minTables` still counts tables only. The verifier is now `verify/2`.
+- Verification: a batch's or crawl's page contract is judged on the data the page delivers, after the requested formats are applied. Before, a check could pass on a field (such as `document.title`) that the published page left out.
+- An explicit list's JSON is built from the selected records. Before, the plain `json` format or a custom schema could fill a different, page-level product and mark it complete while Markdown and `list.records` held the selected ones. Missing or ambiguous values stay incomplete.
+- The AI SDK's `scrape` tool takes the optional `verify` contract and returns `verification` and `readiness`, which it used to drop.
+- A DataDome page whose iframe is its captcha is judged `captcha` even when its response headers alone would have named a generic block. A person can then be offered the page (handoff); a device check still is not.
+- Extraction: a page whose heading-less main region holds two sibling article cards of one template, each with a sourced video and linked text, is now read as those cards instead of coming back empty. Ordinary pairs, duplicates, unsourced videos, navigation and carousels do not qualify. The extractor is now `extract-tf/28` (27 came with the explicit list items below).
+- Access trace: `ladder_channel_started` says how much of the run's time a rung had when it started, `ladder_channel_not_served` says why a rung was left out (a screenshot request, for example, leaves out `installed_chrome`), and an `egress_proxy_refused` warning says when the egress proxy itself refused (402, 403 or 407) rather than the site. A run that succeeds behaves as before.
+- Browser lane: the region wait judges a contract's Markdown checks on the main content the answer will hold, not on the whole live page, so content outside it no longer ends the wait early; it judges the read the wait would end on, up to 1 MB. A screen-reader "loading" placeholder below the screen no longer stops the wait.
+- Hosted Octocrawl's scrape tool description no longer names `get_scrape`, which hosted Octocrawl does not serve.
 - Hosted Octocrawl: a scrape read over HTTP alone because the caller has no browser lane (no key, a key without the browser lane, or an account with fewer than five credits) now says that, and what opens the browser lane, instead of `retry without fastMode`, which the gate would have pinned again. A caller that sent `fastMode: false` is told it was not honoured.
 - Hosted Octocrawl: the stored scrape record (`GET /v1/scrapes/:id`, the MCP `get_scrape` tool) now carries the same hint as the scrape's answer, not `retry without fastMode`.
 - A single-page list request with an explicit `itemSelector` now chooses those items for Markdown, HTML and tables, rather than a neighbouring article or the whole page. An explicit region still takes precedence, and explicit list records respect region exclusions; original record positions and base URLs are retained. Whole-page requests, auto-detected lists and pagination keep their content-selection behaviour.
