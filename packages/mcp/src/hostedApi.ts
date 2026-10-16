@@ -39,7 +39,40 @@ export interface HostedKeyRecord {
   label?: string
   /** The account the key belongs to: its calls spend that account's credits (hostedCredits.ts), not `dailyLimit`. */
   uid?: string
+  /** `oauth`: an MCP connection's own key record (docs/mcp-oauth-tasks.md), reached only through its access tokens; it has no plaintext. */
+  kind?: 'oauth'
 }
+
+/**
+ * An OAuth access token's record under `oauthTokens/{accessTokenDigest}`, written by the authorization server on
+ * octocrawl.dev: the connection's key record it acts as, the resource it was issued for, and when it stops working.
+ */
+export interface HostedOAuthTokenRecord {
+  /** The id of the connection's record in the key store (`hostedApiKeys/{keyId}`). */
+  keyId: string
+  resource: string
+  /** Milliseconds since the epoch. */
+  expiresAt: number
+}
+
+export interface HostedOAuthTokens {
+  /** The record under the token's digest, or null; `fresh` reads past any cache, as `HostedKeys.lookup` does. */
+  lookup(tokenHash: string, options?: { fresh?: boolean }): Promise<HostedOAuthTokenRecord | null>
+}
+
+export class MemoryHostedOAuthTokens implements HostedOAuthTokens {
+  constructor(private readonly records: ReadonlyMap<string, HostedOAuthTokenRecord> = new Map()) {}
+  async lookup(tokenHash: string, _options?: { fresh?: boolean }): Promise<HostedOAuthTokenRecord | null> { return this.records.get(tokenHash) ?? null }
+}
+
+/** The MCP endpoint OAuth access tokens are issued for (ROADMAP PH item 6): every token's `resource` must be this. */
+export const MCP_OAUTH_RESOURCE = 'https://mcp.octocrawl.dev/mcp-oauth'
+/** Its Protected Resource Metadata (RFC 9728), at the path-suffixed well-known URL. */
+export const MCP_OAUTH_RESOURCE_METADATA = 'https://mcp.octocrawl.dev/.well-known/oauth-protected-resource/mcp-oauth'
+export const OAUTH_ISSUER = 'https://octocrawl.dev'
+export const OAUTH_SCOPE = 'mcp'
+/** What an access token starts with; refresh tokens start `ocr_` and never reach this service. */
+export const ACCESS_TOKEN_PREFIX = 'oca_'
 
 export interface HostedKeys {
   /**
@@ -141,6 +174,18 @@ export function hostedTools(browser: boolean) {
     .map((tool) => ({ ...tool, annotations: { ...('annotations' in tool ? tool.annotations : {}), readOnlyHint: true } }))
 }
 /**
+ * The tools /mcp-oauth lists: each declares that it needs OAuth with the `mcp` scope, top level and mirrored in `_meta`
+ * for clients that read only `_meta`, as ChatGPT asks (https://developers.openai.com/apps-sdk/build/auth, read 2026-10-16).
+ */
+export function oauthTools(browser: boolean) {
+  const securitySchemes = [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]
+  return hostedTools(browser).map((tool) => ({ ...tool, securitySchemes, _meta: { securitySchemes } }))
+}
+/** /mcp-oauth's Protected Resource Metadata (RFC 9728). */
+export function oauthResourceMetadata() {
+  return { resource: MCP_OAUTH_RESOURCE, authorization_servers: [OAUTH_ISSUER], scopes_supported: [OAUTH_SCOPE], bearer_methods_supported: ['header'] }
+}
+/**
  * What directories that list MCP servers read before, or instead of, a live scan (Smithery's static server card,
  * https://smithery.ai/docs/build/publish): the server, that it needs no sign-in, and the tools it offers, taken from
  * the same definitions tools/list answers a caller without a key, so the card cannot drift from the server.
@@ -187,6 +232,8 @@ export function verifySiteAccount(hashKey: string, value: string, now = Date.now
 }
 const INTERNAL_CLIENT_HEADER = 'x-w2l-hosted-client'
 const INTERNAL_SECRET_HEADER = 'x-w2l-hosted-internal'
+/** Set only by /mcp-oauth's handler: the one way an access token reaches the gate. Separate from the keyless secret, which /mcp sets too. */
+const OAUTH_SECRET_HEADER = 'x-w2l-hosted-oauth'
 const BODY_LIMIT = 262_144
 
 export interface HostedApiConfig {
@@ -196,6 +243,8 @@ export interface HostedApiConfig {
   /** HMAC key for key digests and address digests: never the raw key or address is stored or logged. */
   hashKey: string
   keys: HostedKeys
+  /** OAuth access tokens for /mcp-oauth; while absent, every call there is answered 401. */
+  oauthTokens?: HostedOAuthTokens
   quota: HostedQuota
   /** One browser-lane scrape at a time per key; in this process when absent (a local run). */
   leases?: HostedLeases
@@ -304,11 +353,13 @@ function utcDay(now: Date): string { return now.toISOString().slice(0, 10) }
 function secondsToUtcMidnight(now: Date): number {
   return Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime()) / 1000))
 }
-function digest(hashKey: string, kind: 'key' | 'ip', value: string): string {
+function digest(hashKey: string, kind: 'key' | 'ip' | 'oca', value: string): string {
   return createHmac('sha256', hashKey).update(`${kind}:${value}`).digest('hex')
 }
 /** The document id a key is stored under: scripts/hosted/issue-key.mjs writes it, the service looks it up. */
 export function keyDigest(hashKey: string, key: string): string { return digest(hashKey, 'key', key) }
+/** The document id an access token is stored under in `oauthTokens`: HMAC-SHA256 of `oca:{token}` with W2L_QUOTA_HASH_KEY. */
+export function accessTokenDigest(hashKey: string, token: string): string { return digest(hashKey, 'oca', token) }
 function sameSecret(presented: string | undefined, secret: string): boolean {
   return typeof presented === 'string' && timingSafeEqual(createHash('sha256').update(presented).digest(), createHash('sha256').update(secret).digest())
 }
@@ -360,6 +411,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const inner = createApp(engine, { exposeInternalErrors: false, jobStreams: false })
   // A process-local secret lets the MCP handler hand the gate a keyless caller's identity; no outside request can present it.
   const internalSecret = randomBytes(32).toString('hex')
+  const oauthSecret = randomBytes(32).toString('hex')
   const leases = config.leases ?? new MemoryHostedLeases()
   const keylessLimiter = new SlidingWindowLimiter(KEYLESS_PER_MINUTE)
   const keyLimiter = new SlidingWindowLimiter(KEY_PER_MINUTE)
@@ -373,20 +425,40 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     return c.json({ error: message, code, agentHints: hints }, status)
   }
 
-  /** Who is calling: a key holder, a keyless caller, or neither (an unknown key). A start reads the key fresh. */
-  const identify = async (headers: Headers, socketAddress: string, fresh = false): Promise<HostedCaller | 'unknown_key'> => {
+  /**
+   * The connection an OAuth access token acts as, or null when the token is unknown, issued for another resource, expired,
+   * or its connection was disconnected. The caller is the connection's key record, an account's key like any other.
+   */
+  const identifyOAuth = async (presented: string, fresh = false): Promise<HostedCaller | null> => {
+    const tokens = config.oauthTokens
+    if (tokens === undefined || !presented.startsWith(ACCESS_TOKEN_PREFIX) || presented.length > 256) return null
+    const token = await tokens.lookup(accessTokenDigest(config.hashKey, presented), { fresh })
+    if (token === null || token.resource !== MCP_OAUTH_RESOURCE || !(token.expiresAt > Date.now()) || !SITE_UID.test(token.keyId)) return null
+    const record = await config.keys.lookup(token.keyId, { fresh })
+    if (record === null || !record.enabled || record.kind !== 'oauth' || record.uid === undefined) return null
+    return { kind: 'key', id: token.keyId, uid: record.uid, dailyLimit: 0, browser: record.browser, plan: 'account' }
+  }
+
+  /**
+   * Who is calling: a key holder, a keyless caller, or neither (an unknown key, or an OAuth access token sent anywhere but
+   * through /mcp-oauth, whose handler calls the gate in-process with its own secret). A start reads the key fresh.
+   */
+  const identify = async (headers: Headers, socketAddress: string, fresh = false): Promise<HostedCaller | 'unknown_key' | 'oauth_token'> => {
     const authorization = headers.get('authorization') ?? ''
+    const internal = headers.get(INTERNAL_SECRET_HEADER)
+    const fromInside = internal !== null && sameSecret(internal, internalSecret)
+    const viaOAuth = headers.get(OAUTH_SECRET_HEADER)
     if (authorization.toLowerCase().startsWith('bearer ')) {
       const presented = authorization.slice(7).trim()
       if (presented.length === 0 || presented.length > 256) return 'unknown_key'
+      if (presented.startsWith(ACCESS_TOKEN_PREFIX)) return viaOAuth !== null && sameSecret(viaOAuth, oauthSecret) ? (await identifyOAuth(presented, fresh)) ?? 'unknown_key' : 'oauth_token'
       const id = digest(config.hashKey, 'key', presented)
       const record = await config.keys.lookup(id, { fresh })
       if (record === null || !record.enabled) return 'unknown_key'
       if (record.uid !== undefined) return { kind: 'key', id, uid: record.uid, dailyLimit: 0, browser: record.browser, plan: 'account' }
       return { kind: 'key', id, dailyLimit: record.dailyLimit, browser: record.browser, plan: record.plan }
     }
-    const internal = headers.get(INTERNAL_SECRET_HEADER)
-    const address = internal !== null && sameSecret(internal, internalSecret) ? (headers.get(INTERNAL_CLIENT_HEADER) ?? socketAddress) : socketAddress
+    const address = fromInside ? (headers.get(INTERNAL_CLIENT_HEADER) ?? socketAddress) : socketAddress
     if (fromClaude(address)) return { kind: 'keyless', pool: 'claude', id: 'claude', dailyLimit: claudeDaily, browser: false, plan: 'keyless' }
     return { kind: 'keyless', id: digest(config.hashKey, 'ip', address), dailyLimit: keylessDaily, browser: false, plan: 'keyless' }
   }
@@ -398,6 +470,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   // Discovery files are public and cheap: the server card, and a plain 404 for every other /.well-known file, so a client
   // looking for OAuth metadata learns there is none instead of reading a refusal as a sign-in wall.
   gate.get('/.well-known/mcp/server-card.json', (c) => c.json(hostedServerCard(), 200, { 'cache-control': 'public, max-age=3600' }))
+  // /mcp-oauth signs in, so its metadata is published (RFC 9728); /mcp needs no sign-in and has none.
+  gate.get('/.well-known/oauth-protected-resource/mcp-oauth', (c) => c.json(oauthResourceMetadata(), 200, { 'cache-control': 'public, max-age=3600', 'access-control-allow-origin': '*' }))
   gate.all('/.well-known/*', (c) => refuse(c, 404, 'not_found', `${c.req.path} is not published by hosted Octocrawl`, ['the server card is at /.well-known/mcp/server-card.json; no sign-in is needed: call POST /mcp without an Authorization header']))
   gate.use('*', async (c, next) => {
     const method = c.req.method
@@ -411,7 +485,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     // The site's signed header is checked without a store, and every Playground call comes from the site's few addresses,
     // so it is not counted per address; the account's own rate below still applies.
     const signed = c.req.header(SITE_ACCOUNT_HEADER)
-    let caller: HostedCaller | 'unknown_key'
+    let caller: HostedCaller | 'unknown_key' | 'oauth_token'
     if (signed !== undefined) {
       const uid = verifySiteAccount(config.hashKey, signed)
       if (uid === null) return refuse(c, 401, 'unauthorized', 'the site\'s account header is not valid, or it expired', ['sign in again at https://octocrawl.dev/dashboard/'])
@@ -422,6 +496,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       if (addressWait !== null) return refuse(c, 429, 'rate_limited', `too many requests from this address: at most ${ADDRESS_PER_MINUTE} a minute`, [`retry after ${addressWait} s`], { 'Retry-After': String(addressWait) })
       caller = await identify(c.req.raw.headers, c.env.socketAddress, starts)
     }
+    if (caller === 'oauth_token') return refuse(c, 401, 'unauthorized', `an OAuth access token works only at the MCP endpoint ${MCP_OAUTH_RESOURCE}`, ['call the API with an account key (oc_...) from https://octocrawl.dev/dashboard/'])
     if (caller === 'unknown_key') return refuse(c, 401, 'unauthorized', 'this key is not one Octocrawl issued, or it was revoked', ['send no Authorization header to use the keyless allowance, or ask for a key at https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint'])
     c.set('caller', caller)
     if (!starts) return next()
@@ -589,7 +664,11 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers }).end(JSON.stringify(body))
   }
 
-  const mcp = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  /** /mcp-oauth's challenge (RFC 6750 §3, RFC 9728 §5.1): no error code when no token came, so the client starts sign-in. */
+  const challenge = (error?: 'invalid_token') => `Bearer resource_metadata="${MCP_OAUTH_RESOURCE_METADATA}", scope="${OAUTH_SCOPE}"${error === undefined ? '' : `, error="${error}"`}`
+
+  /** /mcp: keyless or an account key. /mcp-oauth (`oauth`): an OAuth access token only, and 401 with a challenge without one. */
+  const mcp = async (req: IncomingMessage, res: ServerResponse, oauth: boolean): Promise<void> => {
     if (!['POST', 'GET', 'DELETE'].includes(req.method ?? '')) { sendJson(res, 405, { error: 'method not allowed' }); return }
     const version = req.headers['mcp-protocol-version']
     if (version && (typeof version !== 'string' || !SUPPORTED_PROTOCOL_VERSIONS.includes(version))) { sendJson(res, 400, { error: 'unsupported MCP protocol version' }); return }
@@ -600,8 +679,18 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const headers = new Headers()
     const authorization = req.headers.authorization
     if (typeof authorization === 'string') headers.set('authorization', authorization)
-    const caller = await identify(headers, address)
-    if (caller === 'unknown_key') { sendJson(res, 401, { error: 'this key is not one Octocrawl issued, or it was revoked' }, { 'www-authenticate': 'Bearer' }); return }
+    let caller: HostedCaller
+    if (oauth) {
+      const presented = typeof authorization === 'string' && /^bearer /i.test(authorization) ? authorization.slice(7).trim() : ''
+      if (presented === '') { sendJson(res, 401, { error: 'sign in to Octocrawl to connect: this endpoint takes an OAuth access token' }, { 'www-authenticate': challenge() }); return }
+      const connection = await identifyOAuth(presented)
+      if (connection === null) { sendJson(res, 401, { error: 'this access token is not valid: it expired, or its connection was ended' }, { 'www-authenticate': challenge('invalid_token') }); return }
+      caller = connection
+    } else {
+      const identified = await identify(headers, address)
+      if (identified === 'unknown_key' || identified === 'oauth_token') { sendJson(res, 401, { error: 'this key is not one Octocrawl issued, or it was revoked' }, { 'www-authenticate': 'Bearer' }); return }
+      caller = identified
+    }
     const size = Number(req.headers['content-length'] ?? 0)
     if (size > BODY_LIMIT) { sendJson(res, 413, { error: 'request too large' }); return }
     const chunks: Buffer[] = []
@@ -621,12 +710,14 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       fetch: async (input, init) => {
         const request = new Request(input, init)
         if (caller.kind === 'keyless') { request.headers.set(INTERNAL_SECRET_HEADER, internalSecret); request.headers.set(INTERNAL_CLIENT_HEADER, address) }
+        // The gate takes an access token only from this handler, and reads it again there (fresh for a start).
+        if (oauth) request.headers.set(OAUTH_SECRET_HEADER, oauthSecret)
         return gate.fetch(request, { socketAddress: address })
       },
     })
     const server = createMcpServer(client, {
       allowedTools: HOSTED_API_TOOLS,
-      tools: hostedTools(caller.browser === true),
+      tools: oauth ? oauthTools(caller.browser) : hostedTools(caller.browser === true),
       calls: trackPost(calls, req, res, parsed, [caller.id]),
       normalizeCall: (name, args) => {
         if (!HOSTED_API_TOOLS.has(name)) throw new Error(`${name} is not served by hosted Octocrawl: scrape, map and scrape_product only; ${LOCAL_HINT}`)
@@ -641,8 +732,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
 
   const server = createServer((req, res) => {
     const pathname = new URL(req.url ?? '/', 'http://hosted.internal').pathname
-    if (pathname === '/mcp') {
-      mcp(req, res).catch((error) => {
+    if (pathname === '/mcp' || pathname === '/mcp-oauth') {
+      mcp(req, res, pathname === '/mcp-oauth').catch((error) => {
         log(JSON.stringify({ severity: 'ERROR', event: 'hosted_mcp_error', message: error instanceof Error ? error.message : String(error) }))
         if (!res.headersSent) sendJson(res, 500, { error: 'internal error' }); else res.end()
       })
@@ -670,7 +761,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
 
 // ---- Firestore stores: the key records an operator writes with scripts/hosted/issue-key.mjs, and the daily counters ----
 
-interface FirestoreDoc { name: string; fields?: Record<string, { integerValue?: string; stringValue?: string; booleanValue?: boolean }>; updateTime?: string }
+interface FirestoreDoc { name: string; fields?: Record<string, { integerValue?: string; stringValue?: string; booleanValue?: boolean; timestampValue?: string }>; updateTime?: string }
 
 /** An access token for the Cloud Run service identity, from the metadata server, kept until a minute before it expires. */
 const tokenCache = new WeakMap<typeof fetch, { token: string; until: number }>()
@@ -723,9 +814,37 @@ export class FirestoreHostedKeys implements HostedKeys {
         browser: fields.browser?.booleanValue === true,
         ...(fields.label?.stringValue === undefined ? {} : { label: fields.label.stringValue }),
         ...(fields.uid?.stringValue === undefined ? {} : { uid: fields.uid.stringValue }),
+        ...(fields.kind?.stringValue === 'oauth' ? { kind: 'oauth' as const } : {}),
       }
     }
     this.cache.set(keyHash, { at: Date.now(), record })
+    return record
+  }
+}
+
+/**
+ * Access tokens under `oauthTokens/{accessTokenDigest}`: keyId, resource and expiresAt, written by the authorization server
+ * on octocrawl.dev. A lookup is cached for a minute, as a key's is; a start reads it fresh. A record missing a field is no token.
+ */
+export class FirestoreHostedOAuthTokens implements HostedOAuthTokens {
+  private readonly base: { resource: string; endpoint: string }
+  private readonly cache = new BoundedMap<string, { at: number; record: HostedOAuthTokenRecord | null }>(REMEMBERED_CALLERS)
+  constructor(projectId: string, private readonly fetcher: typeof fetch = fetch, private readonly cacheMs = 60_000) { this.base = firestoreBase(projectId) }
+  async lookup(tokenHash: string, options: { fresh?: boolean } = {}): Promise<HostedOAuthTokenRecord | null> {
+    const cached = this.cache.get(tokenHash)
+    if (options.fresh !== true && cached && Date.now() - cached.at < this.cacheMs) return cached.record
+    const token = await metadataAccessToken(this.fetcher, AbortSignal.timeout(3_000))
+    const response = await this.fetcher(`${this.base.endpoint}/oauthTokens/${tokenHash}`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5_000) })
+    let record: HostedOAuthTokenRecord | null = null
+    if (response.status !== 404) {
+      if (!response.ok) throw new Error(`token store read failed (${response.status})`)
+      const fields = (await response.json() as FirestoreDoc).fields ?? {}
+      const expiresAt = Date.parse(fields.expiresAt?.timestampValue ?? '')
+      const keyId = fields.keyId?.stringValue
+      const resource = fields.resource?.stringValue
+      if (keyId !== undefined && resource !== undefined && Number.isFinite(expiresAt)) record = { keyId, resource, expiresAt }
+    }
+    this.cache.set(tokenHash, { at: Date.now(), record })
     return record
   }
 }

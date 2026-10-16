@@ -34,10 +34,16 @@
 
 ## PR ① 资源服务（`packages/mcp`）
 
-- [ ] **R1** 加 `POST /mcp-oauth`，工具与 `/mcp` 相同。缺 token、token 无效或过期时返回 401，带 `WWW-Authenticate: Bearer resource_metadata="https://mcp.octocrawl.dev/.well-known/oauth-protected-resource/mcp-oauth", scope="mcp"`。不接受免 key 调用，也不接受 `oc_` key。
-- [ ] **R2** 加 `GET /.well-known/oauth-protected-resource/mcp-oauth`，返回 `{resource:"https://mcp.octocrawl.dev/mcp-oauth", authorization_servers:["https://octocrawl.dev"], scopes_supported:["mcp"], bearer_methods_supported:["header"]}`。其余 `/.well-known/*` 仍然 404。
-- [ ] **R3** 在 `identify()` 里识别 `oca_`：查 `oauthTokens/{hmac}`，检查 `expiresAt`，检查 `resource` 等于 `/mcp-oauth`；再读专属 key 记录，看 `enabled`；返回和账户 key 一样的 Caller。沿用 1 分钟缓存。REST `/v1/*` 拒绝 `oca_`。
-- [ ] **R4** 考虑是否给工具加 ChatGPT 的 `securitySchemes`（`[{type:'oauth2', scopes:['mcp']}]`）。只返回 401 够不够，还没核实，见“未核实”第 1 条。
+- [x] **R1** 加 `POST /mcp-oauth`，工具与 `/mcp` 相同。缺 token、token 无效或过期时返回 401，带 `WWW-Authenticate: Bearer resource_metadata="https://mcp.octocrawl.dev/.well-known/oauth-protected-resource/mcp-oauth", scope="mcp"`。不接受免 key 调用，也不接受 `oc_` key。
+- [x] **R2** 加 `GET /.well-known/oauth-protected-resource/mcp-oauth`，返回 `{resource:"https://mcp.octocrawl.dev/mcp-oauth", authorization_servers:["https://octocrawl.dev"], scopes_supported:["mcp"], bearer_methods_supported:["header"]}`。其余 `/.well-known/*` 仍然 404。
+- [x] **R3** 在 `identify()` 里识别 `oca_`：查 `oauthTokens/{hmac}`，检查 `expiresAt`，检查 `resource` 等于 `/mcp-oauth`；再读专属 key 记录，看 `enabled`；返回和账户 key 一样的 Caller。沿用 1 分钟缓存。REST `/v1/*` 拒绝 `oca_`。
+- [x] **R4** 考虑是否给工具加 ChatGPT 的 `securitySchemes`（`[{type:'oauth2', scopes:['mcp']}]`）。只返回 401 够不够，还没核实，见“未核实”第 1 条。
+  - 做了：`/mcp-oauth` 列出的每个工具都带顶层 `securitySchemes`，并在 `_meta.securitySchemes` 镜像一份；`/mcp` 的工具不带。依据见“未核实”第 1 条。
+- PR ① 定下的读取约定（PR ② 写入时要照这个来）：
+  - access token 的文档 id：`HMAC-SHA256(W2L_QUOTA_HASH_KEY, "oca:" + token)` 的 hex（`accessTokenDigest`）。账户 key 用的是 `"key:"` 前缀，两者不会撞。
+  - `oauthTokens/{digest}` 的字段：`keyId`（string，连接专属 key 记录在 `hostedApiKeys` 里的文档 id，只能是 `[A-Za-z0-9_-]{1,128}`）、`resource`（string，必须等于 `https://mcp.octocrawl.dev/mcp-oauth`）、`expiresAt`（timestamp）。缺任何一个字段都当作没有这个 token。
+  - 连接专属 key 记录：`hostedApiKeys/{keyId}`，除了账户 key 已有的字段，还要 `kind:"oauth"` 和 `uid`；没有 `kind:"oauth"` 或没有 `uid` 的记录不能被 access token 使用。
+  - 带了无效 token 的 401 在 R1 的头后面多加 `, error="invalid_token"`（RFC 6750 §3.1）；没带 token 时不加。
 - 验收：`hostedApi.test.ts` 用伪造的 token 存储覆盖这些情况：401 头的格式、PRM 的内容、受众不对时拒绝、过期返回 401、key 停用后失效、`/mcp` 和 `/.well-known/mcp/server-card.json` 的行为不变。`npm run typecheck` 和 `npm test` 通过。
 
 ## PR ② 授权服务（`packages/public-preview`，新文件 `oauth.ts`）
@@ -105,7 +111,7 @@
 
 ## 未核实（做到时先查）
 
-1. ChatGPT 是否要求工具声明 `securitySchemes`，还是 401 就够。
+1. ChatGPT 是否要求工具声明 `securitySchemes`，还是 401 就够。**2026-10-16 查过，按文档做了（R4）。** 查的是 https://developers.openai.com/apps-sdk/build/auth 和 https://developers.openai.com/plugins/reference：文档建议每个工具都声明 `securitySchemes`（即使整个服务器用同一个策略），放在工具对象顶层，参考页另列 `_meta["securitySchemes"]` 作为只读 `_meta` 的客户端的镜像；401 的 `WWW-Authenticate` 用来让 ChatGPT 找到 metadata。文档没有说只返回 401、不声明 `securitySchemes` 行不行，这一点仍未核实，要等 D4 用真实的 ChatGPT 连一次才知道。
 2. Cursor 和 VS Code 是否支持 CIMD，以及它们的回调地址。论坛和 issue 里说 VS Code 用 `https://vscode.dev/redirect` 加 `127.0.0.1:33418`，Cursor 桌面版用 `http://localhost:8787/callback`。不确定之前 DCR 必须保留。
 3. Codex 和 Windsurf 的 OAuth 细节。
 4. MCP 2026-07-28 版改成了无状态（没有 `initialize`，有 `server/discover`），`/mcp` 现有实现与它兼不兼容，不在本清单范围内，只记一笔。
@@ -116,4 +122,4 @@
 
 ## 下次从这里继续
 
-从 PR ① 的 R1 开始。
+PR ① 的 R1–R4 已在分支 `claude/mcp-oauth-resource-server` 上做完（PR 合并前以 PR 页为准）。PR ① 合并后，等 Howard 说再从新分支开始 PR ② 的 A1；写入 `oauthTokens` 和连接 key 记录时照上面“PR ① 定下的读取约定”。另外 A6 建连接 key 记录之前要先处理：`account.ts` 创建 key 时按 `byUid('hostedApiKeys')` 数 5 个上限（约 389 行），连接记录也会被数进去，与决定 2 不符。

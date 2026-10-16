@@ -9,7 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
-import { BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, fromClaude, keyDigest, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys } from '../src/hostedApi.js'
+import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore } from '../src/hostedCredits.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
 
@@ -45,13 +45,15 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; claudeDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void } = {}) {
+async function start(options: { keylessDaily?: number; claudeDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
-  const records = new Map(Object.entries(options.keys ?? {}).map(([key, record]) => [keyDigest(HASH_KEY, key), record]))
+  // `keys` are stored under their plaintext's digest; `keyRecords` under their own id, as a connection's key record has no plaintext.
+  const records = new Map([...Object.entries(options.keys ?? {}).map(([key, record]) => [keyDigest(HASH_KEY, key), record] as const), ...Object.entries(options.keyRecords ?? {})])
+  const oauthTokens = new MemoryHostedOAuthTokens(new Map(Object.entries(options.oauthTokens ?? {}).map(([token, record]) => [accessTokenDigest(HASH_KEY, token), record])))
   const quota = new MemoryHostedQuota()
   const service = createHostedApi({
-    port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: options.keyStore ?? new MemoryHostedKeys(records), quota, leases: options.leases,
+    port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: options.keyStore ?? new MemoryHostedKeys(records), oauthTokens, quota, leases: options.leases,
     ...(options.credits === null ? {} : { credits: options.credits ?? new MemoryCreditsStore() }),
     keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: 100, proxySecret: options.proxySecret,
     networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: options.log ?? (() => {}),
@@ -495,13 +497,116 @@ it('publishes a server card with the tools /mcp lists and no sign-in, and answer
     const listed = (await client.listTools()).tools
     expect(card.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))).toEqual(listed.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })))
   } finally { await client.close() }
-  for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-authorization-server', '/.well-known/mcp-config', '/.well-known/mcp/server-cards.json']) {
+  // /mcp needs no sign-in, so no metadata names it: only /mcp-oauth's (below) is published.
+  for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server', '/.well-known/mcp-config', '/.well-known/mcp/server-cards.json']) {
     const missing = await fetch(`${url}${path}`)
     expect(missing.status, path).toBe(404)
     expect((await missing.json() as { code: string }).code).toBe('not_found')
   }
   // Reading discovery files spends no one's pages.
   expect(quota.counts.size).toBe(0)
+})
+
+const RESOURCE_METADATA = 'https://mcp.octocrawl.dev/.well-known/oauth-protected-resource/mcp-oauth'
+/** A connection's key record: an account's, marked as OAuth's, with no plaintext anyone holds. */
+const CONNECTION: HostedKeyRecord = { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1', kind: 'oauth' }
+const HOUR = 3_600_000
+
+it('/mcp-oauth answers a call without a valid access token with 401 naming its resource metadata, which it publishes', async () => {
+  const { url, quota } = await start({ keys: { oc_live: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } }, keyRecords: { 'connection-1': CONNECTION }, oauthTokens: { oca_good: { keyId: 'connection-1', resource: MCP_OAUTH_RESOURCE, expiresAt: Date.now() + HOUR } } })
+  const initialize = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } } }
+  const call = (headers: Record<string, string>) => post(url, '/mcp-oauth', initialize, { accept: 'application/json, text/event-stream', ...headers })
+  // No token: the challenge names the metadata and the scope, and no error (RFC 6750 §3.1), so a client starts sign-in.
+  const bare = await call({})
+  expect(bare.status).toBe(401)
+  expect(bare.headers.get('www-authenticate')).toBe(`Bearer resource_metadata="${RESOURCE_METADATA}", scope="mcp"`)
+  // An account key, an unknown token and a keyless caller are all refused here: /mcp-oauth takes OAuth access tokens only.
+  for (const authorization of ['Bearer oc_live', 'Bearer oca_nobody', 'Bearer ', 'Basic abc']) {
+    const refused = await call({ authorization })
+    expect(refused.status, authorization).toBe(401)
+    expect(refused.headers.get('www-authenticate'), authorization).toMatch(new RegExp(`^Bearer resource_metadata="${RESOURCE_METADATA.replace(/[.]/g, '\\.')}", scope="mcp"`))
+  }
+  expect((await call({ authorization: 'Bearer oca_nobody' })).headers.get('www-authenticate')).toContain('error="invalid_token"')
+  expect((await call({ authorization: 'Bearer oca_good' })).status).toBe(200)
+  // Each tool declares that it needs OAuth, top level and mirrored in _meta, as ChatGPT reads it (developers.openai.com/apps-sdk/build/auth);
+  // /mcp's tools declare nothing, as before.
+  const list = async (path: string, headers: Record<string, string>) => {
+    const response = await post(url, path, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, { accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18', ...headers })
+    return ((await response.json()) as { result: { tools: Record<string, unknown>[] } }).result.tools
+  }
+  const oauthTools = await list('/mcp-oauth', { authorization: 'Bearer oca_good' })
+  expect(oauthTools.length).toBe(3)
+  for (const tool of oauthTools) expect(tool, String(tool.name)).toMatchObject({ securitySchemes: [{ type: 'oauth2', scopes: ['mcp'] }], _meta: { securitySchemes: [{ type: 'oauth2', scopes: ['mcp'] }] } })
+  for (const tool of await list('/mcp', {})) expect([tool.securitySchemes, tool._meta], String(tool.name)).toEqual([undefined, undefined])
+  // Protected Resource Metadata (RFC 9728) at the path-suffixed well-known URL.
+  const metadata = await fetch(`${url}/.well-known/oauth-protected-resource/mcp-oauth`)
+  expect(metadata.status).toBe(200)
+  expect(metadata.headers.get('access-control-allow-origin')).toBe('*')
+  expect(await metadata.json()).toEqual({ resource: 'https://mcp.octocrawl.dev/mcp-oauth', authorization_servers: ['https://octocrawl.dev'], scopes_supported: ['mcp'], bearer_methods_supported: ['header'] })
+  expect(quota.counts.size).toBe(0)
+})
+
+it('an OAuth access token is its connection\'s key on /mcp-oauth only: wrong audience, expired or disconnected is 401, and REST and /mcp refuse it', async () => {
+  const credits = new MemoryCreditsStore(1_000)
+  const now = Date.now()
+  const { url } = await start({
+    credits,
+    keyRecords: { 'connection-1': CONNECTION, 'connection-off': { ...CONNECTION, enabled: false }, 'plain-key': { ...CONNECTION, kind: undefined }, 'no-account': { ...CONNECTION, uid: undefined } },
+    oauthTokens: {
+      oca_good: { keyId: 'connection-1', resource: MCP_OAUTH_RESOURCE, expiresAt: now + HOUR },
+      oca_for_mcp: { keyId: 'connection-1', resource: 'https://mcp.octocrawl.dev/mcp', expiresAt: now + HOUR },
+      oca_expired: { keyId: 'connection-1', resource: MCP_OAUTH_RESOURCE, expiresAt: now - 1_000 },
+      oca_disconnected: { keyId: 'connection-off', resource: MCP_OAUTH_RESOURCE, expiresAt: now + HOUR },
+      oca_not_oauth: { keyId: 'plain-key', resource: MCP_OAUTH_RESOURCE, expiresAt: now + HOUR },
+      oca_no_account: { keyId: 'no-account', resource: MCP_OAUTH_RESOURCE, expiresAt: now + HOUR },
+      oca_orphan: { keyId: 'missing', resource: MCP_OAUTH_RESOURCE, expiresAt: now + HOUR },
+    },
+  })
+  const holder = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await holder.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp-oauth`), { requestInit: { headers: { authorization: 'Bearer oca_good' } } }))
+    expect((await holder.listTools()).tools.map((tool) => tool.name)).toEqual(['scrape_product', 'scrape', 'map'])
+    const result = await holder.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject({ status: 'success' })
+  } finally { await holder.close() }
+  // The call spent the account's credits under the connection's own key id.
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 999 })
+  expect(credits.requests.get('account-1')!.map((line) => line.keyId)).toEqual(['connection-1'])
+  for (const token of ['oca_for_mcp', 'oca_expired', 'oca_disconnected', 'oca_not_oauth', 'oca_no_account', 'oca_orphan']) {
+    const refused = await post(url, '/mcp-oauth', { jsonrpc: '2.0', id: 1, method: 'tools/list' }, { authorization: `Bearer ${token}`, accept: 'application/json, text/event-stream' })
+    expect(refused.status, token).toBe(401)
+    expect(refused.headers.get('www-authenticate'), token).toContain('error="invalid_token"')
+  }
+  // REST takes keys, not access tokens; /mcp answers an access token as it answers any key it does not know.
+  const rest = await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oca_good' })
+  expect(rest.status).toBe(401)
+  expect(await rest.json()).toMatchObject({ code: 'unauthorized', error: expect.stringContaining('/mcp-oauth') })
+  const mcp = await post(url, '/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/list' }, { authorization: 'Bearer oca_good', accept: 'application/json, text/event-stream' })
+  expect([mcp.status, mcp.headers.get('www-authenticate')]).toEqual([401, 'Bearer'])
+  // A header /mcp does not read as a bearer (a tab after the scheme) is keyless there, and its tool calls never run as the connection.
+  const tabbed = await post(url, '/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scrape', arguments: { url: `${origin}/page` } } }, { authorization: 'Bearer\toca_good', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' })
+  expect(tabbed.status).toBe(200)
+  expect(await tabbed.text()).not.toContain('Tides')
+  expect(credits.requests.get('account-1')).toHaveLength(1)
+})
+
+it('Firestore access tokens: read by digest with their expiry, cached for a minute, and a fresh read past the cache', async () => {
+  const { docs, fetcher } = fakeFirestore()
+  const tokens = new FirestoreHostedOAuthTokens('project-1', fetcher)
+  const name = 'projects/project-1/databases/(default)/documents/oauthTokens/digest-1'
+  docs.set(name, { fields: { keyId: { stringValue: 'connection-1' }, resource: { stringValue: MCP_OAUTH_RESOURCE }, expiresAt: { timestampValue: '2026-10-16T01:00:00Z' } }, updateTime: 't' })
+  expect(await tokens.lookup('digest-1')).toEqual({ keyId: 'connection-1', resource: MCP_OAUTH_RESOURCE, expiresAt: Date.parse('2026-10-16T01:00:00Z') })
+  docs.delete(name)
+  expect(await tokens.lookup('digest-1')).toMatchObject({ keyId: 'connection-1' })
+  expect(await tokens.lookup('digest-1', { fresh: true })).toBeNull()
+  // A record missing a field is no token.
+  docs.set(name, { fields: { keyId: { stringValue: 'connection-1' }, resource: { stringValue: MCP_OAUTH_RESOURCE } }, updateTime: 't2' })
+  expect(await tokens.lookup('digest-1', { fresh: true })).toBeNull()
+  // A connection's key record says it is OAuth's.
+  const keys = new FirestoreHostedKeys('project-1', fetcher)
+  docs.set('projects/project-1/databases/(default)/documents/hostedApiKeys/connection-1', { fields: { enabled: { booleanValue: true }, plan: { stringValue: 'account' }, dailyLimit: { integerValue: '0' }, browser: { booleanValue: true }, uid: { stringValue: 'account-1' }, kind: { stringValue: 'oauth' } }, updateTime: 't' })
+  expect(await keys.lookup('connection-1')).toMatchObject({ kind: 'oauth', uid: 'account-1' })
+  expect(accessTokenDigest(HASH_KEY, 'oca_x')).not.toBe(keyDigest(HASH_KEY, 'oca_x'))
 })
 
 it('a body that is not JSON is 400, and a flood of made-up keys is limited per address before any lookup', async () => {
