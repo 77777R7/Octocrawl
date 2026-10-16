@@ -443,10 +443,11 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   }
 
   /**
-   * Who is calling: a key holder, a keyless caller, or neither (an unknown key, or an OAuth access token sent anywhere but
-   * through /mcp-oauth, whose handler calls the gate in-process with its own secret). A start reads the key fresh.
+   * Who is calling: a key holder, a keyless caller, or neither (an unknown key, an OAuth access token sent anywhere but
+   * through /mcp-oauth, whose handler calls the gate in-process with its own secret, or one whose connection ended). A
+   * start reads the key fresh.
    */
-  const identify = async (headers: Headers, socketAddress: string, fresh = false): Promise<HostedCaller | 'unknown_key' | 'oauth_token'> => {
+  const identify = async (headers: Headers, socketAddress: string, fresh = false): Promise<HostedCaller | 'unknown_key' | 'oauth_token' | 'oauth_ended'> => {
     const authorization = headers.get('authorization') ?? ''
     const internal = headers.get(INTERNAL_SECRET_HEADER)
     const fromInside = internal !== null && sameSecret(internal, internalSecret)
@@ -454,7 +455,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (authorization.toLowerCase().startsWith('bearer ')) {
       const presented = authorization.slice(7).trim()
       if (presented.length === 0 || presented.length > 256) return 'unknown_key'
-      if (presented.startsWith(ACCESS_TOKEN_PREFIX)) return viaOAuth !== null && sameSecret(viaOAuth, oauthSecret) ? (await identifyOAuth(presented, fresh)) ?? 'unknown_key' : 'oauth_token'
+      if (presented.startsWith(ACCESS_TOKEN_PREFIX)) return viaOAuth !== null && sameSecret(viaOAuth, oauthSecret) ? (await identifyOAuth(presented, fresh)) ?? 'oauth_ended' : 'oauth_token'
       const id = digest(config.hashKey, 'key', presented)
       const record = await config.keys.lookup(id, { fresh })
       if (record === null || !record.enabled) return 'unknown_key'
@@ -488,7 +489,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     // The site's signed header is checked without a store, and every Playground call comes from the site's few addresses,
     // so it is not counted per address; the account's own rate below still applies.
     const signed = c.req.header(SITE_ACCOUNT_HEADER)
-    let caller: HostedCaller | 'unknown_key' | 'oauth_token'
+    let caller: HostedCaller | 'unknown_key' | 'oauth_token' | 'oauth_ended'
     if (signed !== undefined) {
       const uid = verifySiteAccount(config.hashKey, signed)
       if (uid === null) return refuse(c, 401, 'unauthorized', 'the site\'s account header is not valid, or it expired', ['sign in again at https://octocrawl.dev/dashboard/'])
@@ -500,6 +501,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       caller = await identify(c.req.raw.headers, c.env.socketAddress, starts)
     }
     if (caller === 'oauth_token') return refuse(c, 401, 'unauthorized', `an OAuth access token works only at the MCP endpoint ${MCP_OAUTH_RESOURCE}`, ['call the API with an account key (oc_...) from https://octocrawl.dev/dashboard/'])
+    // Reached only between /mcp-oauth's own fresh read and this one: the person signs in again, they hold no key.
+    if (caller === 'oauth_ended') return refuse(c, 401, 'unauthorized', 'this connection was disconnected or its sign-in expired: sign in again', [])
     if (caller === 'unknown_key') return refuse(c, 401, 'unauthorized', 'this key is not one Octocrawl issued, or it was revoked', ['send no Authorization header to use the keyless allowance, or ask for a key at https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint'])
     c.set('caller', caller)
     if (!starts) return next()
@@ -670,6 +673,12 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   /** /mcp-oauth's challenge (RFC 6750 §3, RFC 9728 §5.1): no error code when no token came, so the client starts sign-in. */
   const challenge = (error?: 'invalid_token') => `Bearer resource_metadata="${MCP_OAUTH_RESOURCE_METADATA}", scope="${OAUTH_SCOPE}"${error === undefined ? '' : `, error="${error}"`}`
 
+  const OAUTH_ENDED = { error: 'this access token is not valid: it expired, or its connection was ended' }
+  const oauthPresented = (authorization: string | undefined) => typeof authorization === 'string' && /^bearer /i.test(authorization) ? authorization.slice(7).trim() : ''
+  /** Whether a JSON-RPC message, or any message of a batch, calls a tool. */
+  const callsTool = (message: unknown): boolean => Array.isArray(message) ? message.some(callsTool)
+    : message !== null && typeof message === 'object' && (message as { method?: unknown }).method === 'tools/call'
+
   /** /mcp: keyless or an account key. /mcp-oauth (`oauth`): an OAuth access token only, and 401 with a challenge without one. */
   const mcp = async (req: IncomingMessage, res: ServerResponse, oauth: boolean): Promise<void> => {
     if (!['POST', 'GET', 'DELETE'].includes(req.method ?? '')) { sendJson(res, 405, { error: 'method not allowed' }); return }
@@ -684,14 +693,14 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (typeof authorization === 'string') headers.set('authorization', authorization)
     let caller: HostedCaller
     if (oauth) {
-      const presented = typeof authorization === 'string' && /^bearer /i.test(authorization) ? authorization.slice(7).trim() : ''
+      const presented = oauthPresented(authorization)
       if (presented === '') { sendJson(res, 401, { error: 'sign in to Octocrawl to connect: this endpoint takes an OAuth access token' }, { 'www-authenticate': challenge() }); return }
       const connection = await identifyOAuth(presented)
-      if (connection === null) { sendJson(res, 401, { error: 'this access token is not valid: it expired, or its connection was ended' }, { 'www-authenticate': challenge('invalid_token') }); return }
+      if (connection === null) { sendJson(res, 401, OAUTH_ENDED, { 'www-authenticate': challenge('invalid_token') }); return }
       caller = connection
     } else {
       const identified = await identify(headers, address)
-      if (identified === 'unknown_key' || identified === 'oauth_token') { sendJson(res, 401, { error: 'this key is not one Octocrawl issued, or it was revoked' }, { 'www-authenticate': 'Bearer' }); return }
+      if (identified === 'unknown_key' || identified === 'oauth_token' || identified === 'oauth_ended') { sendJson(res, 401, { error: 'this key is not one Octocrawl issued, or it was revoked' }, { 'www-authenticate': 'Bearer' }); return }
       caller = identified
     }
     const size = Number(req.headers['content-length'] ?? 0)
@@ -706,6 +715,13 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     }
     let parsed: unknown
     try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { sendJson(res, 400, { error: 'invalid JSON' }); return }
+    // A tool call reads the token and its connection past the cache, so a connection disconnected on the dashboard is
+    // answered 401 at once and the client signs in again, rather than a tool error for up to a minute. Other methods keep the cache.
+    if (oauth && callsTool(parsed)) {
+      const connection = await identifyOAuth(oauthPresented(authorization), true)
+      if (connection === null) { sendJson(res, 401, OAUTH_ENDED, { 'www-authenticate': challenge('invalid_token') }); return }
+      caller = connection
+    }
     // The tools call the API in-process through the gate, so quota, lane and refusals are the REST ones.
     const client = new W2L({
       baseUrl: 'http://hosted.internal',

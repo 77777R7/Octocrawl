@@ -617,15 +617,58 @@ it('a disconnected connection stops at its next start at once, and within a minu
   const ended = await list()
   expect(ended.status).toBe(401)
   expect(ended.headers.get('www-authenticate')).toContain('error="invalid_token"')
-  // Connected again and cached again, then disconnected: a tool call starts work, which reads the key past the cache, so
-  // it is refused at once and spends nothing.
+  // Connected again and cached again, then disconnected: a tool call reads the token and its key past the cache, so it is
+  // answered 401 with the challenge at once (the client signs in again, Cursor 3.25.6 got a 200 tool error before) and spends nothing.
   docs.set(`${root}/hostedApiKeys/oauth_conn`, record(true))
   clock += 61_000
   expect((await list()).status).toBe(200)
   docs.set(`${root}/hostedApiKeys/oauth_conn`, record(false))
   const call = await post(url, '/mcp-oauth', { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'scrape', arguments: { url: `${origin}/page` } } }, headers)
+  expect(call.status).toBe(401)
+  expect(call.headers.get('www-authenticate')).toBe(`Bearer resource_metadata="${RESOURCE_METADATA}", scope="mcp", error="invalid_token"`)
   expect(await call.text()).not.toContain('Tides')
   expect(credits.requests.size).toBe(0)
+  // The fresh read refreshed the cache, so listing tools is refused from then on too.
+  expect((await list()).status).toBe(401)
+})
+
+it('an OAuth token the gate refuses is told to sign in again, without the key hints', async () => {
+  // The connection is disconnected between the handler's fresh read and the gate's: the gate's refusal reaches the client
+  // as a tool error, and it is the one written for an OAuth connection.
+  let freshReads = 0
+  const keyStore: HostedKeys = { async lookup(id, options) { if (id !== 'connection-1') return null; if (options?.fresh === true) freshReads++; return { ...CONNECTION, enabled: freshReads < 2 } } }
+  const { url } = await start({ keyStore, oauthTokens: { oca_good: { keyId: 'connection-1', resource: MCP_OAUTH_RESOURCE, expiresAt: Date.now() + HOUR } } })
+  const call = await post(url, '/mcp-oauth', { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'scrape', arguments: { url: `${origin}/page` } } }, { authorization: 'Bearer oca_good', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' })
+  expect(call.status).toBe(200)
+  const text = await call.text()
+  expect(text).toContain('this connection was disconnected or its sign-in expired: sign in again')
+  expect(text).not.toContain('not one Octocrawl issued')
+  expect(text).not.toContain('keyless')
+  expect(text).not.toContain('Tides')
+  expect(freshReads).toBe(2)
+})
+
+it('/mcp keeps answering a key revoked while its lookup is cached with a tool error, as before', async () => {
+  const stored = new Map<string, HostedKeyRecord>([[keyDigest(HASH_KEY, 'oc_soon_off'), { enabled: true, plan: 'free', dailyLimit: 5, browser: false }]])
+  const cache = new Map<string, HostedKeyRecord | null>()
+  const keyStore: HostedKeys = {
+    async lookup(hash, options) {
+      if (options?.fresh !== true && cache.has(hash)) return cache.get(hash)!
+      const record = stored.get(hash) ?? null
+      cache.set(hash, record)
+      return record
+    },
+  }
+  const { url } = await start({ keyStore })
+  const headers = { authorization: 'Bearer oc_soon_off', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' }
+  expect((await post(url, '/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/list' }, headers)).status).toBe(200)
+  stored.set(keyDigest(HASH_KEY, 'oc_soon_off'), { enabled: false, plan: 'free', dailyLimit: 5, browser: false })
+  const call = await post(url, '/mcp', { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'scrape', arguments: { url: `${origin}/page` } } }, headers)
+  expect(call.status).toBe(200)
+  expect(call.headers.get('www-authenticate')).toBeNull()
+  const text = await call.text()
+  expect(text).toContain('this key is not one Octocrawl issued, or it was revoked')
+  expect(text).not.toContain('Tides')
 })
 
 it('Firestore access tokens: read by digest with their expiry, cached for a minute, and a fresh read past the cache', async () => {
