@@ -85,7 +85,7 @@ async function finished(kind: 'batch' | 'crawl', id: string): Promise<CrawlPage[
 const HOUR = 3_600_000
 
 describe('page cache: scrape', () => {
-  it.each([true, false])('verifies the final cache usage in debug=%s and persists that verdict', async debug => {
+  it.each([true, false])('verifies the final cache usage in debug=%s and stores the same call facts', async debug => {
     const url = `${origin}/verified-usage-${debug}`
     const first = await scrape({ url, debug, maxAge: HOUR })
     expect(first.usage.requestCount).toBeGreaterThan(0)
@@ -102,8 +102,9 @@ describe('page cache: scrape', () => {
       rawSha256: first.evidenceRecord.rawSha256, fetchedAt: first.evidenceRecord.fetchedAt,
       access: first.evidenceRecord.access, verification: { status: 'passed' }, readiness: { state: 'ready' },
     })
-    const record = await engine.getScrape(hit.scrapeId)
-    expect(record?.verification).toEqual(hit.verification)
+    const record = await engine.getScrape(hit.metadata.scrapeId)
+    expect(record?.usage.requestCount).toBe(0)
+    expect(record?.snapshot).toEqual(hit.snapshot)
     const failed = await scrape({ url, debug, maxAge: HOUR, verify: { checks: [{ type: 'field', path: 'usage.requestCount', min: 1 }] } })
     expect(failed.verification.status).toBe('failed')
     expect(failed.readiness.state).not.toBe('ready')

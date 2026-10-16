@@ -122,7 +122,7 @@ const scrapeInput = z.object({
     .describe('What to return; default ["markdown"]. html is the cleaned main-content HTML; tables gives each data table with its rows and CSV.'),
   onlyMainContent: z.boolean().optional()
     .describe('Default true: the main content without navigation, header and footer. false keeps the whole page body.'),
-  verify: verifyInput.optional().describe('Optional task checks on delivered data. passed covers only these checks, not field accuracy. emptyOk permits an already verified empty result, not missing or unavailable data. The server validates comparisons and format requirements; hosted refuses regex checks.'),
+  verify: verifyInput.optional().describe('Optional task checks on delivered data. Paths must start with status, requestedUrl, finalUrl, markdown, links, html, tables or truncated, which this tool preserves unchanged. listRecordsMin requires an explicit supported path; recordFields is unsupported. Other paths (including snapshot, title, httpStatus and verdict fields) are refused before calling the API. passed covers only configured checks, not field accuracy. emptyOk permits an already verified empty result. The server validates comparisons and formats; hosted refuses regex checks.'),
 })
 
 const mapInput = z.object({
@@ -149,6 +149,12 @@ export function scrapeTool(options: OctocrawlToolsOptions = {}): Tool<ScrapeTool
     description: 'Read one web page with Octocrawl as Markdown (or links, cleaned HTML, tables), with its Evidence Record. status describes the fetch, not task completion: read verification.status and readiness. passed covers only configured checks, not independent field accuracy; not_requested or missing verification is unverified. On failed checks examine failureReason, blockReason and readiness; do not automatically retry login walls, captchas or unavailable data. confidence is not an accuracy probability. Cite finalUrl and the Evidence Record when using content.',
     inputSchema: scrapeInput,
     execute: async (input, { abortSignal }) => {
+      const unsupported = unsupportedVerification(input.verify)
+      if (unsupported !== undefined) return {
+        status: 'refused', httpStatus: 400, code: 'invalid_request', error: unsupported,
+        agentHints: ['Check the requested Markdown, links, HTML or tables. Use the REST API or TypeScript SDK for other response fields.'],
+        retryAfterSeconds: null,
+      }
       const client = clientOf(options)
       try {
         const response = await client.scrape(input.url, {
@@ -164,6 +170,19 @@ export function scrapeTool(options: OctocrawlToolsOptions = {}): Tool<ScrapeTool
       }
     },
   })
+}
+
+/** Only paths whose values and presence survive compactPage can keep the server's contract unchanged. */
+const VERIFIED_TOOL_FIELDS = new Set(['status', 'requestedUrl', 'finalUrl', 'markdown', 'links', 'html', 'tables', 'truncated'])
+
+function unsupportedVerification(contract: ScrapeToolInput['verify']): string | undefined {
+  for (const [index, check] of (contract?.checks ?? []).entries()) {
+    if (check.type === 'recordFields') return `verify.checks[${index}]: recordFields requires list records, which the AI SDK scrape tool does not return`
+    if (check.type !== 'field' && check.type !== 'listRecordsMin') continue
+    if (check.path === undefined) return `verify.checks[${index}]: listRecordsMin requires an explicit path to data returned by the AI SDK scrape tool`
+    if (!VERIFIED_TOOL_FIELDS.has(check.path.split('.')[0]!)) return `verify.checks[${index}]: path "${check.path}" is not preserved unchanged in the AI SDK scrape result`
+  }
+  return undefined
 }
 
 /** List a site's URLs from its sitemaps and start page, without reading each page. */

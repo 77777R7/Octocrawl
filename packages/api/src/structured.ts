@@ -1090,7 +1090,8 @@ function withoutRepeatedBodies(summary: ScrapeResponse['summary'], debug: boolea
  * extraction, the `scrapeId` and `metadata` of the call, the snapshot, the
  * Evidence Record and the timings; compact unless `debug` is true. The id is
  * minted here when the caller (the engine, which writes the scrape record
- * under it) gives none.
+ * under it) gives none. `fetched` is the engine's decision: false projects
+ * this call's zero fetch usage before verification while retaining the source capture.
  */
 export async function prepareScrapeResponse(
   result: ScrapeRun,
@@ -1099,6 +1100,7 @@ export async function prepareScrapeResponse(
   modelConfig: StructuredModelConfig | null,
   overallStart: number,
   scrapeId: string = crypto.randomUUID(),
+  fetched = true,
 ): Promise<ScrapeResponse | CompactScrapeResponse> {
   checkVerificationFormats(req)
   const formats = requestedFormats(req, result)
@@ -1140,7 +1142,9 @@ export async function prepareScrapeResponse(
   }
   // Judge the exact data projection delivered, including the compact document and requested formats.
   // Otherwise a price/entity discarded below could still make a task pass (ADR 0006).
-  const delivered = req.debug === false ? compactScrapeData(withTiming, req, formats, totalMs) : withTiming
+  // Cache reuse has no new fetch usage. Project it before judging; keep the original capture for its evidence.
+  const responseData = fetched ? withTiming : withoutFetchUsage(withTiming)
+  const delivered = req.debug === false ? compactScrapeData(responseData, req, formats, totalMs) : responseData
   // Verdict-derived fields are not source data, including verdicts carried by an earlier ladder/cache view.
   const { verification: _previousVerification, readiness: _previousReadiness, evidenceRecord: _previousEvidence, ...sourceData } = { ...delivered, evidenceRecord: undefined }
   const verification = verify(req.verify, sourceData)
@@ -1150,6 +1154,17 @@ export async function prepareScrapeResponse(
     readiness: readinessOf({ ...result, verification }),
     evidenceRecord: scrapeEvidenceRecord({ ...result, verification }, req, next),
   }
+}
+
+/** A cache answer's usage describes this call; its capture and Evidence Record still describe the original fetch. */
+function withoutFetchUsage(response: ScrapeResponse): ScrapeResponse {
+  const { timings, ...usage } = response.usage
+  const own = timings === undefined ? undefined : {
+    ...(timings.serializeMs === undefined ? {} : { serializeMs: timings.serializeMs }),
+    ...(timings.modelMs === undefined ? {} : { modelMs: timings.modelMs }),
+    totalMs: timings.totalMs,
+  }
+  return { ...response, usage: { ...usage, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, browserMs: 0, externalCostUsd: 0, ...(own === undefined ? {} : { timings: own }) } }
 }
 
 /**

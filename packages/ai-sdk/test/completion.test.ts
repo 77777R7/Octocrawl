@@ -65,7 +65,7 @@ describe('task completion through the AI SDK adapter', () => {
     expect(calls).toBe(1)
   })
 
-  it('offers every existing check without stripping its fields or changing the contract', () => {
+  it('parses wire checks without stripping fields; execution separately bounds the tool paths', () => {
     const checks: VerifyCheck[] = [
       { type: 'markdownIncludes', text: 'Revenue' }, { type: 'markdownMatches', pattern: 'Revenue', flags: 'i' },
       { type: 'markdownCountMin', pattern: '\\d', min: 1 }, { type: 'minTables', min: 1 },

@@ -122,6 +122,25 @@ const openAiEndpoint = (answer: unknown, requests: Array<Record<string, any>>) =
 }) as typeof fetch
 
 describe('scrape response metadata', () => {
+  it.each([0.42, null])('keeps the cached capture cost %s while judging zero fetch usage for this call', async cost => {
+    const run = { ...result, usage: { ...result.usage, externalCostUsd: cost },
+      trace: [{ at: 0, lane: 'http' as const, event: 'cache_hit', detail: { cachedAt: '2026-10-15T00:00:00Z', externalCostUsd: cost } }],
+      channelsTried: [], ladderTrace: [], summary: {
+        channelsTried: [], attempts: [], wallMs: 0, browserMs: 0, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: 0, externalCostUsd: 0,
+        externalCost: { knownSubtotal: 0, unknown: false }, contentTokenMeter: { knownSubtotal: 0, unknown: false }, artifacts: [],
+      },
+    }
+    const response = await prepareScrapeResponse(run, { url: run.requestedUrl, formats: ['markdown'], debug: false, verify: { checks: [
+      { type: 'field', path: 'usage.requestCount', equals: 0 },
+      { type: 'field', path: 'usage.externalCostUsd', equals: 0 },
+    ] } }, {}, null, performance.now(), 'cached-call', false) as CompactScrapeResponse
+    expect(response.usage.externalCostUsd).toBe(0)
+    expect(response.evidenceRecord.access.externalCostUsd).toBe(cost)
+    expect(response.evidenceRecord.rawSha256).toBe(result.evidence.rawBodySha256)
+    expect(response.verification.status).toBe('passed')
+    expect(response.evidenceRecord.verification?.status).toBe('passed')
+  })
+
   it('judges a field on the delivered compact document rather than discarded product facts', async () => {
     const run = { ...result, channelsTried: ['http'], ladderTrace: [], summary: {
       channelsTried: ['http'], attempts: [], wallMs: 10, browserMs: 0, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 10, externalCostUsd: null,

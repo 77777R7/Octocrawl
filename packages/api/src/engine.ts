@@ -1754,9 +1754,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const plan = record ? cachePlanFor(req.url, mode, req, req.formats, rungs.channels, req.robotsOverride, robotsOverride !== undefined) : null
     /** The shaped response and, for an API call, the scrape record, written before the response is sent. */
     const deliver = async (full: ScrapeRun, shapeScope: ReturnType<typeof createExecutionScope>, fetched: boolean): Promise<ScrapeResponse | CompactScrapeResponse> => {
-      const shaped = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
-      // An answer the cache gave fetched nothing: its usage is this call's, its evidence the original fetch's.
-      const response = fetched ? shaped : withoutFetchUsage(shaped)
+      const response = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
       if (!record) return response
       // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
       try {
@@ -2509,23 +2507,6 @@ function pageOptions(req: PageOptions): PageOptions {
     ...(req.lockdown === undefined ? {} : { lockdown: req.lockdown }),
     ...(req.verify === undefined ? {} : { verify: req.verify }),
   }
-}
-
-/**
- * A response the cache answered: its usage is this call's, which requested
- * nothing (no request, attempt, byte or browser time, and none of the
- * original fetch's network timings), with the call's own wall time and its
- * serialize, model and total times; the result's evidence stays the
- * original fetch's.
- */
-function withoutFetchUsage<T extends ScrapeResponse | CompactScrapeResponse>(response: T): T {
-  const { timings, ...usage } = response.usage as T['usage'] & { timings?: { serializeMs?: number; modelMs?: number; totalMs?: number } }
-  const own = timings === undefined ? undefined : {
-    ...(timings.serializeMs === undefined ? {} : { serializeMs: timings.serializeMs }),
-    ...(timings.modelMs === undefined ? {} : { modelMs: timings.modelMs }),
-    ...(timings.totalMs === undefined ? {} : { totalMs: timings.totalMs }),
-  }
-  return { ...response, usage: { ...usage, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, browserMs: 0, externalCostUsd: 0, ...(own === undefined ? {} : { timings: own }) } }
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
