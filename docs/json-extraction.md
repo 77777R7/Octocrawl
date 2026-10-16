@@ -102,6 +102,21 @@ The example selects `[data-testid="history-table"]`, requests both Markdown and 
 
 This is a separate task contract. It does not change the frozen access benchmark or its scores. Empty tables, current quotes and rows outside the selected history region fail. A pass does not independently establish market values, calendar validity, the requested date range, frequency, freshness or complete history; add task-specific checks and source review for those requirements. If Yahoo changes its selectors or headers, inspect that source before changing the contract.
 
+## Examples: product and flight offer records
+
+[`newegg-laptops.json`](../examples/contracts/newegg-laptops.json) and [`skyscanner-london-paris.json`](../examples/contracts/skyscanner-london-paris.json) are explicit single-page request bodies for `POST /v1/scrape`. The TypeScript SDK takes the same body as `sdk.scrape(request.url, request)`; the MCP `scrape` tool takes it as its arguments. Both request Markdown, a selected list and JSON with per-field DOM locators. They add no access grant or browser override: capture eligibility and the server's existing policy still apply.
+
+| Task | Selected records | Required fields on each counted record | Distinct identity |
+| --- | --- | --- | --- |
+| Newegg laptops | `.goods-container[data-itemnumber]` inside `.plp-results-section` | SKU, name, product URL, displayed current price | SKU |
+| London to Paris flight offers | `main a[data-testid^="dealCard_"]` | Offer URL, displayed departure date, carrier, route, displayed starting price | Offer URL |
+
+Each contract checks the captured page title and requires **at least three different complete records** with `recordFields` and `uniqueBy`. A price elsewhere on the page cannot supply a missing record field. Duplicate identities and incomplete records cannot fill the minimum; their rows and source indices remain in `list` and `json.data.records`. Three complete records can pass while additional incomplete records leave `json.status` as `incomplete`; that pass covers the configured minimum, not every returned row. These examples do not replace the frozen access predicates or their scores.
+
+The flight contract reads dates from `deal-leg-date`, carrier names from the airline image **or fallback SVG** `alt`, route text from the flight-info span, and the starting-price label from the card footer. It does not use positional accessibility-description spans: removing a date must not shift route or carrier text into its place. A carrier mentioned elsewhere in a route or navigation cannot rescue a missing requested airline `alt`. Missing source fields stay null; no inferred fallback is provided by these examples.
+
+Values remain source strings, including `$0.00`, `from £20` and a date without a year. `priceFrom` is an advertised starting price, not a guaranteed fare. These checks establish selected-record field presence and identity counts, not numeric/date validity, agreement between URL and displayed text, inferred currency/year, stock, bookability, freshness or complete inventory. They do not validate every displayed offer or prove that a nonempty value is accurate. Inspect the new source before updating selectors or page-title checks when the site changes.
+
 ## The Amazon baseline
 
 Run the fixed 10-product, three-round Amazon MCP baseline with:

@@ -1,0 +1,61 @@
+{
+  "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
+  "formats": [
+    "markdown",
+    "json",
+    {
+      "type": "list",
+      "itemSelector": "main a[data-testid^=\"dealCard_\"]",
+      "fields": [
+        {
+          "name": "url",
+          "attribute": "href"
+        },
+        {
+          "name": "departureDate",
+          "selector": "[data-testid=\"deal-leg-date\"]"
+        },
+        {
+          "name": "carrier",
+          "selector": "[class*=\"Flight__flightProviderImage\"] img, [class*=\"Flight__defaultIcon\"] svg",
+          "attribute": "alt"
+        },
+        {
+          "name": "route",
+          "selector": "[class*=\"Flight__flightInfo\"] > span:not([data-testid])"
+        },
+        {
+          "name": "priceFrom",
+          "selector": "[class*=\"PriceButton__button\"] > span"
+        }
+      ]
+    }
+  ],
+  "includeTags": [
+    "main"
+  ],
+  "maxAge": 0,
+  "verify": {
+    "checks": [
+      {
+        "type": "field",
+        "path": "metadata.title",
+        "equals": "Cheap Flights from London (LOND) to Paris (PARI) | Skyscanner"
+      },
+      {
+        "type": "recordFields",
+        "fields": [
+          "url",
+          "departureDate",
+          "carrier",
+          "route",
+          "priceFrom"
+        ],
+        "min": 3,
+        "uniqueBy": [
+          "url"
+        ]
+      }
+    ]
+  }
+}
