@@ -94,6 +94,14 @@ A fetch can succeed without the data a task asked for: a page of navigation, a s
   - **Cost:** on a provider's browser the wait is session time the provider bills.
   - **Record:** the trace keeps the wait as `region_wait`: whether it held, how long, how many reads it judged, the contract's SHA-256, and each check's `passed` and count, never page text. [`readiness`](scrape-options.md#readiness) reads it. The contract does not enter the page cache's key.
 
+## Example: Yahoo historical rows
+
+[`examples/contracts/yahoo-history.json`](../examples/contracts/yahoo-history.json) requests the AAPL historical table, rather than counting decimal numbers in its current quote. Send the file as the body of `POST /v1/scrape` on your local server.
+
+The example selects `[data-testid="history-table"]`, requests both Markdown and tables, checks the page title, USD label and seven column headers, and requires at least one complete dated OHLC/adjusted-close/volume row. A row-shaped Markdown check also rejects dividend events and `n/a` cells: a nonempty cell alone is not a price. Zero prices and volume remain valid. The header checks allow the two documented close-label forms, with and without their explanatory text.
+
+This is a separate task contract. It does not change the frozen access benchmark or its scores. Empty tables, current quotes and rows outside the selected history region fail. A pass does not independently establish market values, calendar validity, the requested date range, frequency, freshness or complete history; add task-specific checks and source review for those requirements. If Yahoo changes its selectors or headers, inspect that source before changing the contract.
+
 ## The Amazon baseline
 
 Run the fixed 10-product, three-round Amazon MCP baseline with:
