@@ -8,6 +8,10 @@ Octocrawl reports a failure as a failure, never as an empty success:
 
 `empty_verified`, `blocked`, `failed` with reasons, not silent empties; a page answered with an error status keeps its `httpStatus` and Markdown as evidence, never as success, and so does a page on which Octocrawl finds no main content (`failed`/`empty_unverified` with the whole page's Markdown), a main region the page hides with `hidden` and an article region that only names the page included (headings of fewer than 100 characters and almost nothing beside them, no image the Markdown carries, in-page jump links such as "Skip to Filters" set aside)
 
+## Aggregate offer pages
+
+When the declared Product has only AggregateOffer offers with a stated nonnegative lowPrice and no single price, its unlabelled grids of offers stay in the main content. Explicitly labelled recommendation sections and recommendation containers are still removed. The aggregate bound and an individual card's price are not used as the subject's single product price; that field remains unavailable unless another declared source supplies it. Configure checks for the records and fields your task needs: a page's other prices alone do not establish that its offers were delivered.
+
 ## Compact MCP responses
 
 MCP `scrape` is compact by default: it returns the selected content, document/product metadata, aggregate usage and errors without repeating the body under `summary.attempts`, with the response's status and `content-type` header in `snapshot` (`httpStatus`, `contentType`) and the final URL and every redirect hop in `evidenceRecord`. Pass `debug: true` when you need the full route, trace and per-attempt audit. REST and SDK calls that omit `formats` and `debug` keep the legacy full Markdown response.
