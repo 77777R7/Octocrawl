@@ -25,7 +25,7 @@ import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine } f
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION } from './server.js'
-import { TOOLS } from './tools.js'
+import { SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
 
@@ -168,10 +168,11 @@ const REMEMBERED_CALLERS = 20_000
 export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', 'scrape_product'])
 
 /** The tools hosted Octocrawl lists to a caller: scrape_product only to a key with the browser lane, since it needs one,
- * so every tool a client sees can answer. All are read-only here: hosted Octocrawl refuses page actions and logins. */
+ * so every tool a client sees can answer. All are read-only here: hosted Octocrawl refuses page actions and logins.
+ * scrape's description does not name get_scrape, which is not served here. */
 export function hostedTools(browser: boolean) {
   return TOOLS.filter((tool) => HOSTED_API_TOOLS.has(tool.name) && (browser || tool.name !== 'scrape_product'))
-    .map((tool) => ({ ...tool, annotations: { ...('annotations' in tool ? tool.annotations : {}), readOnlyHint: true } }))
+    .map((tool) => ({ ...tool, description: tool.description.replace(SCRAPE_RECORD_HINT, ''), annotations: { ...('annotations' in tool ? tool.annotations : {}), readOnlyHint: true } }))
 }
 /**
  * The tools /mcp-oauth lists: each declares that it needs OAuth with the `mcp` scope, top level and mirrored in `_meta`
