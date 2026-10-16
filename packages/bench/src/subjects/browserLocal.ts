@@ -1,3 +1,4 @@
+import { sourceDataWarnings } from './sourceData.js'
 import { mergeListPages } from './listMerge.js'
 import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type ListRun, type PageAction, fileByteCap, proxyFor, type ContextCookie, type CookieSession, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
@@ -1330,6 +1331,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         },
       })
 
+      const sourceWarnings = sourceDataWarnings(body, pageUrl)
       // No main content: the whole rendered page stays on the failed result
       // as evidence, never content. onlyMainContent: false asks for the whole
       // page, not the main content, so there it is the answer; so is what
@@ -1353,6 +1355,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           lane: 'browser_local',
           escalations: [],
           markdown: wholePage,
+          ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
           ...(wholePage === null ? {} : { links }),
           ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
         }
@@ -1389,6 +1392,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         links,
         ...extra,
         ...tables,
+        ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
         metadata: extracted.metadata,
         document: {
           title: extracted.title,
