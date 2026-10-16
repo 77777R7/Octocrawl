@@ -1,6 +1,10 @@
 # Connect Octocrawl MCP
 
-Hosted Octocrawl is one URL, no account: `https://mcp.octocrawl.dev/mcp`. It reads public pages (`scrape`) and lists a site's URLs (`map`) over HTTP, 20 pages a day per address; a key gives more pages a day and the browser lane. The same packages run everything on your own computer, free and without limit: crawl, batch and Monitor too. Every answer carries an Evidence Record either way.
+Connect your AI agent to Octocrawl at `https://mcp.octocrawl.dev/mcp`. Hosted MCP supports `scrape` for page content and `map` for site URLs. An account key enables browser-backed scraping and the Amazon.sg `scrape_product` tool, subject to service limits. Without a key, hosted access reads over HTTP within a daily allowance.
+
+For crawl, batch and Monitor workflows, start the local API with `npx octocrawl serve` and connect it through the `@octocrawl/mcp` package. Scheduled monitoring also requires local workers. Successful scrape results include an Evidence Record describing the capture; inspect any separate verification result before relying on extracted fields.
+
+Octocrawl's official website is [octocrawl.dev](https://octocrawl.dev/), and its official source repository is [github.com/77777R7/Octocrawl](https://github.com/77777R7/Octocrawl). See the [introduction](/docs/#official-project-and-connections) for REST, SDK and MCP entry points.
 
 To see what `map` finds before connecting a client, try the [free online Link Extractor](/tools/link-extractor/). The guide to [finding all pages on a website](/blog/find-all-pages-on-a-website/) explains which URLs a sitemap, crawler or web archive can find and how to check the list.
 

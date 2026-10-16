@@ -34,7 +34,7 @@ export const FAQ: ReadonlyArray<readonly [question: string, answer: string]> = [
   ["Which sites work?", "Public pages anyone can open without signing in. The preview reads them over HTTP without running JavaScript, so a page that only appears in a browser may come back incomplete. It reads pages up to 2 MiB and files such as PDFs up to 5 MiB, and stops after 40 seconds. Amazon.sg product pages (<code>/dp/ASIN</code>) are in Beta. X and Reddit posts often don’t come through: robots rules, sign-in walls or verification pages can stop the preview, and a hosted X or Reddit result hasn’t been verified yet. See <a href=\"/docs/limits/\">Limits and result states</a>."],
   ["Why only five previews a day?", "The preview is a limited public trial: five previews per visitor and 150 for the whole site each UTC day. A request turned down before a preview starts, such as a malformed URL, or localhost or a private IP address typed into it, doesn’t count. Once a preview starts it counts, whatever the result, including a host name that turns out to point to a private network or a page stopped by robots.txt. Octocrawl on your own computer has no daily limit."],
   ["Do you store the URLs I submit, or the results?", "Results aren’t saved: your recent runs live in this page and are gone when you leave it. Each preview logs its state and the host of the page, never its path. While you type, the page asks the service for a short hint about the address. That request sends the address in its body; the hosting request log records the request path, not its body. Visit and outcome logs are kept for 30 days. The details are on the <a href=\"/docs/privacy/\">Privacy</a> page."],
-  ["How is Octocrawl different from Firecrawl or Crawl4AI?", "Octocrawl reports what it actually read: a blocked, incomplete or timed-out page is a result with a reason, and checked fields carry their source. The <a href=\"https://github.com/77777R7/Octocrawl/blob/main/docs/benchmark-gate.md\">benchmark notes</a> compare the three tools on the same test suite, with the limits of that comparison. For moving off Firecrawl, Octocrawl has a partial, local Firecrawl v1 shim."],
+  ["How is Octocrawl different from Firecrawl or Crawl4AI?", "Octocrawl reports what it actually read: a blocked, incomplete or timed-out page is a result with a reason, and checked fields carry their source. The <a href=\"https://github.com/77777R7/Octocrawl/blob/main/docs/benchmark-gate.md\">benchmark notes</a> compare the three tools on the same test suite, with the limits of that comparison. For moving off Firecrawl, see the <a href=\"/blog/firecrawl-v1-migration/\">local v1 migration guide</a>: a partial shim, not a v2 drop-in replacement."],
   ["Can I call it from a script or an agent?", "Not this preview page: it is for trying Octocrawl in a browser. Call <a href=\"/docs/connect-mcp/\">hosted Octocrawl</a> instead: <code>https://api.octocrawl.dev/v1/scrape</code> over REST, or <code>https://mcp.octocrawl.dev/mcp</code> from Claude Code, Cursor, OpenCode or Codex, keyless within a daily allowance and with a key for more. Or run Octocrawl yourself with no limit."],
   ["Is it free?", "Yes, to start. This preview (five a day) and hosted Octocrawl without a key (20 pages a day per address) need no account. <a href=\"/signin/\">Signing in</a> is free and needs no card: it gives 1,000 credits a month for the hosted API and MCP, and API keys you make yourself in the dashboard. A page read over HTTP costs 1 credit and one read in a browser 5; a blocked page costs nothing. Credit packs for more are planned but not sold yet. Octocrawl is open source under the AGPL-3.0, and running it yourself costs nothing but your own machine."],
 ]
@@ -169,8 +169,8 @@ export interface HeroCopy {
   }
 }
 const HOME_HERO: HeroCopy = {
-  title: 'One link.<br /><em>Web data, ready.</em>',
-  description: 'Readable Markdown and checked fields from public pages, ready for an AI&nbsp;agent, a RAG pipeline or a&nbsp;citation. When a page can’t be read, you get the reason.',
+  title: 'Turn web pages into<br /><em>data your agents can use.</em>',
+  description: 'Octocrawl extracts Markdown, links and structured data from public web pages. Try a URL in your browser, connect your AI agent, or build with our API.',
   next: '#how-it-works',
   nextLabel: 'See how it works',
 }
@@ -193,6 +193,7 @@ export function heroMarkup(copy: HeroCopy): string {
             <div class="hero-cell hero-copy">
               <h1 id="hero-title">${copy.title}</h1>
               <p class="hero-description">${copy.description}</p>
+              ${copy === HOME_HERO ? '<p class="hero-agent-link"><a href="/docs/connect-mcp/">Connect your agent <span aria-hidden="true">↗</span></a></p>' : ''}
             </div>
           </div>`
   const presets = copy.tool ? `${copy.tool.view ? ` data-tool-view="${copy.tool.view}"` : ''}${copy.tool.whole ? ' data-tool-scope="whole"' : ''}${copy.tool.example ? ` data-tool-example="${copy.tool.example}"` : ''}${copy.tool.text ? ' data-tool-text="on"' : ''}${copy.tool.map ? ' data-tool-map="site"' : ''}` : ''
