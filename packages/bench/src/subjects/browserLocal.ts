@@ -1162,15 +1162,21 @@ export class BrowserLocalSubject implements SubjectAdapter {
       if (Buffer.byteLength(body) > this.networkPolicy.maxDecompressedBytes) {
         return this.denied(url, start, trace, new BodyTooLargeError(this.networkPolicy.maxDecompressedBytes))
       }
+      // The layout the page's CSS gives, as markers on a copy of the body that
+      // only extraction and Markdown see; the hash, raw artifact and rendered
+      // witness below keep the same captured source. Without a copy
+      // (see the trace's layout event), the body converts by its tags.
+      const layout = await captureLayout(page, body, {
+        ...(execution.deadlineAt === undefined ? {} : { deadlineAt: execution.deadlineAt - CAPTURE_RESERVE_MS }),
+        maxShadowHtml: Math.min(1_000_000, Math.floor(this.networkPolicy.maxDecompressedBytes / 4)),
+      })
+      trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'layout', detail: layout.detail })
+      // A supported shadow table's source is included in this same live read,
+      // before the evidence is hashed. It never borrows values from another visit.
+      body = layout.sourceHtml ?? body
       const rawBodySha256 = sha256Utf8(body)
       this.onRenderedHtml?.(body, rawBodySha256)
       const rawArtifacts = await captureRawHtml(body, rawBodySha256)
-      // The layout the page's CSS gives, as markers on a copy of the body that
-      // only extraction and Markdown see; the hash, the raw artifact and the
-      // rendered-HTML witness above keep the page as rendered. Without a copy
-      // (see the trace's layout event), the body converts by its tags.
-      const layout = await captureLayout(page, body, execution.deadlineAt === undefined ? {} : { deadlineAt: execution.deadlineAt - CAPTURE_RESERVE_MS })
-      trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'layout', detail: layout.detail })
       const converted = layout.html ?? body
       const wallMs = Date.now() - start
       const browserMs = wallMs
