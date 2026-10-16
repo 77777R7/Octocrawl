@@ -1145,6 +1145,15 @@ export async function prepareScrapeResponse(
   // Cache reuse has no new fetch usage. Project it before judging; keep the original capture for its evidence.
   const responseData = fetched ? withTiming : withoutFetchUsage(withTiming)
   const delivered = req.debug === false ? compactScrapeData(responseData, req, formats, totalMs) : responseData
+  return verifyScrapeResponse(delivered, req, result)
+}
+
+/** Rejudge an already shaped response after a delivery diagnostic, without repeating extraction or fetch usage. */
+export function verifyScrapeResponse(
+  delivered: ScrapeResponse | Omit<CompactScrapeResponse, 'evidenceRecord'>,
+  req: ScrapeRequest,
+  result: FetchResult,
+): ScrapeResponse | CompactScrapeResponse {
   // Verdict-derived fields are not source data, including verdicts carried by an earlier ladder/cache view.
   const { verification: _previousVerification, readiness: _previousReadiness, evidenceRecord: _previousEvidence, ...sourceData } = { ...delivered, evidenceRecord: undefined }
   const verification = verify(req.verify, sourceData)
@@ -1152,7 +1161,7 @@ export async function prepareScrapeResponse(
     ...delivered,
     verification,
     readiness: readinessOf({ ...result, verification }),
-    evidenceRecord: scrapeEvidenceRecord({ ...result, verification }, req, next),
+    evidenceRecord: scrapeEvidenceRecord({ ...result, verification }, req, { markdown: delivered.markdown ?? null, ...(delivered.json === undefined ? {} : { json: delivered.json }) }),
   }
 }
 

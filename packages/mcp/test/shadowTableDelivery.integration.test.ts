@@ -133,7 +133,7 @@ describe('shadow table delivery through HTTP, SDK and MCP', () => {
         ] })
         const passed = min === 2 && (!privateField || debug)
         expect(out.metadata.cacheState).toBe('hit')
-        expect(out.verification, JSON.stringify({ debug, min, privateField, verification: out.verification, list: out.list })).toMatchObject({ status: passed ? 'passed' : 'failed', verifier: 'verify/8' })
+        expect(out.verification, JSON.stringify({ debug, min, privateField, verification: out.verification, list: out.list })).toMatchObject({ status: passed ? 'passed' : 'failed', verifier: 'verify/9' })
         if (out.verification.status !== 'not_requested') {
           expect(out.verification.checks.slice(0, 4).every(check => check.passed)).toBe(true)
           expect(out.verification.checks[4]).toMatchObject({ observedCount: 2, asked: min })
