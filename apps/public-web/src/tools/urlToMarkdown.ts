@@ -1,4 +1,5 @@
 import { toolPageJsonLd, toolPageMarkup as renderToolPage, type ToolPage } from './toolPage'
+import { conversionExample } from './conversionExample'
 import { UNREAD } from './toolSections'
 
 /** /tools/url-to-markdown/: a free page for one task, converting a public page to Markdown, in the free tools' page
@@ -29,17 +30,18 @@ export const URL_TO_MARKDOWN: ToolPage = {
     description: 'Paste a public page and get clean Markdown for an AI&nbsp;agent, a RAG pipeline or your notes. Free, no sign-up. When a page can’t be read, you get the reason.',
     tool: { crumb: 'URL to Markdown' },
   },
+  afterHero: conversionExample('markdown'),
   steps: { title: 'From a link to clean Markdown.', cards: [
     ['01', 'Paste a public URL', 'Any page anyone can open without signing in: an article, documentation, a product page, a PDF. Five a day, no account.'],
     ['02', 'Octocrawl checks, then reads', 'It reads the site’s robots.txt first, then fetches the page over HTTP and keeps its main content, leaving out menus, headers and footers.'],
     ['03', 'Take the Markdown', 'Read it rendered or as source, copy it, or download it as a <code>.md</code> file. Page info shows the final URL and what the page says about itself.'],
   ] },
-  uses: { title: 'Markdown is what models read best.', lead: 'It keeps a page’s headings, paragraphs, lists, tables and links, and drops the markup, scripts and styling around them.', cards: [
-    ['◇', 'AI agents and RAG', 'Give a model the page itself in far fewer tokens than the raw HTML. Headings give natural places to split it into chunks. See <a href="/blog/web-scraping-for-rag/">web scraping for RAG</a>.'],
+  uses: { title: 'Keep the structure your workflow needs.', lead: 'It keeps a page’s headings, paragraphs, lists, tables and links, and drops the markup, scripts and styling around them.', cards: [
+    ['◇', 'AI agents and RAG', 'Keep headings, links and tables for a model or retrieval pipeline. Check token use with your model’s tokenizer. Headings give natural places to split it into chunks. See <a href="/blog/web-scraping-for-rag/">web scraping for RAG</a>.'],
     ['▤', 'Notes and archives', 'Keep a readable copy of an article or a doc page in Obsidian, Notion or a Git repository.'],
     ['⇢', 'Moving content', 'Bring pages from an old site or a wiki into a static site generator or a new docs tool.'],
   ] },
-  unread: { title: 'An empty file is not an answer.', lead: 'Many converters return a blank or half-blank result and say nothing. Octocrawl says what happened.', cards: UNREAD },
+  unread: { title: 'An empty file is not an answer.', lead: 'Review the result state and the returned content before using it. A page read is not proof that your task is complete.', cards: UNREAD },
   code: { title: 'The same conversion, from your own tools.', format: 'markdown' },
   faq: TOOL_FAQ,
 }

@@ -11,7 +11,7 @@ export const TOOLS: readonly Tool[] = [
   { slug: 'website-to-text', name: 'Website to Text', glyph: '¶', text: 'A page’s readable text without the markup, to copy or download as a .txt file.', live: true },
   // The whole-site Link Extractor (map: the site's sitemaps and the start page's links); its path is linked from the
   // blog's find-all-pages article, so it stays.
-  { slug: 'link-extractor', name: 'Link Extractor', glyph: '⇢', text: 'Every page of a site, and where each was found: its sitemap or its links. Or just one page’s links.', live: true },
+  { slug: 'link-extractor', name: 'Link Extractor', glyph: '⇢', text: 'Discover URLs in a site’s sitemaps and start-page links, with limits shown. Or extract one page’s links.', live: true },
 ]
 export const toolPath = (tool: Tool): string => `${TOOLS_PATH}${tool.slug}/`
 
@@ -38,9 +38,9 @@ export function toolCards(cards: ReadonlyArray<readonly [mark: string, head: str
 /** What each tool page says happens when a page can't be read. */
 export const UNREAD: ReadonlyArray<readonly [string, string, string]> = [
   ['✕', 'robots.txt disallows it', 'It stops before fetching and says the site’s rules don’t allow it. If robots.txt can’t be reached at all, it stops too, and says that instead.'],
-  ['!', 'The site blocks the request', 'A verification page, a CAPTCHA or a block page is reported as blocked, never turned into a result about being blocked.'],
-  ['⌂', 'The page needs a login', 'It says so. These tools don’t sign in; Octocrawl on your own computer can read pages you’re signed in to, in your own Chrome.'],
-  ['⟳', 'It is drawn by JavaScript', 'These tools don’t run scripts, so the result can be incomplete or empty, and it says so. With a free account, the hosted API reads such pages in a browser.'],
+  ['!', 'The site blocks the request', 'Recognized verification pages, CAPTCHAs and block pages are reported as blocked. Inspect the output: an unrecognized block or wrong region can still need review.'],
+  ['⌂', 'The page needs a login', 'These tools don’t sign in. A login wall can leave blocked or incomplete content. With authorization, Octocrawl on your own computer can use your signed-in Chrome.'],
+  ['⟳', 'It is drawn by JavaScript', 'These tools don’t run scripts, so the result can be incomplete or empty. Check the returned content. For eligible pages, an account’s hosted API can use the browser lane.'],
 ]
 
 /** What a tool's page asks the API for in its code: Markdown (Website to Text strips it), or links. */

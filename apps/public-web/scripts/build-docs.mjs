@@ -11,9 +11,9 @@ import { siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
 import { DASHBOARD_BODIES, dashboardPageHtml } from './dashboardPages.mjs'
 // The free tool pages, built by Vite (vite.config.ts) and listed in the sitemap here.
 // The free tools' pages (apps/public-web/src/tools/pages.ts), with the day each last changed.
-const TOOL_LOCATIONS = [['/tools/url-to-markdown/', '2026-10-13'], ['/tools/link-extractor/', '2026-10-13'], ['/tools/website-to-text/', '2026-10-13']]
+const TOOL_LOCATIONS = [['/tools/url-to-markdown/', '2026-10-16'], ['/tools/link-extractor/', '2026-10-16'], ['/tools/website-to-text/', '2026-10-16']]
 const TOOLS_HUB_PATH = '/tools/'
-const TOOLS_HUB_UPDATED = '2026-10-13'
+const TOOLS_HUB_UPDATED = '2026-10-16'
 // The product pages (src/product/), with the day each last changed.
 const SCRAPE_PATH = '/scrape/'
 const SCRAPE_UPDATED = '2026-10-13'
@@ -322,7 +322,7 @@ const changelogSource = (await readFile(join(root, '..', '..', 'CHANGELOG.md'), 
 const BLOG_PATH = '/blog/'
 const blogHead = (title, description, path, image) => `<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#071b4f" /><meta name="description" content="${escape(description)}" />${shareHead(path, title, description, image)}<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" /><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png" /><link rel="stylesheet" href="/docs-assets/docs.css?v=${assetVersions['docs.css']}" /><link rel="stylesheet" href="/docs-assets/docs-mobile.css?v=${assetVersions['docs-mobile.css']}" /><link rel="stylesheet" href="/docs-assets/nav.css" /><link rel="stylesheet" href="/docs-assets/blog.css?v=${assetVersions['blog.css']}" />`
 const longDate = day => new Date(`${day}T00:00:00Z`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' })
-const coverPath = (post, name) => `/blog-assets/${post.slug}/${name}`
+const coverPath = (post, name) => `/blog-assets/${post.cover ?? post.slug}/${name}`
 // A cover in three widths, so a phone downloads one near its screen's width: the card (836), cover-1254 and the cover (1672).
 const coverSrcset = post => `${versioned(coverPath(post, 'card.webp'))} 836w, ${versioned(coverPath(post, 'cover-1254.webp'))} 1254w, ${versioned(coverPath(post, 'cover.webp'))} 1672w`
 const jsonLd = data => `<script type="application/ld+json">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`

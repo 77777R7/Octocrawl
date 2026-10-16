@@ -9,7 +9,7 @@ const optedOut = (() => {
 
 export function track(name: string, props: Props = {}): void {
   if (optedOut) return
-  const clean = Object.fromEntries(Object.entries(props).filter(([, value]) => value !== undefined))
+  const clean = Object.fromEntries(Object.entries({ path: location.pathname, ...props }).filter(([, value]) => value !== undefined))
   const body = JSON.stringify({ name, props: clean })
   try { if (navigator.sendBeacon?.('/api/events', new Blob([body], { type: 'application/json' }))) return } catch { /* fall back to fetch */ }
   void fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true, credentials: 'same-origin' }).catch(() => {})
@@ -39,7 +39,7 @@ export function trackLinkClicks(root: HTMLElement): void {
     const link = (event.target as Element | null)?.closest?.('a[href]')
     if (!(link instanceof HTMLAnchorElement)) return
     // Links taken from the page a visitor extracted (its final URL, its Markdown, its link list) are never logged.
-    if (link.closest('#detail-url, .readable-content, .link-row')) return
+    if (link.closest('#detail-url, .readable-content, .link-row, .map-row')) return
     let url: URL
     try { url = new URL(link.href) } catch { return }
     const target = url.host === location.host
