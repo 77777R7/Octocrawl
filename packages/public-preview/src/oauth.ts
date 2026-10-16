@@ -420,14 +420,25 @@ const CHALLENGE = /^[A-Za-z0-9_-]{43}$/
 const VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/
 const SECRET_TOKEN = /^[A-Za-z0-9_-]{43}$/
 
-/** A callback a client may name: https, or http on the loopback interface (RFC 8252), with no fragment. */
-function acceptableRedirect(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length > 2_000) return false
+/**
+ * Why a callback is not one a client may name, as a kind and never the address (for the log), or null when it is:
+ * https, or http on the loopback interface (RFC 8252), with no fragment.
+ */
+function redirectProblem(value: unknown): string | null {
+  if (typeof value !== 'string') return 'not_string'
+  if (value === '') return 'empty'
+  if (value.length > 2_000) return 'too_long'
   let url: URL
-  try { url = new URL(value) } catch { return false }
-  if (url.hash || value.includes('#') || url.username || url.password) return false
-  return url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK.has(url.hostname))
+  try { url = new URL(value) } catch { return 'not_url' }
+  if (url.hash || value.includes('#')) return 'fragment'
+  if (url.username || url.password) return 'credentials'
+  if (url.protocol === 'https:') return null
+  if (url.protocol === 'http:') return LOOPBACK.has(url.hostname) ? null : 'http_not_loopback'
+  return `scheme_${url.protocol.slice(0, -1).toLowerCase().replace(/[^a-z0-9+.-]/g, '').slice(0, 20)}`
 }
+const acceptableRedirect = (value: unknown): value is string => redirectProblem(value) === null
+/** Token endpoint authentication methods in the IANA OAuth registry, the only values of it a refusal's log line names. */
+const AUTH_METHODS: ReadonlySet<string> = new Set(['client_secret_basic', 'client_secret_post', 'client_secret_jwt', 'private_key_jwt', 'tls_client_auth', 'self_signed_tls_client_auth'])
 
 /** Exactly one of the client's callbacks; on the loopback interface the port may differ (RFC 8252 §7.3). */
 function redirectMatches(registered: readonly string[], given: string): boolean {
@@ -767,23 +778,34 @@ export function createOAuthRoutes(options: OAuthOptions) {
     while (registrations.size >= 10_000) registrations.delete(registrations.keys().next().value as string)
     registrations.delete(visitor)
     registrations.set(visitor, [...recent, at])
+    // A refusal is logged by field and kind of problem, so a client that cannot register can be told why; never what it sent.
+    const refuse = (error: string, field: string, problem: string | null, description: string) => {
+      log({ event: 'w2l_oauth', step: 'register', outcome: error, field, ...(problem === null ? {} : { problem }) })
+      oauthError(res, error, description)
+    }
     let body: Record<string, unknown>
     try {
       if (!(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) throw new Error('not JSON')
       const parsed = JSON.parse(await readBody(req)) as unknown
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object')
       body = parsed as Record<string, unknown>
-    } catch { oauthError(res, 'invalid_client_metadata', 'send the client metadata as a JSON object'); return }
+    } catch { refuse('invalid_client_metadata', 'body', null, 'send the client metadata as a JSON object'); return }
     const uris = body.redirect_uris
     if (!Array.isArray(uris) || uris.length === 0 || uris.length > REDIRECTS_MAX || !uris.every(acceptableRedirect)) {
-      oauthError(res, 'invalid_redirect_uri', 'redirect_uris must be https addresses, or http on localhost or 127.0.0.1, without a fragment')
+      const problem = !Array.isArray(uris) || uris.length === 0 ? 'none' : uris.length > REDIRECTS_MAX ? 'too_many' : redirectProblem(uris.find(uri => !acceptableRedirect(uri)))
+      refuse('invalid_redirect_uri', 'redirect_uris', problem, 'redirect_uris must be https addresses, or http on localhost or 127.0.0.1, without a fragment')
       return
     }
-    if (body.token_endpoint_auth_method !== undefined && body.token_endpoint_auth_method !== 'none') { oauthError(res, 'invalid_client_metadata', 'only public clients are registered: token_endpoint_auth_method must be none'); return }
+    if (body.token_endpoint_auth_method !== undefined && body.token_endpoint_auth_method !== 'none') {
+      // Only the methods IANA registers are named in the log; anything else is `other`, never what was sent.
+      const asked = typeof body.token_endpoint_auth_method === 'string' && AUTH_METHODS.has(body.token_endpoint_auth_method) ? body.token_endpoint_auth_method : 'other'
+      refuse('invalid_client_metadata', 'token_endpoint_auth_method', asked, 'only public clients are registered: token_endpoint_auth_method must be none')
+      return
+    }
     const grantTypes = body.grant_types
-    if (grantTypes !== undefined && (!Array.isArray(grantTypes) || !grantTypes.every(type => type === 'authorization_code' || type === 'refresh_token'))) { oauthError(res, 'invalid_client_metadata', 'grant_types may be authorization_code and refresh_token'); return }
+    if (grantTypes !== undefined && (!Array.isArray(grantTypes) || !grantTypes.every(type => type === 'authorization_code' || type === 'refresh_token'))) { refuse('invalid_client_metadata', 'grant_types', null, 'grant_types may be authorization_code and refresh_token'); return }
     const responseTypes = body.response_types
-    if (responseTypes !== undefined && (!Array.isArray(responseTypes) || !responseTypes.every(type => type === 'code'))) { oauthError(res, 'invalid_client_metadata', 'response_types may be code'); return }
+    if (responseTypes !== undefined && (!Array.isArray(responseTypes) || !responseTypes.every(type => type === 'code'))) { refuse('invalid_client_metadata', 'response_types', null, 'response_types may be code'); return }
     const id = `occ_${random(18)}`
     const client: RegisteredClient = { name: cleanName(body.client_name, new URL(uris[0] as string).hostname), redirectUris: uris as string[], applicationType: body.application_type === 'native' ? 'native' : 'web', createdAt: at, expiresAt: at + IDLE_MS }
     await options.store.registerClient(id, client)

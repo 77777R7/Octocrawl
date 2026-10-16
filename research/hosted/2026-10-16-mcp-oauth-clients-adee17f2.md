@@ -29,6 +29,23 @@ Version: Claude Code 2.1.301 (user agent `claude-code/2.1.301 (claude-desktop, a
 
 Result: Claude Code connects through a metadata document, calls a tool on the account's credits under the connection's own key, and stops working after a disconnect, within the minute the hosted API's cache allows.
 
+## Claude Code in the Claude desktop app (second run)
+
+After the disconnect above, Howard signed in again from this Claude desktop session's `/mcp`, at 13:31–13:34Z. The same revisions served it as above: `octocrawl-api` `h17oauthrs` and `w2l-public-preview` `r90oauth`, with no deploy between the runs. Whether the desktop app's traffic went through the proxy was not checked. The client is the desktop app's own Claude Code: user agent `claude-code/2.1.295 (claude-desktop, agent-sdk/0.3.299)`, with the OAuth requests from `Bun/1.4.3`. It is a different build from the 2.1.301 CLI above.
+
+| Time (Z) | What happened |
+| --- | --- |
+| 13:31:32–13:31:37 | Four reads of the authorization server metadata, 200. |
+| 13:31:34 | `POST /oauth/register` **400**. The server did not log why at the time; the PR that adds this section makes it log the refused field and the kind of problem. The client then went on without registering. |
+| 13:31:38 | `GET /oauth/authorize` with `client_id=https://claude.ai/oauth/claude-code-client-metadata` and `redirect_uri=http://localhost:62070/callback` (CIMD), `scope=mcp`, `resource` set. |
+| 13:31:44–45 | Consent `allowed`; code exchanged, `POST /oauth/token` 200. |
+| 13:31:49–50 | `POST /mcp-oauth` initialize 200, `tools/list` 200. |
+| 13:34:05 | This session called `mcp__octocrawl-oauth__scrape` on `https://example.com` with `formats: ["markdown"]`: `status` `success`, `httpStatus` 200, `finalUrl` `https://example.com`, lane `http`. The hosted API logged `hosted_usage` under the new connection's key `oauth_O-_rAa61Oa…` and charged 1 credit (`http`). |
+
+Not repeated for this run: the disconnect check (done above with the CLI). Cost: 1 more credit, for the one HTTP page.
+
+Why the registration attempt came first, and why it was refused, is not known. The Claude Code binary's OAuth provider registers with `{client_name: "Claude Code (<server>)", redirect_uris: [<its redirect URI>], grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none"}`. It withholds its CIMD `client_id` ("registering via DCR") when its redirect URI "is not the document's loopback /callback". Every field but the redirect URI is one the server accepts. So the refusal was most likely `redirect_uris`, for example a redirect URI not yet set. Otherwise the request failed the content-type or JSON check before any field was read. Both are inferences from the binary's strings and the server's code, not something observed.
+
 ## Notes
 
 - **First `claude -p` runs failed for an unrelated reason.** The CLI's own Anthropic sign-in had expired ("OAuth session expired and could not be refreshed"). The same error came with `--strict-mcp-config` and no MCP server at all. It went away after Howard ran `claude auth login`; the scrape above ran after that. Octocrawl's `/oauth/token` saw no refresh request in that time. The 2026-10-13 record hit the same expired sign-in.

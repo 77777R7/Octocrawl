@@ -39,8 +39,9 @@ async function start(options: { now?: () => Date; store?: MemoryOAuthStore } = {
   const auth = createAuthRoutes({ identity: noIdentity, accounts, secret: SECRET, ...(options.now ? { now: options.now } : {}) })
   const store = options.store ?? new MemoryOAuthStore()
   const fetched: string[] = []
+  const lines: Array<Record<string, unknown>> = []
   const oauth = createOAuthRoutes({
-    store, secret: SECRET, current: auth.current, creditsLeft: async () => 742, ...(options.now ? { now: options.now } : {}),
+    store, secret: SECRET, current: auth.current, creditsLeft: async () => 742, ...(options.now ? { now: options.now } : {}), log: line => { lines.push(line) },
     clientMetadata: async (url) => { fetched.push(url); if (!(url in DOCUMENTS)) throw new Error('not found'); return DOCUMENTS[url] },
   })
   const server = createPreviewServer({ quota: { consume: async () => 'ok' }, staticDir: dir, amazonState: null, log: () => {}, visitorCookieSecret: SECRET, auth, oauth })
@@ -54,7 +55,7 @@ async function start(options: { now?: () => Date; store?: MemoryOAuthStore } = {
     await accounts.signIn({ uid, email, provider: 'github.com' }, sessionHash(SECRET, id), new Date(at.getTime() + 86_400_000), at)
     return `w2l_session=${id}`
   }
-  return { url, store, fetched, signIn }
+  return { url, store, fetched, signIn, lines }
 }
 
 function pkce() {
@@ -338,6 +339,30 @@ describe('tokens', () => {
 })
 
 describe('client registration', () => {
+  it('logs why a registration was refused, by field and kind of problem, never the addresses it was sent', async () => {
+    const { url, lines } = await start()
+    const register = (body: unknown) => fetch(`${url}/oauth/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const cases: Array<[unknown, Record<string, unknown>]> = [
+      [{ redirect_uris: [''] }, { outcome: 'invalid_redirect_uri', field: 'redirect_uris', problem: 'empty' }],
+      [{ redirect_uris: ['http://app.example/secret-path'] }, { outcome: 'invalid_redirect_uri', field: 'redirect_uris', problem: 'http_not_loopback' }],
+      [{ redirect_uris: ['cursor://anysphere.cursor-retrieval/oauth/callback'] }, { outcome: 'invalid_redirect_uri', field: 'redirect_uris', problem: 'scheme_cursor' }],
+      [{ redirect_uris: ['https://app.example/cb#frag'] }, { outcome: 'invalid_redirect_uri', field: 'redirect_uris', problem: 'fragment' }],
+      [{ redirect_uris: [] }, { outcome: 'invalid_redirect_uri', field: 'redirect_uris', problem: 'none' }],
+      [{ redirect_uris: ['https://app.example/cb'], token_endpoint_auth_method: 'client_secret_basic' }, { outcome: 'invalid_client_metadata', field: 'token_endpoint_auth_method', problem: 'client_secret_basic' }],
+      [{ redirect_uris: ['https://app.example/cb'], grant_types: ['client_credentials'] }, { outcome: 'invalid_client_metadata', field: 'grant_types' }],
+      [{ redirect_uris: ['https://app.example/cb'], token_endpoint_auth_method: 'Ada.Lovelace@example.org' }, { outcome: 'invalid_client_metadata', field: 'token_endpoint_auth_method', problem: 'other' }],
+    ]
+    for (const [body, expected] of cases) {
+      expect((await register(body)).status, JSON.stringify(body)).toBe(400)
+      expect(lines.at(-1), JSON.stringify(body)).toMatchObject({ event: 'w2l_oauth', step: 'register', ...expected })
+    }
+    const notJson = await fetch(`${url}/oauth/register`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'x' })
+    expect(notJson.status).toBe(400)
+    expect(lines.at(-1)).toMatchObject({ step: 'register', outcome: 'invalid_client_metadata', field: 'body' })
+    // What was sent stays out of the log: no address, path or scheme beyond its kind.
+    expect(JSON.stringify(lines)).not.toMatch(/app\.example|secret-path|anysphere|#frag|lovelace/i)
+  })
+
   it('registers public clients with https or loopback callbacks only, and limits registrations per address', async () => {
     const { url, store } = await start()
     const register = (body: unknown) => fetch(`${url}/oauth/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
