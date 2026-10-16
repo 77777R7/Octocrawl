@@ -7,7 +7,7 @@ Phase 1 of the roadmap's [PH · Hosted Octocrawl](../ROADMAP.md#ph--hosted-octoc
 | How | No `Authorization` header | `Authorization: Bearer oc_…` |
 | Identity | The address Cloudflare reports, hashed | The key's HMAC |
 | Pages a day | `W2L_KEYLESS_DAILY` (20) | the key's `dailyLimit` |
-| Lane | HTTP only (`fastMode` pinned; no screenshot) | HTTP, then the browser when the key's `browser` is true |
+| Lane | HTTP only (`fastMode` pinned, and an `agentHints` line says so when a page needed the browser or the call sent `fastMode: false`; no screenshot) | HTTP, then the browser when the key's `browser` is true |
 | Tools and routes | `scrape`, `map`; `POST /v1/scrape`, `POST /v1/map`, `GET /v1/scrapes/:id`, `GET /v1/maps/:id` | the same, plus `scrape_product` |
 | Starts a minute | 10 | 60 |
 

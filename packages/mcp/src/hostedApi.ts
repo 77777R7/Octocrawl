@@ -21,7 +21,7 @@ import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
-import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine } from '@w2l/api'
+import { closeIdleOnlyWhenUnread, createApp, createApiEngine, FAST_MODE_DECLINED_HINT, MAX_AGENT_HINTS, type ApiEngine } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION } from './server.js'
@@ -323,6 +323,23 @@ export function clientAddress(req: IncomingMessage, proxySecret: string | undefi
 }
 
 const LOCAL_HINT = 'run Octocrawl on your computer for this: npx octocrawl serve, then npx -y @octocrawl/mcp (https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint)'
+/** Why the gate read a scrape over HTTP alone, by what the caller lacks: it replaces the engine's "retry without fastMode",
+ * since a retry is pinned the same way. */
+const HTTP_ONLY_HINTS = {
+  keyless: `hosted Octocrawl reads over HTTP alone without a key, so the browser lane did not run; a key opens it (https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint), or ${LOCAL_HINT}`,
+  key: `this key has no browser lane, so hosted Octocrawl read the page over HTTP alone; ${LOCAL_HINT}`,
+  credits: `this account has fewer credits than a browser page (${CREDITS.browserPage}), so hosted Octocrawl read the page over HTTP alone; the monthly credits come back on the 1st, or ${LOCAL_HINT}`,
+} as const
+
+/** A pinned scrape's answer with the gate's reason in place of the fastMode hint, and said outright to a caller that sent fastMode: false. */
+function withHttpOnlyHint<T extends { agentHints?: readonly string[] }>(result: T, body: unknown, hint: string): T {
+  const hints = result.agentHints ?? []
+  const askedOff = (body as { fastMode?: unknown }).fastMode === false
+  if (!askedOff && !hints.includes(FAST_MODE_DECLINED_HINT)) return result
+  // The gate's line is kept within the engine's cap, in place of the engine's last one when the answer is full.
+  const others = hints.filter((line) => line !== FAST_MODE_DECLINED_HINT).slice(0, MAX_AGENT_HINTS - 1)
+  return { ...result, agentHints: [...others, askedOff ? `fastMode: false was not honoured: ${hint}` : hint] }
+}
 
 export function createHostedApi(config: HostedApiConfig): { server: HttpServer; engine: ApiEngine; close: () => Promise<void> } {
   if (config.hashKey.length < 32) throw new Error('hashKey must contain at least 32 characters')
@@ -467,7 +484,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
         ? { ...(body as Record<string, unknown>), storeInCache: false, ...(caller.browser ? {} : { fastMode: true }) }
         : body
       const req = parseScrapeRequest(pinned)
-      return c.json(await engine.scrape(req, { signal: c.req.raw.signal }), 200)
+      const result = await engine.scrape(req, { signal: c.req.raw.signal })
+      return c.json(caller.browser ? result : withHttpOnlyHint(result, body, HTTP_ONLY_HINTS[caller.kind]), 200)
     }
     await next()
     return c.res
@@ -535,7 +553,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const result = await engine.scrape(parseScrapeRequest(pinned), { signal: c.req.raw.signal })
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
           noteScrape(note, result)
-          response = c.json(result, 200)
+          response = c.json(browser ? result : withHttpOnlyHint(result, body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key), 200)
         }
       } else {
         note.url = requestedUrl(await c.req.raw.clone().json().catch(() => null))

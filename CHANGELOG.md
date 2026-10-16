@@ -21,6 +21,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- Hosted Octocrawl: a scrape read over HTTP alone because the caller has no browser lane (no key, a key without the browser lane, or an account with fewer than five credits) now says that, and what opens the browser lane, instead of `retry without fastMode`, which the gate would have pinned again. A caller that sent `fastMode: false` is told it was not honoured.
 - A single-page list request with an explicit `itemSelector` now chooses those items for Markdown, HTML and tables, rather than a neighbouring article or the whole page. An explicit region still takes precedence, and explicit list records respect region exclusions; original record positions and base URLs are retained. Whole-page requests, auto-detected lists and pagination keep their content-selection behaviour.
 
 - A captcha page a site serves itself is now judged `captcha`, not `bot_detected_generic`. A page counts as one when it has both:
