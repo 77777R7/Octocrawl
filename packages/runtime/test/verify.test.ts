@@ -21,6 +21,47 @@ const PAGES = [
 ]
 
 describe('the task verifier (ADR 0006)', () => {
+  it('does not let repeated complete records satisfy an explicitly distinct task count', () => {
+    const records = [
+      { values: { id: 'a', name: 'Glass vase', price: '12' }, missing: [] },
+      { values: { id: 'a', name: 'Glass vase', price: '12' }, missing: [] },
+      { values: { id: 'b', name: 'Clay bowl', price: '9' }, missing: [] },
+    ]
+    const check = { type: 'recordFields' as const, fields: ['name', 'price'], min: 3, uniqueBy: ['id'] }
+    expect(verify({ checks: [check] }, { status: 'success', list: { records } })).toMatchObject({ status: 'failed', checks: [{ observedCount: 2, asked: 3 }] })
+    expect(records).toHaveLength(3) // Verification never rewrites source records.
+    expect(verify({ checks: [{ type: 'recordFields', fields: ['name', 'price'], min: 3 }] }, { status: 'success', list: { records } }).status).toBe('passed')
+  })
+
+  it('uses explicit compound identities and refuses missing or non-scalar identity values', () => {
+    const records = [
+      { values: { url: 'a|b', sku: 'c', name: 'Same title', price: '0' }, missing: [] },
+      { values: { url: 'a', sku: 'b|c', name: 'Same title', price: '0' }, missing: [] },
+      { values: { url: 'a|b', sku: 'c', name: 'Same title', price: '99' }, missing: [] },
+      ...[null, '', '  ', {}, []].map(sku => ({ values: { url: 'a', sku, name: 'Title', price: '1' }, missing: [] })),
+      { values: { url: 'a', sku: 'd', name: 'Title', price: '1' }, missing: ['sku'] },
+    ]
+    const check = { type: 'recordFields' as const, fields: ['name', 'price'], min: 2, uniqueBy: ['url', 'sku'] }
+    expect(verify({ checks: [check] }, { status: 'success', list: { records } })).toMatchObject({ status: 'passed', checks: [{ observedCount: 2 }] })
+    const zeros = [{ values: { id: 0, name: 'Zero' }, missing: [] }, { values: { id: false, name: 'False' }, missing: [] }]
+    expect(verify({ checks: [{ ...check, fields: ['name'], uniqueBy: ['id'] }] }, { status: 'success', list: { records: zeros } })).toMatchObject({ status: 'passed', checks: [{ observedCount: 2 }] })
+    expect(verify({ checks: [check] }, { status: 'success' }, { partial: true })).toMatchObject({ checks: [{ passed: null }] })
+  })
+
+  it('does not join incomplete duplicates or invent identities for otherwise complete records', () => {
+    const records = [
+      { values: { id: 'a', name: 'Vase', price: null }, missing: ['price'] },
+      { values: { id: 'a', name: null, price: '12' }, missing: ['name'] },
+      { values: { name: 'Bowl', price: '9' }, missing: [] },
+      { values: { id: 'b', name: 'Cup', price: '0' }, missing: ['id'] },
+      { values: { id: 'c', name: 'Plate', price: '4' }, missing: [] },
+      { values: { id: 'c', name: 'Plate', price: '5' }, missing: [] },
+    ]
+    const before = JSON.stringify(records)
+    expect(verify({ checks: [{ type: 'recordFields', fields: ['name', 'price'], min: 2, uniqueBy: ['id'] }] }, { status: 'success', list: { records } })).toMatchObject({ status: 'failed', checks: [{ observedCount: 1, asked: 2 }] })
+    expect(JSON.stringify(records)).toBe(before)
+  })
+
   it("gives run-set.mjs's own verdict on every predicate of every task of the access set, on every page", () => {
     const seen = new Map<string, { pass: number; fail: number }>()
     let compared = 0

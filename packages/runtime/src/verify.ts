@@ -11,7 +11,7 @@ import { sha256Utf8 } from '@w2l/http-core'
 import { canonicalJson } from './evidenceRecord.js'
 
 /** Changes when checks are added or judged differently, as EXTRACTOR_VERSION does for the Markdown. */
-export const VERIFIER_VERSION = 'verify/4'
+export const VERIFIER_VERSION = 'verify/6'
 
 /**
  * What the checks read: the result's own fields (status, markdown, list, tables, json and any other a `field` check
@@ -97,8 +97,18 @@ function judge(check: VerifyCheck, view: VerifyView, partial: boolean): Judged {
         const values = (record as { values?: Record<string, unknown> } | null)?.values ?? {}
         const missing = (record as { missing?: unknown } | null)?.missing
         return check.fields.every((field) => !(Array.isArray(missing) && missing.includes(field)) && values[field] !== undefined && values[field] !== null && values[field] !== '')
-      }).length
-      return counted(whole, check.min, 'record', ' with every field')
+      })
+      if (check.uniqueBy === undefined) return counted(whole.length, check.min, 'record', ' with every field')
+      const keys = new Set<string>()
+      for (const record of whole) {
+        const { values = {}, missing = [] } = record as { values?: Record<string, unknown>; missing?: unknown }
+        const identity = check.uniqueBy.map(field => values[field])
+        // Missing identity never falls back to a title, price or text guessed by the verifier.
+        if (check.uniqueBy.some(field => Array.isArray(missing) && missing.includes(field)) || identity.some(value =>
+          typeof value === 'string' ? value.trim() === '' : typeof value === 'number' ? !Number.isFinite(value) : typeof value !== 'boolean')) continue
+        keys.add(JSON.stringify(identity))
+      }
+      return counted(keys.size, check.min, 'distinct record', ' with every field and identity key')
     }
     case 'field': {
       if (partial && !(check.path.split('.')[0]! in view)) return unavailable
