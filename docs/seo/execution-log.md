@@ -1,8 +1,8 @@
-# Octocrawl SEO first local batch — 2026-10-16
+# Octocrawl SEO execution and release record — 2026-10-16
 
-首轮本地修改与验证已完成，随后按用户指示补做 SEO-06/08/01。限定版本迁移稿已具备内容审阅证据；Google AI Mode 单轮12题已完成；Cloudflare事件可读但完整规则配置仍受限。以下状态已更新；不代表完整产品准确性验收或增长效果。
+当前状态回填：首轮可执行交付和两批网站发布已完成；整份任务尚未全部闭环。下面历史章节保留当时事实，当前状态以本表及文末“已核验发布与剩余任务”覆盖。Cloudflare完整规则读取和固定地区SERP受阻；外部资料完整核对未完成；独立日期Google效果复测已排期但未执行。本次状态回填仅更新执行日志与同步task文件，不新增源码改动或部署；用户后续已授权提交、PR和合并这批文档。
 
-## 工作位置与边界
+## 首轮工作位置与边界（历史基线）
 
 - Checkout: `/Users/howard07/.codex/worktrees/octocrawl-seo-20261016/w2l`
 - Branch: `codex/octocrawl-seo-20261016`
@@ -15,18 +15,19 @@
 
 ## 任务状态
 
-| ID | 状态 | 首轮结果 / 剩余边界 |
+| ID | 当前状态 | 已交付与剩余边界 |
 | --- | --- | --- |
-| SEO-00 | done | 独立主线分支；源码→构建→Cloudflare/Cloud Run 链与生产完整 SHA 已定位；原有工作未变 |
-| SEO-01 | done | 完成 25 URL 公开 HTTP 检查、8 页渲染、robots/sitemap、GSC索引/sitemap/重点URL只读检查；后续通过现有OAuth读到Security Events，4个旧Ray匹配BIC，另有10条verified AI Assistant BIC block；完整配置读取403、Google/Bing影响未知，提案未应用 |
-| SEO-02 | done | 导出相邻28天 GSC Web/AI报告、读取实际第一方日志、指标字典与最小埋点修补；历史不足/归因/任务正确性不可测部分明确，未编造完整漏斗 |
-| SEO-03 | done | 25 URL角色/重点页面意图映射、有限搜索及官方竞品资料复核；固定地区 Google SERP 被验证页阻挡，保留 backend 搜索发现且不声称排名 |
-| SEO-04 | done | 已检查元数据、H1、canonical、Schema、robots、sitemap、noindex、内链；未复现需重建的技术模板缺陷，保留现有基础；随实质内容更改 lastmod |
-| SEO-05 | done | 收紧3工具页相关承诺，增加2种格式同输入示例；补MCP验收与RAG保守导入；校正首页隐私FAQ；现有API/其他文章无须全面重写 |
-| SEO-06 | done | 官方firecrawl-js4.42.0真实调用本地API；公开目标正反对照、10个可复现受控目标用例、24合同fixture通过。v1范围稿进入内容审阅；v2直接替换失败，不主张全面兼容/服务性能领先 |
-| SEO-07 | done | 完成4个合成HTTP200/任务状态最小案例及确切复现命令；明确仅显示判定fixture，非实站抓取质量胜率 |
-| SEO-08 | done | 实际GSC AI Beta报告2次展示；12个固定问题与记录模板；网站/GitHub/npm资料核对。后续Google AI Mode单轮12/12回答、6名称出现、0官方正文引用；ChatGPT模型错误/Perplexity登录门槛保留，另两平台其余题未测；PyPI/目录刷新 deferred |
-| SEO-09 | done | 构建/typecheck/153项聚焦测试、实际本地HTTP接收、桌面/窄屏、正反对照、截图、diff与原工作边界检查完成 |
+| SEO-00 | done | 独立主线 worktree 与工作边界已核验；本次文档分支从 b063b69f 建立。 |
+| SEO-01 | in_progress | 公开检查、GSC基线、BIC事件关联及提案已完成；完整规则/顺序读取 blocked（403），Google/Bing影响未知，生产例外未应用。 |
+| SEO-02 | done | 字典、导出、历史覆盖缺口及最小埋点修补完成；不声称已有两个完整可比观察窗口或完整漏斗。 |
+| SEO-03 | in_progress | 映射、官方资料和定性优先级完成；固定地区 Google SERP 被验证页阻挡，未取得受控排名基线。 |
+| SEO-04 | done | 范围内元数据、Schema、规范入口及构建/线上检查完成；无已证实框架缺陷，不重建框架。 |
+| SEO-05 | done | 工具、API复制、MCP/RAG及首页身份表达已交付并发布；不扩展抓取能力。 |
+| SEO-06 | done | 4.42.0真实客户端限定v1验证完成，迁移文已发布；双方Hosted性能/成本比较仍为conditional，未做且未宣称。 |
+| SEO-07 | done | 四个合成判定fixture与复现步骤已发布；不等同于实站质量胜率，扩展区域案例尚未新增验证。 |
+| SEO-08 | in_progress | Google单轮12题已记录；ChatGPT/Perplexity受阻，后续日期未到；PyPI/目录完整刷新未做。 |
+| SEO-08A | in_progress | 诊断与网站修复上线 done；外部资料一致性 in_progress；Google纠错效果 conditional，等独立日期复测。 |
+| SEO-09 | done | 本地/CI/发布/线上证据已交付并在本次回填；索引和引用效果保留未完成。 |
 
 ## 审阅顺序
 
@@ -34,7 +35,7 @@
 2. [页面意图与选择](page-intent-map.md)：为何改这些页面、为何不重写其他页面。
 3. [衡量字典与真实计数](measurement.md)：原始数据粒度/覆盖、少量测试访问、事件能力边界。
 4. [AI可见性](ai-visibility.md) 与 [12题实际回答](ai-answer-sample-2026-10-16.md)：GSC Beta与平台抽样分别记录。另见[客户端验证](firecrawl-client-verification.md)、[Cloudflare日志与提案](cloudflare-access-2026-10-16.md)。
-5. [迁移草稿](drafts/firecrawl-migration.md)、[质量案例草稿](drafts/http-200-task-completion.md)：未注册路由，未加入 sitemap/llms，无生产可访问副本。
+5. [迁移草稿](drafts/firecrawl-migration.md)、[质量案例草稿](drafts/http-200-task-completion.md)保留审阅阶段文本；它们在PR #526转为两篇公开文章，当前发布地址和验证见文末。
 6. [事实证据表](claim-evidence.md)：逐项能力、版本、模式、时间和限制。
 
 ## 读者可见与行为修改
@@ -75,7 +76,7 @@ W2L_PUBLIC_PREVIEW_PORT=18876 npm run public:preview:local
 
 验证时曾遇到的测试设置问题：缺Playwright Chromium运行时、测试logger选项名和fixture DOM默认导航、测试定位器/事件观察时序；修正测试环境/脚本后实际结果如上。没有将失败当作通过，也没有因此改变产品抓取行为。
 
-## 外部状态与下一步
+## 首轮发布前外部状态（历史快照，已由文末发布汇总更新）
 
 - 本轮变更：本地；本地提交后用 `git log -1` 查看交付commit，`git diff bc47bf0..HEAD` 审阅全部改动。
 - Push：未执行。PR：未创建。Merge：未执行。Deploy/发布：未执行。生产Cloudflare/GSC/Cloud Run设置：未修改。
@@ -103,4 +104,40 @@ W2L_PUBLIC_PREVIEW_PORT=18876 npm run public:preview:local
 - `npm run build:public`、`npm run typecheck`、12文件153项聚焦测试PASS；新文章1440/390四视图均1H1、canonical/Schema正常、图片可读、无全页横向溢出；27索引URL标题/描述唯一、实际静态引用零断链。
 - [实体混淆分析](entity-confusion-analysis-2026-10-16.md)已完成；task md新增总表SEO-08A/P1与7.3的诊断、实施、复测闭环，SEO-06/09/T0观测交叉引用。原路径任务文件与本checkout版本相同。A诊断完成，B实施/C效果复测未完成；不将本批发布称为Google纠错完成。
 - 附加域名诊断题带自动页面上下文，答案回到Octocrawl但无官方引用；保留混杂，不并入原12题。直接来源访问的超时和web取回正文的范围均记录。
-- 发布前检查与后续发布原始证据保存在 `.w2l/seo-20261016/release/`。当前PR/merge/deploy待执行。
+- 发布前检查与后续发布原始证据保存在 `.w2l/seo-20261016/release/`。该段记录的是发布前阶段；两批PR/merge/deploy实际结果见下一节。
+
+## 已核验发布与剩余任务（2026-10-16状态回填）
+
+本节按已保存的发布原始记录及本次只读PR状态复核填写，不重跑产品测试，不把记录时间冒充本次线上复测。此前的“未推送/PR/部署/创建计划”只描述对应历史阶段。
+
+| 批次 | PR / merge | 源码 / 发布证据 | 验收范围 |
+| --- | --- | --- | --- |
+| 首轮网站、埋点和两篇内容 | [#526](https://github.com/77777R7/Octocrawl/pull/526)，11:21:08上海时间合并，merge `98127d4136614551de6841e67faa04a75b931e54` | source `0d1a066f8c35071aa7fd9c2a72b6e8bc6ca2a0e4`；[发布JSON](../../.w2l/seo-20261016/release/release-result.json)；[CI](https://github.com/77777R7/Octocrawl/actions/runs/38843966671) | 本地153项；远端247文件/2976通过/2跳过，Windows通过，崩溃恢复8/8；27URL公开核验 |
+| 品牌身份与准确入口 | [#527](https://github.com/77777R7/Octocrawl/pull/527)，14:13:49合并，merge `b063b69f7854907451dd8a4513a8d5e55f432f97` | source `13226e8faf7e813e1fe5617e609d743a11ad9a4c`；[发布JSON](../../.w2l/seo-08a/release/release-result.json)；[CI](https://github.com/77777R7/Octocrawl/actions/runs/38858816065) | 本地86项/272引用；远端同上；[线上交付](../../.w2l/seo-08a/release/public-delivery.json)：27URL、3重点HTML逐字节、10JS/CSS哈希及6桌面/手机视图通过 |
+
+两批构建源码树分别与合并后的主线树一致；没有将PR状态当成部署证明。第二批发布核验记录（14:19前）为 `w2l-public-preview-identity-13226e8f` / `r89identity` 接收100%流量，`r88seo` / `w2l-public-preview-seo-0d1a066f` 保留回滚。环境及密钥引用保留不变。当前文档整理没有重新读取生产流量，也没有再部署。
+
+已公开：[Firecrawl v1迁移](https://octocrawl.dev/blog/firecrawl-v1-migration/)、[HTTP200与任务完成案例](https://octocrawl.dev/blog/http-200-task-completion/)、[首页](https://octocrawl.dev/)、[介绍](https://octocrawl.dev/docs/)、[MCP](https://octocrawl.dev/docs/connect-mcp/)。源码与文章的限定版本/合成fixture范围不因发布而扩大。IndexNow通知200/27URL不证明已索引；第一批CDN清理OAuth401未执行，第二批未清缓存，实际版本文件匹配。
+
+### 未完成项和明确条件
+
+| 子项 | 状态 | 缺少什么 / 下一个动作 | 证据 |
+| --- | --- | --- | --- |
+| Cloudflare完整规则、顺序和配置 | blocked | 既有只读请求403；取得规则导出/可用读取权限后复核；当前事件不能证明Google/Bing影响 | [访问记录与未应用提案](cloudflare-access-2026-10-16.md) |
+| 生产BIC例外应用 | conditional | 先通过完整规则/表达式适用性/顺序复核，再获得单列生产授权；本批未改规则 | 同上 |
+| 固定地区Google SERP | blocked | 验证页阻挡；保留backend搜索发现，不能标受控地区排名完成 | [意图映射](page-intent-map.md) |
+| 两个完整观察28天窗口 | conditional | 已导出相邻日历窗，但历史覆盖不足；等待可比数据，无法补造前窗历史 | [衡量字典](measurement.md) |
+| ChatGPT / Perplexity完整抽样 | blocked | B1分别Model not found/注册门槛；各余11题未测，不以零代替 | [原始AI样本](ai-answer-sample-2026-10-16.md) |
+| PyPI和目录逐条一致性核对 | todo | 尚未完成新核对/具体错项与建议文字，不是已经证实缺权限；不改第三方条目 | [资料清单](ai-visibility.md) |
+| Hosted竞品性能/成本表及扩展区域质量案例 | conditional | 未取得双方可比实测/冻结样本或新增区域复现；现有限定迁移和最小fixture文章已完成 | [客户端记录](firecrawl-client-verification.md)、[质量文章](https://octocrawl.dev/blog/http-200-task-completion/) |
+| 新抓取/索引检查 | conditional | 2026-10-23 10:00上海时间；已创建计划，未执行 | [计划记录](../../.w2l/seo-08a/release/followups.json) |
+| 原12题独立日期复测/Google纠错验收 | conditional | 2026-11-13和11-20各10:00；每题分别判实体、能力、入口和官方正文引用；已排期不等于完成 | [原基线](ai-answer-sample-2026-10-16.md)、[计划记录](../../.w2l/seo-08a/release/followups.json) |
+| 外联/购买/第三方资料改写、60/90天自动运行 | deferred | 本批未授权，未执行；不扩大已有两项限定计划 | [当前task](2026-10-16-octocrawl-seo-task.md) |
+
+两项计划本次只读确认ACTIVE：`octocrawl`（一次10月23日检查）、`octocrawl-google-ai-12`（两次11月独立采样）。原12题及10月16日样本保持原文件不变，不追加当日重测来刷结果。
+
+### 本次文档同步范围
+
+- 从 `origin/main@b063b69f7854907451dd8a4513a8d5e55f432f97` 建立本地分支 `codex/seo-task-status-20261016`。
+- 维护本执行日志，并把同一份v1.2 task写入本checkout与 `/Users/howard07/Code/w2l/docs/seo/2026-10-16-octocrawl-seo-task.md`；其他历史报告/草稿保留原时点。
+- 原dirty checkout的根 `task.md`、tracked diff和其他未跟踪文件保留。状态回填完成时尚未提交、推送、创建PR或部署；用户随后已授权这批文档的提交与合并，实际提交状态以Git/PR为准。上述网站发布状态只属于#526/#527。
