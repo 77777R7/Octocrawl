@@ -3,7 +3,19 @@ import type { FetchResult } from '@w2l/contracts'
 import { toEvidenceRecord } from '@w2l/runtime'
 import { pageFromUserBrowser, type UserBrowserRead } from '../src/subjects/userBrowserPage.js'
 
+it('keeps a dedicated Skyscanner human challenge blocked when its short text looks extractable', () => {
+  const url = 'https://www.skyscanner.net/sttc/px/captcha-v2/index.html?url=L3JvdXRlcw=='
+  const html = '<html><head><title>Skyscanner</title></head><body><h1>Are you a person or a robot?</h1><p>Please don’t take this personally - some scripts and bots are remarkably lifelike these days!</p><div id="px-captcha"><iframe title="Human verification challenge"></iframe></div></body></html>'
+  expect(pageFromUserBrowser({ requestedUrl: 'https://www.skyscanner.net/routes/lond/pari/london-to-paris.html', finalUrl: url, status: 200, contentType: 'text/html', html, fetchedAt: '2026-10-15T09:20:55Z', wallMs: 0, sawGate: null, act: null, browser: 'synthetic captured-page counterpart' }, null, {})).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+})
+
 const PAGE = `<html><head><title>Members</title></head><body><article><h1>Members</h1>${'<p>The page behind the check, long enough to be read as an article. </p>'.repeat(4)}</article></body></html>`
+
+it('does not deliver extractable challenge text while the dedicated widget is still loading', () => {
+  const finalUrl = 'https://www.skyscanner.net/sttc/px/captcha-v2/index.html?url=L3JvdXRlcw=='
+  const html = '<html><head><title>Skyscanner</title></head><body><h1>Are you a person or a robot?</h1><p>Please don’t take this personally - some scripts and bots are remarkably lifelike these days!</p><div id="px-captcha"><div id="px-loader" class="px-loader-wrapper"></div></div></body></html>'
+  expect(pageFromUserBrowser({ requestedUrl: 'https://www.skyscanner.net/routes/lond/pari/london-to-paris.html', finalUrl, status: 200, contentType: 'text/html', html, fetchedAt: '2026-10-15T11:49:00Z', wallMs: 0, sawGate: null, act: null, browser: 'synthetic loading-challenge counterpart' }, null, {})).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+})
 
 /** The result a check stopped: blocked at a captcha, with the robots decision its lane signed. */
 const STOPPED = {
