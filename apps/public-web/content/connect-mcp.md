@@ -28,21 +28,13 @@ codex mcp add octocrawl --url https://mcp.octocrawl.dev/mcp --bearer-token-env-v
 
 Cursor takes that block in `.cursor/mcp.json` (`"Bearer ${env:OCTOCRAWL_API_KEY}"` reads it from the environment); OpenCode takes the same `headers` object inside its `remote` entry. Over REST, `curl -H 'authorization: Bearer oc_…' https://api.octocrawl.dev/v1/scrape`.
 
-ChatGPT, claude.ai and other clients can also [sign in instead of sending a key](#sign-in-instead-of-a-key).
+Clients can also [sign in instead of sending a key](#sign-in-instead-of-a-key).
 
 ## Sign in instead of a key
 
 `https://mcp.octocrawl.dev/mcp-oauth` is the same server for clients that sign in with OAuth instead of sending a key. The client opens an Octocrawl page where you sign in and choose Authorize. Its calls then spend your account's credits, as a key's do, and show under the client's name in [Activity](/dashboard/activity/). Each connection is listed under MCP connections on [API keys](/dashboard/keys/), where you can disconnect it; it also ends after 90 days unused. An account holds up to ten connections, besides its five keys.
 
 Use one URL per client: `/mcp` for keyless use or a key, `/mcp-oauth` for sign-in. These steps follow each client's own documentation. Sign-in is new on Octocrawl, and this page will mark each client once a connection from it has been checked.
-
-### ChatGPT
-
-In ChatGPT, open [chatgpt.com/plugins](https://chatgpt.com/plugins), select **+**, then **Add custom MCP server**. Give it a name, enter `https://mcp.octocrawl.dev/mcp-oauth` as the server URL, choose OAuth for authentication, confirm the warning and select **Create as a plugin**. Sign in to Octocrawl and choose Authorize when ChatGPT opens the sign-in page. Which accounts and workspaces may add custom MCP servers is set by ChatGPT's own plans and workspace policies. ([OpenAI's guide](https://developers.openai.com/apps-sdk/deploy/connect-chatgpt))
-
-### claude.ai
-
-In Claude, open **Customize › Connectors**, choose **Add custom connector** and enter `https://mcp.octocrawl.dev/mcp-oauth`. Leave the OAuth client ID and secret empty, or keep Claude's published identity where the dialog offers a choice. Sign in to Octocrawl and choose Authorize when Claude opens the sign-in page. On Team and Enterprise plans an Owner adds the connector under **Organization settings › Connectors**, and each member connects it. Claude says a connector added there is reached from Anthropic's servers and is also available in its desktop and mobile apps. ([Anthropic's guide](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp))
 
 ### Claude Code
 

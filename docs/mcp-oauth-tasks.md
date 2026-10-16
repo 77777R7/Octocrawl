@@ -118,6 +118,7 @@
 - [x] **D2** `server.json` 加第二个 remote `https://mcp.octocrawl.dev/mcp-oauth`。发版走 tag 加 Release workflow，那一步要 Howard 批准。
 - PR ④（D1、D2）的做法：
   - D1：新小节放在 “Add a key for more” 之后，ChatGPT、claude.ai、Claude Code、Cursor 各一节，步骤按各家官方文档写（2026-10-16 核对：developers.openai.com/apps-sdk/deploy/connect-chatgpt、support.claude.com 的 custom connectors 文章、code.claude.com/docs/en/mcp、cursor.com/docs/mcp），每节附原文档链接。没有客户端连过，所以页面不写“支持”或 “Verified”，只写“按各家文档、连过一个就标出来”。原来的 key 用法都保留。Cursor 官方文档没写登录在哪里触发，页面只写“在 Cursor 的 MCP 设置提示时登录”。ChatGPT 帮助中心那篇 developer mode 文章抓取时返回 403，所以按开发者文档现行的 `chatgpt.com/plugins` → **+** → **Add custom MCP server** 写。
+  - 2026-10-16 Howard 决定：文档页和 dashboard 都不再放 ChatGPT、claude.ai 的手动接入步骤（接入页只列编码 agent，Connect 页见 #542，文档页和 API keys 页的说明另开 PR）。调研过的同类产品里，只有 Firecrawl 和 Exa 提到这两个客户端，而且都是通过各自在 ChatGPT 插件目录和 claude.ai connector 目录的上架条目来接入。ROADMAP item 6 的 D4 验收里仍包含这两个客户端。
   - D2：`server.json` 的 `remotes` 加了 `/mcp-oauth`，用 Registry 的 2025-12-11 schema 校验通过。要等下次发版才会推到 Registry。
   - **上线顺序**：这页文档会随下一次 public-preview 部署上线，而 `/mcp-oauth` 由 hosted API（另一个 Cloud Run 服务）提供。两个服务要一起部署，或者先部署 hosted API，否则文档里的地址会返回 404。
 - [ ] **D3** 部署前检查（部署要先问 Howard）：
