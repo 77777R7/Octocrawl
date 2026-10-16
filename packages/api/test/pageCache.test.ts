@@ -85,6 +85,32 @@ async function finished(kind: 'batch' | 'crawl', id: string): Promise<CrawlPage[
 const HOUR = 3_600_000
 
 describe('page cache: scrape', () => {
+  it.each([true, false])('verifies the final cache usage in debug=%s and persists that verdict', async debug => {
+    const url = `${origin}/verified-usage-${debug}`
+    const first = await scrape({ url, debug, maxAge: HOUR })
+    expect(first.usage.requestCount).toBeGreaterThan(0)
+    const before = hits.get(`/verified-usage-${debug}`)
+    const hit = await scrape({ url, debug, maxAge: HOUR, verify: { checks: [
+      { type: 'field', path: 'usage.requestCount', equals: 0 },
+      { type: 'field', path: 'usage.bytesWire', equals: 0 },
+      { type: 'field', path: 'usage.bytesDecompressed', equals: 0 },
+      { type: 'field', path: 'usage.timings.requestMs', present: false },
+    ] } })
+    expect(hit.verification.status).toBe('passed')
+    expect(hit.readiness.state).toBe('ready')
+    expect(valid(hit.evidenceRecord)).toMatchObject({
+      rawSha256: first.evidenceRecord.rawSha256, fetchedAt: first.evidenceRecord.fetchedAt,
+      access: first.evidenceRecord.access, verification: { status: 'passed' }, readiness: { state: 'ready' },
+    })
+    const record = await engine.getScrape(hit.scrapeId)
+    expect(record?.verification).toEqual(hit.verification)
+    const failed = await scrape({ url, debug, maxAge: HOUR, verify: { checks: [{ type: 'field', path: 'usage.requestCount', min: 1 }] } })
+    expect(failed.verification.status).toBe('failed')
+    expect(failed.readiness.state).not.toBe('ready')
+    expect(failed.evidenceRecord.verification.status).toBe('failed')
+    expect(hits.get(`/verified-usage-${debug}`)).toBe(before)
+  })
+
   it('keys a stored page without the request\'s task contract, which only bounds the browser\'s wait (ADR 0006, ADR 0007)', async () => {
     const url = `${origin}/granted?contract`
     expect((await scrape({ url, maxAge: HOUR })).metadata).toMatchObject({ cacheState: 'miss' })

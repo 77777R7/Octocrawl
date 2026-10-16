@@ -111,6 +111,37 @@ describe('delivered scrape verification over HTTP, SDK and MCP', () => {
       expect(out.evidenceRecord.verification?.status).toBe('not_requested')
     })
 
+    it(`${surface} judges cache-hit usage after its final projection`, async () => {
+      const options = { formats: ['markdown' as const], maxAge: 3_600_000 }
+      const path = `/cached-${surface}`
+      const first = await scrape(options, path)
+      expect(first.usage.requestCount).toBeGreaterThan(0)
+      const before = reads
+      const hit = await scrape({ ...options, verify: { checks: [
+        { type: 'field', path: 'usage.requestCount', equals: 0 },
+        { type: 'field', path: 'usage.bytesDecompressed', equals: 0 },
+        { type: 'field', path: 'usage.timings.requestMs', present: false },
+        { type: 'markdownIncludes', text: 'Tide report' },
+      ] } }, path)
+      expect(hit.metadata.cacheState).toBe('hit')
+      expect(hit.usage).toMatchObject({ requestCount: 0, bytesDecompressed: 0 })
+      expect(hit.verification.status).toBe('passed')
+      expect(hit.readiness?.state).toBe('ready')
+      expect(hit.evidenceRecord.verification?.status).toBe('passed')
+      expect(hit.evidenceRecord.rawSha256).toBe(first.evidenceRecord.rawSha256)
+      expect(hit.evidenceRecord.fetchedAt).toBe(first.evidenceRecord.fetchedAt)
+
+      const failed = await scrape({ ...options, verify: { checks: [
+        { type: 'field', path: 'usage.requestCount', min: 1 },
+        { type: 'field', path: 'usage.bytesDecompressed', min: 1 },
+        { type: 'field', path: 'usage.timings.requestMs', present: true },
+      ] } }, path)
+      expect(failed.verification.status).toBe('failed')
+      expect(failed.readiness?.state).not.toBe('ready')
+      expect(failed.evidenceRecord.verification?.status).toBe('failed')
+      expect(reads).toBe(before)
+    })
+
     it(`${surface} keeps an unread page failed rather than completing its task`, async () => {
       const out = await scrape({ formats: ['markdown'], verify: { checks: [{ type: 'field', path: 'snapshot.httpStatus', equals: 404 }] } }, '/missing')
       expect(out.status).toBe('failed')
