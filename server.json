@@ -35,6 +35,10 @@
     {
       "type": "streamable-http",
       "url": "https://mcp.octocrawl.dev/mcp"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.octocrawl.dev/mcp-oauth"
     }
   ],
   "websiteUrl": "https://octocrawl.dev/docs/connect-mcp/?utm_source=mcp-registry&utm_medium=listing"
