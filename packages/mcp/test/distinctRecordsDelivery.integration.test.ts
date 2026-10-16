@@ -76,7 +76,7 @@ describe('distinct complete records through HTTP, SDK and MCP', () => {
       it(`${surface} rejects inflated distinct counts on ${debug ? 'full' : 'compact'} delivery without deleting source records`, async () => {
         const out = await scrape(contract(3, ['id']), debug)
         expect(out.status).toBe('success')
-        expect(out.verification).toMatchObject({ status: 'failed', verifier: 'verify/7', checks: [{ observedCount: 2, asked: 3 }] })
+        expect(out.verification).toMatchObject({ status: 'failed', verifier: 'verify/8', checks: [{ observedCount: 2, asked: 3 }] })
         expect(out.readiness.state).not.toBe('ready')
         expect(out.evidenceRecord.verification).toMatchObject({ status: 'failed', failed: ['recordFields'] })
         expect(out.evidenceRecord.readiness).toEqual(out.readiness)

@@ -92,6 +92,34 @@ describe('delivered scrape verification over HTTP, SDK and MCP', () => {
       expect(delivered.verification.status).toBe('passed')
     })
 
+    it(`${surface} checks own JSON keys and rejects prototype paths even on cache hits`, async () => {
+      const options = { formats: ['json' as const, { type: 'list' as const, itemSelector: '.reading', fields: [{ name: 'constructor', selector: '.place' }, { name: 'height', selector: '.height' }] }], maxAge: 3_600_000 }
+      const path = `/own-fields-${surface}`
+      const first = await scrape({ ...options, verify: { checks: [
+        { type: 'field', path: 'json.data.records.0.values.constructor', equals: 'North harbour' },
+        { type: 'field', path: 'json.data.records.1.values.height', equals: '3.0' },
+      ] } }, path)
+      expect(first).toMatchObject({ verification: { status: 'passed' }, readiness: { state: 'ready' }, evidenceRecord: { verification: { status: 'passed' } } })
+      expect(Object.hasOwn(first.list!.records[0]!.values, 'constructor')).toBe(true)
+      const before = reads
+      for (const field of ['json.data.records.0.values.__proto__.toString', 'json.data.constructor', 'json.data.records.constructor']) {
+        for (const present of [true, false]) {
+          const out = await scrape({ ...options, verify: { checks: [{ type: 'field', path: field, present }] } }, path)
+          expect(out.metadata.cacheState).toBe('hit')
+          expect(out.verification).toMatchObject({ status: present ? 'failed' : 'passed', checks: [{ data: true, passed: !present }] })
+          expect(out.readiness.state === 'ready').toBe(!present)
+          expect(out.evidenceRecord.verification?.status).toBe(out.verification.status)
+          expect(out.evidenceRecord.readiness).toEqual(out.readiness)
+          expect(out.json?.data).toEqual(first.json?.data)
+          expect(out.evidenceRecord.rawSha256).toBe(first.evidenceRecord.rawSha256)
+        }
+      }
+      expect(reads).toBe(before)
+      const absent = await scrape({ formats: ['json', { type: 'list', itemSelector: '.reading', fields: [{ name: 'place', selector: '.place' }] }], verify: { checks: [{ type: 'field', path: 'json.data.records.0.values.constructor', present: true }] } })
+      expect(Object.hasOwn(absent.list!.records[0]!.values, 'constructor')).toBe(false)
+      expect(absent).toMatchObject({ verification: { status: 'failed' }, evidenceRecord: { verification: { status: 'failed' } } })
+    })
+
     it(`${surface} preserves selected-list JSON, evidence and verdict`, async () => {
       const out = await scrape({
         formats: ['json', { type: 'list', itemSelector: '.reading', fields: [{ name: 'place', selector: '.place' }, { name: 'height', selector: '.height' }] }],

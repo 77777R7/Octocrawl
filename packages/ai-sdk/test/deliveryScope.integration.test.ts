@@ -90,6 +90,23 @@ describe('AI SDK contracts on the final tool result over HTTP', () => {
     expect(missing).toMatchObject({ verification: { status: 'failed' }, evidenceRecord: { verification: { status: 'failed' } } })
   })
 
+  it('judges prototype paths as absent while keeping supported indexes and the contract hash', async () => {
+    for (const path of ['markdown.constructor', 'markdown.__proto__.toString', 'tables.0.constructor', 'links.__proto__.constructor']) {
+      for (const present of [true, false]) {
+        const verify: NonNullable<ScrapeToolInput['verify']> = { checks: [{ type: 'field', path, present }] }
+        const out = await scrape({ formats: ['markdown', 'tables', 'links'], verify })
+        expect(out).toMatchObject({ status: 'success', verification: { status: present ? 'failed' : 'passed', contractSha256: contractSha256(verify) }, evidenceRecord: { verification: { status: present ? 'failed' : 'passed' } } })
+        expect((out.readiness as { state: string }).state === 'ready').toBe(!present)
+        expect(verifyTask(verify, out)).toEqual(out.verification)
+      }
+    }
+    const verify: NonNullable<ScrapeToolInput['verify']> = { checks: [
+      { type: 'field', path: 'tables.0.rows.1.0', equals: 'North harbour' },
+      { type: 'field', path: 'links.0', present: true },
+    ] }
+    expect(await scrape({ formats: ['markdown', 'tables', 'links'], verify })).toMatchObject({ verification: { status: 'passed', contractSha256: contractSha256(verify) }, readiness: { state: 'ready' }, evidenceRecord: { verification: { status: 'passed' } } })
+  })
+
   it('preserves not_requested and unread-page failure without claiming completion', async () => {
     expect(await scrape({})).toMatchObject({ verification: { status: 'not_requested' }, evidenceRecord: { verification: { status: 'not_requested' } } })
     const out = await scrape({ verify: { checks: [{ type: 'markdownIncludes', text: 'Tide report' }] } }, url.replace('/article', '/missing'))
