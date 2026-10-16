@@ -8,6 +8,8 @@ import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
+/** The scrape description's last sentence, which hosted Octocrawl drops since it does not serve get_scrape (hostedApi.ts). */
+export const SCRAPE_RECORD_HINT = " metadata.scrapeId names the call's record for get_scrape."
 export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch', 'import_login', 'list_logins', 'remove_login',
   'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
   'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter'] as const
@@ -233,7 +235,7 @@ export const TOOLS = [
   },
   {
     name: 'scrape',
-    description: 'Fetch one URL through the Octocrawl coverage ladder. Compact by default; set debug=true for the full audit. The result\'s warnings name what its content cannot vouch for: robots_overridden (robots.txt disallows the URL; a local server fetched it because you named it), or client_rendered_suspected when the HTTP page looks like a shell its scripts fill in and the browser rung found nothing better. Its agentHints, when present, say what to change next time (a login wall, a robots.txt rule, a gate, a wait). metadata.scrapeId names the call\'s record for get_scrape.',
+    description: 'Fetch one URL through the Octocrawl coverage ladder. Compact by default; set debug=true for the full audit. The result\'s warnings name what its content cannot vouch for: robots_overridden (robots.txt disallows the URL; a local server fetched it because you named it), or client_rendered_suspected when the HTTP page looks like a shell its scripts fill in and the browser rung found nothing better. Its agentHints, when present, say what to change next time (a login wall, a robots.txt rule, a gate, a wait).' + SCRAPE_RECORD_HINT,
     // Not marked read-only here: on a server on the person's machine, page `actions` can click and type, and `mode: authed`
     // does so signed in as them. Hosted Octocrawl refuses both and marks its copy read-only (hostedApi.ts).
     annotations: { title: 'Scrape a page', openWorldHint: true },

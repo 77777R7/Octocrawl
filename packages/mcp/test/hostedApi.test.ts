@@ -9,6 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
+import { TOOL_NAMES } from '../src/tools.js'
 import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore } from '../src/hostedCredits.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
@@ -194,6 +195,9 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
     const listed = (await holder.listTools()).tools
     expect(listed.map((tool) => tool.name)).toEqual(['scrape_product', 'scrape', 'map'])
     for (const tool of listed) expect(tool.annotations, tool.name).toMatchObject({ title: expect.any(String), readOnlyHint: true })
+    // No listed tool's description sends the client to a tool hosted Octocrawl does not serve (scrape's get_scrape, 2026-10-16).
+    const names = listed.map((tool) => tool.name)
+    for (const tool of listed) expect(TOOL_NAMES.filter((name) => name.includes('_') && !names.includes(name) && new RegExp(`\\b${name}\\b`).test(tool.description ?? '')), tool.name).toEqual([])
     const result = await holder.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
     expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject({ status: 'success' })
   } finally { await holder.close() }
