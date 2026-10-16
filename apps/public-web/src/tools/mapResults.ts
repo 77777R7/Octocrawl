@@ -3,6 +3,8 @@
  * pages found are listed under the card, each with where it was found, what was left out and why, a filter, and copies
  * as text or CSV. This page leaves the card to main.ts, which shows the page's links. */
 
+import { track } from '../analytics'
+
 type Via = 'start' | 'link' | 'sitemap'
 type MapLink = { url: string; title?: string; via: Via[]; lastmod?: string; robots: string }
 type Refused = Record<'duplicate' | 'collapsed' | 'hostDenied' | 'subtreeDenied' | 'pathDenied' | 'assetDenied' | 'robots' | 'robotsUnchecked' | 'overLimit', number>
@@ -175,12 +177,13 @@ function render(body: HTMLElement, heading: HTMLElement, reply: MapReply): void 
   copy.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(`${visible().map((link) => link.url).join('\n')}\n`)
+      track('result_copy', { view: 'map' })
       copy.textContent = 'Copied ✓'
     } catch { copy.textContent = 'Select to copy' }
     window.setTimeout(() => { copy.textContent = 'Copy' }, 2000)
   })
-  txt.addEventListener('click', () => download(`${visible().map((link) => link.url).join('\n')}\n`, `octocrawl-${name}-pages.txt`, 'text/plain;charset=utf-8'))
-  csv.addEventListener('click', () => download(`url,title,found_via,lastmod,robots\n${visible().map((link) => [link.url, link.title ?? '', link.via.join(' '), link.lastmod ?? '', link.robots].map(csvCell).join(',')).join('\n')}\n`, `octocrawl-${name}-pages.csv`, 'text/csv;charset=utf-8'))
+  txt.addEventListener('click', () => { track('result_download', { view: 'map-text' }); download(`${visible().map((link) => link.url).join('\n')}\n`, `octocrawl-${name}-pages.txt`, 'text/plain;charset=utf-8') })
+  csv.addEventListener('click', () => { track('result_download', { view: 'map-csv' }); download(`url,title,found_via,lastmod,robots\n${visible().map((link) => [link.url, link.title ?? '', link.via.join(' '), link.lastmod ?? '', link.robots].map(csvCell).join(',')).join('\n')}\n`, `octocrawl-${name}-pages.csv`, 'text/csv;charset=utf-8') })
 }
 
 /** Hands a whole-site read to /api/map while Whole site is chosen; `normalize` is main.ts's URL check, so both modes

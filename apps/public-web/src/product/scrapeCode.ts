@@ -1,6 +1,7 @@
 /** The call for what the reader chose on /scrape/ (scrapeState.ts), on the page it shows, in five ways. Pure functions
  * for the snippets, so they are tested without a page; mountScrapeCode puts them on it. */
 import { HOSTED_API, HOSTED_MCP, LOCAL_API, fieldsSchema, shellQuote } from '../getCode'
+import { track } from '../analytics'
 import type { Choice } from './scrapeState'
 
 export type Lang = 'curl' | 'mcp' | 'cli' | 'ts' | 'py'
@@ -111,6 +112,7 @@ export function mountScrapeCode(section: HTMLElement, url: string, follow: (list
   copy?.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(code.textContent ?? '')
+      track('docs_code_copy', { tab: lang })
       copy.textContent = 'Copied'
     } catch { copy.textContent = 'Select to copy' }
     window.setTimeout(() => { copy.textContent = 'Copy' }, 1800)

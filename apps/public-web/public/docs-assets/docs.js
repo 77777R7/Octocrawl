@@ -3,7 +3,7 @@
 const optedOut = navigator.doNotTrack === '1' || navigator.globalPrivacyControl === true
 function track(name, props = {}) {
   if (optedOut) return
-  const body = JSON.stringify({ name, props })
+  const body = JSON.stringify({ name, props: { path: location.pathname, ...props } })
   try { if (navigator.sendBeacon?.('/api/events', new Blob([body], { type: 'application/json' }))) return } catch {}
   fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true, credentials: 'same-origin' }).catch(() => {})
 }
@@ -33,11 +33,11 @@ document.addEventListener('click', async event => {
   if (!button) return
   const code = button.closest('.doc-code')?.querySelector('code')?.textContent
   if (!code) return
-  track('docs_code_copy', { path: location.pathname })
   const original = button.textContent
   const announcement = document.querySelector('#copy-announcement')
   try {
     await navigator.clipboard.writeText(code)
+    track('docs_code_copy', { path: location.pathname })
     button.textContent = 'Copied'
     if (announcement) announcement.textContent = 'Code copied to clipboard.'
   } catch {
