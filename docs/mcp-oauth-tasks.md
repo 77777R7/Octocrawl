@@ -114,8 +114,12 @@
 
 ## PR ④ 文档、Registry 和真实客户端验收
 
-- [ ] **D1** `apps/public-web/content/connect-mcp.md` 加 ChatGPT（developer mode 的 connector）和 claude.ai（custom connector）两个小节，URL 用 `/mcp-oauth`。Claude Code、Cursor 小节补一行 OAuth 的用法，原来的 key 用法保留。
-- [ ] **D2** `server.json` 加第二个 remote `https://mcp.octocrawl.dev/mcp-oauth`。发版走 tag 加 Release workflow，那一步要 Howard 批准。
+- [x] **D1** `apps/public-web/content/connect-mcp.md` 加 ChatGPT（developer mode 的 connector）和 claude.ai（custom connector）两个小节，URL 用 `/mcp-oauth`。Claude Code、Cursor 小节补一行 OAuth 的用法，原来的 key 用法保留。
+- [x] **D2** `server.json` 加第二个 remote `https://mcp.octocrawl.dev/mcp-oauth`。发版走 tag 加 Release workflow，那一步要 Howard 批准。
+- PR ④（D1、D2）的做法：
+  - D1：新小节放在 “Add a key for more” 之后，ChatGPT、claude.ai、Claude Code、Cursor 各一节，步骤按各家官方文档写（2026-10-16 核对：developers.openai.com/apps-sdk/deploy/connect-chatgpt、support.claude.com 的 custom connectors 文章、code.claude.com/docs/en/mcp、cursor.com/docs/mcp），每节附原文档链接。没有客户端连过，所以页面不写“支持”或 “Verified”，只写“按各家文档、连过一个就标出来”。原来的 key 用法都保留。Cursor 官方文档没写登录在哪里触发，页面只写“在 Cursor 的 MCP 设置提示时登录”。ChatGPT 帮助中心那篇 developer mode 文章抓取时返回 403，所以按开发者文档现行的 `chatgpt.com/plugins` → **+** → **Add custom MCP server** 写。
+  - D2：`server.json` 的 `remotes` 加了 `/mcp-oauth`，用 Registry 的 2025-12-11 schema 校验通过。要等下次发版才会推到 Registry。
+  - **上线顺序**：这页文档会随下一次 public-preview 部署上线，而 `/mcp-oauth` 由 hosted API（另一个 Cloud Run 服务）提供。两个服务要一起部署，或者先部署 hosted API，否则文档里的地址会返回 404。
 - [ ] **D3** 部署前检查（部署要先问 Howard）：
   - `public-preview-proxy` Worker 不缓存 `/oauth/*` 和 `/.well-known/oauth-*`（2026-10 有过它缓存 run.app 子请求 4 小时的记录，需要核实）；
   - octocrawl.dev 的 Cloudflare bot 防护不挡 Claude 的出口 `160.79.104.0/21`；
@@ -131,7 +135,9 @@
 3. Codex 和 Windsurf 的 OAuth 细节。
 4. 真实客户端是否都发 `resource`，以及 scope 会不会带 `mcp` 以外的值（比如 `offline_access`）。按 A4，`/oauth/authorize` 要求 `resource` 必须等于 `/mcp-oauth`，scope 只能是 `mcp` 或空，不符合就拒绝。如果 D4 里有客户端因此失败，再决定要不要放宽。
 5. ChatGPT 会不会按我们只公布 `none` 来选认证方式（它自己的文档写的是 `private_key_jwt`）。服务器不校验 `client_assertion`，所以理论上两种都能通过，要等 D4 实际连一次才能确认。
-6. MCP 2026-07-28 版改成了无状态（没有 `initialize`，有 `server/discover`），`/mcp` 现有实现与它兼不兼容，不在本清单范围内，只记一笔。
+6. ChatGPT 的 auth 文档说服务器要在根路径 `/.well-known/oauth-protected-resource` 提供 metadata，我们只在带路径后缀的 `/.well-known/oauth-protected-resource/mcp-oauth` 提供，根路径照旧返回 404（决定 4）。ChatGPT 也会读 401 里的 `resource_metadata`，按 MCP 规范应该够了，要等 D4 确认。
+7. claude.ai 对授权服务各端点的超时是 10 秒（发现、注册、换 token），刷新是 30 秒（claude.com/docs/connectors/building/authentication）。D3 的冷启动检查要按这个标准。
+8. MCP 2026-07-28 版改成了无状态（没有 `initialize`，有 `server/discover`），`/mcp` 现有实现与它兼不兼容，不在本清单范围内，只记一笔。
 
 ## 待我决定（Blocked on Howard）
 
@@ -139,4 +145,4 @@
 
 ## 下次从这里继续
 
-PR ①（77777R7/Octocrawl#534）和 PR ②（77777R7/Octocrawl#537）已合并。PR ③（C1、C2）在分支 `claude/mcp-oauth-connections` 上做完（合并前以 PR 页为准）。下一步是 PR ④：D1 文档和 D2 `server.json` 可以先写；D3 部署前检查和部署本身要 Howard 点头，D4 要在部署之后做。
+PR ①（#534）、PR ②（#537）、PR ③（#538）已合并，都在 77777R7/Octocrawl。PR ④ 的 D1、D2 在分支 `claude/mcp-oauth-docs` 上做完（合并前以 PR 页为准）。剩下 D3（部署前检查，含 6 个集合的 TTL 策略和 10 秒超时）、部署本身、D4 真实客户端验收和发版，都要 Howard 点头才开始。部署时 hosted API 和 public-preview 两个服务要一起上，见上面的“上线顺序”。
