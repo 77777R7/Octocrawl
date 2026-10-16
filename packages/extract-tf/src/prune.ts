@@ -213,7 +213,7 @@ function recommendationRegion(heading: Element): Element[] {
  * prevents is an LLM summarizing the wrong product's features; the failure it
  * must not cause is deleting the product being described.
  */
-export function pruneRecommendations(doc: Document): void {
+export function pruneRecommendations(doc: Document, options: { preserveOfferGrids?: boolean } = {}): void {
   // The element that holds the page's one h1 holds the product: the grid and
   // token triggers never cut it. A page of several h1s (cards that each carry
   // one) has no such title to keep.
@@ -233,7 +233,7 @@ export function pruneRecommendations(doc: Document): void {
   const containers = qsa(doc, 'div,section,ul,ol')
   for (const el of containers.reverse()) {
     if (!el.isConnected) continue
-    if (!holdsH1(el) && isProductGrid(el)) detach(el)
+    if (!options.preserveOfferGrids && !holdsH1(el) && isProductGrid(el)) detach(el)
   }
 
   // Trigger 3: id/class tokens, for carousels rendered without a heading and

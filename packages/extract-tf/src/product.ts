@@ -154,6 +154,30 @@ function firstOffer(product: Record<string, unknown>): Record<string, unknown> |
   return null
 }
 
+/** Whether the same first declared Product used for facts offers only aggregates.
+ * AggregateOffer.lowPrice is a bound across offers, not a single subject price.
+ * Keep its unlabelled offer grids; explicitly named recommendations still go.
+ */
+export function hasAggregateProductOffers(doc: Document): boolean {
+  for (const el of qsa(doc, 'script[type="application/ld+json"]')) {
+    let parsed: unknown
+    try { parsed = JSON.parse(el.textContent ?? '') } catch { continue }
+    const product = findProductNode(parsed)
+    if (product === null) continue
+    const value = product['offers']
+    const offers = Array.isArray(value) ? value : [value]
+    return offers.length > 0 && offers.every((offer: unknown) => {
+      if (typeof offer !== 'object' || offer === null) return false
+      const record = offer as Record<string, unknown>
+      const types = Array.isArray(record['@type']) ? record['@type'] : [record['@type']]
+      const lowPrice = asString(record['lowPrice'])?.trim()
+      return types.some((type: unknown) => typeof type === 'string' && /(?:^|[#/:])AggregateOffer$/i.test(type.trim())) &&
+        lowPrice !== undefined && /^\d+(?:\.\d+)?$/.test(lowPrice) && asString(record['price']) === null
+    })
+  }
+  return false
+}
+
 function factsFromJsonLd(doc: Document): Partial<ProductFacts> {
   for (const el of qsa(doc, 'script[type="application/ld+json"]')) {
     const text = (el.textContent ?? '').trim()

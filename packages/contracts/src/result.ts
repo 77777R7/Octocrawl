@@ -317,7 +317,10 @@ export interface ScreenshotEvidence {
  */
 export interface FetchWarning {
   /**
-   * Machine-readable code. `robots_overridden`: a robots.txt rule was set
+   * Machine-readable code. `source_data_error`: a publisher declaration tied to the
+   * requested target says data is unavailable, corroborated by an observed data gap;
+   * this is a source caveat, not an inferred visible error or a verified empty result.
+   * `robots_overridden`: a robots.txt rule was set
    * aside by a recorded override. `tls_unverified`: the certificate was not
    * verified at the caller's request (`skipTlsVerification`), so the content
    * cannot be attributed to the host with certainty. `client_rendered_suspected`:

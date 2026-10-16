@@ -94,6 +94,11 @@ function regionWaitOf(result: FetchResult, sha: string): { ready: boolean; empty
 
 /** The result's readiness: see Readiness in @w2l/contracts and ADR 0007's table. */
 export function readinessOf(result: FetchResult): Readiness {
+  // A declaration tied to this target and an observed data gap is different from a loading shell.
+  // A passed contract still means only its configured checks passed (it may ask for the error page).
+  if (result.verification?.status !== 'passed' && result.warnings?.some(warning => warning.code === 'source_data_error')) {
+    return readiness('not_served', ['source_data_error'], result)
+  }
   const verification = result.verification
   if (verification !== undefined && verification.status !== 'not_requested') {
     const verified = verifiedReadiness(result, verification)

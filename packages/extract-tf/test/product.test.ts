@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractTf } from '../src/index.js'
+import { extractTf, htmlToMarkdown } from '../src/index.js'
 import {
   collectProductFacts,
   findPriceElement,
@@ -640,4 +640,58 @@ describe('Amazon product adapter', () => {
       expect.objectContaining({ amount: expect.objectContaining({ value: '21.50' }), seller: expect.objectContaining({ value: 'Second Shop' }) }),
     ]))
   })
+})
+
+
+// An aggregate is a set of offers for the subject, not a single buy box.
+// The retained route page declared Product + AggregateOffer and its real
+// priced cards were all removed by the unlabelled recommendation heuristic.
+describe('aggregate offers are subject data', () => {
+  const cards = (prefix = 'Offer') => `<div class="offer-grid">${[1, 2, 3].map(i =>
+    `<div class="card"><a href="/offer/${prefix}-${i}">${prefix} ${i}, departing January ${i}</a><span class="price">£${20 + i}</span><p>Direct travel from North to South with carrier ${i}.</p></div>`).join('')}</div>`
+  const page = (offers: object, extra = '') => `<html><head><script type="application/ld+json">${JSON.stringify({ '@type': 'Product', name: 'North to South travel', offers })}</script></head><body><main><h1>North to South travel</h1><p>Compare the available travel offers for this route and choose the departure that suits your journey.</p>${cards()}${extra}</main></body></html>`
+  const aggregate = { '@type': 'AggregateOffer', lowPrice: 21, priceCurrency: 'GBP' }
+
+  it('keeps all aggregate offer cards and never attributes their first price to the subject', () => {
+    const out = extractTf.extract(page(aggregate))
+    const md = htmlToMarkdown(out.mainHtml, { baseUrl: 'https://example.test/travel' })
+    for (const i of [1, 2, 3]) {
+      expect(md).toContain(`Offer ${i}, departing January ${i}`)
+      expect(md).toContain(`https://example.test/offer/Offer-${i}`)
+      expect(md).toContain(`£${20 + i}`)
+    }
+    expect(out.product?.price).toBeNull()
+  })
+
+  it('still removes explicitly named recommendations beside aggregate offers', () => {
+    const out = extractTf.extract(page(aggregate, `<section><h2>Customers also viewed</h2>${cards('Unrelated')}</section>`))
+    expect(out.mainHtml).toContain('Offer 1, departing')
+    expect(out.mainHtml).not.toContain('Unrelated 1, departing')
+  })
+
+  it('still removes unlabelled recommendations from a single declared Offer', () => {
+    const out = extractTf.extract(page({ '@type': 'Offer', price: 84, priceCurrency: 'GBP' }))
+    expect(out.mainHtml).not.toContain('Offer 1, departing')
+    expect(out.product?.price?.value).toBe('84')
+  })
+
+  it('does not treat an untyped lowPrice object as aggregate evidence', () => {
+    expect(extractTf.extract(page({ lowPrice: 21, priceCurrency: 'GBP' })).mainHtml).not.toContain('Offer 1, departing')
+  })
+
+  it.each(['', 'unknown', -1])('does not protect grids using an invalid aggregate bound %s', lowPrice => {
+    expect(extractTf.extract(page({ ...aggregate, lowPrice })).mainHtml).not.toContain('Offer 1, departing')
+  })
+
+  it('does not let an AggregateOffer on a recommended product protect a PDP grid', () => {
+    const own = { '@type': 'Product', name: 'Own subject', offers: { '@type': 'Offer', price: 84 } }
+    const related = { '@type': 'Product', name: 'Related subject', offers: aggregate }
+    const html = `<script type="application/ld+json">${JSON.stringify({ '@graph': [own, related] })}</script><main><h1>Own subject</h1><p>A detailed description of the actual subject and the things the reader needs to know about it.</p>${cards()}</main>`
+    expect(extractTf.extract(html).mainHtml).not.toContain('Offer 1, departing')
+  })
+
+  it.each(['https://schema.org/AggregateOffer', 'schema:AggregateOffer'])(
+    'recognises the declared aggregate type %s', type => {
+      expect(extractTf.extract(page({ ...aggregate, '@type': type })).mainHtml).toContain('Offer 1, departing')
+    })
 })
