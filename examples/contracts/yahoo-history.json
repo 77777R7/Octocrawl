@@ -1,0 +1,90 @@
+{
+  "url": "https://finance.yahoo.com/quote/AAPL/history/",
+  "formats": [
+    "markdown",
+    "tables"
+  ],
+  "includeTags": [
+    "[data-testid=\"history-table\"]"
+  ],
+  "maxAge": 0,
+  "verify": {
+    "checks": [
+      {
+        "type": "field",
+        "path": "metadata.title",
+        "equals": "Apple Inc. (AAPL) Stock Historical Prices & Data - Yahoo Finance"
+      },
+      {
+        "type": "markdownIncludes",
+        "text": "Currency in USD"
+      },
+      {
+        "type": "field",
+        "path": "tables.0.columns",
+        "equals": 7
+      },
+      {
+        "type": "field",
+        "path": "tables.0.rows.0.0",
+        "equals": "Date"
+      },
+      {
+        "type": "field",
+        "path": "tables.0.rows.0.1",
+        "equals": "Open"
+      },
+      {
+        "type": "field",
+        "path": "tables.0.rows.0.2",
+        "equals": "High"
+      },
+      {
+        "type": "field",
+        "path": "tables.0.rows.0.3",
+        "equals": "Low"
+      },
+      {
+        "type": "field",
+        "path": "tables.0.rows.0.4",
+        "in": [
+          "Close",
+          "Close Close price adjusted for splits."
+        ]
+      },
+      {
+        "type": "field",
+        "path": "tables.0.rows.0.5",
+        "in": [
+          "Adj Close",
+          "Adj Close Adjusted close price adjusted for splits and dividend and/or capital gain distributions."
+        ]
+      },
+      {
+        "type": "field",
+        "path": "tables.0.rows.0.6",
+        "equals": "Volume"
+      },
+      {
+        "type": "tableRowsMin",
+        "tableIndex": 0,
+        "columns": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "min": 1
+      },
+      {
+        "type": "markdownCountMin",
+        "pattern": "^\\| (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{1,2}, [0-9]{4} \\| [0-9][0-9,]*\\.[0-9]+ \\| [0-9][0-9,]*\\.[0-9]+ \\| [0-9][0-9,]*\\.[0-9]+ \\| [0-9][0-9,]*\\.[0-9]+ \\| [0-9][0-9,]*\\.[0-9]+ \\| [0-9][0-9,]* \\|$",
+        "flags": "m",
+        "min": 1
+      }
+    ]
+  }
+}

@@ -1833,7 +1833,13 @@ function readVerifyCheck(value: unknown, at: string): VerifyCheck {
     case 'listRecordsMin': return { type, min: verifyCount(rec.min, `${at}.min`), ...(rec.path === undefined ? {} : { path: verifyText(rec.path, `${at}.path`) }) }
     case 'recordFields': {
       if (!Array.isArray(rec.fields) || rec.fields.length === 0 || rec.fields.length > MAX_RECORD_FIELDS) throw new RequestError(`${at}.fields must be a list of 1 to ${MAX_RECORD_FIELDS} field names`)
-      return { type, fields: rec.fields.map((field, i) => verifyText(field, `${at}.fields[${i}]`)), min: verifyCount(rec.min, `${at}.min`) }
+      let uniqueBy: string[] | undefined
+      if (rec.uniqueBy !== undefined) {
+        if (!Array.isArray(rec.uniqueBy) || rec.uniqueBy.length === 0 || rec.uniqueBy.length > MAX_RECORD_FIELDS) throw new RequestError(`${at}.uniqueBy must be a list of 1 to ${MAX_RECORD_FIELDS} field names`)
+        uniqueBy = rec.uniqueBy.map((field, i) => verifyText(field, `${at}.uniqueBy[${i}]`))
+        if (uniqueBy.some(field => field.trim() === '') || new Set(uniqueBy).size !== uniqueBy.length) throw new RequestError(`${at}.uniqueBy must contain nonblank, distinct field names`)
+      }
+      return { type, fields: rec.fields.map((field, i) => verifyText(field, `${at}.fields[${i}]`)), min: verifyCount(rec.min, `${at}.min`), ...(uniqueBy === undefined ? {} : { uniqueBy }) }
     }
     case 'field': {
       const path = verifyText(rec.path, `${at}.path`)
