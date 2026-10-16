@@ -109,6 +109,22 @@ describe('publisher error delivery through captured-page extraction, HTTP API, S
       expect(out.warnings?.some(warning => warning.code === 'source_data_error')).toBe(true)
     })
 
+    it(`${surface} retains source attribution when final projection changes the contract verdict`, async () => {
+      const verify: VerifyContract = { checks: [
+        { type: 'markdownIncludes', text: 'Laptops' },
+        { type: 'field', path: 'evidence.httpStatus', equals: 200 },
+      ] }
+      for (const debug of [false, true]) {
+        const out = await scrape('error', verify, debug)
+        expect(out.status).toBe('success')
+        expect(out.verification.status).toBe(debug ? 'passed' : 'failed')
+        expect(out.readiness).toMatchObject(debug ? { state: 'ready', basis: ['verified'] } : { state: 'not_served', basis: ['source_data_error'] })
+        expect(out.evidenceRecord.verification?.status).toBe(out.verification.status)
+        expect(out.evidenceRecord.readiness).toEqual(out.readiness)
+        expect(out.warnings?.some(warning => warning.code === 'source_data_error')).toBe(true)
+      }
+    })
+
     it(`${surface} leaves populated and recoverable controls unclassified`, async () => {
       for (const kind of ['products', 'recoverable']) {
         const out = await scrape(kind)
