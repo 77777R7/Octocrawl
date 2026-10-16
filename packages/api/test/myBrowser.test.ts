@@ -331,17 +331,14 @@ describe('the my-browser lane in a batch', () => {
   }, 30_000)
 
   it('says it waits for the person while they have not allowed the sites, and no longer once they have', async () => {
-    const answers: Answer[] = [...Array(6).fill({ answer: '', active: false }), { answer: 'allowed', active: true }]
+    // The person has not answered until the batch was seen waiting for them, however long it takes to get there.
+    const answers: Answer[] = [{ answer: '', active: false }]
     const chrome = fakeChrome(answers, { html: PAGE })
     const app = await setup(chrome)
     const started = await post(app, { urls: ['https://site.test/a'], lane: 'my-browser' })
     const id = String(started.body.id ?? started.body.taskId)
-    let waiting = false
-    for (let i = 0; i < 200 && !waiting; i++) {
-      waiting = (await (await app.request(`/v1/batches/${id}`)).json() as { waitingForApproval?: boolean }).waitingForApproval === true
-      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-    expect(waiting).toBe(true)
+    while ((await (await app.request(`/v1/batches/${id}`)).json() as { waitingForApproval?: boolean }).waitingForApproval !== true) await new Promise((resolve) => setTimeout(resolve, 10))
+    answers.push({ answer: 'allowed', active: true })
     const { report } = await settled(app, id)
     expect(report).toMatchObject({ status: 'completed' })
     expect(report.waitingForApproval).toBeUndefined()
