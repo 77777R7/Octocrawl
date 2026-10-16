@@ -16,6 +16,8 @@ import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
 const HASH_KEY = 'h'.repeat(40)
 const PROSE = 'The harbour office records tide height, wind and visibility for every hour of the day and publishes them each morning. '.repeat(4)
 const PAGE = `<!doctype html><html lang="en"><head><title>Tides</title></head><body><main><article><h1>Tides</h1><p>${PROSE}</p></article></main></body></html>`
+// A client-rendered shell: the http lane asks for the browser lane, which a caller without one never gets.
+const SHELL = '<!doctype html><html><head><title>App</title></head><body><div id="root"></div><noscript>Enable JavaScript to run this app.</noscript></body></html>'
 
 let site: Server
 let origin: string
@@ -23,6 +25,7 @@ beforeAll(async () => {
   site = createServer((req, res) => {
     if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /private\nAllow: /\n')
     if (req.url === '/missing') return void res.writeHead(404, { 'content-type': 'text/html' }).end('<!doctype html><title>Not found</title><h1>Not found</h1>')
+    if (req.url === '/shell') return void res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(SHELL)
     if (req.url === '/slow') return void setTimeout(() => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE), 1_500)
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE)
   })
@@ -246,6 +249,41 @@ it('an account\'s key spends credits by what each result returned, and says what
   // The site's daily total still counts every start; no per-key daily counter is kept for an account.
   expect([...credits.site.values()]).toEqual([7])
   expect(quota.counts.size).toBe(0)
+})
+
+it('a caller without the browser lane is told why a shell was read over HTTP alone, never to retry without fastMode', async () => {
+  const credits = new MemoryCreditsStore(3)
+  const { url } = await start({ keylessDaily: 10, credits, keys: { oc_http: { enabled: true, plan: 'free', dailyLimit: 5, browser: false }, oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const hintsOf = async (response: Response) => {
+    const body = await response.json() as { status: string; failureReason: string; lane: string; agentHints?: string[] }
+    expect(body).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http' })
+    expect(body.agentHints?.join(' ')).not.toContain('retry without fastMode')
+    return body.agentHints?.join(' ') ?? ''
+  }
+  // Keyless, whether fastMode is left out or sent as false: the gate pins it, and the hint says what opens the browser lane.
+  for (const body of [{ url: `${origin}/shell` }, { url: `${origin}/shell`, fastMode: false }]) {
+    const hints = await hintsOf(await post(url, '/v1/scrape', body))
+    expect(hints).toContain('without a key')
+    expect(hints).toContain('https://octocrawl.dev/docs/connect-mcp/')
+  }
+  expect(await hintsOf(await post(url, '/v1/scrape', { url: `${origin}/shell` }, { authorization: 'Bearer oc_http' }))).toContain('this key has no browser lane')
+  expect(await hintsOf(await post(url, '/v1/scrape', { url: `${origin}/shell` }, { authorization: 'Bearer oc_account' }))).toContain('fewer credits than a browser page')
+  // A page the HTTP lane reads in full carries no such hint, unless the caller asked for the browser lane by sending fastMode: false.
+  const page = await (await post(url, '/v1/scrape', { url: `${origin}/page` })).json() as { status: string; agentHints?: string[] }
+  expect(page.status).toBe('success')
+  expect(page.agentHints ?? []).toEqual([])
+  const asked = await (await post(url, '/v1/scrape', { url: `${origin}/page`, fastMode: false })).json() as { status: string; agentHints?: string[] }
+  expect(asked.status).toBe('success')
+  expect(asked.agentHints?.join(' ')).toContain('fastMode: false was not honoured')
+  // The MCP tool goes through the same gate and carries the same hint.
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`)))
+    const result = await client.callTool({ name: 'scrape', arguments: { url: `${origin}/shell`, fastMode: false } })
+    const answer = JSON.parse((result.content as { text: string }[])[0]!.text) as { agentHints?: string[] }
+    expect(answer.agentHints?.join(' ')).not.toContain('retry without fastMode')
+    expect(answer.agentHints?.join(' ')).toContain('without a key')
+  } finally { await client.close() }
 })
 
 it('a key revoked while its lookup is cached stops at its next start; reading a result still uses the cache', async () => {
