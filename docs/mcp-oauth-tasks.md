@@ -151,4 +151,8 @@
 
 ## 下次从这里继续
 
-PR ①（#534）、PR ②（#537）、PR ③（#538）已合并，都在 77777R7/Octocrawl。PR ④ 的 D1、D2 已合并（#539）。D3 的只读检查已做完，结果见 D3 下面。6 个 OAuth 集合的 `expireAt` TTL 已于 2026-10-16 开启（提交后状态为 CREATING，生效后为 ACTIVE；用 `gcloud firestore fields ttls list --project=octopus-w2l-20260924-7r7` 查看）。部署前还要 Howard 决定两件事：(1) 要不要给 Claude 网段加跳过 BIC 的规则；(2) 要不要给 public-preview 设 `min-instances=1`。然后部署 public-preview（hosted API 已经带资源服务上线了）、`purge_everything`、D4 真实客户端验收，最后发版（`server.json` 进 Registry）。
+PR ①（#534）、PR ②（#537）、PR ③（#538）已合并，都在 77777R7/Octocrawl。PR ④ 的 D1、D2 已合并（#539）。D3 的只读检查已做完，结果见 D3 下面。6 个 OAuth 集合的 `expireAt` TTL 已于 2026-10-16 开启，状态为 ACTIVE。Howard 决定暂不加 Claude 网段的 BIC 跳过规则，也暂不设 `min-instances`。
+
+**已部署（2026-10-16）**：public-preview 从 main `adee17f2`（含 #537–#539）构建镜像，部署为 revision `w2l-public-preview-oauth-adee17f2`，tag `r90oauth`，100% 流量；回滚用 `r89identity`。之后做了 `purge_everything`，`favicon.ico` 和 `oauth.css` 都是 MISS。线上检查：授权服务 metadata 返回 200 和 `no-store`；`mcp.octocrawl.dev/mcp-oauth` 返回 401，`WWW-Authenticate` 带 PRM；未登录访问 `/oauth/authorize` 会 303 到 `/signin/?next=…`（这一步之前服务器已经成功读取并校验了 ChatGPT 线上的 CIMD 文档）；用假 code 请求 `/oauth/token` 返回 `invalid_grant`；文档小节和 dashboard 的连接区块都已上线。hosted API 仍是 `h17oauthrs`。
+
+下一步是 D4：用真实客户端各连一次，然后发版（`server.json` 进 Registry）。两步都等 Howard 说开始。
