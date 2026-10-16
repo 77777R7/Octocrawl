@@ -79,12 +79,14 @@ describe('the account page\'s data', () => {
     expect([body.limit, body.retentionDays]).toEqual([1_000, 30])
   })
 
-  it('erases the account\'s keys, daily usage, request lines and credits from Firestore, a page at a time', async () => {
+  it('erases the account\'s keys, daily usage, request lines, credits and OAuth connections from Firestore, a page at a time', async () => {
     const root = 'projects/octocrawl-test/databases/(default)/documents'
     const deleted: string[] = []
     const left: Record<string, string[]> = {
       hostedApiKeys: ['k1', 'k2'].map(id => `${root}/hostedApiKeys/${id}`),
       creditUsage: ['account-0001-2026-10-12', 'account-0001-2026-10-13'].map(id => `${root}/creditUsage/${id}`),
+      // A connection's grant, its code and its tokens (oauth.ts), each kept with the account's uid.
+      ...Object.fromEntries(['oauthGrants', 'oauthCodes', 'oauthTokens', 'oauthRefresh'].map(collection => [collection, [`${root}/${collection}/${collection}-1`]])),
       requests: Array.from({ length: 450 }, (_, i) => `${root}/requestLog/account-0001/requests/${String(i).padStart(4, '0')}`),
     }
     const fetcher = (async (input: string | URL, init?: RequestInit) => {
@@ -107,7 +109,7 @@ describe('the account page\'s data', () => {
     }) as typeof fetch
     await new FirestoreAccountData('octocrawl-test', fetcher).erase('account-0001')
     expect(Object.values(left).flat()).toEqual([])
-    expect(deleted).toHaveLength(2 + 2 + 450 + 1)
+    expect(deleted).toHaveLength(2 + 2 + 4 + 450 + 1)
     // The balance first: a call under way cannot then settle and write usage back.
     expect(deleted[0]).toBe(`${root}/credits/account-0001`)
     await expect(new FirestoreAccountData('octocrawl-test', fetcher).erase('__x__')).rejects.toThrow(/malformed/)
@@ -122,6 +124,20 @@ describe('the account page\'s data', () => {
     await memory.erase('account-0001')
     expect([[...memory.balances.keys()], [...memory.usageDays.values()].map(day => day.uid), [...memory.keyRecords.values()].map(key => key.uid), [...memory.requestLines.keys()]])
       .toEqual([['account-0002'], ['account-0002'], ['account-0002'], ['account-0002']])
+  })
+
+  it('lists the account\'s own keys from Firestore, not the key records its OAuth connections act as', async () => {
+    const root = 'projects/octocrawl-test/databases/(default)/documents'
+    const fetcher = (async (input: string | URL) => {
+      const url = String(input)
+      if (url.startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
+      if (url.endsWith(':runQuery')) return Response.json([
+        { document: { name: `${root}/hostedApiKeys/${'a'.repeat(64)}`, fields: { uid: { stringValue: 'account-0001' }, label: { stringValue: 'laptop' }, prefix: { stringValue: 'oc_abcd' }, createdAt: { timestampValue: '2026-10-12T00:00:00Z' }, enabled: { booleanValue: true } } } },
+        { document: { name: `${root}/hostedApiKeys/oauth_grant-1`, fields: { uid: { stringValue: 'account-0001' }, label: { stringValue: 'ChatGPT (chatgpt.com)' }, kind: { stringValue: 'oauth' }, createdAt: { timestampValue: '2026-10-16T00:00:00Z' }, enabled: { booleanValue: true } } } },
+      ])
+      throw new Error(`unexpected ${url}`)
+    }) as typeof fetch
+    expect((await new FirestoreAccountData('octocrawl-test', fetcher).keys('account-0001')).map(key => key.label)).toEqual(['laptop'])
   })
 
   it('reads a request line\'s formats and duration from Firestore, and leaves them null on a line written before them', async () => {

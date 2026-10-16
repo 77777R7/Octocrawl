@@ -3,7 +3,7 @@
 (() => {
   const $ = (selector) => document.querySelector(selector)
   const params = new URLSearchParams(location.search)
-  const safeNext = (value) => (typeof value === 'string' && /^\/(?![/\\])[\x21-\x5b\x5d-\x7e]{0,300}$/.test(value) ? value : '/dashboard/')
+  const safeNext = (value) => (typeof value === 'string' && /^\/(?![/\\])[\x21-\x5b\x5d-\x7e]{0,2000}$/.test(value) ? value : '/dashboard/')
   const say = (element, text, error = false) => { element.textContent = text; element.classList.toggle('is-error', error) }
 
   const ERRORS = {
@@ -56,7 +56,7 @@
       const button = form.querySelector('button')
       button.disabled = true
       try {
-        const response = await fetch('/auth/email', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) })
+        const response = await fetch('/auth/email', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, next }) })
         if (response.ok) say(message, `We sent a sign-in link to ${email}. Open it in this browser. It works once, for an hour.`)
         else if (response.status === 400) say(message, 'Check the email address and try again.', true)
         else if (response.status === 429) say(message, 'Too many sign-in links were asked for. Wait an hour, or sign in with GitHub or Google.', true)

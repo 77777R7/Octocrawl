@@ -11,6 +11,9 @@
  *   GET  /api/account/activity            { requests, limit, retentionDays }: the latest request lines, newest first
  *   POST /api/account/keys                { label? }  →  { key, id }   (the key, once)
  *   POST /api/account/keys/{id}/revoke    the key stops within a minute (the hosted API caches lookups that long)
+ *
+ * An OAuth connection (oauth.ts) has a key record of its own in `hostedApiKeys`, with `kind: oauth`: it is not listed
+ * among the keys and does not count against the five.
  *   POST /api/account/run                 { endpoint: scrape, url, onlyMainContent?, formats? } as the home page's preview
  *                                         takes it, or { endpoint: map, url, search?, limit? }
  *                                         →  the hosted API's answer, with X-Credits-Used and X-Credits-Remaining
@@ -153,7 +156,8 @@ export class FirestoreAccountData implements AccountData {
       .filter(day => day.day >= since).sort((a, b) => a.day.localeCompare(b.day))
   }
   async keys(uid: string): Promise<KeyView[]> {
-    return (await this.byUid('hostedApiKeys', uid)).map(doc => ({
+    // An OAuth connection's key record (oauth.ts) is listed with its connection, not here, and is not one of the five.
+    return (await this.byUid('hostedApiKeys', uid)).filter(doc => doc.fields?.kind?.stringValue !== 'oauth').map(doc => ({
       id: doc.name.split('/').pop()!, label: doc.fields?.label?.stringValue ?? '', prefix: doc.fields?.prefix?.stringValue ?? '',
       createdAt: doc.fields?.createdAt?.timestampValue ?? '', enabled: doc.fields?.enabled?.booleanValue === true,
     })).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -237,9 +241,10 @@ export class FirestoreAccountData implements AccountData {
     // The balance first: a call already under way then cannot settle (its commit needs the balance), so it writes no
     // usage or request line after these are gone.
     await remove([`${this.resource}/credits/${uid}`])
-    // Keys and daily usage by the account's uid, a page at a time until none is left; the keys stop working within a
-    // minute, as a revoked one does (the hosted API caches lookups that long).
-    for (const collection of ['hostedApiKeys', 'creditUsage']) {
+    // Keys (OAuth connections' included), daily usage and the connections' grants, codes and tokens (oauth.ts) by the
+    // account's uid, a page at a time until none is left; the keys stop working within a minute, as a revoked one does
+    // (the hosted API caches lookups that long).
+    for (const collection of ['hostedApiKeys', 'creditUsage', 'oauthGrants', 'oauthCodes', 'oauthTokens', 'oauthRefresh']) {
       for (let pass = 0; ; pass++) {
         const docs = await this.byUid(collection, uid)
         if (docs.length === 0) break

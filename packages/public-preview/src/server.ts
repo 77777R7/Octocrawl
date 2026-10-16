@@ -14,6 +14,7 @@ import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES
 import { parseWaitlistEntry, WAITLIST_BODY_BYTES, WAITLIST_DAILY_SUBMISSIONS, type WaitlistStore } from './waitlist.js'
 import type { createAuthRoutes } from './auth.js'
 import type { createAccountRoutes } from './account.js'
+import type { createOAuthRoutes } from './oauth.js'
 
 export interface PreviewServerOptions {
   quota: PreviewQuota
@@ -46,6 +47,8 @@ export interface PreviewServerOptions {
   auth?: ReturnType<typeof createAuthRoutes>
   /** The account page's data (account.ts); needs `auth`. */
   account?: ReturnType<typeof createAccountRoutes>
+  /** The OAuth authorization server for MCP clients (oauth.ts); needs `auth`. */
+  oauth?: ReturnType<typeof createOAuthRoutes>
 }
 
 /** The addresses sign-in answers: its own routes, the provider's way back, and who is signed in. */
@@ -474,6 +477,17 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       return
     }
     if (pathname !== '/api/preview') {
+      // OAuth is answered on whatever host it reaches, without the canonical redirect: a client's POST to the token
+      // endpoint must not be sent elsewhere, and the issuer it checks is the public origin either way.
+      if (options.oauth && (pathname.startsWith('/oauth/') || pathname === '/.well-known/oauth-authorization-server')) {
+        try {
+          if (await options.oauth.handle(req, res, requestUrl, requestOrigin(req, publicOrigin), postFromSite(req, siteHost(req, publicOrigin)), visitorAddress(req))) return
+        } catch (error) {
+          log({ event: 'w2l_oauth_error', message: error instanceof Error ? error.message : String(error) })
+          if (!res.headersSent) res.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }).end(JSON.stringify({ error: 'temporarily_unavailable' }))
+          return
+        }
+      }
       if (options.auth && authPath(pathname)) {
         // A sign-in begun on another host (the run.app address) moves to the public one first, so its cookies land there.
         const redirect = pathname.startsWith('/api/') ? null : canonicalRedirect(req, publicOrigin, pathname)

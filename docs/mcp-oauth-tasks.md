@@ -48,37 +48,46 @@
 
 ## PR ② 授权服务（`packages/public-preview`，新文件 `oauth.ts`）
 
-- [ ] **A1** `GET /.well-known/oauth-authorization-server` 的内容：
+- [x] **A1** `GET /.well-known/oauth-authorization-server` 的内容：
   - `issuer` 为 `https://octocrawl.dev`；
   - authorization、token、registration、revocation 四个端点，都在 `/oauth/*` 下；
   - `response_types_supported:["code"]`、`grant_types_supported:["authorization_code","refresh_token"]`、`code_challenge_methods_supported:["S256"]`、`token_endpoint_auth_methods_supported:["none"]`、`scopes_supported:["mcp"]`（不列 `offline_access`）；
   - `client_id_metadata_document_supported:true`、`authorization_response_iss_parameter_supported:true`；
   - 开 CORS，`cache-control: no-store`。
-- [ ] **A2** client 识别。client_id 是 https URL 时按 CIMD 处理：
+- [x] **A2** client 识别。client_id 是 https URL 时按 CIMD 处理：
   - 防 SSRF：只允许 https 和公网 IP，限 5 KB、3 秒，结果缓存 24 小时；
   - 文件里的 `client_id` 必须等于这个 URL；
   - 已知的两个：ChatGPT `https://chatgpt.com/oauth/client.json`，Claude Code `https://claude.ai/oauth/claude-code-client-metadata`。
 
   否则查 `oauthClients/{id}`（DCR 注册的）。
-- [ ] **A3** `POST /oauth/register`（DCR，RFC 7591）：只接受公共客户端；`redirect_uris` 只能是 https 或 loopback；记录 `client_name` 和 `application_type`；按 IP 限速；90 天没用就过期。
-- [ ] **A4** `GET /oauth/authorize` 的校验顺序：client，然后 redirect_uri（完全匹配；loopback 不比端口），然后 `response_type=code`、S256 的 `code_challenge`、`resource` 等于 `https://mcp.octocrawl.dev/mcp-oauth`、scope 为 `mcp` 或空。redirect_uri 通过之前出的错只显示错误页，不跳转。没有 session 时 303 到 `/signin/?next=…`。
-- [ ] **A5** 授权页（HTML 由服务端渲染）：
+- [x] **A3** `POST /oauth/register`（DCR，RFC 7591）：只接受公共客户端；`redirect_uris` 只能是 https 或 loopback；记录 `client_name` 和 `application_type`；按 IP 限速；90 天没用就过期。
+- [x] **A4** `GET /oauth/authorize` 的校验顺序：client，然后 redirect_uri（完全匹配；loopback 不比端口），然后 `response_type=code`、S256 的 `code_challenge`、`resource` 等于 `https://mcp.octocrawl.dev/mcp-oauth`、scope 为 `mcp` 或空。redirect_uri 通过之前出的错只显示错误页，不跳转。没有 session 时 303 到 `/signin/?next=…`。
+- [x] **A5** 授权页（HTML 由服务端渲染）：
   - 内容：客户端名称（转义），以及经过校验的回调域名（“It will send you back to chatgpt.com”）；当前登录的邮箱，加“Not you?”；三条权限：MCP 工具（只读）、花你的 credits（显示本月余额）、一直连接直到断开或 90 天未用；连接记录说明，文案见 ROADMAP 上方的决定，不说“给应用一个 API key”；Cancel 和 Authorize 两个按钮。
   - localhost 回调要额外加本机警告。
   - 样式沿用站点风格。CSP 不允许内联 style，不在页面里放 `style=""`。头部要 `frame-ancestors 'none'`、`X-Frame-Options: DENY`、`no-store`。
-- [ ] **A6** `POST /oauth/authorize`：CSRF 句柄绑定 session 和请求参数哈希，只能用一次，10 分钟过期。
+- [x] **A6** `POST /oauth/authorize`：CSRF 句柄绑定 session 和请求参数哈希，只能用一次，10 分钟过期。
   - 用户点授权：建 `oauthGrants/{grantId}`；建专属 key 记录（`hostedApiKeys` 加 `kind:'oauth'`、`grantId`，label 如 `ChatGPT (chatgpt.com)`，没有明文）；生成 code（60 秒、一次性）；然后 302 到 `redirect_uri?code&state&iss=https://octocrawl.dev`。
   - 用户点取消：跳到 `error=access_denied`。
   - 一个账户超过 10 个连接时显示错误页，不签发 code。
   - **注意**：auth 页现在的 CSP 带 `form-action 'self'`（`auth.ts:542`），Chrome 会把它用到表单提交之后的重定向上，所以跳到 chatgpt.com 会被拦。授权页要么不设 form-action，要么先 303 到本站的一个 GET 页面，再由那个页面跳出去。选一种做法，并写测试证明它可行。
-- [ ] **A7** `POST /oauth/token`（form-encoded）：
+- [x] **A7** `POST /oauth/token`（form-encoded）：
   - `authorization_code` grant：校验 code、`code_verifier`、`redirect_uri`、`client_id`、`resource`；code 被重复使用时，撤销整个连接。
   - `refresh_token` grant：轮换。已经换掉的 refresh 又被拿来用时，撤销整个连接。
   - 返回 `{access_token, token_type:"Bearer", expires_in:3600, refresh_token, scope:"mcp"}`。
   - 出错时返回 `invalid_grant` 或 `invalid_request`。开 CORS，`no-store`。
-- [ ] **A8** `POST /oauth/revoke`（RFC 7009）。
-- [ ] **A9** Firestore 集合：`oauthClients`、`oauthCodes`、`oauthGrants`、`oauthTokens`、`oauthRefresh`，都设 TTL 字段。`auth.ts` 的删除账户流程里，也要删这个账户的 grant 和 token。
-- [ ] **A10** 在 `server.ts` 里给 `/oauth/*` 和 `/.well-known/oauth-authorization-server` 接线。
+- [x] **A8** `POST /oauth/revoke`（RFC 7009）。
+- [x] **A9** Firestore 集合：`oauthClients`、`oauthCodes`、`oauthGrants`、`oauthTokens`、`oauthRefresh`，都设 TTL 字段。`auth.ts` 的删除账户流程里，也要删这个账户的 grant 和 token。
+- [x] **A10** 在 `server.ts` 里给 `/oauth/*` 和 `/.well-known/oauth-authorization-server` 接线。
+- PR ② 的做法（和上面的描述不一致或上面没写的，以这里为准）：
+  - **A4 出错不自动跳转**：redirect_uri 校验通过之后，参数出错也只显示错误页，页面上给一个带 `error`、`state`、`iss` 的链接，要用户自己点才回到 app。原因是任何人都能用 DCR 注册回调，如果自动跳转，octocrawl.dev 就成了开放重定向器（RFC 9700 §4.11.2；审查时复现过）。只有用户在授权页上点了 Authorize 或 Cancel 之后才会 302。
+  - **A4 登录后回到授权请求**：授权请求的 URL 超过了原来 `safeNext` 300 字符的上限，所以服务端和 `account.js` 都把上限放宽到 2000。email 登录原来完成后固定跳到 `/dashboard/`，现在 `POST /auth/email` 也收 `next`，存在签名 cookie `w2l_signin_next` 里（路径 `/auth/email`，1 小时），只在同一个浏览器里打开链接时有效。
+  - **A5 布局**（2026-10-16 Howard 按参考图定的）：页面中间一张卡片。顶部是 Octocrawl 的章鱼标（`/assets/octopus-160.webp`）和客户端首字母方块，中间连一条线；客户端的 logo 不加载，因为 CSP 的 `img-src 'self'` 不允许外部图片。下面依次是一句 “X would like to connect to your Octocrawl account”、回调域名、“Your account will be used to:” 加三条带勾的权限、主按钮 Authorize、文字样式的 Decline，最后是登录邮箱、Sign out 和连接记录说明。样式在 `apps/public-web/public/docs-assets/oauth.css`。
+  - **A6 选的做法**：授权页的 CSP 不设 `form-action`，保留 `frame-ancestors 'none'` 和 `X-Frame-Options: DENY`。2026-10-16 在本机 Chromium（应用内浏览器）里点了一次 Authorize，POST 之后的 302 跳到了 `http://localhost:53682/callback?code=…&state=…&iss=…`，没有被拦截。
+  - **A6 连接计数**：grant 在第一次换到 token 的同一个 commit 里标记 `connected:true`，只有这样的 grant 才算 10 个连接里的一个。同意了但从没换过 code 的 grant 不占名额（审查时发现，客户端换取失败 10 次就会把账户锁 90 天）。几个 grant 几乎同时换 code 时，总数可能略超过 10。
+  - **A6 连接 key 记录**：`hostedApiKeys/oauth_{grantId}`，字段是账户 key 的那些，再加 `kind:"oauth"`、`grantId`，label 如 `ChatGPT (chatgpt.com)`。`account.ts` 的 key 列表和 5 个上限都不算这类记录（这是 C2 的一半，提前在这里做了，否则 A6 一上线就会占用用户的 key 名额）。
+  - **A7**：ChatGPT 的 CIMD 文档写的是 `token_endpoint_auth_method:"private_key_jwt"`，`token_endpoint_auth_methods_supported` 里有 `none`。这里只公布 `none`。如果客户端仍然附带 `client_assertion`，服务器不校验它，当作公共客户端处理。
+  - **A9**：多了一个集合 `oauthNonces`（授权页 CSRF 句柄的一次性记录）。所有集合都有 `expireAt` 作为 TTL 字段；`oauthTokens` 另有 `expiresAt`，这是 hosted API 读的字段。删除账户时清掉 `oauthGrants`、`oauthCodes`、`oauthTokens`、`oauthRefresh` 和连接 key 记录。
 - 验收：`oauth.test.ts` 的规模和 `auth.test.ts` 相当，覆盖：
   - PKCE 错误时拒绝；
   - redirect 完全匹配，loopback 换端口仍能通过；
@@ -105,7 +114,8 @@
 - [ ] **D3** 部署前检查（部署要先问 Howard）：
   - `public-preview-proxy` Worker 不缓存 `/oauth/*` 和 `/.well-known/oauth-*`（2026-10 有过它缓存 run.app 子请求 4 小时的记录，需要核实）；
   - octocrawl.dev 的 Cloudflare bot 防护不挡 Claude 的出口 `160.79.104.0/21`；
-  - public-preview 冷启动能否在 Claude 的 10 秒超时内响应（查 min-instances）。
+  - public-preview 冷启动能否在 Claude 的 10 秒超时内响应（查 min-instances）；
+  - 给 `oauthClients`、`oauthGrants`、`oauthCodes`、`oauthTokens`、`oauthRefresh`、`oauthNonces` 在 Firestore 上配 `expireAt` 的 TTL 策略（PR ② 只写了字段，没有配策略）。
 - [ ] **D4** 部署之后用真实客户端各连一次：ChatGPT developer mode、claude.ai custom connector、Claude Code（`/mcp` 登录）、Cursor；能做的话加上 VS Code、Codex。每个都要做两件事：一次 `scrape`，然后去 dashboard 断开，确认之后返回 401。记录写到 `research/hosted/<YYYY-MM-DD>-mcp-oauth-clients-<commit>.md`，写明客户端版本、走的是 CIMD 还是 DCR、代理还是直连、命令、commit。
 - 验收：ROADMAP PH item 6 的状态行引用这份记录。
 
@@ -114,7 +124,9 @@
 1. ChatGPT 是否要求工具声明 `securitySchemes`，还是 401 就够。**2026-10-16 查过，按文档做了（R4）。** 查的是 https://developers.openai.com/apps-sdk/build/auth 和 https://developers.openai.com/plugins/reference：文档建议每个工具都声明 `securitySchemes`（即使整个服务器用同一个策略），放在工具对象顶层，参考页另列 `_meta["securitySchemes"]` 作为只读 `_meta` 的客户端的镜像；401 的 `WWW-Authenticate` 用来让 ChatGPT 找到 metadata。文档没有说只返回 401、不声明 `securitySchemes` 行不行，这一点仍未核实，要等 D4 用真实的 ChatGPT 连一次才知道。
 2. Cursor 和 VS Code 是否支持 CIMD，以及它们的回调地址。论坛和 issue 里说 VS Code 用 `https://vscode.dev/redirect` 加 `127.0.0.1:33418`，Cursor 桌面版用 `http://localhost:8787/callback`。不确定之前 DCR 必须保留。
 3. Codex 和 Windsurf 的 OAuth 细节。
-4. MCP 2026-07-28 版改成了无状态（没有 `initialize`，有 `server/discover`），`/mcp` 现有实现与它兼不兼容，不在本清单范围内，只记一笔。
+4. 真实客户端是否都发 `resource`，以及 scope 会不会带 `mcp` 以外的值（比如 `offline_access`）。按 A4，`/oauth/authorize` 要求 `resource` 必须等于 `/mcp-oauth`，scope 只能是 `mcp` 或空，不符合就拒绝。如果 D4 里有客户端因此失败，再决定要不要放宽。
+5. ChatGPT 会不会按我们只公布 `none` 来选认证方式（它自己的文档写的是 `private_key_jwt`）。服务器不校验 `client_assertion`，所以理论上两种都能通过，要等 D4 实际连一次才能确认。
+6. MCP 2026-07-28 版改成了无状态（没有 `initialize`，有 `server/discover`），`/mcp` 现有实现与它兼不兼容，不在本清单范围内，只记一笔。
 
 ## 待我决定（Blocked on Howard）
 
@@ -122,4 +134,4 @@
 
 ## 下次从这里继续
 
-PR ① 的 R1–R4 已在分支 `claude/mcp-oauth-resource-server` 上做完（PR 合并前以 PR 页为准）。PR ① 合并后，等 Howard 说再从新分支开始 PR ② 的 A1；写入 `oauthTokens` 和连接 key 记录时照上面“PR ① 定下的读取约定”。另外 A6 建连接 key 记录之前要先处理：`account.ts` 创建 key 时按 `byUid('hostedApiKeys')` 数 5 个上限（约 389 行），连接记录也会被数进去，与决定 2 不符。
+PR ①（R1–R4）已合并（77777R7/Octocrawl#534）。PR ②（A1–A10）在分支 `claude/mcp-oauth-authorization-server` 上做完（合并前以 PR 页为准）。下一步是 PR ③ 的 C1：`/api/account/connections` 按 uid 列出 `oauthGrants`（只列 `connected:true` 的），撤销时调用 `oauth.ts` 的 `disconnect`。C2 里“5 个上限不计 OAuth 连接”这一半已经在 PR ② 做了。

@@ -6,7 +6,8 @@
  *   GET  /auth/github, /auth/google   asks Firebase for the provider's sign-in address and sends the browser there,
  *                                     with Firebase's session id in a short signed cookie
  *   GET  /__/auth/handler             where the provider sends the browser back: Firebase checks the answer
- *   POST /auth/email                  Firebase sends a sign-in link to the address given
+ *   POST /auth/email                  { email, next? }: Firebase sends a sign-in link to the address given; `next` is where the
+ *                                     sign-in goes on when the link is opened in the same browser
  *   GET  /auth/email/finish           the link's page: a button, so a mail scanner that opens links signs no one in
  *   POST /auth/email/finish           signs in with the link's code
  *   POST /auth/logout                 ends the session
@@ -247,6 +248,8 @@ export function creditCarryKey(secret: string, email: string): string {
 export const SESSION_COOKIE = 'w2l_session'
 const OAUTH_COOKIE = 'w2l_oauth'
 const EMAIL_COOKIE = 'w2l_signin_email'
+/** Where an email sign-in goes on, as the provider buttons carry it in their state: an OAuth authorization, say. */
+const NEXT_COOKIE = 'w2l_signin_next'
 const ACCOUNT_HINT_COOKIE = 'w2l_account'
 const LINK_COOKIE = 'w2l_link'
 const DELETE_COOKIE = 'w2l_delete'
@@ -265,7 +268,7 @@ const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/
 
 const NO_STORE = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' }
 
-function cookieValue(req: IncomingMessage, name: string): string | null {
+export function cookieValue(req: IncomingMessage, name: string): string | null {
   const raw = req.headers.cookie?.split(';').map(part => part.trim()).find(part => part.startsWith(`${name}=`))?.slice(name.length + 1)
   return raw === undefined || raw === '' ? null : raw
 }
@@ -299,9 +302,10 @@ function unseal(secret: string, value: string | null): string | null {
 }
 export function sessionHash(secret: string, id: string): string { return createHmac('sha256', secret).update(`session:${id}`).digest('hex') }
 
-/** A path on this site to come back to; anything else (another host, `//host`, a backslash) is the dashboard. */
+/** A path on this site to come back to; anything else (another host, `//host`, a backslash) is the dashboard. Long
+ * enough for an OAuth authorization request (oauth.ts), whose query carries a client's URL, a challenge and its state. */
 export function safeNext(value: string | null | undefined): string {
-  return typeof value === 'string' && /^\/(?![/\\])[\x21-\x5b\x5d-\x7e]{0,300}$/.test(value) ? value : '/dashboard/'
+  return typeof value === 'string' && /^\/(?![/\\])[\x21-\x5b\x5d-\x7e]{0,2000}$/.test(value) ? value : '/dashboard/'
 }
 
 function cookie(origin: string, name: string, value: string, path: string, maxAgeSeconds: number): string {
@@ -509,14 +513,21 @@ export function createAuthRoutes(options: AuthOptions) {
       if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }).end(); return true }
       if (!sameOrigin) { res.writeHead(403, NO_STORE).end(); return true }
       let email = ''
-      try { email = (await readForm(req)).get('email')?.trim().toLowerCase() ?? '' } catch { email = '' }
+      let next: string | null = null
+      try {
+        const form = await readForm(req)
+        email = form.get('email')?.trim().toLowerCase() ?? ''
+        next = form.get('next')
+      } catch { email = '' }
       if (!EMAIL.test(email)) { res.writeHead(400, { ...NO_STORE, 'content-type': 'application/json' }).end(JSON.stringify({ error: 'invalid_email' })); return true }
       const at = now().getTime()
       if (!sendAllowed([`a:${visitor}`, `e:${email}`], at)) { res.writeHead(429, { ...NO_STORE, 'content-type': 'application/json' }).end(JSON.stringify({ error: 'too_many_requests' })); return true }
       try {
         await options.identity.sendEmailLink(email, `${origin}/auth/email/finish`)
         log({ event: 'w2l_auth', step: 'email_link', outcome: 'sent' })
-        res.writeHead(200, { ...NO_STORE, 'content-type': 'application/json', 'set-cookie': cookie(origin, EMAIL_COOKIE, sign(options.secret, 'email', Buffer.from(email).toString('base64url')), '/auth/email', 3_600) })
+        // A way on that is not a path on this site is not kept: the sign-in then goes to the dashboard.
+        const keepNext = next !== null && next !== '/dashboard/' && safeNext(next) === next ? [cookie(origin, NEXT_COOKIE, sign(options.secret, 'next', Buffer.from(next).toString('base64url')), '/auth/email', 3_600)] : []
+        res.writeHead(200, { ...NO_STORE, 'content-type': 'application/json', 'set-cookie': [cookie(origin, EMAIL_COOKIE, sign(options.secret, 'email', Buffer.from(email).toString('base64url')), '/auth/email', 3_600), ...keepNext] })
           .end(JSON.stringify({ sent: true }))
       } catch (error) {
         log({ event: 'w2l_auth', step: 'email_link', outcome: error instanceof SignInRefused ? error.code : 'unavailable' })
@@ -553,7 +564,9 @@ export function createAuthRoutes(options: AuthOptions) {
       try {
         const user = await linkWaiting(req, origin, await options.identity.signInWithEmailLink(email, code))
         log({ event: 'w2l_auth', step: 'sign_in', provider: 'emailLink', outcome: 'ok' })
-        await finishSignIn(req, res, origin, user, [cookie(origin, EMAIL_COOKIE, '', '/auth/email', 0), cookie(origin, LINK_COOKIE, '', '/', 0)], user.linked ? `/dashboard/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : '/dashboard/')
+        const kept = verify(options.secret, 'next', cookieValue(req, NEXT_COOKIE))
+        const next = safeNext(kept === null ? null : Buffer.from(kept, 'base64url').toString('utf8'))
+        await finishSignIn(req, res, origin, user, [cookie(origin, EMAIL_COOKIE, '', '/auth/email', 0), cookie(origin, NEXT_COOKIE, '', '/auth/email', 0), cookie(origin, LINK_COOKIE, '', '/', 0)], user.linked ? `/dashboard/?linked=${user.linked[0] === 'github.com' ? 'github' : 'google'}` : next)
       } catch (error) { fail(error instanceof SignInRefused ? error.code : 'unavailable', 'emailLink', error) }
       return true
     }
