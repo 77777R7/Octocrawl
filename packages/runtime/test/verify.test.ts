@@ -48,6 +48,20 @@ describe('the task verifier (ADR 0006)', () => {
     expect(verify({ checks: [check] }, { status: 'success' }, { partial: true })).toMatchObject({ checks: [{ passed: null }] })
   })
 
+  it('does not join incomplete duplicates or invent identities for otherwise complete records', () => {
+    const records = [
+      { values: { id: 'a', name: 'Vase', price: null }, missing: ['price'] },
+      { values: { id: 'a', name: null, price: '12' }, missing: ['name'] },
+      { values: { name: 'Bowl', price: '9' }, missing: [] },
+      { values: { id: 'b', name: 'Cup', price: '0' }, missing: ['id'] },
+      { values: { id: 'c', name: 'Plate', price: '4' }, missing: [] },
+      { values: { id: 'c', name: 'Plate', price: '5' }, missing: [] },
+    ]
+    const before = JSON.stringify(records)
+    expect(verify({ checks: [{ type: 'recordFields', fields: ['name', 'price'], min: 2, uniqueBy: ['id'] }] }, { status: 'success', list: { records } })).toMatchObject({ status: 'failed', checks: [{ observedCount: 1, asked: 2 }] })
+    expect(JSON.stringify(records)).toBe(before)
+  })
+
   it("gives run-set.mjs's own verdict on every predicate of every task of the access set, on every page", () => {
     const seen = new Map<string, { pass: number; fail: number }>()
     let compared = 0

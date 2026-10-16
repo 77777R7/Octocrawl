@@ -17,6 +17,8 @@ describe('a task contract on a request (verify, ADR 0006)', () => {
   it('reads explicitly declared distinct record keys on the existing recordFields check', () => {
     const verify = { checks: [{ type: 'recordFields', fields: ['name', 'price'], min: 3, uniqueBy: ['url', 'sku'] }] }
     expect(scrape(verify).verify).toEqual(verify)
+    expect(parseBatchStartRequest({ urls: ['https://example.com/'], verify }).verify).toEqual(verify)
+    expect(parseCrawlStartRequest({ url: 'https://example.com/', verify }).verify).toEqual(verify)
   })
 
   it('is read on scrape, batch and crawl as it was written, and is absent when not sent', () => {
