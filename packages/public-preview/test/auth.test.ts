@@ -138,7 +138,11 @@ describe('signing in with GitHub or Google', () => {
 
   it('keeps the way back on this site: another host or a protocol-relative path is the dashboard', () => {
     expect(safeNext('/blog/')).toBe('/blog/')
-    for (const unsafe of ['//evil.example/', 'https://evil.example/', '/\\evil.example', 'blog', null, undefined, '/a b', '/é']) expect(safeNext(unsafe), String(unsafe)).toBe('/dashboard/')
+    for (const unsafe of ['//evil.example/', 'https://evil.example/', '/\\evil.example', 'blog', null, undefined, '/a b', '/é', `/${'a'.repeat(2_048)}`]) expect(safeNext(unsafe), String(unsafe)).toBe('/dashboard/')
+    // An OAuth authorization request comes back whole: its query runs past a thousand characters with a metadata document's URL in it.
+    const authorize = `/oauth/authorize?${new URLSearchParams({ response_type: 'code', client_id: 'https://chatgpt.com/oauth/client.json', redirect_uri: 'https://chatgpt.com/connector_platform_oauth_redirect', state: 's'.repeat(400), code_challenge: 'c'.repeat(43), code_challenge_method: 'S256', resource: 'https://mcp.octocrawl.dev/mcp-oauth', scope: 'mcp' })}`
+    expect(authorize.length).toBeGreaterThan(700)
+    expect(safeNext(authorize)).toBe(authorize)
   })
 })
 
@@ -177,6 +181,22 @@ describe('signing in with an email link', () => {
     expect(fake.calls.at(-1)).toEqual({ method: 'signInWithEmailLink', args: ['ada@example.org', 'code-0123456789'] })
     expect(cookies(signed).w2l_session).toMatch(/^[A-Za-z0-9_-]{43}$/)
     expect(accounts.users.get('email-user-0001')?.providers).toEqual(new Set(['emailLink']))
+  })
+
+  it('goes back where the sign-in was going, as the provider buttons do, when the link is opened in the same browser', async () => {
+    const { url } = await start()
+    const next = '/oauth/authorize?client_id=https%3A%2F%2Fchatgpt.com%2Foauth%2Fclient.json&state=abc'
+    const sent = await fetch(`${url}/auth/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: url }, body: JSON.stringify({ email: 'ada@example.org', next }) })
+    const kept = cookies(sent).w2l_signin_next!
+    expect(sent.headers.getSetCookie().find(line => line.startsWith('w2l_signin_next='))).toMatch(/Path=\/auth\/email; HttpOnly; SameSite=Lax; Max-Age=3600$/)
+    const signed = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url, cookie: `w2l_signin_next=${kept}` }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
+    expect([signed.status, signed.headers.get('location')]).toEqual([303, next])
+    expect(cookies(signed).w2l_signin_next).toBe('')
+    // Forged, or another site: the dashboard.
+    const forged = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url, cookie: `w2l_signin_next=${Buffer.from('//evil.example/').toString('base64url')}.x` }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
+    expect(forged.headers.get('location')).toBe('/dashboard/')
+    const away = await fetch(`${url}/auth/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: url }, body: JSON.stringify({ email: 'ada2@example.org', next: '//evil.example/' }) })
+    expect(cookies(away).w2l_signin_next).toBeUndefined()
   })
 
   it('refuses another site\'s form, a bad address, a used link, and a fourth link an hour', async () => {

@@ -9,6 +9,7 @@ import { firestoreWaitlistFromEnv } from './waitlist.js'
 import { validateAmazonPublicState } from './preview.js'
 import { createAuthRoutes, FirestoreAccountStore, IdentityToolkit } from './auth.js'
 import { createAccountRoutes, FirestoreAccountData } from './account.js'
+import { createOAuthRoutes, FirestoreOAuthStore } from './oauth.js'
 
 if (process.env.W2L_CAPTURE_RAW_DIR) throw new Error('Anonymous preview cannot persist raw capture artifacts')
 const stateFile = process.env.W2L_AMAZON_PUBLIC_STATE_FILE
@@ -45,6 +46,19 @@ const account = auth === undefined || accountData === undefined ? undefined : cr
   // The Playground's runs: the hosted API, which charges and logs them (account.ts, /api/account/run).
   hostedApi: { origin: process.env.W2L_HOSTED_API_URL?.trim() || 'https://api.octocrawl.dev' },
 })
+// MCP clients' OAuth connections (oauth.ts): beside sign-in, with the hosted API's key records and its HMAC key.
+const oauth = auth === undefined || accountData === undefined ? undefined : createOAuthRoutes({
+  store: new FirestoreOAuthStore(process.env.W2L_FIRESTORE_PROJECT_ID ?? ''),
+  secret: (process.env.W2L_QUOTA_HASH_KEY ?? '').trim(),
+  current: auth.current,
+  log: line => console.log(JSON.stringify({ severity: 'INFO', ...line })),
+  // As the dashboard shows it (account.ts, /api/account): a month not spent in yet has its whole grant.
+  creditsLeft: async (uid) => {
+    const balance = await accountData.balance(uid)
+    const grant = balance === null || balance.month !== new Date().toISOString().slice(0, 7) ? monthlyCredits : balance.grant
+    return grant + (balance?.purchased ?? 0)
+  },
+})
 const server = createPreviewServer({
   quota: firestoreQuotaFromEnv(),
   amazonGate: firestoreAmazonGateFromEnv(),
@@ -61,6 +75,7 @@ const server = createPreviewServer({
   waitlist: firestoreWaitlistFromEnv(),
   ...(auth === undefined ? {} : { auth }),
   ...(account === undefined ? {} : { account }),
+  ...(oauth === undefined ? {} : { oauth }),
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false' }))
