@@ -28,6 +28,7 @@ import { evaluateResolved, evaluateUrl, hostedNetworkPolicy, type NetworkPolicy 
 import { metadataAccessToken } from './quota.js'
 import { cookieValue, SESSION_COOKIE, sessionHash, type Session } from './auth.js'
 import type { Logger } from './site.js'
+import type { Connections } from './account.js'
 
 /** The MCP endpoint tokens are issued for; the hosted API refuses a token whose resource is anything else. */
 export const MCP_OAUTH_RESOURCE = 'https://mcp.octocrawl.dev/mcp-oauth'
@@ -76,6 +77,8 @@ export interface OAuthStore {
   useOnce(hash: string, expiresAt: number): Promise<boolean>
   /** The account's connections: exchanged their code, and neither disconnected nor 90 days unused. */
   activeGrants(uid: string, now: number): Promise<number>
+  /** Every grant the account has, whatever its state. */
+  grantsOf(uid: string): Promise<Array<{ id: string; grant: GrantRecord }>>
   /** The grant, its key record and its code, in one commit. */
   connect(connection: Connection): Promise<void>
   /** Marks the code used; `replay` when it already was. Null when there is no such code. */
@@ -86,7 +89,8 @@ export interface OAuthStore {
   issue(issue: Issue): Promise<boolean>
   access(hash: string): Promise<AccessRecord | null>
   deleteAccess(hash: string): Promise<void>
-  /** Ends a connection: the grant is marked revoked and its key record disabled, so its access tokens stop within a minute. */
+  /** Ends a connection: the grant is marked revoked, its key record disabled (its access tokens stop within a minute) and
+   * its refresh tokens deleted. */
   disconnect(grantId: string): Promise<void>
 }
 
@@ -107,7 +111,8 @@ export class MemoryOAuthStore implements OAuthStore {
     this.nonces.set(hash, expiresAt)
     return true
   }
-  async activeGrants(uid: string, now: number) { return [...this.grants.values()].filter(grant => grant.uid === uid && grant.connected && !grant.revoked && grant.lastUsedAt + IDLE_MS > now).length }
+  async activeGrants(uid: string, now: number) { return (await this.grantsOf(uid)).filter(({ grant }) => live(grant, now)).length }
+  async grantsOf(uid: string) { return [...this.grants.entries()].filter(([, grant]) => grant.uid === uid).map(([id, grant]) => ({ id, grant: { ...grant } })) }
   async connect(connection: Connection) {
     this.grants.set(connection.grantId, { ...connection.grant })
     this.keys.set(connection.keyId, { enabled: true, uid: connection.grant.uid, kind: 'oauth', grantId: connection.grantId, label: connection.label, plan: 'account', browser: true, createdAt: connection.grant.createdAt })
@@ -150,6 +155,7 @@ export class MemoryOAuthStore implements OAuthStore {
     grant.revoked = true
     const key = this.keys.get(grant.keyId)
     if (key) key.enabled = false
+    for (const [hash, record] of this.refreshTokens) if (record.grantId === grantId) this.refreshTokens.delete(hash)
   }
 }
 
@@ -162,6 +168,13 @@ const bool = (value: boolean): Value => ({ booleanValue: value })
 const ts = (ms: number): Value => ({ timestampValue: new Date(ms).toISOString() })
 const text = (value: Value | undefined) => (typeof value?.stringValue === 'string' ? value.stringValue : null)
 const time = (value: Value | undefined) => { const ms = Date.parse(value?.timestampValue ?? ''); return Number.isFinite(ms) ? ms : null }
+/** A grant's fields as Firestore keeps them. */
+const grantFrom = (f: Record<string, Value>): GrantRecord => ({
+  uid: text(f.uid) ?? '', clientId: text(f.clientId) ?? '', clientName: text(f.clientName) ?? '', redirectHost: text(f.redirectHost) ?? '', keyId: text(f.keyId) ?? '',
+  createdAt: time(f.createdAt) ?? 0, lastUsedAt: time(f.lastUsedAt) ?? 0, revoked: f.revoked?.booleanValue === true, connected: f.connected?.booleanValue === true,
+})
+/** A connection that counts: its code exchanged, not disconnected, used within 90 days. */
+const live = (grant: GrantRecord, now: number) => grant.connected && !grant.revoked && grant.lastUsedAt + IDLE_MS > now
 /** A document id this store writes or reads by: no slash, no dot path, nothing Firestore reserves. */
 const DOC_ID = /^[A-Za-z0-9_-]{1,128}$/
 
@@ -223,15 +236,20 @@ export class FirestoreOAuthStore implements OAuthStore {
   async useOnce(hash: string, expiresAt: number) {
     return (await this.commit([{ update: { name: this.name('oauthNonces', hash), fields: { expireAt: ts(expiresAt) } }, currentDocument: { exists: false } }])) === 'ok'
   }
-  async activeGrants(uid: string, now: number) {
+  /** Documents of a collection whose `field` equals `value`: a single-field equality, which needs no composite index. */
+  private async where(collection: string, field: string, value: string): Promise<Doc[]> {
     const response = await this.request(`${this.resource}:runQuery`, { method: 'POST', body: JSON.stringify({ structuredQuery: {
-      from: [{ collectionId: 'oauthGrants' }],
-      where: { fieldFilter: { field: { fieldPath: 'uid' }, op: 'EQUAL', value: { stringValue: uid } } },
+      from: [{ collectionId: collection }],
+      where: { fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: { stringValue: value } } },
       limit: 200,
     } }) })
-    if (!response.ok) throw new Error(`oauthGrants query failed (${response.status})`)
+    if (!response.ok) throw new Error(`${collection} query failed (${response.status})`)
     const rows = await response.json() as Array<{ document?: Doc }>
-    return rows.flatMap(row => row.document ? [row.document.fields ?? {}] : []).filter(f => f.connected?.booleanValue === true && f.revoked?.booleanValue !== true && (time(f.lastUsedAt) ?? 0) + IDLE_MS > now).length
+    return rows.flatMap(row => row.document ? [row.document] : [])
+  }
+  async activeGrants(uid: string, now: number) { return (await this.grantsOf(uid)).filter(({ grant }) => live(grant, now)).length }
+  async grantsOf(uid: string) {
+    return (await this.where('oauthGrants', 'uid', uid)).map(doc => ({ id: doc.name.split('/').pop()!, grant: grantFrom(doc.fields ?? {}) }))
   }
   async connect(connection: Connection) {
     const { grant, code } = connection
@@ -268,11 +286,7 @@ export class FirestoreOAuthStore implements OAuthStore {
   async grant(id: string): Promise<GrantRecord | null> {
     const doc = await this.read('oauthGrants', id)
     if (doc === null) return null
-    const f = doc.fields ?? {}
-    return {
-      uid: text(f.uid) ?? '', clientId: text(f.clientId) ?? '', clientName: text(f.clientName) ?? '', redirectHost: text(f.redirectHost) ?? '', keyId: text(f.keyId) ?? '',
-      createdAt: time(f.createdAt) ?? 0, lastUsedAt: time(f.lastUsedAt) ?? 0, revoked: f.revoked?.booleanValue === true, connected: f.connected?.booleanValue === true,
-    }
+    return grantFrom(doc.fields ?? {})
   }
   async refresh(hash: string) {
     const doc = await this.read('oauthRefresh', hash)
@@ -315,6 +329,14 @@ export class FirestoreOAuthStore implements OAuthStore {
     const writes: Write[] = [{ update: { name: this.name('oauthGrants', grantId), fields: { revoked: bool(true) } }, updateMask: { fieldPaths: ['revoked'] }, currentDocument: { exists: true } }]
     if (DOC_ID.test(grant.keyId)) writes.push({ update: { name: this.name('hostedApiKeys', grant.keyId), fields: { enabled: bool(false) } }, updateMask: { fieldPaths: ['enabled'] }, currentDocument: { exists: true } })
     if ((await this.commit(writes)) !== 'ok') throw new Error('disconnect failed')
+    // Then its refresh tokens, a page at a time until none is left: a connection refreshed every hour keeps a used token
+    // an hour for 90 days, past one query's page. A used one is kept no longer either, as the connection it would end is ended.
+    for (let pass = 0; ; pass++) {
+      const docs = await this.where('oauthRefresh', 'grantId', grantId)
+      if (docs.length === 0) break
+      if (pass >= 50) throw new Error('oauthRefresh did not empty')
+      if ((await this.commit(docs.map(doc => ({ delete: doc.name })))) !== 'ok') throw new Error('refresh delete failed')
+    }
   }
 }
 
@@ -801,4 +823,21 @@ export function createOAuthRoutes(options: OAuthOptions) {
   }
 
   return { handle }
+}
+
+/** The account page's view of its connections (account.ts, /api/account/connections). */
+export function accountConnections(store: OAuthStore): Connections {
+  return {
+    async list(uid, now) {
+      return (await store.grantsOf(uid)).filter(({ grant }) => live(grant, now.getTime())).sort((a, b) => b.grant.createdAt - a.grant.createdAt).map(({ id, grant }) => ({
+        id, keyId: grant.keyId, name: grant.clientName, host: grant.redirectHost, createdAt: new Date(grant.createdAt).toISOString(), lastUsedAt: new Date(grant.lastUsedAt).toISOString(),
+      }))
+    },
+    async disconnect(uid, id, now) {
+      const grant = await store.grant(id)
+      if (grant === null || grant.uid !== uid || !live(grant, now.getTime())) return false
+      await store.disconnect(id)
+      return true
+    },
+  }
 }

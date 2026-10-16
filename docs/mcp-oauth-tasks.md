@@ -103,9 +103,14 @@
 
 ## PR ③ 连接列表和撤销
 
-- [ ] **C1** `GET /api/account/connections`：返回应用名、回调域名、授权时间、最近使用时间、本月 credits。`POST /api/account/connections/{grantId}/revoke` 依次：标记 grant 已撤销，key 设 `enabled:false`，删掉 refresh。与 `/api/account/keys` 的 sameOrigin 检查一致。
-- [ ] **C2** dashboard 新增 **MCP connections** 区块，每行一个 Disconnect 按钮（`dashboard.js`）。“Keys” 区块的 5 个上限不计 OAuth 连接。
+- [x] **C1** `GET /api/account/connections`：返回应用名、回调域名、授权时间、最近使用时间、本月 credits。`POST /api/account/connections/{grantId}/revoke` 依次：标记 grant 已撤销，key 设 `enabled:false`，删掉 refresh。与 `/api/account/keys` 的 sameOrigin 检查一致。
+- [x] **C2** dashboard 新增 **MCP connections** 区块，每行一个 Disconnect 按钮（`dashboard.js`）。“Keys” 区块的 5 个上限不计 OAuth 连接。
 - 验收：`account.test.ts` 和 `dashboard.test.ts` 各加对应用例；撤销后带缓存的情况下，1 分钟内 `/mcp-oauth` 返回 401（用可注入的时钟测）。
+- PR ③ 的做法（和上面不一致或上面没写的，以这里为准）：
+  - **本月 credits 和最近使用不由接口返回**。接口返回每个连接的 `keyId`，dashboard 用和 API keys 表同一套统计（`tallyKeys` / `lastUsed` / `monthUse`），按请求记录里的 key id 算。请求记录覆盖不到整月时，同样标 “at least” 并说明原因，这样两张表的口径一致，也不会把未知写成 0。
+  - 列表只列现在算数的连接：已换过 code、没断开、90 天内用过。`GET /api/account` 也带上同一份 `connections`，dashboard 只需一次请求。
+  - 断开时依次：grant 标记 `revoked`、key 设 `enabled:false`、删掉这个 grant 的所有 refresh token（Firestore 里按 `grantId` 查）。access token 不删：key 停用后，开始一次调用时会立即被拒；只读缓存的请求（如列出工具）最多一分钟后被拒。hosted API 的两个 Firestore 存储和 `createHostedApi` 都加了可注入的时钟，测试里验证了这两种情况。
+  - Activity 页的 key 筛选和每行的 title 用 “ChatGPT (chatgpt.com)” 这样的名字显示连接的调用。
 
 ## PR ④ 文档、Registry 和真实客户端验收
 
@@ -134,4 +139,4 @@
 
 ## 下次从这里继续
 
-PR ①（R1–R4）已合并（77777R7/Octocrawl#534）。PR ②（A1–A10）在分支 `claude/mcp-oauth-authorization-server` 上做完（合并前以 PR 页为准）。下一步是 PR ③ 的 C1：`/api/account/connections` 按 uid 列出 `oauthGrants`（只列 `connected:true` 的），撤销时调用 `oauth.ts` 的 `disconnect`。C2 里“5 个上限不计 OAuth 连接”这一半已经在 PR ② 做了。
+PR ①（77777R7/Octocrawl#534）和 PR ②（77777R7/Octocrawl#537）已合并。PR ③（C1、C2）在分支 `claude/mcp-oauth-connections` 上做完（合并前以 PR 页为准）。下一步是 PR ④：D1 文档和 D2 `server.json` 可以先写；D3 部署前检查和部署本身要 Howard 点头，D4 要在部署之后做。

@@ -263,6 +263,8 @@ export interface HostedApiConfig {
   workerCount?: number
   env?: NodeJS.ProcessEnv
   log?: (line: string) => void
+  /** The clock an access token's expiry is checked against (milliseconds); Date.now by default. */
+  now?: () => number
 }
 
 /** The URL a scrape or map body asked for, as the request line keeps it; empty when the body named none. */
@@ -434,7 +436,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const tokens = config.oauthTokens
     if (tokens === undefined || !presented.startsWith(ACCESS_TOKEN_PREFIX) || presented.length > 256) return null
     const token = await tokens.lookup(accessTokenDigest(config.hashKey, presented), { fresh })
-    if (token === null || token.resource !== MCP_OAUTH_RESOURCE || !(token.expiresAt > Date.now()) || !SITE_UID.test(token.keyId)) return null
+    if (token === null || token.resource !== MCP_OAUTH_RESOURCE || !(token.expiresAt > (config.now ?? Date.now)()) || !SITE_UID.test(token.keyId)) return null
     const record = await config.keys.lookup(token.keyId, { fresh })
     if (record === null || !record.enabled || record.kind !== 'oauth' || record.uid === undefined) return null
     return { kind: 'key', id: token.keyId, uid: record.uid, dailyLimit: 0, browser: record.browser, plan: 'account' }
@@ -796,10 +798,10 @@ function firestoreBase(projectId: string): { resource: string; endpoint: string 
 export class FirestoreHostedKeys implements HostedKeys {
   private readonly base: { resource: string; endpoint: string }
   private readonly cache = new BoundedMap<string, { at: number; record: HostedKeyRecord | null }>(REMEMBERED_CALLERS)
-  constructor(projectId: string, private readonly fetcher: typeof fetch = fetch, private readonly cacheMs = 60_000) { this.base = firestoreBase(projectId) }
+  constructor(projectId: string, private readonly fetcher: typeof fetch = fetch, private readonly cacheMs = 60_000, private readonly clock: () => number = Date.now) { this.base = firestoreBase(projectId) }
   async lookup(keyHash: string, options: { fresh?: boolean } = {}): Promise<HostedKeyRecord | null> {
     const cached = this.cache.get(keyHash)
-    if (options.fresh !== true && cached && Date.now() - cached.at < this.cacheMs) return cached.record
+    if (options.fresh !== true && cached && this.clock() - cached.at < this.cacheMs) return cached.record
     const token = await metadataAccessToken(this.fetcher, AbortSignal.timeout(3_000))
     const response = await this.fetcher(`${this.base.endpoint}/hostedApiKeys/${keyHash}`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5_000) })
     let record: HostedKeyRecord | null = null
@@ -818,7 +820,7 @@ export class FirestoreHostedKeys implements HostedKeys {
         ...(fields.kind?.stringValue === 'oauth' ? { kind: 'oauth' as const } : {}),
       }
     }
-    this.cache.set(keyHash, { at: Date.now(), record })
+    this.cache.set(keyHash, { at: this.clock(), record })
     return record
   }
 }
@@ -830,10 +832,10 @@ export class FirestoreHostedKeys implements HostedKeys {
 export class FirestoreHostedOAuthTokens implements HostedOAuthTokens {
   private readonly base: { resource: string; endpoint: string }
   private readonly cache = new BoundedMap<string, { at: number; record: HostedOAuthTokenRecord | null }>(REMEMBERED_CALLERS)
-  constructor(projectId: string, private readonly fetcher: typeof fetch = fetch, private readonly cacheMs = 60_000) { this.base = firestoreBase(projectId) }
+  constructor(projectId: string, private readonly fetcher: typeof fetch = fetch, private readonly cacheMs = 60_000, private readonly clock: () => number = Date.now) { this.base = firestoreBase(projectId) }
   async lookup(tokenHash: string, options: { fresh?: boolean } = {}): Promise<HostedOAuthTokenRecord | null> {
     const cached = this.cache.get(tokenHash)
-    if (options.fresh !== true && cached && Date.now() - cached.at < this.cacheMs) return cached.record
+    if (options.fresh !== true && cached && this.clock() - cached.at < this.cacheMs) return cached.record
     const token = await metadataAccessToken(this.fetcher, AbortSignal.timeout(3_000))
     const response = await this.fetcher(`${this.base.endpoint}/oauthTokens/${tokenHash}`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5_000) })
     let record: HostedOAuthTokenRecord | null = null
@@ -845,7 +847,7 @@ export class FirestoreHostedOAuthTokens implements HostedOAuthTokens {
       const resource = fields.resource?.stringValue
       if (keyId !== undefined && resource !== undefined && Number.isFinite(expiresAt)) record = { keyId, resource, expiresAt }
     }
-    this.cache.set(tokenHash, { at: Date.now(), record })
+    this.cache.set(tokenHash, { at: this.clock(), record })
     return record
   }
 }
