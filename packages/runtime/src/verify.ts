@@ -11,7 +11,7 @@ import { sha256Utf8 } from '@w2l/http-core'
 import { canonicalJson } from './evidenceRecord.js'
 
 /** Changes when checks are added or judged differently, as EXTRACTOR_VERSION does for the Markdown. */
-export const VERIFIER_VERSION = 'verify/4'
+export const VERIFIER_VERSION = 'verify/5'
 
 /**
  * What the checks read: the result's own fields (status, markdown, list, tables, json and any other a `field` check
