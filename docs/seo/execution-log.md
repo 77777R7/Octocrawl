@@ -94,3 +94,13 @@ W2L_PUBLIC_PREVIEW_PORT=18876 npm run public:preview:local
 - 现有Wrangler OAuth可读Cloudflare事件；七天77条，10条AI Assistant BIC block；与首轮4个CF-RAY精确匹配。rulesets/Bot Management GET403和GraphQL失败查询均保留；没有扩大授权范围。
 - 本轮追加原始证据在 `.w2l/seo-20261016/followup/`，私有/忽略；77份追加证据的SHA-256清单与validation-summary.json已保存；只提交可审阅文档、草稿和复现脚本，未提交日志/截图/客户端依赖。
 - 新API仅loopback供测试，检查后停止；原18876网页预览保留。所有网站/规则/SDK兼容范围结论均按实测边界，未推送、开PR、部署、发布或改生产配置。
+
+## 发布批次（2026-10-16，用户后续明确授权）
+
+本节覆盖此前“仅本地、不推送/PR/合并/部署/发布”的边界：用户已授权本批PR、合并、网站部署及文章发布；未授权Cloudflare安全规则、外部目录/外联或npm/PyPI版本发布。下述发布状态以追加记录及实际PR/Cloud Run证据为准，旧章节保留当时事实。
+
+- 两篇经验证稿已转成读者内容并注册 `/blog/firecrawl-v1-migration/`、`/blog/http-200-task-completion/`；复用现有插画资源，通过可选cover字段复用，不复制大图。博客共8篇，sitemap共27URL，HTML与Markdown、Schema/内链已生成。
+- `npm run build:public`、`npm run typecheck`、12文件153项聚焦测试PASS；新文章1440/390四视图均1H1、canonical/Schema正常、图片可读、无全页横向溢出；27索引URL标题/描述唯一、实际静态引用零断链。
+- [实体混淆分析](entity-confusion-analysis-2026-10-16.md)已完成；task md新增总表SEO-08A/P1与7.3的诊断、实施、复测闭环，SEO-06/09/T0观测交叉引用。原路径任务文件与本checkout版本相同。A诊断完成，B实施/C效果复测未完成；不将本批发布称为Google纠错完成。
+- 附加域名诊断题带自动页面上下文，答案回到Octocrawl但无官方引用；保留混杂，不并入原12题。直接来源访问的超时和web取回正文的范围均记录。
+- 发布前检查与后续发布原始证据保存在 `.w2l/seo-20261016/release/`。当前PR/merge/deploy待执行。
