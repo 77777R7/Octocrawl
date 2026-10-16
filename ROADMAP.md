@@ -321,6 +321,7 @@ Hosted phase 1 uses the API's existing hosted mode, which refuses private addres
   - The authorization server is written in this repository on octocrawl.dev, beside sign-in, and keeps its records in Firestore under HMACs as keys are kept. Cloudflare's `workers-oauth-provider` is not used, because it would keep tokens in the Worker's KV, away from sign-in and credits.
   - OAuth gets its own URL, `https://mcp.octocrawl.dev/mcp-oauth`. `/mcp` stays as it is: keyless, or a `Bearer oc_` key. Claude starts sign-in only on a 401, so one URL cannot serve both.
   - Each connection gets its own key record. Its calls spend the account's credits and are logged on their own, and the account page can disconnect it. Connections do not count against the five keys; an account holds at most 10. A connection stays until it is disconnected or goes 90 days unused.
+  - **Accepted 2026-10-16** ([record](research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md), [task list](docs/mcp-oauth-tasks.md)). Claude Code, a claude.ai custom connector, ChatGPT and Cursor each connected to `/mcp-oauth`. Each ran a scrape that was charged to the connection's own key, and each was refused after a dashboard disconnect. Claude Code, claude.ai and ChatGPT used metadata documents; Cursor used registration. ChatGPT and claude.ai are web apps that show no version number, so the record gives their server-side user agents instead.
 
 | # | Item | Accepted when |
 | --- | --- | --- |

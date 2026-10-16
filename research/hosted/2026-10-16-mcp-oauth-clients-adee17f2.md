@@ -107,3 +107,37 @@ Added at chatgpt.com/plugins › + › Add custom MCP server, URL `https://mcp.o
 | Cursor | not run | | |
 
 The table above under "Not run yet" is as it stood before these runs. Cost of these runs: 2 credits from Howard's account.
+
+## Cursor (added later the same day)
+
+Run 16:36–16:45Z. Howard put `{ "mcpServers": { "octocrawl-oauth": { "url": "https://mcp.octocrawl.dev/mcp-oauth" } } }` in `~/.cursor/mcp.json` and signed in when Cursor asked. Client: Cursor 3.25.6 (`Cursor/3.25.6 (darwin arm64)`; its OAuth requests came as `node`). Services as for claude.ai and ChatGPT above (`h17oauthrs`, `r92connect`).
+
+| Time (Z) | What happened |
+| --- | --- |
+| 16:36:53–56 | Two `POST /oauth/register` 201 from `node` (logged `register ok`, clients `occ_xbIn…` and `occ_NGBb…`). Cursor used the second. **Dynamic client registration**, no metadata document. |
+| 16:36:56 | `GET /oauth/authorize` with `client_id=occ_NGBb…`, `redirect_uri=https://www.cursor.com/agents/mcp/oauth/callback` (not the `http://localhost:8787/callback` the Cursor docs name for the desktop app), `scope=mcp`, `resource` set. |
+| 16:36:57–59 | Consent `allowed`; `POST /oauth/token` 200 from `node`. |
+| 16:36:59–37:00 | `POST /mcp-oauth` from Cursor: initialize 200, `tools/list` 200; `GET` 405. Cursor showed `octocrawl-oauth` with 3 tools enabled. |
+| 16:38:50 | Scrape of `https://example.com`, `formats: ["markdown"]`, in a Cursor agent chat: `status` `success`, `httpStatus` 200, `finalUrl` `https://example.com`. `hosted_usage` under key `oauth_c9Huvv2ttZ…`, 1 credit (`http`). |
+| 16:39:27 | Disconnect on `/dashboard/keys/`: revoke 204. |
+| 16:39:39 | Next call, 12 s later: `POST /mcp-oauth` **200**, and the tool result was an error: "401 unauthorized: this key is not one Octocrawl issued, or it was revoked", with the key user's hints (send no Authorization header for the keyless allowance, or request a key). No credit was spent. See the first note below. |
+| 16:41:23–29 | Next call, after the minute's cache: `POST /mcp-oauth` **401**. Cursor read the PRM, registered again (two more 201s, `occ_p7gR…` and `occ_zOTr…`), opened the consent page, and Howard chose Authorize; token 200, and the connection was back. |
+| 16:41:54 | A scrape on the new connection: `hosted_usage` under `oauth_L8Qi9CqDAX…`, 1 credit. |
+| 16:42:09 | That connection disconnected on the dashboard: revoke 204. |
+| 16:45:12–13 | Next call: `POST /mcp-oauth` **401**; refresh `POST /oauth/token` 400. Cursor showed "Connect with octocrawl-oauth" with an **Authenticate** button. |
+
+Notes:
+
+- **A disconnect within the cache's minute is refused inside, not at the door.** At 16:39:39 the `/mcp-oauth` handler still had the token and key record cached (up to 60 s), so it answered 200. The tool call then went through the gate, which reads the key record fresh for every start, and the gate refused it. So the call was refused and nothing was spent, but the client saw a tool error instead of an HTTP 401, and it did not re-authenticate until a call after the cache had expired. The error text is the one written for `oc_` keys and points an OAuth user to keyless use or a key. This is a follow-up, not a failure of the acceptance condition ("disconnects one within a minute").
+- **Each sign-in registered two clients.** Cursor sent two registrations a few seconds apart at each sign-in, and used the second. The unused registrations expire after 90 days unused.
+- **Cost:** 2 credits from Howard's account.
+
+### Status after Cursor
+
+| Client | Version | Flow | Scrape | Disconnect → 401 |
+| --- | --- | --- | --- | --- |
+| Claude Code CLI | 2.1.301 | CIMD | yes | yes, 22 s |
+| Claude Code in the Claude desktop app | 2.1.295 | CIMD, after one refused registration | yes | not repeated |
+| claude.ai custom connector | web app, no version shown; server side `python-httpx/0.28.1`, `Claude-User` | CIMD | yes | yes |
+| ChatGPT custom MCP server | web app, no version shown; server side `openai-connectors-oauth/1.0`, `openai-mcp/1.0.0` | CIMD | yes | yes |
+| Cursor | 3.25.6 | DCR | yes | yes; a call within the minute was refused as a tool error (note above) |
