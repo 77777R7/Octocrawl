@@ -13,7 +13,7 @@ export type VerifyCheck =
   /** Rows after headers with a letter or number in every named column of one delivered table; not field truth. */
   | { type: 'tableRowsMin'; tableIndex: number; columns: readonly number[]; min: number }
   | { type: 'listRecordsMin'; min: number; path?: string }
-  | { type: 'recordFields'; fields: readonly string[]; min: number }
+  | { type: 'recordFields'; fields: readonly string[]; min: number; uniqueBy?: readonly string[] }
   | { type: 'field'; path: string; equals?: string | number | boolean | null; in?: readonly (string | number | boolean | null)[]; present?: boolean; min?: number; max?: number }
 
 export interface VerifyContract {
@@ -73,6 +73,6 @@ export const VERIFY_CHECK_KEYS: Readonly<Record<VerifyCheckType, readonly string
   minTables: ['type', 'min'],
   tableRowsMin: ['type', 'tableIndex', 'columns', 'min'],
   listRecordsMin: ['type', 'min', 'path'],
-  recordFields: ['type', 'fields', 'min'],
+  recordFields: ['type', 'fields', 'min', 'uniqueBy'],
   field: ['type', 'path', 'equals', 'in', 'present', 'min', 'max'],
 }

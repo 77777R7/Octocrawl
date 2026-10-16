@@ -8,6 +8,17 @@ const refused = (verify: unknown): string => {
 }
 
 describe('a task contract on a request (verify, ADR 0006)', () => {
+  it('bounds and validates optional identity keys without accepting an implicit identity', () => {
+    for (const uniqueBy of [[], 'url', ['url', 'url'], [' '], [null], Array.from({ length: 51 }, (_, i) => `key${i}`)]) {
+      expect(refused({ checks: [{ type: 'recordFields', fields: ['name'], min: 2, uniqueBy }] })).toContain('uniqueBy')
+    }
+  })
+
+  it('reads explicitly declared distinct record keys on the existing recordFields check', () => {
+    const verify = { checks: [{ type: 'recordFields', fields: ['name', 'price'], min: 3, uniqueBy: ['url', 'sku'] }] }
+    expect(scrape(verify).verify).toEqual(verify)
+  })
+
   it('is read on scrape, batch and crawl as it was written, and is absent when not sent', () => {
     const verify = {
       checks: [
