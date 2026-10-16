@@ -181,17 +181,24 @@ describe('MapRunner', () => {
 
   it('answers at its deadline with what it found as partial, or failed when it found nothing, never as complete', async () => {
     // The sitemap load runs to its soft deadline and stops with one file unread.
+    let asked = 0
+    let lingered = false
     const slow = fakeSitemap([], {
       before: async (request) => {
+        asked = Date.now()
         await request.accept!({ url: `${SITE}/docs/early`, file: FILE })
         await new Promise((resolve) => setTimeout(resolve, Math.max(0, request.softDeadlineAt! - Date.now())))
+        // Runs on the event loop's next turn: only if the map waits on something once the sitemap stopped.
+        setImmediate(() => { lingered = true })
         return { files: [fileRecord(FILE, 'index', 2), fileRecord(`${SITE}/one.xml`, 'unreadable', null, 'timeout')], urls: [{ url: `${SITE}/docs/early`, file: FILE }], truncated: 'time', unreadFiles: 1 }
       },
     })
     const began = Date.now()
     const cut = await new MapRunner(sources(startPage([link('/docs/1')]), slow.source).wired).run({ id: 'm6', url: START, timeoutMs: 300 })
-    expect(Date.now() - began).toBeLessThan(1_000)
+    // The sitemap was given the map's own deadline, 300 ms from run(), and the map answered as soon as the sitemap stopped there.
     expect(slow.requests[0]!.softDeadlineAt).toBeGreaterThanOrEqual(began + 300)
+    expect(slow.requests[0]!.softDeadlineAt).toBeLessThanOrEqual(asked + 300)
+    expect(lingered).toBe(false)
     expect(cut).toMatchObject({ status: 'partial', stoppedBy: 'timeout' })
     expect(cut.links.map((l) => l.url.replace(SITE, ''))).toEqual(['/docs/', '/docs/1', '/docs/early'])
     expect(cut.warnings.find((warning) => warning.code === 'map_timeout')?.message).toMatch(/^the map stopped at its 300 ms timeout after \d+ ms with 3 links; 1 sitemap files were not read$/)
