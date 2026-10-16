@@ -107,3 +107,33 @@ Each returned URL equals the requested marked URL. Complete responses, HTML/Mark
 Two readonly GraphQL windows covered15:50:03–15:51:47 and15:50:03–15:54:31, limit1000, with `clientRequestQuery` and HTTP method fields that had been confirmed in the schema. Both returned HTTP200, no GraphQL errors, zero Security Events. The markers and the new rule ID were therefore not correlated to any event in those windows. This is not evidence of zero successful requests or of a successful skip. **SEO-01 remains in_progress:** real client content retrieval has passed for these two pages; Cloudflare verified AI Assistant identity, new-rule hit and response correlation have not.
 
 The OpenAI web tool's two exact URL attempts reported inaccessible, with no HTTP status or ray. A single separate Google AI Mode access-only prompt asked for the exact MCP URL's heading and first sentence; it reached Google's unusual-traffic/reCAPTCHA page before an answer. No CAPTCHA was solved, answer regenerated or alternate Google query substituted. Authentication/model were not observed before the challenge. This extra access probe is outside the frozen12-question baseline; that baseline, its answers, counts, settings and independent-date retest schedule remain unchanged. No entity-correction conclusion was drawn.
+
+
+## 16:04:59–16:06: Claude native retrieval and exact request correlation
+
+The user manually signed into Claude in a separate in-app-browser tab. The existing native Claude application's unrelated active task/draft was left untouched. The web UI showed model `Fable 5.1 High`; this is the displayed label, not an independently verified backend model identifier. One new access-only prompt requested the exact MCP page URL below through native web retrieval, excluding connected MCP tools. The visible `Read octocrawl.dev` tool completed and cited that exact URL; it returned H1 **Connect Octocrawl MCP**, first sentence **Connect your AI agent to Octocrawl at https://mcp.octocrawl.dev/mcp.**, and the same official hosted MCP endpoint. This is an operator-run real AI-client access check, not an independent user trial or a repeat of the Google12.
+
+The query ending `08:05:54.875663Z` first returned the robots event alone. The later query ending `08:06:52.882018Z` returned both events below (HTTP200, no GraphQL errors). This preserves the earlier zero/partial windows and shows why those windows were not treated as a traffic census.
+
+| Cloudflare field | MCP page request | Robots preflight during the same native fetch |
+| --- | --- | --- |
+| Time UTC / Asia/Shanghai | `2026-10-16T08:04:59Z` / 16:04:59 | Same second |
+| Host, method | `octocrawl.dev`, GET | `octocrawl.dev`, GET |
+| Path | `/docs/connect-mcp/` | `/robots.txt` |
+| Query | `?seo01_claude_probe=20261016T0805Z`, exact prompt marker | Empty |
+| Verified category | `AI Assistant` | `AI Assistant` |
+| User-Agent | `Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-User/1.0; +claude-user@anthropic.com)` | Same |
+| Action, source | `skip`, `firewallCustom` | Same |
+| Rule | `82f36f42e92a4ab0aa74e34608de6411` | Same |
+| Ruleset | `1d4beb2b55e5423db6b756069d64f2d3` | Same |
+| Edge response status | 200 | 200 |
+| Ray | `a4b58e525a0c0737` | `a4b58e4f298c8432` |
+| sampleInterval | 1 | 1 |
+
+The **MCP page positive case passes**: exact hostname/path/query and a bounded client interval correlate native retrieval and correct delivered body to Cloudflare's verified category, new-rule hit, ray and edge200. The client did not expose HTTP status/response headers; the200 and ray are from the authenticated Cloudflare event, not invented client metadata. The category is also from Cloudflare, not inferred from the User-Agent. No UA spoof, rule widening or repeated answer generation was used.
+
+A separate follow-up native read of `https://octocrawl.dev/robots.txt?seo01_claude_robots=20261016T0806Z` returned the expected complete `User-agent: *`, `Allow: /`, `Disallow: /api/`, sitemap body and `text/plain; charset=utf-8`. Claude explicitly reported that status/headers were not exposed. The query ending08:06:52 had not returned this second query marker; do not pair its body with the earlier empty-query robots event. The empty-query preflight does establish its own rule hit and edge200, without a separately exposed preflight body.
+
+**SEO-01 remains in_progress.** The MCP-page real-client/rule/response correlation is complete, while the other exact allowed paths and excluded-path protections have not all been paired with new verified-client evidence; Google/Bing-specific access and indexing impact remain unknown. The earlier ordinary-client403 negative control remains separate. The Google12 baseline and independent-date retest schedule are unchanged, and rule application or this access success does not establish entity correction or citation improvement.
+
+The acceptance manifest now links the native prompts, visible tool/answer text, screenshots, successful marked event and failed/earlier windows. This evidence is appended to the same three documentation files in [PR #532](https://github.com/77777R7/Octocrawl/pull/532); merge remains conditional on CI passing on the updated head. No further production rule or website change was made.

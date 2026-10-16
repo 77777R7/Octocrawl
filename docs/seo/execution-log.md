@@ -123,7 +123,7 @@ W2L_PUBLIC_PREVIEW_PORT=18876 npm run public:preview:local
 
 | 子项 | 状态 | 缺少什么 / 下一个动作 | 证据 |
 | --- | --- | --- | --- |
-| Cloudflare相关配置、顺序及效果 | in_progress | 控制台已读相关zone配置，单条例外已Active；Wrangler接口仍403，真实verified命中/放行及Google/Bing影响待核验 | [追加访问及应用记录](cloudflare-access-2026-10-16.md) |
+| Cloudflare相关配置、顺序及效果 | in_progress | 控制台已读相关zone配置，单条例外已Active；Wrangler安全配置接口仍403；Claude原生MCP页已精确关联AI Assistant/新规则skip/边缘200及正确正文，其他路径覆盖和Google/Bing影响待核验 | [追加访问及应用记录](cloudflare-access-2026-10-16.md) |
 | 生产BIC例外应用 | done | 相关配置复核、精确dry-run和用户单列授权完成；15:25:32应用并逐字段回读，日志开启，仅跳过BIC；效果验收仍在上一项 | 同上 |
 | 固定地区Google SERP | blocked | 验证页阻挡；保留backend搜索发现，不能标受控地区排名完成 | [意图映射](page-intent-map.md) |
 | 两个完整观察28天窗口 | conditional | 已导出相邻日历窗，但历史覆盖不足；等待可比数据，无法补造前窗历史 | [衡量字典](measurement.md) |
@@ -158,3 +158,12 @@ W2L_PUBLIC_PREVIEW_PORT=18876 npm run public:preview:local
 - 返回数据没有CF-RAY或verified身份。15:50:03至15:54:31的GraphQL窗口HTTP200、无错误、返回0条事件，不能关联新规则ID/身份/响应，SEO-01继续in_progress。不能把MCP成功读取解释为Cloudflare识别了AI Assistant，或归因给该例外。
 - OpenAI web工具两次精确URL读取不可访问；独立Google AI Mode精确URL访问探针遇unusual-traffic/reCAPTCHA，未取得回答，不解验证码、不再生回答。它不是原12题复测，原题/答案/计数/独立日期安排均未更改。
 - [客户端验收manifest](../../.w2l/seo-task-status-20261016/cloudflare/acceptance/manifest.json)包含完整交付、响应检查、GraphQL窗口和受阻记录。本轮只提交既有task、Cloudflare报告和本执行日志3份文档；不提交原始日志/截图，不再改生产规则或部署网站。
+
+
+## 16:04:59追加：Claude原生读取与新规则正例已精确配对
+
+- 用户手动登录独立Claude网页会话；未改原生Claude应用里无关任务或草稿。界面显示Fable 5.1 High，使用原生Read octocrawl.dev读取带唯一query的MCP页，无连接MCP工具/UA伪装。
+- Claude返回正确H1、首句、官方MCP地址并引用精确标记URL。Cloudflare截至16:06:52的查询HTTP200、无错误，返回该页事件：16:04:59，GET /docs/connect-mcp/，query=?seo01_claude_probe=20261016T0805Z，verifiedBotCategory=AI Assistant，Claude-User/1.0，新rule 82f36f42e92a4ab0aa74e34608de6411，skip/firewallCustom，edge200，ray a4b58e525a0c0737，sampleInterval1。身份和状态取自Cloudflare，非由UA推断，客户端本身未暴露HTTP头。
+- 同秒另有robots空query预检事件：同身份/规则/skip/200，ray a4b58e4f298c8432。独立后续robots精确标记读取返回完整预期正文，但上述窗口尚未返回其标记，不与空query事件硬配对。早期零事件和首个仅robots事件窗口均保留。
+- MCP页同请求正例验收通过；SEO-01整体仍in_progress，其他允许路径/排除保护的完整verified覆盖及Google/Bing影响尚缺。原Google12题、答案和独立日期安排不变，不宣称实体混淆已纠正。
+- 同一[PR #532](https://github.com/77777R7/Octocrawl/pull/532)补入这3份文档，更新后重等CI再合并；不重部署网站或再改安全规则。[Cloudflare完整记录](cloudflare-access-2026-10-16.md)、[本地验收manifest](../../.w2l/seo-task-status-20261016/cloudflare/acceptance/manifest.json)。task副本已同步。

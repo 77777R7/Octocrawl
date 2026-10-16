@@ -1,10 +1,10 @@
 # Octocrawl SEO 与 AI 搜索优化：Codex 执行任务
 
-版本：v1.3，追加Cloudflare最小BIC例外应用、真实客户端部分验收与剩余条件\
+版本：v1.3，追加Cloudflare最小BIC例外应用、Claude原生客户端同请求验收与剩余条件\
 制定日期：2026-10-16（Asia/Shanghai）  
 目标网站：<https://octocrawl.dev/>  
 代码仓库：<https://github.com/77777R7/Octocrawl>  
-状态更新：2026-10-16（Asia/Shanghai）。首轮可执行交付及两批网站发布已完成；整份任务尚未全部闭环。Cloudflare 相关 zone 配置已通过登录后的控制台复核，精确 BIC 例外经单列授权于15:25:32应用并回读为Active；真实verified-bot命中放行、Google/Bing影响、外部资料核对及独立日期AI复测仍待验证。状态回填文档已在[PR #529](https://github.com/77777R7/Octocrawl/pull/529)合并；后续Codex/Firecrawl MCP已读到两页HTTP200及正文，但未关联verified身份/新规则事件。用户已授权这3份记录文档提交、PR并在CI通过后合并；实际Git/PR状态单列，不另部署网站或改生产规则。详见[执行日志][ELOG]、[规则应用证据][ECFAPPLY]及[客户端验收证据][ECFACCEPT]。
+状态更新：2026-10-16（Asia/Shanghai）。首轮可执行交付及两批网站发布已完成；整份任务尚未全部闭环。Cloudflare 相关 zone 配置已通过登录后的控制台复核，精确 BIC 例外经单列授权于15:25:32应用并回读为Active；Claude原生网页读取已取得MCP页同标记的verified AI Assistant/新规则skip/边缘200及正确正文；其他路径覆盖、Google/Bing影响、外部资料核对及独立日期AI复测仍待验证。状态回填文档已在[PR #529](https://github.com/77777R7/Octocrawl/pull/529)合并；后续Codex/Firecrawl MCP已读到两页HTTP200及正文，另由登录后的Claude原生网页工具完成MCP页同请求身份/规则/正文关联。用户已授权这3份记录文档提交、PR并在CI通过后合并；实际Git/PR状态单列，不另部署网站或改生产规则。详见[执行日志][ELOG]、[规则应用证据][ECFAPPLY]及[客户端验收证据][ECFACCEPT]。
 
 此前网站发布授权不包含 Cloudflare 安全规则修改；用户随后单独授权应用已通过dry-run的这一条例外，仅限已验证AI Assistant、GET/HEAD、9个精确公开路径、仅跳过BIC并开启日志。此次未授权扩展路径/类别、全站关闭BIC、npm/PyPI版本发布、外部目录改写、外联或购买。原默认本地边界仍适用于未另获授权的后续批次。
 
@@ -122,7 +122,7 @@ Howard 希望你根据本文件推进 Octocrawl 的 SEO 优化。先读当前适
 | ID | 优先级 | 任务 | 当前状态 | 已交付与剩余边界 | 证据 |
 | --- | --- | --- | --- | --- | --- |
 | SEO-00 | P0 | 正确基线与安全工作位置 | done | 独立主线worktree与边界已核验；状态回填分支基于b063b69f，后续规则应用记录分支另从最新主线0c27a7bf建立。 | [证据][ELOG] |
-| SEO-01 | P0 | 抓取、索引与 Cloudflare 差异 | in_progress | 相关zone配置/顺序已核对，BIC例外已Active并回读、日志开启。Codex/Firecrawl MCP两页返回200及正文；verified身份、Ray与新规则命中仍未关联，Google/Bing影响未知。 | [访问记录][ECF]、[应用证据][ECFAPPLY] |
+| SEO-01 | P0 | 抓取、索引与 Cloudflare 差异 | in_progress | 相关zone配置/顺序已核对，BIC例外已Active并回读、日志开启。Firecrawl MCP两页200及正文；Claude原生工具MCP页已关联AI Assistant、精确query、规则skip、Ray和边缘200；其他路径及Google/Bing影响待验。 | [访问记录][ECF]、[应用证据][ECFAPPLY] |
 | SEO-02 | P0 | 搜索与有效使用基线 | done | 字典、导出、历史覆盖缺口及最小埋点修补完成；不声称已有两个完整可比观察窗口或完整漏斗。 | [证据][EMEASURE] |
 | SEO-03 | P1 | 意图映射与有限竞品研究 | in_progress | 映射、官方资料和定性优先级完成；固定地区 Google SERP 被验证页阻挡，未取得受控排名基线。 | [证据][EMAP] |
 | SEO-04 | P1 | 有证据的技术 SEO 修复 | done | 范围内元数据、Schema、规范入口及构建/线上检查完成；无已证实框架缺陷，不重建框架。 | [证据][E527] |
@@ -155,7 +155,7 @@ Howard 希望你根据本文件推进 Octocrawl 的 SEO 优化。先读当前适
 - [x] **done** 对首页、3 个工具页、`/scrape/`、MCP 文档和至少 2 篇文章做渲染后检查；不要仅靠抓取转成的文本判断 Schema 或页面正文。 核验：初轮8页渲染及后续重点页面桌面/窄屏验证完成，不称27页全部视觉验收。 [证据][ELOG]
 - [x] **done** 若已有已登录 GSC，读取相应 property 的页面索引、sitemap 状态及重点 URL 检查；实时测试与上次已索引版本分开记录。 核验：已读GSC存储索引、sitemap和重点URL；未以Live Test替代存储结果，后续索引复查另排期。 [证据][EBASE]
 - [x] **done** 访问差异只做最小复现：普通客户端与浏览器各保留一次必要响应；不通过伪装 Googlebot User-Agent“证明爬虫正常”，不反复改 UA 绕过规则。 核验：四次普通urllib403与浏览器200分别保留；未伪装Googlebot或绕过验证。 [证据][ECF]
-- [ ] **in_progress** 若 Cloudflare 日志可用，核对相关时间、路径、规则、实际动作及已验证的爬虫身份，确定是否影响 Google/Bing/相关搜索爬虫。 核验：历史77条Security Events和4个Ray关联已读；控制台现可读取相关zone规则/Bot Management，OAuth接口仍403。新例外已Active；初始约2分钟窗口返回0条，后续截至15:34:05窗口仅返回普通urllib的bic/block/403且verified类别为空，并精确匹配新ray；仍无新skip命中。随后Codex/Firecrawl MCP两页200及正文检查通过；15:50:03至15:54:31的查询返回0条事件，不能关联身份/新规则。独立Google访问探针遇验证码，原12题未重测；真实verified放行及Google/Bing特定trace仍缺。 [证据][ECF]、[应用证据][ECFAPPLY]
+- [ ] **in_progress** 若 Cloudflare 日志可用，核对相关时间、路径、规则、实际动作及已验证的爬虫身份，确定是否影响 Google/Bing/相关搜索爬虫。 核验：历史77条Security Events和4个Ray关联已读；控制台现可读取相关zone规则/Bot Management，OAuth接口仍403。新例外已Active；初始约2分钟窗口返回0条，后续截至15:34:05窗口仅返回普通urllib的bic/block/403且verified类别为空，并精确匹配新ray；仍无新skip命中。随后Codex/Firecrawl MCP两页200及正文检查通过；15:50:03至15:54:31的查询返回0条事件，不能关联身份/新规则。独立Google访问探针遇验证码，原12题未重测。随后16:04:59 Claude原生网页工具访问MCP页，Cloudflare日志精确query关联AI Assistant、新规则skip、边缘200，ray a4b58e525a0c0737，正文正确；仅该页正例通过，其他路径覆盖和Google/Bing特定trace仍缺。 [证据][ECF]、[应用证据][ECFAPPLY]
 - [x] **done** 有阻挡证据时形成最小规则修改提案、匹配条件和回滚办法；生产修改另等明确授权。 核验：用户单独授权后，15:25:32仅应用已验证AI Assistant、GET/HEAD及9个精确路径的BIC例外，回读products=[bic]、logging.enabled=true、enabled=true；回滚为只禁用新规则82f36f42e92a4ab0aa74e34608de6411。效果验收仍留在上一项。 [证据][ECFAPPLY]
 
 验收：每个结论有 URL、时间、方法、响应或后台证据；403 的根因与 SEO 影响分别得出结论或保留未知。sitemap 存在、已提交、抓取成功、已索引分别陈述。
@@ -317,7 +317,7 @@ Howard 希望你根据本文件推进 Octocrawl 的 SEO 优化。先读当前适
 - [x] **done** 已有 Schema 只修真实缺口：必要时给 Organization、WebSite、SoftwareApplication 与 publisher 关联使用稳定一致的 @id；sameAs/codeRepository 只指向可验证官方资料，和可见正文一致。Schema/llms.txt/FAQ 均不作为 Google 纠错或引用保证。 核验：WebSite/Organization/SoftwareApplication与文档publisher共享一致稳定@id；线上解析通过。 [证据][E527]
 - [ ] **in_progress** 统一官网、README、GitHub、npm/PyPI 与已发现目录的品牌、官方域名、包名、入口、当前版本和部署限制。先列出具体错项与建议文字；本任务不自动改外部条目或联系第三方。 核验：本站与仓库/打包配置入口已统一；PyPI/目录全量刷新和具体错项清单仍待，不自动修改外部条目。 [证据][EVIS]
 - [x] **done** 针对 S1/B3/B2/C1 的具体误述，复用现有 MCP/limits/reference/迁移页的准确入口与短答案，连回身份锚点；不改变抓取内核或扩大能力。 核验：MCP设置、Hosted/本地边界、独立验证语义及本地v1迁移入口已复用并上线；Google回答是否变化未测。 [证据][E527]
-- [x] **done** 访问问题交 SEO-01：规则配置、verified 身份、具体路径和回滚证据充分后，再提出最小生产改动；生产规则授权单列。 核验：已归SEO-01；相关zone配置复核、精确提案dry-run及用户单列授权完成，例外已应用并回读。真实verified命中与Google/Bing影响仍由SEO-01继续核验，不等于SEO纠错完成。 [证据][ECFAPPLY]
+- [x] **done** 访问问题交 SEO-01：规则配置、verified 身份、具体路径和回滚证据充分后，再提出最小生产改动；生产规则授权单列。 核验：已归SEO-01；相关zone配置复核、精确提案dry-run及用户单列授权完成，例外已应用并回读。MCP页真实verified命中及正文已配对；其他路径和Google/Bing影响仍由SEO-01继续核验，不等于SEO纠错完成。 [证据][ECFAPPLY]
 
 已上线实施：沿用现有首页能力/接入区域，补入已审阅的产品文案、官方域名/仓库、REST/SDK/MCP 入口及 Hosted/本地标记。将 Evidence Record 说明与独立 verification 检查分开；定时 Monitor 明确需要本地 workers 和仓库配置。首页删除竞品 keywords，不新增竞品别名 FAQ。外部平台条目未改写，Google回答变化未复测；不把网站修复上线视为实体混淆已纠正。网站发布批次仅含本站文案、入口、元数据和Schema，不发布npm/PyPI包；随后另经单列授权应用一条Cloudflare BIC例外，详见SEO-01，不扩展该授权。
 
@@ -450,8 +450,8 @@ Howard 希望你根据本文件推进 Octocrawl 的 SEO 优化。先读当前适
 - 两批远端均247文件通过、2976测试通过/2跳过，Windows通过、崩溃恢复8/8通过。第二批线上27 sitemap URL通过，3重点页HTML逐字节一致、10实际JS/CSS哈希一致、6响应式视图正常，MDN成功/私网拒绝。[交付原始检查][EDELIVERY]。
 - IndexNow两批均200/27URL，表示通知接受，不表示Google已索引。第一批CDN purge OAuth401未执行；第二批未清缓存，实际版本资源哈希全部匹配。不把这些状态写成索引/引用效果。
 - [Google原12题基线][EAI]与[固定题目/设置][EVIS]保持不变；[独立日期计划][EFOLLOW]只证明安排已创建，不证明结果已取得。
-- [真实客户端部分验收][ECFACCEPT]：Codex调用Firecrawl MCP、maxAge=0/basic，MCP介绍与文档介绍两页返回目标statusCode200，标题/官方入口/完整正文通过；保存交付HTML/Markdown与哈希。Cloudflare身份与新规则事件尚未关联；额外Google精确URL探针被验证码挡在回答之前，不并入原12题。
-- [PR #529](https://github.com/77777R7/Octocrawl/pull/529)：15:09:18合并，merge `0c27a7bf912ae43d4511c3c2dabb07972a7a6b33`，4项CI通过；仅状态文档，无网站部署。后续Cloudflare例外在15:25:32单独获授权应用：ruleset `1d4beb2b55e5423db6b756069d64f2d3` v1、rule `82f36f42e92a4ab0aa74e34608de6411` v1。全局BIC仍on，机器人策略原值保持，真实命中待验。[应用与回滚证据][ECFAPPLY]。
+- [真实客户端部分验收][ECFACCEPT]：Codex调用Firecrawl MCP、maxAge=0/basic，MCP介绍与文档介绍两页返回目标statusCode200，标题/官方入口/完整正文通过；保存交付HTML/Markdown与哈希。另由Claude原生网页读取取得MCP页正确标题/首句/官方入口，Cloudflare同query事件确认AI Assistant、新规则skip、边缘200及ray a4b58e525a0c0737；robots预检也命中同规则200。单页正例通过，SEO-01仍待其他路径及Google/Bing影响。额外Google精确URL探针遇验证码，不并入原12题。
+- [PR #529](https://github.com/77777R7/Octocrawl/pull/529)：15:09:18合并，merge `0c27a7bf912ae43d4511c3c2dabb07972a7a6b33`，4项CI通过；仅状态文档，无网站部署。后续Cloudflare例外在15:25:32单独获授权应用：ruleset `1d4beb2b55e5423db6b756069d64f2d3` v1、rule `82f36f42e92a4ab0aa74e34608de6411` v1。全局BIC仍on，机器人策略原值保持；16:04:59已取得Claude的MCP页精确标记命中及成功正文，其他路径和Google/Bing影响待验。[应用与回滚证据][ECFAPPLY]。
 
 工作副本与原入口只同步本task文件；未把整套docs/seo复制进原dirty checkout。证据链接使用已合并的固定提交URL或此机器的绝对文件路径，使两个副本都能定位证据。原始日志、CSV、截图及凭证不进入文档提交。
 
