@@ -9,7 +9,7 @@ import { firestoreWaitlistFromEnv } from './waitlist.js'
 import { validateAmazonPublicState } from './preview.js'
 import { createAuthRoutes, FirestoreAccountStore, IdentityToolkit } from './auth.js'
 import { createAccountRoutes, FirestoreAccountData } from './account.js'
-import { createOAuthRoutes, FirestoreOAuthStore } from './oauth.js'
+import { accountConnections, createOAuthRoutes, FirestoreOAuthStore } from './oauth.js'
 
 if (process.env.W2L_CAPTURE_RAW_DIR) throw new Error('Anonymous preview cannot persist raw capture artifacts')
 const stateFile = process.env.W2L_AMAZON_PUBLIC_STATE_FILE
@@ -38,17 +38,21 @@ const auth = firebaseApiKey && accountData
     creditCarry: { remember: (uid, key) => accountData.rememberCredits(uid, key, monthlyCredits), carry: (uid, key) => accountData.carryCredits(uid, key) },
   })
   : undefined
+// MCP clients' OAuth records (oauth.ts): its routes below, and the connections the account page lists.
+const oauthStore = auth === undefined || accountData === undefined ? undefined : new FirestoreOAuthStore(process.env.W2L_FIRESTORE_PROJECT_ID ?? '')
 const account = auth === undefined || accountData === undefined ? undefined : createAccountRoutes({
   data: accountData,
   hashKey: (process.env.W2L_QUOTA_HASH_KEY ?? '').trim(),
   current: auth.current,
   monthlyCredits,
+  // The OAuth connections (oauth.ts), listed and disconnected on the API keys page.
+  ...(oauthStore === undefined ? {} : { connections: accountConnections(oauthStore) }),
   // The Playground's runs: the hosted API, which charges and logs them (account.ts, /api/account/run).
   hostedApi: { origin: process.env.W2L_HOSTED_API_URL?.trim() || 'https://api.octocrawl.dev' },
 })
 // MCP clients' OAuth connections (oauth.ts): beside sign-in, with the hosted API's key records and its HMAC key.
-const oauth = auth === undefined || accountData === undefined ? undefined : createOAuthRoutes({
-  store: new FirestoreOAuthStore(process.env.W2L_FIRESTORE_PROJECT_ID ?? ''),
+const oauth = auth === undefined || oauthStore === undefined || accountData === undefined ? undefined : createOAuthRoutes({
+  store: oauthStore,
   secret: (process.env.W2L_QUOTA_HASH_KEY ?? '').trim(),
   current: auth.current,
   log: line => console.log(JSON.stringify({ severity: 'INFO', ...line })),

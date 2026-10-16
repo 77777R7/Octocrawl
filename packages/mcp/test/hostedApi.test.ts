@@ -10,7 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
 import { TOOL_NAMES } from '../src/tools.js'
-import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord } from '../src/hostedApi.js'
+import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore } from '../src/hostedCredits.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
 
@@ -46,7 +46,7 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; claudeDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void } = {}) {
+async function start(options: { keylessDaily?: number; claudeDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
   // `keys` are stored under their plaintext's digest; `keyRecords` under their own id, as a connection's key record has no plaintext.
@@ -54,7 +54,7 @@ async function start(options: { keylessDaily?: number; claudeDaily?: number; pro
   const oauthTokens = new MemoryHostedOAuthTokens(new Map(Object.entries(options.oauthTokens ?? {}).map(([token, record]) => [accessTokenDigest(HASH_KEY, token), record])))
   const quota = new MemoryHostedQuota()
   const service = createHostedApi({
-    port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: options.keyStore ?? new MemoryHostedKeys(records), oauthTokens, quota, leases: options.leases,
+    port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: options.keyStore ?? new MemoryHostedKeys(records), oauthTokens: options.oauthTokenStore ?? oauthTokens, ...(options.now ? { now: options.now } : {}), quota, leases: options.leases,
     ...(options.credits === null ? {} : { credits: options.credits ?? new MemoryCreditsStore() }),
     keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: 100, proxySecret: options.proxySecret,
     networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: options.log ?? (() => {}),
@@ -592,6 +592,40 @@ it('an OAuth access token is its connection\'s key on /mcp-oauth only: wrong aud
   expect(tabbed.status).toBe(200)
   expect(await tabbed.text()).not.toContain('Tides')
   expect(credits.requests.get('account-1')).toHaveLength(1)
+})
+
+it('a disconnected connection stops at its next start at once, and within a minute for calls that read the cache', async () => {
+  const { docs, fetcher } = fakeFirestore()
+  let clock = Date.now()
+  const keys = new FirestoreHostedKeys('project-1', fetcher, 60_000, () => clock)
+  const tokens = new FirestoreHostedOAuthTokens('project-1', fetcher, 60_000, () => clock)
+  const root = 'projects/project-1/databases/(default)/documents'
+  const record = (enabled: boolean) => ({ fields: { enabled: { booleanValue: enabled }, plan: { stringValue: 'account' }, dailyLimit: { integerValue: '0' }, browser: { booleanValue: true }, uid: { stringValue: 'account-1' }, kind: { stringValue: 'oauth' } }, updateTime: 't' })
+  docs.set(`${root}/hostedApiKeys/oauth_conn`, record(true))
+  docs.set(`${root}/oauthTokens/${accessTokenDigest(HASH_KEY, 'oca_live')}`, { fields: { keyId: { stringValue: 'oauth_conn' }, resource: { stringValue: MCP_OAUTH_RESOURCE }, expiresAt: { timestampValue: new Date(clock + HOUR).toISOString() } }, updateTime: 't' })
+  const credits = new MemoryCreditsStore(1_000)
+  const { url } = await start({ credits, keyStore: keys, oauthTokenStore: tokens, now: () => clock })
+  const headers = { authorization: 'Bearer oca_live', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' }
+  const list = () => post(url, '/mcp-oauth', { jsonrpc: '2.0', id: 1, method: 'tools/list' }, headers)
+  expect((await list()).status).toBe(200)
+  // Disconnected on the account page (public-preview account.ts): the connection's key record is disabled. Listing tools
+  // reads the cache, which keeps the answer a minute at most.
+  docs.set(`${root}/hostedApiKeys/oauth_conn`, record(false))
+  clock += 30_000
+  expect((await list()).status).toBe(200)
+  clock += 31_000
+  const ended = await list()
+  expect(ended.status).toBe(401)
+  expect(ended.headers.get('www-authenticate')).toContain('error="invalid_token"')
+  // Connected again and cached again, then disconnected: a tool call starts work, which reads the key past the cache, so
+  // it is refused at once and spends nothing.
+  docs.set(`${root}/hostedApiKeys/oauth_conn`, record(true))
+  clock += 61_000
+  expect((await list()).status).toBe(200)
+  docs.set(`${root}/hostedApiKeys/oauth_conn`, record(false))
+  const call = await post(url, '/mcp-oauth', { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'scrape', arguments: { url: `${origin}/page` } } }, headers)
+  expect(await call.text()).not.toContain('Tides')
+  expect(credits.requests.size).toBe(0)
 })
 
 it('Firestore access tokens: read by digest with their expiry, cached for a minute, and a fresh read past the cache', async () => {

@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { createPreviewServer } from '../src/server.js'
 import { createAuthRoutes, MemoryAccountStore, type IdentityProvider } from '../src/auth.js'
 import { createAccountRoutes, FirestoreAccountData, MAX_ACTIVE_KEYS, MemoryAccountData, playgroundRequest, type AccountRoutesOptions } from '../src/account.js'
+import { accountConnections, MemoryOAuthStore, type GrantRecord } from '../src/oauth.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 // The hosted API itself, so the Playground's signed header is checked by the code that serves it.
 import { createHostedApi, MemoryHostedKeys, MemoryHostedQuota } from '../../mcp/src/hostedApi.js'
@@ -31,12 +32,12 @@ const identity: IdentityProvider = {
   async deleteAccount() {},
 }
 
-async function start(now = new Date('2026-10-11T08:00:00Z'), hostedApi?: AccountRoutesOptions['hostedApi']) {
+async function start(now = new Date('2026-10-11T08:00:00Z'), hostedApi?: AccountRoutesOptions['hostedApi'], connections?: AccountRoutesOptions['connections']) {
   const dir = await mkdtemp(join(tmpdir(), 'w2l-account-')); dirs.push(dir)
   await writeFile(join(dir, '404.html'), '<title>Page not found</title>')
   const auth = createAuthRoutes({ identity, accounts: new MemoryAccountStore(), secret: SECRET })
   const data = new MemoryAccountData()
-  const account = createAccountRoutes({ data, hashKey: SECRET, current: auth.current, now: () => now, ...(hostedApi ? { hostedApi } : {}) })
+  const account = createAccountRoutes({ data, hashKey: SECRET, current: auth.current, now: () => now, ...(hostedApi ? { hostedApi } : {}), ...(connections ? { connections } : {}) })
   const server = createPreviewServer({ quota: { consume: async () => 'ok' }, staticDir: dir, amazonState: null, log: () => {}, visitorCookieSecret: SECRET, auth, account })
   servers.push(server)
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -63,6 +64,8 @@ describe('the account page\'s data', () => {
       credits: { remaining: 1_040, monthly: { left: 1_000, of: 1_000, resetsAt: '2026-11-01T00:00:00.000Z' }, purchased: 40 },
       usage: [{ day: '2026-10-10', http: 3, browser: 1, notFound: 0, map: 1, unread: 2, credits: 9 }],
       keys: [],
+      // No OAuth connections served here: an empty list, not a missing field.
+      connections: [],
     })
     data.balances.set('account-0001', { month: '2026-10', grant: 991, purchased: 40 })
     expect((await (await fetch(`${url}/api/account`, { headers: { cookie } })).json()).credits.monthly.left).toBe(991)
@@ -222,6 +225,36 @@ describe('the account page\'s data', () => {
     expect((await fetch(`${url}/api/account/keys/${id}/revoke`, { method: 'POST', headers: { cookie, origin: url } })).status).toBe(204)
     expect(data.keyRecords.get(id)!.enabled).toBe(false)
     expect(data.keyRecords.get('f'.repeat(64))!.enabled).toBe(true)
+  })
+
+  it('lists the account\'s live OAuth connections, and disconnects only its own, from this site', async () => {
+    const now = new Date('2026-10-11T08:00:00Z')
+    const store = new MemoryOAuthStore()
+    const id = (letter: string) => letter.repeat(24)
+    const grant = (uid: string, extra: Partial<GrantRecord> = {}): GrantRecord => ({ uid, clientId: 'https://chatgpt.com/oauth/client.json', clientName: 'ChatGPT', redirectHost: 'chatgpt.com', keyId: '', createdAt: Date.parse('2026-10-09T10:00:00Z'), lastUsedAt: Date.parse('2026-10-11T07:00:00Z'), revoked: false, connected: true, ...extra })
+    for (const [letter, record] of [['a', grant('account-0001')], ['b', grant('someone-else')], ['c', grant('account-0001', { connected: false })], ['d', grant('account-0001', { revoked: true })], ['e', grant('account-0001', { lastUsedAt: Date.parse('2026-07-01T00:00:00Z') })]] as const) {
+      store.grants.set(id(letter), { ...record, keyId: `oauth_${id(letter)}` })
+      store.keys.set(`oauth_${id(letter)}`, { enabled: !record.revoked, uid: record.uid, kind: 'oauth', grantId: id(letter), label: 'ChatGPT (chatgpt.com)', plan: 'account', browser: true, createdAt: record.createdAt })
+      store.refreshTokens.set(`refresh-${letter}`, { grantId: id(letter), uid: record.uid, clientId: record.clientId, keyId: `oauth_${id(letter)}`, resource: 'https://mcp.octocrawl.dev/mcp-oauth', expiresAt: now.getTime() + 86_400_000, used: false, version: 0 })
+    }
+    const { url, cookie } = await start(now, undefined, accountConnections(store))
+    // Only what is connected now: not another account's, one never exchanged, one disconnected, or one 90 days unused.
+    const expected = [{ id: id('a'), keyId: `oauth_${id('a')}`, name: 'ChatGPT', host: 'chatgpt.com', createdAt: '2026-10-09T10:00:00.000Z', lastUsedAt: '2026-10-11T07:00:00.000Z' }]
+    expect((await (await fetch(`${url}/api/account`, { headers: { cookie } })).json()).connections).toEqual(expected)
+    expect(await (await fetch(`${url}/api/account/connections`, { headers: { cookie } })).json()).toEqual({ connections: expected })
+    expect((await fetch(`${url}/api/account/connections`)).status).toBe(401)
+    const disconnect = (grantId: string, origin = url) => fetch(`${url}/api/account/connections/${grantId}/revoke`, { method: 'POST', headers: { cookie, origin } })
+    expect((await disconnect(id('b'))).status).toBe(404)
+    expect((await disconnect(id('a'), 'https://evil.example')).status).toBe(403)
+    expect((await disconnect('not-an-id')).status).toBe(404)
+    expect((await disconnect(id('a'))).status).toBe(204)
+    // The grant is marked, its key stops (within the hosted API's minute of cache), and its refresh tokens are gone.
+    expect(store.grants.get(id('a'))!.revoked).toBe(true)
+    expect(store.keys.get(`oauth_${id('a')}`)!.enabled).toBe(false)
+    expect([...store.refreshTokens.keys()].sort()).toEqual(['refresh-b', 'refresh-c', 'refresh-d', 'refresh-e'])
+    expect(store.grants.get(id('b'))!.revoked).toBe(false)
+    expect((await (await fetch(`${url}/api/account/connections`, { headers: { cookie } })).json()).connections).toEqual([])
+    expect((await disconnect(id('a'))).status).toBe(404)
   })
 
   it('holds at most five active keys, refuses a label with markup, and a key request from another site', async () => {

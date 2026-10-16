@@ -409,12 +409,31 @@ describe('Firestore records', () => {
     expect(await store.issue({ grantId: 'grant-1', now, access: { hash: 'a3', record: access }, refresh: { hash: 'r3', record: refresh }, rotate: { hash: 'r1', version: read.version } })).toBe(false)
     expect(docs.has(`${root}/oauthTokens/a3`)).toBe(false)
     expect((await store.refresh('r1'))!.used).toBe(true)
+    expect((await store.grantsOf(UID)).map(row => [row.id, row.grant.connected])).toEqual([['grant-1', true]])
     await store.disconnect('grant-1')
     expect((await store.grant('grant-1'))!.revoked).toBe(true)
+    // Its refresh tokens go with it.
+    expect([...docs.keys()].filter(name => name.includes('/oauthRefresh/'))).toEqual([])
     expect(docs.get(`${root}/hostedApiKeys/oauth_grant-1`)!.fields.enabled).toEqual({ booleanValue: false })
     expect(await store.activeGrants(UID, now)).toBe(0)
     expect(await store.useOnce('nonce-1', now + 600_000)).toBe(true)
     expect(await store.useOnce('nonce-1', now + 600_000)).toBe(false)
+  })
+})
+
+describe('disconnecting in Firestore', () => {
+  it('deletes every refresh token of a long-used connection, a page at a time, and no other connection\'s', async () => {
+    const { docs, fetcher } = fakeFirestore()
+    const store = new FirestoreOAuthStore('octocrawl-test', fetcher)
+    const root = 'projects/octocrawl-test/databases/(default)/documents'
+    docs.set(`${root}/oauthGrants/grant-1`, { fields: { uid: { stringValue: UID }, keyId: { stringValue: 'oauth_grant-1' }, connected: { booleanValue: true } }, updateTime: 't' })
+    docs.set(`${root}/hostedApiKeys/oauth_grant-1`, { fields: { enabled: { booleanValue: true } }, updateTime: 't' })
+    // An hour's refresh for ten days and more leaves used tokens past one page of a query.
+    for (let i = 0; i < 450; i++) docs.set(`${root}/oauthRefresh/r${i}`, { fields: { grantId: { stringValue: 'grant-1' }, used: { booleanValue: i < 449 } }, updateTime: 't' })
+    docs.set(`${root}/oauthRefresh/other`, { fields: { grantId: { stringValue: 'grant-2' }, used: { booleanValue: false } }, updateTime: 't' })
+    await store.disconnect('grant-1')
+    expect([...docs.keys()].filter(name => name.includes('/oauthRefresh/'))).toEqual([`${root}/oauthRefresh/other`])
+    expect(docs.get(`${root}/hostedApiKeys/oauth_grant-1`)!.fields.enabled).toEqual({ booleanValue: false })
   })
 })
 
@@ -428,8 +447,9 @@ function fakeFirestore() {
     if (href.endsWith(':runQuery')) {
       const { structuredQuery } = JSON.parse(String(init!.body)) as { structuredQuery: { from: Array<{ collectionId: string }>; where: { fieldFilter: { field: { fieldPath: string }; value: { stringValue: string } } } } }
       const { field, value } = structuredQuery.where.fieldFilter
+      const limit = (structuredQuery as { limit?: number }).limit ?? Infinity
       return Response.json([...docs.entries()].filter(([name, doc]) => name.split('/').at(-2) === structuredQuery.from[0]!.collectionId && (doc.fields[field.fieldPath] as { stringValue?: string } | undefined)?.stringValue === value.stringValue)
-        .map(([name, doc]) => ({ document: { name, fields: doc.fields, updateTime: doc.updateTime } })))
+        .slice(0, limit).map(([name, doc]) => ({ document: { name, fields: doc.fields, updateTime: doc.updateTime } })))
     }
     if (href.endsWith(':commit')) {
       const { writes } = JSON.parse(String(init!.body)) as { writes: Array<{ update?: { name: string; fields: Record<string, Record<string, unknown>> }; updateMask?: { fieldPaths: string[] }; delete?: string; currentDocument?: { exists?: boolean; updateTime?: string } }> }

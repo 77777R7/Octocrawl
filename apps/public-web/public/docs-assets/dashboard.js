@@ -192,6 +192,36 @@
     $('keys-empty').hidden = keys.length > 0
   }
 
+  /** The account's OAuth connections (packages/public-preview oauth.ts): each one's use is counted from the request lines
+   * as a key's is, under the key id its calls carry. */
+  let accountConnections = []
+  const renderConnections = (connections, load) => {
+    const body = $('connections-body')
+    if (!body) return
+    body.replaceChildren(...connections.map((connection) => {
+      const row = document.createElement('tr')
+      const asKey = { id: connection.keyId, createdAt: connection.createdAt }
+      for (const [text, title] of [[connection.name], [connection.host], [day(connection.createdAt)], lastUsed(asKey), monthUse(asKey)]) {
+        const cell = document.createElement('td'); cell.textContent = text; if (title) cell.title = title
+        row.append(cell)
+      }
+      const action = document.createElement('td')
+      const button = document.createElement('button')
+      button.type = 'button'; button.className = 'button quiet'; button.textContent = 'Disconnect'
+      let armed = false
+      button.addEventListener('click', async () => {
+        if (!armed) { armed = true; button.textContent = 'Click again to disconnect'; setTimeout(() => { armed = false; button.textContent = 'Disconnect' }, 4000); return }
+        button.disabled = true
+        const response = await fetch(`/api/account/connections/${connection.id}/revoke`, { method: 'POST', credentials: 'same-origin' }).catch(() => null)
+        if (response && response.status === 204) { say(`Disconnected ${connection.name}. It stops working within a minute.`); load() } else { button.disabled = false; say('The connection could not be ended. Try again.', true) }
+      })
+      action.append(button)
+      row.append(action)
+      return row
+    }))
+    $('connections-empty').hidden = connections.length > 0
+  }
+
   const renderUsage = (days, usage) => {
     const body = $('usage-body')
     if (!body) return
@@ -385,7 +415,7 @@
   }
   const renderActivity = () => {
     if (!activity) return
-    if (resetsAt) { keyStats = tallyKeys(activity, activityLimit, resetsAt, linesUsage); renderKeys(accountKeys, load) }
+    if (resetsAt) { keyStats = tallyKeys(activity, activityLimit, resetsAt, linesUsage); renderKeys(accountKeys, load); renderConnections(accountConnections, load) }
     renderRequests('recent', activity.slice(0, 5))
     renderRuns(activity.filter(fromPlayground).slice(0, 6))
     const shown = filtered()
@@ -521,10 +551,14 @@
     accountUsage = data.usage
     resetsAt = monthly.resetsAt
     renderKeys(data.keys, load)
-    keyNames = new Map(data.keys.map((k) => [k.id, `${k.label} (${k.prefix}…)`]))
+    // A server without OAuth connections sends none.
+    accountConnections = Array.isArray(data.connections) ? data.connections : []
+    renderConnections(accountConnections, load)
+    keyNames = new Map([...data.keys.map((k) => [k.id, `${k.label} (${k.prefix}…)`]), ...accountConnections.map((c) => [c.keyId, `${c.name} (${c.host})`])])
     const keyFilter = $('f-key')
     if (keyFilter && keyFilter.options.length === 1) {
       for (const key of data.keys) keyFilter.append(new Option(`${key.label} (${key.prefix}…)`, key.id))
+      for (const connection of accountConnections) keyFilter.append(new Option(`${connection.name} (${connection.host})`, connection.keyId))
       keyFilter.append(new Option('Playground', 'playground'))
     }
     renderActivity()

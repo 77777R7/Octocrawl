@@ -11,6 +11,8 @@
  *   GET  /api/account/activity            { requests, limit, retentionDays }: the latest request lines, newest first
  *   POST /api/account/keys                { label? }  →  { key, id }   (the key, once)
  *   POST /api/account/keys/{id}/revoke    the key stops within a minute (the hosted API caches lookups that long)
+ *   GET  /api/account/connections         { connections }: the account's OAuth connections (oauth.ts) that are live now
+ *   POST /api/account/connections/{id}/revoke   disconnects one: it stops at its next call, and within a minute at most
  *
  * An OAuth connection (oauth.ts) has a key record of its own in `hostedApiKeys`, with `kind: oauth`: it is not listed
  * among the keys and does not count against the five.
@@ -47,6 +49,17 @@ export interface RequestView {
   /** The formats a scrape asked for (empty: none named) and how long the call took; null on lines written before
    * the hosted API recorded them (2026-10-12) and, for formats, on a map. */
   formats: string[] | null; ms: number | null
+}
+
+/** An OAuth connection as the account page shows it: the app, the host it returns to, and the key id its calls carry
+ * in the request lines (so the page counts its use as it counts a key's). */
+export interface ConnectionView { id: string; keyId: string; name: string; host: string; createdAt: string; lastUsedAt: string }
+/** The account's OAuth connections (oauth.ts, accountConnections). */
+export interface Connections {
+  /** Connections that exchanged their code and are neither disconnected nor 90 days unused, newest first. */
+  list(uid: string, now: Date): Promise<ConnectionView[]>
+  /** Ends the connection if it is the account's and live; false otherwise. */
+  disconnect(uid: string, id: string, now: Date): Promise<boolean>
 }
 
 export interface AccountData {
@@ -282,6 +295,8 @@ export interface AccountRoutesOptions {
   current: (req: IncomingMessage) => Promise<Session | null>
   monthlyCredits?: number
   now?: () => Date
+  /** The account's OAuth connections; absent, none are listed. */
+  connections?: Connections
   /** Where the Playground's runs go: the hosted API's origin (W2L_HOSTED_API_URL). Absent: /api/account/run answers 503. */
   hostedApi?: { origin: string; fetcher?: typeof fetch; timeoutMs?: number }
 }
@@ -360,7 +375,7 @@ export function createAccountRoutes(options: AccountRoutesOptions) {
       if (req.method !== 'GET') { res.writeHead(405, { allow: 'GET' }).end(); return true }
       const month = at.toISOString().slice(0, 7)
       const since = new Date(at.getTime() - (USAGE_DAYS - 1) * 86_400_000).toISOString().slice(0, 10)
-      const [balance, usage, keys, providers] = await Promise.all([options.data.balance(session.uid), options.data.usage(session.uid, since), options.data.keys(session.uid), options.data.providers(session.uid)])
+      const [balance, usage, keys, providers, connections] = await Promise.all([options.data.balance(session.uid), options.data.usage(session.uid, since), options.data.keys(session.uid), options.data.providers(session.uid), options.connections?.list(session.uid, at) ?? []])
       // A month the account has not spent in yet has its whole grant: the hosted API resets it on the first call.
       const grant = balance === null || balance.month !== month ? monthly : balance.grant
       const resetsAt = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1)).toISOString()
@@ -370,7 +385,14 @@ export function createAccountRoutes(options: AccountRoutesOptions) {
         credits: { remaining: grant + (balance?.purchased ?? 0), monthly: { left: grant, of: monthly, resetsAt }, purchased: balance?.purchased ?? 0 },
         usage,
         keys,
+        connections,
       })
+      return true
+    }
+
+    if (pathname === '/api/account/connections') {
+      if (req.method !== 'GET') { res.writeHead(405, { allow: 'GET' }).end(); return true }
+      send(res, 200, { connections: await options.connections?.list(session.uid, at) ?? [] })
       return true
     }
 
@@ -434,6 +456,14 @@ export function createAccountRoutes(options: AccountRoutesOptions) {
         clearTimeout(timer)
         res.off('close', left)
       }
+      return true
+    }
+
+    const disconnect = /^\/api\/account\/connections\/([A-Za-z0-9_-]{24})\/revoke$/.exec(pathname)
+    if (disconnect) {
+      if (req.method !== 'POST') { res.writeHead(405, { allow: 'POST' }).end(); return true }
+      if (!(await options.connections?.disconnect(session.uid, disconnect[1]!, at))) { send(res, 404, { error: 'not_found' }); return true }
+      res.writeHead(204, { 'cache-control': 'no-store' }).end()
       return true
     }
 

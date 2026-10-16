@@ -197,6 +197,58 @@ describe('API keys: last used and this month', () => {
   })
 })
 
+describe('MCP connections', () => {
+  const GRANT = 'g'.repeat(24)
+  const CONNECTION_KEY = `oauth_${GRANT}`
+  const CONNECTIONS = [{ id: GRANT, keyId: CONNECTION_KEY, name: 'ChatGPT', host: 'chatgpt.com', createdAt: '2026-10-14T08:00:00.000Z', lastUsedAt: '2026-10-20T11:00:00.000Z' }]
+  const answers = (connections = CONNECTIONS): Record<string, [number, unknown]> => {
+    const lines = [line('2026-10-20T11:50:00.000Z', CONNECTION_KEY, 5), ...octoberLines()]
+    return {
+      'GET /api/account': [200, { ...account(OCTOBER.resetsAt, usageOf(lines)), connections }],
+      'GET /api/account/activity': [200, { requests: lines, limit: 1000, retentionDays: 30 }],
+      [`POST /api/account/connections/${GRANT}/revoke`]: [204, null],
+    }
+  }
+
+  it('lists each connection with the app, where it returns, and its use counted as a key\'s, apart from the keys', async () => {
+    const keys = await page('/dashboard/keys/', '', OCTOBER.now, answers())
+    const rows = rowsOf(keys.$('connections-body'))
+    // App, returns to, connected, last used, this month, action. Connected since the lines began: its month is exact.
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.slice(0, 5)).toEqual(['ChatGPT', 'chatgpt.com', '2026-10-14', '10 min ago', '5 credits · 1 call'])
+    expect(keys.$('connections-empty').hidden).toBe(true)
+    // Not a key: the keys table and its count of five leave it out.
+    expect(rowsOf(keys.$('keys-body')).map(row => row[0])).toEqual(['laptop agent', 'ci', 'old'])
+    const activity = await page('/dashboard/activity/', '', OCTOBER.now, answers())
+    // Activity names its calls by the app.
+    expect([...activity.$('f-key').querySelectorAll('option')].map(option => option.textContent)).toContain('ChatGPT (chatgpt.com)')
+    expect(activity.$('activity-body').querySelector('tr')!.getAttribute('title')).toBe('Key: ChatGPT (chatgpt.com)')
+  })
+
+  it('disconnects on a second click, says it stops within a minute, and loads the list again', async () => {
+    const given = answers()
+    const keys = await page('/dashboard/keys/', '', OCTOBER.now, given)
+    given['GET /api/account'] = [200, { ...(given['GET /api/account']![1] as object), connections: [] }]
+    const button = keys.$('connections-body').querySelector('button')!
+    expect(button.textContent).toBe('Disconnect')
+    button.click()
+    expect(button.textContent).toBe('Click again to disconnect')
+    expect(keys.calls.some(call => call.method === 'POST')).toBe(false)
+    button.click()
+    await settle()
+    expect(keys.calls.filter(call => call.method === 'POST').map(call => call.path)).toEqual([`/api/account/connections/${GRANT}/revoke`])
+    expect(keys.$('dash-message').textContent).toBe('Disconnected ChatGPT. It stops working within a minute.')
+    expect(rowsOf(keys.$('connections-body'))).toEqual([])
+    expect(keys.$('connections-empty').hidden).toBe(false)
+  })
+
+  it('shows none on an account without connections, or a server that sends no list', async () => {
+    const none = await page('/dashboard/keys/', '', OCTOBER.now, octoberAnswers())
+    expect(rowsOf(none.$('connections-body'))).toEqual([])
+    expect(none.$('connections-empty').hidden).toBe(false)
+  })
+})
+
 describe('Connect fills in a key', () => {
   const KEY = `oc_${'x'.repeat(43)}`
   const MASKED = `oc_xxxx${'•'.repeat(12)}`
