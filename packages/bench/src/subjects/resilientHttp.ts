@@ -764,6 +764,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       status: out.status,
       header: (name) => out.headers?.get(name) ?? null,
       body,
+      finalUrl: out.finalUrl,
       contentful: true,
     })
     if (decisive !== null) return blocked(decisive)
