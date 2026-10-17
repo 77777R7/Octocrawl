@@ -16,17 +16,35 @@ const PROSE = 'The harbour office records tide height, wind and visibility for e
 const adHits: string[] = []
 let pages: Server
 let ads: Server
+let ads6: Server
 let origin: string
 let adOrigin: string
 
 beforeAll(async () => {
-  // The ad host listens on every interface so Chromium reaches it however it resolves `localhost`.
   ads = createServer((req, res) => {
     adHits.push(req.url ?? '')
     if (req.url === '/ad.js') res.writeHead(200, { 'content-type': 'text/javascript' }).end('// an ad script')
     else res.writeHead(200, { 'content-type': 'image/gif' }).end(Buffer.from('47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b', 'hex'))
   })
-  await new Promise<void>((resolve) => ads.listen(0, resolve))
+  // The ad host listens on 127.0.0.1 and on ::1 at the same port, so Chromium reaches it however it resolves `localhost`
+  // (::1 first). Not listen(0) on every address: macOS may hand a dual-stack listener a port another process holds on
+  // ::1 or 0.0.0.0, and Chromium's ad requests then go to that process.
+  ads6 = createServer((req, res) => ads.emit('request', req, res))
+  const listen = (target: Server, port: number, host: string) => new Promise<void>((resolve, reject) => {
+    target.once('error', reject)
+    target.listen(port, host, () => { target.off('error', reject); resolve() })
+  })
+  for (let attempt = 1; ; attempt++) {
+    await listen(ads, 0, '127.0.0.1')
+    try { await listen(ads6, (ads.address() as AddressInfo).port, '::1'); break } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      // A host without IPv6 keeps the 127.0.0.1 listener alone, all that listen(0) gave there too.
+      if (code === 'EADDRNOTAVAIL' || code === 'EAFNOSUPPORT') break
+      // Another process has that port on ::1: take a new one.
+      await new Promise<void>((resolve) => ads.close(() => resolve()))
+      if (code !== 'EADDRINUSE' || attempt === 5) throw error
+    }
+  }
   adOrigin = `http://localhost:${(ads.address() as AddressInfo).port}`
   pages = createServer((req, res) => {
     if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
@@ -44,7 +62,7 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  for (const s of [pages, ads]) await new Promise<void>((resolve) => s.close(() => resolve()))
+  for (const s of [pages, ads, ads6]) if (s.listening) await new Promise<void>((resolve) => s.close(() => resolve()))
 })
 
 describe('the ad-host list', () => {
