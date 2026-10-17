@@ -12,6 +12,10 @@ Octocrawl reports a failure as a failure, never as an empty success:
 
 When the declared Product has only AggregateOffer offers with a stated nonnegative lowPrice and no single price, its unlabelled grids of offers stay in the main content. Explicitly labelled recommendation sections and recommendation containers are still removed. The aggregate bound and an individual card's price are not used as the subject's single product price; that field remains unavailable unless another declared source supplies it. Configure checks for the records and fields your task needs: a page's other prices alone do not establish that its offers were delivered.
 
+## Documents with sibling chapters
+
+For a document without an article/main wrapper, a page heading followed by at least three consecutive numbered sibling chapters can identify the body as its main region. The chapters must hold most of the classified text, with at least three chapters containing text blocks. This retains the publication header and requirements alongside long appendices or glossaries. Ordinary cleaning and explicit `includeTags`/`excludeTags` still apply. This structural heuristic does not establish completeness or accuracy; configure checks for the header and sections your task needs. Passing those checks covers only the configured contract, not independent accuracy acceptance.
+
 ## Compact MCP responses
 
 MCP `scrape` is compact by default: it returns the selected content, document/product metadata, aggregate usage and errors without repeating the body under `summary.attempts`, with the response's status and `content-type` header in `snapshot` (`httpStatus`, `contentType`) and the final URL and every redirect hop in `evidenceRecord`. Pass `debug: true` when you need the full route, trace and per-attempt audit. REST and SDK calls that omit `formats` and `debug` keep the legacy full Markdown response.
