@@ -9,7 +9,7 @@
     {
       "name": "octocrawl",
       "source": "./plugins/octocrawl",
-      "description": "Web scraper for agents: blocked, empty and wrong pages reported as such, with an Evidence Record.",
+      "description": "Web pages as clean Markdown and JSON for AI agents, in fewer tokens, with an Evidence Record.",
       "category": "development"
     }
   ]
