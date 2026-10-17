@@ -1,0 +1,16 @@
+{
+  "name": "octocrawl",
+  "owner": {
+    "name": "Octocrawl",
+    "email": "hello@octocrawl.dev"
+  },
+  "description": "Octocrawl's plugin for Claude Code: the hosted Octocrawl MCP server, signed in with your Octocrawl account.",
+  "plugins": [
+    {
+      "name": "octocrawl",
+      "source": "./plugins/octocrawl",
+      "description": "Web scraper for agents: blocked, empty and wrong pages reported as such, with an Evidence Record.",
+      "category": "development"
+    }
+  ]
+}
