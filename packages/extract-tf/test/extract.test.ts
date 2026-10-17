@@ -134,6 +134,21 @@ describe('extractTf', () => {
     expect(streamed.mainHtml).toContain('Paragraph 5')
     const banner = extractTf.extract(`<!doctype html><html><body><div class="css-globan"><div hidden><p>All official European Union website addresses are in the europa.eu domain, and here is how to tell.</p></div></div><main><h1>Population on 1 January</h1><div id="app"></div></main></body></html>`)
     expect(banner.escalate).toBe(true)
+    // A closed mega-menu is not a streamed body: when its headings and teasers outweigh the article, the <main> that
+    // holds the page's h1 is the content (nasa.gov's blog post, 2026-10-17, read as empty under its hidden menu).
+    const columns = ['Missions', 'Humans in Space', 'Earth', 'The Solar System', 'The Universe', 'Science', 'Aeronautics', 'Technology', 'Learning Resources', 'About NASA', 'News and Events', 'Multimedia']
+      .map((name) => `<div class="global-nav__col"><h3>${name}</h3><ul>${['Overview', 'Latest', 'Archive'].map((l) => `<li><a href="/${l}">${l}</a></li>`).join('')}</ul></div>`).join('')
+    const teasers = ['What’s Up: October 2026 Skywatching Tips from NASA', 'A.15 Biosphere: New Requirement Added to Section 4.2.1', 'Dr. Natasha Schatzman Receives Vertical Flight Society (VFS) Award', 'La NASA refuerza Artemis: añade una misión y perfecciona su arquitectura general']
+      .map((t) => `<div class="card"><a href="/t"><h3>${t}</h3></a></div>`).join('')
+    const report = [
+      'The Artemis II crew travelled around the Moon and back and, along the way, captured observations of the lunar surface that scientists are now studying in detail across several research centres and universities.',
+      'More than 800 gigabytes of lunar science data, some previously unreleased, are now available to the public, including photographs, audio recordings of the crew describing what they saw, and handwritten notes.',
+      'When combined, the images, audio files and crew notes provide a record of the far side under lighting conditions no earlier mission saw, and researchers expect the release to support studies for years to come.',
+    ].map((p) => `<p>${p}</p>`).join('')
+    const nasa = extractTf.extract(`<!doctype html><html><body><header><nav><ul><li><a href="/">Home</a></li></ul></nav></header><div id="global-navigation" class="usa-megamenu" hidden><div class="global-nav__menus"><div class="global-nav__features"><h3>Featured</h3>${teasers}</div>${columns}</div></div><div class="single-blog-container"><aside><div class="post-author">Jane Doe</div><div class="post-date">Oct 07, 2026</div></aside><main id="primary"><article><h1>NASA Releases Artemis II Lunar Science Data, Images</h1>${report}</article></main></div><footer><ul><li><a href="/privacy">Privacy</a></li></ul></footer></body></html>`)
+    expect(nasa.escalate).toBe(false)
+    expect(nasa.mainHtml).toContain('More than 800 gigabytes')
+    expect(nasa.mainHtml).not.toContain('Skywatching')
     // A region inside the <main> stands, an <article> in it for one: it is not widened to the whole <main>.
     const lead = Array.from({ length: 2 }, (_, i) => `<p>Long paragraph ${i + 1}: ${'the survey covers forty villages and three hundred households in the upper valley over two winters, '.repeat(4)}</p>`).join('')
     const inner = extractTf.extract(`<!doctype html><html><body><main><h1>Valley survey</h1><div class="sidebar"><ul><li><a href="/a">Alpha district notes</a></li><li><a href="/b">Beta district notes</a></li></ul><p>Sidebar note: districts are listed by their old names here.</p></div><article>${lead}</article></main></body></html>`)
