@@ -22,6 +22,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **MCP `instructions` and identity.** `initialize` now answers with `instructions`: what Octocrawl does, which tool a task starts with, how to read a result (`status`, `verification.status`, `readiness`, `agentHints`), and what the connection can reach. They are written from the tools that surface lists: a local server, hosted keyless, hosted with a key, or `/mcp-oauth`. `serverInfo` adds `title` `Octocrawl`, a `description` and a `websiteUrl`; the hosted server card and `server.json` carry the same title and description. Clients that do not read `instructions` see no change. (docs/mcp-client-ux-tasks.md W3)
+
 ## 0.5.0 — 2026-10-17
 
 The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `@octocrawl/ai-sdk`, `octocrawl-client`) at 0.5.0. It holds everything below since 0.4.2 on 2026-10-13. It is a minor version because one change refuses requests 0.4.2 accepted: a task contract that checks Markdown, sent with explicit `formats` that leave Markdown out, is now refused before fetching. Entries about the hosted service (api. and mcp.octocrawl.dev) and octocrawl.dev describe what is already live there. The Python client is unchanged apart from its version.
