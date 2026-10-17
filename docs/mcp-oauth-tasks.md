@@ -146,6 +146,7 @@
 7. claude.ai 对授权服务各端点的超时是 10 秒（发现、注册、换 token），刷新是 30 秒（claude.com/docs/connectors/building/authentication）。D3 的冷启动检查要按这个标准。
 8. MCP 2026-07-28 版改成了无状态（没有 `initialize`，有 `server/discover`），`/mcp` 现有实现与它兼不兼容，不在本清单范围内，只记一笔。
    **2026-10-17 查过**：客户端（Claude Code、claude.ai、ChatGPT、Cursor）每次连接的第一个请求都带 `MCP-Protocol-Version: 2026-07-28`，我们按 2025-11-25 规范返回 400（该版规范要求不支持的版本 MUST 回 400），客户端随即退回 `initialize` 并成功，且按域名缓存这个结果。所以这不是 bug，只是每次连接多一个几毫秒的来回。要去掉它只能支持 2026-07-28：官方 SDK v1（`@modelcontextprotocol/sdk`，目前 1.32.1）写明不支持这一版，要迁到 v2（`@modelcontextprotocol/server` 2.3.1，`createMcpHandler` 能同时服务新旧协议）。这是单独的一项工作，没有在 item 6 里做。依据：modelcontextprotocol.io 上 2025-11-25 的 transports 页和 2026-07-28 的 versioning、streamable-http 页。
+   **2026-10-17 已做**：迁到 v2 SDK 后，`/mcp`、`/mcp-oauth`、本地 MCP 服务和 stdio 都支持 2026-07-28（本地测试覆盖），2025 版的 `initialize` 照旧可用，不支持的版本返回 400 和 -32022。还没部署，真实客户端首个请求是否不再多一次 400，要部署后再核实。
 
 ## 待我决定（Blocked on Howard）
 

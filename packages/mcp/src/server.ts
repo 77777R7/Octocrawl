@@ -1,5 +1,4 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js'
-import { CallToolRequestSchema, CancelledNotificationSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { CLIENT_INFO_META_KEY, Server, type Implementation, type Tool } from '@modelcontextprotocol/server'
 import { isApiErrorCode } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import type { PostCalls } from './inFlight.js'
@@ -51,23 +50,25 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
     { capabilities: { tools: {} }, instructions },
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...listed] as typeof TOOLS[number][] }))
+  server.setRequestHandler('tools/list', async () => ({ tools: [...listed] as unknown as Tool[] }))
   const calls = options.calls
   // Replaces the SDK's own handler, which reaches only the calls of this server, that is of this POST.
-  if (calls) server.setNotificationHandler(CancelledNotificationSchema, notification => {
+  if (calls) server.setNotificationHandler('notifications/cancelled', notification => {
     if (notification.params.requestId !== undefined) calls.cancel(notification.params.requestId)
   })
   // The client cancelling a call (notifications/cancelled) aborts its signal: the API request it made, and a wait, stop.
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    const call = calls?.begin(extra.requestId)
+  server.setRequestHandler('tools/call', async (request, ctx) => {
+    const call = calls?.begin(ctx.mcpReq.id)
     try {
       if (options.allowedTools && !options.allowedTools.has(request.params.name)) throw new Error('tool not available in this deployment')
       options.authorizeCall?.(request.params.name,request.params.arguments ?? {})
       const args = options.normalizeCall?.(request.params.name, request.params.arguments ?? {}) ?? request.params.arguments ?? {}
-      const signal = call === undefined ? extra.signal : AbortSignal.any([extra.signal, call.signal])
+      const signal = call === undefined ? ctx.mcpReq.signal : AbortSignal.any([ctx.mcpReq.signal, call.signal])
       let result: unknown
       // Every call is recorded under this client's name and version; the tools take no origin of their own.
-      try { result = await callTool(client, request.params.name, args, { signal, origin: mcpOrigin(server.getClientVersion()) }) }
+      // A 2026-07-28 request names its client itself; a 2025-era one named it in initialize.
+      const named = (ctx.mcpReq.envelope as Record<string, unknown> | undefined)?.[CLIENT_INFO_META_KEY] as Implementation | undefined
+      try { result = await callTool(client, request.params.name, args, { signal, origin: mcpOrigin(named ?? server.getClientVersion()) }) }
       catch (error) { throw call?.signal.aborted ? requestCancelled() : withErrorCode(error) }
       if (call?.signal.aborted) throw requestCancelled()
       // A tool that declares an outputSchema answers its result as structuredContent too.
