@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import type { FetchResult } from '@w2l/contracts'
-import { toEvidenceRecord } from '@w2l/runtime'
+import { readinessOf, toEvidenceRecord } from '@w2l/runtime'
 import { pageFromUserBrowser, type UserBrowserRead } from '../src/subjects/userBrowserPage.js'
 
+it('keeps a dedicated Skyscanner human challenge blocked when its short text looks extractable', () => {
+  const url = 'https://www.skyscanner.net/sttc/px/captcha-v2/index.html?url=L3JvdXRlcw=='
+  const html = '<html><head><title>Skyscanner</title></head><body><h1>Are you a person or a robot?</h1><p>Please don’t take this personally - some scripts and bots are remarkably lifelike these days!</p><div id="px-captcha"><iframe title="Human verification challenge"></iframe></div></body></html>'
+  expect(pageFromUserBrowser({ requestedUrl: 'https://www.skyscanner.net/routes/lond/pari/london-to-paris.html', finalUrl: url, status: 200, contentType: 'text/html', html, fetchedAt: '2026-10-15T09:20:55Z', wallMs: 0, sawGate: null, act: null, browser: 'synthetic captured-page counterpart' }, null, {})).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+})
+
 const PAGE = `<html><head><title>Members</title></head><body><article><h1>Members</h1>${'<p>The page behind the check, long enough to be read as an article. </p>'.repeat(4)}</article></body></html>`
+
+it('does not deliver extractable challenge text while the dedicated widget is still loading', () => {
+  const finalUrl = 'https://www.skyscanner.net/sttc/px/captcha-v2/index.html?url=L3JvdXRlcw=='
+  const html = '<html><head><title>Skyscanner</title></head><body><h1>Are you a person or a robot?</h1><p>Please don’t take this personally - some scripts and bots are remarkably lifelike these days!</p><div id="px-captcha"><div id="px-loader" class="px-loader-wrapper"></div></div></body></html>'
+  expect(pageFromUserBrowser({ requestedUrl: 'https://www.skyscanner.net/routes/lond/pari/london-to-paris.html', finalUrl, status: 200, contentType: 'text/html', html, fetchedAt: '2026-10-15T11:49:00Z', wallMs: 0, sawGate: null, act: null, browser: 'synthetic loading-challenge counterpart' }, null, {})).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+})
 
 /** The result a check stopped: blocked at a captcha, with the robots decision its lane signed. */
 const STOPPED = {
@@ -19,6 +31,30 @@ const read = (html: string, extra: Partial<UserBrowserRead> = {}): UserBrowserRe
 })
 
 describe('a page read in the person\'s browser', () => {
+  it('keeps the publisher error when an empty rendered page exits before content formatting', () => {
+    const state = { page: '/browse/[...seo]', query: { seo: ['electronics', 'laptops', '123'] }, props: { pageProps: { initialData: {
+      searchResult: { itemStacks: [] }, pageMetadata: { pageContext: { browseContext: { errorResponse: { errors: [{ errorType: 'FATAL', statusCode: 'POLARIS_1001', statusMsg: 'INVALID_CAT_ID' }] } } } },
+    } } } }
+    const html = `<html><head><title>Laptops</title><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(state)}</script></head><body><nav><a href="/help">Help</a></nav><main></main></body></html>`
+    const url = 'https://www.walmart.com/browse/electronics/laptops/123'
+    const result = pageFromUserBrowser(read(html, { requestedUrl: url, finalUrl: url }), null, {})
+    expect(result).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
+    expect(result.warnings).toContainEqual(expect.objectContaining({ code: 'source_data_error' }))
+    expect(readinessOf(result)).toEqual({ state: 'not_served', basis: ['source_data_error'] })
+  })
+
+  it('reports a publisher-declared invalid category instead of treating it as a ready product page', () => {
+    const state = { page: '/browse/[...seo]', query: { seo: ['electronics', 'laptops', '123'] }, props: { pageProps: { initialData: {
+      searchResult: { itemStacks: [] }, pageMetadata: { pageContext: { browseContext: { errorResponse: { errors: [{ errorType: 'FATAL', statusCode: 'POLARIS_1001', statusMsg: 'INVALID_CAT_ID' }] } } } },
+    } } } }
+    const html = PAGE.replace('</head>', `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(state)}</script></head>`)
+    const url = 'https://www.walmart.com/browse/electronics/laptops/123'
+    const result = pageFromUserBrowser(read(html, { requestedUrl: url, finalUrl: url }), null, {})
+    expect(result.status).toBe('success') // The HTTP document came; this is a data-availability caveat.
+    expect(result.warnings).toContainEqual(expect.objectContaining({ code: 'source_data_error' }))
+    expect(readinessOf(result)).toEqual({ state: 'not_served', basis: ['source_data_error'] })
+  })
+
   it('is read as the browser lane reads a rendered page, recorded as theirs: mode authed, its headers unseen, the stopped fetch\'s robots decision', () => {
     const result = pageFromUserBrowser(read(PAGE), STOPPED, {})
     expect(result).toMatchObject({ status: 'success', lane: 'browser_local_authed', compliance: null, blockReason: null, evidence: { finalUrl: 'https://site.test/members', httpStatus: 200, contentType: 'text/html; charset=utf-8', redirectChainComplete: false, fetchedAt: '2026-10-04T01:00:00.000Z' } })

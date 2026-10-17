@@ -5,9 +5,14 @@ on:
   pull_request:
 
 jobs:
-  test:
+  linux:
+    name: linux (${{ matrix.project }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [unit, timed, perf]
     steps:
       - name: Runner CPU (perf test timings vary by model)
         run: lscpu
@@ -19,13 +24,38 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
-      - run: npm test
+      - run: npm test -- --project=${{ matrix.project }} --reporter=default --reporter=json --outputFile=test-results/${{ matrix.project }}.json
       - name: A batch of 1,000 URLs over 20 hosts survives kill -9 (0 lost, 0 duplicated)
+        if: matrix.project == 'unit'
         run: npm run verify:batch-crash-1000
       - name: Check for orphaned Chromium processes
+        if: always()
         run: |
           if pgrep -af '[m]s-playwright|[c]hromium_headless_shell|[c]hrome-headless-shell' >/tmp/w2l-chromium-processes.txt; then
             cat /tmp/w2l-chromium-processes.txt
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.project }}
+          path: test-results/${{ matrix.project }}.json
+          if-no-files-found: error
+
+  # Preserve the existing required check name. A cancelled, skipped or failed
+  # matrix member must not turn the aggregate gate green.
+  test:
+    needs: linux
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: All Linux projects passed
+        env:
+          LINUX_RESULT: ${{ needs.linux.result }}
+        run: |
+          if [ "$LINUX_RESULT" != "success" ]; then
+            echo "::error::Linux projects ended with $LINUX_RESULT"
             exit 1
           fi
 

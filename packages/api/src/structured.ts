@@ -1005,6 +1005,12 @@ function checksMarkdown(req: Pick<ScrapeRequest, 'verify'>): boolean {
 
 /** Require the formats each check actually reads; do not verify data the response discards. */
 export function checkVerificationFormats(req: Pick<ScrapeRequest, 'formats' | 'verify'>): void {
+  for (const check of req.verify?.checks ?? []) {
+    const path = check.type === 'field' ? check.path : check.type === 'listRecordsMin' ? check.path : undefined
+    if (path !== undefined && /^(verification|readiness|evidenceRecord)(?:\.|$)/.test(path)) {
+      throw new RequestError('verify cannot check verification, readiness or evidenceRecord: these fields are produced from the verification result; check source data instead')
+    }
+  }
   if (req.verify?.checks.some(check => check.type === 'tableRowsMin') && (req.formats === undefined || !hasFormat(req.formats, 'tables'))) {
     throw new RequestError('formats must include tables when verify uses tableRowsMin; include tables or remove that check')
   }
@@ -1084,7 +1090,8 @@ function withoutRepeatedBodies(summary: ScrapeResponse['summary'], debug: boolea
  * extraction, the `scrapeId` and `metadata` of the call, the snapshot, the
  * Evidence Record and the timings; compact unless `debug` is true. The id is
  * minted here when the caller (the engine, which writes the scrape record
- * under it) gives none.
+ * under it) gives none. `fetched` is the engine's decision: false projects
+ * this call's zero fetch usage before verification while retaining the source capture.
  */
 export async function prepareScrapeResponse(
   result: ScrapeRun,
@@ -1093,6 +1100,7 @@ export async function prepareScrapeResponse(
   modelConfig: StructuredModelConfig | null,
   overallStart: number,
   scrapeId: string = crypto.randomUUID(),
+  fetched = true,
 ): Promise<ScrapeResponse | CompactScrapeResponse> {
   checkVerificationFormats(req)
   const formats = requestedFormats(req, result)
@@ -1101,8 +1109,6 @@ export async function prepareScrapeResponse(
     ? await extractStructured(extractionInput(result), customJsonFormat(formats), execution, modelConfig ?? structuredModelConfigFromEnv(), listFormat(formats))
     : undefined
   const modelMs = json?.modelUsage ? Math.max(0, performance.now() - modelStart) : 0
-  // The task's contract judged on the whole result, before the response leaves out what was not asked for.
-  const verification = verify(req.verify, { ...result, ...(json === undefined ? {} : { json }) })
   const serializeStart = performance.now()
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
   const warning = warningOf(result.warnings)
@@ -1117,7 +1123,6 @@ export async function prepareScrapeResponse(
     ...(hasFormat(formats, 'rawHtml') ? { rawHtml: result.rawHtml ?? null } : {}),
     ...(hasFormat(formats, 'screenshot') ? { screenshot: result.screenshot ?? null } : {}),
     ...(json === undefined ? {} : { json }),
-    verification,
     summary: withoutRepeatedBodies(result.summary, req.debug === true),
   }
   const serializeMs = Math.max(0, performance.now() - serializeStart)
@@ -1127,9 +1132,7 @@ export async function prepareScrapeResponse(
     scrapeId,
     metadata: scrapeResponseMetadata(next, scrapeId),
     snapshot: scrapeSnapshot(next),
-    evidenceRecord: scrapeEvidenceRecord({ ...result, verification }, req, next),
-    // Read from the full result, with its verification: a contract's verdict and the region wait tell its states apart (ADR 0007).
-    readiness: readinessOf({ ...result, verification }),
+    readiness: readinessOf(result),
     usage: {
       ...next.usage,
       wallMs: totalMs,
@@ -1137,8 +1140,40 @@ export async function prepareScrapeResponse(
     },
     summary: { ...next.summary, totalMs },
   }
-  if (req.debug !== false) return withTiming
-  return compactScrapeResponse(withTiming, req, formats, totalMs)
+  // Judge the exact data projection delivered, including the compact document and requested formats.
+  // Otherwise a price/entity discarded below could still make a task pass (ADR 0006).
+  // Cache reuse has no new fetch usage. Project it before judging; keep the original capture for its evidence.
+  const responseData = fetched ? withTiming : withoutFetchUsage(withTiming)
+  const delivered = req.debug === false ? compactScrapeData(responseData, req, formats, totalMs) : responseData
+  return verifyScrapeResponse(delivered, req, result)
+}
+
+/** Rejudge an already shaped response after a delivery diagnostic, without repeating extraction or fetch usage. */
+export function verifyScrapeResponse(
+  delivered: ScrapeResponse | Omit<CompactScrapeResponse, 'evidenceRecord'>,
+  req: ScrapeRequest,
+  result: FetchResult,
+): ScrapeResponse | CompactScrapeResponse {
+  // Verdict-derived fields are not source data, including verdicts carried by an earlier ladder/cache view.
+  const { verification: _previousVerification, readiness: _previousReadiness, evidenceRecord: _previousEvidence, ...sourceData } = { ...delivered, evidenceRecord: undefined }
+  const verification = verify(req.verify, sourceData)
+  return {
+    ...delivered,
+    verification,
+    readiness: readinessOf({ ...result, verification }),
+    evidenceRecord: scrapeEvidenceRecord({ ...result, verification }, req, { markdown: delivered.markdown ?? null, ...(delivered.json === undefined ? {} : { json: delivered.json }) }),
+  }
+}
+
+/** A cache answer's usage describes this call; its capture and Evidence Record still describe the original fetch. */
+function withoutFetchUsage(response: ScrapeResponse): ScrapeResponse {
+  const { timings, ...usage } = response.usage
+  const own = timings === undefined ? undefined : {
+    ...(timings.serializeMs === undefined ? {} : { serializeMs: timings.serializeMs }),
+    ...(timings.modelMs === undefined ? {} : { modelMs: timings.modelMs }),
+    totalMs: timings.totalMs,
+  }
+  return { ...response, usage: { ...usage, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, browserMs: 0, externalCostUsd: 0, ...(own === undefined ? {} : { timings: own }) } }
 }
 
 /**
@@ -1228,21 +1263,17 @@ export function scrapeSnapshot(result: FetchResult): CompactScrapeResponse['snap
   }
 }
 
-export function compactScrapeResponse(
+function compactScrapeData(
   next: ScrapeResponse,
   req: ScrapeRequest,
   formats: readonly ScrapeFormat[] = requestedFormats(req, next),
   totalMs = next.summary.totalMs ?? next.usage.wallMs,
-): CompactScrapeResponse {
+): Omit<CompactScrapeResponse, 'evidenceRecord'> {
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
   return {
     requestedUrl: next.requestedUrl,
     finalUrl: next.evidence.finalUrl,
     snapshot: scrapeSnapshot(next),
-    evidenceRecord: next.evidenceRecord ?? scrapeEvidenceRecord(next, req, {
-      markdown: hasFormat(formats, 'markdown') ? next.markdown : null,
-      ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
-    }),
     status: next.status,
     failureReason: next.failureReason,
     blockReason: next.blockReason,
@@ -1297,5 +1328,20 @@ export function compactScrapeResponse(
     truncatedAt: next.truncatedAt,
     usage: { ...next.usage, totalMs },
     channelsTried: next.channelsTried,
+  }
+}
+
+export function compactScrapeResponse(
+  next: ScrapeResponse,
+  req: ScrapeRequest,
+  formats: readonly ScrapeFormat[] = requestedFormats(req, next),
+  totalMs = next.summary.totalMs ?? next.usage.wallMs,
+): CompactScrapeResponse {
+  return {
+    ...compactScrapeData(next, req, formats, totalMs),
+    evidenceRecord: next.evidenceRecord ?? scrapeEvidenceRecord(next, req, {
+      markdown: hasFormat(formats, 'markdown') ? next.markdown : null,
+      ...(hasFormat(formats, 'json') && next.json !== undefined ? { json: next.json } : {}),
+    }),
   }
 }
