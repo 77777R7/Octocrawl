@@ -203,3 +203,7 @@ Notes:
 - OpenCode registers a client each time it starts a sign-in or checks an unauthenticated server (two 201s here); the unused registration expires after 90 days unused, as with Cursor.
 - OpenCode did not ask to sign in on its own during `opencode run`; `opencode mcp auth octocrawl` is the step.
 - **Cost:** 1 credit from Howard's account.
+
+### Signing out from the client (both, added 2026-10-17)
+
+At 08:46:44Z, after the dashboard disconnects above, `opencode mcp logout octocrawl` printed "Removed OAuth credentials for octocrawl" and `codex mcp logout octocrawl` printed "Removed OAuth credentials for 'octocrawl'."; both clients then listed the server as not signed in. Neither sent `POST /oauth/revoke` (no request to it in the logs from 08:46:30Z; the only OAuth requests were the clients' own discovery and one OpenCode registration from its `mcp list`). So a client's logout removes the tokens from that machine only; the connection itself ends with Disconnect on the dashboard or after 90 days unused.
