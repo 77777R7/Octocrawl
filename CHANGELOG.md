@@ -22,6 +22,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **Hosted MCP lists only what hosted Octocrawl serves.** The hosted `scrape` schema no longer offers what the hosted server refuses: `actions`, `robotsOverride`, `lane`, `handoff`, `skipTlsVerification`, `access`, and the regular-expression `verify` checks. It also drops what it takes but cannot honour. On hosted, `mode: authed` read anonymously, since there are no saved logins, and `lockdown`, `storeInCache`, `maxAge` and `minAge` had nothing to act on, since hosted caches nothing. A keyless connection also loses `screenshot` and `waitFor`, which need the browser lane. `map` drops `ignoreRobotsTxt` and states its hosted caps (limit 5,000, timeout 60 s). A hosted MCP scrape now stops at 100 s by default and at most (REST keeps 300 s), under claude.ai's 240 s tool limit. The keyless `tools/list` goes from 24,337 to 16,135 characters. A client that still sends a removed option gets the same refusal as before. (docs/mcp-client-ux-tasks.md W6)
+
 - MCP 2026-07-28 on every Octocrawl MCP server (`@octocrawl/mcp` over stdio, the local MCP host, and `/mcp` and `/mcp-oauth` once deployed): a client that opens with `server/discover` is served without a session, and a 2025-era client that opens with `initialize` is served as before. A request naming a revision the server does not serve is answered 400 with the spec's `UnsupportedProtocolVersionError` (-32022), listing the revisions it does serve. The MCP servers now run on the v2 MCP TypeScript SDK (`@modelcontextprotocol/server`).
 
 ## 0.5.0 — 2026-10-17

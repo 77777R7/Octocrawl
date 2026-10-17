@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
 import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine } from '@w2l/api'
-import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
+import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION } from './server.js'
 import { SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
@@ -171,7 +171,64 @@ export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', '
  * scrape's description does not name get_scrape, which is not served here. */
 export function hostedTools(browser: boolean) {
   return TOOLS.filter((tool) => HOSTED_API_TOOLS.has(tool.name) && (browser || tool.name !== 'scrape_product'))
-    .map((tool) => ({ ...tool, description: tool.description.replace(SCRAPE_RECORD_HINT, ''), annotations: { ...('annotations' in tool ? tool.annotations : {}), readOnlyHint: true } }))
+    .map((tool) => ({
+      ...tool,
+      description: tool.description.replace(SCRAPE_RECORD_HINT, ''),
+      inputSchema: hostedInputSchema(tool.name, tool.inputSchema, browser),
+      annotations: { ...('annotations' in tool ? tool.annotations : {}), readOnlyHint: true },
+    }))
+}
+
+/**
+ * The scrape options hosted Octocrawl serves (docs/mcp-client-ux-tasks.md W6): the rest it refuses (actions,
+ * robotsOverride, lane, handoff, skipTlsVerification, access other than standard) or takes and cannot honour (mode
+ * authed reads anonymously, as it holds no saved login; lockdown always misses, since nothing is cached; storeInCache,
+ * maxAge and minAge do nothing for the same reason). Measured against createHostedApi on 2026-10-17;
+ * hostedSchema.integration.test.ts calls every listed option, so a new local option reaches hosted only when added here.
+ */
+export const HOSTED_SCRAPE_KEYS: ReadonlySet<string> = new Set(['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'fastMode', 'blockAds', 'removeBase64Images', 'verify', 'integration'])
+/** A hosted MCP scrape's deadline: under claude.ai's 240 s tool limit and Cloud Run's 120 s request timeout. */
+export const HOSTED_MCP_SCRAPE_TIMEOUT_MS = 100_000
+
+/** A hosted copy of a tool's input schema, with only what this connection can use. */
+function hostedInputSchema(name: string, schema: unknown, browser: boolean): unknown {
+  if (name !== 'scrape' && name !== 'map') return schema
+  const copy = structuredClone(schema) as { properties: Record<string, Record<string, unknown>> }
+  const properties = copy.properties
+  if (name === 'map') {
+    delete properties.ignoreRobotsTxt
+    properties.limit = { ...properties.limit, maximum: HOSTED_MAP_MAX_LIMIT }
+    properties.timeout = { ...properties.timeout, maximum: HOSTED_MAP_MAX_TIMEOUT_MS }
+    return copy
+  }
+  for (const key of Object.keys(properties)) if (!HOSTED_SCRAPE_KEYS.has(key)) delete properties[key]
+  properties.mode = { type: 'string', enum: ['standard', 'research'], description: 'The declared identity the page is read under: standard (default) or research. A hosted server holds no saved logins, so it has no authed mode.' }
+  properties.timeout = { ...properties.timeout, maximum: HOSTED_MCP_SCRAPE_TIMEOUT_MS, description: `Deadline in milliseconds for the whole scrape. When it fires the result is partial with the content so far, or failed/timeout. Here at most and by default ${HOSTED_MCP_SCRAPE_TIMEOUT_MS}; a longer one is lowered to it.` }
+  properties.maxFileBytes = { ...properties.maxFileBytes, maximum: HOSTED_MAX_FILE_BYTES }
+  const verify = properties.verify as { properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }
+  const checkType = verify.properties.checks.items.properties.type
+  checkType.enum = checkType.enum.filter((type) => !(VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(type))
+  if (!browser) {
+    // Without the browser lane there is no screenshot and nothing to wait for.
+    delete properties.waitFor
+    const formats = properties.formats as { description: string; items: { anyOf: { enum?: string[]; properties?: { type?: { const?: string } } }[] } }
+    formats.items.anyOf = formats.items.anyOf
+      .filter((variant) => variant.properties?.type?.const !== 'screenshot')
+      .map((variant) => variant.enum === undefined ? variant : { ...variant, enum: variant.enum.filter((value) => !value.startsWith('screenshot')) })
+    formats.description = `${formats.description} This connection has no browser lane, so it offers no screenshot.`
+  } else {
+    // An account's key or connection with fewer credits than a browser page reads over HTTP alone, where a screenshot is refused.
+    const formats = properties.formats as { description: string }
+    formats.description = `${formats.description} On an account's credits a browser page costs 5; with fewer left, a screenshot is refused.`
+  }
+  return copy
+}
+
+/** A hosted MCP scrape's arguments with its deadline held to HOSTED_MCP_SCRAPE_TIMEOUT_MS (REST keeps the engine's own). */
+export function hostedScrapeArguments(args: unknown): unknown {
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return args
+  const timeout = (args as { timeout?: unknown }).timeout
+  return { ...args, timeout: typeof timeout === 'number' && timeout < HOSTED_MCP_SCRAPE_TIMEOUT_MS ? timeout : HOSTED_MCP_SCRAPE_TIMEOUT_MS }
 }
 /**
  * The tools /mcp-oauth lists: each declares that it needs OAuth with the `mcp` scope, top level and mirrored in `_meta`
@@ -741,7 +798,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       normalizeCall: (name, args) => {
         if (!HOSTED_API_TOOLS.has(name)) throw new Error(`${name} is not served by hosted Octocrawl: scrape, map and scrape_product only; ${LOCAL_HINT}`)
         if (name === 'scrape_product' && !caller.browser) throw new Error('scrape_product reads Amazon.sg in a browser, which needs a key; keyless callers use scrape over HTTP')
-        return args
+        return name === 'scrape' ? hostedScrapeArguments(args) : args
       },
     }))
   }
