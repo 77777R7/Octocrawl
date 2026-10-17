@@ -1332,6 +1332,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           linkCount: links.length,
           // The page's visible characters, as the extractor counted them: what readiness reads a page with no main content by (ADR 0007).
           ...(extracted.render === undefined ? {} : { textChars: extracted.render.textChars }),
+          ...(extracted.sourceUnavailable === true ? { sourceUnavailable: true } : {}),
           ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
           ...tagOptions(options),
         },

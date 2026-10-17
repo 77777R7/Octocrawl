@@ -28,6 +28,7 @@ import { collectLabelledValues } from './labels.js'
 import { collectDeclaredValues } from './declared.js'
 import { collectPageMetadata } from './metadata.js'
 import { resolveReactStreaming } from './streaming.js'
+import { sourceUnavailable } from './sourceUnavailable.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -138,6 +139,7 @@ export class ExtractTf implements Extractor {
     // and cleanTree strips script/form/button. cleanTree also detaches
     // article.post elements whose only content is a <form> (quick-reply),
     // which would otherwise suppress forum routing.
+    const unavailable = sourceUnavailable(doc.document)
     const signals = pageSignalsFor(doc.document)
     const preliminaryAdapter = adapterFor(doc.document, options.url)
     const baseUrl = documentBaseUrl(doc.document, options.url)
@@ -310,6 +312,7 @@ export class ExtractTf implements Extractor {
       adapter: adapter.descriptor,
       entities: adapter.entities,
       adapterValidation: amazonValidation ?? adapter.validation,
+      ...(unavailable ? { sourceUnavailable: true as const } : {}),
       emptyTableShells,
       fetchPreloads,
       render: detectRenderSignals(raw, doc.document, {
