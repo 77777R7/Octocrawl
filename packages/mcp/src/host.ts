@@ -8,8 +8,6 @@
 import { createServer, type Server as HttpServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose'
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
 import { closeIdleOnlyWhenUnread, type ApiEngine } from '@w2l/api'
 import { FIRECRAWL_MONITOR_ID, hostedNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
 import { createMcpServer } from './server.js'
@@ -18,6 +16,7 @@ import { REMOTE_TOOLS, normalizeHostedToolCall } from './hostedToolPolicy.js'
 import { validateAmazonPublicState } from './amazonState.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
+import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
 
 export interface HostedConfig {
   mcpUrl: string
@@ -85,7 +84,7 @@ export function createHostedService(config: HostedConfig): {server: HttpServer; 
       if (req.headers.origin && req.headers.origin !== mcpUrl.origin) {sendJson(res,403,{error:'invalid origin'});return}
       if (!['POST','GET','DELETE'].includes(req.method ?? '')) {sendJson(res,405,{error:'method not allowed'});return}
       const version=req.headers['mcp-protocol-version']
-      if (version && (typeof version !== 'string' || !SUPPORTED_PROTOCOL_VERSIONS.includes(version))) {sendJson(res,400,{error:'unsupported MCP protocol version'});return}
+      if (!servesProtocolVersion(version)) {sendJson(res,400,unsupportedProtocolVersion(version));return}
       const header = req.headers.authorization ?? ''
       const token = /^Bearer (\S+)$/.exec(header)?.[1]
       const challenge = `Bearer resource_metadata="${metadataUrl}", scope="openid"`
@@ -109,7 +108,8 @@ export function createHostedService(config: HostedConfig): {server: HttpServer; 
       try {parsedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'))}
       catch {sendJson(res,400,{error:'invalid JSON'});return}
       // A cancellation reaches only a call made with the same bearer token and, when the client sends one, the same MCP session.
-      const mcp = createMcpServer(client,{allowedTools:REMOTE_TOOLS,calls:trackPost(calls,req,res,parsedBody,[token]),
+      const post = trackPost(calls,req,res,parsedBody,[token])
+      await serveMcpPost(req,res,parsedBody,()=>createMcpServer(client,{allowedTools:REMOTE_TOOLS,calls:post,
         normalizeCall:(name,args)=>{
           const normalized=normalizeHostedToolCall(name,args,config.receiverUrl,AMAZON_PRODUCT_SCHEMA)
           if (name === 'create_monitor') {
@@ -118,10 +118,7 @@ export function createHostedService(config: HostedConfig): {server: HttpServer; 
             if (typeof id === 'string' && !engine.getMonitor(id) && engine.listMonitors().length >= 20) throw new Error('remote Monitor limit reached')
           }
           return normalized
-        }})
-      const transport = new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true})
-      try {await mcp.connect(transport);await transport.handleRequest(req,res,parsedBody)}
-      finally {await mcp.close()}
+        }}))
     } catch (error) {
       if (!res.headersSent) sendJson(res,500,{error:error instanceof Error ? error.message : 'internal error'})
       else res.end()
