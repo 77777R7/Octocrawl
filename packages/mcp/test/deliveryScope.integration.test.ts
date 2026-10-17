@@ -184,7 +184,11 @@ describe('delivered scrape verification over HTTP, SDK and MCP', () => {
         const options = { formats: ['markdown' as const], verify: { checks: [{ type: 'field' as const, path, present: true }] } }
         if (surface === 'SDK') await expect(scrape(options)).rejects.toThrow('check source data instead')
         else {
-          await expect(mcp.callTool({ name: 'scrape', arguments: { url: `${origin}/article`, ...options } })).rejects.toThrow('check source data instead')
+          const result = await mcp.callTool({ name: 'scrape', arguments: { url: `${origin}/article`, ...options } })
+          expect(result.isError).toBe(true)
+          expect(result.content).toEqual([{ type: 'text', text: expect.stringContaining('check source data instead') }])
+          expect(result._meta).toEqual({ 'octocrawl/error': { code: 'invalid_request', status: 400 } })
+          expect(result.structuredContent).toBeUndefined()
         }
       }
       expect(reads).toBe(before)
