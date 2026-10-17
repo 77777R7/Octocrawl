@@ -135,5 +135,5 @@ describe('MCP tool surfaces', () => {
     }
   })
 
-  it.todo('stdio pointed at https://api.octocrawl.dev lists all 38 local tools, though that host serves scrape and map alone (W3, W10)')
+  it.todo('stdio pointed at https://api.octocrawl.dev lists all 39 local tools, though that host serves scrape and map alone (W3, W10)')
 })

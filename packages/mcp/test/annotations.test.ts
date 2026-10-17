@@ -9,7 +9,7 @@ import { hostedTools, oauthTools } from '../src/hostedApi.js'
  */
 const READ_ONLY = [
   'map', 'scrape_product', 'get_scrape',
-  'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'list_active_crawls',
+  'get_crawl', 'wait_crawl', 'get_crawl_pages', 'get_crawl_errors', 'list_active_crawls',
   'get_batch', 'get_batch_items', 'wait_batch', 'get_batch_errors',
   'list_logins',
   'preview_monitor', 'list_monitors', 'get_monitor', 'get_monitor_run',

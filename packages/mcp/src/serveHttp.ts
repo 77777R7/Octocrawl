@@ -30,17 +30,18 @@ export function unsupportedProtocolVersion(header: string | string[] | undefined
  * Answers one POST whose body is already read. A 2026-07-28 request (its `_meta`
  * names the revision) is served on its own by the SDK's modern handler; any other
  * request is served as before, statelessly over a 2025-era transport answering
- * JSON. Each POST gets its own server from `server`.
+ * JSON. Each POST gets its own server from `server`, told whether it answers on the
+ * 2025-era JSON path, which cannot carry a notification such as progress.
  */
-export async function serveMcpPost(req: IncomingMessage, res: ServerResponse, body: unknown, server: () => Server): Promise<void> {
+export async function serveMcpPost(req: IncomingMessage, res: ServerResponse, body: unknown, server: (path: { legacy: boolean }) => Server): Promise<void> {
   if (await isLegacyRequest(await toWebRequest(req, body), body)) {
-    const mcp = server()
+    const mcp = server({ legacy: true })
     const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
     try { await mcp.connect(transport); await transport.handleRequest(req, res, body) }
     finally { await mcp.close() }
     return
   }
-  const handler = createMcpHandler(() => server(), { legacy: 'reject' })
+  const handler = createMcpHandler(() => server({ legacy: false }), { legacy: 'reject' })
   try { await toNodeHandler(handler)(req, res, body) }
   finally { await handler.close() }
 }

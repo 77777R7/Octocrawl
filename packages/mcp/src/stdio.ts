@@ -28,7 +28,7 @@ export function parseToken(argv: readonly string[], env: NodeJS.ProcessEnv): str
  * served on 2026-07-28, one opening with initialize on its 2025-era revision.
  */
 export function serveMcpStdio(client: W2L, transport?: Transport, apiUrl?: string): StdioServerHandle {
-  return serveStdio(() => createMcpServer(client, apiUrl === undefined ? {} : { apiUrl }), transport === undefined ? {} : { transport })
+  return serveStdio(() => createMcpServer(client, { progress: true, ...(apiUrl === undefined ? {} : { apiUrl }) }), transport === undefined ? {} : { transport })
 }
 
 /**
