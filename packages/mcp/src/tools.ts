@@ -23,7 +23,7 @@ const IDEMPOTENCY_KEY_PROPERTY = { type: 'string', minLength: 1, maxLength: 200,
 /** A task contract (ADR 0006): the server checks each check's fields by its type and compiles each pattern. */
 const VERIFY_PROPERTY = {
   type: 'object',
-  description: 'Delivered-response checks: passed (these checks only), failed or not_requested. Inspect failure and readiness before retrying. Types: markdownIncludes {text}, markdownMatches {pattern, flags?}, markdownCountMin {pattern, flags?, min}, minTables {min}, tableRowsMin {tableIndex, columns, min} (zero-based; tables format), listRecordsMin {min, path?}, recordFields {fields, min, uniqueBy?} (distinct complete extracted identities), field {path, equals/in/present/min/max}. Markdown checks need markdown format.',
+  description: 'Checks on final delivery; passed covers configured checks only. Inspect failure/readiness before retrying. Types: markdownIncludes, markdownMatches, markdownCountMin, minTables, tableRowsMin (tables format, zero-based columns), listRecordsMin, recordFields (uniqueBy counts complete extracted identities), field. Markdown checks need markdown format.',
   properties: {
     checks: {
       type: 'array', minItems: 1, maxItems: MAX_VERIFY_CHECKS,
