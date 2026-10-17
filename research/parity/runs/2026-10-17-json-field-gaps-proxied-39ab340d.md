@@ -27,7 +27,11 @@ Controls: the Python article's infobox labels (`th` cells) still match (`paradig
 
 Seen but not changed here: GitHub's `title` is the README's first heading (`This is Python version 3.16.0 alpha 1+dev`), not the repository name; Wikipedia's `order` keeps the page's reference marker `[1]`.
 
-## Results
+## Second run at `82fa9600`
+
+After review, `82fa9600` stopped declared values from filling a field whose labels disagree, a product page's `description` and a `name` key. The same command ran against it, proxied in the same way, 2026-10-17T08:19:08Z → 2026-10-17T08:19:13Z. On all five pages `json.data`, `json.issues`, statuses and table sizes were identical to the first run below.
+
+## Results (first run, `39ab340d`)
 
 ### https://arxiv.org/abs/1706.03762
 
