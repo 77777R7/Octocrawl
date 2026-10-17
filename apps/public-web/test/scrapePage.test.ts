@@ -5,43 +5,82 @@ import { describe, expect, it } from 'vitest'
 import { blogPath, posts } from '../scripts/blogPosts.mjs'
 import { pages } from '../scripts/docsPages.mjs'
 import { NAV_CAPABILITIES } from '../scripts/siteNav.mjs'
-import { scrapeBody, scrapeSnippet } from '../src/product/scrapeCode'
-import { SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, STEPS, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
-import { FIELDS, LINKS, MARKDOWN, RUN, TABLE } from '../src/product/scrapeRun'
-import type { Choice } from '../src/product/scrapeState'
+import { scrapeSnippet } from '../src/product/scrapeCode'
+import { gridRows } from '../src/product/scrapeDrop'
+import { foldMarkdown, foldedText } from '../src/product/scrapeMarkdown'
+import { SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
+import { DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, HARD, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
 
-// /scrape/: one recorded scrape (src/product/scrapeRun.ts) played in the hero, walked through in How it works, and the
-// cards, code, calculator and FAQ below.
+// /scrape/: three scrapes recorded on hosted Octocrawl (src/product/scrapeRun.ts) in the hero, then harder pages, the
+// Evidence Record's hash check, the code, the cost and the FAQ.
 const app = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url))
 const markup = scrapePageMarkup()
 const ids = (html: string) => new Set([...html.matchAll(/\sid="([^"]+)"/g)].map(([, id]) => id!))
-const choice = (change: Partial<Choice> = {}): Choice => ({ view: 'markdown', whole: false, fields: ['title', 'price'], fieldsTouched: false, ...change })
 
 describe('the /scrape/ product page', () => {
   it('is built, linked from the Product menu and listed in the sitemap', () => {
     const entry = readFileSync(app('scrape/index.html'), 'utf8')
     expect(entry).toContain('<script type="module" src="/src/product/scrapeMain.ts"></script>')
     expect(entry).toContain(`<title>${SCRAPE_TITLE}</title>`)
+    expect(entry).toContain(`<meta name="description" content="${SCRAPE_DESCRIPTION}" />`)
     expect(entry).toContain('<meta property="og:image" content="__W2L_ORIGIN__/assets/og-scrape.jpg" />')
     expect(existsSync(app('public/assets/og-scrape.jpg'))).toBe(true)
+    // The hero's artwork is the road scene's, preloaded and versioned like the tool pages' coast.
+    expect(entry).toContain('<link rel="preload" as="image" href="/assets/scene-road.webp" />')
+    expect(existsSync(app('public/assets/scene-road.webp'))).toBe(true)
+    // Each tab shows its site's own icon, served from this site (the CSP allows images from 'self' only).
+    for (const id of ['wikipedia', 'docs', 'amazon']) expect([id, existsSync(app(`public/assets/sites/${id}.png`))]).toEqual([id, true])
+    expect(markup).toContain('<div class="pd-art" data-art="road" aria-hidden="true"><div class="hero-backdrop"></div><div class="hero-glyphs"></div></div>')
     expect(SCRAPE_TITLE.length).toBeLessThanOrEqual(60)
     expect(readFileSync(app('vite.config.ts'), 'utf8')).toContain('./scrape/index.html')
     expect(readFileSync(app('scripts/build-docs.mjs'), 'utf8')).toContain(`const SCRAPE_PATH = '${SCRAPE_PATH}'`)
     expect(NAV_CAPABILITIES.find(item => item.title === 'Scrape a page')?.href).toBe(SCRAPE_PATH)
   })
 
-  it('shows the recorded page as recorded: its bytes hash to the Evidence Record, and every line names its source', () => {
-    // The Evidence Record card hashes this copy in the reader's browser; it must be the bytes that were read.
-    const sample = readFileSync(app('public/samples/books-toscrape-a-light-in-the-attic.html.txt'))
-    expect(sample.length).toBe(RUN.bytes)
-    expect(createHash('sha256').update(sample).digest('hex')).toBe(RUN.rawSha256)
-    expect(sample.toString('utf8')).toContain('<p class="price_color">£51.77</p>')
-    const sources = ids(markup.replace(/data-src="([^"]+)"/g, ' id="src:$1"'))
-    for (const src of [...MARKDOWN.flatMap(m => (m.src ? [m.src] : [])), ...LINKS.map(l => l.src), ...FIELDS.map(f => f.src)]) {
-      expect([src, sources.has(`src:${src}`)]).toEqual([src, true])
+  it('shows the three recorded pages: the start of each one’s raw HTML and Markdown from one read', () => {
+    expect(DEMOS.map(d => d.url)).toEqual(['https://en.wikipedia.org/wiki/Octopus', 'https://docs.python.org/3/library/datetime.html', 'https://www.amazon.sg/dp/0135957052'])
+    for (const d of DEMOS) {
+      expect(markup).toContain(`id="dm-pane-${d.id}"`)
+      expect(d.rawHead.length).toBe(6000)
+      expect(d.includeTags.length).toBeGreaterThan(0)
+      expect(d.markdownHead.split('\n')).toHaveLength(Math.min(60, d.markdownLines))
     }
-    expect(TABLE).toHaveLength(7)
-    expect(markup.match(/class="pl-step"/g)).toHaveLength(STEPS.length)
+    expect(DEMOS[0]!.markdownHead.startsWith('# Octopus\n')).toBe(true)
+    expect(markup.match(/class="dm-pane"/g)).toHaveLength(3)
+    expect(markup.match(/class="ft-hard"/g)).toHaveLength(HARD.length)
+  })
+
+  it('lays the raw HTML and the Markdown on the octopus’s grid as the pane shows them', () => {
+    expect(gridRows('<a  href="x">\n\n<b>', 8, false)).toEqual(['<a href=', '"x">', '<b>'])
+    expect(gridRows('# Octopus\n\nAn **octopus**', 20, true)).toEqual(['# Octopus', '', 'An **octopus**'])
+    // The Markdown wraps between words, as the pane's <pre> does; a word longer than a line breaks anywhere.
+    expect(gridRows('aaa bbb ccc', 7, true)).toEqual(['aaa bbb', 'ccc'])
+    expect(gridRows('abcdefghij', 4, true)).toEqual(['abcd', 'efgh', 'ij'])
+    // As a browser does, it may also wrap after a hyphen inside a word and between a link's ] and (.
+    expect(gridRows('eight-limbed [mollusc](https://x)', 14, true)).toEqual(['eight-limbed', '[mollusc]', '(https://x)'])
+  })
+
+  it('folds link targets when it shows the Markdown, keeping the first whole and every word', () => {
+    const md = 'An **octopus**[[a]](#cite_note-3) is a [mollusc](https://en.wikipedia.org/wiki/Mollusc) of the [order](https://en.wikipedia.org/wiki/Order_(biology)) ![x](https://i.png)'
+    expect(foldedText(md)).toBe('An **octopus**[a] is a [mollusc](https://en.wikipedia.org/wiki/Mollusc) of the order x')
+    expect(foldMarkdown(md)[0]!.find(s => s.text === 'order')?.url).toBe('https://en.wikipedia.org/wiki/Order_(biology)')
+    // Folding drops only link syntax: the shown text is the Markdown with each folded link's brackets and target taken out.
+    for (const d of DEMOS) expect(foldedText(d.markdownHead).replace(/\s/g, '').length).toBeLessThanOrEqual(d.markdownHead.replace(/\s/g, '').length)
+  })
+
+  it('hashes the docs page as recorded: the served copy is the bytes that were read, with one cell to change', () => {
+    const sample = readFileSync(app(`public${DOCS_SAMPLE}`))
+    expect(sample.length).toBe(DOCS.bytes)
+    expect(createHash('sha256').update(sample).digest('hex')).toBe(DOCS.rawSha256)
+    const text = sample.toString('utf8')
+    // The section finds the cell by this whole run of bytes, so it must occur once, in the format-code table's first row.
+    const marker = DOCS_CELL.before + DOCS_CELL.value + DOCS_CELL.after
+    const at = text.indexOf(marker)
+    expect(at).toBeGreaterThan(text.indexOf('format codes that the 2011 C standard'))
+    expect(text.indexOf(marker, at + 1)).toBe(-1)
+    // The hash box claims nothing before it has hashed.
+    expect(markup).toContain('id="ft-hash" aria-live="polite">not computed yet</dd>')
+    expect(markup).not.toContain('ft-verdict is-match')
   })
 
   it('has no inline styles, unique ids, its FAQ as structured data, and links only to places that exist', () => {
@@ -63,21 +102,13 @@ describe('the /scrape/ product page', () => {
     }
   })
 
-  it('writes the call for what the reader chose', () => {
-    expect(scrapeBody(RUN.url, choice())).toEqual({ url: RUN.url, formats: ['markdown'] })
-    expect(scrapeBody(RUN.url, choice({ view: 'table', whole: true }))).toEqual({ url: RUN.url, formats: ['tables'], onlyMainContent: false })
-    const fields = scrapeBody(RUN.url, choice({ view: 'fields', fields: ['title', 'author'] }))
-    expect(fields.formats).toEqual([{ type: 'json', schema: { type: 'object', properties: { title: { type: ['string', 'null'] }, author: { type: ['string', 'null'] } }, required: ['title', 'author'], additionalProperties: false } }])
-    // Fields picked in their card join the hero's format.
-    expect((scrapeBody(RUN.url, choice({ view: 'links', fieldsTouched: true })).formats as unknown[])[0]).toBe('links')
-    expect(scrapeSnippet('curl', RUN.url, choice())).toContain(`-d '{"url":"${RUN.url}","formats":["markdown"]}'`)
-    expect(scrapeSnippet('cli', RUN.url, choice())).toBe(`npx octocrawl scrape '${RUN.url}' --markdown`)
-    expect(scrapeSnippet('cli', RUN.url, choice({ view: 'links', whole: true }))).toBe(`npx octocrawl scrape '${RUN.url}' --formats links --no-only-main-content`)
-    const python = scrapeSnippet('py', RUN.url, choice({ view: 'fields', whole: true }))
-    expect(python).toContain('"additionalProperties": False')
-    expect(python).toContain('only_main_content=False,')
-    expect(scrapeSnippet('ts', RUN.url, choice())).toContain("new W2L({ baseUrl: 'http://127.0.0.1:8787' })")
-    expect(scrapeSnippet('mcp', RUN.url, choice({ whole: true }))).toContain('(the whole page, not only the main content)')
+  it('writes the Wikipedia read as the call it was', () => {
+    expect(scrapeSnippet('curl')).toContain(`-d '${JSON.stringify(WIKIPEDIA_REQUEST)}'`)
+    expect(markup).toContain('api.octocrawl.dev/v1/scrape')
+    expect(scrapeSnippet('cli')).toBe(`npx octocrawl scrape '${WIKIPEDIA_REQUEST.url}' --formats '${JSON.stringify(WIKIPEDIA_REQUEST.formats)}'`)
+    expect(scrapeSnippet('py')).toContain('formats=["markdown", "links", "tables", {"type": "json"')
+    expect(scrapeSnippet('ts')).toContain("new W2L({ baseUrl: 'http://127.0.0.1:8787' })")
+    expect(scrapeSnippet('mcp')).toContain('kingdom, phylum, class, order')
   })
 
   it('hands a reader’s URL to the free tool page, which runs it only when this tab asked', () => {
