@@ -151,24 +151,37 @@
 - 指标：错误的验证句 2 → 0。
 - 决定：D2、D5。
 
-## W2 工具面预算与合法性测试（先测量）　M
+## W2 工具面预算与合法性测试（先测量）　M　→ PR #557
 
 起因：后面每一项都要有固定的基线和防回归保护。结构字节决定 5,000 字节的目标能不能达到。结果大小没测过。只加测试和根目录的 devDependency，不改任何已发布行为。
 
-- [ ] **W2.1** 新增 `packages/mcp/test/toolSurface.test.ts`，覆盖这些面：本地 `TOOLS`（stdio 和 `localHost.ts` 8791 共用）、`hostedTools(false)`、`hostedTools(true)`、`oauthTools(false)`、`oauthTools(true)`。`host.ts` 的 `REMOTE_TOOLS` 明确排除，并在测试里注释原因。
-- [ ] **W2.2** 每个工具分列计量：inputSchema 紧凑字节；去掉所有 description 后的结构字节；description 字符数；title、annotations 和 `_meta` 的字节；outputSchema 字节。只有 inputSchema 字节和 description 字符做“只降不升”的 ratchet；其他列只测量，预算由 W4、W8 各自设定。
-- [ ] **W2.3** `_meta` 保留检查：每个本地工具的 `_meta` 键，在 `hostedTools` 和 `oauthTools` 上都还在。今天是空检查，W4 起生效。
-- [ ] **W2.4** schema 合法性：用 ajv 的 draft 2020-12 meta-schema 校验每个 input 和 output schema。顶层属性名要符合 `^[A-Za-z0-9_.-]{1,64}$`，根层级不用 `anyOf`、`oneOf`、`allOf`。ajv 加到根 `package.json` 的 devDependencies 并更新 lockfile，因为 `@w2l/mcp` 没有自己的 devDependencies。不通过的用 `test.todo` 点名，并登记成 follow-up。
-- [ ] **W2.5** 结果大小：
+- [x] **W2.1** 新增 `packages/mcp/test/toolSurface.test.ts`，覆盖这些面：本地 `TOOLS`（stdio 和 `localHost.ts` 8791 共用）、`hostedTools(false)`、`hostedTools(true)`、`oauthTools(false)`、`oauthTools(true)`。`host.ts` 的 `REMOTE_TOOLS` 明确排除，并在测试里注释原因。
+- [x] **W2.2** 每个工具分列计量：inputSchema 紧凑字节；去掉所有 description 后的结构字节；description 字符数；title、annotations 和 `_meta` 的字节；outputSchema 字节。只有 inputSchema 字节和 description 字符做“只降不升”的 ratchet；其他列只测量，预算由 W4、W8 各自设定。
+- [x] **W2.3** `_meta` 保留检查：每个本地工具的 `_meta` 键，在 `hostedTools` 和 `oauthTools` 上都还在。今天是空检查，W4 起生效。
+- [x] **W2.4** schema 合法性：用 ajv 的 draft 2020-12 meta-schema 校验每个 input 和 output schema。顶层属性名要符合 `^[A-Za-z0-9_.-]{1,64}$`，根层级不用 `anyOf`、`oneOf`、`allOf`。ajv 加到根 `package.json` 的 devDependencies 并更新 lockfile，因为 `@w2l/mcp` 没有自己的 devDependencies。不通过的用 `test.todo` 点名，并登记成 follow-up。
+- [x] **W2.5** 结果大小：
   - 扩展 `fixture-scrape.test.ts`，记录 scrape 和 map 序列化结果的字符数；
   - 新增 `fixture-jobs.test.ts`，用进程内引擎、HTTP 档做离线 crawl 和 batch，记录 `get_crawl_pages` 和 `get_batch_items` 的大小；
   - 需要浏览器档的截图 fixture 放进 `vitest.config.ts` 的 TIMED 组。
-- [ ] **W2.6** 记下已知差异：stdio 指向 `https://api.octocrawl.dev` 时列出 38 个工具，而那个地址只服务 scrape 和 map。留给 W3 和 W10 处理。
+- [x] **W2.6** 记下已知差异：stdio 指向 `https://api.octocrawl.dev` 时列出 38 个工具，而那个地址只服务 scrape 和 map。留给 W3 和 W10 处理。
 - 验收：
   - `npm test` 离线通过，`npm run typecheck` 通过。
   - 测试打印每个面的表格，数值在构建差异范围内和基线一致（本地约 77,608；hosted keyless 约 24,395；scrape、crawl、batch_scrape 的紧凑字节和结构字节；annotations 3/38；outputSchema 1/38）。
   - 新的 crawl 和 batch fixture 不放进 TIMED 组也能稳定跑。
 - 指标：结构字节和结果大小从“未知”变成“已测”。
+- 结果（PR #557，src 在 `a7f88cc8`）：
+  - `toolSurface.budget.json` 固定了 5 个面上每个工具的 inputSchema 字节和描述字符；是精确匹配，涨了会失败，降了要连预算文件一起改。
+  - 实测：
+    - 本地 38 个工具 77,608 字符；hosted keyless 24,337（线上 24,395 来自旧构建）；hosted key 24,721。
+    - inputSchema 字节 / 结构字节：scrape 18,247 / 5,985，crawl 17,745 / 5,508，batch_scrape 19,945 / 6,792，map 3,253 / 867。审查时测的结构字节得到确认。
+  - 结果大小（compact，夹具站点，含计时字段，每次略有出入）：
+    - scrape 4,909；map 519；
+    - get_crawl（4 页）450；get_crawl_pages（4 页）19,282，约每页 4.8k，所以 200 页上限可能接近 100 万字符；
+    - wait_batch（3 个 URL）386；get_batch_items（3 项）14,585；
+    - 带视口截图的 scrape 119,895，其中 base64 114,836。
+  - 所有 schema 都通过了 draft 2020-12 meta 校验，没有需要 `test.todo` 的。
+  - 截图测试按 `*.integration.test.ts` 自动进 TIMED 组，`vitest.config.ts` 没改。
+  - 检查：`npm run typecheck` 通过；`npm test` 跑了 251 个文件、3020 个测试，全部通过，另有 1 个 todo。
 - 决定：无。
 
 ## W3 按面生成的 instructions 与身份信息　S
@@ -495,7 +508,7 @@
 ## 未核实
 
 1. 客户端侧的所有改善效果，等 E2 的记录。
-2. 结构字节和结果大小，等 W2。
+2. 结构字节和结果大小：W2 已测（见 W2 的“结果”）。真实网页上的结果大小还没测，等 E2。
 3. `Implementation` 的 title 和 description 从哪个 SDK 版本开始支持，等 W3.4。
 4. hosted `mode authed` 今天的实际行为，等 W6.3。
 5. 取消后上游是否停止，等 W9.6。
@@ -504,6 +517,7 @@
 
 ## 下次从这里继续
 
-- W1 已经开了 PR #555，等合并。站点只在 Howard 要求时部署（流程见 W1 的“部署”一条）。
-- 下一个是 W2（测量和 schema 合法性测试），单独一个 PR，从当时的 `origin/main` 拉分支。它是 W3–W10 的基础。
+- W1（PR #555）和 W2（PR #557）已开 PR，等合并。站点只在 Howard 要求时部署。
+- 下一个是 W3（按面生成的 instructions 与身份信息），单独一个 PR，从当时的 `origin/main` 拉分支。W2 合并之前，W3 的分支先基于 W2 的分支，或者等 W2 合并后再拉。
+- 后续每项改了 schema 或描述的，都要同步改 `packages/mcp/test/toolSurface.budget.json`（`W2L_TOOL_BUDGET_WRITE=1 npx vitest run packages/mcp/test/toolSurface.test.ts`），并在 PR 里说明动了哪一行、为什么。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。
