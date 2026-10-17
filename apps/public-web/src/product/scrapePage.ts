@@ -38,7 +38,7 @@ function foldedHtml(markdown: string): string {
 /** The hero's demo, kept plain: a browser window, a tab per page, and the page's Markdown as the read returned it.
  * scrapeDrop.ts plays the read over it (the raw HTML, the octopus's drop, the Markdown). */
 function demo(): string {
-  const tabs = DEMOS.map((d, i) => `<button class="dm-tab" type="button" role="tab" id="dm-tab-${d.id}" aria-controls="dm-pane-${d.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-demo="${d.id}"><span class="dm-icon is-${d.id}" aria-hidden="true">${d.icon}</span><span class="dm-tab-title">${esc(d.tab)}</span></button>`).join('')
+  const tabs = DEMOS.map((d, i) => `<button class="dm-tab" type="button" role="tab" id="dm-tab-${d.id}" aria-controls="dm-pane-${d.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-demo="${d.id}"><img class="dm-icon" src="/assets/sites/${d.id}.png" alt="" width="20" height="20" /><span class="dm-tab-title">${esc(d.tab)}</span></button>`).join('')
   const panes = DEMOS.map((d, i) => `
             <div class="dm-pane" role="tabpanel" id="dm-pane-${d.id}" aria-labelledby="dm-tab-${d.id}" data-demo="${d.id}"${i ? ' hidden' : ''}>
               <div class="dm-out"><pre class="dm-md" aria-label="The start of the Markdown Octocrawl returned for ${esc(d.url)}">${foldedHtml(d.markdownHead)}</pre><canvas class="dm-drop" aria-hidden="true"></canvas><p class="dm-pill" aria-hidden="true"><span class="dm-glyph"><i>X</i><i>x</i><i>+</i><i>:</i></span>Reading <b>${esc(new URL(d.url).hostname)}</b></p></div>

@@ -68,10 +68,40 @@ const INK = ['~', 'o', '.', '~', '*', '.']
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
 const easeOut = (t: number): number => 1 - (1 - t) ** 3
 
-export type Drop = { play(): void; stop(): void }
+export type Drop = { prime(): void; play(): void; stop(): void }
 
-/** Text as grid rows: whitespace runs collapsed to one space, long lines wrapped; raw HTML drops its blank lines, the
- * Markdown keeps them, as the pane shows it. */
+// The Markdown reads at this many characters a line, as the pane shows it (product.css .dm-md).
+export const MARKDOWN_COLS = 64
+
+/** A Markdown line's pieces between the places a browser may wrap it: at a space (dropped at a wrap), after a hyphen
+ * inside a word, and between a link's ] and (. */
+function pieces(text: string): Array<{ text: string; space: boolean }> {
+  const out: Array<{ text: string; space: boolean }> = []
+  let piece = ''
+  let space = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!
+    if (ch === ' ') {
+      if (piece) out.push({ text: piece, space })
+      piece = ''
+      space = true
+      continue
+    }
+    piece += ch
+    const next = text[i + 1] ?? ''
+    if ((ch === '-' && /\p{L}/u.test(text[i - 1] ?? '') && /\p{L}/u.test(next)) || (ch === ']' && next === '(')) {
+      out.push({ text: piece, space })
+      piece = ''
+      space = false
+    }
+  }
+  if (piece) out.push({ text: piece, space })
+  return out
+}
+
+/** Text as grid rows, whitespace runs collapsed to one space. Raw HTML drops its blank lines and wraps anywhere, as
+ * markup runs on; the Markdown keeps them and wraps between words (a word longer than a line breaks anywhere), as the
+ * pane shows it. */
 export function gridRows(text: string, cols: number, keepBlank: boolean): string[] {
   const rows: string[] = []
   for (const line of text.replace(/\r/g, '').split('\n')) {
@@ -80,7 +110,20 @@ export function gridRows(text: string, cols: number, keepBlank: boolean): string
       if (keepBlank) rows.push('')
       continue
     }
-    for (let i = 0; i < tidy.length; i += cols) rows.push(tidy.slice(i, i + cols))
+    if (!keepBlank) {
+      for (let i = 0; i < tidy.length; i += cols) rows.push(tidy.slice(i, i + cols))
+      continue
+    }
+    let row = ''
+    for (const piece of pieces(tidy)) {
+      const next = row ? `${row}${piece.space ? ' ' : ''}${piece.text}` : piece.text
+      if (next.length <= cols) { row = next; continue }
+      if (row) rows.push(row)
+      let rest = piece.text
+      while (rest.length > cols) { rows.push(rest.slice(0, cols)); rest = rest.slice(cols) }
+      row = rest
+    }
+    if (row) rows.push(row)
   }
   return rows
 }
@@ -119,7 +162,7 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
     visible = Math.max(MANTLE.length + 6, Math.floor((height - 2 * PAD_Y) / PITCH_Y))
     rawRows = gridRows(raw, cols, false).slice(0, visible * DEPTH)
     rows = Math.max(visible, rawRows.length)
-    mdRows = gridRows(markdown, cols, true).slice(0, rows)
+    mdRows = gridRows(markdown, Math.min(cols, MARKDOWN_COLS), true).slice(0, rows)
     decodeAt = Array.from({ length: rows }, () => Array.from({ length: cols }, () => Infinity))
     octoX = Math.floor((cols - SPRITE_W) * 0.46)
   }
@@ -260,8 +303,10 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
     }
   }
 
-  function frame(now: number): void {
-    const t = now - start
+  let primed = false
+
+  /** Draws the read as it stands at `t`. */
+  function paint(t: number): void {
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
     ctx.clearRect(0, 0, width, height)
     ctx.font = FONT
@@ -275,6 +320,11 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
     drawInk(t)
     drawOctopus(t)
     ctx.globalAlpha = 1
+  }
+
+  function frame(now: number): void {
+    const t = now - start
+    paint(t)
     if (t < FADE_AT + FADE_MS) raf = requestAnimationFrame(frame)
     else finish()
   }
@@ -289,16 +339,33 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
   }
 
   return {
+    /** Shows the raw HTML, as it was returned, and "Reading <host>", ready for the octopus. */
+    prime() {
+      if (raf) return
+      out.classList.remove('is-read', 'is-fading')
+      out.classList.add('is-raw', 'is-scraping')
+      fit()
+      primed = true
+      paint(WEAVE_MS)
+    },
     play() {
       if (raf) cancelAnimationFrame(raf)
       out.classList.remove('is-read', 'is-fading')
       out.classList.add('is-raw')
       fit()
-      start = performance.now()
+      // Primed, the raw HTML is already in: the run starts where it would be once woven in.
+      start = performance.now() - (primed ? WEAVE_MS : 0)
+      primed = false
       raf = requestAnimationFrame(frame)
     },
+    /** Ends a run at once (the Markdown shows), or takes back a prime that never played. */
     stop() {
       if (raf) finish()
+      else if (primed) {
+        primed = false
+        ctx.clearRect(0, 0, width, height)
+        out.classList.remove('is-raw', 'is-scraping')
+      }
     },
   }
 }

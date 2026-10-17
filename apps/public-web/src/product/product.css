@@ -36,17 +36,17 @@
 .dm-tab:hover { color: var(--on-navy); }
 .dm-tab:last-child { border-right: 0; }
 .dm-tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.dm-md .md-link { color: #ffc59a; text-decoration: underline; text-decoration-color: rgba(251, 154, 108, .45); text-underline-offset: 3px; }
+/* A folded link reads as its text; its target shows on hover. */
+.dm-md .md-link { color: inherit; text-decoration: none; cursor: help; }
+.dm-md .md-link:hover { text-decoration: underline; text-decoration-color: rgba(251, 154, 108, .5); text-underline-offset: 3px; }
 .dm-tab[aria-selected="true"] { color: #fff; background: #0a1f50; }
 .dm-tab[aria-selected="true"]::before { content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--orange); }
-.dm-icon { display: inline-grid; flex: none; place-items: center; min-width: 20px; height: 20px; padding: 0 3px; border-radius: 5px; color: #0a1f50; background: #f4f6fb; font: 700 11px/1 Georgia, serif; }
-.dm-icon.is-docs { color: #ffd343; background: #2f5f8f; font: 700 9.5px/1 var(--mono); }
-.dm-icon.is-amazon { color: #fff; background: var(--orange); font: 700 13px/1 var(--mono); }
+.dm-icon { flex: none; width: 20px; height: 20px; border-radius: 4px; object-fit: contain; }
 .dm-pane[hidden] { display: none; }
-/* The pane fits the first screen under the headline, so the whole read, landing and all, plays in sight; the octopus
-   dives through three panes of raw HTML as the view follows it. */
-.dm-out { position: relative; height: clamp(320px, calc(100vh - 540px), 600px); overflow: hidden; }
-.dm-md { height: 100%; margin: 0; padding: 22px 26px; overflow: hidden; color: #ffc59a; font: 13px/1.75 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; -webkit-mask-image: linear-gradient(180deg, #000 82%, transparent); mask-image: linear-gradient(180deg, #000 82%, transparent); }
+/* A tall pane that a screen can still hold whole, so the read plays in sight once it is (scrapeFeatures.ts); the
+   octopus dives through up to three panes of raw HTML as the view follows it. The Markdown reads at 64 characters. */
+.dm-out { position: relative; height: clamp(300px, calc(100vh - 200px), 640px); overflow: hidden; }
+.dm-md { box-sizing: border-box; height: 100%; max-width: calc(64ch + 52px); margin: 0; padding: 22px 26px; overflow: hidden; color: #ffc59a; font: 13px/1.75 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; -webkit-mask-image: linear-gradient(180deg, #000 82%, transparent); mask-image: linear-gradient(180deg, #000 82%, transparent); }
 .md-punct { color: #6f86b0; }
 .md-heading, .md-strong { color: #fff; font-weight: 700; }
 .md-url { color: #8db9e8; }
@@ -179,7 +179,7 @@
 }
 @media (max-width: 600px) {
   .pd-intro { padding: 32px 4px 32px; }
-  .dm-out { height: clamp(320px, calc(100vh - 360px), 480px); }
+  .dm-out { height: clamp(300px, calc(100vh - 160px), 520px); }
   .dm-md { padding: 16px; font-size: 12px; }
   .dm-tab { padding: 12px 14px; font-size: 13px; }
   .sc-grid { padding: 64px 4px; }

@@ -42,6 +42,13 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null): voi
       if (drop) drops.set(id, drop)
     }
   }
+  const fits = (): boolean => console_.getBoundingClientRect().height <= window.innerHeight
+  /** The current pane waits for its read as raw HTML only while the window fits the screen and it has not played. */
+  function settle(): void {
+    if (played.has(current)) return
+    if (fits()) drops.get(current)?.prime()
+    else drops.get(current)?.stop()
+  }
   const play = (id: string): void => {
     if (!onScreen || played.has(id)) return
     played.add(id)
@@ -56,6 +63,7 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null): voi
     drops.get(current)?.stop()
     panes.forEach((p) => { p.hidden = p.dataset.demo !== id })
     current = id
+    settle()
     play(id)
   })
   replay?.addEventListener('click', () => {
@@ -63,10 +71,16 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null): voi
     play(current)
   })
   if (!drops.size || !('IntersectionObserver' in window)) return
+  // The read plays once the whole window is in sight, so its landing is seen; until then the pane shows the raw HTML
+  // waiting to be read. A screen too short to hold the window (or one that became so, turned on its side) shows the
+  // Markdown and plays it on a tab or Play again.
+  window.addEventListener('resize', settle)
+  settle()
   new IntersectionObserver(([entry]) => {
-    onScreen = Boolean(entry?.isIntersecting)
-    if (onScreen) play(current)
-  }, { threshold: 0.8 }).observe(console_)
+    settle()
+    onScreen = Boolean(entry?.isIntersecting) && (entry!.intersectionRatio >= 0.85 || !fits())
+    if (onScreen && fits()) play(current)
+  }, { threshold: [0, 0.85] }).observe(console_)
 }
 
 /** The hard ones: three recorded runs behind tabs; a run's facts arrive in turn. */

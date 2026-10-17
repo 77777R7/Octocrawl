@@ -28,6 +28,8 @@ describe('the /scrape/ product page', () => {
     // The hero's artwork is the road scene's, preloaded and versioned like the tool pages' coast.
     expect(entry).toContain('<link rel="preload" as="image" href="/assets/scene-road.webp" />')
     expect(existsSync(app('public/assets/scene-road.webp'))).toBe(true)
+    // Each tab shows its site's own icon, served from this site (the CSP allows images from 'self' only).
+    for (const id of ['wikipedia', 'docs', 'amazon']) expect([id, existsSync(app(`public/assets/sites/${id}.png`))]).toEqual([id, true])
     expect(markup).toContain('<div class="pd-art" data-art="road" aria-hidden="true"><div class="hero-backdrop"></div><div class="hero-glyphs"></div></div>')
     expect(SCRAPE_TITLE.length).toBeLessThanOrEqual(60)
     expect(readFileSync(app('vite.config.ts'), 'utf8')).toContain('./scrape/index.html')
@@ -51,6 +53,11 @@ describe('the /scrape/ product page', () => {
   it('lays the raw HTML and the Markdown on the octopus’s grid as the pane shows them', () => {
     expect(gridRows('<a  href="x">\n\n<b>', 8, false)).toEqual(['<a href=', '"x">', '<b>'])
     expect(gridRows('# Octopus\n\nAn **octopus**', 20, true)).toEqual(['# Octopus', '', 'An **octopus**'])
+    // The Markdown wraps between words, as the pane's <pre> does; a word longer than a line breaks anywhere.
+    expect(gridRows('aaa bbb ccc', 7, true)).toEqual(['aaa bbb', 'ccc'])
+    expect(gridRows('abcdefghij', 4, true)).toEqual(['abcd', 'efgh', 'ij'])
+    // As a browser does, it may also wrap after a hyphen inside a word and between a link's ] and (.
+    expect(gridRows('eight-limbed [mollusc](https://x)', 14, true)).toEqual(['eight-limbed', '[mollusc]', '(https://x)'])
   })
 
   it('folds link targets when it shows the Markdown, keeping the first whole and every word', () => {
