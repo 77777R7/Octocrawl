@@ -223,19 +223,19 @@
   - `host.ts` 试点现在也会拿到默认的本地文案（其中提到了它限制掉的抓取方式）。它没有部署，没有人连着，不处理。
   - 检查：`npm run typecheck` 通过。`npm test` 3019 个全部通过（这次是在审查修复之前跑的）；修复之后跑了 `packages/mcp` 和 `apps/public-web`，31 个文件、280 个测试，全部通过。还没部署，也没发版。
 
-## W4 title、如实的 annotations、工具顺序与 `_meta` 合并　S
+## W4 title、如实的 annotations、工具顺序与 `_meta` 合并　S　→ PR #559
 
 起因：没有 hint 的工具会被客户端当作破坏性写操作（规范默认值），所以 Codex auto 和 VS Code 里每次 `get_batch` 都要确认。title 是工具卡片上显示的名字，也是进 Directory 和 ChatGPT 的前提。
 
-- [ ] **W4.1** 在 `tools.ts` 里加一张表，每个工具一行：title、readOnlyHint、destructiveHint、idempotentHint、openWorldHint。顶层 `Tool.title` 和 `annotations.title` 都从这张表取值。
+- [x] **W4.1** 在 `tools.ts` 里加一张表，每个工具一行：title、readOnlyHint、destructiveHint、idempotentHint、openWorldHint。顶层 `Tool.title` 和 `annotations.title` 都从这张表取值。
   - **只读**：map、scrape_product、get_scrape、crawl 和 batch 的读工具、wait_batch、list_logins、preview_monitor，以及 Monitor 和 delivery 的读工具。会访问外部网页的（map、scrape_product、preview_monitor）设 `openWorldHint: true`；只读 Octocrawl 自己存储的设 `openWorldHint: false`。
   - **start 和 create**：`readOnlyHint: false`、`destructiveHint: false`，不声明 idempotentHint，因为只有带 `idempotencyKey` 时重复 start 才安全。
   - **`destructiveHint: true`**：cancel_crawl、cancel_batch、cancel_monitor_run、remove_login、pause_monitor（它会取消正在执行的任务）。pause_delivery_destination 要先读引擎代码，确认它会停止进行中的工作再设。
   - **本地 scrape**：`readOnlyHint: false`、`destructiveHint: false`、`openWorldHint: true`（D3）。hosted 副本保持 `readOnlyHint: true`。
-- [ ] **W4.2** 顺序：`TOOLS` 改成通用的在前：scrape、map、get_scrape、crawl 系列、batch 系列，然后 scrape_product、batch_products、logins、Monitor、delivery。hosted 的顺序随之变成 scrape、map、scrape_product。
-- [ ] **W4.3** `_meta`：import_login 加 `anthropic/requiresUserInteraction: true`。hosted 的三个工具加 `openai/toolInvocation/invoking` 和 `invoked`，每条不超过 64 字符。
-- [ ] **W4.4** 修 `hostedApi.ts:183`：`_meta` 改成合并 `{ ...('_meta' in tool ? tool._meta : {}), securitySchemes }`，不再整体替换。
-- [ ] **W4.5** 在 CHANGELOG 的 Unreleased 下写一条：`@octocrawl/mcp` 导出的 `TOOLS`、`TOOL_NAMES` 的顺序和字段变了。
+- [x] **W4.2** 顺序：`TOOLS` 改成通用的在前：scrape、map、get_scrape、crawl 系列、batch 系列，然后 scrape_product、batch_products、logins、Monitor、delivery。hosted 的顺序随之变成 scrape、map、scrape_product。
+- [x] **W4.3** `_meta`：import_login 加 `anthropic/requiresUserInteraction: true`。hosted 的三个工具加 `openai/toolInvocation/invoking` 和 `invoked`，每条不超过 64 字符。
+- [x] **W4.4** 修 `hostedApi.ts:183`：`_meta` 改成合并 `{ ...('_meta' in tool ? tool._meta : {}), securitySchemes }`，不再整体替换。
+- [x] **W4.5** 在 CHANGELOG 的 Unreleased 下写一条：`@octocrawl/mcp` 导出的 `TOOLS`、`TOOL_NAMES` 的顺序和字段变了。
 - 验收：
   - 先写表驱动测试，它在 main 上会失败（35/38 个工具没有 hint）。
   - 需要同步更新的现有测试（行号待核）：
@@ -256,6 +256,16 @@
   - 做一次交互式 Codex auto 会话，记录 get_batch 和 map 不弹确认、cancel_batch 弹确认。
 - 指标：title 0/38 → 38/38；显式 hint 3/38 → 38/38；标成只读的读工具 2 → 约 19 个（以表为准）；确认弹窗次数在 eval 里测量。
 - 决定：D3。
+- 结果（PR #559）：
+  - `tools.ts` 里加了一张 `PRESENTATION` 表，类型是 `Record<ToolName, …>`，漏了哪个工具编译都会报错。`TOOLS` 改成从 `TOOL_NAMES` 按新顺序生成，原有定义原样留在 `DEFINITIONS` 里。
+  - 只读的有 19 个。
+  - destructive：比计划多了 `import_login`。审查时发现，导入会替换同一域名下已经保存的登录（`FileSessionStore.save`），而且撤销不了。
+  - `pause_delivery_destination` 不标 destructive：它只改 `enabled` 字段（`setDeliveryDestinationEnabled`），不会中断正在进行的投递。
+  - D3 按默认：本地 scrape 标为非只读。
+  - `/mcp-oauth` 的 `_meta` 改成合并，不再整体覆盖。
+  - 合并 main（含 #554，SDK 升到 v2）时，只有 CHANGELOG 冲突。#554 新加的 2026-07-28 测试，顺序断言改成了新顺序。
+  - 检查：`npm run typecheck` 通过；`npm test` 跑了 3022 个测试，全部通过。
+  - 确认弹窗的实际效果（Codex auto 下 get_batch 不再弹、cancel_batch 仍然弹）还没在交互会话里验证，等 E2。
 
 ## W5 执行错误改成 `isError`（追平 Firecrawl，并带上 agentHints）　M
 
@@ -527,6 +537,6 @@
 
 ## 下次从这里继续
 
-- W1（#555）、W2（#557）、W3（#558）都开了 PR，等合并。hosted 部署和 npm 发版都只在 Howard 要求时做。按 D1，W3+W4 合起来出 0.5.1。
-- 下一个是 W4（title、如实的 annotations、工具顺序、`_meta` 合并），单独一个 PR，从当时的 `origin/main` 拉分支。如果 W2 已经合并，W4 改了 annotations 和顺序之后，要同步更新 `toolSurface.budget.json` 的 meta 列。W4.4 修好之后，W2.3 的 `_meta` 保留检查才真正起作用。
+- W1（#555）、W2（#557）、W3（#558）、W4（#559）都开了 PR，等合并。W3 已经和 #554（SDK v2、协议 2026-07-28）合并过，2026-07-28 下 `server/discover` 也会返回 instructions。hosted 部署和 npm 发版都只在 Howard 要求时做；按 D1，W3+W4 一起出 0.5.1。
+- 下一个是 W5（执行错误改成 `isError`），单独一个 PR，从当时的 `origin/main` 拉分支。注意 #554 之后 `server.ts` 用的是 v2 SDK（`@modelcontextprotocol/server`）：W5 里那些取消判断和行号要按新代码重新核对。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。
