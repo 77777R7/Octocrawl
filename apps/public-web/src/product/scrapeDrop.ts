@@ -3,8 +3,10 @@
  * speeds up, faster and faster all the way down. The raw HTML runs longer than the pane, and the view follows the
  * octopus down it, so its landing is always in sight. Every row its arms sweep turns, there and then, into that row of
  * the Markdown the same read returned (as the pane shows it, link targets folded), decoding outward from the octopus's
- * column. At the foot it squashes, lets go a puff of ink and fades into it, the rows it never reached decode from where
- * it landed, the view glides back to the top, and the pane's own markup (the same Markdown) takes over. Every cell keeps its place on the grid; only its glyph, brightness and colour
+ * column. At the foot it lands with a thud: the ground row's shock runs out both ways, the pane jumps a row up and down
+ * a few times and the window jolts; it squashes, lets go a puff of ink and fades into it, the rows it never reached
+ * decode from where it landed, the view glides back to the top, and the pane's own markup (the same Markdown) takes
+ * over. Every cell keeps its place on the grid; only its glyph, brightness and colour
  * change. Nothing plays with reduced motion or without a canvas: the Markdown shows as it is. */
 
 const NAVY = '#0a1f50'
@@ -27,6 +29,12 @@ const BACK_AT = LAND_AT + 750
 const BACK_MS = 700
 const FADE_AT = BACK_AT + BACK_MS + 120
 const FADE_MS = 360
+// The landing's thud: the ground row's shock runs out over SHOCK_MS, the pane's rows jump by these many rows, one step
+// every JOLT_STEP_MS, and the window jolts for JOLT_MS (product.css .dm-window.is-impact).
+const SHOCK_MS = 380
+const JOLT = [2, -1, 1, -1, 1, 0]
+const JOLT_STEP_MS = 45
+const JOLT_MS = 320
 // The raw HTML the octopus dives through: at least the pane, at most this many panes of it.
 const DEPTH = 3
 // While it dives the view keeps it this far down the pane.
@@ -170,7 +178,10 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
   const ground = (): number => rows - 1
   const x = (col: number): number => PAD_X + col * pitchX + pitchX / 2
   let top = 0
-  const y = (row: number): number => PAD_Y + (row - top) * PITCH_Y + PITCH_Y / 2
+  // The thud's jump: every row drawn this many rows lower (or higher), all together.
+  let jolt = 0
+  const y = (row: number): number => PAD_Y + (row - top + jolt) * PITCH_Y + PITCH_Y / 2
+  const frameEl = out.closest<HTMLElement>('.dm-window')
   const shown = (row: number): boolean => row >= top && row < top + visible
   const centre = (): number => octoX + SPRITE_W / 2
 
@@ -281,6 +292,27 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
     })
   }
 
+  /** The thud's shock: the ground row flares from where it landed outward, each cell running down the ramp. */
+  function drawShock(t: number): void {
+    const since = t - LAND_AT
+    if (since < 0 || since >= SHOCK_MS + cols * 9) return
+    ctx.save()
+    ctx.shadowColor = 'rgba(251, 123, 76, .9)'
+    for (let col = 0; col < cols; col++) {
+      const age = since - Math.abs(col + 0.5 - centre()) * 9
+      if (age < 0 || age >= SHOCK_MS) continue
+      const step = Math.min(RAMP.length - 1, Math.floor(age / SHOCK_MS * RAMP.length))
+      ctx.shadowBlur = 0
+      ctx.globalAlpha = 1
+      ctx.fillStyle = NAVY
+      ctx.fillRect(x(col) - pitchX / 2, y(ground()) - PITCH_Y / 2, pitchX, PITCH_Y)
+      ctx.shadowBlur = step < 2 ? 12 : 0
+      ctx.fillStyle = HOT[step]!
+      ctx.fillText(RAMP[step]!, x(col), y(ground()))
+    }
+    ctx.restore()
+  }
+
   /** The ink: rings of glyphs spreading from where it landed, cooling from orange to the window's blue as they go. */
   function drawInk(t: number): void {
     const since = t - LAND_AT
@@ -315,8 +347,13 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
     out.classList.toggle('is-scraping', t < LAND_AT)
     if (t >= FADE_AT) out.classList.add('is-fading')
     top = view(t)
+    const since = t - LAND_AT
+    const step = Math.floor(since / JOLT_STEP_MS)
+    jolt = since >= 0 && step < JOLT.length ? JOLT[step]! : 0
+    frameEl?.classList.toggle('is-impact', since >= 0 && since < JOLT_MS)
     mark(t)
     drawRows(t)
+    drawShock(t)
     drawInk(t)
     drawOctopus(t)
     ctx.globalAlpha = 1
@@ -332,6 +369,8 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
   function finish(): void {
     cancelAnimationFrame(raf)
     raf = 0
+    jolt = 0
+    frameEl?.classList.remove('is-impact')
     ctx.clearRect(0, 0, width, height)
     out.classList.remove('is-raw', 'is-scraping', 'is-fading')
     out.classList.add('is-read')

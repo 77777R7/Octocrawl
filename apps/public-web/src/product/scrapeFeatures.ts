@@ -26,7 +26,7 @@ function tabbed(tabs: HTMLButtonElement[], key: string, show: (id: string) => vo
 
 /** The hero: one recorded scrape per tab. Each pane's read plays (scrapeDrop.ts) the first time it shows on screen and
  * again on Play again; with reduced motion the results just show. */
-function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null): void {
+function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null, hint: HTMLAnchorElement | null): void {
   const tabs = [...console_.querySelectorAll<HTMLButtonElement>('.dm-tab')]
   const panes = [...console_.querySelectorAll<HTMLElement>('.dm-pane')]
   const drops = new Map<string, Drop>()
@@ -52,6 +52,7 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null): voi
   const play = (id: string): void => {
     if (!onScreen || played.has(id)) return
     played.add(id)
+    if (hint) hint.hidden = true
     drops.get(id)?.play()
   }
   tabbed(tabs, 'demo', (id) => {
@@ -76,9 +77,17 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null): voi
   // Markdown and plays it on a tab or Play again.
   window.addEventListener('resize', settle)
   settle()
+  // While the first read waits below the fold, a cue at the foot of the screen says to scroll down to it; a click
+  // brings the whole window into view. It goes once a read has played.
+  hint?.addEventListener('click', (event) => {
+    event.preventDefault()
+    console_.scrollIntoView({ behavior: still() ? 'auto' : 'smooth', block: 'center' })
+  })
   new IntersectionObserver(([entry]) => {
     settle()
     onScreen = Boolean(entry?.isIntersecting) && (entry!.intersectionRatio >= 0.85 || !fits())
+    // Only while the window lies below: a page restored further down has nothing to scroll down to.
+    if (hint) hint.hidden = played.size > 0 || onScreen || !fits() || !entry || entry.boundingClientRect.top <= 0
     if (onScreen && fits()) play(current)
   }, { threshold: [0, 0.85] }).observe(console_)
 }
@@ -239,7 +248,7 @@ function mountReveal(root: HTMLElement): void {
 
 export function mountScrapeFeatures(root: HTMLElement): void {
   const demo = root.querySelector<HTMLElement>('.dm-window')
-  if (demo) mountDemo(demo, root.querySelector<HTMLButtonElement>('#dm-replay'))
+  if (demo) mountDemo(demo, root.querySelector<HTMLButtonElement>('#dm-replay'), root.querySelector<HTMLAnchorElement>('#pd-scroll'))
   const hard = root.querySelector<HTMLElement>('.hd-window')
   if (hard) mountHard(hard)
   const tamper = root.querySelector<HTMLElement>('#ft-tamper')

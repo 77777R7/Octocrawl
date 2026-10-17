@@ -44,7 +44,7 @@ function demo(): string {
               <div class="dm-out"><pre class="dm-md" aria-label="The start of the Markdown Octocrawl returned for ${esc(d.url)}">${foldedHtml(d.markdownHead)}</pre><canvas class="dm-drop" aria-hidden="true"></canvas><p class="dm-pill" aria-hidden="true"><span class="dm-glyph"><i>X</i><i>x</i><i>+</i><i>:</i></span>Reading <b>${esc(new URL(d.url).hostname)}</b></p></div>
             </div>`).join('')
   return `
-          <div class="dm-window">
+          <div class="dm-window" id="demo">
             <div class="dm-chrome" aria-hidden="true"><i></i><i></i><i></i></div>
             <div class="dm-tabs" role="tablist" aria-label="Three recorded scrapes">${tabs}</div>${panes}
           </div>`
@@ -233,6 +233,7 @@ ${siteHeaderMarkup()}      <main aria-labelledby="pd-title">
         </div>
         <div class="band">
           <div class="frame dm-frame">${demo()}
+            <a class="pd-scroll" id="pd-scroll" href="#demo" hidden><span class="pd-scroll-glyph" aria-hidden="true"></span>Scroll to watch it read</a>
             <p class="pd-caption"><span>Three real pages read on hosted Octocrawl on 17 October 2026, each asking for its content (<code>includeTags</code>): the start of the raw HTML and of the Markdown that read returned. Link targets are folded here except the first; point at a link to see where it goes. Wikipedia text: <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>.</span><button class="pd-replay" type="button" id="dm-replay" hidden><span aria-hidden="true">↻</span> Play again</button></p>
           </div>
         </div>
