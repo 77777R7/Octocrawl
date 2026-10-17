@@ -3,6 +3,7 @@ import { isApiErrorCode } from '@w2l/contracts'
 import { W2L, W2LError } from '@w2l/sdk'
 import type { PostCalls } from './inFlight.js'
 import { serverInstructions } from './instructions.js'
+import { shapeResult } from './results.js'
 import { callTool, TOOLS } from './tools.js'
 
 export interface McpServerOptions {
@@ -88,7 +89,9 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       // A tool that declares an outputSchema answers its result as structuredContent too.
       const declared = TOOLS.find(tool => tool.name === request.params.name)
       const structured = declared !== undefined && 'outputSchema' in declared
-      return { content: [{ type: 'text', text: JSON.stringify(result) }], ...(structured ? { structuredContent: result as Record<string, unknown> } : {}) }
+      // The verdict first, cut to the budget, and a screenshot as an image block too (docs/mcp-client-ux-tasks.md W8).
+      const { value, images } = shapeResult(request.params.name, result)
+      return { content: [{ type: 'text', text: JSON.stringify(value) }, ...images], ...(structured ? { structuredContent: value as Record<string, unknown> } : {}) }
     } finally { call?.end() }
   })
   return server

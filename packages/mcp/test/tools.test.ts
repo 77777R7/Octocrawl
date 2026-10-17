@@ -383,7 +383,7 @@ describe('MCP tools', () => {
       await mcp.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/a'], integration: 'parity-check' } })
       await mcp.callTool({ name: 'scrape_product', arguments: { url: 'https://www.amazon.sg/dp/B000VW9PIK' } })
       expect(calls.map((call) => [call.body?.origin, call.body?.integration])).toEqual([['mcp-parity-check@1', 'parity-check'], ['mcp-parity-check@1', undefined], ['mcp-parity-check@1', 'parity-check'], ['mcp-parity-check@1', undefined]])
-      expect(await mcp.callTool({ name: 'get_scrape', arguments: { id: record.scrapeId } })).toEqual({ content: [{ type: 'text', text: JSON.stringify(record) }] })
+      expect(await mcp.callTool({ name: 'get_scrape', arguments: { id: record.scrapeId } })).toEqual({ content: [{ type: 'text', text: JSON.stringify(record) }], structuredContent: record })
       expect(calls.at(-1)?.line).toBe(`GET http://127.0.0.1:8787/v1/scrapes/${record.scrapeId}`)
       // origin is the server's to record: a caller naming one is refused before any API call.
       expectIsError(await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', origin: 'spoofed@1' } }), 'unsupported_parameter: unsupported parameter: origin')
@@ -597,7 +597,7 @@ describe('MCP tools', () => {
       // Rejected by the shared request parser before any API call, with the same code.
       expectIsError(await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', proxy: 'stealth' } }), 'unsupported_parameter: unsupported parameter: proxy')
       expectIsError(await mcp.callTool({ name: 'get_batch', arguments: {} }), 'invalid_request: id is required')
-      expect(await mcp.callTool({ name: 'get_batch', arguments: { id: 'batch-1' } })).toEqual({ content: [{ type: 'text', text: '{"taskId":"batch-1","status":"completed"}' }] })
+      expect(await mcp.callTool({ name: 'get_batch', arguments: { id: 'batch-1' } })).toEqual({ content: [{ type: 'text', text: '{"taskId":"batch-1","status":"completed"}' }], structuredContent: { taskId: 'batch-1', status: 'completed' } })
     } finally {
       await mcp.close()
     }
