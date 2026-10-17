@@ -55,3 +55,16 @@ The same day, from the Mac through the proxy, with the record's User-Agent:
 - Amazon: not re-fetched (the page changes per request: prices, ranks, tokens).
 
 A page that wants to say "hash the page yourself and get the same value" should use the datetime page for it, not Octopus or Amazon.
+
+## Harder pages (same day, same server)
+
+For the page's "When a page is harder" section. Walmart and Google: keyless REST as above, request bodies `{"url":…,"formats":["markdown"]}`, responses at 09:34:16 GMT (response `date` header). The JavaScript pages: the hosted MCP `scrape` tool through Howard's signed-in `/mcp-oauth` connection (the browser lane needs an account), `formats: ["markdown"]`; the MCP result shows no credit headers, and the tariff charges a browser page 5 credits.
+
+| Page | fetchedAt (UTC) | Status | Lane | robots.txt | What the result says |
+|---|---|---|---|---|---|
+| https://www.walmart.com/ip/5689919121 | 2026-10-17T09:34:16.063Z | blocked, `blockReason: captcha` (HTTP 200 on `walmart.com/blocked?…`) | http | allowed | agentHints: Walmart gates automated access; Octocrawl does not solve challenges or change its identity; a key opens the browser lane, or run it on your own computer. rawSha256 `35ba0637…e1fee76c9d` (same as the 07:50 trial). |
+| https://www.google.com/search?q=octocrawl | — (no fetch) | failed, `failureReason: policy_denied` | http | disallowed (rule `/search`, robots.txt SHA-256 `1aba570a…9538cf2c`) | agentHints: a hosted server obeys robots.txt for every URL. No request was sent (`requestCount` 0). **`evidenceRecord` is `null`** in this response. |
+| https://quotes.toscrape.com/js/ | 2026-10-17T09:35:01.514Z | success, HTTP 200 | browser_local (`channelsTried: http, browser_local`) | no_robots | 10 quotes, 387 tokens; Markdown SHA-256 `bc3bcec1…1dee6ab126`. |
+| https://www.nasa.gov/blogs/missions/2026/10/07/nasa-releases-artemis-ii-lunar-science-data-images/ | 2026-10-17T09:34:48.691Z | **failed, `empty_unverified`** | browser_local | allowed | The returned Markdown holds the whole article ("NASA Releases Artemis II Lunar Science Data, Images", byline, body, contacts) inside the site's navigation, yet readiness says `not_extracted` and the hint says no main content was found. A false failure; not usable as a demo. |
+
+Two findings for the product, not the page: a robots.txt refusal comes back without an Evidence Record (`evidenceRecord: null`), though the robots decision and its hash are in the trace; and main-content detection missed the NASA article on the browser lane.
