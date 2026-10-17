@@ -14,6 +14,7 @@ import { TOOL_NAMES } from '../src/tools.js'
 import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore } from '../src/hostedCredits.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
+import { expectIsError } from './toolErrorChecks.js'
 
 const HASH_KEY = 'h'.repeat(40)
 const PROSE = 'The harbour office records tide height, wind and visibility for every hour of the day and publishes them each morning. '.repeat(4)
@@ -151,7 +152,7 @@ it('keyless calls from Claude\'s egress range share one pool of their own, besid
   const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
   try {
     await client.connect(transport)
-    await expect(client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })).rejects.toThrow(/Claude connector|429/)
+    expectIsError(await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } }), /Claude connector|429/)
   } finally { await client.close() }
 })
 
@@ -182,12 +183,13 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
     const result = await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, formats: ['markdown'] } })
     const text = (result.content as { type: string; text: string }[])[0]!.text
     expect(JSON.parse(text)).toMatchObject({ status: 'success', lane: 'http' })
-    await expect(client.callTool({ name: 'crawl', arguments: { url: `${origin}/` } })).rejects.toThrow('tool not available')
-    await expect(client.callTool({ name: 'scrape_product', arguments: { url: 'https://www.amazon.sg/dp/B000VW9PIK' } })).rejects.toThrow('needs a key')
+    // A tool hosted Octocrawl leaves out stays a protocol error, and says what it offers and where crawls run.
+    await expect(client.callTool({ name: 'crawl', arguments: { url: `${origin}/` } })).rejects.toThrow(/tool not available in this deployment: crawl; this server offers scrape, map, scrape_product\. Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve/)
+    expectIsError(await client.callTool({ name: 'scrape_product', arguments: { url: 'https://www.amazon.sg/dp/B000VW9PIK' } }), 'needs a key')
     await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
     await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
     // The fourth keyless start of the day is refused through the tool too.
-    await expect(client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })).rejects.toThrow(/allowance|429/)
+    expectIsError(await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } }), /allowance|429/)
   } finally { await client.close() }
   const keyed = new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: { authorization: 'Bearer oc_live' } } })
   const holder = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
