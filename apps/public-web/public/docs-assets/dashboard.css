@@ -255,6 +255,7 @@ a:hover{color:#fff}
 /* Connect: whether a client's sign-in was checked with the real client, and its key setup folded under it. */
 .client-status{margin:8px 0 0;color:var(--muted);font:650 11px/1.5 var(--mono)}
 .client-status.is-verified{color:var(--good)}
+.client-status.is-tested{color:var(--ink)}
 .key-alt{margin-top:10px;border-top:1px dotted var(--rule)}
 .key-alt summary{padding:8px 0 4px;color:var(--muted);font:650 11.5px var(--mono);cursor:pointer}
 .key-alt summary:hover,.key-alt[open] summary{color:var(--orange-soft)}
