@@ -7,7 +7,7 @@ import { pages } from '../scripts/docsPages.mjs'
 import { NAV_CAPABILITIES } from '../scripts/siteNav.mjs'
 import { scrapeSnippet } from '../src/product/scrapeCode'
 import { SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
-import { AMAZON_FIELDS, DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, DOCS_TABLE, HARD, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
+import { DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, HARD, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
 
 // /scrape/: three scrapes recorded on hosted Octocrawl (src/product/scrapeRun.ts) in the hero, then harder pages, the
 // Evidence Record's hash check, the code, the cost and the FAQ.
@@ -29,22 +29,16 @@ describe('the /scrape/ product page', () => {
     expect(NAV_CAPABILITIES.find(item => item.title === 'Scrape a page')?.href).toBe(SCRAPE_PATH)
   })
 
-  it('shows the three recorded pages, each with its values as recorded', () => {
-    expect(DEMOS.map(d => d.url)).toEqual(['https://www.amazon.sg/dp/0135957052', 'https://en.wikipedia.org/wiki/Octopus', 'https://docs.python.org/3/library/datetime.html'])
+  it('shows the three recorded pages: the start of each one’s raw HTML and Markdown from one read', () => {
+    expect(DEMOS.map(d => d.url)).toEqual(['https://en.wikipedia.org/wiki/Octopus', 'https://docs.python.org/3/library/datetime.html', 'https://www.amazon.sg/dp/0135957052'])
     for (const d of DEMOS) {
       expect(markup).toContain(`id="dm-pane-${d.id}"`)
-      expect(markup).toContain(`${d.rawSha256.slice(0, 8)}…${d.rawSha256.slice(-8)}`)
+      expect(d.rawHead.length).toBe(4200)
+      expect(d.markdownHead.split('\n')).toHaveLength(60)
     }
-    for (const f of AMAZON_FIELDS) expect(markup).toContain(`"${f.name}"`)
-    expect(AMAZON_FIELDS.filter(f => f.locator === null).map(f => f.name)).toEqual(['brand'])
+    expect(DEMOS[0]!.markdownHead.startsWith('# Octopus\n')).toBe(true)
     expect(markup.match(/class="dm-pane"/g)).toHaveLength(3)
     expect(markup.match(/class="ft-hard"/g)).toHaveLength(HARD.length)
-    expect(DOCS_TABLE[0]).toEqual(['Directive', 'Meaning', 'Example', 'Notes'])
-    // Cut Markdown keeps its real line numbers and says what was cut; the hash box claims nothing before it hashes.
-    expect(markup).toContain('lines 2–29 cut here')
-    expect(markup).toContain('<span class="pd-ln" aria-hidden="true">30</span>')
-    expect(markup).toContain('id="ft-hash" aria-live="polite">not computed yet</dd>')
-    expect(markup).not.toContain('ft-verdict is-match')
   })
 
   it('hashes the docs page as recorded: the served copy is the bytes that were read, with one cell to change', () => {
@@ -57,6 +51,9 @@ describe('the /scrape/ product page', () => {
     const at = text.indexOf(marker)
     expect(at).toBeGreaterThan(text.indexOf('format codes that the 2011 C standard'))
     expect(text.indexOf(marker, at + 1)).toBe(-1)
+    // The hash box claims nothing before it has hashed.
+    expect(markup).toContain('id="ft-hash" aria-live="polite">not computed yet</dd>')
+    expect(markup).not.toContain('ft-verdict is-match')
   })
 
   it('has no inline styles, unique ids, its FAQ as structured data, and links only to places that exist', () => {

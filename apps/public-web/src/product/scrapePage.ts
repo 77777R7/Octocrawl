@@ -1,10 +1,7 @@
 import { footerMarkup, siteHeaderMarkup } from '../page'
 import { glyphCloud } from '../glyphArt'
 import { scrapeSnippet } from './scrapeCode'
-import {
-  AMAZON_FIELDS, DEMOS, DOCS, DOCS_CELL, DOCS_TABLE, DOCS_TABLE_ROWS, DOCS_TABLES, HARD, WIKIPEDIA_LINKS, WIKIPEDIA_MARKDOWN,
-  WIKIPEDIA_TOKENS, type Demo,
-} from './scrapeRun'
+import { DEMOS, DOCS, DOCS_CELL, HARD } from './scrapeRun'
 
 /** /scrape/: what scraping a page with Octocrawl gives, shown on real scrapes recorded on hosted Octocrawl
  * (scrapeRun.ts). The hero shows three pages' results; below, harder pages, the Evidence Record, the call, the cost and
@@ -15,7 +12,6 @@ export const SCRAPE_TITLE = 'Web Scraping API: Markdown, Tables and Fields | Oct
 export const SCRAPE_DESCRIPTION = 'Scrape a public web page into Markdown, links, tables and fields, with an Evidence Record of where each result came from. A page Octocrawl can’t read comes back with the reason and costs 0 credits.'
 
 const esc = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-const short = (hash: string): string => `${hash.slice(0, 8)}…${hash.slice(-8)}`
 const n = (value: number): string => value.toLocaleString('en-US')
 
 /** One Markdown line, coloured: headings, bold, and links' targets. */
@@ -27,51 +23,18 @@ function markdownLine(text: string): string {
     .replace(/\]\((https?:\/\/[^\s)]+(?:\([^\s)]*\))?|#[^\s)]+)\)/g, '<span class="md-punct">](</span><span class="md-url">$1</span><span class="md-punct">)</span>')
 }
 
-const line = (i: number, html: string): string => `<li class="pd-line"><span class="pd-ln" aria-hidden="true">${i}</span><code>${html || '&nbsp;'}</code></li>`
-
-/** What the demo shows for each page, and the sentence under it. */
-function demoBody(demo: Demo): { body: string; note: string } {
-  if (demo.shows === 'fields') {
-    const rows = AMAZON_FIELDS.map((f) => {
-      const value = f.json === 'null' ? '<span class="js-null">null</span>' : `<span class="${f.json.startsWith('"') ? 'js-str' : 'js-num'}">${esc(f.json)}</span>`
-      const where = f.locator ? `<span class="dm-where">${esc(f.locator)}</span>` : `<span class="dm-issue">${esc(f.issue!)}</span>`
-      return `<li class="dm-field${f.locator ? '' : ' is-null'}"><code><span class="js-key">"${f.name}"</span><span class="js-punct">:</span> ${value}</code>${where}</li>`
-    }).join('')
-    return {
-      body: `<ol class="dm-fields" role="list">${rows}</ol>`,
-      note: 'Each value comes with the place on the page it was read from. A book has no brand, so <code>brand</code> comes back <code>null</code> with the reason: Octocrawl doesn’t fill a field the page doesn’t state.',
-    }
-  }
-  if (demo.shows === 'markdown') {
-    return {
-      body: `<ol class="pd-code" role="list">${WIKIPEDIA_MARKDOWN.map((l) => ('gap' in l ? `<li class="pd-line dm-gap"><span class="pd-ln" aria-hidden="true">⋮</span><code>lines ${l.gap[0]}–${l.gap[1]} cut here: ${l.what}</code></li>` : line(l.n, markdownLine(l.text)))).join('')}</ol>`,
-      note: `The article as Markdown, ready for a model to read: ${n(WIKIPEDIA_TOKENS)} tokens, with ${n(WIKIPEDIA_LINKS)} links. The site’s menus and sidebars are left out; ask for the whole page to keep them. Shown here: the start of it, with real line numbers. Text: Wikipedia, <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>.`,
-    }
-  }
-  const [head, ...rows] = DOCS_TABLE
-  const table = `<table class="pd-grid dm-table"><thead><tr>${head!.map((h) => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}<tr><td colspan="4" class="dm-more">… ${DOCS_TABLE_ROWS - 1 - rows.length} more rows</td></tr></tbody></table>`
-  return {
-    body: table,
-    note: `Every data table on the page, as rows and as CSV. This page has ${DOCS_TABLES} tables; the format-code table is 4 columns by ${DOCS_TABLE_ROWS - 1} rows.`,
-  }
-}
-
-/** The hero's demo: one tab per page, each with what came back and the facts of the read. */
+/** The hero's demo, kept plain: a browser window, a tab per page, and the page's Markdown as the read returned it.
+ * scrapeDrop.ts plays the read over it (the raw HTML, the octopus's drop, the Markdown). */
 function demo(): string {
-  const tabs = DEMOS.map((d, i) => `<button class="pd-tab" type="button" role="tab" id="dm-tab-${d.id}" aria-controls="dm-pane-${d.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-demo="${d.id}"><span class="dm-host">${d.tab}</span><span class="dm-title">${d.title}</span></button>`).join('')
-  const panes = DEMOS.map((d, i) => {
-    const { body, note } = demoBody(d)
-    return `
-              <div class="dm-pane" role="tabpanel" id="dm-pane-${d.id}" aria-labelledby="dm-tab-${d.id}" data-demo="${d.id}"${i ? ' hidden' : ''}>
-                <p class="dm-request"><span class="dm-verb">scrape</span><span class="dm-url">${esc(d.url)}</span></p>
-                <div class="dm-out">${body}</div>
-                <p class="dm-note">${note}</p>
-                <p class="pd-status"><span class="pd-status-dot" aria-hidden="true"></span><span>success</span><span class="pd-status-sep" aria-hidden="true">·</span><span>HTTP ${d.httpStatus}</span><span class="pd-status-sep" aria-hidden="true">·</span><span>read over HTTP</span><span class="pd-status-sha" title="SHA-256 of the page’s ${n(d.bytes)} bytes, from its Evidence Record">sha256 ${short(d.rawSha256)}</span></p>
-              </div>`
-  }).join('')
+  const tabs = DEMOS.map((d, i) => `<button class="dm-tab" type="button" role="tab" id="dm-tab-${d.id}" aria-controls="dm-pane-${d.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-demo="${d.id}"><span class="dm-icon is-${d.id}" aria-hidden="true">${d.icon}</span>${esc(d.tab)}</button>`).join('')
+  const panes = DEMOS.map((d, i) => `
+            <div class="dm-pane" role="tabpanel" id="dm-pane-${d.id}" aria-labelledby="dm-tab-${d.id}" data-demo="${d.id}"${i ? ' hidden' : ''}>
+              <div class="dm-out"><pre class="dm-md" aria-label="The start of the Markdown Octocrawl returned for ${esc(d.url)}">${d.markdownHead.split('\n').map(markdownLine).join('\n')}</pre><canvas class="dm-drop" aria-hidden="true"></canvas><p class="dm-pill" aria-hidden="true"><span class="dm-glyph"><i>X</i><i>x</i><i>+</i><i>:</i></span>Reading <b>${esc(new URL(d.url).hostname)}</b></p></div>
+            </div>`).join('')
   return `
-          <div class="pd-console dm-console">
-            <div class="pd-tabs dm-tabs" role="tablist" aria-label="Three recorded scrapes">${tabs}</div>${panes}
+          <div class="dm-window">
+            <div class="dm-chrome" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div class="dm-tabs" role="tablist" aria-label="Three recorded scrapes">${tabs}</div>${panes}
           </div>`
 }
 
@@ -125,7 +88,7 @@ function evidence(): string {
             <h2 id="ev-title">The Evidence Record</h2>
             <p class="sc-lead">Every result carries a record of how it was made, including a page Octocrawl refused to read:</p>
             <ul class="ev-list">${items.map((t) => `<li>${t}</li>`).join('')}</ul>
-            <p class="sc-small">We fetched the Python docs page again the same day and its bytes hashed to the same value as the record. Some pages change between requests; the record still holds the hash of the exact bytes Octocrawl read. <a href="/docs/reference/#evidence-record">Reference</a></p>
+            <p class="sc-small">The bytes here are the docs page exactly as that read returned them. Read earlier the same day, the page hashed to a different value: only its “Last updated” line had changed. The record holds the hash of the exact bytes Octocrawl read. <a href="/docs/reference/#evidence-record">Reference</a></p>
           </div>
           <div class="ft-window ft-tamper" id="ft-tamper">
             <p class="ft-url"><span class="ft-dot" aria-hidden="true"></span>${esc(DOCS.url)}</p>
@@ -158,7 +121,7 @@ function callIt(): string {
         <div class="frame sc-grid">
           <div class="sc-intro">
             <h2 id="cd-title">From your code</h2>
-            <p class="sc-lead">The Wikipedia read above, from curl, an MCP client, the CLI, TypeScript or Python.</p>
+            <p class="sc-lead">The Wikipedia page above, with its links, tables and four fields, from curl, an MCP client, the CLI, TypeScript or Python.</p>
           </div>
           <div class="cd-window">
             <div class="cd-tabs" role="tablist" aria-label="Ways to call it">${tabs.map(([id, label], i) => `<button class="cd-tab" type="button" role="tab" id="cd-tab-${id}" aria-controls="cd-code" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-lang="${id}">${label}</button>`).join('')}<button class="cd-copy" type="button" id="cd-copy">Copy</button></div>
@@ -181,7 +144,7 @@ function cost(): string {
         <div class="frame sc-grid">
           <div class="sc-intro">
             <h2 id="cs-title">What it costs</h2>
-            <p class="sc-lead">The three pages above were read over HTTP: 1 credit each on an account, or free within the 20 a day without a key. A free account gets 1,000 credits a month. On your own computer there is no limit. Paid credit packs aren’t sold yet.</p>
+            <p class="sc-lead">The three pages above were read over HTTP: 1 credit each on an account, or within the 20 free pages a day without a key. A free account gets 1,000 credits a month. On your own computer there is no limit. Paid credit packs aren’t sold yet.</p>
             <p class="sc-small"><a href="/#free-tiers">Free tiers</a> · <a href="/docs/limits/">Limits</a></p>
           </div>
           <table class="cs-table"><thead><tr><th scope="col">Result</th><th scope="col">Credits</th></tr></thead><tbody>${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</tbody></table>
@@ -257,7 +220,7 @@ ${siteHeaderMarkup()}      <main aria-labelledby="pd-title">
         </div>
         <div class="band">
           <div class="frame dm-frame">${demo()}
-            <p class="pd-caption">Three real pages, each read once on hosted Octocrawl on 17 October 2026. Every value in this demo is from those reads. Also: HTML, raw HTML, images and screenshots; all formats are in the <a href="/docs/reference/">reference</a>.</p>
+            <p class="pd-caption"><span>Three real pages read on hosted Octocrawl on 17 October 2026: the start of the raw HTML and of the Markdown that read returned. Wikipedia text: <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>.</span><button class="pd-replay" type="button" id="dm-replay" hidden><span aria-hidden="true">↻</span> Play again</button></p>
           </div>
         </div>
       </main>

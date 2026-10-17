@@ -2,7 +2,8 @@
  * the hand-off of a reader's own URL to the free tool page. Each works on the recorded runs in scrapeRun.ts; nothing
  * here calls an API, except that the Evidence Record section hashes the recorded docs page's bytes (a copy served from
  * this site) in the reader's browser. */
-import { DOCS, DOCS_CELL, DOCS_SAMPLE } from './scrapeRun'
+import { mountDrop, type Drop } from './scrapeDrop'
+import { DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE } from './scrapeRun'
 
 const NOISE = '0123456789abcdef'
 const still = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -22,18 +23,49 @@ function tabbed(tabs: HTMLButtonElement[], key: string, show: (id: string) => vo
   })
 }
 
-/** The hero: one recorded scrape per tab. */
-function mountDemo(console_: HTMLElement): void {
-  const tabs = [...console_.querySelectorAll<HTMLButtonElement>('.pd-tab')]
+/** The hero: one recorded scrape per tab. Each pane's read plays (scrapeDrop.ts) the first time it shows on screen and
+ * again on Play again; with reduced motion the results just show. */
+function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null): void {
+  const tabs = [...console_.querySelectorAll<HTMLButtonElement>('.dm-tab')]
   const panes = [...console_.querySelectorAll<HTMLElement>('.dm-pane')]
+  const drops = new Map<string, Drop>()
+  const played = new Set<string>()
+  let onScreen = false
+  let current = tabs[0]?.dataset.demo ?? ''
+  if (!still()) {
+    for (const pane of panes) {
+      const out = pane.querySelector<HTMLElement>('.dm-out')
+      const id = pane.dataset.demo!
+      const raw = DEMOS.find((d) => d.id === id)?.rawHead ?? ''
+      const drop = out ? mountDrop(out, raw, () => { if (replay) replay.hidden = false }) : null
+      if (drop) drops.set(id, drop)
+    }
+  }
+  const play = (id: string): void => {
+    if (!onScreen || played.has(id)) return
+    played.add(id)
+    drops.get(id)?.play()
+  }
   tabbed(tabs, 'demo', (id) => {
     tabs.forEach((t) => {
       const on = t.dataset.demo === id
       t.setAttribute('aria-selected', String(on))
       t.tabIndex = on ? 0 : -1
     })
+    drops.get(current)?.stop()
     panes.forEach((p) => { p.hidden = p.dataset.demo !== id })
+    current = id
+    play(id)
   })
+  replay?.addEventListener('click', () => {
+    played.delete(current)
+    play(current)
+  })
+  if (!drops.size || !('IntersectionObserver' in window)) return
+  new IntersectionObserver(([entry]) => {
+    onScreen = Boolean(entry?.isIntersecting)
+    if (onScreen) play(current)
+  }, { threshold: 0.45 }).observe(console_)
 }
 
 /** The hard ones: three recorded runs behind tabs; a run's facts arrive in turn. */
@@ -191,8 +223,8 @@ function mountReveal(root: HTMLElement): void {
 }
 
 export function mountScrapeFeatures(root: HTMLElement): void {
-  const demo = root.querySelector<HTMLElement>('.dm-console')
-  if (demo) mountDemo(demo)
+  const demo = root.querySelector<HTMLElement>('.dm-window')
+  if (demo) mountDemo(demo, root.querySelector<HTMLButtonElement>('#dm-replay'))
   const hard = root.querySelector<HTMLElement>('.hd-window')
   if (hard) mountHard(hard)
   const tamper = root.querySelector<HTMLElement>('#ft-tamper')

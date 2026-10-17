@@ -3652,7 +3652,7 @@ for a good explanation.</p>
 <a href="https://www.python.org/psf/donations/">Please donate.</a>
 <br>
     <br>
-      Last updated on Oct 17, 2026 (07:21 UTC).
+      Last updated on Oct 17, 2026 (14:17 UTC).
     
       <a href="/bugs.html">Found a bug</a>?
     

@@ -68,3 +68,20 @@ For the page's "When a page is harder" section. Walmart and Google: keyless REST
 | https://www.nasa.gov/blogs/missions/2026/10/07/nasa-releases-artemis-ii-lunar-science-data-images/ | 2026-10-17T09:34:48.691Z | **failed, `empty_unverified`** | browser_local | allowed | The returned Markdown holds the whole article ("NASA Releases Artemis II Lunar Science Data, Images", byline, body, contacts) inside the site's navigation, yet readiness says `not_extracted` and the hint says no main content was found. A false failure; not usable as a demo. |
 
 One finding for the product, not the page: main-content detection missed the NASA article on the browser lane. (A first reading of the Google response claimed its Evidence Record was null; that was a mistake in the reading script, which failed on the record's null `finalUrl`. The record is in the saved response.)
+
+## The three demo pages again, with raw HTML (same day, 15:54 and 16:00 UTC)
+
+The redesigned hero shows each page's raw HTML turning into its Markdown, so the raw HTML had to come from the same read as the result. The three pages were read again on `api.octocrawl.dev`, now revision `octocrawl-api-nasa-ea3b0d7` (tag `h22nasa`, source `ea3b0d7d`, deployed from another window after #574), keyless REST, direct egress, with `rawHtml` added to each request body above.
+
+- 15:54 (`formats` with `rawHtml` first; Amazon, Octopus and datetime as before): every value shown on the page matched the 09:28 read. Only hashes and byte counts moved.
+- 16:00, the read the page now shows (`formats: ["rawHtml", "markdown", …]`, so Amazon also returned Markdown):
+
+| Page | fetchedAt (UTC) | Bytes | rawSha256 | Markdown lines / tokens |
+|---|---|---|---|---|
+| Octopus | 2026-10-17T16:00:07.468Z | 922,203 | `0a1cc6ca…3f8de562` | 560 / 39,370 |
+| datetime | 2026-10-17T16:00:11.701Z | 429,471 | `9964af63…7f8abe7c` | 2,108 / 28,435 |
+| Amazon.sg | 2026-10-17T15:59:53.921Z | 1,372,004 | `2f1ca227…d3b5fba7` | 815 / 9,535 |
+
+In every response the SHA-256 of `rawHtml` (UTF-8) equals the record's `rawSha256`: the raw HTML is the bytes that were read. The page shows the first 4,200 characters of it and the first 60 lines of the Markdown, as returned. `apps/public-web/public/samples/python-docs-datetime.html.txt` is the datetime read's `rawHtml`.
+
+The datetime page's bytes differed from the 09:28 read (`bad4d2ec…`) in one line only: "Last updated on Oct 17, 2026 (07:21 UTC)" became "(14:17 UTC)". The Octopus page's 16:00 bytes hash to `0a1cc6ca…`, the variant seen at 07:37, not the 09:28 one.
