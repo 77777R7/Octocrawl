@@ -267,26 +267,26 @@
   - 检查：`npm run typecheck` 通过；`npm test` 跑了 3022 个测试，全部通过。
   - 确认弹窗的实际效果（Codex auto 下 get_batch 不再弹、cancel_batch 仍然弹）还没在交互会话里验证，等 E2。
 
-## W5 执行错误改成 `isError`（追平 Firecrawl，并带上 agentHints）　M
+## W5 执行错误改成 `isError`（追平 Firecrawl，并带上 agentHints）　M　→ PR #560
 
 起因：今天 agent 拿到的是 -32603 加一串转义 JSON，或者什么都没拿到，丢掉了能让它自己改正调用的 `agentHints`。本地第一次运行最可能遇到的失败（API 没启动）表现为一个原始的 fetch 错误。Firecrawl 已经返回 `isError` 和部分下一步，所以这一项首先是追平。
 
-- [ ] **W5.1** 在 `server.ts` 里把 `throw withErrorCode(error)` 换成 `toolError(error)`。以下情况**不走** isError：
+- [x] **W5.1** 在 `server.ts` 里把 `throw withErrorCode(error)` 换成 `toolError(error)`。以下情况**不走** isError：
   - 如果 `extra.signal.aborted || call?.signal.aborted`，仍然抛 `requestCancelled()`。stdio 上 `call` 是 undefined，只有 `extra.signal`，所以要补上这个判断。
   - 未知工具名（tools.ts 里抛出的 `unknown tool`，行号待核：约 661、771）和 allowedTools 之外的工具，仍然是协议错误。
   - hosted crawl 也保持协议错误，但要让消息说出可用的工具和本地路径：让 `normalizeCall` 的引导消息排在 `server.ts:49` 的通用消息前面，或者把引导文字放进抛出的错误里。
-- [ ] **W5.2** 其余执行错误都返回 `{ isError: true, content: [{ type: 'text', text }] }`，不带 structuredContent，`_meta['octocrawl/error']` 放 `{code, status}`。text 的格式：
+- [x] **W5.2** 其余执行错误都返回 `{ isError: true, content: [{ type: 'text', text }] }`，不带 structuredContent，`_meta['octocrawl/error']` 放 `{code, status}`。text 的格式：
   - 第一行是 `<code>: <一行修复办法或消息>`；
   - 知道 `retryAfterMs` 时加一行 `Retry after N s`；
   - 每条 agentHint 一行 `Next: ...`；
   - 总长不超过 4,000 字符。
-- [ ] **W5.3** 提示从 `RequestError.agentHints` 和 `W2LError` 里取。解析 `W2LError` 的 body，不再用 `<METHOD> <path> failed: <status> {json}` 这种拼起来的字符串。
-- [ ] **W5.4** 本地 API 连不上（`ECONNREFUSED` 或 `fetch failed`）时映射成 `api_unreachable: no Octocrawl API at <url>; start it with npx octocrawl serve, or set W2L_API_URL`。`stdio.ts` 启动时如果 API 连不上，往 stderr 打一次同样的话。
-- [ ] **W5.5** 未知或已被清理的 id（`TaskNotFoundError`）映射成 `not_found: …; start a new crawl/batch`。
-- [ ] **W5.6** 渲染只在 `server.ts` 里做。导出的 `callTool` 行为不变，仍然抛错；tools.ts 里对 429 的改写（行号待核：约 492-503）留在 `callTool` 里，由渲染器去解析。
-- [ ] **W5.7** “在本地运行”这类事实性提示保留（PH item 1）。`LOCAL_HINT` 和 `HTTP_ONLY_HINTS` 这两个共享常量不改，因为 REST 也在用。UTM 按 D7 只在 MCP 渲染时处理。
-- [ ] **W5.8** 保留期说明：本地只写从 engine.ts 读到的事实（scrape 和 map 的记录没有保留期限，行号待核：约 807、815）；crawl 和 batch 的保留期实现时从引擎里读，读不到就写“未核实”。hosted 不写，因为 hosted 不提供句柄类工具。
-- [ ] **W5.9** 在 CHANGELOG 的 Unreleased 下写清这个行为变更（D4）。
+- [x] **W5.3** 提示从 `RequestError.agentHints` 和 `W2LError` 里取。解析 `W2LError` 的 body，不再用 `<METHOD> <path> failed: <status> {json}` 这种拼起来的字符串。
+- [x] **W5.4** 本地 API 连不上（`ECONNREFUSED` 或 `fetch failed`）时映射成 `api_unreachable: no Octocrawl API at <url>; start it with npx octocrawl serve, or set W2L_API_URL`。`stdio.ts` 启动时如果 API 连不上，往 stderr 打一次同样的话。
+- [x] **W5.5** 未知或已被清理的 id（`TaskNotFoundError`）映射成 `not_found: …; start a new crawl/batch`。
+- [x] **W5.6** 渲染只在 `server.ts` 里做。导出的 `callTool` 行为不变，仍然抛错；tools.ts 里对 429 的改写（行号待核：约 492-503）留在 `callTool` 里，由渲染器去解析。
+- [x] **W5.7** “在本地运行”这类事实性提示保留（PH item 1）。`LOCAL_HINT` 和 `HTTP_ONLY_HINTS` 这两个共享常量不改，因为 REST 也在用。UTM 按 D7 只在 MCP 渲染时处理。
+- [ ] **W5.8**（挪到 W9.2，那里本来就要写这句；本地 scrape 和 map 的记录没有保留期限） 保留期说明：本地只写从 engine.ts 读到的事实（scrape 和 map 的记录没有保留期限，行号待核：约 807、815）；crawl 和 batch 的保留期实现时从引擎里读，读不到就写“未核实”。hosted 不写，因为 hosted 不提供句柄类工具。
+- [x] **W5.9** 在 CHANGELOG 的 Unreleased 下写清这个行为变更（D4）。
 - 验收：
   - 先写失败测试，复现 2026-10-17 的线上探测：hosted 带 actions 的 scrape 返回 -32603 加转义 JSON；hosted crawl 返回 `tool not available in this deployment`。
   - 改完后，以下 5 类执行错误都返回 `isError: true`：
@@ -310,6 +310,16 @@
   - W8 合入后，在 Cursor 里对带 outputSchema 的工具的 isError 结果再做一次冒烟测试。
 - 指标：以 isError 送到模型的执行错误 0/5 → 5/5；送到模型的 agentHints 0 → 全部；不靠人帮忙就从错误中恢复的比例在 eval 里测量。
 - 决定：D4、D7。
+- 结果（PR #560）：
+  - `server.ts` 新增 `toolErrorResult`。hosted 的错误码（`quota_exhausted`、`browser_busy`、`hosted_unavailable`）从 `body.code` 读；429 改写后的错误从 `cause` 里拿出原始的 Retry-After。
+  - 按 D7 的默认，UTM 只在 MCP 渲染时从链接里去掉：逐个解析 URL 再删 `utm_*` 参数，正文不受影响。审查发现第一版正则会删掉正文里的 `?` 和 `&`，已修。
+  - 连接被拒、域名解析失败才算 `api_unreachable`，TLS 失败不算。
+  - 取消改用合并后的 signal 判断，stdio 的取消也能识别。
+  - hosted 上调用不提供的工具（如 crawl）仍是协议错误，但消息会列出这里提供哪些工具，并说明 crawl 这类要在本地跑。
+  - stdio 启动时，如果 API 连不上，向 stderr 打一行提示（`warnIfUnreachable`），不阻塞启动。
+  - 改了 14 处原来期待“抛错”的旧断言。
+  - 检查：`npm run typecheck` 通过；`npm test` 3026 个测试全部通过（在审查修复之前跑的），修复之后 `packages/mcp` 109 个测试全部通过。
+  - Cursor 下 isError 加 outputSchema 的冒烟测试要等 W8。
 
 ## W6 hosted schema 只列出 hosted 接受的选项　M
 
@@ -537,6 +547,6 @@
 
 ## 下次从这里继续
 
-- W1（#555）、W2（#557）、W3（#558）、W4（#559）都开了 PR，等合并。W3 已经和 #554（SDK v2、协议 2026-07-28）合并过，2026-07-28 下 `server/discover` 也会返回 instructions。hosted 部署和 npm 发版都只在 Howard 要求时做；按 D1，W3+W4 一起出 0.5.1。
-- 下一个是 W5（执行错误改成 `isError`），单独一个 PR，从当时的 `origin/main` 拉分支。注意 #554 之后 `server.ts` 用的是 v2 SDK（`@modelcontextprotocol/server`）：W5 里那些取消判断和行号要按新代码重新核对。
+- W1–W5 都开了 PR（#555、#557、#558、#559、#560），等合并。按 D1：W3+W4 一起出 0.5.1；W5 是行为变更，出 0.6.0，hosted 部分和 W6 一起部署一次。部署和发版都只在 Howard 要求时做。
+- 下一个是 W6（hosted schema 只列出 hosted 接受的选项），单独一个 PR，从当时的 `origin/main` 拉分支。W6.3 要先写刻画测试，固定 hosted 下 `mode authed` 今天的行为。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。
