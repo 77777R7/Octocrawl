@@ -167,7 +167,8 @@ const DECLARED_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
 
 /**
  * Candidates from what the page's markup declares (DeclaredValue) and its
- * `<meta name="description">`, for top-level keys nothing else covers. An
+ * `<meta name="description">` (not on a product page), for top-level keys
+ * nothing else covers and whose labels did not disagree. An
  * array field takes every value of a tag; a string field takes its value when
  * it has one, and is left out, saying why, when a repeated tag has several. Article nodes that state a
  * property differently leave the field out with a `field_ambiguous` issue.
@@ -179,15 +180,18 @@ function addDeclaredCandidates(
   issues: StructuredExtractionIssue[],
 ): void {
   const declared = result.document?.declaredValues ?? []
-  const description = result.metadata?.description ?? null
+  // A shop's meta description is its sales line, not the product's description.
+  const description = result.document?.product === null || result.document?.product === undefined ? result.metadata?.description ?? null : null
   for (const [name, child] of Object.entries(effective(root, root).properties ?? {})) {
     const key = labelKey(name)
-    if (key.length === 0 || map.has(name.toLowerCase())) continue
+    // Labels that disagree leave the field out: a declared value does not settle it.
+    if (key.length === 0 || map.has(name.toLowerCase()) || issues.some(issue => issue.path === `/${name}`)) continue
     if (key === 'description' && description !== null) {
       map.set(name.toLowerCase(), { value: description, fact: { source: 'meta', path: 'meta[name="description"]' } })
       continue
     }
-    const exact = declared.filter(item => labelKey(item.name) === key)
+    // An article's `name` is its headline, not what a `name` key asks for on the page (a person's, a product's).
+    const exact = declared.filter(item => item.name !== 'name' && labelKey(item.name) === key)
     const entries = exact.length > 0 ? exact : (DECLARED_SYNONYMS[key] ?? []).map(alias => declared.filter(item => item.name === alias)).find(list => list.length > 0)
     if (entries === undefined || entries.length === 0) continue
     const first = entries[0]!

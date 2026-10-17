@@ -150,16 +150,26 @@ export interface ProductFacts {
 
 /**
  * A value the page states under its own label: a two-cell table row (a `<th>`
- * label and a `<td>` value) or a definition-list pair (one `<dt>`, one
+ * label, or a `<td>` ending in a colon, and a `<td>` value) or a definition-list pair (one `<dt>`, one
  * `<dd>`) in the main content. Both texts are as the page shows them, with
  * whitespace collapsed; nothing is normalized.
  */
+export interface LabelledValue {
+  label: string
+  value: string
+  /**
+   * `table[i] tr[j]` or `dl[i] dt[j]`: zero-based, in document order, the
+   * table or list among those in the main content and the row or term in it.
+   */
+  path: string
+}
+
 /**
  * A value the page's markup declares about the work it shows, read for JSON
  * extraction beside the labels: a Highwire Press `citation_*` meta tag (the
  * tags Google Scholar reads), every one of a repeated tag such as
- * `citation_author` in document order, or a property of the page's one
- * schema.org article node in JSON-LD (`headline`, `name`, `datePublished`,
+ * `citation_author` in document order, or a property of a schema.org
+ * article node in JSON-LD, one entry per node (`headline`, `name`, `datePublished`,
  * `dateModified`, `description`), each as written.
  */
 export interface DeclaredValue {
@@ -168,16 +178,6 @@ export interface DeclaredValue {
   values: readonly string[]
   source: 'meta' | 'jsonld'
   /** `meta[name="citation_author"]`, or `ld+json[i] NewsArticle.datePublished` (the i-th JSON-LD script, the node's type). */
-  path: string
-}
-
-export interface LabelledValue {
-  label: string
-  value: string
-  /**
-   * `table[i] tr[j]` or `dl[i] dt[j]`: zero-based, in document order, the
-   * table or list among those in the main content and the row or term in it.
-   */
   path: string
 }
 

@@ -572,6 +572,23 @@ describe('structured JSON extraction', () => {
     expect(out.issues.map(issue => [issue.code, issue.path])).toEqual([['field_ambiguous', '/headline'], ['field_ambiguous', '/datePublished']])
   })
 
+  it('never fills from a declared value a field whose page labels disagree, nor a product\'s description or a page\'s name from meta or article JSON-LD', async () => {
+    const dated = `<html><head><title>Tide tables</title><meta name="citation_date" content="2017/06/12"><meta name="description" content="Tide tables for the harbour."></head>
+<body><main><h1>Tide tables</h1><p>${'Tide tables for the harbour, with the times of high and low water for each day. '.repeat(3)}</p>
+<table><tr><th>Date</th><td>1 Jan 2020</td></tr><tr><th>Date</th><td>2 Feb 2021</td></tr><tr><th>Description</th><td>Spring</td></tr><tr><th>Description</th><td>Neap</td></tr></table></main></body></html>`
+    const ambiguous = await extractStructured(page(dated, 'https://tides.example/'), json({ date: { type: ['string', 'null'] }, description: { type: ['string', 'null'] } }, ['date', 'description']), {}, null)
+    expect(ambiguous.data).toEqual({ date: null, description: null })
+    expect(ambiguous.issues.map(issue => [issue.code, issue.path])).toEqual([['field_ambiguous', '/date'], ['field_ambiguous', '/description']])
+    // A shop's meta description is its sales line, not the product's description.
+    const shopPage = lamp.replace('<title>Harbour lamp | Shop</title>', '<title>Harbour lamp | Shop</title><meta name="description" content="Buy Harbour lamp online at low price. Free shipping on orders over $50.">')
+    const product = await extractStructured(page(shopPage, 'https://shop.example/lamp'), json({ description: { type: ['string', 'null'] } }, ['description']), {}, null)
+    expect(product.data).toEqual({ description: null })
+    const post = `<html><head><title>Jane Doe</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","name":"Ten tips for gardening"}</script></head>
+<body><main><h1>Jane Doe</h1><p>${'Jane Doe writes about gardening, allotments and the plants that grow well by the sea. '.repeat(3)}</p></main></body></html>`
+    const named = await extractStructured(page(post, 'https://blog.example/jane'), json({ name: { type: ['string', 'null'] }, headline: { type: ['string', 'null'] } }, ['name', 'headline']), {}, null)
+    expect(named.data).toEqual({ name: null, headline: 'Ten tips for gardening' })
+  })
+
   it('reads an infobox row whose label is a data cell ending in a colon', async () => {
     const out = await extractStructured(page(octopusInfobox, 'https://en.wikipedia.org/wiki/Octopus'), json({ kingdom: { type: 'string' }, order: { type: 'string' }, family: { type: ['string', 'null'] } }, ['kingdom', 'order', 'family']), {}, null)
     // A line break in the value cell separates its lines, as on the page.
