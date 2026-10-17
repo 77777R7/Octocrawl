@@ -1,7 +1,8 @@
 /**
  * Label/value pairs a page states in its main content: two-cell table rows
- * (a `<th>` label and a `<td>` value) and definition-list pairs (one `<dt>`
- * and one `<dd>`). JSON extraction matches the labels to schema keys, so a
+ * (a `<th>` label, or a `<td>` whose text ends in a colon as in Wikipedia's
+ * taxobox and arXiv's metadata table, and a `<td>` value) and
+ * definition-list pairs (one `<dt>` and one `<dd>`). JSON extraction matches the labels to schema keys, so a
  * pair is kept only where the page itself says which label a value has:
  * rows of data cells, header rows and terms sharing descriptions are not.
  */
@@ -9,7 +10,21 @@
 import type { LabelledValue } from '@w2l/contracts'
 import { qsa, tagOf } from './dom.js'
 
-const textOf = (el: Element): string => (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+/** The element's text, a line break (`<br>`) read as the space between its lines. */
+function textOf(el: Element): string {
+  const parts: string[] = []
+  const walk = [el as Node]
+  while (walk.length > 0) {
+    const node = walk.pop()!
+    if (node.nodeType === 3 || node.nodeType === 4) parts.push(node.textContent ?? '')
+    else if (node.nodeType === 1 && tagOf(node as Element) === 'br') parts.push(' ')
+    else for (let child = node.lastChild; child !== null; child = child.previousSibling) walk.push(child)
+  }
+  return parts.join('').replace(/\s+/g, ' ').trim()
+}
+
+/** A label cell: a header cell, or a data cell whose text ends in a colon ("Kingdom:"). */
+const LABEL_COLON = /[:：]$/
 
 /** The element itself when it matches, then its matching descendants. */
 function selfAndBelow(root: Element, selector: string): Element[] {
@@ -21,8 +36,9 @@ function tableRows(table: Element, index: number): LabelledValue[] {
   const rows = qsa(table, 'tr').filter((tr) => tr.closest('table') === table)
   for (const [r, row] of rows.entries()) {
     const cells = Array.from(row.children).filter((cell) => tagOf(cell) === 'th' || tagOf(cell) === 'td')
-    if (cells.length !== 2 || tagOf(cells[0]!) !== 'th' || tagOf(cells[1]!) !== 'td') continue
+    if (cells.length !== 2 || tagOf(cells[1]!) !== 'td') continue
     const label = textOf(cells[0]!)
+    if (tagOf(cells[0]!) !== 'th' && !LABEL_COLON.test(label)) continue
     const value = textOf(cells[1]!)
     if (label.length > 0 && value.length > 0) pairs.push({ label, value, path: `table[${index}] tr[${r}]` })
   }

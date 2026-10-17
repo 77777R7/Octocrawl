@@ -557,6 +557,21 @@ ${div('Kiln equipment is depreciated on a straight-line basis over its useful li
     expect(extractTf.extract('<!doctype html><html><body><div id="root"></div></body></html>').labelledValues).toEqual([])
   })
 
+  it('reads a row whose label is a data cell ending in a colon, and a line break in a value as a space', () => {
+    const html = `<!doctype html><html><body><article><h1>Octopus</h1>
+<p>The octopus is a soft-bodied, eight-limbed mollusc of the order Octopoda, with around 300 species.</p>
+<table class="infobox"><tr><th colspan="2">Scientific classification</th></tr>
+<tr><td>Kingdom:</td><td><a href="/wiki/Animal">Animalia</a></td></tr>
+<tr><td>Order:</td><td><a href="/wiki/Octopus">Octopoda</a><br><small>Leach, 1818</small></td></tr>
+<tr><td>Arms</td><td>8</td></tr><tr><td>&nbsp;</td><td>continued</td></tr></table>
+</article></body></html>`
+    // "Arms" with no colon is a data cell like any other; an empty label cell names nothing.
+    expect(extractTf.extract(html).labelledValues).toEqual([
+      { label: 'Kingdom:', value: 'Animalia', path: 'table[0] tr[1]' },
+      { label: 'Order:', value: 'Octopoda Leach, 1818', path: 'table[0] tr[2]' },
+    ])
+  })
+
   it('counts tables whose rows a script has yet to fill', () => {
     const html = `<!doctype html><html><body><main><h1>Population estimates, quarterly</h1>
 <p>Table 17-10-0009-01. Release date 2026-09-23. Frequency: quarterly. Geography: Canada, province or territory.</p>

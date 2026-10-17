@@ -154,6 +154,23 @@ export interface ProductFacts {
  * `<dd>`) in the main content. Both texts are as the page shows them, with
  * whitespace collapsed; nothing is normalized.
  */
+/**
+ * A value the page's markup declares about the work it shows, read for JSON
+ * extraction beside the labels: a Highwire Press `citation_*` meta tag (the
+ * tags Google Scholar reads), every one of a repeated tag such as
+ * `citation_author` in document order, or a property of the page's one
+ * schema.org article node in JSON-LD (`headline`, `name`, `datePublished`,
+ * `dateModified`, `description`), each as written.
+ */
+export interface DeclaredValue {
+  /** The tag's name lowercased (`citation_title`), or the JSON-LD property as written (`datePublished`). */
+  name: string
+  values: readonly string[]
+  source: 'meta' | 'jsonld'
+  /** `meta[name="citation_author"]`, or `ld+json[i] NewsArticle.datePublished` (the i-th JSON-LD script, the node's type). */
+  path: string
+}
+
 export interface LabelledValue {
   label: string
   value: string
@@ -259,6 +276,8 @@ export interface DocumentExtraction {
   adapterValidation?: AdapterValidation
   /** Label/value pairs of the main content; JSON extraction matches them to schema keys. */
   labelledValues?: readonly LabelledValue[]
+  /** Values the page's citation tags and article JSON-LD declare (see DeclaredValue). */
+  declaredValues?: readonly DeclaredValue[]
 }
 
 /** The rule that decided a page's data is most likely rendered client-side (see RenderSignals). */
@@ -365,6 +384,8 @@ export interface ExtractorOutput {
   render?: RenderSignals
   /** Label/value pairs of the main content (see LabelledValue). */
   labelledValues?: readonly LabelledValue[]
+  /** Values the page's citation tags and article JSON-LD declare (see DeclaredValue). */
+  declaredValues?: readonly DeclaredValue[]
   /** Monotonic extractor stage timings. */
   timings: { parseMs: number; extractMs: number }
 }

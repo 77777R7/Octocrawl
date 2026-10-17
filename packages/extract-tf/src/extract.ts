@@ -25,6 +25,7 @@ import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, se
 import { adapterFor } from './adapters.js'
 import { documentBaseUrl } from './links.js'
 import { collectLabelledValues } from './labels.js'
+import { collectDeclaredValues } from './declared.js'
 import { collectPageMetadata } from './metadata.js'
 import { resolveReactStreaming } from './streaming.js'
 
@@ -142,6 +143,8 @@ export class ExtractTf implements Extractor {
     const baseUrl = documentBaseUrl(doc.document, options.url)
     // The page's own <title>, <meta> and <link> declarations, read before cleaning.
     const metadata = collectPageMetadata(doc.document, baseUrl)
+    // Citation tags and article JSON-LD, read before cleaning removes the scripts.
+    const declaredValues = collectDeclaredValues(doc.document)
 
     // Declared product facts share those carriers, so they are read from the
     // raw tree too. The visible-price fallback runs much later, after
@@ -316,6 +319,7 @@ export class ExtractTf implements Extractor {
         loadingShown: main !== null && hasLoadingText(main),
       }),
       labelledValues: main ? collectLabelledValues(main) : [],
+      declaredValues,
       timings: { parseMs, extractMs: Math.max(0, performance.now() - extractionStart) },
     }
 

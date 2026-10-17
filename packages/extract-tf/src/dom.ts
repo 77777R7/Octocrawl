@@ -1057,9 +1057,17 @@ interface TextMeasure {
 }
 
 /**
- * Whether a table lays out other tables: the tables nested in it hold at
- * least half of its text (Hacker News puts its header, story list and footer
- * in one). A data table with a small table in one of its cells is not one.
+ * The class MediaWiki's clade template gives every table of a cladogram: the
+ * tables draw a tree with their borders, and their cells are its labels and
+ * leaves, never rows of data (Wikipedia's Octopus article draws one in 20).
+ */
+const DIAGRAM_TABLE_CLASS = 'clade'
+
+/**
+ * Whether a table lays out other tables or draws a diagram: the tables nested
+ * in it hold at least half of its text (Hacker News puts its header, story
+ * list and footer in one), or it is a cladogram's (DIAGRAM_TABLE_CLASS). A
+ * data table with a small table in one of its cells is not one.
  * The test is for the tables of a tree that does not change while it is
  * asked: each element is measured once, children before parents and without
  * recursion, so asking about every table of a page costs the page's size,
@@ -1069,6 +1077,7 @@ interface TextMeasure {
 export function layoutTables(): (table: Element) => boolean {
   const measured = new Map<Element, TextMeasure>()
   return (table) => {
+    if (table.classList.contains(DIAGRAM_TABLE_CLASS)) return true
     const own = measured.get(table) ?? measure(table, measured)
     return own.tables !== null && own.tables * 2 >= own.text
   }
