@@ -355,7 +355,7 @@ const DEFINITIONS = [
         url: { type: 'string' },
         mode: { type: 'string', enum: ['standard', 'research'], description: 'standard (default) or research; for signed-in pages send a batch in mode authed.' },
         access: { type: 'string', enum: ['standard', 'enhanced'], description: 'standard (default) or enhanced: also the paid providers the operator approved.' },
-        maxPages: { type: ['number', 'null'], description: 'Pages fetched at most. Omitted or null: the server\'s default (none on a local server; hosted servers cap it).' },
+        maxPages: { type: ['number', 'null'], description: 'Pages fetched at most. Omitted: 100. null: the server\'s default (none on a local server; hosted servers cap it).' },
         maxDepth: { type: ['number', 'null'], description: 'Links followed from the start URL at most. Omitted or null: no limit.' },
         useCached: { type: 'boolean' },
         allowlistedDomains: { type: 'array', items: { type: 'string' } },

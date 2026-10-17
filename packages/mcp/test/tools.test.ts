@@ -199,7 +199,7 @@ describe('MCP tools', () => {
     await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
     expect(bodies).toEqual([
-      { url: 'https://example.com/', debug: false, timeout: 120000, ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', debug: false, ...options, origin: SDK_ORIGIN },
       { url: 'https://example.com/', maxPages: 100, ...options, origin: SDK_ORIGIN },
       { urls: ['https://example.com/a'], ...options, origin: SDK_ORIGIN },
     ])

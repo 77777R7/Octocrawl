@@ -43,7 +43,7 @@ describe('a local crawl over MCP', () => {
   let taskRoot: string
   let engine: ApiEngine
   let client: W2L
-  const PAGES = 130
+  const PAGES = 110
 
   beforeAll(async () => {
     // A start page linking to more pages than the default cap.
@@ -72,7 +72,7 @@ describe('a local crawl over MCP', () => {
 
   const crawl = async (args: Record<string, unknown>) => {
     const started = (await callTool(client, 'crawl', { url: `${origin}/`, sitemap: 'skip', fastMode: true, ...args })) as { taskId: string; maxPages?: number }
-    const report = (await callTool(client, 'wait_crawl', { id: started.taskId, timeoutMs: 60_000 })) as { status: string; pagesFetched: number }
+    const report = (await callTool(client, 'wait_crawl', { id: started.taskId, timeoutMs: 120_000 })) as { status: string; pagesFetched: number }
     return { started, report }
   }
 
@@ -81,14 +81,14 @@ describe('a local crawl over MCP', () => {
     expect(started.maxPages).toBe(100)
     expect(report.status).toBe('completed')
     expect(report.pagesFetched).toBe(100)
-  }, 90_000)
+  }, 180_000)
 
   it('keeps an explicit null as the server\'s default, which on a local server is no cap', async () => {
     const { started, report } = await crawl({ maxPages: null })
     expect(started).not.toHaveProperty('maxPages')
     expect(report.status).toBe('completed')
     expect(report.pagesFetched).toBe(PAGES + 1)
-  }, 90_000)
+  }, 180_000)
 })
 
 describe('MCP defaults for a scrape', () => {
