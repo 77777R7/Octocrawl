@@ -23,6 +23,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 ## Unreleased
 
 - MCP 2026-07-28 on every Octocrawl MCP server (`@octocrawl/mcp` over stdio, the local MCP host, and `/mcp` and `/mcp-oauth` once deployed): a client that opens with `server/discover` is served without a session, and a 2025-era client that opens with `initialize` is served as before. A request naming a revision the server does not serve is answered 400 with the spec's `UnsupportedProtocolVersionError` (-32022), listing the revisions it does serve. The MCP servers now run on the v2 MCP TypeScript SDK (`@modelcontextprotocol/server`).
+- **MCP `instructions` and identity.** `initialize` now answers with `instructions`: what Octocrawl does, which tool a task starts with, how to read a result (`status`, `verification.status`, `readiness`, `agentHints`), and what the connection can reach. They are written from the tools that surface lists: a local server, hosted keyless, hosted with a key, or `/mcp-oauth`. `serverInfo` adds `title` `Octocrawl`, a `description` and a `websiteUrl`; the hosted server card and `server.json` carry the same title and description. Clients that do not read `instructions` see no change. (docs/mcp-client-ux-tasks.md W3)
 
 ## 0.5.0 — 2026-10-17
 
