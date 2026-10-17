@@ -754,6 +754,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       tools,
       instructions,
       calls: post,
+      unavailableHint: 'Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.',
       normalizeCall: (name, args) => {
         if (!HOSTED_API_TOOLS.has(name)) throw new Error(`${name} is not served by hosted Octocrawl: scrape, map and scrape_product only; ${LOCAL_HINT}`)
         if (name === 'scrape_product' && !caller.browser) throw new Error('scrape_product reads Amazon.sg in a browser, which needs a key; keyless callers use scrape over HTTP')
