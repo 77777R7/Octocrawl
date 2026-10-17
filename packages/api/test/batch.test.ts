@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createServer } from 'node:http'
+import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { localNetworkPolicy } from '@w2l/contracts'
 import { SqliteTaskStore } from '@w2l/runtime'
@@ -51,12 +51,36 @@ describe('persistent URL-array batch', () => {
         res.end(`<html><head><title>Fixture item ${number}</title></head><body><main><article><h1>Fixture item ${number}</h1><p>This is a long and stable product page for item ${number}. It has enough independent body text for the extraction cascade to accept it as a real article, and it provides a deterministic title to map directly into the requested JSON schema.</p><p><a href="details">Details</a></p></article></main></body></html>`)
       } finally { inFlight-- }
     })
-    // Bound to every address, so the one server answers as 127.0.0.1 and, for a URL appended on a new host, as localhost.
-    await new Promise<void>(resolve => server.listen(0, resolve))
+    // Bound to 127.0.0.1 and to ::1 on the same port, so the one server answers as 127.0.0.1 and, for a URL appended on a new
+    // host, as localhost (::1 first). Not listen(0) on every address: macOS may hand a dual-stack listener a port another
+    // process holds on 0.0.0.0, and that process then answers 127.0.0.1 (a reset, its own page, or nothing the test waits for).
+    const loopback6 = createServer((req, res) => server.emit('request', req, res))
+    const listen = (target: Server, port: number, host: string) => new Promise<void>((resolve, reject) => {
+      target.once('error', reject)
+      target.listen(port, host, () => { target.off('error', reject); resolve() })
+    })
+    for (let attempt = 1; ; attempt++) {
+      await listen(server, 0, '127.0.0.1')
+      try { await listen(loopback6, (server.address() as AddressInfo).port, '::1'); break } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        // A host without IPv6 keeps the 127.0.0.1 listener alone, all that listen(0) gave there too.
+        if (code === 'EADDRNOTAVAIL' || code === 'EAFNOSUPPORT') break
+        // Another process has that port on ::1: take a new one.
+        await new Promise<void>(resolve => server.close(() => resolve()))
+        if (code !== 'EADDRINUSE' || attempt === 5) throw error
+      }
+    }
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
     const localhostOrigin = `http://localhost:${(server.address() as AddressInfo).port}`
     const engine = (extra: Partial<ApiEngineOptions> = {}) => createApiEngine({ taskRoot: root, networkPolicy: { ...localNetworkPolicy(), perHostConcurrency, perHostMinDelayMs: 0 }, workerCount: 2, ...engineOptions, ...extra })
-    cleanup.push(async () => { release(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }) })
+    cleanup.push(async () => {
+      release()
+      for (const listener of [server, loopback6]) {
+        listener.closeAllConnections()
+        if (listener.listening) await new Promise<void>(resolve => listener.close(() => resolve()))
+      }
+      await rm(root, { recursive: true, force: true })
+    })
     return {
       origin, localhostOrigin, root, engine, seen, setSlow: (value: boolean) => { slow = value }, setStarted: (fn: () => void) => { slowStarted = fn }, release: () => release(),
       setHold: (fn: (path: string) => Promise<void>) => { hold = fn }, inFlight: () => inFlight, maxInFlight: () => maxInFlight, resetMaxInFlight: () => { maxInFlight = 0 },

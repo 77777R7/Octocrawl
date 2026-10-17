@@ -34,7 +34,7 @@ Clients can also [sign in instead of sending a key](#sign-in-instead-of-a-key).
 
 `https://mcp.octocrawl.dev/mcp-oauth` is the same server for clients that sign in with OAuth instead of sending a key. The client opens an Octocrawl page where you sign in and choose Authorize. Its calls then spend your account's credits, as a key's do, and show under the client's name in [Activity](/dashboard/activity/). Each connection is listed under MCP connections on [API keys](/dashboard/keys/), where you can disconnect it; it also ends after 90 days unused. An account holds up to ten connections, besides its five keys.
 
-Use one URL per client: `/mcp` for keyless use or a key, `/mcp-oauth` for sign-in. These steps follow each client's own documentation. Sign-in is new on Octocrawl, and this page will mark each client once a connection from it has been checked.
+Use one URL per client: `/mcp` for keyless use or a key, `/mcp-oauth` for sign-in. Both setups below were checked on 2026-10-16: each client signed in, ran a scrape on the account's credits, and was refused after the connection was disconnected ([record](https://github.com/77777R7/Octocrawl/blob/main/research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md)). Another client that follows the MCP authorization spec should sign in the same way, but has not been checked here.
 
 ### Claude Code
 
@@ -44,13 +44,17 @@ claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp-oauth
 
 Then run `/mcp` in Claude Code, select octocrawl and sign in in the browser it opens (`claude mcp login octocrawl` does the same from a terminal). **Clear authentication** in `/mcp` signs it out. The key setup above keeps working on `/mcp`. ([Claude Code's guide](https://code.claude.com/docs/en/mcp))
 
+Checked with Claude Code 2.1.301 on 2026-10-16.
+
 ### Cursor
 
 ```json
 { "mcpServers": { "octocrawl": { "url": "https://mcp.octocrawl.dev/mcp-oauth" } } }
 ```
 
-Merge this into `.cursor/mcp.json` with no `headers`, and sign in when Cursor's MCP settings ask for it. The key setup above keeps working on `/mcp`. ([Cursor's guide](https://cursor.com/docs/mcp))
+Merge this into `.cursor/mcp.json` (or `~/.cursor/mcp.json` for every project) with no `headers`, and sign in when Cursor asks for it. The key setup above keeps working on `/mcp`. ([Cursor's guide](https://cursor.com/docs/mcp))
+
+Checked with Cursor 3.25.6 on 2026-10-16.
 
 ## Send your first task
 
