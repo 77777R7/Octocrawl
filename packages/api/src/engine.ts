@@ -128,7 +128,7 @@ import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlI
 import { FileSessionBrokerStore, FileSessionStore, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
 import { BLOCK_REASON, VERIFY_REGEX_CHECK_TYPES, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
-import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv } from './structured.js'
+import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv, verifyScrapeResponse } from './structured.js'
 
 export interface CrawlWithSteps {
   report: CrawlReport
@@ -1762,9 +1762,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // A pinned fastMode's reason replaces the engine's "retry without fastMode" in the answer and the record alike.
       const pinned = context.fastModePin === undefined ? [] : pinnedFastModeHints(run.agentHints ?? [], context.fastModePin)
       const full: ScrapeRun = pinned.length === 0 ? run : { ...run, agentHints: pinned }
-      const shaped = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
-      // An answer the cache gave fetched nothing: its usage is this call's, its evidence the original fetch's.
-      const response = fetched ? shaped : withoutFetchUsage(shaped)
+      const response = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
       if (!record) return response
       // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
       try {
@@ -1773,7 +1771,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       } catch (error) {
         console.error(JSON.stringify({ component: 'api', event: 'scrape_record_unwritten', scrapeId, error: error instanceof Error ? error.message : String(error) }))
         if (!('trace' in response)) return response
-        return { ...response, trace: [...response.trace, { at: Math.round(performance.now() - overallStart), lane: response.lane, event: 'scrape_record_unwritten', detail: { scrapeId } }] }
+        const trace = [...response.trace, { at: Math.round(performance.now() - overallStart), lane: response.lane, event: 'scrape_record_unwritten', detail: { scrapeId } }]
+        // The persistence diagnostic is part of the full answer too: judge that final projection (ADR 0006).
+        return verifyScrapeResponse({ ...response, trace }, req, { ...full, trace })
       }
     }
     const operation = (async () => {
@@ -2517,23 +2517,6 @@ function pageOptions(req: PageOptions): PageOptions {
     ...(req.lockdown === undefined ? {} : { lockdown: req.lockdown }),
     ...(req.verify === undefined ? {} : { verify: req.verify }),
   }
-}
-
-/**
- * A response the cache answered: its usage is this call's, which requested
- * nothing (no request, attempt, byte or browser time, and none of the
- * original fetch's network timings), with the call's own wall time and its
- * serialize, model and total times; the result's evidence stays the
- * original fetch's.
- */
-function withoutFetchUsage<T extends ScrapeResponse | CompactScrapeResponse>(response: T): T {
-  const { timings, ...usage } = response.usage as T['usage'] & { timings?: { serializeMs?: number; modelMs?: number; totalMs?: number } }
-  const own = timings === undefined ? undefined : {
-    ...(timings.serializeMs === undefined ? {} : { serializeMs: timings.serializeMs }),
-    ...(timings.modelMs === undefined ? {} : { modelMs: timings.modelMs }),
-    ...(timings.totalMs === undefined ? {} : { totalMs: timings.totalMs }),
-  }
-  return { ...response, usage: { ...usage, bytesWire: 0, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, browserMs: 0, externalCostUsd: 0, ...(own === undefined ? {} : { timings: own }) } }
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

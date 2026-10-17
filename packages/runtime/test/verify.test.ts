@@ -21,6 +21,99 @@ const PAGES = [
 ]
 
 describe('the task verifier (ADR 0006)', () => {
+  it('reads only own properties at every field and list path segment', () => {
+    const view = { status: 'success', markdown: 'Harbour', json: { data: { name: 'Harbour' } } }
+    for (const path of ['constructor', '__proto__.toString', 'markdown.constructor', 'markdown.__proto__.toString', 'json.data.constructor', 'json.data.__proto__.toString']) {
+      expect(verify({ checks: [{ type: 'field', path, present: true }] }, view), path).toMatchObject({ status: 'failed', checks: [{ passed: false }] })
+      expect(verify({ checks: [{ type: 'field', path, present: false }] }, view), path).toMatchObject({ status: 'passed', checks: [{ passed: true }] })
+    }
+    const inherited = { status: 'success', json: { data: Object.create({ items: ['not delivered'], price: 42 }) } }
+    expect(verify({ checks: [{ type: 'listRecordsMin', path: 'json.data.items', min: 1 }, { type: 'field', path: 'json.data.price', min: 1 }] }, inherited)).toMatchObject({ status: 'failed', checks: [{ passed: false }, { passed: false }] })
+  })
+
+  it('keeps own prototype-named JSON keys, null-prototype maps and array indexes readable', () => {
+    const data = JSON.parse('{"constructor":"source constructor","__proto__":{"toString":"source text"},"hasOwnProperty":false,"items":[0,false]}') as Record<string, unknown>
+    const nullMap = Object.assign(Object.create(null), { constructor: 'null-map value', price: 0 })
+    const checks: VerifyCheck[] = [
+      { type: 'field', path: 'json.data.constructor', equals: 'source constructor' },
+      { type: 'field', path: 'json.data.__proto__.toString', equals: 'source text' },
+      { type: 'field', path: 'json.data.hasOwnProperty', equals: false },
+      { type: 'field', path: 'json.data.items.0', equals: 0 },
+      { type: 'field', path: 'json.data.items.1', equals: false },
+      { type: 'listRecordsMin', path: 'json.data.items', min: 2 },
+      { type: 'field', path: 'nullMap.constructor', equals: 'null-map value' },
+      { type: 'field', path: 'nullMap.price', equals: 0 },
+    ]
+    const view = { status: 'success', json: { data }, nullMap }
+    const before = JSON.stringify(view)
+    expect(verify({ checks }, view)).toMatchObject({ status: 'passed' })
+    expect(JSON.stringify(view)).toBe(before)
+  })
+
+  it('leaves inherited roots unavailable on partial views', () => {
+    const view = Object.assign(Object.create({ json: { data: { items: ['hidden'] } }, list: { records: [{ values: { name: 'hidden' } }] } }), { status: 'success', markdown: 'Harbour' })
+    const checks: VerifyCheck[] = [
+      { type: 'markdownIncludes', text: 'Harbour' },
+      { type: 'field', path: 'json.data.items', present: true },
+      { type: 'listRecordsMin', path: 'json.data.items', min: 1 },
+      { type: 'recordFields', fields: ['name'], min: 1 },
+    ]
+    expect(verify({ checks }, view, { partial: true })).toMatchObject({ status: 'passed', checks: [{ passed: true }, { passed: null }, { passed: null }, { passed: null }] })
+  })
+
+  it('does not count inherited record fields or identity values as delivered values', () => {
+    const records = [
+      { values: { id: 'own', name: 'Own name' }, missing: [] },
+      { values: Object.create({ id: 'inherited', name: 'Inherited name' }), missing: [] },
+    ]
+    const view = { status: 'success', list: { records } }
+    expect(verify({ checks: [{ type: 'recordFields', fields: ['constructor'], min: 1 }] }, view)).toMatchObject({ status: 'failed', checks: [{ observedCount: 0 }] })
+    expect(verify({ checks: [{ type: 'recordFields', fields: ['name'], uniqueBy: ['id'], min: 2 }] }, view)).toMatchObject({ status: 'failed', checks: [{ observedCount: 1 }] })
+    const ownKeys = { status: 'success', list: { records: [{ values: { constructor: 'Source value', id: 0 }, missing: [] }] } }
+    expect(verify({ checks: [{ type: 'recordFields', fields: ['constructor'], uniqueBy: ['id'], min: 1 }] }, ownKeys)).toMatchObject({ status: 'passed', checks: [{ observedCount: 1 }] })
+  })
+
+  it('does not let repeated complete records satisfy an explicitly distinct task count', () => {
+    const records = [
+      { values: { id: 'a', name: 'Glass vase', price: '12' }, missing: [] },
+      { values: { id: 'a', name: 'Glass vase', price: '12' }, missing: [] },
+      { values: { id: 'b', name: 'Clay bowl', price: '9' }, missing: [] },
+    ]
+    const check = { type: 'recordFields' as const, fields: ['name', 'price'], min: 3, uniqueBy: ['id'] }
+    expect(verify({ checks: [check] }, { status: 'success', list: { records } })).toMatchObject({ status: 'failed', checks: [{ observedCount: 2, asked: 3 }] })
+    expect(records).toHaveLength(3) // Verification never rewrites source records.
+    expect(verify({ checks: [{ type: 'recordFields', fields: ['name', 'price'], min: 3 }] }, { status: 'success', list: { records } }).status).toBe('passed')
+  })
+
+  it('uses explicit compound identities and refuses missing or non-scalar identity values', () => {
+    const records = [
+      { values: { url: 'a|b', sku: 'c', name: 'Same title', price: '0' }, missing: [] },
+      { values: { url: 'a', sku: 'b|c', name: 'Same title', price: '0' }, missing: [] },
+      { values: { url: 'a|b', sku: 'c', name: 'Same title', price: '99' }, missing: [] },
+      ...[null, '', '  ', {}, []].map(sku => ({ values: { url: 'a', sku, name: 'Title', price: '1' }, missing: [] })),
+      { values: { url: 'a', sku: 'd', name: 'Title', price: '1' }, missing: ['sku'] },
+    ]
+    const check = { type: 'recordFields' as const, fields: ['name', 'price'], min: 2, uniqueBy: ['url', 'sku'] }
+    expect(verify({ checks: [check] }, { status: 'success', list: { records } })).toMatchObject({ status: 'passed', checks: [{ observedCount: 2 }] })
+    const zeros = [{ values: { id: 0, name: 'Zero' }, missing: [] }, { values: { id: false, name: 'False' }, missing: [] }]
+    expect(verify({ checks: [{ ...check, fields: ['name'], uniqueBy: ['id'] }] }, { status: 'success', list: { records: zeros } })).toMatchObject({ status: 'passed', checks: [{ observedCount: 2 }] })
+    expect(verify({ checks: [check] }, { status: 'success' }, { partial: true })).toMatchObject({ checks: [{ passed: null }] })
+  })
+
+  it('does not join incomplete duplicates or invent identities for otherwise complete records', () => {
+    const records = [
+      { values: { id: 'a', name: 'Vase', price: null }, missing: ['price'] },
+      { values: { id: 'a', name: null, price: '12' }, missing: ['name'] },
+      { values: { name: 'Bowl', price: '9' }, missing: [] },
+      { values: { id: 'b', name: 'Cup', price: '0' }, missing: ['id'] },
+      { values: { id: 'c', name: 'Plate', price: '4' }, missing: [] },
+      { values: { id: 'c', name: 'Plate', price: '5' }, missing: [] },
+    ]
+    const before = JSON.stringify(records)
+    expect(verify({ checks: [{ type: 'recordFields', fields: ['name', 'price'], min: 2, uniqueBy: ['id'] }] }, { status: 'success', list: { records } })).toMatchObject({ status: 'failed', checks: [{ observedCount: 1, asked: 2 }] })
+    expect(JSON.stringify(records)).toBe(before)
+  })
+
   it("gives run-set.mjs's own verdict on every predicate of every task of the access set, on every page", () => {
     const seen = new Map<string, { pass: number; fail: number }>()
     let compared = 0

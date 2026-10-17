@@ -371,6 +371,11 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   const px = perimeterXChallenge(head, lower)
   if (px !== null) return { reason: 'captcha', signals: px }
 
+  // Skyscanner's dedicated 200 challenge uses a different script path and no
+  // _pxAppId assignment. Its URL and rendered human-check UI agree instead.
+  const skyscanner = res.status === 200 ? skyscannerChallenge(res.body, res.finalUrl) : null
+  if (skyscanner !== null) return skyscanner
+
   // DataDome's challenge, laid over a page that rendered (StubHub from a Singapore exit, 2026-10-11): its iframe from
   // captcha-delivery.com (geo., or another subdomain) sits wherever the script put it, past the head too, so the whole body is read. The
   // interstitial (a device check the browser runs) is a bot check, the captcha a person's. Its tag alone
@@ -472,10 +477,24 @@ const INTERACTION_MAX_TEXT = 4_000
 const AUTOCOMPLETE_ATTRIBUTE = /\sautocomplete\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
 const ARIA_LABEL_ATTRIBUTE = /\saria-label\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
 const ROLE_ATTRIBUTE = /\srole\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+const ID_ATTRIBUTE = /\sid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+const TITLE_ATTRIBUTE = /\stitle\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
 
 function attributeText(tag: string, pattern: RegExp): string {
   const match = pattern.exec(tag)
   return decodeEntities(match?.[1] ?? match?.[2] ?? match?.[3] ?? '').toLowerCase()
+}
+
+/** A scoped challenge route plus real heading, container and loading/rendered widget; never quoted article copy. */
+function skyscannerChallenge(body: string, finalUrl: string | undefined): GateVerdict | null {
+  if (finalUrl === undefined || !finalUrl.includes('/sttc/px/captcha-v2/') || body.length > INTERACTION_MAX_HTML) return null
+  let url: URL
+  try { url = new URL(finalUrl) } catch { return null }
+  if (!['skyscanner.net', 'www.skyscanner.net'].includes(url.hostname) || url.pathname !== '/sttc/px/captcha-v2/index.html') return null
+  const page = pageText(body, WALL_PAGE_MAX_TEXT, true)
+  if (page === null || !page.primaryHeadings.some(heading => /^are you a person or a robot\?$/i.test(heading)) ||
+    !page.controls.pxCaptcha || !(page.controls.humanChallengeFrame || page.controls.pxLoader)) return null
+  return { reason: 'captcha', signals: ['skyscanner_challenge_url', 'heading_person_or_robot', 'px_captcha_container', page.controls.humanChallengeFrame ? 'human_challenge_frame' : 'px_challenge_loader'] }
 }
 
 /** The final URL, a primary heading and real controls must agree; prose or script strings alone are not a gate. */
@@ -537,14 +556,14 @@ function shortWallPage(body: string): GateVerdict | null {
  * found once, from where the last one ended, and an end that is missing ends the reading there (a page cut off, or one
  * built to make a scanner search again and again).
  */
-function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = false): { text: string; headings: string[]; primaryHeadings: string[]; controls: { webauthn: boolean; passkey: boolean; button: boolean; image: boolean } } | null {
+function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = false): { text: string; headings: string[]; primaryHeadings: string[]; controls: { webauthn: boolean; passkey: boolean; button: boolean; image: boolean; pxCaptcha: boolean; humanChallengeFrame: boolean; pxLoader: boolean } } | null {
   // Positions are the body's own: a lowercased copy can be longer ("İ" lowercases to two characters), so tags are matched
   // case-insensitively in place.
   const visible: string[] = []
   let visibleLength = 0
   const headings: string[] = []
   const primaryHeadings: string[] = []
-  const controls = { webauthn: false, passkey: false, button: false, image: false }
+  const controls = { webauthn: false, passkey: false, button: false, image: false, pxCaptcha: false, humanChallengeFrame: false, pxLoader: false }
   let heading: { name: string; parts: string[] } | null = null
   let inHead = false
   let at = 0
@@ -596,6 +615,9 @@ function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = fal
       if (name === 'button' && /\bpasskey\b/.test(attributeText(tagText, ARIA_LABEL_ATTRIBUTE))) controls.passkey = true
       if (name === 'button' || attributeText(tagText, ROLE_ATTRIBUTE) === 'button') controls.button = true
       if (name === 'img') controls.image = true
+      if (name === 'div' && attributeText(tagText, ID_ATTRIBUTE) === 'px-captcha') controls.pxCaptcha = true
+      if (name === 'div' && attributeText(tagText, ID_ATTRIBUTE) === 'px-loader') controls.pxLoader = true
+      if (name === 'iframe' && attributeText(tagText, TITLE_ATTRIBUTE) === 'human verification challenge') controls.humanChallengeFrame = true
     }
     if (closing === '' && HIDDEN_ELEMENTS.has(name) && body[end - 1] !== '/') {
       const closer = new RegExp(`</${name}`, 'gi')

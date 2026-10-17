@@ -22,7 +22,7 @@ const IDEMPOTENCY_KEY_PROPERTY = { type: 'string', minLength: 1, maxLength: 200,
 /** A task contract (ADR 0006): the server checks each check's fields by its type and compiles each pattern. */
 const VERIFY_PROPERTY = {
   type: 'object',
-  description: 'A task contract: the configured checks, judged after the fetch into the answer\'s verification (passed, failed with the checks that failed and why, or not_requested); status stays the fetch\'s. markdownIncludes {text}, markdownMatches {pattern, flags?}, markdownCountMin {pattern, flags?, min}, minTables {min}: table count only, tableRowsMin {tableIndex, columns, min}: rows after headers with a letter or number in every required column of the selected delivered table (zero-based indexes; requires explicit tables format; not judged by the live DOM wait), listRecordsMin {min, path?}, recordFields {fields, min}: list records holding every field named, field {path, and one of equals, in, present, or min/max}. emptyOk: an empty result passes. passed covers only these checks, not independent field accuracy; success or confidence alone is not completion, and not_requested is unverified. A failure needs its reason and readiness examined, not an automatic retry. Explicit formats must include markdown for Markdown checks, minTables included; omitted formats include the checked Markdown. A hosted server refuses markdownMatches and markdownCountMin.',
+  description: 'Checks on the delivered response, reported as verification: passed, failed with reasons, or not_requested (unverified). Fetch status stays separate. Checks: markdownIncludes {text}; markdownMatches {pattern, flags?}; markdownCountMin {pattern, flags?, min}; minTables {min} (count only); tableRowsMin {tableIndex, columns, min}: post-header rows with a letter/number in each named column (zero-based; requires tables format; not a live DOM wait); listRecordsMin {min, path?}; recordFields {fields, min, uniqueBy?}: records holding every field; uniqueBy counts distinct complete identities, whose fields must be extracted; field {path, equals/in/present or min/max}. emptyOk permits an empty result. Explicit formats must include markdown for Markdown checks, including minTables; omitted formats include it. Hosted refuses markdownMatches/markdownCountMin. A pass covers only configured checks, not independent accuracy; success/confidence is not completion. Examine failure reason and readiness before retrying.',
   properties: {
     checks: {
       type: 'array', minItems: 1, maxItems: MAX_VERIFY_CHECKS,
@@ -37,6 +37,7 @@ const VERIFY_PROPERTY = {
           max: { type: 'number' },
           path: { type: 'string', minLength: 1, maxLength: MAX_VERIFY_TEXT },
           fields: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string', minLength: 1, maxLength: MAX_VERIFY_TEXT } },
+          uniqueBy: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: MAX_VERIFY_TEXT } },
           tableIndex: { type: 'integer', minimum: 0, maximum: 1000000 },
           columns: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: { type: 'integer', minimum: 0, maximum: 1000000 } },
           equals: { type: ['string', 'number', 'boolean', 'null'] },
