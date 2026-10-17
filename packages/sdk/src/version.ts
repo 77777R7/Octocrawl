@@ -4,4 +4,4 @@
  * starts (`js-sdk@<version>`), for W2L's own records; nothing goes to the
  * target.
  */
-export const SDK_VERSION = '0.5.0'
+export const SDK_VERSION = '0.6.0'
