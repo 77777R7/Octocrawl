@@ -11,6 +11,12 @@ import { Client as ModernClient } from '@modelcontextprotocol/client'
 import { InMemoryTransport as ModernInMemoryTransport } from '@modelcontextprotocol/server'
 import { expectIsError } from './toolErrorChecks.js'
 
+/** crawl's and batch_scrape's formats, declared loosely as "Same as scrape." (docs/mcp-client-ux-tasks.md W7.4): checked to be that, then read from scrape. */
+function looseSharedFormats(formats: unknown): unknown {
+  expect(formats).toEqual({ type: 'array', minItems: 1, description: 'Same as scrape.' })
+  return (TOOLS.find(tool => tool.name === 'scrape')!.inputSchema.properties as Record<string, unknown>).formats
+}
+
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
     const expected = ['scrape', 'map', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch', 'scrape_product', 'batch_products', 'import_login', 'list_logins', 'remove_login',
@@ -92,10 +98,8 @@ describe('MCP tools', () => {
 
   it('keeps the legacy links format and caller schema on the public tool schema', () => {
     const scrape = TOOLS.find(tool => tool.name === 'scrape')
-    const batch = TOOLS.find(tool => tool.name === 'batch_scrape')
     expect(JSON.stringify(scrape?.inputSchema)).toContain('"links"')
     expect(JSON.stringify(scrape?.inputSchema)).toContain('"schema"')
-    expect(JSON.stringify(batch?.inputSchema)).toContain('"schema"')
   })
 
   it('forwards crawl formats and path filters, with no count cap on formats', async () => {
@@ -180,8 +184,8 @@ describe('MCP tools', () => {
     const properties = TOOLS.find(tool => tool.name === 'batch_scrape')?.inputSchema.properties as Record<string, { type?: string; const?: unknown }>
     expect(properties.allowExternalLinks).toMatchObject({ type: 'boolean', const: false })
     expect(properties.includeSubdomains).toMatchObject({ type: 'boolean', const: false })
-    // MCP streams nothing; the tool that waits says where the streams are.
-    expect(TOOLS.find(tool => tool.name === 'wait_batch')?.description).toContain('MCP has no event stream')
+    // The tool that waits says how long, and what the next call is when it stops at its own timeout.
+    expect(TOOLS.find(tool => tool.name === 'wait_batch')?.description).toMatch(/timeoutMs.*at the timeout it returns the status so far/)
   })
 
   it('declares and forwards onlyMainContent, waitFor, timeout and maxFileBytes for scrape, crawl and batch_scrape', async () => {
@@ -226,7 +230,7 @@ describe('MCP tools', () => {
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
       const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
-      expect(JSON.stringify(properties.formats)).toContain('["markdown","links","json","html","rawHtml","images","tables","screenshot","screenshot@fullPage"]')
+      expect(JSON.stringify(name === 'scrape' ? properties.formats : looseSharedFormats(properties.formats))).toContain('["markdown","links","json","html","rawHtml","images","tables","screenshot","screenshot@fullPage"]')
       expect(properties).toMatchObject({
         includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
         excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
@@ -254,7 +258,7 @@ describe('MCP tools', () => {
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
       const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
-      expect(JSON.stringify(properties.formats)).toContain('"attributes"')
+      expect(JSON.stringify(name === 'scrape' ? properties.formats : looseSharedFormats(properties.formats))).toContain('"attributes"')
       expect(properties).toMatchObject({ removeBase64Images: { type: 'boolean' } })
     }
     // The entry's shape is checked before any API call, as for every other option.
@@ -303,8 +307,8 @@ describe('MCP tools', () => {
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
       const properties = TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, unknown>
-      expect(JSON.stringify(properties.formats)).toContain('"screenshot@fullPage"')
-      expect(JSON.stringify(properties.formats)).toContain('{"const":"screenshot"}')
+      expect(JSON.stringify(name === 'scrape' ? properties.formats : looseSharedFormats(properties.formats))).toContain('"screenshot@fullPage"')
+      expect(JSON.stringify(name === 'scrape' ? properties.formats : looseSharedFormats(properties.formats))).toContain('{"const":"screenshot"}')
     }
     // The entry's bounds are checked before any API call, as for every other option.
     await expect(callTool(client, 'scrape', { url: 'https://example.com/', formats: [{ type: 'screenshot', quality: 101 }] })).rejects.toThrow('screenshot quality must be an integer between 1 and 100')
@@ -711,7 +715,8 @@ describe('MCP tools', () => {
       const properties = Object.keys(tool.inputSchema.properties)
       expect((keys as readonly string[]).filter((key) => !properties.includes(key) && !notOffered.includes(key)), name).toEqual([])
       expect(properties.filter((key) => !(keys as readonly string[]).includes(key) && key !== 'debug'), name).toEqual([])
-      expect((tool.inputSchema.properties as Record<string, { required?: string[] }>).verify?.required, name).toEqual(['checks'])
+      // crawl and batch_scrape declare verify loosely (docs/mcp-client-ux-tasks.md W7.4); scrape carries its shape.
+      expect((tool.inputSchema.properties as Record<string, { required?: string[] }>).verify?.required, name).toEqual(name === 'scrape' ? ['checks'] : undefined)
     }
   })
 

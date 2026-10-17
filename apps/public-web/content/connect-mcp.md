@@ -42,7 +42,7 @@ Use one URL per client: `/mcp` for keyless use or a key, `/mcp-oauth` for sign-i
 claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp-oauth
 ```
 
-Then run `/mcp` in Claude Code, select octocrawl and sign in in the browser it opens (`claude mcp login octocrawl` does the same from a terminal). **Clear authentication** in `/mcp` signs it out. The key setup above keeps working on `/mcp`. ([Claude Code's guide](https://code.claude.com/docs/en/mcp))
+Then run `/mcp` in Claude Code, select octocrawl and sign in in the browser it opens (`claude mcp login octocrawl` does the same from a terminal). The Octocrawl plugin sets up the same server: `/plugin install octocrawl --marketplace 77777R7/Octocrawl`, then sign in from `/mcp` the same way. **Clear authentication** in `/mcp` signs it out. The key setup above keeps working on `/mcp`. ([Claude Code's guide](https://code.claude.com/docs/en/mcp))
 
 Checked with Claude Code 2.1.301 on 2026-10-16.
 
@@ -92,6 +92,8 @@ A connected server and a listed tool establish the connection. To assess the tas
 - Keep the fetch `status` separate from `verification.status`. `not_requested` means no task contract was checked. `passed` means the configured checks passed; it does not establish independent field accuracy.
 - Inspect `readiness` when present. `not_loaded`, `not_extracted` and `not_served` need different next steps. A missing readiness field is unknown.
 - Keep incomplete results and failures visible. Do not convert missing content to a zero value or retry paid access automatically.
+
+The tool descriptions keep each option to a line or two. Every option's full behaviour, with examples, is in the [scrape options reference](https://github.com/77777R7/Octocrawl/blob/main/docs/scrape-options.md), and crawl and batch in [Batch, crawl and map](https://github.com/77777R7/Octocrawl/blob/main/docs/batch-crawl-map.md).
 
 If the client lists no tools, check the selected server's connection error. If the tool returns a quota or access refusal, follow that reason. Changing the MCP client does not establish that the target content can be read. See [result states](/docs/limits/) and the [Evidence Record reference](/docs/reference/#evidence-record).
 

@@ -69,7 +69,9 @@ describe('tool titles and hints', () => {
       expect([tool.name, (invoking as string).length <= 64, (invoked as string).length <= 64]).toEqual([tool.name, true, true])
     }
     for (const tool of oauthTools(true) as readonly Annotated[]) {
-      expect(Object.keys(tool._meta ?? {}).sort(), tool.name).toEqual(['openai/toolInvocation/invoked', 'openai/toolInvocation/invoking', 'securitySchemes'])
+      // scrape and map also stay loaded in Claude Code's tool search (W7.5).
+      const always = tool.name === 'scrape' || tool.name === 'map' ? ['anthropic/alwaysLoad'] : []
+      expect(Object.keys(tool._meta ?? {}).sort(), tool.name).toEqual([...always, 'openai/toolInvocation/invoked', 'openai/toolInvocation/invoking', 'securitySchemes'].sort())
     }
   })
 })

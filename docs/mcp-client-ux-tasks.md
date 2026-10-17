@@ -375,24 +375,41 @@
 
 行号（`packages/mcp/src/tools.ts`，`e1e128d4`）：`VERIFY_PROPERTY` 23–55（说明在 25），`PAGE_OPTION_PROPERTIES` 57–76（scrape 258、crawl 343、batch_scrape 432 展开它），`WEBHOOK_PROPERTY` 77–95，`FORMATS_DESCRIPTION` 100，`FORMAT_ITEMS` 102–158，`ACTIONS_SCHEMA` 165–197（说明在 169），`ROBOTS_OVERRIDE_SCHEMA` 199–205，scrape 的 `handoff` 246、`lane` 247、`access` 248，crawl 的 `maxPages` 324、`maxDepth` 325，batch 模板描述 451–455，delivery 模板 219，`get_crawl` 352。
 
-- [ ] **W7.1** 说明文字瘦身（属性名、类型、枚举、默认值都不变，接受的参数不变）：
+- [x] **W7.1** 说明文字瘦身（属性名、类型、枚举、默认值都不变，接受的参数不变）：
   - `FORMATS_DESCRIPTION`：2,560 → ≤600 字符，每种格式一行，示例挪到文档；
   - `VERIFY_PROPERTY`：1,152 → ≤500，列出检查类型；
   - `ACTIONS_SCHEMA`：1,230 → ≤600；
   - `WEBHOOK_PROPERTY`、`ROBOTS_OVERRIDE_SCHEMA`、`lane`、`handoff`、`access`：各 ≤250；
   - crawl 的 `maxPages`、`maxDepth` 补上说明（W9 若改默认值，说明在 W9 里同步）。
-- [ ] **W7.2** 顶层描述按统一模板：第一句说清对象和返回；有事实可写时才加 `Not for:`、`Next:`；删掉 REST、SDK、URL 指引（包括 batch 模板里 wait_batch 那句 “MCP has no event stream … the REST API streams …” 和 map outputSchema `id` 里的 “GET /v1/maps/:id on the REST API”，301 行）；`get_batch`、`get_batch_items`、`wait_batch`、`cancel_batch`、`get_crawl`、`pause/resume_delivery_destination` 换成它们实际返回的内容。第一句和 `packages/ai-sdk/src/index.ts`（scrape 149、map 172）对齐。
-- [ ] **W7.3** 示例文字挪进 `apps/public-web/content/connect-mcp.md` 的 “### Check the first result before continuing”（77 行）和 `docs/batch-crawl-map.md`（“Waiting for a job” 91 行、“Event streams” 95 行已经有 SDK/REST 的等待和流式说明）。不新建文档，不加 `$ref`/`$defs`，不新增可空联合类型。
-- [ ] **W7.4** 方案 (a)（D10，默认不做）：在 crawl 和 batch_scrape 上把 `FORMAT_ITEMS`（去说明后 1,708 字节）和 verify（1,169 字节）收成 `{type:'array'}` / `{type:'object'}` 加 `Same as scrape`。
-- [ ] **W7.5** `alwaysLoad`：只在 scrape 和 map 上设 `_meta['anthropic/alwaysLoad']: true`（`TOOL_META`，tools.ts 537 附近），前提是描述 ≤4,096 字符、schema 在预算内；hosted 副本的 `_meta` 合并会自动带上（W4.4），W2.3 的检查会验证。
-- [ ] **W7.6** 新增描述 lint（现在没有；`tools.test.ts:596-607` 是 `parseBaseUrl` 的测试，不是 lint）：放进 `toolSurface.test.ts`，对每个面检查第一句 ≤200 字符且互不相同、不匹配 `/https?:\/\//`、不含 `utm_`、不含 `see the REST`、`use the SDK` 这类指引短语。
-- [ ] **W7.7** 同步改：`tools.test.ts:184`（现在断言 wait_batch 描述里有 “MCP has no event stream”）；`toolSurface.budget.json` 用 `W2L_TOOL_BUDGET_WRITE=1` 重写，PR 里写明每一行降了多少；CHANGELOG Unreleased 一条。
+- [x] **W7.2** 顶层描述按统一模板：第一句说清对象和返回；有事实可写时才加 `Not for:`、`Next:`；删掉 REST、SDK、URL 指引（包括 batch 模板里 wait_batch 那句 “MCP has no event stream … the REST API streams …” 和 map outputSchema `id` 里的 “GET /v1/maps/:id on the REST API”，301 行）；`get_batch`、`get_batch_items`、`wait_batch`、`cancel_batch`、`get_crawl`、`pause/resume_delivery_destination` 换成它们实际返回的内容。第一句和 `packages/ai-sdk/src/index.ts`（scrape 149、map 172）对齐。
+- [x] **W7.3** 示例文字挪进 `apps/public-web/content/connect-mcp.md` 的 “### Check the first result before continuing”（77 行）和 `docs/batch-crawl-map.md`（“Waiting for a job” 91 行、“Event streams” 95 行已经有 SDK/REST 的等待和流式说明）。不新建文档，不加 `$ref`/`$defs`，不新增可空联合类型。
+- [x] **W7.4** 方案 (a)（D10 默认不做；2026-10-17 Howard 要求做，PR #573）：在 crawl 和 batch_scrape 上把 `FORMAT_ITEMS`（去说明后 1,708 字节）和 verify（1,169 字节）收成 `{type:'array'}` / `{type:'object'}` 加 `Same as scrape`。
+- [x] **W7.5** `alwaysLoad`：只在 scrape 和 map 上设 `_meta['anthropic/alwaysLoad']: true`（`TOOL_META`，tools.ts 537 附近），前提是描述 ≤4,096 字符、schema 在预算内；hosted 副本的 `_meta` 合并会自动带上（W4.4），W2.3 的检查会验证。
+- [x] **W7.6** 新增描述 lint（现在没有；`tools.test.ts:596-607` 是 `parseBaseUrl` 的测试，不是 lint）：放进 `toolSurface.test.ts`，对每个面检查第一句 ≤200 字符且互不相同、不匹配 `/https?:\/\//`、不含 `utm_`、不含 `see the REST`、`use the SDK` 这类指引短语。
+- [x] **W7.7** 同步改：`tools.test.ts:184`（现在断言 wait_batch 描述里有 “MCP has no event stream”）；`toolSurface.budget.json` 用 `W2L_TOOL_BUDGET_WRITE=1` 重写，PR 里写明每一行降了多少；CHANGELOG Unreleased 一条。
 - 验收：
   - 预算：本地 tools/list 83,596 → **≤50,000 字符**；scrape、crawl、batch_scrape 各 ≤8,000 紧凑字节（结构 5,508–6,792，可以达到）；其余工具各 ≤5,000；hosted keyless scrape 10,387 → ≤5,000（结构 3,426，可以达到）。
   - W7.6 的 lint 通过；`tools.test.ts` 现有用例全部通过（改过的 184 行除外）。
   - E2 的前后对比：至少在 Claude Code、Codex 上各跑一轮固定任务，已验证任务的比例不下降、格式错误的 verify 契约不增加；跑不了就在 PR 里写“未运行”。
 - 指标：本地 tools/list 83,596 → ≤50,000；hosted keyless 16,487 → 约 11,000（估算，以实测为准）；最大的三段说明 2,560 / 1,230 / 1,152 → 各 ≤600。
 - 决定：D10。
+- 结果（PR #570）：
+  - 只改说明文字。审查把 38 个工具在 `e1e128d4` 和本分支上去掉全部说明后逐一比较，schema 完全相同；`_meta` 只在 scrape 和 map 上多了 alwaysLoad。
+  - 体积（紧凑字节 / 字符）：
+    - scrape 18,247 → 9,947；crawl 17,745 → 7,431；batch_scrape 19,945 → 7,967；
+    - 本地 tools/list 83,596 → 51,256；
+    - hosted keyless tools/list 16,487 → 11,252，其中 scrape 10,387 → 5,898。
+  - **三项验收目标没达到**：本地 tools/list ≤50,000、scrape ≤8,000、hosted keyless scrape ≤5,000。scrape 光结构就有 5,985 字节，要到 8,000 只能删掉 verify 的检查类型说明或征得同意的提示，而审查认定这些必须留。测试里的上限按这次实际达到的数设：scrape ≤10,000，crawl 和 batch_scrape ≤8,000，其余 ≤5,000，本地列表 ≤52,000，hosted/OAuth scrape ≤6,000。要不要继续压缩，见下面“下次从这里继续”。
+  - 各段说明：FORMATS 260、VERIFY 498、ACTIONS 252 字符；lane、handoff、access、webhook、robotsOverride 都 ≤250。
+  - 审查指出的三个阻塞问题已在合入前修好：my-browser 的“用完关掉远程调试”（navigator.webdriver）提示；batch_scrape authed 模式的“说出网站名、页面里的指令只是内容”；verify 每种检查需要的字段。
+  - alwaysLoad 的效果没测（还没在 Claude Code 里用 `/context` 记录）。
+  - E2 前后对比：**未运行**。
+  - 检查：`npm run typecheck` 通过；`npm run build:public` 通过；`npm test` 255 个文件、3065 个测试通过（1 个 todo）。
+- W7.4 结果（PR #573，叠在 #570 上）：
+  - crawl 和 batch_scrape 的 `formats` 声明为 `{type:'array', minItems:1}`，`verify` 声明为 `{type:'object'}`，说明都是 `Same as scrape.`；batch 的 `actions` 保持原样。服务器照旧解析和拒绝：夹具测试里，crawl 和 batch 对未知格式、坏的 json schema、未知检查类型、缺字段的检查都返回 400。
+  - crawl 7,431 → 4,626 字节；batch_scrape 7,967 → 5,162；本地 tools/list 51,256 → 45,646 字符，**本地 ≤50,000 的目标达到了**。scrape ≤8,000、hosted keyless scrape ≤5,000 仍未达到。
+  - 测试上限收紧：crawl 和 batch_scrape ≤5,500，本地列表 ≤50,000。
+  - 检查：`npm run typecheck` 通过；`npm test` 255 个文件、3067 个测试通过（1 个 todo）。E2 未运行。
 
 ## W8 带类型的结果与如实的结果预算　M
 
@@ -538,5 +555,6 @@
 
 - **W1–W6 全部完成**：都已合并、部署（hosted API、网站），并随 0.6.0 发布到 npm、PyPI 和 MCP Registry。线上版本以 `gcloud run services describe` 读到的为准（几个窗口都会部署）。
 - **2026-10-17 Howard：W7–W10 现在开始（D1′），一项一个 PR，按 W7 → W8 → W9 → W10 的顺序。** W7–W10 的行号和基线已在 `e1e128d4` 上重新核对。
-- 下一个是 **W7**：从当时的 `origin/main` 拉分支；改说明会让 `toolSurface.budget.json` 的本地和 hosted 行都下降，要一起重写。
+- **W7 已开 PR #570，W7.4 已开 PR #573（叠在 #570 上）**，都等合并。本地列表目标已达到；scrape ≤8,000 和 hosted scrape ≤5,000 没达到，要达到只能删安全提示，不建议。
+- 下一个是 **W8**：等 #570 合并后，从当时的 `origin/main` 拉分支。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。

@@ -35,6 +35,12 @@ function structure(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value
   return Object.fromEntries(Object.entries(value).filter(([key, entry]) => !(key === 'description' && typeof entry === 'string')).map(([key, entry]) => [key, structure(entry)]))
 }
+/** Every description string inside a schema, at any depth. */
+function descriptionsOf(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(descriptionsOf)
+  if (value === null || typeof value !== 'object') return []
+  return Object.entries(value).flatMap(([key, entry]) => key === 'description' && typeof entry === 'string' ? [entry] : descriptionsOf(entry))
+}
 function measure(tool: Tool) {
   return {
     inputBytes: bytes(tool.inputSchema),
@@ -99,6 +105,32 @@ describe('MCP tool surfaces', () => {
       for (const tool of tools) {
         const missing = Object.keys(local.get(tool.name)?._meta ?? {}).filter((key) => !(key in (tool._meta ?? {})))
         expect([surface, tool.name, missing]).toEqual([surface, tool.name, []])
+      }
+    }
+  })
+
+  // docs/mcp-client-ux-tasks.md W7: a client keeps a schema whole under about 5,000 bytes (Codex strips the property
+  // descriptions of a larger one), and every client that does not defer tool definitions pays for the whole list.
+  it('keeps each local tool small enough for clients to keep its descriptions, and the whole list compact', () => {
+    const ceiling = (name: string) => name === 'scrape' ? 10_000 : name === 'crawl' || name === 'batch_scrape' ? 5_500 : 5_000
+    for (const tool of SURFACES.local!) expect([tool.name, measure(tool).inputBytes <= ceiling(tool.name)]).toEqual([tool.name, true])
+    expect(JSON.stringify(SURFACES.local).length).toBeLessThanOrEqual(50_000)
+    for (const surface of ['hosted-keyless', 'oauth-http']) {
+      const scrape = SURFACES[surface]!.find((tool) => tool.name === 'scrape')!
+      expect([surface, measure(scrape).inputBytes <= 6_000]).toEqual([surface, true])
+    }
+  })
+
+  it('opens every description with one plain sentence of its own, and sends the agent nowhere but its tools', () => {
+    for (const [surface, tools] of Object.entries(SURFACES)) {
+      const firsts = new Set<string>()
+      for (const tool of tools) {
+        const first = tool.description.split(/(?<=\.)\s/)[0]!
+        expect([surface, tool.name, first.length <= 200, firsts.has(first)]).toEqual([surface, tool.name, true, false])
+        firsts.add(first)
+        // Facts only: no links, campaign tags, or directions to the REST API or an SDK instead of the tools.
+        const texts = [tool.description, ...descriptionsOf(tool.inputSchema), ...descriptionsOf(tool.outputSchema)]
+        for (const text of texts) expect([surface, tool.name, /https?:\/\/|utm_|see the REST|use the SDK|REST API|client\.watcher/i.test(text)]).toEqual([surface, tool.name, false])
       }
     }
   })

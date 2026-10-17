@@ -1,32 +1,24 @@
 {
   "local": {
-    "scrape_product": {
-      "inputBytes": 131,
-      "descriptionChars": 105
-    },
-    "batch_products": {
-      "inputBytes": 160,
-      "descriptionChars": 126
-    },
     "scrape": {
-      "inputBytes": 18247,
-      "descriptionChars": 565
+      "inputBytes": 9947,
+      "descriptionChars": 450
+    },
+    "map": {
+      "inputBytes": 3117,
+      "descriptionChars": 597
     },
     "get_scrape": {
       "inputBytes": 157,
-      "descriptionChars": 352
-    },
-    "map": {
-      "inputBytes": 3253,
-      "descriptionChars": 1115
+      "descriptionChars": 277
     },
     "crawl": {
-      "inputBytes": 17745,
-      "descriptionChars": 337
+      "inputBytes": 4626,
+      "descriptionChars": 498
     },
     "get_crawl": {
       "inputBytes": 136,
-      "descriptionChars": 47
+      "descriptionChars": 125
     },
     "get_crawl_pages": {
       "inputBytes": 728,
@@ -49,36 +41,44 @@
       "descriptionChars": 221
     },
     "batch_scrape": {
-      "inputBytes": 19945,
-      "descriptionChars": 454
+      "inputBytes": 5162,
+      "descriptionChars": 497
     },
     "get_batch": {
       "inputBytes": 102,
-      "descriptionChars": 42
+      "descriptionChars": 116
     },
     "get_batch_items": {
       "inputBytes": 436,
-      "descriptionChars": 48
+      "descriptionChars": 177
     },
     "wait_batch": {
       "inputBytes": 161,
-      "descriptionChars": 269
+      "descriptionChars": 165
     },
     "cancel_batch": {
       "inputBytes": 102,
-      "descriptionChars": 45
+      "descriptionChars": 67
     },
     "get_batch_errors": {
       "inputBytes": 183,
-      "descriptionChars": 409
+      "descriptionChars": 271
     },
     "hand_off_batch": {
       "inputBytes": 164,
-      "descriptionChars": 1225
+      "descriptionChars": 571
+    },
+    "scrape_product": {
+      "inputBytes": 131,
+      "descriptionChars": 105
+    },
+    "batch_products": {
+      "inputBytes": 160,
+      "descriptionChars": 126
     },
     "import_login": {
       "inputBytes": 208,
-      "descriptionChars": 1156
+      "descriptionChars": 557
     },
     "list_logins": {
       "inputBytes": 62,
@@ -134,11 +134,11 @@
     },
     "pause_delivery_destination": {
       "inputBytes": 129,
-      "descriptionChars": 59
+      "descriptionChars": 81
     },
     "resume_delivery_destination": {
       "inputBytes": 129,
-      "descriptionChars": 60
+      "descriptionChars": 77
     },
     "list_deliveries": {
       "inputBytes": 341,
@@ -155,50 +155,50 @@
   },
   "hosted-keyless": {
     "scrape": {
-      "inputBytes": 10387,
-      "descriptionChars": 507
+      "inputBytes": 5898,
+      "descriptionChars": 392
     },
     "map": {
-      "inputBytes": 2911,
-      "descriptionChars": 1115
+      "inputBytes": 2775,
+      "descriptionChars": 597
     }
   },
   "hosted-key": {
+    "scrape": {
+      "inputBytes": 6526,
+      "descriptionChars": 392
+    },
+    "map": {
+      "inputBytes": 2775,
+      "descriptionChars": 597
+    },
     "scrape_product": {
       "inputBytes": 131,
       "descriptionChars": 105
-    },
-    "scrape": {
-      "inputBytes": 11056,
-      "descriptionChars": 507
-    },
-    "map": {
-      "inputBytes": 2911,
-      "descriptionChars": 1115
     }
   },
   "oauth-http": {
     "scrape": {
-      "inputBytes": 10387,
-      "descriptionChars": 507
+      "inputBytes": 5898,
+      "descriptionChars": 392
     },
     "map": {
-      "inputBytes": 2911,
-      "descriptionChars": 1115
+      "inputBytes": 2775,
+      "descriptionChars": 597
     }
   },
   "oauth-browser": {
+    "scrape": {
+      "inputBytes": 6526,
+      "descriptionChars": 392
+    },
+    "map": {
+      "inputBytes": 2775,
+      "descriptionChars": 597
+    },
     "scrape_product": {
       "inputBytes": 131,
       "descriptionChars": 105
-    },
-    "scrape": {
-      "inputBytes": 11056,
-      "descriptionChars": 507
-    },
-    "map": {
-      "inputBytes": 2911,
-      "descriptionChars": 1115
     }
   }
 }
