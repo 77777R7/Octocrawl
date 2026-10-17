@@ -172,15 +172,27 @@ export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', '
  * scrape's description does not name get_scrape, which is not served here. */
 export function hostedTools(browser: boolean) {
   return TOOLS.filter((tool) => HOSTED_API_TOOLS.has(tool.name) && (browser || tool.name !== 'scrape_product'))
-    .map((tool) => ({ ...tool, description: tool.description.replace(SCRAPE_RECORD_HINT, ''), annotations: { ...('annotations' in tool ? tool.annotations : {}), readOnlyHint: true } }))
+    .map((tool) => ({
+      ...tool,
+      description: tool.description.replace(SCRAPE_RECORD_HINT, ''),
+      annotations: { ...tool.annotations, readOnlyHint: true },
+      _meta: { ...('_meta' in tool ? tool._meta : {}), ...HOSTED_INVOCATION[tool.name as keyof typeof HOSTED_INVOCATION] },
+    }))
 }
+/** What ChatGPT shows while a hosted tool runs and once it has (Apps SDK openai/toolInvocation/*, 64 characters at most). */
+const HOSTED_INVOCATION = {
+  scrape: { 'openai/toolInvocation/invoking': 'Reading the page', 'openai/toolInvocation/invoked': 'Read the page' },
+  map: { 'openai/toolInvocation/invoking': "Listing the site's URLs", 'openai/toolInvocation/invoked': "Listed the site's URLs" },
+  scrape_product: { 'openai/toolInvocation/invoking': 'Reading the product page', 'openai/toolInvocation/invoked': 'Read the product page' },
+} as const
 /**
  * The tools /mcp-oauth lists: each declares that it needs OAuth with the `mcp` scope, top level and mirrored in `_meta`
  * for clients that read only `_meta`, as ChatGPT asks (https://developers.openai.com/apps-sdk/build/auth, read 2026-10-16).
  */
 export function oauthTools(browser: boolean) {
   const securitySchemes = [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]
-  return hostedTools(browser).map((tool) => ({ ...tool, securitySchemes, _meta: { securitySchemes } }))
+  // Merged, not replaced: the hosted copies' own _meta (status lines) stays beside securitySchemes.
+  return hostedTools(browser).map((tool) => ({ ...tool, securitySchemes, _meta: { ...tool._meta, securitySchemes } }))
 }
 /** /mcp-oauth's Protected Resource Metadata (RFC 9728). */
 export function oauthResourceMetadata() {

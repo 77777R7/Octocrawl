@@ -22,6 +22,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **MCP tool titles and honest hints.** Every one of the 38 tools now has a plain `title`, the same in `annotations.title`, and all four hints set explicitly. The 19 reads are `readOnlyHint: true`. Cancels, `remove_login`, `import_login` (it replaces the login already saved for that domain) and `pause_monitor` are `destructiveHint: true`. The local `scrape` stays not read-only, since its actions and authed mode act as the person; the hosted copies are read-only. A client that asked before every call because hints were missing (the spec's defaults) can now let reads through. `tools/list` puts the general tools first (`scrape`, `map`, `get_scrape`, then crawl and batch), so the exported `TOOLS` and `TOOL_NAMES` change order. `import_login` carries `anthropic/requiresUserInteraction`, and the hosted tools carry ChatGPT status lines in `_meta`, which `/mcp-oauth` now merges with its `securitySchemes` instead of replacing them. (docs/mcp-client-ux-tasks.md W4)
+
 ## 0.5.0 — 2026-10-17
 
 The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `@octocrawl/ai-sdk`, `octocrawl-client`) at 0.5.0. It holds everything below since 0.4.2 on 2026-10-13. It is a minor version because one change refuses requests 0.4.2 accepted: a task contract that checks Markdown, sent with explicit `formats` that leave Markdown out, is now refused before fetching. Entries about the hosted service (api. and mcp.octocrawl.dev) and octocrawl.dev describe what is already live there. The Python client is unchanged apart from its version.

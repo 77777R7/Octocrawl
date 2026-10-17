@@ -193,7 +193,7 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
   try {
     await holder.connect(keyed)
     const listed = (await holder.listTools()).tools
-    expect(listed.map((tool) => tool.name)).toEqual(['scrape_product', 'scrape', 'map'])
+    expect(listed.map((tool) => tool.name)).toEqual(['scrape', 'map', 'scrape_product'])
     for (const tool of listed) expect(tool.annotations, tool.name).toMatchObject({ title: expect.any(String), readOnlyHint: true })
     // No listed tool's description sends the client to a tool hosted Octocrawl does not serve (scrape's get_scrape, 2026-10-16).
     const names = listed.map((tool) => tool.name)
@@ -541,7 +541,8 @@ it('/mcp-oauth answers a call without a valid access token with 401 naming its r
   const oauthTools = await list('/mcp-oauth', { authorization: 'Bearer oca_good' })
   expect(oauthTools.length).toBe(3)
   for (const tool of oauthTools) expect(tool, String(tool.name)).toMatchObject({ securitySchemes: [{ type: 'oauth2', scopes: ['mcp'] }], _meta: { securitySchemes: [{ type: 'oauth2', scopes: ['mcp'] }] } })
-  for (const tool of await list('/mcp', {})) expect([tool.securitySchemes, tool._meta], String(tool.name)).toEqual([undefined, undefined])
+  // Their _meta holds the status lines alone (annotations.test.ts), never securitySchemes.
+  for (const tool of await list('/mcp', {})) expect([tool.securitySchemes, 'securitySchemes' in ((tool._meta ?? {}) as object)], String(tool.name)).toEqual([undefined, false])
   // Protected Resource Metadata (RFC 9728) at the path-suffixed well-known URL.
   const metadata = await fetch(`${url}/.well-known/oauth-protected-resource/mcp-oauth`)
   expect(metadata.status).toBe(200)
@@ -569,7 +570,7 @@ it('an OAuth access token is its connection\'s key on /mcp-oauth only: wrong aud
   const holder = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
   try {
     await holder.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp-oauth`), { requestInit: { headers: { authorization: 'Bearer oca_good' } } }))
-    expect((await holder.listTools()).tools.map((tool) => tool.name)).toEqual(['scrape_product', 'scrape', 'map'])
+    expect((await holder.listTools()).tools.map((tool) => tool.name)).toEqual(['scrape', 'map', 'scrape_product'])
     const result = await holder.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
     expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject({ status: 'success' })
   } finally { await holder.close() }
