@@ -416,6 +416,13 @@ describe('structured JSON extraction', () => {
     ])
   })
 
+  it('maps a book\'s byline authors and leaves its brand null', async () => {
+    const authored: FetchResult = { ...result, document: { ...result.document!, product: { ...product, brand: null, authors: [{ value: 'David Thomas', source: 'dom', path: '#bylineInfo .author' }, { value: 'Andrew Hunt', source: 'dom', path: '#bylineInfo .author' }] } } }
+    const out = await extractStructured(authored, json({ authors: { type: 'array', items: { type: 'string' } }, brand: { type: ['string', 'null'] } }, ['authors', 'brand']), {}, null)
+    expect(out.data).toMatchObject({ authors: ['David Thomas', 'Andrew Hunt'], brand: null })
+    expect(out.evidence).toContainEqual({ path: '/authors', source: 'dom', evidencePath: '#bylineInfo .author' })
+  })
+
   it('maps page labels and the visible price to top-level keys and says where each came from', async () => {
     const schema = json({ title: { type: 'string' }, price: { type: 'number' }, availability: { type: 'string' }, upc: { type: 'string' }, isbn: { type: 'string' }, numberOfReviews: { type: 'integer' } }, ['title', 'price', 'availability', 'upc', 'isbn'])
     const out = await extractStructured(page(bookInformation), schema, {}, null)

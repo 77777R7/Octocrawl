@@ -206,7 +206,8 @@ function addProductCandidates(
   // an empty list; a generic product page has no such list, and an invented []
   // or {} would claim the page has none. A list's evidence is its first
   // item's; an empty one's is the extractor's report that it observed none.
-  const { images, prices, variants, specifications } = product
+  const { authors, images, prices, variants, specifications } = product
+  if (authors !== undefined && authors.length > 0) map.set('authors', { value: authors.map(item => item.value), fact: authors[0]! })
   if (images !== undefined) map.set('images', { value: images.map(item => item.value), fact: images[0] ?? observedNone('images') })
   if (prices !== undefined) {
     const unreadMembers: Array<{ path: string; message: string }> = []
