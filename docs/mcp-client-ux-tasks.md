@@ -417,19 +417,32 @@
 
 现状（`e1e128d4`）：结果在 `server.ts` 88–91 行组装，只有声明了 `outputSchema` 的工具（现在只有 map，tools.ts 298–313）才带 `structuredContent`；`isError` 结果本来就不带（W5）。契约里有 `truncated` / `truncatedAt`（`packages/contracts/src/result.ts:527-529`，`api.ts:342-343`），但生产代码从不设成 true；`packages/api/src/hints.ts:212` 已经有截断提示的文案。截图类型 `ScreenshotEvidence`（`result.ts:296-312`），compact 结果在 `packages/api/src/structured.ts:1354` 带 `screenshot`，`path` 只有设了 `W2L_CAPTURE_RAW_DIR` 才有值。列表上限：`get_crawl_pages` limit 1000、maxResults 200，`get_batch_items` limit 50、maxResults 200（`MAX_TOOL_RESULTS = 200`，tools.ts 838），只按条数停，不按大小。
 
-- [ ] **W8.1** outputSchema：在 scrape、get_scrape、get_crawl、get_batch、wait_batch、wait_crawl（W9 之后）、get_crawl_pages、get_batch_items，以及 crawl、batch 的 start（`{taskId, replayed?}`）上声明宽松的 outputSchema（允许 additionalProperties，required 只有 `status` 或 `taskId`）。为 `status`、`verification.status` 枚举、failureReason、readiness、agentHints、evidenceRecord、finalUrl 写类型。hosted 副本带哪些按 D11 定；outputSchema 字节在 W2 的报告里单列。
-- [ ] **W8.2** 序列化顺序：判定字段在前（status、failureReason、blockReason、verification、readiness、agentHints、truncated），markdown 在后。
-- [ ] **W8.3** 内容上限：在 `server.ts` 实现，不改导出的 `callTool`。上限按 D11（W2 实测后在 5 万–8 万字符里选）。超出时截断 markdown，设 `truncated: true` 和数字 `truncatedAt`，沿用 `hints.ts:212` 的提示，并按面补一句：hosted 说用 onlyMainContent 或 includeTags 缩小；本地另加 “用 `get_scrape <id>`（debug）取完整记录”。
-- [ ] **W8.4** 列表工具：`get_crawl_pages`、`get_batch_items` 达到大小预算时停下，返回 `nextCursor`（SDK 的 `stoppedBy` 已有 `maxResults` 等，按大小停是新加的）。`get_scrape` 不受上限（D11 默认）。`anthropic/maxResultSizeChars` 默认不设。
-- [ ] **W8.5** 截图：改成 MCP 的 image content block（base64 放在 image block 里，视觉模型能看到），text 和 structuredContent 的 JSON 里只留 `sha256`、`bytes`、`width`、`height`，去掉 base64；`debug: true` 时 JSON 里保留。本地和 hosted 都这样做，不依赖 `path`（`W2L_CAPTURE_RAW_DIR` 一般不设）。按 D11 默认先弃用一个版本：0.7.0 里先在 JSON 里同时保留 base64 并在 CHANGELOG 预告，下一版去掉。
+- [x] **W8.1** outputSchema：在 scrape、get_scrape、get_crawl、get_batch、wait_batch、wait_crawl（W9 之后）、get_crawl_pages、get_batch_items，以及 crawl、batch 的 start（`{taskId, replayed?}`）上声明宽松的 outputSchema（允许 additionalProperties，required 只有 `status` 或 `taskId`）。为 `status`、`verification.status` 枚举、failureReason、readiness、agentHints、evidenceRecord、finalUrl 写类型。hosted 副本带哪些按 D11 定；outputSchema 字节在 W2 的报告里单列。
+- [x] **W8.2** 序列化顺序：判定字段在前（status、failureReason、blockReason、verification、readiness、agentHints、truncated），markdown 在后。
+- [x] **W8.3** 内容上限：在 `server.ts` 实现，不改导出的 `callTool`。上限按 D11（W2 实测后在 5 万–8 万字符里选）。超出时截断 markdown，设 `truncated: true` 和数字 `truncatedAt`，沿用 `hints.ts:212` 的提示，并按面补一句：hosted 说用 onlyMainContent 或 includeTags 缩小；本地另加 “用 `get_scrape <id>`（debug）取完整记录”。
+- [x] **W8.4** 列表工具：`get_crawl_pages`、`get_batch_items` 达到大小预算时停下，返回 `nextCursor`（SDK 的 `stoppedBy` 已有 `maxResults` 等，按大小停是新加的）。`get_scrape` 不受上限（D11 默认）。`anthropic/maxResultSizeChars` 默认不设。
+- [x] **W8.5** 截图：改成 MCP 的 image content block（base64 放在 image block 里，视觉模型能看到），text 和 structuredContent 的 JSON 里只留 `sha256`、`bytes`、`width`、`height`，去掉 base64；`debug: true` 时 JSON 里保留。本地和 hosted 都这样做，不依赖 `path`（`W2L_CAPTURE_RAW_DIR` 一般不设）。按 D11 默认先弃用一个版本：0.7.0 里先在 JSON 里同时保留 base64 并在 CHANGELOG 预告，下一版去掉。
 - [ ] **W8.6** 可选：`summary` 字段（D11 默认暂不加）。
-- [ ] **W8.7** CHANGELOG Unreleased 一条。
+- [x] **W8.7** CHANGELOG Unreleased 一条。
 - 验收：
   - 先写失败测试：success、blocked、empty_unverified、verification-failed 这几个夹具的结果都没有 structuredContent；一个超大夹具的结果超过上限（今天没有截断）；截图结果的 text 里有 base64。
   - 改完后：ajv 用 outputSchema 校验每个夹具结果；每个面上 `JSON.parse(text)` 和 structuredContent 深度相等；scrape 序列化后第一个键是 `status`；超大夹具不超过上限，带 `truncated: true` 和数字 `truncatedAt`；`get_crawl_pages` 在预算处停并返回 `nextCursor`；截图夹具（`fixture-screenshot.integration.test.ts`）返回 image block。
   - 在 Cursor 上对一个带 outputSchema 的工具的 isError 结果做一次冒烟测试（W5 留下的）。
 - 指标：outputSchema 1/38 → 10+；最大的夹具结果 → 不超过上限；带截图的 scrape text 119,895 → 约 5,000 字符（图另走 image block）。
 - 决定：D11。
+- 结果（PR #575，叠在 #573 上）：
+  - outputSchema：scrape、get_scrape、crawl、get_crawl、get_crawl_pages、batch_scrape、get_batch、wait_batch、get_batch_items 共 9 个（加上 map 是 10/38）。这些 schema 都是宽松的：只把判定字段写成类型，其余字段放行。这些工具都会返回和 text 相同的 structuredContent。hosted scrape 也带同一个 schema。wait_crawl 等 W9 再加。
+  - 上限取 50,000 字符（D11 的下限），也就是 Claude Code 把结果存成文件的阈值。
+    - 超出时先裁 rawHtml、html，再裁 markdown，每个字段都保留能放下的最长前缀。
+    - 设 `truncated: true`，`truncatedAt` 是最后被裁字段里的偏移，并加一条提示，写明裁的是哪个字段、怎样缩小范围。
+    - **和清单不一样的地方**：本地的提示没有写“用 get_scrape <id>（debug）取完整记录”，因为 get_scrape 的记录里没有页面正文，写了就是错的。
+    - scrape 不计入 base64 截图（截图另走 image block）；列表计入 base64，所以列表会在某一页之前停下。
+  - 列表按大小停下时返回 `stoppedBy: "size"`，`nextCursor` 指向最后保留那一页之后，格式和 API 自己的 cursor 相同，编码写在 MCP 包里，不依赖 runtime。
+  - 截图会额外返回 image block。按 D11，JSON 里的 base64 在这一版保留，CHANGELOG 已经预告下一版去掉。W8.6（summary）按 D11 不做。
+  - 体积：本地 tools/list 45,646 → 48,829 字符（仍 ≤50,000）；hosted keyless 11,252 → 12,447。
+  - 干净上下文的审查找出 4 个阻塞问题，都已修好并补了测试：rawHtml 很大时 markdown 被清空；带截图的列表不受上限约束；列表超出上限约 110 字符；stdio 包会多出原生依赖。
+  - 检查：`npm run typecheck`、`npm run build:public` 都通过；`npm test` 256 个文件、3076 个测试通过（1 个 todo）。
+  - **没跑**：在 Cursor 上对 isError 结果做的冒烟测试，以及 E2。
 
 ## W9 长任务：wait_crawl、安全默认值、进度、上游中止测试　M
 
@@ -555,6 +568,6 @@
 
 - **W1–W6 全部完成**：都已合并、部署（hosted API、网站），并随 0.6.0 发布到 npm、PyPI 和 MCP Registry。线上版本以 `gcloud run services describe` 读到的为准（几个窗口都会部署）。
 - **2026-10-17 Howard：W7–W10 现在开始（D1′），一项一个 PR，按 W7 → W8 → W9 → W10 的顺序。** W7–W10 的行号和基线已在 `e1e128d4` 上重新核对。
-- **W7 已开 PR #570，W7.4 已开 PR #573（叠在 #570 上）**，都等合并。本地列表目标已达到；scrape ≤8,000 和 hosted scrape ≤5,000 没达到，要达到只能删安全提示，不建议。
-- 下一个是 **W8**：等 #570 合并后，从当时的 `origin/main` 拉分支。
+- W7（#570）已合并；**W7.4（#573）和 W8（#575，叠在 #573 上）已开 PR，等合并**。scrape ≤8,000 和 hosted scrape ≤5,000 没达到，要达到只能删安全提示，不建议。
+- 下一个是 **W9**（wait_crawl、安全默认值、进度、上游中止测试）：等 #573 和 #575 合并后，从当时的 `origin/main` 拉分支。W8 遗留：Cursor 冒烟测试；下一版去掉 JSON 里的截图 base64。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。
