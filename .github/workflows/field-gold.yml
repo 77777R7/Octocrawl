@@ -1,0 +1,25 @@
+name: Field gold controls
+
+on:
+  push:
+    paths:
+      - 'research/accuracy/**'
+      - '.github/workflows/field-gold.yml'
+  pull_request:
+    paths:
+      - 'research/accuracy/**'
+      - '.github/workflows/field-gold.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-audit-controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python runtime
+        run: python3 --version
+      - name: Offline field gold controls
+        run: python3 -m unittest discover -s research/accuracy -p 'test_*.py' -v
