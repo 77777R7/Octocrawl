@@ -321,17 +321,17 @@
   - 检查：`npm run typecheck` 通过；`npm test` 3026 个测试全部通过（在审查修复之前跑的），修复之后 `packages/mcp` 109 个测试全部通过。
   - Cursor 下 isError 加 outputSchema 的冒烟测试要等 W8。
 
-## W6 hosted schema 只列出 hosted 接受的选项　M
+## W6 hosted schema 只列出 hosted 接受的选项　M　→ PR #563
 
 起因：试用用户先连的是 hosted。今天 agent 看到约 5.8k 字符的选项，用了却被拒绝，白白浪费一次调用和上下文。Directory 要求列出的选项都能成功。另外 300 s 的默认超时超过了 claude.ai 的 240 s 和 Cloud Run 的 120 s。
 
-- [ ] **W6.1** 在 `hostedApi.ts` 的 `hostedTools()` 旁边，声明一个显式的允许列表 `HOSTED_SCRAPE_KEYS`，并把 schema 构建器改成按面传参（W10 会复用）。依据是上面“现状”里列出的 hosted 真实拒绝逻辑。**不要**从 `hostedToolPolicy.ts` 推导。
-- [ ] **W6.2** 去掉这些选项：actions、robotsOverride、lane、handoff、skipTlsVerification、`access: my-browser`、`access: enhanced`（hosted 没有 access grant，要用测试确认）。verify 的检查类型枚举去掉 `VERIFY_REGEX_CHECK_TYPES`。keyless 再去掉 screenshot 格式。
-- [ ] **W6.3** `mode authed`：hosted 上 savedLogins 是 null，也没有显式拒绝，可能会直接匿名运行。先写一个刻画测试，固定它今天的行为，再按 D9 处理。
-- [ ] **W6.4** OAuth 带浏览器的面上，额度不足时会被固定走 HTTP（hostedApi.ts，行号待核：约 625），这一点 schema 表达不了。在描述里说明浏览器格式需要浏览器 credits；被拒绝时由 W5 返回带下一步的 isError。
-- [ ] **W6.5** hosted map 只保留 hosted 支持的选项，并在 schema 里写明上限（limit ≤ 5,000，timeout ≤ 60,000）。
-- [ ] **W6.6** hosted scrape 的超时：只在 MCP 的 `normalizeCall` 里限幅，schema 的最大值设成 D9 定的值（建议 100,000 ms）。REST `/v1/scrape` 不变。限幅要在结果里回显。
-- [ ] **W6.7** 在 CHANGELOG 的 Unreleased 下写一条。和 W5 合成一次 hosted 部署（D9）。
+- [x] **W6.1** 在 `hostedApi.ts` 的 `hostedTools()` 旁边，声明一个显式的允许列表 `HOSTED_SCRAPE_KEYS`，并把 schema 构建器改成按面传参（W10 会复用）。依据是上面“现状”里列出的 hosted 真实拒绝逻辑。**不要**从 `hostedToolPolicy.ts` 推导。
+- [x] **W6.2** 去掉这些选项：actions、robotsOverride、lane、handoff、skipTlsVerification、`access: my-browser`、`access: enhanced`（hosted 没有 access grant，要用测试确认）。verify 的检查类型枚举去掉 `VERIFY_REGEX_CHECK_TYPES`。keyless 再去掉 screenshot 格式。
+- [x] **W6.3** `mode authed`：hosted 上 savedLogins 是 null，也没有显式拒绝，可能会直接匿名运行。先写一个刻画测试，固定它今天的行为，再按 D9 处理。
+- [x] **W6.4** OAuth 带浏览器的面上，额度不足时会被固定走 HTTP（hostedApi.ts，行号待核：约 625），这一点 schema 表达不了。在描述里说明浏览器格式需要浏览器 credits；被拒绝时由 W5 返回带下一步的 isError。
+- [x] **W6.5** hosted map 只保留 hosted 支持的选项，并在 schema 里写明上限（limit ≤ 5,000，timeout ≤ 60,000）。
+- [x] **W6.6** hosted scrape 的超时：只在 MCP 的 `normalizeCall` 里限幅，schema 的最大值设成 D9 定的值（建议 100,000 ms）。REST `/v1/scrape` 不变。限幅要在结果里回显。
+- [x] **W6.7** 在 CHANGELOG 的 Unreleased 下写一条。和 W5 合成一次 hosted 部署（D9）。
 - 验收：
   - 先写失败测试：hosted keyless 的 tools/list 里有 actions、robotsOverride 和正则类检查。再写一个刻画测试，记录 hosted `mode authed` 今天的行为。
   - 改完后：
@@ -343,6 +343,17 @@
   - 部署后线上复测，记录 revision。
 - 指标：hosted scrape 的 inputSchema 约 18.2k → ≤ 5,000 紧凑字节（审查时测得保留部分的结构是 4,078，W2 复测前算未核实）；列出却会被拒绝的选项 约 5.8k 字符 → 0；hosted keyless 的 inputSchema 合计建议 ≤ 8,000 字符，总目标等 W8 定下 outputSchema 后再定。
 - 决定：D9。
+- 结果（PR #563）：
+  - **允许列表是实测出来的**：对 createHostedApi，每个选项各传一个合法值调用一次，keyless 和带浏览器的 key 各测一轮。
+    - 被拒绝的：handoff、lane、`access` 取 standard 以外的值、skipTlsVerification、actions、robotsOverride、正则类 verify 检查；map 的 ignoreRobotsTxt、limit 超过 5000、timeout 超过 60000。
+    - 只在 keyless 下失败的：screenshot 被拒；waitFor 大于 0 时返回 policy_denied。
+    - **被接受但没有效果**：`mode authed` 在 hosted 上以匿名身份读取，返回 success；`lockdown` 永远是 cache_miss；`storeInCache`、`maxAge`、`minAge` 都不起作用（gate 把 storeInCache 写死为 false）。这些也都从 schema 里去掉了。比计划多去掉了 lockdown 和三个缓存选项。
+  - 按 D9 的默认：超时上限 100 s，只对 MCP 生效，REST 仍是 300 s；`mode authed` 只从 schema 去掉，引擎不改。W6.3 的刻画测试记录了它今天匿名读取的行为。
+  - 浏览器面在描述里写明：账户 credits 少于 5 时，截图会被拒绝。W5 合入后，这时返回 isError。
+  - 体积：keyless 的 tools/list 从 24,337 降到 16,135 字符；hosted scrape 的 inputSchema 从 18,247 降到 10,387 字节（带 key 的是 11,056）。**还没到 5,000 字节的目标**，剩下的主要是 formats 和 verify 的长说明，要等 W7 来压缩。
+  - 防漂移测试：`hostedSchema.integration.test.ts`（TIMED 组）对每个列出的选项都实际调用一次；列出的选项如果没有样例值，测试直接失败。
+  - 检查：`npm run typecheck` 通过；`npm test` 3022 个测试全部通过。
+  - 线上复测要等 W5 和 W6 一起做 hosted 部署（D9 的部署时机）。
 
 ## W7 本地 schema 瘦身和描述前置　L（等试用发现处理完再开始）
 
@@ -547,6 +558,6 @@
 
 ## 下次从这里继续
 
-- W1–W5 都开了 PR（#555、#557、#558、#559、#560），等合并。按 D1：W3+W4 一起出 0.5.1；W5 是行为变更，出 0.6.0，hosted 部分和 W6 一起部署一次。部署和发版都只在 Howard 要求时做。
-- 下一个是 W6（hosted schema 只列出 hosted 接受的选项），单独一个 PR，从当时的 `origin/main` 拉分支。W6.3 要先写刻画测试，固定 hosted 下 `mode authed` 今天的行为。
+- W1–W6 都开了 PR（#555、#557、#558、#559、#560、#563），等合并。W5 和 W6 合并后，一起做一次 hosted 部署（只在 Howard 要求时）。
+- 下一个是 W7（本地 schema 瘦身和描述前置）。按 D1，它要等外部试用的发现处理完再开始。开始前要先确认 W2 已经合并，因为 W7 要改 `toolSurface.budget.json`；W6 也已经让 hosted scrape 去掉了一些属性。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。
