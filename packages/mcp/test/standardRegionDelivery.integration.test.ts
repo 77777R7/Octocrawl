@@ -12,7 +12,7 @@ import { createApiEngine, createApp, type ApiEngine } from '@w2l/api'
 import { localNetworkPolicy, type CompactScrapeResponse, type VerifyContract } from '@w2l/contracts'
 import { buildChannels } from '@w2l/bench'
 import { W2L } from '@w2l/sdk'
-import { createMcpServer } from '../src/server.js'
+import { serveMcpStdio } from '../src/stdio.js'
 
 function fixture(kind: string): string {
   const chapters = [1, 2, 3].map(n => `<section id="chapter-${n}"><h2>${n}. Requirement ${n}</h2>${Array.from({ length: 3 }, (_, i) => `<p>Requirement ${n}, paragraph ${i + 1}: implementations MUST preserve the declared unit and the observation date when returning a measured value.</p>`).join('')}</section>`).join('')
@@ -31,6 +31,7 @@ describe('standard chapters through localhost HTTP, engine, API, SDK and modern 
   let sdk: W2L
   let baseUrl: string
   let mcp: Client
+  let mcpServer: ReturnType<typeof serveMcpStdio>
   let structured: boolean
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), 'octocrawl-standard-'))
@@ -43,13 +44,16 @@ describe('standard chapters through localhost HTTP, engine, API, SDK and modern 
     if (!api.listening) await new Promise<void>(resolve => api.once('listening', resolve))
     baseUrl = `http://127.0.0.1:${(api.address() as AddressInfo).port}`
     sdk = new W2L({ baseUrl })
-    mcp = new Client({ name: 'octocrawl-standard-test', version: '1.0.0' })
+    mcp = new Client({ name: 'octocrawl-standard-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } })
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
-    await Promise.all([createMcpServer(sdk).connect(serverSide), mcp.connect(clientSide)])
+    mcpServer = serveMcpStdio(sdk, serverSide)
+    await mcp.connect(clientSide)
+    expect(mcp.getNegotiatedProtocolVersion()).toBe('2026-07-28')
     structured = (await mcp.listTools()).tools.some(tool => tool.name === 'scrape' && tool.outputSchema !== undefined)
   })
   afterAll(async () => {
     await mcp?.close()
+    await mcpServer?.close()
     await engine?.close()
     await Promise.all([api, source].filter(Boolean).map(server => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))))
     if (root) await rm(root, { recursive: true, force: true })
