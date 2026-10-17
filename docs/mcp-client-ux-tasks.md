@@ -1,6 +1,6 @@
 # MCP 客户端体验任务清单
 
-依据：2026-10-17 的调研和方案（Howard 要求“让用户更快、体验更友好，特别是客户端这边”），以及 [ROADMAP.md](../ROADMAP.md)、[AGENTS.md](../AGENTS.md)。行号核实基于 `main` 的 `a7f88cc8`，日期 2026-10-17。标“行号待核”的引用来自方案审查，动手前要在当时的 `main` 上再查一次。
+依据：2026-10-17 的调研和方案（Howard 要求“让用户更快、体验更友好，特别是客户端这边”），以及 [ROADMAP.md](../ROADMAP.md)、[AGENTS.md](../AGENTS.md)。行号核实基于 `main` 的 `a7f88cc8`，日期 2026-10-17；W7–W10 在 W1–W6 合并后于同日在 `e1e128d4` 上重新核对。标“行号待核”的引用来自方案审查，动手前要在当时的 `main` 上再查一次。
 
 起因：同样接进 Cursor、Codex、Claude 后，Firecrawl 的工具一眼能看出分组和用途，Octocrawl 的看不出来。调研的结论是，业界做“分类”不靠改工具名，靠四样东西：`instructions`（连接时告诉模型有哪些工具组、怎么配合）、`title`（给人看的名字）、`annotations`（只读还是会改东西，客户端据此分组和决定是否弹确认）、工具集开关（只开需要的组）。这四样 Octocrawl 现在基本都没有。另外，工具定义体积很大，出错时 agent 拿不到下一步提示，长任务没有有界等待。登录（OAuth）已经能用，不在本清单范围内。
 
@@ -10,11 +10,12 @@
 
 每条标出影响的任务。没决定的，按“默认”一栏先做，或者先做不受影响的部分。
 
-**2026-10-17 Howard：D1–D15 先按下表的默认值走。** 之后改了哪一条，就在该行注明日期和新的决定。
+**2026-10-17 Howard：D1–D15 先按下表的默认值走。** 之后改了哪一条，就在该行注明日期和新的决定。D1 已改，见 D1′。
 
 | # | 问题 | 影响 | 默认（未否决前按此） |
 | --- | --- | --- | --- |
 | D1 | 排期：本周做 W1–W4；W5+W6 合并成一次 hosted 部署；W7–W10 等外部试用的发现处理完再开始。是否同意？ | 全部 | 同意 |
+| D1′ | **2026-10-17 Howard 改了 D1**：W7–W10 不再等外部试用，现在就开始，一项一个 PR、按顺序做。 | W7–W10 | 已定 |
 | D2 | 哪个窗口做：W1 改的是 `apps/public-web`（UI 窗口负责的范围）。W1 在 UI 窗口做，还是按“小 follow-up 在当前窗口做”的规则在这里做？`packages/mcp` 的改动由这个窗口做吗？ | W1、全部 | W1 在这里做，开新分支 |
 | D3 | 本地 `scrape` 如实标成非只读（它的 actions 和 mode authed 会以本人身份操作页面）。这样在 W10 之前，Codex auto 和 VS Code 里每次本地 scrape 都会弹确认，是否接受？ | W4 | 接受 |
 | D4 | 执行错误从“抛 JSON-RPC 错误”改成“返回 `isError` 结果”。这对用程序调用的人是行为变更，是否接受？跟哪个版本发布？ | W5 | 接受，随 0.6.0 |
@@ -29,6 +30,7 @@
 | D13 | 本地默认工具集：保持 `all`（兼容），还是改成精简的 `core,crawl,batch`、其余需要显式开启？如果改，从哪个版本开始？ | W10 | 保持 `all` |
 | D14 | ~~`@modelcontextprotocol/sdk` 的下限从 `^1.25.2` 提高~~。2026-10-17 W3 查过 1.25.2 的 tarball：`ImplementationSchema` 已经有 title、description、websiteUrl 和 icons，`Server` 也已经接受 `instructions`，**不用提高下限**。 | W3 | 不需要 |
 | D15 | 分发：octocrawl.dev 的浅色和深色 PNG 图标是否批准？Connect 页按 #543 的“只列编码 agent”规则要不要加 VS Code？要不要发 Claude plugin skill？W4、W5 之后要不要申请进 Anthropic Directory 或 ChatGPT 上架？ | W3、W1 | 先不做，等 W4、W5 合入后再问 |
+| D16 | W9 的进度通知：只在 stdio 上发，还是 2026-07-28 的 HTTP 路径也发？#554 之后，`serveHttp.ts` 的新协议路径（`createMcpHandler`，默认 `responseMode: 'auto'`）在发出关联消息时会自动升级成 SSE，能送达；只有旧协议路径（`enableJsonResponse: true`）会丢掉通知。 | W9 | stdio 和新协议 HTTP 都发；旧协议照旧不发 |
 
 ## 定下的方向（来自调研）
 
@@ -64,6 +66,9 @@
 | S27/S30 | 补齐身份元数据（title、description、websiteUrl、图标）；每个客户端都有一步安装；写的验证步骤和用户实际看到的一致 | widely-adopted | `serverInfo` 只有 name 和 version；Connect 页说错了工具数 | W1、W3 |
 
 ## 现状（在 `a7f88cc8` 上查到的）
+
+> 这一节是 W1 开工前的原始记录，留作对照。W1–W6 之后的现状写在各项的“结果”和下面的 W7–W10 里（2026-10-17 在 `e1e128d4` 上重新核对过）。
+
 
 - `packages/mcp/src/server.ts`：
   - `:23` `MCP_VERSION = '0.5.0'`，是硬编码的。
@@ -104,6 +109,14 @@
 - **Firecrawl keyless**（firecrawl-fastmcp 3.30.2）：3 个工具，26,448 字符；每个工具都有 title、annotations 和 outputSchema；instructions 1,408 字符。
 - **结果大小**：未测，算未知，不当作 0。
 
+### W1–W6 之后的基线（2026-10-17，`e1e128d4`，`W2L_TOOL_SURFACE_REPORT=1 npx vitest run packages/mcp/test/toolSurface.test.ts`）
+
+- 本地 tools/list：38 个工具，**83,596 字符**（W4 加了 title 和 annotations，比 77,608 多出来的是这部分）。
+- 本地 inputSchema 字节 / 去掉说明后的结构字节：scrape 18,247 / 5,985，crawl 17,745 / 5,508，batch_scrape 19,945 / 6,792，map 3,253 / 867。
+- 长说明实测（属性的 `description` 字符数）：formats 2,560，verify 1,152，actions 1,230，webhook 878，robotsOverride 695，lane 811，handoff 485，access 450。原计划里的 4,329 / 2,451 / 2,509 复现不出来，以这里为准。
+- hosted keyless tools/list 16,487 字符；hosted scrape inputSchema 10,387 字节（结构 3,426），带 key 11,056（结构 3,931）。
+- outputSchema 1/38（map）；instructions 本地 1,591 字符。
+
 ## 总原则
 
 - **流程**：
@@ -121,10 +134,10 @@
 - **两条发布轨道**：
   - **hosted 部署**：只在 Howard 要求时做。先部署不接流量的 revision 并在 tag 地址上冒烟测试；main CI 通过后 `update-traffic`；确认线上 revision；保留上一个 tag 作为回滚。
   - **npm 和 registry 发布**：打 tag，走 Release workflow（Howard 要批准两次），`server.json` 和 `MCP_VERSION` 一起升版本。
-- **建议的版本节奏**（待 D1、D4 确认）：
-  - W3+W4 是增量改动，发 0.5.1；
-  - W5 是 `isError` 行为变更，发 0.6.0，W6 在 hosted 上随它一起部署；
-  - W7–W10 之后发 0.6.x 或 0.7.0。
+- **版本**：
+  - 已发：W3–W6 和 #554 一起随 **0.6.0** 发布（2026-10-17，#564、tag `v0.6.0`，npm、PyPI、MCP Registry 都是 0.6.0）。
+  - 接下来：W7（只改说明文字）和 W10（默认 `all`，只加开关）是增量，可以发 0.6.x；W8（截图去掉 base64、结果截断）和 W9（本地 crawl 缺省 `maxPages`、更短的默认超时）改了省略参数时的默认行为，建议一起发 0.7.0。
+- **部署之前先看线上**：几个窗口都在部署，动手前用 `gcloud run services describe` 读一下当时的线上 revision。
 - **证据诚实**：
   - 客户端侧的效果，要在真实客户端里跑过才写“改善了”；没跑的写 unknown。
   - 每次真实客户端运行都在 `research/` 下写一份带日期的记录，写明命令、commit、客户端版本、是否走代理。
@@ -137,6 +150,7 @@
 - [x] **W1.1** `apps/public-web/scripts/build-docs.mjs:142`：Claude Code keyless 的验证句改成 `/mcp lists scrape and map`，并注明 `scrape_product` 只列给带浏览器通道的 key 和登录用户。
 - [x] **W1.2** `build-docs.mjs:150`：Cursor keyless 的验证句把 "three tools" 改成 `scrape and map`。
 - [x] **W1.3** `apps/public-web/content/connect-mcp.md` 的 `/mcp-oauth` 小节（:35-57）补上 Codex 的接法（`codex mcp add … --url https://mcp.octocrawl.dev/mcp-oauth`，具体命令先查 Codex 文档）。状态写成“Howard 报告可用，尚无带日期的记录”，有了 `research/hosted/` 的记录再改成 Checked <date>。
+  - 之后：另一个窗口的 #561 用 Codex CLI 0.162.1 实测过，页面已经改成 “Checked with Codex CLI 0.162.1 on 2026-10-17”。
   - 做了：命令是 `codex mcp add octocrawl --url https://mcp.octocrawl.dev/mcp-oauth` 加上 `codex mcp login octocrawl`（codex-cli 0.162.1 的 `codex mcp --help` 里有 `login`、`logout` 两个子命令）。页面上标的是 “Reported working; not checked here yet”。2026-10-16 核查那句话改成只点名 Claude Code 和 Cursor。
 - [x] **W1.4** `docs/hosted-api.md:16`：删掉“找不到 OAuth metadata”的说法，写明 `/.well-known/oauth-protected-resource/mcp-oauth` 存在；在表格里加上 `/mcp-oauth`。
 - [x] **W1.5** 保持 keyless 在前、key 作为升级（D5）。页面结构不变，不新增文档。
@@ -355,124 +369,88 @@
   - 检查：`npm run typecheck` 通过；`npm test` 3022 个测试全部通过。
   - 线上复测要等 W5 和 W6 一起做 hosted 部署（D9 的部署时机）。
 
-## W7 本地 schema 瘦身和描述前置　L（等试用发现处理完再开始）
+## W7 本地 schema 瘦身和描述前置　L
 
-起因：Codex 会把超过 5,000 字节的 schema 里的属性说明全部删掉，所以今天它的 agent 看到的 scrape、crawl、batch_scrape 参数都没有说明。不做延迟加载的客户端，一开始就要付约 22k token。描述的第一句决定 tool search 能不能搜到这个工具。
+起因：Codex 对超过约 5,000 字节的 schema 会删掉全部属性说明（尽力而为，可配置），所以它的 agent 看到的 scrape、crawl、batch_scrape 参数没有说明。不做延迟加载的客户端一开始就要付约 2.4 万 token。描述的第一句决定 tool search 能不能搜到这个工具。说明文字都在共享常量里，改一处，本地和 hosted 一起变小。
 
-- [ ] **W7.1** 所有属性名、类型、枚举、默认值都不变，接受的参数也不变，只改说明文字：
-  - `FORMATS_DESCRIPTION`：4,329 → ≤ 600 字符，每种格式一行，并注明示例在文档里；
-  - `VERIFY_PROPERTY`：2,451 → ≤ 500 字符，列出检查类型；
-  - `ACTIONS_SCHEMA` 的说明：2,509 → ≤ 600 字符；
-  - `WEBHOOK_PROPERTY`、robotsOverride、lane、handoff、access：各 ≤ 250 字符；
-  - crawl 和 batch_scrape 上共享的页面选项：写 `Same as scrape.`；
-  - crawl 的 `maxPages`、`maxDepth`：补上说明。
-- [ ] **W7.2** 顶层描述统一模板：
-  - 第一句说清对象和返回内容，和 `@octocrawl/ai-sdk` 的描述对齐；
-  - 有事实可写时才加 `Not for:` 和 `Next:`；
-  - 删掉 REST、SDK 和 URL 的指引（包括 `tools.ts:455` 里 wait_batch 那句）；
-  - get_batch、get_batch_items、wait_batch、cancel_batch、get_crawl、pause/resume_delivery_destination 的模板文字，换成它们实际返回的内容。
-- [ ] **W7.3** 示例文字挪进现有的 `connect-mcp.md` 的 “Check the first result” 和 `docs/batch-crawl-map.md`，不新建文档。不加 `$ref`/`$defs`，不新增可空联合类型。
-- [ ] **W7.4** 方案 (a)（按 D10 决定做不做）：在 crawl 和 batch_scrape 上，把嵌套的 `FORMAT_ITEMS` 的 anyOf（去掉说明后 1,708 字节）和 verify（1,169 字节）收成 `{type:'array'}` 和 `{type:'object'}`，加上 `Same as scrape`，校验仍然由服务器端的解析函数负责。
-- [ ] **W7.5** `alwaysLoad`：只在 scrape 和 map 上设 `_meta['anthropic/alwaysLoad']: true`，前提是描述不超过 4,096 字符、schema 在 W2 的预算内。在 Claude Code 里用 `/context` 记录之前，效果算未测量。
-- [ ] **W7.6** 在 CHANGELOG 的 Unreleased 下写一条。
+行号（`packages/mcp/src/tools.ts`，`e1e128d4`）：`VERIFY_PROPERTY` 23–55（说明在 25），`PAGE_OPTION_PROPERTIES` 57–76（scrape 258、crawl 343、batch_scrape 432 展开它），`WEBHOOK_PROPERTY` 77–95，`FORMATS_DESCRIPTION` 100，`FORMAT_ITEMS` 102–158，`ACTIONS_SCHEMA` 165–197（说明在 169），`ROBOTS_OVERRIDE_SCHEMA` 199–205，scrape 的 `handoff` 246、`lane` 247、`access` 248，crawl 的 `maxPages` 324、`maxDepth` 325，batch 模板描述 451–455，delivery 模板 219，`get_crawl` 352。
+
+- [ ] **W7.1** 说明文字瘦身（属性名、类型、枚举、默认值都不变，接受的参数不变）：
+  - `FORMATS_DESCRIPTION`：2,560 → ≤600 字符，每种格式一行，示例挪到文档；
+  - `VERIFY_PROPERTY`：1,152 → ≤500，列出检查类型；
+  - `ACTIONS_SCHEMA`：1,230 → ≤600；
+  - `WEBHOOK_PROPERTY`、`ROBOTS_OVERRIDE_SCHEMA`、`lane`、`handoff`、`access`：各 ≤250；
+  - crawl 的 `maxPages`、`maxDepth` 补上说明（W9 若改默认值，说明在 W9 里同步）。
+- [ ] **W7.2** 顶层描述按统一模板：第一句说清对象和返回；有事实可写时才加 `Not for:`、`Next:`；删掉 REST、SDK、URL 指引（包括 batch 模板里 wait_batch 那句 “MCP has no event stream … the REST API streams …” 和 map outputSchema `id` 里的 “GET /v1/maps/:id on the REST API”，301 行）；`get_batch`、`get_batch_items`、`wait_batch`、`cancel_batch`、`get_crawl`、`pause/resume_delivery_destination` 换成它们实际返回的内容。第一句和 `packages/ai-sdk/src/index.ts`（scrape 149、map 172）对齐。
+- [ ] **W7.3** 示例文字挪进 `apps/public-web/content/connect-mcp.md` 的 “### Check the first result before continuing”（77 行）和 `docs/batch-crawl-map.md`（“Waiting for a job” 91 行、“Event streams” 95 行已经有 SDK/REST 的等待和流式说明）。不新建文档，不加 `$ref`/`$defs`，不新增可空联合类型。
+- [ ] **W7.4** 方案 (a)（D10，默认不做）：在 crawl 和 batch_scrape 上把 `FORMAT_ITEMS`（去说明后 1,708 字节）和 verify（1,169 字节）收成 `{type:'array'}` / `{type:'object'}` 加 `Same as scrape`。
+- [ ] **W7.5** `alwaysLoad`：只在 scrape 和 map 上设 `_meta['anthropic/alwaysLoad']: true`（`TOOL_META`，tools.ts 537 附近），前提是描述 ≤4,096 字符、schema 在预算内；hosted 副本的 `_meta` 合并会自动带上（W4.4），W2.3 的检查会验证。
+- [ ] **W7.6** 新增描述 lint（现在没有；`tools.test.ts:596-607` 是 `parseBaseUrl` 的测试，不是 lint）：放进 `toolSurface.test.ts`，对每个面检查第一句 ≤200 字符且互不相同、不匹配 `/https?:\/\//`、不含 `utm_`、不含 `see the REST`、`use the SDK` 这类指引短语。
+- [ ] **W7.7** 同步改：`tools.test.ts:184`（现在断言 wait_batch 描述里有 “MCP has no event stream”）；`toolSurface.budget.json` 用 `W2L_TOOL_BUDGET_WRITE=1` 重写，PR 里写明每一行降了多少；CHANGELOG Unreleased 一条。
 - 验收：
-  - W2 的预算收紧到：
-    - 本地 inputSchema 加描述合计 ≤ 40,000 字符；
-    - scrape、crawl、batch_scrape 各 ≤ 8,000 紧凑字节（结构本身 5,508–6,792，可以达到）；
-    - 其余工具各 ≤ 5,000；
-    - 采用 (a) 的话，crawl 和 batch_scrape ≤ 5,000。
-  - 描述的 lint 检查：
-    - 第一句 ≤ 200 字符，而且互不相同；
-    - 不匹配 `/https?:\/\//`，不含 `utm_`；
-    - 不含少数明确的指引短语（比如 `see the REST`、`use the SDK`）；
-    - `tools.test.ts:596-607` 仍然通过。
-  - `tools.test.ts` 现有的用例全部通过。
-  - 在 Claude Code、Codex、Cursor、OpenCode 上做前后两轮 eval：已验证任务的比例不能下降，格式错误的 verify 契约不能增加。两份记录都保留。
-- 指标：本地 tools/list 77,608 → ≤ 40,000 字符；最大的三段说明 4,329 / 2,509 / 2,451 → 各 ≤ 600；超过 Codex 5,000 字节预算的工具 3 → 3（不采用 (a)）或 1（采用 (a)）。
+  - 预算：本地 tools/list 83,596 → **≤50,000 字符**；scrape、crawl、batch_scrape 各 ≤8,000 紧凑字节（结构 5,508–6,792，可以达到）；其余工具各 ≤5,000；hosted keyless scrape 10,387 → ≤5,000（结构 3,426，可以达到）。
+  - W7.6 的 lint 通过；`tools.test.ts` 现有用例全部通过（改过的 184 行除外）。
+  - E2 的前后对比：至少在 Claude Code、Codex 上各跑一轮固定任务，已验证任务的比例不下降、格式错误的 verify 契约不增加；跑不了就在 PR 里写“未运行”。
+- 指标：本地 tools/list 83,596 → ≤50,000；hosted keyless 16,487 → 约 11,000（估算，以实测为准）；最大的三段说明 2,560 / 1,230 / 1,152 → 各 ≤600。
 - 决定：D10。
 
 ## W8 带类型的结果与如实的结果预算　M
 
-起因：判定字段有了类型，Evidence Record 和如实的失败判定在 code mode 和 Codex 里都能被程序读取。两个通道放同样的内容，是唯一同时适合 Cursor 和 Codex 的做法。Claude Code 超过 2.5 万 token 就截断，没有预算的页面可能悄悄丢掉结尾。内联 base64 既浪费 token，视觉模型也看不到。
+起因：判定字段有了类型，Evidence Record 和如实的失败判定在 code mode 和 Codex 里都能被程序读取。Claude Code 超过 2.5 万 token 就截断、超过 5 万字符的文本存成文件，现在没有任何内容上限。一次带截图的 scrape 是 119,895 字符，其中 114,836 是 base64（W2 实测）。`get_crawl_pages` 4 页 19,282 字符，200 页上限可能接近 100 万。
 
-- [ ] **W8.1** 在 scrape、get_scrape、get_crawl、get_batch、wait_batch、wait_crawl（W9 之后）、get_crawl_pages、get_batch_items，以及 crawl 和 batch 的 start（`{taskId, replayed?}`）上声明宽松的 outputSchema：允许 additionalProperties，required 只有 `status`。为这些字段写类型：`status` 和 `verification.status` 的枚举、failureReason、readiness、agentHints、evidenceRecord、finalUrl。hosted 副本带哪些 outputSchema，先测量再按 D11 定。
+现状（`e1e128d4`）：结果在 `server.ts` 88–91 行组装，只有声明了 `outputSchema` 的工具（现在只有 map，tools.ts 298–313）才带 `structuredContent`；`isError` 结果本来就不带（W5）。契约里有 `truncated` / `truncatedAt`（`packages/contracts/src/result.ts:527-529`，`api.ts:342-343`），但生产代码从不设成 true；`packages/api/src/hints.ts:212` 已经有截断提示的文案。截图类型 `ScreenshotEvidence`（`result.ts:296-312`），compact 结果在 `packages/api/src/structured.ts:1354` 带 `screenshot`，`path` 只有设了 `W2L_CAPTURE_RAW_DIR` 才有值。列表上限：`get_crawl_pages` limit 1000、maxResults 200，`get_batch_items` limit 50、maxResults 200（`MAX_TOOL_RESULTS = 200`，tools.ts 838），只按条数停，不按大小。
+
+- [ ] **W8.1** outputSchema：在 scrape、get_scrape、get_crawl、get_batch、wait_batch、wait_crawl（W9 之后）、get_crawl_pages、get_batch_items，以及 crawl、batch 的 start（`{taskId, replayed?}`）上声明宽松的 outputSchema（允许 additionalProperties，required 只有 `status` 或 `taskId`）。为 `status`、`verification.status` 枚举、failureReason、readiness、agentHints、evidenceRecord、finalUrl 写类型。hosted 副本带哪些按 D11 定；outputSchema 字节在 W2 的报告里单列。
 - [ ] **W8.2** 序列化顺序：判定字段在前（status、failureReason、blockReason、verification、readiness、agentHints、truncated），markdown 在后。
-- [ ] **W8.3** 内容预算：在 `server.ts` 里实现，不放进导出的 `callTool`。上限按 W2 实测的 fixture 大小和 D11 设定，并且低于约 2.5 万 token。超出上限时截断 markdown，设 `truncated: true` 和数字 `truncatedAt`，再附一条按面不同的提示：
-  - hosted：建议用 onlyMainContent 或 includeTags 缩小请求，不提 get_scrape（hosted 不提供它）；
-  - 本地：同样的缩小建议，外加用 `get_scrape <id>`（debug）取完整记录。
-- [ ] **W8.4** 列表类工具达到预算时停下，返回 `nextCursor`。get_scrape 是否受上限约束按 D11 定。`anthropic/maxResultSizeChars` 默认不设。
-- [ ] **W8.5** 截图：只在 base URL 是本机回环地址时，改成 image content block，JSON 里保留 sha256、size 和本机能读到的 path，两个通道都去掉 base64（debug 下保留）。远程（hosted，以及 stdio 指向 api.octocrawl.dev）保持现状，因为 Cloud Run 内存里的 path 客户端读不到。弃用节奏按 D11。
-- [ ] **W8.6** 可选：在结果最前面加一个 `summary` 字段（D11）。
-- [ ] **W8.7** 在 CHANGELOG 的 Unreleased 下写一条。
+- [ ] **W8.3** 内容上限：在 `server.ts` 实现，不改导出的 `callTool`。上限按 D11（W2 实测后在 5 万–8 万字符里选）。超出时截断 markdown，设 `truncated: true` 和数字 `truncatedAt`，沿用 `hints.ts:212` 的提示，并按面补一句：hosted 说用 onlyMainContent 或 includeTags 缩小；本地另加 “用 `get_scrape <id>`（debug）取完整记录”。
+- [ ] **W8.4** 列表工具：`get_crawl_pages`、`get_batch_items` 达到大小预算时停下，返回 `nextCursor`（SDK 的 `stoppedBy` 已有 `maxResults` 等，按大小停是新加的）。`get_scrape` 不受上限（D11 默认）。`anthropic/maxResultSizeChars` 默认不设。
+- [ ] **W8.5** 截图：改成 MCP 的 image content block（base64 放在 image block 里，视觉模型能看到），text 和 structuredContent 的 JSON 里只留 `sha256`、`bytes`、`width`、`height`，去掉 base64；`debug: true` 时 JSON 里保留。本地和 hosted 都这样做，不依赖 `path`（`W2L_CAPTURE_RAW_DIR` 一般不设）。按 D11 默认先弃用一个版本：0.7.0 里先在 JSON 里同时保留 base64 并在 CHANGELOG 预告，下一版去掉。
+- [ ] **W8.6** 可选：`summary` 字段（D11 默认暂不加）。
+- [ ] **W8.7** CHANGELOG Unreleased 一条。
 - 验收：
-  - 先写失败测试：success、blocked、empty_unverified、verification-failed 这几个 fixture 的结果都没有 structuredContent，`truncatedAt` 一直是 null。
-  - 改完后：
-    - ajv 用 outputSchema 校验每个 fixture 结果；
-    - 每个面上 `JSON.parse(text)` 和 structuredContent 深度相等；
-    - isError 结果不带 structuredContent；
-    - scrape 序列化后第一个键是 `status`；
-    - 超大 fixture 返回的结果不超过上限，带 `truncated: true`、数字 `truncatedAt` 和对应面的提示，hosted 的提示里不提 get_scrape；
-    - `get_crawl_pages` 设 `maxResults: 200` 时在预算处停下，并返回 `nextCursor`；
-    - 本机截图 fixture（TIMED 组）返回 image block，text 里没有 base64；
-    - hosted 截图仍带 base64。
-  - 重跑 W5 的 Cursor isError 冒烟测试。
-- 指标：outputSchema 1/38 → 10 个以上；最大的 fixture 结果从 W2 实测值降到不超过 D11 定的上限；本机默认结果里的截图 base64 从“总是有”变成“从来没有”（远程不变）；eval 里被悄悄截断的结果：未知 → 0。
+  - 先写失败测试：success、blocked、empty_unverified、verification-failed 这几个夹具的结果都没有 structuredContent；一个超大夹具的结果超过上限（今天没有截断）；截图结果的 text 里有 base64。
+  - 改完后：ajv 用 outputSchema 校验每个夹具结果；每个面上 `JSON.parse(text)` 和 structuredContent 深度相等；scrape 序列化后第一个键是 `status`；超大夹具不超过上限，带 `truncated: true` 和数字 `truncatedAt`；`get_crawl_pages` 在预算处停并返回 `nextCursor`；截图夹具（`fixture-screenshot.integration.test.ts`）返回 image block。
+  - 在 Cursor 上对一个带 outputSchema 的工具的 isError 结果做一次冒烟测试（W5 留下的）。
+- 指标：outputSchema 1/38 → 10+；最大的夹具结果 → 不超过上限；带截图的 scrape text 119,895 → 约 5,000 字符（图另走 image block）。
 - 决定：D11。
 
-## W9 长任务：wait_crawl、安全默认值、stdio 进度、上游中止测试　M
+## W9 长任务：wait_crawl、安全默认值、进度、上游中止测试　M
 
-起因：agent 今天要自己写 get_crawl 的轮询。300–600 s 的同步等待超过 claude.ai 的 240 s，也会被 Claude Code 转到后台。本地 crawl 不写 maxPages 就没有上限。进度通知能重置 Claude Code 的空闲计时，也能让本人在等待时知道发生了什么。
+起因：agent 今天要自己写 get_crawl 轮询；本地 scrape 默认 300 s，my-browser 和 handoff 等 600 s，都超过 claude.ai 的 240 s；本地 crawl 不写 maxPages 就没有上限。进度通知能重置 Claude Code 的空闲计时，也让本人知道在等什么。
 
-- [ ] **W9.1** 新增 `wait_crawl`：基于 SDK 的 `waitCrawl`，用它自己的 `timeoutMs` 和 `WaitTimeoutError.last`。
-  - `timeoutMs` 默认 30,000，上限和 wait_batch 统一（D12；如果选 120,000，要同时把 `tools.ts:649` 的 300,000 降下来，并写进 CHANGELOG）。
-  - 超时返回当前的 crawl 状态，并附 `Next: wait_crawl again or get_crawl_pages`。
-  - 遵守中止信号，只读。
-  - hosted 上有 crawl 之前，不在 hosted 列出。
-  - 本地工具数变成 39 个。
-- [ ] **W9.2** crawl、batch_scrape、batch_products 的描述里写出 wait 步骤，以及 W5.8 的保留期说明。
-- [ ] **W9.3** crawl 的 `maxPages` 默认值：只在请求里完全没有 `maxPages` 键时，由 MCP 层套用 D12 定的值，并在结果里回显。显式的 `null` 保持今天的含义（用服务器默认值，本地是无上限）。默认值的出处（行号待核）：
-  - `listen.ts:173` 是 hosted 模式，值为 100；
-  - 本地 serve 是 null（`listen.ts:203`）；
-  - 10 来自 `host.ts:57` 的试点；
-  - 8791 的 `localHost.ts` 没有设。
-- [ ] **W9.4** scrape 超时：MCP 层的默认值降到 200 s 以下（D12），和 REST 及契约里的 `DEFAULT_SCRAPE_TIMEOUT_MS` 300,000 不同，要在 CHANGELOG 写明。my-browser 和 handoff 保留长等待，但在描述开头写清楚。
-- [ ] **W9.5** 进度通知：新增 `McpServerOptions.progress`，只由 `stdio.ts` 打开。HTTP 主机永远不开，因为 JSON 响应模式会丢掉通知。导出的 `callTool` 的 options 加一个可选的 `onProgress`。打开且请求带 `_meta.progressToken` 时：
-  - wait_batch 和 wait_crawl 在 tools.ts 里用 getBatch 和 getCrawl 自己轮询，发限速的 `notifications/progress`（比如 `12/40 pages`），不改 SDK；
-  - 需要本人参与的等待（my-browser、handoff、hand_off_batch、import_login）每 10–15 s 发一次心跳，告诉本人该做什么。
-- [ ] **W9.6** 上游中止：扩展 `httpCancellation.test.ts`，测试被取消的 scrape 是否释放浏览器租约、是否不产生账本扣费，并记录结果。如果不会中止，在本文件里另开一项，那属于引擎改动。
-- [ ] **W9.7** 在 CHANGELOG 的 Unreleased 下写清所有默认值变更，结果里回显实际用的值。
+现状（`e1e128d4`）：`wait_batch` 用自己的计时器，默认 30,000、上限 300,000（tools.ts 711–721，schema 454），超时返回 `getBatch`。SDK 有 `waitCrawl`（`packages/sdk/src/client.ts:585`）和 `WaitTimeoutError`（137–142，带 `last`）。`listen.ts:173` hosted `defaultMaxPages: 100`（也是上限，`engine.ts:1955` 拒绝超过的），`listen.ts:203` 本地 null（无上限）；`localHost.ts` 没设。本地今天“省略 maxPages”和“显式 null”是同一个意思。`DEFAULT_SCRAPE_TIMEOUT_MS = 300_000`（`packages/contracts/src/api.ts:26`）；hosted MCP 已经是 100 s（W6）。v2 SDK 里进度用 `ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress, total?, message? } })`，token 在 `request.params._meta?.progressToken`。
+
+- [ ] **W9.1** 新增 `wait_crawl`：照 `wait_batch` 的写法（自己的计时器，超时返回 `getCrawl` 的当前状态），`timeoutMs` 默认 30,000，上限和 wait_batch 统一（D12 默认 120,000；同时把 wait_batch 的上限从 300,000 降到 120,000，写进 CHANGELOG）。超时附 `Next: wait_crawl again or get_crawl_pages`。遵守中止信号，只读（加进 PRESENTATION、TOOL_NAMES，crawl 组）。hosted 有 crawl 之前不在 hosted 列出。`instructions.ts:23-24` 的路由句改成 “crawl, then wait_crawl, then get_crawl_pages”。本地变成 39 个工具，`toolSurface.budget.json` 加一行。
+- [ ] **W9.2** crawl、batch_scrape、batch_products 的描述写出 wait 步骤和保留期（W5.8 挪过来的）：本地 scrape 和 map 记录没有保留期限；crawl 和 batch 的保留期从引擎读，读不到就写“未核实”。
+- [ ] **W9.3** 本地 crawl 的 `maxPages` 缺省值：MCP 层只在请求里**没有** `maxPages` 键时套用 D12 的值（默认 100）并在结果里回显；显式的 `null` 继续表示“用服务器默认值”（本地无上限）。需要确认 `parseCrawlStartRequest` 能把显式 `null` 原样传下去。hosted 不受影响（本来就有 100 的上限，hosted 也不提供 crawl）。
+- [ ] **W9.4** 本地 MCP scrape 默认超时：降到 D12 的值（默认 120 s），只在 MCP 层、只在省略 `timeout` 时；REST 和契约仍是 300 s。my-browser、handoff、hand_off_batch（默认 600 s）、import_login（默认 120 s）保留长等待，描述开头写明“会等本人，最多 N 分钟”。
+- [ ] **W9.5** 进度通知（D16）：`McpServerOptions.progress` 打开时，请求带了 progressToken 就发：wait_batch 和 wait_crawl 每次轮询发一条（如 `12/40 pages`，每 5 s 最多一条）；需要本人参与的等待每 10–15 s 发一次心跳，说明本人该做什么。stdio 和 2026-07-28 的 HTTP 路径打开；旧协议的 JSON 模式送不到，不开。导出的 `callTool` 加可选的 `onProgress`，签名只增不改。
+- [ ] **W9.6** 上游中止：扩展 `httpCancellation.test.ts`（已有本地 scrape 取消、断开、hosted wait_batch 取消等用例），测试被取消的 scrape 是否释放浏览器租约、是否不扣费，并记录结果。如果不中止，在本清单另开一项（属于引擎改动）。
+- [ ] **W9.7** CHANGELOG Unreleased 写清所有默认值变更；结果里回显实际用的值。
 - 验收：
-  - 先写失败测试：本地 fixture 站点上不带 maxPages 的 crawl，跟随的页数超过拟定的默认值；给了 progressToken 也不发进度。
-  - 改完后：
-    - 缺少 maxPages 键时套用默认值并说明；显式 null 的行为和今天一样；两种情况各有测试；
-    - wait_crawl 在任务完成时返回完成状态，自己超时时返回运行中的状态和 Next 行，客户端取消时抛出取消，timeoutMs 超过上限时返回 isError；
-    - 进度值严格递增，每 5 s 最多一条，结果之后不再发送，HTTP 主机上从不发送；
-    - 取消测试记录引擎工作是否停止。
-  - 在 Claude Code 里用 wait_crawl 真实爬一次 quotes.toscrape.com，记录命令、commit 和是否走代理。
-- 指标：带有界等待的 crawl 0 → 1；不需要本人参与的工具里最长的默认同步等待 300,000 ms → ≤ 120,000（或按 D12）；发进度的 stdio 工具 0 → 6；取消后上游是否停止：从未核实变成已测试；完成一次 10 页 crawl 需要的调用次数在 eval 里测量。
-- 决定：D12。
+  - 先写失败测试：本地夹具站点上不带 maxPages 的 crawl 跟随的页数超过 100；给了 progressToken 也不发进度；本地 MCP scrape 不写 timeout 时用的是 300 s。
+  - 改完后：缺 maxPages 键套用默认值并回显，显式 null 行为不变（各一个测试）；wait_crawl 完成、超时、取消、timeoutMs 超上限四种情况各有测试；进度值严格递增、每 5 s 最多一条、结果之后不再发、旧协议 HTTP 上不发；取消测试记录引擎工作是否停止。
+  - 在 Claude Code 里用 wait_crawl 真实爬一次 quotes.toscrape.com，记录命令、commit、是否走代理。
+- 指标：带有界等待的 crawl 0 → 1；不需要本人参与的工具里最长的默认同步等待 300,000 → 120,000 ms；发进度的工具 0 → 6；取消后上游是否停止：未核实 → 已测试。
+- 决定：D12、D16。
 
 ## W10 本地工具集和只读模式　M
 
-起因：客户端对工具数有限制（VS Code 每次请求 128 个，Windsurf 总共 100 个），不做延迟加载的客户端会加载所有定义。16 个 Monitor 和 delivery 工具对大多数用户来说挤占了常用路径。只读模式能如实地提供一个不弹确认的本地 scrape，不用把会操作页面的那个 scrape 误标成只读。
+起因：客户端对工具数有上限（VS Code 每次请求 128 个，Windsurf 总共 100 个），不做延迟加载的客户端会加载所有定义；16 个 Monitor 和 delivery 工具对大多数用户挤占了常用路径。只读模式能如实提供一个不弹确认的本地 scrape。
 
-- [ ] **W10.1** `stdio.ts` 解析 `--toolsets=core,crawl,batch,products,logins,monitor,delivery|all`（环境变量 `W2L_MCP_TOOLSETS`）和 `--read-only`（环境变量 `W2L_MCP_READ_ONLY`），映射到 `createMcpServer` 已有的 `allowedTools` 和 `tools` 选项。`core` 是 scrape、get_scrape、map；crawl 组包含 wait_crawl。
-- [ ] **W10.2** `--read-only` 只列 W4 表里的只读工具，再加一个用 W6 的按面构建器生成的“只读 scrape”，标 `readOnlyHint: true`。这个 scrape 只去掉会以本人身份操作的选项：actions、mode authed、lane my-browser、handoff、access my-browser。正则 verify 检查、screenshot、robotsOverride、skipTlsVerification、access enhanced 都保留，因为它们在本地合法，也不以本人身份操作。
-- [ ] **W10.3** 名称不认识时启动失败，并列出合法的名称。调用选择范围之外的工具时，按 W5 的协议错误规则返回消息，并说出打开它的 flag。
-- [ ] **W10.4** W3 的 instructions 自动跟着工具集变。如果 D8 选了“自动切换”，也在这里实现。
-- [ ] **W10.5** 环境变量写进 `server.json` 的 `environmentVariables`。在 `packages/mcp/README.md` 和文档里给出 Claude Code、Codex、Cursor、VS Code 的示例配置。
-- [ ] **W10.6** 默认是 `all`（D13）。如果要改成精简默认，提前一个版本在 CHANGELOG 里预告，并在 instructions 里加一行说明 `--toolsets all`。
+现状（`e1e128d4`）：`packages/mcp/src/stdio.ts`（63 行）用 `parseBaseUrl`（8–14）、`parseToken`（16–23）读参数，`serveMcpStdio`（29–32）调 `createMcpServer`，不传 `allowedTools`/`tools`。`createMcpServer` 已经支持 `allowedTools`（server.ts 9）、`tools`（11）、`unavailableHint`（23）；instructions 按列出的工具生成（50–51），所以工具集变了说明会自动跟着变（原 W10.4 已满足）。只读集合就是 PRESENTATION 里 readOnly 为 true 的 19 个（tools.ts 493–535）。hosted 的按面构建器 `hostedInputSchema`（hostedApi.ts 196）可以参考，但只处理 scrape 和 map。`server.json` 只有 `W2L_API_URL`、`W2L_API_TOKEN` 两个环境变量。`packages/mcp/README.md` 只有一个 Claude Desktop 风格的配置示例。
+
+- [ ] **W10.1** `stdio.ts` 解析 `--toolsets=core,crawl,batch,products,logins,monitor,delivery|all`（环境变量 `W2L_MCP_TOOLSETS`）和 `--read-only`（`W2L_MCP_READ_ONLY`），映射到 `allowedTools` 和 `tools`。`core` 是 scrape、get_scrape、map；crawl 组含 wait_crawl（W9 之后）。组的定义放在 tools.ts，从 `TOOL_NAMES` 派生，测试保证每个工具恰好属于一个组。
+- [ ] **W10.2** `--read-only`：只列 PRESENTATION 里只读的工具，再加一个“只读 scrape”：去掉会以本人身份操作的选项（actions、`mode` 的 authed、lane、handoff、`access` 的 my-browser），标 `readOnlyHint: true`。构建器参考 `hostedInputSchema`，抽一个小函数共用，hosted 的行为不变（W6 的 drift 测试守着）。
+- [ ] **W10.3** 名称不认识时启动失败并列出合法名称。调用选择范围之外的工具时，沿用 `unavailableHint`，说出打开它的 flag（如 “enable it with --toolsets=crawl”）。
+- [ ] **W10.4** 环境变量写进 `server.json` 的 `environmentVariables`；`packages/mcp/README.md` 补 Claude Code、Codex、Cursor、VS Code 的示例配置（含 `--toolsets` 和 `--read-only`）。
+- [ ] **W10.5** 默认 `all`（D13）。要改成精简默认的话，提前一个版本在 CHANGELOG 预告，并在 instructions 加一行说明 `--toolsets all`。
+- [ ] **W10.6** `toolSurface.test.ts` 加 `local-core`、`local-read-only` 两个面（预算文件加对应行）；CHANGELOG Unreleased 一条。
 - 验收：
   - 先写失败测试：不管环境变量怎么设，stdio 服务器都列 38 个工具。
-  - 改完后：
-    - `--toolsets=core` 正好列 3 个工具；
-    - `--read-only` 只列 readOnlyHint 工具，它的 scrape schema 里没有 actions、mode authed、lane my-browser、handoff，但还有正则检查和 screenshot；
-    - 只读 scrape 的大小在 W2 实测后定目标：结构允许就 ≤ 5,000，否则 ≤ 8,000，并写明 Codex 仍会删掉说明；
-    - 名称不认识时以非零退出码退出并列出名称；
-    - 不带 flag 时列出全部工具；
-    - W2 里出现每种配置的预算行。
+  - 改完后：`--toolsets=core` 正好 3 个工具；`--read-only` 只列只读工具，它的 scrape 没有 actions、authed、lane、handoff，但还有 verify 正则检查和 screenshot；未知名称以非零退出码退出并列出名称；不带 flag 时列全部；instructions 只提到列出的工具（W3 的检查）。
   - 记录一次用 `--read-only` 的 Claude Code 交互会话。
-- 指标：core 配置 38 → 3 个工具；`--read-only` 下本地 scrape 的 readOnlyHint false → true；`--read-only` 下 Codex auto 和 VS Code 里本地 scrape 的确认弹窗“每次都弹”变成 0（在 eval 记录之前只是根据客户端规则推断）。
+- 指标：core 38 → 3 个工具；`--read-only` 下本地 scrape 的 readOnlyHint false → true；Codex auto 和 VS Code 下本地 scrape 的确认弹窗：每次都弹 → 0（交互记录之前只是按客户端规则推断）。
 - 决定：D13。
 
 ## E 评估（贯穿全程）
@@ -480,7 +458,7 @@
 - [ ] **E1 静态检查**：从 W2 起放进 `npm test`，离线运行。按面分别检查：本地 all、core、read-only，hosted keyless，hosted OAuth（不带和带浏览器）。具体内容就是 W2–W10 验收里写的预算、覆盖率、schema 合法性、instructions、描述 lint、两个通道一致、错误格式。每个 PR 都要说明它动了哪一行预算、为什么。
 - [ ] **E2 真实客户端里的固定任务集**：
   - **冻结时机**：W3–W6 合入或部署之前冻结。本地用 npm 上的 `@octocrawl/mcp` 0.5.0 当基线；hosted 用冻结时的线上 revision 加它的源码 SHA（冻结时用 gcloud 确认），保留它的 tag，以便以后复跑。
-  - **轮次**：基线一轮，W1–W4 之后一轮，W5–W6 之后一轮，W7–W10 之后一轮。每轮开始前所有客户端重新连接，避免 tools/list 缓存影响对比。
+  - **轮次**：原计划是 W3 之前冻结基线，但 W1–W6 已经在没有基线的情况下上线并发进 0.6.0，所以现在的基线就是 0.6.0（npm `@octocrawl/mcp` 0.6.0、hosted `h20v060`）。之后每做完 W7–W10 中的一项跑一轮。每轮开始前所有客户端重新连接，避免 tools/list 缓存影响对比。
   - **客户端**：Claude Code、Codex CLI（auto）、Cursor、OpenCode 必跑。VS Code Copilot、claude.ai、ChatGPT 需要 Howard 登录，没跑的记为“未运行”。
   - **驱动方式**：用脚本以无头方式跑（`claude -p`、`codex exec`、`cursor-agent`、`opencode run`），统计除确认弹窗以外的所有指标。确认弹窗另用小的交互样本测：每个客户端每轮 3 个任务，各跑一次。
   - **任务**：12 个，每个跑 3 次，用本地 fixture 和 `research/parity/sites.md` 里稳定的页面，URL 冻结后不换：
@@ -549,7 +527,7 @@
 ## 未核实
 
 1. 客户端侧的所有改善效果，等 E2 的记录。
-2. 结构字节和结果大小：W2 已测（见 W2 的“结果”）。真实网页上的结果大小还没测，等 E2。
+2. 结构字节和结果大小：W2 已测（见 W2 的“结果”），2026-10-17 在 `e1e128d4` 上又测了一次（见“W1–W6 之后的基线”）。真实网页上的结果大小还没测，等 E2。
 3. `Implementation` 的 title 和 description 从哪个 SDK 版本开始支持，等 W3.4。
 4. hosted `mode authed` 今天的实际行为，等 W6.3。
 5. 取消后上游是否停止，等 W9.6。
@@ -558,6 +536,7 @@
 
 ## 下次从这里继续
 
-- W1–W6 都开了 PR（#555、#557、#558、#559、#560、#563），等合并。W5 和 W6 合并后，一起做一次 hosted 部署（只在 Howard 要求时）。
-- 下一个是 W7（本地 schema 瘦身和描述前置）。按 D1，它要等外部试用的发现处理完再开始。开始前要先确认 W2 已经合并，因为 W7 要改 `toolSurface.budget.json`；W6 也已经让 hosted scrape 去掉了一些属性。
+- **W1–W6 全部完成**：都已合并、部署（hosted API、网站），并随 0.6.0 发布到 npm、PyPI 和 MCP Registry。线上版本以 `gcloud run services describe` 读到的为准（几个窗口都会部署）。
+- **2026-10-17 Howard：W7–W10 现在开始（D1′），一项一个 PR，按 W7 → W8 → W9 → W10 的顺序。** W7–W10 的行号和基线已在 `e1e128d4` 上重新核对。
+- 下一个是 **W7**：从当时的 `origin/main` 拉分支；改说明会让 `toolSurface.budget.json` 的本地和 hosted 行都下降，要一起重写。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。
