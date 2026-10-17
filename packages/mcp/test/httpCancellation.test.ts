@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from '@modelcontextprotocol/client'
 import type { BatchStatusResponse, ExecutionContext, ScrapeRequest, ScrapeResponse } from '@w2l/contracts'
 import { createHostedService } from '../src/host.js'
 import { createLocalService } from '../src/localHost.js'
@@ -203,6 +204,25 @@ it('stops a scrape over HTTP when the MCP SDK client cancels its call', async ()
   await vi.waitFor(() => expect(site.closed).toEqual(['/page']), { timeout: 5_000 })
   // The client kept the session id it was given and sent it with the cancellation.
   expect(transport.sessionId).toMatch(/^[0-9a-f-]{36}$/)
+})
+
+it('stops a scrape over HTTP when a 2026-07-28 client closes the call\'s response stream', async () => {
+  const site = await silentSite()
+  const port = await freePort()
+  const root = await mkdtemp(join(tmpdir(), 'w2l-local-cancel-'))
+  const service = createLocalService({ taskRoot: root, port })
+  cleanup.push(async () => { await service.close(); await rm(root, { recursive: true, force: true }) })
+  if (!service.server.listening) await once(service.server, 'listening')
+  const client = new ModernClient({ name: 'w2l-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } })
+  await client.connect(new ModernTransport(new URL(`http://127.0.0.1:${port}/mcp`)))
+  cleanup.push(() => client.close())
+  expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28')
+  const stop = new AbortController()
+  const calling = client.callTool({ name: 'scrape', arguments: { url: `${site.origin}/page`, timeout: 120_000 } }, { signal: stop.signal })
+  await vi.waitFor(() => expect(site.opened).toEqual(['/page']), { timeout: 10_000 })
+  stop.abort()
+  await expect(calling).rejects.toThrow()
+  await vi.waitFor(() => expect(site.closed).toEqual(['/page']), { timeout: 5_000 })
 })
 
 describe('InFlightCalls', () => {

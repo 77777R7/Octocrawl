@@ -145,6 +145,7 @@
 6. ChatGPT 的 auth 文档说服务器要在根路径 `/.well-known/oauth-protected-resource` 提供 metadata，我们只在带路径后缀的 `/.well-known/oauth-protected-resource/mcp-oauth` 提供，根路径照旧返回 404（决定 4）。ChatGPT 也会读 401 里的 `resource_metadata`，按 MCP 规范应该够了，要等 D4 确认。
 7. claude.ai 对授权服务各端点的超时是 10 秒（发现、注册、换 token），刷新是 30 秒（claude.com/docs/connectors/building/authentication）。D3 的冷启动检查要按这个标准。
 8. MCP 2026-07-28 版改成了无状态（没有 `initialize`，有 `server/discover`），`/mcp` 现有实现与它兼不兼容，不在本清单范围内，只记一笔。
+   - 2026-10-17：迁到 v2 SDK 后，`/mcp`、`/mcp-oauth`、本地 MCP 服务和 stdio 都支持 2026-07-28（本地测试覆盖），2025 版的 `initialize` 照旧可用，不支持的版本返回 400 和 -32022。还没部署，真实客户端首个请求是否不再多一次 400，要部署后再核实。
 
 ## 待我决定（Blocked on Howard）
 

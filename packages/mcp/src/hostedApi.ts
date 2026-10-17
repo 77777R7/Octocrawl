@@ -19,14 +19,13 @@ import { readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
 import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION } from './server.js'
 import { SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
+import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
 import { CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
@@ -683,7 +682,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const mcp = async (req: IncomingMessage, res: ServerResponse, oauth: boolean): Promise<void> => {
     if (!['POST', 'GET', 'DELETE'].includes(req.method ?? '')) { sendJson(res, 405, { error: 'method not allowed' }); return }
     const version = req.headers['mcp-protocol-version']
-    if (version && (typeof version !== 'string' || !SUPPORTED_PROTOCOL_VERSIONS.includes(version))) { sendJson(res, 400, { error: 'unsupported MCP protocol version' }); return }
+    if (!servesProtocolVersion(version)) { sendJson(res, 400, unsupportedProtocolVersion(version)); return }
     if (req.method !== 'POST') { sendJson(res, 405, { error: 'stream and session management unavailable: every request is answered on its own POST' }); return }
     const address = clientAddress(req, config.proxySecret)
     const addressWait = addressLimiter.retryAfterSeconds(digest(config.hashKey, 'ip', address))
@@ -734,19 +733,17 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
         return gate.fetch(request, { socketAddress: address })
       },
     })
-    const server = createMcpServer(client, {
+    const post = trackPost(calls, req, res, parsed, [caller.id])
+    await serveMcpPost(req, res, parsed, () => createMcpServer(client, {
       allowedTools: HOSTED_API_TOOLS,
       tools: oauth ? oauthTools(caller.browser) : hostedTools(caller.browser === true),
-      calls: trackPost(calls, req, res, parsed, [caller.id]),
+      calls: post,
       normalizeCall: (name, args) => {
         if (!HOSTED_API_TOOLS.has(name)) throw new Error(`${name} is not served by hosted Octocrawl: scrape, map and scrape_product only; ${LOCAL_HINT}`)
         if (name === 'scrape_product' && !caller.browser) throw new Error('scrape_product reads Amazon.sg in a browser, which needs a key; keyless callers use scrape over HTTP')
         return args
       },
-    })
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
-    try { await server.connect(transport); await transport.handleRequest(req, res, parsed) }
-    finally { await server.close() }
+    }))
   }
 
   const server = createServer((req, res) => {
