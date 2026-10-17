@@ -30,6 +30,12 @@ class ScoreControls(unittest.TestCase):
   self.assertEqual(rebase_url('http://127.0.0.1:8862/ebooks/1','https://example.org/top','http://127.0.0.1:8862'),'https://example.org/ebooks/1');self.assertEqual(rebase_url('https://other.test/ebooks/1','https://example.org/top','http://127.0.0.1:8862'),'https://other.test/ebooks/1')
  def test_section_does_not_select_navigation_link(self):
   md='- [Parameters](#parameters)\n## Parameters\ncallbackFn\n## Return value\nAn array.';s,_=section(md,'Parameters');self.assertEqual(s,'callbackFn')
+ def test_unit_symbols_preserve_case(self):
+  c=self.case();c['units']['s']['value']='S';r=score_case(c,self.output(),'http://127.0.0.1:8862');self.assertFalse(r['rows'][0]['checks']['unit'])
+ def test_javascript_parameter_case_is_not_repaired(self):
+  c=self.case();c['id']='H08';c['fields'][0].update(id='H08/map/parameter_thisArg',entityId='map',name='parameter_thisArg',value='thisArg',dataType='text',unitRef='na')
+  d=self.output();d['markdown']='# Array.prototype.map()\n## Parameters\nthisarg\n## Return value\nAn array.'
+  r=score_case(c,d,'http://127.0.0.1:8862');self.assertEqual(r['totals']['observedFields'],0)
  def test_false_does_not_equal_zero(self):self.assertFalse(equal('false','0','integer'))
 
 if __name__=='__main__':unittest.main()

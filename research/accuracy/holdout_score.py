@@ -181,7 +181,7 @@ def mapped(case,doc,fixture_origin):
    if n.startswith('parameter_'):
     key=n.removeprefix('parameter_');v=None;r=None
     for i,line in enumerate(params.splitlines()):
-     if re.fullmatch(r'(?:[-*]\s*)?'+re.escape(key)+r'(?:\s+Optional)?',norm(line),re.I):v=key;r=pref+f'.line[{i}]';break
+     if re.fullmatch(r'(?:[-*]\s*)?'+re.escape(key)+r'(?:\s+Optional)?',norm(line)):v=key;r=pref+f'.line[{i}]';break
    put(f,v,r,date=date,entity=method is not None)
  else:raise ValueError('Unsupported frozen case '+cid)
  return out,duplicates,notes
@@ -201,7 +201,7 @@ def score_case(case,doc,fixture_origin):
   checks={'value':value_ok,'entity':o.get('entityMatched',False),'sameSource':same_source}
   for label,collection,refkey,obskey in [('unit','units','unitRef','unit'),('date','dates','dateRef','businessDate'),('period','periods','periodRef','period')]:
    context=case[collection].get(f.get(refkey))
-   checks[label]=True if not context or context['state']=='not_applicable' else None if context['state']=='unknown' else norm(o.get(obskey) or '').casefold()==norm(context['value']).casefold()
+   checks[label]=True if not context or context['state']=='not_applicable' else None if context['state']=='unknown' else (norm(o.get(obskey) or '').casefold()==norm(context['value']).casefold() if label=='period' else norm(o.get(obskey) or '')==norm(context['value']))
   complete=all(v is True for v in checks.values());locatable=value_ok and checks['entity'] and same_source and bool(o.get('outputLocation'))
   rows.append({'fieldId':f['id'],'entityId':f['entityId'],'field':f['name'],'required':f['required'],'expected':f['value'],**o,'checks':checks,'fullyCorrect':complete,'independentlySourceLocatable':locatable,'sourceEvidence':f['evidence'],'contextEvidence':{k:case[k].get(f.get(ref)) for k,ref in [('units','unitRef'),('dates','dateRef'),('periods','periodRef')]}})
  totals={'fieldSlots':len(rows),'requiredFields':sum(f['required'] for f in rows),'observedFields':sum(r.get('observed') is not None for r in rows),'valueCorrect':sum(r['checks']['value'] and r['checks']['entity'] for r in rows),'fullyCorrect':sum(r['fullyCorrect'] for r in rows),'requiredFullyCorrect':sum(r['required'] and r['fullyCorrect'] for r in rows),'sourceLocatable':sum(r['independentlySourceLocatable'] for r in rows),'duplicateSelectedRecords':sum(duplicates.values())}

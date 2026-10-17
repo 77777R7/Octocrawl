@@ -20,7 +20,7 @@ Source locatability is the independent reviewer's output location plus sealed so
 
 ## Execution and boundaries
 
-Run the 13 synthetic scorer controls before opening. Hash the plan and executable review code. With runtime config, dataset and output directory outside Git:
+Run the 15 synthetic scorer controls before opening. Hash the plan and executable review code. With runtime config, dataset and output directory outside Git:
 
 ```sh
 node research/accuracy/run_holdout.mjs --run /absolute/private/runtime-config.json
