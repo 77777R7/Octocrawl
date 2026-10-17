@@ -1,0 +1,19 @@
+name: Reserved field scorer controls
+on:
+  push:
+    paths:
+      - 'research/accuracy/*holdout*'
+      - '.github/workflows/field-acceptance.yml'
+  pull_request:
+    paths:
+      - 'research/accuracy/*holdout*'
+      - '.github/workflows/field-acceptance.yml'
+permissions:
+  contents: read
+jobs:
+  frozen-scorer-controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s research/accuracy -p 'test_holdout*.py' -v
