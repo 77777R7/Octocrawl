@@ -168,3 +168,38 @@ Notes:
 - In the second run the model then tried a different tool, `codex_apps/octocrawl.scrape`, which comes from Codex's ChatGPT apps rather than from this server, and it stopped at "MCP tool call requires approval". That call did not reach `/mcp-oauth`.
 - The 405s on `GET` and `DELETE /mcp-oauth` are the Streamable HTTP answer for a server without a standalone stream or sessions; Codex carried on.
 - **Cost:** 1 credit from Howard's account.
+
+## OpenCode (added 2026-10-17)
+
+Run 08:30–08:36Z on 2026-10-17, from this Mac with the shell's `HTTPS_PROXY` set (proxied). Client: OpenCode 1.18.26 (`opencode/1.18.26`), model `deepseek-v4-flash` from Howard's own provider config. Services: `octocrawl-api` revision `octocrawl-api-v060-67d01484` (tag `h20v060`, main `67d01484`, 0.6.0), `w2l-public-preview` revision `w2l-public-preview-mcpux-cd0cbec` (tag `r95mcpux`).
+
+Config, in a scratch directory's `opencode.json`, as the dashboard's Connect page gives it:
+
+```json
+{ "mcp": { "octocrawl": { "type": "remote", "url": "https://mcp.octocrawl.dev/mcp-oauth", "enabled": true } } }
+```
+
+Commands, from that directory:
+
+```bash
+opencode mcp list
+opencode mcp auth octocrawl
+opencode run "Use the octocrawl MCP server's scrape tool on https://example.com and reply with only the page title and the evidence record's rawSha256 field. Do not use any other tool."
+```
+
+| Time (Z) | What happened |
+| --- | --- |
+| 08:30:43 | `opencode mcp list`: `POST /mcp-oauth` 401, PRM 200, `POST /oauth/register` 201. It listed the server as "needs authentication". |
+| 08:30:50–53 | `opencode mcp auth octocrawl`: 401, PRM 200, a second `POST /oauth/register` 201 (client `occ_LwNf…`). **Dynamic client registration.** |
+| 08:30:53–59 | `GET /oauth/authorize` with `redirect_uri=http://127.0.0.1:19876/mcp/oauth/callback`, `scope=mcp`, `resource` set; Howard chose Authorize (302). |
+| 08:31:01–03 | `POST /oauth/token` 200; `POST /mcp-oauth` 200 (initialize), 202, `GET` 405, 200 (`tools/list`). `opencode mcp list` then showed "✓ octocrawl connected". |
+| 08:34:22–25 | One more consent (`GET` 200, `POST` 302) from the browser, from the authorize link pasted in chat after the sign-in had finished. Its code went to the closed loopback port and was never exchanged; no connection came of it. |
+| 08:34:36–48 | `opencode run`: the tool call `octocrawl_scrape {"url":"https://example.com","debug":true}`; OpenCode answered "Example Domain" and `25ddf2c883e0d1958ea971d279a7e4f0fd446724ee3db7db19dadabd4a62e484`. `hosted_usage` under key `oauth_N2iyJ0LQ…`, 1 credit (`http`). |
+| 08:35:29 | Howard chose Disconnect on `/dashboard/keys/`: revoke 204. |
+| 08:35:40–49 | Next `opencode run`, 11 s later: initialize and `tools/list` 200 (the handler's minute of cache), the tool call **401**, refresh `POST /oauth/token` 400. OpenCode showed `Error: Unauthorized`, and `opencode mcp list` went back to "needs authentication". No credit was spent. |
+
+Notes:
+
+- OpenCode registers a client each time it starts a sign-in or checks an unauthenticated server (two 201s here); the unused registration expires after 90 days unused, as with Cursor.
+- OpenCode did not ask to sign in on its own during `opencode run`; `opencode mcp auth octocrawl` is the step.
+- **Cost:** 1 credit from Howard's account.

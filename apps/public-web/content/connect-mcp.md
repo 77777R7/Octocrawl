@@ -66,6 +66,16 @@ Codex sees that the server signs in with OAuth and opens a browser to sign in as
 
 Checked with Codex CLI 0.162.1 on 2026-10-17.
 
+### OpenCode
+
+```json
+{ "mcp": { "octocrawl": { "type": "remote", "url": "https://mcp.octocrawl.dev/mcp-oauth", "enabled": true } } }
+```
+
+Merge this into the `mcp` object of `opencode.json` with no `headers`, then run `opencode mcp auth octocrawl` and sign in in the browser it opens. `opencode mcp list` shows whether it is connected, and `opencode mcp logout octocrawl` signs it out. The key setup above keeps working on `/mcp`. ([OpenCode's guide](https://opencode.ai/docs/mcp-servers))
+
+Checked with OpenCode 1.18.26 on 2026-10-17.
+
 ## Send your first task
 
 ```text

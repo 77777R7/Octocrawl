@@ -281,12 +281,12 @@ describe('Connect leads with sign-in', () => {
 
   it('says which sign-ins have been checked with the real client, and which only follow its docs', async () => {
     const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
-    // Checked with the real client (research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md): Claude Code, Cursor and Codex.
-    for (const [id, name, day] of [['claude', 'Claude Code', '2026-10-16'], ['cursor', 'Cursor', '2026-10-16'], ['codex', 'Codex', '2026-10-17']]) {
+    // Checked with the real client (research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md): Claude Code, Cursor, Codex and OpenCode.
+    for (const [id, name, day] of [['claude', 'Claude Code', '2026-10-16'], ['cursor', 'Cursor', '2026-10-16'], ['codex', 'Codex', '2026-10-17'], ['opencode', 'OpenCode', '2026-10-17']]) {
       expect(connect.$(`c-${id}`).querySelector('.client-status')!.textContent, id).toBe(`Sign-in checked with ${name} on ${day}`)
       expect(connect.$(`c-${id}`).querySelector('.client-status')!.classList.contains('is-verified'), id).toBe(true)
     }
-    for (const id of ['opencode', 'cline']) {
+    for (const id of ['cline']) {
       const status = connect.$(`c-${id}`).querySelector('.client-status')!
       expect(status.textContent, id).toMatch(/^Sign-in not checked with .+ yet: these steps follow its docs$/)
       expect(status.classList.contains('is-verified'), id).toBe(false)
