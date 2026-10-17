@@ -1,7 +1,7 @@
 {
   "local": {
     "scrape": {
-      "inputBytes": 9947,
+      "inputBytes": 10000,
       "descriptionChars": 450
     },
     "map": {
@@ -13,12 +13,16 @@
       "descriptionChars": 277
     },
     "crawl": {
-      "inputBytes": 4626,
-      "descriptionChars": 498
+      "inputBytes": 4629,
+      "descriptionChars": 603
     },
     "get_crawl": {
       "inputBytes": 136,
       "descriptionChars": 125
+    },
+    "wait_crawl": {
+      "inputBytes": 195,
+      "descriptionChars": 181
     },
     "get_crawl_pages": {
       "inputBytes": 728,
@@ -42,7 +46,7 @@
     },
     "batch_scrape": {
       "inputBytes": 5162,
-      "descriptionChars": 497
+      "descriptionChars": 550
     },
     "get_batch": {
       "inputBytes": 102,
@@ -54,7 +58,7 @@
     },
     "wait_batch": {
       "inputBytes": 161,
-      "descriptionChars": 165
+      "descriptionChars": 181
     },
     "cancel_batch": {
       "inputBytes": 102,
@@ -66,7 +70,7 @@
     },
     "hand_off_batch": {
       "inputBytes": 164,
-      "descriptionChars": 571
+      "descriptionChars": 629
     },
     "scrape_product": {
       "inputBytes": 131,
@@ -74,11 +78,11 @@
     },
     "batch_products": {
       "inputBytes": 160,
-      "descriptionChars": 126
+      "descriptionChars": 154
     },
     "import_login": {
       "inputBytes": 208,
-      "descriptionChars": 557
+      "descriptionChars": 607
     },
     "list_logins": {
       "inputBytes": 62,

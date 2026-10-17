@@ -82,7 +82,8 @@ export function createLocalService(config: LocalConfig): {server: HttpServer; cl
       catch {sendJson(res,400,{error:'invalid JSON'});return}
       // One user, no token: a cancellation reaches only a call of the same MCP session.
       const post=trackPost(calls,req,res,body,[])
-      await serveMcpPost(req,res,body,()=>createMcpServer(runtime.client,{calls:post}))
+      // Progress reaches the client on the 2026-07-28 path, not on the 2025-era JSON one (docs/mcp-client-ux-tasks.md D16).
+      await serveMcpPost(req,res,body,({legacy})=>createMcpServer(runtime.client,{calls:post,progress:!legacy}))
     } catch(error) {
       if (!res.headersSent) sendJson(res,500,{error:error instanceof Error?error.message:'internal error'})
       else res.end()

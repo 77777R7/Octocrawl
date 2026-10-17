@@ -126,6 +126,8 @@ export interface WaitOptions extends RequestOptions {
   timeoutMs?: number
   /** Consecutive failed status requests retried before the last error is thrown. Default 5; 0 retries none. */
   maxRetries?: number
+  /** Called with each status read while the task is still running, before the next poll; not with the finished one the wait returns. An error it throws is ignored. */
+  onPoll?: (report: CrawlReport) => void
 }
 
 /**
@@ -796,6 +798,8 @@ export class W2L {
           const report = await poll({ signal })
           if (FINISHED.includes(report.status)) return report
           last = report
+          // A listener's error must not count as a failed status request.
+          try { options.onPoll?.(report as unknown as CrawlReport) } catch { /* ignored */ }
           failure = undefined
           failures = 0
         } catch (error) {

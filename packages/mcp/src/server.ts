@@ -4,7 +4,7 @@ import { W2L, W2LError } from '@w2l/sdk'
 import type { PostCalls } from './inFlight.js'
 import { serverInstructions } from './instructions.js'
 import { shapeResult } from './results.js'
-import { callTool, TOOLS } from './tools.js'
+import { callTool, TOOLS, type ToolProgress } from './tools.js'
 
 export interface McpServerOptions {
   allowedTools?: ReadonlySet<string>
@@ -24,6 +24,12 @@ export interface McpServerOptions {
   unavailableHint?: string
   /** The API this server calls, named when it cannot be reached (a local server's base URL). */
   apiUrl?: string
+  /**
+   * Send notifications/progress to a call that asked for it with a progressToken (docs/mcp-client-ux-tasks.md W9.5):
+   * on over stdio and the 2026-07-28 HTTP path, off on the 2025-era JSON path, which cannot carry them. Tests set
+   * the intervals.
+   */
+  progress?: boolean | { everyMs?: number; heartbeatMs?: number }
 }
 
 /** This server's own version: the `origin` of a call whose client declared no name and version. */
@@ -72,13 +78,18 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
         throw new Error(`tool not available in this deployment: ${request.params.name}; this server offers ${[...options.allowedTools].join(', ')}.${options.unavailableHint === undefined ? '' : ` ${options.unavailableHint}`}`)
       }
       let result: unknown
+      let progress: ProgressReporter | undefined
       try {
         options.authorizeCall?.(request.params.name,request.params.arguments ?? {})
         const args = options.normalizeCall?.(request.params.name, request.params.arguments ?? {}) ?? request.params.arguments ?? {}
         // Every call is recorded under this client's name and version; the tools take no origin of their own.
         // A 2026-07-28 request names its client itself; a 2025-era one named it in initialize.
         const named = (ctx.mcpReq.envelope as Record<string, unknown> | undefined)?.[CLIENT_INFO_META_KEY] as Implementation | undefined
-        result = await callTool(client, request.params.name, args, { signal, origin: mcpOrigin(named ?? server.getClientVersion()) })
+        const token = options.progress === undefined || options.progress === false ? undefined : request.params._meta?.progressToken
+        progress = token === undefined ? undefined : progressReporter(request.params.name, args, options.progress === true || options.progress === undefined || options.progress === false ? {} : options.progress, (params) => ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken: token, ...params } }))
+        // Nothing is sent once the call has answered.
+        try { result = await callTool(client, request.params.name, args, { signal, origin: mcpOrigin(named ?? server.getClientVersion()), ...(progress === undefined ? {} : { onProgress: progress.update }) }) }
+        finally { progress?.stop() }
       } catch (error) {
         if (signal.aborted) throw requestCancelled()
         if (error instanceof Error && error.message.startsWith('unknown tool: ')) throw withErrorCode(error)
@@ -95,6 +106,49 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
     } finally { call?.end() }
   })
   return server
+}
+
+type ProgressReporter = { update: (update: ToolProgress) => void; stop: () => void }
+/** wait_crawl and wait_batch report at most this often; a wait for the person says what it waits for this often. */
+const PROGRESS_EVERY_MS = 5_000
+const HEARTBEAT_EVERY_MS = 12_000
+
+/** What a call waits for the person to do, when it does: the heartbeat's message. */
+function personWait(tool: string, args: unknown): string | null {
+  const rec = args !== null && typeof args === 'object' ? args as Record<string, unknown> : {}
+  if (tool === 'import_login') return 'waiting for the person to allow Octocrawl in their Chrome'
+  if (tool === 'hand_off_batch') return 'waiting for the person to get through the check in the Chrome tab Octocrawl opened'
+  if (tool === 'scrape' && (rec.lane === 'my-browser' || rec.access === 'my-browser')) return 'waiting for the person to allow reading this site in their Chrome'
+  if (tool === 'scrape' && rec.handoff !== undefined && rec.handoff !== false) return 'reading; if a check stops it, waiting for the person in their Chrome'
+  return null
+}
+
+/**
+ * notifications/progress for one call (docs/mcp-client-ux-tasks.md W9.5): progress only grows, a wait tool's
+ * updates come at most every 5 s, a wait for the person sends a heartbeat every 12 s, and nothing follows stop().
+ */
+function progressReporter(tool: string, args: unknown, intervals: { everyMs?: number; heartbeatMs?: number }, send: (params: ToolProgress) => Promise<void>): ProgressReporter {
+  const everyMs = intervals.everyMs ?? PROGRESS_EVERY_MS
+  let stopped = false
+  let sent = -Infinity
+  let sentAt = -Infinity
+  const emit = (update: ToolProgress) => {
+    sent = update.progress
+    sentAt = Date.now()
+    send(update).catch(() => { /* a client that went away hears nothing */ })
+  }
+  const waiting = personWait(tool, args)
+  const started = Date.now()
+  const heartbeat = waiting === null ? undefined : setInterval(() => {
+    if (stopped) return
+    const seconds = Math.round((Date.now() - started) / 1000)
+    emit({ progress: Math.max(seconds, sent + 1), message: `${waiting} (${seconds} s)` })
+  }, intervals.heartbeatMs ?? HEARTBEAT_EVERY_MS)
+  heartbeat?.unref?.()
+  return {
+    update: (update) => { if (!stopped && update.progress > sent && Date.now() - sentAt >= everyMs) emit(update) },
+    stop: () => { stopped = true; if (heartbeat !== undefined) clearInterval(heartbeat) },
+  }
 }
 
 /**
