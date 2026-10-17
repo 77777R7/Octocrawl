@@ -19,7 +19,7 @@ import { detectRenderSignals, hasLoadingText, hydrationShown, rawSignals } from 
 import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { hiddenRegion, selectMain } from './main.js'
-import { collectDeclaredProductFacts, fillPriceFromText, markOptionGroups, selectProduct, settleOptionGroups } from './product.js'
+import { collectDeclaredProductFacts, fillPriceFromText, hasAggregateProductOffers, markOptionGroups, selectProduct, settleOptionGroups } from './product.js'
 import { pageSignalsFor, routePage, selectCardList, selectDetectedList, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
@@ -150,6 +150,7 @@ export class ExtractTf implements Extractor {
     // raw tree too. The visible-price fallback runs much later, after
     // recommendation pruning — see below.
     const declaredFacts = collectDeclaredProductFacts(doc.document)
+    const aggregateOffers = declaredFacts.price === null && signals.jsonLdTypes.includes('aggregateoffer') && hasAggregateProductOffers(doc.document)
     const amazonProduct = isAmazonProductPage(doc.document, options.url)
     const sourceFacts = amazonProduct
       ? collectAmazonProductFacts(doc.document, options.url, declaredFacts)
@@ -190,7 +191,7 @@ export class ExtractTf implements Extractor {
     // Recommendation carousels are cut only on product pages. On a listing
     // page the priced cards ARE the content, and pruning them would delete
     // the answer.
-    if (decision.type === 'product') pruneRecommendations(doc.document)
+    if (decision.type === 'product') pruneRecommendations(doc.document, { preserveOfferGrids: aggregateOffers })
 
     const classifyOptions: ClassifyOptions = { ...DEFAULT_CLASSIFY, favorPrecision }
     if (favorPrecision) classifyOptions.minTextLength = 60
@@ -257,7 +258,7 @@ export class ExtractTf implements Extractor {
       // fragments inside the subject container. The adapter must prefer an
       // honest null over attributing one of those generic price tokens to the
       // main ASIN.
-      if (!amazonProduct) fillPriceFromText(product, doc.document)
+      if (!amazonProduct && !aggregateOffers) fillPriceFromText(product, doc.document)
       if (amazonProduct && product.price !== null && product.priceCurrency === null) product.priceCurrency = inferAmazonCurrency(options.url, product.price.value)
     }
 

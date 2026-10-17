@@ -39,6 +39,37 @@ function layoutParent(el: Element): Element | null {
 }
 
 /**
+ * Some long documents have no semantic wrapper: a page heading and numbered
+ * chapters are siblings of the body. Picking one chapter loses both the
+ * document's publication header and the other requirements. Recognize that
+ * structure conservatively, rather than widening arbitrary competing regions.
+ */
+function siblingChapters(doc: Document, blocks: TextBlock[], totalLength: number): Element | null {
+  const body = doc.body
+  if (!body || body.querySelector('article,main,[role="main"]')) return null
+  const children = Array.from(body.children)
+  const titles = qsa(body, 'h1')
+  if (titles.length === 0 || titles.some((h) => h.closest('[hidden]'))) return null
+  const chapters: Element[] = []
+  for (const child of children) {
+    if (!['div', 'section'].includes(tagOf(child)) || child.querySelector('h1') || child.closest('[hidden]')) continue
+    const heading = child.querySelector('h2')
+    const number = /^(\d+)\.\s+\S/.exec((heading?.textContent ?? '').trim())
+    if (!number) continue
+    if (Number(number[1]) !== chapters.length + 1) return null
+    chapters.push(child)
+  }
+  if (chapters.length < 3) return null
+  const first = children.indexOf(chapters[0]!)
+  if (!titles.every((h) => children.slice(0, first).some((child) => child === h || child.contains(h)))) return null
+  // References can contain only short linked entries, which the prose filter
+  // intentionally omits. Require three substantive chapters, not prose in all.
+  if (chapters.filter((chapter) => blocks.some((b) => chapter.contains(b.el))).length < 3) return null
+  const chapterLength = blocks.filter((b) => chapters.some((chapter) => chapter.contains(b.el))).reduce((sum, b) => sum + b.length, 0)
+  return chapterLength >= totalLength * 0.5 ? body : null
+}
+
+/**
  * Pick the container (or container-like run) that represents main content.
  * Returns the element whose HTML should be emitted.
  */
@@ -80,6 +111,9 @@ function pickRegion(doc: Document, blocks: TextBlock[]): Element | null {
   const totalLength = blocks.reduce((sum, b) => sum + b.length, 0)
   const bodyText = blocks.filter((b) => layoutParent(b.el) === doc.body).reduce((sum, b) => sum + b.length, 0)
   if (doc.body && bodyText >= totalLength * 0.5) return doc.body
+
+  const documentBody = siblingChapters(doc, blocks, totalLength)
+  if (documentBody) return documentBody
 
   // Score every container that holds at least one block.
   const candidates = new Map<Element, Candidate>()
