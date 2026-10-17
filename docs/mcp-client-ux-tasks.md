@@ -27,7 +27,7 @@
 | D11 | 结果内容上限定多少（按 W2 实测，在 5 万到 8 万字符之间选）？`get_scrape` 不受上限，还是改分页？本机截图的 base64 立即去掉，还是先弃用一个版本？要不要加 `summary` 字段，只在 MCP 里还是也进 REST/SDK 的 compact 契约？hosted 副本带哪些 outputSchema？ | W8 | 按实测取值；`get_scrape` 不受上限；先弃用一个版本；summary 暂不加 |
 | D12 | MCP 层 crawl 的 `maxPages` 缺省时用多少（100，与 hosted 模式一致；或 10）？MCP scrape 默认超时（建议 120 s，REST 仍是 300 s）？`wait_crawl` 和 `wait_batch` 的统一上限（120,000 或 300,000 ms）？ | W9 | 100；120 s；120,000 |
 | D13 | 本地默认工具集：保持 `all`（兼容），还是改成精简的 `core,crawl,batch`、其余需要显式开启？如果改，从哪个版本开始？ | W10 | 保持 `all` |
-| D14 | `@modelcontextprotocol/sdk` 的下限从 `^1.25.2` 提高到支持 `Implementation` 的 title 和 description 的版本，是否同意？具体版本实现时去查。 | W3 | 同意 |
+| D14 | ~~`@modelcontextprotocol/sdk` 的下限从 `^1.25.2` 提高~~。2026-10-17 W3 查过 1.25.2 的 tarball：`ImplementationSchema` 已经有 title、description、websiteUrl 和 icons，`Server` 也已经接受 `instructions`，**不用提高下限**。 | W3 | 不需要 |
 | D15 | 分发：octocrawl.dev 的浅色和深色 PNG 图标是否批准？Connect 页按 #543 的“只列编码 agent”规则要不要加 VS Code？要不要发 Claude plugin skill？W4、W5 之后要不要申请进 Anthropic Directory 或 ChatGPT 上架？ | W3、W1 | 先不做，等 W4、W5 合入后再问 |
 
 ## 定下的方向（来自调研）
@@ -184,11 +184,11 @@
   - 检查：`npm run typecheck` 通过；`npm test` 跑了 251 个文件、3020 个测试，全部通过，另有 1 个 todo。
 - 决定：无。
 
-## W3 按面生成的 instructions 与身份信息　S
+## W3 按面生成的 instructions 与身份信息　S　→ PR #558
 
 起因：在 tool search 下（Claude Code 和 Cursor 默认开启，Codex 把 instructions 当作命名空间描述），模型一开始只看到工具名和 instructions。这是提高“第一次就选对工具”最便宜的办法，也能在不占 schema 字节的前提下让 Octocrawl 的长处被看见。
 
-- [ ] **W3.1** 新增 `packages/mcp/src/instructions.ts`，根据实际列出的工具名生成文字：工具在场就写对应的句子，不在场就用条件句。内容包括：
+- [x] **W3.1** 新增 `packages/mcp/src/instructions.ts`，根据实际列出的工具名生成文字：工具在场就写对应的句子，不在场就用条件句。内容包括：
   - Octocrawl 是什么：把页面转成 Markdown，并附 Evidence Record；被拦截、空页、错页都会如实报告。
   - 路由：单个 URL 用 scrape；站点 URL 用 map；已知列表用 batch_scrape，再 wait_batch，再 get_batch_items；子树用 crawl，再 get_crawl 或 get_crawl_pages（W9 之后加 wait_crawl）；Amazon.sg 用 scrape_product。
   - 怎么读结果：`status`、`verification.status`、`readiness` 三者的区别；`agentHints` 是下一步；`isError` 表示调用没有执行。
@@ -197,10 +197,10 @@
   - 两条速度事实：`fastMode` 只走 HTTP；`waitFor > 0` 直接从浏览器档开始。
   - 本面的限制：hosted keyless 只走 HTTP、有每日额度；登录后消耗 credits（D6）；crawl、batch 和 Monitor 在本地运行（只写事实，与 PH item 1 一致，不带 URL）。
   - 一句条件句：base URL 是 hosted Octocrawl 时，只有 scrape 和 map 能用（D8）。
-- [ ] **W3.2** 接线：新增 `McpServerOptions.instructions`，传进 `server.ts:37` 的 `new Server(...)`；`stdio.ts`、`localHost.ts`、`hostedApi.ts`（`/mcp` 和 `/mcp-oauth`）都接上。`host.ts` 不改。
-- [ ] **W3.3** 身份信息：`serverInfo` 加 title `Octocrawl`、description 和 websiteUrl（UTM 按 D7）。`serverInfo`、`hostedServerCard`（hostedApi.ts，行号待核：约 196）和 `server.json` 在同一个 PR 里对齐。
-- [ ] **W3.4** 版本：查 SDK changelog，确认 `Implementation` 类型从哪个版本开始有 title 和 description，按 D14 提高 `packages/mcp/package.json` 的下限。再加一个测试：`MCP_VERSION` 等于 `packages/mcp/package.json` 的 version。
-- [ ] **W3.5** 在 CHANGELOG 的 Unreleased 下写一条。
+- [x] **W3.2** 接线：新增 `McpServerOptions.instructions`，传进 `server.ts:37` 的 `new Server(...)`；`stdio.ts`、`localHost.ts`、`hostedApi.ts`（`/mcp` 和 `/mcp-oauth`）都接上。`host.ts` 不改。
+- [x] **W3.3** 身份信息：`serverInfo` 加 title `Octocrawl`、description 和 websiteUrl（UTM 按 D7）。`serverInfo`、`hostedServerCard`（hostedApi.ts，行号待核：约 196）和 `server.json` 在同一个 PR 里对齐。
+- [x] **W3.4** 版本：查 SDK changelog，确认 `Implementation` 类型从哪个版本开始有 title 和 description，按 D14 提高 `packages/mcp/package.json` 的下限。再加一个测试：`MCP_VERSION` 等于 `packages/mcp/package.json` 的 version。
+- [x] **W3.5** 在 CHANGELOG 的 Unreleased 下写一条。
 - 验收：
   - 先写失败测试：stdio 和 hosted keyless、OAuth 的 initialize 都没有 instructions。
   - 改完后，用 InMemoryTransport 在 stdio（全量）、localHost、hosted keyless、hosted OAuth 上各做一次 initialize，检查：
@@ -212,6 +212,16 @@
   - hosted 部署后（Howard 要求时）做一次线上 initialize，记录 revision 和是否走代理。
 - 指标：4 个面的 instructions 0 → 1,000–2,000 字符；serverInfo 字段 2 → 4–5 个。
 - 决定：D6、D7、D8、D14。
+- 结果（PR #558）：
+  - 新增 `packages/mcp/src/instructions.ts`。`createMcpServer` 默认按列出的工具生成本地版；`hostedApi.ts` 按调用方传入 hosted 版（keyless、key、`/mcp-oauth`）。stdio 和 8791 不用改代码。
+  - 长度：本地 1,591 字符，hosted keyless 1,136，OAuth 1,173。都不含 URL 或 `utm_`。
+  - D6 按默认：写了每日额度和 credits。D7 按默认：`serverInfo` 的 websiteUrl 保留 UTM。D8 按默认：只写一句条件句，并且只在 scrape 和 map 都列出时才写。
+  - 身份信息：`SERVER_IDENTITY` 统一管 name、title、description。server card 共用这三项；`server.json` 加了 `title`，用官方 2025-12-11 schema 校验过一次。测试保证它们和 `MCP_VERSION`、package version 一致。
+  - 审查发现两处事实错误，已修并补了测试：
+    - Claude 出口地址的 keyless 是所有 Claude 连接器共享的额度，不是按地址算；
+    - “报错就是没执行”这句不对：start 在客户端超时后，任务可能已经开始，所以改成提醒用同一个 `idempotencyKey` 重发。
+  - `host.ts` 试点现在也会拿到默认的本地文案（其中提到了它限制掉的抓取方式）。它没有部署，没有人连着，不处理。
+  - 检查：`npm run typecheck` 通过。`npm test` 3019 个全部通过（这次是在审查修复之前跑的）；修复之后跑了 `packages/mcp` 和 `apps/public-web`，31 个文件、280 个测试，全部通过。还没部署，也没发版。
 
 ## W4 title、如实的 annotations、工具顺序与 `_meta` 合并　S
 
@@ -517,7 +527,6 @@
 
 ## 下次从这里继续
 
-- W1（PR #555）和 W2（PR #557）已开 PR，等合并。站点只在 Howard 要求时部署。
-- 下一个是 W3（按面生成的 instructions 与身份信息），单独一个 PR，从当时的 `origin/main` 拉分支。W2 合并之前，W3 的分支先基于 W2 的分支，或者等 W2 合并后再拉。
-- 后续每项改了 schema 或描述的，都要同步改 `packages/mcp/test/toolSurface.budget.json`（`W2L_TOOL_BUDGET_WRITE=1 npx vitest run packages/mcp/test/toolSurface.test.ts`），并在 PR 里说明动了哪一行、为什么。
+- W1（#555）、W2（#557）、W3（#558）都开了 PR，等合并。hosted 部署和 npm 发版都只在 Howard 要求时做。按 D1，W3+W4 合起来出 0.5.1。
+- 下一个是 W4（title、如实的 annotations、工具顺序、`_meta` 合并），单独一个 PR，从当时的 `origin/main` 拉分支。如果 W2 已经合并，W4 改了 annotations 和顺序之后，要同步更新 `toolSurface.budget.json` 的 meta 列。W4.4 修好之后，W2.3 的 `_meta` 保留检查才真正起作用。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。
