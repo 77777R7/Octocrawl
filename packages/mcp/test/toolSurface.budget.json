@@ -1,24 +1,16 @@
 {
   "local": {
-    "scrape_product": {
-      "inputBytes": 131,
-      "descriptionChars": 105
-    },
-    "batch_products": {
-      "inputBytes": 160,
-      "descriptionChars": 126
-    },
     "scrape": {
       "inputBytes": 18238,
       "descriptionChars": 565
     },
-    "get_scrape": {
-      "inputBytes": 157,
-      "descriptionChars": 352
-    },
     "map": {
       "inputBytes": 3253,
       "descriptionChars": 1115
+    },
+    "get_scrape": {
+      "inputBytes": 157,
+      "descriptionChars": 352
     },
     "crawl": {
       "inputBytes": 17736,
@@ -75,6 +67,14 @@
     "hand_off_batch": {
       "inputBytes": 164,
       "descriptionChars": 1225
+    },
+    "scrape_product": {
+      "inputBytes": 131,
+      "descriptionChars": 105
+    },
+    "batch_products": {
+      "inputBytes": 160,
+      "descriptionChars": 126
     },
     "import_login": {
       "inputBytes": 208,
@@ -155,50 +155,50 @@
   },
   "hosted-keyless": {
     "scrape": {
-      "inputBytes": 18238,
+      "inputBytes": 10378,
       "descriptionChars": 507
     },
     "map": {
-      "inputBytes": 3253,
+      "inputBytes": 2911,
       "descriptionChars": 1115
     }
   },
   "hosted-key": {
-    "scrape_product": {
-      "inputBytes": 131,
-      "descriptionChars": 105
-    },
     "scrape": {
-      "inputBytes": 18238,
+      "inputBytes": 11047,
       "descriptionChars": 507
     },
     "map": {
-      "inputBytes": 3253,
+      "inputBytes": 2911,
       "descriptionChars": 1115
+    },
+    "scrape_product": {
+      "inputBytes": 131,
+      "descriptionChars": 105
     }
   },
   "oauth-http": {
     "scrape": {
-      "inputBytes": 18238,
+      "inputBytes": 10378,
       "descriptionChars": 507
     },
     "map": {
-      "inputBytes": 3253,
+      "inputBytes": 2911,
       "descriptionChars": 1115
     }
   },
   "oauth-browser": {
-    "scrape_product": {
-      "inputBytes": 131,
-      "descriptionChars": 105
-    },
     "scrape": {
-      "inputBytes": 18238,
+      "inputBytes": 11047,
       "descriptionChars": 507
     },
     "map": {
-      "inputBytes": 3253,
+      "inputBytes": 2911,
       "descriptionChars": 1115
+    },
+    "scrape_product": {
+      "inputBytes": 131,
+      "descriptionChars": 105
     }
   }
 }
