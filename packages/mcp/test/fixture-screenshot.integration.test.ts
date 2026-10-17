@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { createApiEngine, createApp, type ApiEngine } from '@w2l/api'
 import { W2L } from '@w2l/sdk'
+import { shapeResult } from '../src/results.js'
 import { callTool } from '../src/tools.js'
 
 /**
@@ -38,5 +39,7 @@ describe('MCP scrape with a screenshot against the fixture catalog', () => {
     expect(base64.length).toBeGreaterThan(0)
     const chars = JSON.stringify(result).length
     if (process.env.W2L_TOOL_SURFACE_REPORT === '1') console.info(`result size: scrape with screenshot (compact): ${chars} chars, of which base64 ${base64.length}`)
+    // The MCP server also answers the capture as an image block (docs/mcp-client-ux-tasks.md W8.5).
+    expect(shapeResult('scrape', result).images).toEqual([{ type: 'image', data: base64, mimeType: 'image/png' }])
   }, 60_000)
 })

@@ -3,7 +3,7 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { BATCH_ERRORS_MAX_LIMIT, MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_TYPES, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchHandoffRequest, parseBatchStartRequest, parseLoginImportRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { BATCH_ERRORS_MAX_LIMIT, BLOCK_REASON, FAILURE_REASON, RESULT_STATUS, TASK_STATUS, MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_TYPES, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchHandoffRequest, parseBatchStartRequest, parseLoginImportRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
 import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
@@ -564,10 +564,57 @@ const TOOL_META: Partial<Record<ToolName, Record<string, unknown>>> = {
   map: { 'anthropic/alwaysLoad': true },
 }
 
+/**
+ * The results the read tools declare (docs/mcp-client-ux-tasks.md W8.1): loose, so a field the API adds later still
+ * passes, with the verdict typed. A tool with an outputSchema answers structuredContent too (server.ts).
+ */
+const NULLABLE_STRING = { type: ['string', 'null'] } as const
+const SCRAPE_OUTPUT = {
+  type: 'object',
+  properties: {
+    status: { enum: RESULT_STATUS },
+    failureReason: { enum: [...FAILURE_REASON, null] },
+    blockReason: { enum: [...BLOCK_REASON, null] },
+    verification: { type: 'object', properties: { status: { enum: ['passed', 'failed', 'not_requested'] } }, required: ['status'] },
+    readiness: { type: ['object', 'null'], properties: { state: { enum: ['ready', 'not_loaded', 'not_extracted', 'not_served'] } } },
+    agentHints: { type: 'array', items: { type: 'string' } },
+    truncated: { type: 'boolean' },
+    truncatedAt: { type: ['integer', 'null'] },
+    finalUrl: NULLABLE_STRING,
+    evidenceRecord: { type: ['object', 'null'] },
+    markdown: NULLABLE_STRING,
+  },
+  required: ['status'],
+} as const
+const JOB_STARTED_OUTPUT = { type: 'object', properties: { taskId: { type: 'string' }, replayed: { type: 'boolean' } }, required: ['taskId'] } as const
+const JOB_STATUS_OUTPUT = { type: 'object', properties: { taskId: { type: 'string' }, status: { enum: TASK_STATUS } }, required: ['status'] } as const
+const PAGE_LIST_OUTPUT = {
+  type: 'object',
+  properties: {
+    items: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, url: { type: 'string' }, status: { type: 'string' }, markdown: NULLABLE_STRING } } },
+    nextCursor: NULLABLE_STRING,
+    hasMore: { type: 'boolean' },
+    stoppedBy: { enum: ['end', 'maxResults', 'size'], description: 'size: the answer reached its size budget; read on from nextCursor.' },
+  },
+  required: ['items'],
+} as const
+const TOOL_OUTPUT: Partial<Record<ToolName, object>> = {
+  scrape: SCRAPE_OUTPUT,
+  get_scrape: { type: 'object', properties: { scrapeId: { type: 'string' }, status: { enum: RESULT_STATUS }, failureReason: NULLABLE_STRING, blockReason: NULLABLE_STRING }, required: ['status'] },
+  crawl: JOB_STARTED_OUTPUT,
+  get_crawl: JOB_STATUS_OUTPUT,
+  get_crawl_pages: PAGE_LIST_OUTPUT,
+  batch_scrape: JOB_STARTED_OUTPUT,
+  get_batch: JOB_STATUS_OUTPUT,
+  wait_batch: JOB_STATUS_OUTPUT,
+  get_batch_items: PAGE_LIST_OUTPUT,
+}
+
 function present<T extends { name: ToolName }>(definition: T) {
   const [title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint] = PRESENTATION[definition.name]
   const meta = TOOL_META[definition.name]
-  return { ...definition, title, annotations: { title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint }, ...(meta === undefined ? {} : { _meta: meta }) }
+  const output = TOOL_OUTPUT[definition.name]
+  return { ...definition, ...(output === undefined ? {} : { outputSchema: output }), title, annotations: { title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint }, ...(meta === undefined ? {} : { _meta: meta }) }
 }
 
 export const TOOLS = TOOL_NAMES.map((name) => present(DEFINITIONS.find((definition) => definition.name === name)!))
