@@ -73,12 +73,56 @@ const bookInformation = `<html><head><title>A Light in the Attic | Books to Scra
 const shop = (price: string) => `<html lang="de"><head><title>Messinglampe | Shop</title></head><body><main><h1>Messinglampe</h1><p class="price">${price}</p>
 <p>Eine Messinglampe mit mattiertem Glasschirm, passend für Schreibtisch oder Nachttisch und für eine Standardfassung verdrahtet.</p></main></body></html>`
 
+/** The arXiv abstract page: a subject heading above the paper's own labelled title, citation_* tags, and metadata rows labelled by data cells. */
+const arxivAbstract = `<html lang="en"><head><title>[1706.03762] Attention Is All You Need</title>
+<meta name="citation_title" content="Attention Is All You Need" />
+<meta name="citation_author" content="Vaswani, Ashish" /><meta name="citation_author" content="Shazeer, Noam" /><meta name="citation_author" content="Parmar, Niki" />
+<meta name="citation_date" content="2017/06/12" /><meta name="citation_online_date" content="2023/08/02" />
+<meta property="og:title" content="Attention Is All You Need" /></head><body>
+<div id="abs-outer"><div class="leftcolumn"><div class="subheader"><h1>Computer Science > Computation and Language</h1></div>
+<div id="content-inner"><div id="abs">
+<div class="dateline">[Submitted on 12 Jun 2017 (<a href="/abs/1706.03762v1">v1</a>), last revised 2 Aug 2023 (this version, v7)]</div>
+<h1 class="title mathjax"><span class="descriptor">Title:</span>Attention Is All You Need</h1>
+<div class="authors"><span class="descriptor">Authors:</span><a href="/a/vaswani">Ashish Vaswani</a>, <a href="/a/shazeer">Noam Shazeer</a>, <a href="/a/parmar">Niki Parmar</a></div>
+<blockquote class="abstract mathjax"><span class="descriptor">Abstract:</span>The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.</blockquote>
+<div class="metatable"><table summary="Additional metadata">
+<tr><td class="tablecell label">Comments:</td><td class="tablecell comments mathjax">15 pages, 5 figures</td></tr>
+<tr><td class="tablecell label">Cite as:</td><td class="tablecell arxivid"><span class="arxivid"><a href="/abs/1706.03762">arXiv:1706.03762</a> [cs.CL]</span></td></tr>
+<tr><td class="tablecell label">&nbsp;</td><td class="tablecell arxivdoi"><a href="https://doi.org/10.48550/arXiv.1706.03762">https://doi.org/10.48550/arXiv.1706.03762</a></td></tr>
+</table></div></div></div></div></div></body></html>`
+
+/** A GOV.UK news story: its description meta, a NewsArticle JSON-LD node that names the story with `name`, and the From/Published list. */
+const govukStory = `<html lang="en"><head><title>Applications open for inquest training course - GOV.UK</title>
+<meta name="description" content="Applications are now open for training providers to submit an inquest training course to us for approval.">
+<meta name="govuk:first-published-at" content="2026-10-08T15:53:00+01:00">
+<script type="application/ld+json">{"@context":"http://schema.org","@type":"NewsArticle","mainEntityOfPage":{"@type":"WebPage","@id":"https://www.gov.uk/government/news/approved-training-course-for-inquests"},"name":"Applications open for inquest training course","datePublished":"2026-10-08T15:53:00+01:00","dateModified":"2026-10-16T13:00:37+01:00","text":"Applications are now open for training providers to submit an inquest training course to us for approval.","publisher":{"@type":"Organization","name":"GOV.UK","url":"https://www.gov.uk"}}</script>
+<script type="application/ld+json">{"@context":"http://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"item":{"name":"Home","@id":"https://www.gov.uk/"}}]}</script>
+</head><body><main id="content" class="govuk-main-wrapper">
+<h1 class="gem-c-heading__text govuk-heading-xl">Applications open for inquest training course</h1>
+<p class="gem-c-lead-paragraph">Applications are now open for training providers to submit an inquest training course to us for approval.</p>
+<dl class="gem-c-metadata__list"><dt>From:</dt><dd><a href="/government/organisations/legal-aid-agency">Legal Aid Agency</a></dd>
+<dt>Published:</dt><dd>8 October 2026</dd><dt>Last updated:</dt><dd>16 October 2026</dd></dl>
+<div class="govspeak"><p>${'Training providers can now apply to have an inquest training course approved, so that providers of legal help at inquests can meet the new supervision standard. '.repeat(3)}</p></div>
+</main></body></html>`
+
+/** Wikipedia's taxobox: rank labels in data cells ending in a colon, under header rows. */
+const octopusInfobox = `<html lang="en"><head><title>Octopus - Wikipedia</title></head><body><main id="content"><h1>Octopus</h1>
+<div class="mw-parser-output"><table class="infobox biota"><tbody>
+<tr><th colspan="2">Octopus</th></tr>
+<tr><td colspan="2">Common octopus (Octopus vulgaris)</td></tr>
+<tr><th colspan="2">Scientific classification</th></tr>
+<tr><td>Kingdom:</td><td><a href="/wiki/Animal">Animalia</a></td></tr>
+<tr class="taxonrow"><td>Phylum:</td><td><a href="/wiki/Mollusca">Mollusca</a></td></tr>
+<tr class="taxonrow"><td>Order:</td><td><a href="/wiki/Octopus">Octopoda</a><br><small><a href="/wiki/William_Elford_Leach">Leach</a>, 1818</small></td></tr>
+</tbody></table>
+<p>${'The octopus is a soft-bodied, eight-limbed mollusc of the order Octopoda, with around 300 species. '.repeat(3)}</p></div></main></body></html>`
+
 /** A FetchResult for inline HTML, with the document the HTTP lane attaches. */
 function page(html: string, url = 'https://books.example/catalogue/a-light-in-the-attic_1000/index.html'): FetchResult {
   const out = extractTf.extract(html, { url })
   return {
     ...result, requestedUrl: url, markdown: 'page', evidence: { ...result.evidence, finalUrl: url }, metadata: out.metadata,
-    document: { title: out.title, pageType: out.pageType, strategy: out.strategy, confidence: out.confidence, product: out.product ?? null, adapter: out.adapter, entities: out.entities, adapterValidation: out.adapterValidation, labelledValues: out.labelledValues },
+    document: { title: out.title, pageType: out.pageType, strategy: out.strategy, confidence: out.confidence, product: out.product ?? null, adapter: out.adapter, entities: out.entities, adapterValidation: out.adapterValidation, labelledValues: out.labelledValues, declaredValues: out.declaredValues },
   }
 }
 const json = (properties: Record<string, JsonSchema>, required: string[], modelFallback = false): JsonFormatRequest => ({
@@ -449,6 +493,117 @@ describe('structured JSON extraction', () => {
     expect(out.issues.map(issue => [issue.code, issue.path])).toEqual([['field_ambiguous', '/price'], ['missing_required', '/price']])
     expect(out.issues[0]?.message).toContain('"Price (excl. tax)" = "£40.00"')
     expect(out.issues[0]?.message).toContain('"Price (incl. tax)" = "£48.00"')
+  })
+
+  it('takes a scholarly page\'s title, authors and date from its citation_* tags, never from a heading above the title', async () => {
+    const out = await extractStructured(page(arxivAbstract, 'https://arxiv.org/abs/1706.03762'), json({
+      title: { type: 'string' }, authors: { type: 'array', items: { type: 'string' } }, author: { type: ['string', 'null'] }, date: { type: 'string' },
+      doi: { type: ['string', 'null'] }, submitted: { type: ['string', 'null'] }, comments: { type: 'string' }, citeAs: { type: 'string' },
+    }, ['title', 'authors', 'date']), {}, null)
+    expect(out.data).toEqual({
+      title: 'Attention Is All You Need', authors: ['Vaswani, Ashish', 'Shazeer, Noam', 'Parmar, Niki'], author: null, date: '2017/06/12',
+      doi: null, submitted: null, comments: '15 pages, 5 figures', citeAs: 'arXiv:1706.03762 [cs.CL]',
+    })
+    expect(out.evidence).toEqual([
+      { path: '/title', source: 'meta', evidencePath: 'meta[name="citation_title"]' },
+      { path: '/authors', source: 'meta', evidencePath: 'meta[name="citation_author"]' },
+      { path: '/date', source: 'meta', evidencePath: 'meta[name="citation_date"]' },
+      { path: '/comments', source: 'dom', evidencePath: 'table[0] tr[0] "Comments:"' },
+      { path: '/citeAs', source: 'dom', evidencePath: 'table[0] tr[1] "Cite as:"' },
+    ])
+    // Eight authors do not fit one string; the DOI row has no label and no citation_doi tag names it; "Submitted on" is prose.
+    expect(out.issues).toEqual([
+      { code: 'field_unavailable', path: '/author', message: 'the page declares 3 values for citation_author (meta[name="citation_author"]); a string holds one, so none was chosen' },
+      { code: 'field_unavailable', path: '/doi', message: 'no verified source for this nullable field on the selected page' },
+      { code: 'field_unavailable', path: '/submitted', message: 'no verified source for this nullable field on the selected page' },
+    ])
+    expect(out.status).toBe('complete')
+  })
+
+  it('takes a DOI, one author and a publication date from citation_* tags, and the tag name itself as a key', async () => {
+    const html = `<html><head><title>Tidal mixing | Journal of Coasts</title>
+<meta name="citation_title" content="Tidal mixing in shallow estuaries"><meta name="citation_author" content="Okafor, Ada">
+<meta name="citation_publication_date" content="2024/03/05"><meta name="citation_doi" content="10.1234/coasts.2024.17"></head>
+<body><main><h1>Tidal mixing in shallow estuaries</h1><p>${'We measured tidal mixing across nine shallow estuaries over two summers and report the salinity gradients. '.repeat(3)}</p></main></body></html>`
+    const out = await extractStructured(page(html, 'https://journal.example/coasts/17'), json({
+      doi: { type: 'string' }, author: { type: 'string' }, authors: { type: 'array', items: { type: 'string' } }, publicationDate: { type: 'string' }, citation_doi: { type: 'string' },
+    }, ['doi', 'author', 'authors', 'publicationDate', 'citation_doi']), {}, null)
+    expect(out.status).toBe('complete')
+    expect(out.data).toEqual({ doi: '10.1234/coasts.2024.17', author: 'Okafor, Ada', authors: ['Okafor, Ada'], publicationDate: '2024/03/05', citation_doi: '10.1234/coasts.2024.17' })
+    expect(out.evidence.map(item => [item.path, item.source, item.evidencePath])).toEqual([
+      ['/doi', 'meta', 'meta[name="citation_doi"]'],
+      ['/author', 'meta', 'meta[name="citation_author"]'],
+      ['/authors', 'meta', 'meta[name="citation_author"]'],
+      ['/publicationDate', 'meta', 'meta[name="citation_publication_date"]'],
+      ['/citation_doi', 'meta', 'meta[name="citation_doi"]'],
+    ])
+  })
+
+  it('fills description from <meta name="description"> and an article\'s schema.org names from its JSON-LD', async () => {
+    const out = await extractStructured(page(govukStory, 'https://www.gov.uk/government/news/approved-training-course-for-inquests'), json({
+      title: { type: 'string' }, description: { type: 'string' }, headline: { type: 'string' }, datePublished: { type: 'string' },
+      dateModified: { type: 'string' }, published: { type: 'string' },
+    }, ['title', 'description', 'headline', 'datePublished', 'dateModified', 'published']), {}, null)
+    expect(out.status).toBe('complete')
+    expect(out.data).toEqual({
+      title: 'Applications open for inquest training course',
+      description: 'Applications are now open for training providers to submit an inquest training course to us for approval.',
+      headline: 'Applications open for inquest training course', datePublished: '2026-10-08T15:53:00+01:00',
+      dateModified: '2026-10-16T13:00:37+01:00', published: '8 October 2026',
+    })
+    expect(out.evidence).toEqual([
+      { path: '/title', source: 'dom', evidencePath: 'h1[0]' },
+      { path: '/description', source: 'meta', evidencePath: 'meta[name="description"]' },
+      { path: '/headline', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.name' },
+      { path: '/datePublished', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.datePublished' },
+      { path: '/dateModified', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.dateModified' },
+      { path: '/published', source: 'dom', evidencePath: 'dl[0] dt[1] "Published:"' },
+    ])
+  })
+
+  it('fills description on a page that states nothing else about itself', async () => {
+    const html = `<html><head><title>GitHub - python/cpython: The Python programming language</title>
+<meta name="description" content="The Python programming language. Contribute to python/cpython development by creating an account on GitHub."></head>
+<body><main><h1>python/cpython</h1><p>${'This is Python version 3.15.0 alpha 1, the source of the reference interpreter and its standard library. '.repeat(3)}</p></main></body></html>`
+    const out = await extractStructured(page(html, 'https://github.com/python/cpython'), json({ description: { type: 'string' } }, ['description']), {}, null)
+    expect(out.status).toBe('complete')
+    expect(out.data).toEqual({ description: 'The Python programming language. Contribute to python/cpython development by creating an account on GitHub.' })
+  })
+
+  it('leaves out a schema.org name that two articles on the page state differently', async () => {
+    const node = (headline: string, date: string) => `<script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"${headline}","datePublished":"${date}"}</script>`
+    const html = `<html><head><title>Harbour notes</title>${node('Spring tides', '2026-03-01')}${node('Neap tides', '2026-03-08')}</head>
+<body><main><h1>Harbour notes</h1><p>${'Two short notes on the tides in the harbour this month, with the times of high water. '.repeat(3)}</p></main></body></html>`
+    const out = await extractStructured(page(html, 'https://notes.example/tides'), json({ headline: { type: ['string', 'null'] }, datePublished: { type: ['string', 'null'] } }, ['headline', 'datePublished']), {}, null)
+    expect(out.data).toEqual({ headline: null, datePublished: null })
+    expect(out.issues.map(issue => [issue.code, issue.path])).toEqual([['field_ambiguous', '/headline'], ['field_ambiguous', '/datePublished']])
+  })
+
+  it('never fills from a declared value a field whose page labels disagree, nor a product\'s description or a page\'s name from meta or article JSON-LD', async () => {
+    const dated = `<html><head><title>Tide tables</title><meta name="citation_date" content="2017/06/12"><meta name="description" content="Tide tables for the harbour."></head>
+<body><main><h1>Tide tables</h1><p>${'Tide tables for the harbour, with the times of high and low water for each day. '.repeat(3)}</p>
+<table><tr><th>Date</th><td>1 Jan 2020</td></tr><tr><th>Date</th><td>2 Feb 2021</td></tr><tr><th>Description</th><td>Spring</td></tr><tr><th>Description</th><td>Neap</td></tr></table></main></body></html>`
+    const ambiguous = await extractStructured(page(dated, 'https://tides.example/'), json({ date: { type: ['string', 'null'] }, description: { type: ['string', 'null'] } }, ['date', 'description']), {}, null)
+    expect(ambiguous.data).toEqual({ date: null, description: null })
+    expect(ambiguous.issues.map(issue => [issue.code, issue.path])).toEqual([['field_ambiguous', '/date'], ['field_ambiguous', '/description']])
+    // A shop's meta description is its sales line, not the product's description.
+    const shopPage = lamp.replace('<title>Harbour lamp | Shop</title>', '<title>Harbour lamp | Shop</title><meta name="description" content="Buy Harbour lamp online at low price. Free shipping on orders over $50.">')
+    const product = await extractStructured(page(shopPage, 'https://shop.example/lamp'), json({ description: { type: ['string', 'null'] } }, ['description']), {}, null)
+    expect(product.data).toEqual({ description: null })
+    const post = `<html><head><title>Jane Doe</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","name":"Ten tips for gardening"}</script></head>
+<body><main><h1>Jane Doe</h1><p>${'Jane Doe writes about gardening, allotments and the plants that grow well by the sea. '.repeat(3)}</p></main></body></html>`
+    const named = await extractStructured(page(post, 'https://blog.example/jane'), json({ name: { type: ['string', 'null'] }, headline: { type: ['string', 'null'] } }, ['name', 'headline']), {}, null)
+    expect(named.data).toEqual({ name: null, headline: 'Ten tips for gardening' })
+  })
+
+  it('reads an infobox row whose label is a data cell ending in a colon', async () => {
+    const out = await extractStructured(page(octopusInfobox, 'https://en.wikipedia.org/wiki/Octopus'), json({ kingdom: { type: 'string' }, order: { type: 'string' }, family: { type: ['string', 'null'] } }, ['kingdom', 'order', 'family']), {}, null)
+    // A line break in the value cell separates its lines, as on the page.
+    expect(out.data).toEqual({ kingdom: 'Animalia', order: 'Octopoda Leach, 1818', family: null })
+    expect(out.evidence).toEqual([
+      { path: '/kingdom', source: 'dom', evidencePath: 'table[0] tr[3] "Kingdom:"' },
+      { path: '/order', source: 'dom', evidencePath: 'table[0] tr[5] "Order:"' },
+    ])
   })
 
   it('does not fill a nested field from a page-level value that shares its key', async () => {

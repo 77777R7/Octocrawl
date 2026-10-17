@@ -148,6 +148,76 @@ function addLabelCandidates(
   }
 }
 
+/**
+ * Schema keys that name, under another name, what a declared value states
+ * unambiguously, with the declared names to read in order: a scholarly page's
+ * citation tags, and an article's own name in its JSON-LD for its headline.
+ * Any other key matches a declared name only as written (`citation_doi`,
+ * `datePublished`). A submission or other date is not read from a tag that
+ * names a different one.
+ */
+const DECLARED_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
+  author: ['citation_author'],
+  authors: ['citation_author'],
+  doi: ['citation_doi'],
+  date: ['citation_publication_date', 'citation_date'],
+  publicationdate: ['citation_publication_date', 'citation_date'],
+  headline: ['headline', 'name'],
+}
+
+/**
+ * Candidates from what the page's markup declares (DeclaredValue) and its
+ * `<meta name="description">` (not on a product page), for top-level keys
+ * nothing else covers and whose labels did not disagree. An
+ * array field takes every value of a tag; a string field takes its value when
+ * it has one, and is left out, saying why, when a repeated tag has several. Article nodes that state a
+ * property differently leave the field out with a `field_ambiguous` issue.
+ */
+function addDeclaredCandidates(
+  map: Map<string, Candidate>,
+  root: JsonSchema,
+  result: FetchResult,
+  issues: StructuredExtractionIssue[],
+): void {
+  const declared = result.document?.declaredValues ?? []
+  // A shop's meta description is its sales line, not the product's description.
+  const description = result.document?.product === null || result.document?.product === undefined ? result.metadata?.description ?? null : null
+  for (const [name, child] of Object.entries(effective(root, root).properties ?? {})) {
+    const key = labelKey(name)
+    // Labels that disagree leave the field out: a declared value does not settle it.
+    if (key.length === 0 || map.has(name.toLowerCase()) || issues.some(issue => issue.path === `/${name}`)) continue
+    if (key === 'description' && description !== null) {
+      map.set(name.toLowerCase(), { value: description, fact: { source: 'meta', path: 'meta[name="description"]' } })
+      continue
+    }
+    // An article's `name` is its headline, not what a `name` key asks for on the page (a person's, a product's).
+    const exact = declared.filter(item => item.name !== 'name' && labelKey(item.name) === key)
+    const entries = exact.length > 0 ? exact : (DECLARED_SYNONYMS[key] ?? []).map(alias => declared.filter(item => item.name === alias)).find(list => list.length > 0)
+    if (entries === undefined || entries.length === 0) continue
+    const first = entries[0]!
+    const fact: NonNullable<Candidate['fact']> = { source: first.source, path: first.path }
+    if (entries.some(item => JSON.stringify(item.values) !== JSON.stringify(first.values))) {
+      issues.push({
+        code: 'field_ambiguous',
+        path: `/${name}`,
+        message: `the page declares different values for /${name}: ${entries.map(item => `${item.path} = ${JSON.stringify(item.values.join(', '))}`).join(', ')}`,
+      })
+      continue
+    }
+    map.set(name.toLowerCase(), {
+      value: first.values.length === 1 && !schemaTypes(effective(root, child)).includes('array') ? first.values[0]! : [...first.values],
+      fact,
+      ...(first.values.length > 1 ? { unread: `the page declares ${first.values.length} values for ${first.name} (${first.path}); a string holds one, so none was chosen` } : {}),
+    })
+  }
+}
+
+/** A scholarly page's own title, from its citation_title tag: the first heading may name the archive's subject instead (arXiv). */
+function citationTitle(result: FetchResult): Candidate | null {
+  const tag = result.document?.declaredValues?.find(item => item.name === 'citation_title')
+  return tag === undefined || tag.values.length !== 1 ? null : { value: tag.values[0]!, fact: { source: tag.source, path: tag.path } }
+}
+
 function candidates(result: FetchResult, schema?: JsonSchema, issues: StructuredExtractionIssue[] = []): Map<string, Candidate> {
   const map = new Map<string, Candidate>()
   const product = result.document?.product ?? null
@@ -161,7 +231,11 @@ function candidates(result: FetchResult, schema?: JsonSchema, issues: Structured
   map.set('url', { value: result.evidence.finalUrl, fact: { source: 'fetch', path: 'finalUrl' } })
   map.set('requesturl', { value: result.requestedUrl, fact: { source: 'fetch', path: 'requestedUrl' } })
   map.set('finalurl', { value: result.evidence.finalUrl, fact: { source: 'fetch', path: 'finalUrl' } })
-  if (result.document?.title) {
+  const citation = citationTitle(result)
+  if (citation !== null) {
+    map.set('title', citation)
+    map.set('pagetitle', citation)
+  } else if (result.document?.title) {
     const fact = titleFact(result.document.title, result.metadata)
     map.set('title', { value: result.document.title, fact })
     map.set('pagetitle', { value: result.document.title, fact })
@@ -170,6 +244,7 @@ function candidates(result: FetchResult, schema?: JsonSchema, issues: Structured
   if (product !== null) addProductCandidates(map, product, put)
   // A PDF's labels are its `Label: value` lines, each with its page (pdfFields.ts).
   if (schema !== undefined) addLabelCandidates(map, schema, [...(result.document?.labelledValues ?? []), ...pdfLabelledValues(result)], issues)
+  if (schema !== undefined) addDeclaredCandidates(map, schema, result, issues)
   return map
 }
 
@@ -328,6 +403,8 @@ function coerce(value: JsonValue, schema: JsonSchema, readNumbers = true): JsonV
     const reading = readNumbers ? readNumber(value) : null
     return reading !== null && 'value' in reading && (types.includes('number') || Number.isInteger(reading.value)) ? reading.value : undefined
   }
+  // A list of strings is one string only when it holds one: its items are not joined into text the page never wrote.
+  if (types.includes('string') && Array.isArray(value)) return value.length === 1 && typeof value[0] === 'string' ? value[0] : undefined
   if (types.includes('string') && typeof value !== 'string') return String(value)
   if (types.includes('boolean') && typeof value === 'string') {
     if (value === 'true') return true

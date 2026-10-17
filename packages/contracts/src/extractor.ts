@@ -152,7 +152,7 @@ export interface ProductFacts {
 
 /**
  * A value the page states under its own label: a two-cell table row (a `<th>`
- * label and a `<td>` value) or a definition-list pair (one `<dt>`, one
+ * label, or a `<td>` ending in a colon, and a `<td>` value) or a definition-list pair (one `<dt>`, one
  * `<dd>`) in the main content. Both texts are as the page shows them, with
  * whitespace collapsed; nothing is normalized.
  */
@@ -163,6 +163,23 @@ export interface LabelledValue {
    * `table[i] tr[j]` or `dl[i] dt[j]`: zero-based, in document order, the
    * table or list among those in the main content and the row or term in it.
    */
+  path: string
+}
+
+/**
+ * A value the page's markup declares about the work it shows, read for JSON
+ * extraction beside the labels: a Highwire Press `citation_*` meta tag (the
+ * tags Google Scholar reads), every one of a repeated tag such as
+ * `citation_author` in document order, or a property of a schema.org
+ * article node in JSON-LD, one entry per node (`headline`, `name`, `datePublished`,
+ * `dateModified`, `description`), each as written.
+ */
+export interface DeclaredValue {
+  /** The tag's name lowercased (`citation_title`), or the JSON-LD property as written (`datePublished`). */
+  name: string
+  values: readonly string[]
+  source: 'meta' | 'jsonld'
+  /** `meta[name="citation_author"]`, or `ld+json[i] NewsArticle.datePublished` (the i-th JSON-LD script, the node's type). */
   path: string
 }
 
@@ -261,6 +278,8 @@ export interface DocumentExtraction {
   adapterValidation?: AdapterValidation
   /** Label/value pairs of the main content; JSON extraction matches them to schema keys. */
   labelledValues?: readonly LabelledValue[]
+  /** Values the page's citation tags and article JSON-LD declare (see DeclaredValue). */
+  declaredValues?: readonly DeclaredValue[]
 }
 
 /** The rule that decided a page's data is most likely rendered client-side (see RenderSignals). */
@@ -367,6 +386,8 @@ export interface ExtractorOutput {
   render?: RenderSignals
   /** Label/value pairs of the main content (see LabelledValue). */
   labelledValues?: readonly LabelledValue[]
+  /** Values the page's citation tags and article JSON-LD declare (see DeclaredValue). */
+  declaredValues?: readonly DeclaredValue[]
   /** Monotonic extractor stage timings. */
   timings: { parseMs: number; extractMs: number }
 }

@@ -172,6 +172,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
       entities: extracted.entities,
       adapterValidation: extracted.adapterValidation,
       labelledValues: extracted.labelledValues,
+      declaredValues: extracted.declaredValues,
     },
     ...htmlFormats(whole, body, extracted.mainHtml, options),
     usage: { ...base.usage, contentTokens: estimateTokens(markdown) },

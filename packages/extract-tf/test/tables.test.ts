@@ -26,6 +26,21 @@ describe('htmlToTables', () => {
     ])
   })
 
+  it('reads a cladogram drawn with MediaWiki clade tables as a diagram, not as data tables', () => {
+    const leaf = (a: string, b: string) => '<table class="clade"><tbody>' +
+      `<tr><td class="clade-label first"></td><td rowspan="2" class="clade-leaf"><p><a href="/wiki/${a}">${a}</a> <img src="/${a}.jpg" alt=""></p></td></tr><tr><td class="clade-slabel"></td></tr>` +
+      `<tr><td class="clade-label"></td><td rowspan="2" class="clade-leaf"><p><a href="/wiki/${b}">${b}</a></p></td></tr><tr><td class="clade-slabel last"></td></tr>` +
+      '</tbody></table>'
+    const html = '<main><p>The cladogram of the octopods:</p><div class="clade"><table class="clade"><tbody>' +
+      `<tr><td class="clade-label first"><b>Octopoda</b></td><td rowspan="2" class="clade-leaf"><div>${leaf('Cirroteuthidae', 'Stauroteuthidae')}</div></td></tr><tr><td class="clade-slabel"></td></tr>` +
+      `<tr><td class="clade-label">Incirrata</td><td rowspan="2" class="clade-leaf"><div>${leaf('Argonautidae', 'Ocythoidae')}</div></td></tr><tr><td class="clade-slabel last">155 mya</td></tr>` +
+      '</tbody></table></div>' +
+      '<table><tr><th>Species</th><th>Arms</th></tr><tr><td>Common octopus</td><td>8</td></tr></table></main>'
+    expect(htmlToTables(html)).toEqual([{ tableIndex: 0, caption: null, headerRows: 1, rows: [['Species', 'Arms'], ['Common octopus', '8']] }])
+    expect(gfmTables(htmlToMarkdown(html))).toBe(1)
+    expect(htmlToMarkdown(html)).toContain('Cirroteuthidae')
+  })
+
   it('finds the data tables inside a layout table, as the Markdown does', () => {
     const story = (n: number) => `<tr><td>${n}.</td><td>Story ${n}</td></tr>`
     const html = `<table><tr><td>Header</td></tr><tr><td><table>${story(1)}${story(2)}${story(3)}</table></td></tr><tr><td>Footer</td></tr></table>`

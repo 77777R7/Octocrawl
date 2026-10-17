@@ -73,6 +73,7 @@ export class ExtractTfSubject implements SubjectAdapter {
           entities: out.entities,
           adapterValidation: out.adapterValidation,
           labelledValues: out.labelledValues,
+          declaredValues: out.declaredValues,
         }
         routeEvidence = {
           pageType: out.pageType,

@@ -624,6 +624,7 @@ export class ProviderSubject implements SubjectAdapter {
         entities: extracted.entities,
         adapterValidation: extracted.adapterValidation,
         labelledValues: extracted.labelledValues,
+        declaredValues: extracted.declaredValues,
       },
       ...htmlFormats(res.body, res.body, extracted.mainHtml, options),
       ...extra,

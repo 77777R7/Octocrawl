@@ -844,6 +844,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         entities: extracted.entities,
         adapterValidation: extracted.adapterValidation,
         labelledValues: extracted.labelledValues,
+        declaredValues: extracted.declaredValues,
       },
       ...htmlFormats(body, body, extracted.mainHtml, options),
       usage: { ...base.usage, contentTokens },

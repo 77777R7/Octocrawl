@@ -1400,6 +1400,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           entities: extracted.entities,
           adapterValidation: extracted.adapterValidation,
           labelledValues: extracted.labelledValues,
+          declaredValues: extracted.declaredValues,
         },
         // rawHtml is the page as rendered; html comes from the copy extraction read, without its layout markers.
         ...htmlFormats(body, converted, extracted.mainHtml, options),
