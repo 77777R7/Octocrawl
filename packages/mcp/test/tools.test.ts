@@ -9,10 +9,11 @@ import { createMcpServer, mcpOrigin } from '../src/server.js'
 import { parseBaseUrl, parseToken, serveMcpStdio } from '../src/stdio.js'
 import { Client as ModernClient } from '@modelcontextprotocol/client'
 import { InMemoryTransport as ModernInMemoryTransport } from '@modelcontextprotocol/server'
+import { expectIsError } from './toolErrorChecks.js'
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
-    const expected = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch', 'import_login', 'list_logins', 'remove_login',
+    const expected = ['scrape', 'map', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch', 'scrape_product', 'batch_products', 'import_login', 'list_logins', 'remove_login',
       'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
       'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter']
     expect([...TOOL_NAMES]).toEqual(expected)
@@ -381,8 +382,8 @@ describe('MCP tools', () => {
       expect(await mcp.callTool({ name: 'get_scrape', arguments: { id: record.scrapeId } })).toEqual({ content: [{ type: 'text', text: JSON.stringify(record) }] })
       expect(calls.at(-1)?.line).toBe(`GET http://127.0.0.1:8787/v1/scrapes/${record.scrapeId}`)
       // origin is the server's to record: a caller naming one is refused before any API call.
-      await expect(mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', origin: 'spoofed@1' } })).rejects.toThrow('unsupported_parameter: unsupported parameter: origin')
-      await expect(mcp.callTool({ name: 'get_scrape', arguments: {} })).rejects.toThrow('id is required')
+      expectIsError(await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', origin: 'spoofed@1' } }), 'unsupported_parameter: unsupported parameter: origin')
+      expectIsError(await mcp.callTool({ name: 'get_scrape', arguments: {} }), 'id is required')
       expect(calls).toHaveLength(5)
     } finally {
       await mcp.close()
@@ -583,13 +584,15 @@ describe('MCP tools', () => {
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
     await Promise.all([createMcpServer(client).connect(serverSide), mcp.connect(clientSide)])
     try {
-      await expect(mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })).rejects.toMatchObject({
-        message: expect.stringContaining(`unsupported_format: POST /v1/scrape failed: 400 ${JSON.stringify(rejected)}`),
-        data: { code: 'unsupported_format', status: 400 },
+      // The API's code and message, not the raw response; the code and status stay readable in _meta.
+      expect(await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })).toMatchObject({
+        isError: true,
+        content: [{ type: 'text', text: `unsupported_format: ${rejected.error}` }],
+        _meta: { 'octocrawl/error': { code: 'unsupported_format', status: 400 } },
       })
       // Rejected by the shared request parser before any API call, with the same code.
-      await expect(mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', proxy: 'stealth' } })).rejects.toThrow('unsupported_parameter: unsupported parameter: proxy')
-      await expect(mcp.callTool({ name: 'get_batch', arguments: {} })).rejects.toThrow('invalid_request: id is required')
+      expectIsError(await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', proxy: 'stealth' } }), 'unsupported_parameter: unsupported parameter: proxy')
+      expectIsError(await mcp.callTool({ name: 'get_batch', arguments: {} }), 'invalid_request: id is required')
       expect(await mcp.callTool({ name: 'get_batch', arguments: { id: 'batch-1' } })).toEqual({ content: [{ type: 'text', text: '{"taskId":"batch-1","status":"completed"}' }] })
     } finally {
       await mcp.close()
@@ -735,7 +738,7 @@ describe('MCP tools', () => {
   it('names scrape and scrape_product, and claims read-only only where no call can act on a page', () => {
     // scrape takes page actions and an authed mode on a server on the person's machine, so it is not read-only here.
     expect(TOOLS.find((t) => t.name === 'scrape')).toMatchObject({ annotations: { title: 'Scrape a page', openWorldHint: true } })
-    expect((TOOLS.find((t) => t.name === 'scrape') as { annotations: Record<string, unknown> }).annotations.readOnlyHint).toBeUndefined()
+    expect((TOOLS.find((t) => t.name === 'scrape') as { annotations: Record<string, unknown> }).annotations.readOnlyHint).toBe(false)
     expect(TOOLS.find((t) => t.name === 'scrape_product')).toMatchObject({ annotations: { title: 'Amazon.sg product JSON', readOnlyHint: true, openWorldHint: true } })
   })
 
@@ -743,7 +746,7 @@ describe('MCP tools', () => {
     const tool = TOOLS.find((t) => t.name === 'map')!
     expect(Object.keys(tool.inputSchema.properties).sort()).toEqual([...MAP_KEYS.filter((key) => key !== 'origin'), 'debug'].sort())
     expect(tool.inputSchema.additionalProperties).toBe(false)
-    expect('annotations' in tool && tool.annotations).toEqual({ title: 'Map a site', readOnlyHint: true, idempotentHint: true, openWorldHint: true })
+    expect('annotations' in tool && tool.annotations).toEqual({ title: 'Map a site', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true })
     expect('outputSchema' in tool && tool.outputSchema.required).toEqual(['id', 'status', 'stoppedBy', 'links'])
     const native: MapResponse = {
       id: 'map-1', url: 'https://example.com/docs/', status: 'partial', stoppedBy: 'timeout',
@@ -772,9 +775,9 @@ describe('MCP tools', () => {
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
     await Promise.all([createMcpServer(client).connect(serverSide), mcp.connect(clientSide)])
     try {
-      await expect(mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', limit: 0 } })).rejects.toThrow('invalid_request: limit must be an integer from 1 to 100000')
-      await expect(mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', origin: 'x' } })).rejects.toThrow('unsupported_parameter: unsupported parameter: origin')
-      await expect(mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', debug: 'yes' } })).rejects.toThrow('invalid_request: debug must be a boolean')
+      expectIsError(await mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', limit: 0 } }), 'invalid_request: limit must be an integer from 1 to 100000')
+      expectIsError(await mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', origin: 'x' } }), 'unsupported_parameter: unsupported parameter: origin')
+      expectIsError(await mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', debug: 'yes' } }), 'invalid_request: debug must be a boolean')
     } finally {
       await mcp.close()
     }

@@ -22,7 +22,8 @@ import { Hono, type Context } from 'hono'
 import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
-import { createMcpServer, MCP_VERSION } from './server.js'
+import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
+import { serverInstructions } from './instructions.js'
 import { SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
@@ -175,7 +176,8 @@ export function hostedTools(browser: boolean) {
       ...tool,
       description: tool.description.replace(SCRAPE_RECORD_HINT, ''),
       inputSchema: hostedInputSchema(tool.name, tool.inputSchema, browser),
-      annotations: { ...('annotations' in tool ? tool.annotations : {}), readOnlyHint: true },
+      annotations: { ...tool.annotations, readOnlyHint: true },
+      _meta: { ...('_meta' in tool ? tool._meta : {}), ...HOSTED_INVOCATION[tool.name as keyof typeof HOSTED_INVOCATION] },
     }))
 }
 
@@ -230,13 +232,20 @@ export function hostedScrapeArguments(args: unknown): unknown {
   const timeout = (args as { timeout?: unknown }).timeout
   return { ...args, timeout: typeof timeout === 'number' && timeout < HOSTED_MCP_SCRAPE_TIMEOUT_MS ? timeout : HOSTED_MCP_SCRAPE_TIMEOUT_MS }
 }
+/** What ChatGPT shows while a hosted tool runs and once it has (Apps SDK openai/toolInvocation/*, 64 characters at most). */
+const HOSTED_INVOCATION = {
+  scrape: { 'openai/toolInvocation/invoking': 'Reading the page', 'openai/toolInvocation/invoked': 'Read the page' },
+  map: { 'openai/toolInvocation/invoking': "Listing the site's URLs", 'openai/toolInvocation/invoked': "Listed the site's URLs" },
+  scrape_product: { 'openai/toolInvocation/invoking': 'Reading the product page', 'openai/toolInvocation/invoked': 'Read the product page' },
+} as const
 /**
  * The tools /mcp-oauth lists: each declares that it needs OAuth with the `mcp` scope, top level and mirrored in `_meta`
  * for clients that read only `_meta`, as ChatGPT asks (https://developers.openai.com/apps-sdk/build/auth, read 2026-10-16).
  */
 export function oauthTools(browser: boolean) {
   const securitySchemes = [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]
-  return hostedTools(browser).map((tool) => ({ ...tool, securitySchemes, _meta: { securitySchemes } }))
+  // Merged, not replaced: the hosted copies' own _meta (status lines) stays beside securitySchemes.
+  return hostedTools(browser).map((tool) => ({ ...tool, securitySchemes, _meta: { ...tool._meta, securitySchemes } }))
 }
 /** /mcp-oauth's Protected Resource Metadata (RFC 9728). */
 export function oauthResourceMetadata() {
@@ -249,7 +258,7 @@ export function oauthResourceMetadata() {
  */
 export function hostedServerCard() {
   return {
-    serverInfo: { name: 'octocrawl', title: 'Octocrawl', version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server-card&utm_medium=listing' },
+    serverInfo: { ...SERVER_IDENTITY, version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server-card&utm_medium=listing' },
     authentication: { required: false },
     tools: hostedTools(false),
     resources: [],
@@ -791,10 +800,14 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       },
     })
     const post = trackPost(calls, req, res, parsed, [caller.id])
+    const tools = oauth ? oauthTools(caller.browser) : hostedTools(caller.browser === true)
+    const instructions = serverInstructions(tools.map((tool) => tool.name), { kind: 'hosted', connection: oauth ? 'oauth' : caller.kind === 'key' ? 'key' : 'keyless', browser: caller.browser === true, sharedPool: caller.kind === 'keyless' && caller.pool === 'claude' })
     await serveMcpPost(req, res, parsed, () => createMcpServer(client, {
       allowedTools: HOSTED_API_TOOLS,
-      tools: oauth ? oauthTools(caller.browser) : hostedTools(caller.browser === true),
+      tools,
+      instructions,
       calls: post,
+      unavailableHint: 'Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.',
       normalizeCall: (name, args) => {
         if (!HOSTED_API_TOOLS.has(name)) throw new Error(`${name} is not served by hosted Octocrawl: scrape, map and scrape_product only; ${LOCAL_HINT}`)
         if (name === 'scrape_product' && !caller.browser) throw new Error('scrape_product reads Amazon.sg in a browser, which needs a key; keyless callers use scrape over HTTP')

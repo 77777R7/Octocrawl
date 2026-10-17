@@ -141,3 +141,30 @@ Notes:
 | claude.ai custom connector | web app, no version shown; server side `python-httpx/0.28.1`, `Claude-User` | CIMD | yes | yes |
 | ChatGPT custom MCP server | web app, no version shown; server side `openai-connectors-oauth/1.0`, `openai-mcp/1.0.0` | CIMD | yes | yes |
 | Cursor | 3.25.6 | DCR | yes | yes; a call within the minute was refused as a tool error (note above) |
+
+## Codex (added 2026-10-17)
+
+Run 05:14–05:18Z on 2026-10-17, from this Mac with the shell's `HTTPS_PROXY` set (proxied). Client: Codex CLI 0.162.1 (`codex-mcp-client/0.162.1`). Services: `octocrawl-api` revision `octocrawl-api-mcpv2-15c689be` (tag `h19mcpv2`, main `15c689be`), `w2l-public-preview` revision `w2l-public-preview-verified-8444e4ad` (tag `r93verified`).
+
+Commands, as the dashboard's Connect page gives them:
+
+```bash
+codex mcp add octocrawl --url https://mcp.octocrawl.dev/mcp-oauth
+codex exec --skip-git-repo-check -s read-only "Use the octocrawl MCP server's scrape tool on https://example.com and reply with only the page title and the evidence record's sha256 field. Do not use any other tool."
+```
+
+| Time (Z) | What happened |
+| --- | --- |
+| 05:14:25–26 | `codex mcp add` printed "Detected OAuth support. Starting OAuth flow…" and started the sign-in itself: `GET /mcp-oauth` 405, PRM 200, authorization server metadata 200. |
+| 05:14:26–28 | `GET /oauth/authorize` with `client_id=https://chatgpt.com/oauth/codex/client.json`, `redirect_uri=http://127.0.0.1:50490/callback`, `scope=mcp`, `resource` set; Howard chose Authorize (`POST /oauth/authorize` 302). **CIMD.** The metadata document lists `http://127.0.0.1/callback` without a port, so the loopback port is matched loosely. |
+| 05:14:29 | `POST /oauth/token` 200; Codex printed "Successfully logged in." `codex mcp login` was not needed. |
+| 05:14:46–54 | `codex exec`: `POST /mcp-oauth` 200 (initialize), 202 (notification), 200 (`tools/list`), 200 (scrape). Codex answered "Example Domain" and SHA-256 `25ddf2c883e0d1958ea971d279a7e4f0fd446724ee3db7db19dadabd4a62e484`. `hosted_usage` under key `oauth_rDkhTOAp…`, 1 credit (`http`). |
+| 05:14:57 | `DELETE /mcp-oauth` 405 when Codex exited. |
+| 05:15:58 | Howard chose Disconnect on `/dashboard/keys/`: revoke 204. |
+| 05:17:33–34 | Next `codex exec`: `POST /mcp-oauth` **401** with `error="invalid_token"`; refresh `POST /oauth/token` 400. Codex logged `AuthRequired` and did not start the server. No credit was spent. |
+
+Notes:
+
+- In the second run the model then tried a different tool, `codex_apps/octocrawl.scrape`, which comes from Codex's ChatGPT apps rather than from this server, and it stopped at "MCP tool call requires approval". That call did not reach `/mcp-oauth`.
+- The 405s on `GET` and `DELETE /mcp-oauth` are the Streamable HTTP answer for a server without a standalone stream or sessions; Codex carried on.
+- **Cost:** 1 credit from Howard's account.
