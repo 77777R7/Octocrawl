@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import Ajv2020Module from 'ajv/dist/2020.js'
-import { TOOLS } from '../src/tools.js'
+import { TOOL_NAMES, TOOLS } from '../src/tools.js'
 import { selectionOptions } from '../src/toolsets.js'
 import { hostedTools, oauthTools } from '../src/hostedApi.js'
 
@@ -98,6 +98,19 @@ describe('MCP tool surfaces', () => {
           const combinators = ['anyOf', 'oneOf', 'allOf'].filter((key) => key in record)
           expect([surface, tool.name, kind, names, combinators]).toEqual([surface, tool.name, kind, [], []])
         }
+      }
+    }
+  })
+
+  // The Claude directory asks that a description not send the agent to a tool the server does not list ("as on crawl", 2026-10-18).
+  it('names no tool a hosted or OAuth surface does not list, in any tool or parameter description', () => {
+    for (const surface of ['hosted-keyless', 'hosted-key', 'oauth-http', 'oauth-browser']) {
+      const tools = SURFACES[surface]!
+      const unlisted = TOOL_NAMES.filter((name) => !tools.some((tool) => tool.name === name))
+      for (const tool of tools) {
+        const texts = [tool.description, ...descriptionsOf(tool.inputSchema), ...descriptionsOf(tool.outputSchema)]
+        const named = unlisted.filter((name) => texts.some((text) => new RegExp(`\\b${name}\\b`).test(text)))
+        expect([surface, tool.name, named]).toEqual([surface, tool.name, []])
       }
     }
   })
