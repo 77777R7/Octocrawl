@@ -207,3 +207,25 @@ Notes:
 ### Signing out from the client (both, added 2026-10-17)
 
 At 08:46:44Z, after the dashboard disconnects above, `opencode mcp logout octocrawl` printed "Removed OAuth credentials for octocrawl" and `codex mcp logout octocrawl` printed "Removed OAuth credentials for 'octocrawl'."; both clients then listed the server as not signed in. Neither sent `POST /oauth/revoke` (no request to it in the logs from 08:46:30Z; the only OAuth requests were the clients' own discovery and one OpenCode registration from its `mcp list`). So a client's logout removes the tokens from that machine only; the connection itself ends with Disconnect on the dashboard or after 90 days unused.
+
+## Cline (added 2026-10-17): tested with its OAuth settings, not run in Cline
+
+Cline was not installed on this Mac, and Howard chose not to set it up. Instead, the part of the sign-in that depends on the client was run with the same library and the same settings Cline uses. **This is not a run in Cline**: no Cline build, model or UI was involved, and no account signed in.
+
+What Cline sends, read from `cline/cline` main at `a42df8c8d5fd9d9f9a9073589baffe32ea9bb2f0` (2026-10-17; extension `claude-dev` 4.1.25):
+
+- `sdk/packages/core/src/extensions/mcp/oauth.ts:212-220` and `apps/vscode/src/services/mcp/McpOAuthManager.ts:108-116`: dynamic client registration with `client_name` `Cline`, `redirect_uris` `[http://127.0.0.1:<port>/mcp/oauth/callback]`, `grant_types` `authorization_code`, `refresh_token`, `response_types` `code`, `token_endpoint_auth_method` `none`, no `scope`.
+- `McpOAuthManager.ts:48`: ports 1456 to 1461. The `vscode://` callback was removed in commit `4829f08b` (2026-06-19).
+- No metadata document (CIMD); the flow itself is `@modelcontextprotocol/sdk`'s `auth()` through `StreamableHTTPClientTransport`, which resolves to 1.30.0 in Cline's `bun.lock`.
+- On a 401 with no usable token, `McpHub.ts:679-696` shows an Authenticate button.
+
+Run 09:36:46Z on 2026-10-17, proxied, against `octocrawl-api` `h21fields` and `w2l-public-preview` `r96opencode`: a Node script with `@modelcontextprotocol/sdk@1.30.0` gave `StreamableHTTPClientTransport(https://mcp.octocrawl.dev/mcp-oauth)` an `OAuthClientProvider` with exactly the metadata above, called `client.connect`, then fetched the authorization URL the SDK produced, without a session. Once with port 1456, once with 1461.
+
+| Step | Port 1456 | Port 1461 |
+| --- | --- | --- |
+| `client.connect` | `UnauthorizedError` after discovery (expected: it waits for the browser) | same |
+| `POST /oauth/register` | client `occ_ndD4…`, `token_endpoint_auth_method` `none` | client `occ_3z0J…`, same |
+| Authorization request | `redirect_uri` `http://127.0.0.1:1456/mcp/oauth/callback`, `scope` `mcp`, `resource` `https://mcp.octocrawl.dev/mcp-oauth`, `S256`, `code` | the same with port 1461 |
+| `GET /oauth/authorize` | 303 to `/signin/` (no session), not the "This app cannot connect" page | same |
+
+What this does not show: the consent click, the token exchange, a tool call, a token refresh and the 401 after Disconnect were not run with Cline's settings. The server handles those steps the same way whatever metadata a client registered with. The consent, token exchange, a tool call and the 401 after Disconnect were run above with Claude Code CLI, claude.ai, ChatGPT, Cursor, Codex and OpenCode; OpenCode also registered by dynamic client registration with a loopback `/mcp/oauth/callback`. No successful token refresh is recorded in this file for any client (the refreshes above were all after a Disconnect, and got 400). Whether Cline's UI then behaves as its source reads is unknown until someone runs Cline. The two registrations expire after 90 days unused. **Cost:** none.

@@ -279,18 +279,19 @@ describe('Connect leads with sign-in', () => {
     expect([...connect.window.document.querySelectorAll('.install-row')].map(row => row.id)).toEqual(AGENTS.map(id => `c-${id}`))
   })
 
-  it('says which sign-ins have been checked with the real client, and which only follow its docs', async () => {
+  it('says which sign-ins have been checked with the real client, and which were only tested with its settings', async () => {
     const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
     // Checked with the real client (research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md): Claude Code, Cursor, Codex and OpenCode.
     for (const [id, name, day] of [['claude', 'Claude Code', '2026-10-16'], ['cursor', 'Cursor', '2026-10-16'], ['codex', 'Codex', '2026-10-17'], ['opencode', 'OpenCode', '2026-10-17']]) {
       expect(connect.$(`c-${id}`).querySelector('.client-status')!.textContent, id).toBe(`Sign-in checked with ${name} on ${day}`)
       expect(connect.$(`c-${id}`).querySelector('.client-status')!.classList.contains('is-verified'), id).toBe(true)
     }
-    for (const id of ['cline']) {
-      const status = connect.$(`c-${id}`).querySelector('.client-status')!
-      expect(status.textContent, id).toMatch(/^Sign-in not checked with .+ yet: these steps follow its docs$/)
-      expect(status.classList.contains('is-verified'), id).toBe(false)
-    }
+    // Cline: tested with the OAuth settings its source sends, not run in Cline (same record, "Cline" section).
+    const cline = connect.$('c-cline').querySelector('.client-status')!
+    expect(cline.textContent).toBe('Sign-in tested on 2026-10-17 with the OAuth settings Cline sends; not yet run in Cline itself')
+    expect(cline.textContent).not.toMatch(/checked with/)
+    expect(cline.classList.contains('is-verified')).toBe(false)
+    expect(cline.classList.contains('is-tested')).toBe(true)
   })
 
   it('names both MCP URLs: sign-in, and keyless or a key', async () => {
