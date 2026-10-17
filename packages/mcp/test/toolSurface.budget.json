@@ -155,11 +155,11 @@
   },
   "hosted-keyless": {
     "scrape": {
-      "inputBytes": 18247,
+      "inputBytes": 10387,
       "descriptionChars": 507
     },
     "map": {
-      "inputBytes": 3253,
+      "inputBytes": 2911,
       "descriptionChars": 1115
     }
   },
@@ -169,21 +169,21 @@
       "descriptionChars": 105
     },
     "scrape": {
-      "inputBytes": 18247,
+      "inputBytes": 11056,
       "descriptionChars": 507
     },
     "map": {
-      "inputBytes": 3253,
+      "inputBytes": 2911,
       "descriptionChars": 1115
     }
   },
   "oauth-http": {
     "scrape": {
-      "inputBytes": 18247,
+      "inputBytes": 10387,
       "descriptionChars": 507
     },
     "map": {
-      "inputBytes": 3253,
+      "inputBytes": 2911,
       "descriptionChars": 1115
     }
   },
@@ -193,11 +193,11 @@
       "descriptionChars": 105
     },
     "scrape": {
-      "inputBytes": 18247,
+      "inputBytes": 11056,
       "descriptionChars": 507
     },
     "map": {
-      "inputBytes": 3253,
+      "inputBytes": 2911,
       "descriptionChars": 1115
     }
   }
