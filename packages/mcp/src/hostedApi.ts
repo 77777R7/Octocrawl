@@ -22,7 +22,8 @@ import { Hono, type Context } from 'hono'
 import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
-import { createMcpServer, MCP_VERSION } from './server.js'
+import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
+import { serverInstructions } from './instructions.js'
 import { SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
@@ -204,7 +205,7 @@ export function oauthResourceMetadata() {
  */
 export function hostedServerCard() {
   return {
-    serverInfo: { name: 'octocrawl', title: 'Octocrawl', version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server-card&utm_medium=listing' },
+    serverInfo: { ...SERVER_IDENTITY, version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server-card&utm_medium=listing' },
     authentication: { required: false },
     tools: hostedTools(false),
     resources: [],
@@ -746,9 +747,12 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       },
     })
     const post = trackPost(calls, req, res, parsed, [caller.id])
+    const tools = oauth ? oauthTools(caller.browser) : hostedTools(caller.browser === true)
+    const instructions = serverInstructions(tools.map((tool) => tool.name), { kind: 'hosted', connection: oauth ? 'oauth' : caller.kind === 'key' ? 'key' : 'keyless', browser: caller.browser === true, sharedPool: caller.kind === 'keyless' && caller.pool === 'claude' })
     await serveMcpPost(req, res, parsed, () => createMcpServer(client, {
       allowedTools: HOSTED_API_TOOLS,
-      tools: oauth ? oauthTools(caller.browser) : hostedTools(caller.browser === true),
+      tools,
+      instructions,
       calls: post,
       normalizeCall: (name, args) => {
         if (!HOSTED_API_TOOLS.has(name)) throw new Error(`${name} is not served by hosted Octocrawl: scrape, map and scrape_product only; ${LOCAL_HINT}`)

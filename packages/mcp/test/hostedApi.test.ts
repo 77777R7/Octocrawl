@@ -10,6 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from '@modelcontextprotocol/client'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
+import { expectUsableInstructions } from './instructionChecks.js'
 import { TOOL_NAMES } from '../src/tools.js'
 import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore } from '../src/hostedCredits.js'
@@ -573,7 +574,10 @@ it('/mcp and /mcp-oauth serve MCP 2026-07-28 without a session, still answer a 2
     try {
       await client.connect(new ModernTransport(new URL(`${url}${path}`), { requestInit: { headers: auth } }))
       expect(client.getNegotiatedProtocolVersion(), path).toBe('2026-07-28')
-      expect((await client.listTools()).tools.map((tool) => tool.name), path).toEqual(path === '/mcp' ? ['scrape', 'map'] : ['scrape', 'map', 'scrape_product'])
+      const listed = (await client.listTools()).tools.map((tool) => tool.name)
+      expect(listed, path).toEqual(path === '/mcp' ? ['scrape', 'map'] : ['scrape', 'map', 'scrape_product'])
+      // server/discover carries the same instructions initialize does.
+      expectUsableInstructions(client.getInstructions(), listed)
       const result = await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, formats: ['markdown'] } })
       expect(JSON.parse((result.content as { text: string }[])[0]!.text), path).toMatchObject({ status: 'success' })
     } finally { await client.close() }
@@ -753,4 +757,32 @@ it('sweeps scrape and map records and saved files older than the TTL from the ta
   expect(await sweepTaskRoot(dir, 10 * 60_000)).toBe(3)
   for (const sub of ['files', 'scrapes', 'maps']) expect(await readdir(join(dir, sub))).toEqual(['new'])
   await rm(dir, { recursive: true, force: true })
+})
+
+it('answers initialize on every hosted connection with instructions for the tools it lists and the limits it has', async () => {
+  const { url } = await start({
+    keys: { oc_http: { enabled: true, plan: 'free', dailyLimit: 5, browser: false }, oc_browser: { enabled: true, plan: 'free', dailyLimit: 5, browser: true } },
+    keyRecords: { 'connection-1': CONNECTION }, oauthTokens: { oca_good: { keyId: 'connection-1', resource: MCP_OAUTH_RESOURCE, expiresAt: Date.now() + HOUR } },
+  })
+  const rpc = async (path: string, method: string, headers: Record<string, string>) => {
+    const params = method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'instructions-test', version: '1.0.0' } } : {}
+    const response = await post(url, path, { jsonrpc: '2.0', id: 1, method, params }, { accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18', ...headers })
+    return ((await response.json()) as { result: Record<string, unknown> }).result
+  }
+  const surfaces: { path: string; headers: Record<string, string>; has: string[] }[] = [
+    { path: '/mcp', headers: {}, has: ['over HTTP alone', 'daily allowance'] },
+    { path: '/mcp', headers: { authorization: 'Bearer oc_http' }, has: ['over HTTP alone'] },
+    { path: '/mcp', headers: { authorization: 'Bearer oc_browser' }, has: ['browser lane'] },
+    { path: '/mcp-oauth', headers: { authorization: 'Bearer oca_good' }, has: ['credits', 'browser lane'] },
+  ]
+  for (const surface of surfaces) {
+    const init = await rpc(surface.path, 'initialize', surface.headers)
+    const listed = ((await rpc(surface.path, 'tools/list', surface.headers)).tools as { name: string }[]).map((tool) => tool.name)
+    const instructions = init.instructions as string | undefined
+    expectUsableInstructions(instructions, listed)
+    for (const phrase of surface.has) expect([surface.path, surface.headers, instructions!.includes(phrase)]).toEqual([surface.path, surface.headers, true])
+    // Crawls, batches and Monitors are named as what runs on the person's computer, never as tools to call here.
+    expect(instructions).toContain('npx octocrawl serve')
+    expect(init.serverInfo).toMatchObject({ name: 'octocrawl', title: 'Octocrawl', version: MCP_VERSION, description: expect.any(String) })
+  }
 })

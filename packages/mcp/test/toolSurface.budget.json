@@ -1,0 +1,204 @@
+{
+  "local": {
+    "scrape_product": {
+      "inputBytes": 131,
+      "descriptionChars": 105
+    },
+    "batch_products": {
+      "inputBytes": 160,
+      "descriptionChars": 126
+    },
+    "scrape": {
+      "inputBytes": 18247,
+      "descriptionChars": 565
+    },
+    "get_scrape": {
+      "inputBytes": 157,
+      "descriptionChars": 352
+    },
+    "map": {
+      "inputBytes": 3253,
+      "descriptionChars": 1115
+    },
+    "crawl": {
+      "inputBytes": 17745,
+      "descriptionChars": 337
+    },
+    "get_crawl": {
+      "inputBytes": 136,
+      "descriptionChars": 47
+    },
+    "get_crawl_pages": {
+      "inputBytes": 728,
+      "descriptionChars": 406
+    },
+    "get_crawl_errors": {
+      "inputBytes": 212,
+      "descriptionChars": 49
+    },
+    "cancel_crawl": {
+      "inputBytes": 102,
+      "descriptionChars": 54
+    },
+    "resume_crawl": {
+      "inputBytes": 102,
+      "descriptionChars": 106
+    },
+    "list_active_crawls": {
+      "inputBytes": 62,
+      "descriptionChars": 221
+    },
+    "batch_scrape": {
+      "inputBytes": 19945,
+      "descriptionChars": 454
+    },
+    "get_batch": {
+      "inputBytes": 102,
+      "descriptionChars": 42
+    },
+    "get_batch_items": {
+      "inputBytes": 436,
+      "descriptionChars": 48
+    },
+    "wait_batch": {
+      "inputBytes": 161,
+      "descriptionChars": 269
+    },
+    "cancel_batch": {
+      "inputBytes": 102,
+      "descriptionChars": 45
+    },
+    "get_batch_errors": {
+      "inputBytes": 183,
+      "descriptionChars": 409
+    },
+    "hand_off_batch": {
+      "inputBytes": 164,
+      "descriptionChars": 1225
+    },
+    "import_login": {
+      "inputBytes": 208,
+      "descriptionChars": 1156
+    },
+    "list_logins": {
+      "inputBytes": 62,
+      "descriptionChars": 176
+    },
+    "remove_login": {
+      "inputBytes": 137,
+      "descriptionChars": 73
+    },
+    "preview_monitor": {
+      "inputBytes": 396,
+      "descriptionChars": 132
+    },
+    "create_monitor": {
+      "inputBytes": 396,
+      "descriptionChars": 152
+    },
+    "list_monitors": {
+      "inputBytes": 88,
+      "descriptionChars": 41
+    },
+    "get_monitor": {
+      "inputBytes": 129,
+      "descriptionChars": 70
+    },
+    "run_monitor": {
+      "inputBytes": 133,
+      "descriptionChars": 95
+    },
+    "get_monitor_run": {
+      "inputBytes": 163,
+      "descriptionChars": 69
+    },
+    "pause_monitor": {
+      "inputBytes": 129,
+      "descriptionChars": 53
+    },
+    "resume_monitor": {
+      "inputBytes": 129,
+      "descriptionChars": 61
+    },
+    "cancel_monitor_run": {
+      "inputBytes": 136,
+      "descriptionChars": 50
+    },
+    "create_delivery_destination": {
+      "inputBytes": 287,
+      "descriptionChars": 123
+    },
+    "list_delivery_destinations": {
+      "inputBytes": 117,
+      "descriptionChars": 160
+    },
+    "pause_delivery_destination": {
+      "inputBytes": 129,
+      "descriptionChars": 59
+    },
+    "resume_delivery_destination": {
+      "inputBytes": 129,
+      "descriptionChars": 60
+    },
+    "list_deliveries": {
+      "inputBytes": 341,
+      "descriptionChars": 140
+    },
+    "get_delivery": {
+      "inputBytes": 129,
+      "descriptionChars": 44
+    },
+    "retry_dead_letter": {
+      "inputBytes": 102,
+      "descriptionChars": 62
+    }
+  },
+  "hosted-keyless": {
+    "scrape": {
+      "inputBytes": 18247,
+      "descriptionChars": 507
+    },
+    "map": {
+      "inputBytes": 3253,
+      "descriptionChars": 1115
+    }
+  },
+  "hosted-key": {
+    "scrape_product": {
+      "inputBytes": 131,
+      "descriptionChars": 105
+    },
+    "scrape": {
+      "inputBytes": 18247,
+      "descriptionChars": 507
+    },
+    "map": {
+      "inputBytes": 3253,
+      "descriptionChars": 1115
+    }
+  },
+  "oauth-http": {
+    "scrape": {
+      "inputBytes": 18247,
+      "descriptionChars": 507
+    },
+    "map": {
+      "inputBytes": 3253,
+      "descriptionChars": 1115
+    }
+  },
+  "oauth-browser": {
+    "scrape_product": {
+      "inputBytes": 131,
+      "descriptionChars": 105
+    },
+    "scrape": {
+      "inputBytes": 18247,
+      "descriptionChars": 507
+    },
+    "map": {
+      "inputBytes": 3253,
+      "descriptionChars": 1115
+    }
+  }
+}
