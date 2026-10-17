@@ -1,0 +1,240 @@
+{
+  "schema": "octocrawl.field-acceptance-plan/1",
+  "versions": {
+    "candidate": "ca94fdd5e2fd28e892418ba6fa7938b94eeeb3aa",
+    "control": "15c689bec3c35457f07cedfced9d44411736e18e"
+  },
+  "datasetSealSha256": "2aa8c018ec2174f5e376458dd438e0149973debc5c3733a72b32dd8ab83a9c33",
+  "scope": "One retained-source HTTP replay per version/task through production engine/API/SDK compact serialization. No live access comparison, product tuning, MCP assertion or independent human acceptance.",
+  "caseIds": [
+    "H01",
+    "H02",
+    "H03",
+    "H04",
+    "H05",
+    "H06",
+    "H07",
+    "H08"
+  ],
+  "cases": [
+    {
+      "id": "H01",
+      "split": "reserved",
+      "kind": "article",
+      "url": "https://www.rfc-editor.org/rfc/rfc9110.html",
+      "task": "Extract RFC identifier/title, publication month/year, status category and the named authors from the document header.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group.",
+      "checkNeedle": "RFC 9110"
+    },
+    {
+      "id": "H02",
+      "split": "reserved",
+      "kind": "listing",
+      "url": "https://www.gutenberg.org/browse/scores/top",
+      "task": "Extract the first three books in Top 100 EBooks yesterday: ebook ID, title/author display and download count, with the stated reporting date/period.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group.",
+      "checkNeedle": "Top 100 EBooks"
+    },
+    {
+      "id": "H03",
+      "split": "reserved",
+      "kind": "scientific_table",
+      "url": "https://ssd.jpl.nasa.gov/astro_par.html",
+      "task": "Extract the first three stated astrodynamic constants with quantity name, exact value and unit, including uncertainties/definitions when supplied.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group.",
+      "checkNeedle": "Astrodynamic"
+    },
+    {
+      "id": "H04",
+      "split": "reserved",
+      "kind": "dated_table",
+      "url": "https://www.gov.uk/bank-holidays",
+      "task": "Extract the first three England and Wales 2027 bank holidays with full calendar date and holiday name; keep the year and region attached.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group.",
+      "checkNeedle": "bank holidays"
+    },
+    {
+      "id": "H05",
+      "split": "reserved",
+      "kind": "scientific_table",
+      "url": "https://www.nist.gov/pml/owm/metric-si-prefixes",
+      "task": "Extract quetta, ronna, ronto and quecto with symbol and decimal factor; preserve signs/exponents and stated source date if any.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group.",
+      "checkNeedle": "Metric"
+    },
+    {
+      "id": "H06",
+      "split": "reserved",
+      "kind": "registry_table",
+      "url": "https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml",
+      "task": "Extract status codes 200, 404 and 429 with description and reference from their own registry rows; distinguish registry update date from HTTP response date.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group.",
+      "checkNeedle": "HTTP Status"
+    },
+    {
+      "id": "H07",
+      "split": "reserved",
+      "kind": "article",
+      "url": "https://www.w3.org/TR/WCAG22/",
+      "task": "Extract the exact WCAG version/title, displayed specification status/date and three named conformance levels from the source.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group.",
+      "checkNeedle": "WCAG"
+    },
+    {
+      "id": "H08",
+      "split": "reserved",
+      "kind": "article",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map",
+      "task": "Extract the method identity, callback parameter names, return-value statement and explicit last-modified date; do not use navigation or Array length as this method's value.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group.",
+      "checkNeedle": "map()"
+    }
+  ],
+  "fixtureOrigin": "http://127.0.0.1:8862",
+  "request": {
+    "formats": [
+      "markdown",
+      "tables",
+      "links"
+    ],
+    "debug": false,
+    "onlyMainContent": true,
+    "fastMode": true,
+    "maxAge": 0,
+    "storeInCache": false,
+    "timeout": 30000
+  },
+  "slots": [
+    {
+      "id": "01-H01-candidate",
+      "caseId": "H01",
+      "version": "candidate"
+    },
+    {
+      "id": "02-H01-control",
+      "caseId": "H01",
+      "version": "control"
+    },
+    {
+      "id": "03-H02-control",
+      "caseId": "H02",
+      "version": "control"
+    },
+    {
+      "id": "04-H02-candidate",
+      "caseId": "H02",
+      "version": "candidate"
+    },
+    {
+      "id": "05-H03-candidate",
+      "caseId": "H03",
+      "version": "candidate"
+    },
+    {
+      "id": "06-H03-control",
+      "caseId": "H03",
+      "version": "control"
+    },
+    {
+      "id": "07-H04-control",
+      "caseId": "H04",
+      "version": "control"
+    },
+    {
+      "id": "08-H04-candidate",
+      "caseId": "H04",
+      "version": "candidate"
+    },
+    {
+      "id": "09-H05-candidate",
+      "caseId": "H05",
+      "version": "candidate"
+    },
+    {
+      "id": "10-H05-control",
+      "caseId": "H05",
+      "version": "control"
+    },
+    {
+      "id": "11-H06-control",
+      "caseId": "H06",
+      "version": "control"
+    },
+    {
+      "id": "12-H06-candidate",
+      "caseId": "H06",
+      "version": "candidate"
+    },
+    {
+      "id": "13-H07-candidate",
+      "caseId": "H07",
+      "version": "candidate"
+    },
+    {
+      "id": "14-H07-control",
+      "caseId": "H07",
+      "version": "control"
+    },
+    {
+      "id": "15-H08-control",
+      "caseId": "H08",
+      "version": "control"
+    },
+    {
+      "id": "16-H08-candidate",
+      "caseId": "H08",
+      "version": "candidate"
+    }
+  ],
+  "denominators": {
+    "tasksPerVersion": 8,
+    "fieldsPerVersion": 77,
+    "requiredFieldsPerVersion": 75,
+    "optionalFieldsPerVersion": 2,
+    "capturedRequiredFieldsPerVersion": 75,
+    "requiredNotCapturedInReservedGroup": 0,
+    "unscoredDevelopmentRequiredNotCaptured": 54
+  },
+  "mapping": {
+    "source": "Sealed gold field/entity IDs, type and context refs. Never modify annotations.",
+    "tablePrecedence": "Nonempty structured tables first; Markdown pipe tables only when no nonempty table array exists. Cross-format duplication is not record duplication.",
+    "H01": "RFC document header before Abstract/Status/TOC, max8000chars; RFC ID/title/category/month/authors. Title may use explicit page metadata; no fetch-time substitution.",
+    "H02": "Top100 EBooks yesterday heading section, records by same-link ebook URL/id, title by author (count); first report table ISO day; explicit downloads context.",
+    "H03": "Constant quantity in first cell, symbol second, numeric value and unit in third. No year/date inference.",
+    "H04": "England and Wales2027 table caption; same-row date/weekday/name, year from caption.",
+    "H05": "Named prefix cell with next symbol/factor; exponent operators or actual powers of ten only; concatenate1030 never repaired to10^30. Updated date must be explicit.",
+    "H06": "Status code first cell, description second, reference third; Last Updated source label date.",
+    "H07": "WCAG2.2 title, W3C Recommendation header date, For Level A/AA/AAA conformance clauses rather than TOC.",
+    "H08": "Method article title, parameter term lines in Parameters, first Return value paragraph, explicit last-modified date; capture time forbidden.",
+    "urlNormalization": "Only fixture origin is rebased to original source origin; original path retained. Raw serialized URLs remain stored.",
+    "valueNormalization": "Whitespace/Markdown links, typographic apostrophes, exact Decimal without rounding; IDs/SI symbols preserve case. Dates preserve month/day precision."
+  },
+  "metrics": {
+    "primary": "Fully correct required fields /75, requiring entity,value,known unit,date,period and same-source hash. All77slots including optional separately reported.",
+    "fieldCorrectness": "Fully correct /observed fields, with missing and value-only/context-missing counts separate; null denominator stays null.",
+    "evidence": "Independent source locatability from immutable gold proof plus same-source hash and output location; explicit product field citations are not requested and not claimed.",
+    "duplicates": "Extra records among selected identities in primary representation; article duplicate rate not estimated.",
+    "taskAccepted": "All required selected fields fully correct and no selected-record duplicate. Configured identity checks remain separate.",
+    "unknown": "Missing/unresolvable output never filled from expected labels or capture timestamp. Unexpected output shapes remain evaluator-unresolved; diagnostic review cannot change the frozen primary score."
+  },
+  "budgets": {
+    "logicalScrapes": 16,
+    "targetExternalRequests": 0,
+    "expectedSourceBodyReads": 16,
+    "perScrapeTimeoutMs": 30000,
+    "retries": 0,
+    "enhanced": false,
+    "browser": false,
+    "model": false,
+    "paidProvider": false
+  },
+  "stop": "Pause before startup/next slot on actual other tests/acceptance/API or13:50–14:10/20:50–21:10 CST; close own services. Attempted slots never rerun. Source/runtime fault recorded as first failure. No selector/code/contract tuning after unseal."
+}
