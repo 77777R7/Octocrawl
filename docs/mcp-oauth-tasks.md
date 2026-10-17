@@ -139,7 +139,7 @@
 
 1. ChatGPT 是否要求工具声明 `securitySchemes`，还是 401 就够。**2026-10-16 查过，按文档做了（R4）。** 查的是 https://developers.openai.com/apps-sdk/build/auth 和 https://developers.openai.com/plugins/reference：文档建议每个工具都声明 `securitySchemes`（即使整个服务器用同一个策略），放在工具对象顶层，参考页另列 `_meta["securitySchemes"]` 作为只读 `_meta` 的客户端的镜像；401 的 `WWW-Authenticate` 用来让 ChatGPT 找到 metadata。文档没有说只返回 401、不声明 `securitySchemes` 行不行，这一点仍未核实，要等 D4 用真实的 ChatGPT 连一次才知道。
 2. Cursor 和 VS Code 是否支持 CIMD，以及它们的回调地址。论坛和 issue 里说 VS Code 用 `https://vscode.dev/redirect` 加 `127.0.0.1:33418`，Cursor 桌面版用 `http://localhost:8787/callback`。不确定之前 DCR 必须保留。
-3. Codex 和 Windsurf 的 OAuth 细节。
+3. Codex 和 Windsurf 的 OAuth 细节。**Codex 2026-10-17 查过**：Codex CLI 0.162.1 走 CIMD（`https://chatgpt.com/oauth/codex/client.json`），回调是 `http://127.0.0.1:<随机端口>/callback`，带 `resource` 和 `scope=mcp`；`codex mcp add` 发现服务器要 OAuth 就直接开始登录，不需要再跑 `codex mcp login`。断开后下一次请求收到 401。记录在 `research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md` 的 Codex 一节。Windsurf 仍未核实。
 4. 真实客户端是否都发 `resource`，以及 scope 会不会带 `mcp` 以外的值（比如 `offline_access`）。按 A4，`/oauth/authorize` 要求 `resource` 必须等于 `/mcp-oauth`，scope 只能是 `mcp` 或空，不符合就拒绝。如果 D4 里有客户端因此失败，再决定要不要放宽。
 5. ChatGPT 会不会按我们只公布 `none` 来选认证方式（它自己的文档写的是 `private_key_jwt`）。服务器不校验 `client_assertion`，所以理论上两种都能通过，要等 D4 实际连一次才能确认。
 6. ChatGPT 的 auth 文档说服务器要在根路径 `/.well-known/oauth-protected-resource` 提供 metadata，我们只在带路径后缀的 `/.well-known/oauth-protected-resource/mcp-oauth` 提供，根路径照旧返回 404（决定 4）。ChatGPT 也会读 401 里的 `resource_metadata`，按 MCP 规范应该够了，要等 D4 确认。
