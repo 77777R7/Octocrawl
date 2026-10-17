@@ -31,16 +31,21 @@
 .dm-window { overflow: hidden; border: 1px solid var(--edge); border-radius: 16px; background: #0a1f50; box-shadow: 0 40px 80px -30px rgba(0, 6, 24, .9); }
 .dm-chrome { display: flex; gap: 7px; padding: 14px 16px; }
 .dm-chrome i { width: 11px; height: 11px; border-radius: 50%; background: rgba(168, 201, 250, .2); }
-.dm-tabs { display: flex; overflow-x: auto; border-top: 1px solid var(--edge); border-bottom: 1px solid var(--edge); background: rgba(4, 16, 46, .55); scrollbar-width: none; }
-.dm-tab { position: relative; display: inline-flex; flex: none; align-items: center; gap: 10px; padding: 13px 18px; border: 0; border-right: 1px solid var(--edge); color: var(--on-navy-3); background: none; font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: color .2s, background .2s; }
+.dm-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--edge); border-bottom: 1px solid var(--edge); background: rgba(4, 16, 46, .55); scrollbar-width: none; }
+.dm-tab { position: relative; display: flex; min-width: 0; align-items: center; gap: 10px; padding: 13px 18px; border: 0; border-right: 1px solid var(--edge); color: var(--on-navy-3); background: none; font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: color .2s, background .2s; }
 .dm-tab:hover { color: var(--on-navy); }
+.dm-tab:last-child { border-right: 0; }
+.dm-tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dm-md .md-link { color: #ffc59a; text-decoration: underline; text-decoration-color: rgba(251, 154, 108, .45); text-underline-offset: 3px; }
 .dm-tab[aria-selected="true"] { color: #fff; background: #0a1f50; }
 .dm-tab[aria-selected="true"]::before { content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--orange); }
 .dm-icon { display: inline-grid; flex: none; place-items: center; min-width: 20px; height: 20px; padding: 0 3px; border-radius: 5px; color: #0a1f50; background: #f4f6fb; font: 700 11px/1 Georgia, serif; }
 .dm-icon.is-docs { color: #ffd343; background: #2f5f8f; font: 700 9.5px/1 var(--mono); }
 .dm-icon.is-amazon { color: #fff; background: var(--orange); font: 700 13px/1 var(--mono); }
 .dm-pane[hidden] { display: none; }
-.dm-out { position: relative; height: 720px; overflow: hidden; }
+/* The pane fits the first screen under the headline, so the whole read, landing and all, plays in sight; the octopus
+   dives through three panes of raw HTML as the view follows it. */
+.dm-out { position: relative; height: clamp(320px, calc(100vh - 540px), 600px); overflow: hidden; }
 .dm-md { height: 100%; margin: 0; padding: 22px 26px; overflow: hidden; color: #ffc59a; font: 13px/1.75 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; -webkit-mask-image: linear-gradient(180deg, #000 82%, transparent); mask-image: linear-gradient(180deg, #000 82%, transparent); }
 .md-punct { color: #6f86b0; }
 .md-heading, .md-strong { color: #fff; font-weight: 700; }
@@ -174,7 +179,7 @@
 }
 @media (max-width: 600px) {
   .pd-intro { padding: 32px 4px 32px; }
-  .dm-out { height: 560px; }
+  .dm-out { height: clamp(320px, calc(100vh - 360px), 480px); }
   .dm-md { padding: 16px; font-size: 12px; }
   .dm-tab { padding: 12px 14px; font-size: 13px; }
   .sc-grid { padding: 64px 4px; }

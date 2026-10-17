@@ -1,9 +1,10 @@
 /** The hero demo's read, its own octopus: the page's raw HTML as it was returned fills the pane and "Reading <host>"
  * shows; a glyph octopus dives in head first from the top, its eight arms streaming up behind it and lengthening as it
- * speeds up, faster and faster all the way down. Every row its arms sweep turns, there and then, into that row of the
- * Markdown the same read returned, decoding outward from the octopus's column. At the foot it squashes, lets go a puff
- * of ink and fades into it, and the rows it never reached decode from where it landed outward. Then the pane's own
- * markup (the same Markdown) takes over. Every cell keeps its place on the grid; only its glyph, brightness and colour
+ * speeds up, faster and faster all the way down. The raw HTML runs longer than the pane, and the view follows the
+ * octopus down it, so its landing is always in sight. Every row its arms sweep turns, there and then, into that row of
+ * the Markdown the same read returned (as the pane shows it, link targets folded), decoding outward from the octopus's
+ * column. At the foot it squashes, lets go a puff of ink and fades into it, the rows it never reached decode from where
+ * it landed, the view glides back to the top, and the pane's own markup (the same Markdown) takes over. Every cell keeps its place on the grid; only its glyph, brightness and colour
  * change. Nothing plays with reduced motion or without a canvas: the Markdown shows as it is. */
 
 const NAVY = '#0a1f50'
@@ -18,11 +19,18 @@ const PAD_Y = 22
 const WEAVE_MS = 320
 const ENTER_AT = 650
 const DIVE_AT = 900
-const DIVE_MS = 1700
+const DIVE_MS = 2000
 const LAND_AT = DIVE_AT + DIVE_MS
 const INK_MS = 900
-const FADE_AT = LAND_AT + 950
+// After the ink, the view glides back to the top of the page before the pane's markup takes over.
+const BACK_AT = LAND_AT + 750
+const BACK_MS = 700
+const FADE_AT = BACK_AT + BACK_MS + 120
 const FADE_MS = 360
+// The raw HTML the octopus dives through: at least the pane, at most this many panes of it.
+const DEPTH = 3
+// While it dives the view keeps it this far down the pane.
+const FOLLOW = 0.62
 // A cell decoding runs down the density ramp, then shows the Markdown's character.
 const DECODE_MS = 150
 const RAMP = ['X', 'x', '+', ':']
@@ -90,6 +98,7 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
   let pitchX = 7.5
   let cols = 0
   let visible = 0
+  let rows = 0
   let rawRows: string[] = []
   let mdRows: string[] = []
   // When each cell turns into the Markdown, on the run's clock.
@@ -108,14 +117,18 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
     pitchX = ctx.measureText('M').width
     cols = Math.max(SPRITE_W + 6, Math.floor((width - 2 * PAD_X) / pitchX))
     visible = Math.max(MANTLE.length + 6, Math.floor((height - 2 * PAD_Y) / PITCH_Y))
-    rawRows = gridRows(raw, cols, false).slice(0, visible)
-    mdRows = gridRows(markdown, cols, true).slice(0, visible)
-    decodeAt = Array.from({ length: visible }, () => Array.from({ length: cols }, () => Infinity))
+    rawRows = gridRows(raw, cols, false).slice(0, visible * DEPTH)
+    rows = Math.max(visible, rawRows.length)
+    mdRows = gridRows(markdown, cols, true).slice(0, rows)
+    decodeAt = Array.from({ length: rows }, () => Array.from({ length: cols }, () => Infinity))
     octoX = Math.floor((cols - SPRITE_W) * 0.46)
   }
-  const ground = (): number => visible - 1
+  // Rows are the page's (0 at its top, `ground` its last); the view shows `visible` of them from `view(t)` on.
+  const ground = (): number => rows - 1
   const x = (col: number): number => PAD_X + col * pitchX + pitchX / 2
-  const y = (row: number): number => PAD_Y + row * PITCH_Y + PITCH_Y / 2
+  let top = 0
+  const y = (row: number): number => PAD_Y + (row - top) * PITCH_Y + PITCH_Y / 2
+  const shown = (row: number): boolean => row >= top && row < top + visible
   const centre = (): number => octoX + SPRITE_W / 2
 
   /** How far the dive has gone (0 to 1): a small start speed, then faster and faster. */
@@ -131,10 +144,18 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
     return Math.round(first + dive(t) * (ground() - first))
   }
 
+  /** The first row in view: following the octopus down while it dives, holding while it lands, then gliding back up. */
+  const view = (t: number): number => {
+    const last = rows - visible
+    if (t < BACK_AT) return Math.max(0, Math.min(last, lead(t) - Math.round(visible * FOLLOW)))
+    const k = clamp01((t - BACK_AT) / BACK_MS)
+    return Math.round(last * (1 - k * k * (3 - 2 * k)))
+  }
+
   /** The rows the arms have swept decode from the octopus's column outward; once it lands, the rest from there. */
   function mark(t: number): void {
     const swept = t < DIVE_AT ? -1 : lead(t) - MANTLE.length
-    for (let r = 0; r < visible; r++) {
+    for (let r = 0; r < rows; r++) {
       const row = decodeAt[r]!
       if (row[0] !== Infinity) continue
       if (r <= swept) {
@@ -146,8 +167,8 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
   }
 
   function drawRows(t: number): void {
-    for (let r = 0; r < visible; r++) {
-      if (t - r * (WEAVE_MS / visible) < 0) continue
+    for (let r = top; r < Math.min(rows, top + visible); r++) {
+      if (t - (r - top) * (WEAVE_MS / visible) < 0) continue
       const rawRow = rawRows[r] ?? ''
       const mdRow = mdRows[r] ?? ''
       const heading = mdRow.startsWith('#')
@@ -180,7 +201,7 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
 
   /** A row of the sprite, its cells covering what is under them. */
   function spriteRow(line: string, row: number, left: number, colour: (ch: string) => string, alpha: number): void {
-    if (row < 0 || row > ground()) return
+    if (row < 0 || row > ground() || !shown(row)) return
     const first = line.search(/\S/)
     if (first < 0) return
     const last = line.length - 1 - [...line].reverse().join('').search(/\S/)
@@ -231,7 +252,7 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
         const a = Math.PI + (Math.PI * s) / Math.max(1, steps - 1)
         const col = Math.round(centre() + Math.cos(a) * rr)
         const row = Math.round(ground() + Math.sin(a) * rr * 0.45)
-        if (col < 0 || col >= cols || row < 0 || row > ground()) continue
+        if (col < 0 || col >= cols || row < 0 || row > ground() || !shown(row)) continue
         ctx.globalAlpha = (1 - k) * (1 - ring * 0.28)
         ctx.fillStyle = k < 0.3 ? '#ff9a66' : ring === 0 ? '#a8c9fa' : '#6f86b0'
         ctx.fillText(INK[(s + ring * 2) % INK.length]!, x(col), y(row))
@@ -248,6 +269,7 @@ export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDon
     ctx.textBaseline = 'middle'
     out.classList.toggle('is-scraping', t < LAND_AT)
     if (t >= FADE_AT) out.classList.add('is-fading')
+    top = view(t)
     mark(t)
     drawRows(t)
     drawInk(t)

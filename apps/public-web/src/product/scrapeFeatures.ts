@@ -3,6 +3,7 @@
  * here calls an API, except that the Evidence Record section hashes the recorded docs page's bytes (a copy served from
  * this site) in the reader's browser. */
 import { mountDrop, type Drop } from './scrapeDrop'
+import { foldedText } from './scrapeMarkdown'
 import { DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE } from './scrapeRun'
 
 const NOISE = '0123456789abcdef'
@@ -37,7 +38,7 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null): voi
       const out = pane.querySelector<HTMLElement>('.dm-out')
       const id = pane.dataset.demo!
       const demo = DEMOS.find((d) => d.id === id)
-      const drop = out && demo ? mountDrop(out, demo.rawHead, demo.markdownHead, () => { if (replay) replay.hidden = false }) : null
+      const drop = out && demo ? mountDrop(out, demo.rawHead, foldedText(demo.markdownHead), () => { if (replay) replay.hidden = false }) : null
       if (drop) drops.set(id, drop)
     }
   }
@@ -65,7 +66,7 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null): voi
   new IntersectionObserver(([entry]) => {
     onScreen = Boolean(entry?.isIntersecting)
     if (onScreen) play(current)
-  }, { threshold: 0.45 }).observe(console_)
+  }, { threshold: 0.8 }).observe(console_)
 }
 
 /** The hard ones: three recorded runs behind tabs; a run's facts arrive in turn. */

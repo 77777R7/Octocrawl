@@ -85,3 +85,16 @@ The redesigned hero shows each page's raw HTML turning into its Markdown, so the
 In every response the SHA-256 of `rawHtml` (UTF-8) equals the record's `rawSha256`: the raw HTML is the bytes that were read. The page shows the first 4,200 characters of it and the first 60 lines of the Markdown, as returned. `apps/public-web/public/samples/python-docs-datetime.html.txt` is the datetime read's `rawHtml`.
 
 The datetime page's bytes differed from the 09:28 read (`bad4d2ec…`) in one line only: "Last updated on Oct 17, 2026 (07:21 UTC)" became "(14:17 UTC)". The Octopus page's 16:00 bytes hash to `0a1cc6ca…`, the variant seen at 07:37, not the 09:28 one.
+
+
+## The three demo pages with their content only (18:17–18:18 UTC)
+
+The hero's Markdown had read as clutter (badges, the infobox, breadcrumbs and many links), so each page was read again asking for its content with `includeTags`, on the same server (`h22nasa`, `ea3b0d7d`), keyless REST, direct egress, `formats: ["rawHtml", "markdown"]`. The Octopus page was read twice; the second request, below, added nested paragraphs and `h3`.
+
+| Page | fetchedAt (UTC) | includeTags | Bytes | rawSha256 | Markdown lines / tokens |
+|---|---|---|---|---|---|
+| Octopus | 2026-10-17T18:18:04.012Z | `h1, .mw-parser-output section > p, .mw-parser-output h2, .mw-parser-output h3` | 922,203 | `0a1cc6ca…3f8de562` | 189 / 15,463 |
+| datetime | 2026-10-17T18:17:37.919Z | `section#module-datetime > h1, section#module-datetime > p, section#module-datetime > section > h2, section#module-datetime > section > p` | 429,471 | `9964af63…7f8abe7c` | 147 / 2,606 |
+| Amazon.sg | 2026-10-17T18:17:41.006Z | `#productTitle, #bookDescription_feature_div, #detailBullets_feature_div` | 1,370,190 | `9964e182…9c34f59a` | 25 / 953 |
+
+`rawHtml` hashes to `rawSha256` in every response. The page shows the first 6,000 characters of the raw HTML and the first 60 lines of the Markdown (Amazon's is 25 lines in all). When it shows the Markdown it folds link targets: a link shows as its text with its target in a tooltip, an image as its alt text, a footnote mark as `[a]`, and the first link to another page stays whole (`apps/public-web/src/product/scrapeMarkdown.ts`). The Markdown itself is kept as returned.

@@ -7,6 +7,7 @@ import { pages } from '../scripts/docsPages.mjs'
 import { NAV_CAPABILITIES } from '../scripts/siteNav.mjs'
 import { scrapeSnippet } from '../src/product/scrapeCode'
 import { gridRows } from '../src/product/scrapeDrop'
+import { foldMarkdown, foldedText } from '../src/product/scrapeMarkdown'
 import { SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
 import { DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, HARD, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
 
@@ -38,8 +39,9 @@ describe('the /scrape/ product page', () => {
     expect(DEMOS.map(d => d.url)).toEqual(['https://en.wikipedia.org/wiki/Octopus', 'https://docs.python.org/3/library/datetime.html', 'https://www.amazon.sg/dp/0135957052'])
     for (const d of DEMOS) {
       expect(markup).toContain(`id="dm-pane-${d.id}"`)
-      expect(d.rawHead.length).toBe(4200)
-      expect(d.markdownHead.split('\n')).toHaveLength(60)
+      expect(d.rawHead.length).toBe(6000)
+      expect(d.includeTags.length).toBeGreaterThan(0)
+      expect(d.markdownHead.split('\n')).toHaveLength(Math.min(60, d.markdownLines))
     }
     expect(DEMOS[0]!.markdownHead.startsWith('# Octopus\n')).toBe(true)
     expect(markup.match(/class="dm-pane"/g)).toHaveLength(3)
@@ -49,6 +51,14 @@ describe('the /scrape/ product page', () => {
   it('lays the raw HTML and the Markdown on the octopus’s grid as the pane shows them', () => {
     expect(gridRows('<a  href="x">\n\n<b>', 8, false)).toEqual(['<a href=', '"x">', '<b>'])
     expect(gridRows('# Octopus\n\nAn **octopus**', 20, true)).toEqual(['# Octopus', '', 'An **octopus**'])
+  })
+
+  it('folds link targets when it shows the Markdown, keeping the first whole and every word', () => {
+    const md = 'An **octopus**[[a]](#cite_note-3) is a [mollusc](https://en.wikipedia.org/wiki/Mollusc) of the [order](https://en.wikipedia.org/wiki/Order_(biology)) ![x](https://i.png)'
+    expect(foldedText(md)).toBe('An **octopus**[a] is a [mollusc](https://en.wikipedia.org/wiki/Mollusc) of the order x')
+    expect(foldMarkdown(md)[0]!.find(s => s.text === 'order')?.url).toBe('https://en.wikipedia.org/wiki/Order_(biology)')
+    // Folding drops only link syntax: the shown text is the Markdown with each folded link's brackets and target taken out.
+    for (const d of DEMOS) expect(foldedText(d.markdownHead).replace(/\s/g, '').length).toBeLessThanOrEqual(d.markdownHead.replace(/\s/g, '').length)
   })
 
   it('hashes the docs page as recorded: the served copy is the bytes that were read, with one cell to change', () => {

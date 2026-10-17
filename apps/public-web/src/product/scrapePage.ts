@@ -1,6 +1,7 @@
 import { footerMarkup, siteHeaderMarkup } from '../page'
 import { glyphCloud } from '../glyphArt'
 import { scrapeSnippet } from './scrapeCode'
+import { foldMarkdown } from './scrapeMarkdown'
 import { DEMOS, DOCS, DOCS_CELL, HARD } from './scrapeRun'
 
 /** /scrape/: what scraping a page with Octocrawl gives, shown on real scrapes recorded on hosted Octocrawl
@@ -23,13 +24,24 @@ function markdownLine(text: string): string {
     .replace(/\]\((https?:\/\/[^\s)]+(?:\([^\s)]*\))?|#[^\s)]+)\)/g, '<span class="md-punct">](</span><span class="md-url">$1</span><span class="md-punct">)</span>')
 }
 
+/** A page's Markdown as the demo shows it: link targets folded (scrapeMarkdown.ts), headings and bold marked. */
+function foldedHtml(markdown: string): string {
+  return foldMarkdown(markdown).map((segments) => {
+    const heading = /^#{1,6} /.test(segments[0]?.text ?? '')
+    const html = segments.map((s) => (s.url
+      ? `<span class="md-link" title="${esc(s.url)}">${esc(s.text)}</span>`
+      : heading ? esc(s.text) : markdownLine(s.text))).join('')
+    return heading ? `<span class="md-heading">${html.replace(/^(#{1,6})/, '<span class="md-punct">$1</span>')}</span>` : html
+  }).join('\n')
+}
+
 /** The hero's demo, kept plain: a browser window, a tab per page, and the page's Markdown as the read returned it.
  * scrapeDrop.ts plays the read over it (the raw HTML, the octopus's drop, the Markdown). */
 function demo(): string {
-  const tabs = DEMOS.map((d, i) => `<button class="dm-tab" type="button" role="tab" id="dm-tab-${d.id}" aria-controls="dm-pane-${d.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-demo="${d.id}"><span class="dm-icon is-${d.id}" aria-hidden="true">${d.icon}</span>${esc(d.tab)}</button>`).join('')
+  const tabs = DEMOS.map((d, i) => `<button class="dm-tab" type="button" role="tab" id="dm-tab-${d.id}" aria-controls="dm-pane-${d.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-demo="${d.id}"><span class="dm-icon is-${d.id}" aria-hidden="true">${d.icon}</span><span class="dm-tab-title">${esc(d.tab)}</span></button>`).join('')
   const panes = DEMOS.map((d, i) => `
             <div class="dm-pane" role="tabpanel" id="dm-pane-${d.id}" aria-labelledby="dm-tab-${d.id}" data-demo="${d.id}"${i ? ' hidden' : ''}>
-              <div class="dm-out"><pre class="dm-md" aria-label="The start of the Markdown Octocrawl returned for ${esc(d.url)}">${d.markdownHead.split('\n').map(markdownLine).join('\n')}</pre><canvas class="dm-drop" aria-hidden="true"></canvas><p class="dm-pill" aria-hidden="true"><span class="dm-glyph"><i>X</i><i>x</i><i>+</i><i>:</i></span>Reading <b>${esc(new URL(d.url).hostname)}</b></p></div>
+              <div class="dm-out"><pre class="dm-md" aria-label="The start of the Markdown Octocrawl returned for ${esc(d.url)}">${foldedHtml(d.markdownHead)}</pre><canvas class="dm-drop" aria-hidden="true"></canvas><p class="dm-pill" aria-hidden="true"><span class="dm-glyph"><i>X</i><i>x</i><i>+</i><i>:</i></span>Reading <b>${esc(new URL(d.url).hostname)}</b></p></div>
             </div>`).join('')
   return `
           <div class="dm-window">
@@ -221,7 +233,7 @@ ${siteHeaderMarkup()}      <main aria-labelledby="pd-title">
         </div>
         <div class="band">
           <div class="frame dm-frame">${demo()}
-            <p class="pd-caption"><span>Three real pages read on hosted Octocrawl on 17 October 2026: the start of the raw HTML and of the Markdown that read returned. Wikipedia text: <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>.</span><button class="pd-replay" type="button" id="dm-replay" hidden><span aria-hidden="true">↻</span> Play again</button></p>
+            <p class="pd-caption"><span>Three real pages read on hosted Octocrawl on 17 October 2026, each asking for its content (<code>includeTags</code>): the start of the raw HTML and of the Markdown that read returned. Link targets are folded here except the first; point at a link to see where it goes. Wikipedia text: <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>.</span><button class="pd-replay" type="button" id="dm-replay" hidden><span aria-hidden="true">↻</span> Play again</button></p>
           </div>
         </div>
       </main>
