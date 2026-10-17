@@ -14,7 +14,7 @@ claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp
 
 The server is added for that project only, which is the default `--scope local`. Use `--scope user` to have it in every project, or `--scope project` to share it with your team through the repository's `.mcp.json`. `claude mcp list` checks that it connects. The [Claude Code MCP docs](https://code.claude.com/docs/en/mcp) cover the scopes in more detail.
 
-Claude Code then has three tools from hosted Octocrawl:
+Without a key, Claude Code then lists two tools from hosted Octocrawl, `map` and `scrape`; a key with the browser lane adds `scrape_product`:
 
 | Tool | What it does | Without a key |
 | --- | --- | --- |

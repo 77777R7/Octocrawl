@@ -34,7 +34,7 @@ Clients can also [sign in instead of sending a key](#sign-in-instead-of-a-key).
 
 `https://mcp.octocrawl.dev/mcp-oauth` is the same server for clients that sign in with OAuth instead of sending a key. The client opens an Octocrawl page where you sign in and choose Authorize. Its calls then spend your account's credits, as a key's do, and show under the client's name in [Activity](/dashboard/activity/). Each connection is listed under MCP connections on [API keys](/dashboard/keys/), where you can disconnect it; it also ends after 90 days unused. An account holds up to ten connections, besides its five keys.
 
-Use one URL per client: `/mcp` for keyless use or a key, `/mcp-oauth` for sign-in. Both setups below were checked on 2026-10-16: each client signed in, ran a scrape on the account's credits, and was refused after the connection was disconnected ([record](https://github.com/77777R7/Octocrawl/blob/main/research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md)). Another client that follows the MCP authorization spec should sign in the same way, but has not been checked here.
+Use one URL per client: `/mcp` for keyless use or a key, `/mcp-oauth` for sign-in. The Claude Code and Cursor setups below were checked on 2026-10-16: each client signed in, ran a scrape on the account's credits, and was refused after the connection was disconnected ([record](https://github.com/77777R7/Octocrawl/blob/main/research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md)). Another client that follows the MCP authorization spec should sign in the same way, but has not been checked here.
 
 ### Claude Code
 
@@ -55,6 +55,17 @@ Checked with Claude Code 2.1.301 on 2026-10-16.
 Merge this into `.cursor/mcp.json` (or `~/.cursor/mcp.json` for every project) with no `headers`, and sign in when Cursor asks for it. The key setup above keeps working on `/mcp`. ([Cursor's guide](https://cursor.com/docs/mcp))
 
 Checked with Cursor 3.25.6 on 2026-10-16.
+
+### Codex
+
+```bash
+codex mcp add octocrawl --url https://mcp.octocrawl.dev/mcp-oauth
+codex mcp login octocrawl
+```
+
+`codex mcp login octocrawl` signs in with OAuth, and `codex mcp logout octocrawl` signs it out. The key setup above keeps working on `/mcp`. ([Codex's guide](https://learn.chatgpt.com/docs/extend/mcp))
+
+Reported working; not checked here yet.
 
 ## Send your first task
 
