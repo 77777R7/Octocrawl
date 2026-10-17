@@ -8,7 +8,7 @@ import { FIELDS, HARD, LINKS, MARKDOWN, MISSING, PAGE, RUN, TABLE, WHOLE_EXTRA }
 
 export const SCRAPE_PATH = '/scrape/'
 export const SCRAPE_TITLE = 'Web Scraping API: Markdown and Checked Fields | Octocrawl'
-export const SCRAPE_DESCRIPTION = 'Turn any web page into Markdown, links, tables and source-checked fields, with an Evidence Record for every result. A page that is blocked or refused comes back with the reason, and costs nothing.'
+export const SCRAPE_DESCRIPTION = 'Turn any web page into Markdown, links, tables and source-checked fields your agent reads in fewer tokens than raw HTML, with an Evidence Record for every result.'
 
 const esc = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const short = (hash: string): string => `${hash.slice(0, 8)}…${hash.slice(-8)}`
