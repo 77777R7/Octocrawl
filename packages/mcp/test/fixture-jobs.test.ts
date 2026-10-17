@@ -61,4 +61,19 @@ describe('MCP crawl and batch results against the fixture catalog', () => {
     report('wait_batch (3 URLs)', JSON.stringify(waited).length)
     report('get_batch_items (3 items)', JSON.stringify(items).length)
   })
+  // crawl and batch_scrape declare formats and verify loosely (docs/mcp-client-ux-tasks.md W7.4), so the server's parsing is the check.
+  it('refuses on crawl and batch_scrape the formats and verify that scrape\'s schema would not allow', async () => {
+    const url = `${fixtures.url}/crawl/listing`
+    for (const bad of [{ formats: ['nonsense'] }, { formats: [{ type: 'json', schema: 5 }] }, { verify: { checks: [{ type: 'bogus' }] } }, { verify: { checks: [{ type: 'markdownIncludes' }] } }]) {
+      await expect(callTool(client, 'crawl', { url, maxPages: 1, ...bad }), JSON.stringify(bad)).rejects.toMatchObject({ status: 400 })
+      await expect(callTool(client, 'batch_scrape', { urls: [url], ...bad }), JSON.stringify(bad)).rejects.toMatchObject({ status: 400 })
+    }
+  })
+
+  it('judges a verify contract sent on batch_scrape as scrape does', async () => {
+    const started = (await callTool(client, 'batch_scrape', { urls: [`${fixtures.url}/crawl/item/1`], formats: ['markdown'], verify: { checks: [{ type: 'markdownIncludes', text: 'zzz-not-on-the-page' }] } })) as { taskId: string }
+    await callTool(client, 'wait_batch', { id: started.taskId, timeoutMs: 20_000 })
+    const items = (await callTool(client, 'get_batch_items', { id: started.taskId })) as { items: Array<{ verification?: { status?: string } }> }
+    expect(items.items[0]?.verification?.status).toBe('failed')
+  })
 })
