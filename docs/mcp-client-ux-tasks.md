@@ -450,19 +450,39 @@
 
 现状（`e1e128d4`）：`wait_batch` 用自己的计时器，默认 30,000、上限 300,000（tools.ts 711–721，schema 454），超时返回 `getBatch`。SDK 有 `waitCrawl`（`packages/sdk/src/client.ts:585`）和 `WaitTimeoutError`（137–142，带 `last`）。`listen.ts:173` hosted `defaultMaxPages: 100`（也是上限，`engine.ts:1955` 拒绝超过的），`listen.ts:203` 本地 null（无上限）；`localHost.ts` 没设。本地今天“省略 maxPages”和“显式 null”是同一个意思。`DEFAULT_SCRAPE_TIMEOUT_MS = 300_000`（`packages/contracts/src/api.ts:26`）；hosted MCP 已经是 100 s（W6）。v2 SDK 里进度用 `ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress, total?, message? } })`，token 在 `request.params._meta?.progressToken`。
 
-- [ ] **W9.1** 新增 `wait_crawl`：照 `wait_batch` 的写法（自己的计时器，超时返回 `getCrawl` 的当前状态），`timeoutMs` 默认 30,000，上限和 wait_batch 统一（D12 默认 120,000；同时把 wait_batch 的上限从 300,000 降到 120,000，写进 CHANGELOG）。超时附 `Next: wait_crawl again or get_crawl_pages`。遵守中止信号，只读（加进 PRESENTATION、TOOL_NAMES，crawl 组）。hosted 有 crawl 之前不在 hosted 列出。`instructions.ts:23-24` 的路由句改成 “crawl, then wait_crawl, then get_crawl_pages”。本地变成 39 个工具，`toolSurface.budget.json` 加一行。
-- [ ] **W9.2** crawl、batch_scrape、batch_products 的描述写出 wait 步骤和保留期（W5.8 挪过来的）：本地 scrape 和 map 记录没有保留期限；crawl 和 batch 的保留期从引擎读，读不到就写“未核实”。
-- [ ] **W9.3** 本地 crawl 的 `maxPages` 缺省值：MCP 层只在请求里**没有** `maxPages` 键时套用 D12 的值（默认 100）并在结果里回显；显式的 `null` 继续表示“用服务器默认值”（本地无上限）。需要确认 `parseCrawlStartRequest` 能把显式 `null` 原样传下去。hosted 不受影响（本来就有 100 的上限，hosted 也不提供 crawl）。
-- [ ] **W9.4** 本地 MCP scrape 默认超时：降到 D12 的值（默认 120 s），只在 MCP 层、只在省略 `timeout` 时；REST 和契约仍是 300 s。my-browser、handoff、hand_off_batch（默认 600 s）、import_login（默认 120 s）保留长等待，描述开头写明“会等本人，最多 N 分钟”。
-- [ ] **W9.5** 进度通知（D16）：`McpServerOptions.progress` 打开时，请求带了 progressToken 就发：wait_batch 和 wait_crawl 每次轮询发一条（如 `12/40 pages`，每 5 s 最多一条）；需要本人参与的等待每 10–15 s 发一次心跳，说明本人该做什么。stdio 和 2026-07-28 的 HTTP 路径打开；旧协议的 JSON 模式送不到，不开。导出的 `callTool` 加可选的 `onProgress`，签名只增不改。
-- [ ] **W9.6** 上游中止：扩展 `httpCancellation.test.ts`（已有本地 scrape 取消、断开、hosted wait_batch 取消等用例），测试被取消的 scrape 是否释放浏览器租约、是否不扣费，并记录结果。如果不中止，在本清单另开一项（属于引擎改动）。
-- [ ] **W9.7** CHANGELOG Unreleased 写清所有默认值变更；结果里回显实际用的值。
+- [x] **W9.1** 新增 `wait_crawl`：照 `wait_batch` 的写法（自己的计时器，超时返回 `getCrawl` 的当前状态），`timeoutMs` 默认 30,000，上限和 wait_batch 统一（D12 默认 120,000；同时把 wait_batch 的上限从 300,000 降到 120,000，写进 CHANGELOG）。超时附 `Next: wait_crawl again or get_crawl_pages`。遵守中止信号，只读（加进 PRESENTATION、TOOL_NAMES，crawl 组）。hosted 有 crawl 之前不在 hosted 列出。`instructions.ts:23-24` 的路由句改成 “crawl, then wait_crawl, then get_crawl_pages”。本地变成 39 个工具，`toolSurface.budget.json` 加一行。
+- [x] **W9.2** crawl、batch_scrape、batch_products 的描述写出 wait 步骤和保留期（W5.8 挪过来的）：本地 scrape 和 map 记录没有保留期限；crawl 和 batch 的保留期从引擎读，读不到就写“未核实”。
+- [x] **W9.3** 本地 crawl 的 `maxPages` 缺省值：MCP 层只在请求里**没有** `maxPages` 键时套用 D12 的值（默认 100）并在结果里回显；显式的 `null` 继续表示“用服务器默认值”（本地无上限）。需要确认 `parseCrawlStartRequest` 能把显式 `null` 原样传下去。hosted 不受影响（本来就有 100 的上限，hosted 也不提供 crawl）。
+- [x] **W9.4** 本地 MCP scrape 默认超时：降到 D12 的值（默认 120 s），只在 MCP 层、只在省略 `timeout` 时；REST 和契约仍是 300 s。my-browser、handoff、hand_off_batch（默认 600 s）、import_login（默认 120 s）保留长等待，描述开头写明“会等本人，最多 N 分钟”。
+- [x] **W9.5** 进度通知（D16）：`McpServerOptions.progress` 打开时，请求带了 progressToken 就发：wait_batch 和 wait_crawl 每次轮询发一条（如 `12/40 pages`，每 5 s 最多一条）；需要本人参与的等待每 10–15 s 发一次心跳，说明本人该做什么。stdio 和 2026-07-28 的 HTTP 路径打开；旧协议的 JSON 模式送不到，不开。导出的 `callTool` 加可选的 `onProgress`，签名只增不改。
+- [x] **W9.6** 上游中止：扩展 `httpCancellation.test.ts`（已有本地 scrape 取消、断开、hosted wait_batch 取消等用例），测试被取消的 scrape 是否释放浏览器租约、是否不扣费，并记录结果。如果不中止，在本清单另开一项（属于引擎改动）。
+- [x] **W9.7** CHANGELOG Unreleased 写清所有默认值变更；结果里回显实际用的值。
 - 验收：
   - 先写失败测试：本地夹具站点上不带 maxPages 的 crawl 跟随的页数超过 100；给了 progressToken 也不发进度；本地 MCP scrape 不写 timeout 时用的是 300 s。
   - 改完后：缺 maxPages 键套用默认值并回显，显式 null 行为不变（各一个测试）；wait_crawl 完成、超时、取消、timeoutMs 超上限四种情况各有测试；进度值严格递增、每 5 s 最多一条、结果之后不再发、旧协议 HTTP 上不发；取消测试记录引擎工作是否停止。
   - 在 Claude Code 里用 wait_crawl 真实爬一次 quotes.toscrape.com，记录命令、commit、是否走代理。
 - 指标：带有界等待的 crawl 0 → 1；不需要本人参与的工具里最长的默认同步等待 300,000 → 120,000 ms；发进度的工具 0 → 6；取消后上游是否停止：未核实 → 已测试。
 - 决定：D12、D16。
+- 结果（PR #577）：
+  - wait_crawl 已加上：自己的计时器，超时时返回当前报告，并提示再等一次或去读 get_crawl_pages。wait_batch 和 wait_crawl 的 timeoutMs 上限统一为 120,000。本地工具变成 39 个，hosted 不列出 wait_crawl。
+  - 默认值只在 MCP 层生效，REST 和 SDK 不变：
+    - crawl 请求里没有 `maxPages` 键时，套用 100，并在返回里回显 `maxPages: 100`；显式 `null` 仍然是服务器默认值（本地没有上限）。
+    - scrape 请求里没有 `timeout` 键时，用 120 s。需要等本人的读取（lane 或 access 为 my-browser、handoff）不套用，保留服务器默认值。hosted 本来就自己设成 100 s。
+  - 进度：stdio 和本地 2026-07-28 路径打开，旧协议的 JSON 路径关闭（serveMcpPost 的工厂函数现在会收到 `{ legacy }`）。
+    - wait_crawl 和 wait_batch 每次轮询后发进度，数值严格递增，每 5 s 最多一条，batch 带上总数。
+    - import_login、hand_off_batch 和等本人的 scrape 每 12 s 发一次心跳，说明本人该做什么。
+    - 返回结果之后不再发送。
+    - `callTool` 加了可选的 `onProgress`，SDK 的 `WaitOptions` 加了可选的 `onPoll`，都是只增不改。
+  - 保留期：引擎里找不到任何删除任务的逻辑，所以描述里写的是 “How long the server keeps them is not stated”。
+  - **上游中止（W9.6）已测试**：hosted 的 MCP scrape 中途被取消后，浏览器租约会释放，credits 不扣（grant 仍是 1,000）。本地 scrape 被取消后会关闭上游连接，这一点已有测试覆盖。**不需要另开引擎改动。**
+  - 真实站点：用 stdio MCP 跑 `wait_crawl` 爬 https://quotes.toscrape.com/，commit 2e7d013e，走代理（127.0.0.1:7890），本地 API 用 `npm run api` 启动。
+    - crawl 没写 maxPages，返回里回显了 100。
+    - 一次 wait_crawl（timeoutMs 120,000）在 109 s 内返回 completed，共 100 页。
+    - 收到 22 条进度通知，间隔约 5 s，从 0 增到 98。
+    - 这次是用 MCP SDK 的客户端脚本跑的，**不是在 Claude Code 里跑的**。
+  - 体积：本地 tools/list 48,829 → 49,962 字符；scrape 10,000 字节，刚好在上限；hosted 不变。
+  - 干净上下文的审查找出 3 个阻塞问题，都已修好：类型检查错误；maxPages 的说明和新默认值矛盾；长任务测试放在了并行的 unit 组。
+  - 检查：`npm run typecheck` 和 `npm run build:public` 都通过；`npm test` 258 个文件、3091 个测试通过（1 个 todo）。E2 没跑。
 
 ## W10 本地工具集和只读模式　M
 
@@ -568,6 +588,6 @@
 
 - **W1–W6 全部完成**：都已合并、部署（hosted API、网站），并随 0.6.0 发布到 npm、PyPI 和 MCP Registry。线上版本以 `gcloud run services describe` 读到的为准（几个窗口都会部署）。
 - **2026-10-17 Howard：W7–W10 现在开始（D1′），一项一个 PR，按 W7 → W8 → W9 → W10 的顺序。** W7–W10 的行号和基线已在 `e1e128d4` 上重新核对。
-- W7（#570）和 W7.4（#573）已合并；**W8（#575）已开 PR，等合并**。scrape ≤8,000 和 hosted scrape ≤5,000 没达到，要达到只能删安全提示，不建议。
-- 下一个是 **W9**（wait_crawl、安全默认值、进度、上游中止测试）：等 #573 和 #575 合并后，从当时的 `origin/main` 拉分支。W8 遗留：Cursor 冒烟测试；下一版去掉 JSON 里的截图 base64。
+- W7（#570）、W7.4（#573）、W8（#575）已合并；**W9（#577）已开 PR，等合并**。scrape ≤8,000 和 hosted scrape ≤5,000 没达到，要达到只能删安全提示，不建议。
+- 下一个是 **W10**（本地工具集和只读模式）：等 #577 合并后，从当时的 `origin/main` 拉分支。遗留：W8 的 Cursor 冒烟测试；下一版去掉 JSON 里的截图 base64；在 Claude Code 里真实跑一次 wait_crawl；W7–W10 都做完后发 0.7.0（W9 改了默认值，CHANGELOG 已经写明）。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。
