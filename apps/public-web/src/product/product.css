@@ -9,7 +9,7 @@
 /* The coastal road, the whole painting at the hero's width from its top, fading into the navy below; the glyph layer
    (heroGlyphs.ts, road scene) lights it in its own glyphs. */
 .pd-art { position: absolute; top: 0; left: 0; z-index: -2; isolation: isolate; width: 100%; aspect-ratio: 1672 / 941; pointer-events: none; -webkit-mask-image: linear-gradient(180deg, #000 78%, transparent); mask-image: linear-gradient(180deg, #000 78%, transparent); }
-.pd-art .hero-backdrop { background-image: url('/assets/scene-road.webp'); background-position: center top; }
+.pd-art .hero-backdrop { background-image: url('/assets/scene-road.webp'); background-position: center top; filter: none; }
 /* The headline sits on the starry sky; the shade deepens towards the demo window so the window's edges stay calm. */
 .pd-shade { background: radial-gradient(ellipse 46% 30% at 50% 22%, rgba(3, 14, 45, .5), transparent 70%), linear-gradient(180deg, rgba(3, 14, 45, .28) 0%, rgba(3, 14, 45, .1) 30%, rgba(3, 14, 45, .25) 55%, rgba(3, 14, 45, .7) 100%); }
 .pd-hero .band-header { position: relative; z-index: 20; }

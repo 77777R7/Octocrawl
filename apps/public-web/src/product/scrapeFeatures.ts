@@ -36,8 +36,8 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null): voi
     for (const pane of panes) {
       const out = pane.querySelector<HTMLElement>('.dm-out')
       const id = pane.dataset.demo!
-      const raw = DEMOS.find((d) => d.id === id)?.rawHead ?? ''
-      const drop = out ? mountDrop(out, raw, () => { if (replay) replay.hidden = false }) : null
+      const demo = DEMOS.find((d) => d.id === id)
+      const drop = out && demo ? mountDrop(out, demo.rawHead, demo.markdownHead, () => { if (replay) replay.hidden = false }) : null
       if (drop) drops.set(id, drop)
     }
   }

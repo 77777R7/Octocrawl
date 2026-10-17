@@ -6,6 +6,7 @@ import { blogPath, posts } from '../scripts/blogPosts.mjs'
 import { pages } from '../scripts/docsPages.mjs'
 import { NAV_CAPABILITIES } from '../scripts/siteNav.mjs'
 import { scrapeSnippet } from '../src/product/scrapeCode'
+import { gridRows } from '../src/product/scrapeDrop'
 import { SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
 import { DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, HARD, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
 
@@ -43,6 +44,11 @@ describe('the /scrape/ product page', () => {
     expect(DEMOS[0]!.markdownHead.startsWith('# Octopus\n')).toBe(true)
     expect(markup.match(/class="dm-pane"/g)).toHaveLength(3)
     expect(markup.match(/class="ft-hard"/g)).toHaveLength(HARD.length)
+  })
+
+  it('lays the raw HTML and the Markdown on the octopus’s grid as the pane shows them', () => {
+    expect(gridRows('<a  href="x">\n\n<b>', 8, false)).toEqual(['<a href=', '"x">', '<b>'])
+    expect(gridRows('# Octopus\n\nAn **octopus**', 20, true)).toEqual(['# Octopus', '', 'An **octopus**'])
   })
 
   it('hashes the docs page as recorded: the served copy is the bytes that were read, with one cell to change', () => {

@@ -1,45 +1,83 @@
-/** The hero demo's read, in the home page's crawl window's glyphs (octopusGlyphs.ts): the page's raw HTML as it was
- * returned fills the pane, "Reading <host>" shows, the glyph octopus peeks in at the top and drops to the foot faster and
- * faster, the rows it passes run down the density ramp into a glyph texture, it lands with a thud (the ground row's
- * shock, a burst of rays, dust and flying bits, the pane jumping a row), and the raw HTML gives way to the result,
- * which is the pane's own markup (the Markdown). Every cell keeps its place on the grid; only its glyph, brightness and colour change.
- * Nothing plays with reduced motion or without a canvas: the result shows as it is. */
-import {
-  ARMS, BURST, BURST_FADE_MS, BURST_GROW_MS, BURST_HOLD_MS, clamp01, DEBRIS, DUST, easeOut, HOT, MANTLE, RAMP, SHAKE,
-  SHAKE_STEP_MS, SPRITE_H, SPRITE_W, SQUASH, TEXTURE, THUD_MS,
-} from '../octopusGlyphs'
+/** The hero demo's read, its own octopus: the page's raw HTML as it was returned fills the pane and "Reading <host>"
+ * shows; a glyph octopus dives in head first from the top, its eight arms streaming up behind it and lengthening as it
+ * speeds up, faster and faster all the way down. Every row its arms sweep turns, there and then, into that row of the
+ * Markdown the same read returned, decoding outward from the octopus's column. At the foot it squashes, lets go a puff
+ * of ink and fades into it, and the rows it never reached decode from where it landed outward. Then the pane's own
+ * markup (the same Markdown) takes over. Every cell keeps its place on the grid; only its glyph, brightness and colour
+ * change. Nothing plays with reduced motion or without a canvas: the Markdown shows as it is. */
 
 const NAVY = '#0a1f50'
-const PITCH_Y = 20
-const FONT = '12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
-// The grid's margin inside the pane, as the Markdown's.
+// The grid matches the pane's Markdown (product.css .dm-md: 13px, line height 1.75, 22px by 26px padding), so the
+// handoff to it does not jump.
+const PITCH_Y = 22.75
+const FONT = '13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 const PAD_X = 26
-const PAD_Y = 16
-// The timeline, in ms from the start: the raw rows weave in, the octopus peeks in, drops and lands, the thud runs, and
-// the canvas fades as the result comes in.
+const PAD_Y = 22
+// The timeline, in ms from the start: the raw rows weave in, the octopus's mantle appears at the top, it dives, lands,
+// the ink spreads and the rest decodes, and the canvas fades as the pane's markup comes in.
 const WEAVE_MS = 320
-const PEEK_AT = 900
-const DROP_AT = 1400
-const DROP_MS = 1700
-const LAND_AT = DROP_AT + DROP_MS
-const FADE_AT = LAND_AT + THUD_MS - 100
+const ENTER_AT = 650
+const DIVE_AT = 900
+const DIVE_MS = 1700
+const LAND_AT = DIVE_AT + DIVE_MS
+const INK_MS = 900
+const FADE_AT = LAND_AT + 950
 const FADE_MS = 360
-const READ_MS = 280
+// A cell decoding runs down the density ramp, then shows the Markdown's character.
+const DECODE_MS = 150
+const RAMP = ['X', 'x', '+', ':']
+const HOT = ['#fff1e0', '#ffc59a', '#ff9a66', '#fb7b4c']
+
+// The diving octopus, head first: its eight arms stream up behind it (two strokes, and a longer trail when fast),
+// its collar with two orange eyes that read, and its mantle leading the way down. Every row is 13 cells wide.
+const SPRITE_W = 13
+const TRAIL = [" .  :   :  . ", "  ' . | . '  "]
+const ARMS = [[
+  " .  '  .  '  ",
+  "  \\ \\ | / /  ",
+  "   \\\\|||//   ",
+], [
+  "  '  .  '  . ",
+  "  / \\ | / \\  ",
+  "   \\\\|||//   ",
+]]
+const MANTLE = [
+  "  ,=o===o=,  ",
+  " =#########= ",
+  " =#########= ",
+  "  \\#######/  ",
+  "   '-----'   ",
+]
+// Landed: squashed flat, eyes shut, arms splayed on the ground.
+const SQUASH = [
+  " ,=-=====-=, ",
+  "=###########=",
+  "\\x\\x\\ | /x/x/",
+]
+// The ink: rings of these, spreading from where it landed.
+const INK = ['~', 'o', '.', '~', '*', '.']
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
+const easeOut = (t: number): number => 1 - (1 - t) ** 3
 
 export type Drop = { play(): void; stop(): void }
 
-/** The raw text as grid rows: whitespace runs collapsed to one space, line breaks kept, long lines wrapped. */
-export function rawRows(raw: string, cols: number): string[] {
+/** Text as grid rows: whitespace runs collapsed to one space, long lines wrapped; raw HTML drops its blank lines, the
+ * Markdown keeps them, as the pane shows it. */
+export function gridRows(text: string, cols: number, keepBlank: boolean): string[] {
   const rows: string[] = []
-  for (const line of raw.replace(/\r/g, '').split('\n')) {
-    const text = line.replace(/\s+/g, ' ').trim()
-    if (!text) continue
-    for (let i = 0; i < text.length; i += cols) rows.push(text.slice(i, i + cols))
+  for (const line of text.replace(/\r/g, '').split('\n')) {
+    const tidy = line.replace(/\s+/g, ' ').trimEnd()
+    if (!tidy.trim()) {
+      if (keepBlank) rows.push('')
+      continue
+    }
+    for (let i = 0; i < tidy.length; i += cols) rows.push(tidy.slice(i, i + cols))
   }
   return rows
 }
 
-export function mountDrop(out: HTMLElement, raw: string, onDone: () => void): Drop | null {
+export function mountDrop(out: HTMLElement, raw: string, markdown: string, onDone: () => void): Drop | null {
   const canvas = out.querySelector<HTMLCanvasElement>('.dm-drop')
   const context = canvas?.getContext('2d')
   if (!canvas || !context) return null
@@ -48,16 +86,19 @@ export function mountDrop(out: HTMLElement, raw: string, onDone: () => void): Dr
   let start = 0
   let width = 0
   let height = 0
-  let pitchX = 7
+  let ratio = 1
+  let pitchX = 7.5
   let cols = 0
-  let rows: string[] = []
   let visible = 0
-  let readAt: number[][] = []
+  let rawRows: string[] = []
+  let mdRows: string[] = []
+  // When each cell turns into the Markdown, on the run's clock.
+  let decodeAt: number[][] = []
   let octoX = 0
 
   const fit = (): void => {
     const box = out.getBoundingClientRect()
-    const ratio = window.devicePixelRatio || 1
+    ratio = window.devicePixelRatio || 1
     width = box.width
     height = box.height
     canvas.width = Math.round(width * ratio)
@@ -65,176 +106,153 @@ export function mountDrop(out: HTMLElement, raw: string, onDone: () => void): Dr
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
     ctx.font = FONT
     pitchX = ctx.measureText('M').width
-    cols = Math.max(SPRITE_W + 4, Math.floor((width - 2 * PAD_X) / pitchX))
-    visible = Math.max(SPRITE_H + 3, Math.floor((height - 2 * PAD_Y) / PITCH_Y))
-    rows = rawRows(raw, cols).slice(0, visible)
-    readAt = rows.map((row) => Array.from({ length: row.length }, () => Infinity))
-    octoX = Math.floor((cols - SPRITE_W) * 0.42)
+    cols = Math.max(SPRITE_W + 6, Math.floor((width - 2 * PAD_X) / pitchX))
+    visible = Math.max(MANTLE.length + 6, Math.floor((height - 2 * PAD_Y) / PITCH_Y))
+    rawRows = gridRows(raw, cols, false).slice(0, visible)
+    mdRows = gridRows(markdown, cols, true).slice(0, visible)
+    decodeAt = Array.from({ length: visible }, () => Array.from({ length: cols }, () => Infinity))
+    octoX = Math.floor((cols - SPRITE_W) * 0.46)
   }
   const ground = (): number => visible - 1
   const x = (col: number): number => PAD_X + col * pitchX + pitchX / 2
   const y = (row: number): number => PAD_Y + row * PITCH_Y + PITCH_Y / 2
-  /** Where the octopus's head is (a row; above 0 is out of sight). */
-  const headAt = (t: number): number => {
-    if (t < PEEK_AT) return -SPRITE_H - 1
-    if (t < DROP_AT) return -SPRITE_H + Math.round(easeOut((t - PEEK_AT) / (DROP_AT - PEEK_AT)) * (SPRITE_H - 2))
-    // Thrown down: a small start speed, then faster and faster all the way, so it lands with a thud.
-    const d = clamp01((t - DROP_AT) / DROP_MS)
-    return Math.round(-2 + (0.15 * d + 0.85 * d * d) * (ground() - SPRITE_H + 2))
+  const centre = (): number => octoX + SPRITE_W / 2
+
+  /** How far the dive has gone (0 to 1): a small start speed, then faster and faster. */
+  const dive = (t: number): number => {
+    const d = clamp01((t - DIVE_AT) / DIVE_MS)
+    return 0.15 * d + 0.85 * d * d
   }
-  const cell = (col: number, row: number, char: string, colour: string, alpha = 1, glow = 0): void => {
-    ctx.shadowBlur = 0
-    ctx.globalAlpha = 1
-    ctx.fillStyle = NAVY
-    ctx.fillRect(x(col) - pitchX / 2, y(row) - PITCH_Y / 2, pitchX, PITCH_Y)
-    ctx.shadowBlur = glow
-    ctx.globalAlpha = alpha
-    ctx.fillStyle = colour
-    ctx.fillText(char, x(col), y(row))
+  /** The row the mantle's leading edge is on (its last row); before the dive, sliding in from above. */
+  const lead = (t: number): number => {
+    const first = MANTLE.length - 1
+    if (t < ENTER_AT) return -1
+    if (t < DIVE_AT) return Math.round(-1 + easeOut((t - ENTER_AT) / (DIVE_AT - ENTER_AT)) * first)
+    return Math.round(first + dive(t) * (ground() - first))
   }
 
-  function drawRows(t: number, shake: number): void {
-    const head = headAt(t)
-    rows.forEach((row, r) => {
-      const shown = r + shake
-      const woven = t - r * (WEAVE_MS / Math.max(1, rows.length))
-      if (woven < 0) return
-      for (let c = 0; c < row.length; c++) {
-        const ch = row[c]!
-        if (ch === ' ') continue
-        // A row the octopus's arms have passed is read, from the column under it outward.
-        if (readAt[r]![c] === Infinity && head + SPRITE_H > r && t >= DROP_AT) readAt[r]![c] = t + Math.abs(c - (octoX + SPRITE_W / 2)) * 4
-        const age = t - readAt[r]![c]!
-        ctx.globalAlpha = 1
-        if (age < 0) {
-          ctx.fillStyle = 'rgba(168, 201, 250, .4)'
-          ctx.fillText(ch, x(c), y(shown))
-        } else if (age < READ_MS) {
-          const step = Math.min(RAMP.length - 1, Math.floor(age / READ_MS * RAMP.length))
-          ctx.fillStyle = HOT[step]!
-          ctx.fillText(RAMP[step]!, x(c), y(shown))
-        } else {
-          ctx.fillStyle = 'rgba(251, 154, 108, .5)'
-          ctx.fillText(TEXTURE[(r * 7 + c * 3) % TEXTURE.length]!, x(c), y(shown))
-        }
+  /** The rows the arms have swept decode from the octopus's column outward; once it lands, the rest from there. */
+  function mark(t: number): void {
+    const swept = t < DIVE_AT ? -1 : lead(t) - MANTLE.length
+    for (let r = 0; r < visible; r++) {
+      const row = decodeAt[r]!
+      if (row[0] !== Infinity) continue
+      if (r <= swept) {
+        for (let c = 0; c < cols; c++) row[c] = t + Math.abs(c - centre()) * 3
+      } else if (t >= LAND_AT) {
+        for (let c = 0; c < cols; c++) row[c] = t + Math.hypot((c - centre()) * 0.5, r - ground()) * 22
       }
-    })
-  }
-
-  function drawOctopus(t: number, shake: number): void {
-    const head = headAt(t)
-    if (head + SPRITE_H < 0) return
-    const since = t - LAND_AT
-    const squashed = since >= 0 && since < 200
-    const hop = since >= 200 && since < 320 ? 1 : 0
-    const squint = since >= 0 && since < 400
-    const stride = Math.floor(t / 240) % 2
-    const drop = t >= DROP_AT ? clamp01((t - DROP_AT) / DROP_MS) : 0
-    const stretched = drop > 0.7 && since < 0
-    const lines = squashed ? SQUASH : stretched ? [...MANTLE.slice(0, 4), MANTLE[3]!, MANTLE[4]!, ...ARMS[stride]!] : [...MANTLE, ...ARMS[stride]!]
-    const row0 = head + shake + (squashed ? SPRITE_H - SQUASH.length : stretched ? -1 : -hop)
-    const left = octoX - (squashed ? 1 : 0)
-    if (drop > 0.55 && since < 0) {
-      // Streaks above it while it drops fast.
-      const length = Math.round(1 + 4 * (drop - 0.55) / 0.45)
-      for (let k = 1; k <= length; k++) {
-        if (row0 - k < 0) break
-        ctx.globalAlpha = 0.85 * (1 - k / (length + 1))
-        ctx.fillStyle = '#a8c9fa'
-        for (let dx = 3; dx < SPRITE_W - 3; dx += 2) ctx.fillText(k === 1 ? '|' : k === 2 ? ':' : '.', x(left + dx), y(row0 - k))
-      }
-      ctx.globalAlpha = 1
     }
-    lines.forEach((line, dy) => {
-      const row = row0 + dy
-      if (row < 0 || row > ground()) return
-      const first = line.search(/\S/)
-      const last = line.length - 1 - [...line].reverse().join('').search(/\S/)
-      ctx.globalAlpha = 1
-      ctx.fillStyle = NAVY
-      ctx.fillRect(x(left + first - 1) - pitchX / 2, y(row) - PITCH_Y / 2, (last - first + 3) * pitchX, PITCH_Y)
-      let eye = 0
-      for (let dx = 0; dx < line.length; dx++) {
-        const ch = line[dx]!
-        if (ch === ' ') continue
-        if (ch === 'O') {
-          if (squint) { ctx.fillStyle = '#ffffff'; ctx.fillText(eye++ === 0 ? '>' : '<', x(left + dx), y(row)) }
-          else { ctx.fillStyle = '#011758'; ctx.fillRect(x(left + dx) - pitchX * 0.4, y(row) - PITCH_Y * 0.3, pitchX * 0.8, PITCH_Y * 0.6) }
+  }
+
+  function drawRows(t: number): void {
+    for (let r = 0; r < visible; r++) {
+      if (t - r * (WEAVE_MS / visible) < 0) continue
+      const rawRow = rawRows[r] ?? ''
+      const mdRow = mdRows[r] ?? ''
+      const heading = mdRow.startsWith('#')
+      for (let c = 0; c < cols; c++) {
+        const age = t - decodeAt[r]![c]!
+        if (age < 0) {
+          const ch = rawRow[c]
+          if (!ch || ch === ' ') continue
+          ctx.globalAlpha = 1
+          ctx.fillStyle = 'rgba(168, 201, 250, .38)'
+          ctx.fillText(ch, x(c), y(r))
           continue
         }
-        ctx.fillStyle = squashed || dy < MANTLE.length + (stretched ? 1 : 0) ? '#d6e6ff' : '#a8c9fa'
-        ctx.fillText(ch, x(left + dx), y(row))
+        const ch = mdRow[c]
+        const had = (rawRow[c] ?? ' ') !== ' '
+        if (age < DECODE_MS && (had || (ch && ch !== ' '))) {
+          const step = Math.min(RAMP.length - 1, Math.floor(age / DECODE_MS * RAMP.length))
+          ctx.globalAlpha = 1
+          ctx.fillStyle = HOT[step]!
+          ctx.fillText(RAMP[step]!, x(c), y(r))
+          continue
+        }
+        if (!ch || ch === ' ') continue
+        ctx.globalAlpha = 1
+        ctx.fillStyle = heading ? '#fb7b4c' : '#ffc59a'
+        ctx.fillText(ch, x(c), y(r))
       }
+    }
+  }
+
+  /** A row of the sprite, its cells covering what is under them. */
+  function spriteRow(line: string, row: number, left: number, colour: (ch: string) => string, alpha: number): void {
+    if (row < 0 || row > ground()) return
+    const first = line.search(/\S/)
+    if (first < 0) return
+    const last = line.length - 1 - [...line].reverse().join('').search(/\S/)
+    ctx.globalAlpha = alpha
+    ctx.fillStyle = NAVY
+    ctx.fillRect(x(left + first) - pitchX / 2, y(row) - PITCH_Y / 2, (last - first + 1) * pitchX, PITCH_Y)
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]!
+      if (ch === ' ') continue
+      ctx.fillStyle = colour(ch)
+      ctx.fillText(ch, x(left + i), y(row))
+    }
+  }
+
+  function drawOctopus(t: number): void {
+    const since = t - LAND_AT
+    if (t < ENTER_AT || since > INK_MS * 0.6) return
+    const alpha = since < 150 ? 1 : 1 - clamp01((since - 150) / (INK_MS * 0.6 - 150))
+    const colour = (ch: string): string => (ch === 'o' ? '#fb7b4c' : ch === '#' || ch === '=' || ch === ',' ? '#d6e6ff' : '#a8c9fa')
+    if (since >= 0) {
+      SQUASH.forEach((line, i) => spriteRow(line, ground() - SQUASH.length + 1 + i, octoX, colour, alpha))
+      return
+    }
+    // The faster it goes, the quicker its arms stroke and the longer they stream behind it.
+    const speed = t < DIVE_AT ? 0 : clamp01((t - DIVE_AT) / DIVE_MS)
+    const stroke = ARMS[Math.floor(t / (speed > 0.5 ? 120 : 220)) % 2]!
+    const trail = speed > 0.75 ? TRAIL : speed > 0.4 ? TRAIL.slice(1) : []
+    const lines = [...trail, ...stroke, ...MANTLE]
+    const top = lead(t) - lines.length + 1
+    lines.forEach((line, i) => {
+      // The arms sway from side to side, more the slower it goes.
+      const sway = i < trail.length + stroke.length ? Math.round(Math.sin(t / 160 + i) * (1 - speed) * 0.8) : 0
+      spriteRow(line, top + i, octoX + sway, colour, i < trail.length ? 0.6 : 1)
     })
   }
 
-  /** The landing: the ground row's shock both ways, rays of glyphs bursting out, dust rolling away, bits flying up. */
-  function drawThud(t: number): void {
+  /** The ink: rings of glyphs spreading from where it landed, cooling from orange to the window's blue as they go. */
+  function drawInk(t: number): void {
     const since = t - LAND_AT
-    if (since < 0 || since >= THUD_MS) return
-    const g = ground()
-    const centre = octoX + SPRITE_W / 2
-    ctx.save()
-    ctx.shadowColor = 'rgba(251, 123, 76, .9)'
-    for (let col = 0; col < cols; col++) {
-      const age = since - Math.abs(col + 0.5 - centre) * 9
-      if (age < 0 || age >= 380) continue
-      const step = Math.min(RAMP.length - 1, Math.floor(age / 380 * RAMP.length))
-      cell(col, g, RAMP[step]!, HOT[step]!, 1, step < 2 ? 12 : 0)
-    }
-    const grow = easeOut(clamp01(since / BURST_GROW_MS))
-    const eaten = clamp01((since - BURST_HOLD_MS) / BURST_FADE_MS)
-    if (eaten < 1) {
-      const ox = x(0) - pitchX / 2 + centre * pitchX
-      const oy = y(g)
-      for (const [angle, share, thick] of BURST) {
-        const length = share * (thick ? width : height * 0.75) * grow
-        const rad = angle * Math.PI / 180
-        const char = angle < 20 || angle > 160 ? '=' : angle < 70 ? '/' : angle <= 110 ? '|' : '\\'
-        let last = ''
-        for (let d = pitchX * 1.5; d <= length; d += Math.min(pitchX, PITCH_Y) * 0.7) {
-          const f = d / Math.max(1, length)
-          if (f < eaten) continue
-          const col = Math.floor((ox + Math.cos(rad) * d - PAD_X) / pitchX)
-          const row = Math.round((oy - Math.sin(rad) * d - PAD_Y - PITCH_Y / 2) / PITCH_Y)
-          if (`${col},${row}` === last || col < 0 || col >= cols || row < 0) continue
-          last = `${col},${row}`
-          const colour = f < 0.18 ? '#ffffff' : f < 0.4 ? HOT[0]! : f < 0.62 ? HOT[1]! : f < 0.84 ? HOT[3]! : '#d9542f'
-          cell(col, row, f < 0.2 ? 'X' : char, colour, 1 - 0.5 * eaten, f < 0.6 ? 12 : 4)
-        }
+    if (since < 0 || since > INK_MS) return
+    const k = since / INK_MS
+    const radius = easeOut(k) * Math.max(10, cols * 0.42)
+    for (let ring = 0; ring < 3; ring++) {
+      const rr = radius - ring * 2.2
+      if (rr <= 0.5) continue
+      const steps = Math.ceil(rr * 6)
+      for (let s = 0; s < steps; s++) {
+        const a = Math.PI + (Math.PI * s) / Math.max(1, steps - 1)
+        const col = Math.round(centre() + Math.cos(a) * rr)
+        const row = Math.round(ground() + Math.sin(a) * rr * 0.45)
+        if (col < 0 || col >= cols || row < 0 || row > ground()) continue
+        ctx.globalAlpha = (1 - k) * (1 - ring * 0.28)
+        ctx.fillStyle = k < 0.3 ? '#ff9a66' : ring === 0 ? '#a8c9fa' : '#6f86b0'
+        ctx.fillText(INK[(s + ring * 2) % INK.length]!, x(col), y(row))
       }
     }
-    const s = since / 1000
-    for (const [speed, lift, char] of DUST) {
-      if (s > 0.6) break
-      const travel = speed * s - 0.5 * speed * 1.6 * s * s
-      for (const side of [-1, 1]) cell(Math.round(centre + side * travel), g - lift, char, '#c9d8f2', 1 - s / 0.6)
-    }
-    ctx.shadowBlur = 0
-    for (const [speed, lift, char] of DEBRIS) {
-      const rise = lift * s - 0.5 * 55 * s * s
-      if (rise < 0 || s > 0.8) continue
-      ctx.globalAlpha = 1 - s / 0.8
-      ctx.fillStyle = '#ffc59a'
-      ctx.fillText(char, x(Math.round(centre + speed * s)), y(g - 1 - Math.round(rise)))
-    }
-    ctx.restore()
   }
 
   function frame(now: number): void {
     const t = now - start
-    const step = Math.floor((t - LAND_AT) / SHAKE_STEP_MS)
-    const shake = t >= LAND_AT && step < SHAKE.length ? SHAKE[step]! : 0
-    ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0)
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
     ctx.clearRect(0, 0, width, height)
     ctx.font = FONT
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     out.classList.toggle('is-scraping', t < LAND_AT)
     if (t >= FADE_AT) out.classList.add('is-fading')
-    drawRows(t, shake)
-    drawThud(t)
-    drawOctopus(t, shake)
+    mark(t)
+    drawRows(t)
+    drawInk(t)
+    drawOctopus(t)
+    ctx.globalAlpha = 1
     if (t < FADE_AT + FADE_MS) raf = requestAnimationFrame(frame)
     else finish()
   }
