@@ -42,7 +42,7 @@ Use one URL per client: `/mcp` for keyless use or a key, `/mcp-oauth` for sign-i
 claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp-oauth
 ```
 
-Then run `/mcp` in Claude Code, select octocrawl and sign in in the browser it opens (`claude mcp login octocrawl` does the same from a terminal). **Clear authentication** in `/mcp` signs it out. The key setup above keeps working on `/mcp`. ([Claude Code's guide](https://code.claude.com/docs/en/mcp))
+Then run `/mcp` in Claude Code, select octocrawl and sign in in the browser it opens (`claude mcp login octocrawl` does the same from a terminal). The Octocrawl plugin sets up the same server: `/plugin install octocrawl --marketplace 77777R7/Octocrawl`, then sign in from `/mcp` the same way. **Clear authentication** in `/mcp` signs it out. The key setup above keeps working on `/mcp`. ([Claude Code's guide](https://code.claude.com/docs/en/mcp))
 
 Checked with Claude Code 2.1.301 on 2026-10-16.
 

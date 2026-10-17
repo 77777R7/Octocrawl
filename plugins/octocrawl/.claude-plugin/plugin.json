@@ -1,0 +1,19 @@
+{
+  "name": "octocrawl",
+  "version": "0.6.0",
+  "description": "Web scraper for agents: blocked, empty and wrong pages reported as such, with an Evidence Record.",
+  "author": {
+    "name": "Octocrawl",
+    "email": "hello@octocrawl.dev",
+    "url": "https://octocrawl.dev/"
+  },
+  "homepage": "https://octocrawl.dev/",
+  "repository": "https://github.com/77777R7/Octocrawl",
+  "license": "AGPL-3.0-only",
+  "keywords": ["web-scraping", "markdown", "crawler", "evidence", "mcp"],
+  "icon": "https://octocrawl.dev/assets/favicon-192.png",
+  "documentationUrl": "https://octocrawl.dev/docs/connect-mcp/",
+  "supportUrl": "https://octocrawl.dev/docs/contact/",
+  "privacyPolicyUrl": "https://octocrawl.dev/docs/privacy/",
+  "termsOfServiceUrl": "https://octocrawl.dev/docs/terms/"
+}
