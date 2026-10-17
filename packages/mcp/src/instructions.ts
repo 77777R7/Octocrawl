@@ -7,7 +7,7 @@
 
 /** Where the server runs, and for hosted Octocrawl what the caller brought. */
 export type InstructionsSurface =
-  | { kind: 'local' }
+  | { kind: 'local'; /** Started with --read-only: scrape does not act as the person (docs/mcp-client-ux-tasks.md W10.2). */ readOnly?: boolean }
   | { kind: 'hosted'; connection: 'keyless' | 'key' | 'oauth'; browser: boolean; /** A keyless caller from Claude's egress range, whose allowance every such connector shares. */ sharedPool?: boolean }
 
 export function serverInstructions(toolNames: Iterable<string>, surface: InstructionsSurface): string {
@@ -36,7 +36,9 @@ export function serverInstructions(toolNames: Iterable<string>, surface: Instruc
 
   if (surface.kind === 'local') {
     if (has('scrape')) {
-      lines.push('lane my-browser, handoff and mode authed read pages in the person\'s own Chrome or with their saved login: ask the person first and name the site.')
+      lines.push(surface.readOnly === true
+        ? 'This server is read-only: its tools only read, and scrape takes no actions, lane, handoff or mode authed, so nothing runs as the person.'
+        : 'lane my-browser, handoff and mode authed read pages in the person\'s own Chrome or with their saved login: ask the person first and name the site.')
       lines.push('fastMode: true reads over HTTP alone; waitFor above 0 starts in the browser, for a page known to need scripts.')
     }
     if (has('scrape', 'map')) lines.push('If this server\'s API is hosted Octocrawl (api.octocrawl.dev) rather than npx octocrawl serve on this computer, only scrape and map run there.')

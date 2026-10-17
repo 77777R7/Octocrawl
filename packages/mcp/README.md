@@ -12,7 +12,7 @@ Octocrawl as an MCP server over stdio, for Claude Desktop, Claude Code, Cursor, 
 
 A client that takes only so many tools, or loads every definition up front, can list some groups alone. `--toolsets` (or `W2L_MCP_TOOLSETS`) takes a comma-separated list of `core` (scrape, get_scrape, map), `crawl`, `batch`, `products`, `logins`, `monitor` and `delivery`, or `all`, the default. An unknown name stops the server and names the valid ones. A call to a tool left out says which flag lists it.
 
-`--read-only` (or `W2L_MCP_READ_ONLY=1`) lists the tools that only read, plus a `scrape` without the options that act as the person (`actions`, `lane`, `handoff`, `mode` authed, `access` my-browser), marked read-only so a client can run it without asking. A call that sends one of those options anyway is refused before any request.
+`--read-only` (or `W2L_MCP_READ_ONLY=1`; a value other than yes or no stops the server) lists the tools that only read, plus a `scrape` without the options that act as the person (`actions`, `lane`, `handoff`, `mode` authed, `access` my-browser), marked read-only so a client can run it without asking. A call that sends one of those options anyway is refused before any request.
 
 Claude Code:
 

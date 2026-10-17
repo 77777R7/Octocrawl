@@ -1,4 +1,5 @@
 import { RequestError } from '@w2l/contracts'
+import { serverInstructions } from './instructions.js'
 import type { McpServerOptions } from './server.js'
 import { TOOL_NAMES, TOOLS, type ToolName } from './tools.js'
 
@@ -29,14 +30,29 @@ export interface ToolSelection { toolsets?: readonly ToolsetName[]; readOnly?: b
 export function parseToolSelection(argv: readonly string[], env: NodeJS.ProcessEnv): ToolSelection {
   const flag = argv.find((arg) => arg.startsWith('--toolsets='))
   const index = argv.indexOf('--toolsets')
+  if ((flag !== undefined && flag === '--toolsets=') || (flag === undefined && index >= 0 && (argv[index + 1] === undefined || argv[index + 1]!.startsWith('--')))) throw new Error(`--toolsets needs a value; the toolsets are ${[...TOOLSET_NAMES, 'all'].join(', ')}`)
   const raw = flag !== undefined ? flag.slice('--toolsets='.length) : index >= 0 ? argv[index + 1] : env['W2L_MCP_TOOLSETS']
-  const readOnly = argv.includes('--read-only') || ['1', 'true'].includes((env['W2L_MCP_READ_ONLY'] ?? '').toLowerCase())
+  const readOnly = readOnlyOf(argv, env)
   if (raw === undefined || raw.trim() === '') return { readOnly }
   const names = raw.split(',').map((name) => name.trim()).filter((name) => name !== '')
   const unknown = names.filter((name) => name !== 'all' && !(TOOLSET_NAMES as string[]).includes(name))
   if (unknown.length > 0 || names.length === 0) throw new Error(`unknown toolset${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ') || raw}; the toolsets are ${[...TOOLSET_NAMES, 'all'].join(', ')}`)
   if (names.includes('all')) return { readOnly }
   return { toolsets: TOOLSET_NAMES.filter((name) => names.includes(name)), readOnly }
+}
+
+/**
+ * --read-only, --read-only=<yes|no> or W2L_MCP_READ_ONLY: a safety switch, so a value it cannot read stops the start
+ * rather than leaving every tool listed. The flag wins over the variable.
+ */
+function readOnlyOf(argv: readonly string[], env: NodeJS.ProcessEnv): boolean {
+  const flag = argv.find((arg) => arg === '--read-only' || arg.startsWith('--read-only='))
+  const value = flag === undefined ? env['W2L_MCP_READ_ONLY'] : flag === '--read-only' ? 'true' : flag.slice('--read-only='.length)
+  if (value === undefined || (flag === undefined && value.trim() === '')) return false
+  const normal = value.trim().toLowerCase()
+  if (['1', 'true', 'yes', 'on'].includes(normal)) return true
+  if (['0', 'false', 'no', 'off'].includes(normal)) return false
+  throw new Error(`${flag === undefined ? 'W2L_MCP_READ_ONLY' : '--read-only'} must be true or false (1/0, yes/no, on/off), not ${JSON.stringify(value)}`)
 }
 
 /** The scrape options that act as the person or wait for them, which a read-only server leaves out (W10.2). */
@@ -73,7 +89,7 @@ function refuseActingAsPerson(name: string, args: unknown): void {
 }
 
 /** The McpServerOptions that list `selection` and say how to reach a tool it leaves out. Undefined for every tool, read-write. */
-export function selectionOptions(selection: ToolSelection): Pick<McpServerOptions, 'allowedTools' | 'tools' | 'unavailableHint' | 'authorizeCall'> {
+export function selectionOptions(selection: ToolSelection): Pick<McpServerOptions, 'allowedTools' | 'tools' | 'unavailableHint' | 'authorizeCall' | 'instructions'> {
   const inSets = selection.toolsets === undefined ? TOOL_NAMES : TOOL_NAMES.filter((name) => (selection.toolsets as readonly string[]).includes(toolsetOf(name)!))
   if (selection.toolsets === undefined && selection.readOnly !== true) return {}
   const listed = TOOLS
@@ -84,11 +100,15 @@ export function selectionOptions(selection: ToolSelection): Pick<McpServerOption
     allowedTools: new Set(listed.map((tool) => tool.name)),
     tools: listed,
     unavailableHint: (name: string) => {
+      // A name no toolset holds is no tool at all: the list of what this server offers says enough.
       const set = toolsetOf(name)
-      if (set !== undefined && !(inSets as readonly string[]).includes(name)) return `Enable it with --toolsets=${set} (or W2L_MCP_TOOLSETS).`
-      if (selection.readOnly === true) return 'It is left out by --read-only, as it changes something or acts as the person.'
-      return undefined
+      if (set === undefined) return undefined
+      const reasons: string[] = []
+      if (!(inSets as readonly string[]).includes(name)) reasons.push(`enable it with --toolsets=${set} (or W2L_MCP_TOOLSETS)`)
+      if (selection.readOnly === true && !TOOLS.find((tool) => tool.name === name)!.annotations.readOnlyHint) reasons.push('start the server without --read-only, which leaves out what changes something or acts as the person')
+      return reasons.length === 0 ? undefined : `To use it, ${reasons.join(', and ')}.`
     },
+    instructions: serverInstructions(listed.map((tool) => tool.name), { kind: 'local', ...(selection.readOnly === true ? { readOnly: true } : {}) }),
     ...(selection.readOnly === true ? { authorizeCall: refuseActingAsPerson } : {}),
   }
 }

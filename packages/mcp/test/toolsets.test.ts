@@ -4,7 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/server'
 import { W2L } from '@w2l/sdk'
 import { serveMcpStdio } from '../src/stdio.js'
 import { TOOL_NAMES, TOOLS } from '../src/tools.js'
-import { parseToolSelection, TOOLSET_NAMES, TOOLSETS } from '../src/toolsets.js'
+import { parseToolSelection, selectionOptions, TOOLSET_NAMES, TOOLSETS } from '../src/toolsets.js'
 import { expectUsableInstructions } from './instructionChecks.js'
 
 /**
@@ -65,6 +65,25 @@ describe('toolsets', () => {
   it('refuses an unknown toolset name and names the valid ones', () => {
     expect(() => parseToolSelection(['--toolsets=core,crawls'], {})).toThrow(`unknown toolset: crawls; the toolsets are ${[...TOOLSET_NAMES, 'all'].join(', ')}`)
     expect(() => parseToolSelection([], { W2L_MCP_TOOLSETS: ',' })).toThrow(/unknown toolset/)
+    for (const argv of [['--toolsets'], ['--toolsets='], ['--toolsets', '--read-only']]) expect(() => parseToolSelection(argv, { W2L_MCP_TOOLSETS: 'core' }), argv.join(' ')).toThrow('--toolsets needs a value')
+  })
+
+  it('reads --read-only and W2L_MCP_READ_ONLY as a yes or no, and stops on anything else', () => {
+    for (const [argv, env, readOnly] of [
+      [['--read-only'], {}, true], [['--read-only=true'], {}, true], [['--read-only=1'], {}, true], [['--read-only=no'], { W2L_MCP_READ_ONLY: '1' }, false],
+      [[], { W2L_MCP_READ_ONLY: 'yes' }, true], [[], { W2L_MCP_READ_ONLY: 'TRUE' }, true], [[], { W2L_MCP_READ_ONLY: '0' }, false], [[], { W2L_MCP_READ_ONLY: '' }, false], [[], {}, false],
+    ] as const) expect(parseToolSelection(argv, env).readOnly, `${argv.join(' ')} ${JSON.stringify(env)}`).toBe(readOnly)
+    expect(() => parseToolSelection(['--read-only=maybe'], {})).toThrow('--read-only must be true or false')
+    expect(() => parseToolSelection([], { W2L_MCP_READ_ONLY: 'enabled' })).toThrow('W2L_MCP_READ_ONLY must be true or false')
+  })
+
+  it('says every reason a tool is left out, and nothing about a name that is no tool', () => {
+    const hint = (selection: Parameters<typeof selectionOptions>[0], name: string) => (selectionOptions(selection).unavailableHint as (tool: string) => string | undefined)(name)
+    expect(hint({ toolsets: ['core'] }, 'crawl')).toBe('To use it, enable it with --toolsets=crawl (or W2L_MCP_TOOLSETS).')
+    expect(hint({ readOnly: true }, 'crawl')).toBe('To use it, start the server without --read-only, which leaves out what changes something or acts as the person.')
+    expect(hint({ toolsets: ['core'], readOnly: true }, 'crawl')).toBe('To use it, enable it with --toolsets=crawl (or W2L_MCP_TOOLSETS), and start the server without --read-only, which leaves out what changes something or acts as the person.')
+    expect(hint({ toolsets: ['core'], readOnly: true }, 'get_crawl')).toBe('To use it, enable it with --toolsets=crawl (or W2L_MCP_TOOLSETS).')
+    expect(hint({ readOnly: true }, 'nope')).toBeUndefined()
   })
 })
 
@@ -84,6 +103,9 @@ describe('--read-only', () => {
         expect(JSON.stringify(scrape.verify)).toContain('markdownMatches')
         expect(JSON.stringify(scrape.formats)).toContain('screenshot')
         expectUsableInstructions(server.instructions, server.tools.map((tool) => tool.name))
+        // It does not tell the model to ask the person about options it refuses.
+        expect(server.instructions).not.toMatch(/ask the person first/)
+        expect(server.instructions).toContain('This server is read-only')
       } finally { await server.close() }
     }
   })
