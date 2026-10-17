@@ -11,6 +11,12 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { callTool } from '../src/tools.js'
 import { createMcpServer } from '../src/server.js'
 
+/** A result's size in characters, printed with W2L_TOOL_SURFACE_REPORT=1 (as toolSurface.test.ts does). */
+function reportSize(label: string, chars: number): void {
+  expect(chars).toBeGreaterThan(0)
+  if (process.env.W2L_TOOL_SURFACE_REPORT === '1') console.info(`result size: ${label}: ${chars} chars`)
+}
+
 describe('MCP scrape against the fixture catalog', () => {
   let fixtures: FixtureServer
   let taskRoot: string
@@ -70,6 +76,8 @@ describe('MCP scrape against the fixture catalog', () => {
       httpStatus: 200,
       outputSha256: { markdown: expect.stringMatching(/^[0-9a-f]{64}$/), json: null },
     })
+    // The serialized result is what a client hands the model (docs/mcp-client-ux-tasks.md W2): measured, not yet budgeted.
+    reportSize('scrape /crawl/listing (compact)', JSON.stringify(result).length)
     await engine.close()
   })
 
@@ -92,6 +100,7 @@ describe('MCP scrape against the fixture catalog', () => {
         links: [{ url, title: 'Harbour lantern catalog' }, ...[1, 2, 3].map((n) => ({ url: `${fixtures.url}/crawl/item/${n}`, title: `Harbour lantern teapot 0${n}` }))],
       })
       expect(JSON.parse((compact.content as Array<{ text: string }>)[0]!.text)).toEqual(compact.structuredContent)
+      reportSize('map /crawl/listing (compact text)', (compact.content as Array<{ text: string }>)[0]!.text.length)
       // The full map matches the same schema.
       const full = await mcp.callTool({ name: 'map', arguments: { url, debug: true } })
       expect(full.structuredContent).toMatchObject({ status: 'completed', sources: { startPage: { lane: 'http' } }, refused: { subtreeDenied: 3 } })

@@ -139,7 +139,7 @@ const mcpClients = {
       icon: 'claude-code.svg',
       intro: 'Add hosted Octocrawl to Claude Code over HTTP. Run this in the project where you use Claude Code; --scope user adds it everywhere.',
       code: `claude mcp add --transport http octocrawl ${REMOTE_MCP_URL}`, language: 'bash',
-      verify: 'Run claude mcp list: octocrawl shows as Connected. In Claude Code, /mcp lists scrape, map and scrape_product; then send the first task below.',
+      verify: 'Run claude mcp list: octocrawl shows as Connected. In Claude Code, /mcp lists scrape and map (scrape_product is listed only to a key with the browser lane); then send the first task below.',
       source: 'https://code.claude.com/docs/en/mcp',
     },
     {
@@ -147,7 +147,7 @@ const mcpClients = {
       icon: 'cursor.svg',
       intro: 'Merge this server into your project .cursor/mcp.json (or your user-level ~/.cursor/mcp.json). Keep existing servers.',
       code: `{\n  "mcpServers": {\n    "octocrawl": {\n      "url": "${REMOTE_MCP_URL}"\n    }\n  }\n}`, language: 'json',
-      verify: 'Approve the server when Cursor asks, then check its tools in Cursor Settings → MCP. In Cursor CLI, cursor-agent mcp enable octocrawl approves it and cursor-agent mcp list-tools octocrawl lists the three tools.',
+      verify: 'Approve the server when Cursor asks, then check its tools in Cursor Settings → MCP. In Cursor CLI, cursor-agent mcp enable octocrawl approves it and cursor-agent mcp list-tools octocrawl lists scrape and map.',
       source: 'https://cursor.com/docs/mcp',
     },
     {
