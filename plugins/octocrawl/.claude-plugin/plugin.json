@@ -1,6 +1,6 @@
 {
   "name": "octocrawl",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Web pages as clean Markdown and JSON for AI agents, in fewer tokens, with an Evidence Record.",
   "author": {
     "name": "Octocrawl",

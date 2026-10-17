@@ -33,7 +33,7 @@ export interface McpServerOptions {
 }
 
 /** This server's own version: the `origin` of a call whose client declared no name and version. */
-export const MCP_VERSION = '0.6.0'
+export const MCP_VERSION = '0.7.0'
 
 /** Who this server is, in initialize's serverInfo; hosted Octocrawl's server card says the same (hostedApi.ts). */
 export const SERVER_IDENTITY = {
