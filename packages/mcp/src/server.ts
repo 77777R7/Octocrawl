@@ -2,6 +2,7 @@ import { CLIENT_INFO_META_KEY, Server, type Implementation, type Tool } from '@m
 import { isApiErrorCode } from '@w2l/contracts'
 import { W2L, W2LError } from '@w2l/sdk'
 import type { PostCalls } from './inFlight.js'
+import { serverInstructions } from './instructions.js'
 import { callTool, TOOLS } from './tools.js'
 
 export interface McpServerOptions {
@@ -16,6 +17,8 @@ export interface McpServerOptions {
    * POST, or when the POST's client disconnects.
    */
   calls?: PostCalls
+  /** What initialize tells the client about this server; by default written from the tools it lists, for a local server. */
+  instructions?: string
   /** Said after "this server offers ..." when a client calls a tool this deployment leaves out: where the tool does run. */
   unavailableHint?: string
   /** The API this server calls, named when it cannot be reached (a local server's base URL). */
@@ -24,6 +27,13 @@ export interface McpServerOptions {
 
 /** This server's own version: the `origin` of a call whose client declared no name and version. */
 export const MCP_VERSION = '0.5.0'
+
+/** Who this server is, in initialize's serverInfo; hosted Octocrawl's server card says the same (hostedApi.ts). */
+export const SERVER_IDENTITY = {
+  name: 'octocrawl',
+  title: 'Octocrawl',
+  description: 'Web scraper for agents: blocked, empty and wrong pages reported as such, with an Evidence Record.',
+} as const
 
 /**
  * The `origin` W2L records for this client's calls: `mcp-<client name>@<client
@@ -37,9 +47,14 @@ export function mcpOrigin(client: { name: string; version: string } | undefined)
 }
 
 export function createMcpServer(client: W2L, options: McpServerOptions = {}): Server {
-  const server = new Server({ name: 'octocrawl', version: MCP_VERSION }, { capabilities: { tools: {} } })
+  const listed = options.tools ?? TOOLS.filter(tool => options.allowedTools === undefined || options.allowedTools.has(tool.name))
+  const instructions = options.instructions ?? serverInstructions(listed.map(tool => (tool as { name: string }).name), { kind: 'local' })
+  const server = new Server(
+    { ...SERVER_IDENTITY, version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server&utm_medium=listing' },
+    { capabilities: { tools: {} }, instructions },
+  )
 
-  server.setRequestHandler('tools/list', async () => ({ tools: [...(options.tools ?? TOOLS.filter(tool => options.allowedTools === undefined || options.allowedTools.has(tool.name)))] as unknown as Tool[] }))
+  server.setRequestHandler('tools/list', async () => ({ tools: [...listed] as unknown as Tool[] }))
   const calls = options.calls
   // Replaces the SDK's own handler, which reaches only the calls of this server, that is of this POST.
   if (calls) server.setNotificationHandler('notifications/cancelled', notification => {

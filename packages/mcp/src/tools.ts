@@ -10,7 +10,8 @@ import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
 /** The scrape description's last sentence, which hosted Octocrawl drops since it does not serve get_scrape (hostedApi.ts). */
 export const SCRAPE_RECORD_HINT = " metadata.scrapeId names the call's record for get_scrape."
-export const TOOL_NAMES = ['scrape_product', 'batch_products', 'scrape', 'get_scrape', 'map', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch', 'import_login', 'list_logins', 'remove_login',
+/** Every tool, in the order tools/list gives them: the general ones first (docs/mcp-client-ux-tasks.md W4). */
+export const TOOL_NAMES = ['scrape', 'map', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch', 'scrape_product', 'batch_products', 'import_login', 'list_logins', 'remove_login',
   'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
   'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter'] as const
 export type ToolName = (typeof TOOL_NAMES)[number]
@@ -221,11 +222,10 @@ const MONITOR_TOOLS = [
   {name:'retry_dead_letter',description:'Explicitly retry a dead-letter delivery with the same eventId.',inputSchema:{type:'object',properties:{id:{type:'string'}},required:['id'],additionalProperties:false}},
 ] as const
 
-export const TOOLS = [
+const DEFINITIONS = [
   {
     name:'scrape_product',
     description:'Get evidence-backed JSON for one anonymous Amazon.sg /dp/{ASIN} product. No schema or model setup needed.',
-    annotations: { title: 'Amazon.sg product JSON', readOnlyHint: true, openWorldHint: true },
     inputSchema:{type:'object',properties:{url:{type:'string'},debug:{type:'boolean'}},required:['url'],additionalProperties:false},
   },
   {
@@ -238,7 +238,6 @@ export const TOOLS = [
     description: 'Fetch one URL through the Octocrawl coverage ladder. Compact by default; set debug=true for the full audit. The result\'s warnings name what its content cannot vouch for: robots_overridden (robots.txt disallows the URL; a local server fetched it because you named it), or client_rendered_suspected when the HTTP page looks like a shell its scripts fill in and the browser rung found nothing better. Its agentHints, when present, say what to change next time (a login wall, a robots.txt rule, a gate, a wait).' + SCRAPE_RECORD_HINT,
     // Not marked read-only here: on a server on the person's machine, page `actions` can click and type, and `mode: authed`
     // does so signed in as them. Hosted Octocrawl refuses both and marks its copy read-only (hostedApi.ts).
-    annotations: { title: 'Scrape a page', openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -273,7 +272,6 @@ export const TOOLS = [
   {
     name: 'map',
     description: 'List a site\'s URLs without fetching each page: the start URL, the links on its page (read on the http lane alone; no browser) and the entries of the sitemaps the site declares (robots.txt Sitemap: lines, else /sitemap.xml), inside one deadline. Every URL is in the crawl\'s scope (the start host and its www twin, the start URL\'s path subtree, assets left out, similar URLs folded) and allowed by its host\'s robots.txt unless ignoreRobotsTxt is set; what was left out is counted. A title is never fetched: the start page\'s own, an anchor\'s text or a sitemap\'s news title. At the deadline the answer is what was found, status partial (failed when nothing), stoppedBy timeout. Compact by default ({ id, status, stoppedBy, links: [{ url, title?, description?, robots? }], warning?, agentHints?, counts }; robots only on a link robots.txt keeps out, under ignoreRobotsTxt); debug=true returns the full map with each link\'s evidence (via, sitemapFile, lastmod, robots), the sources read and the refusals. One page body is read at most: a site without a sitemap maps only its start page\'s links; crawl reads further pages.',
-    annotations: { title: 'Map a site', readOnlyHint: true, idempotentHint: true, openWorldHint: true },
     inputSchema: {
       type: 'object',
       properties: {
@@ -482,6 +480,71 @@ export const TOOLS = [
   },
   ...MONITOR_TOOLS,
 ] as const
+
+/** A tool's title and its four hints: read-only, destructive, idempotent, open-world (the MCP spec's ToolAnnotations). */
+type Presentation = readonly [title: string, readOnly: boolean, destructive: boolean, idempotent: boolean, openWorld: boolean]
+/**
+ * Every tool's title and honest hints (docs/mcp-client-ux-tasks.md W4). Without hints a client must assume a tool
+ * writes, destroys and reaches the open web (the spec's defaults), and asks the person before each call. Reads are
+ * read-only; open-world marks what reaches pages or webhooks beyond Octocrawl's own records; destructive marks what
+ * cancels running work or forgets something the person saved. The local scrape is not read-only: its actions, mode
+ * authed and my-browser lane act as the person. A start is not idempotent, since only a repeated idempotencyKey is.
+ */
+const PRESENTATION: Record<ToolName, Presentation> = {
+  scrape: ['Scrape a page', false, false, false, true],
+  map: ['Map a site', true, false, true, true],
+  get_scrape: ['Get a scrape record', true, false, true, false],
+  crawl: ['Start a crawl', false, false, false, true],
+  get_crawl: ['Get crawl status', true, false, true, false],
+  get_crawl_pages: ['Get crawl pages', true, false, true, false],
+  get_crawl_errors: ['Get crawl errors', true, false, true, false],
+  cancel_crawl: ['Cancel a crawl', false, true, true, false],
+  resume_crawl: ['Resume a crawl', false, false, false, true],
+  list_active_crawls: ['List active crawls', true, false, true, false],
+  batch_scrape: ['Start a batch scrape', false, false, false, true],
+  get_batch: ['Get batch status', true, false, true, false],
+  get_batch_items: ['Get batch items', true, false, true, false],
+  wait_batch: ['Wait for a batch', true, false, true, false],
+  cancel_batch: ['Cancel a batch', false, true, true, false],
+  get_batch_errors: ['Get batch errors', true, false, true, false],
+  hand_off_batch: ['Hand blocked batch items to the person', false, false, false, true],
+  scrape_product: ['Amazon.sg product JSON', true, false, true, true],
+  batch_products: ['Start an Amazon.sg product batch', false, false, false, true],
+  // Importing replaces the login already saved for that domain (FileSessionStore.save), which cannot be undone.
+  import_login: ['Import a saved login', false, true, false, false],
+  list_logins: ['List saved logins', true, false, true, false],
+  remove_login: ['Remove a saved login', false, true, true, false],
+  preview_monitor: ['Preview a Monitor', true, false, true, true],
+  create_monitor: ['Create a Monitor', false, false, false, true],
+  list_monitors: ['List Monitors', true, false, true, false],
+  get_monitor: ['Get a Monitor', true, false, true, false],
+  run_monitor: ['Run a Monitor now', false, false, false, true],
+  get_monitor_run: ['Get a Monitor run', true, false, true, false],
+  // Pausing a Monitor also cancels its running execution.
+  pause_monitor: ['Pause a Monitor', false, true, true, false],
+  resume_monitor: ['Resume a Monitor', false, false, false, true],
+  cancel_monitor_run: ['Cancel a Monitor run', false, true, true, false],
+  create_delivery_destination: ['Add a webhook destination', false, false, false, true],
+  list_delivery_destinations: ['List webhook destinations', true, false, true, false],
+  // Pausing a destination only stops new deliveries to it (engine.setDeliveryDestinationEnabled); nothing running is cut.
+  pause_delivery_destination: ['Pause a webhook destination', false, false, true, false],
+  resume_delivery_destination: ['Resume a webhook destination', false, false, true, true],
+  list_deliveries: ['List deliveries', true, false, true, false],
+  get_delivery: ['Get a delivery', true, false, true, false],
+  retry_dead_letter: ['Retry a failed delivery', false, false, false, true],
+}
+/** Extra fields a client reads from a tool's _meta: import_login waits for the person in their Chrome, so Claude Code asks every time. */
+const TOOL_META: Partial<Record<ToolName, Record<string, unknown>>> = {
+  import_login: { 'anthropic/requiresUserInteraction': true },
+}
+
+function present<T extends { name: ToolName }>(definition: T) {
+  const [title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint] = PRESENTATION[definition.name]
+  const meta = TOOL_META[definition.name]
+  return { ...definition, title, annotations: { title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint }, ...(meta === undefined ? {} : { _meta: meta }) }
+}
+
+export const TOOLS = TOOL_NAMES.map((name) => present(DEFINITIONS.find((definition) => definition.name === name)!))
 
 /**
  * `request.signal` is the MCP call's: every API request the tool makes, and a
