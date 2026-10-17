@@ -10,6 +10,8 @@
 
 每条标出影响的任务。没决定的，按“默认”一栏先做，或者先做不受影响的部分。
 
+**2026-10-17 Howard：D1–D15 先按下表的默认值走。** 之后改了哪一条，就在该行注明日期和新的决定。
+
 | # | 问题 | 影响 | 默认（未否决前按此） |
 | --- | --- | --- | --- |
 | D1 | 排期：本周做 W1–W4；W5+W6 合并成一次 hosted 部署；W7–W10 等外部试用的发现处理完再开始。是否同意？ | 全部 | 同意 |
@@ -128,20 +130,23 @@
   - 每次真实客户端运行都在 `research/` 下写一份带日期的记录，写明命令、commit、客户端版本、是否走代理。
 - **检查**：每个 PR 都要跑 `npm run typecheck` 和 `npm test`（跑测试前 unset 代理），并把结果写进 PR。
 
-## W1 Connect 页事实修正（keyless 仍在最前）　S
+## W1 Connect 页事实修正（keyless 仍在最前）　S　→ PR #555
 
 起因：今天不登录的新用户被告知会看到三个工具，实际只有两个，容易以为自己装错了。这是外部试用之前唯一直接帮到非作者用户的改动。服务：外部试用门槛、PH item 4。
 
-- [ ] **W1.1** `apps/public-web/scripts/build-docs.mjs:142`：Claude Code keyless 的验证句改成 `/mcp lists scrape and map`，并注明 `scrape_product` 只列给带浏览器通道的 key 和登录用户。
-- [ ] **W1.2** `build-docs.mjs:150`：Cursor keyless 的验证句把 "three tools" 改成 `scrape and map`。
-- [ ] **W1.3** `apps/public-web/content/connect-mcp.md` 的 `/mcp-oauth` 小节（:35-57）补上 Codex 的接法（`codex mcp add … --url https://mcp.octocrawl.dev/mcp-oauth`，具体命令先查 Codex 文档）。状态写成“Howard 报告可用，尚无带日期的记录”，有了 `research/hosted/` 的记录再改成 Checked <date>。
-- [ ] **W1.4** `docs/hosted-api.md:16`：删掉“找不到 OAuth metadata”的说法，写明 `/.well-known/oauth-protected-resource/mcp-oauth` 存在；在表格里加上 `/mcp-oauth`。
-- [ ] **W1.5** 保持 keyless 在前、key 作为升级（D5）。页面结构不变，不新增文档。
+- [x] **W1.1** `apps/public-web/scripts/build-docs.mjs:142`：Claude Code keyless 的验证句改成 `/mcp lists scrape and map`，并注明 `scrape_product` 只列给带浏览器通道的 key 和登录用户。
+- [x] **W1.2** `build-docs.mjs:150`：Cursor keyless 的验证句把 "three tools" 改成 `scrape and map`。
+- [x] **W1.3** `apps/public-web/content/connect-mcp.md` 的 `/mcp-oauth` 小节（:35-57）补上 Codex 的接法（`codex mcp add … --url https://mcp.octocrawl.dev/mcp-oauth`，具体命令先查 Codex 文档）。状态写成“Howard 报告可用，尚无带日期的记录”，有了 `research/hosted/` 的记录再改成 Checked <date>。
+  - 做了：命令是 `codex mcp add octocrawl --url https://mcp.octocrawl.dev/mcp-oauth` 加上 `codex mcp login octocrawl`（codex-cli 0.162.1 的 `codex mcp --help` 里有 `login`、`logout` 两个子命令）。页面上标的是 “Reported working; not checked here yet”。2026-10-16 核查那句话改成只点名 Claude Code 和 Cursor。
+- [x] **W1.4** `docs/hosted-api.md:16`：删掉“找不到 OAuth metadata”的说法，写明 `/.well-known/oauth-protected-resource/mcp-oauth` 存在；在表格里加上 `/mcp-oauth`。
+- [x] **W1.5** 保持 keyless 在前、key 作为升级（D5）。页面结构不变，不新增文档。
+- [x] **W1.6**（做的时候发现的）博客 `apps/public-web/content/blog/claude-code-web-scraping.md:17` 也写着“three tools”，改成：没有 key 时列出两个，带浏览器通道的 key 再加 `scrape_product`。按 `blogPosts.test.ts` 的要求，`updatedDate` 改成 2026-10-17。CHANGELOG 里 0.3.x 那条写着 “the three tools” 的条目是过去的发布记录，不改。
 - 验收：
   - `apps/public-web` 构建和测试通过；
   - `grep` 确认 keyless 验证句里没有 `three tools` 和 `scrape_product`；
   - 每条 keyless 验证句和 `research/hosted/2026-10-13-mcp-clients.md` 里该客户端实际列出的工具一致；
   - `docs/hosted-api.md` 提到了 `/mcp-oauth` 和它的 PRM。
+- 结果（PR #555）：`npm run build:public` 通过；`dist` 里剩下的 “three tools” 只有基准测试那句和过去的 CHANGELOG 条目。`npx vitest run apps/public-web packages/public-preview` 跑了 34 个文件、334 个测试，全部通过（跑前 unset 了代理）。站点还没部署。
 - 部署（只在 Howard 要求时）：先用 `public:preview:local`（8798）检查 CSP；然后部署带 tag 的 revision、`update-traffic`、确认线上 revision；最后做 Cloudflare purge 和 indexnow。
 - 指标：错误的验证句 2 → 0。
 - 决定：D2、D5。
@@ -494,11 +499,11 @@
 3. `Implementation` 的 title 和 description 从哪个 SDK 版本开始支持，等 W3.4。
 4. hosted `mode authed` 今天的实际行为，等 W6.3。
 5. 取消后上游是否停止，等 W9.6。
-6. Codex 用 `/mcp-oauth` 的具体命令和效果：Howard 报告能用，但没有带日期的记录，等 W1.3。
+6. Codex 用 `/mcp-oauth` 的效果：命令已经写进 Connect 页（W1.3），Howard 报告能用，但还没有带日期的真实客户端记录。等 E2 或一次单独的 Codex 登录记录。
 7. 标“行号待核”的引用，动手前在当时的 `main` 上再查。
 
 ## 下次从这里继续
 
-- 还没有任何任务开工。先请 Howard 定 D1、D2；如果按默认，就从 W1 开始（单独一个 PR，只改文档）。
-- W2 是 W3–W10 的基础，W1 之后紧接着做。
+- W1 已经开了 PR #555，等合并。站点只在 Howard 要求时部署（流程见 W1 的“部署”一条）。
+- 下一个是 W2（测量和 schema 合法性测试），单独一个 PR，从当时的 `origin/main` 拉分支。它是 W3–W10 的基础。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。
