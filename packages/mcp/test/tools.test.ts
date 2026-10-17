@@ -9,6 +9,7 @@ import { createMcpServer, mcpOrigin } from '../src/server.js'
 import { parseBaseUrl, parseToken, serveMcpStdio } from '../src/stdio.js'
 import { Client as ModernClient } from '@modelcontextprotocol/client'
 import { InMemoryTransport as ModernInMemoryTransport } from '@modelcontextprotocol/server'
+import { expectIsError } from './toolErrorChecks.js'
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
@@ -381,8 +382,8 @@ describe('MCP tools', () => {
       expect(await mcp.callTool({ name: 'get_scrape', arguments: { id: record.scrapeId } })).toEqual({ content: [{ type: 'text', text: JSON.stringify(record) }] })
       expect(calls.at(-1)?.line).toBe(`GET http://127.0.0.1:8787/v1/scrapes/${record.scrapeId}`)
       // origin is the server's to record: a caller naming one is refused before any API call.
-      await expect(mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', origin: 'spoofed@1' } })).rejects.toThrow('unsupported_parameter: unsupported parameter: origin')
-      await expect(mcp.callTool({ name: 'get_scrape', arguments: {} })).rejects.toThrow('id is required')
+      expectIsError(await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', origin: 'spoofed@1' } }), 'unsupported_parameter: unsupported parameter: origin')
+      expectIsError(await mcp.callTool({ name: 'get_scrape', arguments: {} }), 'id is required')
       expect(calls).toHaveLength(5)
     } finally {
       await mcp.close()
@@ -583,13 +584,15 @@ describe('MCP tools', () => {
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
     await Promise.all([createMcpServer(client).connect(serverSide), mcp.connect(clientSide)])
     try {
-      await expect(mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })).rejects.toMatchObject({
-        message: expect.stringContaining(`unsupported_format: POST /v1/scrape failed: 400 ${JSON.stringify(rejected)}`),
-        data: { code: 'unsupported_format', status: 400 },
+      // The API's code and message, not the raw response; the code and status stay readable in _meta.
+      expect(await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })).toMatchObject({
+        isError: true,
+        content: [{ type: 'text', text: `unsupported_format: ${rejected.error}` }],
+        _meta: { 'octocrawl/error': { code: 'unsupported_format', status: 400 } },
       })
       // Rejected by the shared request parser before any API call, with the same code.
-      await expect(mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', proxy: 'stealth' } })).rejects.toThrow('unsupported_parameter: unsupported parameter: proxy')
-      await expect(mcp.callTool({ name: 'get_batch', arguments: {} })).rejects.toThrow('invalid_request: id is required')
+      expectIsError(await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', proxy: 'stealth' } }), 'unsupported_parameter: unsupported parameter: proxy')
+      expectIsError(await mcp.callTool({ name: 'get_batch', arguments: {} }), 'invalid_request: id is required')
       expect(await mcp.callTool({ name: 'get_batch', arguments: { id: 'batch-1' } })).toEqual({ content: [{ type: 'text', text: '{"taskId":"batch-1","status":"completed"}' }] })
     } finally {
       await mcp.close()
@@ -772,9 +775,9 @@ describe('MCP tools', () => {
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
     await Promise.all([createMcpServer(client).connect(serverSide), mcp.connect(clientSide)])
     try {
-      await expect(mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', limit: 0 } })).rejects.toThrow('invalid_request: limit must be an integer from 1 to 100000')
-      await expect(mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', origin: 'x' } })).rejects.toThrow('unsupported_parameter: unsupported parameter: origin')
-      await expect(mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', debug: 'yes' } })).rejects.toThrow('invalid_request: debug must be a boolean')
+      expectIsError(await mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', limit: 0 } }), 'invalid_request: limit must be an integer from 1 to 100000')
+      expectIsError(await mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', origin: 'x' } }), 'unsupported_parameter: unsupported parameter: origin')
+      expectIsError(await mcp.callTool({ name: 'map', arguments: { url: 'https://example.com/', debug: 'yes' } }), 'invalid_request: debug must be a boolean')
     } finally {
       await mcp.close()
     }

@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { createHostedService } from '../src/host.js'
+import { expectIsError } from './toolErrorChecks.js'
 
 let close: (()=>Promise<void>) | undefined
 let root: string | undefined
@@ -52,9 +53,9 @@ it('speaks real Streamable HTTP and enforces origin, bearer subject and scope',a
     await expect(client.callTool({name:'map',arguments:{url:'https://www.amazon.sg/dp/B000VW9PIK'}})).rejects.toThrow('tool not available in this deployment')
     const result=await client.callTool({name:'list_monitors',arguments:{}})
     expect(result.content).toMatchObject([{type:'text',text:'[]'}])
-    await expect(client.callTool({name:'preview_monitor',arguments:{url:'https://elsewhere.example'}})).rejects.toThrow('allowlist')
-    await expect(client.callTool({name:'scrape',arguments:{url:'https://127.0.0.1/dp/B000VW9PIK'}})).rejects.toThrow('Amazon.sg')
-    await expect(client.callTool({name:'batch_scrape',arguments:{urls:['https://www.amazon.com/dp/B000VW9PIK']}})).rejects.toThrow('Amazon.sg')
-    await expect(client.callTool({name:'create_delivery_destination',arguments:{monitorId:'firecrawl-introduction',url:'https://elsewhere.example/webhook'}})).rejects.toThrow('remote pilot only supports')
+    expectIsError(await client.callTool({name:'preview_monitor',arguments:{url:'https://elsewhere.example'}}), 'allowlist')
+    expectIsError(await client.callTool({name:'scrape',arguments:{url:'https://127.0.0.1/dp/B000VW9PIK'}}), 'Amazon.sg')
+    expectIsError(await client.callTool({name:'batch_scrape',arguments:{urls:['https://www.amazon.com/dp/B000VW9PIK']}}), 'Amazon.sg')
+    expectIsError(await client.callTool({name:'create_delivery_destination',arguments:{monitorId:'firecrawl-introduction',url:'https://elsewhere.example/webhook'}}), 'remote pilot only supports')
   } finally {await client.close()}
 })
