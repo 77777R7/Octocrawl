@@ -13,7 +13,7 @@
       "descriptionChars": 277
     },
     "crawl": {
-      "inputBytes": 7431,
+      "inputBytes": 4626,
       "descriptionChars": 498
     },
     "get_crawl": {
@@ -41,7 +41,7 @@
       "descriptionChars": 221
     },
     "batch_scrape": {
-      "inputBytes": 7967,
+      "inputBytes": 5162,
       "descriptionChars": 497
     },
     "get_batch": {

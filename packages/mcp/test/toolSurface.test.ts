@@ -112,9 +112,9 @@ describe('MCP tool surfaces', () => {
   // docs/mcp-client-ux-tasks.md W7: a client keeps a schema whole under about 5,000 bytes (Codex strips the property
   // descriptions of a larger one), and every client that does not defer tool definitions pays for the whole list.
   it('keeps each local tool small enough for clients to keep its descriptions, and the whole list compact', () => {
-    const ceiling = (name: string) => name === 'scrape' ? 10_000 : name === 'crawl' || name === 'batch_scrape' ? 8_000 : 5_000
+    const ceiling = (name: string) => name === 'scrape' ? 10_000 : name === 'crawl' || name === 'batch_scrape' ? 5_500 : 5_000
     for (const tool of SURFACES.local!) expect([tool.name, measure(tool).inputBytes <= ceiling(tool.name)]).toEqual([tool.name, true])
-    expect(JSON.stringify(SURFACES.local).length).toBeLessThanOrEqual(52_000)
+    expect(JSON.stringify(SURFACES.local).length).toBeLessThanOrEqual(50_000)
     for (const surface of ['hosted-keyless', 'oauth-http']) {
       const scrape = SURFACES[surface]!.find((tool) => tool.name === 'scrape')!
       expect([surface, measure(scrape).inputBytes <= 6_000]).toEqual([surface, true])
