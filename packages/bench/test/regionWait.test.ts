@@ -22,6 +22,21 @@ const view = (text: string, extra: Record<string, unknown> = {}) => ({ loading: 
 const prices: VerifyContract = { checks: [{ type: 'markdownCountMin', pattern: '\\$\\d+', min: 3 }] }
 
 describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', () => {
+  it('waits for complete distinct identities instead of repeated cards or missing keys', async () => {
+    const records = [
+      { values: { id: 'a', name: 'Vase', price: '12' }, missing: [] },
+      { values: { id: 'a', name: 'Vase', price: '13' }, missing: [] },
+      { values: { name: 'Bowl', price: '9' }, missing: [] },
+    ]
+    const contract: VerifyContract = { checks: [{ type: 'recordFields', fields: ['name', 'price'], min: 2, uniqueBy: ['id'] }] }
+    const spec = { contract, list: { itemSelector: '.card', fields: [{ name: 'id' }, { name: 'name' }, { name: 'price' }] } }
+    const repeated = page([view('Catalog', { list: { records } })])
+    expect(await waitForRegion(repeated, spec, { maxMs: 1_000, sampleMs: 500, now: repeated.now })).toMatchObject({ ready: false, empty: false, checks: [{ passed: false, observedCount: 1 }] })
+    const complete = [...records, { values: { id: 'b', name: 'Cup', price: '0' }, missing: [] }]
+    const filled = page([view('Catalog', { list: { records: complete } })])
+    expect(await waitForRegion(filled, spec, { maxMs: 1_000, sampleMs: 500, now: filled.now })).toMatchObject({ ready: true, checks: [{ passed: true, observedCount: 2 }] })
+  })
+
   it('asks for one only with a task contract, and reads records only when the list format names its items and fields', () => {
     expect(regionSpecOf({})).toBeUndefined()
     expect(regionSpecOf({ verify: prices })).toEqual({ contract: prices })

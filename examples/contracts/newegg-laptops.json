@@ -1,0 +1,56 @@
+{
+  "url": "https://www.newegg.com/p/pl?d=laptop",
+  "formats": [
+    "markdown",
+    "json",
+    {
+      "type": "list",
+      "itemSelector": ".plp-results-section .goods-container[data-itemnumber]",
+      "fields": [
+        {
+          "name": "sku",
+          "attribute": "data-itemnumber"
+        },
+        {
+          "name": "name",
+          "selector": ".goods-title"
+        },
+        {
+          "name": "url",
+          "selector": ".goods-title",
+          "attribute": "href"
+        },
+        {
+          "name": "price",
+          "selector": ".goods-price-current"
+        }
+      ]
+    }
+  ],
+  "includeTags": [
+    ".plp-results-section"
+  ],
+  "maxAge": 0,
+  "verify": {
+    "checks": [
+      {
+        "type": "field",
+        "path": "metadata.title",
+        "equals": "Laptops and Notebooks Computers"
+      },
+      {
+        "type": "recordFields",
+        "fields": [
+          "sku",
+          "name",
+          "url",
+          "price"
+        ],
+        "min": 3,
+        "uniqueBy": [
+          "sku"
+        ]
+      }
+    ]
+  }
+}
