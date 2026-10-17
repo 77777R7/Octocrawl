@@ -290,6 +290,8 @@ describe('Connect leads with sign-in', () => {
     const cline = connect.$('c-cline').querySelector('.client-status')!
     expect(cline.textContent).toBe('Sign-in tested on 2026-10-17 with the OAuth settings Cline sends; not yet run in Cline itself')
     expect(cline.textContent).not.toMatch(/checked with/)
+    expect(cline.classList.contains('is-verified')).toBe(false)
+    expect(cline.classList.contains('is-tested')).toBe(true)
   })
 
   it('names both MCP URLs: sign-in, and keyless or a key', async () => {

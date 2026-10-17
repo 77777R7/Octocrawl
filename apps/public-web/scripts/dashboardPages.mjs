@@ -119,7 +119,7 @@ const MCP_KEY_URL = 'https://mcp.octocrawl.dev/mcp'
  */
 const installRow = (id, name, icon, { note, code, checked = null, tested = null }, key) => {
   const status = checked ? `<p class="client-status is-verified">Sign-in checked with ${escape(name)} on ${checked}</p>`
-    : tested ? `<p class="client-status is-verified">Sign-in tested on ${tested} with the OAuth settings ${escape(name)} sends; not yet run in ${escape(name)} itself</p>`
+    : tested ? `<p class="client-status is-tested">Sign-in tested on ${tested} with the OAuth settings ${escape(name)} sends; not yet run in ${escape(name)} itself</p>`
     : `<p class="client-status">Sign-in not checked with ${escape(name)} yet: these steps follow its docs</p>`
   const alternative = `<details class="key-alt"><summary>Use an API key instead</summary><p class="dash-small">${key.note}</p>${dashCode(`code-${id}`, key.code)}</details>`
   return `<details class="install-row" id="c-${id}"><summary><span class="int-icon">${icon.endsWith('.svg') ? `<img src="/docs-assets/agent-clients/${icon}" width="22" height="22" alt="" />` : escape(icon)}</span><strong>${escape(name)}</strong><span class="install-btn">Install <span aria-hidden="true">▾</span></span></summary><div class="install-body"><p class="dash-small">${note}</p>${dashCode(`signin-${id}`, code)}${status}${alternative}</div></details>`
