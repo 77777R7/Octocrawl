@@ -20,8 +20,8 @@ export interface McpServerOptions {
   calls?: PostCalls
   /** What initialize tells the client about this server; by default written from the tools it lists, for a local server. */
   instructions?: string
-  /** Said after "this server offers ..." when a client calls a tool this deployment leaves out: where the tool does run. */
-  unavailableHint?: string
+  /** Said after "this server offers ..." when a client calls a tool this deployment leaves out: where the tool does run, or how to list it. */
+  unavailableHint?: string | ((tool: string) => string | undefined)
   /** The API this server calls, named when it cannot be reached (a local server's base URL). */
   apiUrl?: string
   /**
@@ -75,7 +75,8 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
     try {
       // A tool this deployment leaves out stays a protocol error, as the spec has an unknown tool, but says what is offered.
       if (options.allowedTools && !options.allowedTools.has(request.params.name)) {
-        throw new Error(`tool not available in this deployment: ${request.params.name}; this server offers ${[...options.allowedTools].join(', ')}.${options.unavailableHint === undefined ? '' : ` ${options.unavailableHint}`}`)
+        const hint = typeof options.unavailableHint === 'function' ? options.unavailableHint(request.params.name) : options.unavailableHint
+        throw new Error(`tool not available in this deployment: ${request.params.name}; this server offers ${[...options.allowedTools].join(', ')}.${hint === undefined ? '' : ` ${hint}`}`)
       }
       let result: unknown
       let progress: ProgressReporter | undefined

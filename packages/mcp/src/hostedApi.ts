@@ -25,6 +25,7 @@ import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
 import { serverInstructions } from './instructions.js'
 import { SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
+import { scrapeSchemaWithout } from './toolsets.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
 import { CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
@@ -195,16 +196,16 @@ export const HOSTED_MCP_SCRAPE_TIMEOUT_MS = 100_000
 /** A hosted copy of a tool's input schema, with only what this connection can use. */
 function hostedInputSchema(name: string, schema: unknown, browser: boolean): unknown {
   if (name !== 'scrape' && name !== 'map') return schema
-  const copy = structuredClone(schema) as { properties: Record<string, Record<string, unknown>> }
-  const properties = copy.properties
   if (name === 'map') {
+    const copy = structuredClone(schema) as { properties: Record<string, Record<string, unknown>> }
+    const properties = copy.properties
     delete properties.ignoreRobotsTxt
     properties.limit = { ...properties.limit, maximum: HOSTED_MAP_MAX_LIMIT }
     properties.timeout = { ...properties.timeout, maximum: HOSTED_MAP_MAX_TIMEOUT_MS }
     return copy
   }
-  for (const key of Object.keys(properties)) if (!HOSTED_SCRAPE_KEYS.has(key)) delete properties[key]
-  properties.mode = { type: 'string', enum: ['standard', 'research'], description: 'The declared identity the page is read under: standard (default) or research. A hosted server holds no saved logins, so it has no authed mode.' }
+  const copy = scrapeSchemaWithout(schema, (key) => HOSTED_SCRAPE_KEYS.has(key), 'The declared identity the page is read under: standard (default) or research. A hosted server holds no saved logins, so it has no authed mode.')
+  const properties = copy.properties
   properties.timeout = { ...properties.timeout, maximum: HOSTED_MCP_SCRAPE_TIMEOUT_MS, description: `Deadline in milliseconds for the whole scrape. When it fires the result is partial with the content so far, or failed/timeout. Here at most and by default ${HOSTED_MCP_SCRAPE_TIMEOUT_MS}; a longer one is lowered to it.` }
   properties.maxFileBytes = { ...properties.maxFileBytes, maximum: HOSTED_MAX_FILE_BYTES }
   const verify = properties.verify as { properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }

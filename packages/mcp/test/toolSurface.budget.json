@@ -204,5 +204,105 @@
       "inputBytes": 131,
       "descriptionChars": 105
     }
+  },
+  "local-core": {
+    "scrape": {
+      "inputBytes": 10000,
+      "descriptionChars": 450
+    },
+    "map": {
+      "inputBytes": 3117,
+      "descriptionChars": 597
+    },
+    "get_scrape": {
+      "inputBytes": 157,
+      "descriptionChars": 277
+    }
+  },
+  "local-read-only": {
+    "scrape": {
+      "inputBytes": 7670,
+      "descriptionChars": 450
+    },
+    "map": {
+      "inputBytes": 3117,
+      "descriptionChars": 597
+    },
+    "get_scrape": {
+      "inputBytes": 157,
+      "descriptionChars": 277
+    },
+    "get_crawl": {
+      "inputBytes": 136,
+      "descriptionChars": 125
+    },
+    "wait_crawl": {
+      "inputBytes": 195,
+      "descriptionChars": 181
+    },
+    "get_crawl_pages": {
+      "inputBytes": 728,
+      "descriptionChars": 406
+    },
+    "get_crawl_errors": {
+      "inputBytes": 212,
+      "descriptionChars": 49
+    },
+    "list_active_crawls": {
+      "inputBytes": 62,
+      "descriptionChars": 221
+    },
+    "get_batch": {
+      "inputBytes": 102,
+      "descriptionChars": 116
+    },
+    "get_batch_items": {
+      "inputBytes": 436,
+      "descriptionChars": 177
+    },
+    "wait_batch": {
+      "inputBytes": 161,
+      "descriptionChars": 181
+    },
+    "get_batch_errors": {
+      "inputBytes": 183,
+      "descriptionChars": 271
+    },
+    "scrape_product": {
+      "inputBytes": 131,
+      "descriptionChars": 105
+    },
+    "list_logins": {
+      "inputBytes": 62,
+      "descriptionChars": 176
+    },
+    "preview_monitor": {
+      "inputBytes": 396,
+      "descriptionChars": 132
+    },
+    "list_monitors": {
+      "inputBytes": 88,
+      "descriptionChars": 41
+    },
+    "get_monitor": {
+      "inputBytes": 129,
+      "descriptionChars": 70
+    },
+    "get_monitor_run": {
+      "inputBytes": 163,
+      "descriptionChars": 69
+    },
+    "list_delivery_destinations": {
+      "inputBytes": 117,
+      "descriptionChars": 160
+    },
+    "list_deliveries": {
+      "inputBytes": 341,
+      "descriptionChars": 140
+    },
+    "get_delivery": {
+      "inputBytes": 129,
+      "descriptionChars": 44
+    }
   }
 }

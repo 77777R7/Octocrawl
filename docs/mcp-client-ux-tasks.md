@@ -490,18 +490,31 @@
 
 现状（`e1e128d4`）：`packages/mcp/src/stdio.ts`（63 行）用 `parseBaseUrl`（8–14）、`parseToken`（16–23）读参数，`serveMcpStdio`（29–32）调 `createMcpServer`，不传 `allowedTools`/`tools`。`createMcpServer` 已经支持 `allowedTools`（server.ts 9）、`tools`（11）、`unavailableHint`（23）；instructions 按列出的工具生成（50–51），所以工具集变了说明会自动跟着变（原 W10.4 已满足）。只读集合就是 PRESENTATION 里 readOnly 为 true 的 19 个（tools.ts 493–535）。hosted 的按面构建器 `hostedInputSchema`（hostedApi.ts 196）可以参考，但只处理 scrape 和 map。`server.json` 只有 `W2L_API_URL`、`W2L_API_TOKEN` 两个环境变量。`packages/mcp/README.md` 只有一个 Claude Desktop 风格的配置示例。
 
-- [ ] **W10.1** `stdio.ts` 解析 `--toolsets=core,crawl,batch,products,logins,monitor,delivery|all`（环境变量 `W2L_MCP_TOOLSETS`）和 `--read-only`（`W2L_MCP_READ_ONLY`），映射到 `allowedTools` 和 `tools`。`core` 是 scrape、get_scrape、map；crawl 组含 wait_crawl（W9 之后）。组的定义放在 tools.ts，从 `TOOL_NAMES` 派生，测试保证每个工具恰好属于一个组。
-- [ ] **W10.2** `--read-only`：只列 PRESENTATION 里只读的工具，再加一个“只读 scrape”：去掉会以本人身份操作的选项（actions、`mode` 的 authed、lane、handoff、`access` 的 my-browser），标 `readOnlyHint: true`。构建器参考 `hostedInputSchema`，抽一个小函数共用，hosted 的行为不变（W6 的 drift 测试守着）。
-- [ ] **W10.3** 名称不认识时启动失败并列出合法名称。调用选择范围之外的工具时，沿用 `unavailableHint`，说出打开它的 flag（如 “enable it with --toolsets=crawl”）。
-- [ ] **W10.4** 环境变量写进 `server.json` 的 `environmentVariables`；`packages/mcp/README.md` 补 Claude Code、Codex、Cursor、VS Code 的示例配置（含 `--toolsets` 和 `--read-only`）。
-- [ ] **W10.5** 默认 `all`（D13）。要改成精简默认的话，提前一个版本在 CHANGELOG 预告，并在 instructions 加一行说明 `--toolsets all`。
-- [ ] **W10.6** `toolSurface.test.ts` 加 `local-core`、`local-read-only` 两个面（预算文件加对应行）；CHANGELOG Unreleased 一条。
+- [x] **W10.1** `stdio.ts` 解析 `--toolsets=core,crawl,batch,products,logins,monitor,delivery|all`（环境变量 `W2L_MCP_TOOLSETS`）和 `--read-only`（`W2L_MCP_READ_ONLY`），映射到 `allowedTools` 和 `tools`。`core` 是 scrape、get_scrape、map；crawl 组含 wait_crawl（W9 之后）。组的定义放在 tools.ts，从 `TOOL_NAMES` 派生，测试保证每个工具恰好属于一个组。
+- [x] **W10.2** `--read-only`：只列 PRESENTATION 里只读的工具，再加一个“只读 scrape”：去掉会以本人身份操作的选项（actions、`mode` 的 authed、lane、handoff、`access` 的 my-browser），标 `readOnlyHint: true`。构建器参考 `hostedInputSchema`，抽一个小函数共用，hosted 的行为不变（W6 的 drift 测试守着）。
+- [x] **W10.3** 名称不认识时启动失败并列出合法名称。调用选择范围之外的工具时，沿用 `unavailableHint`，说出打开它的 flag（如 “enable it with --toolsets=crawl”）。
+- [x] **W10.4** 环境变量写进 `server.json` 的 `environmentVariables`；`packages/mcp/README.md` 补 Claude Code、Codex、Cursor、VS Code 的示例配置（含 `--toolsets` 和 `--read-only`）。
+- [x] **W10.5** 默认 `all`（D13）。要改成精简默认的话，提前一个版本在 CHANGELOG 预告，并在 instructions 加一行说明 `--toolsets all`。
+- [x] **W10.6** `toolSurface.test.ts` 加 `local-core`、`local-read-only` 两个面（预算文件加对应行）；CHANGELOG Unreleased 一条。
 - 验收：
   - 先写失败测试：不管环境变量怎么设，stdio 服务器都列 38 个工具。
   - 改完后：`--toolsets=core` 正好 3 个工具；`--read-only` 只列只读工具，它的 scrape 没有 actions、authed、lane、handoff，但还有 verify 正则检查和 screenshot；未知名称以非零退出码退出并列出名称；不带 flag 时列全部；instructions 只提到列出的工具（W3 的检查）。
   - 记录一次用 `--read-only` 的 Claude Code 交互会话。
 - 指标：core 38 → 3 个工具；`--read-only` 下本地 scrape 的 readOnlyHint false → true；Codex auto 和 VS Code 下本地 scrape 的确认弹窗：每次都弹 → 0（交互记录之前只是按客户端规则推断）。
 - 决定：D13。
+- 结果（PR #580）：
+  - `--toolsets` / `W2L_MCP_TOOLSETS` 一共 7 个组加 `all`，定义在新文件 `toolsets.ts`，测试保证每个工具恰好属于一个组。默认值按 D13 仍是 `all`。
+  - `--read-only` 也可以写成 `--read-only=<yes|no>`，环境变量是 `W2L_MCP_READ_ONLY`。打开后列出 20 个只读工具，再加一个只读的 scrape，共 21 个。
+    - 只读 scrape：去掉 actions、lane、handoff；mode 只能选 standard 或 research；access 只能选 standard 或 enhanced；标 `readOnlyHint: true`；verify 的正则检查和 screenshot 都保留。
+    - 客户端仍然发送这些选项时，服务器在调用 API 之前就拒绝，错误码是 `unsupported_parameter`。
+    - instructions 改成说明这是只读服务器，不再让模型去问本人。
+  - 构建 schema 的 `scrapeSchemaWithout` 和 hosted 共用。审查时逐字节比较过：hosted 和 oauth 四个面在 main 和本分支上的输出完全相同。
+  - 以下情况都以非零码退出，并列出合法的值：未知的组名、`--toolsets` 后面没写值、只读开关的值不是 yes 或 no。调用一个没列出的工具时，提示会说出所有原因和对应的 flag。
+  - server.json 加了这两个环境变量；README 加了 Claude Code、Codex、Cursor、VS Code 的配置示例。
+  - 体积：local-core 3 个工具，17,687 字符；local-read-only 21 个工具，27,305 字符。原有的预算行都没变。
+  - 干净上下文的审查找出 3 个阻塞问题，都已修好：`--read-only=true` 和 `=yes` 被静默忽略；只读模式的 instructions 还在让模型去问本人；两个原因同时成立时提示只说一个。
+  - 检查：`npm run typecheck` 和 `npm run build:public` 都通过；`npm test` 260 个文件、3101 个测试通过（1 个 todo）。
+  - **没做**：用 `--read-only` 在 Claude Code 里的交互记录，以及 E2。Codex 和 VS Code 的确认弹窗指标在交互记录之前仍然只是推断。
 
 ## E 评估（贯穿全程）
 
@@ -588,6 +601,6 @@
 
 - **W1–W6 全部完成**：都已合并、部署（hosted API、网站），并随 0.6.0 发布到 npm、PyPI 和 MCP Registry。线上版本以 `gcloud run services describe` 读到的为准（几个窗口都会部署）。
 - **2026-10-17 Howard：W7–W10 现在开始（D1′），一项一个 PR，按 W7 → W8 → W9 → W10 的顺序。** W7–W10 的行号和基线已在 `e1e128d4` 上重新核对。
-- W7（#570）、W7.4（#573）、W8（#575）已合并；**W9（#577）已开 PR，等合并**。scrape ≤8,000 和 hosted scrape ≤5,000 没达到，要达到只能删安全提示，不建议。
-- 下一个是 **W10**（本地工具集和只读模式）：等 #577 合并后，从当时的 `origin/main` 拉分支。遗留：W8 的 Cursor 冒烟测试；下一版去掉 JSON 里的截图 base64；在 Claude Code 里真实跑一次 wait_crawl；W7–W10 都做完后发 0.7.0（W9 改了默认值，CHANGELOG 已经写明）。
+- W7（#570）、W7.4（#573）、W8（#575）、W9（#577）已合并；**W10（#580）已开 PR，等合并**。W7–W10 的代码到此全部完成。scrape ≤8,000 和 hosted scrape ≤5,000 没达到，要达到只能删安全提示，不建议。
+- 下一步：#580 合并后发 0.7.0（W9 改了默认值，CHANGELOG 已经写明）；然后跑 E2 的 W7–W10 轮。遗留：W8 的 Cursor 冒烟测试；下一版去掉 JSON 里的截图 base64；在 Claude Code 里真实跑一次 wait_crawl；W10 在 Claude Code 里的 `--read-only` 交互记录。
 - 每完成一项：在这里打勾，补上 PR 编号，把“待 Howard 决定”里已经定了的移到“定下的方向”。

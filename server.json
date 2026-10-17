@@ -28,6 +28,16 @@
           "description": "A bearer token for a hosted or self-hosted API; none for a local one",
           "isRequired": false,
           "isSecret": true
+        },
+        {
+          "name": "W2L_MCP_TOOLSETS",
+          "description": "The tool groups to list, comma-separated: core, crawl, batch, products, logins, monitor, delivery, or all (default all); the same as --toolsets",
+          "isRequired": false
+        },
+        {
+          "name": "W2L_MCP_READ_ONLY",
+          "description": "1 lists read-only tools alone, with a scrape that does not act as the person; the same as --read-only",
+          "isRequired": false
         }
       ]
     }
