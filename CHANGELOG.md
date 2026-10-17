@@ -22,6 +22,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- MCP 2026-07-28 on every Octocrawl MCP server (`@octocrawl/mcp` over stdio, the local MCP host, and `/mcp` and `/mcp-oauth` once deployed): a client that opens with `server/discover` is served without a session, and a 2025-era client that opens with `initialize` is served as before. A request naming a revision the server does not serve is answered 400 with the spec's `UnsupportedProtocolVersionError` (-32022), listing the revisions it does serve. The MCP servers now run on the v2 MCP TypeScript SDK (`@modelcontextprotocol/server`).
+
 ## 0.5.0 — 2026-10-17
 
 The published packages (`octocrawl`, `@octocrawl/cli`, `@octocrawl/sdk`, `@octocrawl/mcp`, `@octocrawl/ai-sdk`, `octocrawl-client`) at 0.5.0. It holds everything below since 0.4.2 on 2026-10-13. It is a minor version because one change refuses requests 0.4.2 accepted: a task contract that checks Markdown, sent with explicit `formats` that leave Markdown out, is now refused before fetching. Entries about the hosted service (api. and mcp.octocrawl.dev) and octocrawl.dev describe what is already live there. The Python client is unchanged apart from its version.

@@ -1,14 +1,13 @@
 import { createServer, type Server as HttpServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js'
 import { hostedNetworkPolicy, localNetworkPolicy, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { closeIdleOnlyWhenUnread, defaultSessionsFile } from '@w2l/api'
 import { createManagedRuntime } from './managedRuntime.js'
 import { createMcpServer } from './server.js'
 import { validateAmazonPublicState } from './amazonState.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
+import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
 
 export interface LocalConfig {
   taskRoot: string
@@ -67,7 +66,7 @@ export function createLocalService(config: LocalConfig): {server: HttpServer; cl
       if (req.method==='GET' || req.method==='DELETE') {sendJson(res,405,{error:'stream and session management unavailable'});return}
       if (req.method!=='POST') {sendJson(res,405,{error:'method not allowed'});return}
       const version=req.headers['mcp-protocol-version']
-      if (version && (typeof version!=='string' || !SUPPORTED_PROTOCOL_VERSIONS.includes(version))) {sendJson(res,400,{error:'unsupported MCP protocol version'});return}
+      if (!servesProtocolVersion(version)) {sendJson(res,400,unsupportedProtocolVersion(version));return}
       const size=Number(req.headers['content-length'] ?? 0)
       if (size>262_144) {sendJson(res,413,{error:'request too large'});return}
       const chunks:Buffer[]=[]
@@ -82,10 +81,8 @@ export function createLocalService(config: LocalConfig): {server: HttpServer; cl
       try {body=JSON.parse(Buffer.concat(chunks).toString('utf8'))}
       catch {sendJson(res,400,{error:'invalid JSON'});return}
       // One user, no token: a cancellation reaches only a call of the same MCP session.
-      const mcp=createMcpServer(runtime.client,{calls:trackPost(calls,req,res,body,[])})
-      const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true})
-      try {await mcp.connect(transport);await transport.handleRequest(req,res,body)}
-      finally {await mcp.close()}
+      const post=trackPost(calls,req,res,body,[])
+      await serveMcpPost(req,res,body,()=>createMcpServer(runtime.client,{calls:post}))
     } catch(error) {
       if (!res.headersSent) sendJson(res,500,{error:error instanceof Error?error.message:'internal error'})
       else res.end()

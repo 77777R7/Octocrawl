@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { isInitializeRequest, type RequestId } from '@modelcontextprotocol/sdk/types.js'
+import { isInitializeRequest, type RequestId } from '@modelcontextprotocol/server'
 
 /** Calls a notifications/cancelled can reach at once; a call past this many is still stopped when its client disconnects. */
 export const MAX_CANCELLABLE_CALLS = 10_000
