@@ -1,6 +1,6 @@
 # Octocrawl for Claude Code
 
-This plugin connects Claude Code to hosted Octocrawl, a web scraper for agents. Octocrawl reads a web page as Markdown and attaches an Evidence Record: the final URL, when it was fetched, the HTTP status, what robots.txt allowed and hashes of what was read. A blocked, empty or wrong page comes back with a status that says so, never as an invented page.
+This plugin connects Claude Code to hosted Octocrawl, which turns web pages into clean Markdown, links and JSON that your agent reads in fewer tokens than raw HTML. Every result carries an Evidence Record: the final URL, when it was fetched, the HTTP status, what robots.txt allowed and hashes of what was read, so an answer can cite exactly where it came from.
 
 ## Install
 

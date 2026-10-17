@@ -5,6 +5,7 @@ import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer } from './server.js'
+import { parseToolSelection, selectionOptions, type ToolSelection } from './toolsets.js'
 
 export function parseBaseUrl(argv: readonly string[], env: NodeJS.ProcessEnv): string {
   const flag = argv.find((arg) => arg.startsWith('--base-url='))
@@ -26,9 +27,11 @@ export function parseToken(argv: readonly string[], env: NodeJS.ProcessEnv): str
 /**
  * Serves MCP over stdio (or `transport`): a client opening with server/discover is
  * served on 2026-07-28, one opening with initialize on its 2025-era revision.
+ * `selection` lists some toolsets, or read-only tools alone (docs/mcp-client-ux-tasks.md W10); by default all.
  */
-export function serveMcpStdio(client: W2L, transport?: Transport, apiUrl?: string): StdioServerHandle {
-  return serveStdio(() => createMcpServer(client, apiUrl === undefined ? {} : { apiUrl }), transport === undefined ? {} : { transport })
+export function serveMcpStdio(client: W2L, transport?: Transport, apiUrl?: string, selection: ToolSelection = {}): StdioServerHandle {
+  const listed = selectionOptions(selection)
+  return serveStdio(() => createMcpServer(client, { progress: true, ...listed, ...(apiUrl === undefined ? {} : { apiUrl }) }), transport === undefined ? {} : { transport })
 }
 
 /**
@@ -49,7 +52,9 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2)
   const baseUrl = parseBaseUrl(argv, process.env)
   const token = parseToken(argv, process.env)
-  serveMcpStdio(new W2L({ baseUrl, token }), undefined, baseUrl)
+  // An unknown toolset name stops the start, naming the valid ones.
+  const selection = parseToolSelection(argv, process.env)
+  serveMcpStdio(new W2L({ baseUrl, token }), undefined, baseUrl, selection)
   void warnIfUnreachable(baseUrl)
 }
 

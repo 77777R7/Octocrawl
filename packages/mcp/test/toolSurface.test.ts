@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import Ajv2020Module from 'ajv/dist/2020.js'
 import { TOOLS } from '../src/tools.js'
+import { selectionOptions } from '../src/toolsets.js'
 import { hostedTools, oauthTools } from '../src/hostedApi.js'
 
 /**
@@ -23,6 +24,9 @@ const SURFACES: Record<string, readonly Tool[]> = {
   'hosted-key': hostedTools(true) as readonly Tool[],
   'oauth-http': oauthTools(false) as readonly Tool[],
   'oauth-browser': oauthTools(true) as readonly Tool[],
+  // A stdio server started with --toolsets=core, or with --read-only (docs/mcp-client-ux-tasks.md W10.6).
+  'local-core': selectionOptions({ toolsets: ['core'] }).tools as readonly Tool[],
+  'local-read-only': selectionOptions({ readOnly: true }).tools as readonly Tool[],
 }
 
 const BUDGET_FILE = fileURLToPath(new URL('./toolSurface.budget.json', import.meta.url))
@@ -135,5 +139,5 @@ describe('MCP tool surfaces', () => {
     }
   })
 
-  it.todo('stdio pointed at https://api.octocrawl.dev lists all 38 local tools, though that host serves scrape and map alone (W3, W10)')
+  it.todo('stdio pointed at https://api.octocrawl.dev lists all 39 local tools, though that host serves scrape and map alone (W3, W10)')
 })

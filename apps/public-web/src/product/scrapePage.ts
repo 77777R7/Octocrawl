@@ -9,7 +9,7 @@ import { DEMOS, DOCS, DOCS_CELL, HARD } from './scrapeRun'
 
 export const SCRAPE_PATH = '/scrape/'
 export const SCRAPE_TITLE = 'Web Scraping API: Markdown, Tables and Fields | Octocrawl'
-export const SCRAPE_DESCRIPTION = 'Scrape a public web page into Markdown, links, tables and fields, with an Evidence Record of where each result came from. A page Octocrawl can’t read comes back with the reason and costs 0 credits.'
+export const SCRAPE_DESCRIPTION = 'Scrape a public web page into Markdown, links, tables and fields your agent reads in fewer tokens than raw HTML, with an Evidence Record of where each result came from.'
 
 const esc = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const n = (value: number): string => value.toLocaleString('en-US')

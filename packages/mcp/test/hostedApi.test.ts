@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
@@ -489,6 +489,26 @@ it('an account\'s MCP tool calls spend its credits through the same gate, and a 
   await rm(root!, { recursive: true, force: true }); root = undefined
   const bare = await start({ credits: null, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: false, uid: 'account-1' } } })
   expect((await post(bare.url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_account' })).status).toBe(503)
+})
+
+// docs/mcp-client-ux-tasks.md W9.6: what a cancelled call leaves behind upstream.
+it('a hosted MCP scrape the client cancels frees its browser lease and costs nothing', async () => {
+  const credits = new MemoryCreditsStore(1_000)
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ credits, leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const holder = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await holder.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: { authorization: 'Bearer oc_account' } } }))
+    const cancel = new AbortController()
+    const call = holder.callTool({ name: 'scrape', arguments: { url: `${origin}/slow` } }, undefined, { signal: cancel.signal })
+    await vi.waitFor(() => expect(leases.held.size).toBe(1))
+    cancel.abort()
+    await expect(call).rejects.toThrow()
+    await vi.waitFor(() => expect(leases.held.size).toBe(0), { timeout: 5_000 })
+    // The page answers after 1.5 s; by then the call is settled.
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+  } finally { await holder.close() }
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 1_000 })
 })
 
 it('publishes a server card with the tools /mcp lists and no sign-in, and answers 404 for any other /.well-known file', async () => {

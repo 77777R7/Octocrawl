@@ -7,7 +7,7 @@
 
 /** Where the server runs, and for hosted Octocrawl what the caller brought. */
 export type InstructionsSurface =
-  | { kind: 'local' }
+  | { kind: 'local'; /** Started with --read-only: scrape does not act as the person (docs/mcp-client-ux-tasks.md W10.2). */ readOnly?: boolean }
   | { kind: 'hosted'; connection: 'keyless' | 'key' | 'oauth'; browser: boolean; /** A keyless caller from Claude's egress range, whose allowance every such connector shares. */ sharedPool?: boolean }
 
 export function serverInstructions(toolNames: Iterable<string>, surface: InstructionsSurface): string {
@@ -21,7 +21,8 @@ export function serverInstructions(toolNames: Iterable<string>, surface: Instruc
   if (has('scrape')) routes.push('one known URL: scrape')
   if (has('map')) routes.push('the URLs of a site without reading each page: map')
   if (has('batch_scrape', 'wait_batch', 'get_batch_items')) routes.push('a known list of URLs: batch_scrape, then wait_batch, then get_batch_items')
-  if (has('crawl', 'get_crawl', 'get_crawl_pages')) routes.push('a section of a site, page by page: crawl, then get_crawl until it ends, then get_crawl_pages')
+  if (has('crawl', 'wait_crawl', 'get_crawl_pages')) routes.push('a section of a site, page by page: crawl, then wait_crawl, then get_crawl_pages')
+  else if (has('crawl', 'get_crawl', 'get_crawl_pages')) routes.push('a section of a site, page by page: crawl, then get_crawl until it ends, then get_crawl_pages')
   if (has('scrape_product')) routes.push('an Amazon.sg product page as checked JSON: scrape_product')
   if (has('preview_monitor', 'create_monitor')) routes.push('a page to re-check on a schedule: preview_monitor, then create_monitor')
   if (routes.length > 0) lines.push(`Start with: ${routes.join('; ')}.`)
@@ -35,7 +36,9 @@ export function serverInstructions(toolNames: Iterable<string>, surface: Instruc
 
   if (surface.kind === 'local') {
     if (has('scrape')) {
-      lines.push('lane my-browser, handoff and mode authed read pages in the person\'s own Chrome or with their saved login: ask the person first and name the site.')
+      lines.push(surface.readOnly === true
+        ? 'This server is read-only: its tools only read, and scrape takes no actions, lane, handoff or mode authed, so nothing runs as the person.'
+        : 'lane my-browser, handoff and mode authed read pages in the person\'s own Chrome or with their saved login: ask the person first and name the site.')
       lines.push('fastMode: true reads over HTTP alone; waitFor above 0 starts in the browser, for a page known to need scripts.')
     }
     if (has('scrape', 'map')) lines.push('If this server\'s API is hosted Octocrawl (api.octocrawl.dev) rather than npx octocrawl serve on this computer, only scrape and map run there.')

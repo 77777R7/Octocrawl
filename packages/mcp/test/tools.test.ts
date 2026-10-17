@@ -19,7 +19,7 @@ function looseSharedFormats(formats: unknown): unknown {
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
-    const expected = ['scrape', 'map', 'get_scrape', 'crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch', 'scrape_product', 'batch_products', 'import_login', 'list_logins', 'remove_login',
+    const expected = ['scrape', 'map', 'get_scrape', 'crawl', 'get_crawl', 'wait_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch', 'scrape_product', 'batch_products', 'import_login', 'list_logins', 'remove_login',
       'preview_monitor','create_monitor','list_monitors','get_monitor','run_monitor','get_monitor_run','pause_monitor','resume_monitor','cancel_monitor_run',
       'create_delivery_destination','list_delivery_destinations','pause_delivery_destination','resume_delivery_destination','list_deliveries','get_delivery','retry_dead_letter']
     expect([...TOOL_NAMES]).toEqual(expected)
@@ -66,7 +66,7 @@ describe('MCP tools', () => {
       'POST http://127.0.0.1:8787/v1/crawl/task-1/cancel',
       'POST http://127.0.0.1:8787/v1/crawl/task-1/resume',
     ])
-    expect(calls[0]?.body).toEqual({ url: 'https://example.com/', mode: 'standard', debug: false, origin: SDK_ORIGIN })
+    expect(calls[0]?.body).toEqual({ url: 'https://example.com/', mode: 'standard', debug: false, timeout: 120000, origin: SDK_ORIGIN })
   })
 
   it('forwards custom formats and debug to REST', async () => {
@@ -110,7 +110,7 @@ describe('MCP tools', () => {
     }) as typeof fetch })
     const request = { url: 'https://example.com/', formats: ['markdown', 'links'], includeLinks: true, includePaths: ['^/docs/'], excludePaths: ['^/docs/old/'] }
     await callTool(client, 'crawl', request)
-    expect(body).toEqual({ ...request, origin: SDK_ORIGIN })
+    expect(body).toEqual({ ...request, maxPages: 100, origin: SDK_ORIGIN })
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
       const formats = (TOOLS.find(tool => tool.name === name)?.inputSchema.properties as Record<string, { maxItems?: number }>).formats
       expect(formats).toBeDefined()
@@ -126,7 +126,7 @@ describe('MCP tools', () => {
     }) as typeof fetch })
     const scope = { regexOnFullURL: true, ignoreQueryParameters: true, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: true, allowExternalLinks: true }
     await callTool(client, 'crawl', { url: 'https://example.com/docs/', ...scope })
-    expect(calls[0]?.body).toEqual({ url: 'https://example.com/docs/', ...scope, origin: SDK_ORIGIN })
+    expect(calls[0]?.body).toEqual({ maxPages: 100, url: 'https://example.com/docs/', ...scope, origin: SDK_ORIGIN })
     await callTool(client, 'get_crawl_pages', { id: 'task-1', includeDuplicates: true })
     expect(calls[1]?.line).toBe('GET http://127.0.0.1:8787/v1/crawl/task-1/pages?includeDuplicates=true')
     const crawl = TOOLS.find((tool) => tool.name === 'crawl')?.inputSchema.properties as Record<string, unknown>
@@ -152,7 +152,7 @@ describe('MCP tools', () => {
       return json({ items: all.slice(start, end), nextCursor: end < all.length ? String(end) : null, hasMore: end < all.length })
     }) as typeof fetch })
     await callTool(client, 'crawl', { url: 'https://example.com/', sitemap: 'only', maxConcurrency: 2 })
-    expect(calls[0]?.body).toEqual({ url: 'https://example.com/', sitemap: 'only', maxConcurrency: 2, origin: SDK_ORIGIN })
+    expect(calls[0]?.body).toEqual({ maxPages: 100, url: 'https://example.com/', sitemap: 'only', maxConcurrency: 2, origin: SDK_ORIGIN })
     expect(await callTool(client, 'list_active_crawls', {})).toEqual({ crawls: [] })
     expect(calls[1]?.line).toBe('GET /v1/crawl/active')
     // Pages of two, three wanted: two requests, the second no larger than the one item still wanted, and the cursor continues after it.
@@ -200,7 +200,7 @@ describe('MCP tools', () => {
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
     expect(bodies).toEqual([
       { url: 'https://example.com/', debug: false, ...options, origin: SDK_ORIGIN },
-      { url: 'https://example.com/', ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', maxPages: 100, ...options, origin: SDK_ORIGIN },
       { urls: ['https://example.com/a'], ...options, origin: SDK_ORIGIN },
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
@@ -224,8 +224,8 @@ describe('MCP tools', () => {
     await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
     expect(bodies).toEqual([
-      { url: 'https://example.com/', debug: false, ...options, origin: SDK_ORIGIN },
-      { url: 'https://example.com/', ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', debug: false, timeout: 120000, ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', maxPages: 100, ...options, origin: SDK_ORIGIN },
       { urls: ['https://example.com/a'], ...options, origin: SDK_ORIGIN },
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
@@ -252,8 +252,8 @@ describe('MCP tools', () => {
     await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
     expect(bodies).toEqual([
-      { url: 'https://example.com/', debug: false, ...options, origin: SDK_ORIGIN },
-      { url: 'https://example.com/', ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', debug: false, timeout: 120000, ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', maxPages: 100, ...options, origin: SDK_ORIGIN },
       { urls: ['https://example.com/a'], ...options, origin: SDK_ORIGIN },
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
@@ -277,8 +277,8 @@ describe('MCP tools', () => {
     await callTool(client, 'crawl', { url: 'https://example.com/', ...options, sitemap: 'skip' })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
     expect(bodies).toEqual([
-      { url: 'https://example.com/', debug: false, ...options, origin: SDK_ORIGIN },
-      { url: 'https://example.com/', ...options, sitemap: 'skip', origin: SDK_ORIGIN },
+      { url: 'https://example.com/', debug: false, timeout: 120000, ...options, origin: SDK_ORIGIN },
+      { url: 'https://example.com/', maxPages: 100, ...options, sitemap: 'skip', origin: SDK_ORIGIN },
       { urls: ['https://example.com/a'], ...options, origin: SDK_ORIGIN },
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
@@ -301,8 +301,8 @@ describe('MCP tools', () => {
     await callTool(client, 'crawl', { url: 'https://example.com/', formats: ['screenshot@fullPage'] })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], formats: ['markdown', entry] })
     expect(bodies).toEqual([
-      { url: 'https://example.com/', debug: false, formats: ['markdown', 'screenshot'], origin: SDK_ORIGIN },
-      { url: 'https://example.com/', formats: [{ type: 'screenshot', fullPage: true }], origin: SDK_ORIGIN },
+      { url: 'https://example.com/', debug: false, timeout: 120000, formats: ['markdown', 'screenshot'], origin: SDK_ORIGIN },
+      { url: 'https://example.com/', maxPages: 100, formats: [{ type: 'screenshot', fullPage: true }], origin: SDK_ORIGIN },
       { urls: ['https://example.com/a'], formats: ['markdown', entry], origin: SDK_ORIGIN },
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
@@ -347,8 +347,8 @@ describe('MCP tools', () => {
     await callTool(client, 'crawl', { url: 'https://example.com/', ...options })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/a'], ...options })
     expect(bodies).toEqual([
-      { url: 'https://example.com/', debug: false, ...sent },
-      { url: 'https://example.com/', ...sent },
+      { url: 'https://example.com/', debug: false, timeout: 120000, ...sent },
+      { url: 'https://example.com/', maxPages: 100, ...sent },
       { urls: ['https://example.com/a'], ...sent },
     ])
     for (const name of ['scrape', 'crawl', 'batch_scrape']) {
@@ -383,7 +383,7 @@ describe('MCP tools', () => {
       await mcp.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/a'], integration: 'parity-check' } })
       await mcp.callTool({ name: 'scrape_product', arguments: { url: 'https://www.amazon.sg/dp/B000VW9PIK' } })
       expect(calls.map((call) => [call.body?.origin, call.body?.integration])).toEqual([['mcp-parity-check@1', 'parity-check'], ['mcp-parity-check@1', undefined], ['mcp-parity-check@1', 'parity-check'], ['mcp-parity-check@1', undefined]])
-      expect(await mcp.callTool({ name: 'get_scrape', arguments: { id: record.scrapeId } })).toEqual({ content: [{ type: 'text', text: JSON.stringify(record) }] })
+      expect(await mcp.callTool({ name: 'get_scrape', arguments: { id: record.scrapeId } })).toEqual({ content: [{ type: 'text', text: JSON.stringify(record) }], structuredContent: record })
       expect(calls.at(-1)?.line).toBe(`GET http://127.0.0.1:8787/v1/scrapes/${record.scrapeId}`)
       // origin is the server's to record: a caller naming one is refused before any API call.
       expectIsError(await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', origin: 'spoofed@1' } }), 'unsupported_parameter: unsupported parameter: origin')
@@ -523,7 +523,7 @@ describe('MCP tools', () => {
     expect(calls[0]?.body).toEqual({ urls: ['https://example.com/a'], idempotencyKey: 'nightly-1', origin: SDK_ORIGIN })
     await callTool(client, 'batch_scrape', { urls: ['https://example.com/b'], appendToId: 'batch-1', ignoreInvalidURLs: true })
     expect(calls[1]?.body).toEqual({ urls: ['https://example.com/b'], appendToId: 'batch-1', ignoreInvalidURLs: true, origin: SDK_ORIGIN })
-    expect(await callTool(client, 'crawl', { url: 'https://example.com/', idempotencyKey: 'nightly-2' })).toEqual({ taskId: 'crawl-1', replayed: true })
+    expect(await callTool(client, 'crawl', { url: 'https://example.com/', idempotencyKey: 'nightly-2' })).toEqual({ taskId: 'crawl-1', replayed: true, maxPages: 100 })
     expect(calls[2]?.body).toMatchObject({ url: 'https://example.com/', idempotencyKey: 'nightly-2', origin: SDK_ORIGIN })
     const key = { type: 'string', minLength: 1, maxLength: 200 }
     const batch = TOOLS.find((tool) => tool.name === 'batch_scrape')?.inputSchema.properties as Record<string, unknown>
@@ -567,7 +567,7 @@ describe('MCP tools', () => {
       await vi.waitFor(() => expect(signals[0]!.aborted).toBe(true))
 
       const wait = new AbortController()
-      const waiting = mcp.callTool({ name: 'wait_batch', arguments: { id: 'batch-1', timeoutMs: 300_000 } }, undefined, { signal: wait.signal })
+      const waiting = mcp.callTool({ name: 'wait_batch', arguments: { id: 'batch-1', timeoutMs: 120_000 } }, undefined, { signal: wait.signal })
       await vi.waitFor(() => expect(signals.length).toBeGreaterThan(1))
       wait.abort()
       await expect(waiting).rejects.toThrow()
@@ -597,7 +597,7 @@ describe('MCP tools', () => {
       // Rejected by the shared request parser before any API call, with the same code.
       expectIsError(await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', proxy: 'stealth' } }), 'unsupported_parameter: unsupported parameter: proxy')
       expectIsError(await mcp.callTool({ name: 'get_batch', arguments: {} }), 'invalid_request: id is required')
-      expect(await mcp.callTool({ name: 'get_batch', arguments: { id: 'batch-1' } })).toEqual({ content: [{ type: 'text', text: '{"taskId":"batch-1","status":"completed"}' }] })
+      expect(await mcp.callTool({ name: 'get_batch', arguments: { id: 'batch-1' } })).toEqual({ content: [{ type: 'text', text: '{"taskId":"batch-1","status":"completed"}' }], structuredContent: { taskId: 'batch-1', status: 'completed' } })
     } finally {
       await mcp.close()
     }

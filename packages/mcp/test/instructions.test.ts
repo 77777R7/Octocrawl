@@ -16,11 +16,11 @@ async function connect(server: ReturnType<typeof createMcpServer>) {
 }
 
 describe('server instructions and identity', () => {
-  it('answers initialize on the local server with instructions for the 38 tools and Octocrawl\'s identity', async () => {
+  it('answers initialize on the local server with instructions for the 39 tools and Octocrawl\'s identity', async () => {
     const client = await connect(createMcpServer(new W2L({ baseUrl: 'http://127.0.0.1:1' })))
     try {
       const listed = (await client.listTools()).tools.map((tool) => tool.name)
-      expect(listed).toHaveLength(38)
+      expect(listed).toHaveLength(39)
       expectUsableInstructions(client.getInstructions(), listed)
       // The routes it teaches name the tools a first task needs.
       expect(mentionedTools(client.getInstructions()!)).toEqual(expect.arrayContaining(['scrape', 'map', 'crawl', 'batch_scrape', 'wait_batch']))

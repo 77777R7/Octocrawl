@@ -9,7 +9,7 @@
 <p align="center">
   <b>One link. Web data, ready.</b><br>
   Markdown and data from web pages, for AI agents and RAG.<br>
-  Every result records how it was read. Every failure says why.
+  Fewer tokens than raw HTML. Every result records how it was read.
 </p>
 
 <p align="center">
