@@ -132,6 +132,8 @@ export interface ProductFacts {
   brand: ProductFact | null
   availability: ProductFact | null
   /** Rich product facts are additive so older extractors remain valid. */
+  /** A book's or other media item's credited authors, read from its byline; such an item has no brand. */
+  authors?: readonly ProductFact[]
   kind?: 'physical' | 'subscription' | 'unknown'
   subjectId?: ProductFact | null
   prices?: readonly ProductPrice[]

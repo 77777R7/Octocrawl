@@ -29,6 +29,66 @@ describe('public site adapter registry', () => {
     expect(JSON.stringify(out.entities)).not.toContain('29.00')
   })
 
+  // The markup of amazon.com/dp/0135957052 as hosted Octocrawl read it on 2026-10-17 (cd0cbec7), cut down.
+  const bookHtml = `<!doctype html><html><head><link rel="canonical" href="https://www.amazon.sg/dp/0135957052"></head><body>
+    <div id="dp-container"><input name="ASIN" value="0135957052"><h1 id="productTitle">The Pragmatic Programmer</h1>
+    <div id="bylineInfo" class="a-section">by <span class="author notFaded"><a href="/s?field-author=David+Thomas">David Thomas</a>
+      <span class="contribution"><span class="a-color-secondary">(Author), </span></span></span>
+      <span class="author notFaded"><a href="/Andrew-Hunt/e/B001HMRWA6">Andrew Hunt</a>
+      <span class="contribution"><span class="a-color-secondary">(Author)</span></span></span>
+      <i class="a-icon a-icon-text-separator"></i><span class="a-color-secondary">Format: </span><span>Hardcover</span></div>
+    <div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">S$58.83</span></span></div>
+    <div id="main-image-container"><img id="landingImage" data-old-hires="https://m.media-amazon.com/images/I/71f1jieYHNL._SL1043_.jpg">
+      <img src="https://images-na.ssl-images-amazon.com/images/G/01/x-locale/common/grey-pixel.gif">
+      <img src="https://m.media-amazon.com/images/I/spacer.gif" width="1" height="1"></div>
+    <div id="detailBullets_feature_div"><ul>
+      <li><span class="a-list-item"><span class="a-text-bold">Publisher &rlm; : &lrm; </span> <span>Addison-Wesley Professional</span></span></li>
+      <li><span class="a-list-item"><span class="a-text-bold">ISBN-10 &rlm; : &lrm; </span> <span>0135957052</span></span></li>
+      <li><span class="a-list-item"><span class="a-text-bold"> Customer Reviews: </span>
+        <div id="detailBullets_averageCustomerReviews"><span class="a-icon-alt">4.8 out of 5 stars</span> <span>(3,661)</span>
+        <script type="text/javascript">var dpAcrHasRegisteredArcLinkClickAction; P.when('A', 'ready').execute(function(A) {})</script>
+        <style>.x{color:red}</style></div></span></li>
+    </ul></div></div></body></html>`
+
+  it('reads a book byline as its authors, never as the brand', () => {
+    const out = extractTf.extract(bookHtml, { url: 'https://www.amazon.sg/dp/0135957052' })
+    const fields = out.entities[0]?.fields
+    expect(out.adapterValidation?.valid).toBe(true)
+    expect(fields?.brand).toBeUndefined()
+    expect(out.product?.brand).toBeNull()
+    expect(fields?.authors).toMatchObject({ normalized: ['David Thomas', 'Andrew Hunt'], path: '#bylineInfo .author' })
+    expect(JSON.stringify(out.entities)).not.toContain('Format:')
+  })
+
+  it('keeps a store byline as the brand without its prefix or a format suffix', () => {
+    const html = bookHtml.replace(/<div id="bylineInfo"[\s\S]*?Hardcover<\/span><\/div>/, '<a id="bylineInfo" href="/stores/Anker">Visit the Anker Store</a>')
+    const out = extractTf.extract(html, { url: 'https://www.amazon.sg/dp/0135957052' })
+    expect(out.entities[0]?.fields.brand?.normalized).toBe('Anker')
+    expect(out.entities[0]?.fields.authors).toBeUndefined()
+  })
+
+  it('drops placeholder and one-pixel images from an Amazon product', () => {
+    const out = extractTf.extract(bookHtml, { url: 'https://www.amazon.sg/dp/0135957052' })
+    expect(out.entities[0]?.fields.images?.normalized).toEqual(['https://m.media-amazon.com/images/I/71f1jieYHNL._SL1043_.jpg'])
+  })
+
+  it('trims Amazon detail-bullet labels and leaves script and style text out of their values', () => {
+    const out = extractTf.extract(bookHtml, { url: 'https://www.amazon.sg/dp/0135957052' })
+    expect(out.entities[0]?.fields.specifications?.normalized).toEqual({
+      'Publisher': 'Addison-Wesley Professional',
+      'ISBN-10': '0135957052',
+      'Customer Reviews': '4.8 out of 5 stars (3,661)',
+    })
+    expect(JSON.stringify(out)).not.toMatch(/dpAcrHasRegisteredArcLinkClickAction|color:red/)
+  })
+
+  it('returns an Amazon price only with its currency', () => {
+    const out = extractTf.extract(bookHtml.replace('www.amazon.sg', 'www.amazon.com'), { url: 'https://www.amazon.com/dp/0135957052' })
+    expect(out.entities[0]?.fields.price?.normalized).toBe('58.83')
+    expect(out.entities[0]?.fields.currency?.normalized).toBe('SGD')
+    expect(out.entities[0]?.fields.offers?.normalized).toEqual([{ amount: '58.83', currency: 'SGD', priceType: 'current', seller: null }])
+  })
+
   it('keeps an Amazon URL-only product identity unverified', () => {
     const out = extractTf.extract('<html><body><div id="dp-container"><h1 id="productTitle">Uncorroborated product</h1></div></body></html>', {
       url: 'https://www.amazon.com/dp/B012345678',

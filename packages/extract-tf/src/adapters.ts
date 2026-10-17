@@ -46,6 +46,7 @@ function productEntity(product: ProductFacts, url: string | undefined): Extracte
   put('rating', product.rating); put('reviewCount', product.reviewCount)
   fields.kind = field(product.kind ?? 'unknown', 'dom', 'adapter:amazon-product')
   if (product.prices?.length) fields.offers = field(product.prices.map(item => ({ amount: item.amount.value, currency: item.currency?.value ?? null, priceType: item.priceType, seller: item.seller?.value ?? null })), sourceOf(product.prices[0]?.amount.source), product.prices[0]?.amount.path ?? 'document')
+  if (product.authors?.length) fields.authors = field(product.authors.map(item => item.value), sourceOf(product.authors[0]?.source), product.authors[0]?.path ?? 'document')
   if (product.images?.length) fields.images = field(product.images.map(item => item.value), sourceOf(product.images[0]?.source), product.images[0]?.path ?? 'document')
   if (product.variants?.length) fields.variants = field(product.variants.map(item => ({ name: item.name, value: item.value, selected: item.selected })), sourceOf(product.variants[0]?.source), product.variants[0]?.path ?? 'document')
   if (product.specifications && Object.keys(product.specifications).length > 0) fields.specifications = field(Object.fromEntries(Object.entries(product.specifications).map(([key, fact]) => [key, fact.value])), 'dom', '#productDetails')

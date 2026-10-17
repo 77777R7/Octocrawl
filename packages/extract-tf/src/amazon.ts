@@ -48,12 +48,16 @@ function jsonFact(value: unknown, path: string): ProductFact | null {
   return typeof value === 'string' || typeof value === 'number' ? { value: String(value), source: 'jsonld', path } : null
 }
 
-function text(scope: ParentNode, selector: string): string | null {
-  const el = qs(scope, selector)
-  if (!el) return null
+/** An element's visible text: the script, style and template text inside it is left out. */
+function ownText(el: Element): string | null {
   const copy = el.cloneNode(true) as Element
   for (const noise of qsa(copy, 'script,style,noscript,template')) noise.remove()
   return clean(textOf(copy))
+}
+
+function text(scope: ParentNode, selector: string): string | null {
+  const el = qs(scope, selector)
+  return el ? ownText(el) : null
 }
 
 function attr(scope: ParentNode, selector: string, name: string): string | null {
@@ -225,7 +229,7 @@ function amazonPrices(doc: Document, subscription: boolean, url: string | undefi
   for (const selector of selectors) {
     for (const el of qsa(subject, selector)) {
       if (el.closest('#recommendations, .related-products, .a-carousel, #aod-offer-list')) continue
-      const raw = clean(textOf(el))
+      const raw = ownText(el)
       if (raw === null || !/[\d]/.test(raw) || seen.has(raw)) continue
       seen.add(raw)
       const currency = inferAmazonCurrency(url, raw)
@@ -261,7 +265,7 @@ function alternateOffers(doc: Document, url: string | undefined): readonly Produ
 function variants(doc: Document): readonly ProductVariant[] {
   const out: ProductVariant[] = []
   for (const el of qsa(doc, '#twister .a-button-selected, #twister .swatchSelect, #twister [data-csa-c-item-type="asin"]')) {
-    const value = clean(el.getAttribute('title') ?? el.getAttribute('aria-label') ?? textOf(el))
+    const value = clean(el.getAttribute('title') ?? el.getAttribute('aria-label')) ?? ownText(el)
     if (value === null) continue
     const parent = el.closest('li,div')
     const name = clean(parent?.parentElement?.previousElementSibling?.textContent) ?? 'variant'
@@ -286,6 +290,35 @@ function availabilityFact(value: string, selector: string): ProductFact | null {
   return null
 }
 
+/**
+ * A book's byline credits people, each with a role ("David Thomas (Author)"),
+ * and names the format; it has no brand. Its authors are the names credited
+ * as Author, or every credited name when none is.
+ */
+function bylineAuthors(doc: Document): readonly ProductFact[] | null {
+  const credits = qsa(doc, '#bylineInfo .author').map(el => ({
+    name: text(el, 'a') ?? clean(ownText(el)?.replace(/\(.*$/, '')),
+    role: text(el, '.contribution') ?? '',
+  })).filter((credit): credit is { name: string; role: string } => credit.name !== null)
+  if (credits.length === 0) return null
+  const authors = credits.some(credit => /\bAuthor\b/i.test(credit.role)) ? credits.filter(credit => /\bAuthor\b/i.test(credit.role)) : credits
+  return [...new Set(authors.map(credit => credit.name))].map(name => ({ value: name, source: 'dom', path: '#bylineInfo .author' }))
+}
+
+/** A store byline's brand: "Visit the Anker Store" or "Brand: Anker", without any "Format: …" note. */
+function storeBrand(value: string, selector: string): ProductFact | null {
+  return domFact(value.replace(/\s*Format:.*$/i, '').replace(/^Brand:\s*/i, '').replace(/^Visit the\s+/i, '').replace(/\s+Store$/i, ''), selector)
+}
+
+const PLACEHOLDER_IMAGE = /\/(?:grey|gray|transparent|clear)-pixel\.gif$|\/(?:spacer|pixel|blank)\.gif$|^data:/i
+
+/** A product photo, not a loading placeholder or a one-pixel spacer. */
+function productImage(el: Element, value: string): boolean {
+  let pathname = value
+  try { pathname = new URL(value).pathname } catch { /* a relative or malformed URL is matched as written */ }
+  return !PLACEHOLDER_IMAGE.test(pathname) && !PLACEHOLDER_IMAGE.test(value) && el.getAttribute('width') !== '1' && el.getAttribute('height') !== '1'
+}
+
 function specifications(doc: Document): Readonly<Record<string, ProductFact>> {
   const out: Record<string, ProductFact> = {}
   for (const row of qsa(doc, '#productDetails_techSpec_section_1 tr, #productDetails_detailBullets_sections1 tr, #prodDetails tr')) {
@@ -294,9 +327,9 @@ function specifications(doc: Document): Readonly<Record<string, ProductFact>> {
     if (key !== null && value !== null && key !== value && out[key] === undefined) out[key] = { value, source: 'dom', path: '#productDetails' }
   }
   for (const li of qsa(doc, '#detailBullets_feature_div li')) {
-    const raw = clean(textOf(li))
-    const split = raw?.match(/^([^:]{2,80}):\s*(.+)$/)
-    if (split?.[1] && split[2] && out[split[1]] === undefined) out[split[1]] = { value: split[2], source: 'dom', path: '#detailBullets_feature_div' }
+    const split = ownText(li)?.match(/^([^:]{2,80}):\s*(.+)$/)
+    const key = clean(split?.[1])
+    if (key !== null && split?.[2] && out[key] === undefined) out[key] = { value: split[2], source: 'dom', path: '#detailBullets_feature_div' }
   }
   return out
 }
@@ -357,7 +390,8 @@ export function collectAmazonProductFacts(doc: Document, url: string | undefined
     if (amount !== null) selectedPrices = [{ amount: domFact(amountOf(amount), selectedOfferSelector)!, currency: inferAmazonCurrency(url, amount), priceType: 'subscription', seller: null }]
   }
   const store = first(doc, ['#bylineInfo', '[data-feature-name="bylineInfo"]'])
-  const brand = store === null ? null : domFact(store.value.replace(/^Brand:\s*/i, '').replace(/^Visit the\s+/i, '').replace(/\s+Store$/i, ''), store.selector)
+  const authors = bylineAuthors(doc)
+  const brand = store === null || authors !== null ? null : storeBrand(store.value, store.selector)
   const sellerHit = first(doc, ['#sellerProfileTriggerId', '#merchant-info', '.tabular-buybox-text[tabular-attribute-name="Sold by"]', '#merchantInfoFeature_feature_div .offer-display-feature-text-message'])
   const seller = sellerHit === null
     ? (/\bSold\s*by\s*Blink\b/i.test(pageText) || /SoldbyBlink/i.test(pageText.replace(/\s+/g, '')) ? domFact('Blink', 'body:Sold by') : null)
@@ -370,7 +404,7 @@ export function collectAmazonProductFacts(doc: Document, url: string | undefined
   for (const selector of ['#landingImage', '#imgTagWrapperId img', '#main-image-container img']) {
     for (const el of qsa(doc, selector)) {
       const value = clean(el.getAttribute('data-old-hires') ?? el.getAttribute('src'))
-      if (value !== null && !images.some(image => image.value === value)) images.push({ value, source: 'dom', path: selector })
+      if (value !== null && productImage(el, value) && !images.some(image => image.value === value)) images.push({ value, source: 'dom', path: selector })
     }
   }
   const jsonPrice = jsonFact(offer?.price, `${jsonPath}/offers/price`)
@@ -398,7 +432,8 @@ export function collectAmazonProductFacts(doc: Document, url: string | undefined
     price: primary?.amount ?? null,
     priceCurrency: primary?.currency ?? null,
     sku: { value: identity.observedSelectedId, source: 'dom', path: 'main product input[name="ASIN"]' },
-    brand: brand ?? jsonFact(jsonBrand?.name ?? jsonNode?.brand, `${jsonPath}/brand/name`),
+    brand: authors !== null ? null : brand ?? jsonFact(jsonBrand?.name ?? jsonNode?.brand, `${jsonPath}/brand/name`),
+    ...(authors === null ? {} : { authors }),
     availability: availabilityHit === null ? jsonFact(jsonAvailability, `${jsonPath}/offers/availability`) : availabilityFact(availabilityHit.value, availabilityHit.selector),
     kind: subscription ? 'subscription' : 'physical',
     subjectId: { value: identity.observedSelectedId, source: 'dom', path: 'main product input[name="ASIN"]' },
