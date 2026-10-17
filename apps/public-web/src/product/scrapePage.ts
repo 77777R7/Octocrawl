@@ -206,7 +206,8 @@ export function scrapePageMarkup(): string {
   return `
   <div class="page-shell product-page">
     <div class="pd-hero" id="top">
-      <canvas class="pd-hero-field" aria-hidden="true"></canvas>
+      <div class="pd-art" data-art="road" aria-hidden="true"><div class="hero-backdrop"></div><div class="hero-glyphs"></div></div>
+      <div class="hero-shade pd-shade" aria-hidden="true"></div>
 ${siteHeaderMarkup()}      <main aria-labelledby="pd-title">
         <div class="band">
           <div class="frame pd-intro">

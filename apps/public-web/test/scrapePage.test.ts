@@ -23,6 +23,10 @@ describe('the /scrape/ product page', () => {
     expect(entry).toContain(`<meta name="description" content="${SCRAPE_DESCRIPTION}" />`)
     expect(entry).toContain('<meta property="og:image" content="__W2L_ORIGIN__/assets/og-scrape.jpg" />')
     expect(existsSync(app('public/assets/og-scrape.jpg'))).toBe(true)
+    // The hero's artwork is the road scene's, preloaded and versioned like the tool pages' coast.
+    expect(entry).toContain('<link rel="preload" as="image" href="/assets/scene-road.webp" />')
+    expect(existsSync(app('public/assets/scene-road.webp'))).toBe(true)
+    expect(markup).toContain('<div class="pd-art" data-art="road" aria-hidden="true"><div class="hero-backdrop"></div><div class="hero-glyphs"></div></div>')
     expect(SCRAPE_TITLE.length).toBeLessThanOrEqual(60)
     expect(readFileSync(app('vite.config.ts'), 'utf8')).toContain('./scrape/index.html')
     expect(readFileSync(app('scripts/build-docs.mjs'), 'utf8')).toContain(`const SCRAPE_PATH = '${SCRAPE_PATH}'`)
