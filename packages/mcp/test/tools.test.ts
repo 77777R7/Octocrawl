@@ -180,8 +180,8 @@ describe('MCP tools', () => {
     const properties = TOOLS.find(tool => tool.name === 'batch_scrape')?.inputSchema.properties as Record<string, { type?: string; const?: unknown }>
     expect(properties.allowExternalLinks).toMatchObject({ type: 'boolean', const: false })
     expect(properties.includeSubdomains).toMatchObject({ type: 'boolean', const: false })
-    // MCP streams nothing; the tool that waits says where the streams are.
-    expect(TOOLS.find(tool => tool.name === 'wait_batch')?.description).toContain('MCP has no event stream')
+    // The tool that waits says how long, and what the next call is when it stops at its own timeout.
+    expect(TOOLS.find(tool => tool.name === 'wait_batch')?.description).toMatch(/timeoutMs.*at the timeout it returns the status so far/)
   })
 
   it('declares and forwards onlyMainContent, waitFor, timeout and maxFileBytes for scrape, crawl and batch_scrape', async () => {

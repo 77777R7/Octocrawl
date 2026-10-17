@@ -93,6 +93,8 @@ A connected server and a listed tool establish the connection. To assess the tas
 - Inspect `readiness` when present. `not_loaded`, `not_extracted` and `not_served` need different next steps. A missing readiness field is unknown.
 - Keep incomplete results and failures visible. Do not convert missing content to a zero value or retry paid access automatically.
 
+The tool descriptions keep each option to a line or two. Every option's full behaviour, with examples, is in the [scrape options reference](https://github.com/77777R7/Octocrawl/blob/main/docs/scrape-options.md), and crawl and batch in [Batch, crawl and map](https://github.com/77777R7/Octocrawl/blob/main/docs/batch-crawl-map.md).
+
 If the client lists no tools, check the selected server's connection error. If the tool returns a quota or access refusal, follow that reason. Changing the MCP client does not establish that the target content can be read. See [result states](/docs/limits/) and the [Evidence Record reference](/docs/reference/#evidence-record).
 
 ## What hosted Octocrawl does not do
