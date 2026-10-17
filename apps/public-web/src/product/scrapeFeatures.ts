@@ -1,64 +1,50 @@
-/** What it does on /scrape/: the four cards' controls, the cost calculator and the hand-off of a reader's own URL to
- * the free tool page. Each works on the recorded runs in scrapeRun.ts; nothing here calls an API, except that the
- * Evidence Record card hashes the recorded page's bytes (a copy served from this site) in the reader's browser. */
-import { choose, current } from './scrapeState'
-import { PAGE, RUN, WHOLE_TOKENS } from './scrapeRun'
+/** The controls on /scrape/: the hero's three recorded scrapes, the harder pages, the Evidence Record's hash check and
+ * the hand-off of a reader's own URL to the free tool page. Each works on the recorded runs in scrapeRun.ts; nothing
+ * here calls an API, except that the Evidence Record section hashes the recorded docs page's bytes (a copy served from
+ * this site) in the reader's browser. */
+import { DOCS, DOCS_CELL, DOCS_SAMPLE } from './scrapeRun'
 
-const SAMPLE = '/samples/books-toscrape-a-light-in-the-attic.html.txt'
 const NOISE = '0123456789abcdef'
 const still = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-/** Clean Markdown: main content or the whole page. The whole page's extra lines arrive one by one. */
-function mountClean(card: HTMLElement): void {
-  const buttons = [...card.querySelectorAll<HTMLButtonElement>('[data-scope]')]
-  const extra = [...card.querySelectorAll<HTMLElement>('.is-extra')]
-  const tokens = card.querySelector<HTMLElement>('[data-tokens]')
-  const set = (whole: boolean): void => {
-    buttons.forEach((b) => b.setAttribute('aria-checked', String((b.dataset.scope === 'whole') === whole)))
-    extra.forEach((line, i) => {
-      if (whole) window.setTimeout(() => { line.hidden = false; line.classList.add('is-arriving') }, still() ? 0 : i * 60)
-      else { line.hidden = true; line.classList.remove('is-arriving') }
+/** Tabs with arrow keys: show(id) for the one picked. */
+function tabbed(tabs: HTMLButtonElement[], key: string, show: (id: string) => void): void {
+  tabs.forEach((tab, i) => {
+    tab.addEventListener('click', () => show(tab.dataset[key]!))
+    tab.addEventListener('keydown', (event) => {
+      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+      if (!step) return
+      event.preventDefault()
+      const next = tabs[(i + step + tabs.length) % tabs.length]!
+      show(next.dataset[key]!)
+      next.focus()
     })
-    if (tokens) tokens.textContent = String(whole ? WHOLE_TOKENS : RUN.contentTokens)
-    choose({ whole })
-  }
-  buttons.forEach((b) => b.addEventListener('click', () => set(b.dataset.scope === 'whole')))
-  card.querySelector('.ft-switch')?.addEventListener('keydown', (event) => {
-    const key = (event as KeyboardEvent).key
-    if (key !== 'ArrowRight' && key !== 'ArrowLeft') return
-    event.preventDefault()
-    const whole = !current().whole
-    set(whole)
-    buttons.find((b) => (b.dataset.scope === 'whole') === whole)?.focus()
   })
 }
 
-/** Checked fields: each chip asks for a field; one the page doesn't state arrives as null with its reason. */
-function mountFields(card: HTMLElement): void {
-  const chips = [...card.querySelectorAll<HTMLButtonElement>('.ft-chip')]
-  const lines = new Map([...card.querySelectorAll<HTMLElement>('.ft-field')].map((line) => [line.dataset.field!, line]))
-  chips.forEach((chip) => chip.addEventListener('click', () => {
-    const on = chip.getAttribute('aria-pressed') !== 'true'
-    chip.setAttribute('aria-pressed', String(on))
-    const line = lines.get(chip.dataset.field!)
-    if (line) {
-      line.hidden = !on
-      line.classList.toggle('is-arriving', on)
-    }
-    choose({ fields: chips.filter((c) => c.getAttribute('aria-pressed') === 'true').map((c) => c.dataset.field!), fieldsTouched: true })
-  }))
+/** The hero: one recorded scrape per tab. */
+function mountDemo(console_: HTMLElement): void {
+  const tabs = [...console_.querySelectorAll<HTMLButtonElement>('.pd-tab')]
+  const panes = [...console_.querySelectorAll<HTMLElement>('.dm-pane')]
+  tabbed(tabs, 'demo', (id) => {
+    tabs.forEach((t) => {
+      const on = t.dataset.demo === id
+      t.setAttribute('aria-selected', String(on))
+      t.tabIndex = on ? 0 : -1
+    })
+    panes.forEach((p) => { p.hidden = p.dataset.demo !== id })
+  })
 }
 
 /** The hard ones: three recorded runs behind tabs; a run's facts arrive in turn. */
 function mountHard(card: HTMLElement): void {
   const tabs = [...card.querySelectorAll<HTMLButtonElement>('.ft-tab')]
   const panes = [...card.querySelectorAll<HTMLElement>('.ft-hard')]
-  const show = (id: string, focus = false): void => {
+  const show = (id: string): void => {
     tabs.forEach((t) => {
       const on = t.dataset.hard === id
       t.setAttribute('aria-selected', String(on))
       t.tabIndex = on ? 0 : -1
-      if (on && focus) t.focus()
     })
     panes.forEach((p) => {
       p.hidden = p.dataset.hard !== id
@@ -69,42 +55,45 @@ function mountHard(card: HTMLElement): void {
       }
     })
   }
-  tabs.forEach((tab, i) => {
-    tab.addEventListener('click', () => show(tab.dataset.hard!))
-    tab.addEventListener('keydown', (event) => {
-      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
-      if (!step) return
-      event.preventDefault()
-      show(tabs[(i + step + tabs.length) % tabs.length]!.dataset.hard!, true)
-    })
-  })
+  // The first tab plays when the card comes into view, unless the reader has picked one by then.
+  let picked = false
+  tabbed(tabs, 'hard', (id) => { picked = true; show(id) })
   new IntersectionObserver(([entry], observer) => {
     if (!entry?.isIntersecting) return
     observer.disconnect()
-    show(tabs[0]!.dataset.hard!)
+    if (!picked) show(tabs[0]!.dataset.hard!)
   }, { threshold: 0.4 }).observe(card)
 }
 
-/** The Evidence Record: the page's bytes, as recorded, hashed here; change the price and the hash moves away from the
- * record's. */
+/** The Evidence Record: the docs page's bytes, as recorded, hashed here once the section is in view; change the cell
+ * and the hash moves away from the record's. Until a digest is computed, or when one can't be, nothing claims a match. */
 function mountTamper(card: HTMLElement): void {
-  const input = card.querySelector<HTMLInputElement>('#ft-price')
+  const input = card.querySelector<HTMLInputElement>('#ft-cell')
   const hash = card.querySelector<HTMLElement>('#ft-hash')
   const verdict = card.querySelector<HTMLElement>('#ft-verdict')
   const reset = card.querySelector<HTMLButtonElement>('#ft-reset')
   if (!input || !hash || !verdict) return
   const subtle = window.crypto?.subtle
+  const fail = (text: string): void => {
+    verdict.className = 'ft-verdict is-failed'
+    verdict.firstElementChild!.textContent = '!'
+    verdict.lastElementChild!.textContent = text
+    hash.textContent = 'not computed'
+    card.classList.remove('is-tampered')
+    if (reset) reset.hidden = true
+  }
   if (!subtle) {
     input.readOnly = true
-    verdict.lastElementChild!.textContent = 'This browser can’t hash here; the record’s value is shown.'
+    fail('This browser can’t compute SHA-256 here, so nothing was hashed.')
     return
   }
   let bytes: Promise<Uint8Array> | undefined
-  const load = (): Promise<Uint8Array> => (bytes ??= fetch(SAMPLE).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status))))).then((b) => new Uint8Array(b)))
+  const load = (): Promise<Uint8Array> => (bytes ??= fetch(DOCS_SAMPLE).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status))))).then((b) => new Uint8Array(b)))
   const encoder = new TextEncoder()
-  const before = encoder.encode(`<p class="price_color">`)
-  const after = encoder.encode(`</p>`)
-  /** Where the price sits in the bytes: after the first `<p class="price_color">`. */
+  const marker = encoder.encode(DOCS_CELL.before + DOCS_CELL.value + DOCS_CELL.after)
+  const skip = encoder.encode(DOCS_CELL.before).length
+  const length = encoder.encode(DOCS_CELL.value).length
+  /** Where the cell sits in the bytes: inside the only run of before, value and after. */
   const find = (data: Uint8Array, needle: Uint8Array, from = 0): number => {
     outer: for (let i = from; i <= data.length - needle.length; i++) {
       for (let j = 0; j < needle.length; j++) if (data[i + j] !== needle[j]) continue outer
@@ -117,23 +106,29 @@ function mountTamper(card: HTMLElement): void {
     const mine = ++run
     let data: Uint8Array
     try { data = await load() } catch {
-      verdict.lastElementChild!.textContent = 'The recorded page couldn’t be loaded here.'
+      if (mine === run) fail('The recorded page couldn’t be loaded here, so nothing was hashed.')
       return
     }
-    const start = find(data, before) + before.length
-    const end = find(data, after, start)
-    if (start < before.length || end < 0) return
-    const edited = new Uint8Array([...data.subarray(0, start), ...encoder.encode(input.value), ...data.subarray(end)])
+    const at = find(data, marker)
+    if (at < 0) return void (mine === run && fail('The recorded page isn’t the expected copy, so nothing was hashed.'))
+    const start = at + skip
+    const end = start + length
+    const cell = encoder.encode(input.value)
+    const edited = new Uint8Array(start + cell.length + data.length - end)
+    edited.set(data.subarray(0, start))
+    edited.set(cell, start)
+    edited.set(data.subarray(end), start + cell.length)
     const digest = [...new Uint8Array(await subtle.digest('SHA-256', edited))].map((b) => b.toString(16).padStart(2, '0')).join('')
     if (mine !== run) return
-    const match = digest === RUN.rawSha256
+    const match = digest === DOCS.rawSha256
+    hash.classList.remove('is-pending')
     card.classList.toggle('is-tampered', !match)
     verdict.className = `ft-verdict ${match ? 'is-match' : 'is-mismatch'}`
     verdict.firstElementChild!.textContent = match ? '✓' : '✗'
     verdict.lastElementChild!.textContent = match ? 'Matches: this is the page that was read.' : 'Doesn’t match: this is not the page that was read.'
     if (reset) reset.hidden = match
     // The new hash decodes in from noise, its changed characters marked.
-    const mark = (shown: string): string => [...shown].map((ch, i) => (ch !== RUN.rawSha256[i] ? `<b>${ch}</b>` : ch)).join('')
+    const mark = (shown: string): string => [...shown].map((ch, i) => (ch !== DOCS.rawSha256[i] ? `<b>${ch}</b>` : ch)).join('')
     if (still()) return void (hash.innerHTML = mark(digest))
     const t0 = performance.now()
     const tick = (now: number): void => {
@@ -145,49 +140,18 @@ function mountTamper(card: HTMLElement): void {
     }
     requestAnimationFrame(tick)
   }
-  input.addEventListener('focus', () => void load().catch(() => {}), { once: true })
   input.addEventListener('input', () => void update())
+  if (!('IntersectionObserver' in window)) void update()
+  else new IntersectionObserver(([entry], observer) => {
+    if (!entry?.isIntersecting) return
+    observer.disconnect()
+    void update()
+  }, { rootMargin: '200px' }).observe(card)
   reset?.addEventListener('click', () => {
-    input.value = PAGE.price
+    input.value = DOCS_CELL.value
     void update()
     input.focus()
   })
-}
-
-/** The calculator: pages a month on a log scale from 100 to 100,000, and the share that needs a browser. */
-function mountCost(form: HTMLFormElement): void {
-  const pages = form.querySelector<HTMLInputElement>('#cs-pages')
-  const browser = form.querySelector<HTMLInputElement>('#cs-browser')
-  const pagesOut = form.querySelector<HTMLOutputElement>('#cs-pages-out')
-  const browserOut = form.querySelector<HTMLOutputElement>('#cs-browser-out')
-  const total = form.querySelector<HTMLOutputElement>('#cs-total')
-  const bar = form.querySelector<HTMLProgressElement>('#cs-bar')
-  const verdict = form.querySelector<HTMLElement>('#cs-verdict')
-  if (!pages || !browser || !total || !bar || !verdict) return
-  const nice = (n: number): number => {
-    const step = n < 1000 ? 50 : n < 10000 ? 500 : 5000
-    return Math.max(100, Math.round(n / step) * step)
-  }
-  const update = (): void => {
-    const count = nice(10 ** (2 + (3 * Number(pages.value)) / 100))
-    const share = Number(browser.value) / 100
-    const credits = Math.round(count * (1 - share) + count * share * 5)
-    for (const range of [pages, browser]) range.style.setProperty('--fill', `${range.value}%`)
-    if (pagesOut) pagesOut.value = count.toLocaleString('en-US')
-    if (browserOut) browserOut.value = `${Math.round(share * 100)}%`
-    total.value = credits.toLocaleString('en-US')
-    bar.value = Math.min(credits, 1000)
-    bar.textContent = `${credits.toLocaleString('en-US')} of 1,000`
-    form.classList.toggle('is-over', credits > 1000)
-    const keyless = share === 0 && count <= 600
-    verdict.innerHTML = credits <= 1000
-      ? `Fits a free account’s 1,000 credits a month.${keyless ? ' Or no account at all: 20 pages a day without a key.' : ''}`
-      : `${(credits - 1000).toLocaleString('en-US')} credits more than a free account’s 1,000. Credit packs aren’t sold yet: run Octocrawl on your own computer, with no limit, or <a href="/docs/contact/">tell us what you need</a>.`
-  }
-  pages.addEventListener('input', update)
-  browser.addEventListener('input', update)
-  form.addEventListener('submit', (event) => event.preventDefault())
-  update()
 }
 
 /** A reader's own URL goes to the free tool page, which runs it once: the hand-off is marked in this tab's session
@@ -213,7 +177,7 @@ function mountTry(form: HTMLFormElement): void {
 
 /** Cards rise in as they come into view. */
 function mountReveal(root: HTMLElement): void {
-  const cards = [...root.querySelectorAll<HTMLElement>('.ft-card, .cd-window, .cs-calc, .tr-window')]
+  const cards = [...root.querySelectorAll<HTMLElement>('.sc-grid > :last-child, .rn-wrap, .tr-window')]
   if (still() || !('IntersectionObserver' in window)) return
   root.classList.add('is-revealing')
   const observer = new IntersectionObserver((entries) => {
@@ -227,16 +191,12 @@ function mountReveal(root: HTMLElement): void {
 }
 
 export function mountScrapeFeatures(root: HTMLElement): void {
-  const clean = root.querySelector<HTMLElement>('.ft-clean')
-  if (clean) mountClean(clean)
-  const fields = root.querySelector<HTMLElement>('.ft-fields')
-  if (fields) mountFields(fields)
-  const hard = root.querySelector<HTMLElement>('.ft-hardcard')
+  const demo = root.querySelector<HTMLElement>('.dm-console')
+  if (demo) mountDemo(demo)
+  const hard = root.querySelector<HTMLElement>('.hd-window')
   if (hard) mountHard(hard)
-  const tamper = root.querySelector<HTMLElement>('.ft-evidence')
+  const tamper = root.querySelector<HTMLElement>('#ft-tamper')
   if (tamper) mountTamper(tamper)
-  const cost = root.querySelector<HTMLFormElement>('#cs-calc')
-  if (cost) mountCost(cost)
   const tryForm = root.querySelector<HTMLFormElement>('#tr-form')
   if (tryForm) mountTry(tryForm)
   mountReveal(root)
