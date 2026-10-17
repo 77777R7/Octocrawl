@@ -6,7 +6,9 @@ import { BATCH_KEYS, CRAWL_KEYS, MAP_KEYS, SCRAPE_KEYS, type MapResponse } from 
 import { SDK_ORIGIN, W2L } from '@w2l/sdk'
 import { callTool, TOOL_NAMES, TOOLS } from '../src/tools.js'
 import { createMcpServer, mcpOrigin } from '../src/server.js'
-import { parseBaseUrl, parseToken } from '../src/stdio.js'
+import { parseBaseUrl, parseToken, serveMcpStdio } from '../src/stdio.js'
+import { Client as ModernClient } from '@modelcontextprotocol/client'
+import { InMemoryTransport as ModernInMemoryTransport } from '@modelcontextprotocol/server'
 
 describe('MCP tools', () => {
   it('exposes scrape, crawl, and persistent batch operations', () => {
@@ -617,6 +619,21 @@ describe('MCP tools', () => {
     expect(parseToken([], {})).toBeUndefined()
     expect(parseToken([], { W2L_API_TOKEN: 'secret' })).toBe('secret')
     expect(parseToken(['--token', 'cli'], {})).toBe('cli')
+  })
+
+  it('stdio serves a 2026-07-28 client after server/discover and a 2025-11-25 client after initialize', async () => {
+    const client = new W2L({ baseUrl: 'http://127.0.0.1:8787', fetch: (async () => json({ status: 'success', markdown: 'ok', requestedUrl: 'https://example.com/' })) as typeof fetch })
+    for (const mode of ['auto', 'legacy'] as const) {
+      const [clientSide, serverSide] = ModernInMemoryTransport.createLinkedPair()
+      const handle = serveMcpStdio(client, serverSide)
+      const mcp = new ModernClient({ name: 'w2l-stdio-test', version: '1.0.0' }, { versionNegotiation: { mode } })
+      try {
+        await mcp.connect(clientSide)
+        expect(mcp.getNegotiatedProtocolVersion(), mode).toBe(mode === 'auto' ? '2026-07-28' : '2025-11-25')
+        const result = await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })
+        expect(JSON.parse((result.content as { text: string }[])[0]!.text), mode).toMatchObject({ status: 'success' })
+      } finally { await mcp.close(); await handle.close() }
+    }
   })
 
   it('creates paused first-use Monitors and queues durable runs through REST', async () => {

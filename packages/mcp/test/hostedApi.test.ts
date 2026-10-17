@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from '@modelcontextprotocol/client'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
 import { TOOL_NAMES } from '../src/tools.js'
@@ -548,6 +549,42 @@ it('/mcp-oauth answers a call without a valid access token with 401 naming its r
   expect(metadata.headers.get('access-control-allow-origin')).toBe('*')
   expect(await metadata.json()).toEqual({ resource: 'https://mcp.octocrawl.dev/mcp-oauth', authorization_servers: ['https://octocrawl.dev'], scopes_supported: ['mcp'], bearer_methods_supported: ['header'] })
   expect(quota.counts.size).toBe(0)
+})
+
+it('/mcp and /mcp-oauth serve MCP 2026-07-28 without a session, still answer a 2025-11-25 initialize, and refuse other versions as the spec says', async () => {
+  const { url } = await start({ keyRecords: { 'connection-1': CONNECTION }, oauthTokens: { oca_good: { keyId: 'connection-1', resource: MCP_OAUTH_RESOURCE, expiresAt: Date.now() + HOUR } } })
+  const headers = { accept: 'application/json, text/event-stream' }
+  for (const [path, authorization] of [['/mcp', undefined], ['/mcp-oauth', 'Bearer oca_good']] as const) {
+    const auth: Record<string, string> = authorization === undefined ? {} : { authorization }
+    // A version the server does not implement: 400 and UnsupportedProtocolVersionError (-32022) naming both eras' versions.
+    const refused = await post(url, path, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, { ...headers, ...auth, 'mcp-protocol-version': '1999-01-01' })
+    expect(refused.status, path).toBe(400)
+    const error = ((await refused.json()) as { error: { code: number; data: { supported: string[]; requested: string } } }).error
+    expect(error.code, path).toBe(-32022)
+    expect(error.data.requested, path).toBe('1999-01-01')
+    expect(error.data.supported, path).toEqual(expect.arrayContaining(['2026-07-28', '2025-11-25', '2025-06-18']))
+    // A 2025-11-25 client opens with initialize and is answered on that revision.
+    const initialize = await post(url, path, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '1' } } }, { ...headers, ...auth })
+    expect(initialize.status, path).toBe(200)
+    expect(((await initialize.json()) as { result: { protocolVersion: string } }).result.protocolVersion, path).toBe('2025-11-25')
+    // A 2026-07-28 client: server/discover, then every request on its own, with no session.
+    const client = new ModernClient({ name: 'octocrawl-modern-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } })
+    try {
+      await client.connect(new ModernTransport(new URL(`${url}${path}`), { requestInit: { headers: auth } }))
+      expect(client.getNegotiatedProtocolVersion(), path).toBe('2026-07-28')
+      expect((await client.listTools()).tools.map((tool) => tool.name), path).toEqual(path === '/mcp' ? ['scrape', 'map'] : ['scrape_product', 'scrape', 'map'])
+      const result = await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, formats: ['markdown'] } })
+      expect(JSON.parse((result.content as { text: string }[])[0]!.text), path).toMatchObject({ status: 'success' })
+    } finally { await client.close() }
+  }
+  // /mcp-oauth's challenge is the same for a 2026-07-28 request: a client starts sign-in from it.
+  const modern = { jsonrpc: '2.0', id: 1, method: 'server/discover', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientInfo': { name: 't', version: '1' }, 'io.modelcontextprotocol/clientCapabilities': {} } } }
+  const bare = await post(url, '/mcp-oauth', modern, { ...headers, 'mcp-protocol-version': '2026-07-28', 'mcp-method': 'server/discover' })
+  expect(bare.status).toBe(401)
+  expect(bare.headers.get('www-authenticate')).toBe(`Bearer resource_metadata="${RESOURCE_METADATA}", scope="mcp"`)
+  const ended = await post(url, '/mcp-oauth', modern, { ...headers, authorization: 'Bearer oca_nobody', 'mcp-protocol-version': '2026-07-28', 'mcp-method': 'server/discover' })
+  expect(ended.status).toBe(401)
+  expect(ended.headers.get('www-authenticate')).toBe(`Bearer resource_metadata="${RESOURCE_METADATA}", scope="mcp", error="invalid_token"`)
 })
 
 it('an OAuth access token is its connection\'s key on /mcp-oauth only: wrong audience, expired or disconnected is 401, and REST and /mcp refuse it', async () => {
