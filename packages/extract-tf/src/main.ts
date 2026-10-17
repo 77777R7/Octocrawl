@@ -47,10 +47,13 @@ export function selectMain(doc: Document, blocks: TextBlock[]): Element | null {
   // A region the cascade found outside the page's <main>, when every h1 of the page is in that <main>, is not its
   // content: the blocks it won on are chrome (Sephora's category page, whose header promotion was its one block of
   // prose while its <main> held the title and the product tiles, link-heavy and so no blocks of their own). A region
-  // inside a hidden element is left as it is: React streams a page's body in `<div hidden id="S:1">` outside the
-  // <main> its script moves it into (x.com), and any other hidden region is the extractor's to report as hidden.
+  // in a part React streams hidden is left as it is: React streams a page's body in `<div hidden id="S:1">` outside
+  // the <main> its script moves it into (x.com). A region the page hides is chrome as well (nasa.gov's closed
+  // mega-menu, whose teasers and column headings outweighed the article in its <main>); with no such <main> it stands,
+  // for the extractor to report as hidden.
   const main = doc.querySelector('main')
-  if (picked === null || main === null || main.contains(picked) || picked.contains(main) || picked.closest('[hidden]') !== null) return picked
+  if (picked === null || main === null || main.contains(picked) || picked.contains(main)) return picked
+  if (picked.closest('[hidden]') !== null && !hiddenRegion(picked)) return picked
   const h1s = qsa(doc, 'h1')
   return h1s.length > 0 && h1s.every((h1) => main.contains(h1)) ? main : picked
 }
@@ -154,4 +157,37 @@ function longestRun(blocks: TextBlock[]): Element | null {
   // Emit the common ancestor of the run.
   const parent = bestRun[0]!.el.parentElement
   return parent ?? bestRun[0]!.el
+}
+
+/**
+ * Whether the page hides the region: it, or an element around it, carries `hidden`. What the page does not show is not
+ * its content, however much text it holds (ROADMAP PA item 4: Eurostat's data browser read in a browser, whose only
+ * prose was the EU banner's hidden dropdown, answered `success` with it). A hidden part inside a shown region, a
+ * collapsed answer for one, stays part of that region. Not hidden: `hidden="until-found"`, which a reader's search
+ * opens; a React streaming segment (`<div hidden id="S:1">`), which the page's script moves into place; and
+ * `aria-hidden`, which a modal sets on the page behind it and which hides nothing from the eye.
+ */
+export function hiddenRegion(region: Element): boolean {
+  for (let el: Element | null = region; el !== null; el = el.parentElement) {
+    const hidden = el.getAttribute('hidden')
+    if (hidden !== null && hidden.toLowerCase() !== 'until-found' && !reactStreamedSegment(el)) return true
+  }
+  return false
+}
+
+/** The id React gives a part of the page it streams hidden and then moves into place (an optional identifier prefix, `S:`, a hex number). */
+const REACT_STREAMED_SEGMENT = /S:[0-9a-f]+$/i
+
+/**
+ * Whether a hidden element is a part React streams: `<div hidden id="S:1">`, or inside a table a bare `<table hidden>`
+ * around the part that carries the id (`<tbody id="S:1">`, `<colgroup id="S:1">`, or `<tr id="S:1">` under the tbody
+ * the parser adds).
+ */
+function reactStreamedSegment(el: Element): boolean {
+  if (REACT_STREAMED_SEGMENT.test(el.id)) return true
+  if (el.tagName.toLowerCase() !== 'table' || el.id !== '') return false
+  const part = el.firstElementChild
+  if (part === null) return false
+  if (REACT_STREAMED_SEGMENT.test(part.id)) return true
+  return part.tagName.toLowerCase() === 'tbody' && part.id === '' && REACT_STREAMED_SEGMENT.test(part.firstElementChild?.id ?? '')
 }
