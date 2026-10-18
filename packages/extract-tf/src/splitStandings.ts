@@ -137,7 +137,16 @@ export function prepareSplitStandings(doc: Document, baseUrl?: string | null, ex
   }
   return () => {
     for (const p of plans) {
-      if (!p.wrapper.isConnected || !p.left.isConnected || !p.right.isConnected || !visible(p.wrapper) || p.headers.some(h => !h.isConnected) || p.teams.some(t => !t.identity.isConnected || !t.stats.isConnected || cells(t.stats).length !== t.values.length || cells(t.stats).some((c, i) => clean(c.textContent) !== t.values[i]))) continue
+      if (!h1s[0]!.isConnected || !p.wrapper.isConnected || !p.left.isConnected || !p.right.isConnected || !visible(p.wrapper)) continue
+      if (p.headers.some((h, i) => !h.isConnected || clean(h.textContent) !== get(columns[i]!.definition, 'a'))) continue
+      const lostSource = p.teams.some(t => {
+        const identityCells = cells(t.identity), statCells = cells(t.stats)
+        const links = Array.from(t.identity.querySelectorAll('a[href]'))
+        return t.identity.closest('table') !== p.left || t.stats.closest('table') !== p.right || identityCells.length !== 1 ||
+          !links.some(a => visible(a) && clean(a.textContent) === t.name && a.getAttribute('data-clubhouse-uid') === t.uid && url(a.getAttribute('href'), baseUrl) === t.href) ||
+          statCells.length !== t.values.length || statCells.some((c, i) => !visible(c) || clean(c.textContent) !== t.values[i])
+      })
+      if (lostSource) continue
       const table = doc.createElement('table'), caption = doc.createElement('caption'), thead = doc.createElement('thead'), header = doc.createElement('tr'), tbody = doc.createElement('tbody')
       caption.textContent = `${p.heading} — ${p.conference}`
       const cell = (tag: string, text: string): Element => { const c = doc.createElement(tag); c.textContent = text; return c }

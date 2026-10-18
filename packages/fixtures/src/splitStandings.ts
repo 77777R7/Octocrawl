@@ -31,6 +31,7 @@ export function splitStandingsFixture(kind = 'valid'): string {
   if (kind === 'wrong-header') tables = tables.replace('<th>DIFF</th>', '<th>PTS</th>')
   if (kind === 'missing-uid') tables = tables.replace('data-clubhouse-uid="s:40~l:46~t:901"', '')
   if (kind === 'duplicate-team') tables = tables.replaceAll('s:40~l:46~t:902', 's:40~l:46~t:901')
+  if (kind === 'cleaned-identity') tables = tables.replace('>Harbour Owls</a>', '><nav>Harbour Owls</nav></a>')
   if (kind === 'empty-value') tables = tables.replace('<td>+7.5</td>', '<td></td>')
   const wrapper = `<div class="${kind === 'no-wrapper' ? '' : 'ResponsiveTable ResponsiveTable--fixed-left'}" id="east"><div class="Table__Title">Eastern Conference</div>${tables}</div>`
   let west = ''
