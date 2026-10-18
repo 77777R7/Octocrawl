@@ -263,6 +263,12 @@ Main-content Markdown and HTML preserve a selected OTTO variant URL when the sam
 
 Price text stays as published: `ab` means a starting price, while monthly installments and UVP remain separate. This does not establish availability or a payable price. `rawHtml` and the full-page `links` discovery list retain the original source markup and anchor addresses. A verification pass covers only configured checks; a price count and keyword do not certify record identity or independent accuracy.
 
+## Split standings tables
+
+Main-content extraction combines supported NBA standings tables only when the fixed team table and scrolling statistics share one `ResponsiveTable` wrapper and unique matching row keys. Visible team names, UID/URL, selected season and phase, conference, typed headers and every displayed statistic must agree with the same page's publisher data. Row order alone is insufficient. Missing, conflicting, duplicated or unmatched associations retain the original split tables.
+
+The combined Markdown, HTML and `tables` keep the original identity cell and literal statistics. Each row also carries Season (including phase), Conference and Team UID; its caption identifies the standings context. No missing value is filled from a script. Explicit `includeTags` keeps exactly the selected content without this automatic join, and `excludeTags` prevents restoring removed rows or fields. `rawHtml` stays unchanged. This does not support arbitrary neighbouring tables or establish independent sports accuracy. A verification pass covers only configured checks.
+
 ## Percentage direction
 
 Markdown and `tables` preserve a downward caret as a minus in supported percent-change cells when a negative sort value corroborates it. The displayed magnitude and decimal precision stay unchanged. Literal signs and rounded `0.0%` stay as written; colour, ordinary arrows and sort metadata alone do not establish a sign. Other icon-only value formats are not covered. A verification pass covers only its configured checks, not independent field accuracy.

@@ -31,6 +31,7 @@ import { collectPageMetadata } from './metadata.js'
 import { resolveReactStreaming } from './streaming.js'
 import { includeCollectionLeads } from './collection.js'
 import { sourceUnavailable } from './sourceUnavailable.js'
+import { prepareSplitStandings } from './splitStandings.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -178,6 +179,7 @@ export class ExtractTf implements Extractor {
     // What is cleaned and pruned is decided on that page too, and the
     // excluded elements are removed after it, with everything inside them.
     const excluded = namedBy(doc.document, pruneSelectors ?? [])
+    const joinStandings = includeSelectors?.length ? () => {} : prepareSplitStandings(doc.document, baseUrl, excluded)
     restoreVariantLinks(doc.document, baseUrl)
     // A product's options shown as controls are kept aside before cleaning
     // removes the controls, and shown once the page is known to be a product's.
@@ -185,6 +187,7 @@ export class ExtractTf implements Extractor {
     cleanTree(doc.document, excluded)
     pruneTree(doc.document, { blockAds })
     detachAll(excluded)
+    joinStandings()
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
     settleOptionGroups(optionGroups, decision.type === 'product')

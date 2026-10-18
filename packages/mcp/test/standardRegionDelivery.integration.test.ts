@@ -91,7 +91,7 @@ describe('standard chapters through localhost HTTP, engine, API, SDK and modern 
         expect(out.snapshot.rawBodySha256).toBe(createHash('sha256').update(fixture(kind)).digest('hex'))
         expect(out.evidenceRecord.rawSha256).toBe(out.snapshot.rawBodySha256)
         expect(out.evidenceRecord.outputSha256.markdown).toBe(createHash('sha256').update(out.markdown!).digest('hex'))
-        expect(out.evidenceRecord.extractor.version).toBe('extract-tf/35')
+        expect(out.evidenceRecord.extractor.version).toBe('extract-tf/36')
       }
     })
   }
