@@ -215,6 +215,8 @@ it('hosted tool results carry the page and its Evidence Record, without telemetr
   const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
   try {
     await client.connect(transport)
+    // Listing first makes the client check each result against its tool's outputSchema.
+    await client.listTools()
     const text = (result: Awaited<ReturnType<Client['callTool']>>) => JSON.parse((result.content as { text: string }[])[0]!.text) as Record<string, any>
     const scraped = text(await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } }))
     expect(scraped).toMatchObject({ status: 'success', markdown: expect.stringContaining('Tides'), evidenceRecord: { finalUrl: `${origin}/page`, fetchedAt: expect.any(String), httpStatus: 200 } })
@@ -223,7 +225,8 @@ it('hosted tool results carry the page and its Evidence Record, without telemetr
     expect(scraped.metadata).toMatchObject({ title: 'Tides', statusCode: 200 })
     const mapped = text(await client.callTool({ name: 'map', arguments: { url: `${origin}/page` } }))
     expect(mapped).toMatchObject({ status: expect.any(String), links: expect.any(Array) })
-    expect(mapped).not.toHaveProperty('id')
+    // A map keeps its id: the map outputSchema requires it.
+    expect(mapped).toHaveProperty('id')
     // debug is the caller asking for the full audit: answered whole.
     const audited = text(await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, debug: true } }))
     expect(audited.metadata).toHaveProperty('scrapeId')

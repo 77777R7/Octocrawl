@@ -225,8 +225,9 @@ describe('withoutTelemetry: hosted results without telemetry, internal ids or ca
     expect(withoutTelemetry('scrape', result, { debug: true })).toBe(result)
   })
 
-  it('drops a map\'s record id, and leaves other tools alone', () => {
-    expect(withoutTelemetry('map', { id: 'map-1', status: 'completed', links: [] }, {})).toEqual({ status: 'completed', links: [] })
+  it('keeps a map\'s id, which its outputSchema requires, and leaves other tools alone', () => {
+    const map = { id: 'map-1', status: 'completed', stoppedBy: 'end', links: [] }
+    expect(withoutTelemetry('map', map, {})).toBe(map)
     const other = { taskId: 't1', status: 'running' }
     expect(withoutTelemetry('get_crawl', other, {})).toBe(other)
   })

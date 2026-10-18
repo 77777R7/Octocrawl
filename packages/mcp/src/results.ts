@@ -27,15 +27,12 @@ export function shapeResult(tool: string, result: unknown): { value: unknown; im
  * A result without the call's telemetry and internal ids, for a deployment whose tools offer no record to look them up
  * by (hosted Octocrawl has no get_scrape): OpenAI's plugin review asks that a tool result leave out session, trace and
  * request ids and logging metadata (developers.openai.com/plugins/plugin-guidelines, "Response minimization"). The page,
- * the verdict and the Evidence Record stay: its fetch time and hashes are what a citation needs. Its hints lose their
+ * the verdict and the Evidence Record stay: its fetch time and hashes are what a citation needs. A map keeps its id, which
+ * its outputSchema requires. Its hints lose their
  * campaign tags, as error texts do. debug asks for the whole.
  */
 export function withoutTelemetry(tool: string, result: unknown, args: unknown): unknown {
   if (!isObject(result) || (isObject(args) && args.debug === true)) return result
-  if (tool === 'map') {
-    const { id: _id, ...rest } = result
-    return rest
-  }
   if (tool !== 'scrape' && tool !== 'scrape_product') return result
   const { usage: _usage, channelsTried: _channels, ...rest } = result
   const untagged = Array.isArray(rest.agentHints) ? { ...rest, agentHints: rest.agentHints.map((hint) => (typeof hint === 'string' ? withoutCampaign(hint) : hint)) } : rest
