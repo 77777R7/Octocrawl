@@ -4,6 +4,9 @@
  * also comes as an image block, and action captures) are not counted, as they cannot be cut; on a page list they are,
  * since the list stops before a page instead. get_scrape is not capped: it carries no page body.
  */
+import type { VerifyContract } from '@w2l/contracts'
+import { resultProjection } from './resultVerification.js'
+
 export const RESULT_TEXT_MAX = 50_000
 
 /** The fields that say what happened, serialised before the page body (W8.2). */
@@ -16,9 +19,9 @@ export type ImageBlock = { type: 'image'; data: string; mimeType: string }
 type Json = Record<string, unknown>
 
 /** A tool's result as the MCP server answers it: the verdict first, cut to the budget, and a screenshot as an image block. */
-export function shapeResult(tool: string, result: unknown): { value: unknown; images: ImageBlock[] } {
+export function shapeResult(tool: string, result: unknown, contract?: VerifyContract): { value: unknown; images: ImageBlock[] } {
   if (!isObject(result)) return { value: result, images: [] }
-  if (tool === 'scrape') return { value: withinBudget(verdictFirst(result), RESULT_TEXT_MAX, withoutBase64), images: screenshotImage(result) }
+  if (tool === 'scrape') return { value: withinBudget(verdictFirst(result), RESULT_TEXT_MAX, withoutBase64, resultProjection(result, contract)), images: screenshotImage(result) }
   if ((tool === 'get_crawl_pages' || tool === 'get_batch_items') && Array.isArray(result.items)) return { value: pageListWithinBudget(result), images: [] }
   return { value: result, images: [] }
 }
@@ -78,7 +81,7 @@ function screenshotImage(result: Json): ImageBlock[] {
  * A result over the budget with its page bodies shortened until it fits, rawHtml and html before markdown, with
  * truncated, truncatedAt (the offset in the last body cut) and a hint naming the body and how to narrow it.
  */
-function withinBudget(result: Json, max: number, measure: Measure): Json {
+function withinBudget(result: Json, max: number, measure: Measure, project = resultProjection(result)): Json {
   if (measure(result) <= max) return result
   let cut = result
   let cutAny = false
@@ -86,7 +89,7 @@ function withinBudget(result: Json, max: number, measure: Measure): Json {
     const body = cut[field]
     if (typeof body !== 'string' || body === '') continue
     const base = cut
-    const keeping = (keep: number): Json => verdictFirst({ ...base, [field]: body.slice(0, keep), truncated: true, truncatedAt: keep, agentHints: hintsWith(base, field, keep) })
+    const keeping = (keep: number): Json => verdictFirst(project({ ...base, [field]: body.slice(0, keep), truncated: true, truncatedAt: keep, agentHints: hintsWith(base, field, keep) }))
     // The longest prefix that fits; JSON escapes make the text longer than the body, so search rather than subtract.
     let low = 0
     let high = body.length

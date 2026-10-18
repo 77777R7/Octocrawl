@@ -60,6 +60,7 @@ export class ExtractTfSubject implements SubjectAdapter {
         strategy: string
         confidence: number
         escalate: boolean
+        sourceUnavailable?: true
       } | null = null
       if (isSuccessStatus(status) && !isNoContentStatus(status)) {
         const out = extractTf.extract(body, { url })
@@ -80,6 +81,7 @@ export class ExtractTfSubject implements SubjectAdapter {
           strategy: out.strategy,
           confidence: out.confidence,
           escalate: out.escalate,
+          ...(out.sourceUnavailable === true ? { sourceUnavailable: true as const } : {}),
         }
         lastResort = out.lastResort === true
         if (out.escalate) {
