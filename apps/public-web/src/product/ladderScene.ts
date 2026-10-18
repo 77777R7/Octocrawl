@@ -101,7 +101,8 @@ export function mountLadder(section: HTMLElement): void {
    * last, it goes on to the summit. */
   const progress = (): number => {
     if (wide.matches) return staged()
-    const line = window.innerHeight * 0.5
+    // Stacked, the card is pinned at the top of the window: read against the middle of what is left below it.
+    const line = (Math.max(0, frame.getBoundingClientRect().bottom) + window.innerHeight) / 2
     const mids = steps.map((step) => {
       const box = step.getBoundingClientRect()
       return box.top + box.height / 2
@@ -355,7 +356,8 @@ export function mountLadder(section: HTMLElement): void {
       const y = box.y - unit * 1.3 - height / 2
       paint.fillStyle = 'rgba(2, 10, 40, .82)'
       paint.beginPath()
-      paint.roundRect(x, y, width, height, 6)
+      if (paint.roundRect) paint.roundRect(x, y, width, height, 6)
+      else paint.rect(x, y, width, height)
       paint.fill()
       paint.fillStyle = `rgb(${TONES[1]})`
       paint.fillText(text, x + width / 2, y + height / 2 + 1)

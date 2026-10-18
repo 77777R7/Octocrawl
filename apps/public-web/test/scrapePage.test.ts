@@ -13,7 +13,7 @@ import { foldMarkdown, foldedText } from '../src/product/scrapeMarkdown'
 import { BUILT_FOR, FORMAT_CARDS, LADDER, SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
 import { AMAZON_FIELDS, DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, OCTOPUS_SIZES, PDF_READ, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
 
-// /scrape/: three scrapes recorded on hosted Octocrawl (src/product/scrapeRun.ts) in the hero, then harder pages, the
+// /scrape/: three scrapes recorded on hosted Octocrawl (src/product/scrapeRun.ts) in the hero, then how it climbs to read a page, the
 // Evidence Record's hash check, the code, the cost and the FAQ.
 const app = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url))
 const markup = scrapePageMarkup()
@@ -96,6 +96,10 @@ describe('the /scrape/ product page', () => {
     expect(LADDER.slice(2).every((s) => s.meta[0] === 'On your computer')).toBe(true)
     // Each step says what it is in more than a line, and what it needs.
     for (const step of LADDER) expect(step.text.length).toBeGreaterThan(120)
+    // What each needs is said: installed Chrome needs an access grant, and your own Chrome is chosen, not climbed to.
+    expect(LADDER[2]!.meta).toContain('access: "enhanced" with an access grant')
+    expect(LADDER[3]!.meta.join(' ')).toMatch(/You choose it/)
+    expect(LADDER.map((s) => s.text).join(' ')).not.toMatch(/under a second/)
     expect(markup).toContain('<canvas class="ld-canvas" aria-hidden="true"></canvas>')
     // The climb runs from the drop to the summit as the track scrolls by, in order and never backwards.
     const stops = Array.from({ length: 101 }, (_, i) => climbAt(i / 100))

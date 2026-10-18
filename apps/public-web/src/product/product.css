@@ -357,9 +357,11 @@
 .ld-section.is-staged .ld-body { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .45s ease, opacity .3s ease; }
 .ld-section.is-staged .ld-body > div { min-height: 0; overflow: hidden; }
 .ld-section.is-staged .ld-step.is-active .ld-body { grid-template-rows: 1fr; opacity: 1; }
+/* Stacked: the card goes above the steps and stays at the top of the window while they scroll under it, so the climb
+   is in sight as each step is read. */
 @media (max-width: 1000px) {
-  .ld-grid { grid-template-columns: minmax(0, 1fr); gap: 44px; }
-  .ld-art { position: relative; top: auto; width: 100%; max-width: 560px; }
+  .ld-grid { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .ld-art { position: sticky; top: 12px; z-index: 1; order: -1; width: 100%; max-width: 560px; max-height: 46vh; aspect-ratio: auto; height: min(46vh, 92vw); }
 }
 @media (max-width: 680px) {
   .ld-section { --ld-cut: 38px; padding: 80px 0 64px; }

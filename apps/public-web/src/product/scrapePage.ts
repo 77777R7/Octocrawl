@@ -294,13 +294,14 @@ function builtFor(): string {
 }
 
 /** How Octocrawl reads a page: the cheapest way first, a step up only when the page needs it. The steps are the access
- * ladder's rungs (docs/access.md): HTTP and the browser on hosted and on your computer; installed Chrome
- * (access: "enhanced") and your own Chrome on your computer only. Beside the steps, one page climbs the mountain in the
+ * ladder (docs/access.md): HTTP and then the browser, on hosted and on your computer; installed Chrome after them, on your
+ * computer under an access grant (access: "enhanced"); and your own Chrome, which you choose rather than climb to
+ * (access: "my-browser"), on your computer only. Beside the steps, one page climbs the mountain in the
  * painting a ledge at a time as the section scrolls by (ladderScene.ts), and the step it is on is marked in the list. The 60 of 72 is the seed user's list read on 2026-09-30 (research/coos-pilot/rerun-local-2026-09-30.md). */
 export const LADDER: ReadonlyArray<{ title: string; text: string; meta: readonly string[]; why?: string }> = [
   {
     title: 'HTTP',
-    text: 'Octocrawl first asks the site for the page’s HTML, the way a search engine does: no browser, nothing to install, back in well under a second. In one customer’s list of 72 pages, 60 stopped here.',
+    text: 'Octocrawl first asks the site for the page’s HTML, the way a search engine does: no browser and nothing to install, the quickest and cheapest way to read a page. In one early user’s list of 72 pages, 60 stopped here.',
     meta: ['Hosted and on your computer', '1 credit hosted'],
     why: 'drawn by script',
   },
@@ -312,14 +313,14 @@ export const LADDER: ReadonlyArray<{ title: string; text: string; meta: readonly
   },
   {
     title: 'Your installed Chrome',
-    text: 'Some sites check whether a real browser is visiting and turn automated ones away. With enhanced access, Octocrawl reads those in the Google Chrome installed on your computer: real Chrome, with its own identity and a fresh, empty profile for every page.',
-    meta: ['On your computer', 'access: "enhanced"'],
-    why: 'behind a sign-in',
+    text: 'Some sites check whether a real browser is visiting and turn automated ones away. With enhanced access set up on your computer, Octocrawl goes on to read those in the Google Chrome installed there: real Chrome, with its own identity and a fresh, empty profile for every page.',
+    meta: ['On your computer', 'access: "enhanced" with an access grant'],
+    why: 'behind your sign-in: your call',
   },
   {
     title: 'Your own Chrome',
-    text: 'Pages behind your sign-in are read in the Chrome you already use, signed in as you. Octocrawl fetches nothing itself: your Chrome loads the page, and only on the sites you allowed with a click.',
-    meta: ['On your computer', 'access: "my-browser"'],
+    text: 'For pages behind your sign-in, you can choose to read them in the Chrome you already use, signed in as you. Octocrawl fetches nothing itself: your Chrome loads the page, and only on the sites you allowed with a click.',
+    meta: ['On your computer', 'You choose it: access: "my-browser"'],
   },
 ]
 
