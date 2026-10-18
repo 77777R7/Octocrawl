@@ -323,6 +323,18 @@ Hosted phase 1 uses the API's existing hosted mode, which refuses private addres
   - Each connection gets its own key record. Its calls spend the account's credits and are logged on their own, and the account page can disconnect it. Connections do not count against the five keys; an account holds at most 10. A connection stays until it is disconnected or goes 90 days unused.
   - **Accepted 2026-10-16** ([record](research/hosted/2026-10-16-mcp-oauth-clients-adee17f2.md), [task list](docs/mcp-oauth-tasks.md)). Claude Code, a claude.ai custom connector, ChatGPT and Cursor each connected to `/mcp-oauth`. Each ran a scrape that was charged to the connection's own key, and each was refused after a dashboard disconnect. Claude Code, claude.ai and ChatGPT used metadata documents; Cursor used registration. ChatGPT and claude.ai are web apps that show no version number, so the record gives their server-side user agents instead.
 
+- **Proposed 2026-10-18, not yet decided: the cloud feature plan and the business plan.** Both are research proposals for Howard's decision; nothing in them changes the items or exit below until he decides.
+  - [Cloud feature plan](docs/launch/2026-10-18-cloud-feature-plan.md): 22 competitors' cloud features, demand evidence, a technical audit and a staged architecture.
+    - Positioning: a web-data backend for agents and small teams. Crawl, batch and parallel jobs that finish in the cloud, results kept and exportable, webhooks, and a results grid where every cell links to its Evidence.
+    - Parallel jobs: per-account limits per lane, per-job limits, and per-host politeness across all tenants.
+    - Visual canvas: the results grid is the main one, after a job progress page. No self-built node-based workflow canvas; an n8n node and linear pipeline templates instead.
+    - Teams: `workspace_id` on every table from the start. Invites and roles come with billing, and free credits stay per person.
+    - An Alexandria-like catalog comes later, as verified adapters with their pass rates. It sits in the Paused row for hosted agent and deep research until Howard reopens it.
+    - Step 0, before building: 30 days of logs (2026-10-18) showed no external demand yet (34 refused hosted crawl or batch calls, mostly our own curl; account usage from two accounts, both the author's). So first come the two-week cost record (item 3), Cloud Run browser seconds per page, egress success from Cloud Run against Webshare, how agent clients poll async jobs, and a Postgres queue spike. Then a small hosted batch and crawl (up to 1,000 URLs). Then the full worker-pool foundation.
+  - [Business plan](docs/launch/2026-10-18-hosted-business-plan.md): 15 competitors' pricing verified on 2026-10-18, our cost per operation and margins (estimates), and a 12-week plan.
+    - Recommendation: before any checkout code, confirm the seller entity and a merchant of record's written acceptance, test willingness to pay with a fake-door pricing page and interviews, and compare hosted against Firecrawl and the local path on the same tasks.
+    - Proposed starting point for P4: one-time credit packs; the browser page from 5 credits to 2 with a 30 s render budget; search only through a provider that allows resale, or the user's own key. Pricing waits until the cloud features are planned (Howard, 2026-10-18).
+
 | # | Item | Accepted when |
 | --- | --- | --- |
 | 1 | Hosted API and remote MCP, phase 1 | `POST /v1/scrape` and `/v1/map` and the MCP tools `scrape`, `map` and `scrape_product` served at `api.octocrawl.dev` and `mcp.octocrawl.dev` from one process in hosted mode; every other route and tool refused by name with an `agentHints` entry that says to run it locally. Keyless calls use the HTTP lane only; a key enables the browser lane at concurrency 1. Connected from Claude Code, Cursor, OpenCode and Codex with the one-line commands on the Connect MCP page, each recorded with its client version |
@@ -359,6 +371,7 @@ Moved after PA on 2026-10-05. A `my-browser` lane over Chrome remote debugging i
 - Pricing page: the free local path, keyless hosted use, the free key, and the credit packs, with what one credit buys on each lane; the academic price and the founding-member places left. The Pro plugin's offline licence (below) is priced only if it ships before hosted credits do.
 - Terms, privacy policy and acceptable-use policy (no bypassing paywalls or access controls, no scraping personal data for marketing), reviewed by a lawyer.
 - Launch to interviewees first, then the Chrome Web Store, Show HN, MCP directories and research mailing lists.
+- Pricing research and a proposed starting point (2026-10-18, not decided): [business plan](docs/launch/2026-10-18-hosted-business-plan.md). It names Paddle as the likeliest merchant of record and Dodo Payments as one that refuses scraping; the choice waits for where the seller is registered.
 - Measure licence activations and user feedback. Telemetry in the free version is off by default; if it is ever enabled, it is disclosed and can be turned off in one step.
 
 ### P5 · Breadth for developers (after P3)
