@@ -266,6 +266,8 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
   let broken = 0
   let summitSent = false
   const pointer = { x: 0, y: 0, active: false }
+  // A framed artwork (/scrape/'s .pd-art) lets the pointer through to the page; its hero hears the pointer instead.
+  const events = hero.classList.contains('pd-art') ? hero.parentElement ?? hero : hero
   // Recent clicks (canvas css px), when each was on the glyphs' clock.
   const clicks: Array<{ x: number; y: number; at: number }> = []
   // The hero's size and the form's messages decide the layout; the first report of each is the layout just made.
@@ -327,7 +329,8 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     // The page's own content keeps calm ground: text stays legible and the octopus keeps its silhouette.
     zones = []
     const zone = (selector: string, pad: number, strength: number): void => {
-      const rect = hero.querySelector(selector)?.getBoundingClientRect()
+      // A hero whose artwork has a frame of its own (/scrape/'s .pd-art) finds the page's content beside the frame.
+      const rect = (hero.querySelector(selector) ?? (hero.classList.contains('pd-art') ? hero.parentElement?.querySelector(selector) : null))?.getBoundingClientRect()
       if (!rect?.width || !rect.height) return
       zones.push({ l: rect.left - box.left - pad, t: rect.top - box.top - pad, r: rect.right - box.left + pad, b: rect.bottom - box.top + pad, strength, header: selector === '.site-header' })
     }
@@ -338,6 +341,12 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     zone('#capability-message', 12, 0.95)
     zone(hero.querySelector('.hero-ascii-layer') ? '.hero-ascii-layer' : '#hero-ascii', 0, 0.3)
     zone('.hero-scroll', 12, 0.8)
+    // A product page's hero (/scrape/): its headline, lead, buttons and demo window.
+    zone('#pd-title', 28, 0.95)
+    zone('.pd-lead', 28, 0.95)
+    zone('.pd-actions', 16, 0.95)
+    zone('.dm-window', 8, 1)
+    zone('.pd-caption', 12, 0.9)
     // The entrance spreads from the octopus's middle to the farthest corner of the hero.
     const octopus = (hero.querySelector('.hero-ascii-layer') ?? hero.querySelector('#hero-ascii'))?.getBoundingClientRect()
     source = octopus?.width ? { x: octopus.left - box.left + octopus.width / 2, y: octopus.top - box.top + octopus.height / 2 } : { x: width / 2, y: height / 2 }
@@ -723,9 +732,9 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     resize.disconnect()
     resolution?.removeEventListener('change', layout)
     hero.removeEventListener('w2l:rest', onRest)
-    hero.removeEventListener('pointermove', onPointer)
-    hero.removeEventListener('pointerleave', onLeave)
-    hero.removeEventListener('pointerdown', onClick)
+    events.removeEventListener('pointermove', onPointer)
+    events.removeEventListener('pointerleave', onLeave)
+    events.removeEventListener('pointerdown', onClick)
     document.removeEventListener('visibilitychange', onVisibility)
     canvas.remove()
   }
@@ -736,9 +745,9 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
       started = true
       // Listening before the artwork is analysed: a rest asked for meanwhile still holds once it is.
       hero.addEventListener('w2l:rest', onRest)
-      hero.addEventListener('pointermove', onPointer, { passive: true })
-      hero.addEventListener('pointerleave', onLeave)
-      hero.addEventListener('pointerdown', onClick, { passive: true })
+      events.addEventListener('pointermove', onPointer, { passive: true })
+      events.addEventListener('pointerleave', onLeave)
+      events.addEventListener('pointerdown', onClick, { passive: true })
       document.addEventListener('visibilitychange', onVisibility)
       void ready.then((result) => {
         if (disposed) return
