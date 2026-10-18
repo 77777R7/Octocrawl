@@ -9,7 +9,7 @@ import { NAV_CAPABILITIES } from '../scripts/siteNav.mjs'
 import { scrapeSnippet } from '../src/product/scrapeCode'
 import { gridRows } from '../src/product/scrapeDrop'
 import { foldMarkdown, foldedText } from '../src/product/scrapeMarkdown'
-import { FORMAT_CARDS, SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
+import { BUILT_FOR, FORMAT_CARDS, SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
 import { AMAZON_FIELDS, DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, HARD, OCTOPUS_SIZES, PDF_READ, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
 
 // /scrape/: three scrapes recorded on hosted Octocrawl (src/product/scrapeRun.ts) in the hero, then harder pages, the
@@ -73,6 +73,16 @@ describe('the /scrape/ product page', () => {
     const art = FORMAT_CARDS.map((c) => new RegExp(`\\.fx-card\\.is-${c.id} \\{ background-image: url\\('/assets/cards/([a-z]+-\\d)\\.webp'\\)`).exec(css)?.[1])
     expect(art).toEqual(['sky-1', 'sky-2', 'sky-3', 'nature-1', 'nature-2', 'nature-3'])
     for (const c of FORMAT_CARDS) expect(markup).toContain(`<div class="fx-card is-${c.id}${c === FORMAT_CARDS[0] ? ' is-active' : ''}" id="fx-card-${c.id}" data-step="${FORMAT_CARDS.indexOf(c)}">`)
+  })
+
+  it('follows What you get with Built for: three cards, each with its figure', () => {
+    expect(markup.indexOf('id="built-for"')).toBeGreaterThan(markup.indexOf('id="what-you-get"'))
+    expect(markup.indexOf('id="built-for"')).toBeLessThan(markup.indexOf('id="harder"'))
+    expect(markup).toContain('Built for agents that <b>read</b>, pipelines that <b>learn</b>, and jobs that <b>watch</b>.')
+    expect(markup.match(/<li class="bf-card">/g)).toHaveLength(BUILT_FOR.length)
+    for (const card of BUILT_FOR) expect(markup).toContain(`data-icon="${card.icon}"`)
+    // The cards say who it is for; there is nothing in them to click.
+    expect(markup.slice(markup.indexOf('id="built-for"'), markup.indexOf('id="harder"'))).not.toContain('<a ')
   })
 
   it('puts one window of recorded output on each format card', () => {
