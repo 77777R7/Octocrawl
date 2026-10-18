@@ -245,6 +245,13 @@
 .fx-card { position: absolute; inset: 7% 0 0; margin: 0; overflow: hidden; border-radius: 24px; background: radial-gradient(ellipse 80% 60% at 70% 10%, rgba(243, 104, 61, .22), transparent 70%), linear-gradient(160deg, #123478, #061634) center / cover; transform: translateY(104%); transition: transform .75s cubic-bezier(.2, .8, .2, 1), filter .75s ease; }
 .fx-card.is-active { transform: none; }
 .fx-card.is-past { filter: brightness(.55); transform: translateY(-7.5%) scale(.93); }
+/* Once scrapeFormats.ts drives the cards from the scroll, they move with it frame by frame: no transition to lag behind,
+   the shrink anchored at the top edge so a covered card's edge shows above the next, and a shade for the darkening. */
+.fx-section.is-linked .fx-stack { overflow: visible; }
+.fx-section.is-linked .fx-card { transform-origin: 50% 0; transition: none; will-change: transform; }
+/* The shade is square and the card clips it (overflow: hidden), so it follows the card's corners whatever their shape;
+   a shade with its own rounded corners missed a squircle card's corners and left them light. */
+.fx-section.is-linked .fx-card::after { content: ""; position: absolute; inset: 0; z-index: 3; background: #030817; opacity: var(--fx-dim, 0); pointer-events: none; }
 .fx-section.is-near .fx-card.is-markdown { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/scene-coast.webp'); }
 .fx-section.is-near .fx-card.is-select { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/ink-mountain.webp'); }
 .fx-section.is-near .fx-card.is-json { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/scene-earth.webp'); }
