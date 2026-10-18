@@ -75,15 +75,14 @@ describe('the /scrape/ product page', () => {
     for (const c of FORMAT_CARDS) expect(markup).toContain(`<div class="fx-card is-${c.id}${c === FORMAT_CARDS[0] ? ' is-active' : ''}" id="fx-card-${c.id}" data-step="${FORMAT_CARDS.indexOf(c)}">`)
   })
 
-  it('follows What you get with Built for: three cards, each with its figure and a link to start', () => {
+  it('follows What you get with Built for: three cards, each with its figure', () => {
     expect(markup.indexOf('id="built-for"')).toBeGreaterThan(markup.indexOf('id="what-you-get"'))
     expect(markup.indexOf('id="built-for"')).toBeLessThan(markup.indexOf('id="harder"'))
     expect(markup).toContain('Built for agents that <b>read</b>, pipelines that <b>learn</b>, and jobs that <b>watch</b>.')
     expect(markup.match(/<li class="bf-card">/g)).toHaveLength(BUILT_FOR.length)
-    for (const card of BUILT_FOR) {
-      expect(markup).toContain(`data-icon="${card.icon}"`)
-      expect(markup).toContain(`href="${card.href}" aria-label="${card.link}"`)
-    }
+    for (const card of BUILT_FOR) expect(markup).toContain(`data-icon="${card.icon}"`)
+    // The cards say who it is for; there is nothing in them to click.
+    expect(markup.slice(markup.indexOf('id="built-for"'), markup.indexOf('id="harder"'))).not.toContain('<a ')
   })
 
   it('puts one window of recorded output on each format card', () => {

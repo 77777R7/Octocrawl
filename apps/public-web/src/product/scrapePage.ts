@@ -250,32 +250,35 @@ function whatYouGet(): string {
     </section>`
 }
 
-/** Built for: who Octocrawl is for, a card each, each with a figure drawn in characters (builtForIcons.ts). */
-export const BUILT_FOR: ReadonlyArray<{ icon: string; title: string; text: string; label: string; href: string; link: string }> = [
+/** Built for: who Octocrawl is for, a card each, each with a figure drawn in characters that answers the pointer
+ * (builtForIcons.ts). */
+export const BUILT_FOR: ReadonlyArray<{ icon: string; title: string; text: string; label: string }> = [
   {
     icon: 'orbit', title: 'Web access for any agent',
     text: 'Give Claude Code, Cursor, Codex or any MCP client a scrape tool. It reads clean Markdown and knows when a read failed instead of guessing.',
-    label: 'Agents · MCP', href: '/docs/connect-mcp/', link: 'Connect your agent over MCP',
+    label: 'Agents · MCP',
   },
   {
     icon: 'stack', title: 'Clean input for every model',
     text: 'Pages become Markdown and tables your RAG pipeline can index straight away, each output hashed so you know exactly what you stored.',
-    label: 'Pipelines · SDK', href: '/docs/integrations/ai-sdk/', link: 'Use Octocrawl from the AI SDK',
+    label: 'Pipelines · SDK',
   },
   {
     icon: 'radar', title: 'Data that stays current',
     text: 'Pull prices, specs and tables as typed JSON. Run Octocrawl on your own computer to read them again on a schedule and get every change at your webhook.',
-    label: 'Monitoring · Webhooks', href: '/docs/guides/monitor-webhook/', link: 'Watch a page and send its changes to a webhook',
+    label: 'Monitoring · Webhooks',
   },
 ]
 
 function builtFor(): string {
   const cards = BUILT_FOR.map((c) => `
             <li class="bf-card">
-              <h3>${c.title}</h3>
-              <div class="bf-art"><canvas class="bf-icon" data-icon="${c.icon}" aria-hidden="true"></canvas></div>
-              <p class="bf-text">${c.text}</p>
-              <p class="bf-foot"><span>${c.label}</span><a class="bf-go" href="${c.href}" aria-label="${c.link}"><span aria-hidden="true">→</span></a></p>
+              <div class="bf-inner">
+                <h3>${c.title}</h3>
+                <div class="bf-art"><canvas class="bf-icon" data-icon="${c.icon}" aria-hidden="true"></canvas></div>
+                <p class="bf-text">${c.text}</p>
+                <p class="bf-foot">${c.label}</p>
+              </div>
             </li>`).join('')
   return `
     <section class="bf-section" id="built-for" aria-labelledby="bf-title">

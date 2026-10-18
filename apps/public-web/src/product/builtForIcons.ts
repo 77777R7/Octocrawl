@@ -1,6 +1,6 @@
 /** The Built for cards' figures (scrapePage.ts builtFor): small 3D shapes made of points, turning slowly, drawn as
  * characters on a grid. Each point lands in a grid cell; the nearest, best-lit point in a cell picks its character
- * from a ramp (fainter marks for the far side, denser ones for the near) and its colour, ice blue or, for a figure's
+ * from a ramp (fainter marks for the far side, denser ones for the near) and its colour, the page's navy or, for a figure's
  * moving part, the brand's orange.
  *
  * - orbit (agents): a tilted ring with a bead running round it and a small core, an agent's loop round its tools;
@@ -8,16 +8,25 @@
  * - radar (monitoring): a tilted dish with rings and a sweep that lights what it passes, a few blips flaring.
  *
  * A figure scrambles its characters and settles when its card first comes into view; the pointer over a card turns it
- * faster and brightens it. It draws only while on screen and the tab is visible; with reduced motion each draws one
- * still frame. */
+ * faster and brightens it. Over the figure itself the pointer pushes the characters near it out of its way, lights them
+ * and turns them over, and the figure turns to face it; a click or tap sends a ring of orange characters out from where
+ * it landed, pushing what it crosses, and kicks the figure into a faster turn that winds down. It draws only while on
+ * screen and the tab is visible; with reduced motion each draws one still frame and does not answer the pointer. */
 
 type Point = { x: number; y: number; z: number; glow: number; accent: boolean }
 type Figure = (t: number) => Point[]
 
 const RAMP = '·:-=+xX#%@'
-const ICE = '150, 198, 248'
-const ACCENT = '255, 174, 134'
+const ICE = '20, 37, 74'
+const ACCENT = '243, 104, 61'
 const SETTLE_SECONDS = 0.9
+/** How far from the pointer, in px, characters are pushed and stirred, and how far the nearest are pushed. */
+const REACH = 64
+const PUSH = 24
+/** A click's ring: how fast it spreads (px a second), how long it lasts, and how much faster it turns the figure. */
+const PULSE_SPEED = 300
+const PULSE_SECONDS = 0.8
+const KICK = 4
 
 const hash = (a: number, b: number): number => {
   const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453
@@ -127,7 +136,13 @@ export function mountBuiltForIcons(section: HTMLElement): void {
     const paint = canvas.getContext('2d')
     const card = canvas.closest<HTMLElement>('.bf-card')
     if (!figure || !view || !paint || !card) return []
-    return [{ canvas, paint, figure, view, card, seen: false, revealed: 0, time: hash(canvas.dataset.icon!.charCodeAt(0), 3) * 20, speed: 1, hover: false }]
+    return [{
+      canvas, paint, figure, view, card, seen: false, revealed: 0, time: hash(canvas.dataset.icon!.charCodeAt(0), 3) * 20, speed: 1, hover: false,
+      // The pointer over the canvas in client coordinates (null when it is elsewhere); where that is on the canvas, kept
+      // after it leaves so its push fades where it was; how fully it is there (0 to 1), and the figure's turn to face it.
+      pointer: null as { x: number; y: number } | null, px: 0, py: 0, over: 0, lookX: 0, lookY: 0,
+      kick: 0, pulses: [] as Array<{ x: number; y: number; age: number; seed: number }>,
+    }]
   })
   if (!icons.length) return
   let frame = 0
@@ -148,13 +163,16 @@ export function mountBuiltForIcons(section: HTMLElement): void {
     const rows = Math.floor(h / cellH)
     const glow = new Float32Array(cols * rows)
     const accent = new Uint8Array(cols * rows)
+    const stir = new Float32Array(cols * rows)
     const size = Math.min(w, h) * 0.5 * view.scale
-    const spin = view.spin(icon.time)
+    // Facing the pointer: its side of the figure comes round and towards it.
+    const spin = view.spin(icon.time) - icon.lookX
+    const tilt = view.tilt - icon.lookY
     const cs = Math.cos(spin)
     const sn = Math.sin(spin)
-    const ct = Math.cos(view.tilt)
-    const st = Math.sin(view.tilt)
-    const brighten = icon.hover ? 0.18 : 0
+    const ct = Math.cos(tilt)
+    const st = Math.sin(tilt)
+    const brighten = icon.hover ? 0.08 : 0
     for (const p of icon.figure(icon.time)) {
       // Turn about the upright axis, then tilt towards the reader.
       const x = p.x * cs - p.z * sn
@@ -162,16 +180,69 @@ export function mountBuiltForIcons(section: HTMLElement): void {
       const y = p.y * ct - z0 * st
       const z = p.y * st + z0 * ct
       const near = (z + 1.3) / 2.6
-      const sx = w / 2 + x * size * (1 + z * 0.08)
-      const sy = h / 2 + y * size * (1 + z * 0.08)
+      let sx = w / 2 + x * size * (1 + z * 0.08)
+      let sy = h / 2 + y * size * (1 + z * 0.08)
+      // The pointer pushes the characters near it out of its way, the nearest furthest, and stirs them.
+      let stirred = 0
+      if (icon.over > 0.01) {
+        const dx = sx - icon.px
+        const dy = sy - icon.py
+        const d = Math.hypot(dx, dy) || 1
+        if (d < REACH) {
+          const f = (1 - d / REACH) * icon.over
+          sx += (dx / d) * f * f * PUSH
+          sy += (dy / d) * f * f * PUSH
+          stirred = f
+        }
+      }
+      // A click's ring pushes outwards what it is crossing and turns it orange.
+      let ringed = 0
+      for (const pulse of icon.pulses) {
+        const dx = sx - pulse.x
+        const dy = sy - pulse.y
+        const d = Math.hypot(dx, dy) || 1
+        const k = Math.max(0, 1 - Math.abs(d - pulse.age * PULSE_SPEED) / 22) * (1 - pulse.age / PULSE_SECONDS)
+        if (k > 0) {
+          sx += (dx / d) * k * 12
+          sy += (dy / d) * k * 12
+          stirred = Math.max(stirred, k)
+          ringed = Math.max(ringed, k)
+        }
+      }
       const c = Math.floor(sx / cellW)
       const r = Math.floor(sy / cellH)
       if (c < 0 || r < 0 || c >= cols || r >= rows) continue
       const i = r * cols + c
-      const value = Math.min(1, p.glow * (0.35 + 0.65 * near) + brighten)
+      const value = Math.min(1, p.glow * (0.35 + 0.65 * near) + brighten + stirred * 0.5)
       if (value > glow[i]!) {
         glow[i] = value
-        accent[i] = p.accent ? 1 : 0
+        accent[i] = p.accent || ringed > 0.55 ? 1 : 0
+      }
+      if (ringed > 0.55) accent[i] = 1
+      if (stirred > stir[i]!) stir[i] = stirred
+    }
+    // A faint dotted circle round the pointer, so it shows where its reach is over the empty canvas too.
+    if (icon.over > 0.01) {
+      for (let i = 0; i < glow.length; i++) {
+        const d = Math.hypot(((i % cols) + 0.5) * cellW - icon.px, (Math.floor(i / cols) + 0.5) * cellH - icon.py)
+        const k = 1 - Math.abs(d - REACH * 0.8) / (cellH * 0.6)
+        if (k <= 0 || hash(i, 7) > 0.6) continue
+        const value = 0.16 * icon.over
+        if (value > glow[i]!) glow[i] = value
+      }
+    }
+    // The rings themselves: orange characters, a few missing, across the empty canvas as well as the figure.
+    for (const pulse of icon.pulses) {
+      const radius = pulse.age * PULSE_SPEED
+      const fade = 1 - pulse.age / PULSE_SECONDS
+      for (let i = 0; i < glow.length; i++) {
+        const d = Math.hypot(((i % cols) + 0.5) * cellW - pulse.x, (Math.floor(i / cols) + 0.5) * cellH - pulse.y)
+        const k = 1 - Math.abs(d - radius) / cellH
+        if (k <= 0 || hash(i, pulse.seed) > 0.75) continue
+        const value = k * fade * 0.85
+        if (value > glow[i]!) glow[i] = value
+        if (value > 0.25) accent[i] = 1
+        if (value > stir[i]!) stir[i] = value
       }
     }
     paint.setTransform(ratio, 0, 0, ratio, 0, 0)
@@ -188,6 +259,8 @@ export function mountBuiltForIcons(section: HTMLElement): void {
       if (g < 0.08) continue
       let mark = RAMP[Math.min(RAMP.length - 1, Math.floor(g * RAMP.length))]!
       if (settle < 1 && hash(i, tick) > settle) mark = RAMP[Math.floor(hash(tick, i) * RAMP.length)]!
+      // Stirred characters turn over among the dense ones.
+      else if (stir[i]! > 0.12 && hash(i, tick + 0.5) < stir[i]!) mark = RAMP[4 + Math.floor(hash(tick, i + 0.5) * 6)]!
       const key = `${mark}|${accent[i]}|${Math.round(g * 5)}`
       const list = groups.get(key)
       if (list) list.push(i)
@@ -209,10 +282,27 @@ export function mountBuiltForIcons(section: HTMLElement): void {
     for (const icon of icons) {
       if (!icon.seen) continue
       any = true
-      // The pointer turns the figure faster, easing in and out.
+      // The pointer turns the figure faster, easing in and out; a click's kick winds down.
       icon.speed += ((icon.hover ? 2.6 : 1) - icon.speed) * 0.08
-      icon.time += dt * icon.speed
+      icon.kick *= Math.exp(-dt * 1.5)
+      icon.time += dt * (icon.speed + icon.kick)
       icon.revealed += dt
+      // Where the pointer is on the canvas (it moves with the page under a still pointer), and the turn towards it.
+      const ease = 1 - Math.exp(-dt * 6)
+      let lookX = 0
+      let lookY = 0
+      if (icon.pointer) {
+        const box = icon.canvas.getBoundingClientRect()
+        icon.px = icon.pointer.x - box.left
+        icon.py = icon.pointer.y - box.top
+        lookX = (icon.px / box.width - 0.5) * 1.1
+        lookY = (icon.py / box.height - 0.5) * 0.6
+      }
+      icon.over += ((icon.pointer ? 1 : 0) - icon.over) * ease
+      icon.lookX += (lookX - icon.lookX) * ease
+      icon.lookY += (lookY - icon.lookY) * ease
+      for (const pulse of icon.pulses) pulse.age += dt
+      icon.pulses = icon.pulses.filter((pulse) => pulse.age < PULSE_SECONDS)
       draw(icon, now)
     }
     if (any) frame = requestAnimationFrame(loop)
@@ -237,6 +327,14 @@ export function mountBuiltForIcons(section: HTMLElement): void {
     seen.observe(icon.canvas)
     icon.card.addEventListener('pointerenter', () => { icon.hover = true })
     icon.card.addEventListener('pointerleave', () => { icon.hover = false })
+    if (still) continue
+    icon.canvas.addEventListener('pointermove', (event) => { icon.pointer = { x: event.clientX, y: event.clientY } })
+    icon.canvas.addEventListener('pointerleave', () => { icon.pointer = null })
+    icon.canvas.addEventListener('pointerdown', (event) => {
+      const box = icon.canvas.getBoundingClientRect()
+      icon.pulses = [...icon.pulses.slice(-2), { x: event.clientX - box.left, y: event.clientY - box.top, age: 0, seed: event.timeStamp }]
+      icon.kick = Math.min(8, icon.kick + KICK)
+    })
   }
   document.addEventListener('visibilitychange', () => {
     last = 0
