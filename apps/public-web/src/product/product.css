@@ -340,6 +340,14 @@
   .bf-section.is-linked .bf-stage { position: sticky; top: var(--bf-pin, 0); }
   .bf-section.is-linked .bf-window { overflow: clip; }
 }
+/* A short window: the figures and the gaps shrink so the pinned headline and cards fit in it. */
+@media (min-width: 1001px) and (max-height: 860px) {
+  .bf-cards { margin-top: 32px; }
+  .bf-art { height: 180px; }
+  .bf-inner { padding-top: 24px; padding-bottom: 20px; }
+  .bf-text { margin-top: 16px; }
+  .bf-foot { margin-top: 16px; }
+}
 /* The edge is a background, which forced colours drop; draw it in the text colour there. */
 @media (forced-colors: active) { .bf-card { background: CanvasText; } }
 

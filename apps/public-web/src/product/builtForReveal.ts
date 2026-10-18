@@ -161,12 +161,12 @@ export function mountBuiltForReveal(section: HTMLElement): void {
     card.classList.toggle('is-moving', own < 0.985)
   }
 
-  /** The track's length and where the stage is pinned: centred top to bottom in the window, or, taller than it, with
-   * its foot just above the window's. */
+  /** The track's length and where the stage is pinned: centred top to bottom in the window, or, taller than it, near
+   * the top, so the headline stays in sight and the foot of the cards shows as the page moves on. */
   let pinTop = 0
   const measure = (): void => {
     const room = window.innerHeight - stage.offsetHeight
-    pinTop = room >= 32 ? room / 2 : room - 16
+    pinTop = room >= 32 ? room / 2 : 16
     section.style.setProperty('--bf-pin', `${pinTop.toFixed(0)}px`)
     section.style.setProperty('--bf-track', `${(stage.offsetHeight + window.innerHeight * TRACK).toFixed(0)}px`)
   }
