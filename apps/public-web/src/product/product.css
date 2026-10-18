@@ -252,12 +252,14 @@
 .fx-section.is-linked .fx-stack { overflow: visible; }
 .fx-section.is-linked .fx-card { transition: none; transform-origin: top; transform: translateY(var(--fx-rise, 0px)) translateY(calc(var(--fx-under, 0) * -26px)) scale(calc(1 - var(--fx-under, 0) * .06)); filter: brightness(calc(1 - var(--fx-under, 0) * .5)); }
 .fx-section.is-linked .fx-card.is-waiting { opacity: 0; }
-.fx-section.is-near .fx-card.is-markdown { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/scene-coast.webp'); }
-.fx-section.is-near .fx-card.is-select { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/ink-mountain.webp'); }
-.fx-section.is-near .fx-card.is-json { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/scene-earth.webp'); }
-.fx-section.is-near .fx-card.is-tables { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/mountain-hero.webp'); }
-.fx-section.is-near .fx-card.is-browser { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/ink-earth.webp'); }
-.fx-section.is-near .fx-card.is-files { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/scene-road.webp'); }
+/* The cards' artwork: three skies, each on two cards, loaded once the cards are near. */
+.fx-section.is-near .fx-card { background-position: center; background-size: cover; }
+.fx-section.is-near .fx-card.is-markdown { background-image: url('/assets/cards/sky-1.webp'); }
+.fx-section.is-near .fx-card.is-select { background-image: url('/assets/cards/sky-2.webp'); }
+.fx-section.is-near .fx-card.is-json { background-image: url('/assets/cards/sky-3.webp'); }
+.fx-section.is-near .fx-card.is-tables { background-image: url('/assets/cards/sky-1.webp'); }
+.fx-section.is-near .fx-card.is-browser { background-image: url('/assets/cards/sky-2.webp'); }
+.fx-section.is-near .fx-card.is-files { background-image: url('/assets/cards/sky-3.webp'); }
 
 .fx-pane { position: absolute; box-sizing: border-box; padding: 14px 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, .5); border-radius: 16px; color: var(--text); background: rgba(247, 248, 251, .93); box-shadow: 0 30px 60px -28px rgba(0, 6, 24, .65); font: 12px/1.6 var(--mono); }
 .fx-pane pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
