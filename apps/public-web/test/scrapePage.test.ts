@@ -9,8 +9,8 @@ import { NAV_CAPABILITIES } from '../scripts/siteNav.mjs'
 import { scrapeSnippet } from '../src/product/scrapeCode'
 import { gridRows } from '../src/product/scrapeDrop'
 import { foldMarkdown, foldedText } from '../src/product/scrapeMarkdown'
-import { SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
-import { DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, HARD, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
+import { FORMAT_CARDS, SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
+import { AMAZON_FIELDS, CARD_MARKDOWN, DATETIME_TABLE, DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, HARD, OCTOPUS_SIZES, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
 
 // /scrape/: three scrapes recorded on hosted Octocrawl (src/product/scrapeRun.ts) in the hero, then harder pages, the
 // Evidence Record's hash check, the code, the cost and the FAQ.
@@ -49,6 +49,32 @@ describe('the /scrape/ product page', () => {
     expect(DEMOS[0]!.markdownHead.startsWith('# Octopus\n')).toBe(true)
     expect(markup.match(/class="dm-pane"/g)).toHaveLength(3)
     expect(markup.match(/class="ft-hard"/g)).toHaveLength(HARD.length)
+  })
+
+  it('opens What you get with the banner, then one item and one card per format, in the same order', () => {
+    expect(markup.indexOf('id="what-you-get"')).toBeGreaterThan(markup.indexOf('id="demo"'))
+    expect(markup.indexOf('id="what-you-get"')).toBeLessThan(markup.indexOf('id="harder"'))
+    expect(markup).toContain('<div class="fx-light" aria-hidden="true"></div>')
+    expect(markup.match(/class="fx-item[ "]/g)).toHaveLength(FORMAT_CARDS.length)
+    expect(markup.match(/<figure class="fx-card /g)).toHaveLength(FORMAT_CARDS.length)
+    FORMAT_CARDS.forEach((c, i) => {
+      expect(markup).toContain(`aria-controls="fx-card-${c.id}">${c.title}</button>`)
+      expect(markup).toContain(`id="fx-card-${c.id}" data-step="${i}"`)
+    })
+    // Narrow screens put each card after its words by these orders (product.css), one pair per format.
+    const css = readFileSync(app('src/product/product.css'), 'utf8')
+    FORMAT_CARDS.forEach((_, i) => expect(css).toContain(`.fx-item[data-step="${i}"] { order: ${2 * i}; } .fx-card[data-step="${i}"] { order: ${2 * i + 1}; }`))
+  })
+
+  it('shows the recorded numbers on the format cards', () => {
+    // 922,203 bytes of HTML; 158,375 of Markdown for the whole page, 62,302 with the hero's includeTags (same bytes read).
+    expect(OCTOPUS_SIZES).toEqual({ rawBytes: 922_203, markdownBytes: 158_375, selectedBytes: 62_302 })
+    expect(markup).toContain('<b>83%</b> smaller')
+    expect(markup).toContain('<b>93%</b> smaller')
+    expect(CARD_MARKDOWN.startsWith('# Octopus\n…\n| Kingdom: |')).toBe(true)
+    expect(AMAZON_FIELDS.find(([k]) => k === 'price')?.slice(1)).toEqual(['64.55', '#buybox .a-price .a-offscreen'])
+    expect(DATETIME_TABLE).toMatchObject({ index: 4, columns: 4, rows: 37 })
+    expect(DATETIME_TABLE.head[0]).toEqual(['Directive', 'Meaning', 'Example', 'Notes'])
   })
 
   it('lays the raw HTML and the Markdown on the octopus’s grid as the pane shows them', () => {

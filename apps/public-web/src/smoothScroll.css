@@ -1,0 +1,2 @@
+/* Lenis moves the page itself; the browser's own smooth scroll (styles.css) would ease each of its steps again. */
+html.lenis { scroll-behavior: auto; }

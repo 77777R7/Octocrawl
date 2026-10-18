@@ -86,3 +86,23 @@ export const HARD: readonly Hard[] = [
     lines: [],
   },
 ]
+
+/** What the "What you get" cards show, all from the reads above (research/hosted/2026-10-17-scrape-page-demos-e1e128d4.md).
+ * The Octopus page was read twice from the same bytes (rawSha256 0a1cc6ca…): at 16:00 UTC as a whole page, and at 18:18
+ * UTC with the hero's includeTags. CARD_MARKDOWN is the 16:00 read's Markdown, cut where it shows "…". */
+export const OCTOPUS_SIZES = { rawBytes: 922_203, markdownBytes: 158_375, selectedBytes: 62_302 } as const
+export const CARD_MARKDOWN = "# Octopus\n…\n| Kingdom: | [Animalia](https://en.wikipedia.org/wiki/Animal) |\n| Phylum: | [Mollusca](https://en.wikipedia.org/wiki/Mollusca) |\n| Class: | [Cephalopoda](https://en.wikipedia.org/wiki/Cephalopod) |\n…\nAn **octopus** (pl.: **octopuses** or **octopodes**[[a]](#cite_note-3)) is a soft-bodied, eight-limbed [mollusc](https://en.wikipedia.org/wiki/Mollusc) of the [order](https://en.wikipedia.org/wiki/Order_(biology)) **Octopoda** ([/ɒkˈtɒpədə/](https://en.wikipedia.org/wiki/Help:IPA/English), [*ok-TOP-ə-də*](https://en.wikipedia.org/wiki/Help:Pronunciation_respelling_key)[[3]](#cite_note-4)). The order consists of some 300 [species](https://en.wikipedia.org/wiki/Species) and is grouped within the class [Cephalopoda](https://en.wikipedia.org/wiki/Cephalopod) with [squids](https://en.wikipedia.org/wiki/Squid), [cuttlefish](https://en.wikipedia.org/wiki/Cuttlefish), and [nautiloids](https://en.wikipedia.org/wiki/Nautiloid). Like other cephalopods, an octopus is [bilaterally symmetric](https://en.wikipedia.org/wiki/Symmetry_in_biology) with two eyes and a [beaked](https://en.wikipedia.org/wiki/Cephalopod_beak) mouth at the centre point of the eight limbs.[[b]](#cite_note-6) An octopus can radically deform its shape, enabling it to squeeze through small gaps. They trail their appendages behind them as they swim backwards. The [siphon](https://en.wikipedia.org/wiki/Siphon_(mollusc)) is used for [respiration](https://en.wikipedia.org/wiki/Aquatic_respiration) and [locomotion](https://en.wikipedia.org/wiki/Aquatic_locomotion) (by [water jet propulsion](https://en.wikipedia.org/wiki/Jet_propulsion#Jet-propelled_animals)). Octopuses have a complex nervous system and excellent sight, and are among the most intelligent and behaviourally diverse [invertebrates](https://en.wikipedia.org/wiki/Invertebrate)."
+
+/** The Amazon.sg read at 09:28 UTC: fields of the product schema with where each was read, and the one issue. */
+export const AMAZON_FIELDS: ReadonlyArray<readonly [string, string, string]> = [
+  ['title', "\"Pragmatic Programmer, The: your journey to mastery, 20th Anniversary Edition\"", '#productTitle'],
+  ['price', '64.55', '#buybox .a-price .a-offscreen'],
+  ['currency', '"SGD"', '#buybox .a-price .a-offscreen'],
+  ['availability', '"In stock"', '#availability span'],
+  ['rating', '4.8', '#acrPopover'],
+  ['reviewCount', '2578', '#acrCustomerReviewText'],
+]
+export const AMAZON_ISSUE = { field: 'brand', code: 'field_unavailable' } as const
+
+/** The datetime read's format-code table (tableIndex 4): its header and first rows, and its size without the header. */
+export const DATETIME_TABLE = { index: 4, columns: 4, rows: 37, head: [["Directive","Meaning","Example","Notes"],["%a","Weekday as locale’s abbreviated name.","Sun, Mon, …, Sat (en_US); So, Mo, …, Sa (de_DE)","(1)"],["%A","Weekday as locale’s full name.","Sunday, Monday, …, Saturday (en_US); Sonntag, Montag, …, Samstag (de_DE)","(1)"],["%b","Month as locale’s abbreviated name.","Jan, Feb, …, Dec (en_US); Jan, Feb, …, Dez (de_DE)","(1)"]] } as const
