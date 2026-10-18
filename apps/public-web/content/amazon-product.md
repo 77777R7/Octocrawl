@@ -7,7 +7,7 @@ Octocrawl's Amazon.sg product path checks the main product on `/dp/{ASIN}` pages
 On the [Octocrawl page](/), paste a public `https://www.amazon.sg/dp/{ASIN}` URL. A server-configured anonymous Singapore preference is required for product previews. In Codex with the [local MCP service](/docs/connect-mcp/), ask:
 
 ```text
-Use Octocrawl scrape_product on https://www.amazon.sg/dp/B000VW9PIK. Show the requested and selected ASIN, title, price, currency, seller, delivery location, field evidence, and missing reasons. Do not treat a page capture as a complete product record unless the checks pass.
+Use Octocrawl scrape_product on https://www.amazon.sg/dp/B0CFV1W66Y. Show the requested and selected ASIN, title, price, currency, seller, delivery location, field evidence, and missing reasons. Do not treat a page capture as a complete product record unless the checks pass.
 ```
 
 That ASIN is an example request, not a promise of a live offer. The server's product schema and anonymous region preference are fixed for this path; no external model is called by `scrape_product`.

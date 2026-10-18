@@ -200,6 +200,8 @@ function hostedInputSchema(name: string, schema: unknown, browser: boolean): unk
     const copy = structuredClone(schema) as { properties: Record<string, Record<string, unknown>> }
     const properties = copy.properties
     delete properties.ignoreRobotsTxt
+    // The local description points to crawl, which hosted Octocrawl does not list.
+    properties.includePaths = { ...properties.includePaths, description: 'Pathname regexes a URL must match.' }
     properties.limit = { ...properties.limit, maximum: HOSTED_MAP_MAX_LIMIT }
     properties.timeout = { ...properties.timeout, maximum: HOSTED_MAP_MAX_TIMEOUT_MS }
     return copy
