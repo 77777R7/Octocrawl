@@ -19,7 +19,7 @@
  *
  * Honesty rules, mirroring the page-type router's signal discipline:
  *  - a status code alone is only decisive where the code *means* the gate
- *    (429 rate limit, 451 legal, 401 auth), and a 429 yields only to a
+ *    (429 rate limit, 451 legal, 401 auth). A 429 or 401 yields only to a
  *    decisive challenge page served with it. A bare 403 is NOT enough — it is
  *    indistinguishable from an ordinary permission error, so it classifies as
  *    nothing on its own and the caller keeps reporting `http_error`.
@@ -303,6 +303,12 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     return { reason: 'geo_restricted', signals: ['status_451'] }
   }
   if (res.status === 401) {
+    // MarketWatch serves DataDome's human challenge with 401. Its actual
+    // captcha iframe is more specific than the status; the sensor alone is not.
+    const challenge = DATADOME_CHALLENGE.exec(res.body)
+    if (challenge?.[1]?.toLowerCase() === 'captcha') {
+      return { reason: 'captcha', signals: ['status_401', 'datadome_captcha'] }
+    }
     return { reason: 'login_wall', signals: ['status_401'] }
   }
 

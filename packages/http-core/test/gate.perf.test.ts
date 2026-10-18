@@ -14,6 +14,18 @@ function timed(body: string): number {
 }
 
 describe('classifyGate on large or hostile pages', () => {
+  it('keeps the 401 DataDome scan bounded on hostile and script-heavy bodies', () => {
+    const cases = [
+      { body: '<iframe'.repeat(100_000), reason: 'login_wall' },
+      { body: '<script>' + 'x'.repeat(2_000_000) + '</script><iframe src="https://geo.captcha-delivery.com/captcha/"></iframe>', reason: 'captcha' },
+    ]
+    for (const { body, reason } of cases) {
+      const started = performance.now()
+      expect(classifyGate({ ...res(body), status: 401 })?.reason).toBe(reason)
+      expect(performance.now() - started).toBeLessThan(1_500)
+    }
+  })
+
   it('bounds the dedicated challenge scan and keeps hostile tags linear', () => {
     const finalUrl = 'https://www.skyscanner.net/sttc/px/captcha-v2/index.html'
     for (const body of ['<h1>Are you a person or a robot?</h1>' + '<iframe'.repeat(100_000), '<script>' + 'x'.repeat(1_000_001) + '</script>']) {
