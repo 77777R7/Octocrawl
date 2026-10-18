@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import Ajv from 'ajv'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
@@ -147,6 +148,41 @@ describe('MCP result budget', () => {
       const last = list.items.at(-1)!
       expect(decodeStepCursor(list.nextCursor), name).toEqual({ createdAt: last.createdAt, id: last.id })
     }
+  })
+
+  it('does not reuse a stored page pass after cutting it without its original contract', async () => {
+    const markdown = 'word '.repeat(20_000) + 'REQUIRED_TAIL_FIELD'
+    const verification = { status: 'passed', verifier: 'verify/9', contractSha256: 'a'.repeat(64), reason: null, checks: [{ index: 0, type: 'markdownCountMin', data: true, passed: true, observed: '1 match, at least 1 asked', observedCount: 1, asked: 1 }] }
+    const readiness = { state: 'ready', basis: ['verified'], waitedMs: 123 }
+    const first = { ...page(1, markdown), verification, readiness, evidenceRecord: { rawSha256: 'b'.repeat(64), outputSha256: { markdown: createHash('sha256').update(markdown).digest('hex'), json: null }, verification: { status: 'passed' }, readiness: { state: 'ready', basis: ['verified'] } } }
+    const mcp = await connect(apiAnswering(() => ({ items: [first, page(2, 'later')], nextCursor: null, hasMore: false })))
+    for (const name of ['get_crawl_pages', 'get_batch_items']) {
+      const reply = (await mcp.callTool({ name, arguments: { id: 'task-1' } })) as ToolResult
+      expect(expectTyped(name, reply).length).toBeLessThanOrEqual(RESULT_TEXT_MAX)
+      const value = (reply.structuredContent!.items as Array<Record<string, any>>)[0]!
+      expect(value.truncated).toBe(true)
+      expect(value.markdown).not.toContain('REQUIRED_TAIL_FIELD')
+      expect(value.verification).toMatchObject({ status: 'failed', contractSha256: verification.contractSha256, checks: [{ passed: null, observed: expect.stringContaining('original contract is unavailable') }] })
+      expect(value.verification.checks[0].observedCount).toBeUndefined()
+      expect(value.readiness).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'mcp_result_truncated'], waitedMs: 123 })
+      expect(value.evidenceRecord.verification).toMatchObject({ status: 'failed', failed: [] })
+      expect(value.evidenceRecord.readiness).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'mcp_result_truncated'] })
+      expect(value.evidenceRecord.outputSha256.markdown).toBe(createHash('sha256').update(value.markdown).digest('hex'))
+      expect(value.evidenceRecord.rawSha256).toBe('b'.repeat(64))
+      expect(decodeStepCursor(reply.structuredContent!.nextCursor as string)).toEqual({ createdAt: first.createdAt, id: first.id })
+    }
+    expect(first.verification.status).toBe('passed') // Transport projection must not mutate the stored object.
+    expect(first.markdown).toBe(markdown)
+    await mcp.close()
+  })
+
+  it('keeps an existing access refusal when a long diagnostic body is cut', async () => {
+    const markdown = 'challenge evidence '.repeat(10_000)
+    const mcp = await connect(apiAnswering(() => ({ status: 'blocked', blockReason: 'captcha', failureReason: null, markdown, verification: { status: 'failed', verifier: 'verify/9', contractSha256: 'a'.repeat(64), reason: 'page_not_read', checks: [] }, readiness: { state: 'not_served', basis: ['captcha'] }, evidenceRecord: { rawSha256: 'b'.repeat(64), outputSha256: { markdown: '', json: null } } })))
+    const reply = (await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', verify: { checks: [{ type: 'markdownIncludes', text: 'a real result' }] } } })) as ToolResult
+    expect(expectTyped('scrape', reply).length).toBeLessThanOrEqual(RESULT_TEXT_MAX)
+    expect(reply.structuredContent).toMatchObject({ status: 'blocked', blockReason: 'captcha', verification: { status: 'failed', reason: 'page_not_read', checks: [] }, readiness: { state: 'not_served', basis: ['captcha'] }, evidenceRecord: { rawSha256: 'b'.repeat(64), verification: { status: 'failed', reason: 'page_not_read' }, readiness: { state: 'not_served', basis: ['captcha'] } } })
+    await mcp.close()
   })
 
   const scrapeAnswering = (fields: Record<string, unknown>) => apiAnswering(() => ({ requestedUrl: 'https://example.com/', status: 'success', failureReason: null, blockReason: null, verification: { status: 'not_requested' }, truncated: false, truncatedAt: null, ...fields }))
