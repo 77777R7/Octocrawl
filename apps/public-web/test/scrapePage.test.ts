@@ -32,7 +32,7 @@ describe('the /scrape/ product page', () => {
     // Each tab shows its site's own icon, served from this site (the CSP allows images from 'self' only).
     for (const id of ['wikipedia', 'docs', 'amazon']) expect([id, existsSync(app(`public/assets/sites/${id}.png`))]).toEqual([id, true])
     // The format cards' artwork, versioned like the other artwork.
-    for (const n of [1, 2, 3]) expect([n, existsSync(app(`public/assets/cards/sky-${n}.webp`))]).toEqual([n, true])
+    for (const art of ['sky-1', 'sky-2', 'sky-3', 'nature-1', 'nature-2', 'nature-3']) expect([art, existsSync(app(`public/assets/cards/${art}.webp`))]).toEqual([art, true])
     expect(markup).toContain('<div class="pd-art" data-art="road" aria-hidden="true"><div class="hero-backdrop"></div><div class="hero-glyphs"></div></div>')
     expect(SCRAPE_TITLE.length).toBeLessThanOrEqual(60)
     expect(readFileSync(app('vite.config.ts'), 'utf8')).toContain('./scrape/index.html')

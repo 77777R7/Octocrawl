@@ -34,10 +34,13 @@ export const VERSIONED_PUBLIC_FILES = [
   '/assets/sites/wikipedia.png',
   '/assets/sites/docs.png',
   '/assets/sites/amazon.png',
-  // The /scrape/ format cards' artwork, two cards each (src/product/product.css, .fx-card).
+  // The /scrape/ format cards' artwork, one painting each (src/product/product.css, .fx-card).
   '/assets/cards/sky-1.webp',
   '/assets/cards/sky-2.webp',
   '/assets/cards/sky-3.webp',
+  '/assets/cards/nature-1.webp',
+  '/assets/cards/nature-2.webp',
+  '/assets/cards/nature-3.webp',
   // The client logos on Connect MCP.
   '/docs-assets/agent-clients/claude-code.svg',
   '/docs-assets/agent-clients/codex.svg',
