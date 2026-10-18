@@ -18,7 +18,7 @@ describe('source-corroborated split standings', () => {
       expect(md).toContain(`[${team.name}](https://stats.fixture.test${team.url}) | ${team.stats.join(' | ')} | 2026-27 Preseason | Eastern Conference | ${team.uid}`)
     }
   })
-  for (const kind of ['wrong-season', 'wrong-phase', 'wrong-selected', 'wrong-url', 'wrong-uid', 'wrong-stats', 'wrong-diff', 'wrong-conference', 'duplicate-payload-team', 'duplicate-key', 'missing-row', 'missing-key', 'orphan-key', 'no-wrapper', 'no-json', 'invalid-json', 'duplicate-json', 'wrong-heading', 'spanned', 'hidden', 'wrong-header', 'missing-uid', 'duplicate-team', 'empty-value', 'duplicate-wrapper', 'cleaned-identity']) it(`does not guess ambiguous associations: ${kind}`, () => {
+  for (const kind of ['wrong-season', 'wrong-phase', 'wrong-selected', 'wrong-url', 'wrong-uid', 'wrong-stats', 'wrong-diff', 'wrong-conference', 'duplicate-payload-team', 'duplicate-key', 'missing-row', 'missing-key', 'orphan-key', 'no-wrapper', 'no-json', 'invalid-json', 'duplicate-json', 'wrong-heading', 'spanned', 'hidden', 'wrong-header', 'missing-uid', 'duplicate-team', 'empty-value', 'duplicate-wrapper', 'cleaned-identity', 'invalid-phase-type', 'invalid-metadata-type']) it(`does not guess ambiguous associations: ${kind}`, () => {
     const { tables } = extract(kind)
     expect(tables.length).toBeGreaterThan(0)
     expect(tables.every(table => table.rows[0]?.includes('Team UID') !== true)).toBe(true)

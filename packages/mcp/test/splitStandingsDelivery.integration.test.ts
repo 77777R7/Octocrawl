@@ -88,7 +88,7 @@ describe('split standings through localhost HTTP, engine, API, SDK and modern MC
           { type: 'field' as const, path: `tables.0.rows.${i + 1}.8`, equals: team.uid },
         ]),
       ] }
-      for (const kind of ['valid', 'reordered', 'wrong-season', 'wrong-stats', 'wrong-url', 'missing-key', 'duplicate-key', 'missing-row', 'wrong-diff']) {
+      for (const kind of ['valid', 'reordered', 'wrong-season', 'wrong-stats', 'wrong-url', 'missing-key', 'duplicate-key', 'missing-row', 'wrong-diff', 'invalid-phase-type', 'invalid-metadata-type']) {
         const out = await scrape(surface, debug, kind, verify)
         const passed = kind === 'valid' || kind === 'reordered'
         expect(out.status, JSON.stringify(out)).toBe('success')

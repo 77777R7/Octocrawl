@@ -44,7 +44,9 @@ export function splitStandingsFixture(kind = 'valid'): string {
     }
     standings.groups.groups.push(western)
   }
-  const json = JSON.stringify({ page: { content: { standings } } })
+  let json = JSON.stringify({ page: { content: { standings } } })
+  if (kind === 'invalid-phase-type') json = json.replace('"seasontype":1', '"seasontype":{"toString":null,"valueOf":null}')
+  if (kind === 'invalid-metadata-type') json = json.replace('"seasonTypeId":"1"', '"seasonTypeId":{"toString":null,"valueOf":null}')
   const script = kind === 'no-json' ? '' : `<script>window.__CONFIG__={"not":"standings"};window['__espnfitt__']=${kind === 'invalid-json' ? '{broken}' : json};</script>`
   return `<!doctype html><html><head><title>NBA Preseason Standings 2026-27</title></head><body><main><h1>NBA Preseason Standings 2026-27</h1><select aria-label="Standings Season"><option selected value="${kind === 'wrong-selected' ? 2026 : 2027}">2026-27</option></select><select aria-label="Standings Season Type"><option selected value="1">Preseason</option></select>${wrapper}${west}${kind === 'duplicate-wrapper' ? wrapper : ''}</main>${script}${kind === 'duplicate-json' ? script : ''}</body></html>`
 }

@@ -11,6 +11,7 @@ const obj = (x: unknown): Obj | null => x !== null && typeof x === 'object' && !
 const get = (x: unknown, k: string): unknown => { const o = obj(x); return o !== null && Object.hasOwn(o, k) ? o[k] : undefined }
 const array = (x: unknown): unknown[] => Array.isArray(x) ? x : []
 const str = (x: unknown): string => typeof x === 'string' ? x : ''
+const scalar = (x: unknown): string => typeof x === 'string' ? x : typeof x === 'number' && Number.isFinite(x) ? String(x) : ''
 
 /** Read a single named JSON object assignment, including pages with config before it. */
 function payload(doc: Document): unknown {
@@ -89,8 +90,8 @@ export function prepareSplitStandings(doc: Document, baseUrl?: string | null, ex
   const selectedYear = selected(doc, 'Standings Season'), selectedPhase = selected(doc, 'Standings Season Type')
   const contextNodes = [h1s[0], selectedYear?.el, selectedPhase?.el].filter((x): x is Element => x !== undefined)
   if (get(data, 'leagueName') !== 'nba' || get(data, 'leagueUid') !== 's:40~l:46' || !Number.isInteger(year) || !/^[1-4]$/.test(phase) || !/^\d{4}-\d{2}$/.test(season) || !phaseName ||
-    h1s.length !== 1 || clean(h1s[0]!.textContent) !== heading || get(requested, 'season') !== year || String(get(requested, 'seasontype')) !== phase ||
-    get(metadata, 'year') !== season || get(metadata, 'seasonType') !== phaseName || String(get(metadata, 'seasonTypeId')) !== phase ||
+    h1s.length !== 1 || clean(h1s[0]!.textContent) !== heading || get(requested, 'season') !== year || scalar(get(requested, 'seasontype')) !== phase ||
+    get(metadata, 'year') !== season || get(metadata, 'seasonType') !== phaseName || scalar(get(metadata, 'seasonTypeId')) !== phase ||
     selectedYear?.value !== String(year) || selectedYear.text !== season || selectedPhase?.value !== phase || selectedPhase.text !== phaseName ||
     [...excluded].some(e => contextNodes.some(n => e.contains(n) || n.contains(e)))) return () => {}
   const groups = get(data, 'groups'), declaredHeaders = get(groups, 'headers')
