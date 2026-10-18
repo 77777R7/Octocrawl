@@ -316,19 +316,19 @@ const SCENES: readonly Scene[] = [
     stars: false,
     lift(card, x, y) {
       let lift = 0
-      const reach = card.grid.cell * 5.5
+      const reach = card.grid.cell * 2.2
       for (const f of card.movers) {
         // f.vx holds the firefly's blink, set by draw.
         if (f.vx < 0.05 || Math.abs(x - f.x) > reach || Math.abs(y - f.y) > reach) continue
         const d = Math.hypot(x - f.x, y - f.y) / reach
-        if (d < 1) lift = Math.max(lift, (1 - d * d) * 0.75 * f.vx)
+        if (d < 1) lift = Math.max(lift, (1 - d * d) * 0.35 * f.vx)
       }
       return lift
     },
     draw(card, light, solid, t, dt) {
       const { w, h } = card.size
       const { cell } = card.grid
-      while (card.movers.length < 36) {
+      while (card.movers.length < 18) {
         const n = card.movers.length + card.index * 31
         card.movers.push({ x: w * hash(n, 1), y: h * (0.15 + 0.82 * hash(n, 2)), vx: 0, vy: 0, born: t - hash(n, 3) * 6, life: 1, seed: hash(n, 4) * 100 })
       }
@@ -342,10 +342,10 @@ const SCENES: readonly Scene[] = [
         if (f.y < h * 0.1) f.y = h * 0.95
         if (f.y > h + cell) f.y = h * 0.2
         const cycle = ((t - f.born + f.seed) % 3) / 3
-        const blink = cycle < 0.1 ? cycle / 0.1 : cycle < 0.65 ? 1 - ((cycle - 0.1) / 0.55) ** 2 : 0
+        const blink = cycle < 0.08 ? cycle / 0.08 : cycle < 0.45 ? 1 - ((cycle - 0.08) / 0.37) ** 2 : 0
         f.vx = blink
-        light.glow(f.x, f.y, cell * 5, FIREFLY, blink)
-        solid.mark(blink > 0.6 ? '×' : blink > 0.25 ? '+' : '·', f.x, f.y, [255, 246, 150], 0.25 + 0.75 * blink)
+        light.glow(f.x, f.y, cell * 2.2, FIREFLY, 0.85 * blink)
+        solid.mark(blink > 0.6 ? '+' : '·', f.x, f.y, [255, 250, 180], 0.2 + 0.8 * blink)
       }
     },
   },
