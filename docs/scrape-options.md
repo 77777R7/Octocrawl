@@ -16,6 +16,8 @@ When the declared Product has only AggregateOffer offers with a stated nonnegati
 
 For a document without an article/main wrapper, a page heading followed by at least three consecutive numbered sibling chapters can identify the body as its main region. The chapters must hold most of the classified text, with at least three chapters containing text blocks. This retains the publication header and requirements alongside long appendices or glossaries. Ordinary cleaning and explicit `includeTags`/`excludeTags` still apply. This structural heuristic does not establish completeness or accuracy; configure checks for the header and sections your task needs. Passing those checks covers only the configured contract, not independent accuracy acceptance.
 
+On a collection page, selecting a chronological list also retains preceding lead cards within the same `main` or `role="main"` when their card template occurs in at least three list items. Navigation, sidebars, recommendations, unrelated templates and following sections do not widen that selection. Explicit `includeTags`/`excludeTags` still apply. Check the headline and its associated link when the task requires them; this selection rule does not prove the page is complete.
+
 ## Compact MCP responses
 
 MCP `scrape` is compact by default: it returns the selected content, document/product metadata, aggregate usage and errors without repeating the body under `summary.attempts`, with the response's status and `content-type` header in `snapshot` (`httpStatus`, `contentType`) and the final URL and every redirect hop in `evidenceRecord`. Pass `debug: true` when you need the full route, trace and per-attempt audit. REST and SDK calls that omit `formats` and `debug` keep the legacy full Markdown response.

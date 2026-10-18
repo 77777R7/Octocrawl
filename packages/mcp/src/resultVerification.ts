@@ -17,8 +17,8 @@ function evidence(verification: Verification): EvidenceVerification {
     : { status: verification.status, verifier: verification.verifier, contractSha256: verification.contractSha256, reason: verification.reason, failed: verification.checks.filter(check => check.passed === false).map(check => check.type) }
 }
 
-/** Prepare once per source result, then judge each candidate prefix inside the budget calculation. */
-export function resultProjection(original: Json, contract?: VerifyContract): (projection: Json) => Json {
+/** Recheck a minimized result or each candidate prefix inside the budget calculation. */
+export function resultProjection(original: Json, contract?: VerifyContract, basis = 'mcp_result_truncated'): (projection: Json) => Json {
   let before: Verification | undefined
   const previous = original.verification as Verification | undefined
   const priorReadiness = object(original.readiness) ? original.readiness as unknown as Readiness : undefined
@@ -33,9 +33,9 @@ export function resultProjection(original: Json, contract?: VerifyContract): (pr
     let readiness = priorReadiness
     if (verification?.status === 'passed') readiness = { ...priorReadiness, state: 'ready', basis: ['verified'] }
     else if (verification?.status === 'failed') {
-      // Preserve an existing access/loading/source failure. A check that held before this cut lost delivery here.
+      // Preserve an existing access/loading/source failure. A previously passing check lost delivery here.
       if (before?.status === 'passed' || priorReadiness?.state === 'ready' || priorReadiness === undefined) {
-        readiness = { ...priorReadiness, state: 'not_extracted', basis: ['checks_failed', 'mcp_result_truncated'] }
+        readiness = { ...priorReadiness, state: 'not_extracted', basis: ['checks_failed', basis] }
       }
     }
     const record = original.evidenceRecord

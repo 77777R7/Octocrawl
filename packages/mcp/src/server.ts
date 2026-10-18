@@ -107,7 +107,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       const declared = TOOLS.find(tool => tool.name === request.params.name)
       const structured = declared !== undefined && 'outputSchema' in declared
       // The verdict first, cut to the budget, and a screenshot as an image block too (docs/mcp-client-ux-tasks.md W8).
-      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments) : result, contract)
+      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments, contract) : result, contract)
       return { content: [{ type: 'text', text: JSON.stringify(value) }, ...images], ...(structured ? { structuredContent: value as Record<string, unknown> } : {}) }
     } finally { call?.end() }
   })

@@ -34,14 +34,17 @@ export function shapeResult(tool: string, result: unknown, contract?: VerifyCont
  * its outputSchema requires. Its hints lose their
  * campaign tags, as error texts do. debug asks for the whole.
  */
-export function withoutTelemetry(tool: string, result: unknown, args: unknown): unknown {
+export function withoutTelemetry(tool: string, result: unknown, args: unknown, contract?: VerifyContract): unknown {
   if (!isObject(result) || (isObject(args) && args.debug === true)) return result
   if (tool !== 'scrape' && tool !== 'scrape_product') return result
   const { usage: _usage, channelsTried: _channels, ...rest } = result
   const untagged = Array.isArray(rest.agentHints) ? { ...rest, agentHints: rest.agentHints.map((hint) => (typeof hint === 'string' ? withoutCampaign(hint) : hint)) } : rest
-  if (!isObject(untagged.metadata)) return untagged
-  const { scrapeId: _scrapeId, concurrencyLimited: _limited, concurrencyQueueDurationMs: _queued, ...metadata } = untagged.metadata
-  return { ...untagged, metadata }
+  let minimized = untagged
+  if (isObject(untagged.metadata)) {
+    const { scrapeId: _scrapeId, concurrencyLimited: _limited, concurrencyQueueDurationMs: _queued, ...metadata } = untagged.metadata
+    minimized = { ...untagged, metadata }
+  }
+  return tool === 'scrape' && contract !== undefined ? resultProjection(result, contract, 'mcp_result_minimized')(minimized) : minimized
 }
 
 /** The links in a text without their utm_* parameters, which a model has no use for (REST keeps them); prose is left alone. */

@@ -28,6 +28,7 @@ import { collectLabelledValues } from './labels.js'
 import { collectDeclaredValues } from './declared.js'
 import { collectPageMetadata } from './metadata.js'
 import { resolveReactStreaming } from './streaming.js'
+import { includeCollectionLeads } from './collection.js'
 import { sourceUnavailable } from './sourceUnavailable.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
@@ -250,6 +251,8 @@ export class ExtractTf implements Extractor {
       }
       if (main !== null) strategy = 'list'
     }
+
+    if (main !== null && strategy === 'list' && (decision.type === 'collection' || decision.type === 'listing')) main = includeCollectionLeads(main)
 
     let product: ProductFacts | null = null
     if (decision.type === 'product') {
