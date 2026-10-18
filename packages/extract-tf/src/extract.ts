@@ -19,15 +19,19 @@ import { detectRenderSignals, hasLoadingText, hydrationShown, rawSignals } from 
 import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { hiddenRegion, selectMain } from './main.js'
-import { collectDeclaredProductFacts, fillPriceFromText, markOptionGroups, selectProduct, settleOptionGroups } from './product.js'
+import { collectDeclaredProductFacts, fillPriceFromText, hasAggregateProductOffers, markOptionGroups, selectProduct, settleOptionGroups } from './product.js'
 import { pageSignalsFor, routePage, selectCardList, selectDetectedList, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
 import { documentBaseUrl } from './links.js'
+import { restoreVariantLinks } from './variantLinks.js'
 import { collectLabelledValues } from './labels.js'
 import { collectDeclaredValues } from './declared.js'
 import { collectPageMetadata } from './metadata.js'
 import { resolveReactStreaming } from './streaming.js'
+import { includeCollectionLeads } from './collection.js'
+import { sourceUnavailable } from './sourceUnavailable.js'
+import { prepareSplitStandings } from './splitStandings.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -138,6 +142,7 @@ export class ExtractTf implements Extractor {
     // and cleanTree strips script/form/button. cleanTree also detaches
     // article.post elements whose only content is a <form> (quick-reply),
     // which would otherwise suppress forum routing.
+    const unavailable = sourceUnavailable(doc.document)
     const signals = pageSignalsFor(doc.document)
     const preliminaryAdapter = adapterFor(doc.document, options.url)
     const baseUrl = documentBaseUrl(doc.document, options.url)
@@ -150,6 +155,7 @@ export class ExtractTf implements Extractor {
     // raw tree too. The visible-price fallback runs much later, after
     // recommendation pruning — see below.
     const declaredFacts = collectDeclaredProductFacts(doc.document)
+    const aggregateOffers = declaredFacts.price === null && signals.jsonLdTypes.includes('aggregateoffer') && hasAggregateProductOffers(doc.document)
     const amazonProduct = isAmazonProductPage(doc.document, options.url)
     const sourceFacts = amazonProduct
       ? collectAmazonProductFacts(doc.document, options.url, declaredFacts)
@@ -173,12 +179,15 @@ export class ExtractTf implements Extractor {
     // What is cleaned and pruned is decided on that page too, and the
     // excluded elements are removed after it, with everything inside them.
     const excluded = namedBy(doc.document, pruneSelectors ?? [])
+    const joinStandings = includeSelectors?.length ? () => {} : prepareSplitStandings(doc.document, baseUrl, excluded)
+    restoreVariantLinks(doc.document, baseUrl)
     // A product's options shown as controls are kept aside before cleaning
     // removes the controls, and shown once the page is known to be a product's.
     const optionGroups = markOptionGroups(doc.document, excluded)
     cleanTree(doc.document, excluded)
     pruneTree(doc.document, { blockAds })
     detachAll(excluded)
+    joinStandings()
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
     settleOptionGroups(optionGroups, decision.type === 'product')
@@ -190,7 +199,7 @@ export class ExtractTf implements Extractor {
     // Recommendation carousels are cut only on product pages. On a listing
     // page the priced cards ARE the content, and pruning them would delete
     // the answer.
-    if (decision.type === 'product') pruneRecommendations(doc.document)
+    if (decision.type === 'product') pruneRecommendations(doc.document, { preserveOfferGrids: aggregateOffers })
 
     const classifyOptions: ClassifyOptions = { ...DEFAULT_CLASSIFY, favorPrecision }
     if (favorPrecision) classifyOptions.minTextLength = 60
@@ -248,6 +257,8 @@ export class ExtractTf implements Extractor {
       if (main !== null) strategy = 'list'
     }
 
+    if (main !== null && strategy === 'list' && (decision.type === 'collection' || decision.type === 'listing')) main = includeCollectionLeads(main)
+
     let product: ProductFacts | null = null
     if (decision.type === 'product') {
       product = sourceFacts
@@ -257,7 +268,7 @@ export class ExtractTf implements Extractor {
       // fragments inside the subject container. The adapter must prefer an
       // honest null over attributing one of those generic price tokens to the
       // main ASIN.
-      if (!amazonProduct) fillPriceFromText(product, doc.document)
+      if (!amazonProduct && !aggregateOffers) fillPriceFromText(product, doc.document)
       if (amazonProduct && product.price !== null && product.priceCurrency === null) product.priceCurrency = inferAmazonCurrency(options.url, product.price.value)
     }
 
@@ -279,7 +290,7 @@ export class ExtractTf implements Extractor {
     // cascade's confidence. The page itself still went through the cascade
     // for its type, title and main region, and `escalate` below stays what
     // the cascade found of the page.
-    const selection = includeSelectors !== undefined && includeSelectors.length > 0 ? selectionBody(html, includeSelectors, pruneSelectors) : null
+    const selection = includeSelectors !== undefined && includeSelectors.length > 0 ? selectionBody(html, includeSelectors, pruneSelectors, baseUrl) : null
     const selected = selection !== null && !selection.blank
     const output: ExtractorOutput = {
       title: pickTitle(doc.document, main),
@@ -309,6 +320,7 @@ export class ExtractTf implements Extractor {
       adapter: adapter.descriptor,
       entities: adapter.entities,
       adapterValidation: amazonValidation ?? adapter.validation,
+      ...(unavailable ? { sourceUnavailable: true as const } : {}),
       emptyTableShells,
       fetchPreloads,
       render: detectRenderSignals(raw, doc.document, {

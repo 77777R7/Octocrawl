@@ -23,7 +23,7 @@ const IDEMPOTENCY_KEY_PROPERTY = { type: 'string', minLength: 1, maxLength: 200,
 /** A task contract (ADR 0006): the server checks each check's fields by its type and compiles each pattern. */
 const VERIFY_PROPERTY = {
   type: 'object',
-  description: 'Checks judged into verification: passed (these checks only), failed or not_requested (unverified). Examine a failure before retrying. Types: markdownIncludes {text}, markdownMatches {pattern, flags?}, markdownCountMin {pattern, flags?, min}, minTables {min}, tableRowsMin {tableIndex, columns, min} (zero-based; needs tables format), listRecordsMin {min, path?}, recordFields {fields, min}, field {path + one of equals, in, present, min/max}. Markdown checks and minTables need markdown in formats.',
+  description: 'Checks on final delivery; passed covers configured checks only. Inspect failure/readiness before retrying. Types: markdownIncludes, markdownMatches, markdownCountMin, minTables, tableRowsMin (tables format, zero-based columns), listRecordsMin, recordFields (uniqueBy counts complete extracted identities), field. Markdown checks need markdown format.',
   properties: {
     checks: {
       type: 'array', minItems: 1, maxItems: MAX_VERIFY_CHECKS,
@@ -38,6 +38,7 @@ const VERIFY_PROPERTY = {
           max: { type: 'number' },
           path: { type: 'string', minLength: 1, maxLength: MAX_VERIFY_TEXT },
           fields: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string', minLength: 1, maxLength: MAX_VERIFY_TEXT } },
+          uniqueBy: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: MAX_VERIFY_TEXT } },
           tableIndex: { type: 'integer', minimum: 0, maximum: 1000000 },
           columns: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: { type: 'integer', minimum: 0, maximum: 1000000 } },
           equals: { type: ['string', 'number', 'boolean', 'null'] },

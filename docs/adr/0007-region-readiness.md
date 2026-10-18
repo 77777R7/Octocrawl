@@ -105,6 +105,12 @@
 - **HTTP 通道：** 不渲染，所以判断不了"加载了但没抽到"。空壳算 `not_loaded`，要换浏览器读。
 - **Evidence Record：** 新增一个可选块 `readiness: { state, basis }`，登记进 `EVIDENCE_RECORD_ADDED_KEYS`。
 
+### 2026-10-18：显式来源不可用
+
+已抓取的 HTTP 200 页面也可能明确声明网站不可用。提取器在调用方的选区/裁剪之前，以标题和可见、占主要篇幅的站点不可用提示共同产生 `sourceUnavailable` 诊断；各内容通道在最终 `extract` trace 中保留该信号。隐藏提示、引用、商品缺货和有实际数据行的可见表格不作为整页不可用证明。目前保守识别英语/法语的明确站点提示，不推断所有站点的维护状态；HTTP 不知道的外部样式可见性仍未知，浏览器的隐藏标记按捕获读取。
+
+无契约或契约未通过时，该信号给出 `not_served`，basis 为 `source_unavailable`，优先于加载/空壳推断。只读最后一次提取，旧通道的诊断不能污染后续正常捕获；已配置检查通过仍为 `ready/verified`，不把一个关键词契约通过称为独立准确性通过。抓取 `status`、正文、验证契约及 passed/failed/not_requested 语义不变；API、SDK、MCP 及 Evidence Record 保持相同状态。仅改分类，不代表目标数据恢复，旧记录/缓存与验收成绩不回写；需要新捕获时用 `maxAge: 0`。
+
 ### 4. 执行阶梯
 
 ADR 0006 已经在质量跳级前面留了一个位置：带契约时遇到 `checks_failed`，先问这里的分类器。

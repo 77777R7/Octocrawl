@@ -63,6 +63,16 @@ view 里的字段都可以缺：
 - `minTables` 有 `view.tableCount` 就用它，没有才数 `view.markdown` 里的 GFM 表格；后者和 `run-set.mjs` 的判法一致。DOM 视图可以把可见的 `<table>` 和 `role=table`/`grid` 的数量填进 `tableCount`。
 - 一份 view 里没有某类判定需要的部分（例如 DOM 视图没有 `json`，`field` 判定就没法跑），这条判定记为 `passed: null`，`observed` 为 "not available in this view"，不算通过也不算失败。对最终结果构造的 view，这类判定照常判失败。
 
+### 2026-10-18：MCP 大小预算也是最终投影的一部分
+
+托管 MCP 的精简结果也属于最终投影：移除 usage、channelsTried 或内部 metadata 后，带契约的 scrape 重新验证实际交付对象，再处理大小预算。被移除的必需字段失败，readiness 为 not_extracted，basis 含 checks_failed 和 mcp_result_minimized；debug 保留字段时仍可通过。三项结论和 text/structuredContent 同步。精简遥测不改变原抓取状态，也不代表独立准确性验收。
+
+MCP 的 `scrape` 在 API 验证之后仍可能为 50,000 字符结果预算裁短 rawHtml、html、markdown。裁剪时使用同一份原契约和现有验证器重算每个候选投影的 verification，将新结论、readiness、Evidence Record 和提示计入预算后再选择前缀；文本与 structuredContent 来自同一个最终对象。验证、readiness、evidenceRecord 不作为自身证据。没有发生裁剪的结果保持 API 结论。
+
+保留的字段仍可通过；被裁掉的必需字段失败。裁剪前检查通过、裁后失败，表示此次交付没有交出内容，readiness 为 not_extracted，basis 含 checks_failed 和 mcp_result_truncated。既有访问、加载及来源失败保持其分类。抓取 status 和原始来源/snapshot 哈希不变，Evidence Record 的 Markdown 输出哈希对应裁后的正文；无契约仍为 not_requested。
+
+`get_crawl_pages` / `get_batch_items` 的首个超大页面也可能被裁短，而回读结果没有原契约。此时不能从旧检查摘要猜契约或保留 passed：原契约身份保留，检查记为未复核（passed:null、说明原契约缺失，移除旧 observedCount），整体为 failed/checks_failed，readiness 和 ER 同步。page_not_read、empty_not_allowed 等已有失败原因保留；未裁的页不改。传输裁剪不回写 API 缓存或存储记录，不触发重新抓取，也不证明独立准确性验收通过。
+
 ### 3. 结果：`verification`，顶层 `status` 不变
 
 每个 scrape 结果、batch 和 crawl 的每一页（`CrawlPage`）、webhook 的 page 事件都带上：

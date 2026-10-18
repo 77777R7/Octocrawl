@@ -1,3 +1,4 @@
+import { sourceDataWarnings } from './sourceData.js'
 import {
   estimateTokens,
   fileByteCap,
@@ -692,6 +693,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         linkCount: links.length,
         // The page's visible characters, as the extractor counted them: what readiness reads a page with no main content by (ADR 0007).
         ...(extracted.render === undefined ? {} : { textChars: extracted.render.textChars }),
+        ...(extracted.sourceUnavailable === true ? { sourceUnavailable: true } : {}),
         ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}),
         ...tagOptions(options),
       },
@@ -709,8 +711,9 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // the rendered page and never raises it. On the failed result the lane's
     // own extract_low_confidence ask already names that hop.
     const render = extracted.render
+    const sourceWarnings = sourceDataWarnings(body, out.finalUrl)
     const clientRenderedCaveat = (): FetchWarning[] => {
-      if (render === undefined || !render.clientRendered) return []
+      if (render === undefined || !render.clientRendered) return sourceWarnings
       trace.push({
         at: wallMs,
         lane: 'http',
@@ -724,7 +727,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           ...(render.listRecords === undefined ? {} : { listRecords: render.listRecords }),
         },
       })
-      return [{
+      return [...sourceWarnings, {
         code: 'client_rendered_suspected',
         message: `The page appears to fill in its data with JavaScript (${render.reason}); this HTTP capture may be a shell.`,
       }]
@@ -764,6 +767,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       status: out.status,
       header: (name) => out.headers?.get(name) ?? null,
       body,
+      finalUrl: out.finalUrl,
       contentful: true,
     })
     if (decisive !== null) return blocked(decisive)

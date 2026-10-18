@@ -13,6 +13,7 @@
 
 import { detach, detachAll, outerHtml, parse, qsa, tagOf, textOf } from './dom.js'
 import { namedBy } from './selectors.js'
+import { restoreVariantLinks } from './variantLinks.js'
 import { LAYOUT_MARKERS } from './markdown.js'
 import { looksLikePrice } from './product.js'
 
@@ -213,7 +214,7 @@ function recommendationRegion(heading: Element): Element[] {
  * prevents is an LLM summarizing the wrong product's features; the failure it
  * must not cause is deleting the product being described.
  */
-export function pruneRecommendations(doc: Document): void {
+export function pruneRecommendations(doc: Document, options: { preserveOfferGrids?: boolean } = {}): void {
   // The element that holds the page's one h1 holds the product: the grid and
   // token triggers never cut it. A page of several h1s (cards that each carry
   // one) has no such title to keep.
@@ -233,7 +234,7 @@ export function pruneRecommendations(doc: Document): void {
   const containers = qsa(doc, 'div,section,ul,ol')
   for (const el of containers.reverse()) {
     if (!el.isConnected) continue
-    if (!holdsH1(el) && isProductGrid(el)) detach(el)
+    if (!options.preserveOfferGrids && !holdsH1(el) && isProductGrid(el)) detach(el)
   }
 
   // Trigger 3: id/class tokens, for carousels rendered without a heading and
@@ -304,11 +305,12 @@ export function wholePageBody(html: string, exclusions: readonly string[] = []):
  * empty elements, such as the root of an application its scripts have yet
  * to fill.
  */
-export function selectionBody(html: string, selectors: readonly string[], exclusions: readonly string[] = []): { html: string; matched: number; blank: boolean } {
+export function selectionBody(html: string, selectors: readonly string[], exclusions: readonly string[] = [], baseUrl?: string | null): { html: string; matched: number; blank: boolean } {
   const doc = parse(html)
   const document = doc.document
   const named = namedBy(document, selectors)
   const excluded = namedBy(document, exclusions)
+  restoreVariantLinks(document, baseUrl)
   const top = document.documentElement
   const page = pageRoot(document)
   // An excluded body, or root element, takes the whole page along.
