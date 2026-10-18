@@ -510,3 +510,17 @@ a:hover{color:#fff}
   .kpis,.panel{animation:print .42s steps(7) both}
   @keyframes print{from{clip-path:inset(0 0 100% 0)}to{clip-path:inset(0 0 0 0)}}
 }
+
+/* Apple-style corners: where the browser can draw a squircle (corner-shape, Chromium 139+), cards' corners curve
+   continuously into their sides. A squircle of the same radius looks tighter, so each card radius grows by about 1.8×;
+   other browsers keep the round corners above. */
+@supports (corner-shape: squircle) {
+  .dash-menu { border-radius: 18px; corner-shape: squircle; }
+  .glass-tip { border-radius: 18px; corner-shape: squircle; }
+  .ev-hero { border-radius: 18px; corner-shape: squircle; }
+  .pg-picker { border-radius: 22px; corner-shape: squircle; }
+  .pg-tile { border-radius: 18px; corner-shape: squircle; }
+  .pg-card { border-radius: 25px; corner-shape: squircle; }
+  .pg-panel { border-radius: 25px; corner-shape: squircle; }
+  .pg-runs { border-radius: 29px; corner-shape: squircle; }
+}

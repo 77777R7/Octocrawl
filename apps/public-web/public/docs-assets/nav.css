@@ -100,3 +100,17 @@
   .nav-caret, .nav-panel li a { transition: none; }
   .nav-panel.is-printing, .site-nav.is-printing, .nav-panel.is-printing *, .nav-panel.is-printing::after, .site-nav.is-printing::after { animation: none; }
 }
+
+/* Apple-style corners: where the browser can draw a squircle (corner-shape, Chromium 139+), cards' corners curve
+   continuously into their sides. A squircle of the same radius looks tighter, so each card radius grows by about 1.8×;
+   other browsers keep the round corners above. */
+@supports (corner-shape: squircle) {
+  .nav-panel { border-radius: 25px; corner-shape: squircle; }
+  .nav-feature { border-radius: 22px; corner-shape: squircle; }
+  .github-link { border-radius: 18px; corner-shape: squircle; }
+  .account-link { border-radius: 18px; corner-shape: squircle; }
+  @media (max-width: 900px) and (scripting: enabled) {
+    :root .nav-toggle { border-radius: 18px; corner-shape: squircle; }
+    :root .site-nav { border-radius: 25px; corner-shape: squircle; }
+  }
+}
