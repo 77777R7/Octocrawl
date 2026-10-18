@@ -25,6 +25,7 @@ export function mountFormats(section: HTMLElement): void {
       section.classList.add('is-near')
       void import('./cardGlow').then(({ mountCardGlow }) => mountCardGlow(section)).catch(() => { /* The paintings stay still. */ })
       void import('./scrapeWindows').then(({ mountWindows }) => mountWindows(section)).catch(() => { /* The windows show their results as they are. */ })
+      void import('./glassLens').then(({ mountGlassLens }) => mountGlassLens(section)).catch(() => { /* The windows stay frosted. */ })
     })
   }
   mountSteps(section)

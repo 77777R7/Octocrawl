@@ -278,6 +278,28 @@
 /* While a window decodes: what it decodes from is dim, the front glows. */
 .fx-win-body .is-ahead { color: rgba(141, 185, 232, .3); font-weight: 400; }
 .fx-win-body .is-front { color: var(--orange-200); }
+/* The glass rules come after the plain window's, so their colours win where the browser draws glass. */
+/* Frosted glass where the browser can blur what is behind: the painting and its light show through, softened and a
+   little darkened so the text holds on the brightest skies; a faint sheen across the top and a lit upper edge. */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .fx-win { border-color: rgba(255, 255, 255, .2); background: linear-gradient(160deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .03) 38%, rgba(255, 255, 255, 0) 60%), rgba(6, 20, 52, .7); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 0 0 1px rgba(255, 255, 255, .04), 0 30px 60px -24px rgba(0, 6, 24, .7); -webkit-backdrop-filter: blur(18px) saturate(140%) brightness(.62); backdrop-filter: blur(18px) saturate(140%) brightness(.62); }
+  .fx-win-bar { border-bottom-color: rgba(255, 255, 255, .12); background: rgba(255, 255, 255, .05); color: rgba(230, 238, 252, .78); }
+  .fx-win-body .p, .fx-win-body .c { color: rgba(200, 222, 248, .62); }
+  .fx-win-body .is-ahead { color: rgba(200, 222, 248, .38); }
+  .fx-win-body, .fx-win-bar { text-shadow: 0 1px 2px rgba(0, 8, 30, .4); }
+}
+/* Glass where the browser can bend the backdrop (glassLens.ts): the rounded rim draws the painting in a little, as
+   real glass does, the whole pane gets the same light frost with its colour kept, and a thin rim catches the light.
+   The blur comes before the bend: after a url() filter Chromium lets the raw backdrop show through the blur's edges. */
+.fx-win.is-lens { background: linear-gradient(160deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, 0) 45%), rgba(5, 18, 50, .52); -webkit-backdrop-filter: blur(7px) var(--fx-lens) saturate(170%) brightness(.64); backdrop-filter: blur(7px) var(--fx-lens) saturate(170%) brightness(.64); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 24px 50px -22px rgba(0, 6, 24, .65); }
+/* The secondary text (punctuation, link targets, notes, authors, the bar) a little brighter on this clearer glass. */
+.fx-win.is-lens .fx-win-body .p, .fx-win.is-lens .fx-win-body .c { color: rgba(214, 228, 248, .74); }
+.fx-win.is-lens .fx-win-body .u { color: rgba(176, 208, 246, .9); }
+.fx-win.is-lens .fx-win-body .a { color: rgba(206, 224, 248, .8); }
+.fx-win.is-lens .fx-win-bar { color: rgba(236, 242, 252, .88); }
+/* The lit rim: a thin edge catching light from the upper left, brighter there and fading round the sides. */
+.fx-win.is-lens::before { content: ""; position: absolute; inset: 0; z-index: 1; padding: 1.5px; border-radius: inherit; background: linear-gradient(135deg, rgba(255, 255, 255, .62), rgba(255, 255, 255, .12) 32%, rgba(255, 255, 255, .04) 62%, rgba(255, 255, 255, .26)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); pointer-events: none; }
+.fx-lens-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 /* The cards' artwork, one painting each: the three skies, then the three landscapes; loaded once the cards are near. */
 .fx-section.is-near .fx-card { background-position: center; background-size: cover; }
 .fx-section.is-near .fx-card.is-markdown { background-image: url('/assets/cards/sky-1.webp'); }
@@ -342,7 +364,7 @@
   .fx-banner { border-radius: 52px; corner-shape: squircle; }
   .fx-item, .fx-head button:focus-visible { border-radius: 36px; corner-shape: squircle; }
   .fx-card { border-radius: 44px; corner-shape: squircle; }
-  .fx-win { border-radius: 28px; corner-shape: squircle; }
+  .fx-win, .fx-win.is-lens::before { border-radius: 28px; corner-shape: squircle; }
   @media (max-width: 680px) {
     .fx-banner { border-radius: 36px; }
   }
