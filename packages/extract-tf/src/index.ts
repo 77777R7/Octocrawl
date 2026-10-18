@@ -1,4 +1,6 @@
 export { ExtractTf, extractTf } from './extract.js'
+export { materializeShadowTables } from './shadowTables.js'
+export type { CapturedShadowTable } from './shadowTables.js'
 export { classifyBlocks } from './classify.js'
 export type { TextBlock, ClassifyOptions } from './classify.js'
 export { cleanTree, pruneTree, pruneRecommendations, selectionBody, wholePageBody, withoutLayoutMarkers } from './prune.js'

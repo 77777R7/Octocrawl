@@ -94,12 +94,29 @@ function regionWaitOf(result: FetchResult, sha: string): { ready: boolean; empty
 
 /** The result's readiness: see Readiness in @w2l/contracts and ADR 0007's table. */
 export function readinessOf(result: FetchResult): Readiness {
+  // A declaration tied to this target and an observed data gap is different from a loading shell.
+  // A passed contract still means only its configured checks passed (it may ask for the error page).
+  if (result.verification?.status !== 'passed' && result.warnings?.some(warning => warning.code === 'source_data_error')) {
+    return readiness('not_served', ['source_data_error'], result)
+  }
   const verification = result.verification
+  // A configured pass keeps ADR 0007's semantics. Otherwise an active source outage is not a loading shell.
+  if (verification?.status !== 'passed' && sourceUnavailable(result)) return readiness('not_served', ['source_unavailable'], result)
   if (verification !== undefined && verification.status !== 'not_requested') {
     const verified = verifiedReadiness(result, verification)
     if (verified !== undefined) return verified
   }
   return signalReadiness(result)
+}
+
+/** Only the final extraction speaks: an earlier lane/view must not label a later healthy capture. */
+function sourceUnavailable(result: FetchResult): boolean {
+  if (!(result.status === 'success' || result.status === 'partial' || (result.status === 'failed' && result.failureReason === 'empty_unverified'))) return false
+  for (let i = result.trace.length - 1; i >= 0; i--) {
+    const event = result.trace[i]!
+    if (event.event === 'extract') return event.detail?.sourceUnavailable === true
+  }
+  return false
 }
 
 /**
