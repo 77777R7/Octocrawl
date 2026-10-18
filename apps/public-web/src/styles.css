@@ -1479,3 +1479,39 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .can-evidence { max-width: 76ch; margin-top: 32px; }
 .can-evidence h3 { margin: 0 0 12px; font-size: 22px; }
 .can-evidence p { margin: 0; color: var(--ink-soft); font-size: 15px; line-height: 1.65; }
+
+/* Apple-style corners: where the browser can draw a squircle (corner-shape, Chromium 139+), cards' corners curve
+   continuously into their sides. A squircle of the same radius looks tighter, so each card radius grows by about 1.8×;
+   other browsers keep the round corners above. */
+@supports (corner-shape: squircle) {
+  .url-card { border-radius: 29px; corner-shape: squircle; }
+  .tool-button { border-radius: 18px; corner-shape: squircle; }
+  .example-button { border-radius: 18px; corner-shape: squircle; }
+  .submit-button { border-radius: 18px; corner-shape: squircle; }
+  .run-card { border-radius: 25px; corner-shape: squircle; }
+  .loading-panel { border-radius: 25px; corner-shape: squircle; }
+  .product-panel, .output-panel, .guidance-panel { border-radius: 25px; corner-shape: squircle; }
+  .how-replay { border-radius: 36px; corner-shape: squircle; }
+  .cta-primary { border-radius: 18px; corner-shape: squircle; }
+  .selfhost-sheet { border-radius: 36px; corner-shape: squircle; }
+  .footer-card { border-radius: 22px; corner-shape: squircle; }
+  @media (max-width: 600px) {
+    .sheet { border-radius: 22px 22px 0 0; corner-shape: squircle; }
+    .how-replay { border-radius: 29px; corner-shape: squircle; }
+    .selfhost-sheet { border-radius: 29px; corner-shape: squircle; }
+  }
+  .demo-card { border-radius: 32px; corner-shape: squircle; }
+  .flow-box { border-radius: 40px; corner-shape: squircle; }
+  .flow-node.is-main .flow-box { border-radius: 43px; corner-shape: squircle; }
+  .fields-card { border-radius: 25px; corner-shape: squircle; }
+  .state-icon { border-radius: 22px; corner-shape: squircle; }
+  .icon-glyph { border-radius: 22px; corner-shape: squircle; }
+  .cta-form { border-radius: 25px; corner-shape: squircle; }
+  .waitlist-field input:not([type="checkbox"]), .waitlist-field select, .waitlist-field textarea { border-radius: 18px; corner-shape: squircle; }
+  .waitlist-done { border-radius: 22px; corner-shape: squircle; }
+  .use-window { border-radius: 29px; corner-shape: squircle; }
+  @media (max-width: 860px) {
+    .is-story .tier-head { border-radius: 18px 18px 0 0; corner-shape: squircle; }
+    .is-story .tier-panel { border-radius: 0 0 18px 18px; corner-shape: squircle; }
+  }
+}

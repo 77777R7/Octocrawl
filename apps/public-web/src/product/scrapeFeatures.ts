@@ -3,6 +3,7 @@
  * here calls an API, except that the Evidence Record section hashes the recorded docs page's bytes (a copy served from
  * this site) in the reader's browser. */
 import { mountDrop, type Drop } from './scrapeDrop'
+import { scrollPageTo } from '../smoothScroll'
 import { foldedText } from './scrapeMarkdown'
 import { DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE } from './scrapeRun'
 
@@ -81,7 +82,8 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null, hint
   // brings the whole window into view. It goes once a read has played.
   hint?.addEventListener('click', (event) => {
     event.preventDefault()
-    console_.scrollIntoView({ behavior: still() ? 'auto' : 'smooth', block: 'center' })
+    const box = console_.getBoundingClientRect()
+    scrollPageTo(window.scrollY + box.top - Math.max(0, (window.innerHeight - box.height) / 2))
   })
   new IntersectionObserver(([entry]) => {
     settle()
