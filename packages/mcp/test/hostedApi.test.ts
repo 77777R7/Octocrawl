@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from '@modelcontextprotocol/client'
-import { hostedNetworkPolicy } from '@w2l/contracts'
+import { hostedNetworkPolicy, type CompactScrapeResponse } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
 import { expectUsableInstructions } from './instructionChecks.js'
 import { TOOL_NAMES } from '../src/tools.js'
@@ -324,6 +324,28 @@ it('a caller without the browser lane is told why a shell was read over HTTP alo
     expect(answer.agentHints?.join(' ')).not.toContain('retry without fastMode')
     expect(answer.agentHints?.join(' ')).toContain('without a key')
   } finally { await client.close() }
+})
+
+it('keeps the pinned HTTP-only hint in the final verified response and stored record', async () => {
+  const { url } = await start({ keylessDaily: 3 })
+  const request = { url: `${origin}/page?cache-projection`, formats: ['markdown'], fastMode: false, debug: false, maxAge: 3_600_000 }
+  const first = await (await post(url, '/v1/scrape', request)).json() as CompactScrapeResponse
+  expect(first.usage.requestCount).toBeGreaterThan(0)
+  const hit = await (await post(url, '/v1/scrape', { ...request, verify: { checks: [
+    { type: 'field', path: 'usage.requestCount', min: 1 },
+    { type: 'field', path: 'usage.bytesDecompressed', min: 1 },
+    { type: 'field', path: 'agentHints.0', present: true },
+  ] } })).json() as CompactScrapeResponse
+  // Hosted calls deliberately do not fill the cache. Cache projection has a separate local API test.
+  expect(hit.metadata.cacheState).toBe('miss')
+  expect(hit.usage.requestCount).toBeGreaterThan(0)
+  expect(hit.agentHints?.join(' ')).toContain('fastMode: false was not honoured')
+  expect(hit.agentHints?.join(' ')).not.toContain('retry without fastMode')
+  expect(hit.verification.status).toBe('passed')
+  expect(hit.readiness.state).toBe('ready')
+  expect(hit.evidenceRecord.verification?.status).toBe('passed')
+  const record = await (await fetch(`${url}/v1/scrapes/${hit.metadata.scrapeId}`)).json() as { agentHints?: string[] }
+  expect(record.agentHints).toEqual(hit.agentHints)
 })
 
 it('a key revoked while its lookup is cached stops at its next start; reading a result still uses the cache', async () => {

@@ -105,6 +105,10 @@
 - **HTTP 通道：** 不渲染，所以判断不了"加载了但没抽到"。空壳算 `not_loaded`，要换浏览器读。
 - **Evidence Record：** 新增一个可选块 `readiness: { state, basis }`，登记进 `EVIDENCE_RECORD_ADDED_KEYS`。
 
+### 2026-10-18：有界本地回退的局部截止
+
+首次 HTTP 响应头超时可在资格与剩余预算满足时，向本地浏览器回退一次，整个调用上限30秒。局部截止保留在原始 attempt；最终结果通过 `local_fallback_deadline` trace 保留加载未完成信号，无契约 partial 为 `not_loaded`，不把整任务预算标作耗尽。显式检查通过仍只覆盖配置检查，不代表独立字段准确性。验证码、空内容、失败契约或超时后不再升级其他通道。
+
 ### 4. 执行阶梯
 
 ADR 0006 已经在质量跳级前面留了一个位置：带契约时遇到 `checks_failed`，先问这里的分类器。

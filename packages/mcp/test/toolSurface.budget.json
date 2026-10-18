@@ -1,7 +1,7 @@
 {
   "local": {
     "scrape": {
-      "inputBytes": 10000,
+      "inputBytes": 9983,
       "descriptionChars": 450
     },
     "map": {
@@ -159,7 +159,7 @@
   },
   "hosted-keyless": {
     "scrape": {
-      "inputBytes": 5898,
+      "inputBytes": 5881,
       "descriptionChars": 392
     },
     "map": {
@@ -169,7 +169,7 @@
   },
   "hosted-key": {
     "scrape": {
-      "inputBytes": 6526,
+      "inputBytes": 6509,
       "descriptionChars": 392
     },
     "map": {
@@ -183,7 +183,7 @@
   },
   "oauth-http": {
     "scrape": {
-      "inputBytes": 5898,
+      "inputBytes": 5881,
       "descriptionChars": 392
     },
     "map": {
@@ -193,7 +193,7 @@
   },
   "oauth-browser": {
     "scrape": {
-      "inputBytes": 6526,
+      "inputBytes": 6509,
       "descriptionChars": 392
     },
     "map": {
@@ -207,7 +207,7 @@
   },
   "local-core": {
     "scrape": {
-      "inputBytes": 10000,
+      "inputBytes": 9983,
       "descriptionChars": 450
     },
     "map": {
@@ -221,7 +221,7 @@
   },
   "local-read-only": {
     "scrape": {
-      "inputBytes": 7670,
+      "inputBytes": 7653,
       "descriptionChars": 450
     },
     "map": {

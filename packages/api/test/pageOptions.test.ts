@@ -261,18 +261,21 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     expect(shim).toMatchObject({ status: 200, body: { success: false, error: 'failed: timeout' } })
   })
 
-  it('a timeout longer than the lanes\' default waits gives a server slow to send its headers that time', async () => {
+  it('an HTTP-only request waits past the default header cap only with an explicit timeout', async () => {
     const withTimeout = await setup(hangingBrowser)
     const withoutTimeout = await setup(hangingBrowser)
     const [waited, capped] = await Promise.all([
-      withTimeout.post('/v1/scrape', { url: `${withTimeout.origin}/slow`, timeout: 16_000 }),
-      withoutTimeout.post('/v1/scrape', { url: `${withoutTimeout.origin}/slow` }),
+      withTimeout.post('/v1/scrape', { url: `${withTimeout.origin}/slow`, timeout: 16_000, fastMode: true }),
+      withoutTimeout.post('/v1/scrape', { url: `${withoutTimeout.origin}/slow`, fastMode: true }),
     ])
     expect(waited).toMatchObject({ status: 200, body: { status: 'success', lane: 'http', failureReason: null } })
     expect(waited.body.markdown).toContain('Hourly survey')
-    // Without a timeout the HTTP lane keeps its 10 s wait for headers.
+    // Isolate the HTTP wire cap: the default route now offers one bounded local browser after a headers timeout.
+    // Without an explicit timeout this HTTP-only request still keeps its 10 s header wait.
     expect(capped).toMatchObject({ status: 200, body: { status: 'failed', failureReason: 'timeout', lane: 'http' } })
     expect(capped.body.usage.deadlineExceeded).not.toBe(true)
+    expect(waited.body.channelsTried).toEqual(['http'])
+    expect(capped.body.channelsTried).toEqual(['http'])
   }, 30_000)
 
   it('waitFor starts at the browser rung with the options, and says so when there is no browser rung', async () => {
