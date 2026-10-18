@@ -1,0 +1,208 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readinessOf } from '@w2l/runtime'
+import { identityBundleFrom, modeIdentity, type FetchResult } from '@w2l/contracts'
+import { LadderRunner, type Channel } from '../src/routing/ladder.js'
+
+const url = 'https://www.zalando.de/herrenschuhe/'
+const identity = identityBundleFrom(modeIdentity('standard'))
+
+function headersTimeout(): FetchResult {
+  return {
+    requestedUrl: url, status: 'failed', failureReason: 'timeout', blockReason: null, budgetExceeded: null,
+    lane: 'http', escalations: [], handoff: null, markdown: null, truncated: false, truncatedAt: null, compliance: null,
+    evidence: { finalUrl: url, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
+    usage: { wallMs: 12_000, bytesWire: 0, bytesDecompressed: 0, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: 0, externalCostUsd: 0 },
+    trace: [{ at: 12_000, lane: 'http', event: 'request_failed', detail: { reason: 'timeout', error: 'HeadersTimeoutError', code: 'UND_ERR_HEADERS_TIMEOUT' } }],
+  }
+}
+
+function product(): FetchResult {
+  const timeout = headersTimeout()
+  return { ...timeout, status: 'success', failureReason: null, lane: 'browser_local',
+    markdown: '# Shoes\n\nTrail Runner — €79.95',
+    evidence: { ...timeout.evidence, httpStatus: 200, contentType: 'text/html', rawBodySha256: 'a'.repeat(64) },
+    usage: { ...timeout.usage, wallMs: 6500, bytesWire: 100, bytesDecompressed: 100, contentTokens: 12, browserMs: 6500 }, trace: [] }
+}
+
+function channel(id: string, result: FetchResult): Channel & { calls: number } {
+  return { id, identity, calls: 0, async fetch() { this.calls++; return result } }
+}
+
+describe('HTTP headers-timeout local fallback', () => {
+  it('offers one eligible local browser when the HTTP header cap expires with run budget left', async () => {
+    const http = channel('http', headersTimeout())
+    const browser = channel('browser_local', product())
+    const run = await new LadderRunner([http, browser], { mode: 'standard' }).run(url, null, { deadlineAt: Date.now() + 300_000 })
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(run.result.markdown).toContain('€79.95')
+    expect(run.summary.attempts[0]?.result).toEqual(headersTimeout())
+    expect(browser.calls).toBe(1)
+  })
+})
+
+
+afterEach(() => vi.useRealTimers())
+
+const budget = () => ({ deadlineAt: Date.now() + 300_000 })
+
+describe('headers-timeout fallback boundaries', () => {
+  it.each([
+    ['generic timeout', (r: FetchResult) => ({ ...r, trace: [] })],
+    ['body timeout', (r: FetchResult) => ({ ...r, trace: [{ at: 10, lane: 'http' as const, event: 'request_failed', detail: { error: 'BodyTimeoutError', code: 'UND_ERR_BODY_TIMEOUT' } }] })],
+    ['run deadline', (r: FetchResult) => ({ ...r, usage: { ...r.usage, deadlineExceeded: true } })],
+    ['received status', (r: FetchResult) => ({ ...r, evidence: { ...r.evidence, httpStatus: 503 } })],
+    ['received body', (r: FetchResult) => ({ ...r, evidence: { ...r.evidence, rawBodySha256: 'a'.repeat(64) } })],
+    ['received bytes', (r: FetchResult) => ({ ...r, usage: { ...r.usage, bytesDecompressed: 100 } })],
+    ['later HTTP retry', (r: FetchResult) => ({ ...r, usage: { ...r.usage, attemptCount: 2 } })],
+    ['publisher cooldown', (r: FetchResult) => ({ ...r, retryAt: Date.now() + 60_000 })],
+    ['robots refusal', (r: FetchResult) => ({ ...r, failureReason: 'policy_denied' as const })],
+    ['rate limit', (r: FetchResult) => ({ ...r, status: 'blocked' as const, failureReason: null, blockReason: 'rate_limit' as const })],
+  ])('keeps %s terminal', async (_name, modify) => {
+    const browser = channel('browser_local', product())
+    const run = await new LadderRunner([channel('http', modify(headersTimeout())), browser], { mode: 'standard' }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http'])
+    expect(browser.calls).toBe(0)
+  })
+
+  it.each([undefined, Number.POSITIVE_INFINITY, 29_000])('requires a known full local-call budget: %s', async remaining => {
+    const browser = channel('browser_local', product())
+    const run = await new LadderRunner([channel('http', headersTimeout()), browser], { mode: 'standard' }).run(url, null, remaining === undefined ? {} : { deadlineAt: Date.now() + remaining })
+    expect(run.channelsTried).toEqual(['http'])
+    expect(browser.calls).toBe(0)
+  })
+
+  it.each(['absent', 'not served', 'refused', 'bad identity'])('requires an eligible local browser: %s', async kind => {
+    const browser = channel('browser_local', product())
+    if (kind === 'not served') browser.serves = () => false
+    if (kind === 'refused') browser.refusal = () => 'request options refused'
+    if (kind === 'bad identity') Object.assign(browser, { identity: undefined })
+    const run = await new LadderRunner([channel('http', headersTimeout()), ...(kind === 'absent' ? [] : [browser])], { mode: 'standard' }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http'])
+    expect(browser.calls).toBe(0)
+  })
+
+  it('does not treat compatible transport as the initial HTTP rung', async () => {
+    const browser = channel('browser_local', product())
+    const run = await new LadderRunner([channel('http_compat', headersTimeout()), browser], { mode: 'standard' }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http_compat'])
+  })
+
+  it('does not fetch outside the allowlist', async () => {
+    const http = channel('http', headersTimeout())
+    const browser = channel('browser_local', product())
+    const run = await new LadderRunner([http, browser], { mode: 'standard', allowlistedDomains: ['other.example'] }).run(url, null, budget())
+    expect(run.result.failureReason).toBe('policy_denied')
+    expect(http.calls + browser.calls).toBe(0)
+  })
+
+  it('keeps a saved authenticated session on its route', async () => {
+    const http = channel('http', headersTimeout())
+    const browser = channel('browser_local', product())
+    const run = await new LadderRunner([http, browser], { mode: 'authed' }).run(url, { domain: 'www.zalando.de', vendor: 'browser_local_authed', attestedBy: 'operator', attestedAt: new Date().toISOString() }, budget())
+    expect(run.channelsTried).toEqual(['http'])
+    expect(browser.calls).toBe(0)
+  })
+
+  it.each(['captcha', 'timeout', 'contract failure', 'empty'])('stops after one local answer: %s', async kind => {
+    const answer = kind === 'captcha' ? { ...product(), status: 'blocked' as const, blockReason: 'captcha' as const, markdown: null }
+      : kind === 'timeout' ? { ...headersTimeout(), lane: 'browser_local' as const }
+      : kind === 'empty' ? { ...product(), status: 'failed' as const, failureReason: 'empty_unverified' as const, markdown: null }
+      : product()
+    const browser = channel('browser_local', answer)
+    const installed = channel('installed_chrome', product())
+    const paid = { ...channel('provider', product()), vendorId: 'steel', priceCeilingUsd: 1 }
+    const secondBrowser = channel('browser_local', product())
+    const run = await new LadderRunner([channel('http', headersTimeout()), installed, browser, secondBrowser, paid], { mode: 'standard', enhanced: true }, null, null, null,
+      kind === 'contract failure' ? { verify: { checks: [{ type: 'markdownIncludes', text: 'not on page' }] } } : {})
+      .run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(browser.calls).toBe(1)
+    expect(installed.calls + secondBrowser.calls + paid.calls).toBe(0)
+    expect(run.result.markdown).toBe(answer.markdown)
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ channel: 'http', event: 'ladder_step', detail: expect.objectContaining({ escalate: 'http_headers_timeout' }) }))
+  })
+
+  it('caps a hanging local call with its own signal while the run still has time', async () => {
+    vi.useFakeTimers()
+    const parentDeadline = Date.now() + 300_000
+    let seen: { signal?: AbortSignal; deadlineAt?: number } | undefined
+    let started!: () => void
+    const didStart = new Promise<void>(resolve => { started = resolve })
+    const browser: Channel = { id: 'browser_local', identity, fetch: async (_url, _session, execution) => {
+      seen = execution; started(); return new Promise(() => {})
+    } }
+    const pending = new LadderRunner([channel('http', headersTimeout()), browser], { mode: 'standard' }).run(url, null, { deadlineAt: parentDeadline })
+    await didStart
+    expect(seen?.deadlineAt).toBe(Date.now() + 30_000)
+    await vi.advanceTimersByTimeAsync(30_000)
+    const run = await pending
+    expect(seen?.signal?.aborted).toBe(true)
+    expect(run.result.failureReason).toBe('timeout')
+    expect(run.result.usage.deadlineExceeded).not.toBe(true)
+    expect(run.summary.attempts).toHaveLength(2)
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_headers_timeout_fallback_expired' }))
+  })
+
+  it('propagates caller cancellation during fallback', async () => {
+    const controller = new AbortController()
+    let started!: () => void
+    const didStart = new Promise<void>(resolve => { started = resolve })
+    const browser: Channel = { id: 'browser_local', identity, fetch: async () => { started(); return new Promise(() => {}) } }
+    const pending = new LadderRunner([channel('http', headersTimeout()), browser], { mode: 'standard' }).run(url, null, { ...budget(), signal: controller.signal })
+    const rejected = expect(pending).rejects.toThrow('caller cancelled')
+    await didStart
+    controller.abort(new Error('caller cancelled'))
+    await rejected
+  })
+})
+
+
+describe('fallback deadline and context accounting', () => {
+  it('retains a local deadline on the attempt without reporting the whole run exhausted', async () => {
+    const answer = { ...product(), status: 'partial' as const, usage: { ...product().usage, deadlineExceeded: true } }
+    const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', answer)], { mode: 'standard' }).run(url, null, budget())
+    expect(run.result.status).toBe('partial')
+    expect(run.result.markdown).toContain('€79.95')
+    expect(run.result.usage.deadlineExceeded).toBeUndefined()
+    expect(readinessOf(run.result)).toMatchObject({ state: 'not_loaded', basis: ['deadline_exceeded'] })
+    expect(run.summary.attempts[1]?.result).toEqual(answer)
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_step', channel: 'browser_local', detail: expect.objectContaining({ localDeadlineExceeded: true, escalate: null }) }))
+  })
+
+  it('still reports an actual caller deadline reached during fallback', async () => {
+    vi.useFakeTimers()
+    let started!: () => void
+    const didStart = new Promise<void>(resolve => { started = resolve })
+    const browser: Channel = { id: 'browser_local', identity, fetch: async () => { started(); return new Promise(() => {}) } }
+    const pending = new LadderRunner([channel('http', headersTimeout()), browser], { mode: 'standard' }).run(url, null, { deadlineAt: Date.now() + 30_000 })
+    await didStart
+    await vi.advanceTimersByTimeAsync(30_000)
+    const run = await pending
+    expect(run.result.failureReason).toBe('timeout')
+    expect(run.result.usage.deadlineExceeded).toBe(true)
+  })
+
+  it('does not repeat a browser already attempted before HTTP', async () => {
+    const browser = channel('browser_local', { ...headersTimeout(), lane: 'browser_local', failureReason: 'empty_unverified' })
+    const run = await new LadderRunner([browser, channel('http', headersTimeout()), channel('browser_local', product())], { mode: 'standard' }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['browser_local', 'http'])
+    expect(browser.calls).toBe(1)
+  })
+
+  it('passes the existing task context through the local scope', async () => {
+    const cookieSession = { id: 'same-task', cookieHeader: async () => '', store: async () => 0, browserCookies: async () => [], storeBrowserChanges: async () => ({ kept: 0, removed: 0 }) }
+    const onRobotsOverride = () => {}
+    const onRetryAfter = () => {}
+    let seen: unknown
+    const browser: Channel = { id: 'browser_local', identity, fetch: async (_url, _session, execution) => { seen = execution; return product() } }
+    await new LadderRunner([channel('http', headersTimeout()), browser], { mode: 'standard' }).run(url, null, { ...budget(), cookieSession, onRobotsOverride, onRetryAfter })
+    expect(seen).toMatchObject({ cookieSession, onRetryAfter })
+    expect((seen as { cookieSession: unknown }).cookieSession).toBe(cookieSession)
+  })
+})
+
+
+it('ignores an unrelated local-deadline trace', () => {
+  const result = { ...product(), status: 'partial' as const, trace: [{ at: 0, lane: 'browser_local' as const, event: 'local_fallback_deadline', detail: { trigger: 'unrelated' } }] }
+  expect(readinessOf(result)).toMatchObject({ state: 'ready', basis: [] })
+})

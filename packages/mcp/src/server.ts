@@ -1,5 +1,5 @@
 import { CLIENT_INFO_META_KEY, Server, type Implementation, type Tool } from '@modelcontextprotocol/server'
-import { isApiErrorCode } from '@w2l/contracts'
+import { isApiErrorCode, readVerify, type VerifyContract } from '@w2l/contracts'
 import { W2L, W2LError } from '@w2l/sdk'
 import type { PostCalls } from './inFlight.js'
 import { serverInstructions } from './instructions.js'
@@ -82,10 +82,12 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
         throw new Error(`tool not available in this deployment: ${request.params.name}; this server offers ${[...options.allowedTools].join(', ')}.${hint === undefined ? '' : ` ${hint}`}`)
       }
       let result: unknown
+      let contract: VerifyContract | undefined
       let progress: ProgressReporter | undefined
       try {
         options.authorizeCall?.(request.params.name,request.params.arguments ?? {})
         const args = options.normalizeCall?.(request.params.name, request.params.arguments ?? {}) ?? request.params.arguments ?? {}
+        if (request.params.name === 'scrape' && args !== null && typeof args === 'object') contract = readVerify((args as Record<string, unknown>).verify)
         // Every call is recorded under this client's name and version; the tools take no origin of their own.
         // A 2026-07-28 request names its client itself; a 2025-era one named it in initialize.
         const named = (ctx.mcpReq.envelope as Record<string, unknown> | undefined)?.[CLIENT_INFO_META_KEY] as Implementation | undefined
@@ -105,7 +107,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       const declared = TOOLS.find(tool => tool.name === request.params.name)
       const structured = declared !== undefined && 'outputSchema' in declared
       // The verdict first, cut to the budget, and a screenshot as an image block too (docs/mcp-client-ux-tasks.md W8).
-      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments) : result)
+      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments, contract) : result, contract)
       return { content: [{ type: 'text', text: JSON.stringify(value) }, ...images], ...(structured ? { structuredContent: value as Record<string, unknown> } : {}) }
     } finally { call?.end() }
   })
