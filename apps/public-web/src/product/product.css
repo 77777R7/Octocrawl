@@ -338,3 +338,26 @@
 @media (prefers-reduced-motion: reduce) {
   .fx-card, .fx-body, .fx-item, .fx-head button { transition: none; }
 }
+
+/* Apple-style corners: where the browser can draw a squircle (corner-shape, Chromium 139+), every card's corners
+   curve continuously into its sides instead of meeting them at a circle's edge. A squircle of the same radius looks
+   tighter, so each radius grows by about 1.8×. Other browsers keep the round corners above. */
+@supports (corner-shape: squircle) {
+  .pd-button { border-radius: 20px; corner-shape: squircle; }
+  .dm-window { border-radius: 28px; corner-shape: squircle; }
+  .ft-window { border-radius: 26px; corner-shape: squircle; }
+  .ft-facts div { border-radius: 16px; corner-shape: squircle; }
+  .ft-refused { border-radius: 22px; corner-shape: squircle; }
+  .ft-source, .ft-verdict { border-radius: 18px; corner-shape: squircle; }
+  .cd-window { border-radius: 32px; corner-shape: squircle; }
+  .tr-window { border-radius: 44px; corner-shape: squircle; }
+  .tr-form { border-radius: 28px; corner-shape: squircle; }
+  .fx-banner { border-radius: 52px; corner-shape: squircle; }
+  .fx-item, .fx-head button:focus-visible { border-radius: 36px; corner-shape: squircle; }
+  .fx-card { border-radius: 44px; corner-shape: squircle; }
+  .fx-pane { border-radius: 28px; corner-shape: squircle; }
+  .fx-stat { border-radius: 24px; corner-shape: squircle; }
+  @media (max-width: 680px) {
+    .fx-banner { border-radius: 36px; }
+  }
+}
