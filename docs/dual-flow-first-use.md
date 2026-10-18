@@ -29,7 +29,7 @@ codex mcp add w2l-local --url http://127.0.0.1:8791/mcp
 
 ## 一个对话取得商品 JSON 与批次结果
 
-告诉 Codex：“用 Octocrawl 的 `scrape_product` 采集 `https://www.amazon.sg/dp/B000VW9PIK`，显示主体 ASIN、标题、当前价格／币种、卖家、配送地、字段证据和缺失原因。”这个工具只需一个 URL，服务固定使用已复核的商品 Schema，不调用外部模型。实际结果中，页面抓取 `status: success` 与商品 JSON 的 `json.status: complete` 是两项不同检查；价格不在页面可见时返回 `null`，`json.issues` 说明无已验证来源。先确认选中主体 ASIN 与请求 ASIN 相同，以及配送地为 Singapore、可见报价币种为 SGD。
+告诉 Codex：“用 Octocrawl 的 `scrape_product` 采集 `https://www.amazon.sg/dp/B0CFV1W66Y`，显示主体 ASIN、标题、当前价格／币种、卖家、配送地、字段证据和缺失原因。”这个工具只需一个 URL，服务固定使用已复核的商品 Schema，不调用外部模型。实际结果中，页面抓取 `status: success` 与商品 JSON 的 `json.status: complete` 是两项不同检查；价格不在页面可见时返回 `null`，`json.issues` 说明无已验证来源。先确认选中主体 ASIN 与请求 ASIN 相同，以及配送地为 Singapore、可见报价币种为 SGD。
 
 多个已知商品 URL 可让 Codex 调用 `batch_products({"urls":[...]})`。它立即返回 `taskId`；通过 `get_batch`／`wait_batch` 查进度，再用 `get_batch_items` 分页取结果。每项都有状态、失败原因和 usage 计时。首轮最多 1000 个**不同** ASIN；批次持久化，客户端断开不会取消，`cancel_batch` 才显式取消。不要把 1000 页可靠性门槛当作已通过；[预先锁定的验收标准](roadmap/dual-flow-mvp-gates.md)仍待最终托管路径实测。
 

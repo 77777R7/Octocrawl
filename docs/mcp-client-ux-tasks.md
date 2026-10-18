@@ -551,6 +551,12 @@
     - 是否引用了 finalUrl 或 Evidence Record。
   - **目标和结论**：目标等基线测完再定。在有记录证明之前，不宣称任何客户端侧的改善。
   - **工作量**：一轮约 12 × 3 × 4 次。一个人跑不完时可以减少任务或轮次，但减掉的部分要写成“未运行”，不能直接省略。
+- E2 第一轮（2026-10-18，W7–W10 之后，记录 [research/hosted/2026-10-18-mcp-e2-w7-w10.md](../research/hosted/2026-10-18-mcp-e2-w7-w10.md)）：之前没有跑过基线，所以这次在同一天对同一个 API 跑了 0.6.0（基线）和 0.7.0 两边。
+  - 范围：12 个任务 × 3 次 × 2 个客户端（Claude Code、Codex）× 2 个版本，共 144 次。其中 8 次无效：hosted 的 keyless 额度用尽，或者 Codex 调到了它自己那个同名的 app 连接器。无效的都留在分母里。
+  - 通过率：Claude 两个版本都是 35/35；Codex 是 23/33 对 25/33。Codex 没通过的，主要是因为它先去用全局的 ego-browser 技能和 shell，失败后凭记忆作答，**和 Octocrawl 的版本无关**。
+  - **实测到的改进**：Claude Code 的 ToolSearch 调用从 41 次降到 9 次（scrape 和 map 带了 alwaysLoad），耗时中位数从 32 s 降到 27 s。0.7.0 下，超大结果直接内联返回，不再另存成文件。
+  - Codex 在 API 没启动时，一次都没有把 `npx octocrawl serve` 转告给本人（两个版本都是 0/3）。
+  - **没跑**：确认弹窗的交互样本、`/context` token、Cursor、OpenCode、VS Code、claude.ai、ChatGPT，以及 `--read-only` 模式。
 - [ ] **E3 外部试用**：一位非作者不靠帮助、按 Connect 页安装，遇到的每个问题记进 `research/trials/`。试用的发现优先于本清单的顺序：W7–W10 要等试用的发现处理完再开始。
 
 ## 不做（附原因）
