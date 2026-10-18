@@ -3,7 +3,8 @@ import { isApiErrorCode } from '@w2l/contracts'
 import { W2L, W2LError } from '@w2l/sdk'
 import type { PostCalls } from './inFlight.js'
 import { serverInstructions } from './instructions.js'
-import { shapeResult } from './results.js'
+import { shapeResult, withoutCampaign, withoutTelemetry } from './results.js'
+export { withoutCampaign } from './results.js'
 import { callTool, TOOLS, type ToolProgress } from './tools.js'
 
 export interface McpServerOptions {
@@ -30,6 +31,8 @@ export interface McpServerOptions {
    * the intervals.
    */
   progress?: boolean | { everyMs?: number; heartbeatMs?: number }
+  /** Answer results without telemetry and internal ids (withoutTelemetry): hosted Octocrawl, whose tools cannot look them up. */
+  minimalResults?: boolean
 }
 
 /** This server's own version: the `origin` of a call whose client declared no name and version. */
@@ -102,7 +105,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       const declared = TOOLS.find(tool => tool.name === request.params.name)
       const structured = declared !== undefined && 'outputSchema' in declared
       // The verdict first, cut to the budget, and a screenshot as an image block too (docs/mcp-client-ux-tasks.md W8).
-      const { value, images } = shapeResult(request.params.name, result)
+      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments) : result)
       return { content: [{ type: 'text', text: JSON.stringify(value) }, ...images], ...(structured ? { structuredContent: value as Record<string, unknown> } : {}) }
     } finally { call?.end() }
   })
@@ -173,17 +176,6 @@ const JOB_ID_TOOL = /^(get_crawl|get_crawl_pages|get_crawl_errors|cancel_crawl|r
 /** The longest error text: Claude Code keeps the first and last 5,000 characters of a longer one. */
 const ERROR_TEXT_MAX = 4_000
 
-/** The links in a text without their utm_* parameters, which a model has no use for (REST keeps them); prose is left alone. */
-export function withoutCampaign(text: string): string {
-  return text.replace(/https?:\/\/[^\s)]+/g, (link) => {
-    let url: URL
-    try { url = new URL(link) } catch { return link }
-    const tags = [...url.searchParams.keys()].filter((key) => key.startsWith('utm_'))
-    if (tags.length === 0) return link
-    for (const key of tags) url.searchParams.delete(key)
-    return url.toString()
-  })
-}
 
 /**
  * A failed call as the tool result the model reads: `<code>: <what happened>`, then `Retry after N s` when the

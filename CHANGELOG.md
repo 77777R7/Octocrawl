@@ -24,6 +24,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 ## Unreleased
 
 - **OpenAI plugin package.** `plugins/octocrawl-openai` is the package for OpenAI's plugin directory (ChatGPT and Codex), in the portable Agent Plugins format: the listing, five positive and three negative review cases and release notes in `plugin.json`, one remote MCP server (`https://mcp.octocrawl.dev/mcp-oauth`, OAuth with a Client ID Metadata Document) in `mcp.json`, a `get-started` onboarding skill and the icons. Its version moves with the packages. Not yet submitted.
+- **Hosted MCP results without telemetry.** `scrape` and `scrape_product` on `mcp.octocrawl.dev` (`/mcp` and `/mcp-oauth`) no longer answer the call's `usage`, `channelsTried`, `metadata.scrapeId`, `metadata.concurrencyLimited`, or `metadata.concurrencyQueueDurationMs`, which no hosted tool can look up, and `agentHints` links lose their `utm_*` tags. The page, the verdict and the Evidence Record are unchanged; `debug: true` still answers the whole result, and REST and a server on your computer are unchanged. OpenAI's plugin review asks for this ("Response minimization").
 
 ## 0.7.0 — 2026-10-18
 

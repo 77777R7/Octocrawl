@@ -28,6 +28,12 @@ export const VERSIONED_PUBLIC_FILES = [
   '/assets/octopus-ghost.webp',
   // The free tool pages' hero backdrop (src/styles.css, .hero[data-art='coast']).
   '/assets/scene-coast.webp',
+  // The /scrape/ page's hero backdrop (src/product/product.css, .pd-hero .hero-backdrop).
+  '/assets/scene-road.webp',
+  // The /scrape/ demo's tab icons: each site's own, from its site (src/product/scrapePage.ts).
+  '/assets/sites/wikipedia.png',
+  '/assets/sites/docs.png',
+  '/assets/sites/amazon.png',
   // The client logos on Connect MCP.
   '/docs-assets/agent-clients/claude-code.svg',
   '/docs-assets/agent-clients/codex.svg',

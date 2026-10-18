@@ -1,7 +1,7 @@
 /** The hero artworks' geometry and glyph kinds, shared by the glyph layer (heroGlyphs.ts), its night sky
  * (heroSky.ts), its sea of clouds (heroFog.ts) and the worker that finds the artwork's painted glyphs (heroGlyphsWorker.ts), with the small helpers
  * they share. The home page's hero shows the mountain; a page can show the coast instead (SCENES). Coordinates are
- * the artwork's natural pixels. */
+ * the artwork's natural pixels. The /scrape/ page shows the coastal road (product/scrapeMain.ts). */
 
 export const ART = '/assets/mountain-hero.webp'
 // The ridge of the mountain in the lower right, traced from the artwork: glyphs below it are mountain, above it
@@ -94,6 +94,22 @@ function onCliffs(x: number, y: number): number {
   return smooth(-2, 14, inside(CLIFFS, x, y))
 }
 
+// The coastal road's land, traced from its artwork: the wooded cliff with the house on the left, the ranges' ridge
+// across to the sunset (over the main peak), the horizon back to the bridge, and the rocks below the road to the
+// artwork's foot. The sea in front of the ranges is not land.
+const ROAD: Line = [
+  [0, 225], [40, 240], [60, 255], [100, 262], [130, 300], [160, 350], [200, 380], [240, 415], [270, 450], [300, 500],
+  [330, 550], [400, 540], [500, 515], [600, 505], [655, 493], [700, 510], [760, 540], [820, 560], [880, 585],
+  [960, 570], [1010, 580], [1060, 595], [1110, 595], [1160, 612], [1230, 622], [1300, 610], [1360, 632],
+  [1420, 640], [1672, 628], [1722, 628], [1722, 682], [900, 682], [640, 690], [680, 720], [750, 760], [800, 800],
+  [840, 941], [840, 991], [-50, 991], [-50, 225],
+]
+
+/** How much a point belongs to the coastal road's land: inside its outline, fading in over its edge. */
+function onRoad(x: number, y: number): number {
+  return smooth(-2, 14, inside(ROAD, x, y))
+}
+
 /** An artwork the hero can show and the lie of its land, in the artwork's natural pixels. */
 export type Scene = {
   art: string
@@ -117,7 +133,7 @@ export type Scene = {
   sparks: boolean
 }
 
-export type SceneName = 'mountain' | 'coast'
+export type SceneName = 'mountain' | 'coast' | 'road'
 export const SCENES: Readonly<Record<SceneName, Scene>> = {
   mountain: {
     art: ART,
@@ -145,10 +161,25 @@ export const SCENES: Readonly<Record<SceneName, Scene>> = {
     fog: false,
     sparks: false,
   },
+  // The /scrape/ page's hero: a road along a cliff at dusk, the sun setting over the sea. The swell rolls in from the
+  // left and breaks on the rock out in the sun's path.
+  road: {
+    art: '/assets/scene-road.webp',
+    base: 941,
+    summit: [655, 493],
+    left: 0,
+    top: 225,
+    outline: ROAD,
+    land: onRoad,
+    sea: { horizon: 682, shore: [1330, 878] },
+    sky: 330,
+    fog: false,
+    sparks: false,
+  },
 }
 
 /** The scene a hero asks for (its data-art), the mountain unless it names another. */
-export const sceneName = (art: string | undefined): SceneName => (art === 'coast' ? 'coast' : 'mountain')
+export const sceneName = (art: string | undefined): SceneName => (art === 'coast' || art === 'road' ? art : 'mountain')
 
 /** A computed background-position component (its first layer's) as an offset in px: a percentage, a length or a
  * calc() of both. Anything else centres the artwork, as the browser would. */
