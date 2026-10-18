@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { blogPath, posts } from '../scripts/blogPosts.mjs'
 import { pages } from '../scripts/docsPages.mjs'
+import { DASHBOARD_PAGES } from '../scripts/dashboardPages.mjs'
 import { NAV_CAPABILITIES } from '../scripts/siteNav.mjs'
 import { scrapeSnippet } from '../src/product/scrapeCode'
 import { gridRows } from '../src/product/scrapeDrop'
@@ -95,10 +96,11 @@ describe('the /scrape/ product page', () => {
     for (const [, hash] of markup.matchAll(/href="#([a-z-]+)"/g)) expect([hash, own.has(hash!)]).toEqual([hash, true])
     const docs = new Set(pages.map(page => (page.slug ? `/docs/${page.slug}/` : '/docs/')))
     const blog = new Set(posts.map(post => blogPath(post)))
+    const dashboard = new Set(DASHBOARD_PAGES.map(([path]) => path))
     const body = markup.slice(markup.indexOf('</header>'), markup.indexOf('<footer'))
     for (const [, href] of body.matchAll(/href="(\/[^"]*)"/g)) {
       const path = href!.split('#')[0]!
-      expect([path, docs.has(path) || blog.has(path) || path === '/' || existsSync(app(`${path.slice(1)}index.html`))]).toEqual([path, true])
+      expect([path, docs.has(path) || blog.has(path) || dashboard.has(path) || path === '/' || existsSync(app(`${path.slice(1)}index.html`))]).toEqual([path, true])
     }
   })
 
