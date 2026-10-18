@@ -338,6 +338,7 @@
 @media (min-width: 1001px) {
   .bf-section.is-linked .bf-track { height: var(--bf-track, auto); }
   .bf-section.is-linked .bf-stage { position: sticky; top: var(--bf-pin, 0); }
+  .bf-section.is-linked .bf-window { overflow: clip; }
 }
 /* The edge is a background, which forced colours drop; draw it in the text colour there. */
 @media (forced-colors: active) { .bf-card { background: CanvasText; } }

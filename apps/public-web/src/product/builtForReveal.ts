@@ -1,8 +1,9 @@
 /** Built for coming into view, following the scroll (scrapePage.ts builtFor). The headline's words rise into place one
  * after another as it comes up the screen, and its orange words, once in place, turn over through characters before
- * settling on their letters; the lead follows. On wide screens the row of cards then holds still in the middle of the
- * window while the page scrolls on: empty at first, then the two outer cards drop in from above the window and the
- * middle one rises from below it, and they hold together before the page moves on. On narrow screens, where they stack,
+ * settling on their letters; the lead follows. On wide screens the whole section then holds still in the window while
+ * the page scrolls on: the headline and lead in place over an empty space, then the two outer cards drop into it from
+ * its top edge and the middle one rises into it from its bottom edge, and they hold together before the page moves
+ * on. On narrow screens, where they stack,
  * each rises as it comes up. Scrolling back takes them apart again. A card's edge turns orange and its figure
  * starts to settle (builtForIcons.ts) once it is in place.
  *
@@ -14,8 +15,8 @@ const CARD_RISE = 160
 /** How long the pinned stretch is, in window heights, and where in it (0 to 1) the outer cards and the middle one come
  * in. */
 const TRACK = 1.3
-const SIDES = [0.12, 0.58] as const
-const MIDDLE = [0.26, 0.72] as const
+const SIDES = [0.14, 0.56] as const
+const MIDDLE = [0.28, 0.7] as const
 const DECODE_MS = 450
 const GLYPHS = '#%@*+=x'
 
@@ -65,15 +66,21 @@ export function mountBuiltForReveal(section: HTMLElement): void {
     }
   }
   section.classList.add('is-linked')
-  // The row on a stage that pins while the page scrolls through a track as long as the animation (wide screens only;
+  // The headline, lead and cards on one stage that pins while the page scrolls through a track as long as the
+  // animation; the cards move inside a window that clips them, so they come in from its edges (wide screens only;
   // product.css).
+  const frame = row.parentElement!
   const track = document.createElement('div')
   track.className = 'bf-track'
   const stage = document.createElement('div')
   stage.className = 'bf-stage'
-  row.replaceWith(track)
-  stage.append(row)
+  const slot = document.createElement('div')
+  slot.className = 'bf-window'
+  row.replaceWith(slot)
+  slot.append(row)
+  stage.append(...frame.childNodes)
   track.append(stage)
+  frame.append(track)
 
   /** An orange word turning over through characters, letter by letter from the left, before it settles. */
   const decode = (word: (typeof words)[number]): void => {
@@ -131,14 +138,15 @@ export function mountBuiltForReveal(section: HTMLElement): void {
       }
       return
     }
-    // Side by side: the row holds still on screen while the page scrolls on through the track behind it. Empty at
-    // first; then the outer cards drop in from above the window and the middle one rises from below it, a little after;
+    // Side by side: the section holds still on screen while the page scrolls on through the track behind it. The
+    // cards' space empty at first; then the outer cards drop in from its top edge and the middle one rises from its
+    // bottom edge, a little after;
     // then they hold together for a moment before the page moves on.
     const box = track.getBoundingClientRect()
     const span = Math.max(1, box.height - stage.offsetHeight)
     const at = clamp01((pinTop - box.top) / span)
-    const above = pinTop + stage.offsetHeight + 60
-    const below = window.innerHeight - pinTop + 60
+    const above = slot.offsetHeight + 24
+    const below = slot.offsetHeight + 24
     cards.forEach((card, i) => {
       const middle = i === 1
       const [from, to] = middle ? MIDDLE : SIDES
@@ -153,10 +161,12 @@ export function mountBuiltForReveal(section: HTMLElement): void {
     card.classList.toggle('is-moving', own < 0.985)
   }
 
-  /** The track's length and where the row is pinned: centred top to bottom in the window. */
+  /** The track's length and where the stage is pinned: centred top to bottom in the window, or, taller than it, with
+   * its foot just above the window's. */
   let pinTop = 0
   const measure = (): void => {
-    pinTop = Math.max(16, (window.innerHeight - stage.offsetHeight) / 2)
+    const room = window.innerHeight - stage.offsetHeight
+    pinTop = room >= 32 ? room / 2 : room - 16
     section.style.setProperty('--bf-pin', `${pinTop.toFixed(0)}px`)
     section.style.setProperty('--bf-track', `${(stage.offsetHeight + window.innerHeight * TRACK).toFixed(0)}px`)
   }
