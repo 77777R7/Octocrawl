@@ -227,7 +227,7 @@ ${siteHeaderMarkup()}      <main aria-labelledby="pd-title">
             <p class="pd-lead">Give Octocrawl a public URL. You get the page as Markdown, its links and tables, the fields you name, and an Evidence Record of where each one came from.</p>
             <div class="pd-actions">
               <a class="pd-button is-primary" href="/dashboard/scrape/">Scrape now <span aria-hidden="true">→</span></a>
-              <a class="pd-button" href="/docs/reference/#rest-and-sdk">Read the docs</a>
+              <a class="pd-button" href="/docs/scrape/">Read the docs</a>
             </div>
           </div>
         </div>
