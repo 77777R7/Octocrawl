@@ -250,6 +250,46 @@ function whatYouGet(): string {
     </section>`
 }
 
+/** Built for: who Octocrawl is for, a card each, each with a figure drawn in characters (builtForIcons.ts). */
+export const BUILT_FOR: ReadonlyArray<{ icon: string; title: string; text: string; label: string; href: string; link: string }> = [
+  {
+    icon: 'orbit', title: 'Web access for any agent',
+    text: 'Give Claude Code, Cursor, Codex or any MCP client a scrape tool. It reads clean Markdown and knows when a read failed instead of guessing.',
+    label: 'Agents · MCP', href: '/docs/connect-mcp/', link: 'Connect your agent over MCP',
+  },
+  {
+    icon: 'stack', title: 'Clean input for every model',
+    text: 'Pages become Markdown and tables your RAG pipeline can index straight away, each output hashed so you know exactly what you stored.',
+    label: 'Pipelines · SDK', href: '/docs/integrations/ai-sdk/', link: 'Use Octocrawl from the AI SDK',
+  },
+  {
+    icon: 'radar', title: 'Data that stays current',
+    text: 'Pull prices, specs and tables as typed JSON. Run Octocrawl on your own computer to read them again on a schedule and get every change at your webhook.',
+    label: 'Monitoring · Webhooks', href: '/docs/guides/monitor-webhook/', link: 'Watch a page and send its changes to a webhook',
+  },
+]
+
+function builtFor(): string {
+  const cards = BUILT_FOR.map((c) => `
+            <li class="bf-card">
+              <h3>${c.title}</h3>
+              <div class="bf-art"><canvas class="bf-icon" data-icon="${c.icon}" aria-hidden="true"></canvas></div>
+              <p class="bf-text">${c.text}</p>
+              <p class="bf-foot"><span>${c.label}</span><a class="bf-go" href="${c.href}" aria-label="${c.link}"><span aria-hidden="true">→</span></a></p>
+            </li>`).join('')
+  return `
+    <section class="bf-section" id="built-for" aria-labelledby="bf-title">
+      <div class="band">
+        <div class="frame">
+          <h2 id="bf-title" class="bf-title">Built for agents that <b>read</b>, pipelines that <b>learn</b>, and jobs that <b>watch</b>.</h2>
+          <p class="bf-lead">Octocrawl turns any public page into clean, sourced data, ready for whatever reads it next.</p>
+          <ul class="bf-cards">${cards}
+          </ul>
+        </div>
+      </div>
+    </section>`
+}
+
 /** Harder pages: three recorded runs behind tabs. */
 function harder(): string {
   const tabs = HARD.map((h, i) => `<button class="ft-tab" type="button" role="tab" id="ft-tab-${h.id}" aria-controls="ft-hard-${h.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-hard="${h.id}">${h.tab}</button>`).join('')
@@ -440,6 +480,7 @@ ${siteHeaderMarkup()}      <main aria-labelledby="pd-title">
       </main>
     </div>
 ${whatYouGet()}
+${builtFor()}
 ${harder()}
 ${evidence()}
 ${callIt()}
