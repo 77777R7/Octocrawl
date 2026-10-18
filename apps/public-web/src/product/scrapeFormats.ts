@@ -20,7 +20,12 @@ export function mountFormats(section: HTMLElement): void {
       }).catch(() => { /* The CSS glow stays. */ })
     })
   }
-  if (scroll) once(scroll, '400px', () => section.classList.add('is-near'))
+  if (scroll) {
+    once(scroll, '400px', () => {
+      section.classList.add('is-near')
+      void import('./cardGlow').then(({ mountCardGlow }) => mountCardGlow(section)).catch(() => { /* The paintings stay still. */ })
+    })
+  }
   mountSteps(section)
 }
 

@@ -2,7 +2,7 @@ import { footerMarkup, siteHeaderMarkup } from '../page'
 import { glyphCloud } from '../glyphArt'
 import { scrapeSnippet } from './scrapeCode'
 import { foldMarkdown } from './scrapeMarkdown'
-import { AMAZON_FIELDS, AMAZON_ISSUE, CARD_MARKDOWN, DATETIME_TABLE, DEMOS, DOCS, DOCS_CELL, HARD, OCTOPUS_SIZES } from './scrapeRun'
+import { DEMOS, DOCS, DOCS_CELL, HARD } from './scrapeRun'
 
 /** /scrape/: what scraping a page with Octocrawl gives, shown on real scrapes recorded on hosted Octocrawl
  * (scrapeRun.ts). The hero shows three pages' results; below, harder pages, the Evidence Record, the call, the cost and
@@ -50,63 +50,34 @@ function demo(): string {
           </div>`
 }
 
-const kb = (bytes: number): string => `${Math.round(bytes / 1000)} KB`
-const smaller = (from: number, to: number): number => Math.round(100 - (100 * to) / from)
-
 /** The formats the banner names, each with its glyph. */
 export const FORMAT_ICONS: ReadonlyArray<readonly [string, string]> = [['#', 'Markdown'], ['{}', 'JSON'], ['┼', 'Tables'], ['≡', 'Lists'], ['↗', 'Links'], ['¶', 'PDF']]
 
-/** What you get, one card each: the left column's words and the right column's card, drawn from the recorded reads. */
-export const FORMAT_CARDS: ReadonlyArray<{ id: string; eyebrow: string; title: string; text: string; card: () => string }> = [
+/** What you get, one per format: the left column's words; its card on the right shows a painting for now. */
+export const FORMAT_CARDS: ReadonlyArray<{ id: string; eyebrow: string; title: string; text: string }> = [
   {
     id: 'markdown', eyebrow: 'Built for LLMs', title: 'Clean Markdown.',
     text: 'Menus, ads, sidebars and footers are stripped away. Your model reads the content and nothing else.',
-    card: () => `
-              <div class="fx-pane is-raw"><p class="fx-label">HTML <b>${kb(OCTOPUS_SIZES.rawBytes)}</b></p><pre>${esc(DEMOS[0]!.rawHead.slice(0, 1400))}</pre></div>
-              <div class="fx-pane is-md"><p class="fx-label">Markdown <b>${kb(OCTOPUS_SIZES.markdownBytes)}</b></p><pre>${foldedHtml(CARD_MARKDOWN)}</pre></div>
-              <p class="fx-stat"><b>${smaller(OCTOPUS_SIZES.rawBytes, OCTOPUS_SIZES.markdownBytes)}%</b> smaller</p>
-              <figcaption>en.wikipedia.org/wiki/Octopus · read 17 Oct 2026</figcaption>`,
   },
   {
     id: 'select', eyebrow: 'Just the part you need', title: 'Precise selection.',
     text: 'Point at sections with CSS selectors and leave the rest of the page behind.',
-    card: () => `
-              <div class="fx-pane is-select"><p class="fx-label">includeTags</p><ul class="fx-chips">${DEMOS[0]!.includeTags.map((t) => `<li><code>${esc(t)}</code></li>`).join('')}</ul></div>
-              <div class="fx-pane is-md"><p class="fx-label">Markdown <b>${kb(OCTOPUS_SIZES.selectedBytes)}</b></p><pre>${foldedHtml(DEMOS[0]!.markdownHead.split('\n').slice(0, 5).join('\n'))}</pre></div>
-              <p class="fx-stat"><b>${smaller(OCTOPUS_SIZES.rawBytes, OCTOPUS_SIZES.selectedBytes)}%</b> smaller</p>
-              <figcaption>en.wikipedia.org/wiki/Octopus · read 17 Oct 2026</figcaption>`,
   },
   {
     id: 'json', eyebrow: 'Fields with receipts', title: 'Structured JSON.',
     text: 'Describe the fields in a JSON Schema. Each value comes back typed, with the exact spot on the page it was read from. No guessing, no made-up values.',
-    card: () => `
-              <div class="fx-pane is-json"><p class="fx-label">json.data <span>read from</span></p>
-                <dl class="fx-fields">${AMAZON_FIELDS.map(([k, v, at]) => `<div><dt>${k}</dt><dd><code>${esc(v)}</code><small>${esc(at)}</small></dd></div>`).join('')}<div class="is-issue"><dt>${AMAZON_ISSUE.field}</dt><dd><code>null</code><small>${AMAZON_ISSUE.code}</small></dd></div></dl></div>
-              <figcaption>amazon.sg/dp/0135957052 · read 17 Oct 2026</figcaption>`,
   },
   {
     id: 'tables', eyebrow: 'Tables as data', title: 'Every table, ready to use.',
     text: 'Each data table comes back as rows for a dataframe, a spreadsheet or a prompt.',
-    card: () => `
-              <div class="fx-pane is-table"><p class="fx-label">tables[${DATETIME_TABLE.index}] <b>${DATETIME_TABLE.columns} × ${DATETIME_TABLE.rows}</b></p>
-                <table><thead><tr>${DATETIME_TABLE.head[0].map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${DATETIME_TABLE.head.slice(1).map((row) => `<tr>${row.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-              <p class="fx-stat"><b>${DATETIME_TABLE.rows}</b> rows, also as CSV</p>
-              <figcaption>docs.python.org/3/library/datetime.html · read 17 Oct 2026</figcaption>`,
   },
   {
     id: 'browser', eyebrow: 'Real browser', title: 'JavaScript, rendered.',
     text: 'Pages built with React, Vue or Next.js open in a real browser automatically, so content drawn by scripts comes back too.',
-    card: () => `
-              <div class="fx-pane is-trace"><p class="fx-label">tried</p><p class="fx-lanes"><span>http</span><span aria-hidden="true">→</span><span class="is-on">browser</span></p><p class="fx-result">success · <b>10 quotes</b> · 387 tokens</p></div>
-              <div class="fx-pane is-md"><p class="fx-label">Markdown</p><pre>${HARD[0]!.lines.slice(0, 7).map((t) => markdownLine(t)).join('\n')}</pre></div>
-              <figcaption>quotes.toscrape.com/js · read 17 Oct 2026</figcaption>`,
   },
   {
     id: 'files', eyebrow: 'Docs to data', title: 'PDFs and files.',
     text: 'PDFs come back as Markdown, page by page. CSV, JSON and text files come back as text.',
-    card: () => `
-              <div class="fx-pane is-pdf" aria-hidden="true"><p class="fx-label">PDF <b>p. 1</b></p><i class="is-head"></i><i></i><i></i><i class="is-short"></i><i></i><i></i><i class="is-short"></i><i></i><i></i><i></i><i class="is-short"></i></div>
-              <div class="fx-pane is-md" aria-hidden="true"><pre><span class="md-punct">&lt;!-- page 1 --&gt;</span>\n<span class="md-punct">#</span> <span class="fx-bar is-head"></span>\n<span class="fx-bar"></span>\n<span class="fx-bar"></span>\n<span class="fx-bar is-short"></span>\n\n<span class="md-punct">&lt;!-- page 2 --&gt;</span>\n<span class="md-punct">##</span> <span class="fx-bar is-head"></span>\n<span class="fx-bar"></span>\n<span class="fx-bar is-short"></span></pre></div>`,
   },
 ]
 
@@ -116,8 +87,7 @@ function whatYouGet(): string {
   const items = FORMAT_CARDS.map((c, i) => `
             <li class="fx-item${i ? '' : ' is-active'}" data-step="${i}"><h3 class="fx-head"><button type="button" data-step="${i}" aria-controls="fx-card-${c.id}">${c.title}</button></h3><div class="fx-body"><p class="fx-eyebrow">${c.eyebrow}</p><p>${c.text}</p></div></li>`).join('')
   const cards = FORMAT_CARDS.map((c, i) => `
-            <figure class="fx-card is-${c.id}${i ? '' : ' is-active'}" id="fx-card-${c.id}" data-step="${i}">${c.card()}
-            </figure>`).join('')
+            <div class="fx-card is-${c.id}${i ? '' : ' is-active'}" id="fx-card-${c.id}" data-step="${i}"></div>`).join('')
   return `
     <section class="fx-section" id="what-you-get" aria-labelledby="fx-title">
       <div class="band">
