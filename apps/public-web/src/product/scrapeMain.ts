@@ -9,7 +9,7 @@ import { mountGlyphRipple } from '../glyphRipple'
 import { mountSmoothScroll } from '../smoothScroll'
 
 // /scrape/: damped scrolling, the hero's artwork brought to life in its own glyphs, its three recorded scrapes, what
-// you get, the harder pages, the hash check and the code.
+// you get, who it is built for, how it climbs to read a page, the hash check and the code.
 mountSmoothScroll()
 mountHeroArt()
 const shell = document.querySelector<HTMLElement>('.product-page')
@@ -17,6 +17,8 @@ if (shell) mountScrapeFeatures(shell)
 const builtFor = document.querySelector<HTMLElement>('#built-for')
 if (builtFor) mountBuiltForReveal(builtFor)
 if (builtFor) void import('./builtForIcons').then(({ mountBuiltForIcons }) => mountBuiltForIcons(builtFor)).catch(() => { /* The cards keep their words. */ })
+const ladder = document.querySelector<HTMLElement>('#ladder')
+if (ladder) void import('./ladderScene').then(({ mountLadder }) => mountLadder(ladder)).catch(() => { /* The steps keep their words. */ })
 const formats = document.querySelector<HTMLElement>('#what-you-get')
 if (formats) mountFormats(formats)
 const code = document.querySelector<HTMLElement>('#call-it')

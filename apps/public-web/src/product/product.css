@@ -94,11 +94,8 @@
 .sc-intro h2 { margin: 0; color: #142a57; font-size: clamp(28px, 3vw, 40px); font-weight: 400; line-height: 1.12; letter-spacing: -.04em; }
 .sc-lead { margin: 14px 0 0; color: var(--ink-soft); font-size: 16px; line-height: 1.65; }
 .sc-small { margin: 18px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
-.sc-small a, .hd-cases a { color: var(--link); }
+.sc-small a { color: var(--link); }
 .sc-intro code { font: .9em var(--mono); }
-.hd-cases { display: grid; gap: 16px; margin: 24px 0 0; }
-.hd-cases dt { color: #142a57; font-weight: 600; }
-.hd-cases dd { margin: 4px 0 0; color: var(--ink-soft); font-size: 15px; line-height: 1.6; }
 .ev-list { margin: 16px 0 0; padding-left: 20px; color: var(--ink-soft); font-size: 15px; line-height: 1.7; }
 .rn-wrap { padding: 0 24px 88px; }
 .rn-table { width: 100%; border-collapse: collapse; font-size: 15px; }
@@ -111,31 +108,8 @@
 
 /* The dark windows. */
 .ft-window { position: relative; flex: 1; min-height: 0; padding: 14px; overflow: hidden; border-radius: 14px; color: var(--on-navy); background: radial-gradient(circle, rgba(141, 185, 232, .1) 1px, transparent 1.6px) 0 0 / 18px 18px, linear-gradient(180deg, #0a2463, #061634); font: 12px/1.6 var(--mono); }
-.ft-md { margin: 10px 0 0; padding: 0; list-style: none; }
-.ft-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-height: 1.6em; }
-.ft-line code { color: #d9e5fb; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
-@keyframes ft-arrive { from { opacity: 0; transform: translateX(-8px); background: rgba(127, 214, 164, .18); } to { opacity: 1; transform: none; background: transparent; } }
-.ft-tabs { display: flex; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--edge); overflow-x: auto; scrollbar-width: none; }
-.ft-tab { padding: 7px 11px; border: 0; border-radius: 8px; color: var(--on-navy-3); background: none; font: 500 12px/1 var(--mono); white-space: nowrap; cursor: pointer; }
-.ft-tab[aria-selected="true"] { color: #fff; background: rgba(255, 255, 255, .09); }
-.ft-hard { padding-top: 12px; }
 .ft-url { display: flex; align-items: center; gap: 8px; margin: 0; overflow: hidden; color: var(--on-navy-2); white-space: nowrap; text-overflow: ellipsis; }
 .ft-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #7fd6a4; }
-.ft-dot.is-failed, .ft-dot.is-blocked { background: #f3c26b; }
-.ft-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 12px 0 0; }
-.ft-facts div { padding: 8px 10px; border: 1px solid var(--edge); border-radius: 9px; background: rgba(255, 255, 255, .03); }
-.ft-facts dt { color: var(--on-navy-3); font-size: 10.5px; letter-spacing: .04em; }
-.ft-facts dd { margin: 3px 0 0; color: #fff; }
-.ft-hard.is-playing .ft-facts div { animation: ft-arrive .5s cubic-bezier(.2, .8, .2, 1) both; }
-.ft-hard.is-playing .ft-facts div:nth-child(2) { animation-delay: .12s; }
-.ft-hard.is-playing .ft-facts div:nth-child(3) { animation-delay: .24s; }
-.ft-hard.is-playing .ft-facts div:nth-child(4) { animation-delay: .36s; }
-.ft-hard.is-playing .ft-md { animation: ft-arrive .5s .45s cubic-bezier(.2, .8, .2, 1) both; }
-.ft-refused { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 18px auto 4px; padding: 14px 22px; width: fit-content; border: 2px solid #f3c26b; border-radius: 12px; color: #f3c26b; transform: rotate(-3deg); }
-.ft-refused span { font-size: 20px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.ft-refused small { color: var(--on-navy-2); font-size: 11px; }
-.ft-hard.is-playing .ft-refused { animation: ft-stamp .45s .5s cubic-bezier(.3, 1.6, .5, 1) both; }
-@keyframes ft-stamp { from { opacity: 0; transform: rotate(-3deg) scale(1.7); } to { opacity: 1; transform: rotate(-3deg); } }
 .ft-tamper { display: flex; flex-direction: column; gap: 12px; }
 .ft-source { margin: 0; padding: 12px 14px; overflow-x: auto; border: 1px solid var(--edge); border-radius: 10px; color: #8db9e8; background: rgba(0, 0, 0, .18); font: inherit; white-space: pre; }
 .ft-src-dim { color: rgba(157, 178, 214, .55); }
@@ -196,7 +170,6 @@
   .sc-grid { padding: 64px 4px; }
   .rn-wrap { padding: 0 4px 64px; }
   .rn-table { font-size: 14px; }
-  .ft-facts { grid-template-columns: minmax(0, 1fr); }
   .tr-form { flex-direction: column; }
   .tr-input { min-height: 46px; }
 }
@@ -205,7 +178,7 @@
 @media (prefers-reduced-motion: reduce) {
   .dm-out .dm-md, .dm-glyph i, .pd-scroll, .pd-scroll-glyph { animation: none; }
   .dm-glyph i:first-child { opacity: 1; }
-  .ft-hard.is-playing .ft-facts div, .ft-hard.is-playing .ft-md, .ft-hard.is-playing .ft-refused, .cd-code.is-fresh code { animation: none; }
+  .cd-code.is-fresh code { animation: none; }
 }
 
 /* What you get: a banner of light drawn in characters (glyphLight.ts) over a dark curve, the headline under it; then
@@ -351,6 +324,49 @@
 /* The edge is a background, which forced colours drop; draw it in the text colour there. */
 @media (forced-colors: active) { .bf-card { background: CanvasText; } }
 
+/* How it reads a page: the steps on the left, the one in play marked; on the right the mountain painting in a dark
+   card cut at the top right and the bottom left, a page climbing its ledges as the section scrolls by (ladderScene.ts). */
+.ld-section { --ld-cut: 54px; padding: 110px 0 100px; color: var(--text); background: var(--page); }
+.ld-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 64px; align-items: start; }
+.ld-eyebrow { margin: 0; color: var(--muted); font-size: 15px; }
+.ld-title { max-width: 620px; margin: 14px 0 0; color: var(--text); font-size: clamp(32px, 3.6vw, 50px); font-weight: 400; line-height: 1.08; letter-spacing: -.045em; text-wrap: balance; }
+.ld-title b { color: #e0552a; font-weight: 600; }
+.ld-steps { margin: 36px 0 0; padding: 0; border-top: 1px dashed rgba(20, 37, 74, .16); list-style: none; }
+.ld-step { position: relative; padding: 20px 0 20px 22px; border-bottom: 1px dashed rgba(20, 37, 74, .16); }
+.ld-step::before { position: absolute; top: 22px; bottom: 22px; left: 0; width: 3px; border-radius: 2px; background: var(--orange); transform: scaleY(0); transition: transform .35s ease; content: ''; }
+.ld-step.is-active::before { transform: none; }
+.ld-step h3 { margin: 0; color: #7b8aa6; font-size: 19px; font-weight: 600; letter-spacing: -.02em; transition: color .35s ease; }
+.ld-step.is-active h3 { color: var(--text); }
+.ld-num { margin-right: 10px; color: var(--orange-ink); font: 500 12px/1 var(--mono); }
+.ld-text { margin: 8px 0 0; color: var(--ink-soft); font-size: 15.5px; line-height: 1.6; }
+.ld-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
+.ld-meta li { padding: 5px 9px; border: 1px solid rgba(20, 37, 74, .14); border-radius: 6px; color: var(--ink-soft); font: 500 11.5px/1.2 var(--mono); }
+.ld-art { position: sticky; top: max(24px, calc(50vh - 300px)); aspect-ratio: 1 / .95; background: #061634 url('/assets/mountain-hero.webp') 100% 62% / cover no-repeat; clip-path: polygon(0 0, calc(100% - var(--ld-cut)) 0, 100% var(--ld-cut), 100% 100%, var(--ld-cut) 100%, 0 calc(100% - var(--ld-cut))); }
+.ld-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ld-tag { position: absolute; top: 18px; left: 22px; z-index: 1; margin: 0; color: var(--on-navy-2); font: 500 12px/1 var(--mono); letter-spacing: .04em; }
+.ld-tag b { color: var(--orange-200); font-weight: 500; }
+/* On wide screens the section is a stage (ladderScene.ts, .is-staged): it holds still while the page scrolls through its
+   track, the steps fold to their titles and the one in play opens, and the climb on the right follows the scroll. */
+.ld-section.is-staged .ld-track { height: var(--ld-track, auto); }
+.ld-section.is-staged .ld-stage { position: sticky; top: 0; display: flex; align-items: center; height: 100vh; }
+.ld-section.is-staged .ld-stage > .band { width: 100%; }
+.ld-section.is-staged .ld-grid { align-items: center; }
+.ld-section.is-staged .ld-art { position: relative; top: auto; }
+.ld-section.is-staged .ld-steps { margin-top: 28px; }
+.ld-section.is-staged .ld-step { padding: 16px 0 16px 22px; }
+.ld-section.is-staged .ld-body { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .45s ease, opacity .3s ease; }
+.ld-section.is-staged .ld-body > div { min-height: 0; overflow: hidden; }
+.ld-section.is-staged .ld-step.is-active .ld-body { grid-template-rows: 1fr; opacity: 1; }
+/* Stacked: the card goes above the steps and stays at the top of the window while they scroll under it, so the climb
+   is in sight as each step is read. */
+@media (max-width: 1000px) {
+  .ld-grid { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .ld-art { position: sticky; top: 12px; z-index: 1; order: -1; width: 100%; max-width: 560px; max-height: 46vh; aspect-ratio: auto; height: min(46vh, 92vw); }
+}
+@media (max-width: 680px) {
+  .ld-section { --ld-cut: 38px; padding: 80px 0 64px; }
+}
+
 @media (max-width: 1000px) {
   .bf-cards { grid-template-columns: minmax(0, 1fr); max-width: 560px; }
   .fx-section { padding-top: 72px; }
@@ -400,8 +416,6 @@
   .pd-button { border-radius: 20px; corner-shape: squircle; }
   .dm-window { border-radius: 28px; corner-shape: squircle; }
   .ft-window { border-radius: 26px; corner-shape: squircle; }
-  .ft-facts div { border-radius: 16px; corner-shape: squircle; }
-  .ft-refused { border-radius: 22px; corner-shape: squircle; }
   .ft-source, .ft-verdict { border-radius: 18px; corner-shape: squircle; }
   .cd-window { border-radius: 32px; corner-shape: squircle; }
   .tr-window { border-radius: 44px; corner-shape: squircle; }

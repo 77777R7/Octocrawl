@@ -1,4 +1,4 @@
-/** The controls on /scrape/: the hero's three recorded scrapes, the harder pages, the Evidence Record's hash check and
+/** The controls on /scrape/: the hero's three recorded scrapes, the Evidence Record's hash check and
  * the hand-off of a reader's own URL to the free tool page. Each works on the recorded runs in scrapeRun.ts; nothing
  * here calls an API, except that the Evidence Record section hashes the recorded docs page's bytes (a copy served from
  * this site) in the reader's browser. */
@@ -92,35 +92,6 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null, hint
     if (hint) hint.hidden = played.size > 0 || onScreen || !fits() || !entry || entry.boundingClientRect.top <= 0
     if (onScreen && fits()) play(current)
   }, { threshold: [0, 0.85] }).observe(console_)
-}
-
-/** The hard ones: three recorded runs behind tabs; a run's facts arrive in turn. */
-function mountHard(card: HTMLElement): void {
-  const tabs = [...card.querySelectorAll<HTMLButtonElement>('.ft-tab')]
-  const panes = [...card.querySelectorAll<HTMLElement>('.ft-hard')]
-  const show = (id: string): void => {
-    tabs.forEach((t) => {
-      const on = t.dataset.hard === id
-      t.setAttribute('aria-selected', String(on))
-      t.tabIndex = on ? 0 : -1
-    })
-    panes.forEach((p) => {
-      p.hidden = p.dataset.hard !== id
-      if (!p.hidden) {
-        p.classList.remove('is-playing')
-        void p.offsetWidth
-        p.classList.add('is-playing')
-      }
-    })
-  }
-  // The first tab plays when the card comes into view, unless the reader has picked one by then.
-  let picked = false
-  tabbed(tabs, 'hard', (id) => { picked = true; show(id) })
-  new IntersectionObserver(([entry], observer) => {
-    if (!entry?.isIntersecting) return
-    observer.disconnect()
-    if (!picked) show(tabs[0]!.dataset.hard!)
-  }, { threshold: 0.4 }).observe(card)
 }
 
 /** The Evidence Record: the docs page's bytes, as recorded, hashed here once the section is in view; change the cell
@@ -251,8 +222,6 @@ function mountReveal(root: HTMLElement): void {
 export function mountScrapeFeatures(root: HTMLElement): void {
   const demo = root.querySelector<HTMLElement>('.dm-window')
   if (demo) mountDemo(demo, root.querySelector<HTMLButtonElement>('#dm-replay'), root.querySelector<HTMLAnchorElement>('#pd-scroll'))
-  const hard = root.querySelector<HTMLElement>('.hd-window')
-  if (hard) mountHard(hard)
   const tamper = root.querySelector<HTMLElement>('#ft-tamper')
   if (tamper) mountTamper(tamper)
   const tryForm = root.querySelector<HTMLFormElement>('#tr-form')
