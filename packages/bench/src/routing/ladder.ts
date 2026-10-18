@@ -186,8 +186,8 @@ export function summarize(channelsTried: readonly string[], attempts: readonly {
  * A failure with no routing class that a stronger rung may still answer (ROADMAP PA item 4): a 403 or 405 answered
  * without a gate Octocrawl recognises (a site's bot defence often answers so), a page a browser rendered with no main
  * content it could verify, and on an http rung a refused connection (a defence that drops a client by its TLS does so;
- * the browser is another client, and a paid provider is not asked for a network failure). Not a timeout, which on a
- * slow or dead site would hold the scrape for the browser's wait too; not a rate limit, which asks for fewer requests
+ * the browser is another client, and a paid provider is not asked for a network failure). Not a general timeout: the bounded
+ * initial-header exception is separate. Nor a rate limit, which asks for fewer requests
  * rather than another client; nor an error status that is the page's own answer (404, 410, 5xx). Null when the failure
  * stands; else what the ladder steps up for.
  */
@@ -198,6 +198,20 @@ function strongerRungMayAnswer(result: FetchResult, channelId: string): string |
   if (result.failureReason === 'empty_unverified' && !HTTP_CHANNELS.has(channelId)) return 'empty_unverified'
   if (result.failureReason === 'connection_error' && HTTP_CHANNELS.has(channelId)) return 'connection_error'
   return null
+}
+
+/** A single local fallback gets a full, bounded navigation budget; never an unbounded timeout retry. */
+const HEADERS_TIMEOUT_FALLBACK_MS = 30_000
+
+/** Only undici's first header wait, with no response body or exhausted caller budget, qualifies. */
+function initialHeadersTimeout(result: FetchResult, channel: Channel, tried: readonly string[]): boolean {
+  const failed = result.trace.filter(event => event.event === 'request_failed').at(-1)
+  return channel.id === 'http' && channel.vendorId === undefined && tried.length === 1
+    && result.status === 'failed' && result.failureReason === 'timeout' && result.blockReason === null
+    && result.retryAt === undefined && result.usage.deadlineExceeded !== true && result.usage.attemptCount === 1
+    && result.evidence.httpStatus === null && result.evidence.rawBodySha256 === null && result.markdown === null
+    && result.usage.bytesDecompressed === 0 && (result.usage.bytesWire === null || result.usage.bytesWire === 0)
+    && failed?.detail?.error === 'HeadersTimeoutError' && failed.detail.code === 'UND_ERR_HEADERS_TIMEOUT'
 }
 
 function resultRequestsEscalation(result: FetchResult): boolean {
@@ -622,8 +636,11 @@ export class LadderRunner {
     let qualityEscalation: Escalation | null = null
     /** A rung's page failed the task contract with its content there but not extracted: a paid rung would read the same page. */
     let contractNotExtracted = false
+    let headersTimeoutFallback: Channel | null = null
       for (const channel of ordered) {
         throwIfExecutionStopped(execution)
+        // This timeout exception offers exactly one already-qualified local rung, never compat, Chrome or a vendor.
+        if (headersTimeoutFallback !== null && channel !== headersTimeoutFallback) continue
         if (channel.vendorId !== undefined && contractNotExtracted) {
           ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: channel.id, detail: { vendorId: channel.vendorId, reason: 'the task contract failed on a page that came but was not extracted (not_extracted); a paid rung would read the same page' } })
           continue
@@ -658,10 +675,22 @@ export class LadderRunner {
         const startedAt = new Date().toISOString()
         // When each rung was called and how much of the run's time it had left: a rung reached late fails for want of time.
         // Said as the call goes out, so a provider rung passed over for its price or budget is not counted as started.
-        const fetched = await this.paidFetch(channel, channel.id, url, effectiveSession, execution, options, progress, () => {
-          channelsTried.push(channel.id)
-          ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_channel_started', channel: channel.id, detail: { vendorId: channel.vendorId ?? null, remainingMs: execution.deadlineAt === undefined ? null : Math.max(0, execution.deadlineAt - Date.now()) } })
-        })
+        const fallback = headersTimeoutFallback === channel
+        const callStarted = performance.now()
+        const localScope = fallback ? createExecutionScope({ ...execution, deadlineAt: Math.min(execution.deadlineAt!, Date.now() + HEADERS_TIMEOUT_FALLBACK_MS) }) : null
+        const callExecution = localScope ?? execution
+        let fetched: FetchResult | null
+        try {
+          fetched = await this.paidFetch(channel, channel.id, url, effectiveSession, callExecution, options, progress, () => {
+            channelsTried.push(channel.id)
+            ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_channel_started', channel: channel.id, detail: { vendorId: channel.vendorId ?? null, remainingMs: callExecution.deadlineAt === undefined ? null : Math.max(0, callExecution.deadlineAt - Date.now()) } })
+          })
+        } catch (error) {
+          // Only the fallback's own cap becomes a local timeout. Caller cancellation and the run deadline keep their semantics.
+          if (localScope === null || !deadlineReached(localScope) || deadlineReached(execution) || execution.signal?.aborted) throw error
+          fetched = deadlineFailure(url, 'browser_local', Math.max(0, performance.now() - callStarted))
+          ladderTrace.push({ at: fetched.usage.wallMs, event: 'ladder_headers_timeout_fallback_expired', channel: channel.id, detail: { maxMs: HEADERS_TIMEOUT_FALLBACK_MS } })
+        } finally { localScope?.dispose() }
         if (fetched === null) continue
         const result = fetched
         attempts.push(attemptOf(channel, channel.id, result, attempts.length + 1, startedAt))
@@ -678,10 +707,17 @@ export class LadderRunner {
         // whose content came but was not extracted as that vendor failing (ADR 0007).
         const failedReadiness = checked?.verdict === 'failed' ? (this.options.classifyContractFailure ?? contractReadiness)(result, checked.verification) : null
       // A rung the deadline cut short ends the run: nothing after it has time.
-      if (result.usage.deadlineExceeded === true || (result.failureReason === 'timeout' && deadlineReached(execution))) {
+      if ((!fallback && result.usage.deadlineExceeded === true) || ((fallback || result.failureReason === 'timeout') && deadlineReached(execution))) {
         return deadlineOutcome(url, progress, result)
       }
       last = result
+      if (fallback) {
+        // The attempt keeps its original local deadline flag; the answer must not call that the caller's deadline.
+        const { deadlineExceeded: localDeadline, ...usage } = result.usage
+        const answer = localDeadline === true ? { ...result, usage } : result
+        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_step', channel: channel.id, detail: { status: result.status, escalate: null, fallback: 'http_headers_timeout', verification: checked?.verdict ?? null, localDeadlineExceeded: localDeadline === true } })
+        return finish(sanitizeResult(answer), false)
+      }
       if (result.retryAt !== undefined || execution.signal?.aborted) return finish(result, false)
       // The site refused the saved login (expired, signed out): that is the
       // answer. A public rung after it would return the logged-out page as
@@ -869,7 +905,14 @@ export class LadderRunner {
       const subjectAsked = resultRequestsEscalation(result)
       // Content an earlier rung found stays the answer: a later rung's failure is not stepped past. Nor is the saved login's:
       // the rungs after it do not carry the login, and would answer with the logged-out page.
-      const stronger = cls === null && !subjectAsked && best === null && channel !== sessionFirst && channel.id !== 'authed_session' ? strongerRungMayAnswer(result, channel.id) : null
+      if (cls === null && !subjectAsked && best === null && effectiveSession === null && initialHeadersTimeout(result, channel, channelsTried)
+        && Number.isFinite(execution.deadlineAt) && execution.deadlineAt! - Date.now() >= HEADERS_TIMEOUT_FALLBACK_MS) {
+        headersTimeoutFallback = ordered.slice(ordered.indexOf(channel) + 1).find(candidate => candidate.id === 'browser_local'
+          && candidate.vendorId === undefined && refuseChannelIdentity(url, candidate) === null) ?? null
+        if (headersTimeoutFallback !== null) ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_headers_timeout_fallback', channel: channel.id, detail: { to: 'browser_local', remainingMs: execution.deadlineAt! - Date.now(), maxMs: HEADERS_TIMEOUT_FALLBACK_MS } })
+      }
+      const stronger = headersTimeoutFallback !== null ? 'http_headers_timeout'
+        : cls === null && !subjectAsked && best === null && channel !== sessionFirst && channel.id !== 'authed_session' ? strongerRungMayAnswer(result, channel.id) : null
       if (stronger !== null && (result.evidence.httpStatus != null || result.markdown !== null)) progress.steppedPast = { channel: channel.id, result }
 
       ladderTrace.push({
