@@ -207,6 +207,30 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
   } finally { await holder.close() }
 })
 
+it('hosted tool results carry the page and its Evidence Record, without telemetry or internal ids, unless debug asks', async () => {
+  // OpenAI's plugin review asks that tool results leave out session, trace and request ids and logging metadata
+  // (developers.openai.com/plugins/plugin-guidelines, "Response minimization"); hosted Octocrawl offers no get_scrape to use them.
+  const { url } = await start({ keylessDaily: 10 })
+  const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(transport)
+    const text = (result: Awaited<ReturnType<Client['callTool']>>) => JSON.parse((result.content as { text: string }[])[0]!.text) as Record<string, any>
+    const scraped = text(await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } }))
+    expect(scraped).toMatchObject({ status: 'success', markdown: expect.stringContaining('Tides'), evidenceRecord: { finalUrl: `${origin}/page`, fetchedAt: expect.any(String), httpStatus: 200 } })
+    for (const key of ['usage', 'channelsTried']) expect(scraped, key).not.toHaveProperty(key)
+    for (const key of ['scrapeId', 'concurrencyLimited', 'concurrencyQueueDurationMs']) expect(scraped.metadata, key).not.toHaveProperty(key)
+    expect(scraped.metadata).toMatchObject({ title: 'Tides', statusCode: 200 })
+    const mapped = text(await client.callTool({ name: 'map', arguments: { url: `${origin}/page` } }))
+    expect(mapped).toMatchObject({ status: expect.any(String), links: expect.any(Array) })
+    expect(mapped).not.toHaveProperty('id')
+    // debug is the caller asking for the full audit: answered whole.
+    const audited = text(await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, debug: true } }))
+    expect(audited.metadata).toHaveProperty('scrapeId')
+    expect(audited).toHaveProperty('usage')
+  } finally { await client.close() }
+})
+
 it('an account\'s key spends credits by what each result returned, and says what it spent and what is left', async () => {
   const credits = new MemoryCreditsStore(1_000)
   const { url, quota } = await start({ credits, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })

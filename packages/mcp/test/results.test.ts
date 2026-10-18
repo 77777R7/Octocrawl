@@ -11,7 +11,7 @@ import { createApiEngine, createApp, type ApiEngine } from '@w2l/api'
 import { decodeStepCursor } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer } from '../src/server.js'
-import { RESULT_TEXT_MAX } from '../src/results.js'
+import { RESULT_TEXT_MAX, withoutTelemetry } from '../src/results.js'
 import { TOOLS } from '../src/tools.js'
 
 /**
@@ -204,5 +204,30 @@ describe('MCP result budget', () => {
     expect(result.content.filter((block) => block.type === 'image')).toEqual([{ type: 'image', data: base64, mimeType: 'image/png' }])
     // Deprecated for one release (D11): the JSON still carries the base64.
     expect((result.structuredContent!.screenshot as { base64: string; sha256: string }).sha256).toBe('a'.repeat(64))
+  })
+})
+
+describe('withoutTelemetry: hosted results without telemetry, internal ids or campaign tags', () => {
+  it('drops a scrape\'s usage, lanes tried and record id, keeps the page and its Evidence Record, and untags its hints', () => {
+    const result = {
+      status: 'success', markdown: '# Tides', channelsTried: ['http'], usage: { wallMs: 12, timings: { totalMs: 12 } },
+      evidenceRecord: { finalUrl: 'https://example.com/', fetchedAt: '2026-10-18T00:00:00.000Z', rawSha256: 'ab' },
+      metadata: { title: 'Tides', statusCode: 200, scrapeId: 'id-1', concurrencyLimited: false, concurrencyQueueDurationMs: 0 },
+      agentHints: ['run Octocrawl on your computer (https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint)'],
+    }
+    expect(withoutTelemetry('scrape', result, {})).toEqual({
+      status: 'success', markdown: '# Tides',
+      evidenceRecord: { finalUrl: 'https://example.com/', fetchedAt: '2026-10-18T00:00:00.000Z', rawSha256: 'ab' },
+      metadata: { title: 'Tides', statusCode: 200 },
+      agentHints: ['run Octocrawl on your computer (https://octocrawl.dev/docs/connect-mcp/)'],
+    })
+    // debug is the caller asking for the full audit.
+    expect(withoutTelemetry('scrape', result, { debug: true })).toBe(result)
+  })
+
+  it('drops a map\'s record id, and leaves other tools alone', () => {
+    expect(withoutTelemetry('map', { id: 'map-1', status: 'completed', links: [] }, {})).toEqual({ status: 'completed', links: [] })
+    const other = { taskId: 't1', status: 'running' }
+    expect(withoutTelemetry('get_crawl', other, {})).toBe(other)
   })
 })
