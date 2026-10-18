@@ -245,13 +245,13 @@
 .fx-card { position: absolute; inset: 7% 0 0; margin: 0; overflow: hidden; border-radius: 24px; background: radial-gradient(ellipse 80% 60% at 70% 10%, rgba(243, 104, 61, .22), transparent 70%), linear-gradient(160deg, #123478, #061634) center / cover; transform: translateY(104%); transition: transform .75s cubic-bezier(.2, .8, .2, 1), filter .75s ease; }
 .fx-card.is-active { transform: none; }
 .fx-card.is-past { filter: brightness(.55); transform: translateY(-7.5%) scale(.93); }
-/* Once scrapeFormats.ts drives the cards from the scroll, they move with it frame by frame: no transition to lag behind,
-   the shrink anchored at the top edge so a covered card's edge shows above the next, and a shade for the darkening. */
+/* Once scrapeFormats.ts drives the cards, each card carries two numbers: --fx-rise, how far below its place it still
+   is, and --fx-under, how far the next card has come over it. A card being covered steps back 26px, narrows by 6% about
+   its top edge so that edge still shows, and dims by half; it all follows the scroll, so nothing transitions. A card
+   that has not started rising stays transparent, so a scroll the script has not caught up with cannot show it. */
 .fx-section.is-linked .fx-stack { overflow: visible; }
-.fx-section.is-linked .fx-card { transform-origin: 50% 0; transition: none; will-change: transform; }
-/* The shade is square and the card clips it (overflow: hidden), so it follows the card's corners whatever their shape;
-   a shade with its own rounded corners missed a squircle card's corners and left them light. */
-.fx-section.is-linked .fx-card::after { content: ""; position: absolute; inset: 0; z-index: 3; background: #030817; opacity: var(--fx-dim, 0); pointer-events: none; }
+.fx-section.is-linked .fx-card { transition: none; transform-origin: top; transform: translateY(var(--fx-rise, 0px)) translateY(calc(var(--fx-under, 0) * -26px)) scale(calc(1 - var(--fx-under, 0) * .06)); filter: brightness(calc(1 - var(--fx-under, 0) * .5)); }
+.fx-section.is-linked .fx-card.is-waiting { opacity: 0; }
 .fx-section.is-near .fx-card.is-markdown { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/scene-coast.webp'); }
 .fx-section.is-near .fx-card.is-select { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/ink-mountain.webp'); }
 .fx-section.is-near .fx-card.is-json { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/scene-earth.webp'); }
@@ -259,12 +259,12 @@
 .fx-section.is-near .fx-card.is-browser { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/ink-earth.webp'); }
 .fx-section.is-near .fx-card.is-files { background-image: linear-gradient(180deg, rgba(6, 22, 52, .1), rgba(6, 22, 52, .35)), url('/assets/scene-road.webp'); }
 
-.fx-pane { position: absolute; box-sizing: border-box; padding: 14px 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, .5); border-radius: 16px; color: var(--text); background: rgba(247, 248, 251, .88); box-shadow: 0 30px 60px -28px rgba(0, 6, 24, .65); font: 12px/1.6 var(--mono); backdrop-filter: blur(14px); }
+.fx-pane { position: absolute; box-sizing: border-box; padding: 14px 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, .5); border-radius: 16px; color: var(--text); background: rgba(247, 248, 251, .93); box-shadow: 0 30px 60px -28px rgba(0, 6, 24, .65); font: 12px/1.6 var(--mono); }
 .fx-pane pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .fx-label { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 10px; color: var(--muted); font: 600 11px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .fx-label b { color: var(--orange-ink); }
 .fx-label span { font-weight: 500; }
-.fx-pane.is-raw { top: 7%; left: 5%; width: 54%; height: 58%; border-color: rgba(230, 238, 252, .12); color: rgba(183, 200, 230, .75); background: rgba(6, 22, 52, .78); -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent); mask-image: linear-gradient(180deg, #000 55%, transparent); }
+.fx-pane.is-raw { top: 7%; left: 5%; width: 54%; height: 58%; border-color: rgba(230, 238, 252, .12); color: rgba(183, 200, 230, .75); background: rgba(6, 22, 52, .86); -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent); mask-image: linear-gradient(180deg, #000 55%, transparent); }
 .fx-pane.is-raw .fx-label { color: var(--on-navy-3); }
 .fx-pane.is-raw .fx-label b { color: var(--orange-200); }
 .fx-pane.is-raw pre { font-size: 11px; line-height: 1.5; }
