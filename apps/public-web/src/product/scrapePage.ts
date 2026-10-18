@@ -254,8 +254,8 @@ function whatYouGet(): string {
  * (builtForIcons.ts). */
 export const BUILT_FOR: ReadonlyArray<{ icon: string; title: string; text: string; label: string }> = [
   {
-    icon: 'orbit', title: 'Web access for any agent',
-    text: 'Give Claude Code, Cursor, Codex or any MCP client a scrape tool. It reads clean Markdown and knows when a read failed instead of guessing.',
+    icon: 'agents', title: 'Web access for any agent',
+    text: 'Give Claude Code, Codex, Cursor, OpenCode or any MCP client a scrape tool. It reads clean Markdown and knows when a read failed instead of guessing.',
     label: 'Agents · MCP',
   },
   {
