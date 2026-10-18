@@ -78,4 +78,12 @@ describe('OpenAI plugin', () => {
     const walk = (at: URL): string[] => readdirSync(at, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(new URL(`${entry.name}/`, at)) : [new URL(entry.name, at).pathname])
     for (const file of walk(dir)) expect(lstatSync(file).isSymbolicLink(), file).toBe(false)
   })
+
+  it('is listed by the repository\'s Codex marketplace from its own folder', () => {
+    // `codex plugin marketplace add 77777R7/Octocrawl` reads .agents/plugins/marketplace.json (developers.openai.com/plugins/build/plugins).
+    const marketplace = json(new URL('.agents/plugins/marketplace.json', root))
+    expect(marketplace.name).toBe('octocrawl')
+    expect(marketplace.plugins).toEqual([{ name: 'octocrawl', source: { source: 'local', path: './plugins/octocrawl-openai' }, policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' }, category: openai().interface.category }])
+    expect(existsSync(new URL('plugins/octocrawl-openai/plugin.json', root))).toBe(true)
+  })
 })

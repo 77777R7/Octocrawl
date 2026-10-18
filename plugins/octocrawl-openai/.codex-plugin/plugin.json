@@ -1,0 +1,46 @@
+{
+  "name": "octocrawl",
+  "version": "0.7.0",
+  "description": "Web pages as clean Markdown and JSON for AI agents, in fewer tokens, with an Evidence Record.",
+  "author": {
+    "name": "Octocrawl",
+    "email": "hello@octocrawl.dev",
+    "url": "https://octocrawl.dev/"
+  },
+  "homepage": "https://octocrawl.dev/",
+  "repository": "https://github.com/77777R7/Octocrawl",
+  "license": "AGPL-3.0-only",
+  "keywords": [
+    "web-scraping",
+    "markdown",
+    "tables",
+    "evidence",
+    "research"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Octocrawl",
+    "shortDescription": "Web pages as clean Markdown",
+    "longDescription": "Octocrawl turns public web pages into clean Markdown, tables, links and JSON that ChatGPT and Codex can read in fewer tokens than raw HTML. Ask it to read an article, pull the tables out of a page, list the pages of a site, or get an Amazon.sg product as structured JSON, and it returns just the content, ready to quote, compare or analyse.\n\nEvery result carries an Evidence Record: the final URL, when the page was fetched, the HTTP status, what the site's robots.txt allowed, and hashes of what was read. Answers can cite exactly where a fact came from, and a page that could not be read, such as a missing page, says so instead of returning invented content.\n\nWho it is for: anyone who needs facts from public web pages in a conversation or a coding task, such as researchers, analysts and developers.\n\nLimits: it reads public pages only. It obeys robots.txt for every address, refuses private network addresses, and does not sign in to sites, solve CAPTCHAs or use proxies. Calls spend your Octocrawl account's monthly credits (1 per page read over HTTP, 5 per page read in a browser, 1 per map); every account gets 1,000 free credits a month. Crawls, batches and monitoring run on your own computer with the open-source Octocrawl, not in this plugin.",
+    "developerName": "Octocrawl",
+    "category": "Productivity",
+    "capabilities": [
+      "Read web pages",
+      "Extract tables",
+      "Map a site"
+    ],
+    "websiteURL": "https://octocrawl.dev/",
+    "supportURL": "https://octocrawl.dev/docs/contact/",
+    "privacyPolicyURL": "https://octocrawl.dev/docs/privacy/",
+    "termsOfServiceURL": "https://octocrawl.dev/docs/terms/",
+    "defaultPrompt": [
+      "Read https://en.wikipedia.org/wiki/Web_scraping and summarise it with its source.",
+      "Get the tables on https://www.gov.uk/bank-holidays.",
+      "List the chapters of https://docs.python.org/3/tutorial/."
+    ],
+    "brandColor": "#F3683D",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
+  }
+}

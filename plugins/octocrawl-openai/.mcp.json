@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "octocrawl": {
+      "url": "https://mcp.octocrawl.dev/mcp-oauth"
+    }
+  }
+}

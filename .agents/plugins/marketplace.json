@@ -1,0 +1,20 @@
+{
+  "name": "octocrawl",
+  "interface": {
+    "displayName": "Octocrawl"
+  },
+  "plugins": [
+    {
+      "name": "octocrawl",
+      "source": {
+        "source": "local",
+        "path": "./plugins/octocrawl-openai"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
