@@ -10,7 +10,7 @@ import { scrapeSnippet } from '../src/product/scrapeCode'
 import { gridRows } from '../src/product/scrapeDrop'
 import { foldMarkdown, foldedText } from '../src/product/scrapeMarkdown'
 import { FORMAT_CARDS, SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
-import { DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, HARD, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
+import { AMAZON_FIELDS, DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, HARD, OCTOPUS_SIZES, PDF_READ, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
 
 // /scrape/: three scrapes recorded on hosted Octocrawl (src/product/scrapeRun.ts) in the hero, then harder pages, the
 // Evidence Record's hash check, the code, the cost and the FAQ.
@@ -72,7 +72,25 @@ describe('the /scrape/ product page', () => {
     const css = readFileSync(app('src/product/product.css'), 'utf8')
     const art = FORMAT_CARDS.map((c) => new RegExp(`\\.fx-card\\.is-${c.id} \\{ background-image: url\\('/assets/cards/([a-z]+-\\d)\\.webp'\\)`).exec(css)?.[1])
     expect(art).toEqual(['sky-1', 'sky-2', 'sky-3', 'nature-1', 'nature-2', 'nature-3'])
-    for (const c of FORMAT_CARDS) expect(markup).toContain(`<div class="fx-card is-${c.id}${c === FORMAT_CARDS[0] ? ' is-active' : ''}" id="fx-card-${c.id}" data-step="${FORMAT_CARDS.indexOf(c)}"></div>`)
+    for (const c of FORMAT_CARDS) expect(markup).toContain(`<div class="fx-card is-${c.id}${c === FORMAT_CARDS[0] ? ' is-active' : ''}" id="fx-card-${c.id}" data-step="${FORMAT_CARDS.indexOf(c)}">`)
+  })
+
+  it('puts one window of recorded output on each format card', () => {
+    expect(markup.match(/class="fx-win[ "]/g)).toHaveLength(FORMAT_CARDS.length)
+    for (const tag of ['922 KB → 62 KB', '4 × 37 · also CSV', 'HTTP → browser', 'PDF · 15 of 15 pages']) expect(markup).toContain(`<b class="fx-win-tag">${tag}</b>`)
+    // The PDF read (research/hosted/2026-10-18-scrape-page-pdf-714af563.md): all 15 pages read, its Markdown in order.
+    expect(PDF_READ).toMatchObject({ pageCount: 15, pagesRead: 15 })
+    expect(PDF_READ.lines.filter((line) => line.startsWith('<!-- page'))).toEqual(['<!-- page 1 -->', '<!-- page 2 -->'])
+    // 922,203 bytes of HTML read; 158,375 of Markdown for the whole page (the 16:00 read).
+    expect(OCTOPUS_SIZES).toMatchObject({ rawBytes: 922_203, markdownBytes: 158_375 })
+    expect(markup).toContain('<b class="fx-win-tag">922 KB → 158 KB</b>')
+    // The lead paragraph the window quotes is the line after the title in the hero's read, the same in both reads.
+    expect(DEMOS[0]!.markdownHead.split('\n')[2]!.startsWith('An **octopus**')).toBe(true)
+    expect(AMAZON_FIELDS.find(([k]) => k === 'price')?.slice(1)).toEqual(['64.55', '#buybox .a-price .a-offscreen'])
+    expect(markup).toContain('<span class="w">← field_unavailable</span>')
+    // Assistive tech reads each result from a copy that the decode never touches; the animated text is hidden from it.
+    expect(markup.match(/<pre class="fx-win-body" aria-hidden="true">/g)).toHaveLength(FORMAT_CARDS.length)
+    expect(markup.match(/<pre class="visually-hidden">/g)).toHaveLength(FORMAT_CARDS.length)
   })
 
   it('lays the raw HTML and the Markdown on the octopus’s grid as the pane shows them', () => {

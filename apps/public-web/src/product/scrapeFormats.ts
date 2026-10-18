@@ -24,6 +24,7 @@ export function mountFormats(section: HTMLElement): void {
     once(scroll, '400px', () => {
       section.classList.add('is-near')
       void import('./cardGlow').then(({ mountCardGlow }) => mountCardGlow(section)).catch(() => { /* The paintings stay still. */ })
+      void import('./scrapeWindows').then(({ mountWindows }) => mountWindows(section)).catch(() => { /* The windows show their results as they are. */ })
     })
   }
   mountSteps(section)
@@ -116,6 +117,9 @@ function mountSteps(section: HTMLElement): void {
     if (step !== active) {
       active = step
       items.forEach((item, i) => item.classList.toggle('is-active', i === step))
+      // The card now at the front, for its window to decode (scrapeWindows.ts), which may load after this.
+      section.dataset.front = String(step)
+      section.dispatchEvent(new CustomEvent('fx:front', { detail: cards[step] }))
     }
   }
   const queue = (): void => {

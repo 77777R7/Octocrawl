@@ -256,6 +256,28 @@
    the marks there brighten in place. */
 .fx-glow { position: absolute; top: 0; left: 0; width: 100%; height: 100%; mix-blend-mode: screen; pointer-events: none; }
 .fx-solid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+
+/* A card's window: one real result in a small dark browser window centred on the painting, above its light. The
+   bar names the page and the one number that matters; the body is the result, decoding in (scrapeWindows.ts). */
+.fx-win { position: absolute; top: 50%; left: 50%; z-index: 4; display: flex; flex-direction: column; width: min(74%, 560px); max-height: 74%; transform: translate(-50%, -50%); overflow: hidden; border: 1px solid rgba(150, 186, 236, .18); border-radius: 16px; background: rgba(5, 18, 48, .86); box-shadow: 0 30px 60px -24px rgba(0, 6, 24, .75); }
+.fx-win-bar { display: flex; align-items: center; gap: 9px; margin: 0; padding: 10px 14px; border-bottom: 1px solid rgba(150, 186, 236, .12); color: var(--on-navy-3); font: 500 11.5px/1.2 var(--mono); }
+.fx-win-bar img { flex: none; width: 16px; height: 16px; border-radius: 4px; }
+.fx-win-dot { flex: none; width: 10px; height: 10px; margin: 3px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 0 3px rgba(243, 104, 61, .2); }
+.fx-win-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-win-tag { flex: none; margin-left: auto; color: var(--orange-200); font-weight: 600; }
+.fx-win-body { margin: 0; padding: 14px 16px 16px; overflow: hidden; color: #c9d8f2; font: 12px/1.65 var(--mono); white-space: pre; }
+.fx-win.is-wrap .fx-win-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.fx-win-body .h { color: #fff; font-weight: 700; }
+.fx-win-body .p { color: rgba(141, 185, 232, .55); }
+.fx-win-body .u { color: rgba(141, 185, 232, .75); }
+.fx-win-body .k { color: var(--orange-100); }
+.fx-win-body .v { color: #eef4ff; }
+.fx-win-body .c { color: rgba(141, 185, 232, .5); }
+.fx-win-body .a { color: rgba(141, 185, 232, .62); }
+.fx-win-body .w { color: var(--orange-200); }
+/* While a window decodes: what it decodes from is dim, the front glows. */
+.fx-win-body .is-ahead { color: rgba(141, 185, 232, .3); font-weight: 400; }
+.fx-win-body .is-front { color: var(--orange-200); }
 /* The cards' artwork, one painting each: the three skies, then the three landscapes; loaded once the cards are near. */
 .fx-section.is-near .fx-card { background-position: center; background-size: cover; }
 .fx-section.is-near .fx-card.is-markdown { background-image: url('/assets/cards/sky-1.webp'); }
@@ -284,7 +306,18 @@
   .fx-item[data-step="4"] { order: 8; } .fx-card[data-step="4"] { order: 9; }
   .fx-item[data-step="5"] { order: 10; } .fx-card[data-step="5"] { order: 11; }
 }
+/* Below this the rows of a window that does not wrap can be wider than it: it fades out at its right edge, so a cut row
+   reads as one that goes on. */
+@media (max-width: 1100px) {
+  .fx-win:not(.is-wrap) .fx-win-body { -webkit-mask-image: linear-gradient(90deg, #000 84%, transparent); mask-image: linear-gradient(90deg, #000 84%, transparent); }
+}
 @media (max-width: 680px) {
+  .fx-win { width: 92%; max-height: 86%; }
+  .fx-win-body { padding: 12px; font-size: 11px; }
+  /* Too narrow for the column of where each value was read: the values stay, and the missing field still says so. */
+  .fx-win-body .c { display: none; }
+  .fx-win-body .w { margin-left: 2ch; }
+
   .fx-banner { height: auto; min-height: 560px; border-radius: 20px; }
   .fx-copy { padding: 220px 16px 40px; }
   .fx-lead { font-size: 16px; }
@@ -309,6 +342,7 @@
   .fx-banner { border-radius: 52px; corner-shape: squircle; }
   .fx-item, .fx-head button:focus-visible { border-radius: 36px; corner-shape: squircle; }
   .fx-card { border-radius: 44px; corner-shape: squircle; }
+  .fx-win { border-radius: 28px; corner-shape: squircle; }
   @media (max-width: 680px) {
     .fx-banner { border-radius: 36px; }
   }
