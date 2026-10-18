@@ -4,6 +4,7 @@ import { trackLinkClicks, trackPageView } from '../analytics'
 import { mountScrapeCode } from './scrapeCode'
 import { mountScrapeFeatures } from './scrapeFeatures'
 import { mountFormats } from './scrapeFormats'
+import { mountBuiltForReveal } from './builtForReveal'
 import { mountGlyphRipple } from '../glyphRipple'
 import { mountSmoothScroll } from '../smoothScroll'
 
@@ -14,6 +15,7 @@ mountHeroArt()
 const shell = document.querySelector<HTMLElement>('.product-page')
 if (shell) mountScrapeFeatures(shell)
 const builtFor = document.querySelector<HTMLElement>('#built-for')
+if (builtFor) mountBuiltForReveal(builtFor)
 if (builtFor) void import('./builtForIcons').then(({ mountBuiltForIcons }) => mountBuiltForIcons(builtFor)).catch(() => { /* The cards keep their words. */ })
 const formats = document.querySelector<HTMLElement>('#what-you-get')
 if (formats) mountFormats(formats)
