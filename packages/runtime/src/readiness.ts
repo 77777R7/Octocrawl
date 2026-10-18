@@ -34,7 +34,9 @@ function notLoadedSignals(result: FetchResult): string[] {
   if (warnings.has('page_still_changing') || result.trace.some((event) => event.event === 'steady_wait' && event.detail?.steady === false)) signals.push('page_still_changing')
   if (warnings.has('client_rendered_suspected')) signals.push('client_rendered_suspected')
   if (result.trace.some((event) => event.event === 'wait_for' && event.detail?.cutShortBy !== undefined)) signals.push('wait_cut_short')
-  if (result.usage.deadlineExceeded === true) signals.push('deadline_exceeded')
+  // A bounded local fallback can expire while the enclosing scrape still has time. Its scoped trace keeps the
+  // loading signal without claiming that the caller's whole deadline was exhausted.
+  if (result.usage.deadlineExceeded === true || result.trace.some(event => event.event === 'local_fallback_deadline' && event.detail?.trigger === 'http_headers_timeout')) signals.push('deadline_exceeded')
   if ((result.actions?.lists ?? []).some((list) => list.stoppedBy === 'deadline')) signals.push('list_not_exhausted')
   return signals
 }

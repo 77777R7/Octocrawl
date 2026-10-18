@@ -8,7 +8,7 @@
 
 预算未知/不足、普通或正文超时、已发生 HTTP 重试、Retry-After、限流、政策拒绝、已加载认证会话，以及没有合资格本地浏览器的请求，均不使用这个例外。显式 `timeout` 仍按调用者截止等待 HTTP；MCP scrape 默认显式设置 120000 毫秒，也遵守这一语义。本规则不提前切断该等待。
 
-`summary.attempts` 保留原 HTTP 超时和浏览器原始结果；`ladderTrace` 记录 `http_headers_timeout`、剩余预算、30 秒上限及局部截止。浏览器子预算耗尽与整个任务截止分别记录。最终验证继续针对实际交付投影，`verification`、`readiness` 和 Evidence Record 同步；`passed` 只覆盖所配置的检查，不等于独立准确性验收通过。
+`summary.attempts` 保留原 HTTP 超时和浏览器原始结果；`ladderTrace` 记录 `http_headers_timeout`、剩余预算、30 秒上限及局部截止。浏览器子预算耗尽与整个任务截止分别记录；局部截止的 trace 保留加载未完成信号，不能把无契约的 partial 标为 ready。最终验证继续针对实际交付投影，`verification`、`readiness` 和 Evidence Record 同步；`passed` 只覆盖所配置的检查，不等于独立准确性验收通过。
 
 这是路由策略的受限例外。localhost 回归通过只能证明该路径与交付边界正确，不能证明 Zalando 当前放行、完成率提升或发布门槛已满足；原正式成绩保留。
 

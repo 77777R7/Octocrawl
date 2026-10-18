@@ -688,7 +688,8 @@ export class LadderRunner {
         } catch (error) {
           // Only the fallback's own cap becomes a local timeout. Caller cancellation and the run deadline keep their semantics.
           if (localScope === null || !deadlineReached(localScope) || deadlineReached(execution) || execution.signal?.aborted) throw error
-          fetched = deadlineFailure(url, 'browser_local', Math.max(0, performance.now() - callStarted))
+          const timedOut = deadlineFailure(url, 'browser_local', Math.max(0, performance.now() - callStarted))
+          fetched = { ...timedOut, usage: { ...timedOut.usage, deadlineExceeded: true } }
           ladderTrace.push({ at: fetched.usage.wallMs, event: 'ladder_headers_timeout_fallback_expired', channel: channel.id, detail: { maxMs: HEADERS_TIMEOUT_FALLBACK_MS } })
         } finally { localScope?.dispose() }
         if (fetched === null) continue
@@ -714,7 +715,7 @@ export class LadderRunner {
       if (fallback) {
         // The attempt keeps its original local deadline flag; the answer must not call that the caller's deadline.
         const { deadlineExceeded: localDeadline, ...usage } = result.usage
-        const answer = localDeadline === true ? { ...result, usage } : result
+        const answer: FetchResult = localDeadline === true ? { ...result, usage, trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'local_fallback_deadline', detail: { trigger: 'http_headers_timeout', maxMs: HEADERS_TIMEOUT_FALLBACK_MS } }] } : result
         ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_step', channel: channel.id, detail: { status: result.status, escalate: null, fallback: 'http_headers_timeout', verification: checked?.verdict ?? null, localDeadlineExceeded: localDeadline === true } })
         return finish(sanitizeResult(answer), false)
       }

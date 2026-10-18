@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readinessOf } from '@w2l/runtime'
 import { identityBundleFrom, modeIdentity, type FetchResult } from '@w2l/contracts'
 import { LadderRunner, type Channel } from '../src/routing/ladder.js'
 
@@ -163,6 +164,7 @@ describe('fallback deadline and context accounting', () => {
     expect(run.result.status).toBe('partial')
     expect(run.result.markdown).toContain('€79.95')
     expect(run.result.usage.deadlineExceeded).toBeUndefined()
+    expect(readinessOf(run.result)).toMatchObject({ state: 'not_loaded', basis: ['deadline_exceeded'] })
     expect(run.summary.attempts[1]?.result).toEqual(answer)
     expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_step', channel: 'browser_local', detail: expect.objectContaining({ localDeadlineExceeded: true, escalate: null }) }))
   })
@@ -197,4 +199,10 @@ describe('fallback deadline and context accounting', () => {
     expect(seen).toMatchObject({ cookieSession, onRetryAfter })
     expect((seen as { cookieSession: unknown }).cookieSession).toBe(cookieSession)
   })
+})
+
+
+it('ignores an unrelated local-deadline trace', () => {
+  const result = { ...product(), status: 'partial' as const, trace: [{ at: 0, lane: 'browser_local' as const, event: 'local_fallback_deadline', detail: { trigger: 'unrelated' } }] }
+  expect(readinessOf(result)).toMatchObject({ state: 'ready', basis: [] })
 })
