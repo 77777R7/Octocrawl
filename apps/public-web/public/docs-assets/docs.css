@@ -302,3 +302,10 @@ a[aria-current=page] .doc-nav-mark{background:var(--orange)}
 
 /* Inline code such as a full URL breaks inside the line on a phone instead of widening the page. */
 .doc-article :not(pre)>code{overflow-wrap:anywhere}
+
+/* Apple-style corners: where the browser can draw a squircle (corner-shape, Chromium 139+), cards' corners curve
+   continuously into their sides. A squircle of the same radius looks tighter, so each card radius grows by about 1.8×;
+   other browsers keep the round corners above. */
+@supports (corner-shape: squircle) {
+  .mcp-command-row { border-radius: 20px; corner-shape: squircle; }
+}

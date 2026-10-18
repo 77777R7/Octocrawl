@@ -32,3 +32,12 @@
 .oauth-card p.oauth-message{margin:0 0 14px;color:var(--text);font-size:15px;line-height:1.55}
 .oauth-card a{color:var(--ink);font-weight:600}
 @media (max-width:480px){.oauth-card{padding:28px 20px 22px}.oauth-title{font-size:19px}}
+
+/* Apple-style corners: where the browser can draw a squircle (corner-shape, Chromium 139+), cards' corners curve
+   continuously into their sides. A squircle of the same radius looks tighter, so each card radius grows by about 1.8×;
+   other browsers keep the round corners above. */
+@supports (corner-shape: squircle) {
+  .oauth-card { border-radius: 25px; corner-shape: squircle; }
+  .oauth-mark { border-radius: 25px; corner-shape: squircle; }
+  .oauth-scopes { border-radius: 18px; corner-shape: squircle; }
+}

@@ -1,8 +1,8 @@
 import { footerMarkup, siteHeaderMarkup } from '../page'
 import { glyphCloud } from '../glyphArt'
 import { scrapeSnippet } from './scrapeCode'
-import { foldMarkdown } from './scrapeMarkdown'
-import { DEMOS, DOCS, DOCS_CELL, HARD } from './scrapeRun'
+import { foldMarkdown, foldedText } from './scrapeMarkdown'
+import { AMAZON_FIELDS, AMAZON_ISSUE, DATETIME_TABLE, DEMOS, DOCS, DOCS_CELL, HARD, OCTOPUS_SIZES, PDF_READ } from './scrapeRun'
 
 /** /scrape/: what scraping a page with Octocrawl gives, shown on real scrapes recorded on hosted Octocrawl
  * (scrapeRun.ts). The hero shows three pages' results; below, harder pages, the Evidence Record, the call, the cost and
@@ -48,6 +48,206 @@ function demo(): string {
             <div class="dm-chrome" aria-hidden="true"><i></i><i></i><i></i></div>
             <div class="dm-tabs" role="tablist" aria-label="Three recorded scrapes">${tabs}</div>${panes}
           </div>`
+}
+
+/** A line of a card's window: segments of text, each with its class (h heading, p punctuation, u link target, k key,
+ * v value, c comment, a author, w warning). */
+type Segment = readonly [string, string]
+
+/** A card's window: a small dark browser window on the painting holding one real result. With `source`, scrapeWindows.ts
+ * shows that text in the window's shape first (the raw HTML) and decodes it into the result when the card comes to the
+ * front; without it the result types itself in. */
+function cardWindow(o: { icon?: string; url: string; tag: string; label: string; source?: string; wrap?: boolean; lines: Segment[][] }): string {
+  const lines = o.lines.map((line) => `<span class="fx-ln">${line.map(([cls, text]) => `<span class="${cls}">${esc(text)}</span>`).join('')}</span>`).join('\n')
+  const text = o.lines.map((line) => line.map(([, t]) => t).join('').trimEnd()).join('\n')
+  // The window decodes in place (scrapeWindows.ts), so assistive tech reads the result from a copy that never changes.
+  return `<div class="fx-win${o.wrap ? ' is-wrap' : ''}"${o.source ? ` data-source="${esc(o.source)}"` : ''}>
+              <pre class="visually-hidden">${esc(`${o.label}:\n${text}`)}</pre>
+              <p class="fx-win-bar" aria-hidden="true">${o.icon ? `<img src="/assets/sites/${o.icon}.png" alt="" width="16" height="16" />` : '<span class="fx-win-dot" aria-hidden="true"></span>'}<span class="fx-win-url">${esc(o.url)}</span><b class="fx-win-tag">${esc(o.tag)}</b></p>
+              <pre class="fx-win-body" aria-hidden="true">${lines}</pre>
+            </div>`
+}
+
+/** A Markdown line split into segments: ** and link brackets as punctuation, link targets as links. */
+function markdownSegments(text: string): Segment[] {
+  return text.split(/(\*\*|\]\([^)]*\)|\[)/).filter(Boolean).map((part) => [part === '**' || part === '[' ? 'p' : part.startsWith('](') ? 'u' : 'b', part] as const)
+}
+
+/** Card 1: the Octopus page's raw HTML decoding into the start of its Markdown, the lead paragraph cut short. */
+function markdownWindow(): string {
+  const lead = foldedText(DEMOS[0]!.markdownHead.split('\n')[2]!)
+  const cut = `${lead.slice(0, lead.lastIndexOf(' ', 230))} …`
+  return cardWindow({
+    icon: 'wikipedia', url: 'en.wikipedia.org/wiki/Octopus', tag: `${kb(OCTOPUS_SIZES.rawBytes)} → ${kb(OCTOPUS_SIZES.markdownBytes)}`, wrap: true,
+    label: 'The start of the Markdown Octocrawl returned for the Wikipedia Octopus page',
+    source: DEMOS[0]!.rawHead.replace(/\s+/g, ' ').slice(0, 900),
+    lines: [[['p', '# '], ['h', 'Octopus']], [['p', '…']], markdownSegments(cut)],
+  })
+}
+
+/** Card 3: some of the Amazon.sg product's fields, each with where on the page it was read, and the field it has not. */
+function jsonWindow(): string {
+  const width = 32
+  const field = (key: string, value: string, note: Segment, last = false): Segment[] => {
+    const shown = value.length > 18 ? `${value.slice(0, 16)}…"` : value
+    const text = `  "${key}": ${shown}${last ? '' : ','}`
+    return [['k', `  "${key}"`], ['p', ': '], ['v', `${shown}${last ? '' : ','}`], ['c', ' '.repeat(Math.max(1, width - text.length))], note]
+  }
+  return cardWindow({
+    icon: 'amazon', url: 'amazon.sg/dp/0135957052', tag: 'fields + where read',
+    label: 'Fields Octocrawl read from the Amazon.sg product page, each with where on the page it was read',
+    lines: [
+      [['p', '{']],
+      [['p', '  …']],
+      ...AMAZON_FIELDS.map(([key, value, at]) => (key ? field(key, value, ['c', `← ${at}`]) : [['p', '  …']] as Segment[])),
+      [['p', '  …']],
+      field(AMAZON_ISSUE.field, 'null', ['w', `← ${AMAZON_ISSUE.code}`], true),
+      [['p', '}']],
+    ],
+  })
+}
+
+/** Text cut to `n` characters, an ellipsis marking the cut, padded to `n`. */
+const cell = (text: string, n: number): string => (text.length > n ? `${text.slice(0, n - 1)}…` : text.padEnd(n))
+
+/** Card 2: the selectors sent with the Octopus read, and the Markdown they kept: its title, the lead paragraph cut short,
+ * and the section headings, "…" wherever the window leaves lines out. */
+function selectWindow(): string {
+  const tags = DEMOS[0]!.includeTags
+  const kept = DEMOS[0]!.markdownHead.split('\n')
+  const lines: Segment[][] = [[['p', '"includeTags": [']]]
+  tags.forEach((tag, i) => lines.push([['p', '  '], ['v', `"${tag}"`], ['p', i < tags.length - 1 ? ',' : '']]))
+  lines.push([['p', ']']], [['c', '']])
+  // The Markdown's headings in order, with the lead under the title; a "…" for each run of lines skipped.
+  let skipped = false
+  for (const [i, line] of kept.entries()) {
+    const heading = /^#{1,3} /.exec(line)
+    if (heading) {
+      if (skipped) lines.push([['p', '…']])
+      skipped = false
+      lines.push([['p', heading[0]], ['h', line.slice(heading[0].length)]])
+      if (lines.length >= 15) {
+        lines.push([['p', '…']])
+        break
+      }
+    } else if (i === 2) {
+      lines.push(markdownSegments(`${foldedText(line).slice(0, 44)} …`))
+    } else if (line) skipped = true
+  }
+  return cardWindow({
+    icon: 'wikipedia', url: 'en.wikipedia.org/wiki/Octopus', tag: `${kb(OCTOPUS_SIZES.rawBytes)} → ${kb(OCTOPUS_SIZES.selectedBytes)}`,
+    label: 'The selectors sent with the Wikipedia Octopus read and the start of the Markdown they kept', lines,
+  })
+}
+
+/** Card 4: the datetime page's format-code table as rows, its first three under the header. */
+function tableWindow(): string {
+  const widths = [10, 24, 18, 5]
+  const row = (cells: readonly string[], head = false): Segment[] => cells.map((text, i) => [head ? 'h' : i === 0 ? 'k' : 'v', `${cell(text, widths[i]!)}${i < cells.length - 1 ? ' ' : ''}`] as const)
+  return cardWindow({
+    icon: 'docs', url: 'docs.python.org/3/library/datetime.html', tag: `${DATETIME_TABLE.columns} × ${DATETIME_TABLE.rows} · also CSV`,
+    label: 'The first rows of the format-code table Octocrawl returned for the Python datetime docs page',
+    lines: [
+      [['p', `tables[${DATETIME_TABLE.index}]`]],
+      row(DATETIME_TABLE.head[0], true),
+      [['p', widths.map((w) => '─'.repeat(w)).join(' ')]],
+      ...DATETIME_TABLE.head.slice(1, 4).map((cells) => row(cells)),
+      [['p', '…']],
+    ],
+  })
+}
+
+/** Card 5: a page drawn by its script, read over HTTP and then in a browser, and the quotes it gave. */
+function browserWindow(): string {
+  const facts = HARD[0]!.facts.slice(0, 3)
+  const quotes = HARD[0]!.lines.filter(Boolean).slice(0, 5)
+  return cardWindow({
+    url: new URL(HARD[0]!.url).host + new URL(HARD[0]!.url).pathname, tag: 'HTTP → browser', wrap: true,
+    label: 'How Octocrawl read the quotes page, drawn by its script, and the start of the Markdown it returned',
+    lines: [
+      ...facts.map(([k, v]) => [['k', cell(k, 9)], ['v', v]] as Segment[]),
+      [['c', '']],
+      ...quotes.map((line) => (line.startsWith('#') ? markdownSegments(foldedText(line)).map(([c, t]) => [c === 'b' ? 'h' : c, t] as const) : line.startsWith('by ') ? [['a', line]] as Segment[] : markdownSegments(line))),
+      [['p', '…']],
+    ],
+  })
+}
+
+/** Card 6: a paper read from its PDF: page markers, its title and the start of its abstract. */
+function pdfWindow(): string {
+  return cardWindow({
+    url: new URL(PDF_READ.url).host + new URL(PDF_READ.url).pathname, tag: `PDF · ${PDF_READ.pagesRead} of ${PDF_READ.pageCount} pages`, wrap: true,
+    label: 'The start of the Markdown Octocrawl returned for a paper read from its PDF',
+    lines: [...PDF_READ.lines, '…'].map((line) => (line.startsWith('<!--') ? [['k', line]] : line === '…' ? [['p', line]] : line === 'Attention Is All You Need' || /^(Abstract|1 Introduction)$/.test(line) ? [['h', line]] : [['v', line]]) as Segment[]),
+  })
+}
+
+const kb = (bytes: number): string => `${Math.round(bytes / 1000)} KB`
+
+/** The formats the banner names, each with its glyph. */
+export const FORMAT_ICONS: ReadonlyArray<readonly [string, string]> = [['#', 'Markdown'], ['{}', 'JSON'], ['┼', 'Tables'], ['≡', 'Lists'], ['↗', 'Links'], ['¶', 'PDF']]
+
+/** What you get, one per format: the left column's words; its card on the right shows a painting for now. */
+export const FORMAT_CARDS: ReadonlyArray<{ id: string; eyebrow: string; title: string; text: string; window?: () => string }> = [
+  {
+    id: 'markdown', eyebrow: 'Built for LLMs', title: 'Clean Markdown.', window: markdownWindow,
+    text: 'Menus, ads, sidebars and footers are stripped away. Your model reads the content and nothing else.',
+  },
+  {
+    id: 'select', eyebrow: 'Just the part you need', title: 'Precise selection.', window: selectWindow,
+    text: 'Point at sections with CSS selectors and leave the rest of the page behind.',
+  },
+  {
+    id: 'json', eyebrow: 'Fields with receipts', title: 'Structured JSON.', window: jsonWindow,
+    text: 'Describe the fields in a JSON Schema. Each value comes back typed, with the exact spot on the page it was read from. No guessing, no made-up values.',
+  },
+  {
+    id: 'tables', eyebrow: 'Tables as data', title: 'Every table, ready to use.', window: tableWindow,
+    text: 'Each data table comes back as rows for a dataframe, a spreadsheet or a prompt.',
+  },
+  {
+    id: 'browser', eyebrow: 'Real browser', title: 'JavaScript, rendered.', window: browserWindow,
+    text: 'Pages built with React, Vue or Next.js open in a real browser automatically, so content drawn by scripts comes back too.',
+  },
+  {
+    id: 'files', eyebrow: 'Docs to data', title: 'PDFs and files.', window: pdfWindow,
+    text: 'PDFs come back as Markdown, page by page. CSV, JSON and text files come back as text.',
+  },
+]
+
+/** What you get: a banner of light in characters that opens the formats, then the formats themselves, the words on the
+ * left and a card on the right that changes as the reader scrolls (scrapeFormats.ts). */
+function whatYouGet(): string {
+  const items = FORMAT_CARDS.map((c, i) => `
+            <li class="fx-item${i ? '' : ' is-active'}" data-step="${i}"><h3 class="fx-head"><button type="button" data-step="${i}" aria-controls="fx-card-${c.id}">${c.title}</button></h3><div class="fx-body"><p class="fx-eyebrow">${c.eyebrow}</p><p>${c.text}</p></div></li>`).join('')
+  const cards = FORMAT_CARDS.map((c, i) => `
+            <div class="fx-card is-${c.id}${i ? '' : ' is-active'}" id="fx-card-${c.id}" data-step="${i}">${c.window ? `
+            ${c.window()}
+            ` : ''}</div>`).join('')
+  return `
+    <section class="fx-section" id="what-you-get" aria-labelledby="fx-title">
+      <div class="band">
+        <div class="frame">
+          <div class="fx-banner">
+            <div class="fx-light" aria-hidden="true"></div>
+            <div class="fx-copy">
+              <p class="fx-kicker">What you get</p>
+              <h2 id="fx-title">Every format your agent needs. <span>One call.</span></h2>
+              <p class="fx-lead">Markdown, tables, typed fields, links and screenshots, all from the same read. No HTML to clean, no parser to write.</p>
+              <ul class="fx-formats" aria-label="Formats">${FORMAT_ICONS.map(([g, label]) => `<li><span class="fx-glyph" aria-hidden="true">${esc(g)}</span>${label}</li>`).join('')}</ul>
+            </div>
+          </div>
+          <div class="fx-scroll">
+            <div class="fx-stage">
+              <ol class="fx-list">${items}
+              </ol>
+              <div class="fx-stack">${cards}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>`
 }
 
 /** Harder pages: three recorded runs behind tabs. */
@@ -239,6 +439,7 @@ ${siteHeaderMarkup()}      <main aria-labelledby="pd-title">
         </div>
       </main>
     </div>
+${whatYouGet()}
 ${harder()}
 ${evidence()}
 ${callIt()}

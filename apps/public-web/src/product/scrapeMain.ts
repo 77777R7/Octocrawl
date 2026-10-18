@@ -3,13 +3,18 @@ import './product.css'
 import { trackLinkClicks, trackPageView } from '../analytics'
 import { mountScrapeCode } from './scrapeCode'
 import { mountScrapeFeatures } from './scrapeFeatures'
+import { mountFormats } from './scrapeFormats'
 import { mountGlyphRipple } from '../glyphRipple'
+import { mountSmoothScroll } from '../smoothScroll'
 
-// /scrape/: the hero's artwork brought to life in its own glyphs, its three recorded scrapes, the harder pages, the hash
-// check and the code.
+// /scrape/: damped scrolling, the hero's artwork brought to life in its own glyphs, its three recorded scrapes, what
+// you get, the harder pages, the hash check and the code.
+mountSmoothScroll()
 mountHeroArt()
 const shell = document.querySelector<HTMLElement>('.product-page')
 if (shell) mountScrapeFeatures(shell)
+const formats = document.querySelector<HTMLElement>('#what-you-get')
+if (formats) mountFormats(formats)
 const code = document.querySelector<HTMLElement>('#call-it')
 if (code) mountScrapeCode(code)
 for (const cloud of document.querySelectorAll<HTMLElement>('.glyph-cloud[data-seed]')) mountGlyphRipple(cloud)

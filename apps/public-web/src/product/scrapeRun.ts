@@ -86,3 +86,57 @@ export const HARD: readonly Hard[] = [
     lines: [],
   },
 ]
+
+
+/** What the format cards' windows show, from the reads above (research/hosted/2026-10-17-scrape-page-demos-e1e128d4.md).
+ * The Octopus page was read at 16:00 UTC as a whole page and at 18:18 UTC with the hero's includeTags, from the same
+ * bytes (rawSha256 0a1cc6ca…); the lead paragraph is the same line in both Markdowns, so the whole-page window quotes it
+ * from DEMOS[0]. */
+export const OCTOPUS_SIZES = { rawBytes: 922_203, markdownBytes: 158_375, selectedBytes: 62_302 } as const
+
+/** The Amazon.sg read at 09:28 UTC: a run of the product's fields in the order the JSON gives them, each with where it was
+ * read; an empty key stands for the fields between that the window leaves out (deliveryLocation), and the window marks
+ * the ones before (asin, title, kind) and after (images to specifications) the same way. */
+export const AMAZON_FIELDS: ReadonlyArray<readonly [string, string, string]> = [
+  ['price', '64.55', '#buybox .a-price .a-offscreen'],
+  ['currency', '"SGD"', '#buybox .a-price .a-offscreen'],
+  ['seller', '"Amazon US"', '#sellerProfileTriggerId'],
+  ['availability', '"In stock"', '#availability span'],
+  ['', '', ''],
+  ['rating', '4.8', '#acrPopover'],
+  ['reviewCount', '2578', '#acrCustomerReviewText'],
+]
+export const AMAZON_ISSUE = { field: 'brand', code: 'field_unavailable' } as const
+
+/** The datetime read's format-code table (tableIndex 4): its header and first rows, and its size without the header. */
+export const DATETIME_TABLE = {
+  index: 4, columns: 4, rows: 37,
+  head: [
+    ['Directive', 'Meaning', 'Example', 'Notes'],
+    ['%a', 'Weekday as locale’s abbreviated name.', 'Sun, Mon, …, Sat (en_US); So, Mo, …, Sa (de_DE)', '(1)'],
+    ['%A', 'Weekday as locale’s full name.', 'Sunday, Monday, …, Saturday (en_US); Sonntag, Montag, …, Samstag (de_DE)', '(1)'],
+    ['%b', 'Month as locale’s abbreviated name.', 'Jan, Feb, …, Dec (en_US); Jan, Feb, …, Dez (de_DE)', '(1)'],
+    ['%B', 'Month as locale’s full name.', 'January, February, …, December (en_US); Januar, Februar, …, Dezember (de_DE)', '(1)'],
+  ],
+} as const
+
+/** A PDF read on hosted Octocrawl on 18 October 2026 (keyless REST, revision h25lean, extractor commit 714af563):
+ * research/hosted/2026-10-18-scrape-page-pdf-714af563.md. `lines` are lines of its Markdown in order, "…" where lines
+ * are left out. */
+export const PDF_READ = {
+  url: 'https://arxiv.org/pdf/1706.03762',
+  fetchedAt: '2026-10-18T10:19:41.743Z',
+  bytes: 2_215_244, pageCount: 15, pagesRead: 15, markdownLines: 957, contentTokens: 10_015,
+  lines: [
+    '<!-- page 1 -->',
+    '…',
+    'Attention Is All You Need',
+    '…',
+    'Abstract',
+    'The dominant sequence transduction models are based on complex recurrent or',
+    'convolutional neural networks that include an encoder and a decoder. The best',
+    '…',
+    '<!-- page 2 -->',
+    '1 Introduction',
+  ],
+} as const

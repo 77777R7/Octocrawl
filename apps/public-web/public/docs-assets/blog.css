@@ -68,3 +68,13 @@
   .blog-feature-meta{padding-top:20px;font-size:14px}
 }
 @media (prefers-reduced-motion:reduce){.blog-card,.blog-feature,.blog-tabs a{transition:none}.blog-card:hover{transform:none}}
+
+/* Apple-style corners: where the browser can draw a squircle (corner-shape, Chromium 139+), cards' corners curve
+   continuously into their sides. A squircle of the same radius looks tighter, so each card radius grows by about 1.8×;
+   other browsers keep the round corners above. */
+@supports (corner-shape: squircle) {
+  .blog-cover img { border-radius: 22px; corner-shape: squircle; }
+  .doc-figure img { border-radius: 18px; corner-shape: squircle; }
+  .blog-feature { border-radius: 22px; corner-shape: squircle; }
+  .blog-card { border-radius: 22px; corner-shape: squircle; }
+}
