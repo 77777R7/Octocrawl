@@ -23,6 +23,36 @@ export function shapeResult(tool: string, result: unknown): { value: unknown; im
   return { value: result, images: [] }
 }
 
+/**
+ * A result without the call's telemetry and internal ids, for a deployment whose tools offer no record to look them up
+ * by (hosted Octocrawl has no get_scrape): OpenAI's plugin review asks that a tool result leave out session, trace and
+ * request ids and logging metadata (developers.openai.com/plugins/plugin-guidelines, "Response minimization"). The page,
+ * the verdict and the Evidence Record stay: its fetch time and hashes are what a citation needs. A map keeps its id, which
+ * its outputSchema requires. Its hints lose their
+ * campaign tags, as error texts do. debug asks for the whole.
+ */
+export function withoutTelemetry(tool: string, result: unknown, args: unknown): unknown {
+  if (!isObject(result) || (isObject(args) && args.debug === true)) return result
+  if (tool !== 'scrape' && tool !== 'scrape_product') return result
+  const { usage: _usage, channelsTried: _channels, ...rest } = result
+  const untagged = Array.isArray(rest.agentHints) ? { ...rest, agentHints: rest.agentHints.map((hint) => (typeof hint === 'string' ? withoutCampaign(hint) : hint)) } : rest
+  if (!isObject(untagged.metadata)) return untagged
+  const { scrapeId: _scrapeId, concurrencyLimited: _limited, concurrencyQueueDurationMs: _queued, ...metadata } = untagged.metadata
+  return { ...untagged, metadata }
+}
+
+/** The links in a text without their utm_* parameters, which a model has no use for (REST keeps them); prose is left alone. */
+export function withoutCampaign(text: string): string {
+  return text.replace(/https?:\/\/[^\s)]+/g, (link) => {
+    let url: URL
+    try { url = new URL(link) } catch { return link }
+    const tags = [...url.searchParams.keys()].filter((key) => key.startsWith('utm_'))
+    if (tags.length === 0) return link
+    for (const key of tags) url.searchParams.delete(key)
+    return url.toString()
+  })
+}
+
 function isObject(value: unknown): value is Json {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }

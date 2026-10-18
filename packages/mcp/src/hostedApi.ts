@@ -809,6 +809,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       allowedTools: HOSTED_API_TOOLS,
       tools,
       instructions,
+      minimalResults: true,
       calls: post,
       unavailableHint: 'Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.',
       normalizeCall: (name, args) => {
