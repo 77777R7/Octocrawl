@@ -23,6 +23,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **OpenAI plugin package.** `plugins/octocrawl-openai` is the package for OpenAI's plugin directory (ChatGPT and Codex), in the portable Agent Plugins format: the listing, five positive and three negative review cases and release notes in `plugin.json`, one remote MCP server (`https://mcp.octocrawl.dev/mcp-oauth`, OAuth with a Client ID Metadata Document) in `mcp.json`, a `get-started` onboarding skill and the icons. Its version moves with the packages. Not yet submitted.
 ## 0.7.0 — 2026-10-18
 
 The published packages at 0.7.0: W7–W10 of the MCP client work, the Claude Code plugin, and the extraction fixes below. **The local MCP server's defaults change:** a `crawl` without `maxPages` fetches at most 100 pages, a `scrape` without `timeout` stops after 120 s unless it waits for the person, and `wait_batch` takes a `timeoutMs` of at most 120,000. A screenshot's `base64` in the MCP JSON is deprecated and goes in the next release; read the image block. The REST API, the SDK's defaults and the Python client are unchanged (the SDK gains `WaitOptions.onPoll`).
