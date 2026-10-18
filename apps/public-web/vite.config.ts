@@ -49,9 +49,6 @@ export default defineConfig({
     // The home page and each free tool page (the same hero and script: src/page.ts heroMarkup, src/main.ts), the tools'
     // hub and the product pages.
     rollupOptions: { input: { main: fileURLToPath(new URL('./index.html', import.meta.url)), toolsHub: fileURLToPath(new URL('./tools/index.html', import.meta.url)), ...Object.fromEntries(TOOL_PAGES.map((page) => [page.slug, fileURLToPath(new URL(`./tools/${page.slug}/index.html`, import.meta.url))])), scrape: fileURLToPath(new URL('./scrape/index.html', import.meta.url)) } },
-    // The hero octopus chunk (three.js and the ASCII renderer) is about 500 kB, lazy and decorative: it loads only
-    // on wide desktops with motion allowed, after the page works. The limit still flags anything that grows past it.
-    chunkSizeWarningLimit: 560,
     // The stylesheet's vh lines are fallbacks for browsers without svh (Safari before 15.4, Chrome before 108,
     // Firefox before 101). The CSS minifier drops any declaration its targets never need, so the targets include
     // those browsers; without this it would ship svh alone.

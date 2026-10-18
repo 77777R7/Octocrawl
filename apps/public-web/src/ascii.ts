@@ -4,21 +4,8 @@ type OctopusEvent = CustomEvent<{ state?: 'running' | 'awake' | 'stalled' } | nu
 // meanwhile, so a dim hero never looks broken.
 const WAIT_MS = 8000
 
-// The octopus renders with three.js, which needs WebGL 2; without it neither chunk is worth loading.
-let webgl: boolean | undefined
-function hasWebGL(): boolean {
-  if (webgl === undefined) {
-    try {
-      const context = document.createElement('canvas').getContext('webgl2')
-      webgl = Boolean(context)
-      context?.getExtension('WEBGL_lose_context')?.loseContext()
-    } catch { webgl = false }
-  }
-  return webgl
-}
-
-/** Load the hero decorations only in the wide desktop layout with a fine pointer, motion allowed and WebGL: the
- * React Bits octopus behind the headline and the artwork's own glyphs and night sky lit up around it. They move
+/** Load the hero decorations only in the wide desktop layout with a fine pointer and motion allowed: the octopus
+ * typed behind the headline (heroOctopus.ts) and the artwork's own glyphs and night sky lit up around it. They move
  * together or not at all: the glyphs light up from the octopus outwards when it wakes, both loop for as long as the
  * hero is on screen and rest while the visitor works with the form, and both stop if the octopus stalls. */
 export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero: HTMLElement): void {
@@ -33,7 +20,7 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
   // Nothing loads before the hero's first intersection report, so a page opened further down (a section link,
   // a restored scroll position) fetches no decoration.
   let visible = false
-  // The octopus could not start (its chunk, WebGL or source failed, or it was too slow to draw): the hero stays
+  // The octopus could not start (its chunk, canvas or source failed, or it was too slow to draw): the hero stays
   // static for this page view.
   let failed = false
   // The visitor is working with the form: focus inside it, or a preview in flight.
@@ -41,9 +28,11 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
   // A preview is in flight: the octopus takes the link.
   let taking = false
 
+  // Nothing loads before the first contentful paint and an idle moment after it (see below).
+  let ready = false
+
   const media = (): boolean => !motion.matches && pointer.matches && !compact.matches
-  // Until the WebGL probe has run the hero stays static (see below).
-  const eligible = (): boolean => visible && media() && webgl === true && !failed
+  const eligible = (): boolean => visible && ready && media() && !failed
   // A hero that leaves the screen stops, and starts over when it returns.
   const reconcile = (): void => {
     if (!eligible()) {
@@ -57,7 +46,7 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
   const fail = (): void => {
     failed = true
     octopus.classList.add('is-static')
-    // Deferred: the report can come from inside React's commit, which must not unmount its own root.
+    // Deferred: the report can come from inside the octopus's own mount, before its dispose exists.
     window.setTimeout(reconcile, 0)
   }
   /** The hero yields while the visitor works with the real form: while they type, or while one of its panels is open,
@@ -93,7 +82,7 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
     const version = ++generation
     const waiting = window.setTimeout(() => octopus.classList.add('is-static'), WAIT_MS)
     // Each chunk fails on its own; without the octopus nothing animates.
-    void Promise.allSettled([import('./asciiReact'), import('./heroGlyphs')]).then(([octo, lights]) => {
+    void Promise.allSettled([import('./heroOctopus'), import('./heroGlyphs')]).then(([octo, lights]) => {
       loading = false
       if (version !== generation || !eligible()) {
         window.clearTimeout(waiting)
@@ -126,12 +115,12 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
           // The octopus keeps its last whole frame; the glyphs go with it.
           glyphs?.dispose()
           glyphs = null
-          // A stall before the first frame means the octopus never drew: no WebGL context, no source, too slow.
+          // A stall before the first frame means the octopus never drew: no canvas, no source, too slow.
           if (!drawn) fail()
         }
       }
       hero.addEventListener('w2l:octopus', onOctopus)
-      const unmount = octo.value.mountReactBitsAscii(octopus)
+      const unmount = octo.value.mountHeroOctopus(octopus)
       dispose = () => {
         window.clearTimeout(waiting)
         hero.removeEventListener('w2l:octopus', onOctopus)
@@ -148,15 +137,15 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
     reconcile()
   }, { threshold: 0.05 })
   observer.observe(hero)
-  // Probing WebGL creates and drops a context (3–30 ms), so it waits for the first contentful paint and an idle
-  // moment after it, and runs only where the rest of the test passes.
-  const probe = (): void => {
-    if (media() && !hasWebGL()) octopus.classList.add('is-static')
+  // The decorations wait for the first contentful paint and an idle moment after it, so they never compete with
+  // the page's own first paint.
+  const start = (): void => {
+    ready = true
     reconcile()
   }
   const soon = (): void => {
-    if ('requestIdleCallback' in window) window.requestIdleCallback(probe, { timeout: 1000 })
-    else setTimeout(probe, 50)
+    if ('requestIdleCallback' in window) window.requestIdleCallback(start, { timeout: 1000 })
+    else setTimeout(start, 50)
   }
   if (typeof PerformanceObserver !== 'undefined' && PerformanceObserver.supportedEntryTypes?.includes('paint')) {
     new PerformanceObserver((list, paints) => {
@@ -165,5 +154,5 @@ export function mountHeroAscii(octopus: HTMLElement, artwork: HTMLElement, hero:
       soon()
     }).observe({ type: 'paint', buffered: true })
   } else setTimeout(soon, 300)
-  for (const query of [motion, pointer, compact]) query.addEventListener('change', probe)
+  for (const query of [motion, pointer, compact]) query.addEventListener('change', reconcile)
 }
