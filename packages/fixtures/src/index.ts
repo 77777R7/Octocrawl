@@ -14,3 +14,4 @@ export { ALL_BOILERPLATE, NAV_MARKER, FOOTER_MARKER, COOKIE_MARKER, SIDEBAR_MARK
 export { toGfmTable } from './tableGfm.js'
 export { textPdf } from './pdf.js'
 export { NEWS_LEADS, newsCollectionFixture } from './newsCollection.js'
+export { VARIANT_CARDS, variantListingFixture } from './variantListing.js'

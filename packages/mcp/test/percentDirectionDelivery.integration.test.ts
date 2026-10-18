@@ -83,7 +83,7 @@ describe('percent direction through localhost HTTP, engine, API, SDK and MCP', (
         expect(out.rawHtml).toBe(html)
         expect(out.snapshot.rawBodySha256).toBe(createHash('sha256').update(html).digest('hex'))
         expect(out.evidenceRecord.rawSha256).toBe(out.snapshot.rawBodySha256)
-        expect(out.evidenceRecord.extractor.version).toBe('extract-tf/34')
+        expect(out.evidenceRecord.extractor.version).toBe('extract-tf/35')
       }
     })
     it(`${surface} ${debug ? 'full' : 'compact'} rejects a contract expecting the dropped sign`, async () => {

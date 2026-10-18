@@ -24,6 +24,7 @@ import { pageSignalsFor, routePage, selectCardList, selectDetectedList, selectLi
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
 import { documentBaseUrl } from './links.js'
+import { restoreVariantLinks } from './variantLinks.js'
 import { collectLabelledValues } from './labels.js'
 import { collectDeclaredValues } from './declared.js'
 import { collectPageMetadata } from './metadata.js'
@@ -177,6 +178,7 @@ export class ExtractTf implements Extractor {
     // What is cleaned and pruned is decided on that page too, and the
     // excluded elements are removed after it, with everything inside them.
     const excluded = namedBy(doc.document, pruneSelectors ?? [])
+    restoreVariantLinks(doc.document, baseUrl)
     // A product's options shown as controls are kept aside before cleaning
     // removes the controls, and shown once the page is known to be a product's.
     const optionGroups = markOptionGroups(doc.document, excluded)
@@ -285,7 +287,7 @@ export class ExtractTf implements Extractor {
     // cascade's confidence. The page itself still went through the cascade
     // for its type, title and main region, and `escalate` below stays what
     // the cascade found of the page.
-    const selection = includeSelectors !== undefined && includeSelectors.length > 0 ? selectionBody(html, includeSelectors, pruneSelectors) : null
+    const selection = includeSelectors !== undefined && includeSelectors.length > 0 ? selectionBody(html, includeSelectors, pruneSelectors, baseUrl) : null
     const selected = selection !== null && !selection.blank
     const output: ExtractorOutput = {
       title: pickTitle(doc.document, main),

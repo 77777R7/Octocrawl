@@ -13,6 +13,7 @@
 
 import { detach, detachAll, outerHtml, parse, qsa, tagOf, textOf } from './dom.js'
 import { namedBy } from './selectors.js'
+import { restoreVariantLinks } from './variantLinks.js'
 import { LAYOUT_MARKERS } from './markdown.js'
 import { looksLikePrice } from './product.js'
 
@@ -304,11 +305,12 @@ export function wholePageBody(html: string, exclusions: readonly string[] = []):
  * empty elements, such as the root of an application its scripts have yet
  * to fill.
  */
-export function selectionBody(html: string, selectors: readonly string[], exclusions: readonly string[] = []): { html: string; matched: number; blank: boolean } {
+export function selectionBody(html: string, selectors: readonly string[], exclusions: readonly string[] = [], baseUrl?: string | null): { html: string; matched: number; blank: boolean } {
   const doc = parse(html)
   const document = doc.document
   const named = namedBy(document, selectors)
   const excluded = namedBy(document, exclusions)
+  restoreVariantLinks(document, baseUrl)
   const top = document.documentElement
   const page = pageRoot(document)
   // An excluded body, or root element, takes the whole page along.
