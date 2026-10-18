@@ -255,6 +255,7 @@
 /* Light over the paintings (cardGlow.ts): the painting drawn again where the light falls, screened onto the card, so
    the marks there brighten in place. */
 .fx-glow { position: absolute; top: 0; left: 0; width: 100%; height: 100%; mix-blend-mode: screen; pointer-events: none; }
+.fx-solid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 /* The cards' artwork, one painting each: the three skies, then the three landscapes; loaded once the cards are near. */
 .fx-section.is-near .fx-card { background-position: center; background-size: cover; }
 .fx-section.is-near .fx-card.is-markdown { background-image: url('/assets/cards/sky-1.webp'); }
