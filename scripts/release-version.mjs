@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // The version of what W2L publishes, kept in one place per package but checked
 // together: the CLI (`octocrawl`, `@octocrawl/cli`), `@octocrawl/mcp`,
-// `@octocrawl/sdk`, `@octocrawl/ai-sdk`, the Python client `octocrawl-client` and the Claude Code plugin
-// (plugins/octocrawl) are released as one version. A release tag `vX.Y.Z` publishes only when every place says X.Y.Z.
+// `@octocrawl/sdk`, `@octocrawl/ai-sdk`, the Python client `octocrawl-client`, the Claude Code plugin
+// (plugins/octocrawl) and the OpenAI plugin (plugins/octocrawl-openai) are released as one version. A release tag `vX.Y.Z` publishes only when every place says X.Y.Z.
 //
 // Usage: node scripts/release-version.mjs check [X.Y.Z]   (no version: every place agrees)
 //        node scripts/release-version.mjs set X.Y.Z       (writes every place, then the lockfile)
@@ -19,6 +19,7 @@ const PLACES = [
   ...['cli', 'mcp', 'sdk', 'ai-sdk'].map((dir) => jsonVersion(`packages/${dir}/package.json`)),
   serverJsonVersion('server.json'),
   jsonVersion('plugins/octocrawl/.claude-plugin/plugin.json'),
+  jsonVersion('plugins/octocrawl-openai/plugin.json'),
   textVersion('packages/cli/src/run.ts', /export const CLI_VERSION = '([^']+)'/, (v) => `export const CLI_VERSION = '${v}'`),
   textVersion('packages/mcp/src/server.ts', /const MCP_VERSION = '([^']+)'/, (v) => `const MCP_VERSION = '${v}'`),
   textVersion('packages/sdk/src/version.ts', /export const SDK_VERSION = '([^']+)'/, (v) => `export const SDK_VERSION = '${v}'`),

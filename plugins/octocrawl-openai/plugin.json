@@ -1,0 +1,105 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "octocrawl",
+  "version": "0.7.0",
+  "description": "Web pages as clean Markdown and JSON for AI agents, in fewer tokens, with an Evidence Record.",
+  "author": {
+    "name": "Octocrawl",
+    "email": "hello@octocrawl.dev",
+    "url": "https://octocrawl.dev/"
+  },
+  "homepage": "https://octocrawl.dev/",
+  "repository": "https://github.com/77777R7/Octocrawl",
+  "license": "AGPL-3.0-only",
+  "keywords": [
+    "web-scraping",
+    "markdown",
+    "tables",
+    "evidence",
+    "research"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Octocrawl",
+        "shortDescription": "Web pages as clean Markdown",
+        "longDescription": "Octocrawl turns public web pages into clean Markdown, tables, links and JSON that ChatGPT and Codex can read in fewer tokens than raw HTML. Ask it to read an article, pull the tables out of a page, list the pages of a site, or get an Amazon.sg product as structured JSON, and it returns just the content, ready to quote, compare or analyse.\n\nEvery result carries an Evidence Record: the final URL, when the page was fetched, the HTTP status, what the site's robots.txt allowed, and hashes of what was read. Answers can cite exactly where a fact came from, and a page that could not be read, such as a missing page, says so instead of returning invented content.\n\nWho it is for: anyone who needs facts from public web pages in a conversation or a coding task, such as researchers, analysts and developers.\n\nLimits: it reads public pages only. It obeys robots.txt for every address, refuses private network addresses, and does not sign in to sites, solve CAPTCHAs or use proxies. Calls spend your Octocrawl account's monthly credits (1 per page read over HTTP, 5 per page read in a browser, 1 per map); every account gets 1,000 free credits a month. Crawls, batches and monitoring run on your own computer with the open-source Octocrawl, not in this plugin.",
+        "developerName": "Octocrawl",
+        "category": "Productivity",
+        "capabilities": [
+          "Read web pages",
+          "Extract tables",
+          "Map a site"
+        ],
+        "websiteURL": "https://octocrawl.dev/",
+        "supportURL": "https://octocrawl.dev/docs/contact/",
+        "privacyPolicyURL": "https://octocrawl.dev/docs/privacy/",
+        "termsOfServiceURL": "https://octocrawl.dev/docs/terms/",
+        "defaultPrompt": [
+          "Read https://en.wikipedia.org/wiki/Web_scraping and summarise it with its source.",
+          "Get the tables on https://www.gov.uk/bank-holidays.",
+          "List the chapters of https://docs.python.org/3/tutorial/."
+        ],
+        "brandColor": "#F3683D",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/logo.png"
+      },
+      "onboardingSkill": "./skills/get-started/SKILL.md",
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Read an article as Markdown and cite it",
+              "prompt": "Use Octocrawl to read https://en.wikipedia.org/wiki/Web_scraping as Markdown, summarise it in five bullet points, and cite the final URL and fetch time from its Evidence Record.",
+              "tools_triggered": "scrape",
+              "expected_behavior": "A five-point summary of the article, citing https://en.wikipedia.org/wiki/Web_scraping and the fetch time from evidenceRecord.fetchedAt."
+            },
+            {
+              "description": "Extract the tables from a page",
+              "prompt": "Use Octocrawl to get the tables on https://www.gov.uk/bank-holidays and tell me the remaining bank holidays in England and Wales this year.",
+              "tools_triggered": "scrape",
+              "expected_behavior": "The page's tables come back (one per region and year, with Date, Day of the week and Bank holiday columns); the answer lists the remaining England and Wales dates from them."
+            },
+            {
+              "description": "List the pages of a site",
+              "prompt": "Use Octocrawl's map tool on https://docs.python.org/3/tutorial/ and list the chapters of the Python tutorial with their URLs.",
+              "tools_triggered": "map",
+              "expected_behavior": "A list of the tutorial's chapter URLs under https://docs.python.org/3/tutorial/, with their titles, without reading each page."
+            },
+            {
+              "description": "Get a product page as structured JSON",
+              "prompt": "Use Octocrawl's scrape_product on https://www.amazon.sg/dp/B0CFV1W66Y and tell me the product's price, rating and brand.",
+              "tools_triggered": "scrape_product",
+              "expected_behavior": "Product JSON with json.status complete: brand, price in SGD, rating and review count, each field with the page location it was read from."
+            },
+            {
+              "description": "Report a missing page honestly",
+              "prompt": "Use Octocrawl to read https://www.python.org/this-page-does-not-exist-octocrawl and tell me what it says.",
+              "tools_triggered": "scrape",
+              "expected_behavior": "The result is status failed with failureReason http_error and HTTP 404; the answer says the page does not exist instead of presenting the error page as content."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Signing in to a private account. Octocrawl reads public pages only and holds no logins, so it should explain that it cannot sign in and read private account pages.",
+              "prompt": "Sign in to my bank account at https://www.example.com/login and download my statements."
+            },
+            {
+              "description": "Reading a private network address. Hosted Octocrawl refuses private addresses: the result is failed with policy_denied and nothing is fetched.",
+              "prompt": "Read the admin page of my router at http://192.168.1.1/admin."
+            },
+            {
+              "description": "Getting around a site's access controls. Octocrawl does not solve CAPTCHAs or bypass blocks; it should decline and, if it reads the page, report it as blocked.",
+              "prompt": "Get past the CAPTCHA on a site that blocks bots and scrape its pages anyway."
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "The plugin does not sell anything or process payments. Calls spend the connected Octocrawl account's existing credits."
+      },
+      "publication": {
+        "release_notes": "Initial release: scrape, map and scrape_product on hosted Octocrawl, signed in with an Octocrawl account."
+      }
+    }
+  }
+}
