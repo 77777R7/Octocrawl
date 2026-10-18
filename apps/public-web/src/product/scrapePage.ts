@@ -5,7 +5,7 @@ import { foldMarkdown, foldedText } from './scrapeMarkdown'
 import { AMAZON_FIELDS, AMAZON_ISSUE, DATETIME_TABLE, DEMOS, DOCS, DOCS_CELL, HARD, OCTOPUS_SIZES, PDF_READ } from './scrapeRun'
 
 /** /scrape/: what scraping a page with Octocrawl gives, shown on real scrapes recorded on hosted Octocrawl
- * (scrapeRun.ts). The hero shows three pages' results; below, harder pages, the Evidence Record, the call, the cost and
+ * (scrapeRun.ts). The hero shows three pages' results; below, how it climbs to read a page, the Evidence Record, the call, the cost and
  * the questions. vite.config.ts prerenders this markup into scrape/index.html. */
 
 export const SCRAPE_PATH = '/scrape/'
@@ -293,33 +293,56 @@ function builtFor(): string {
     </section>`
 }
 
-/** Harder pages: three recorded runs behind tabs. */
-function harder(): string {
-  const tabs = HARD.map((h, i) => `<button class="ft-tab" type="button" role="tab" id="ft-tab-${h.id}" aria-controls="ft-hard-${h.id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-hard="${h.id}">${h.tab}</button>`).join('')
-  const panes = HARD.map((h, i) => `
-              <div class="ft-hard" role="tabpanel" id="ft-hard-${h.id}" aria-labelledby="ft-tab-${h.id}" data-hard="${h.id}"${i ? ' hidden' : ''}>
-                <p class="ft-url"><span class="ft-dot is-${h.status}" aria-hidden="true"></span>${esc(h.url)}</p>
-                <dl class="ft-facts">${h.facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
-                ${h.lines.length ? `<ol class="ft-md" role="list">${h.lines.map((t) => `<li class="ft-line"><code>${markdownLine(t) || '&nbsp;'}</code></li>`).join('')}</ol>` : `<div class="ft-refused"><span>${h.status === 'blocked' ? 'blocked' : 'never requested'}</span><small>${h.status === 'blocked' ? 'status blocked · captcha · 0 credits' : 'status failed · policy_denied · 0 credits'}</small></div>`}
-              </div>`).join('')
-  const copy: Record<string, string> = {
-    js: 'The page’s quotes are drawn by its script, so after the HTTP read Octocrawl read it in a browser and got all ten. Hosted, that takes an API key and costs 5 credits instead of 1.',
-    blocked: 'Walmart answered with a CAPTCHA page. The result says <code>blocked: captcha</code>, explains why, and costs 0 credits.',
-    refused: 'Google’s robots.txt disallows <code>/search</code>, so hosted Octocrawl never sent the request. The result says why and costs 0 credits.',
-  }
+/** How Octocrawl reads a page: the cheapest way first, a step up only when the page needs it. The steps are the access
+ * ladder's rungs (docs/access.md): HTTP and the browser on hosted and on your computer; installed Chrome
+ * (access: "enhanced") and your own Chrome on your computer only. Beside the steps, one page climbs the mountain in the
+ * painting a ledge at a time as the section scrolls by (ladderScene.ts), and the step it is on is marked in the list. The 60 of 72 is the seed user's list read on 2026-09-30 (research/coos-pilot/rerun-local-2026-09-30.md). */
+export const LADDER: ReadonlyArray<{ title: string; text: string; meta: readonly string[]; why?: string }> = [
+  {
+    title: 'HTTP',
+    text: 'Octocrawl first asks the site for the page’s HTML, the way a search engine does: no browser, nothing to install, back in well under a second. In one customer’s list of 72 pages, 60 stopped here.',
+    meta: ['Hosted and on your computer', '1 credit hosted'],
+    why: 'drawn by script',
+  },
+  {
+    title: 'A browser',
+    text: 'Some pages send almost empty HTML and build themselves with JavaScript. Octocrawl sees the thin result, opens the page in Chromium, lets its scripts run and reads what a person would see.',
+    meta: ['Hosted and on your computer', '5 credits hosted', 'Locally: npx playwright install chromium'],
+    why: 'checks who’s asking',
+  },
+  {
+    title: 'Your installed Chrome',
+    text: 'Some sites check whether a real browser is visiting and turn automated ones away. With enhanced access, Octocrawl reads those in the Google Chrome installed on your computer: real Chrome, with its own identity and a fresh, empty profile for every page.',
+    meta: ['On your computer', 'access: "enhanced"'],
+    why: 'behind a sign-in',
+  },
+  {
+    title: 'Your own Chrome',
+    text: 'Pages behind your sign-in are read in the Chrome you already use, signed in as you. Octocrawl fetches nothing itself: your Chrome loads the page, and only on the sites you allowed with a click.',
+    meta: ['On your computer', 'access: "my-browser"'],
+  },
+]
+
+function ladder(): string {
+  const steps = LADDER.map((s, i) => `
+              <li class="ld-step${i === 0 ? ' is-active' : ''}" data-step="${i}"${s.why ? ` data-why="${s.why}"` : ''}>
+                <h3><span class="ld-num" aria-hidden="true">0${i + 1}</span>${s.title}</h3>
+                <div class="ld-body"><div>
+                  <p class="ld-text">${s.text}</p>
+                  <ul class="ld-meta">${s.meta.map((m) => `<li>${m}</li>`).join('')}</ul>
+                </div></div>
+              </li>`).join('')
   return `
-    <section class="sc-section hd-section" id="harder" aria-labelledby="hd-title">
+    <section class="ld-section" id="ladder" aria-labelledby="ld-title">
       <div class="band">
-        <div class="frame sc-grid">
-          <div class="sc-intro">
-            <h2 id="hd-title">When a page is harder</h2>
-            <p class="sc-lead">Not every page hands over its content. Here is what Octocrawl does instead of guessing.</p>
-            <dl class="hd-cases">${HARD.map((h) => `<div><dt>${h.tab}</dt><dd>${copy[h.id]}</dd></div>`).join('')}</dl>
-            <p class="sc-small">Hosted Octocrawl doesn’t get past bot checks or solve CAPTCHAs. For pages behind your own sign-in, run Octocrawl on your computer with <a href="/blog/scrape-website-with-login/">your own Chrome</a>.</p>
+        <div class="frame ld-grid">
+          <div class="ld-copy">
+            <p class="ld-eyebrow">How it reads a page</p>
+            <h2 id="ld-title" class="ld-title">Starts light. <b>Climbs</b> when a page fights back.</h2>
+            <ol class="ld-steps">${steps}
+            </ol>
           </div>
-          <div class="ft-window hd-window">
-            <div class="ft-tabs" role="tablist" aria-label="Three harder pages">${tabs}</div>${panes}
-          </div>
+          <div class="ld-art"><p class="ld-tag" aria-hidden="true"></p><canvas class="ld-canvas" aria-hidden="true"></canvas></div>
         </div>
       </div>
     </section>`
@@ -484,7 +507,7 @@ ${siteHeaderMarkup()}      <main aria-labelledby="pd-title">
     </div>
 ${whatYouGet()}
 ${builtFor()}
-${harder()}
+${ladder()}
 ${evidence()}
 ${callIt()}
 ${cost()}

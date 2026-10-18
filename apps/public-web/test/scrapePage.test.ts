@@ -6,11 +6,12 @@ import { blogPath, posts } from '../scripts/blogPosts.mjs'
 import { pages } from '../scripts/docsPages.mjs'
 import { DASHBOARD_PAGES } from '../scripts/dashboardPages.mjs'
 import { NAV_CAPABILITIES } from '../scripts/siteNav.mjs'
+import { climbAt } from '../src/product/ladderScene'
 import { scrapeSnippet } from '../src/product/scrapeCode'
 import { gridRows } from '../src/product/scrapeDrop'
 import { foldMarkdown, foldedText } from '../src/product/scrapeMarkdown'
-import { BUILT_FOR, FORMAT_CARDS, SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
-import { AMAZON_FIELDS, DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, HARD, OCTOPUS_SIZES, PDF_READ, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
+import { BUILT_FOR, FORMAT_CARDS, LADDER, SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
+import { AMAZON_FIELDS, DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, OCTOPUS_SIZES, PDF_READ, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
 
 // /scrape/: three scrapes recorded on hosted Octocrawl (src/product/scrapeRun.ts) in the hero, then harder pages, the
 // Evidence Record's hash check, the code, the cost and the FAQ.
@@ -50,12 +51,11 @@ describe('the /scrape/ product page', () => {
     }
     expect(DEMOS[0]!.markdownHead.startsWith('# Octopus\n')).toBe(true)
     expect(markup.match(/class="dm-pane"/g)).toHaveLength(3)
-    expect(markup.match(/class="ft-hard"/g)).toHaveLength(HARD.length)
   })
 
   it('opens What you get with the banner, then one item and one card per format, in the same order', () => {
     expect(markup.indexOf('id="what-you-get"')).toBeGreaterThan(markup.indexOf('id="demo"'))
-    expect(markup.indexOf('id="what-you-get"')).toBeLessThan(markup.indexOf('id="harder"'))
+    expect(markup.indexOf('id="what-you-get"')).toBeLessThan(markup.indexOf('id="built-for"'))
     expect(markup).toContain('<div class="fx-light" aria-hidden="true"></div>')
     expect(markup.match(/class="fx-item[ "]/g)).toHaveLength(FORMAT_CARDS.length)
     expect(markup.match(/<div class="fx-card /g)).toHaveLength(FORMAT_CARDS.length)
@@ -77,12 +77,31 @@ describe('the /scrape/ product page', () => {
 
   it('follows What you get with Built for: three cards, each with its figure', () => {
     expect(markup.indexOf('id="built-for"')).toBeGreaterThan(markup.indexOf('id="what-you-get"'))
-    expect(markup.indexOf('id="built-for"')).toBeLessThan(markup.indexOf('id="harder"'))
+    expect(markup.indexOf('id="built-for"')).toBeLessThan(markup.indexOf('id="ladder"'))
     expect(markup).toContain('Built for agents that <b>read</b>, pipelines that <b>learn</b>, and jobs that <b>watch</b>.')
     expect(markup.match(/<li class="bf-card">/g)).toHaveLength(BUILT_FOR.length)
     for (const card of BUILT_FOR) expect(markup).toContain(`data-icon="${card.icon}"`)
     // The cards say who it is for; there is nothing in them to click.
-    expect(markup.slice(markup.indexOf('id="built-for"'), markup.indexOf('id="harder"'))).not.toContain('<a ')
+    expect(markup.slice(markup.indexOf('id="built-for"'), markup.indexOf('id="ladder"'))).not.toContain('<a ')
+  })
+
+  it('follows Built for with how it reads a page: the four steps, then the Evidence Record, and no harder-pages section', () => {
+    expect(markup.indexOf('id="ladder"')).toBeGreaterThan(markup.indexOf('id="built-for"'))
+    expect(markup.indexOf('id="ladder"')).toBeLessThan(markup.indexOf('id="evidence-record"'))
+    expect(markup).not.toContain('id="harder"')
+    expect(markup).toContain('Starts light. <b>Climbs</b> when a page fights back.')
+    expect(LADDER.map((s) => s.title)).toEqual(['HTTP', 'A browser', 'Your installed Chrome', 'Your own Chrome'])
+    // One item per step; the last two say they run on your computer.
+    expect(markup.match(/<li class="ld-step[ "]/g)).toHaveLength(LADDER.length)
+    expect(LADDER.slice(2).every((s) => s.meta[0] === 'On your computer')).toBe(true)
+    // Each step says what it is in more than a line, and what it needs.
+    for (const step of LADDER) expect(step.text.length).toBeGreaterThan(120)
+    expect(markup).toContain('<canvas class="ld-canvas" aria-hidden="true"></canvas>')
+    // The climb runs from the drop to the summit as the track scrolls by, in order and never backwards.
+    const stops = Array.from({ length: 101 }, (_, i) => climbAt(i / 100))
+    expect(stops[0]).toMatchObject({ phase: 'drop', ledge: 0 })
+    expect(stops[100]).toMatchObject({ phase: 'stay', ledge: LADDER.length })
+    for (let i = 1; i < stops.length; i++) expect(stops[i]!.ledge).toBeGreaterThanOrEqual(stops[i - 1]!.ledge)
   })
 
   it('puts one window of recorded output on each format card', () => {
