@@ -1,7 +1,7 @@
 // The Playground's glyphs (scripts/build-docs.mjs, playgroundBody): the home page's octopus redrawn as a grid of glyphs
-// on a canvas, and a slow current of glyphs behind the recent runs. Plain script, no bundle: the hero's own octopus is a
-// WebGL renderer tied to the home page. Every glyph stays on its cell; motion changes which glyph a cell shows and how
-// bright it is, never where it is. Still with reduced motion, paused in a hidden tab or off screen.
+// on a canvas, and a slow current of glyphs behind the recent runs. Plain script, no bundle: the hero's own octopus
+// (src/heroOctopus.ts) is tied to the home page's layout. Every glyph stays on its cell; motion changes which glyph a
+// cell shows and how bright it is, never where it is. Still with reduced motion, paused in a hidden tab or off screen.
 // window.OctoGlyphs.octopus(canvas, anchor) → { set(state), pulse() } with 'idle' | 'running'; window.OctoGlyphs.current(pre).
 // With an anchor (the URL card in front of it), the octopus is drawn wider than the card and centred on it a little
 // high, so its eyes peek over the card's top edge and its arms reach out on both sides.
