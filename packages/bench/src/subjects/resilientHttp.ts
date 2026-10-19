@@ -1,3 +1,4 @@
+import { sourceDataWarnings } from './sourceData.js'
 import {
   estimateTokens,
   fileByteCap,
@@ -709,8 +710,9 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // the rendered page and never raises it. On the failed result the lane's
     // own extract_low_confidence ask already names that hop.
     const render = extracted.render
+    const sourceWarnings = sourceDataWarnings(body, out.finalUrl)
     const clientRenderedCaveat = (): FetchWarning[] => {
-      if (render === undefined || !render.clientRendered) return []
+      if (render === undefined || !render.clientRendered) return sourceWarnings
       trace.push({
         at: wallMs,
         lane: 'http',
@@ -724,7 +726,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           ...(render.listRecords === undefined ? {} : { listRecords: render.listRecords }),
         },
       })
-      return [{
+      return [...sourceWarnings, {
         code: 'client_rendered_suspected',
         message: `The page appears to fill in its data with JavaScript (${render.reason}); this HTTP capture may be a shell.`,
       }]
