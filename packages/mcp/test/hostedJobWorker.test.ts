@@ -117,6 +117,16 @@ describe('hosted job worker', () => {
     expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBeGreaterThanOrEqual(5)
   })
 
+  it('takes the day\'s job pool and credits for the pages a job has left, not a whole slice (no headroom on its last slice)', async () => {
+    const { origin, credits, create, drain } = await setup({ limits: { slicePages: 100 } })
+    const id = await create(parseBatchStartRequest({ urls: ['/a', '/b', '/c'].map((path) => `${origin}${path}`), fastMode: true }))
+    expect((await drain(id)).at(-1)).toBe('completed')
+    expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(3)
+    const crawl = await create(parseCrawlStartRequest({ url: `${origin}/`, maxPages: 2, fastMode: true }), 'crawl')
+    await drain(crawl)
+    expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(5)
+  })
+
   it('runs a crawl in slices under its maxPages', async () => {
     const { origin, seen, store, create, drain } = await setup()
     const id = await create(parseCrawlStartRequest({ url: `${origin}/`, maxPages: 3, fastMode: true }), 'crawl')
