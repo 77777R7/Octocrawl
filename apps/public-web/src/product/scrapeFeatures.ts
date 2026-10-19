@@ -259,7 +259,7 @@ function mountTry(form: HTMLFormElement): void {
 
 /** Cards rise in as they come into view. */
 function mountReveal(root: HTMLElement): void {
-  const cards = [...root.querySelectorAll<HTMLElement>('.sc-grid > :last-child, .rn-wrap, .tr-window')]
+  const cards = [...root.querySelectorAll<HTMLElement>('.sc-grid > :last-child, .tr-window')]
   if (still() || !('IntersectionObserver' in window)) return
   root.classList.add('is-revealing')
   const observer = new IntersectionObserver((entries) => {

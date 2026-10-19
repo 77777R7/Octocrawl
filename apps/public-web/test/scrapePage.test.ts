@@ -7,11 +7,10 @@ import { pages } from '../scripts/docsPages.mjs'
 import { DASHBOARD_PAGES } from '../scripts/dashboardPages.mjs'
 import { NAV_CAPABILITIES } from '../scripts/siteNav.mjs'
 import { climbAt } from '../src/product/ladderScene'
-import { scrapeSnippet } from '../src/product/scrapeCode'
 import { gridRows } from '../src/product/scrapeDrop'
 import { foldMarkdown, foldedText } from '../src/product/scrapeMarkdown'
 import { BUILT_FOR, EVIDENCE_STEPS, FORMAT_CARDS, LADDER, SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
-import { AMAZON_FIELDS, DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, OCTOPUS_SIZES, PDF_READ, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
+import { AMAZON_FIELDS, DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, OCTOPUS_SIZES, PDF_READ } from '../src/product/scrapeRun'
 
 // /scrape/: three scrapes recorded on hosted Octocrawl (src/product/scrapeRun.ts) in the hero, then how it climbs to read a page, the
 // Evidence Record's hash check, the code, the cost and the FAQ.
@@ -162,7 +161,7 @@ describe('the /scrape/ product page', () => {
   })
 
   it('stages the Evidence Record: five steps beside the record of a read, with a refusal behind it and no links', () => {
-    const section = markup.slice(markup.indexOf('id="evidence-record"'), markup.indexOf('id="call-it"'))
+    const section = markup.slice(markup.indexOf('id="evidence-record"'), markup.indexOf('id="cost"'))
     expect(section).toContain('<p class="ev-eyebrow">The Evidence Record</p>')
     expect(section).toContain('Every page comes with its <b>receipt</b>.')
     expect(section).not.toContain('<a ')
@@ -199,15 +198,6 @@ describe('the /scrape/ product page', () => {
       const path = href!.split('#')[0]!
       expect([path, docs.has(path) || blog.has(path) || dashboard.has(path) || path === '/' || existsSync(app(`${path.slice(1)}index.html`))]).toEqual([path, true])
     }
-  })
-
-  it('writes the Wikipedia read as the call it was', () => {
-    expect(scrapeSnippet('curl')).toContain(`-d '${JSON.stringify(WIKIPEDIA_REQUEST)}'`)
-    expect(markup).toContain('api.octocrawl.dev/v1/scrape')
-    expect(scrapeSnippet('cli')).toBe(`npx octocrawl scrape '${WIKIPEDIA_REQUEST.url}' --formats '${JSON.stringify(WIKIPEDIA_REQUEST.formats)}'`)
-    expect(scrapeSnippet('py')).toContain('formats=["markdown", "links", "tables", {"type": "json"')
-    expect(scrapeSnippet('ts')).toContain("new W2L({ baseUrl: 'http://127.0.0.1:8787' })")
-    expect(scrapeSnippet('mcp')).toContain('kingdom, phylum, class, order')
   })
 
   it('hands a reader’s URL to the free tool page, which runs it only when this tab asked', () => {

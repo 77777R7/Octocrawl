@@ -1,11 +1,10 @@
 import { footerMarkup, siteHeaderMarkup } from '../page'
 import { glyphCloud } from '../glyphArt'
-import { scrapeSnippet } from './scrapeCode'
 import { foldMarkdown, foldedText } from './scrapeMarkdown'
 import { AMAZON_FIELDS, AMAZON_ISSUE, DATETIME_TABLE, DEMOS, DOCS, DOCS_CELL, HARD, OCTOPUS_SIZES, PDF_READ } from './scrapeRun'
 
 /** /scrape/: what scraping a page with Octocrawl gives, shown on real scrapes recorded on hosted Octocrawl
- * (scrapeRun.ts). The hero shows three pages' results; below, how it climbs to read a page, the Evidence Record, the call, the cost and
+ * (scrapeRun.ts). The hero shows three pages' results; below, how it climbs to read a page, the Evidence Record, the cost and
  * the questions. vite.config.ts prerenders this markup into scrape/index.html. */
 
 export const SCRAPE_PATH = '/scrape/'
@@ -437,37 +436,6 @@ function evidence(): string {
     </section>`
 }
 
-/** From your code: the Wikipedia read as a call, and where each part runs. */
-function callIt(): string {
-  const tabs = [['curl', 'cURL'], ['mcp', 'MCP'], ['cli', 'CLI'], ['ts', 'TypeScript'], ['py', 'Python']]
-  const rows: Array<[string, string, string]> = [
-    ['Start', '<code>api.octocrawl.dev</code> / <code>mcp.octocrawl.dev</code>', '<code>npx octocrawl serve</code>'],
-    ['Limit', '20 pages a day without a key; 1,000 credits a month with a free account', 'None'],
-    ['Pages that need a browser', 'With an API key', 'Yes'],
-    ['Crawl, batch, actions, signed-in pages', '—', 'Yes'],
-    ['robots.txt', 'Never requests a page it disallows', 'Reads a URL you give it, and records the decision'],
-  ]
-  return `
-    <section class="sc-section cd-section" id="call-it" aria-labelledby="cd-title">
-      <div class="band">
-        <div class="frame sc-grid">
-          <div class="sc-intro">
-            <h2 id="cd-title">From your code</h2>
-            <p class="sc-lead">The Wikipedia page above, with its links, tables and four fields, from curl, an MCP client, the CLI, TypeScript or Python.</p>
-          </div>
-          <div class="cd-window">
-            <div class="cd-tabs" role="tablist" aria-label="Ways to call it">${tabs.map(([id, label], i) => `<button class="cd-tab" type="button" role="tab" id="cd-tab-${id}" aria-controls="cd-code" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-lang="${id}">${label}</button>`).join('')}<button class="cd-copy" type="button" id="cd-copy">Copy</button></div>
-            <pre class="cd-code" id="cd-code" role="tabpanel" aria-labelledby="cd-tab-curl" tabindex="0"><code>${esc(scrapeSnippet('curl'))}</code></pre>
-            <p class="cd-note" id="cd-note"></p>
-          </div>
-        </div>
-        <div class="frame rn-wrap">
-          <table class="rn-table"><thead><tr><th scope="col"><span class="visually-hidden">What</span></th><th scope="col">Hosted</th><th scope="col">On your own computer</th></tr></thead><tbody>${rows.map(([a, b, c]) => `<tr><th scope="row">${a}</th><td>${b}</td><td>${c}</td></tr>`).join('')}</tbody></table>
-        </div>
-      </div>
-    </section>`
-}
-
 function cost(): string {
   const rows: Array<[string, string]> = [['Page read over HTTP', '1'], ['Page read in a browser', '5'], ['Page not found (404, 410)', '1'], ['Blocked, not allowed, or nothing read', '0']]
   return `
@@ -563,7 +531,6 @@ ${whatYouGet()}
 ${builtFor()}
 ${ladder()}
 ${evidence()}
-${callIt()}
 ${cost()}
 ${faq()}
 ${tryIt()}

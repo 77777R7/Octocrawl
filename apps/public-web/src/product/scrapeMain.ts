@@ -1,7 +1,6 @@
 import '../styles.css'
 import './product.css'
 import { trackLinkClicks, trackPageView } from '../analytics'
-import { mountScrapeCode } from './scrapeCode'
 import { mountScrapeFeatures } from './scrapeFeatures'
 import { mountFormats } from './scrapeFormats'
 import { mountBuiltForReveal } from './builtForReveal'
@@ -9,7 +8,7 @@ import { mountGlyphRipple } from '../glyphRipple'
 import { mountSmoothScroll } from '../smoothScroll'
 
 // /scrape/: damped scrolling, the hero's artwork brought to life in its own glyphs, its three recorded scrapes, what
-// you get, who it is built for, how it climbs to read a page, the hash check and the code.
+// you get, who it is built for, how it climbs to read a page, and the hash check.
 mountSmoothScroll()
 mountHeroArt()
 const shell = document.querySelector<HTMLElement>('.product-page')
@@ -23,8 +22,6 @@ const evidence = document.querySelector<HTMLElement>('#evidence-record')
 if (evidence) void import('./evidenceStage').then(({ mountEvidenceStage }) => mountEvidenceStage(evidence)).catch(() => { /* The record shows as it is. */ })
 const formats = document.querySelector<HTMLElement>('#what-you-get')
 if (formats) mountFormats(formats)
-const code = document.querySelector<HTMLElement>('#call-it')
-if (code) mountScrapeCode(code)
 for (const cloud of document.querySelectorAll<HTMLElement>('.glyph-cloud[data-seed]')) mountGlyphRipple(cloud)
 trackPageView()
 trackLinkClicks(document.body)
