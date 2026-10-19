@@ -183,6 +183,9 @@
   - 全局开关现在是**关**的，打开之前先完成 PR ⑥ 的验收。
 - [x] **D8**（PR ⑥ 第一轮发现）worker 在 2 GiB 时，docs.python.org/3/ 的 30 页 crawl 每次投递都把 JavaScript 堆撑爆（大约 1 GB）。容器崩溃，站点租约 16 分钟不释放，同一个站的其他任务只能干等。已改成 4 GiB、`--max-old-space-size=3072`（`octocrawl-jobs-w2-mem4g`），之后这个任务跑完了。哪个页面撑爆了内存还没查清。
 - [x] **D9**（PR ⑥ 第一轮发现）每段都按 N 加 1 页占当天的任务页数池，不看任务还剩几页，一个 30 页的 crawl 也占 101 页。18 个小任务就把 2,000 页的账户日上限占满了，实际读的大约 280 页。已改成只按任务剩下的页数预留，剩下的都放得进这一段时不加余量页，credits 也同样处理。maxCredits 封顶时，收费不超过预留。
+- [x] **D10**（PR ⑥ 第二轮发现）worker 建引擎时没有套用 hosted 的 5 MiB 文件上限（网关有）。docs.python.org 的 crawl 把 56 MB 的 `python-3.15-docs-html.tar.bz2` 当页面读了进来，worker 的内存（D8）就是被它撑爆的。另外 `/pages` 一次取 50 或 100 项时，响应超过 Cloud Run 的 32 MiB 上限，返回 500。已修：worker 改用网关同一个 `hostedPolicy()`；分页按大约 16 MB 的字节预算截断，单条超过预算时单独返回一条。
+- [ ] **E7**（PR ⑥ 第二轮发现，引擎问题，本地也有）`application/octet-stream` 的压缩包被当成 `success`，Markdown 是一堆乱码。不认识的二进制类型应该判失败，不能算读到了内容。
+- [ ] **R7**（PR ⑥ 第二轮发现）`api.octocrawl.dev` 前面的 Cloudflare，会用 `error code: 1010`（浏览器签名）拦掉 Python `urllib` 默认的 User-Agent。Node 的 fetch 不受影响。要核对 Python SDK 的 UA 会不会被拦。
 - [ ] **D7**（重试次数定下来时提出）worker 记下同一段连续失败的次数，到 N 次就把任务记为失败（`delivery_failed`），免得一段一直失败时每 10 分钟重试一次、持续 37 天。
 
 ## PR ⑥ 验收

@@ -51,6 +51,7 @@ describe('hosted job worker', () => {
       if (path === '/sitemap.xml') { res.writeHead(404).end(); return }
       seen.push(path)
       if (path === options.gate) return
+      if (path === '/archive.tar.bz2') { res.writeHead(200, { 'content-type': 'application/octet-stream' }).end(Buffer.alloc(6 * 1024 * 1024, 7)); return }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(path))
     }
     const server = createServer(handler)
@@ -125,6 +126,20 @@ describe('hosted job worker', () => {
     const crawl = await create(parseCrawlStartRequest({ url: `${origin}/`, maxPages: 2, fastMode: true }), 'crawl')
     await drain(crawl)
     expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(5)
+  })
+
+  it('reads under hosted Octocrawl\'s 5 MiB file cap, as a scrape does', async () => {
+    const { origin, store, files, deps, create, drain } = await setup()
+    // The engine's own channels, as in production: the test's channels are built on a policy of their own.
+    const base = deps.engineOptions!()
+    deps.engineOptions = () => ({ ...base, channelsFor: undefined })
+    const id = await create(parseBatchStartRequest({ urls: [`${origin}/archive.tar.bz2`, `${origin}/a`], fastMode: true }))
+    expect((await drain(id)).at(-1)).toBe('completed')
+    const job = (await store.get(id))!
+    const items = gunzipSync(files.objects.get(job.segments![0]!)!.body).toString('utf8').split('\n').map((line) => JSON.parse(line) as { url: string; status: string; failureReason: string | null; markdown: string | null })
+    const archive = items.find((item) => item.url.endsWith('.tar.bz2'))!
+    expect(archive).toMatchObject({ status: 'failed', failureReason: 'body_too_large' })
+    expect(archive.markdown ?? '').toHaveLength(0)
   })
 
   it('runs a crawl in slices under its maxPages', async () => {
