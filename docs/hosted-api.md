@@ -139,11 +139,14 @@ The worker is deployed from the hosted API's image, not public, one slice an ins
 ```sh
 gcloud run deploy octocrawl-jobs --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
   --service-account="$W2L_RUNTIME_SA" --no-allow-unauthenticated --ingress=all \
-  --cpu=1 --memory=2Gi --concurrency=1 --min-instances=0 --max-instances=3 --timeout=900s \
-  --command=node --args=packages/mcp/dist/hostedJobsCli.js --revision-suffix="$W2L_REVISION_SUFFIX" --env-vars-file=jobs-env.yaml
+  --cpu=1 --memory=4Gi --concurrency=1 --min-instances=0 --max-instances=3 --timeout=900s \
+  --command=node --args=packages/mcp/dist/hostedJobsCli.js --revision-suffix="$W2L_REVISION_SUFFIX" --env-vars-file=jobs-env.yaml \
+  --update-env-vars=NODE_OPTIONS=--max-old-space-size=3072
 gcloud run services add-iam-policy-binding octocrawl-jobs --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
   --member="serviceAccount:octocrawl-jobs-tasks@${W2L_PROJECT_ID}.iam.gserviceaccount.com" --role=roles/run.invoker
 ```
+
+4 GiB and a 3 GB JavaScript heap since 2026-10-20 (`octocrawl-jobs-w2-mem4g`): at 2 GiB a 30-page crawl of docs.python.org/3/ ran the heap out of memory (`FATAL ERROR: Ineffective mark-compacts near heap limit`, about 1 GB) on every delivery, until the change.
 
 The API takes the same variables with `--update-env-vars` on its next release. Verified on 2026-10-20 (worker `octocrawl-jobs-w1-5141c6d`, API `octocrawl-api-jobs-5141c6d`, tag `h28jobs`, rollback `h27shares`), with a key issued for the purpose and revoked after: a 6-URL batch and a 5-page crawl through the real queue, worker and bucket each completed in one slice in about 11 s, paged back, exported by a signed link, were charged 6 and 4 credits once each (`creditSettles`), and had their expiry queued 7 days on. A request to the worker without a token is 403 from Cloud Run, and with another account's token 401 from the worker. The switch was left off.
 

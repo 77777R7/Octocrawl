@@ -71,6 +71,8 @@ export interface SliceOutcome { status: 200 | 503; outcome: string }
 
 /** Pages a slice may store past its limit: the engine's workers less one (workerCount 2 below). */
 const SLICE_HEADROOM = 1
+/** A crawl's page limit on hosted Octocrawl (hostedJobRoutes.ts JOB_MAX_CRAWL_PAGES), for a request stored without one. */
+const JOB_MAX_PAGES = 500
 /** A slice's lease outlasts a delivery's dispatch deadline (900 s). */
 const LEASE_FLOOR_MS = 16 * 60_000
 const ERROR_STATUSES = new Set(['failed', 'blocked', 'cancelled', 'budget_exceeded'])
@@ -135,6 +137,11 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
   if (allowed <= 0) return pass((j) => ({ ...j, status: 'completed', failureReason: 'max_credits' }))
   // Under maxCredits the headroom page must fit too.
   let pages = Math.min(limits.slicePages, job.credits.maxCredits === null ? allowed : Math.max(1, allowed - SLICE_HEADROOM))
+  // No more than the job has left: a batch's URLs not yet read, a crawl's pages under its maxPages. A slice that asks for
+  // all of them gets no headroom, as there is no page past them; the day's pool and the credits are taken for what is left.
+  const left = Math.max(1, (job.kind === 'batch' ? (request as ParsedBatchStartRequest).urls.length : ((request as ParsedCrawlStartRequest).maxPages ?? JOB_MAX_PAGES)) - job.counts.pages - job.counts.errors)
+  const headroom = left > pages ? SLICE_HEADROOM : 0
+  pages = Math.min(pages, left)
 
   const tag = holder.slice(0, 8)
   const taskRoot = join(deps.workRoot, `${jobId}-${holder}`)
@@ -166,11 +173,13 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     const day = now().toISOString().slice(0, 10)
     const pools = (n: number) => [{ id: `${day}-jobs`, limit: limits.jobsDaily, amount: n }, { id: `${day}-jobs-account-${job.uid}`, limit: limits.jobsAccountDaily, amount: n }]
     const reservationId = `${jobId}-${generation}-${holder}`
-    let reservedPages = pages + SLICE_HEADROOM
+    // Under maxCredits the reservation stays within what is left of it; a page a drain stores past it is not charged.
+    let reservedPages = Math.min(pages + headroom, job.credits.maxCredits === null ? Number.POSITIVE_INFINITY : allowed)
     let reserved = await deps.credits.reserve(job.uid, reservedPages * price, pools(reservedPages), now(), reservationId)
     if (!reserved.ok && reserved.limited === 'credits' && reserved.remaining >= price) {
       reservedPages = Math.floor(reserved.remaining / price)
-      pages = Math.max(1, reservedPages - SLICE_HEADROOM)
+      // What is left of the job fits: no headroom needed. Otherwise a page of the reservation is the headroom.
+      pages = left <= reservedPages ? left : Math.max(1, reservedPages - SLICE_HEADROOM)
       reserved = await deps.credits.reserve(job.uid, reservedPages * price, pools(reservedPages), now(), reservationId)
     }
     if (!reserved.ok) {
@@ -221,7 +230,10 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     await deps.files.upload(segment, new Uint8Array(gzipSync(result.items.map((item) => JSON.stringify(item)).join('\n'))), { contentType: 'application/gzip' })
     foldCheckpoint(taskDir)
     await deps.files.upload(nextCheckpoint, new Uint8Array(readFileSync(join(taskDir, CHECKPOINT_FILENAME))), { contentType: 'application/vnd.sqlite3' })
-    const { used, perKind } = priceOf(result.charges)
+    // Charged what its pages cost, never more than it reserved (the headroom page past a maxCredits cap is free).
+    const priced = priceOf(result.charges)
+    const used = Math.min(priced.used, reservedPages * price)
+    const perKind = priced.perKind
     const errors = result.charges.filter((charge) => ERROR_STATUSES.has(charge.status)).length
     const idle = result.items.length === 0 && result.status === 'paused'
     const idleSlices = idle ? (job.idleSlices ?? 0) + 1 : 0
