@@ -357,6 +357,13 @@ Hosted phase 1 uses the API's existing hosted mode, which refuses private addres
 | H4 · Teams and payment | Invites and roles, key scopes and budgets, payment through a merchant of record (P4), a read-only results grid, schedules and Monitor | Starts with P4; done at the first outside payment |
 | H5 · Breadth | Results grid with added columns (the user's own model key), hosted search, linear pipeline templates, a verified adapter catalog (the Alexandria-like idea, which first needs Howard to take it out of [Paused](#paused)), hosted enhanced access | Each item decided from H4's usage data |
 
+**H0 done 2026-10-19.** Its three pieces:
+- Load test: [2026-10-19-h0-load-test-714af563.md](research/hosted/2026-10-19-h0-load-test-714af563.md) (#598), direct. It measured $0.013 per 1,000 HTTP pages and $0.053 per 1,000 browser pages on easy sites, at list price.
+- Egress comparison: [2026-10-19-h0-egress-714af563.md](research/hosted/2026-10-19-h0-egress-714af563.md) (#600), direct and through the gateway. Both arms read 72 of 74 pages, and the gateway was about three times slower, so H1 starts without a proxy route. Blocking sites were not in the set.
+- The `W2L_SITE_DAILY` split is a code change (#599), not a record: keyless callers together get `W2L_KEYLESS_TOTAL_DAILY` (500) and each account `W2L_ACCOUNT_DAILY` (500). It is not deployed yet.
+
+H1 is next.
+
 ### P3 · Browser lane and Pro (weeks 11–14)
 
 Moved after PA on 2026-10-05. A `my-browser` lane over Chrome remote debugging is PA's item 8; the extension below remains the design for queue mode and for reading without remote debugging.
