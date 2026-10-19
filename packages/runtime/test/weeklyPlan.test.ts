@@ -21,7 +21,7 @@ describe('weekly rotation', () => {
     const ids = Array.from({ length: 36 }, (_, i) => `T${String(i + 1).padStart(3, '0')}`)
     const groups = rotationGroups(ids)
     expect(groups.map((g) => g.length)).toEqual([10, 10, 10, 6])
-    expect(groups[0][0]).toBe('T001')
+    expect(groups[0]?.[0]).toBe('T001')
     expect(groups[3]).toEqual(['T031', 'T032', 'T033', 'T034', 'T035', 'T036'])
     expect(groups.flat()).toEqual(ids)
   })
@@ -118,16 +118,16 @@ describe('weekly summary', () => {
 
   it('gives each Octocrawl arm its gap to the best competitor arm, by part', () => {
     const rows = summaryRows([arm('free', false, [30, 24, 2, 4]), arm('steel', false, [35, 24, 6, 5]), arm('firecrawl', true, [40, 25, 10, 5]), arm('zenrows', true, [38, 25, 12, 1])])
-    expect(rows[0].gap).toEqual({ all: 10, healthy: 1, challenge: 10, rotation: 1 })
-    expect(rows[1].gap).toEqual({ all: 5, healthy: 1, challenge: 6, rotation: 0 })
-    expect(rows[2].gap).toBeNull()
-    expect(rows[0].status).toBe('run')
+    expect(rows[0]?.gap).toEqual({ all: 10, healthy: 1, challenge: 10, rotation: 1 })
+    expect(rows[1]?.gap).toEqual({ all: 5, healthy: 1, challenge: 6, rotation: 0 })
+    expect(rows[2]?.gap).toBeNull()
+    expect(rows[0]?.status).toBe('run')
   })
 
   it('keeps a competitor arm that did not run as not_run and leaves the gap unknown rather than 0', () => {
     const rows = summaryRows([arm('free', false, [30, 24, 2, 4]), arm('firecrawl', true, null)])
-    expect(rows[1].status).toBe('not_run (no key)')
-    expect(rows[1].verified).toBeNull()
-    expect(rows[0].gap).toEqual({ all: null, healthy: null, challenge: null, rotation: null })
+    expect(rows[1]?.status).toBe('not_run (no key)')
+    expect(rows[1]?.verified).toBeNull()
+    expect(rows[0]?.gap).toEqual({ all: null, healthy: null, challenge: null, rotation: null })
   })
 })
