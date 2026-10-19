@@ -230,6 +230,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 - 2026-10-19：清单写成，核实基于 `2ffd7f25`。基线数字待 P0.1，开发集基线待 R1b。
 - 2026-10-20：决定 1、3、7、9 已定；P0.2 的 PR #609 已开，P0.5 进行中。
 - 2026-10-20：P0.1 基线跑完，在 `main` `1c4d9178`（#609、#610 之后）。92 题 enhanced（Steel 数据中心 grant，走 Clash）：verified 58/92，假成功 2（T010、T031），p50 6251 ms，p95 31203 ms，Steel 费用 $0.0251；健康 25 题 23 过（T027 http_error 400、T052 cloudflare_challenge）；T060 本轮 verified，不再是假成功，原因 unknown。记录 `research/access/runs/2026-10-20-pa-next-baseline-all-1c4d9178.md`。16 题 installed_chrome（Clash 出口，复用 10-14 验收的 grant）：12/16 过，未过 T045、T046、T068（DataDome）、T048（Cloudflare），假成功 0，费用 $0。记录 `research/access/runs/2026-10-20-pa-next-baseline-ic16-1c4d9178.md`。
+- 2026-10-20：P0.4 每周脚本首次本地运行（代码 `main` `259bcef3` 加本 PR，记录名用 259bcef3；走 Clash，周 2026-W43，轮换第 3 组只有 6 题，共 47 题）。免费臂 36/47（健康 23/25，16 题 installed_chrome 10/16，高于验收下限 7、低于 11；轮换 3/6），假成功 0，$0；Steel 臂 28/47（16 题只过 2），假成功 1，$0.0049；Firecrawl 37/47，假成功 4，账户实扣 70 credits；ZenRows 34/47，假成功 3，实扣 338 credits（$0.338）。与最好竞品的差距：免费臂 1（16 题上 4），Steel 臂 9。记录 `research/access/runs/2026-10-20-weekly-{free,steel,firecrawl,zenrows,summary}-259bcef3.md`。计划任务未建，待 Howard 点头。
 
 ## 下次从这里继续
 
