@@ -609,6 +609,11 @@ export class CrawlOrchestrator {
     }
     // Pages on the host the seed redirected to belong to the crawl, as before.
     for (const step of contentful) if (step.depth === 0) frontier.followSeedRedirect(step.result!.evidence.finalUrl)
+    if (spec.skipFetchedOnResume === true) {
+      // Every URL the task has a step for is done; the caller enqueues the contentful pages' links, and the frontier refuses the done ones.
+      for (const step of prior) frontier.markVisited(step.canonicalUrl)
+      return contentful
+    }
     for (const step of contentful) frontier.seed(step.url, step.depth)
     return contentful
   }

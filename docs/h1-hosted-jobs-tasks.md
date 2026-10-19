@@ -70,9 +70,11 @@
 
 这是方案里最不确定的一个 PR。做不下去就停下，回去改方案（方案 §12）。
 
-- [ ] **E1** 先写失败测试：crawl 分三段续跑，每个 URL 只请求一次。
-  - 改 `restoreFrontier`：已读页标为已访问，只把它们的链接放回队列。
-  - 改 `orchestrator.test.ts:311` 的期望，并说明本地 `resume_crawl` 也跟着变了（写进 CHANGELOG）。
+- [x] **E1** 先写失败测试：crawl 分三段续跑，每个 URL 只请求一次。
+  - 做法和原计划不同：没改默认行为，改为加一个选项 `CrawlSpec.skipFetchedOnResume`，hosted worker 打开它。打开后，续跑时任务已有步骤的 URL（不论结果）都标为已访问，只把读到内容的页的链接放回队列。
+  - 为什么不改默认：本地 crawl 的页面列表只读最新一次 attempt（engine.ts:1086、2160），续跑时重读就是为了让新 attempt 自己列全所有页。改了默认，本地 `resume_crawl` 之后的列表会缺掉前面的页。`orchestrator.test.ts:311` 的期望保持不变。
+  - 也没用 `useCached`：缓存页仍要等每站间隔和 Crawl-delay，每段都会白等；而且每段都把旧步骤复制进新 attempt，checkpoint 会按平方增长。
+  - 测试：三段续跑每个 URL 只读一次；上一段失败的页不重读；页数预算跨段累计。
 - [ ] **E2** 引擎能导出、也能接受每站的最后请求时间和已知 Crawl-delay。
   - 测试：跨段的请求间隔不小于 Crawl-delay。
 - [ ] **E3** batch 续跑时可以只取一部分站点的 URL（按站过滤）。

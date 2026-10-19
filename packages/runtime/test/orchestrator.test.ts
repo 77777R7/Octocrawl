@@ -332,6 +332,43 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(resumeReport.cachedPages).toBe(0)
   })
 
+  it('resumes from where it stopped with skipFetchedOnResume: across three runs every URL is fetched once (hosted slices, H1 E1)', async () => {
+    const pages = new Map([
+      [SEED, outcome(SEED, [ITEM_A, ITEM_B])],
+      [ITEM_A, outcome(ITEM_A, [ITEM_B])],
+      [ITEM_B, outcome(ITEM_B, [])],
+    ])
+    const store = new MemoryTaskStore()
+    const first = new FakeAtom(pages)
+    const firstReport = await interruptedAfterFirstPage(first, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', skipFetchedOnResume: true }, store)
+    expect(first.fetches).toEqual([SEED])
+    const second = new FakeAtom(pages)
+    const secondReport = await interruptedAfterFirstPage(second, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', resumeFrom: firstReport.taskId, skipFetchedOnResume: true }, store)
+    expect(secondReport.status).toBe('paused')
+    expect(second.fetches).toEqual([ITEM_A])
+    const third = new FakeAtom(pages)
+    const thirdReport = await runWith(third, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', resumeFrom: firstReport.taskId, skipFetchedOnResume: true }, store).go()
+    expect(thirdReport.status).toBe('completed')
+    expect(third.fetches).toEqual([ITEM_B])
+    expect((await store.listSteps(firstReport.taskId)).map((step) => step.url).sort()).toEqual([SEED, ITEM_A, ITEM_B])
+  })
+
+  it('does not refetch a page that failed in an earlier run with skipFetchedOnResume, and keeps the page budget across runs', async () => {
+    const blocked: ScrapeOutcome = { result: { ...page(ITEM_A), status: 'blocked', blockReason: 'bot_detected_generic', markdown: '' }, links: [] }
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A, ITEM_B])], [ITEM_A, blocked], [ITEM_B, outcome(ITEM_B, [])]])
+    const store = new MemoryTaskStore()
+    const spec = { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', skipFetchedOnResume: true, budget: { maxPages: 2, maxWallMs: null, maxCostUsd: null, maxTokens: null } }
+    const firstReport = await interruptedAfterFirstPage(new FakeAtom(pages), spec, store)
+    const second = new FakeAtom(pages)
+    await interruptedAfterFirstPage(second, { ...spec, resumeFrom: firstReport.taskId }, store)
+    expect(second.fetches).toEqual([ITEM_A])
+    const third = new FakeAtom(pages)
+    const thirdReport = await runWith(third, { ...spec, resumeFrom: firstReport.taskId }, store).go()
+    // Two pages are the task's budget: the seed and the blocked page. B is not fetched, and A is not fetched again.
+    expect(third.fetches).toEqual([])
+    expect(thirdReport.budgetExceeded).toBe('pages')
+  })
+
   it('never fetches filtered links and keeps the path filters of a SQLite task on resume', async () => {
     const { mkdtemp, rm } = await import('node:fs/promises')
     const { tmpdir } = await import('node:os')

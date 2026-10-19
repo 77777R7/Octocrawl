@@ -168,6 +168,12 @@ export interface CrawlSpec {
   allowlistedDomains: readonly string[]
   resumeFrom: string | null
   useCached: boolean
+  /**
+   * A resumed crawl fetches no URL the task already has a step for, whatever became of it, and follows the links of
+   * its contentful pages from where it stopped (hosted job slices, ROADMAP PH H1). Default false: a resumed crawl
+   * fetches its pages again, so that the new attempt lists every page on its own.
+   */
+  skipFetchedOnResume?: boolean
   /** When set, openRun updates this existing task instead of inserting a new id. */
   taskId?: string
   /**
