@@ -376,7 +376,7 @@ export async function compareChannels(
   return { perUrl }
 }
 
-function summarize(perUrl: { url: string; arms: ArmOutcome[] }[]): string {
+export function summarize(perUrl: { url: string; arms: ArmOutcome[] }[]): string {
   const lines: string[] = []
   lines.push('# Live channel comparison', '')
   lines.push('| URL | arm | status | class | failure | wall | tokens | cost | handoff |')
@@ -395,26 +395,30 @@ function summarize(perUrl: { url: string; arms: ArmOutcome[] }[]): string {
   }
 
   lines.push('', '## Summary per arm', '')
-  lines.push('| arm | contentful | false success | median wall | total cost | handoffs |')
-  lines.push('|---|---|---|---|---|---|')
+  lines.push('| arm | contentful | no result | false success | median wall | total cost | handoffs |')
+  lines.push('|---|---|---|---|---|---|---|')
   const armNames = ['http', 'browser_local', 'browserbase', 'steel']
   for (const name of armNames) {
-    const results = perUrl
-      .map((p) => p.arms.find((a) => a.arm === name)?.result)
-      .filter((r): r is ArmResult => r !== undefined)
-    if (results.length === 0) {
-      lines.push(`| ${name} | SKIPPED | — | — | — | — |`)
+    // Every URL the arm ran on stays in its denominator: one that gave no result (an error or a timeout) is no_result.
+    const ran = perUrl
+      .map((p) => p.arms.find((a) => a.arm === name))
+      .filter((a): a is ArmOutcome => a !== undefined && !(a.result === undefined && a.error?.startsWith('SKIPPED') === true))
+    if (ran.length === 0) {
+      lines.push(`| ${name} | SKIPPED | — | — | — | — | — |`)
       continue
     }
+    const results = ran.map((a) => a.result).filter((r): r is ArmResult => r !== undefined)
+    const noResult = ran.length - results.length
     const contentful = results.filter((r) => r.contentful).length
     const falsePos = results.filter((r) => r.falseSuccess).length
     const walls = results.map((r) => r.wallMs).sort((x, y) => x - y)
     const median = walls.length > 0 ? walls[Math.floor(walls.length / 2)] : null
     // Unknown is not zero: one attempt without a stated cost makes the total unknown.
-    const cost = results.some((r) => r.costUsd === null) ? null : results.reduce((s, r) => s + (r.costUsd ?? 0), 0)
+    // An attempt with no result may still have cost something: its cost is unknown too.
+    const cost = noResult > 0 || results.some((r) => r.costUsd === null) ? null : results.reduce((s, r) => s + (r.costUsd ?? 0), 0)
     const handoffs = results.filter((r) => r.handoff !== null).length
     lines.push(
-      `| ${name} | ${contentful}/${results.length} | ${falsePos} | ${median ?? '—'} | ${cost === null ? 'unknown' : cost.toFixed(4)} | ${handoffs} |`,
+      `| ${name} | ${contentful}/${ran.length} | ${noResult} | ${falsePos} | ${median ?? '—'} | ${cost === null ? 'unknown' : cost.toFixed(4)} | ${handoffs} |`,
     )
   }
   return lines.join('\n')

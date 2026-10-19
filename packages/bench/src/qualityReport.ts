@@ -13,11 +13,11 @@ export function renderQualityReport(run: BenchmarkRun): string {
     '',
     '## Subjects',
     '',
-    '| Subject | verified completion | false success | P95 wall | cost / contentful | escalations |',
+    '| Subject | contentful, no failed check | false success | P95 wall | cost / contentful | escalations |',
     '| --- | ---: | ---: | ---: | ---: | ---: |',
   ]
   for (const score of run.scores) {
-    out.push(`| ${score.subjectId} | ${pct(score.verifiedCompletionRate)} | ${pct(score.falseSuccessRate)} | ${score.p95WallMs}ms | ${money(score.knownCostPerContentfulPageUsd)} | ${score.escalationCount} |`)
+    out.push(`| ${score.subjectId} | ${pct(score.contentfulUncontradictedRate)} | ${pct(score.falseSuccessRate)} | ${score.p95WallMs}ms | ${money(score.knownCostPerContentfulPageUsd)} | ${score.escalationCount} |`)
   }
   for (const tier of ['L0', 'L1', 'L2'] as const) {
     if (tier === 'L0') {

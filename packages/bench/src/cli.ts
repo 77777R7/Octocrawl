@@ -60,7 +60,7 @@ async function main() {
     )
     console.log(`  Median wall time: ${score.medianWallMs}ms`)
     console.log(`  P95 wall time: ${score.p95WallMs}ms`)
-    console.log(`  Verified completion: ${score.verifiedCompletionRate === null ? 'unknown' : (score.verifiedCompletionRate * 100).toFixed(1) + '%'}`)
+    console.log(`  Contentful, no failed check: ${score.contentfulUncontradictedRate === null ? 'unknown' : (score.contentfulUncontradictedRate * 100).toFixed(1) + '%'}`)
     console.log(`  Escalations: ${score.escalationCount}`)
     console.log(`  Budget violations: ${score.budgetViolations}`)
     console.log()
