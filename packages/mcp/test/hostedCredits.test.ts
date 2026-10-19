@@ -58,6 +58,14 @@ describe('the in-memory ledger', () => {
     expect(store.balances.get('account-1')).toEqual({ month: '2026-10', grant: 1, purchased: 4 })
   })
 
+  it('tells an account\'s balance without taking anything: this month\'s grant, then what a call took', async () => {
+    const store = new MemoryCreditsStore(10)
+    expect(await store.balance('account-1', OCT)).toBe(10)
+    await store.reserve('account-1', 3, [SITE], OCT)
+    expect(await store.balance('account-1', OCT)).toBe(7)
+    expect(await store.balance('account-1', new Date('2026-11-01T00:00:00Z'))).toBe(10)
+  })
+
   it('refuses when the site has served its day, taking nothing from the account', async () => {
     const store = new MemoryCreditsStore(10)
     store.site.set(SITE.id, SITE.limit)
@@ -193,6 +201,16 @@ describe('the Firestore ledger', () => {
     expect((firestore.commits.at(-1) as { writes: unknown[] }).writes).toHaveLength(2)
     // Ids sort newest first in Firestore's default order.
     expect(requestLineId(new Date(OCT.getTime() + 1_000), 'b') < requestLineId(OCT, 'a')).toBe(true)
+  })
+
+  it('reads a balance without a commit, a new account at the monthly grant', async () => {
+    const firestore = fakeFirestore()
+    const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 10, firestore.fetcher)
+    expect(await store.balance('account-1', OCT)).toBe(10)
+    await store.reserve('account-1', 4, [SITE], OCT)
+    expect(await store.balance('account-1', OCT)).toBe(6)
+    expect(firestore.commits).toHaveLength(1)
+    await expect(store.balance('../x', OCT)).rejects.toThrow(/malformed/)
   })
 
   it('refuses past the balance or the site\'s day without writing, and rejects a malformed account id', async () => {

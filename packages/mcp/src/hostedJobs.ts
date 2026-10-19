@@ -75,6 +75,8 @@ export interface HostedJobStore {
   cancel(id: string, workspaceId: string, now?: Date): Promise<CancelResult>
   /** Marks a finished job expired once its results are deleted. */
   expire(id: string, now?: Date): Promise<ExpireResult>
+  /** Fails a job not yet finished, with a reason, freeing its slot as a cancel does (a job whose slice could not be queued). */
+  fail(id: string, reason: string, now?: Date): Promise<CancelResult>
 }
 
 /** A claim belongs to the workspace it names first, so a replay can only ever answer that workspace's own job. */
@@ -176,6 +178,14 @@ export class MemoryHostedJobStore implements HostedJobStore {
     this.jobs.set(id, next)
     return { ok: true, job: next, promoted: this.leave(workspaceId, id) }
   }
+  async fail(id: string, reason: string, now = new Date()): Promise<CancelResult> {
+    const job = this.jobs.get(id)
+    if (!job) return { ok: false, reason: 'missing' }
+    if (FINISHED.has(job.status)) return { ok: true, job, promoted: null }
+    const next: HostedJob = { ...transitions.finish(job, 'failed', now), failureReason: reason, lease: job.lease }
+    this.jobs.set(id, next)
+    return { ok: true, job: next, promoted: this.leave(job.workspaceId, id) }
+  }
   async expire(id: string): Promise<ExpireResult> {
     const job = this.jobs.get(id)
     if (!job) return { ok: false, reason: 'missing' }
@@ -234,7 +244,7 @@ export class FirestoreHostedJobStore implements HostedJobStore {
       const next = transitions.create(job, slots.value ?? { running: [], queued: [] }, limits)
       if ('busy' in next) return { ok: false, reason: 'busy', running: slots.value!.running.length, queued: slots.value!.queued.length }
       const writes = [this.jobWrite(next.job, { exists: false }), this.slotsWrite(job.workspaceId, next.slots, slots.updateTime)]
-      if (claim) writes.push({ update: { name: this.name('hostedJobIdempotency', claim.id), fields: { jobId: { stringValue: job.id }, fingerprint: { stringValue: claim.fingerprint }, expireAt: { timestampValue: claim.expireAt } } }, currentDocument: held?.updateTime ? { updateTime: held.updateTime } : { exists: false } })
+      if (claim) writes.push({ update: { name: this.name('hostedJobIdempotency', claim.id), fields: { uid: { stringValue: job.uid }, jobId: { stringValue: job.id }, fingerprint: { stringValue: claim.fingerprint }, expireAt: { timestampValue: claim.expireAt } } }, currentDocument: held?.updateTime ? { updateTime: held.updateTime } : { exists: false } })
       return await this.commit(token, writes) ? { ok: true, job: next.job, replayed: false } : undefined
     })
   }
@@ -274,6 +284,16 @@ export class FirestoreHostedJobStore implements HostedJobStore {
       if (read.value === null || read.value.workspaceId !== workspaceId) return { ok: false, reason: 'missing' }
       if (FINISHED.has(read.value.status)) return { ok: true, job: read.value, promoted: null }
       return this.leaveWith(token, { ...transitions.finish(read.value, 'cancelled', now), lease: read.value.lease }, read.updateTime!)
+    })
+  }
+
+  async fail(id: string, reason: string, now = new Date()): Promise<CancelResult> {
+    checkedId(id, 'job id')
+    return this.retry(async (token) => {
+      const read = await this.readJob(id, token)
+      if (read.value === null) return { ok: false, reason: 'missing' }
+      if (FINISHED.has(read.value.status)) return { ok: true, job: read.value, promoted: null }
+      return this.leaveWith(token, { ...transitions.finish(read.value, 'failed', now), failureReason: reason, lease: read.value.lease }, read.updateTime!)
     })
   }
 

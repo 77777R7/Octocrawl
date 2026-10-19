@@ -131,6 +131,8 @@ export interface CreditsStore {
   /** Gives back what the call did not cost and adds it to the account's usage for the day, with the call's request line
    * when there is one; returns the balance after. */
   settle(reservation: Reservation, used: number, kind: UsageKind, now?: Date, note?: RequestNote): Promise<{ remaining: number }>
+  /** The credits the account has this month, taking nothing; a hosted job's start checks it covers a slice. */
+  balance(uid: string, now?: Date): Promise<number>
 }
 
 export function utcMonth(now: Date): string { return now.toISOString().slice(0, 7) }
@@ -174,6 +176,10 @@ export class MemoryCreditsStore implements CreditsStore {
     this.balances.set(uid, left)
     for (const quota of quotas) this.site.set(quota.id, (this.site.get(quota.id) ?? 0) + 1)
     return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased } }
+  }
+  async balance(uid: string, now = new Date()): Promise<number> {
+    const have = current(this.balances.get(uid) ?? null, utcMonth(now), this.monthlyGrant)
+    return have.grant + have.purchased
   }
   async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date(), note?: RequestNote): Promise<{ remaining: number }> {
     const refund = Math.max(0, reservation.fromGrant + reservation.fromPurchased - used)
@@ -229,6 +235,14 @@ export class FirestoreCreditsStore implements CreditsStore {
     if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(projectId)) throw new Error('W2L_FIRESTORE_PROJECT_ID is invalid')
     this.resource = `projects/${projectId}/databases/(default)/documents`
     this.endpoint = `https://firestore.googleapis.com/v1/${this.resource}`
+  }
+
+  async balance(uid: string, now = new Date()): Promise<number> {
+    if (!validAccountId(uid)) throw new Error('account id is malformed')
+    const doc = await this.read(`credits/${uid}`, await this.token())
+    const balance = doc === null ? null : { month: doc.fields?.month?.stringValue ?? '', grant: integer(doc.fields?.grant, 'grant'), purchased: integer(doc.fields?.purchased, 'purchased') }
+    const have = current(balance, utcMonth(now), this.monthlyGrant)
+    return have.grant + have.purchased
   }
 
   async reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now = new Date()): Promise<ReserveResult> {

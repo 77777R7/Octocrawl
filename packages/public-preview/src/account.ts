@@ -135,8 +135,10 @@ interface Doc { name: string; fields?: Record<string, Value> }
 
 export class FirestoreAccountData implements AccountData {
   private readonly resource: string
-  constructor(projectId: string, private readonly fetcher: typeof fetch = fetch) {
+  /** `jobsBucket`: the GCS bucket hosted jobs keep their files in (`W2L_JOBS_BUCKET`); absent, there are none to erase. */
+  constructor(projectId: string, private readonly fetcher: typeof fetch = fetch, private readonly jobsBucket?: string) {
     if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(projectId)) throw new Error('W2L_FIRESTORE_PROJECT_ID is invalid')
+    if (jobsBucket !== undefined && !/^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(jobsBucket)) throw new Error('W2L_JOBS_BUCKET is invalid')
     this.resource = `projects/${projectId}/databases/(default)/documents`
   }
   private async request(path: string, init: RequestInit = {}): Promise<Response> {
@@ -257,7 +259,9 @@ export class FirestoreAccountData implements AccountData {
     // Keys (OAuth connections' included), daily usage and the connections' grants, codes and tokens (oauth.ts) by the
     // account's uid, a page at a time until none is left; the keys stop working within a minute, as a revoked one does
     // (the hosted API caches lookups that long).
-    for (const collection of ['hostedApiKeys', 'creditUsage', 'oauthGrants', 'oauthCodes', 'oauthTokens', 'oauthRefresh']) {
+    // Hosted jobs (packages/mcp/src/hostedJobs.ts) and their idempotency keys go the same way; a slice still running finds
+    // its job gone and writes nothing more. The workspace's running and queued slots go with them.
+    for (const collection of ['hostedApiKeys', 'creditUsage', 'oauthGrants', 'oauthCodes', 'oauthTokens', 'oauthRefresh', 'hostedJobs', 'hostedJobIdempotency']) {
       for (let pass = 0; ; pass++) {
         const docs = await this.byUid(collection, uid)
         if (docs.length === 0) break
@@ -265,6 +269,9 @@ export class FirestoreAccountData implements AccountData {
         await remove(docs.map(doc => doc.name))
       }
     }
+    await remove([`${this.resource}/hostedJobWorkspaces/ws_${uid}`])
+    // The jobs' pages and exports in GCS, under the account's workspace.
+    if (this.jobsBucket !== undefined) await this.eraseJobFiles(`w/ws_${uid}/`)
     // The request lines, a page of names at a time.
     for (let pass = 0; ; pass++) {
       const response = await this.request(`${this.resource}/requestLog/${uid}/requests?pageSize=300&mask.fieldPaths=at`)
@@ -273,6 +280,23 @@ export class FirestoreAccountData implements AccountData {
       if (names.length === 0) break
       if (pass >= 200) throw new Error('requestLog did not empty')
       await remove(names)
+    }
+  }
+  /** Every object under a prefix of the jobs bucket, a listing page at a time. */
+  private async eraseJobFiles(prefix: string): Promise<void> {
+    const token = await metadataAccessToken(this.fetcher, AbortSignal.timeout(3_000))
+    const headers = { authorization: `Bearer ${token}` }
+    const bucket = `https://storage.googleapis.com/storage/v1/b/${this.jobsBucket}/o`
+    for (let pass = 0; ; pass++) {
+      const response = await this.fetcher(`${bucket}?${new URLSearchParams({ prefix, fields: 'items(name)' })}`, { headers, signal: AbortSignal.timeout(8_000) })
+      if (!response.ok) throw new Error(`job files listing failed (${response.status})`)
+      const names = ((await response.json() as { items?: { name: string }[] }).items ?? []).map(item => item.name)
+      if (names.length === 0) return
+      if (pass >= 200) throw new Error('job files did not empty')
+      for (const name of names) {
+        const removed = await this.fetcher(`${bucket}/${encodeURIComponent(name)}`, { method: 'DELETE', headers, signal: AbortSignal.timeout(8_000) })
+        if (!removed.ok && removed.status !== 404) throw new Error(`job file delete failed (${removed.status})`)
+      }
     }
   }
   async revokeKey(uid: string, id: string): Promise<boolean> {
