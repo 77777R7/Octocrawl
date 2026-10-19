@@ -151,6 +151,12 @@ export function fromClaude(address: string): boolean {
   return isIP(address) === 4 && claudeEgress.check(address, 'ipv4')
 }
 export const DEFAULT_SITE_DAILY = 1_500
+/**
+ * Shares of the site's day (ROADMAP PH stage H0), so that no one caller can use it up: every keyless caller together,
+ * Claude's pool included, and each account. Starts are counted against the site's total and the share both.
+ */
+export const DEFAULT_KEYLESS_TOTAL_DAILY = 500
+export const DEFAULT_ACCOUNT_DAILY = 500
 /** Requests per minute a caller may start, so a loop cannot spend a day's allowance in a second. */
 export const KEYLESS_PER_MINUTE = 10
 export const KEY_PER_MINUTE = 60
@@ -325,6 +331,10 @@ export interface HostedApiConfig {
   /** Keyless pages a UTC day for every caller in Claude's egress range together (see CLAUDE_EGRESS). */
   claudeDaily?: number
   siteDaily?: number
+  /** Keyless pages a UTC day for every keyless caller together, within the site's total. */
+  keylessTotalDaily?: number
+  /** Pages a UTC day one account's keys may start, within the site's total. */
+  accountDaily?: number
   /** The public address of this API, named in hints; e.g. https://api.octocrawl.dev */
   publicOrigin?: string
   networkPolicy?: NetworkPolicy
@@ -465,6 +475,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const keylessDaily = config.keylessDaily ?? DEFAULT_KEYLESS_DAILY
   const claudeDaily = config.claudeDaily ?? DEFAULT_CLAUDE_DAILY
   const siteDaily = config.siteDaily ?? DEFAULT_SITE_DAILY
+  const keylessTotalDaily = config.keylessTotalDaily ?? DEFAULT_KEYLESS_TOTAL_DAILY
+  const accountDaily = config.accountDaily ?? DEFAULT_ACCOUNT_DAILY
   const base = config.networkPolicy ?? hostedNetworkPolicy()
   const policy = withOperatorContact({ ...base, maxFileBytes: Math.min(base.maxFileBytes ?? HOSTED_MAX_FILE_BYTES, HOSTED_MAX_FILE_BYTES) }, env)
   const engine = createApiEngine({
@@ -610,13 +622,19 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
 
   /** A start that passed the rate limits: an account's key spends credits, any other caller its daily allowance. */
   async function keyedStart(c: Context<GateEnv>, caller: HostedCaller, path: string, day: string, now: Date, next: () => Promise<void>) {
-    if (caller.uid !== undefined) return accountStart(c, caller, caller.uid, path, `${day}-site`, now, next)
-    const quota = await config.quota.consume([{ id: `${day}-site`, limit: siteDaily }, { id: `${day}-${caller.kind}-${caller.id}`, limit: caller.dailyLimit }], now)
+    if (caller.uid !== undefined) return accountStart(c, caller, caller.uid, path, day, now, next)
+    const keylessTotal = `${day}-keyless`
+    const quota = await config.quota.consume([
+      { id: `${day}-site`, limit: siteDaily },
+      ...(caller.kind === 'keyless' ? [{ id: keylessTotal, limit: keylessTotalDaily }] : []),
+      { id: `${day}-${caller.kind}-${caller.id}`, limit: caller.dailyLimit },
+    ], now)
     if (!quota.ok) {
       const seconds = secondsToUtcMidnight(now)
       const site = quota.limited.endsWith('-site')
-      return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served its ${quota.limit} pages for today` : caller.pool === 'claude' ? `the ${quota.limit} pages a day that every Claude connector without a key shares are used up` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
-        [caller.kind === 'keyless' && caller.pool !== 'claude' && !site ? 'a key raises the allowance: https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint' : LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+      const shared = quota.limited === keylessTotal
+      return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served its ${quota.limit} pages for today` : shared ? `the ${quota.limit} pages a day that hosted Octocrawl serves without a key are used up` : caller.pool === 'claude' ? `the ${quota.limit} pages a day that every Claude connector without a key shares are used up` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
+        [caller.kind === 'keyless' && (shared || (caller.pool !== 'claude' && !site)) ? 'a key raises the allowance: https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint' : LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
     }
     logUsage(caller, path, day)
     if (path === '/v1/scrape') {
@@ -638,13 +656,14 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
    * for an HTTP page or a map), runs it, then settles at what its result cost and says so in `X-Credits-Used` and
    * `X-Credits-Remaining`. An account with at least one credit but fewer than five reads over HTTP alone this time.
    */
-  async function accountStart(c: Context<GateEnv>, caller: HostedCaller, uid: string, path: string, siteId: string, now: Date, next: () => Promise<void>) {
+  async function accountStart(c: Context<GateEnv>, caller: HostedCaller, uid: string, path: string, day: string, now: Date, next: () => Promise<void>) {
     const credits = config.credits
     if (credits === undefined) return c.json({ error: 'account credits are unavailable on this server', code: 'internal_error' }, 503)
-    const site = { id: siteId, limit: siteDaily }
+    const site = { id: `${day}-site`, limit: siteDaily }
+    const quotas = [site, { id: `${day}-account-${uid}`, limit: accountDaily }]
     const isScrape = path === '/v1/scrape'
     let browser = isScrape && caller.browser
-    const reserve = (amount: number) => credits.reserve(uid, amount, site, now).catch((error: unknown) => {
+    const reserve = (amount: number) => credits.reserve(uid, amount, quotas, now).catch((error: unknown) => {
       // A commit that timed out may still have applied: the line names what may have been taken, to check against credits/{uid}.
       log(JSON.stringify({ severity: 'ERROR', event: 'hosted_credits_reserve_failed', uid, amount, message: error instanceof Error ? error.message : String(error) }))
       throw error
@@ -657,15 +676,15 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (!reserved.ok) {
       // A key the API still had cached for a minute after its account was deleted (public-preview auth.ts).
       if (reserved.limited === 'account') return refuse(c, 401, 'unauthorized', 'this key\'s account no longer exists', [])
-      if (reserved.limited === 'site') {
+      if (reserved.limited === 'quota') {
         const seconds = secondsToUtcMidnight(now)
-        return refuse(c, 429, 'quota_exhausted', `hosted Octocrawl has served its ${reserved.limit} pages for today`, [LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+        return refuse(c, 429, 'quota_exhausted', reserved.id === site.id ? `hosted Octocrawl has served its ${reserved.limit} pages for today` : `this account has started its ${reserved.limit} hosted pages for today`, [LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
       }
       const seconds = secondsToNextGrant(now)
       return refuse(c, 429, 'quota_exhausted', `this account's credits are used up (${reserved.remaining} left)`,
         [`the monthly credits come back on the 1st at 00:00 UTC, in ${seconds} s`, LOCAL_HINT], { 'Retry-After': String(seconds), 'X-Credits-Remaining': String(reserved.remaining) })
     }
-    logUsage(caller, path, siteId.slice(0, 10))
+    logUsage(caller, path, day)
     const reservation: Reservation = reserved.reservation
     let charge: ReturnType<typeof scrapeCharge> = { credits: 0, kind: 'unread' }
     // The call's line for the dashboard's Activity page: what was asked for, then what came back.

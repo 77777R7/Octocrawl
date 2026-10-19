@@ -116,16 +116,18 @@ export interface Reservation {
 export type ReserveResult =
   | { ok: true; reservation: Reservation }
   | { ok: false; limited: 'credits'; remaining: number }
-  | { ok: false; limited: 'site'; limit: number }
+  /** A daily counter is at its limit: the site's day, or one account's share of it (`id` names which). */
+  | { ok: false; limited: 'quota'; id: string; limit: number }
   /** The account has no `users/{uid}`: it was deleted (a key the API still had cached), or never signed in. */
   | { ok: false; limited: 'account' }
 
 export interface CreditsStore {
   /**
-   * Takes `amount` credits from the account (this month's grant first, then bought credits) and one start from the
-   * site's daily counter, in one atomic commit; refuses, taking nothing, when either would go past its limit.
+   * Takes `amount` credits from the account (this month's grant first, then bought credits) and one start from each
+   * daily counter (the site's, the account's), in one atomic commit; refuses, taking nothing, when any would go past
+   * its limit, naming the first.
    */
-  reserve(uid: string, amount: number, site: QuotaEntry, now?: Date): Promise<ReserveResult>
+  reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now?: Date): Promise<ReserveResult>
   /** Gives back what the call did not cost and adds it to the account's usage for the day, with the call's request line
    * when there is one; returns the balance after. */
   settle(reservation: Reservation, used: number, kind: UsageKind, now?: Date, note?: RequestNote): Promise<{ remaining: number }>
@@ -161,15 +163,16 @@ export class MemoryCreditsStore implements CreditsStore {
   readonly usage = new Map<string, Record<UsageKind | 'credits', number>>()
   readonly requests = new Map<string, RequestLine[]>()
   constructor(private readonly monthlyGrant = DEFAULT_MONTHLY_CREDITS) {}
-  async reserve(uid: string, amount: number, site: QuotaEntry, now = new Date()): Promise<ReserveResult> {
+  async reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now = new Date()): Promise<ReserveResult> {
     const month = utcMonth(now)
     const have = current(this.balances.get(uid) ?? null, month, this.monthlyGrant)
-    if ((this.site.get(site.id) ?? 0) >= site.limit) return { ok: false, limited: 'site', limit: site.limit }
+    const full = quotas.find((quota) => (this.site.get(quota.id) ?? 0) >= quota.limit)
+    if (full) return { ok: false, limited: 'quota', id: full.id, limit: full.limit }
     if (have.grant + have.purchased < amount) return { ok: false, limited: 'credits', remaining: have.grant + have.purchased }
     const { fromGrant, fromPurchased } = take(amount, have)
     const left = { month, grant: have.grant - fromGrant, purchased: have.purchased - fromPurchased }
     this.balances.set(uid, left)
-    this.site.set(site.id, (this.site.get(site.id) ?? 0) + 1)
+    for (const quota of quotas) this.site.set(quota.id, (this.site.get(quota.id) ?? 0) + 1)
     return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased } }
   }
   async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date(), note?: RequestNote): Promise<{ remaining: number }> {
@@ -188,7 +191,7 @@ export class MemoryCreditsStore implements CreditsStore {
   }
 }
 
-// ---- Firestore: `credits/{uid}` holds the balance, `hostedQuotas/{day}-site` the site's starts, `creditUsage/{uid}-{day}` the day's use ----
+// ---- Firestore: `credits/{uid}` holds the balance, `hostedQuotas/{day}-site` the site's starts and `hostedQuotas/{day}-account-{uid}` the account's, `creditUsage/{uid}-{day}` the day's use ----
 
 interface Value { integerValue?: string; stringValue?: string; timestampValue?: string }
 interface FirestoreDoc { name: string; fields?: Record<string, Value>; updateTime?: string }
@@ -219,7 +222,7 @@ export class FirestoreCreditsStore implements CreditsStore {
   private readonly endpoint: string
   /**
    * `token` gives an access token for the service identity; hostedApi.ts passes its metadata-server helper. The
-   * balance and the site counter are read, then written in one commit whose update-time preconditions make a
+   * balance and the daily counters are read, then written in one commit whose update-time preconditions make a
    * concurrent spender retry; a refund and the day's usage are server-side increments, which need no read.
    */
   constructor(projectId: string, private readonly token: () => Promise<string>, private readonly monthlyGrant = DEFAULT_MONTHLY_CREDITS, private readonly fetcher: typeof fetch = fetch) {
@@ -228,14 +231,15 @@ export class FirestoreCreditsStore implements CreditsStore {
     this.endpoint = `https://firestore.googleapis.com/v1/${this.resource}`
   }
 
-  async reserve(uid: string, amount: number, site: QuotaEntry, now = new Date()): Promise<ReserveResult> {
+  async reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now = new Date()): Promise<ReserveResult> {
     if (!validAccountId(uid)) throw new Error('account id is malformed')
     const month = utcMonth(now)
     for (let attempt = 0; attempt < 6; attempt++) {
       const token = await this.token()
-      const [balanceDoc, siteDoc] = await Promise.all([this.read(`credits/${uid}`, token), this.read(`hostedQuotas/${site.id}`, token)])
-      const siteCount = siteDoc === null ? 0 : integer(siteDoc.fields?.count, 'site count')
-      if (siteCount >= site.limit) return { ok: false, limited: 'site', limit: site.limit }
+      const [balanceDoc, ...quotaDocs] = await Promise.all([this.read(`credits/${uid}`, token), ...quotas.map((quota) => this.read(`hostedQuotas/${quota.id}`, token))])
+      const counts = quotaDocs.map((doc) => doc === null ? 0 : integer(doc.fields?.count, 'quota count'))
+      const full = quotas.findIndex((quota, index) => counts[index]! >= quota.limit)
+      if (full >= 0) return { ok: false, limited: 'quota', id: quotas[full]!.id, limit: quotas[full]!.limit }
       const balance = balanceDoc === null ? null : {
         month: balanceDoc.fields?.month?.stringValue ?? '',
         grant: integer(balanceDoc.fields?.grant, 'grant'),
@@ -245,7 +249,7 @@ export class FirestoreCreditsStore implements CreditsStore {
       if (have.grant + have.purchased < amount) return { ok: false, limited: 'credits', remaining: have.grant + have.purchased }
       const { fromGrant, fromPurchased } = take(amount, have)
       const left = { grant: have.grant - fromGrant, purchased: have.purchased - fromPurchased }
-      const siteExpireAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2)).toISOString()
+      const quotaExpireAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2)).toISOString()
       // An account's first balance needs the account: `users/{uid}`, which sign-in writes and deleting the account removes
       // first (packages/public-preview auth.ts). A key the hosted API still has cached for a minute after its account was
       // deleted cannot bring the balance back. The write changes nothing: the smaller of the first sign-in time and the
@@ -263,10 +267,10 @@ export class FirestoreCreditsStore implements CreditsStore {
           updateMask: { fieldPaths: ['month', 'grant', 'purchased'] },
           currentDocument: balanceDoc === null ? { exists: false } : { updateTime: balanceDoc.updateTime },
         },
-        {
-          update: { name: `${this.resource}/hostedQuotas/${site.id}`, fields: { count: { integerValue: String(siteCount + 1) }, expireAt: { timestampValue: siteExpireAt } } },
-          currentDocument: siteDoc === null ? { exists: false } : { updateTime: siteDoc.updateTime },
-        },
+        ...quotas.map((quota, index) => ({
+          update: { name: `${this.resource}/hostedQuotas/${quota.id}`, fields: { count: { integerValue: String(counts[index]! + 1) }, expireAt: { timestampValue: quotaExpireAt } } },
+          currentDocument: quotaDocs[index] === null ? { exists: false } : { updateTime: quotaDocs[index]!.updateTime },
+        })),
       ], true)
       if (committed === 'missing') {
         // A document that had to exist is gone: the account's record (deleted), or a balance or counter deleted since it

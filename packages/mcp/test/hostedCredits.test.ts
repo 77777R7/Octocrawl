@@ -38,19 +38,19 @@ describe('what a result costs', () => {
 describe('the in-memory ledger', () => {
   it('spends the monthly grant, gives back what a call did not cost, and refuses past the balance', async () => {
     const store = new MemoryCreditsStore(10)
-    const first = await store.reserve('account-1', 5, SITE, OCT)
+    const first = await store.reserve('account-1', 5, [SITE], OCT)
     expect(first).toMatchObject({ ok: true, reservation: { fromGrant: 5, fromPurchased: 0, remaining: 5 } })
     if (!first.ok) throw new Error('unreachable')
     expect(await store.settle(first.reservation, 1, 'http', OCT)).toEqual({ remaining: 9 })
-    for (let i = 0; i < 9; i++) expect((await store.reserve('account-1', 1, SITE, OCT)).ok).toBe(true)
-    expect(await store.reserve('account-1', 1, SITE, OCT)).toEqual({ ok: false, limited: 'credits', remaining: 0 })
+    for (let i = 0; i < 9; i++) expect((await store.reserve('account-1', 1, [SITE], OCT)).ok).toBe(true)
+    expect(await store.reserve('account-1', 1, [SITE], OCT)).toEqual({ ok: false, limited: 'credits', remaining: 0 })
     expect(store.usage.get('account-1-2026-10-11')).toEqual({ http: 1, browser: 0, not_found: 0, map: 0, unread: 0, credits: 1 })
   })
 
   it('renews the grant in a new month without rolling the old one over, and spends it before bought credits', async () => {
     const store = new MemoryCreditsStore(10)
     store.balances.set('account-1', { month: '2026-09', grant: 3, purchased: 4 })
-    const reserved = await store.reserve('account-1', 12, SITE, OCT)
+    const reserved = await store.reserve('account-1', 12, [SITE], OCT)
     expect(reserved).toMatchObject({ ok: true, reservation: { month: '2026-10', fromGrant: 10, fromPurchased: 2, remaining: 2 } })
     if (!reserved.ok) throw new Error('unreachable')
     // A refund goes to the bought credits first, and never lifts the grant past what was taken from it.
@@ -61,8 +61,17 @@ describe('the in-memory ledger', () => {
   it('refuses when the site has served its day, taking nothing from the account', async () => {
     const store = new MemoryCreditsStore(10)
     store.site.set(SITE.id, SITE.limit)
-    expect(await store.reserve('account-1', 1, SITE, OCT)).toEqual({ ok: false, limited: 'site', limit: 100 })
+    expect(await store.reserve('account-1', 1, [SITE], OCT)).toEqual({ ok: false, limited: 'quota', id: SITE.id, limit: 100 })
     expect(store.balances.has('account-1')).toBe(false)
+  })
+
+  it('counts a start on every counter it is given, and refuses at the first full one, taking nothing', async () => {
+    const store = new MemoryCreditsStore(10)
+    const ACCOUNT = { id: '2026-10-11-account-account-1', limit: 2 }
+    for (let i = 0; i < 2; i++) expect((await store.reserve('account-1', 1, [SITE, ACCOUNT], OCT)).ok).toBe(true)
+    expect(await store.reserve('account-1', 1, [SITE, ACCOUNT], OCT)).toEqual({ ok: false, limited: 'quota', id: ACCOUNT.id, limit: 2 })
+    expect(store.site.get(SITE.id)).toBe(2)
+    expect(store.balances.get('account-1')).toMatchObject({ grant: 8 })
   })
 })
 
@@ -117,18 +126,18 @@ describe('the Firestore ledger', () => {
   it('starts no balance for an account without its record: a deleted account\'s key the API still has cached', async () => {
     const firestore = fakeFirestore([])
     const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
-    expect(await store.reserve('account-1', 1, SITE, OCT)).toEqual({ ok: false, limited: 'account' })
+    expect(await store.reserve('account-1', 1, [SITE], OCT)).toEqual({ ok: false, limited: 'account' })
     expect(firestore.docs.has(`${firestore.resource}/credits/account-1`)).toBe(false)
     expect(firestore.docs.has(`${firestore.resource}/hostedQuotas/${SITE.id}`)).toBe(false)
     // An account that already has a balance is not asked for its record (keys issued by hand before sign-in existed).
     firestore.docs.set(`${firestore.resource}/credits/account-2`, { fields: { month: { stringValue: '2026-10' }, grant: { integerValue: '10' }, purchased: { integerValue: '0' } }, updateTime: '2026-10-10T00:00:00Z' })
-    expect(await store.reserve('account-2', 1, SITE, OCT)).toMatchObject({ ok: true, reservation: { remaining: 9 } })
+    expect(await store.reserve('account-2', 1, [SITE], OCT)).toMatchObject({ ok: true, reservation: { remaining: 9 } })
   })
 
   it('creates a balance on first use, spends with preconditions, retries a conflict and settles with server-side increments', async () => {
     const firestore = fakeFirestore()
     const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
-    const first = await store.reserve('account-1', 5, SITE, OCT)
+    const first = await store.reserve('account-1', 5, [SITE], OCT)
     expect(first).toMatchObject({ ok: true, reservation: { fromGrant: 5, remaining: 995 } })
     const [created] = firestore.commits as Array<{ writes: Array<{ currentDocument: unknown }> }>
     // The account's record must exist for its first balance; the write leaves it as it was.
@@ -141,14 +150,14 @@ describe('the Firestore ledger', () => {
     expect(firestore.docs.get(`${firestore.resource}/hostedQuotas/${SITE.id}`)!.fields.count).toEqual({ integerValue: '1' })
     // A concurrent spender moved the balance: the commit is refused once and the reservation retried against what is there now.
     firestore.conflictOnce()
-    expect(await store.reserve('account-1', 1, SITE, OCT)).toMatchObject({ ok: true, reservation: { remaining: 998 } })
+    expect(await store.reserve('account-1', 1, [SITE], OCT)).toMatchObject({ ok: true, reservation: { remaining: 998 } })
     expect(firestore.docs.get(`${firestore.resource}/hostedQuotas/${SITE.id}`)!.fields.count).toEqual({ integerValue: '2' })
   })
 
   it('writes a call\'s request line in the settle\'s commit, without nulls, to expire in 30 days, newest first by id', async () => {
     const firestore = fakeFirestore()
     const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
-    const reserved = await store.reserve('account-1', 5, SITE, OCT)
+    const reserved = await store.reserve('account-1', 5, [SITE], OCT)
     if (!reserved.ok) throw new Error('unreachable')
     const note = { endpoint: 'scrape' as const, keyId: 'k'.repeat(64), url: `https://example.org/${'a'.repeat(3_000)}`, finalUrl: 'https://example.org/a', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed' as const, sha256: 'f'.repeat(64), links: null, formats: ['markdown', 'json'], ms: 1_234 }
     await store.settle(reserved.reservation, 1, 'http', OCT, note)
@@ -164,18 +173,18 @@ describe('the Firestore ledger', () => {
     expect(line.fields.formats).toEqual({ arrayValue: { values: [{ stringValue: 'markdown' }, { stringValue: 'json' }] } })
     expect(line.fields.ms).toEqual({ integerValue: '1234' })
     for (const [formats, written] of [[[], { arrayValue: {} }], [null, undefined]] as const) {
-      const next = await store.reserve('account-1', 1, SITE, OCT)
+      const next = await store.reserve('account-1', 1, [SITE], OCT)
       if (!next.ok) throw new Error('unreachable')
       await store.settle(next.reservation, 0, 'unread', OCT, { ...note, formats: formats === null ? null : [...formats] })
       expect((firestore.commits.at(-1) as { writes: Array<{ update: { fields: Record<string, unknown> } }> }).writes[2]!.update.fields.formats).toEqual(written)
     }
     // A settle without a line (no account key's call) writes none.
-    const again = await store.reserve('account-1', 1, SITE, OCT)
+    const again = await store.reserve('account-1', 1, [SITE], OCT)
     if (!again.ok) throw new Error('unreachable')
     await store.settle(again.reservation, 0, 'unread', OCT)
     expect((firestore.commits.at(-1) as { writes: unknown[] }).writes).toHaveLength(2)
     // A half surrogate (a caller's body, or a cut at 2,048) is written as U+FFFD; a line Firestore still refuses is dropped, not the charge.
-    const third = await store.reserve('account-1', 5, SITE, OCT)
+    const third = await store.reserve('account-1', 5, [SITE], OCT)
     if (!third.ok) throw new Error('unreachable')
     firestore.refuseNextWith(400)
     expect(await store.settle(third.reservation, 0, 'unread', OCT, { ...note, url: 'https://example.org/\ud83d' })).toEqual({ remaining: 999 })
@@ -189,14 +198,26 @@ describe('the Firestore ledger', () => {
   it('refuses past the balance or the site\'s day without writing, and rejects a malformed account id', async () => {
     const firestore = fakeFirestore()
     const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 2, firestore.fetcher)
-    expect((await store.reserve('account-1', 2, SITE, OCT)).ok).toBe(true)
-    expect(await store.reserve('account-1', 1, SITE, OCT)).toEqual({ ok: false, limited: 'credits', remaining: 0 })
-    expect(await store.reserve('account-2', 1, { id: SITE.id, limit: 1 }, OCT)).toEqual({ ok: false, limited: 'site', limit: 1 })
+    expect((await store.reserve('account-1', 2, [SITE], OCT)).ok).toBe(true)
+    expect(await store.reserve('account-1', 1, [SITE], OCT)).toEqual({ ok: false, limited: 'credits', remaining: 0 })
+    expect(await store.reserve('account-2', 1, [{ id: SITE.id, limit: 1 }], OCT)).toEqual({ ok: false, limited: 'quota', id: SITE.id, limit: 1 })
     expect(firestore.commits).toHaveLength(1)
-    await expect(store.reserve('../other', 1, SITE, OCT)).rejects.toThrow(/malformed/)
-    await expect(store.reserve('__reserved__', 1, SITE, OCT)).rejects.toThrow(/malformed/)
+    await expect(store.reserve('../other', 1, [SITE], OCT)).rejects.toThrow(/malformed/)
+    await expect(store.reserve('__reserved__', 1, [SITE], OCT)).rejects.toThrow(/malformed/)
     // A balance a purchase wrote with `purchased` alone reads its missing grant as zero, not as a broken account.
     firestore.docs.set(`${firestore.resource}/credits/account-3`, { fields: { month: { stringValue: '2026-10' }, purchased: { integerValue: '4' } }, updateTime: '2026-10-11T00:00:00Z' })
-    expect(await store.reserve('account-3', 1, SITE, OCT)).toMatchObject({ ok: true, reservation: { fromGrant: 0, fromPurchased: 1, remaining: 3 } })
+    expect(await store.reserve('account-3', 1, [SITE], OCT)).toMatchObject({ ok: true, reservation: { fromGrant: 0, fromPurchased: 1, remaining: 3 } })
+  })
+
+  it('writes every counter in the reserve\'s commit with its precondition, and refuses at a full one without writing', async () => {
+    const firestore = fakeFirestore()
+    const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 10, firestore.fetcher)
+    const ACCOUNT = { id: '2026-10-11-account-account-1', limit: 1 }
+    expect((await store.reserve('account-1', 1, [SITE, ACCOUNT], OCT)).ok).toBe(true)
+    const names = (firestore.commits[0] as { writes: Array<{ update: { name: string } }> }).writes.map((write) => write.update.name.split('/documents/')[1])
+    expect(names).toEqual(['users/account-1', 'credits/account-1', `hostedQuotas/${SITE.id}`, `hostedQuotas/${ACCOUNT.id}`])
+    expect(firestore.docs.get(`${firestore.resource}/hostedQuotas/${ACCOUNT.id}`)?.fields.count).toEqual({ integerValue: '1' })
+    expect(await store.reserve('account-1', 1, [SITE, ACCOUNT], OCT)).toEqual({ ok: false, limited: 'quota', id: ACCOUNT.id, limit: 1 })
+    expect(firestore.commits).toHaveLength(1)
   })
 })
