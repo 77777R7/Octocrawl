@@ -353,6 +353,24 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect((await store.listSteps(firstReport.taskId)).map((step) => step.url).sort()).toEqual([SEED, ITEM_A, ITEM_B])
   })
 
+  it('keeps a host\'s pace across runs: the task stores when each host last started and its Crawl-delay, and a resumed run waits it out (H1 E2)', async () => {
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A])], [ITEM_A, outcome(ITEM_A, [])]])
+    const store = new MemoryTaskStore()
+    // The seed's robots.txt gives a 5 s Crawl-delay.
+    const firstAtom: ScrapeAtom = { scrape: async (url) => ({ ...pages.get(url)!, crawlDelayMs: 5_000 }), close: async () => {} }
+    const firstReport = await interruptedAfterFirstPage(firstAtom, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', skipFetchedOnResume: true }, store)
+    expect((await store.getTask(firstReport.taskId))?.pacing).toEqual({ 'fixture.test': { lastStartedAtMs: 1_000, crawlDelayMs: 5_000 } })
+    // A new run on a new orchestrator, one second later: its first request to the host waits until 5 s after the last one.
+    const clock = new FakeClock(); clock.t = 2_000
+    const started: number[] = []
+    const atom: ScrapeAtom = { scrape: async (url) => { started.push(clock.now()); return pages.get(url)! }, close: async () => {} }
+    // One worker: the fake clock adds every waiting worker's wait to the time.
+    const report = await new CrawlOrchestrator({ store, atom, clock, workerCount: 1 }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl', resumeFrom: firstReport.taskId, skipFetchedOnResume: true })
+    expect(report.status).toBe('completed')
+    expect(started).toEqual([6_000])
+    expect((await store.getTask(firstReport.taskId))?.pacing).toEqual({ 'fixture.test': { lastStartedAtMs: 6_000, crawlDelayMs: 5_000 } })
+  })
+
   it('does not refetch a page that failed in an earlier run with skipFetchedOnResume, and keeps the page budget across runs', async () => {
     const blocked: ScrapeOutcome = { result: { ...page(ITEM_A), status: 'blocked', blockReason: 'bot_detected_generic', markdown: '' }, links: [] }
     const pages = new Map([[SEED, outcome(SEED, [ITEM_A, ITEM_B])], [ITEM_A, blocked], [ITEM_B, outcome(ITEM_B, [])]])

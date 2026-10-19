@@ -194,6 +194,8 @@ export class CrawlOrchestrator {
     let failed: unknown = null
     let task: Task | undefined
     let attempt: Attempt | undefined
+    // The run's frontier, whose hosts' pace the task keeps when the run ends (Task.pacing).
+    let runFrontier: Frontier | undefined
     // A crawl's link discovery counters, written with the attempt after every page; a batch discovers nothing.
     let discovery: CrawlDiscovery | null = null
     const meters = () => ({
@@ -247,7 +249,9 @@ export class CrawlOrchestrator {
         excludePaths: stored?.excludePaths ?? spec.excludePaths,
         ...scopeOptions(spec, stored),
         ...this.frontierOptions,
+        ...pacedFrom(this.frontierOptions.crawlDelayMsByHost, task.pacing),
       })
+      runFrontier = frontier
       const priorSteps = await this.store.listSteps(task.id)
       const restoredLinks = await this.restoreFrontier(frontier, task, spec, priorSteps)
       // How many of a batch's URLs the frontier has been given; an append pushes to the end of the list, so the tail past this index is new.
@@ -511,9 +515,10 @@ export class CrawlOrchestrator {
       if (failed === null) failed = err
     }
     // The row as it is now, not the object the run opened with: a batch's URL list may have grown meanwhile, and the final write keeps it.
-    let finished: Task = { ...(persistedTask ?? task), status, updatedAt: endedAt }
+    const pacing = runFrontier === undefined ? {} : { pacing: runFrontier.pacing() }
+    let finished: Task = { ...(persistedTask ?? task), status, updatedAt: endedAt, ...pacing }
     try {
-      finished = { ...((await this.store.getTask(task.id)) ?? persistedTask ?? task), status, updatedAt: endedAt }
+      finished = { ...((await this.store.getTask(task.id)) ?? persistedTask ?? task), status, updatedAt: endedAt, ...pacing }
       await this.store.putTask(finished)
     } catch (err) {
       if (failed === null) failed = err
@@ -639,6 +644,21 @@ export class CrawlOrchestrator {
     addDiscovery(discovery, offered)
     return { ...record, sources: loaded.sources, files: loaded.files, listed: loaded.urls.length, enqueued: offered.enqueued, truncated: loaded.truncated }
   }
+}
+
+/**
+ * The frontier's pace options with a task's stored pace (Task.pacing) folded in: each host's last start, and the
+ * strictest Crawl-delay of the server's and the task's.
+ */
+function pacedFrom(serverDelays: ReadonlyMap<string, number> | undefined, pacing: Task['pacing']): { crawlDelayMsByHost?: ReadonlyMap<string, number>; lastStartedAtMsByHost?: ReadonlyMap<string, number> } {
+  if (pacing === undefined) return {}
+  const delays = new Map(serverDelays ?? [])
+  const starts = new Map<string, number>()
+  for (const [host, pace] of Object.entries(pacing)) {
+    if (pace.crawlDelayMs !== null) delays.set(host, Math.max(delays.get(host) ?? 0, pace.crawlDelayMs))
+    if (pace.lastStartedAtMs !== null) starts.set(host, pace.lastStartedAtMs)
+  }
+  return { crawlDelayMsByHost: delays, lastStartedAtMsByHost: starts }
 }
 
 /** Whether a result is a list step stopped at a check the site put up (ListStop `challenge`), its pages kept for a later run. */

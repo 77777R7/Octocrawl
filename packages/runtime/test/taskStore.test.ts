@@ -163,6 +163,15 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.getTask('task-1')).toEqual(crawl)
     })
 
+    it('round-trips the hosts\' pace a resumed run keeps, and a task without one', async () => {
+      ;({ store, cleanup } = await open())
+      const paced = task({ pacing: { 'example.com': { lastStartedAtMs: 1_790_000_000_000, crawlDelayMs: 2_000 }, 'other.test': { lastStartedAtMs: 1_790_000_000_500, crawlDelayMs: null } } })
+      await store.putTask(paced)
+      expect(await store.getTask('task-1')).toEqual(paced)
+      await store.putTask(task())
+      expect(await store.getTask('task-1')).toEqual(task())
+    })
+
     it('counts unique completed URLs and pages all outcomes without loading bodies for status', async () => {
       ;({ store, cleanup } = await open())
       await seed(store)

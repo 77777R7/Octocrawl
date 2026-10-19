@@ -75,8 +75,11 @@
   - 为什么不改默认：本地 crawl 的页面列表只读最新一次 attempt（engine.ts:1086、2160），续跑时重读就是为了让新 attempt 自己列全所有页。改了默认，本地 `resume_crawl` 之后的列表会缺掉前面的页。`orchestrator.test.ts:311` 的期望保持不变。
   - 也没用 `useCached`：缓存页仍要等每站间隔和 Crawl-delay，每段都会白等；而且每段都把旧步骤复制进新 attempt，checkpoint 会按平方增长。
   - 测试：三段续跑每个 URL 只读一次；上一段失败的页不重读；页数预算跨段累计。
-- [ ] **E2** 引擎能导出、也能接受每站的最后请求时间和已知 Crawl-delay。
+- [x] **E2** 引擎能导出、也能接受每站的最后请求时间和已知 Crawl-delay。
   - 测试：跨段的请求间隔不小于 Crawl-delay。
+  - 做法：一次运行结束时（包括 shutdown 暂停），把每站节奏写进任务行的 `Task.pacing`（SQLite 新列 `pacing_json`）。续跑时折回 frontier。节奏跟着 `checkpoint.sqlite` 在段与段之间传，本地重启续跑也受益。
+  - 没带过去的：`OriginScheduler` 里 429 的冷却时间（`packages/bench/src/subjects/originScheduler.ts`），新一段会忘掉。站点回 429 时，Retry-After 只在段内有效。记为后续项 **E6**。
+- [ ] **E6**（E2 时发现）把 `OriginScheduler` 的 429 冷却也存进 `Task.pacing`，让它跨段有效。
 - [ ] **E3** batch 续跑时可以只取一部分站点的 URL（按站过滤）。
   - 测试：只跑指定站点，其余 URL 留在下一段。
 - [ ] **E4** “跑一段”入口：订阅 `jobEvents` 的 `page` 事件，新页数到 N 或用时到 T 就 `close({ cancelActive: true })`，结束状态是 `paused`。
