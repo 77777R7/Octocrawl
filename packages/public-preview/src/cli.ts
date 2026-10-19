@@ -23,7 +23,7 @@ const staticDir = resolve(process.env.W2L_PUBLIC_WEB_DIST ?? 'apps/public-web/di
 const monthlyCredits = Number(process.env.W2L_MONTHLY_CREDITS ?? 1_000)
 if (!Number.isSafeInteger(monthlyCredits) || monthlyCredits < 1) throw new Error('W2L_MONTHLY_CREDITS must be a positive integer')
 // The account's data, read by the dashboard and deleted with the account; only where sign-in is served.
-const accountData = firebaseApiKey ? new FirestoreAccountData(process.env.W2L_FIRESTORE_PROJECT_ID ?? '') : undefined
+const accountData = firebaseApiKey ? new FirestoreAccountData(process.env.W2L_FIRESTORE_PROJECT_ID ?? '', fetch, process.env.W2L_JOBS_BUCKET?.trim() || undefined) : undefined
 const auth = firebaseApiKey && accountData
   ? createAuthRoutes({
     identity: new IdentityToolkit(firebaseApiKey),

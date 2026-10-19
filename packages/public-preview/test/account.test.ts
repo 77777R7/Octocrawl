@@ -90,6 +90,10 @@ describe('the account page\'s data', () => {
       creditUsage: ['account-0001-2026-10-12', 'account-0001-2026-10-13'].map(id => `${root}/creditUsage/${id}`),
       // A connection's grant, its code and its tokens (oauth.ts), each kept with the account's uid.
       ...Object.fromEntries(['oauthGrants', 'oauthCodes', 'oauthTokens', 'oauthRefresh'].map(collection => [collection, [`${root}/${collection}/${collection}-1`]])),
+      // Hosted jobs and their idempotency keys, each kept with the account's uid (packages/mcp/src/hostedJobs.ts).
+      hostedJobs: [`${root}/hostedJobs/job-1`],
+      hostedJobIdempotency: [`${root}/hostedJobIdempotency/ws_account-0001-abc`],
+      files: ['w/ws_account-0001/jobs/job-1/pages/00000.jsonl.gz', 'w/ws_account-0001/jobs/job-1/checkpoint.sqlite'],
       requests: Array.from({ length: 450 }, (_, i) => `${root}/requestLog/account-0001/requests/${String(i).padStart(4, '0')}`),
     }
     const fetcher = (async (input: string | URL, init?: RequestInit) => {
@@ -101,6 +105,16 @@ describe('the account page\'s data', () => {
         return Response.json(left[body.structuredQuery.from[0]!.collectionId]!.slice(0, 200).map(name => ({ document: { name } })))
       }
       if (url.includes('/requestLog/account-0001/requests?')) return Response.json({ documents: left.requests!.slice(0, 300).map(name => ({ name })) })
+      if (url.startsWith('https://storage.googleapis.com/storage/v1/b/octocrawl-jobs/o?')) {
+        expect(new URL(url).searchParams.get('prefix')).toBe('w/ws_account-0001/')
+        return Response.json({ items: left.files!.map(name => ({ name })) })
+      }
+      if (url.startsWith('https://storage.googleapis.com/storage/v1/b/octocrawl-jobs/o/') && init?.method === 'DELETE') {
+        const name = decodeURIComponent(url.slice('https://storage.googleapis.com/storage/v1/b/octocrawl-jobs/o/'.length))
+        left.files!.splice(left.files!.indexOf(name), 1)
+        deleted.push(`gcs:${name}`)
+        return new Response(null, { status: 204 })
+      }
       if (url.endsWith(':commit')) {
         const names = (JSON.parse(String(init!.body)) as { writes: Array<{ delete: string }> }).writes.map(write => write.delete)
         expect(names.length).toBeLessThanOrEqual(500)
@@ -110,9 +124,11 @@ describe('the account page\'s data', () => {
       }
       throw new Error(`unexpected ${url}`)
     }) as typeof fetch
-    await new FirestoreAccountData('octocrawl-test', fetcher).erase('account-0001')
+    await new FirestoreAccountData('octocrawl-test', fetcher, 'octocrawl-jobs').erase('account-0001')
     expect(Object.values(left).flat()).toEqual([])
-    expect(deleted).toHaveLength(2 + 2 + 4 + 450 + 1)
+    // Keys, usage, OAuth, jobs and idempotency keys, the workspace's slots, request lines, the balance, and two job files.
+    expect(deleted).toHaveLength(2 + 2 + 4 + 2 + 1 + 450 + 1 + 2)
+    expect(deleted).toContain(`${root}/hostedJobWorkspaces/ws_account-0001`)
     // The balance first: a call under way cannot then settle and write usage back.
     expect(deleted[0]).toBe(`${root}/credits/account-0001`)
     await expect(new FirestoreAccountData('octocrawl-test', fetcher).erase('__x__')).rejects.toThrow(/malformed/)

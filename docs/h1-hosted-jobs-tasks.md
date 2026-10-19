@@ -99,18 +99,26 @@
 
 ## PR ③ hosted 任务路由（`packages/mcp/src/hostedApi.ts`）
 
-- [ ] **R1** 网关放行方案 §6 的路由，只给已登录账户的 key 和 OAuth 连接。
+- [x] **R1** 网关放行方案 §6 的路由，只给已登录账户的 key 和 OAuth 连接。
   - 无 key 调用和没有账户的手发 key 返回 403，并说明原因。
-- [ ] **R2** 归属检查：`workspaceId` 不一致返回 404；过期返回 410 `job_expired`。
-- [ ] **R3** 限制：
+- [x] **R2** 归属检查：`workspaceId` 不一致返回 404；过期返回 410 `job_expired`。
+- [x] **R3** 限制：
   - 每账户同时运行最多 2 个任务，排队最多 10 个，超过返回 429 加 `Retry-After`；
   - crawl 的 `maxPages` 默认 100，最多 500；
   - batch 1 到 1,000 个 URL；
   - 支持 `Idempotency-Key`；
   - 支持 `maxCredits`。
-- [ ] **R4** 启动时返回估计花费；余额连一段都不够时拒绝启动。
-- [ ] **R5** 列表接口从 GCS 分段文件分页（游标 `slice:line`），响应形状和本地 API 一致；导出接口返回签名链接。
-- [ ] **R6** 删除账户时连带删除 `w/ws_<uid>/` 下的文件和对应的任务文档（public-preview 的删除流程）。
+- [x] **R4** 启动时返回估计花费；余额连一段都不够时拒绝启动。
+- [x] **R5** 列表接口从 GCS 分段文件分页（游标 `slice:line`），响应形状和本地 API 一致；导出接口返回签名链接。
+- [x] **R6** 删除账户时连带删除 `w/ws_<uid>/` 下的文件和对应的任务文档（public-preview 的删除流程）。
+- PR ③ 做成的样子（`packages/mcp/src/hostedJobRoutes.ts`）：
+  - 只有 `createHostedApi` 同时配置了 `jobs` 和 `credits`，网关才放行任务路由；不配置就和以前一样返回 403。
+  - 只接受白名单里的参数（`HOSTED_BATCH_KEYS`、`HOSTED_CRAWL_KEYS`），其余的报出参数名后拒绝。
+  - key 没有浏览器通道时固定 `fastMode`，按每页 1 credit 估价。
+  - `maxPages: null` 按默认值 100 处理。
+  - 第一段入队失败的任务记为 `failed`，原因 `not_queued`，让出名额，并接着给下一个被提升的任务入队（`HostedJobStore.fail`）。
+  - `CreditsStore.balance` 是新加的余额查询。
+  - 删除账户时，删掉 `hostedJobs`、`hostedJobIdempotency`、工作区名单，以及 `W2L_JOBS_BUCKET` 里 `w/ws_<uid>/` 下的文件。
 
 ## PR ④ worker（`/internal/jobs/:id/slice`）
 
@@ -130,6 +138,7 @@
 - [ ] **W9**（PR ② 审查时发现）同一个任务的两次 `runSlice` 可能同时通过“没在跑”的检查。hosted 靠 Firestore 租约挡住（W2），worker 只能在拿到租约后调用。
 - [ ] **W10**（PR ② 审查时发现）`batchHosts` 传的站名必须和 `URL.hostname` 一样：小写、punycode、不带端口。否则那些 URL 永远留着，任务一直 `paused`。由 worker 用同一个函数从 URL 算站名。
 - [ ] **W11**（PR ② 审查时发现）读 sitemap 的时间如果超过一段的时间上限，每段都还没读页就被排空，任务永远推进不了。worker 要发现“连续两段 0 新页”，然后记失败，或者给下一段更长的时间。
+- [ ] **W12**（PR ③ 审查时发现）一段正在跑时账户被删除，这一段可能在删除列出文件之后才上传分段文件，文件就留下了。worker 上传前要确认任务还在；结算时发现任务已经没了，就删掉自己刚写的文件。
 - [ ] **W8**（PR ① 审查时发现）一个从没结束的任务被 TTL 删除后，它在工作区名单里的位置要释放；被提升的任务文档不存在时跳过它。
 - 验收测试：
   - 一段跑到中途死掉，重投先得到 503，租约过期后被新实例接手，不重复扣费；
@@ -157,5 +166,5 @@
 
 ## 下次从这里继续
 
-- 方案和本清单已合并（#602）。PR ① 已合并（#605），PR ② 已提交。
-- 下一项是 **PR ③ 的 R1**。E6 留到 PR ④ 一起做。
+- 方案和本清单已合并（#602）。PR ① 已合并（#605），PR ② 已合并（#606），PR ③ 已提交。
+- 下一项是 **PR ④ 的 W1**，E6 也在 PR ④ 里做。

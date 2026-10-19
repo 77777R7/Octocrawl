@@ -29,6 +29,7 @@ import { scrapeSchemaWithout } from './toolsets.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
 import { CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
+import { createJobRoutes, isJobRoute, type HostedJobsConfig } from './hostedJobRoutes.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
 export interface HostedKeyRecord {
@@ -325,6 +326,8 @@ export interface HostedApiConfig {
   leases?: HostedLeases
   /** Accounts' credit balances; a key that names an account is refused while this is absent. */
   credits?: CreditsStore
+  /** Hosted batch and crawl jobs (ROADMAP PH H1), for accounts' keys; absent, or without credits: their routes stay refused. */
+  jobs?: HostedJobsConfig
   /** Shared with the Cloudflare Worker; proves CF-Connecting-IP. Absent: the socket address is the keyless identity. */
   proxySecret?: string
   keylessDaily?: number
@@ -472,6 +475,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   if (config.hashKey.length < 32) throw new Error('hashKey must contain at least 32 characters')
   const env = config.env ?? process.env
   const log = config.log ?? ((line: string) => console.log(line))
+  const jobRoutes = config.jobs === undefined || config.credits === undefined ? null : createJobRoutes(config.jobs, config.credits, log)
   const keylessDaily = config.keylessDaily ?? DEFAULT_KEYLESS_DAILY
   const claudeDaily = config.claudeDaily ?? DEFAULT_CLAUDE_DAILY
   const siteDaily = config.siteDaily ?? DEFAULT_SITE_DAILY
@@ -562,8 +566,10 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const path = c.req.path
     const starts = method === 'POST' && (path === '/v1/scrape' || path === '/v1/map')
     const reads = method === 'GET' && (path.startsWith('/v1/scrapes/') || path.startsWith('/v1/maps/'))
+    const jobRoute = jobRoutes !== null && isJobRoute(method, path)
+    const jobStart = jobRoute && method === 'POST' && (path === '/v1/batches' || path === '/v1/crawl')
     if (method === 'GET' && path === '/health') return next()
-    if (!starts && !reads) {
+    if (!starts && !reads && !jobRoute) {
       return refuse(c, 403, 'hosted_unavailable', `${method} ${path} is not served by hosted Octocrawl: scrape and map only (POST /v1/scrape, POST /v1/map)`, [LOCAL_HINT, 'batch, crawl and Monitor are hosted in a later phase of the roadmap'])
     }
     // The site's signed header is checked without a store, and every Playground call comes from the site's few addresses,
@@ -578,13 +584,22 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       // Every request counts against its address first, before any lookup, so a flood of made-up keys reaches no store.
       const addressWait = addressLimiter.retryAfterSeconds(digest(config.hashKey, 'ip', c.env.socketAddress))
       if (addressWait !== null) return refuse(c, 429, 'rate_limited', `too many requests from this address: at most ${ADDRESS_PER_MINUTE} a minute`, [`retry after ${addressWait} s`], { 'Retry-After': String(addressWait) })
-      caller = await identify(c.req.raw.headers, c.env.socketAddress, starts)
+      caller = await identify(c.req.raw.headers, c.env.socketAddress, starts || jobStart)
     }
     if (caller === 'oauth_token') return refuse(c, 401, 'unauthorized', `an OAuth access token works only at the MCP endpoint ${MCP_OAUTH_RESOURCE}`, ['call the API with an account key (oc_...) from https://octocrawl.dev/dashboard/'])
     // Reached only between /mcp-oauth's own fresh read and this one: the person signs in again, they hold no key.
     if (caller === 'oauth_ended') return refuse(c, 401, 'unauthorized', 'this connection was disconnected or its sign-in expired: sign in again', [])
     if (caller === 'unknown_key') return refuse(c, 401, 'unauthorized', 'this key is not one Octocrawl issued, or it was revoked', ['send no Authorization header to use the keyless allowance, or ask for a key at https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint'])
     c.set('caller', caller)
+    if (jobRoute) {
+      // A job spends an account's credits over many pages: keyless callers and keys without an account have none to spend.
+      if (caller.kind !== 'key' || caller.uid === undefined) return refuse(c, 403, 'jobs_need_account', 'hosted batch and crawl jobs need an account\'s key', ['create a key at https://octocrawl.dev/dashboard/ , or run it on your computer: npx octocrawl serve'])
+      if (jobStart) {
+        const wait = keyLimiter.retryAfterSeconds(caller.id)
+        if (wait !== null) return refuse(c, 429, 'rate_limited', `too many requests: at most ${KEY_PER_MINUTE} starts a minute`, [`retry after ${wait} s`], { 'Retry-After': String(wait) })
+      }
+      return jobRoutes!.handle(c.req.raw, { uid: caller.uid, keyId: caller.id, browser: caller.browser })
+    }
     if (!starts) return next()
     const limiter = caller.kind === 'key' ? keyLimiter : caller.pool === 'claude' ? claudeLimiter : keylessLimiter
     const retryAfter = limiter.retryAfterSeconds(caller.id)
