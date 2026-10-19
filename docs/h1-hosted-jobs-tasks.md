@@ -165,16 +165,23 @@
 
 ## PR ⑤ 基础设施和部署（先问你）
 
-- [ ] **D1** 启用 Cloud Tasks API，建队列 `octocrawl-jobs`：asia-southeast1，最多 3 个并发投递，最多重试 5 次。
+- [x] **D1** 启用 Cloud Tasks API，建队列 `octocrawl-jobs`：asia-southeast1，最多 3 个并发投递，最多重试 5 次。
   - 重试次数要想清楚（PR ④ 第二轮审查提出）：一段一直失败、重试用完以后，任务就没有投递了，会一直停在 `running`。要么不设上限、靠退避，要么加一个定时扫描，把很久没动的任务记为失败。
-- [ ] **D2** 建 bucket `octocrawl-jobs-<project>`：asia-southeast1，30 天生命周期兜底。
-- [ ] **D3** 服务账号权限：
+- [x] **D2** 建 bucket `octocrawl-jobs-<project>`：asia-southeast1，30 天生命周期兜底。
+- [x] **D3** 服务账号权限：
   - 队列的服务账号对 `octocrawl-jobs` 有 `run.invoker`；
   - 服务对 bucket 有读写权限；
   - 有 `signBlob` 权限。
-- [ ] **D4** 部署 `octocrawl-jobs`：请求超时 15 分钟，不公开。`octocrawl-api` 用新 tag 部署，再切流量并确认线上 revision。
-- [ ] **D5** 打开 Firestore TTL：`hostedJobs.deleteAt`、`hostedJobIdempotency.expireAt`。
-- [ ] **D6** 把部署步骤写进 `docs/hosted-api.md`。
+- [x] **D4** 部署 `octocrawl-jobs`：请求超时 15 分钟，不公开。`octocrawl-api` 用新 tag 部署，再切流量并确认线上 revision。
+- [x] **D5** 打开 Firestore TTL：`hostedJobs.deleteAt`、`hostedJobIdempotency.expireAt`。
+- [x] **D6** 把部署步骤写进 `docs/hosted-api.md`。
+- PR ⑤ 做成的样子（2026-10-20）：
+  - 资源和命令都写在 `docs/hosted-api.md` 的“Batch and crawl jobs”一节。
+  - 队列不限重试次数，退避 10 秒到 10 分钟。
+  - 端到端用一把临时 key 验证过，用完已吊销：6 个 URL 的 batch 和 5 页的 crawl 都在一段内完成，各自只结算一次，到期删除排在 7 天后。
+  - 线上：API 是 `h28jobs`（回滚 `h27shares`），worker 是 `octocrawl-jobs-w1-5141c6d`。
+  - 全局开关现在是**关**的，打开之前先完成 PR ⑥ 的验收。
+- [ ] **D7**（重试次数定下来时提出）worker 记下同一段连续失败的次数，到 N 次就把任务记为失败（`delivery_failed`），免得一段一直失败时每 10 分钟重试一次、持续 37 天。
 
 ## PR ⑥ 验收
 
@@ -185,5 +192,5 @@
 
 ## 下次从这里继续
 
-- 方案和本清单已合并（#602）。PR ① 到 ③ 已合并（#605、#606、#607），PR ④ 已提交。
-- 下一项是 **PR ⑤**：动 GCP 资源和部署，先问 Howard。
+- 方案和本清单已合并（#602）。PR ① 到 ④ 已合并（#605–#608），PR ⑤ 已部署（2026-10-20），全局开关关着。
+- 下一项是 **PR ⑥ 的 V1**：parity 的 crawl 和 batch 用例对 hosted 跑一遍。要先打开开关，并发一把测试 key。

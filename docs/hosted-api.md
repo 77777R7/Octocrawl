@@ -101,6 +101,52 @@ claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp && claud
 
 To roll back, `gcloud run services update-traffic octocrawl-api --to-tags=<previous tag>=100`.
 
+## Batch and crawl jobs
+
+Hosted batch (1–1,000 URLs) and crawl (at most 500 pages) jobs (ROADMAP PH stage H1, [plan](launch/2026-10-19-h1-hosted-jobs-plan.md), [task list](h1-hosted-jobs-tasks.md)) run for accounts' keys only, a slice at a time: the API (`hostedJobRoutes.ts`) writes the job to Firestore (`hostedJobs`) and queues its first slice on Cloud Tasks; the worker service `octocrawl-jobs` (`hostedJobWorker.ts`, on the same image) runs each slice and writes its pages to GCS. Both services turn jobs on when all five variables are set (`hostedJobsCloud.ts`):
+
+| Variable | Value |
+| --- | --- |
+| `W2L_FIRESTORE_PROJECT_ID` | the project |
+| `W2L_JOBS_BUCKET` | `octocrawl-jobs-${W2L_PROJECT_ID}` |
+| `W2L_JOBS_QUEUE` | `asia-southeast1/octocrawl-jobs` |
+| `W2L_JOBS_WORKER_URL` | `https://octocrawl-jobs-c7fpmz73tq-as.a.run.app` |
+| `W2L_JOBS_TASKS_ACCOUNT` | `octocrawl-jobs-tasks@${W2L_PROJECT_ID}.iam.gserviceaccount.com` |
+
+The global switch is the Firestore document `hostedConfig/jobs`, field `enabled`; absent means on, and both services read it at most every 30 s. Off, a start answers 503 `jobs_paused` and a running job's slice stops at its next page and waits five minutes.
+
+The resources, made once on 2026-10-20:
+
+```sh
+gcloud services enable cloudtasks.googleapis.com iamcredentials.googleapis.com --project="$W2L_PROJECT_ID"
+gcloud iam service-accounts create octocrawl-jobs-tasks --project="$W2L_PROJECT_ID"
+# The runtime account (w2l-preview) queues tasks, delivers them as octocrawl-jobs-tasks, and signs export links as itself.
+gcloud projects add-iam-policy-binding "$W2L_PROJECT_ID" --member="serviceAccount:${W2L_RUNTIME_SA}" --role=roles/cloudtasks.enqueuer
+gcloud iam service-accounts add-iam-policy-binding "octocrawl-jobs-tasks@${W2L_PROJECT_ID}.iam.gserviceaccount.com" --member="serviceAccount:${W2L_RUNTIME_SA}" --role=roles/iam.serviceAccountUser --project="$W2L_PROJECT_ID"
+gcloud iam service-accounts add-iam-policy-binding "$W2L_RUNTIME_SA" --member="serviceAccount:${W2L_RUNTIME_SA}" --role=roles/iam.serviceAccountTokenCreator --project="$W2L_PROJECT_ID"
+# Files: private, deleted 30 days after they were written as a backstop (the worker deletes a job's files when it expires).
+gcloud storage buckets create "gs://octocrawl-jobs-${W2L_PROJECT_ID}" --location=asia-southeast1 --uniform-bucket-level-access --public-access-prevention --project="$W2L_PROJECT_ID"
+gcloud storage buckets update "gs://octocrawl-jobs-${W2L_PROJECT_ID}" --lifecycle-file=lifecycle.json --project="$W2L_PROJECT_ID"   # {"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}
+gcloud storage buckets add-iam-policy-binding "gs://octocrawl-jobs-${W2L_PROJECT_ID}" --member="serviceAccount:${W2L_RUNTIME_SA}" --role=roles/storage.objectAdmin --project="$W2L_PROJECT_ID"
+# Retries without a limit, backing off from 10 s to 10 min: a held lease answers 503 until it expires (16 min), and a job
+# with no delivery left would stay running. A slice that fails every time is retried every 10 min (hosted_job_delivery_failed).
+gcloud tasks queues create octocrawl-jobs --location=asia-southeast1 --max-concurrent-dispatches=3 --max-dispatches-per-second=1 --max-attempts=-1 --min-backoff=10s --max-backoff=600s --max-doublings=5 --project="$W2L_PROJECT_ID"
+for spec in hostedJobs:deleteAt hostedJobIdempotency:expireAt creditSettles:expireAt; do gcloud firestore fields ttls update "${spec#*:}" --collection-group="${spec%%:*}" --enable-ttl --async --project="$W2L_PROJECT_ID"; done
+```
+
+The worker is deployed from the hosted API's image, not public, one slice an instance; the queue's account may invoke it:
+
+```sh
+gcloud run deploy octocrawl-jobs --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --service-account="$W2L_RUNTIME_SA" --no-allow-unauthenticated --ingress=all \
+  --cpu=1 --memory=2Gi --concurrency=1 --min-instances=0 --max-instances=3 --timeout=900s \
+  --command=node --args=packages/mcp/dist/hostedJobsCli.js --revision-suffix="$W2L_REVISION_SUFFIX" --env-vars-file=jobs-env.yaml
+gcloud run services add-iam-policy-binding octocrawl-jobs --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --member="serviceAccount:octocrawl-jobs-tasks@${W2L_PROJECT_ID}.iam.gserviceaccount.com" --role=roles/run.invoker
+```
+
+The API takes the same variables with `--update-env-vars` on its next release. Verified on 2026-10-20 (worker `octocrawl-jobs-w1-5141c6d`, API `octocrawl-api-jobs-5141c6d`, tag `h28jobs`, rollback `h27shares`), with a key issued for the purpose and revoked after: a 6-URL batch and a 5-page crawl through the real queue, worker and bucket each completed in one slice in about 11 s, paged back, exported by a signed link, were charged 6 and 4 credits once each (`creditSettles`), and had their expiry queued 7 days on. A request to the worker without a token is 403 from Cloud Run, and with another account's token 401 from the worker. The switch was left off.
+
 ## Keys
 
 Keys are issued by hand from the waitlist in phase 1 (`scripts/public-preview/waitlist.mjs` lists it). A key is printed once; only its HMAC under `w2l-quota-hash-key` is stored, as the id of a document in Firestore's `hostedApiKeys` collection with `enabled`, `plan`, `dailyLimit`, `browser` and `label`. A start (`POST /v1/scrape`, `POST /v1/map`, and an MCP tool call, which goes through the same gate) reads the key's document fresh, so a key revoked by the script stops at its next start (ROADMAP PH item 2). What starts no work (the MCP tool list, reading a result by id) uses a lookup cached for a minute.
