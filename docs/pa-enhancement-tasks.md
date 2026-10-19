@@ -7,7 +7,7 @@
 
 核实基于 `main` 的 `2ffd7f25`（#604 表格等待、#607 H1 PR ③ 已合入），日期 2026-10-19。方案 §五 的六个 PA 缺口（A、B、D、E、F、G）逐条对照过源码：A、B、D、E、F 成立，G 部分成立；§五.7 的评测缺口成立（见表末两行）；C（#604）不在 §五，已合入。对照结果和勘误见下面两节。
 
-**外部试用门（ROADMAP.md:23-29）：** 期限 2026-10-17 已过；`main` 上没有 `research/trials/`，仓库里查不到任何试用记录，仓库之外有没有试用过不知道。ROADMAP 写"过期无试用则工作停止、原因写进 ROADMAP"；方案 §十一.1 的立场是试用安排沿原计划推进、不阻塞工程修复。本清单按方案的立场排工作，门的处置见"待你决定 9"，P0.2 不自行解除或改写它。
+**外部试用门（ROADMAP.md:23-29）：** 期限 2026-10-17 已过；`main` 上没有 `research/trials/`，仓库里查不到任何试用记录，仓库之外有没有试用过不知道。ROADMAP 写"过期无试用则工作停止、原因写进 ROADMAP"；方案 §十一.1 的立场是试用安排沿原计划推进、不阻塞工程修复。已定（2026-10-20，决定 9）：门不再设日期，改成"有人试用时记录到 `research/trials/`，试用的发现优先于新功能"，并写明 10-17 期限已过、仓库里没有试用记录；PA 工作照推进。P0.2 的 PR 一并改。
 
 **编号：** 本清单的编号只在本清单内有效。`docs/h1-hosted-jobs-tasks.md` 的 S/E/R/W/D/V 编号和 ROADMAP PH 的 H0–H5 另有所指，引用它们时一律写"H1 清单的 W3"或"PH H5"。
 
@@ -54,16 +54,16 @@
 
 还没回复的项先按默认做，你改了我再跟着改。
 
-1. **一次性运行预算。** 可追溯的费用：数据中心 Steel grant 一轮 92 题 $0.0210（36 次付费调用，`research/access/runs/2026-10-12-pa4-92-datacenter-b117b45.md`），带 `vendor_residential_proxy` 的一轮 $1.3894（`research/access/runs/2026-10-11-pa4-92-residential-scroll-cd9d9e7.md:16`）。默认：Phase 0 基线 + Phase 2 的一次 Steel 对账 + K1 两窗口的 Octocrawl 臂共 $10 以内，grant 不列 `vendor_residential_proxy`，自备网关带宽未计量（unknown）。超出先问。影响 P0.1、E7、K1–K3。
+1. **一次性运行预算。已定（2026-10-20）：$10 以内，grant 不列 `vendor_residential_proxy`。** 可追溯的费用：数据中心 Steel grant 一轮 92 题 $0.0210（36 次付费调用，`research/access/runs/2026-10-12-pa4-92-datacenter-b117b45.md`），带 `vendor_residential_proxy` 的一轮 $1.3894（`research/access/runs/2026-10-11-pa4-92-residential-scroll-cd9d9e7.md:16`）。默认：Phase 0 基线 + Phase 2 的一次 Steel 对账 + K1 两窗口的 Octocrawl 臂共 $10 以内，grant 不列 `vendor_residential_proxy`，自备网关带宽未计量（unknown）。超出先问。影响 P0.1、E7、K1–K3。
 2. **未合入 PR 的处置。** 草稿：#584（106 文件，NO-GO）、#528、#582；非草稿的开放 PR：#512、#514、#515；研究草稿 #556、#562 见 R1/R3。默认：#512/#514 的内容 #591 已带入 `main`（verify/9 含 uniqueBy），关闭；#584/#528/#582 的 D 类片段按 D6 拆成小 PR 后关闭原 PR；#515（Skyscanner 验证码分类）单独审。影响 P0.3、D6。
-3. **保留字段集由谁标注。** 方案 §十一.1 要求独立标注、不参与修复的人复核。默认：#556 的 D01–D10 做开发集、H01–H08 降为回归集；新保留集 v2 由本窗口选 URL 并标注，你或一位外部人抽查 20% 的字段。影响 R2、Phase 2 验收。
+3. **保留字段集由谁标注。已定（2026-10-20）：本窗口选题并标注，Howard 或一位外部人抽查 20%，标注记录写明谁标谁查。** 方案 §十一.1 要求独立标注、不参与修复的人复核。原默认：#556 的 D01–D10 做开发集、H01–H08 降为回归集；新保留集 v2 由本窗口选 URL 并标注，你或一位外部人抽查 20% 的字段。影响 R2、Phase 2 验收。
 4. **PA 与 H1 的时间分配。** ROADMAP 写"尚未设定"。默认：Phase 0–2 的 PA 任务先行，H1 PR ④ 在另一个窗口并行。`packages/mcp/src/hostedCredits.ts` 只由 PR ④ 窗口改，本清单 EH1 的字段改动排在 PR ④ 之后；给 PR ④ 的接口约定由 P0.6 送达，`docs/h1-hosted-jobs-tasks.md` 由 H1 窗口自己改。
 5. **Cloud Run 固定运行时实验（G4）。** 要起 Cloud Run Job、花钱。默认：从 Phase 1 起可并行做，起任何 `gcloud` 之前问你。
 6. **Browserbase 资格复查（K2）。** 官方文档已把 Verified 写成 Scale 可用。默认：只查账户页面和一次 403/200 探测，不买任何套餐；要买先问。
-7. **每周重跑的范围、费用和调度。** ROADMAP item 9 写"健康 25 题 + 轮换切片"（属竞品基线项），ADR 0005 写"installed_chrome 的 16 题"，两者都没有调度。默认：一个脚本只跑 Octocrawl 臂（25 健康 + 16 挑战 + 10 题轮换 frozen），竞品臂留给 K1 的两个窗口，P0.2 把 item 9 改成这个口径；16 题用只列 installed_chrome 的 grant，不花钱；健康与轮换组默认 standard；是否加一臂 Steel enhanced（约 $0.02/周，是持续花费，不在决定 1 的 $10 里）你定，不加就没有单位成本数字。调度用桌面 app 的计划任务跑在你的 Mac（launchd 被 TCC 挡，同 `octocrawl-cleanup-gone` 的做法），建计划任务前要你点头。影响 P0.4。
+7. **每周重跑的范围、费用和调度。已定（2026-10-20）：三类臂都跑：Octocrawl 免费臂（25 健康 + 16 挑战用只列 installed_chrome 的 grant + 10 题轮换 frozen，健康与轮换组 standard）、Steel enhanced 臂（同 51 题，约 $0.02/周，持续花费，不在决定 1 的 $10 里）、竞品臂（Firecrawl Cloud、ZenRows 各跑同 51 题，每周约 51 次调用/家，额度见决定 10）。差距数字每周刷新，K1 仍是正式的两窗口对照。** 调度用桌面 app 的计划任务跑在你的 Mac（launchd 被 TCC 挡，同 `octocrawl-cleanup-gone` 的做法），建计划任务前仍要你点头。影响 P0.4、P0.2 的 item 9 措辞。
 8. **8791 本地 host 何时重启。** A 合入后它要重启才读到 grant；CLAUDE.local.md 说不要动它，A4 也不会运行 `local-service.mjs install`（它会 bootout 再 bootstrap）。默认：A 的验收在 8797 起第二个 host 做、用完关掉，8791 由你自己择时重启。
-9. **外部试用门。** 期限已过、仓库里没有试用记录。默认：本清单按方案 §十一.1 的立场推进 Phase 0–2；你决定是解除、改期还是让 P0.2 在 ROADMAP 写明过期原因。相关的开放任务在 `docs/mcp-client-ux-tasks.md` 的 E3。
-10. **竞品臂的 key 与额度（K1）。** 两窗口 × (92 + ≥40) 题，每家约 2×132 次调用；w2 一轮 92 题用了 81 Firecrawl credits（`ROADMAP.md:271`），估 230–260 credits；ZenRows 计价单位待查。默认：K1 开始前先确认两个 key 有效、额度够，不够先问你，不自行升级套餐；这笔额度不计入决定 1 的 $10。
+9. **外部试用门。已定（2026-10-20）：不设日期。** P0.2 把 ROADMAP 的门改成"有人试用时记录到 `research/trials/`，试用的发现优先于新功能"，并写明 10-17 期限已过、仓库里没有试用记录；PA 工作照推进。相关的开放任务在 `docs/mcp-client-ux-tasks.md` 的 E3。
+10. **竞品臂的 key 与额度（K1）。** 两窗口 × (92 + ≥40) 题，每家约 2×132 次调用；w2 一轮 92 题用了 81 Firecrawl credits（`ROADMAP.md:271`），估 230–260 credits；ZenRows 计价单位待查。默认：K1 开始前先确认两个 key 有效、额度够，不够先问你，不自行升级套餐；这笔额度不计入决定 1 的 $10。每周重跑的竞品臂（决定 7）另耗每家约 51 次调用/周（Firecrawl 约 45 credits/周），建计划任务前一并确认额度。
 11. **托管计价。** 现状核对发现 `hostedCredits.ts` 的 scrapeCharge 把 provider 通道按 5 credits 平价，与 ROADMAP"成本加 margin"不一致，但 10-18 的商业计划正提议浏览器页 5→2 credits，ROADMAP 写两份提案未决前什么都不改。默认：本轮只产出成本数字，不改任何计价；浏览器页 5 还是 2 随商业计划一起决定。
 12. **`waitForRegion` 对无表格读取器通道的行为（C2）。** 现在只有 `readTables` 存在时才可能报 `tablesUnjudged`，provider 通道带 `tableRowsMin` 合同时可以凭标题 ready。默认：改成没有表格读取器就报 `tablesUnjudged`、永不 ready；这会改变所有不传 readTables 的通道的等待行为，PR 里写明。
 
@@ -86,7 +86,7 @@
 | Phase 0 · 基线与整理 | P0.5 runner 分母 → P0.1 基线记录；P0.2 ROADMAP 修正；P0.3 PR 分流；P0.4 每周重跑脚本；P0.6 给 H1 窗口的接口约定 | 无 | 两份基线记录在仓库里（含 planned/attempted/not_run 与 Grant 行）；P0.5 的测试绿；P0.3 每个 PR 的处置已写入；ROADMAP 的 item 5/9 和 PH H1 行正确；每周脚本跑过一次；P0.6 送达 |
 | Phase 1 · 三条并行线 + 评测基建 | A 入口一致、B 文档捕获、D 主体字段；R 开发集（R1、R1b 基线）与保留集 v2 | 失败测试不等任何基线；A/B/D 的验收对比用 P0.1，D 的合入和 D6 依赖 R1 + R1b | A/B/D 各自验收通过并合入（B 含 B3、B4、B6；D6 滚动，不在此内）；R1b 基线记录在案；保留集 v2 冻结且未对任何候选跑过 |
 | Phase 2 · 交付闭环 | C 表格残余、E 付费持久、F 有限候选与模型证据 | C1 和 C2 的失败测试不依赖 B；C2 的 provider 接线依赖 B2；E 只依赖 Phase 0，有空窗口可提前到 Phase 1；F2 依赖 D2/D3；F3a 依赖 B3 的 captureId 和 D6 的 RFC/WCAG fixture；E3 与 F3a/F4 都碰 `routing/ladder.ts`，F 的接线在 E3 合入后 rebase | E1 绿、E7 本地全过、一次真实 Steel 对账记录在案；F1/F2 通过，F3a/F3b 的 fixture 通过，开发集相对 R1b 上升、不降低合同，T073 与 H01–H08 记录在案；C2 接上或报 `tablesUnjudged`、C3 断言通过、C1 记录在案；保留集 v2 的同日配对运行记录在案 |
-| Phase 3 · 观测与路线 | G1 字节诚实、G2a/G2b 路线观测与持久化、G3 排序、G4 Cloud Run 固定运行时、G5 公开捕获字段 | G1 无依赖（provider.ts 那一行随 B2 做）；G2a 只为 chargedUsd 依赖 E；G2b 依赖 G2a；G3 依赖 F 稳定、G2b 和两个窗口；G4 只依赖决定 5，可从 Phase 1 起并行 | G1 的测试绿；一次带 grant 的指定运行记录含 G2a 的分层结果（访问送达 / 区域加载 / 任务通过）和单位成本；G2b 的持久化在该运行里写入但不改决策；G5 的公开字段登记 |
+| Phase 3 · 观测与路线 | G1 字节诚实、G2a/G2b 路线观测与持久化、G3 排序、G4 Cloud Run 固定运行时、G5 公开捕获字段 | G1 无依赖（provider.ts 那一行随 B2 做）；G2a 只为 chargedUsd 依赖 E；G2b 依赖 G2a；G3 依赖 F 稳定、G2b 和两个窗口；G4 只依赖决定 5，可从 Phase 1 起并行 | G1 的测试绿；每周重跑的 Steel 臂记录含 G2a 的分层结果（访问送达 / 区域加载 / 任务通过）和单位成本；G2b 的持久化在该运行里写入但不改决策；G5 的公开字段登记 |
 | Phase 4 · 对照与受控开放 | K1 两窗口竞品对照、K2 Browserbase 复查、K3 出口配对、K4 默认值决定、K5 ROADMAP 收口 | K1 依赖 Phase 2 合入和 G1/G2a 的字段；K2、K3 的测量是单独的小运行，可在 Phase 1–2 的空窗口做，决定留在 Phase 4 | ROADMAP 的 bar 状态更新：差距数字、补法、决定 |
 
 A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同时做。文件归属：A5 改 `ladderCli.ts` 的 `buildChannels`，B2/B3 改 `vendors/cdp.ts` 与 `subjects/provider.ts`，B4 改 `routing/ladder.ts` 的 providers 过滤，互不重叠，各自合入时 rebase 即可。
@@ -105,17 +105,17 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - 验收：两份记录，各有命令、commit、代理/直连、Grant 行、费用、planned/attempted/not_run；92 题的 verified/假成功/p50/p95 和健康 25 题的逐题结果写进本清单"进度"节。
 - [ ] **P0.2 ROADMAP 与文档修正（一个 docs PR，只改 ROADMAP 和 docs/access.md）。**
   - PA item 5 状态行：installed_chrome 已建成（`ladderCli.ts:306-324`），引用 ADR 0005 的实现/验收 2026-10-14、CHANGELOG 0.5.0、验收记录 7b56397b；每周重跑和出口按检测类型选择仍开放。不写未核实的记录数。
-  - PA item 9：每周重跑按决定 7 的口径（Octocrawl 臂；差距数字只由 K1 刷新）。
+  - PA item 9：每周重跑按决定 7 的口径（三类臂：Octocrawl 免费、Steel enhanced、Firecrawl/ZenRows；差距数字每周刷新，K1 是正式两窗口对照）。
   - PH H1 行：PR ③ 已合入，下一项是 H1 清单的 W1。`docs/h1-hosted-jobs-tasks.md` 不动，由 H1 窗口改。
-  - PA 节加一行链接到本清单。试用门按决定 9，没答复前不改。
+  - PA 节加一行链接到本清单。试用门按决定 9：去掉日期，改成"有人试用时记录到 `research/trials/`，试用的发现优先于新功能"，写明 10-17 期限已过、仓库里没有试用记录。
   - `docs/access.md:53`（standard+enhanced 也建 provider rung）、`:117`（403 不是 409）。
 - [ ] **P0.3 未合入 PR 的分流（按决定 2）。** 每个 PR 写一条处置理由：已被 #591 带入 / 拆入 D6 / 单独审 / 关闭。#584 剩余可拆的片段：RFC/WCAG 兄弟章节（归 D6）、OTTO 变体链接与起价、ESPN 拆分积分榜、带符号百分比、FT 头条卡片、聚合报价、来源不可用分类（#582）、验证码分类、示例合同。Nasdaq 影子表的源码已在 `main`（#516），只剩测试。
   - 注意版本号：`main` 是 extract-tf/30、verify/9；#528 写 /32、#584 写 /36、#512/#514 写 verify/5、/6，移植时重新取号。
-- [ ] **P0.4 每周重跑脚本（按决定 7）。** `research/access/weekly.mjs`：25 健康 + 16 挑战 + 10 题轮换 frozen，每题带合同，记录到 `research/access/runs/<date>-weekly-<commit>.md`。
+- [ ] **P0.4 每周重跑脚本（按决定 7）。** `research/access/weekly.mjs`：同一组 51 题（25 健康 + 16 挑战 + 10 题轮换 frozen）跑三类臂：Octocrawl 免费臂、Steel enhanced 臂（数据中心 grant，不列 `vendor_residential_proxy`）、竞品臂（`--target firecrawl` / `zenrows`，用 `research/access/run-set.mjs` 已有的竞品 runner），每题带合同（竞品不收合同），每臂一份记录 `research/access/runs/<date>-weekly-<arm>-<commit>.md`，再汇总一份写差距数字。
   - 轮换规则：16 题之外的 frozen 题有 36 道（`tasks.v1.json` 里 part=frozen 的 50 道减去子集里的 14 道；不用 run-set 的 `--set frozen`，它还会带上 3 道 unstable），按文件顺序切 4 组（10/10/10/6），组号 = ISO 周数 mod 4，偏移由日期推出、不存文件；记录头写组号。16 题臂要带 `--set all`。
-  - 脚本自己起 API（照 `sticky-vs-rotating.sh:17-18`：固定一个空闲端口，避开 8787、8791、8812–8814；等 listening 再跑；结束时关掉，失败也关）。16 题用只列 installed_chrome 的 grant；每份记录写 Chrome 版本，大版本变化时再跑一次 16 题；与验收基线（ADR 0005 / 7b56397b：11 和 7 of 16，探针两次各 12）比较，低于基线就写记录并标"停止默认推荐，待重测"。
+  - 脚本自己起 API（照 `sticky-vs-rotating.sh:17-18`：固定一个空闲端口，避开 8787、8791、8812–8814；等 listening 再跑；结束时关掉，失败也关）；Octocrawl 免费臂和 Steel 臂各起一次 API，grant 不同。16 题的免费臂用只列 installed_chrome 的 grant；每份记录写 Chrome 版本，大版本变化时再跑一次 16 题；与验收基线（ADR 0005 / 7b56397b：11 和 7 of 16，探针两次各 12）比较，低于基线就写记录并标"停止默认推荐，待重测"。
   - 16 题子集加机器可读定义：`research/access/subsets.v1.json`（不改 `tasks.v1.json`，免得任务文件 SHA 变化），`cloudrun-xvfb/run.sh:20`、`sticky-vs-rotating.sh:19`、`docs/pa-challenge-botcheck-tasks.md` 改为引用它。
-  - 验收：脚本本地跑过一次并有记录；计划任务只在你点头后建（名字、时间写进本清单）。
+  - 验收：脚本本地跑过一次、三类臂各有记录和一份汇总；计划任务只在你点头并确认竞品额度后建（名字、时间写进本清单）。
 - [ ] **P0.6 给 H1 窗口的接口约定（一条消息，不改它的文件）。** 内容：PR ④ 的 worker 引擎不传 accessGrant（PH H5 之前保持 null）；托管切片的 USD 付费调用若将来存在，预留存 Firestore、挨着 `hostedJobs`，key `{jobId}-{slice}-{ordinal}`，credits 的幂等键 `{jobId}-{slice}` 不变、USD key 是它的子键；PR ④ 的 W5 验收要覆盖"旧租约提交不得改写预留"和"重复投递按 `{jobId}-{slice}-{ordinal}` 幂等、不重复预留"。
 
 ## Phase 1 · 三条并行线 + 评测基建
@@ -213,7 +213,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 - [ ] **G3 排序。** 单位有效交付成本代替累计成本；新 host、新版本或样本不足时用现有固定阶梯；先影子排序（只记日志，保持声明顺序），两个窗口一致收益后才固化。
 - [ ] **G4 Cloud Run 固定运行时（研究，按决定 5，可从 Phase 1 起并行）。** 镜像 digest、Chrome/Playwright 版本、字体、locale、显示参数固定，影响指纹或检测的参数只用 ADR 0005 测量过的那一组；启动自检分项（Xvfb、CDP、浏览器、DNS、代理控制页）；init 子进程回收与信号转发、admission control、保留非 root；分别计时冷启动、导航、challenge wait、region wait、捕获、提取、序列化、取消清理；资源配置用困难页负载曲线定；做一次本地 vs Cloud Run 同 16 题同出口的配对运行，隔离 Xvfb/出口/CDP 的归因（方案 §四.3）。只出记录，不开放托管 PA。出口成功率的测量与云功能计划 step 0 用同一 parity 站点集，记录可共用。
 - [ ] **G5 公开的捕获字段（B3 经 F3a 用过、稳定后）。** Evidence 和 Evidence Record 加可选 `document: { captureId, generation, responseMatch }`，登记 `EVIDENCE_RECORD_ADDED_KEYS` 与 `packages/contracts/schemas/evidence-record.v1.json`，`w2l.evidence/1` 保持有效；测试在 `packages/contracts/test/evidenceRecord.test.ts`。
-- 验收：一次带 grant 的指定运行记录含 G2a 字段和单位成本；G1 的测试；G5 的 key 列表测试；路线决策不变。
+- 验收：每周重跑的 Steel 臂记录含 G2a 字段和单位成本；G1 的测试；G5 的 key 列表测试；路线决策不变。
 
 ## Phase 4 · 对照与受控开放
 
@@ -227,8 +227,9 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 ## 进度
 
 - 2026-10-19：清单写成，核实基于 `2ffd7f25`。基线数字待 P0.1，开发集基线待 R1b。
+- 2026-10-20：决定 1、3、7、9 已定；P0.2 的 PR #609 已开，P0.5 进行中。
 
 ## 下次从这里继续
 
-- 先回复"待你决定"的 1、3、7、9（其余可按默认）。
+- 决定 1、3、7、9 已定（2026-10-20），其余按默认。
 - 下一项是 **P0.5**（runner 分母，P0.1 的记录格式靠它）和 **P0.2**（ROADMAP 修正），两者可同时开；P0.5 合入后跑 **P0.1**；A1、B1、D1 的失败测试和 R1 不等基线，可各开一个窗口。
