@@ -49,7 +49,7 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; claudeDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void } = {}) {
+async function start(options: { keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; accountDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
   // `keys` are stored under their plaintext's digest; `keyRecords` under their own id, as a connection's key record has no plaintext.
@@ -59,7 +59,7 @@ async function start(options: { keylessDaily?: number; claudeDaily?: number; pro
   const service = createHostedApi({
     port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: options.keyStore ?? new MemoryHostedKeys(records), oauthTokens: options.oauthTokenStore ?? oauthTokens, ...(options.now ? { now: options.now } : {}), quota, leases: options.leases,
     ...(options.credits === null ? {} : { credits: options.credits ?? new MemoryCreditsStore() }),
-    keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: 100, proxySecret: options.proxySecret,
+    keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: 100, keylessTotalDaily: options.keylessTotalDaily, accountDaily: options.accountDaily, proxySecret: options.proxySecret,
     networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: options.log ?? (() => {}),
   })
   close = service.close
@@ -110,8 +110,8 @@ it('keyless: reads a page over the HTTP lane alone, within a daily allowance, th
   expect(body.code).toBe('quota_exhausted')
   expect(body.agentHints.join(' ')).toContain('key')
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { 'content-type': 'text/plain' })).status).toBe(429)
-  // Three starts counted (two reads and the refused screenshot), the fourth refused.
-  expect([...quota.counts.values()].sort()).toEqual([3, 3])
+  // Three starts counted (two reads and the refused screenshot), the fourth refused: on the site's day, the keyless share and the address's day.
+  expect([...quota.counts.values()].sort()).toEqual([3, 3, 3])
 })
 
 it('a key is looked up by its digest, a revoked or unknown one is 401, and a key holder has its own allowance', async () => {
@@ -155,6 +155,40 @@ it('keyless calls from Claude\'s egress range share one pool of their own, besid
     await client.connect(transport)
     expectIsError(await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } }), /Claude connector|429/)
   } finally { await client.close() }
+})
+
+it('every keyless caller together, Claude\'s pool included, gets a share of the site\'s day, and a key is outside it', async () => {
+  const { url } = await start({ keylessDaily: 5, claudeDaily: 5, keylessTotalDaily: 2, proxySecret: 's'.repeat(32), keys: { oc_key: { enabled: true, plan: 'free', dailyLimit: 5, browser: false } } })
+  const from = (ip: string) => ({ 'x-w2l-proxy-secret': 's'.repeat(32), 'cf-connecting-ip': ip })
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, from('203.0.113.1'))).status).toBe(200)
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, from('160.79.104.10'))).status).toBe(200)
+  // A third address, with its own day untouched, finds the share spent.
+  const spent = await post(url, '/v1/scrape', { url: `${origin}/page` }, from('203.0.113.2'))
+  expect(spent.status).toBe(429)
+  const refusal = await spent.json() as { error: string; agentHints: string[] }
+  expect(refusal.error).toContain('the 2 pages a day that hosted Octocrawl serves without a key are used up')
+  expect(refusal.agentHints[0]).toContain('a key raises the allowance')
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { ...from('203.0.113.2'), authorization: 'Bearer oc_key' })).status).toBe(200)
+})
+
+it('one account starts at most its share of the site\'s day, refused with nothing taken, while another account goes on', async () => {
+  const credits = new MemoryCreditsStore(1_000)
+  const { url } = await start({ credits, accountDaily: 2, keys: {
+    oc_one: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' },
+    oc_two: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-2' },
+  } })
+  const one = { authorization: 'Bearer oc_one' }
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, one)).status).toBe(200)
+  expect((await post(url, '/v1/map', { url: `${origin}/page` }, one)).status).toBe(200)
+  const spent = await post(url, '/v1/scrape', { url: `${origin}/page` }, one)
+  expect(spent.status).toBe(429)
+  expect(Number(spent.headers.get('retry-after'))).toBeGreaterThan(0)
+  const refusal = await spent.json() as { code: string; error: string; agentHints: string[] }
+  expect(refusal.code).toBe('quota_exhausted')
+  expect(refusal.error).toContain('this account has started its 2 hosted pages for today')
+  expect(refusal.agentHints.join(' ')).toContain('00:00 UTC')
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 998 })
+  expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_two' })).status).toBe(200)
 })
 
 it('the Worker\'s address header counts only with the shared secret', async () => {
@@ -283,8 +317,8 @@ it('an account\'s key spends credits by what each result returned, and says what
   expect(lines.every(line => line.ms! >= 0)).toBe(true)
   // Never the page's content: its words appear nowhere in the lines.
   expect(JSON.stringify(lines)).not.toContain('Tides')
-  // The site's daily total still counts every start; no per-key daily counter is kept for an account.
-  expect([...credits.site.values()]).toEqual([7])
+  // The site's daily total and the account's share count every start; no per-key daily counter is kept for an account.
+  expect([...credits.site.entries()].map(([id, count]) => [id.slice(11), count])).toEqual([['site', 7], ['account-account-1', 7]])
   expect(quota.counts.size).toBe(0)
 })
 
