@@ -4,7 +4,7 @@
 //
 // Usage: npm run api   (in another terminal, from the repo root)
 //        node research/parity/run-sites.mjs [--batch 1] [--only S01,S04] [--record <file.md>]
-// Env:   W2L_API_URL (default http://127.0.0.1:8787)
+// Env:   W2L_API_URL (default http://127.0.0.1:8787); W2L_API_TOKEN, a key sent as a bearer token (a hosted API)
 //
 // Raw responses and results.json go to .w2l/parity/<timestamp>/ (git-ignored).
 // --record also writes the Markdown summary to <file.md>, for a dated record
@@ -180,10 +180,14 @@ try {
   dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }).trim() !== ''
 } catch {}
 
+// A hosted API (W2L_API_URL=https://api.octocrawl.dev) needs a key: W2L_API_TOKEN, the SDK's variable, is sent on REST
+// calls too when it is set. Its value is never recorded.
+const restAuth = process.env.W2L_API_TOKEN ? { authorization: `Bearer ${process.env.W2L_API_TOKEN}` } : {}
+
 async function call(method, path, body) {
   const res = await fetch(api + path, {
     method,
-    headers: body ? { 'content-type': 'application/json' } : {},
+    headers: { ...restAuth, ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
   const text = await res.text()
@@ -384,7 +388,7 @@ const runners = {
     let midRunUrls = null
     for (let i = 0; i < 120; i++) {
       status = await call('GET', `/v1/batches/${taskId}`)
-      if (!['pending', 'running'].includes(status.json?.status)) break
+      if (!['pending', 'queued', 'running'].includes(status.json?.status)) break
       polls.push({ status: status.json.status, completed: status.json.completed ?? null })
       if (midRunUrls === null && status.json.status === 'running' && status.json.completed > 0) {
         midRunUrls = (await readAll(`/v1/batches/${taskId}/items`, 50)).items.map((item) => item.url)
@@ -486,7 +490,7 @@ const runners = {
     let midRunPages = null
     for (let i = 0; i < 150; i++) {
       status = await call('GET', `/v1/crawl/${taskId}`)
-      if (!['pending', 'running'].includes(status.json?.status)) break
+      if (!['pending', 'queued', 'running'].includes(status.json?.status)) break
       polls.push({ status: status.json.status, pagesFetched: status.json.pagesFetched ?? null })
       if (midRunPages === null && status.json.status === 'running' && status.json.pagesFetched > 0) {
         midRunPages = (await call('GET', `/v1/crawl/${taskId}/pages?limit=100`)).json?.items?.length ?? null
