@@ -96,6 +96,66 @@ a { color: inherit; }
 
 .hero-cells { position: relative; display: grid; min-height: clamp(340px, 46vh, 500px); min-height: clamp(340px, 46svh, 500px); }
 .hero-copy { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 56px 32px; text-align: center; }
+/* The home hero: a two-line headline, its second line in orange, one line under it with an open-source chip, Start for
+   free and Connect your agent, then the URL card, the whole block centred between the bar and See how it works. The
+   octopus lies behind the headline with its eyes between the two lines; the copy's top padding leaves room for the
+   part of its head that rises above the headline. */
+.hero:not(.is-tool) { --hero-h1: clamp(46px, 5vw, 76px); --hero-sub: clamp(16px, 1.4vw, 18px); --home-octopus: clamp(400px, min(44vw, 66vh), 780px); }
+@media (max-height: 760px) { .hero:not(.is-tool) { --home-octopus: clamp(340px, 58vh, 780px); } }
+.hero:not(.is-tool) h1 { font-size: var(--hero-h1); line-height: 1.16; }
+@media (min-width: 1050px) {
+  .hero:not(.is-tool) > main { padding-top: 0; }
+  .hero:not(.is-tool) > main > .band:first-child { margin-top: auto; }
+  .hero:not(.is-tool) .hero-scroll { margin-top: auto; }
+  .hero:not(.is-tool) .hero-cells { min-height: 0; }
+  /* The head rises .35 of the octopus's size above its eyes, and the eyes sit 1.18 of the headline's size below its
+     top, in the gap between line one's baseline and line two's ascenders. */
+  .hero:not(.is-tool) .hero-copy { justify-content: flex-start; padding: max(24px, .35 * var(--home-octopus) - 1.18 * var(--hero-h1) + 12px) 32px 0; }
+  .hero:not(.is-tool) .hero-form-row { padding-top: 40px; }
+  /* The eyes are .057 of the size above the layer's centre. */
+  .hero:not(.is-tool) .hero-octopus-cell::before, .hero:not(.is-tool) .hero-ascii-layer { top: calc(max(24px, .35 * var(--home-octopus) - 1.18 * var(--hero-h1) + 12px) + 1.18 * var(--hero-h1) + .057 * var(--octopus-size)); }
+}
+.hero:not(.is-tool) .hero-octopus-cell { --octopus-size: var(--home-octopus); }
+/* The shade behind the copy is lighter and wider here, so the octopus's body behind the text keeps the head's tone. */
+.hero:not(.is-tool) .hero-copy::before { inset: -12% -8%; background: radial-gradient(ellipse 60% 60% at center, rgba(3, 16, 52, .2), rgba(3, 16, 52, .08) 60%, transparent 90%); }
+/* A tighter card than the tools pages': the URL line and the toolbar each lose a few pixels. */
+.hero:not(.is-tool) .url-entry { padding-block: 8px; }
+.hero:not(.is-tool) .url-entry input { padding-block: 10px; }
+.hero:not(.is-tool) .url-toolbar { padding-block: 8px; }
+.hero:not(.is-tool) h1 em { color: var(--orange-200); }
+.hero:not(.is-tool) .hero-description { max-width: 880px; margin-top: 22px; font-size: var(--hero-sub); }
+/* The open-source chip is liquid glass: a frosted, brightened pill with a lit rim and a highlight that drifts across
+   it. Now and then (and on hover) it turns into its ASCII self, a dark square plate with the words printed
+   from noise in brackets, and then pours back into glass (heroChip.ts). */
+.hero-chip { position: relative; isolation: isolate; display: inline-block; margin-left: 8px; padding: 2px 14px; border-radius: 999px; color: #fff; white-space: nowrap; vertical-align: 1px; background: linear-gradient(135deg, rgba(255, 255, 255, .2), rgba(255, 255, 255, .05) 45%, rgba(255, 255, 255, .12)); -webkit-backdrop-filter: blur(12px) saturate(1.8) brightness(1.12); backdrop-filter: blur(12px) saturate(1.8) brightness(1.12); box-shadow: inset 0 1px 1px rgba(255, 255, 255, .5), inset 0 -1px 1px rgba(255, 255, 255, .1), inset 0 0 14px rgba(255, 255, 255, .08), 0 8px 22px -10px rgba(1, 12, 45, .8); transition: background .6s ease, box-shadow .6s ease, border-radius .5s cubic-bezier(.5, 0, .2, 1), -webkit-backdrop-filter .6s ease, backdrop-filter .6s ease; }
+.hero-chip::before, .hero-chip::after { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none; transition: opacity .6s ease; }
+/* The highlight: a soft sheet of light that slides slowly over the glass, like light through liquid. */
+.hero-chip::before { background: radial-gradient(60% 120% at var(--sheen, 22%) 0%, rgba(255, 255, 255, .34), transparent 70%); mix-blend-mode: screen; animation: chip-sheen 7s ease-in-out infinite alternate; }
+/* The rim: bright where the light falls, top left, fading round to the bottom right. */
+.hero-chip::after { padding: 1px; background: linear-gradient(140deg, rgba(255, 255, 255, .75), rgba(255, 255, 255, .12) 40%, rgba(255, 255, 255, .06) 60%, rgba(255, 255, 255, .4)); -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+@property --sheen { syntax: '<percentage>'; inherits: false; initial-value: 22%; }
+@keyframes chip-sheen { to { --sheen: 78%; } }
+.hero-chip-text { display: inline-block; transition: opacity .35s ease, filter .35s ease; }
+.hero-chip-ascii { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #ffb68f; text-shadow: 0 0 10px rgba(255, 140, 90, .35); font: 600 var(--chip-ascii, 14px)/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0; white-space: pre; opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+.hero-chip.is-ascii { border-radius: 3px; background: rgba(3, 13, 42, .72); -webkit-backdrop-filter: blur(0) saturate(1) brightness(1); backdrop-filter: blur(0) saturate(1) brightness(1); box-shadow: inset 0 0 0 rgba(255, 255, 255, 0), inset 0 0 0 rgba(255, 255, 255, 0), inset 0 0 0 rgba(255, 255, 255, 0), 0 0 0 rgba(1, 12, 45, 0); }
+.hero-chip.is-ascii::before, .hero-chip.is-ascii::after { opacity: 0; }
+.hero-chip.is-ascii .hero-chip-text { opacity: 0; filter: blur(3px); }
+.hero-chip.is-ascii .hero-chip-ascii { opacity: 1; }
+/* Pouring back: the glass overshoots and settles, like a drop finding its shape. */
+.hero-chip.is-pouring { animation: chip-pour .7s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes chip-pour { 0% { scale: 1.08 .86; } 45% { scale: .96 1.06; } 100% { scale: 1; } }
+@media (prefers-reduced-motion: reduce) { .hero-chip::before { animation: none; } }
+.hero-ctas { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 28px 0 0; }
+.hero-cta { display: inline-flex; gap: 10px; align-items: center; min-height: 48px; padding: 0 20px; border: 1px solid rgba(183, 200, 230, .3); border-radius: 12px; color: #fff; background: rgba(6, 22, 60, .45); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); font-size: 16px; font-weight: 600; text-decoration: none; transition: background .2s, border-color .2s, transform .2s; }
+.hero-cta:hover { border-color: rgba(183, 200, 230, .6); background: rgba(6, 22, 60, .65); }
+.hero-cta.is-primary { border-color: transparent; background: var(--orange); box-shadow: 0 12px 30px -10px rgba(243, 104, 61, .8); }
+.hero-cta.is-primary:hover { background: #f57a52; transform: translateY(-1px); }
+.hero-cta:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.hero-agents { display: inline-flex; padding-left: 6px; }
+.hero-agent { width: 28px; height: 28px; margin-left: -5px; border-radius: 50%; box-shadow: 0 0 0 2px #0b1d4f; }
+/* On a phone the headline breaks where it balances, not where the desktop line ends. */
+@media (max-width: 520px) { .hero:not(.is-tool) h1 { text-wrap: balance; } .hero:not(.is-tool) h1 br { display: none; } .hero-ctas { flex-direction: column; align-self: stretch; align-items: stretch; max-width: 360px; margin-inline: auto; } .hero-cta { justify-content: center; min-height: 46px; padding: 0 16px; font-size: 15px; } }
+@supports (corner-shape: squircle) { .hero-cta { border-radius: 22px; corner-shape: squircle; } }
 .hero-copy::before { content: ''; position: absolute; z-index: -1; inset: 8% 4%; pointer-events: none; background: radial-gradient(ellipse 74% 78% at center, rgba(3, 16, 52, .42), rgba(3, 16, 52, .18) 55%, transparent 86%); }
 .hero h1 { margin: 0; font-size: clamp(44px, 4.4vw, 64px); line-height: 1.14; font-weight: 400; letter-spacing: -.046em; text-shadow: 0 5px 32px rgba(1, 16, 55, .35); }
 .hero h1 em { font-style: normal; color: inherit; }
@@ -1472,8 +1532,6 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 }
 
 /* Product identity copy shares the existing section rhythm. */
-.hero-agent-link { margin: 18px 0 0; font-size: 15px; }
-.hero-agent-link a { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; color: #e0eafb; text-underline-offset: 4px; }
 .start-scope, .start-identity { max-width: 76ch; margin: 20px auto; color: var(--ink-soft); font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
 .start-scope a, .start-identity a, .start-lead a, .can-evidence a { color: inherit; text-underline-offset: 3px; }
 .can-evidence { max-width: 76ch; margin-top: 32px; }
