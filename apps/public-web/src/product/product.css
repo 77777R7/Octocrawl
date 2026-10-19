@@ -96,14 +96,8 @@
 .sc-small { margin: 18px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
 .sc-small a { color: var(--link); }
 .sc-intro code { font: .9em var(--mono); }
-.rn-wrap { padding: 0 24px 88px; }
-.rn-table { width: 100%; border-collapse: collapse; font-size: 15px; }
-.rn-table th, .rn-table td { padding: 13px 16px 13px 0; border-top: 1px solid var(--line); color: var(--ink-soft); text-align: left; vertical-align: top; }
-.rn-table thead th { padding-top: 0; border-top: 0; color: var(--label); font: 600 11px/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
-.rn-table tbody th { color: #142a57; font-weight: 600; }
-.rn-table code { font: .9em var(--mono); }
-.is-revealing .sc-grid > :last-child, .is-revealing .rn-wrap, .is-revealing .tr-window { opacity: 0; transform: translateY(20px); transition: opacity .6s, transform .7s cubic-bezier(.2, .8, .2, 1); }
-.is-revealing .sc-grid > .is-in:last-child, .is-revealing .rn-wrap.is-in, .is-revealing .tr-window.is-in { opacity: 1; transform: none; }
+.is-revealing .sc-grid > :last-child, .is-revealing .tr-window { opacity: 0; transform: translateY(20px); transition: opacity .6s, transform .7s cubic-bezier(.2, .8, .2, 1); }
+.is-revealing .sc-grid > .is-in:last-child, .is-revealing .tr-window.is-in { opacity: 1; transform: none; }
 
 /* The dark windows. */
 .ft-window { position: relative; flex: 1; min-height: 0; padding: 14px; overflow: hidden; border-radius: 14px; color: var(--on-navy); background: radial-gradient(circle, rgba(141, 185, 232, .1) 1px, transparent 1.6px) 0 0 / 18px 18px, linear-gradient(180deg, #0a2463, #061634); font: 12px/1.6 var(--mono); }
@@ -119,18 +113,6 @@
 .ft-verdict.is-pending, .ft-verdict.is-failed { color: var(--on-navy-2); background: rgba(255, 255, 255, .05); }
 
 /* From your code. */
-.cd-window { overflow: hidden; border-radius: 18px; color: var(--on-navy); background: linear-gradient(180deg, #0a2463, #061634); box-shadow: 0 30px 60px -32px rgba(7, 27, 79, .6); }
-.cd-tabs { display: flex; align-items: center; gap: 2px; padding: 8px 10px; border-bottom: 1px solid var(--edge); overflow-x: auto; scrollbar-width: none; }
-.cd-tab { padding: 8px 12px; border: 0; border-radius: 8px; color: var(--on-navy-3); background: none; font: 500 12.5px/1 var(--mono); white-space: nowrap; cursor: pointer; }
-.cd-tab[aria-selected="true"] { color: #fff; background: rgba(255, 255, 255, .09); }
-.cd-copy { margin-left: auto; padding: 7px 11px; border: 1px solid var(--edge); border-radius: 8px; color: var(--on-navy); background: rgba(255, 255, 255, .04); font: 500 12px/1 var(--mono); cursor: pointer; }
-.cd-code { min-height: 230px; margin: 0; padding: 20px 22px; overflow-x: auto; font: 13px/1.7 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.cd-code code { color: #d9e5fb; font: inherit; }
-.cd-code.is-fresh code { animation: cd-fresh .5s ease both; }
-@keyframes cd-fresh { from { opacity: .35; filter: blur(2px); } to { opacity: 1; filter: none; } }
-.cd-note { margin: 0; padding: 12px 22px 16px; border-top: 1px solid var(--edge); color: var(--on-navy-3); font-size: 12.5px; line-height: 1.55; }
-.cd-note code { color: var(--on-navy); font: 12px var(--mono); }
-.cd-note a { color: var(--link-on-navy); }
 
 /* What it costs. */
 .cs-table { width: 100%; margin-top: 6px; border-collapse: collapse; font-size: 15px; }
@@ -151,7 +133,6 @@
 
 @media (max-width: 1000px) {
   .sc-grid { grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 72px 24px; }
-  .rn-wrap { overflow-x: auto; }
 }
 @media (max-width: 600px) {
   .pd-intro { padding: 32px 4px 32px; }
@@ -159,8 +140,6 @@
   .dm-md { padding: 16px; font-size: 12px; }
   .dm-tab { padding: 12px 14px; font-size: 13px; }
   .sc-grid { padding: 64px 4px; }
-  .rn-wrap { padding: 0 4px 64px; }
-  .rn-table { font-size: 14px; }
   .tr-form { flex-direction: column; }
   .tr-input { min-height: 46px; }
 }
@@ -169,7 +148,6 @@
 @media (prefers-reduced-motion: reduce) {
   .dm-out .dm-md, .dm-glyph i, .pd-scroll, .pd-scroll-glyph { animation: none; }
   .dm-glyph i:first-child { opacity: 1; }
-  .cd-code.is-fresh code { animation: none; }
 }
 
 /* What you get: a banner of light drawn in characters (glyphLight.ts) over a dark curve, the headline under it; then
@@ -585,7 +563,6 @@
   .dm-window { border-radius: 28px; corner-shape: squircle; }
   .ft-window { border-radius: 26px; corner-shape: squircle; }
   .ft-source, .ft-verdict { border-radius: 18px; corner-shape: squircle; }
-  .cd-window { border-radius: 32px; corner-shape: squircle; }
   .tr-window { border-radius: 44px; corner-shape: squircle; }
   .tr-form { border-radius: 28px; corner-shape: squircle; }
   .fx-banner { border-radius: 52px; corner-shape: squircle; }

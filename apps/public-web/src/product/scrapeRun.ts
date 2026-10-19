@@ -61,12 +61,6 @@ export const DOCS = DEMOS[1]!
 export const DOCS_SAMPLE = '/samples/python-docs-datetime.html.txt'
 export const DOCS_CELL = { before: '<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">', value: '%a', after: '</span>' } as const
 
-/** The Wikipedia request as code (the hero's read also asked for rawHtml). */
-export const WIKIPEDIA_REQUEST = {
-  url: 'https://en.wikipedia.org/wiki/Octopus',
-  formats: ['markdown', 'links', 'tables', { type: 'json', schema: { type: 'object', properties: { kingdom: { type: ['string', 'null'] }, phylum: { type: ['string', 'null'] }, class: { type: ['string', 'null'] }, order: { type: ['string', 'null'] } } } }],
-} as const
-
 /** Harder pages, the same day on the same server. */
 export type Hard = { id: string; tab: string; url: string; status: string; facts: ReadonlyArray<readonly [string, string]>; lines: readonly string[] }
 export const HARD: readonly Hard[] = [
