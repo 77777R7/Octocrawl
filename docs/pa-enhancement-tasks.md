@@ -97,7 +97,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - 测试落点：`packages/runtime/test/runSetReport.test.ts`，照 `verify.test.ts:6` 导入 judge.mjs 的写法导入 `../../../research/access/runSetReport.mjs`，喂一串带 proxyRefused 的合成 rows；`npm test` 自然包含它。
   - 同时按方案 §五.7 给旧 bench 指标改名，免得被当成正式准入数：`packages/bench/src/runner.ts:236` 的 `verifiedCompletionRate`（只计有真值标注的结果，或改名 contentfulWithTruthRate）、`phase3ScoreCli.ts:47/61` 的 `verifiedCompletion`、`liveCompareCli.ts:404` 过滤无 result 的 arm 改为计入 `no_result`；加一个小测试；文档写明唯一的正式准入协议是 run-set.mjs + 合同。不动已归档的 92 题报告。
   - 验收：`npx vitest run packages/runtime/test/runSetReport.test.ts` 绿；用 `--only` 两题 + 模拟连续 proxyRefused 跑出的记录里能看到 not_run 列表和 Grant 行。
-- [ ] **P0.1 基线运行。** 在 `main` `2ffd7f25` 上两次运行，各有自己的 `--record` 文件（已存在 run-set 会拒绝）。这是 Phase 2/4 一切合同验证对比的"前"；它只给合同验证基线，不给字段正确率（字段正确率的前值见 R1b）。
+- [x] **P0.1 基线运行（完成 2026-10-20，在 `main` `1c4d9178` 上，记录见"进度"）。** 在 `main` `2ffd7f25` 上两次运行，各有自己的 `--record` 文件（已存在 run-set 会拒绝）。这是 Phase 2/4 一切合同验证对比的"前"；它只给合同验证基线，不给字段正确率（字段正确率的前值见 R1b）。
   - 92 题 enhanced：API 按 `docs/access.md` 的 `W2L_VENDORS=steel` 与 `STEEL_API_KEY` 启动，`W2L_ACCESS_GRANT` 指向主 checkout 的 `.w2l/access/steel-grant.json`（不列 `vendor_residential_proxy`），端口照 10-12 记录用 8796，走代理。`node research/access/run-set.mjs --set all --access '"enhanced"' --save-responses --record research/access/runs/2026-10-<dd>-pa-next-baseline-all-2ffd7f25.md`。
   - 25 健康题包含在 92 题里（`tasks.v1.json` 的 healthy part），从同一份记录切出，不单独跑。
   - 16 题挑战子集（installed_chrome）：API 启动行照 `research/access/sticky-vs-rotating.sh:17-19` 的形式（`W2L_ACCESS_GRANT=.w2l/access/installed-chrome-grant.json`，`--port 8797`），但出口照验收记录 7b56397b 用 Clash（`HTTPS_PROXY=127.0.0.1:7890`），不是脚本里转发到 Webshare 住宅网关的 8796；`W2L_API_URL=http://127.0.0.1:8797`，`--set all --only T001,T002,T005,T034,T038,T045,T046,T047,T048,T049,T053,T068,T071,T076,B001,B008 --access '"enhanced"' --record …-pa-next-baseline-ic16-2ffd7f25.md`（默认 `--set frozen` 会筛掉 blind 的 B001/B008）。
@@ -228,6 +228,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 
 - 2026-10-19：清单写成，核实基于 `2ffd7f25`。基线数字待 P0.1，开发集基线待 R1b。
 - 2026-10-20：决定 1、3、7、9 已定；P0.2 的 PR #609 已开，P0.5 进行中。
+- 2026-10-20：P0.1 基线跑完，在 `main` `1c4d9178`（#609、#610 之后）。92 题 enhanced（Steel 数据中心 grant，走 Clash）：verified 58/92，假成功 2（T010、T031），p50 6251 ms，p95 31203 ms，Steel 费用 $0.0251；健康 25 题 23 过（T027 http_error 400、T052 cloudflare_challenge）；T060 本轮 verified，不再是假成功，原因 unknown。记录 `research/access/runs/2026-10-20-pa-next-baseline-all-1c4d9178.md`。16 题 installed_chrome（Clash 出口，复用 10-14 验收的 grant）：12/16 过，未过 T045、T046、T068（DataDome）、T048（Cloudflare），假成功 0，费用 $0。记录 `research/access/runs/2026-10-20-pa-next-baseline-ic16-1c4d9178.md`。
 
 ## 下次从这里继续
 
