@@ -346,6 +346,17 @@ Hosted phase 1 uses the API's existing hosted mode, which refuses private addres
 
 **Exit:** phase 1's four items accepted with records; at least five keys issued and used by people other than the author; the two-week cost record written. Phase 2 opens after P4's first payment or when a key holder asks for hosted batch, crawl or Monitor and will pay for it.
 
+**Changed 2026-10-19 by Howard: hosted jobs start now, in stages H0–H5, before phase 2's opening condition is met.** Each stage starts when the previous stage's exit is met, with no dates. The stages follow the [cloud feature plan](docs/launch/2026-10-18-cloud-feature-plan.md), cut down to build small first and measure along the way. They take over item 5 above. How much time they get against PA's items is not set yet.
+
+| Stage | Work | Exit |
+| --- | --- | --- |
+| H0 · Measure | Load-test a no-traffic revision with 500 HTTP and 200 browser pages, to get the cost per 1,000 pages per lane and the browser seconds per page from Cloud Run's metrics. Compare egress success on the `research/parity/sites.md` crawl sites from Cloud Run directly and through the proxy gateway. Split `W2L_SITE_DAILY` so one crawl cannot use up the whole service's day | Three records in `research/hosted/`, each with its command, commit and whether it ran proxied. The egress record decides whether H1 includes the proxy route. The two-week billing record (item 3) keeps running and corrects these numbers later |
+| H1 · Small hosted jobs | Hosted `batch_scrape` up to 1,000 URLs and `crawl` up to 500 pages, on Cloud Tasks, GCS and a Firestore job document, without Postgres. Per-account concurrency and a queue; an idempotency key and a per-job credit budget; results kept 7 days and exportable; `workspace_id` on every record | `npm test` and `npm run typecheck` pass; the parity sites pass hosted; a 1,000-URL batch reads back from any instance after it finishes |
+| H2 · Clients and invited use | MCP tools to start, poll, page through and cancel a job; a job progress page; a signed webhook when a job ends. No crawl without a key, a page cap per job and a global stop switch. Deployed with the tagged-revision release, then opened to invited key holders | Start, poll and fetch recorded end to end from at least three clients (Claude Code, Codex and one more), each with its version; outside users running jobs |
+| H3 · Full foundation | Postgres and a Cloud Run worker pool with per-host politeness across all workers and tenants; H1's jobs moved onto it and the size limits raised | Starts only when the small version cannot keep up: jobs queue too long, or a user needs more than 1,000 URLs |
+| H4 · Teams and payment | Invites and roles, key scopes and budgets, payment through a merchant of record (P4), a read-only results grid, schedules and Monitor | Starts with P4; done at the first outside payment |
+| H5 · Breadth | Results grid with added columns (the user's own model key), hosted search, linear pipeline templates, a verified adapter catalog (the Alexandria-like idea, which first needs Howard to take it out of [Paused](#paused)), hosted enhanced access | Each item decided from H4's usage data |
+
 ### P3 · Browser lane and Pro (weeks 11–14)
 
 Moved after PA on 2026-10-05. A `my-browser` lane over Chrome remote debugging is PA's item 8; the extension below remains the design for queue mode and for reading without remote debugging.
