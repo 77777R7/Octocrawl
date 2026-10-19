@@ -83,9 +83,13 @@
 - [x] **E3** batch 续跑时可以只取一部分站点的 URL（按站过滤）。
   - 测试：只跑指定站点，其余 URL 留在下一段。
   - 做法：`CrawlSpec.batchHosts`。不在列表里的站点的 URL 不放进队列，这次运行结束时只要还有剩下的就记为 `paused`，不记 `completed`。
-- [ ] **E4** “跑一段”入口：订阅 `jobEvents` 的 `page` 事件，新页数到 N 或用时到 T 就 `close({ cancelActive: true })`，结束状态是 `paused`。
+- [x] **E4** “跑一段”入口：订阅 `jobEvents` 的 `page` 事件，新页数到 N 或用时到 T 就 `close({ cancelActive: true })`，结束状态是 `paused`。
   - 测试：多站 batch 和 crawl 各分三段，每段换一个新引擎和复制过去的任务目录。
   - 要验证：`maxPages` 准确，取消在下一页前生效。
+  - 做成的样子（`packages/api/test/jobSlices.test.ts`）：
+    - 引擎新增 `runSlice(taskId, { maxNewPages, maxMs, batchHosts?, graceMs? })`，加两个选项：`deferLaunch`（启动请求只存任务、不跑）和 `taskIds`（任务 id 用 jobId）。
+    - 到达上限时不是 `close`，而是“排空”（orchestrator 新增 `drainSignal`）：不再取新页，正在读的页读完并存下，任务以 `paused` 结束。宽限期（默认 60 秒）过了还没读完才硬中断。原因：直接中断时，正在读的页下一段要重读，测试里 7 页请求了 14 次。
+    - 每段会重读一次 sitemap：frontier 的待读队列不存进 checkpoint，sitemap 里还没读的条目靠重读找回，每段多 1 个请求。
 - [ ] **E5** 量一下 checkpoint 的大小：1,000 页的 batch 和 500 页的 crawl。结果写进 PR 描述。
   - 超过 50 MB 的话，在这个 PR 里加一项：checkpoint 只留续跑需要的字段。
 

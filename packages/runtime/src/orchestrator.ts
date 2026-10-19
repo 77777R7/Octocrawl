@@ -95,6 +95,11 @@ export interface OrchestratorOptions {
   /** Service shutdown interrupts work but leaves the task resumable. */
   shutdownSignal?: AbortSignal
   /**
+   * Draining starts no new page: the pages in flight finish and are stored, then the run ends paused, resumable as after
+   * a shutdown (a hosted job slice reaching its limit, ROADMAP PH H1). A shutdown still cuts the pages in flight.
+   */
+  drainSignal?: AbortSignal
+  /**
    * The third-party cost of a page whose scrape threw: null (unknown, the default) when the scrape may have called a paid
    * service before it threw, 0 when the caller knows no paid route exists, so a run under a cost cap is not stopped by it.
    */
@@ -131,6 +136,7 @@ export class CrawlOrchestrator {
   private readonly signal?: AbortSignal
   private readonly scrapeErrorCostUsd: number | null
   private readonly shutdownSignal?: AbortSignal
+  private readonly drainSignal?: AbortSignal
   private readonly sitemapSource?: SitemapSource
   private readonly onStep?: (step: StepRecord) => void | Promise<void>
   private ahead: (() => number) | null = null
@@ -145,6 +151,7 @@ export class CrawlOrchestrator {
     this.signal = options.signal
     this.scrapeErrorCostUsd = options.scrapeErrorCostUsd === undefined ? null : options.scrapeErrorCostUsd
     this.shutdownSignal = options.shutdownSignal
+    this.drainSignal = options.drainSignal
     this.sitemapSource = options.sitemapSource
     this.onStep = options.onStep
   }
@@ -289,6 +296,9 @@ export class CrawlOrchestrator {
       wakeWorkers = (): void => {
         while (wakeResolvers.length > 0) wakeResolvers.shift()!()
       }
+      const drained = (): boolean => this.drainSignal?.aborted === true
+      // A drain wakes the idle workers, which then stop; the ones with a page in flight stop once it is stored.
+      this.drainSignal?.addEventListener('abort', () => wakeWorkers(), { once: true })
       // URLs appended to a batch since the frontier was last fed: seeded (a URL this task already fetched is marked visited instead) and the idle workers woken.
       const seedAppended = (current: Task | null): void => {
         if (current?.batch === undefined || current.batch.urls.length <= seededCount) return
@@ -320,7 +330,7 @@ export class CrawlOrchestrator {
       const work = async (): Promise<void> => {
         for (;;) {
           const now = this.clock.now()
-          if (stopping || stopped()) break
+          if (stopping || stopped() || drained()) break
           const persistedTask = await this.store.getTask(runningTask.id)
           if (persistedTask?.status === 'cancelled') {
             persistedCancellation = true
@@ -340,7 +350,8 @@ export class CrawlOrchestrator {
             }
             const remainingWait = Math.max(0, next.nextReadyAtMs - now)
             if (spec.budget.maxWallMs !== null && spent.wallMs + remainingWait >= spec.budget.maxWallMs) { markTimeBudget(); break }
-            try { await raceWithSignal(this.clock.wait(remainingWait, scope.signal), scope.signal) } catch (error) { if (!stopped()) throw error }
+            const waitSignal = this.drainSignal === undefined ? scope.signal : AbortSignal.any([scope.signal, this.drainSignal])
+            try { await raceWithSignal(this.clock.wait(remainingWait, waitSignal), waitSignal) } catch (error) { if (!stopped() && !drained()) throw error }
             continue
           }
           const item = next.item
@@ -506,7 +517,7 @@ export class CrawlOrchestrator {
     const endedAt = new Date(this.clock.now()).toISOString()
     const persistedTask = await this.store.getTask(task.id)
     const cancelled = this.signal?.aborted === true || persistedCancellation || persistedTask?.status === 'cancelled'
-    const interrupted = !cancelled && this.shutdownSignal?.aborted === true
+    const interrupted = !cancelled && (this.shutdownSignal?.aborted === true || this.drainSignal?.aborted === true)
     const left = !cancelled && !interrupted && failed === null && deferredUrls > 0
     const status = cancelled ? 'cancelled' : interrupted || left ? 'paused' : failed !== null ? 'failed' : 'completed'
     const finishedAttempt: Attempt = {
