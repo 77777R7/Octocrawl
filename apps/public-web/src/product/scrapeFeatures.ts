@@ -94,21 +94,38 @@ function mountDemo(console_: HTMLElement, replay: HTMLButtonElement | null, hint
   }, { threshold: [0, 0.85] }).observe(console_)
 }
 
-/** The Evidence Record: the docs page's bytes, as recorded, hashed here once the section is in view; change the cell
- * and the hash moves away from the record's. Until a digest is computed, or when one can't be, nothing claims a match. */
+/** The Evidence Record's check (scrapePage.ts evidence): the docs page's bytes, as recorded, hashed here, and the
+ * digest set digit by digit under the record's own fingerprint. Change the cell and the hash moves: its digits decode
+ * afresh, the ones that now differ from the record's flip red and are counted, and the record shakes; put it back and
+ * they settle green. The stage (evidenceStage.ts) asks for the check with ev:check when its beat comes, and for the
+ * bytes early with ev:prefetch; without the stage the check runs when it comes into view. Pointing at a digit marks the
+ * one in the same place in the other fingerprint. Until a digest is computed, or when one can't be, nothing claims a
+ * match. */
 function mountTamper(card: HTMLElement): void {
   const input = card.querySelector<HTMLInputElement>('#ft-cell')
-  const hash = card.querySelector<HTMLElement>('#ft-hash')
   const verdict = card.querySelector<HTMLElement>('#ft-verdict')
   const reset = card.querySelector<HTMLButtonElement>('#ft-reset')
-  if (!input || !hash || !verdict) return
+  const live = card.querySelector<HTMLElement>('#ev-live')
+  const cells = [...card.querySelectorAll<HTMLElement>('#ev-hash-here i')]
+  const section = card.closest<HTMLElement>('#evidence-record')
+  const panel = card.closest<HTMLElement>('.ev-panel')
+  if (!input || !verdict || cells.length !== 64) return
+  let run = 0
+  /** The verdict in a line, and in full for a screen reader when the reader changed the cell. */
+  let announce = false
+  const say = (state: 'match' | 'mismatch' | 'failed', mark: string, text: string, spoken = text): void => {
+    verdict.className = `ft-verdict is-${state}`
+    verdict.firstElementChild!.textContent = mark
+    verdict.lastElementChild!.textContent = text
+    if (live && announce) live.textContent = spoken
+  }
   const subtle = window.crypto?.subtle
   const fail = (text: string): void => {
-    verdict.className = 'ft-verdict is-failed'
-    verdict.firstElementChild!.textContent = '!'
-    verdict.lastElementChild!.textContent = text
-    hash.textContent = 'not computed'
-    card.classList.remove('is-tampered')
+    say('failed', '!', text)
+    cells.forEach((cell) => {
+      cell.textContent = '·'
+      cell.className = ''
+    })
     if (reset) reset.hidden = true
   }
   if (!subtle) {
@@ -130,7 +147,47 @@ function mountTamper(card: HTMLElement): void {
     }
     return -1
   }
-  let run = 0
+  /** The digest into the grid, decoding from noise from the left; then each digit marked as the record's or moved. */
+  const show = (digest: string, mine: number): void => {
+    const record = DOCS.rawSha256
+    const moved = [...digest].filter((ch, i) => ch !== record[i]).length
+    const settle = (): void => {
+      cells.forEach((cell, i) => {
+        cell.textContent = digest[i]!
+        cell.className = `is-locked ${digest[i] === record[i] ? 'is-same' : 'is-diff'}`
+      })
+      if (moved) say('mismatch', '✗', `${moved} of 64 digits moved.`, `${moved} of 64 digits moved: this is not the page that was read.`)
+      else say('match', '✓', 'Matches the record, digit for digit.', 'Matches the record, digit for digit: these are the bytes that were read.')
+      if (reset) reset.hidden = !moved
+      if (still()) return
+      // The digits that moved flip in one after another; a match sweeps green from the left.
+      void card.offsetWidth
+      cells.forEach((cell, i) => {
+        if (moved && digest[i] === record[i]) return
+        cell.style.animationDelay = `${i * (moved ? 7 : 9)}ms`
+        cell.classList.add(moved ? 'is-flip' : 'is-sweep')
+      })
+      if (moved && panel) {
+        panel.classList.remove('is-shake')
+        void panel.offsetWidth
+        panel.classList.add('is-shake')
+      }
+    }
+    if (still()) return settle()
+    const start = performance.now()
+    const tick = (now: number): void => {
+      if (mine !== run) return
+      const t = Math.min(1, (now - start) / 480)
+      const locked = Math.floor(cells.length * t)
+      cells.forEach((cell, i) => {
+        cell.textContent = i < locked ? digest[i]! : NOISE[Math.floor(Math.random() * 16)]!
+        cell.className = i < locked ? 'is-locked' : ''
+      })
+      if (t < 1) requestAnimationFrame(tick)
+      else settle()
+    }
+    requestAnimationFrame(tick)
+  }
   const update = async (): Promise<void> => {
     const mine = ++run
     let data: Uint8Array
@@ -149,38 +206,34 @@ function mountTamper(card: HTMLElement): void {
     edited.set(data.subarray(end), start + cell.length)
     const digest = [...new Uint8Array(await subtle.digest('SHA-256', edited))].map((b) => b.toString(16).padStart(2, '0')).join('')
     if (mine !== run) return
-    const match = digest === DOCS.rawSha256
-    hash.classList.remove('is-pending')
-    card.classList.toggle('is-tampered', !match)
-    verdict.className = `ft-verdict ${match ? 'is-match' : 'is-mismatch'}`
-    verdict.firstElementChild!.textContent = match ? '✓' : '✗'
-    verdict.lastElementChild!.textContent = match ? 'Matches: this is the page that was read.' : 'Doesn’t match: this is not the page that was read.'
-    if (reset) reset.hidden = match
-    // The new hash decodes in from noise, its changed characters marked.
-    const mark = (shown: string): string => [...shown].map((ch, i) => (ch !== DOCS.rawSha256[i] ? `<b>${ch}</b>` : ch)).join('')
-    if (still()) return void (hash.innerHTML = mark(digest))
-    const t0 = performance.now()
-    const tick = (now: number): void => {
-      if (mine !== run) return
-      const t = Math.min(1, (now - t0) / 420)
-      const n = Math.floor(digest.length * t)
-      hash.innerHTML = mark(digest.slice(0, n)) + [...digest.slice(n)].map((_, i) => NOISE[(i * 7 + Math.floor(now / 30)) % 16]).join('')
-      if (t < 1) requestAnimationFrame(tick)
-    }
-    requestAnimationFrame(tick)
+    show(digest, mine)
   }
-  input.addEventListener('input', () => void update())
-  if (!('IntersectionObserver' in window)) void update()
-  else new IntersectionObserver(([entry], observer) => {
-    if (!entry?.isIntersecting) return
+  input.addEventListener('input', () => {
+    announce = true
+    void update()
+  })
+  section?.addEventListener('ev:prefetch', () => void load().catch(() => { /* The check says so when it runs. */ }))
+  section?.addEventListener('ev:check', () => void update())
+  new IntersectionObserver(([entry], observer) => {
+    // On the stage the check waits for its beat (ev:check).
+    if (!entry?.isIntersecting || section?.classList.contains('is-staged')) return
     observer.disconnect()
     void update()
   }, { rootMargin: '200px' }).observe(card)
   reset?.addEventListener('click', () => {
     input.value = DOCS_CELL.value
+    announce = true
     void update()
     input.focus()
   })
+  // Pointing at a digit marks the one in the same place in the other fingerprint.
+  const peers = (target: EventTarget | null, on: boolean): void => {
+    const digit = target instanceof Element ? target.closest<HTMLElement>('.ev-hash i') : null
+    if (!digit || !panel) return
+    for (const twin of panel.querySelectorAll<HTMLElement>(`.ev-hash i[data-i="${digit.dataset.i}"]`)) twin.classList.toggle('is-peer', on)
+  }
+  panel?.addEventListener('pointerover', (event) => peers(event.target, true))
+  panel?.addEventListener('pointerout', (event) => peers(event.target, false))
 }
 
 /** A reader's own URL goes to the free tool page, which runs it once: the hand-off is marked in this tab's session

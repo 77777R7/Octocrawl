@@ -10,7 +10,7 @@ import { climbAt } from '../src/product/ladderScene'
 import { scrapeSnippet } from '../src/product/scrapeCode'
 import { gridRows } from '../src/product/scrapeDrop'
 import { foldMarkdown, foldedText } from '../src/product/scrapeMarkdown'
-import { BUILT_FOR, FORMAT_CARDS, LADDER, SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
+import { BUILT_FOR, EVIDENCE_STEPS, FORMAT_CARDS, LADDER, SCRAPE_DESCRIPTION, SCRAPE_FAQ, SCRAPE_PATH, SCRAPE_TITLE, scrapeJsonLd, scrapePageMarkup } from '../src/product/scrapePage'
 import { AMAZON_FIELDS, DEMOS, DOCS, DOCS_CELL, DOCS_SAMPLE, OCTOPUS_SIZES, PDF_READ, WIKIPEDIA_REQUEST } from '../src/product/scrapeRun'
 
 // /scrape/: three scrapes recorded on hosted Octocrawl (src/product/scrapeRun.ts) in the hero, then how it climbs to read a page, the
@@ -154,9 +154,31 @@ describe('the /scrape/ product page', () => {
     const at = text.indexOf(marker)
     expect(at).toBeGreaterThan(text.indexOf('format codes that the 2011 C standard'))
     expect(text.indexOf(marker, at + 1)).toBe(-1)
-    // The hash box claims nothing before it has hashed.
-    expect(markup).toContain('id="ft-hash" aria-live="polite">not computed yet</dd>')
+    // The check claims nothing before it has hashed: its fingerprint is blank, its verdict pending, nothing announced.
+    expect(markup).toContain('<p class="visually-hidden" id="ev-live" aria-live="polite"></p>')
+    expect(markup).toContain(`<span class="ev-hash is-here" id="ev-hash-here" aria-hidden="true">`)
+    expect(markup).toContain('<p class="ft-verdict is-pending" id="ft-verdict">')
     expect(markup).not.toContain('ft-verdict is-match')
+  })
+
+  it('stages the Evidence Record: five steps beside the record of a read, with a refusal behind it and no links', () => {
+    const section = markup.slice(markup.indexOf('id="evidence-record"'), markup.indexOf('id="call-it"'))
+    expect(section).toContain('<p class="ev-eyebrow">The Evidence Record</p>')
+    expect(section).toContain('Every page comes with its <b>receipt</b>.')
+    expect(section).not.toContain('<a ')
+    expect(section.match(/<li class="ev-step[ "]/g)).toHaveLength(EVIDENCE_STEPS.length)
+    expect(EVIDENCE_STEPS.map(([title]) => title)).toEqual(['Where it came from', 'When, and was it allowed', 'A fingerprint of every byte', 'Even a refusal', 'Check it yourself'])
+    // The read's values are that read's own: its time (rolled in digit by digit, read out whole), its bytes, and its
+    // fingerprint laid out digit by digit in order.
+    expect(section).toContain('<span class="visually-hidden">2026-10-17 18:17:37 UTC</span>')
+    expect(section).toContain(`<span class="ev-count">${DOCS.bytes.toLocaleString('en-US')}</span> bytes read`)
+    const record = section.slice(section.indexOf('<span class="ev-hash is-record"'), section.indexOf('<span class="visually-hidden">', section.indexOf('<span class="ev-hash is-record"')))
+    expect([...record.matchAll(/<i data-i="(\d+)">([0-9a-f])<\/i>/g)].map(([, i, ch]) => `${i}${ch}`).join(' ')).toBe([...DOCS.rawSha256].map((ch, i) => `${i}${ch}`).join(' '))
+    // Each digit column of the time starts at its own digit, so it reads right without the script.
+    for (const [, column] of section.matchAll(/<span class="ev-digit-col">(\d{20})<\/span>/g)) expect(column![0]).toBe(column![10])
+    // The refusal sent no request and cost nothing.
+    expect(section).toContain('failed · policy_denied')
+    expect(section).toContain('<span>0 credits</span>')
   })
 
   it('has no inline styles, unique ids, its FAQ as structured data, and links only to places that exist', () => {

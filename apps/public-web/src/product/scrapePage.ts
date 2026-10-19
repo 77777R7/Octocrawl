@@ -349,35 +349,88 @@ function ladder(): string {
     </section>`
 }
 
-/** The Evidence Record: what it holds, and the docs page's bytes hashed in the reader's browser. */
+/** The Evidence Record as a stage (evidenceStage.ts). On the left, what a record holds, step by step; on the right the
+ * record of the Python docs read (scrapeRun.ts DOCS) as a receipt, with the record of a page hosted Octocrawl refused
+ * under robots.txt stacked behind it. On wide screens the section holds still while the page scrolls through the
+ * steps: the receipt is written row by row, the refusal is laid over it, and then the page's bytes are hashed in the
+ * reader's browser into a fingerprint set under the record's own, digit under digit. Both records are hosted reads of
+ * 2026-10-17 (research/hosted/2026-10-17-scrape-page-demos-e1e128d4.md). */
+export const EVIDENCE_STEPS: ReadonlyArray<readonly [title: string, text: string]> = [
+  ['Where it came from', 'The URL you asked for, the URL it was read from, and every redirect in between.'],
+  ['When, and was it allowed', 'When it was fetched, the HTTP status, what the site’s robots.txt said, and which step read it.'],
+  ['A fingerprint of every byte', 'SHA-256 hashes of the page’s bytes and of the Markdown and JSON you got. Change one byte and the hash changes.'],
+  ['Even a refusal', 'A page Octocrawl won’t read still gets a record that says why, and costs nothing.'],
+  ['Check it yourself', `Here are the page’s ${n(DOCS.bytes)} bytes as they were read, hashed in your browser. Change one character and watch the fingerprint move.`],
+]
+
+/** The refused read: Google's robots.txt disallows /search, so no request was sent. */
+const REFUSED = { url: 'https://www.google.com/search?q=octocrawl', rule: '/search', robotsSha256: '1aba570a…9538cf2c' } as const
+
+/** A SHA-256 as an eight-by-eight grid of digits in two lines, each digit numbered so the grid under it lines up. */
+function hashGrid(hash: string, kind: 'record' | 'here', id = ''): string {
+  const group = (from: number): string => `<span class="ev-hash-group">${[...hash.slice(from, from + 8)].map((ch, k) => `<i data-i="${from + k}">${ch}</i>`).join('')}</span>`
+  const line = (from: number): string => `<span class="ev-hash-line">${[0, 8, 16, 24].map((k) => group(from + k)).join('')}</span>`
+  return `<span class="ev-hash is-${kind}"${id ? ` id="${id}"` : ''} aria-hidden="true">${line(0)}${line(32)}</span>`
+}
+
+/** A date and time whose digits roll into place (evidenceStage.ts). Each digit's column starts at its own digit, so the
+ * column at rest shows it; read down it counts up to it. */
+function odometer(text: string): string {
+  const digit = (d: number): string => `<span class="ev-digit"><span class="ev-digit-col">${Array.from({ length: 20 }, (_, k) => (d - k + 20) % 10).join('')}</span></span>`
+  return `<span class="ev-odo" aria-hidden="true">${[...text].map((ch) => (/\d/.test(ch) ? digit(Number(ch)) : `<span class="ev-sep">${ch === ' ' ? '&nbsp;' : ch}</span>`)).join('')}</span><span class="visually-hidden">${text}</span>`
+}
+
 function evidence(): string {
-  const items = [
-    'the URL you asked for, the URL fetched, and any redirects',
-    'when it was fetched, and the HTTP status',
-    'the robots.txt decision',
-    'whether it was read over HTTP or in a browser',
-    'SHA-256 hashes of the page’s bytes and of the Markdown and JSON you received',
-    'for each field, where on the page it was read',
-  ]
+  const at = new Date(DOCS.fetchedAt).toISOString()
+  const when = `${at.slice(0, 10)} ${at.slice(11, 19)} UTC`
+  const short = (hash: string): string => `${hash.slice(0, 8)}…${hash.slice(-8)}`
+  const badge = (text: string, tone: 'ok' | 'warn' | 'plain' = 'plain', id = ''): string => `<span class="ev-badge is-${tone}"${id ? ` id="${id}"` : ''}>${text}</span>`
+  const row = (beat: number, glyph: string, title: string, detail: string, end = '', extra = ''): string => `
+                  <li class="ev-row${extra}" data-beat="${beat}"><span class="ev-tile" aria-hidden="true">${glyph}</span><span class="ev-what"><b>${title}</b><small>${detail}</small></span>${end}</li>`
+  const steps = EVIDENCE_STEPS.map(([title, text], i) => `
+              <li class="ev-step${i === 0 ? ' is-active' : ''}" data-beat="${i}">
+                <h3><span class="ev-num" aria-hidden="true">0${i + 1}</span>${title}</h3>
+                <div class="ev-body"><div><p>${text}</p></div></div>
+              </li>`).join('')
+  const pips = '<span class="ev-pips" aria-hidden="true"><i class="is-lit"></i><i></i><i></i><i></i></span>'
+  const stream = `<span class="ev-stream" aria-hidden="true"><span class="ev-stream-text">${esc(DOCS.rawHead.replace(/\s+/g, ' ').slice(0, 1800))}</span></span>`
   return `
-    <section class="sc-section ev-section" id="evidence-record" aria-labelledby="ev-title">
+    <section class="ev-section" id="evidence-record" aria-labelledby="ev-title">
       <div class="band">
-        <div class="frame sc-grid">
-          <div class="sc-intro">
-            <h2 id="ev-title">The Evidence Record</h2>
-            <p class="sc-lead">Every result carries a record of how it was made, including a page Octocrawl refused to read:</p>
-            <ul class="ev-list">${items.map((t) => `<li>${t}</li>`).join('')}</ul>
-            <p class="sc-small">The bytes here are the docs page exactly as that read returned them. Read earlier the same day, the page hashed to a different value: only its “Last updated” line had changed. The record holds the hash of the exact bytes Octocrawl read. <a href="/docs/reference/#evidence-record">Reference</a></p>
+        <div class="frame ev-grid">
+          <div class="ev-copy">
+            <p class="ev-eyebrow">The Evidence Record</p>
+            <h2 id="ev-title" class="ev-title">Every page comes with its <b>receipt</b>.</h2>
+            <p class="ev-lead">Each result carries a record of how it was made: where the page came from, how it was read, and a fingerprint that proves it is what you got.</p>
+            <ol class="ev-steps">${steps}
+            </ol>
           </div>
-          <div class="ft-window ft-tamper" id="ft-tamper">
-            <p class="ft-url"><span class="ft-dot" aria-hidden="true"></span>${esc(DOCS.url)}</p>
-            <pre class="ft-source" aria-label="The page’s HTML at the first row of its format-code table"><span class="ft-src-dim">&lt;tr class="row-even"&gt;&lt;td&gt;&lt;p&gt;&lt;code …&gt;&lt;span class="pre"&gt;</span><input class="ft-price" id="ft-cell" type="text" value="${esc(DOCS_CELL.value)}" aria-label="A cell in the page’s HTML; change it" spellcheck="false" autocomplete="off" /><span class="ft-src-dim">&lt;/span&gt;…</span></pre>
-            <dl class="ft-hashes">
-              <div><dt>SHA-256 of the page’s ${n(DOCS.bytes)} bytes, here in your browser</dt><dd class="ft-hash is-pending" id="ft-hash" aria-live="polite">not computed yet</dd></div>
-              <div><dt>rawSha256 in the Evidence Record</dt><dd class="ft-hash is-record">${DOCS.rawSha256}</dd></div>
-            </dl>
-            <p class="ft-verdict is-pending" id="ft-verdict"><span aria-hidden="true">…</span> <span>Hashed in your browser when this part of the page is in view.</span></p>
-            <button class="ft-reset" type="button" id="ft-reset" hidden>Put it back</button>
+          <div class="ev-frame">
+            <div class="ev-stack">
+              <article class="ev-panel ev-read" aria-label="The Evidence Record of a read of the Python docs’ datetime page">
+                <header class="ev-head"><span class="ev-tile" aria-hidden="true">¶</span><span class="ev-site" data-text="docs.python.org · datetime">docs.python.org · datetime</span>${badge('success · 200', 'ok', 'ev-status')}</header>
+                <ul class="ev-rows">${row(0, '↗', 'Where', esc(DOCS.url.replace('https://', '')), '', ' ev-fold')}${row(1, '◷', 'When', odometer(when), badge('HTTP 200', 'ok'), ' ev-fold')}${row(1, '⌂', 'robots.txt', 'The site allows it', badge('Allowed', 'ok'), ' ev-fold')}${row(1, '⇢', 'Read over', 'HTTP, the first of four steps', pips, ' ev-fold')}
+                  <li class="ev-row ev-print" data-beat="2"><span class="ev-tile" aria-hidden="true">#</span><span class="ev-what"><b>Fingerprint <em>rawSha256</em></b>${hashGrid(DOCS.rawSha256, 'record')}<span class="visually-hidden">${DOCS.rawSha256}</span></span>${stream}</li>
+                </ul>
+                <div class="ev-check" id="ft-tamper">
+                  <div class="ev-check-in"><div class="ev-check-body">
+                    <p class="ev-check-label">Hashed here, in your browser</p>
+                    ${hashGrid('·'.repeat(64), 'here', 'ev-hash-here')}
+                    <p class="ev-check-label">Change a cell of the page’s HTML</p>
+                    <pre class="ft-source" aria-label="The page’s HTML at the first row of its format-code table"><span class="ft-src-dim">…&lt;td&gt;&lt;p&gt;&lt;code …&gt;&lt;span class="pre"&gt;</span><input class="ft-price" id="ft-cell" type="text" value="${esc(DOCS_CELL.value)}" aria-label="A cell in the page’s HTML; change it" spellcheck="false" autocomplete="off" /><span class="ft-src-dim">&lt;/span&gt;…</span></pre>
+                    <div class="ev-verdict-row"><p class="ft-verdict is-pending" id="ft-verdict"><span aria-hidden="true">…</span> <span>Hashed in your browser when it comes into view.</span></p><button class="ft-reset" type="button" id="ft-reset" hidden>Put it back</button></div>
+                    <p class="visually-hidden" id="ev-live" aria-live="polite"></p>
+                  </div></div>
+                </div>
+                <footer class="ev-foot" data-beat="2"><span><span class="ev-count">${n(DOCS.bytes)}</span> bytes read</span><span>Markdown · ${DOCS.markdownLines} lines · ${short(DOCS.markdownSha256)}</span></footer>
+              </article>
+              <article class="ev-panel ev-refused" aria-label="The Evidence Record of a page hosted Octocrawl would not read">
+                <header class="ev-head"><span class="ev-tile" aria-hidden="true">¶</span><span class="ev-site">google.com · search</span>${badge('failed · policy_denied', 'warn')}</header>
+                <ul class="ev-rows">${row(3, '↗', 'Where', esc(REFUSED.url.replace('https://', '')))}${row(3, '⌂', 'robots.txt', `Disallowed by the rule <code>${REFUSED.rule}</code>`, badge('Disallowed', 'warn'))}${row(3, '⇢', 'Request sent', 'None, so nothing was fetched or hashed', badge('0 requests'))}${row(3, '#', 'robots.txt SHA-256', REFUSED.robotsSha256)}
+                </ul>
+                <footer class="ev-foot" data-beat="3"><span>0 credits</span><span>Hosted Octocrawl obeys robots.txt</span></footer>
+              </article>
+            </div>
           </div>
         </div>
       </div>
