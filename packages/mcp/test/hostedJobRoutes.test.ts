@@ -219,6 +219,19 @@ describe('hosted job routes', () => {
     expect((await call('GET', `/v1/crawl/${taskId}/pages?cursor=x`, 'oc_one')).status).toBe(400)
   })
 
+  it('keeps a page of items under its byte budget, so a response never grows past what Cloud Run serves, and goes on from the cursor', async () => {
+    const { call, sliceWrote } = await start()
+    const { taskId } = await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(3) })).json() as { taskId: string }
+    const big = 'x'.repeat(9_000_000)
+    await sliceWrote(taskId, [{ url: 'a', status: 'success', markdown: big }, { url: 'b', status: 'success', markdown: big }, { url: 'c', status: 'success', markdown: 'small' }] as unknown as Array<{ url: string; status: string }>)
+    const first = await (await call('GET', `/v1/batches/${taskId}/items?limit=100`, 'oc_one')).json() as { items: Array<{ url: string }>; nextCursor: string; hasMore: boolean }
+    expect(first.items.map((item) => item.url)).toEqual(['a'])
+    expect(first.hasMore).toBe(true)
+    const second = await (await call('GET', `/v1/batches/${taskId}/items?limit=100&cursor=${first.nextCursor}`, 'oc_one')).json() as { items: Array<{ url: string }>; hasMore: boolean }
+    expect(second.items.map((item) => item.url)).toEqual(['b', 'c'])
+    expect(second.hasMore).toBe(false)
+  })
+
   it('cancels a job of the account, frees its slot and queues the first slice of the job that takes it', async () => {
     const { call, enqueued } = await start({ credits: new MemoryCreditsStore(100_000) })
     const ids: string[] = []

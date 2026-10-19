@@ -168,6 +168,10 @@ export const BROWSER_LEASE_MS = 130_000
 export const ADDRESS_PER_MINUTE = 120
 /** A file (PDF, CSV, ...) a hosted call may read: the preview's cap. Files land under the task root, which Cloud Run keeps in memory. */
 export const HOSTED_MAX_FILE_BYTES = 5 * 1024 * 1024
+/** The network policy hosted Octocrawl reads under, the gate's and the job worker's: the file cap and the operator's contact. */
+export function hostedPolicy(base: NetworkPolicy, env: NodeJS.ProcessEnv = process.env): NetworkPolicy {
+  return withOperatorContact({ ...base, maxFileBytes: Math.min(base.maxFileBytes ?? HOSTED_MAX_FILE_BYTES, HOSTED_MAX_FILE_BYTES) }, env)
+}
 /** Scrape and map records and saved files are swept from the task root after this long: hosted phase 1 keeps nothing. */
 export const HOSTED_RECORD_TTL_MS = 10 * 60_000
 const SWEEP_EVERY_MS = 60_000
@@ -482,8 +486,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const siteDaily = config.siteDaily ?? DEFAULT_SITE_DAILY
   const keylessTotalDaily = config.keylessTotalDaily ?? DEFAULT_KEYLESS_TOTAL_DAILY
   const accountDaily = config.accountDaily ?? DEFAULT_ACCOUNT_DAILY
-  const base = config.networkPolicy ?? hostedNetworkPolicy()
-  const policy = withOperatorContact({ ...base, maxFileBytes: Math.min(base.maxFileBytes ?? HOSTED_MAX_FILE_BYTES, HOSTED_MAX_FILE_BYTES) }, env)
+  const policy = hostedPolicy(config.networkPolicy ?? hostedNetworkPolicy(), env)
   const engine = createApiEngine({
     taskRoot: config.taskRoot,
     networkPolicy: policy,

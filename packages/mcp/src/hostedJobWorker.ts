@@ -16,7 +16,7 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import { createApiEngine, type ApiEngineOptions, type SliceCharge } from '@w2l/api'
 import { hostedNetworkPolicy, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore } from '@w2l/runtime'
-import type { HostedLeases } from './hostedApi.js'
+import { hostedPolicy, type HostedLeases } from './hostedApi.js'
 import { CREDITS, scrapeCharge, type CreditsStore, type Reservation, type UsageKind } from './hostedCredits.js'
 import type { UploadResult } from './hostedCloud.js'
 import type { HostedJob, HostedJobStore } from './hostedJobs.js'
@@ -192,9 +192,12 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     if (!held.ok) return { status: 200, outcome: held.reason }
 
     // The slice: a new engine over the restored task, stopped by the job's cancel or the switch meanwhile.
+    // The policy a hosted scrape reads under (its 5 MiB file cap and the operator's contact), on whatever network a test gives.
+    const extra = deps.engineOptions?.() ?? {}
     const engine = createApiEngine({
-      taskRoot, networkPolicy: hostedNetworkPolicy(), hosted: true, defaultMaxPages: 500, allowRobotsOverride: false, sessionsFile: null, userChrome: null,
-      workerCount: SLICE_HEADROOM + 1, resumeOnStart: false, deferLaunch: true, taskIds: () => jobId, ...deps.engineOptions?.(),
+      taskRoot, hosted: true, defaultMaxPages: 500, allowRobotsOverride: false, sessionsFile: null, userChrome: null,
+      workerCount: SLICE_HEADROOM + 1, resumeOnStart: false, deferLaunch: true, taskIds: () => jobId, ...extra,
+      networkPolicy: hostedPolicy(extra.networkPolicy ?? hostedNetworkPolicy()),
     })
     const off = new AbortController()
     let result: Awaited<ReturnType<typeof engine.runSlice>>

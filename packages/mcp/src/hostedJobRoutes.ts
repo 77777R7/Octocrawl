@@ -26,6 +26,8 @@ export const JOB_LIMITS: JobLimits = { maxRunning: 2, maxQueued: 10 }
 const IDEMPOTENCY_TTL_MS = 24 * 3_600_000
 const PAGE_LIST_DEFAULT = 50
 const PAGE_LIST_MAX = 100
+/** A page of items stays under this many bytes of JSON, well under Cloud Run's 32 MiB response limit; one larger item is a page alone. */
+const PAGE_LIST_MAX_BYTES = 16_000_000
 const EXPORT_LINK_SECONDS = 900
 const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -193,18 +195,21 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     const from = cursor === null ? [0, 0] : cursor.split(':').map(Number)
     if (from.length !== 2 || !from.every((n) => Number.isSafeInteger(n) && n >= 0)) return refusal(400, 'invalid_request', 'cursor is not one this API issued')
     const items: unknown[] = []
+    let bytes = 0
+    let full = false
     let [slice, line] = from as [number, number]
-    for (; slice < job.counts.slices && items.length < limit; slice++, line = 0) {
+    for (; slice < job.counts.slices && !full; slice++, line = 0) {
       const lines = await config.files.segment(job, slice) ?? []
       for (; line < lines.length; line++) {
         const item = JSON.parse(lines[line]!) as { status?: string }
         const isError = ['failed', 'blocked', 'cancelled', 'budget_exceeded'].includes(item.status ?? '')
         if (filter === 'pages' && (isError || item.status === 'duplicate')) continue
         if (filter === 'errors' && !isError) continue
-        if (items.length === limit) break
+        if (items.length === limit || (items.length > 0 && bytes + lines[line]!.length > PAGE_LIST_MAX_BYTES)) { full = true; break }
         items.push(item)
+        bytes += lines[line]!.length
       }
-      if (items.length === limit && line < lines.length) break
+      if (full) break
     }
     const hasMore = slice < job.counts.slices
     return json({ items, nextCursor: hasMore ? `${slice}:${line}` : null, hasMore })
