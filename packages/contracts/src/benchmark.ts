@@ -88,8 +88,12 @@ export interface SuiteScore {
   budgetViolations: number
   /** Ground-truth quality split by L0 identity, L1 HTTP, and L2 browser cases. */
   qualityByTier: Readonly<Record<'L0' | 'L1' | 'L2', TierScore>>
-  /** Contentful outcomes whose reported execution cost is fully known. */
-  verifiedCompletionRate: number | null
+  /**
+   * Contentful outcomes no ground-truth check failed, over all cases. A check without a truth annotation is unknown
+   * and does not fail, so this is not a verified rate, and not PA's admission number (research/access/run-set.mjs with
+   * each task's contract is). Formerly verifiedCompletionRate.
+   */
+  contentfulUncontradictedRate: number | null
   knownCostPerContentfulPageUsd: number | null
   escalationCount: number
 }

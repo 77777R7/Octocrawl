@@ -1,12 +1,16 @@
 // PA access task set runner (G0 of the enhanced-access phase, ROADMAP.md "PA · Enhanced access").
 //
+// This runner, with each task's predicates sent as its `verify` contract (ADR 0006), is the one formal admission
+// protocol for PA: a number that goes into ROADMAP or a decision comes from its records. The bench package's scores
+// (packages/bench: contentfulUncontradictedRate, phase3ScoreCli, w2l-live-compare) are development checks, not admission numbers.
+//
 // Runs the tasks in research/access/tasks.v1.json through a running local API (npm run api),
 // judges each answer by the task's own predicates, writes one JSON line per attempt under
 // .w2l/access/runs/<timestamp>/ and, with --record, a Markdown summary that is the committed record.
 //
 // Usage: node research/access/run-set.mjs [--set frozen|healthy|blind|candidate|all] [--only T01,T02] [--warm]
 //          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--no-contract] [--raw-html] [--save-responses]
-//          [--record research/access/runs/<date>-<label>-<commit>.md]
+//          [--grant <grant file>] [--record research/access/runs/<date>-<label>-<commit>.md]
 //        node research/access/run-set.mjs --rejudge .w2l/access/runs/<timestamp> [--record research/access/runs/<new file>.md]
 //   --target     who fetches the pages (ROADMAP PA item 9, the competitor baseline). octocrawl (the default) is the local
 //                API. firecrawl is Firecrawl Cloud's POST /v2/scrape with FIRECRAWL_API_KEY: the task's own formats,
@@ -74,7 +78,14 @@
 //                  because nothing measures it yet. A table with any null is reported as unknown. A paid
 //                  call's proxyBytes and solves are what the provider reported its sessions used (null:
 //                  not reported), under the vendor_residential_proxy and vendor_captcha_solving grants.
-//   denominator    every task in the selected set, including ones the API could not answer.
+//   denominator    every task in the selected set, including ones the API could not answer. The record gives the
+//                  attempts planned, attempted and not run; an early stop (below) names each attempt it did not make,
+//                  which counts as not verified.
+//   --grant        the access grant file the API was started with (default: W2L_ACCESS_GRANT, a path or the JSON
+//                  itself). The record's Grant line gives its SHA-256 and capability names, nothing else of it; none
+//                  when neither is given. The runner cannot read the API's own grant back, so the line says it was given.
+//   channels tried (octocrawl) each attempt's rungs as the answer names them, then those its ladder passed over and why
+//                  (unknown when the answer names none).
 //   paid calls     (octocrawl) the provider calls the page's Evidence Record lists (access.paidCalls, ROADMAP PA item 4):
 //                  each one's provider, what Octocrawl made of the page it returned (never the provider's word), and
 //                  whether it is the answer; chargedUsd is what the API's spend ledger charged the scrape
@@ -109,9 +120,10 @@ import { readFile, writeFile as writeRaw, mkdir, appendFile as appendRaw } from 
 import { existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isData, judge } from './judge.mjs'
+import { channelsCell, denominator, denominatorLines, grantLine, grantOf, plannedAttempts, stopReason } from './runSetReport.mjs'
 
 // Every file the runner writes goes through scrub() (defined below, before the first write), except a page's own Markdown.
 const writeFile = (file, text) => writeRaw(file, scrub(text))
@@ -138,6 +150,9 @@ const TARGETS = { octocrawl: 'the local Octocrawl API', firecrawl: 'Firecrawl Cl
 if (!(target in TARGETS)) throw new Error(`--target must be one of ${Object.keys(TARGETS).join(', ')}`)
 if (target !== 'octocrawl' && flag('--access') !== undefined) throw new Error('--access is an Octocrawl option; a competitor runs with its own strongest route')
 if (target !== 'octocrawl' && extraRequest !== null) throw new Error('--request is an Octocrawl option')
+// The grant the API was started with, as given to the runner: a file, or (W2L_ACCESS_GRANT) the JSON itself.
+const grantSource = (flag('--grant') ?? process.env.W2L_ACCESS_GRANT ?? '').trim()
+const grant = rejudgeDir !== undefined ? undefined : grantOf(grantSource === '' ? null : grantSource.startsWith('{') ? grantSource : await readFile(resolve(repo, grantSource), 'utf8'))
 
 
 const taskText = await readFile(join(here, 'tasks.v1.json'), 'utf8')
@@ -149,7 +164,7 @@ for (const t of rejudgeDir === undefined ? tasks : taskFile.tasks) {
   if (!t.predicates.some(isData)) throw new Error(`${t.id} has no data predicate; a status check alone cannot verify a task`)
 }
 
-if (recordFile !== undefined && existsSync(join(repo, recordFile))) throw new Error(`--record ${recordFile} exists: a record is not rewritten; name a new file`)
+if (recordFile !== undefined && existsSync(resolve(repo, recordFile))) throw new Error(`--record ${recordFile} exists: a record is not rewritten; name a new file`)
 
 /** A proxy setting as a record may show it: scheme, host and port, never a user name, password, path or query (a token). */
 function proxyShown(value) {
@@ -202,6 +217,7 @@ const environment = {
   api,
   exitIp: null,
   tasksSha256,
+  grant,
   startedAt: new Date().toISOString(),
 }
 if (rejudgeDir === undefined && process.env.W2L_EGRESS_ECHO_URL) {
@@ -493,28 +509,32 @@ if (rejudgeDir !== undefined) {
   const shown = shownEnv(prior.environment.proxyEnv ?? {})
   Object.assign(environment, shown, { proxyCredentialsRemoved: [...new Set([...(prior.environment.proxyCredentialsRemoved ?? []), ...shown.proxyCredentialsRemoved])] })
   environment.tasksSha256 = prior.environment.tasksSha256
+  // A run from before the grant line keeps none: not recorded, not this rejudge's.
+  environment.grant = prior.environment.grant
   priorRun = prior
 }
-// Three attempts in a row that the egress proxy itself refused stop the run: a spent plan or a dead proxy would
-// otherwise write every later task down as the site's failure (2026-10-14, Webshare's 402 bandwidthlimit).
-const PROXY_REFUSED_STOP = 3
-let proxyRefusedInARow = 0
+// The early stop (PROXY_REFUSED_STOP refusals in a row) and the denominator are in runSetReport.mjs.
+const planned = plannedAttempts(tasks, warm ? ['cold', 'warm'] : ['cold'])
 let stoppedEarly = null
-tasksLoop: for (const task of rejudgeDir === undefined ? tasks : []) {
-  for (const temperature of warm ? ['cold', 'warm'] : ['cold']) {
-    const row = await attempt(task, temperature)
-    rows.push(row)
-    await appendFile(linesFile, JSON.stringify(row) + '\n')
-    console.log(scrub(`${task.id} ${temperature} ${row.outcome.verified ? 'verified' : 'not verified'} ${row.observed.status ?? '-'} ${row.observed.reason ?? ''}${row.observed.proxyRefused ? ` (egress proxy refused${row.observed.proxyRefused.status === null ? '' : `, ${row.observed.proxyRefused.status}`})` : ''}`))
-    proxyRefusedInARow = row.observed.proxyRefused && !row.outcome.verified ? proxyRefusedInARow + 1 : 0
-    if (proxyRefusedInARow >= PROXY_REFUSED_STOP) {
-      stoppedEarly = `the egress proxy refused ${PROXY_REFUSED_STOP} attempts in a row (last ${task.id}); the run stopped after ${rows.length} of ${tasks.length * (warm ? 2 : 1)} attempts`
-      console.log(stoppedEarly)
-      break tasksLoop
-    }
+const byTask = new Map(tasks.map((t) => [t.id, t]))
+for (const { taskId, temperature } of rejudgeDir === undefined ? planned : []) {
+  const row = await attempt(byTask.get(taskId), temperature)
+  rows.push(row)
+  await appendFile(linesFile, JSON.stringify(row) + '\n')
+  console.log(scrub(`${taskId} ${temperature} ${row.outcome.verified ? 'verified' : 'not verified'} ${row.observed.status ?? '-'} ${row.observed.reason ?? ''}${row.observed.proxyRefused ? ` (egress proxy refused${row.observed.proxyRefused.status === null ? '' : `, ${row.observed.proxyRefused.status}`})` : ''}`))
+  stoppedEarly = stopReason(rows, planned.length)
+  if (stoppedEarly !== null) {
+    console.log(stoppedEarly)
+    break
   }
 }
 if (stoppedEarly !== null) environment.stoppedEarly = stoppedEarly
+// A rejudge keeps the run's own denominator; a run from before it was recorded has unknown planned and not-run counts
+// when it stopped early, and none not run otherwise.
+const runDenominator = rejudgeDir === undefined ? denominator(planned, rows)
+  : priorRun.denominator !== undefined ? { ...priorRun.denominator, attempted: rows.length }
+  : priorRun.environment.stoppedEarly ? { planned: null, attempted: rows.length, notRun: null }
+  : { planned: rows.length, attempted: rows.length, notRun: [] }
 
 // The product judged each attempt by the predicates sent with it, so it is compared with the
 // runner's verdict on those same predicates: the run's own, not a rejudge's.
@@ -558,7 +578,7 @@ const finishedAt = priorRun?.finishedAt ?? new Date().toISOString()
 const command = priorRun?.command ?? `node research/access/run-set.mjs ${args.join(' ')}`
 const hasWarm = rows.some((r) => r.temperature === 'warm')
 const totals = { cold: summary('cold'), ...(hasWarm ? { warm: summary('warm') } : {}) }
-await writeFile(join(runDir, rejudgeDir === undefined ? 'summary.json' : `summary.rejudged-${rejudgeStamp}.json`), JSON.stringify({ command, environment, finishedAt, set: priorRun?.set ?? setFilter, access: priorRun?.access ?? access ?? null, request: priorRun?.request ?? extraRequest, totals, ...(rejudged === null ? {} : { rejudged }) }, null, 2))
+await writeFile(join(runDir, rejudgeDir === undefined ? 'summary.json' : `summary.rejudged-${rejudgeStamp}.json`), JSON.stringify({ command, environment, finishedAt, set: priorRun?.set ?? setFilter, access: priorRun?.access ?? access ?? null, request: priorRun?.request ?? extraRequest, totals, denominator: runDenominator, ...(rejudged === null ? {} : { rejudged }) }, null, 2))
 
 if (recordFile !== undefined) {
   const fmt = (v) => (v === null ? 'unknown' : String(v))
@@ -632,8 +652,10 @@ if (recordFile !== undefined) {
     `- Target: ${TARGETS[environment.target ?? 'octocrawl']}${(environment.target ?? 'octocrawl') === 'octocrawl' ? '' : ' (the network line is the driver\'s way to its API; the provider fetches from its own cloud)'}`,
     `- API: ${(environment.target ?? 'octocrawl') === 'octocrawl' ? environment.api : 'the provider\'s'}; access option: ${(priorRun === null ? access ?? null : priorRun.access) === null ? 'none' : `\`${JSON.stringify(priorRun === null ? access : priorRun.access)}\``}${(priorRun === null ? extraRequest : priorRun.request ?? null) === null ? '' : `; request options added to every task: \`${JSON.stringify(priorRun === null ? extraRequest : priorRun.request)}\``}`,
     `- Exit address: ${environment.exitIp ?? 'not recorded'}`,
+    grantLine(environment.grant),
     `- Run: ${environment.startedAt} → ${finishedAt}`,
-    `- Tasks: ${rows.filter((r) => r.temperature === 'cold').length} (set \`${priorRun?.set ?? setFilter}\`${only ? `, only ${only.join(', ')}` : ''}); task file SHA-256 at fetch time: ${environment.tasksSha256 === undefined ? 'not recorded (run before the hash was added)' : `\`${environment.tasksSha256}\``}; method in the header of run-set.mjs`, '',
+    `- Tasks: ${rows.filter((r) => r.temperature === 'cold').length} (set \`${priorRun?.set ?? setFilter}\`${only ? `, only ${only.join(', ')}` : ''}); task file SHA-256 at fetch time: ${environment.tasksSha256 === undefined ? 'not recorded (run before the hash was added)' : `\`${environment.tasksSha256}\``}; method in the header of run-set.mjs`,
+    ...denominatorLines(runDenominator, environment.stoppedEarly), '',
     `| Attempts | Verified | False success | p50 ms | p95 ms | External cost per 1,000 verified (USD) | Egress cost per 1,000 verified (USD) |${'credits' in totals.cold ? ' Credits (inferred) | Credits per 1,000 verified |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- |${'credits' in totals.cold ? ' --- | --- |' : ''}`,
     ...Object.entries(totals).map(([temp, t]) => `| ${temp}: ${t.attempts} | ${t.verified} | ${t.falseSuccess} | ${fmt(t.p50Ms)} | ${fmt(t.p95Ms)} | ${fmt(t.externalCostPer1000VerifiedUsd)} | ${fmt(t.egressCostPer1000VerifiedUsd)} |${'credits' in t ? ` ${fmt(t.credits)} | ${fmt(t.creditsPer1000Verified === null ? null : Math.round(t.creditsPer1000Verified))} |` : ''}`), '',
@@ -642,11 +664,10 @@ if (recordFile !== undefined) {
     ...(readinessColumn ? [...Object.keys(totals).map((temp) => `- Readiness (${temp}, ADR 0007): ${readinessCounts(temp)}; region waits: ${regionCounts(temp)}`), ''] : []),
     ...(skipsRecorded ? [...Object.keys(totals).map(skipsLine), ''] : []),
     ...(rungsRecorded ? [...Object.keys(totals).flatMap(rungLines), ''] : []),
-    ...(environment.stoppedEarly ? [`- **Stopped early:** ${environment.stoppedEarly}. The attempts not run are not in the denominator.`, ''] : []),
     ...(robotsRecorded ? [...Object.keys(totals).map(robotsLine), ''] : []),
     `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}${readinessColumn ? ' Readiness |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}${readinessColumn ? ' --- |' : ''}`,
-    ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${(r.observed.channelsTried ?? []).join(' → ')} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}${readinessColumn ? ` ${readinessCell(r)} |` : ''}`),
+    ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${channelsCell(r)} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}${readinessColumn ? ` ${readinessCell(r)} |` : ''}`),
     ...Object.entries(totals).filter(([, t]) => t.productJudged > 0).map(([temp, t]) => {
       const disagree = rows.filter((x) => x.temperature === temp && typeof x.observed.productVerification === 'string' && (x.observed.productVerification === 'passed') !== runnerAtRun(x))
       return `- Task contract (${temp}): the product's verification agreed with the runner${rejudged === null ? '' : "'s verdict at the time of the run (the predicates the product was sent, not the rejudge's)"} on ${t.productAgreed} of ${t.productJudged} attempts that carry one (${t.productVerified} passed)${disagree.length === 0 ? '' : `; disagreed on ${disagree.map((x) => `${x.taskId} (product ${x.observed.productVerification}, runner ${runnerAtRun(x) ? 'verified' : 'not verified'})`).join(', ')}`}`
@@ -654,7 +675,7 @@ if (recordFile !== undefined) {
     '', 'Suspected cause: not isolated for any task (a run through the product cannot isolate it; see the method).', '',
     ...(droppedRows.length === 0 ? [] : [`Not rejudged, counted above with the run's own verdict (removed from the task file, or its URL changed, after this run; a reason, where given, is in tasks.v1.json \`excluded\`): ${[...new Set(droppedRows.map((r) => r.taskId))].join(', ')}.`, '']),
   ].join('\n')
-  await mkdir(dirname(join(repo, recordFile)), { recursive: true })
-  await writeFile(join(repo, recordFile), md)
+  await mkdir(dirname(resolve(repo, recordFile)), { recursive: true })
+  await writeFile(resolve(repo, recordFile), md)
 }
 console.log(JSON.stringify(totals))

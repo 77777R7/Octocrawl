@@ -206,7 +206,8 @@ function scoreSubject(
   } as const
   const knownCostOutcomes = subjectOutcomes.filter((o) => CONTENTFUL_STATUS.has(o.result.status) && o.result.usage.externalCostUsd !== null)
   const contentfulCost = knownCostOutcomes.reduce((sum, o) => sum + (o.result.usage.externalCostUsd ?? 0), 0)
-  const verifiedContentful = contentfulOutcomes.filter((outcome) => !outcome.isFalseSuccess).length
+  // Contentful and contradicted by no check: an unannotated check is unknown, not a pass, so this is not "verified".
+  const uncontradicted = contentfulOutcomes.filter((outcome) => !outcome.isFalseSuccess).length
   const escalationCount = subjectOutcomes.reduce((sum, o) => sum + o.result.escalations.length, 0)
 
   return {
@@ -233,8 +234,8 @@ function scoreSubject(
     medianContentTokens,
     budgetViolations: subjectOutcomes.filter((o) => !o.budgetRespected).length,
     qualityByTier,
-    verifiedCompletionRate: subjectOutcomes.length > 0 ? verifiedContentful / subjectOutcomes.length : null,
-    knownCostPerContentfulPageUsd: knownCostOutcomes.length === verifiedContentful && verifiedContentful > 0 ? contentfulCost / verifiedContentful : null,
+    contentfulUncontradictedRate: subjectOutcomes.length > 0 ? uncontradicted / subjectOutcomes.length : null,
+    knownCostPerContentfulPageUsd: knownCostOutcomes.length === uncontradicted && uncontradicted > 0 ? contentfulCost / uncontradicted : null,
     escalationCount,
   }
 }

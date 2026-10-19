@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compareChannels } from '../src/liveCompareCli.js'
+import { compareChannels, summarize } from '../src/liveCompareCli.js'
 import type { FetchResult } from '@w2l/contracts'
 
 function okResult(url: string): FetchResult {
@@ -237,5 +237,18 @@ describe('live-compare deadline plumbing', () => {
     expect(navigationTimeout(now + 1234, now)).toBe(1234)
     expect(navigationTimeout(now + 30_000, now)).toBe(20_000) // capped
     expect(navigationTimeout(undefined, now)).toBe(20_000) // no caller deadline
+  })
+})
+
+describe('w2l-live-compare summary', () => {
+  it('keeps an arm that gave no result in its denominator, as no_result, and its cost unknown', () => {
+    const ok = { arm: 'http', status: 'success', blockReason: null, failureReason: null, failureClass: null, wallMs: 5, tokens: 1, costUsd: 0, handoff: null, contentful: true, falseSuccess: false }
+    const report = summarize([
+      { url: 'https://a.example/1', arms: [{ arm: 'http', ok: true, result: ok }, { arm: 'steel', ok: false, error: 'SKIPPED: no API key in environment' }] },
+      { url: 'https://a.example/2', arms: [{ arm: 'http', ok: false, error: 'timeout' }, { arm: 'steel', ok: false, error: 'SKIPPED: no API key in environment' }] },
+    ])
+    expect(report).toContain('| arm | contentful | no result |')
+    expect(report).toContain('| http | 1/2 | 1 | 0 | 5 | unknown | 0 |')
+    expect(report).toContain('| steel | SKIPPED |')
   })
 })
