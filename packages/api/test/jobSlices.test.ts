@@ -104,6 +104,25 @@ describe('job slices', () => {
     expect(seen.map((request) => `${request.host}${request.path}`).sort()).toEqual(['127.0.0.1/a', '127.0.0.1/c', 'localhost/b'])
   })
 
+  it('runs nothing for URLs appended to a deferred batch until the next slice, which reads them', async () => {
+    const { origin, seen, engineAfter } = await site()
+    const { engine } = await engineAfter(null)
+    await engine.startBatch(parseBatchStartRequest({ urls: [`${origin}/a`] }))
+    expect((await engine.runSlice(JOB_ID, { maxNewPages: 100, maxMs: 30_000 }))?.status).toBe('completed')
+    await engine.startBatch(parseBatchStartRequest({ appendToId: JOB_ID, urls: [`${origin}/b`] }))
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(seen.map((request) => request.path)).toEqual(['/a'])
+    expect((await engine.runSlice(JOB_ID, { maxNewPages: 100, maxMs: 30_000 }))?.status).toBe('completed')
+    expect(seen.map((request) => request.path)).toEqual(['/a', '/b'])
+  })
+
+  it('completes rather than pauses when the slice reaches its page limit on the last page', async () => {
+    const { origin, engineAfter } = await site()
+    const { engine } = await engineAfter(null)
+    await engine.startBatch(parseBatchStartRequest({ urls: [`${origin}/a`, `${origin}/b`] }))
+    expect(await engine.runSlice(JOB_ID, { maxNewPages: 2, maxMs: 30_000 })).toMatchObject({ status: 'completed', newPages: 2 })
+  })
+
   it('pauses a slice at its time limit while a page hangs, and runs nothing for a task cancelled between slices', async () => {
     const { origin, release, engineAfter } = await site({ gate: '/' })
     let { engine, root } = await engineAfter(null)

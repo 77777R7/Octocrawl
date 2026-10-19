@@ -517,7 +517,9 @@ export class CrawlOrchestrator {
     const endedAt = new Date(this.clock.now()).toISOString()
     const persistedTask = await this.store.getTask(task.id)
     const cancelled = this.signal?.aborted === true || persistedCancellation || persistedTask?.status === 'cancelled'
-    const interrupted = !cancelled && (this.shutdownSignal?.aborted === true || this.drainSignal?.aborted === true)
+    // A drain that came once nothing was left to fetch ends the run as it would have ended anyway.
+    const drainedWithWorkLeft = this.drainSignal?.aborted === true && (runFrontier === undefined || runFrontier.pendingCount() > 0)
+    const interrupted = !cancelled && (this.shutdownSignal?.aborted === true || drainedWithWorkLeft)
     const left = !cancelled && !interrupted && failed === null && deferredUrls > 0
     const status = cancelled ? 'cancelled' : interrupted || left ? 'paused' : failed !== null ? 'failed' : 'completed'
     const finishedAttempt: Attempt = {

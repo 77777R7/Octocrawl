@@ -90,8 +90,12 @@
     - 引擎新增 `runSlice(taskId, { maxNewPages, maxMs, batchHosts?, graceMs? })`，加两个选项：`deferLaunch`（启动请求只存任务、不跑）和 `taskIds`（任务 id 用 jobId）。
     - 到达上限时不是 `close`，而是“排空”（orchestrator 新增 `drainSignal`）：不再取新页，正在读的页读完并存下，任务以 `paused` 结束。宽限期（默认 60 秒）过了还没读完才硬中断。原因：直接中断时，正在读的页下一段要重读，测试里 7 页请求了 14 次。
     - 每段会重读一次 sitemap：frontier 的待读队列不存进 checkpoint，sitemap 里还没读的条目靠重读找回，每段多 1 个请求。
-- [ ] **E5** 量一下 checkpoint 的大小：1,000 页的 batch 和 500 页的 crawl。结果写进 PR 描述。
+- [x] **E5** 量一下 checkpoint 的大小：1,000 页的 batch 和 500 页的 crawl。结果写进 PR 描述。
   - 超过 50 MB 的话，在这个 PR 里加一项：checkpoint 只留续跑需要的字段。
+  - 2026-10-19 在本机经代理用 `runSlice` 跑，每段 250 个新页，只量 `checkpoint.sqlite` 主文件，不含 WAL：
+    - books.toscrape 1,000 个 URL 的 batch：4 段，17.2 MB，约 17 KB 一页；
+    - docs.python.org/3/library/ 的 crawl：范围内只有 327 页，2 段，21.5 MB，约 66 KB 一页。按这个推算 500 页约 33 MB（估计）。
+  - 都低于 50 MB，checkpoint 暂不瘦身。页面更大的站会更大，PR ⑥ 的验收里再看一次。
 
 ## PR ③ hosted 任务路由（`packages/mcp/src/hostedApi.ts`）
 
@@ -123,6 +127,9 @@
 - [ ] **W5** 站点租约 `hostedHostLeases/{host}`；挑不出可跑的站点时延迟 30 秒重排。
 - [ ] **W6** 任务结束时生成 `export.jsonl.gz`，再排一个定时到 `expireAt` 的删除任务。
 - [ ] **W7**（PR ① 审查时发现）create 的提交生效了但响应超时：重试时任务文档已存在，要认出这是自己写的，不能占着名额报错。
+- [ ] **W9**（PR ② 审查时发现）同一个任务的两次 `runSlice` 可能同时通过“没在跑”的检查。hosted 靠 Firestore 租约挡住（W2），worker 只能在拿到租约后调用。
+- [ ] **W10**（PR ② 审查时发现）`batchHosts` 传的站名必须和 `URL.hostname` 一样：小写、punycode、不带端口。否则那些 URL 永远留着，任务一直 `paused`。由 worker 用同一个函数从 URL 算站名。
+- [ ] **W11**（PR ② 审查时发现）读 sitemap 的时间如果超过一段的时间上限，每段都还没读页就被排空，任务永远推进不了。worker 要发现“连续两段 0 新页”，然后记失败，或者给下一段更长的时间。
 - [ ] **W8**（PR ① 审查时发现）一个从没结束的任务被 TTL 删除后，它在工作区名单里的位置要释放；被提升的任务文档不存在时跳过它。
 - 验收测试：
   - 一段跑到中途死掉，重投先得到 503，租约过期后被新实例接手，不重复扣费；
@@ -150,5 +157,5 @@
 
 ## 下次从这里继续
 
-- 方案和本清单已合并（#602）。PR ① 已提交。
-- 下一项是 **PR ② 的 E1**。
+- 方案和本清单已合并（#602）。PR ① 已合并（#605），PR ② 已提交。
+- 下一项是 **PR ③ 的 R1**。E6 留到 PR ④ 一起做。

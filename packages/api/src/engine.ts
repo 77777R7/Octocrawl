@@ -438,7 +438,8 @@ export interface ApiEngineOptions {
    */
   resumeOnStart?: boolean
   /**
-   * Start requests store the task `pending` and run nothing; runSlice runs it (hosted job slices). Default false.
+   * Start requests and appends store the task and run nothing, and nothing resumes at start; runSlice runs a task a
+   * slice at a time (hosted job slices). Default false.
    */
   deferLaunch?: boolean
   /** The id a new crawl or batch gets (a UUID); default a random one. A hosted job worker passes the job's id. */
@@ -1687,7 +1688,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       // URLs appended to a batch after its workers had stopped have no step yet: a new attempt fetches them, and the task stays in flight meanwhile.
       const pending = task.batch === undefined ? null : await appendedWithoutStep(task.id, store)
-      if (pending !== null) { launchTask(pending, store, batchRunOptions(pending.batch, true)); return }
+      // A slice does not go on past its limits: the task waits, paused, for the next slice to read them.
+      if (pending !== null && req.slice !== undefined) await store.putTask({ ...pending, status: 'paused', updatedAt: new Date().toISOString() })
+      else if (pending !== null) { launchTask(pending, store, batchRunOptions(pending.batch, true)); return }
       // The session files go before anyone hears of the end: a webhook's receiver or an events stream told of the terminal
       // row finds no cookies on the disk. A run paused by shutdown keeps them for its resume, and has no terminal event.
       const after = await store.getTask(task.id)
@@ -1712,7 +1715,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   // A crawl paused by shutdown or left running by a crash resumes the same
   // way, with the options stored at its start; one stored before they were
   // kept stays as it is rather than run with guessed limits.
-  for (const name of options.resumeOnStart !== false && existsSync(taskRoot) ? readdirSync(taskRoot) : []) {
+  // A deferred engine resumes nothing on its own: its tasks run a slice at a time, by runSlice.
+  for (const name of options.resumeOnStart !== false && options.deferLaunch !== true && existsSync(taskRoot) ? readdirSync(taskRoot) : []) {
     const taskDir = join(taskRoot, name)
     if (!existsSync(join(taskDir, 'checkpoint.sqlite'))) continue
     const store = SqliteTaskStore.open(taskDir)
@@ -2287,7 +2291,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           const pending: Task = { ...task, status: 'pending', updatedAt: new Date().toISOString() }
           await store.putTask(pending)
           const run = task.batch === undefined ? crawlRunOptions(pending, true) : batchRunOptions(task.batch, true)
-          launchTask(pending, store, { ...run, slice: { drain: drain.signal, stop: stop.signal, ...(limits.batchHosts === undefined ? {} : { batchHosts: limits.batchHosts }) } })
+          try { launchTask(pending, store, { ...run, slice: { drain: drain.signal, stop: stop.signal, ...(limits.batchHosts === undefined ? {} : { batchHosts: limits.batchHosts }) } }) }
+          catch (error) { await store.putTask(task); throw error }
           launched = true
           await inflight.get(taskId)
         } finally {
@@ -2505,7 +2510,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       await store.putTask(updated)
       const accepted: BatchAccepted = { taskId: id, requested: total, appended: req.urls.length, ...(invalidURLs === undefined ? {} : { invalidURLs }) }
       submission.record(id, accepted)
-      if (!inflight.has(id)) {
+      // A deferred engine runs nothing here: the next slice reads the appended URLs.
+      if (!inflight.has(id) && options.deferLaunch !== true) {
         launchTask(updated, store, batchRunOptions(batch, true))
         launched = true
       }
@@ -2672,7 +2678,10 @@ interface TaskRunOptions {
 }
 
 export interface SliceLimits {
-  /** New pages stored before the slice pauses the task; pages in flight then are not stored and are read by a later slice. */
+  /**
+   * New pages stored before the slice drains: no page starts after it, and the pages in flight are still stored, so a
+   * slice can store up to the worker count less one more.
+   */
   maxNewPages: number
   maxMs: number
   /** A batch's hosts this slice reads; the others wait for a later slice. Absent: every host. */
