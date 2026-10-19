@@ -16,7 +16,9 @@ out=$logs/$label.log; : > $out
 echo "== $label $mode start $(date -u +%FT%TZ)" | tee -a $out
 (HTTPS_PROXY=http://127.0.0.1:8796 HTTP_PROXY=http://127.0.0.1:8796 W2L_ACCESS_GRANT=.w2l/access/installed-chrome-grant.json node --import tsx packages/api/src/cli.ts --port 8797 > $logs/api-$label.log 2>&1 &)
 for _ in $(seq 1 90); do grep -q listening $logs/api-$label.log 2>/dev/null && break; sleep 2; done
-for t in ${=TASKS:-T001 T002 T005 T034 T038 T045 T046 T047 T048 T049 T053 T068 T071 T076 B001 B008}; do
+# TASKS defaults to the challenge16 subset of research/access/subsets.v1.json.
+subset=$(node -e "process.stdout.write(require('./research/access/subsets.v1.json').subsets.challenge16.tasks.join(' '))")
+for t in ${=TASKS:-$subset}; do
   # zsh's $RANDOM repeats inside $(...): the session id comes from node.
   sid=$([ $mode = sticky ] && node -e "console.log(1 + Math.floor(Math.random() * 999999999))" || echo rotate)
   UP=$(node -e "const u=new URL(process.argv[1]);u.username=encodeURIComponent(decodeURIComponent(u.username).replace(/-rotate\$/,'-'+process.argv[2]));process.stdout.write(u.href)" "$BASE" $sid)

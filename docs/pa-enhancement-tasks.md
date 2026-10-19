@@ -111,11 +111,12 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - `docs/access.md:53`（standard+enhanced 也建 provider rung）、`:117`（403 不是 409）。
 - [ ] **P0.3 未合入 PR 的分流（按决定 2）。** 每个 PR 写一条处置理由：已被 #591 带入 / 拆入 D6 / 单独审 / 关闭。#584 剩余可拆的片段：RFC/WCAG 兄弟章节（归 D6）、OTTO 变体链接与起价、ESPN 拆分积分榜、带符号百分比、FT 头条卡片、聚合报价、来源不可用分类（#582）、验证码分类、示例合同。Nasdaq 影子表的源码已在 `main`（#516），只剩测试。
   - 注意版本号：`main` 是 extract-tf/30、verify/9；#528 写 /32、#584 写 /36、#512/#514 写 verify/5、/6，移植时重新取号。
-- [ ] **P0.4 每周重跑脚本（按决定 7）。** `research/access/weekly.mjs`：同一组 51 题（25 健康 + 16 挑战 + 10 题轮换 frozen）跑三类臂：Octocrawl 免费臂、Steel enhanced 臂（数据中心 grant，不列 `vendor_residential_proxy`）、竞品臂（`--target firecrawl` / `zenrows`，用 `research/access/run-set.mjs` 已有的竞品 runner），每题带合同（竞品不收合同），每臂一份记录 `research/access/runs/<date>-weekly-<arm>-<commit>.md`，再汇总一份写差距数字。
+- [x] **P0.4 每周重跑脚本（按决定 7；脚本、子集定义、单元测试和首次本地运行 2026-10-20，计划任务未建）。** `research/access/weekly.mjs`：同一组 51 题（25 健康 + 16 挑战 + 10 题轮换 frozen）跑三类臂：Octocrawl 免费臂、Steel enhanced 臂（数据中心 grant，不列 `vendor_residential_proxy`）、竞品臂（`--target firecrawl` / `zenrows`，用 `research/access/run-set.mjs` 已有的竞品 runner），每题带合同（竞品不收合同），每臂一份记录 `research/access/runs/<date>-weekly-<arm>-<commit>.md`，再汇总一份写差距数字。
   - 轮换规则：16 题之外的 frozen 题有 36 道（`tasks.v1.json` 里 part=frozen 的 50 道减去子集里的 14 道；不用 run-set 的 `--set frozen`，它还会带上 3 道 unstable），按文件顺序切 4 组（10/10/10/6），组号 = ISO 周数 mod 4，偏移由日期推出、不存文件；记录头写组号。16 题臂要带 `--set all`。
   - 脚本自己起 API（照 `sticky-vs-rotating.sh:17-18`：固定一个空闲端口，避开 8787、8791、8812–8814；等 listening 再跑；结束时关掉，失败也关）；Octocrawl 免费臂和 Steel 臂各起一次 API，grant 不同。16 题的免费臂用只列 installed_chrome 的 grant；每份记录写 Chrome 版本，大版本变化时再跑一次 16 题；与验收基线（ADR 0005 / 7b56397b：11 和 7 of 16，探针两次各 12）比较，低于基线就写记录并标"停止默认推荐，待重测"。
   - 16 题子集加机器可读定义：`research/access/subsets.v1.json`（不改 `tasks.v1.json`，免得任务文件 SHA 变化），`cloudrun-xvfb/run.sh:20`、`sticky-vs-rotating.sh:19`、`docs/pa-challenge-botcheck-tasks.md` 改为引用它。
   - 验收：脚本本地跑过一次、三类臂各有记录和一份汇总；计划任务只在你点头并确认竞品额度后建（名字、时间写进本清单）。
+  - [ ] 计划任务：只在你点头并确认竞品额度后建（名字、时间写进本清单）。建议的命令 `node research/access/weekly.mjs`（在 `main` 的最新 checkout 里，shell 带 `HTTPS_PROXY`），建议时间每周一 10:30 本地时间（在 `octocrawl-cleanup-gone` 之后）；每周预期费用：Steel 约 $0.02–0.03，Firecrawl 约 47–51 credits，ZenRows 约 50–250 credits（auto 模式按成功的配置计费，1–25/页）。
 - [ ] **P0.6 给 H1 窗口的接口约定（一条消息，不改它的文件）。** 内容：PR ④ 的 worker 引擎不传 accessGrant（PH H5 之前保持 null）；托管切片的 USD 付费调用若将来存在，预留存 Firestore、挨着 `hostedJobs`，key `{jobId}-{slice}-{ordinal}`，credits 的幂等键 `{jobId}-{slice}` 不变、USD key 是它的子键；PR ④ 的 W5 验收要覆盖"旧租约提交不得改写预留"和"重复投递按 `{jobId}-{slice}-{ordinal}` 幂等、不重复预留"。
 
 ## Phase 1 · 三条并行线 + 评测基建
