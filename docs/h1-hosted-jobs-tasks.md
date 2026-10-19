@@ -44,19 +44,27 @@
 
 ## PR ① 存储客户端（`packages/mcp`，新文件）
 
-- [ ] **S1** `hostedJobs/{jobId}` 的读写，字段按方案 §4。
+- [x] **S1** `hostedJobs/{jobId}` 的读写，字段按方案 §4。
   - 用事务加 update-time 前置条件，做到：创建任务、改状态、拿租约（比较 `generation`）、放租约、加计数。
   - 内存实现和 Firestore REST 实现各一份，接口相同。
-- [ ] **S2** `hostedJobIdempotency/{workspaceId}-{keyHash}`，24 小时 TTL。
+- [x] **S2** `hostedJobIdempotency/{workspaceId}-{keyHash}`，24 小时 TTL。
   - 同一个 key 加同一个请求返回原来的 jobId；同一个 key 配不同请求返回冲突。
-- [ ] **S3** GCS 客户端：
+- [x] **S3** GCS 客户端：
   - 上传、下载、删除前缀；
   - 上传带 `ifGenerationMatch`；
   - 签名下载链接，15 分钟有效。签名用服务账号的 `signBlob`（IAM Credentials REST），不在镜像里放私钥。
-- [ ] **S4** Cloud Tasks 客户端：
+- [x] **S4** Cloud Tasks 客户端：
   - 建任务，带 OIDC token、`scheduleTime` 和 `dispatchDeadline`；
   - 任务名由 `{jobId}-{generation}` 生成，用来去重。
 - 验收：每个客户端都对假的 HTTP 服务测过成功、前置条件失败重试、404 和 409；`npm run typecheck` 和 `npm test` 通过。
+- PR ① 做成的样子（`packages/mcp/src/hostedJobs.ts`、`hostedCloud.ts`）：
+  - 任务、工作区的运行/排队名单和幂等 key 在一次提交里写；
+  - 排队中的任务拿不到租约（`queued`），被提升时才排第一段；
+  - 幂等 key 的 id 必须以它的 workspaceId 开头。
+- 还没对真实 Google 服务验证过，PR ⑤ 部署后核对：
+  - GCS 媒体下载是否带 `x-goog-generation`；
+  - 签名链接能否被 GCS 接受；
+  - Cloud Tasks 的请求体是否被接受。
 
 ## PR ② 分段执行（`packages/api`、`packages/runtime`）
 
@@ -104,6 +112,8 @@
 - [ ] **W4** 每 5 秒读一次任务文档，响应取消和全局开关 `hostedConfig/jobs.enabled`。
 - [ ] **W5** 站点租约 `hostedHostLeases/{host}`；挑不出可跑的站点时延迟 30 秒重排。
 - [ ] **W6** 任务结束时生成 `export.jsonl.gz`，再排一个定时到 `expireAt` 的删除任务。
+- [ ] **W7**（PR ① 审查时发现）create 的提交生效了但响应超时：重试时任务文档已存在，要认出这是自己写的，不能占着名额报错。
+- [ ] **W8**（PR ① 审查时发现）一个从没结束的任务被 TTL 删除后，它在工作区名单里的位置要释放；被提升的任务文档不存在时跳过它。
 - 验收测试：
   - 一段跑到中途死掉，重投先得到 503，租约过期后被新实例接手，不重复扣费；
   - 旧段的重复投递被丢弃；
@@ -130,5 +140,5 @@
 
 ## 下次从这里继续
 
-- 方案 PR #602 等你确认后合并。
-- 下一项是 **PR ① 的 S1**。
+- 方案和本清单已合并（#602）。PR ① 已提交。
+- 下一项是 **PR ② 的 E1**。
