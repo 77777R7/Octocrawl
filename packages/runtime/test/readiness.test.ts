@@ -155,3 +155,9 @@ describe('readinessOf (ADR 0007, ROADMAP PA item 11)', () => {
     expect(readinessOf(result({ verification: { status: 'not_requested' } }))).toEqual({ state: 'ready', basis: [] })
   })
 })
+
+
+it('keeps a bounded table capture unknown without losing the time actually waited', () => {
+  const page = result({ verification: { status: 'failed', verifier: 'verify/9', contractSha256: 'c'.repeat(64), reason: 'checks_failed', checks: [] } }, [{ at: 1, lane: 'browser_local', event: 'region_wait', detail: { ready: false, empty: false, waitedMs: 3_000, reads: 7, judged: 7, loading: false, steady: true, contractSha256: 'c'.repeat(64), tablesUnjudged: true, checks: [{ type: 'markdownIncludes', passed: true }, { type: 'tableRowsMin', passed: null }] } }])
+  expect(readinessOf(page)).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'], waitedMs: 3_000 })
+})

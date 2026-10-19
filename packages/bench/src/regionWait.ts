@@ -9,7 +9,7 @@
  * The view only judges readiness: the task's verdict is still the contract run on what was extracted.
  */
 
-import type { FetchOptions, Lane, ListField, TraceEvent, VerificationCheck, VerifyContract } from '@w2l/contracts'
+import type { FetchOptions, Lane, ListField, PageTable, TraceEvent, VerificationCheck, VerifyContract } from '@w2l/contracts'
 import { htmlToMarkdown } from '@w2l/extract-tf'
 import { contractSha256, verify, type VerifyView } from '@w2l/runtime'
 import { isNavigationError, LOADING_PROBE, type SettlePage } from './browserSettle.js'
@@ -42,6 +42,8 @@ const MAX_ANSWER_HTML = 1_000_000
 /** The checks that read the Markdown: on the live page, they read the page's whole HTML converted as the result's Markdown is. */
 const MARKDOWN_CHECKS: ReadonlySet<string> = new Set(['markdownIncludes', 'markdownMatches', 'markdownCountMin'])
 
+type RegionTables = readonly Pick<PageTable, 'tableIndex' | 'headerRows' | 'rows' | 'omitted'>[]
+
 /** What the wait judges: the request's task contract, and the list format's records when it names them. */
 export interface RegionSpec {
   contract: VerifyContract
@@ -53,6 +55,8 @@ export interface RegionSpec {
    * leaves out (T005, 2026-10-14: six prices on the page, none in its main content).
    */
   answerMarkdown?: (html: string, href: string) => string | null
+  /** A lane that captures tables can judge row contracts on the same bounded capture/selection as its answer. */
+  readTables?: (remainingMs: number) => Promise<RegionTables | undefined>
 }
 
 /**
@@ -206,6 +210,8 @@ export interface RegionOutcome {
   unjudged?: RegionUnjudged
   /** Screens the wait scrolled down for a region that loads as it comes into view; absent from a lane that does not scroll (the my-browser lane: the person's own tab). */
   scrolls?: number
+  /** A requested table capture remained unavailable; other judged checks cannot prove its absence. */
+  tablesUnjudged?: true
   /**
    * Set when the wait ran out while it was scrolling toward the region, before the page ended (or MAX_REGION_SCROLLS,
    * which REGION_WAIT_MAX_MS at REGION_SAMPLE_MS does not reach): the region may lie further down, not yet in view
@@ -250,7 +256,7 @@ export class RegionTracker {
   }
 
   /** Judge one read; true once the region is ready. A read with no view (cut off, or the probe failed) breaks the run of reads. */
-  observe(json: unknown): boolean {
+  observe(json: unknown, tables?: RegionTables): boolean {
     this.reads++
     let view: RegionView
     try { view = typeof json === 'string' ? JSON.parse(json) as RegionView : {} } catch { view = {} }
@@ -263,11 +269,12 @@ export class RegionTracker {
     }
     this.judged++
     const markdown = this.markdownOf(view)
-    const verifyView: VerifyView = { status: 'success', tableCount: view.tableCount ?? 0, ...(markdown === undefined ? {} : { markdown }), ...(view.list === undefined ? {} : { list: view.list }) }
+    const verifyView: VerifyView = { status: 'success', ...(tables === undefined ? {} : { tables }), tableCount: tables === undefined ? view.tableCount ?? 0 : tables.filter(table => table.omitted === undefined).length, ...(markdown === undefined ? {} : { markdown }), ...(view.list === undefined ? {} : { list: view.list }) }
     const verification = verify(this.spec.contract, verifyView, { partial: true })
     const checks = verification.status === 'not_requested' ? [] : verification.checks.map(({ index, type, passed, observedCount }) => ({ index, type, passed, ...(observedCount === undefined ? {} : { observedCount }) }))
-    // The first judged view decides whether the page can judge the contract at all.
-    if (this.judged === 1 && checks.every((check) => check.passed === null)) {
+    // A lane without a table reader may skip unavailable checks. A bounded capture can be temporarily
+    // unavailable, so its table checks are retried within the same region budget, never counted as passed.
+    if (this.judged === 1 && this.spec.readTables === undefined && checks.every((check) => check.passed === null)) {
       this.judgeable = false
       // The Markdown checks went unjudged because the page's HTML was too large to send or convert: the page had one.
       const tooLarge = this.needsMarkdown && (view.html === null || (typeof view.html === 'string' && view.html.length > MAX_VIEW_HTML))
@@ -279,6 +286,7 @@ export class RegionTracker {
     // Reads in a row with the same counts and the same text, this one included.
     this.sameReads = key === this.previousKey && steady === true ? this.sameReads + 1 : 1
     let passed = verification.status === 'passed' && key === this.previousKey
+      && (this.spec.readTables === undefined || checks.every(check => check.type !== 'tableRowsMin' || check.passed === true))
     let reported = checks
     // A read the whole page would end the wait on is judged again on what the answer will hold (spec.answerMarkdown):
     // only such reads, as extraction is not cheap, and only on a page up to MAX_ANSWER_HTML; its time counts in the read's,
@@ -318,7 +326,8 @@ export class RegionTracker {
   }
 
   outcome(): RegionOutcome {
-    return { ...this.last, waitedMs: this.now() - this.started, reads: this.reads, judged: this.judged, contractSha256: this.sha, ...(this.unjudged === undefined ? {} : { unjudged: this.unjudged }) }
+    const tablesUnjudged = this.spec.readTables !== undefined && this.last.checks.some(check => check.type === 'tableRowsMin' && check.passed === null)
+    return { ...this.last, waitedMs: this.now() - this.started, reads: this.reads, judged: this.judged, contractSha256: this.sha, ...(tablesUnjudged ? { tablesUnjudged: true as const } : {}), ...(this.unjudged === undefined ? {} : { unjudged: this.unjudged }) }
   }
 }
 
@@ -354,13 +363,15 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
   for (;;) {
     const readStarted = now()
     let json: unknown
+    let tables: RegionTables | undefined
     try {
       json = await page.evaluate(expression)
+      if (spec.readTables !== undefined) tables = await spec.readTables(Math.max(0, deadline - now()))
     } catch (error) {
       if (!isNavigationError(error)) throw error
       json = undefined
     }
-    const ready = tracker.observe(json)
+    const ready = tracker.observe(json, tables)
     if (!tracker.judgeable) return await outcome()
     // A read takes what the last one took (a large page's HTML, its Markdown): none is begun that would end past the bound.
     const readMs = now() - readStarted
@@ -387,6 +398,6 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
 /** The trace event a region wait leaves: what it saw, by counts, never the page's text. */
 export function regionWaitEvent(outcome: RegionOutcome | undefined, at: number, lane: Lane): TraceEvent | null {
   if (outcome === undefined) return null
-  const { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, unjudged, scrolls, scrollUnfinished } = outcome
-  return { at, lane, event: 'region_wait', detail: { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, ...(unjudged === undefined ? {} : { unjudged }), ...(scrolls === undefined ? {} : { scrolls }), ...(scrollUnfinished === true ? { scrollUnfinished } : {}) } }
+  const { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, unjudged, tablesUnjudged, scrolls, scrollUnfinished } = outcome
+  return { at, lane, event: 'region_wait', detail: { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, ...(tablesUnjudged === true ? { tablesUnjudged } : {}), ...(unjudged === undefined ? {} : { unjudged }), ...(scrolls === undefined ? {} : { scrolls }), ...(scrollUnfinished === true ? { scrollUnfinished } : {}) } }
 }
