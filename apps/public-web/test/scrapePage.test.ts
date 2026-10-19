@@ -154,7 +154,8 @@ describe('the /scrape/ product page', () => {
     const at = text.indexOf(marker)
     expect(at).toBeGreaterThan(text.indexOf('format codes that the 2011 C standard'))
     expect(text.indexOf(marker, at + 1)).toBe(-1)
-    // The check claims nothing before it has hashed: its fingerprint is blank, its verdict pending, its stamp empty.
+    // The check claims nothing before it has hashed: its fingerprint is blank, its verdict pending, nothing announced.
+    expect(markup).toContain('<p class="visually-hidden" id="ev-live" aria-live="polite"></p>')
     expect(markup).toContain(`<span class="ev-hash is-here" id="ev-hash-here" aria-hidden="true">`)
     expect(markup).toContain('<p class="ft-verdict is-pending" id="ft-verdict">')
     expect(markup).not.toContain('ft-verdict is-match')

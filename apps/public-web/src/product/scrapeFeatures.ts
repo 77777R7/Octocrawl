@@ -111,12 +111,13 @@ function mountTamper(card: HTMLElement): void {
   const panel = card.closest<HTMLElement>('.ev-panel')
   if (!input || !verdict || cells.length !== 64) return
   let run = 0
-  /** The verdict in a line, and in full for a screen reader. */
+  /** The verdict in a line, and in full for a screen reader when the reader changed the cell. */
+  let announce = false
   const say = (state: 'match' | 'mismatch' | 'failed', mark: string, text: string, spoken = text): void => {
     verdict.className = `ft-verdict is-${state}`
     verdict.firstElementChild!.textContent = mark
     verdict.lastElementChild!.textContent = text
-    if (live) live.textContent = spoken
+    if (live && announce) live.textContent = spoken
   }
   const subtle = window.crypto?.subtle
   const fail = (text: string): void => {
@@ -207,7 +208,10 @@ function mountTamper(card: HTMLElement): void {
     if (mine !== run) return
     show(digest, mine)
   }
-  input.addEventListener('input', () => void update())
+  input.addEventListener('input', () => {
+    announce = true
+    void update()
+  })
   section?.addEventListener('ev:prefetch', () => void load().catch(() => { /* The check says so when it runs. */ }))
   section?.addEventListener('ev:check', () => void update())
   new IntersectionObserver(([entry], observer) => {
@@ -218,6 +222,7 @@ function mountTamper(card: HTMLElement): void {
   }, { rootMargin: '200px' }).observe(card)
   reset?.addEventListener('click', () => {
     input.value = DOCS_CELL.value
+    announce = true
     void update()
     input.focus()
   })

@@ -15,6 +15,8 @@
  * stack of records leans a little towards a mouse, under a soft glare, except while its cell is being edited. With
  * reduced motion none of this runs and everything shows as it is. */
 
+import { scrollPageTo } from '../smoothScroll'
+
 const BEATS = 5
 /** How long the stage holds still, in window heights beyond its own. */
 const TRACK = 2.4
@@ -365,6 +367,13 @@ export function mountEvidenceStage(section: HTMLElement): void {
   })
   stack.addEventListener('focusin', leanSoon)
   stack.addEventListener('focusout', leanSoon)
+
+  // Tabbing into the check out of its beat brings the beat, so what has focus is in sight.
+  read.querySelector('.ev-check')?.addEventListener('focusin', () => {
+    if (!staged || beat === BEATS - 1) return
+    const box = track.getBoundingClientRect()
+    scrollPageTo(window.scrollY + box.top + 0.92 * (box.height - window.innerHeight))
+  })
 
   window.addEventListener('scroll', queue, { passive: true })
   window.addEventListener('resize', () => {

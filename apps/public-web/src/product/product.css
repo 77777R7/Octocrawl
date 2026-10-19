@@ -416,7 +416,7 @@
 
 /* The check: the bytes hashed here, the cell to change, the verdict. */
 .ev-check { display: grid; grid-template-rows: 1fr; }
-.ev-check-in { min-height: 0; overflow: hidden; }
+.ev-check-in { min-height: 0; overflow: clip; }
 .ev-check-body { position: relative; display: grid; gap: 10px; padding: 14px 22px 18px 74px; border-top: 1px solid rgba(150, 186, 236, .14); font: 12px/1.6 var(--mono); }
 .ev-check-label { margin: 0; color: var(--on-navy-3); font: 500 11px/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
 .ev-check .ev-hash { margin: 0 0 4px; }
@@ -444,14 +444,16 @@
 /* Measuring the stage's tallest beat (evidenceStage.ts): nothing moves meanwhile. */
 .ev-section.is-measuring, .ev-section.is-measuring * { transition: none !important; }
 .ev-section.is-staged .ev-panel { grid-area: 1 / 1; transition: transform .75s cubic-bezier(.2, .8, .2, 1), opacity .5s ease, filter .6s ease; }
-.ev-section.is-staged .ev-refused { z-index: 1; opacity: 0; visibility: hidden; transform: translateY(44px) scale(.95); transition: transform .6s cubic-bezier(.4, 0, .2, 1), opacity .4s ease, visibility 0s .6s; }
-.ev-section.is-staged[data-beat="3"] .ev-refused { opacity: 1; visibility: visible; transform: none; transition: transform .75s cubic-bezier(.2, .8, .2, 1), opacity .5s ease, visibility 0s; }
+/* Out of its beat a record or the check is only out of sight: a screen reader still reads it, and the check can take
+   focus, which brings its beat (evidenceStage.ts). */
+.ev-section.is-staged .ev-refused { z-index: 1; opacity: 0; pointer-events: none; transform: translateY(44px) scale(.95); transition: transform .6s cubic-bezier(.4, 0, .2, 1), opacity .4s ease; }
+.ev-section.is-staged[data-beat="3"] .ev-refused { opacity: 1; pointer-events: auto; transform: none; transition: transform .75s cubic-bezier(.2, .8, .2, 1), opacity .5s ease; }
 .ev-section.is-staged[data-beat="4"] .ev-refused { transform: translateY(70px) rotate(3deg) scale(.95); }
 .ev-section.is-staged[data-beat="3"] .ev-read { filter: brightness(.45) saturate(.85); transform: translateY(-40px) scale(.9); }
 .ev-section.is-staged .ev-fold { transition: max-height .55s cubic-bezier(.4, 0, .2, 1), padding .55s cubic-bezier(.4, 0, .2, 1), opacity .35s ease; }
 .ev-section.is-staged[data-beat="4"] .ev-fold { max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; }
-.ev-section.is-staged .ev-check { grid-template-rows: 0fr; visibility: hidden; transition: grid-template-rows .5s cubic-bezier(.4, 0, .2, 1), visibility 0s .5s; }
-.ev-section.is-staged[data-beat="4"] .ev-check { grid-template-rows: 1fr; visibility: visible; transition: grid-template-rows .6s cubic-bezier(.2, .8, .2, 1) .2s, visibility 0s; }
+.ev-section.is-staged .ev-check { grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .5s cubic-bezier(.4, 0, .2, 1), opacity .3s ease; }
+.ev-section.is-staged[data-beat="4"] .ev-check { grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows .6s cubic-bezier(.2, .8, .2, 1) .2s, opacity .4s ease .25s; }
 @media (min-width: 1001px) and (max-height: 820px) {
   .ev-section.is-staged .ev-title { font-size: clamp(30px, 3.2vw, 44px); }
   .ev-section.is-staged .ev-lead { margin-top: 12px; font-size: 16px; }
@@ -470,7 +472,10 @@
   .ev-row, .ev-head, .ev-foot { padding-right: 14px; padding-left: 14px; }
   .ev-row::after { right: 14px; left: 14px; }
   .ev-tile { width: 30px; height: 30px; }
-  .ev-check-body { padding: 14px; }
+  /* The check's fingerprint keeps the record's left edge and width, both in four lines of two groups, digit under
+     digit. */
+  .ev-check-body { padding: 14px 14px 16px 60px; }
+  .ev-hash-line { display: grid; grid-template-columns: repeat(2, max-content); gap: 4px 12px; }
   .ev-check .ft-source { white-space: pre-wrap; word-break: break-all; }
   .ev-what small { white-space: normal; overflow-wrap: anywhere; }
   .ev-hash { font-size: 12px; }
