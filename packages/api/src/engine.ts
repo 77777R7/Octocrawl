@@ -76,6 +76,7 @@ import {
   type StepStatus,
   type Task,
   type TaskStatus,
+  type HostPacing,
   type CrawlPageQuery,
   type ExecutionContext,
   type AppliedRobotsOverride,
@@ -2272,7 +2273,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       try {
         const task = await store.getTask(taskId)
         if (task === null) return null
-        if (isTerminalStatus(task.status)) return { status: task.status, attemptId: (await store.listAttempts(taskId)).at(-1)?.id ?? null, newPages: 0 }
+        if (isTerminalStatus(task.status)) return { status: task.status, attemptId: (await store.listAttempts(taskId)).at(-1)?.id ?? null, newPages: 0, items: [], charges: [] }
         // At a limit the slice drains: no new page starts, the pages in flight are stored. Those still running after the grace are cut.
         const drain = new AbortController()
         const stop = new AbortController()
@@ -2287,7 +2288,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           if (event.type === 'page' && event.taskId === taskId && ++newPages >= limits.maxNewPages) pause()
         })
         const timer = setTimeout(pause, limits.maxMs)
+        if (limits.signal?.aborted === true) pause()
+        limits.signal?.addEventListener('abort', pause, { once: true })
         try {
+          // A site's cooldown from an earlier slice (a 429's Retry-After) holds here too, on either scheme.
+          for (const [host, pace] of Object.entries(task.pacing ?? {})) {
+            if (typeof pace.cooldownUntilMs === 'number' && pace.cooldownUntilMs > Date.now()) for (const scheme of ['https', 'http']) originScheduler.cooldown(`${scheme}://${host}`, pace.cooldownUntilMs)
+          }
           const pending: Task = { ...task, status: 'pending', updatedAt: new Date().toISOString() }
           await store.putTask(pending)
           const run = task.batch === undefined ? crawlRunOptions(pending, true) : batchRunOptions(task.batch, true)
@@ -2298,12 +2305,35 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         } finally {
           clearTimeout(timer)
           clearTimeout(graceTimer)
+          limits.signal?.removeEventListener('abort', pause)
           unsubscribe()
+        }
+        // The cooldowns still in force go with the task's pace to the next slice.
+        const cooldowns = originScheduler.cooldowns()
+        if (Object.keys(cooldowns).length > 0) {
+          const writer = SqliteTaskStore.open(join(taskRoot, taskId))
+          try {
+            const current = await writer.getTask(taskId)
+            if (current !== null) {
+              const pacing: Record<string, HostPacing> = { ...(current.pacing ?? {}) }
+              for (const [origin, until] of Object.entries(cooldowns)) {
+                const host = new URL(origin).host
+                pacing[host] = { lastStartedAtMs: pacing[host]?.lastStartedAtMs ?? null, crawlDelayMs: pacing[host]?.crawlDelayMs ?? null, cooldownUntilMs: Math.max(until, pacing[host]?.cooldownUntilMs ?? 0) }
+              }
+              await writer.putTask({ ...current, pacing })
+            }
+          } finally { await writer.close() }
         }
         const after = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
         try {
           const ended = await after.getTask(taskId)
-          return { status: ended?.status ?? 'failed', attemptId: (await after.listAttempts(taskId)).at(-1)?.id ?? null, newPages }
+          const attemptId = (await after.listAttempts(taskId)).at(-1)?.id ?? null
+          const steps = attemptId === null || ended === null ? [] : await after.listSteps(taskId, attemptId)
+          return {
+            status: ended?.status ?? 'failed', attemptId, newPages,
+            items: steps.map((step) => { const { audit: _audit, ...item } = toCrawlPage(step, ended!); return { ...item, trace: [] } as CrawlPage }),
+            charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null })),
+          }
         } finally { await after.close() }
       } finally {
         if (!launched) await store.close()
@@ -2688,6 +2718,8 @@ export interface SliceLimits {
   batchHosts?: readonly string[]
   /** How long the pages in flight at a limit may take to finish before they are cut; default 60 s. */
   graceMs?: number
+  /** Drains the slice as a limit does when it aborts (a hosted job switched off meanwhile). */
+  signal?: AbortSignal
 }
 
 export interface SliceResult {
@@ -2696,7 +2728,13 @@ export interface SliceResult {
   /** The slice's attempt, whose steps are the pages it stored; null when it ran none. */
   attemptId: string | null
   newPages: number
+  /** The pages the slice stored, as a batch's items are listed (no trace or audit), in the order they were stored. */
+  items: CrawlPage[]
+  /** What each of those pages was, for its price (hostedCredits.ts scrapeCharge), item for item. */
+  charges: SliceCharge[]
 }
+
+export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null }
 
 /** A batch never discovers: its frontier takes the whole host and exact canonical URLs. */
 const BATCH_SCOPE: CrawlScopeOptions = { regexOnFullURL: false, ignoreQueryParameters: false, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false }

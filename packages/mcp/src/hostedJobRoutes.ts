@@ -46,7 +46,8 @@ export interface JobFiles {
 export function gcsJobFiles(bucket: GcsBucket): JobFiles {
   return {
     async segment(job, slice) {
-      const object = await bucket.download(segmentName(job, slice))
+      // A committed slice's file is named on the job; a slice that did not commit wrote one nobody reads.
+      const object = await bucket.download(job.segments?.[slice] ?? segmentName(job, slice))
       if (object === null) return null
       return gunzipSync(object.body).toString('utf8').split('\n').filter((line) => line.length > 0)
     },
@@ -223,6 +224,9 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
         const cancelled = await config.store.cancel(id, found.workspaceId, now())
         if (!cancelled.ok) return refusal(404, 'not_found', `no ${kind} ${id} for this account`)
         await queuePromoted(cancelled.promoted)
+        // One more delivery for the cancelled job: the worker writes its export and schedules its expiry (a slice queued or
+        // running for this generation already is the same task, and does it).
+        await config.enqueueSlice(cancelled.job).catch((error: unknown) => log(JSON.stringify({ severity: 'ERROR', event: 'hosted_job_enqueue_failed', workspaceId: cancelled.job.workspaceId, jobId: id, message: String(error) })))
         return json(status(cancelled.job))
       }
       if (method !== 'GET') return refusal(404, 'not_found', `${method} ${url.pathname} is not a job route`)

@@ -111,6 +111,11 @@ export interface Reservation {
   fromPurchased: number
   /** What the account had left once these were taken. */
   remaining: number
+  /**
+   * Set when the reservation is settled once at most, whoever settles it (a hosted job's slice, or the next slice after one
+   * that died): a second settle of the same id changes nothing (`creditSettles/{id}`).
+   */
+  id?: string
 }
 
 export type ReserveResult =
@@ -127,10 +132,11 @@ export interface CreditsStore {
    * daily counter (the site's, the account's), in one atomic commit; refuses, taking nothing, when any would go past
    * its limit, naming the first.
    */
-  reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now?: Date): Promise<ReserveResult>
+  reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now?: Date, id?: string): Promise<ReserveResult>
   /** Gives back what the call did not cost and adds it to the account's usage for the day, with the call's request line
-   * when there is one; returns the balance after. */
-  settle(reservation: Reservation, used: number, kind: UsageKind, now?: Date, note?: RequestNote): Promise<{ remaining: number }>
+   * when there is one; returns the balance after. `perKind` counts many reads at once (a hosted job's slice) in place of
+   * one of `kind`. */
+  settle(reservation: Reservation, used: number, kind: UsageKind, now?: Date, note?: RequestNote, perKind?: Partial<Record<UsageKind, number>>): Promise<{ remaining: number }>
   /** The credits the account has this month, taking nothing; a hosted job's start checks it covers a slice. */
   balance(uid: string, now?: Date): Promise<number>
 }
@@ -164,24 +170,29 @@ export class MemoryCreditsStore implements CreditsStore {
   readonly site = new Map<string, number>()
   readonly usage = new Map<string, Record<UsageKind | 'credits', number>>()
   readonly requests = new Map<string, RequestLine[]>()
+  readonly settled = new Set<string>()
   constructor(private readonly monthlyGrant = DEFAULT_MONTHLY_CREDITS) {}
-  async reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now = new Date()): Promise<ReserveResult> {
+  async reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now = new Date(), id?: string): Promise<ReserveResult> {
     const month = utcMonth(now)
     const have = current(this.balances.get(uid) ?? null, month, this.monthlyGrant)
-    const full = quotas.find((quota) => (this.site.get(quota.id) ?? 0) >= quota.limit)
+    const full = quotas.find((quota) => (this.site.get(quota.id) ?? 0) + (quota.amount ?? 1) > quota.limit)
     if (full) return { ok: false, limited: 'quota', id: full.id, limit: full.limit }
     if (have.grant + have.purchased < amount) return { ok: false, limited: 'credits', remaining: have.grant + have.purchased }
     const { fromGrant, fromPurchased } = take(amount, have)
     const left = { month, grant: have.grant - fromGrant, purchased: have.purchased - fromPurchased }
     this.balances.set(uid, left)
-    for (const quota of quotas) this.site.set(quota.id, (this.site.get(quota.id) ?? 0) + 1)
-    return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased } }
+    for (const quota of quotas) this.site.set(quota.id, (this.site.get(quota.id) ?? 0) + (quota.amount ?? 1))
+    return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased, ...(id === undefined ? {} : { id }) } }
   }
   async balance(uid: string, now = new Date()): Promise<number> {
     const have = current(this.balances.get(uid) ?? null, utcMonth(now), this.monthlyGrant)
     return have.grant + have.purchased
   }
-  async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date(), note?: RequestNote): Promise<{ remaining: number }> {
+  async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date(), note?: RequestNote, perKind?: Partial<Record<UsageKind, number>>): Promise<{ remaining: number }> {
+    if (reservation.id !== undefined) {
+      if (this.settled.has(reservation.id)) return { remaining: await this.balance(reservation.uid, now) }
+      this.settled.add(reservation.id)
+    }
     const refund = Math.max(0, reservation.fromGrant + reservation.fromPurchased - used)
     const back = giveBack(refund, reservation)
     if (note) this.requests.set(reservation.uid, [requestLine(note, requestLineId(now), now, kind, used), ...(this.requests.get(reservation.uid) ?? [])])
@@ -190,7 +201,8 @@ export class MemoryCreditsStore implements CreditsStore {
     balance.purchased += back.toPurchased
     const day = `${reservation.uid}-${now.toISOString().slice(0, 10)}`
     const counts = this.usage.get(day) ?? { http: 0, browser: 0, not_found: 0, map: 0, unread: 0, credits: 0 }
-    counts[kind] += 1
+    if (perKind === undefined) counts[kind] += 1
+    else for (const [name, n] of Object.entries(perKind) as Array<[UsageKind, number]>) counts[name] += n
     counts.credits += used
     this.usage.set(day, counts)
     return { remaining: balance.grant + balance.purchased }
@@ -245,14 +257,14 @@ export class FirestoreCreditsStore implements CreditsStore {
     return have.grant + have.purchased
   }
 
-  async reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now = new Date()): Promise<ReserveResult> {
+  async reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now = new Date(), id?: string): Promise<ReserveResult> {
     if (!validAccountId(uid)) throw new Error('account id is malformed')
     const month = utcMonth(now)
     for (let attempt = 0; attempt < 6; attempt++) {
       const token = await this.token()
       const [balanceDoc, ...quotaDocs] = await Promise.all([this.read(`credits/${uid}`, token), ...quotas.map((quota) => this.read(`hostedQuotas/${quota.id}`, token))])
       const counts = quotaDocs.map((doc) => doc === null ? 0 : integer(doc.fields?.count, 'quota count'))
-      const full = quotas.findIndex((quota, index) => counts[index]! >= quota.limit)
+      const full = quotas.findIndex((quota, index) => counts[index]! + (quota.amount ?? 1) > quota.limit)
       if (full >= 0) return { ok: false, limited: 'quota', id: quotas[full]!.id, limit: quotas[full]!.limit }
       const balance = balanceDoc === null ? null : {
         month: balanceDoc.fields?.month?.stringValue ?? '',
@@ -282,7 +294,7 @@ export class FirestoreCreditsStore implements CreditsStore {
           currentDocument: balanceDoc === null ? { exists: false } : { updateTime: balanceDoc.updateTime },
         },
         ...quotas.map((quota, index) => ({
-          update: { name: `${this.resource}/hostedQuotas/${quota.id}`, fields: { count: { integerValue: String(counts[index]! + 1) }, expireAt: { timestampValue: quotaExpireAt } } },
+          update: { name: `${this.resource}/hostedQuotas/${quota.id}`, fields: { count: { integerValue: String(counts[index]! + (quota.amount ?? 1)) }, expireAt: { timestampValue: quotaExpireAt } } },
           currentDocument: quotaDocs[index] === null ? { exists: false } : { updateTime: quotaDocs[index]!.updateTime },
         })),
       ], true)
@@ -293,12 +305,12 @@ export class FirestoreCreditsStore implements CreditsStore {
         continue
       }
       if (committed === 'retry') continue
-      return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased } }
+      return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased, ...(id === undefined ? {} : { id }) } }
     }
     throw new Error('credits contention exceeded retry budget')
   }
 
-  async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date(), note?: RequestNote): Promise<{ remaining: number }> {
+  async settle(reservation: Reservation, used: number, kind: UsageKind, now = new Date(), note?: RequestNote, perKind?: Partial<Record<UsageKind, number>>): Promise<{ remaining: number }> {
     const refund = Math.max(0, reservation.fromGrant + reservation.fromPurchased - used)
     const back = giveBack(refund, reservation)
     const day = now.toISOString().slice(0, 10)
@@ -317,10 +329,15 @@ export class FirestoreCreditsStore implements CreditsStore {
       {
         update: { name: `${this.resource}/creditUsage/${reservation.uid}-${day}`, fields: { uid: { stringValue: reservation.uid }, day: { stringValue: day }, expireAt: { timestampValue: expireAt } } },
         updateMask: { fieldPaths: ['uid', 'day', 'expireAt'] },
-        updateTransforms: [increment(kind, 1), increment('credits', used)],
+        updateTransforms: [...(perKind === undefined ? [increment(kind, 1)] : Object.entries(perKind).filter(([, n]) => n > 0).map(([name, n]) => increment(name, n))), increment('credits', used)],
       },
       ...(line === null || !withLine ? [] : [{ update: { name: `${this.resource}/requestLog/${reservation.uid}/requests/${line.id}`, fields: requestLineFields(line, reservation.uid, now) } }]),
+      // Settled once: the record must not exist yet, so a second settle of the same reservation applies nothing.
+      ...(reservation.id === undefined ? [] : [{ update: { name: `${this.resource}/creditSettles/${reservation.id}`, fields: { uid: { stringValue: reservation.uid }, used: { integerValue: String(used) }, expireAt: { timestampValue: new Date(now.getTime() + 30 * 86_400_000).toISOString() } } }, currentDocument: { exists: false } }]),
     ]
+    if (reservation.id !== undefined && !/^[A-Za-z0-9_-]{1,200}$/.test(reservation.id)) throw new Error('reservation id is malformed')
+    const settledAlready = async () => reservation.id !== undefined && (await this.read(`creditSettles/${reservation.id}`, await this.token())) !== null
+    if (await settledAlready()) return { remaining: reservation.remaining }
     let response: CommitResponse | 'retry' = 'retry'
     for (let attempt = 0; attempt < 3 && response === 'retry'; attempt++) {
       try {
@@ -331,7 +348,11 @@ export class FirestoreCreditsStore implements CreditsStore {
         response = await this.commit(await this.token(), writes(false))
       }
     }
-    if (response === 'retry') throw new Error('credits settle was refused')
+    if (response === 'retry') {
+      // Refused for its precondition: another settle of the same reservation came first.
+      if (await settledAlready()) return { remaining: reservation.remaining }
+      throw new Error('credits settle was refused')
+    }
     const results = response.writeResults?.[0]?.transformResults ?? []
     const grant = Number(results[0]?.integerValue)
     const purchased = Number(results[1]?.integerValue)

@@ -374,6 +374,7 @@ describe('@w2l/runtime public surface', () => {
       'diffDocument',
       'encodeStepCursor',
       'enqueueJobDelivery',
+      'foldCheckpoint',
       'hostOf',
       'initializeFirecrawlMonitor',
       'initializeMonitor',

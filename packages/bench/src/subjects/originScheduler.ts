@@ -59,6 +59,13 @@ export class OriginScheduler {
     this.pump(origin, state)
   }
 
+  /** The cooldowns still in force (epoch ms by origin), for a task to keep across runs (Task.pacing). */
+  cooldowns(nowMs = Date.now()): Record<string, number> {
+    const out: Record<string, number> = {}
+    for (const [origin, state] of this.origins) if (state.cooldownUntil > nowMs) out[origin] = state.cooldownUntil
+    return out
+  }
+
   retryAt(origin: string): number | undefined {
     const until = this.origins.get(origin)?.cooldownUntil ?? 0
     return until > Date.now() ? until : undefined

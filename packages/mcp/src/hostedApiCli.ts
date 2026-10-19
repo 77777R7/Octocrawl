@@ -21,6 +21,9 @@
 import { hostedProxyNotice } from '@w2l/contracts'
 import { createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, FirestoreHostedQuota, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, serviceAccessToken, type HostedKeys, type HostedLeases, type HostedOAuthTokens, type HostedQuota } from './hostedApi.js'
 import { FirestoreCreditsStore, MemoryCreditsStore, type CreditsStore } from './hostedCredits.js'
+import { FirestoreHostedJobStore } from './hostedJobs.js'
+import { gcsJobFiles } from './hostedJobRoutes.js'
+import { jobsCloudFromEnv } from './hostedJobsCloud.js'
 
 function positive(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -57,12 +60,15 @@ if (store === 'memory') {
   credits = new FirestoreCreditsStore(project, serviceAccessToken(), monthlyCredits)
 } else throw new Error('W2L_HOSTED_STORE must be firestore or memory')
 
+// Hosted batch and crawl jobs (ROADMAP PH H1): on when the five jobs variables are set (hostedJobsCloud.ts).
+const jobsCloud = store === 'firestore' ? await jobsCloudFromEnv(process.env) : null
 const notice = hostedProxyNotice(process.env)
 if (notice) console.log(`octocrawl-hosted-api: ${notice}`)
 const service = createHostedApi({
   port, host: '0.0.0.0',
   taskRoot: process.env.W2L_TASK_ROOT ?? '/tmp/octocrawl-hosted',
   hashKey, keys, oauthTokens, quota, leases, credits,
+  ...(jobsCloud === null ? {} : { jobs: { store: new FirestoreHostedJobStore(jobsCloud.project, serviceAccessToken()), files: gcsJobFiles(jobsCloud.bucket), enqueueSlice: jobsCloud.enqueueSlice, enabled: jobsCloud.enabled } }),
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
   keylessDaily: positive('W2L_KEYLESS_DAILY', 20),
   claudeDaily: positive('W2L_CLAUDE_DAILY', 200),

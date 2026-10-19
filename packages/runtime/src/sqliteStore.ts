@@ -506,3 +506,12 @@ function stepFromRow(row: StepRow): StepRecord {
     updatedAt: row.updated_at,
   }
 }
+
+/**
+ * Folds a task directory's write-ahead log into its checkpoint.sqlite, so that one file holds the whole task: a hosted
+ * job's slice copies the checkpoint to storage as one file (ROADMAP PH H1). Call it once no store has the task open.
+ */
+export function foldCheckpoint(taskDir: string): void {
+  const db = new Database(join(taskDir, CHECKPOINT_FILENAME))
+  try { db.pragma('wal_checkpoint(TRUNCATE)') } finally { db.close() }
+}
