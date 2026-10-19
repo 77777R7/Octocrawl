@@ -32,7 +32,7 @@ import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverride
 import { dropLastStep, runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, LOADING_WAIT_MAX_MS, loadingWaitEvent, waitForRenderedStability, withStillLoadingWarning } from '../browserSettle.js'
 import { REGION_WAIT_MAX_MS, regionSpecOf, regionWaitEvent, waitForRegion } from '../regionWait.js'
-import { captureLayout } from '../browserLayout.js'
+import { captureLayout, LAYOUT_MAX_ELEMENTS, SHADOW_TABLE_LIMITS } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
 import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
@@ -1063,6 +1063,30 @@ export class BrowserLocalSubject implements SubjectAdapter {
           const main = extractTf.extract(html, { url: href, pruneSelectors: options.excludeTags, blockAds: options.blockAds })
           return main.escalate ? null : htmlToMarkdown(main.mainHtml, { baseUrl: main.baseUrl, ...markdownOptions(options) })
         },
+      }
+      // Row contracts wait on the same capture and table selection the final answer uses, not just its title.
+      // Other lanes without this capture keep their partial view; the final verifier remains authoritative.
+      if (region !== undefined && options.includeTables === true && region.contract.checks.some(check => check.type === 'tableRowsMin')) {
+        region.readTables = async remainingMs => {
+          if (remainingMs <= 0) return undefined
+          const deadlineAt = Date.now() + remainingMs
+          // Refuse oversized reads in the browser, before transferring the HTML on each sample.
+          const raw = await shownPage.evaluate(({ maxElements, maxHtml }) => {
+            if ((document.body?.getElementsByTagName('*').length ?? 0) > maxElements) return null
+            const html = (document.doctype === null ? '' : new XMLSerializer().serializeToString(document.doctype)) + document.documentElement.outerHTML
+            return html.length > maxHtml ? null : html
+          }, { maxElements: LAYOUT_MAX_ELEMENTS, maxHtml: SHADOW_TABLE_LIMITS.html })
+          if (raw === null || Date.now() >= deadlineAt) return undefined
+          const captured = await captureLayout(shownPage, raw, { deadlineAt })
+          if (captured.html === null || captured.html.length > SHADOW_TABLE_LIMITS.html || Date.now() >= deadlineAt ||
+            (captured.detail.shadowTables !== undefined && !['none', 'captured'].includes(captured.detail.shadowTables.outcome))) return undefined
+          const href = shownPage.url()
+          const main = extractTf.extract(captured.html, { url: href, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, captured.html.length), blockAds: options.blockAds })
+          const tables = tablesFormat(wholePageAsked(options)
+            ? { html: captured.html, options: { baseUrl: href, exclude: options.excludeTags, ...markdownOptions(options) } }
+            : { html: main.mainHtml, options: { baseUrl: main.baseUrl, ...markdownOptions(options) } }, href, options, [], 'browser_local', 0).tables
+          return Date.now() >= deadlineAt ? undefined : tables
+        }
       }
       // Only on a page that answered and shows no check: a block, a challenge or an error page is not waited on for a
       // region it will never show. The check is the gate's decisive one, so a page with content is never skipped.

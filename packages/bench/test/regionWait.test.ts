@@ -267,3 +267,45 @@ describe('the wait for the region a task needs (ADR 0007, ROADMAP PA item 11)', 
     expect(regionWaitEvent({ ...outcome, reads: 1, judged: 1, unjudged: 'html_too_large' }, 7, 'my_browser')?.detail).toMatchObject({ judged: 1, unjudged: 'html_too_large' })
   })
 })
+
+
+describe('table contracts during the region wait', () => {
+  const contract: VerifyContract = { checks: [{ type: 'markdownIncludes', text: 'AAPL' }, { type: 'tableRowsMin', tableIndex: 0, columns: [0, 1], min: 2 }] }
+  const table = (rows: string[][]) => [{ tableIndex: 0, headerRows: 1, rows: [['Date', 'Price'], ...rows] }]
+
+  it('does not finish on a stable title before delayed complete rows reach the capture view', async () => {
+    const shown = page([view('AAPL')])
+    let reads = 0
+    const readTables = async () => ++reads < 3 ? [] : table([['2026-01-01', '$100'], ['2026-01-02', '$101']])
+    const out = await waitForRegion(shown, { contract, readTables }, { maxMs: 5_000, sampleMs: 500, now: shown.now })
+    expect(out).toMatchObject({ ready: true, reads: 4, checks: [{ passed: true }, { passed: true, observedCount: 2 }] })
+    expect(reads).toBe(4)
+  })
+
+  it('counts captured shadow tables for a mixed count and row contract', async () => {
+    const shown = page([view('AAPL')])
+    const out = await waitForRegion(shown, { contract: { checks: [...contract.checks, { type: 'minTables', min: 1 }] }, readTables: async () => table([['2026-01-01', '$100'], ['2026-01-02', '$101']]) }, { maxMs: 1_000, now: shown.now })
+    expect(out).toMatchObject({ ready: true, reads: 2, checks: [{ passed: true }, { passed: true, observedCount: 2 }, { passed: true, observedCount: 1 }] })
+  })
+
+  it('keeps missing columns and unavailable captures from becoming ready on the title alone', async () => {
+    for (const tables of [table([['2026-01-01'], ['2026-01-02']]), undefined]) {
+      const shown = page([view('AAPL')])
+      const out = await waitForRegion(shown, { contract, readTables: async () => tables }, { maxMs: 1_000, now: shown.now })
+      expect(out.ready).toBe(false)
+      expect(out.reads).toBe(3)
+      expect(out.checks[1]?.passed).toBe(tables === undefined ? null : false)
+    }
+  })
+
+  it('bounds the capture by the remaining region budget, including a zero budget', async () => {
+    const shown = page([view('AAPL')])
+    const budgets: number[] = []
+    await waitForRegion(shown, { contract, readTables: async remaining => { budgets.push(remaining); return [] } }, { maxMs: 1_000, now: shown.now })
+    expect(budgets).toEqual([1_000, 500, 0])
+    const zero = page([view('AAPL')])
+    const once: number[] = []
+    expect(await waitForRegion(zero, { contract, readTables: async remaining => { once.push(remaining); return [] } }, { maxMs: 0, now: zero.now })).toMatchObject({ ready: false, reads: 1 })
+    expect(once).toEqual([0])
+  })
+})
