@@ -55,7 +55,7 @@ import {
 import { abortableSleep, createExecutionScope, createSpendLedger, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { reportFromTaskAttempt } from './crawlReport.js'
 import { Frontier, type FrontierEnqueueResult, type FrontierItem } from './frontier.js'
-import { canonicalizeUrl } from './canonicalize.js'
+import { canonicalizeUrl, hostOf } from './canonicalize.js'
 import type { TaskStore } from './taskStore.js'
 
 /** The URL-scope options a run gives its frontier (CrawlStartRequest names them). */
@@ -196,6 +196,9 @@ export class CrawlOrchestrator {
     let attempt: Attempt | undefined
     // The run's frontier, whose hosts' pace the task keeps when the run ends (Task.pacing).
     let runFrontier: Frontier | undefined
+    // A batch's URLs on hosts outside spec.batchHosts, left for a later run: while there are any, the run ends paused.
+    const batchHosts = spec.batchHosts === undefined ? null : new Set(spec.batchHosts.map((host) => host.toLowerCase()))
+    let deferredUrls = 0
     // A crawl's link discovery counters, written with the attempt after every page; a batch discovers nothing.
     let discovery: CrawlDiscovery | null = null
     const meters = () => ({
@@ -253,7 +256,9 @@ export class CrawlOrchestrator {
       })
       runFrontier = frontier
       const priorSteps = await this.store.listSteps(task.id)
-      const restoredLinks = await this.restoreFrontier(frontier, task, spec, priorSteps)
+      const deferredSeed = { hosts: batchHosts, count: 0 }
+      const restoredLinks = await this.restoreFrontier(frontier, task, spec, priorSteps, deferredSeed)
+      deferredUrls += deferredSeed.count
       // How many of a batch's URLs the frontier has been given; an append pushes to the end of the list, so the tail past this index is new.
       let seededCount = task.batch?.urls.length ?? 0
       if (sitemapMode !== 'skip' && this.sitemapSource !== undefined && discovery !== null) {
@@ -287,7 +292,7 @@ export class CrawlOrchestrator {
       // URLs appended to a batch since the frontier was last fed: seeded (a URL this task already fetched is marked visited instead) and the idle workers woken.
       const seedAppended = (current: Task | null): void => {
         if (current?.batch === undefined || current.batch.urls.length <= seededCount) return
-        seedBatchUrls(frontier, current.batch.urls.slice(seededCount), taskUrls)
+        deferredUrls += seedBatchUrls(frontier, current.batch.urls.slice(seededCount), taskUrls, batchHosts)
         seededCount = current.batch.urls.length
         wakeWorkers()
       }
@@ -502,7 +507,8 @@ export class CrawlOrchestrator {
     const persistedTask = await this.store.getTask(task.id)
     const cancelled = this.signal?.aborted === true || persistedCancellation || persistedTask?.status === 'cancelled'
     const interrupted = !cancelled && this.shutdownSignal?.aborted === true
-    const status = cancelled ? 'cancelled' : interrupted ? 'paused' : failed !== null ? 'failed' : 'completed'
+    const left = !cancelled && !interrupted && failed === null && deferredUrls > 0
+    const status = cancelled ? 'cancelled' : interrupted || left ? 'paused' : failed !== null ? 'failed' : 'completed'
     const finishedAttempt: Attempt = {
       ...attempt,
       status: interrupted ? 'interrupted' : status === 'paused' ? 'interrupted' : status,
@@ -598,9 +604,9 @@ export class CrawlOrchestrator {
    * crawl's contentful pages. Returns the resumed pages whose links the caller
    * enqueues after the sitemap's entries (none for a batch or a fresh crawl).
    */
-  private async restoreFrontier(frontier: Frontier, task: Task, spec: CrawlSpec, prior: readonly StepRecord[]): Promise<readonly StepRecord[]> {
+  private async restoreFrontier(frontier: Frontier, task: Task, spec: CrawlSpec, prior: readonly StepRecord[], deferred: { hosts: ReadonlySet<string> | null; count: number }): Promise<readonly StepRecord[]> {
     if (task.batch !== undefined) {
-      seedBatchUrls(frontier, task.batch.urls, new Set(prior.filter(step => step.result !== null).map(step => step.canonicalUrl)))
+      deferred.count += seedBatchUrls(frontier, task.batch.urls, new Set(prior.filter(step => step.result !== null).map(step => step.canonicalUrl)), deferred.hosts)
       return []
     }
     if (spec.resumeFrom === null) {
@@ -671,13 +677,19 @@ function listsPages(task: Task): boolean {
   return (task.batch?.actions ?? []).some((action) => action.type === 'paginate')
 }
 
-/** Seed a batch's URLs; one the task has already fetched (by canonical URL) is marked visited instead, so a resume or a relaunch never fetches it again. */
-function seedBatchUrls(frontier: Frontier, urls: readonly string[], completed: ReadonlySet<string>): void {
+/**
+ * Seed a batch's URLs; one the task has already fetched (by canonical URL) is marked visited instead, so a resume or a
+ * relaunch never fetches it again. With `hosts`, a URL on another host is left for a later run. Returns how many were left.
+ */
+function seedBatchUrls(frontier: Frontier, urls: readonly string[], completed: ReadonlySet<string>, hosts: ReadonlySet<string> | null = null): number {
+  let left = 0
   for (const url of urls) {
     const canonical = canonicalizeUrl(url)
     if (canonical !== null && completed.has(canonical)) frontier.markVisited(canonical)
+    else if (hosts !== null && canonical !== null && !hosts.has(hostOf(canonical))) left++
     else frontier.seed(url)
   }
+  return left
 }
 
 /**

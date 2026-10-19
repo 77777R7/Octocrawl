@@ -679,6 +679,21 @@ describe('CrawlOrchestrator batch append', () => {
     expect((await store.listSteps('batch-1')).map((step) => step.url).sort()).toEqual([BATCH_A, BATCH_B].sort())
   })
 
+  it('runs a batch over some of its hosts with batchHosts, leaving the rest for a later run and pausing rather than completing (H1 E3)', async () => {
+    const store = new MemoryTaskStore()
+    await batchTask(store, [BATCH_A, BATCH_C, BATCH_B])
+    const pages = new Map([[BATCH_A, outcome(BATCH_A, [])], [BATCH_B, outcome(BATCH_B, [])], [BATCH_C, outcome(BATCH_C, [])]])
+    const first = new FakeAtom(pages)
+    const firstReport = await new CrawlOrchestrator({ store, atom: first, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ ...batchSpec, taskId: 'batch-1', batchHosts: ['fixture.test'] })
+    expect(first.fetches).toEqual([BATCH_A, BATCH_B])
+    expect(firstReport.status).toBe('paused')
+    expect((await store.getTask('batch-1'))?.status).toBe('paused')
+    const second = new FakeAtom(pages)
+    const secondReport = await new CrawlOrchestrator({ store, atom: second, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ ...batchSpec, resumeFrom: 'batch-1', batchHosts: ['other.test'] })
+    expect(second.fetches).toEqual([BATCH_C])
+    expect(secondReport.status).toBe('completed')
+  })
+
   it('keeps the pages a list step read when its URL stopped at a check the site put up, so a later run can go on from them', async () => {
     const store = new MemoryTaskStore()
     await store.putTask({ id: 'batch-1', seedUrl: BATCH_A, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls: [BATCH_A, BATCH_B], formats: ['markdown'], includeLinks: false, actions: [{ type: 'paginate', nextSelector: 'a.next' }] }, createdAt: STARTED, updatedAt: STARTED })

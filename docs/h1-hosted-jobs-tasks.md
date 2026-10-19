@@ -80,8 +80,9 @@
   - 做法：一次运行结束时（包括 shutdown 暂停），把每站节奏写进任务行的 `Task.pacing`（SQLite 新列 `pacing_json`）。续跑时折回 frontier。节奏跟着 `checkpoint.sqlite` 在段与段之间传，本地重启续跑也受益。
   - 没带过去的：`OriginScheduler` 里 429 的冷却时间（`packages/bench/src/subjects/originScheduler.ts`），新一段会忘掉。站点回 429 时，Retry-After 只在段内有效。记为后续项 **E6**。
 - [ ] **E6**（E2 时发现）把 `OriginScheduler` 的 429 冷却也存进 `Task.pacing`，让它跨段有效。
-- [ ] **E3** batch 续跑时可以只取一部分站点的 URL（按站过滤）。
+- [x] **E3** batch 续跑时可以只取一部分站点的 URL（按站过滤）。
   - 测试：只跑指定站点，其余 URL 留在下一段。
+  - 做法：`CrawlSpec.batchHosts`。不在列表里的站点的 URL 不放进队列，这次运行结束时只要还有剩下的就记为 `paused`，不记 `completed`。
 - [ ] **E4** “跑一段”入口：订阅 `jobEvents` 的 `page` 事件，新页数到 N 或用时到 T 就 `close({ cancelActive: true })`，结束状态是 `paused`。
   - 测试：多站 batch 和 crawl 各分三段，每段换一个新引擎和复制过去的任务目录。
   - 要验证：`maxPages` 准确，取消在下一页前生效。

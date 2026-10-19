@@ -174,6 +174,11 @@ export interface CrawlSpec {
    * fetches its pages again, so that the new attempt lists every page on its own.
    */
   skipFetchedOnResume?: boolean
+  /**
+   * A batch run reads only the URLs on these hosts and leaves the others for a later run, ending `paused` while any
+   * is left (hosted job slices take hosts no other slice holds, ROADMAP PH H1). Absent: every URL.
+   */
+  batchHosts?: readonly string[]
   /** When set, openRun updates this existing task instead of inserting a new id. */
   taskId?: string
   /**
