@@ -168,9 +168,11 @@ export interface HeroCopy {
     map?: boolean
   }
 }
+/** The agents the MCP guide sets up, drawn small beside Connect your agent (main.ts, from agentOctopus.ts's marks). */
+const AGENT_NAMES = ['Claude Code', 'Codex', 'Cursor', 'OpenCode']
 const HOME_HERO: HeroCopy = {
-  title: 'Turn web pages into<br /><em>data your agents can use.</em>',
-  description: 'Octocrawl extracts Markdown, links and structured data from public web pages. Try a URL in your browser, connect your AI agent, or build with our API.',
+  title: 'Turn web pages into <br /><em>data your agents can use.</em>',
+  description: 'Clean Markdown and structured data from public pages, each with a receipt.',
   next: '#how-it-works',
   nextLabel: 'See how it works',
 }
@@ -189,11 +191,11 @@ export function heroMarkup(copy: HeroCopy): string {
             <div class="map-mode" role="radiogroup" aria-label="What to read"><button type="button" role="radio" aria-checked="true" data-map-mode="site">Whole site</button><button type="button" role="radio" aria-checked="false" data-map-mode="page">This page</button></div>` : ''}
           </div>` : `
           <div class="frame hero-cells">
-            <div class="hero-octopus-cell" id="hero-ascii" data-calm="#hero-title, .hero-description" data-reach=".url-card" aria-hidden="true"></div>
+            <div class="hero-octopus-cell" id="hero-ascii" data-calm="#hero-title, .hero-description, .hero-ctas" data-calm-depth="0.4" data-calm-feather="120" data-reach=".url-card" aria-hidden="true"></div>
             <div class="hero-cell hero-copy">
               <h1 id="hero-title">${copy.title}</h1>
-              <p class="hero-description">${copy.description}</p>
-              ${copy === HOME_HERO ? '<p class="hero-agent-link"><a href="/docs/connect-mcp/">Connect your agent <span aria-hidden="true">↗</span></a></p>' : ''}
+              <p class="hero-description">${copy.description}${copy === HOME_HERO ? ' <span class="hero-chip" id="hero-chip"><span class="hero-chip-text">It’s also open source!</span><span class="hero-chip-ascii" aria-hidden="true"></span></span>' : ''}</p>${copy === HOME_HERO ? `
+              <p class="hero-ctas"><a class="hero-cta is-primary" href="/signin/">Start for free</a><a class="hero-cta" href="/docs/connect-mcp/"><span class="hero-agents" aria-hidden="true">${AGENT_NAMES.map((name, i) => `<canvas class="hero-agent" data-agent="${i}" title="${name}"></canvas>`).join('')}</span>Connect your agent</a></p>` : ''}
             </div>
           </div>`
   const presets = copy.tool ? `${copy.tool.view ? ` data-tool-view="${copy.tool.view}"` : ''}${copy.tool.whole ? ' data-tool-scope="whole"' : ''}${copy.tool.example ? ` data-tool-example="${copy.tool.example}"` : ''}${copy.tool.text ? ' data-tool-text="on"' : ''}${copy.tool.map ? ' data-tool-map="site"' : ''}` : ''

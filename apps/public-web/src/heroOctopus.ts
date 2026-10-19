@@ -802,7 +802,12 @@ class Octopus {
     // The page's text keeps quieter ink behind it (the page names it in a data-calm attribute): the octopus still
     // shows through the headline, but never at a glyph's full weight under a letter.
     const calm = new Float32Array(count).fill(1)
-    const selectors = this.layer.closest('[data-calm]')?.getAttribute('data-calm')
+    const host = this.layer.closest<HTMLElement>('[data-calm]')
+    const selectors = host?.getAttribute('data-calm')
+    // How much the ink drops under the text and over how many css px it comes back beyond the text's box; a page can
+    // ask for a lighter, longer fade (data-calm-depth, data-calm-feather) so the octopus has no visible band.
+    const depth = Math.min(1, Math.max(0, Number(host?.dataset.calmDepth ?? 0.62) || 0))
+    const feather = Math.max(1, Number(host?.dataset.calmFeather ?? 28) || 28)
     const layer = this.layer.getBoundingClientRect()
     if (selectors) {
       for (const element of document.querySelectorAll(selectors)) {
@@ -817,14 +822,14 @@ class Octopus {
             const x = this.offsetX + (cx + 0.5) * cellW
             const outside = Math.hypot(Math.max(l - x, 0, x - rr), Math.max(t - y, 0, y - b))
             const i = cx + cy * cols
-            calm[i] = Math.min(calm[i], 1 - 0.62 * (1 - smoothstep(Math.min(1, outside / 28))))
+            calm[i] = Math.min(calm[i], 1 - depth * (1 - smoothstep(Math.min(1, outside / feather))))
           }
         }
       }
     }
     // Warm light keeps off the page's text: none right under the letters, all of it beyond their feather.
     const warmth = new Float32Array(count)
-    for (let i = 0; i < count; i++) warmth[i] = ((calm[i] - 0.38) / 0.62) ** 2
+    for (let i = 0; i < count; i++) warmth[i] = depth > 0 ? ((calm[i] - (1 - depth)) / depth) ** 2 : 1
     // For the take: the two arms that reach the card's edge, how much of their reach each column and row takes, and
     // how far along the ink every cell lies from where its arm meets the card (css px), so a packet follows each
     // arm's own curl.
