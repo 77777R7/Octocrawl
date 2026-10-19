@@ -332,6 +332,61 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(resumeReport.cachedPages).toBe(0)
   })
 
+  it('resumes from where it stopped with skipFetchedOnResume: across three runs every URL is fetched once (hosted slices, H1 E1)', async () => {
+    const pages = new Map([
+      [SEED, outcome(SEED, [ITEM_A, ITEM_B])],
+      [ITEM_A, outcome(ITEM_A, [ITEM_B])],
+      [ITEM_B, outcome(ITEM_B, [])],
+    ])
+    const store = new MemoryTaskStore()
+    const first = new FakeAtom(pages)
+    const firstReport = await interruptedAfterFirstPage(first, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', skipFetchedOnResume: true }, store)
+    expect(first.fetches).toEqual([SEED])
+    const second = new FakeAtom(pages)
+    const secondReport = await interruptedAfterFirstPage(second, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', resumeFrom: firstReport.taskId, skipFetchedOnResume: true }, store)
+    expect(secondReport.status).toBe('paused')
+    expect(second.fetches).toEqual([ITEM_A])
+    const third = new FakeAtom(pages)
+    const thirdReport = await runWith(third, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', resumeFrom: firstReport.taskId, skipFetchedOnResume: true }, store).go()
+    expect(thirdReport.status).toBe('completed')
+    expect(third.fetches).toEqual([ITEM_B])
+    expect((await store.listSteps(firstReport.taskId)).map((step) => step.url).sort()).toEqual([SEED, ITEM_A, ITEM_B])
+  })
+
+  it('keeps a host\'s pace across runs: the task stores when each host last started and its Crawl-delay, and a resumed run waits it out (H1 E2)', async () => {
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A])], [ITEM_A, outcome(ITEM_A, [])]])
+    const store = new MemoryTaskStore()
+    // The seed's robots.txt gives a 5 s Crawl-delay.
+    const firstAtom: ScrapeAtom = { scrape: async (url) => ({ ...pages.get(url)!, crawlDelayMs: 5_000 }), close: async () => {} }
+    const firstReport = await interruptedAfterFirstPage(firstAtom, { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', skipFetchedOnResume: true }, store)
+    expect((await store.getTask(firstReport.taskId))?.pacing).toEqual({ 'fixture.test': { lastStartedAtMs: 1_000, crawlDelayMs: 5_000 } })
+    // A new run on a new orchestrator, one second later: its first request to the host waits until 5 s after the last one.
+    const clock = new FakeClock(); clock.t = 2_000
+    const started: number[] = []
+    const atom: ScrapeAtom = { scrape: async (url) => { started.push(clock.now()); return pages.get(url)! }, close: async () => {} }
+    // One worker: the fake clock adds every waiting worker's wait to the time.
+    const report = await new CrawlOrchestrator({ store, atom, clock, workerCount: 1 }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl', resumeFrom: firstReport.taskId, skipFetchedOnResume: true })
+    expect(report.status).toBe('completed')
+    expect(started).toEqual([6_000])
+    expect((await store.getTask(firstReport.taskId))?.pacing).toEqual({ 'fixture.test': { lastStartedAtMs: 6_000, crawlDelayMs: 5_000 } })
+  })
+
+  it('does not refetch a page that failed in an earlier run with skipFetchedOnResume, and keeps the page budget across runs', async () => {
+    const blocked: ScrapeOutcome = { result: { ...page(ITEM_A), status: 'blocked', blockReason: 'bot_detected_generic', markdown: '' }, links: [] }
+    const pages = new Map([[SEED, outcome(SEED, [ITEM_A, ITEM_B])], [ITEM_A, blocked], [ITEM_B, outcome(ITEM_B, [])]])
+    const store = new MemoryTaskStore()
+    const spec = { seedUrl: SEED, taskDir: '/tmp/w2l-crawl', skipFetchedOnResume: true, budget: { maxPages: 2, maxWallMs: null, maxCostUsd: null, maxTokens: null } }
+    const firstReport = await interruptedAfterFirstPage(new FakeAtom(pages), spec, store)
+    const second = new FakeAtom(pages)
+    await interruptedAfterFirstPage(second, { ...spec, resumeFrom: firstReport.taskId }, store)
+    expect(second.fetches).toEqual([ITEM_A])
+    const third = new FakeAtom(pages)
+    const thirdReport = await runWith(third, { ...spec, resumeFrom: firstReport.taskId }, store).go()
+    // Two pages are the task's budget: the seed and the blocked page. B is not fetched, and A is not fetched again.
+    expect(third.fetches).toEqual([])
+    expect(thirdReport.budgetExceeded).toBe('pages')
+  })
+
   it('never fetches filtered links and keeps the path filters of a SQLite task on resume', async () => {
     const { mkdtemp, rm } = await import('node:fs/promises')
     const { tmpdir } = await import('node:os')
@@ -622,6 +677,21 @@ describe('CrawlOrchestrator batch append', () => {
     // Stored with its URL's step: nothing is left to resume from.
     expect(await store.listPagesRead('batch-1', BATCH_A)).toEqual([])
     expect((await store.listSteps('batch-1')).map((step) => step.url).sort()).toEqual([BATCH_A, BATCH_B].sort())
+  })
+
+  it('runs a batch over some of its hosts with batchHosts, leaving the rest for a later run and pausing rather than completing (H1 E3)', async () => {
+    const store = new MemoryTaskStore()
+    await batchTask(store, [BATCH_A, BATCH_C, BATCH_B])
+    const pages = new Map([[BATCH_A, outcome(BATCH_A, [])], [BATCH_B, outcome(BATCH_B, [])], [BATCH_C, outcome(BATCH_C, [])]])
+    const first = new FakeAtom(pages)
+    const firstReport = await new CrawlOrchestrator({ store, atom: first, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ ...batchSpec, taskId: 'batch-1', batchHosts: ['fixture.test'] })
+    expect(first.fetches).toEqual([BATCH_A, BATCH_B])
+    expect(firstReport.status).toBe('paused')
+    expect((await store.getTask('batch-1'))?.status).toBe('paused')
+    const second = new FakeAtom(pages)
+    const secondReport = await new CrawlOrchestrator({ store, atom: second, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ ...batchSpec, resumeFrom: 'batch-1', batchHosts: ['other.test'] })
+    expect(second.fetches).toEqual([BATCH_C])
+    expect(secondReport.status).toBe('completed')
   })
 
   it('keeps the pages a list step read when its URL stopped at a check the site put up, so a later run can go on from them', async () => {

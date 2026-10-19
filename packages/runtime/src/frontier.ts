@@ -40,7 +40,7 @@
  */
 
 import { isIP } from 'node:net'
-import { DEFAULT_NETWORK_POLICY } from '@w2l/contracts'
+import { DEFAULT_NETWORK_POLICY, type HostPacing } from '@w2l/contracts'
 import { hostMatchesAllowlist } from '@w2l/http-core'
 import { canonicalizeUrl, hostOf, visitKey } from './canonicalize.js'
 import { compilePathFilter, type PathFilter } from './pathFilter.js'
@@ -93,6 +93,8 @@ export interface FrontierOptions {
   perHostMinDelayMs?: number
   /** robots.txt Crawl-delay per host, already parsed to milliseconds. */
   crawlDelayMsByHost?: ReadonlyMap<string, number>
+  /** When each host's last page started (epoch ms), from an earlier run of the task: its delay counts from then. */
+  lastStartedAtMsByHost?: ReadonlyMap<string, number>
   includePaths?: readonly string[]
   excludePaths?: readonly string[]
   /** Match includePaths / excludePaths against the canonical URL instead of the pathname. */
@@ -163,6 +165,7 @@ export class Frontier {
     this.perHostConcurrency = options.perHostConcurrency ?? DEFAULT_NETWORK_POLICY.perHostConcurrency
     this.perHostMinDelayMs = options.perHostMinDelayMs ?? DEFAULT_NETWORK_POLICY.perHostMinDelayMs
     this.crawlDelayMsByHost = options.crawlDelayMsByHost ?? new Map()
+    for (const [host, at] of options.lastStartedAtMsByHost ?? []) this.lastStartedAtMs.set(host, at)
   }
 
   seed(url: string = this.seedCanonicalUrl, depth = 0): FrontierEnqueueResult {
@@ -266,6 +269,15 @@ export class Frontier {
     const current = this.crawlDelayMsByHost.get(host) ?? 0
     if (next <= current) return
     this.crawlDelayMsByHost = new Map(this.crawlDelayMsByHost).set(host, next)
+  }
+
+  /** Every host's pace as it stands: when its last page started and its Crawl-delay, for the task to keep (Task.pacing). */
+  pacing(): Record<string, HostPacing> {
+    const out: Record<string, HostPacing> = {}
+    for (const host of new Set([...this.lastStartedAtMs.keys(), ...this.crawlDelayMsByHost.keys()])) {
+      out[host] = { lastStartedAtMs: this.lastStartedAtMs.get(host) ?? null, crawlDelayMs: this.crawlDelayMsByHost.get(host) ?? null }
+    }
+    return out
   }
 
   /** The robots.txt Crawl-delay in force for `host`, or null when none is known. */

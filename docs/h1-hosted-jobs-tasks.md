@@ -70,18 +70,32 @@
 
 这是方案里最不确定的一个 PR。做不下去就停下，回去改方案（方案 §12）。
 
-- [ ] **E1** 先写失败测试：crawl 分三段续跑，每个 URL 只请求一次。
-  - 改 `restoreFrontier`：已读页标为已访问，只把它们的链接放回队列。
-  - 改 `orchestrator.test.ts:311` 的期望，并说明本地 `resume_crawl` 也跟着变了（写进 CHANGELOG）。
-- [ ] **E2** 引擎能导出、也能接受每站的最后请求时间和已知 Crawl-delay。
+- [x] **E1** 先写失败测试：crawl 分三段续跑，每个 URL 只请求一次。
+  - 做法和原计划不同：没改默认行为，改为加一个选项 `CrawlSpec.skipFetchedOnResume`，hosted worker 打开它。打开后，续跑时任务已有步骤的 URL（不论结果）都标为已访问，只把读到内容的页的链接放回队列。
+  - 为什么不改默认：本地 crawl 的页面列表只读最新一次 attempt（engine.ts:1086、2160），续跑时重读就是为了让新 attempt 自己列全所有页。改了默认，本地 `resume_crawl` 之后的列表会缺掉前面的页。`orchestrator.test.ts:311` 的期望保持不变。
+  - 也没用 `useCached`：缓存页仍要等每站间隔和 Crawl-delay，每段都会白等；而且每段都把旧步骤复制进新 attempt，checkpoint 会按平方增长。
+  - 测试：三段续跑每个 URL 只读一次；上一段失败的页不重读；页数预算跨段累计。
+- [x] **E2** 引擎能导出、也能接受每站的最后请求时间和已知 Crawl-delay。
   - 测试：跨段的请求间隔不小于 Crawl-delay。
-- [ ] **E3** batch 续跑时可以只取一部分站点的 URL（按站过滤）。
+  - 做法：一次运行结束时（包括 shutdown 暂停），把每站节奏写进任务行的 `Task.pacing`（SQLite 新列 `pacing_json`）。续跑时折回 frontier。节奏跟着 `checkpoint.sqlite` 在段与段之间传，本地重启续跑也受益。
+  - 没带过去的：`OriginScheduler` 里 429 的冷却时间（`packages/bench/src/subjects/originScheduler.ts`），新一段会忘掉。站点回 429 时，Retry-After 只在段内有效。记为后续项 **E6**。
+- [ ] **E6**（E2 时发现）把 `OriginScheduler` 的 429 冷却也存进 `Task.pacing`，让它跨段有效。
+- [x] **E3** batch 续跑时可以只取一部分站点的 URL（按站过滤）。
   - 测试：只跑指定站点，其余 URL 留在下一段。
-- [ ] **E4** “跑一段”入口：订阅 `jobEvents` 的 `page` 事件，新页数到 N 或用时到 T 就 `close({ cancelActive: true })`，结束状态是 `paused`。
+  - 做法：`CrawlSpec.batchHosts`。不在列表里的站点的 URL 不放进队列，这次运行结束时只要还有剩下的就记为 `paused`，不记 `completed`。
+- [x] **E4** “跑一段”入口：订阅 `jobEvents` 的 `page` 事件，新页数到 N 或用时到 T 就 `close({ cancelActive: true })`，结束状态是 `paused`。
   - 测试：多站 batch 和 crawl 各分三段，每段换一个新引擎和复制过去的任务目录。
   - 要验证：`maxPages` 准确，取消在下一页前生效。
-- [ ] **E5** 量一下 checkpoint 的大小：1,000 页的 batch 和 500 页的 crawl。结果写进 PR 描述。
+  - 做成的样子（`packages/api/test/jobSlices.test.ts`）：
+    - 引擎新增 `runSlice(taskId, { maxNewPages, maxMs, batchHosts?, graceMs? })`，加两个选项：`deferLaunch`（启动请求只存任务、不跑）和 `taskIds`（任务 id 用 jobId）。
+    - 到达上限时不是 `close`，而是“排空”（orchestrator 新增 `drainSignal`）：不再取新页，正在读的页读完并存下，任务以 `paused` 结束。宽限期（默认 60 秒）过了还没读完才硬中断。原因：直接中断时，正在读的页下一段要重读，测试里 7 页请求了 14 次。
+    - 每段会重读一次 sitemap：frontier 的待读队列不存进 checkpoint，sitemap 里还没读的条目靠重读找回，每段多 1 个请求。
+- [x] **E5** 量一下 checkpoint 的大小：1,000 页的 batch 和 500 页的 crawl。结果写进 PR 描述。
   - 超过 50 MB 的话，在这个 PR 里加一项：checkpoint 只留续跑需要的字段。
+  - 2026-10-19 在本机经代理用 `runSlice` 跑，每段 250 个新页，只量 `checkpoint.sqlite` 主文件，不含 WAL：
+    - books.toscrape 1,000 个 URL 的 batch：4 段，17.2 MB，约 17 KB 一页；
+    - docs.python.org/3/library/ 的 crawl：范围内只有 327 页，2 段，21.5 MB，约 66 KB 一页。按这个推算 500 页约 33 MB（估计）。
+  - 都低于 50 MB，checkpoint 暂不瘦身。页面更大的站会更大，PR ⑥ 的验收里再看一次。
 
 ## PR ③ hosted 任务路由（`packages/mcp/src/hostedApi.ts`）
 
@@ -113,6 +127,9 @@
 - [ ] **W5** 站点租约 `hostedHostLeases/{host}`；挑不出可跑的站点时延迟 30 秒重排。
 - [ ] **W6** 任务结束时生成 `export.jsonl.gz`，再排一个定时到 `expireAt` 的删除任务。
 - [ ] **W7**（PR ① 审查时发现）create 的提交生效了但响应超时：重试时任务文档已存在，要认出这是自己写的，不能占着名额报错。
+- [ ] **W9**（PR ② 审查时发现）同一个任务的两次 `runSlice` 可能同时通过“没在跑”的检查。hosted 靠 Firestore 租约挡住（W2），worker 只能在拿到租约后调用。
+- [ ] **W10**（PR ② 审查时发现）`batchHosts` 传的站名必须和 `URL.hostname` 一样：小写、punycode、不带端口。否则那些 URL 永远留着，任务一直 `paused`。由 worker 用同一个函数从 URL 算站名。
+- [ ] **W11**（PR ② 审查时发现）读 sitemap 的时间如果超过一段的时间上限，每段都还没读页就被排空，任务永远推进不了。worker 要发现“连续两段 0 新页”，然后记失败，或者给下一段更长的时间。
 - [ ] **W8**（PR ① 审查时发现）一个从没结束的任务被 TTL 删除后，它在工作区名单里的位置要释放；被提升的任务文档不存在时跳过它。
 - 验收测试：
   - 一段跑到中途死掉，重投先得到 503，租约过期后被新实例接手，不重复扣费；
@@ -140,5 +157,5 @@
 
 ## 下次从这里继续
 
-- 方案和本清单已合并（#602）。PR ① 已提交。
-- 下一项是 **PR ② 的 E1**。
+- 方案和本清单已合并（#602）。PR ① 已合并（#605），PR ② 已提交。
+- 下一项是 **PR ③ 的 R1**。E6 留到 PR ④ 一起做。

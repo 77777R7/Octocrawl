@@ -134,8 +134,19 @@ export interface Task {
   } & PageOptions
   /** Who started the task (`origin`, `integration`), stored with it and reported as `attribution` on its status; absent when the request named neither. */
   attribution?: RequestAttribution
+  /**
+   * Per host, when its last page started (epoch ms) and the robots.txt Crawl-delay in force, as the task's last run left
+   * them: a resumed run, here or on another instance (hosted job slices, ROADMAP PH H1), keeps the host's pace. Absent
+   * until a run has ended.
+   */
+  pacing?: Readonly<Record<string, HostPacing>>
   createdAt: string
   updatedAt: string
+}
+
+export interface HostPacing {
+  lastStartedAtMs: number | null
+  crawlDelayMs: number | null
 }
 
 /**

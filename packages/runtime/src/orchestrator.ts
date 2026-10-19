@@ -55,7 +55,7 @@ import {
 import { abortableSleep, createExecutionScope, createSpendLedger, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { reportFromTaskAttempt } from './crawlReport.js'
 import { Frontier, type FrontierEnqueueResult, type FrontierItem } from './frontier.js'
-import { canonicalizeUrl } from './canonicalize.js'
+import { canonicalizeUrl, hostOf } from './canonicalize.js'
 import type { TaskStore } from './taskStore.js'
 
 /** The URL-scope options a run gives its frontier (CrawlStartRequest names them). */
@@ -95,6 +95,11 @@ export interface OrchestratorOptions {
   /** Service shutdown interrupts work but leaves the task resumable. */
   shutdownSignal?: AbortSignal
   /**
+   * Draining starts no new page: the pages in flight finish and are stored, then the run ends paused, resumable as after
+   * a shutdown (a hosted job slice reaching its limit, ROADMAP PH H1). A shutdown still cuts the pages in flight.
+   */
+  drainSignal?: AbortSignal
+  /**
    * The third-party cost of a page whose scrape threw: null (unknown, the default) when the scrape may have called a paid
    * service before it threw, 0 when the caller knows no paid route exists, so a run under a cost cap is not stopped by it.
    */
@@ -131,6 +136,7 @@ export class CrawlOrchestrator {
   private readonly signal?: AbortSignal
   private readonly scrapeErrorCostUsd: number | null
   private readonly shutdownSignal?: AbortSignal
+  private readonly drainSignal?: AbortSignal
   private readonly sitemapSource?: SitemapSource
   private readonly onStep?: (step: StepRecord) => void | Promise<void>
   private ahead: (() => number) | null = null
@@ -145,6 +151,7 @@ export class CrawlOrchestrator {
     this.signal = options.signal
     this.scrapeErrorCostUsd = options.scrapeErrorCostUsd === undefined ? null : options.scrapeErrorCostUsd
     this.shutdownSignal = options.shutdownSignal
+    this.drainSignal = options.drainSignal
     this.sitemapSource = options.sitemapSource
     this.onStep = options.onStep
   }
@@ -194,6 +201,11 @@ export class CrawlOrchestrator {
     let failed: unknown = null
     let task: Task | undefined
     let attempt: Attempt | undefined
+    // The run's frontier, whose hosts' pace the task keeps when the run ends (Task.pacing).
+    let runFrontier: Frontier | undefined
+    // A batch's URLs on hosts outside spec.batchHosts, left for a later run: while there are any, the run ends paused.
+    const batchHosts = spec.batchHosts === undefined ? null : new Set(spec.batchHosts.map((host) => host.toLowerCase()))
+    let deferredUrls = 0
     // A crawl's link discovery counters, written with the attempt after every page; a batch discovers nothing.
     let discovery: CrawlDiscovery | null = null
     const meters = () => ({
@@ -247,9 +259,13 @@ export class CrawlOrchestrator {
         excludePaths: stored?.excludePaths ?? spec.excludePaths,
         ...scopeOptions(spec, stored),
         ...this.frontierOptions,
+        ...pacedFrom(this.frontierOptions.crawlDelayMsByHost, task.pacing),
       })
+      runFrontier = frontier
       const priorSteps = await this.store.listSteps(task.id)
-      const restoredLinks = await this.restoreFrontier(frontier, task, spec, priorSteps)
+      const deferredSeed = { hosts: batchHosts, count: 0 }
+      const restoredLinks = await this.restoreFrontier(frontier, task, spec, priorSteps, deferredSeed)
+      deferredUrls += deferredSeed.count
       // How many of a batch's URLs the frontier has been given; an append pushes to the end of the list, so the tail past this index is new.
       let seededCount = task.batch?.urls.length ?? 0
       if (sitemapMode !== 'skip' && this.sitemapSource !== undefined && discovery !== null) {
@@ -280,10 +296,13 @@ export class CrawlOrchestrator {
       wakeWorkers = (): void => {
         while (wakeResolvers.length > 0) wakeResolvers.shift()!()
       }
+      const drained = (): boolean => this.drainSignal?.aborted === true
+      // A drain wakes the idle workers, which then stop; the ones with a page in flight stop once it is stored.
+      this.drainSignal?.addEventListener('abort', () => wakeWorkers(), { once: true })
       // URLs appended to a batch since the frontier was last fed: seeded (a URL this task already fetched is marked visited instead) and the idle workers woken.
       const seedAppended = (current: Task | null): void => {
         if (current?.batch === undefined || current.batch.urls.length <= seededCount) return
-        seedBatchUrls(frontier, current.batch.urls.slice(seededCount), taskUrls)
+        deferredUrls += seedBatchUrls(frontier, current.batch.urls.slice(seededCount), taskUrls, batchHosts)
         seededCount = current.batch.urls.length
         wakeWorkers()
       }
@@ -311,7 +330,7 @@ export class CrawlOrchestrator {
       const work = async (): Promise<void> => {
         for (;;) {
           const now = this.clock.now()
-          if (stopping || stopped()) break
+          if (stopping || stopped() || drained()) break
           const persistedTask = await this.store.getTask(runningTask.id)
           if (persistedTask?.status === 'cancelled') {
             persistedCancellation = true
@@ -331,7 +350,8 @@ export class CrawlOrchestrator {
             }
             const remainingWait = Math.max(0, next.nextReadyAtMs - now)
             if (spec.budget.maxWallMs !== null && spent.wallMs + remainingWait >= spec.budget.maxWallMs) { markTimeBudget(); break }
-            try { await raceWithSignal(this.clock.wait(remainingWait, scope.signal), scope.signal) } catch (error) { if (!stopped()) throw error }
+            const waitSignal = this.drainSignal === undefined ? scope.signal : AbortSignal.any([scope.signal, this.drainSignal])
+            try { await raceWithSignal(this.clock.wait(remainingWait, waitSignal), waitSignal) } catch (error) { if (!stopped() && !drained()) throw error }
             continue
           }
           const item = next.item
@@ -497,8 +517,11 @@ export class CrawlOrchestrator {
     const endedAt = new Date(this.clock.now()).toISOString()
     const persistedTask = await this.store.getTask(task.id)
     const cancelled = this.signal?.aborted === true || persistedCancellation || persistedTask?.status === 'cancelled'
-    const interrupted = !cancelled && this.shutdownSignal?.aborted === true
-    const status = cancelled ? 'cancelled' : interrupted ? 'paused' : failed !== null ? 'failed' : 'completed'
+    // A drain that came once nothing was left to fetch ends the run as it would have ended anyway.
+    const drainedWithWorkLeft = this.drainSignal?.aborted === true && (runFrontier === undefined || runFrontier.pendingCount() > 0)
+    const interrupted = !cancelled && (this.shutdownSignal?.aborted === true || drainedWithWorkLeft)
+    const left = !cancelled && !interrupted && failed === null && deferredUrls > 0
+    const status = cancelled ? 'cancelled' : interrupted || left ? 'paused' : failed !== null ? 'failed' : 'completed'
     const finishedAttempt: Attempt = {
       ...attempt,
       status: interrupted ? 'interrupted' : status === 'paused' ? 'interrupted' : status,
@@ -511,9 +534,10 @@ export class CrawlOrchestrator {
       if (failed === null) failed = err
     }
     // The row as it is now, not the object the run opened with: a batch's URL list may have grown meanwhile, and the final write keeps it.
-    let finished: Task = { ...(persistedTask ?? task), status, updatedAt: endedAt }
+    const pacing = runFrontier === undefined ? {} : { pacing: runFrontier.pacing() }
+    let finished: Task = { ...(persistedTask ?? task), status, updatedAt: endedAt, ...pacing }
     try {
-      finished = { ...((await this.store.getTask(task.id)) ?? persistedTask ?? task), status, updatedAt: endedAt }
+      finished = { ...((await this.store.getTask(task.id)) ?? persistedTask ?? task), status, updatedAt: endedAt, ...pacing }
       await this.store.putTask(finished)
     } catch (err) {
       if (failed === null) failed = err
@@ -593,9 +617,9 @@ export class CrawlOrchestrator {
    * crawl's contentful pages. Returns the resumed pages whose links the caller
    * enqueues after the sitemap's entries (none for a batch or a fresh crawl).
    */
-  private async restoreFrontier(frontier: Frontier, task: Task, spec: CrawlSpec, prior: readonly StepRecord[]): Promise<readonly StepRecord[]> {
+  private async restoreFrontier(frontier: Frontier, task: Task, spec: CrawlSpec, prior: readonly StepRecord[], deferred: { hosts: ReadonlySet<string> | null; count: number }): Promise<readonly StepRecord[]> {
     if (task.batch !== undefined) {
-      seedBatchUrls(frontier, task.batch.urls, new Set(prior.filter(step => step.result !== null).map(step => step.canonicalUrl)))
+      deferred.count += seedBatchUrls(frontier, task.batch.urls, new Set(prior.filter(step => step.result !== null).map(step => step.canonicalUrl)), deferred.hosts)
       return []
     }
     if (spec.resumeFrom === null) {
@@ -609,6 +633,11 @@ export class CrawlOrchestrator {
     }
     // Pages on the host the seed redirected to belong to the crawl, as before.
     for (const step of contentful) if (step.depth === 0) frontier.followSeedRedirect(step.result!.evidence.finalUrl)
+    if (spec.skipFetchedOnResume === true) {
+      // Every URL the task has a step for is done; the caller enqueues the contentful pages' links, and the frontier refuses the done ones.
+      for (const step of prior) frontier.markVisited(step.canonicalUrl)
+      return contentful
+    }
     for (const step of contentful) frontier.seed(step.url, step.depth)
     return contentful
   }
@@ -636,6 +665,21 @@ export class CrawlOrchestrator {
   }
 }
 
+/**
+ * The frontier's pace options with a task's stored pace (Task.pacing) folded in: each host's last start, and the
+ * strictest Crawl-delay of the server's and the task's.
+ */
+function pacedFrom(serverDelays: ReadonlyMap<string, number> | undefined, pacing: Task['pacing']): { crawlDelayMsByHost?: ReadonlyMap<string, number>; lastStartedAtMsByHost?: ReadonlyMap<string, number> } {
+  if (pacing === undefined) return {}
+  const delays = new Map(serverDelays ?? [])
+  const starts = new Map<string, number>()
+  for (const [host, pace] of Object.entries(pacing)) {
+    if (pace.crawlDelayMs !== null) delays.set(host, Math.max(delays.get(host) ?? 0, pace.crawlDelayMs))
+    if (pace.lastStartedAtMs !== null) starts.set(host, pace.lastStartedAtMs)
+  }
+  return { crawlDelayMsByHost: delays, lastStartedAtMsByHost: starts }
+}
+
 /** Whether a result is a list step stopped at a check the site put up (ListStop `challenge`), its pages kept for a later run. */
 function stoppedAtCheck(result: FetchResult): boolean {
   return result.status === 'blocked' && (result.actions?.lists ?? []).some((list) => list.stoppedBy === 'challenge')
@@ -646,13 +690,19 @@ function listsPages(task: Task): boolean {
   return (task.batch?.actions ?? []).some((action) => action.type === 'paginate')
 }
 
-/** Seed a batch's URLs; one the task has already fetched (by canonical URL) is marked visited instead, so a resume or a relaunch never fetches it again. */
-function seedBatchUrls(frontier: Frontier, urls: readonly string[], completed: ReadonlySet<string>): void {
+/**
+ * Seed a batch's URLs; one the task has already fetched (by canonical URL) is marked visited instead, so a resume or a
+ * relaunch never fetches it again. With `hosts`, a URL on another host is left for a later run. Returns how many were left.
+ */
+function seedBatchUrls(frontier: Frontier, urls: readonly string[], completed: ReadonlySet<string>, hosts: ReadonlySet<string> | null = null): number {
+  let left = 0
   for (const url of urls) {
     const canonical = canonicalizeUrl(url)
     if (canonical !== null && completed.has(canonical)) frontier.markVisited(canonical)
+    else if (hosts !== null && canonical !== null && !hosts.has(hostOf(canonical))) left++
     else frontier.seed(url)
   }
+  return left
 }
 
 /**

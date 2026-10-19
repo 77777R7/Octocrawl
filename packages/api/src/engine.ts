@@ -267,6 +267,14 @@ export interface ApiEngine {
    */
   resumeCrawl(taskId: string): Promise<CrawlAccepted | null>
   /**
+   * Run one slice of a stored crawl or batch (hosted job slices, ROADMAP PH H1): it resumes without fetching any URL
+   * the task already has (CrawlSpec.skipFetchedOnResume), over `batchHosts` only when given, and pauses once
+   * `maxNewPages` new pages are stored or `maxMs` has passed; the promise settles when the task's row says how it
+   * ended. Null for an unknown task; a finished task runs nothing and answers its status; a CrawlStateError when
+   * this process is already running it.
+   */
+  runSlice(taskId: string, limits: SliceLimits): Promise<SliceResult | null>
+  /**
    * Hand a finished batch's items that a check stopped (a captcha, a
    * challenge, a login wall) to the person, in their own Chrome: each is
    * opened there in turn, read once they are through, and its result
@@ -429,6 +437,13 @@ export interface ApiEngineOptions {
    * passes false, so it neither runs nor waits for earlier jobs.
    */
   resumeOnStart?: boolean
+  /**
+   * Start requests and appends store the task and run nothing, and nothing resumes at start; runSlice runs a task a
+   * slice at a time (hosted job slices). Default false.
+   */
+  deferLaunch?: boolean
+  /** The id a new crawl or batch gets (a UUID); default a random one. A hosted job worker passes the job's id. */
+  taskIds?: () => string
 }
 
 
@@ -826,6 +841,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const conditionalHttp = new ResilientHttpSubject('standard', networkPolicy, originScheduler, undefined, false, fileStore)
   const defaultMaxPages = options.defaultMaxPages ?? null
   const workerCount = Math.max(1, options.workerCount ?? DEFAULT_WORKER_COUNT)
+  const newTaskId = options.taskIds ?? (() => crypto.randomUUID())
   // One robots.txt cache per mode, shared by the http rung and a crawl's sitemap reader, so a host's robots.txt is read once for both.
   const robotsCaches = new Map<string, RobotsOriginCache>()
   const robotsCacheFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress): RobotsOriginCache => {
@@ -1640,7 +1656,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       perHostConcurrency: Math.min(4, networkPolicy.perHostConcurrency),
       perHostMinDelayMs: networkPolicy.perHostMinDelayMs,
       crawlDelayMsByHost: options.crawlDelayMsByHost,
-      shutdownSignal: shutdownController.signal,
+      shutdownSignal: req.slice === undefined ? shutdownController.signal : AbortSignal.any([shutdownController.signal, req.slice.stop]),
+      ...(req.slice === undefined ? {} : { drainSignal: req.slice.drain }),
       signal: controller.signal,
       ...(sitemapSource === undefined ? {} : { sitemapSource }),
       onStep,
@@ -1665,12 +1682,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...req.scope,
         sitemap: req.sitemap,
         maxConcurrency: req.maxConcurrency,
+        ...(req.slice === undefined ? {} : { skipFetchedOnResume: true, ...(req.slice.batchHosts === undefined ? {} : { batchHosts: req.slice.batchHosts }) }),
       })
     })().then(async () => {
       crawlControllers.delete(task.id); runningCrawls.delete(task.id)
       // URLs appended to a batch after its workers had stopped have no step yet: a new attempt fetches them, and the task stays in flight meanwhile.
       const pending = task.batch === undefined ? null : await appendedWithoutStep(task.id, store)
-      if (pending !== null) { launchTask(pending, store, batchRunOptions(pending.batch, true)); return }
+      // A slice does not go on past its limits: the task waits, paused, for the next slice to read them.
+      if (pending !== null && req.slice !== undefined) await store.putTask({ ...pending, status: 'paused', updatedAt: new Date().toISOString() })
+      else if (pending !== null) { launchTask(pending, store, batchRunOptions(pending.batch, true)); return }
       // The session files go before anyone hears of the end: a webhook's receiver or an events stream told of the terminal
       // row finds no cookies on the disk. A run paused by shutdown keeps them for its resume, and has no terminal event.
       const after = await store.getTask(task.id)
@@ -1695,7 +1715,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   // A crawl paused by shutdown or left running by a crash resumes the same
   // way, with the options stored at its start; one stored before they were
   // kept stays as it is rather than run with guessed limits.
-  for (const name of options.resumeOnStart !== false && existsSync(taskRoot) ? readdirSync(taskRoot) : []) {
+  // A deferred engine resumes nothing on its own: its tasks run a slice at a time, by runSlice.
+  for (const name of options.resumeOnStart !== false && options.deferLaunch !== true && existsSync(taskRoot) ? readdirSync(taskRoot) : []) {
     const taskDir = join(taskRoot, name)
     if (!existsSync(join(taskDir, 'checkpoint.sqlite'))) continue
     const store = SqliteTaskStore.open(taskDir)
@@ -1963,7 +1984,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       const submission = claimSubmission<CrawlAccepted>(req)
       if (submission.replay !== undefined) return submission.replay
       const mode = defaultApiMode(req.mode)
-      const taskId = crypto.randomUUID()
+      const taskId = newTaskId()
       const accepted: CrawlAccepted = { taskId }
       submission.record(taskId, accepted)
       try {
@@ -2012,7 +2033,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       await store.putTask(task)
       jobWebhooks.started(task)
       void jobEvents.emit({ type: 'started', taskId, jobKind: 'crawl' })
-      launchTask(task, store, crawlRunOptions(task, false))
+      if (options.deferLaunch === true) await store.close()
+      else launchTask(task, store, crawlRunOptions(task, false))
       } catch (error) { submission.forget(); throw error }
       return accepted
     },
@@ -2058,7 +2080,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       if (options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
         throw new RequestError('active batch limit reached')
       }
-      const taskId = crypto.randomUUID()
+      const taskId = newTaskId()
       const taskDir = join(taskRoot, taskId)
       const now = new Date().toISOString()
       const urls = [...req.urls]
@@ -2087,7 +2109,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         await store.putTask(task)
         jobWebhooks.started(task)
         void jobEvents.emit({ type: 'started', taskId, jobKind: 'batch' })
-        launchTask(task, store, batchRunOptions(batch, false))
+        if (options.deferLaunch === true) await store.close()
+        else launchTask(task, store, batchRunOptions(batch, false))
       } catch (error) { submission.forget(); throw error }
       return accepted
       } finally { batchStartInProgress = false }
@@ -2234,6 +2257,54 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         catch (error) { await store.putTask(task); throw error }
         launched = true
         return { taskId }
+      } finally {
+        if (!launched) await store.close()
+      }
+    },
+
+    async runSlice(taskId, limits) {
+      if (!UUID.test(taskId)) return null
+      if (!existsSync(join(taskRoot, taskId, 'checkpoint.sqlite'))) return null
+      if (!Number.isInteger(limits.maxNewPages) || limits.maxNewPages < 1 || !Number.isFinite(limits.maxMs) || limits.maxMs < 1) throw new RequestError('a slice needs at least one page and one millisecond')
+      if (inflight.has(taskId)) throw new CrawlStateError('this task is already running here')
+      const store = SqliteTaskStore.open(join(taskRoot, taskId))
+      let launched = false
+      try {
+        const task = await store.getTask(taskId)
+        if (task === null) return null
+        if (isTerminalStatus(task.status)) return { status: task.status, attemptId: (await store.listAttempts(taskId)).at(-1)?.id ?? null, newPages: 0 }
+        // At a limit the slice drains: no new page starts, the pages in flight are stored. Those still running after the grace are cut.
+        const drain = new AbortController()
+        const stop = new AbortController()
+        let graceTimer: ReturnType<typeof setTimeout> | undefined
+        const pause = () => {
+          if (drain.signal.aborted) return
+          drain.abort(new DOMException('slice limit', 'AbortError'))
+          graceTimer = setTimeout(() => stop.abort(new DOMException('slice grace over', 'ShutdownError')), limits.graceMs ?? 60_000)
+        }
+        let newPages = 0
+        const unsubscribe = jobEvents.on((event) => {
+          if (event.type === 'page' && event.taskId === taskId && ++newPages >= limits.maxNewPages) pause()
+        })
+        const timer = setTimeout(pause, limits.maxMs)
+        try {
+          const pending: Task = { ...task, status: 'pending', updatedAt: new Date().toISOString() }
+          await store.putTask(pending)
+          const run = task.batch === undefined ? crawlRunOptions(pending, true) : batchRunOptions(task.batch, true)
+          try { launchTask(pending, store, { ...run, slice: { drain: drain.signal, stop: stop.signal, ...(limits.batchHosts === undefined ? {} : { batchHosts: limits.batchHosts }) } }) }
+          catch (error) { await store.putTask(task); throw error }
+          launched = true
+          await inflight.get(taskId)
+        } finally {
+          clearTimeout(timer)
+          clearTimeout(graceTimer)
+          unsubscribe()
+        }
+        const after = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
+        try {
+          const ended = await after.getTask(taskId)
+          return { status: ended?.status ?? 'failed', attemptId: (await after.listAttempts(taskId)).at(-1)?.id ?? null, newPages }
+        } finally { await after.close() }
       } finally {
         if (!launched) await store.close()
       }
@@ -2439,7 +2510,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       await store.putTask(updated)
       const accepted: BatchAccepted = { taskId: id, requested: total, appended: req.urls.length, ...(invalidURLs === undefined ? {} : { invalidURLs }) }
       submission.record(id, accepted)
-      if (!inflight.has(id)) {
+      // A deferred engine runs nothing here: the next slice reads the appended URLs.
+      if (!inflight.has(id) && options.deferLaunch !== true) {
         launchTask(updated, store, batchRunOptions(batch, true))
         launched = true
       }
@@ -2601,6 +2673,29 @@ interface TaskRunOptions {
   sitemap: SitemapMode
   maxConcurrency: number | null
   policyAllowlist: readonly string[]
+  /** A slice of a hosted job (runSlice): its drain and its stop, either of which pauses the task, and the batch hosts it reads. */
+  slice?: { drain: AbortSignal; stop: AbortSignal; batchHosts?: readonly string[] }
+}
+
+export interface SliceLimits {
+  /**
+   * New pages stored before the slice drains: no page starts after it, and the pages in flight are still stored, so a
+   * slice can store up to the worker count less one more.
+   */
+  maxNewPages: number
+  maxMs: number
+  /** A batch's hosts this slice reads; the others wait for a later slice. Absent: every host. */
+  batchHosts?: readonly string[]
+  /** How long the pages in flight at a limit may take to finish before they are cut; default 60 s. */
+  graceMs?: number
+}
+
+export interface SliceResult {
+  /** The task's status when the slice ended: `paused` while it has more to do. */
+  status: TaskStatus
+  /** The slice's attempt, whose steps are the pages it stored; null when it ran none. */
+  attemptId: string | null
+  newPages: number
 }
 
 /** A batch never discovers: its frontier takes the whole host and exact canonical URLs. */
