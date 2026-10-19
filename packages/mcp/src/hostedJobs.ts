@@ -35,6 +35,20 @@ export interface HostedJob {
   lease: { holder: string; expireAt: string } | null
   /** Per host, when its last request started and the Crawl-delay robots.txt gave, carried from slice to slice. */
   hosts: Record<string, { lastStartedAt: string; crawlDelayMs: number | null }>
+  /**
+   * The credits a slice reserved (hostedCredits.ts Reservation, with an id) and, once the slice committed, what it used:
+   * kept until it is settled, so that a slice that died, or a settle that failed, is settled by the next delivery. A
+   * reservation settles once whoever settles it.
+   */
+  reservation?: { reservation: unknown; used: number | null; perKind?: Record<string, number> } | null
+  /** The job's committed checkpoint object, written by the last committed slice; null before the first. */
+  checkpoint?: string | null
+  /** The committed slices' page files, in order: what reads page through and the export joins. */
+  segments?: string[]
+  /** Slices in a row that stored no page; at the worker's limit the job fails (`no_progress`). */
+  idleSlices?: number
+  /** The queued job this one's end promoted into its slot: a later delivery of this job queues its first slice if no one did. */
+  promoted?: string | null
   createdAt: string
   startedAt: string | null
   finishedAt: string | null
@@ -69,6 +83,8 @@ export interface HostedJobStore {
   create(job: HostedJob, limits: JobLimits, claim: IdempotencyClaim | null, now?: Date): Promise<CreateResult>
   get(id: string): Promise<HostedJob | null>
   acquireLease(id: string, lease: { generation: number; holder: string; ttlMs: number }, now?: Date): Promise<LeaseResult>
+  /** Changes a job while `holder` holds its lease, keeping the lease and the generation (a slice's reservation). */
+  updateHeld(id: string, holder: string, patch: (job: HostedJob) => HostedJob): Promise<CommitResult>
   /** Writes a slice's outcome while `holder` still holds the lease. A job cancelled meanwhile stays cancelled. */
   commitSlice(id: string, holder: string, patch: (job: HostedJob) => HostedJob, now?: Date): Promise<CommitResult>
   /** Cancels a job of this workspace; another workspace's job is missing. Cancelling a finished job changes nothing. */
@@ -96,6 +112,9 @@ export function newHostedJob(input: { id: string; workspaceId: string; uid: stri
 
 interface Slots { running: string[]; queued: string[] }
 
+/** Slots without the jobs whose records are gone (a TTL deleted a job that never finished). */
+const pruned = (slots: Slots, alive: (id: string) => boolean): Slots => ({ running: slots.running.filter(alive), queued: slots.queued.filter(alive) })
+
 /** The pure transitions both stores apply, so they cannot drift apart. */
 const transitions = {
   create(job: HostedJob, slots: Slots, limits: JobLimits): { job: HostedJob; slots: Slots } | { busy: true } {
@@ -110,11 +129,14 @@ const transitions = {
     if (job.lease !== null && Date.parse(job.lease.expireAt) > now.getTime()) return { ok: false, reason: 'busy' }
     return { ok: true, job: { ...job, startedAt: job.startedAt ?? now.toISOString(), lease: { holder: lease.holder, expireAt: new Date(now.getTime() + lease.ttlMs).toISOString() } } }
   },
-  /** A job leaving the slots: its own removed, and when it ran, the first queued one promoted to run. */
-  release(slots: Slots, id: string): { slots: Slots; promoted: string | null } {
+  /**
+   * A job leaving the slots: its own removed, and when it ran, the first queued one promoted to run. `alive` names the
+   * jobs whose records still exist: one a TTL deleted holds no slot and is never promoted.
+   */
+  release(slots: Slots, id: string, alive: (id: string) => boolean = () => true): { slots: Slots; promoted: string | null } {
     const ran = slots.running.includes(id)
-    const running = slots.running.filter((other) => other !== id)
-    const queued = slots.queued.filter((other) => other !== id)
+    const running = slots.running.filter((other) => other !== id && alive(other))
+    const queued = slots.queued.filter((other) => other !== id && alive(other))
     const promoted = ran ? queued[0] ?? null : null
     return { slots: { running: promoted === null ? running : [...running, promoted], queued: promoted === null ? queued : queued.slice(1) }, promoted }
   },
@@ -145,8 +167,11 @@ export class MemoryHostedJobStore implements HostedJobStore {
         if (existing && existing.workspaceId === job.workspaceId) return { ok: true, job: existing, replayed: true }
       }
     }
-    const next = transitions.create(job, this.slots.get(job.workspaceId) ?? { running: [], queued: [] }, limits)
-    if ('busy' in next) { const slots = this.slots.get(job.workspaceId)!; return { ok: false, reason: 'busy', running: slots.running.length, queued: slots.queued.length } }
+    // A full workspace first lets go of the jobs whose records are gone.
+    let slots = this.slots.get(job.workspaceId) ?? { running: [], queued: [] }
+    let next = transitions.create(job, slots, limits)
+    if ('busy' in next) { slots = pruned(slots, (id) => this.jobs.has(id)); next = transitions.create(job, slots, limits) }
+    if ('busy' in next) return { ok: false, reason: 'busy', running: slots.running.length, queued: slots.queued.length }
     this.jobs.set(job.id, next.job)
     this.slots.set(job.workspaceId, next.slots)
     if (claim) this.claims.set(claim.id, { jobId: job.id, fingerprint: claim.fingerprint, expireAt: claim.expireAt })
@@ -160,6 +185,14 @@ export class MemoryHostedJobStore implements HostedJobStore {
     if (result.ok) this.jobs.set(id, result.job)
     return result
   }
+  async updateHeld(id: string, holder: string, patch: (job: HostedJob) => HostedJob): Promise<CommitResult> {
+    const job = this.jobs.get(id)
+    if (!job) return { ok: false, reason: 'missing' }
+    if (job.lease?.holder !== holder) return { ok: false, reason: 'lost' }
+    const next = { ...patch(job), status: job.status, lease: job.lease, generation: job.generation }
+    this.jobs.set(id, next)
+    return { ok: true, job: next, promoted: null }
+  }
   async commitSlice(id: string, holder: string, patch: (job: HostedJob) => HostedJob, now = new Date()): Promise<CommitResult> {
     const job = this.jobs.get(id)
     if (!job) return { ok: false, reason: 'missing' }
@@ -167,24 +200,29 @@ export class MemoryHostedJobStore implements HostedJobStore {
     const { job: next, finishing } = applySlice(job, patch, now)
     this.jobs.set(id, next)
     if (!finishing) return { ok: true, job: next, promoted: null }
-    return { ok: true, job: next, promoted: this.leave(job.workspaceId, id) }
+    const promoted = this.leave(job.workspaceId, id)
+    const ended = { ...next, promoted }
+    this.jobs.set(id, ended)
+    return { ok: true, job: ended, promoted }
   }
   async cancel(id: string, workspaceId: string, now = new Date()): Promise<CancelResult> {
     const job = this.jobs.get(id)
     if (!job || job.workspaceId !== workspaceId) return { ok: false, reason: 'missing' }
     if (FINISHED.has(job.status)) return { ok: true, job, promoted: null }
     // The lease stays: the slice running now writes its pages, and commitSlice keeps the cancel.
-    const next = { ...transitions.finish(job, 'cancelled', now), lease: job.lease }
+    const promoted = this.leave(workspaceId, id)
+    const next = { ...transitions.finish(job, 'cancelled', now), lease: job.lease, promoted }
     this.jobs.set(id, next)
-    return { ok: true, job: next, promoted: this.leave(workspaceId, id) }
+    return { ok: true, job: next, promoted }
   }
   async fail(id: string, reason: string, now = new Date()): Promise<CancelResult> {
     const job = this.jobs.get(id)
     if (!job) return { ok: false, reason: 'missing' }
     if (FINISHED.has(job.status)) return { ok: true, job, promoted: null }
-    const next: HostedJob = { ...transitions.finish(job, 'failed', now), failureReason: reason, lease: job.lease }
+    const promoted = this.leave(job.workspaceId, id)
+    const next: HostedJob = { ...transitions.finish(job, 'failed', now), failureReason: reason, lease: job.lease, promoted }
     this.jobs.set(id, next)
-    return { ok: true, job: next, promoted: this.leave(job.workspaceId, id) }
+    return { ok: true, job: next, promoted }
   }
   async expire(id: string): Promise<ExpireResult> {
     const job = this.jobs.get(id)
@@ -195,7 +233,7 @@ export class MemoryHostedJobStore implements HostedJobStore {
     return { ok: true, job: next }
   }
   private leave(workspaceId: string, id: string): string | null {
-    const { slots, promoted } = transitions.release(this.slots.get(workspaceId) ?? { running: [], queued: [] }, id)
+    const { slots, promoted } = transitions.release(this.slots.get(workspaceId) ?? { running: [], queued: [] }, id, (other) => this.jobs.has(other))
     this.slots.set(workspaceId, slots)
     const next = promoted === null ? undefined : this.jobs.get(promoted)
     if (next) this.jobs.set(next.id, { ...next, status: 'running' })
@@ -241,11 +279,28 @@ export class FirestoreHostedJobStore implements HostedJobStore {
         const existing = await this.get(live.jobId)
         if (existing && existing.workspaceId === job.workspaceId) return { ok: true, job: existing, replayed: true }
       }
-      const next = transitions.create(job, slots.value ?? { running: [], queued: [] }, limits)
-      if ('busy' in next) return { ok: false, reason: 'busy', running: slots.value!.running.length, queued: slots.value!.queued.length }
+      let current = slots.value ?? { running: [], queued: [] }
+      let next = transitions.create(job, current, limits)
+      if ('busy' in next) {
+        // A full workspace first lets go of the jobs whose records are gone.
+        const ids = [...current.running, ...current.queued]
+        const reads = await Promise.all(ids.map((id) => this.readJob(id, token)))
+        const alive = new Set(ids.filter((_, index) => reads[index]!.value !== null))
+        current = pruned(current, (id) => alive.has(id))
+        next = transitions.create(job, current, limits)
+      }
+      if ('busy' in next) return { ok: false, reason: 'busy', running: current.running.length, queued: current.queued.length }
       const writes = [this.jobWrite(next.job, { exists: false }), this.slotsWrite(job.workspaceId, next.slots, slots.updateTime)]
       if (claim) writes.push({ update: { name: this.name('hostedJobIdempotency', claim.id), fields: { uid: { stringValue: job.uid }, jobId: { stringValue: job.id }, fingerprint: { stringValue: claim.fingerprint }, expireAt: { timestampValue: claim.expireAt } } }, currentDocument: held?.updateTime ? { updateTime: held.updateTime } : { exists: false } })
-      return await this.commit(token, writes) ? { ok: true, job: next.job, replayed: false } : undefined
+      let applied: boolean
+      try { applied = await this.commit(token, writes) }
+      catch (error) {
+        // A commit whose answer was lost may have applied: the job's record, under its new random id, says whether it did.
+        const written = await this.readJob(job.id, token).catch(() => null)
+        if (written?.value) return { ok: true, job: written.value, replayed: false }
+        throw error
+      }
+      return applied ? { ok: true, job: next.job, replayed: false } : undefined
     })
   }
 
@@ -262,6 +317,17 @@ export class FirestoreHostedJobStore implements HostedJobStore {
       const result = transitions.lease(read.value, lease, now)
       if (!result.ok) return result
       return await this.commit(token, [this.jobWrite(result.job, { updateTime: read.updateTime! })]) ? result : undefined
+    })
+  }
+
+  async updateHeld(id: string, holder: string, patch: (job: HostedJob) => HostedJob): Promise<CommitResult> {
+    checkedId(id, 'job id')
+    return this.retry(async (token) => {
+      const read = await this.readJob(id, token)
+      if (read.value === null) return { ok: false, reason: 'missing' }
+      if (read.value.lease?.holder !== holder) return { ok: false, reason: 'lost' }
+      const job = { ...patch(read.value), status: read.value.status, lease: read.value.lease, generation: read.value.generation }
+      return await this.commit(token, [this.jobWrite(job, { updateTime: read.updateTime! })]) ? { ok: true, job, promoted: null } : undefined
     })
   }
 
@@ -311,7 +377,11 @@ export class FirestoreHostedJobStore implements HostedJobStore {
   /** Writes a finishing job with its workspace's slots released, in one commit; undefined asks for a retry. */
   private async leaveWith(token: string, job: HostedJob, jobUpdateTime: string): Promise<{ ok: true; job: HostedJob; promoted: string | null } | undefined> {
     const slots = await this.readSlots(job.workspaceId, token)
-    const { slots: left, promoted } = transitions.release(slots.value ?? { running: [], queued: [] }, job.id)
+    const queued = slots.value?.queued ?? []
+    const queuedReads = await Promise.all(queued.map((id) => this.readJob(id, token)))
+    const gone = new Set(queued.filter((_, index) => queuedReads[index]!.value === null))
+    const { slots: left, promoted } = transitions.release(slots.value ?? { running: [], queued: [] }, job.id, (other) => !gone.has(other))
+    job = { ...job, promoted }
     const writes = [this.jobWrite(job, { updateTime: jobUpdateTime }), this.slotsWrite(job.workspaceId, left, slots.updateTime)]
     let promotedUpdate: Read<HostedJob> | null = null
     if (promoted !== null) {

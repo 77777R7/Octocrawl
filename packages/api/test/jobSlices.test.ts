@@ -25,7 +25,7 @@ describe('job slices', () => {
   const cleanup: Array<() => Promise<void>> = []
   afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
 
-  async function site(options: { gate?: string } = {}) {
+  async function site(options: { gate?: string; tooMany?: string } = {}) {
     const seen: Array<{ host: string; path: string }> = []
     let release!: () => void
     const released = new Promise<void>((resolve) => { release = resolve })
@@ -33,6 +33,7 @@ describe('job slices', () => {
       const path = req.url ?? '/'
       if (path === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
       seen.push({ host: (req.headers.host ?? '').replace(/:\d+$/, ''), path })
+      if (path === options.tooMany) { res.writeHead(429, { 'retry-after': '2', 'content-type': 'text/plain' }).end('slow down'); return }
       if (path === options.gate) await released
       if (res.destroyed) return
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(path))
@@ -96,6 +97,9 @@ describe('job slices', () => {
     await engine.startBatch(parseBatchStartRequest({ urls: [`${origin}/a`, `${twin}/b`, `${origin}/c`] }))
     const first = await engine.runSlice(JOB_ID, { maxNewPages: 100, maxMs: 30_000, batchHosts: ['127.0.0.1'] })
     expect(first?.status).toBe('paused')
+    // The slice's pages come back as a batch lists its items, each with what it was for its price.
+    expect(first?.items.map((item) => item.url).sort()).toEqual([`${origin}/a`, `${origin}/c`])
+    expect(first?.charges).toEqual([{ status: 'success', lane: 'http', failureReason: null, httpStatus: 200 }, { status: 'success', lane: 'http', failureReason: null, httpStatus: 200 }])
     expect(seen.map((request) => `${request.host}${request.path}`).sort()).toEqual(['127.0.0.1/a', '127.0.0.1/c'])
     await engine.close({ cancelActive: true });
     ({ engine, root } = await engineAfter(root))
@@ -114,6 +118,35 @@ describe('job slices', () => {
     expect(seen.map((request) => request.path)).toEqual(['/a'])
     expect((await engine.runSlice(JOB_ID, { maxNewPages: 100, maxMs: 30_000 }))?.status).toBe('completed')
     expect(seen.map((request) => request.path)).toEqual(['/a', '/b'])
+  })
+
+  it('drains a slice when its outside signal aborts', async () => {
+    const { origin, engineAfter } = await site()
+    const { engine } = await engineAfter(null)
+    await engine.startBatch(parseBatchStartRequest({ urls: [`${origin}/a`, `${origin}/b`] }))
+    const off = new AbortController(); off.abort()
+    expect(await engine.runSlice(JOB_ID, { maxNewPages: 100, maxMs: 30_000, signal: off.signal })).toMatchObject({ status: 'paused', newPages: 0 })
+  })
+
+  it('keeps a site\'s 429 cooldown across slices: the next slice waits out its Retry-After (H1 E6)', async () => {
+    const { origin, seen, engineAfter } = await site({ tooMany: '/a' })
+    // The engine's own channels share its origin scheduler, where a 429 sets the cooldown; HTTP alone keeps it off the browser.
+    const own = { channelsFor: undefined }
+    let { engine, root } = await engineAfter(null, own)
+    await engine.startBatch(parseBatchStartRequest({ urls: [`${origin}/a`], fastMode: true }))
+    await engine.runSlice(JOB_ID, { maxNewPages: 100, maxMs: 30_000 })
+    const stored = SqliteTaskStore.openReadOnly(join(root, JOB_ID))
+    const pacing = await (async () => { try { return (await stored.getTask(JOB_ID))?.pacing } finally { await stored.close() } })()
+    expect(pacing?.['127.0.0.1:' + new URL(origin).port]?.cooldownUntilMs).toBeGreaterThan(Date.now() + 1_000)
+    await engine.close({ cancelActive: true });
+    ({ engine, root } = await engineAfter(root, own))
+    await engine.startBatch(parseBatchStartRequest({ appendToId: JOB_ID, urls: [`${origin}/b`] }))
+    const before = seen.length
+    const began = Date.now()
+    await engine.runSlice(JOB_ID, { maxNewPages: 100, maxMs: 30_000 })
+    // /b waited out the 2 s the site asked for /a before it was requested.
+    expect(seen.length).toBeGreaterThan(before)
+    expect(Date.now() - began).toBeGreaterThanOrEqual(1_500)
   })
 
   it('completes rather than pauses when the slice reaches its page limit on the last page', async () => {

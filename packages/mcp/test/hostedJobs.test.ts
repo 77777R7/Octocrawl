@@ -12,8 +12,15 @@ function fakeFirestore() {
   const commits: Array<{ writes: unknown[] }> = []
   let clock = 0
   let conflicts = 0
+  let loseAnswer = false
   const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
+    if (url.endsWith(':commit') && loseAnswer) {
+      // The commit applies, then its answer never arrives.
+      loseAnswer = false
+      await fetcher(input, init)
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    }
     if (url.endsWith(':commit')) {
       const body = JSON.parse(String(init?.body)) as { writes: Array<{ update?: { name: string; fields: Record<string, unknown> }; delete?: string; currentDocument?: { exists?: boolean; updateTime?: string } }> }
       commits.push(body)
@@ -36,12 +43,15 @@ function fakeFirestore() {
     if (!doc) return new Response(JSON.stringify({ error: { status: 'NOT_FOUND' } }), { status: 404 })
     return new Response(JSON.stringify({ name, ...doc }), { status: 200 })
   }) as typeof fetch
-  return { resource, docs, commits, fetcher, conflictOnce: () => { conflicts = 1 } }
+  return { resource, docs, commits, fetcher, conflictOnce: () => { conflicts = 1 }, loseNextAnswer: () => { loseAnswer = true } }
 }
 
 const stores: Array<[string, () => HostedJobStore]> = [
   ['memory', () => new MemoryHostedJobStore()],
-  ['firestore', () => new FirestoreHostedJobStore('octocrawl-test', async () => 'token', fakeFirestore().fetcher)],
+  ['firestore', () => {
+    const firestore = fakeFirestore()
+    return Object.assign(new FirestoreHostedJobStore('octocrawl-test', async () => 'token', firestore.fetcher), { removeForTest: async (id: string) => { firestore.docs.delete(`${firestore.resource}/hostedJobs/${id}`) } })
+  }],
 ]
 
 describe.each(stores)('%s job store', (_name, make) => {
@@ -135,12 +145,41 @@ describe.each(stores)('%s job store', (_name, make) => {
     expect(await store.fail('job-9', 'x', NOW)).toEqual({ ok: false, reason: 'missing' })
   })
 
+  it('updates a held job without moving its generation or lease, and refuses another holder', async () => {
+    const store = make()
+    await store.create(job('job-1'), LIMITS, null, NOW)
+    await store.acquireLease('job-1', { generation: 0, holder: 'h1', ttlMs: 60_000 }, NOW)
+    expect(await store.updateHeld('job-1', 'h1', (j) => ({ ...j, reservation: { reservation: { uid: 'account-1', fromGrant: 5 }, used: null }, generation: 9, status: 'completed' }))).toMatchObject({ ok: true, job: { generation: 0, status: 'running', lease: { holder: 'h1' }, reservation: { reservation: { fromGrant: 5 } } } })
+    expect(await store.updateHeld('job-1', 'h2', (j) => j)).toEqual({ ok: false, reason: 'lost' })
+    expect(await store.updateHeld('job-9', 'h1', (j) => j)).toEqual({ ok: false, reason: 'missing' })
+  })
+
   it('marks a finished job expired, and nothing else', async () => {
     const store = make()
     await store.create(job('job-1'), LIMITS, null, NOW)
     expect(await store.expire('job-1', NOW)).toEqual({ ok: false, reason: 'not_finished' })
     await store.cancel('job-1', 'ws_account-1', NOW)
     expect(await store.expire('job-1', NOW)).toMatchObject({ ok: true, job: { status: 'expired' } })
+  })
+})
+
+describe.each(stores)('%s job store, records gone missing', (_name, make) => {
+  it('frees the slots of jobs whose records are gone (a TTL), and promotes past a queued job that is gone', async () => {
+    const store = make()
+    const gone = async (id: string) => {
+      if (store instanceof MemoryHostedJobStore) store.jobs.delete(id)
+      else await (store as unknown as { removeForTest(id: string): Promise<void> }).removeForTest(id)
+    }
+    await store.create(job('job-1'), { maxRunning: 1, maxQueued: 2 }, null, NOW)
+    await store.create(job('job-2'), { maxRunning: 1, maxQueued: 2 }, null, NOW)
+    await store.create(job('job-3'), { maxRunning: 1, maxQueued: 2 }, null, NOW)
+    await gone('job-2')
+    // job-1 ends: job-2 is gone, so job-3 takes the slot.
+    expect(await store.cancel('job-1', 'ws_account-1', NOW)).toMatchObject({ ok: true, promoted: 'job-3' })
+    expect(await store.get('job-3')).toMatchObject({ status: 'running' })
+    // job-3's record goes too: a full workspace drops it and has room again.
+    await gone('job-3')
+    expect(await store.create(job('job-4'), { maxRunning: 1, maxQueued: 0 }, null, NOW)).toMatchObject({ ok: true, job: { status: 'running' } })
   })
 })
 
@@ -158,6 +197,14 @@ describe('Firestore job store', () => {
     expect(writes[0]!.update.fields.workspaceId).toEqual({ stringValue: 'ws_account-1' })
     expect(writes[0]!.update.fields.deleteAt).toEqual({ timestampValue: '2026-11-18T08:00:00.000Z' })
     expect(writes[2]!.update.fields.expireAt).toEqual({ timestampValue: '2026-10-20T08:00:00.000Z' })
+  })
+
+  it('counts a create whose commit applied but whose answer was lost as created', async () => {
+    const firestore = fakeFirestore()
+    const store = new FirestoreHostedJobStore('octocrawl-test', async () => 'token', firestore.fetcher)
+    firestore.loseNextAnswer()
+    expect(await store.create(job('job-1'), LIMITS, null, NOW)).toMatchObject({ ok: true, replayed: false, job: { id: 'job-1', status: 'running' } })
+    expect(firestore.commits).toHaveLength(1)
   })
 
   it('refuses a malformed job, workspace or key id before any request', async () => {

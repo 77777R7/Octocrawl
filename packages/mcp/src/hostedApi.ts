@@ -112,7 +112,8 @@ export class MemoryHostedLeases implements HostedLeases {
   }
 }
 
-export interface QuotaEntry { id: string; limit: number }
+/** A daily counter and its limit; `amount` is what one use adds (default 1; a hosted job's slice adds its pages). */
+export interface QuotaEntry { id: string; limit: number; amount?: number }
 export type QuotaResult = { ok: true } | { ok: false; limited: string; limit: number }
 
 export interface HostedQuota {

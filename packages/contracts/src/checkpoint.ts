@@ -147,6 +147,8 @@ export interface Task {
 export interface HostPacing {
   lastStartedAtMs: number | null
   crawlDelayMs: number | null
+  /** Until when the site asked to be left alone (a 429's Retry-After, epoch ms); absent when it did not. */
+  cooldownUntilMs?: number | null
 }
 
 /**

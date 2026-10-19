@@ -225,7 +225,8 @@ describe('hosted job routes', () => {
     for (let i = 0; i < 3; i++) ids.push(((await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(1) })).json()) as { taskId: string }).taskId)
     expect((await call('POST', `/v1/batches/${ids[0]}/cancel`, 'oc_two')).status).toBe(404)
     expect(await (await call('POST', `/v1/batches/${ids[0]}/cancel`, 'oc_one')).json()).toMatchObject({ taskId: ids[0], status: 'cancelled' })
-    expect(enqueued.map((job) => job.id)).toEqual([ids[0], ids[1], ids[2]])
+    // The two running jobs, the promoted one, and the cancelled one's last delivery.
+    expect(enqueued.map((job) => job.id)).toEqual([ids[0], ids[1], ids[2], ids[0]])
     expect(await (await call('GET', `/v1/batches/${ids[2]}`, 'oc_one')).json()).toMatchObject({ status: 'running' })
   })
 

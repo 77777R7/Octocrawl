@@ -66,6 +66,28 @@ describe('the in-memory ledger', () => {
     expect(await store.balance('account-1', new Date('2026-11-01T00:00:00Z'))).toBe(10)
   })
 
+  it('counts a slice\'s pages on a daily counter at once, refusing what would pass its limit, and settles the reads by kind', async () => {
+    const store = new MemoryCreditsStore(1_000)
+    const POOL = { id: '2026-10-11-jobs', limit: 150, amount: 100 }
+    const first = await store.reserve('account-1', 500, [POOL], OCT)
+    expect(first.ok).toBe(true)
+    expect(await store.reserve('account-1', 500, [POOL], OCT)).toEqual({ ok: false, limited: 'quota', id: POOL.id, limit: 150 })
+    expect((await store.reserve('account-1', 50, [{ ...POOL, amount: 50 }], OCT)).ok).toBe(true)
+    if (!first.ok) throw new Error('unreachable')
+    expect(await store.settle(first.reservation, 30, 'http', OCT, undefined, { http: 10, browser: 4 })).toEqual({ remaining: 920 })
+    expect(store.usage.get('account-1-2026-10-11')).toMatchObject({ http: 10, browser: 4, credits: 30 })
+  })
+
+  it('settles a reservation with an id once: a second settle, a refund after a charge or the other way, changes nothing', async () => {
+    const store = new MemoryCreditsStore(100)
+    const reserved = await store.reserve('account-1', 10, [SITE], OCT, 'job-1-0-h1')
+    if (!reserved.ok) throw new Error('unreachable')
+    expect(reserved.reservation.id).toBe('job-1-0-h1')
+    expect(await store.settle(reserved.reservation, 4, 'http', OCT)).toEqual({ remaining: 96 })
+    expect(await store.settle(reserved.reservation, 0, 'unread', OCT)).toEqual({ remaining: 96 })
+    expect(store.usage.get('account-1-2026-10-11')).toMatchObject({ http: 1, unread: 0, credits: 4 })
+  })
+
   it('refuses when the site has served its day, taking nothing from the account', async () => {
     const store = new MemoryCreditsStore(10)
     store.site.set(SITE.id, SITE.limit)
@@ -211,6 +233,19 @@ describe('the Firestore ledger', () => {
     expect(await store.balance('account-1', OCT)).toBe(6)
     expect(firestore.commits).toHaveLength(1)
     await expect(store.balance('../x', OCT)).rejects.toThrow(/malformed/)
+  })
+
+  it('settles a reservation with an id once in Firestore, by a record created with the settle', async () => {
+    const firestore = fakeFirestore()
+    const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 100, firestore.fetcher)
+    const reserved = await store.reserve('account-1', 10, [SITE], OCT, 'job-1-0-h1')
+    if (!reserved.ok) throw new Error('unreachable')
+    await store.settle(reserved.reservation, 4, 'http', OCT)
+    expect(firestore.docs.has(`${firestore.resource}/creditSettles/job-1-0-h1`)).toBe(true)
+    const commits = firestore.commits.length
+    await store.settle(reserved.reservation, 0, 'unread', OCT)
+    expect(firestore.commits).toHaveLength(commits)
+    expect(await store.balance('account-1', OCT)).toBe(96)
   })
 
   it('refuses past the balance or the site\'s day without writing, and rejects a malformed account id', async () => {
