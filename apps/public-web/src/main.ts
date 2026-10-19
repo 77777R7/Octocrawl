@@ -1,6 +1,8 @@
 import './styles.css'
 import './tools/tools.css'
 import { mountHeroAscii } from './ascii'
+import { drawHeroAgents } from './heroAgents'
+import { mountHeroChip } from './heroChip'
 import { mountHeroClick } from './heroClick'
 import { mountGlyphRipple } from './glyphRipple'
 import { mountHowReplay } from './howReplay'
@@ -118,6 +120,9 @@ else addEventListener('load', dropFragment, { once: true })
 const heroAscii = document.querySelector<HTMLElement>('#hero-ascii')
 const heroGlyphLayer = document.querySelector<HTMLElement>('#hero-glyphs')
 if (heroAscii && heroGlyphLayer) mountHeroAscii(heroAscii, heroGlyphLayer, hero)
+drawHeroAgents(document)
+const heroChip = document.querySelector<HTMLElement>('#hero-chip')
+if (heroChip) mountHeroChip(heroChip)
 const heroSpark = document.querySelector<HTMLElement>('#hero-click-spark')
 if (heroSpark) mountHeroClick(heroSpark, hero)
 // The replay of recorded runs is the home page's own; a free tool page has none.

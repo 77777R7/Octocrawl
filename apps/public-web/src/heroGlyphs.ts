@@ -337,6 +337,7 @@ export function playHeroGlyphs(layer: HTMLElement, hero: HTMLElement): HeroGlyph
     zone('.site-header', 8, 0.95)
     zone('#hero-title', 28, 0.95)
     zone('.hero-description', 28, 0.95)
+    zone('.hero-ctas', 16, 0.95)
     zone('#form-message', 12, 0.95)
     zone('#capability-message', 12, 0.95)
     zone(hero.querySelector('.hero-ascii-layer') ? '.hero-ascii-layer' : '#hero-ascii', 0, 0.3)

@@ -68,7 +68,8 @@ describe('delayed table contracts through HTTP, SDK and MCP', () => {
   async function scrape(surface: 'API' | 'SDK' | 'MCP', path = '/', excluded = false): Promise<CompactScrapeResponse> {
     const args = { url: `${origin}${path}`, formats: ['markdown', 'tables', 'rawHtml'] as const, debug: false as const, maxAge: 0, timeout: excluded || path === '/never' || path === '/missing-column' ? 4_000 : 18_000,
       ...(excluded ? { excludeTags: ['quote-table'] } : {}),
-      verify: { checks: [{ type: 'markdownMatches' as const, pattern: 'Apple|AAPL', flags: 'i' }, { type: 'minTables' as const, min: 1 }, { type: 'tableRowsMin' as const, tableIndex: 0, columns: [0, 1, 2, 3, 4, 5], min: 10 }] },
+      // Keep the original failing contract: minTables would itself delay the old reader and mask this regression.
+      verify: { checks: [{ type: 'markdownMatches' as const, pattern: 'Apple|AAPL', flags: 'i' }, { type: 'tableRowsMin' as const, tableIndex: 0, columns: [0, 1, 2, 3, 4, 5], min: 10 }] },
     }
     if (surface === 'API') {
       const response = await fetch(`${apiOrigin}/v1/scrape`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(args) })
