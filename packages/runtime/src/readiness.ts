@@ -87,8 +87,9 @@ function regionWaitOf(result: FetchResult, sha: string): { ready: boolean; empty
     const detail = event.detail ?? {}
     // A stored page (the cache) may carry another request's wait: it says nothing of this contract's region.
     if (detail.contractSha256 !== sha || !(Number(detail.judged) > 0)) return undefined
-    // A wait whose view could judge none of the checks (a page too large, a contract of json fields) held nothing either way.
-    if (detail.unjudged !== undefined) return undefined
+    // No judged view, or a requested table capture that remained unavailable, proves neither presence nor absence.
+    // A table capture did spend its recorded wait, so waitedOf still counts it.
+    if (detail.unjudged !== undefined || detail.tablesUnjudged === true) return undefined
     return { ready: detail.ready === true, empty: detail.empty === true, loading: detail.loading === true, steady: typeof detail.steady === 'boolean' ? detail.steady : null, scrollUnfinished: detail.scrollUnfinished === true }
   }
   return undefined

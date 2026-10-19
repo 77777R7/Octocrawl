@@ -210,6 +210,8 @@ export interface RegionOutcome {
   unjudged?: RegionUnjudged
   /** Screens the wait scrolled down for a region that loads as it comes into view; absent from a lane that does not scroll (the my-browser lane: the person's own tab). */
   scrolls?: number
+  /** A requested table capture remained unavailable; other judged checks cannot prove its absence. */
+  tablesUnjudged?: true
   /**
    * Set when the wait ran out while it was scrolling toward the region, before the page ended (or MAX_REGION_SCROLLS,
    * which REGION_WAIT_MAX_MS at REGION_SAMPLE_MS does not reach): the region may lie further down, not yet in view
@@ -324,7 +326,8 @@ export class RegionTracker {
   }
 
   outcome(): RegionOutcome {
-    return { ...this.last, waitedMs: this.now() - this.started, reads: this.reads, judged: this.judged, contractSha256: this.sha, ...(this.unjudged === undefined ? {} : { unjudged: this.unjudged }) }
+    const tablesUnjudged = this.spec.readTables !== undefined && this.last.checks.some(check => check.type === 'tableRowsMin' && check.passed === null)
+    return { ...this.last, waitedMs: this.now() - this.started, reads: this.reads, judged: this.judged, contractSha256: this.sha, ...(tablesUnjudged ? { tablesUnjudged: true as const } : {}), ...(this.unjudged === undefined ? {} : { unjudged: this.unjudged }) }
   }
 }
 
@@ -395,6 +398,6 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
 /** The trace event a region wait leaves: what it saw, by counts, never the page's text. */
 export function regionWaitEvent(outcome: RegionOutcome | undefined, at: number, lane: Lane): TraceEvent | null {
   if (outcome === undefined) return null
-  const { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, unjudged, scrolls, scrollUnfinished } = outcome
-  return { at, lane, event: 'region_wait', detail: { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, ...(unjudged === undefined ? {} : { unjudged }), ...(scrolls === undefined ? {} : { scrolls }), ...(scrollUnfinished === true ? { scrollUnfinished } : {}) } }
+  const { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, unjudged, tablesUnjudged, scrolls, scrollUnfinished } = outcome
+  return { at, lane, event: 'region_wait', detail: { ready, empty, waitedMs, reads, judged, loading, steady, contractSha256: sha, checks, ...(tablesUnjudged === true ? { tablesUnjudged } : {}), ...(unjudged === undefined ? {} : { unjudged }), ...(scrolls === undefined ? {} : { scrolls }), ...(scrollUnfinished === true ? { scrollUnfinished } : {}) } }
 }

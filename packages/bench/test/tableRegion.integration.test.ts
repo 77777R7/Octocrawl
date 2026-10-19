@@ -41,6 +41,6 @@ describe('bounded table region capture', () => {
     const region = out.trace.find(event => event.event === 'region_wait')?.detail
     expect(region).toMatchObject({ ready: false })
     expect(out.tables?.some(value => value.rows.some(row => row.includes('$100'))) ?? false).toBe(false)
-    if (path.endsWith('-cap')) expect(region).toMatchObject({ checks: [{ passed: true }, { passed: null }] })
+    if (path.endsWith('-cap')) expect(region).toMatchObject({ tablesUnjudged: true, checks: [{ passed: true }, { passed: null }] })
   })
 })

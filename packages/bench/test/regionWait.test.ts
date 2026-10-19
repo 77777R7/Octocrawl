@@ -295,6 +295,7 @@ describe('table contracts during the region wait', () => {
       expect(out.ready).toBe(false)
       expect(out.reads).toBe(3)
       expect(out.checks[1]?.passed).toBe(tables === undefined ? null : false)
+      expect(out.tablesUnjudged).toBe(tables === undefined ? true : undefined)
     }
   })
 
