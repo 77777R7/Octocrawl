@@ -62,6 +62,7 @@ const date = flag('--date') ?? today()
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('--date must be YYYY-MM-DD')
 const sh = (cmd) => execSync(cmd, { cwd: repo }).toString().trim()
 const commit = sh('git rev-parse --short HEAD')
+const dirty = sh('git status --porcelain -- research packages docs') !== ''
 const mainCheckout = dirname(sh('git rev-parse --path-format=absolute --git-common-dir'))
 const checkouts = [...new Set([repo, mainCheckout])]
 /** A git-ignored file of this checkout, else of the main checkout: a grant or the competitors' env file. */
@@ -85,6 +86,8 @@ const minCredits = Number(flag('--min-credits') ?? set.all.length)
 const recordPath = (arm) => `research/access/runs/${date}-weekly-${arm}-${commit}.md`
 const workDir = join(repo, '.w2l/access/weekly', `${date}-${commit}`)
 for (const arm of [...arms, 'summary']) if (existsSync(join(repo, recordPath(arm)))) throw new Error(`${recordPath(arm)} exists: a record is not rewritten; use --date for another run of the day or run from another commit`)
+const scratchLabels = { free: ['free-standard', 'free-ic16', 'free-ic16-rerun'], steel: ['steel-all'], firecrawl: ['firecrawl-all'], zenrows: ['zenrows-all'] }
+for (const arm of arms) for (const label of scratchLabels[arm]) if (existsSync(join(workDir, `${label}.md`))) throw new Error(`${join(workDir, `${label}.md`)} is left from an earlier run of this date and commit (run-set.mjs would refuse to rewrite it); move the directory away or use --date`)
 
 const chromeVersion = (() => {
   for (const bin of ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'google-chrome', 'google-chrome-stable']) {
@@ -161,14 +164,13 @@ function partTotals(runs, ids) {
   const counted = runs.filter((r) => !r.label.endsWith('-rerun'))
   const want = new Set(ids)
   const rows = counted.flatMap((r) => r.attempts.filter((a) => a.temperature === 'cold' && want.has(a.taskId)))
-  const planned = ids.filter((id) => counted.some((r) => r.only.includes(id))).length
-  return { planned, attempted: rows.length, verified: rows.filter((a) => a.outcome.verified).length, falseSuccess: rows.filter((a) => a.outcome.falseSuccess).length }
+  return { planned: ids.length, attempted: rows.length, verified: rows.filter((a) => a.outcome.verified).length, falseSuccess: rows.filter((a) => a.outcome.falseSuccess).length }
 }
 const parts = (runs) => ({ all: partTotals(runs, set.all), healthy: partTotals(runs, set.healthy), challenge: partTotals(runs, set.challenge), rotation: partTotals(runs, set.rotation) })
 const combinedTotals = (runs) => {
   const rows = runs.filter((r) => !r.label.endsWith('-rerun')).flatMap((r) => r.attempts.filter((a) => a.temperature === 'cold'))
   const walls = rows.map((a) => a.outcome.wallMs).filter((v) => typeof v === 'number').sort((a, b) => a - b)
-  const q = (p) => (walls.length === 0 ? null : walls[Math.min(walls.length - 1, Math.max(0, Math.ceil(p * walls.length) - 1))])
+  const q = (p) => (walls.length === 0 ? null : Math.round(walls[Math.min(walls.length - 1, Math.floor(p * walls.length))])) // as run-set.mjs's pct
   return { attempts: rows.length, verified: rows.filter((a) => a.outcome.verified).length, falseSuccess: rows.filter((a) => a.outcome.falseSuccess).length, p50Ms: q(0.5), p95Ms: q(0.95) }
 }
 const notRunLine = (runs) => { const nr = runs.flatMap((r) => r.summary.denominator?.notRun ?? []); return `- Not run by the runner (its early stop): ${nr.length === 0 ? 'none' : nr.map((p) => p.taskId).join(', ')}` }
@@ -177,12 +179,12 @@ const runSection = (r) => ['', `## Run: ${r.label}`, '', `Raw run: \`${r.runDir}
 
 async function writeArmRecord(arm, title, headerExtra, runs, cost) {
   const p = parts(runs)
-  const lines = [`# Weekly rerun: ${title}, ${date}`, '', ...weeklyHeaderLines({ date, commit, arm, set, chrome: chromeVersion, previousChrome: prevChrome, chromeRerun }), ...headerExtra, `- Cost: ${cost}`, notRunLine(runs), '', ...partsLines(p), ...runs.flatMap(runSection), '']
+  const lines = [`# Weekly rerun: ${title}, ${date}`, '', ...weeklyHeaderLines({ date, commit: dirty ? `${commit} (working tree had uncommitted changes under research/, packages/ or docs/)` : commit, arm, set, chrome: chromeVersion, previousChrome: prevChrome, chromeRerun }), ...headerExtra, `- Cost: ${cost}`, notRunLine(runs), '', ...partsLines(p), ...runs.flatMap(runSection), '']
   await writeFile(join(repo, recordPath(arm)), lines.join('\n'))
   return p
 }
 async function writeNotRun(arm, title, reason, extra = []) {
-  const lines = [`# Weekly rerun: ${title}, ${date}`, '', ...weeklyHeaderLines({ date, commit, arm, set, chrome: chromeVersion, previousChrome: prevChrome, chromeRerun }), ...extra, `- Not run: ${reason}`, '- Cost: $0 (nothing was fetched)', '', `Planned ${set.all.length}, attempted 0, not run ${set.all.length}: every task counts as not verified.`, '']
+  const lines = [`# Weekly rerun: ${title}, ${date}`, '', ...weeklyHeaderLines({ date, commit: dirty ? `${commit} (working tree had uncommitted changes under research/, packages/ or docs/)` : commit, arm, set, chrome: chromeVersion, previousChrome: prevChrome, chromeRerun }), ...extra, `- Not run: ${reason}`, '- Cost: $0 (nothing was fetched)', '', `Planned ${set.all.length}, attempted 0, not run ${set.all.length}: every task counts as not verified.`, '']
   await writeFile(join(repo, recordPath(arm)), lines.join('\n'))
   const zero = { planned: set.all.length, attempted: 0, verified: 0, falseSuccess: 0 }
   return { arm, competitor: arm === 'firecrawl' || arm === 'zenrows', totals: null, reason, cost: '$0', parts: { all: zero, healthy: { ...zero, planned: set.healthy.length }, challenge: { ...zero, planned: set.challenge.length }, rotation: { ...zero, planned: set.rotation.length } } }
@@ -198,6 +200,7 @@ async function freeArm() {
   if (grant.capabilities === null || grant.capabilities.join() !== 'installed_chrome') return writeNotRun('free', title, `the grant ${grantFile} must name installed_chrome alone; it names ${grant.capabilities?.join(', ') ?? 'nothing readable'}`)
   const env = { W2L_ACCESS_GRANT: grantFile, W2L_API_URL: `http://127.0.0.1:${port}` }
   const runs = []
+  const failures = []
   try {
     await startApi('free', env)
     runs.push(await runSet('free-standard', ['--set', 'all', '--only', idsArg([...set.healthy, ...set.rotation]), '--access', '"standard"'], env))
@@ -206,6 +209,7 @@ async function freeArm() {
   } catch (e) {
     await stopApi()
     if (runs.length === 0) return fail('free', title, e)
+    failures.push(`- Not run (the arm stopped after ${runs.map((r) => r.label).join(', ')}): ${e.message.replace(/\n/g, ' ')}; the tasks of the runs not made stay in the denominator as not verified`)
     console.error(`free: ${e.message}; the record carries the runs that finished`)
   } finally { await stopApi() }
   const ic = runs.filter((r) => r.label.startsWith('free-ic16'))
@@ -213,6 +217,7 @@ async function freeArm() {
     `- API: http://127.0.0.1:${port}, started by this script with W2L_ACCESS_GRANT=${grantFile} (SHA-256 \`${grant.sha256}\`, capabilities: ${grant.capabilities.join(', ')}); the healthy and rotation tasks with access "standard", the 16 challenge tasks with "enhanced"; stopped after the arm`,
     ...ic.map((r) => `${baselineLine(r.summary.totals.cold?.verified ?? null)}${ic.length > 1 ? ` (run ${r.label})` : ''}`),
     ...(ic.length === 0 ? [baselineLine(null)] : []),
+    ...failures,
   ]
   const p = await writeArmRecord('free', title, extra, runs, '$0 (no paid route; the Clash exit\'s bandwidth is not metered: unknown)')
   return { arm: 'free', competitor: false, totals: combinedTotals(runs), cost: '$0', parts: p, baseline: ic.map((r) => r.summary.totals.cold?.verified ?? null) }
@@ -292,7 +297,7 @@ const gapCell = (r, part) => (r.gap === null ? '-' : r.gap[part] === null ? 'unk
 const free = results.find((r) => r.arm === 'free')
 const summary = [
   `# Weekly rerun: summary, ${date}`, '',
-  ...weeklyHeaderLines({ date, commit, arm: 'summary', set, chrome: chromeVersion, previousChrome: prevChrome, chromeRerun }),
+  ...weeklyHeaderLines({ date, commit: dirty ? `${commit} (working tree had uncommitted changes under research/, packages/ or docs/)` : commit, arm: 'summary', set, chrome: chromeVersion, previousChrome: prevChrome, chromeRerun }),
   `- Arms: ${results.map((r) => `${r.arm} (${r.totals === null ? 'not_run' : 'run'}, [record](${date}-weekly-${r.arm}-${commit}.md))`).join('; ')}; arms not asked for: ${ARMS.filter((a) => !arms.includes(a)).join(', ') || 'none'}`,
   `- Gap: the best competitor arm's verified count minus the arm's, on the same tasks; a negative gap is a lead. With no competitor arm run the gap is unknown, not 0.`,
   ...(free && free.baseline ? [free.baseline.map((v) => baselineLine(v)).join('\n')] : []),

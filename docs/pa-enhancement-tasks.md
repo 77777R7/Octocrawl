@@ -116,7 +116,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - 脚本自己起 API（照 `sticky-vs-rotating.sh:17-18`：固定一个空闲端口，避开 8787、8791、8812–8814；等 listening 再跑；结束时关掉，失败也关）；Octocrawl 免费臂和 Steel 臂各起一次 API，grant 不同。16 题的免费臂用只列 installed_chrome 的 grant；每份记录写 Chrome 版本，大版本变化时再跑一次 16 题；与验收基线（ADR 0005 / 7b56397b：11 和 7 of 16，探针两次各 12）比较，低于基线就写记录并标"停止默认推荐，待重测"。
   - 16 题子集加机器可读定义：`research/access/subsets.v1.json`（不改 `tasks.v1.json`，免得任务文件 SHA 变化），`cloudrun-xvfb/run.sh:20`、`sticky-vs-rotating.sh:19`、`docs/pa-challenge-botcheck-tasks.md` 改为引用它。
   - 验收：脚本本地跑过一次、三类臂各有记录和一份汇总；计划任务只在你点头并确认竞品额度后建（名字、时间写进本清单）。
-  - [ ] 计划任务：只在你点头并确认竞品额度后建（名字、时间写进本清单）。建议的命令 `node research/access/weekly.mjs`（在 `main` 的最新 checkout 里，shell 带 `HTTPS_PROXY`），建议时间每周一 10:30 本地时间（在 `octocrawl-cleanup-gone` 之后）；每周预期费用：Steel 约 $0.02–0.03，Firecrawl 约 47–51 credits，ZenRows 约 50–250 credits（auto 模式按成功的配置计费，1–25/页）。
+  - [ ] 计划任务：只在你点头并确认竞品额度后建（名字、时间写进本清单）。第 4 组只有 6 题，所以四周里有一周是 47 题而不是 51。建议的命令 `node research/access/weekly.mjs`（在 `main` 的最新 checkout 里，shell 带 `HTTPS_PROXY`），建议时间每周一 10:30 本地时间（在 `octocrawl-cleanup-gone` 之后）；每周预期费用：Steel 约 $0.02–0.03，Firecrawl 约 47–51 credits，ZenRows 约 50–250 credits（auto 模式按成功的配置计费，1–25/页）。
 - [ ] **P0.6 给 H1 窗口的接口约定（一条消息，不改它的文件）。** 内容：PR ④ 的 worker 引擎不传 accessGrant（PH H5 之前保持 null）；托管切片的 USD 付费调用若将来存在，预留存 Firestore、挨着 `hostedJobs`，key `{jobId}-{slice}-{ordinal}`，credits 的幂等键 `{jobId}-{slice}` 不变、USD key 是它的子键；PR ④ 的 W5 验收要覆盖"旧租约提交不得改写预留"和"重复投递按 `{jobId}-{slice}-{ordinal}` 幂等、不重复预留"。
 
 ## Phase 1 · 三条并行线 + 评测基建
