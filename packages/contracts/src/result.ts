@@ -96,6 +96,13 @@ export interface ResourceUsage {
   vendorSolves?: number | null
   /** The country the provider's residential proxy was asked for (ISO 3166-1 alpha-2). Absent when none was granted. */
   vendorProxyCountry?: string
+  /**
+   * Bytes those sessions' pages received, as Octocrawl's own transport counted them over CDP (under a tariff with
+   * maxBytesPerCall); null when it could not count one of them. Absent when the transport did not count.
+   */
+  vendorBytesCounted?: number | null
+  /** True when the transport ended one of those sessions at the tariff's maxBytesPerCall. Absent with vendorBytesCounted. */
+  vendorBytesCapped?: boolean
   /** Stage timings use a monotonic clock. Optional for legacy producers. */
   timings?: ResourceTimings
   /**
