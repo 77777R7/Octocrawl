@@ -58,14 +58,52 @@ export interface AdapterValidation {
   issues: readonly string[]
 }
 
+/**
+ * What a fact holds for, as the page states it beside the fact: each member
+ * only when the page states it. A product's facts: the variant (its SKU, or
+ * the variant's `@id`) of a ProductGroup page they are about, the region an
+ * offer is for (`eligibleRegion`, a delivery location) and the offer's type
+ * (`Offer`, `AggregateOffer`, or a price's kind such as `list`). A document's
+ * declared values: the version, publication and revision dates of the node
+ * that states them. A table's row key, column header, unit, footnote and
+ * effective date are not read yet: no extractor reads a table cell as a fact.
+ */
+export interface FactContext {
+  variant?: string
+  region?: string
+  offerType?: string
+  version?: string
+  published?: string
+  revised?: string
+}
+
 /** One product fact plus the evidence class it was drawn from. */
 export interface ProductFact {
-  /** The value exactly as the page carried it. Never normalized — a
-   *  normalized price is a claim we would be making, not one we read. */
+  /** The value as the page carried it, whitespace collapsed and a schema.org
+   *  enumeration IRI shortened to its name (`InStock`). Never normalized
+   *  otherwise: a normalized price is a claim we would be making, not one we read. */
   value: string
   source: ProductFactSource
   /** JSON Pointer or CSS selector locating the evidence when available. */
   path?: string
+  /** The source's text, whitespace collapsed, when `value` was cut from it: an enumeration IRI, an amount out of `$84.00`, a count out of `2,345 ratings`. */
+  rawValue?: string
+  /**
+   * The value read as a number, and the rule it was read by. No extractor
+   * fills these today: a number is read where its type is known, in JSON
+   * extraction, which reports both as `normalized` and `conversion` on the
+   * field's evidence.
+   */
+  normalizedValue?: number | string
+  conversion?: string
+  /** The unit the same declaration states for the value: an amount's currency (`priceCurrency` of the same offer). */
+  unit?: string
+  context?: FactContext
+  /**
+   * The source states there is no value ("N/A", "none", "not applicable"):
+   * `value` is that statement. A field no source states is null instead.
+   */
+  absent?: true
 }
 
 export interface ProductPrice {
@@ -197,6 +235,8 @@ export interface DeclaredValue {
   source: 'meta' | 'jsonld'
   /** `meta[name="citation_author"]`, or `ld+json[i] NewsArticle.datePublished` (the i-th JSON-LD script, the node's type). */
   path: string
+  /** For a JSON-LD article property: the `version`, `datePublished` and `dateModified` its node states, as written. */
+  context?: Pick<FactContext, 'version' | 'published' | 'revised'>
 }
 
 /**

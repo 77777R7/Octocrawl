@@ -64,6 +64,35 @@ describe('readNumber: a number as the page writes it', () => {
     expect(value('19.00', { decimalPoint: true })).toBe(19)
   })
 
+  it('keeps the sign and unit of a percentage, and names the rule each number was read by (PA D3b)', () => {
+    expect(readNumber('-3.2%')).toEqual({ value: -3.2, conversion: 'number/decimal', unit: '%' })
+    expect(readNumber('+0.5 pp')).toEqual({ value: 0.5, conversion: 'number/decimal', unit: 'pp' })
+    expect(readNumber('−1,25 %')).toEqual({ value: -1.25, conversion: 'number/decimal', unit: '%' })
+    expect(readNumber('+12 p.p.')).toEqual({ value: 12, conversion: 'number/plain', unit: 'p.p.' })
+    expect(readNumber('1.299,00 €')).toEqual({ value: 1299, conversion: 'number/grouped', unit: '€' })
+    expect(readNumber('1.234', { count: true })).toEqual({ value: 1234, conversion: 'number/count' })
+    expect(readNumber('1,299円')).toEqual({ value: 1299, conversion: 'number/no-minor-unit', unit: '円' })
+    expect(readNumber('19.000', { decimalPoint: true })).toEqual({ value: 19, conversion: 'number/decimal-point' })
+    // A percent is not money, and one sign is all a number has.
+    for (const text of ['12 € %', '$5%', '+-3%', '++3', '%5']) expect(value(text), text).toBe('not_a_number')
+  })
+
+  it('settles a lone separator in a number that is not money by the page\'s declared language', () => {
+    const rule = (text: string, language: string) => readNumber(text, { language })
+    expect(rule('1.299', 'de-DE')).toEqual({ value: 1299, conversion: 'number/language:de-DE' })
+    expect(rule('1,299', 'de-AT')).toEqual({ value: 1.299, conversion: 'number/language:de-AT' })
+    expect(rule('1,299', 'en-GB')).toEqual({ value: 1299, conversion: 'number/language:en-GB' })
+    expect(rule('1.299', 'en')).toEqual({ value: 1.299, conversion: 'number/language:en' })
+    // Swiss German writes the point as its decimal; French groups by spaces, so its "." settles nothing.
+    expect(value('1.299', { language: 'de-CH' })).toBe(1.299)
+    expect(value('1,299', { language: 'fr' })).toBe(1.299)
+    expect(value('1.299', { language: 'fr-FR' })).toBe('unsettled')
+    // A language whose regions differ, or none, settles nothing; nor does any language settle money.
+    for (const language of ['de', 'it', 'es', 'es-419', 'en-ZA', 'xx', '', null]) expect(value('1.299', { language }), String(language)).toBe('unsettled')
+    expect(value('1.299 €', { language: 'de-DE' })).toBe('unsettled')
+    expect(value('1.299', { language: 'de-DE', currency: 'EUR' })).toBe('unsettled')
+  })
+
   it('reads nothing from text that is not one amount', () => {
     for (const text of [
       '', 'In stock (22 available)', '4.7 out of 5', 'HL-1', 'https://shop.example/lamp/2', 'Call for price', '1.2.3', '12 99 €', '1.299.00', '1,2,3',

@@ -295,9 +295,9 @@ describe('toEvidenceRecord', () => {
     const reordered = toEvidenceRecord(result(), { mode: 'standard' }, { json: { ...json, data: { title: 'A Light in the Attic', stock: { label: 'In stock', count: 22 }, price: 51.77 } } })
     expect(reordered.outputSha256.json).toBe(record.outputSha256.json)
     expect(record.fieldEvidence).toEqual({
-      '/price': { source: 'jsonld', locator: '/offers/price' },
-      '/title': { source: 'dom', locator: 'table[0] tr[0] "Title"' },
-      '/stock': { source: 'model', locator: null },
+      '/price': { source: 'jsonld', locator: '/offers/price', reading: null },
+      '/title': { source: 'dom', locator: 'table[0] tr[0] "Title"', reading: null },
+      '/stock': { source: 'model', locator: null, reading: null },
     })
     expect(toEvidenceRecord(result(), { mode: 'standard' }, { json: { ...json, data: null, evidence: [] } })).toMatchObject({ outputSha256: { json: null }, fieldEvidence: {} })
   })

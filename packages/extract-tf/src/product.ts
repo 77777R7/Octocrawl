@@ -25,7 +25,8 @@
  * `woocommerce-Price-amount` without naming any of them.
  */
 
-import type { ProductFact, ProductFactSource, ProductFacts, ProductFieldConflict, QuoteState } from '@w2l/contracts'
+import type { FactContext, ProductFact, ProductFactSource, ProductFacts, ProductFieldConflict, QuoteState } from '@w2l/contracts'
+import { statesAbsence } from './absence.js'
 import { commonAncestor, qsa, tagOf, textOf } from './dom.js'
 import type { TextBlock } from './classify.js'
 
@@ -64,10 +65,31 @@ function hasPriceToken(el: Element): boolean {
 // Fact collection
 // ---------------------------------------------------------------------------
 
-function fact(value: string | null | undefined, source: ProductFactSource, path?: string): ProductFact | null {
+/** What else a declaration states with a value: the text before an enumeration was shortened, the unit, the context. */
+interface FactExtra {
+  raw?: string | null
+  unit?: string | null
+  context?: FactContext
+}
+
+const collapse = (v: string): string => v.trim().replace(/\s+/g, ' ')
+
+function fact(value: string | null | undefined, source: ProductFactSource, path?: string, extra: FactExtra = {}): ProductFact | null {
   if (typeof value !== 'string') return null
-  const trimmed = value.trim().replace(/\s+/g, ' ')
-  return trimmed.length > 0 ? { value: trimmed, source, ...(path === undefined ? {} : { path }) } : null
+  const trimmed = collapse(value)
+  if (trimmed.length === 0) return null
+  const raw = typeof extra.raw === 'string' ? collapse(extra.raw) : trimmed
+  const unit = typeof extra.unit === 'string' ? collapse(extra.unit) : ''
+  const context = extra.context === undefined || Object.keys(extra.context).length === 0 ? undefined : extra.context
+  return {
+    value: trimmed,
+    source,
+    ...(path === undefined ? {} : { path }),
+    ...(raw !== trimmed ? { rawValue: raw } : {}),
+    ...(unit.length > 0 ? { unit } : {}),
+    ...(context === undefined ? {} : { context }),
+    ...(statesAbsence(trimmed) ? { absent: true as const } : {}),
+  }
 }
 
 /** Empty facts: we looked at a product page and every field came back unstated. */
@@ -314,7 +336,7 @@ function mergeIds(into: Partial<Record<IdKind, string[]>>, from: Partial<Record<
  * MPN, or by its `url` with the query). Without a selection a field the offers
  * agree on is still stated, and one they state differently is ambiguous.
  */
-function offerFields(product: Record<string, unknown>, path: string, ctx: Resolved): Pick<DeclaredProduct, 'fields' | 'ambiguous'> & { ids: Partial<Record<IdKind, string[]>>; urls: UrlKey[] } {
+function offerFields(product: Record<string, unknown>, path: string, ctx: Resolved, variant: FactContext): Pick<DeclaredProduct, 'fields' | 'ambiguous'> & { ids: Partial<Record<IdKind, string[]>>; urls: UrlKey[] } {
   const raw = product['offers']
   const offers = (Array.isArray(raw) ? raw.map((o, i) => ({ offer: record(o), path: `${path}/offers/${i}` })) : [{ offer: record(raw), path: `${path}/offers` }])
     .filter((o): o is { offer: Record<string, unknown>; path: string } => o.offer !== null)
@@ -338,21 +360,37 @@ function offerFields(product: Record<string, unknown>, path: string, ctx: Resolv
     ['price', (o) => asString(o['price']), 'price'],
     ['priceCurrency', (o) => asString(o['priceCurrency']), 'priceCurrency'],
   ]
+  // What an offer's facts hold for: its type and the region it is for, beside the variant it is an offer of.
+  const contextOf = (offer: Record<string, unknown>, at: string): FactContext => {
+    const type = typesOf(offer).map((t) => shortEnum(t)!)[0]
+    const region = scalarAt(offer['eligibleRegion'], `${at}/eligibleRegion`)?.value
+    return { ...(type === undefined ? {} : { offerType: type }), ...(region === undefined ? {} : { region: collapse(region) }), ...variant }
+  }
   for (const [field, read, key] of readers) {
-    const facts = chosen.map(({ offer, path: at }) => fact(read(offer), 'jsonld', `${at}/${key}`)).filter((f): f is ProductFact => f !== null)
+    const facts = chosen.map(({ offer, path: at }) => fact(read(offer), 'jsonld', `${at}/${key}`, {
+      context: contextOf(offer, at),
+      ...(field === 'price' ? { unit: asString(offer['priceCurrency']) } : {}),
+    })).filter((f): f is ProductFact => f !== null)
     if (facts.length === 0) continue
-    if (facts.every((f) => sameValue(field, f.value, facts[0]!.value))) fields[field] = facts[0]!
+    if (facts.every((f) => sameValue(field, f.value, facts[0]!.value))) fields[field] = agreed(facts)
     else ambiguous[field] = facts
   }
   const availability = chosen.map(({ offer, path: at }) => {
     const found = scalarAt(offer['availability'], `${at}/availability`)
-    return found === null ? null : fact(shortEnum(found.value), 'jsonld', found.path)
+    return found === null ? null : fact(shortEnum(found.value), 'jsonld', found.path, { raw: found.value, context: contextOf(offer, at) })
   }).filter((f): f is ProductFact => f !== null)
   if (availability.length > 0) {
-    if (availability.every((f) => sameValue('availability', f.value, availability[0]!.value))) fields.availability = availability[0]!
+    if (availability.every((f) => sameValue('availability', f.value, availability[0]!.value))) fields.availability = agreed(availability)
     else ambiguous.availability = availability
   }
   return { fields, ambiguous, ids, urls }
+}
+
+/** One value several offers state alike: its unit and context only where every one of them states the same (10 USD and 10 EUR leave the unit unknown). */
+function agreed(facts: readonly ProductFact[]): ProductFact {
+  const { unit, context, ...first } = facts[0]!
+  const same = (read: (f: ProductFact) => unknown) => facts.every((f) => JSON.stringify(read(f)) === JSON.stringify(read(facts[0]!)))
+  return { ...first, ...(unit !== undefined && same((f) => f.unit) ? { unit } : {}), ...(context !== undefined && same((f) => f.context) ? { context } : {}) }
 }
 
 /** The request as subject resolution reads it. */
@@ -400,7 +438,10 @@ function jsonLdProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
     const own = (key: string) => scalarAt(rec[key], `${path}/${pointerToken(key)}`)
     const inherited = (key: string) => own(key) ?? (group === null ? null : scalarAt(group.node[key], `${group.path}/${pointerToken(key)}`))
     const sku = asString(rec['sku']) !== null ? own('sku') : asString(rec['mpn']) !== null ? own('mpn') : null
-    const offers = offerFields(rec, path, ctx)
+    // A ProductGroup's variant: its facts hold for that variant.
+    const variantId = group === null ? null : asString(rec['sku']) ?? asString(rec['@id'])
+    const variant: FactContext = variantId === null ? {} : { variant: collapse(variantId) }
+    const offers = offerFields(rec, path, ctx, variant)
     const id = asString(rec['@id'])
     const url = asString(rec['url'])
     const urls = [url].flatMap((u) => (u === null ? [] : [urlKey(u, ctx.base)])).filter((u): u is UrlKey => u !== null)
@@ -411,9 +452,9 @@ function jsonLdProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
     out.push({
       where: path,
       fields: {
-        ...(name === null ? {} : { name: fact(name.value, 'jsonld', name.path)! }),
-        ...(sku === null ? {} : { sku: fact(sku.value, 'jsonld', sku.path)! }),
-        ...(brand === null ? {} : { brand: fact(brand.value, 'jsonld', brand.path)! }),
+        ...(name === null ? {} : { name: fact(name.value, 'jsonld', name.path, { context: variant })! }),
+        ...(sku === null ? {} : { sku: fact(sku.value, 'jsonld', sku.path, { context: variant })! }),
+        ...(brand === null ? {} : { brand: fact(brand.value, 'jsonld', brand.path, { context: variant })! }),
         ...offers.fields,
       },
       source: 'jsonld',
@@ -510,14 +551,14 @@ function microdataProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
       }
       return null
     }
-    const read = (prop: string, value: (s: string) => string | null = (s) => s) => {
+    const read = (prop: string, value: (s: string) => string | null = (s) => s, extra: FactExtra = {}) => {
       const found = pick(prop)
-      return found === null ? null : fact(value(found.value), 'microdata', found.path)
+      return found === null ? null : fact(value(found.value), 'microdata', found.path, { raw: found.value, ...extra })
     }
     const fields: Partial<Record<FactField, ProductFact>> = {}
     const facts: Array<[FactField, ProductFact | null]> = [
       ['name', read('name')],
-      ['price', read('price')],
+      ['price', read('price', (s) => s, { unit: pick('priceCurrency')?.value })],
       ['priceCurrency', read('priceCurrency')],
       ['sku', read('sku') ?? read('mpn')],
       ['brand', read('brand')],
@@ -547,22 +588,23 @@ function microdataProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
 
 /** OpenGraph / Facebook product meta tags, the third machine-readable path: about the page's own product. */
 function metaFacts(doc: Document): { fields: Partial<Record<FactField, ProductFact>>; ids: Partial<Record<IdKind, string[]>> } {
-  const meta = (names: readonly string[], value: (s: string) => string | null = (s) => s): ProductFact | null => {
+  const meta = (names: readonly string[], value: (s: string) => string | null = (s) => s, extra: FactExtra = {}): ProductFact | null => {
     for (const name of names) {
       for (const el of qsa(doc, `meta[property="${name}"],meta[name="${name}"]`)) {
         const v = el.getAttribute('content')
         if (v === null || v.trim().length === 0) continue
         const attr = el.getAttribute('property') === name ? 'property' : 'name'
-        return fact(value(v), 'meta', `meta[${attr}="${name}"]`)
+        return fact(value(v), 'meta', `meta[${attr}="${name}"]`, { raw: v, ...extra })
       }
     }
     return null
   }
   const fields: Partial<Record<FactField, ProductFact>> = {}
+  const currency = meta(['product:price:currency', 'og:price:currency'])
   const facts: Array<[FactField, ProductFact | null]> = [
     ['name', meta(['og:title', 'product:title'])],
-    ['price', meta(['product:price:amount', 'og:price:amount'])],
-    ['priceCurrency', meta(['product:price:currency', 'og:price:currency'])],
+    ['price', meta(['product:price:amount', 'og:price:amount'], (s) => s, { unit: currency?.value })],
+    ['priceCurrency', currency],
     ['sku', meta(['product:retailer_item_id', 'product:sku'])],
     ['brand', meta(['product:brand', 'og:brand'])],
     ['availability', meta(['product:availability', 'og:availability'], shortEnum)],

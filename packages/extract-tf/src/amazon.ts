@@ -234,8 +234,9 @@ function amazonPrices(doc: Document, subscription: boolean, url: string | undefi
       seen.add(raw)
       const currency = inferAmazonCurrency(url, raw)
       const unitPrice = el.closest('.apex-priceperunit-value, .pricePerUnit, .unit-price') !== null
+      const amount = amountOf(raw)
       prices.push({
-        amount: { value: amountOf(raw), source: 'dom', path: selector },
+        amount: { value: amount, source: 'dom', path: selector, ...(amount === raw ? {} : { rawValue: raw }) },
         currency: currency === null ? null : { ...currency, path: currency.source === 'inferred' ? currency.path : selector },
         priceType: subscription ? 'subscription' : unitPrice ? 'unit' : prices.some(price => price.priceType === 'current') ? 'other' : 'current',
         seller: null,
@@ -272,6 +273,12 @@ function variants(doc: Document): readonly ProductVariant[] {
     out.push({ name, value, selected: el.classList.contains('a-button-selected') || el.classList.contains('swatchSelect'), source: 'dom', path: '#twister' })
   }
   return out
+}
+
+/** The fact with the text it was cut from, when that differs. */
+function withRaw(fact: ProductFact | null, raw: string | null | undefined): ProductFact | null {
+  const text = raw?.replace(/\s+/g, ' ').trim()
+  return fact === null || text === undefined || text === fact.value ? fact : { ...fact, rawValue: text }
 }
 
 function availabilityFact(value: string, selector: string): ProductFact | null {
@@ -417,11 +424,17 @@ export function collectAmazonProductFacts(doc: Document, url: string | undefined
   const effectiveSeller = seller ?? jsonFact(jsonSeller?.name, `${jsonPath}/offers/seller/name`)
   const fallbackPrices: readonly ProductPrice[] = fallbackPrice === null ? [] : [{ amount: fallbackPrice, currency: fallbackCurrency, priceType: 'other', seller: null }]
   const quoteState = determineQuoteState(selectedPrices, availabilityHit?.value ?? null)
+  // A quote holds for the delivery location the page shows and is of its kind (current, list, unit, ...).
+  const quoted = (price: ProductPrice): ProductPrice => ({
+    ...price,
+    amount: { ...price.amount, context: { ...(deliveryHit === null ? {} : { region: deliveryHit.value }), offerType: price.priceType } },
+  })
   const prices: readonly ProductPrice[] = (selectedPrices.length > 0 ? [...selectedPrices, ...alternateOffers(doc, url)] : fallbackPrices)
-    .map((price, index) => index === 0 && effectiveSeller !== null ? { ...price, seller: effectiveSeller } : price)
-  const primary = quoteState === 'present'
+    .map((price, index) => quoted(index === 0 && effectiveSeller !== null ? { ...price, seller: effectiveSeller } : price))
+  const primarySelected = quoteState === 'present'
     ? selectedPrices.find(price => price.priceType === 'current' || price.priceType === 'subscription') ?? null
     : null
+  const primary = primarySelected === null ? null : quoted(primarySelected)
   const jsonImage = Array.isArray(jsonNode?.image) ? jsonNode?.image[0] : jsonNode?.image
   const subjectImages = images.length > 0 ? images : [jsonFact(jsonImage, `${jsonPath}/image`), metaFact(doc, 'meta[property="og:image"]')].filter((value): value is ProductFact => value !== null).slice(0, 1)
   const jsonAvailability = typeof offer?.availability === 'string' ? offer.availability.split('/').pop() : null
@@ -443,7 +456,7 @@ export function collectAmazonProductFacts(doc: Document, url: string | undefined
     seller: effectiveSeller,
     deliveryLocation: deliveryHit === null ? null : domFact(deliveryHit.value, deliveryHit.selector),
     rating: domFact(ratingRaw?.match(/[0-5](?:\.[0-9])?/)?.[0] ?? null, '#acrPopover'),
-    reviewCount: domFact(reviewRaw?.match(/[\d,]+/)?.[0]?.replaceAll(',', '') ?? null, '#acrCustomerReviewText'),
+    reviewCount: withRaw(domFact(reviewRaw?.match(/[\d,]+/)?.[0]?.replaceAll(',', '') ?? null, '#acrCustomerReviewText'), reviewRaw),
     images: subjectImages,
     variants: extractedVariants,
     specifications: specifications(doc),

@@ -96,10 +96,10 @@ describe('PDP facts: evidence is labelled, never invented', () => {
   it('prefers JSON-LD over rendered text and records the source', () => {
     const out = extractTf.extract(PDP(PRODUCT_LD))
     expect(out.product?.name).toEqual({ value: 'Four-spout infusion teapot', source: 'jsonld', path: '/script/0/name' })
-    expect(out.product?.price).toEqual({ value: '84.00', source: 'jsonld', path: '/script/0/offers/price' })
+    expect(out.product?.price).toEqual({ value: '84.00', source: 'jsonld', path: '/script/0/offers/price', unit: 'USD', context: { offerType: 'Offer' } })
     expect(out.product?.sku).toEqual({ value: 'TP-4S-600', source: 'jsonld', path: '/script/0/sku' })
     expect(out.product?.brand).toEqual({ value: 'Harbour Clay', source: 'jsonld', path: '/script/0/brand/name' })
-    expect(out.product?.availability).toEqual({ value: 'InStock', source: 'jsonld', path: '/script/0/offers/availability' })
+    expect(out.product?.availability).toEqual({ value: 'InStock', rawValue: 'https://schema.org/InStock', source: 'jsonld', path: '/script/0/offers/availability', context: { offerType: 'Offer' } })
   })
 
   it('reads microdata content attributes, not their (empty) text', () => {
@@ -115,7 +115,7 @@ describe('PDP facts: evidence is labelled, never invented', () => {
 </div></body></html>`
     const out = extractTf.extract(html)
     expect(out.pageType).toBe('product')
-    expect(out.product?.price).toEqual({ value: '129.50', source: 'microdata', path: 'microdata[0] [itemprop~="price"]' })
+    expect(out.product?.price).toEqual({ value: '129.50', source: 'microdata', path: 'microdata[0] [itemprop~="price"]', unit: 'GBP' })
     expect(out.product?.priceCurrency?.value).toBe('GBP')
     expect(out.product?.availability?.value).toBe('OutOfStock')
     expect(out.product?.sku?.value).toBe('CI-900')
@@ -133,7 +133,7 @@ describe('PDP facts: evidence is labelled, never invented', () => {
 </main></body></html>`
     const out = extractTf.extract(html)
     // JSON-LD supplies the price; the meta tags fill what it left null.
-    expect(out.product?.price).toEqual({ value: '18.00', source: 'jsonld', path: '/script/0/offers/price' })
+    expect(out.product?.price).toEqual({ value: '18.00', source: 'jsonld', path: '/script/0/offers/price', context: { offerType: 'Offer' } })
     expect(out.product?.priceCurrency).toEqual({ value: 'EUR', source: 'meta', path: 'meta[property="product:price:currency"]' })
     expect(out.product?.brand).toEqual({ value: 'Estuary Ceramics', source: 'meta', path: 'meta[property="product:brand"]' })
   })
@@ -175,7 +175,7 @@ describe('PDP facts: evidence is labelled, never invented', () => {
 </main></body></html>`
     const out = extractTf.extract(html)
     expect(out.pageType).toBe('product')
-    expect(out.product?.price).toEqual({ value: '42.00', source: 'meta', path: 'meta[property="product:price:amount"]' })
+    expect(out.product?.price).toEqual({ value: '42.00', source: 'meta', path: 'meta[property="product:price:amount"]', unit: 'USD' })
   })
 })
 
@@ -197,7 +197,7 @@ describe('PDP facts: the subject is chosen before fields are merged', () => {
       ld({ '@context': 'https://schema.org', '@type': 'Product', name: 'Walnut serving board', sku: 'WB-450', url: 'https://shop.example/products/walnut-board', offers: { '@type': 'Offer', price: '64.00', priceCurrency: 'USD', availability: 'https://schema.org/InStock' } }))
     const out = extractTf.extract(html, { url: 'https://shop.example/products/walnut-board' })
     expect(out.product?.name).toEqual({ value: 'Walnut serving board', source: 'jsonld', path: '/script/1/name' })
-    expect(out.product?.price).toEqual({ value: '64.00', source: 'jsonld', path: '/script/1/offers/price' })
+    expect(out.product?.price).toEqual({ value: '64.00', source: 'jsonld', path: '/script/1/offers/price', unit: 'USD', context: { offerType: 'Offer' } })
     expect(out.product?.sku?.value).toBe('WB-450')
     expect(out.product?.identity?.status).toBe('matched')
     expect(out.product?.identity?.observedSelectedId).toBe('WB-450')
@@ -239,15 +239,15 @@ describe('PDP facts: the subject is chosen before fields are merged', () => {
       hasVariant: [variant('T-S', 'S', '28.00', 'InStock'), variant('T-M', 'M', '28.00', 'InStock'), variant('T-XL', 'XL', '32.00', 'OutOfStock')],
     }))
     const out = extractTf.extract(html, { url: 'https://shop.example/products/tee?variant=T-XL' })
-    expect(out.product?.sku).toEqual({ value: 'T-XL', source: 'jsonld', path: '/script/0/hasVariant/2/sku' })
+    expect(out.product?.sku).toEqual({ value: 'T-XL', source: 'jsonld', path: '/script/0/hasVariant/2/sku', context: { variant: 'T-XL' } })
     // The page's product meta tags state its default variant's price; they name none of the declared products.
     const withMeta = extractTf.extract(html.replace('</head>', '<meta property="og:price:amount" content="28.00"><meta property="og:price:currency" content="EUR"></head>'), { url: 'https://shop.example/products/tee?variant=T-XL' })
     expect(withMeta.product?.price?.value).toBe('32.00')
     expect(withMeta.product?.ambiguous).toBeUndefined()
-    expect(out.product?.price).toEqual({ value: '32.00', source: 'jsonld', path: '/script/0/hasVariant/2/offers/price' })
+    expect(out.product?.price).toEqual({ value: '32.00', source: 'jsonld', path: '/script/0/hasVariant/2/offers/price', unit: 'EUR', context: { offerType: 'Offer', variant: 'T-XL' } })
     expect(out.product?.availability?.value).toBe('OutOfStock')
     // The group's own properties hold for each of its variants.
-    expect(out.product?.brand).toEqual({ value: 'Fieldwork', source: 'jsonld', path: '/script/0/brand/name' })
+    expect(out.product?.brand).toEqual({ value: 'Fieldwork', source: 'jsonld', path: '/script/0/brand/name', context: { variant: 'T-XL' } })
     expect(out.product?.identity).toMatchObject({ status: 'matched', requestedId: 'T-XL', observedSelectedId: 'T-XL', parentId: 'TEE' })
   })
 
@@ -258,7 +258,7 @@ describe('PDP facts: the subject is chosen before fields are merged', () => {
       { '@type': 'Offer', sku: 'KN-8-ASH', url: 'https://shop.example/products/knife-block?variant=ash', price: '98.00', priceCurrency: 'USD' },
     ]
     const selected = extractTf.extract(product(offers), { url: 'https://shop.example/products/knife-block?variant=ash' })
-    expect(selected.product?.price).toEqual({ value: '98.00', source: 'jsonld', path: '/script/0/offers/1/price' })
+    expect(selected.product?.price).toEqual({ value: '98.00', source: 'jsonld', path: '/script/0/offers/1/price', unit: 'USD', context: { offerType: 'Offer' } })
     // Without a selection, offers that disagree leave the price unstated, with both recorded.
     const unselected = extractTf.extract(product(offers), { url: 'https://shop.example/products/knife-block' })
     expect(unselected.product?.price).toBeNull()
@@ -332,8 +332,8 @@ describe('PDP facts: the subject is chosen before fields are merged', () => {
     expect(out.product?.ambiguous).toEqual([{
       field: 'price',
       facts: [
-        { value: '129.50', source: 'jsonld', path: '/script/0/offers/price' },
-        { value: '119.50', source: 'microdata', path: 'microdata[0] [itemprop~="price"]' },
+        { value: '129.50', source: 'jsonld', path: '/script/0/offers/price', unit: 'GBP', context: { offerType: 'Offer' } },
+        { value: '119.50', source: 'microdata', path: 'microdata[0] [itemprop~="price"]', unit: 'GBP' },
       ],
     }])
   })
@@ -371,6 +371,17 @@ describe('PDP facts: what each fact holds for (D3b field contract)', () => {
     const out = extractTf.extract(html, { url: 'https://shop.example/products/tee?variant=T-XL' })
     expect(out.product?.price).toEqual({ value: '32.00', source: 'jsonld', path: '/script/0/hasVariant/1/offers/price', unit: 'EUR', context: { offerType: 'Offer', variant: 'T-XL' } })
     expect(out.product?.sku?.context).toEqual({ variant: 'T-XL' })
+  })
+
+  it('keeps a unit and context only where every offer stating the value states the same', () => {
+    const html = page(ld({ '@type': 'Product', name: 'Lamp', offers: [
+      { '@type': 'Offer', price: '10', priceCurrency: 'USD', eligibleRegion: 'US', availability: 'https://schema.org/InStock' },
+      { '@type': 'Offer', price: '10', priceCurrency: 'EUR', eligibleRegion: 'DE', availability: 'https://schema.org/InStock' },
+    ] }))
+    const out = extractTf.extract(html, { url: 'https://shop.example/lamp' })
+    expect(out.product?.price).toEqual({ value: '10', source: 'jsonld', path: '/script/0/offers/0/price' })
+    expect(out.product?.availability?.context).toBeUndefined()
+    expect(out.product?.priceCurrency).toBeNull()
   })
 
   it('marks a value the page states there is none of as absent, and leaves an unstated one null', () => {

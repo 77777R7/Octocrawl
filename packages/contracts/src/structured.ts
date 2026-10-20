@@ -1,6 +1,7 @@
 import type {
   AdapterDescriptor,
   ExtractedEntity,
+  FactContext,
   ProductFactSource,
 } from './extractor.js'
 
@@ -158,16 +159,26 @@ export interface StructuredFieldEvidence {
    * For a value the model wrote: the page text it was located in, as written (`In Stock` for `in_stock`).
    */
   text?: string
-  /** For a number or an ISO date the model wrote: the value `text` was read as. */
+  /** For a number read from page text, or a number or an ISO date the model wrote: the value `text` was read as. */
   normalized?: number | string
-  /** What stands beside `text` on the page, as written: a currency or unit next to a number, a date in the same line, the delivery region a price is for. */
-  context?: { currency?: string; unit?: string; date?: string; region?: string }
+  /** For a number read from page text: the rule it was read by (`number/decimal`, `number/language:de`; numbers.ts). */
+  conversion?: string
+  /**
+   * What stands beside `text` on the page, as written: a currency or unit next to a number (the currency the same
+   * declaration states for a declared price), a date in the same line, the delivery region a price is for, and what
+   * the fact holds for (FactContext: variant, offer type, a document's version and dates).
+   */
+  context?: { currency?: string; unit?: string; date?: string; region?: string } & FactContext
+  /** The page states there is no value (`text`, such as "N/A"): the value is null for that reason, not for want of a source. */
+  absent?: true
 }
 
 export type StructuredIssueCode =
   | 'adapter_unavailable'
   | 'subject_unverified'
   | 'field_unavailable'
+  /** The page states there is no value for the field ("N/A"): it is null or left out on the page's word, not unobserved. */
+  | 'field_absent'
   /** Page labels matching the field state different values, so none was chosen. */
   | 'field_ambiguous'
   | 'missing_required'
