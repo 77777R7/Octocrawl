@@ -26,7 +26,7 @@
    "group": "reserved-v2",
    "url": "https://go.dev/blog/http-connection-reuse",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -96,7 +96,7 @@
    "group": "reserved-v2",
    "url": "https://blog.rust-lang.org/2026/10/01/Rust-1.99.0/",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -157,7 +157,7 @@
    "group": "reserved-v2",
    "url": "https://nodejs.org/en/blog/vulnerability/october-2026-security-releases",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -227,7 +227,7 @@
    "group": "reserved-v2",
    "url": "https://theconversation.com/japans-mmx-mission-aims-to-swipe-soil-samples-from-mars-moon-phobos-294129",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -288,7 +288,7 @@
    "group": "reserved-v2",
    "url": "https://kubernetes.io/blog/2026/10/06/kubernetes-cgroups-v2-shift/",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -349,7 +349,7 @@
    "group": "reserved-v2",
    "url": "https://blog.cloudflare.com/obsessive-inference-optimization/",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -410,7 +410,7 @@
    "group": "reserved-v2",
    "url": "https://www.eff.org/deeplinks/2026/10/require-police-get-warrant-search-alpr-data",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -471,7 +471,7 @@
    "group": "reserved-v2",
    "url": "https://www.adafruit.com/product/6065",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -550,7 +550,7 @@
    "group": "reserved-v2",
    "url": "https://www.pishop.us/product/raspberry-pi-4-model-b-3gb/",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -629,7 +629,7 @@
    "group": "reserved-v2",
    "url": "https://www.kiwi-electronics.com/en/bbc-microbit-v2-2-go-bundle-10th-anniversary-edition-20905",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -708,7 +708,7 @@
    "group": "reserved-v2",
    "url": "https://store.steampowered.com/app/620/Portal_2/",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -778,7 +778,7 @@
    "group": "reserved-v2",
    "url": "https://www.gog.com/en/game/the_witcher_3_wild_hunt_game_of_the_year_edition",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -848,7 +848,7 @@
    "group": "reserved-v2",
    "url": "https://www.berrybase.de/en/raspberry-pi-5-8gb-ram",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -936,7 +936,7 @@
    "group": "reserved-v2",
    "url": "https://www.manning.com/books/rust-in-action",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -1015,11 +1015,7 @@
    "group": "reserved-v2",
    "url": "https://www.debian.org/security/",
    "checkNeedle": null,
-   "recordEntities": [
-    "advisory-1",
-    "advisory-2",
-    "advisory-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1140,11 +1136,7 @@
    "group": "reserved-v2",
    "url": "https://ubuntu.com/security/notices",
    "checkNeedle": null,
-   "recordEntities": [
-    "notice-1",
-    "notice-2",
-    "notice-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1265,11 +1257,7 @@
    "group": "reserved-v2",
    "url": "https://www.postgresql.org/about/newsarchive/",
    "checkNeedle": null,
-   "recordEntities": [
-    "news-1",
-    "news-2",
-    "news-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1390,11 +1378,7 @@
    "group": "reserved-v2",
    "url": "https://www.freebsd.org/security/advisories/",
    "checkNeedle": null,
-   "recordEntities": [
-    "advisory-1",
-    "advisory-2",
-    "advisory-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1496,11 +1480,7 @@
    "group": "reserved-v2",
    "url": "https://arxiv.org/list/cs.CL/new",
    "checkNeedle": null,
-   "recordEntities": [
-    "paper-1",
-    "paper-2",
-    "paper-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1602,11 +1582,7 @@
    "group": "reserved-v2",
    "url": "https://www.ruby-lang.org/en/news/",
    "checkNeedle": null,
-   "recordEntities": [
-    "post-1",
-    "post-2",
-    "post-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1727,11 +1703,7 @@
    "group": "reserved-v2",
    "url": "https://nodejs.org/en/blog",
    "checkNeedle": null,
-   "recordEntities": [
-    "post-1",
-    "post-2",
-    "post-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1852,11 +1824,7 @@
    "group": "reserved-v2",
    "url": "https://endoflife.date/python",
    "checkNeedle": null,
-   "recordEntities": [
-    "cycle-1",
-    "cycle-2",
-    "cycle-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1977,11 +1945,7 @@
    "group": "reserved-v2",
    "url": "https://devguide.python.org/versions/",
    "checkNeedle": null,
-   "recordEntities": [
-    "branch-1",
-    "branch-2",
-    "branch-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -2102,11 +2066,7 @@
    "group": "reserved-v2",
    "url": "https://www.worldometers.info/world-population/population-by-country/",
    "checkNeedle": null,
-   "recordEntities": [
-    "country-1",
-    "country-2",
-    "country-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -2227,11 +2187,7 @@
    "group": "reserved-v2",
    "url": "https://www.rba.gov.au/statistics/frequency/exchange-rates.html",
    "checkNeedle": null,
-   "recordEntities": [
-    "currency-1",
-    "currency-2",
-    "currency-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -2314,11 +2270,7 @@
    "group": "reserved-v2",
    "url": "https://www.kernel.org/",
    "checkNeedle": null,
-   "recordEntities": [
-    "release-1",
-    "release-2",
-    "release-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -2420,11 +2372,7 @@
    "group": "reserved-v2",
    "url": "https://www.php.net/supported-versions.php",
    "checkNeedle": null,
-   "recordEntities": [
-    "branch-1",
-    "branch-2",
-    "branch-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -2545,11 +2493,7 @@
    "group": "reserved-v2",
    "url": "https://www.postgresql.org/support/versioning/",
    "checkNeedle": null,
-   "recordEntities": [
-    "version-1",
-    "version-2",
-    "version-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -2670,11 +2614,7 @@
    "group": "reserved-v2",
    "url": "https://news.ycombinator.com/",
    "checkNeedle": null,
-   "recordEntities": [
-    "story-1",
-    "story-2",
-    "story-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -2795,11 +2735,7 @@
    "group": "reserved-v2",
    "url": "https://www.githubstatus.com/history",
    "checkNeedle": null,
-   "recordEntities": [
-    "incident-1",
-    "incident-2",
-    "incident-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -2882,11 +2818,7 @@
    "group": "reserved-v2",
    "url": "https://www.cloudflarestatus.com/history",
    "checkNeedle": null,
-   "recordEntities": [
-    "entry-1",
-    "entry-2",
-    "entry-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -2990,11 +2922,7 @@
    "group": "reserved-v2",
    "url": "https://forecast.weather.gov/MapClick.php?lat=47.6062&lon=-122.3321",
    "checkNeedle": null,
-   "recordEntities": [
-    "period-1",
-    "period-2",
-    "period-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -3105,7 +3033,7 @@
    "group": "reserved-v2",
    "url": "https://pypi.org/project/requests/",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -3166,11 +3094,7 @@
    "group": "reserved-v2",
    "url": "https://www.x-rates.com/table/?from=USD&amount=1",
    "checkNeedle": null,
-   "recordEntities": [
-    "rate-1",
-    "rate-2",
-    "rate-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -3253,11 +3177,7 @@
    "group": "reserved-v2",
    "url": "https://www.yr.no/en/forecast/daily-table/2-2643743/United%20Kingdom/England/London",
    "checkNeedle": null,
-   "recordEntities": [
-    "day-1",
-    "day-2",
-    "day-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -3359,7 +3279,7 @@
    "group": "reserved-v2",
    "url": "https://zenodo.org/records/23488905",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -3438,7 +3358,7 @@
    "group": "reserved-v2",
    "url": "https://peps.python.org/pep-0008/",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -3526,7 +3446,7 @@
    "group": "reserved-v2",
    "url": "https://datatracker.ietf.org/doc/rfc9112/",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -3614,7 +3534,7 @@
    "group": "reserved-v2",
    "url": "https://openlibrary.org/works/OL45804W",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -3684,7 +3604,7 @@
    "group": "reserved-v2",
    "url": "https://www.osti.gov/biblio/1478744",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -3763,7 +3683,7 @@
    "group": "reserved-v2",
    "url": "https://arxiv.org/abs/2610.22428",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -3842,7 +3762,7 @@
    "group": "reserved-v2",
    "url": "https://www.nature.com/articles/s41586-020-2649-2",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",

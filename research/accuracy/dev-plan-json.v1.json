@@ -26,7 +26,7 @@
    "group": "development",
    "url": "https://www.census.gov/quickfacts/fact/table/US/PST045224",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -105,11 +105,7 @@
    "group": "development",
    "url": "https://www.newegg.com/p/pl?d=laptop",
    "checkNeedle": null,
-   "recordEntities": [
-    "34-236-753",
-    "1TS-000D-1TE80",
-    "1TS-000A-15W75"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -249,11 +245,7 @@
    "group": "development",
    "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
    "checkNeedle": null,
-   "recordEntities": [
-    "offer-1",
-    "offer-2",
-    "offer-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -431,11 +423,7 @@
    "group": "development",
    "url": "https://www.nasdaq.com/market-activity/stocks/aapl/historical",
    "checkNeedle": null,
-   "recordEntities": [
-    "AAPL/10/15/2026",
-    "AAPL/10/14/2026",
-    "AAPL/10/13/2026"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -613,11 +601,7 @@
    "group": "development",
    "url": "https://www.otto.de/technik/laptop/",
    "checkNeedle": null,
-   "recordEntities": [
-    "1996119966/1996119866",
-    "2085076160/2085076237",
-    "2035349268/2035349269"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -757,11 +741,7 @@
    "group": "development",
    "url": "https://finance.yahoo.com/quote/AAPL/history/",
    "checkNeedle": null,
-   "recordEntities": [
-    "required-slot-1",
-    "required-slot-2",
-    "required-slot-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -948,11 +928,7 @@
    "group": "development",
    "url": "https://www.aliexpress.com/category/702/laptops.html",
    "checkNeedle": null,
-   "recordEntities": [
-    "required-slot-1",
-    "required-slot-2",
-    "required-slot-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1060,13 +1036,7 @@
    "group": "development",
    "url": "https://www.temu.com/",
    "checkNeedle": null,
-   "recordEntities": [
-    "required-slot-1",
-    "required-slot-2",
-    "required-slot-3",
-    "required-slot-4",
-    "required-slot-5"
-   ],
+   "records": 5,
    "request": {
     "formats": [
      "markdown",
@@ -1204,11 +1174,7 @@
    "group": "development",
    "url": "https://www.coingecko.com/",
    "checkNeedle": null,
-   "recordEntities": [
-    "coin-1",
-    "coin-2",
-    "coin-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1386,11 +1352,7 @@
    "group": "development",
    "url": "https://www.walmart.com/browse/electronics/laptops/3944_3951_1089430_132960",
    "checkNeedle": null,
-   "recordEntities": [
-    "required-slot-1",
-    "required-slot-2",
-    "required-slot-3"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1501,7 +1463,7 @@
    "group": "regression",
    "url": "https://www.rfc-editor.org/rfc/rfc9110.html",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -1598,11 +1560,7 @@
    "group": "regression",
    "url": "https://www.gutenberg.org/browse/scores/top",
    "checkNeedle": null,
-   "recordEntities": [
-    "ebook-1342",
-    "ebook-84",
-    "ebook-2701"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1742,11 +1700,7 @@
    "group": "regression",
    "url": "https://ssd.jpl.nasa.gov/astro_par.html",
    "checkNeedle": null,
-   "recordEntities": [
-    "day",
-    "Julian_year",
-    "Julian_century"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1848,11 +1802,7 @@
    "group": "regression",
    "url": "https://www.gov.uk/bank-holidays",
    "checkNeedle": null,
-   "recordEntities": [
-    "england-wales/1 January",
-    "england-wales/26 March",
-    "england-wales/29 March"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -1954,12 +1904,7 @@
    "group": "regression",
    "url": "https://www.nist.gov/pml/owm/metric-si-prefixes",
    "checkNeedle": null,
-   "recordEntities": [
-    "quetta",
-    "ronna",
-    "ronto",
-    "quecto"
-   ],
+   "records": 4,
    "request": {
     "formats": [
      "markdown",
@@ -2079,11 +2024,7 @@
    "group": "regression",
    "url": "https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml",
    "checkNeedle": null,
-   "recordEntities": [
-    "http-status-200",
-    "http-status-404",
-    "http-status-429"
-   ],
+   "records": 3,
    "request": {
     "formats": [
      "markdown",
@@ -2188,7 +2129,7 @@
    "group": "regression",
    "url": "https://www.w3.org/TR/WCAG22/",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",
@@ -2276,7 +2217,7 @@
    "group": "regression",
    "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map",
    "checkNeedle": null,
-   "recordEntities": [],
+   "records": 0,
    "request": {
     "formats": [
      "markdown",

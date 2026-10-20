@@ -3,7 +3,7 @@ verify contract per case.
 
 Each case's schema and checks come from its frozen task definition only: the field names, data types, required flags
 and record grouping its gold.json declares, plus the word "currency" in the task text. No value, unit or date of a
-label is read. The schema lists the task's fields; verify checks that json is complete, that each required field is
+label is read, and no entity id is written (some dev-set ids are label values, such as SKUs), only the record count. The schema lists the task's fields; verify checks that json is complete, that each required field is
 present and that the task's number of records exists. Numbers are typed by the schema itself (a value that breaks it
 makes json invalid or incomplete), since a verify `field` check has no type test.
 
@@ -58,7 +58,7 @@ def write(base,dataset,out,name):
  plan=json.loads((HERE/base).read_text());cases=[]
  for c in plan['cases']:
   gold=json.loads((Path(dataset)/'cases'/c['id']/'gold.json').read_text());p=plan_case(gold)
-  cases.append({'id':c['id'],'group':c['group'],'url':c['url'],'checkNeedle':None,'recordEntities':p['recordEntities'],
+  cases.append({'id':c['id'],'group':c['group'],'url':c['url'],'checkNeedle':None,'records':len(p['recordEntities']),
    'request':{'formats':[*plan['request']['formats'],p['json']],'verify':p['verify']}})
  new={**{k:v for k,v in plan.items() if k!='cases'},'schema':'octocrawl.field-run-plan-json/1','name':name,
   'scope':plan['scope']+' Each case adds a json format with a schema and a verify contract derived from its task (json_plans.py); the Markdown, tables and links request is otherwise unchanged.',
