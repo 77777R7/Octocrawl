@@ -15,6 +15,7 @@ import type {
   PageMetadata,
   ProductFact,
   ProductFacts,
+  ProductFieldConflict,
   ScrapeFormat,
   ScrapeMetadata,
   ScrapeRequest,
@@ -121,7 +122,8 @@ function addLabelCandidates(
 ): void {
   for (const [name, child] of Object.entries(effective(root, root).properties ?? {})) {
     const key = labelKey(name)
-    if (key.length === 0 || map.has(name.toLowerCase())) continue
+    // A product field its own sources dispute is not settled by a page label either.
+    if (key.length === 0 || map.has(name.toLowerCase()) || issues.some(issue => issue.path === `/${name}`)) continue
     const exact = labels.filter(item => labelKey(item.label) === key)
     const matched = exact.length > 0 ? exact : labels.filter(item => baseLabelKey(item.label) === key)
     if (matched.length === 0) continue
@@ -242,6 +244,7 @@ function candidates(result: FetchResult, schema?: JsonSchema, issues: Structured
   }
   if (result.document?.pageType) map.set('pagetype', { value: result.document.pageType, fact: { source: 'inferred', path: 'document.pageType' } })
   if (product !== null) addProductCandidates(map, product, put)
+  if (product !== null && schema !== undefined) addProductConflicts(product, schema, issues)
   // A PDF's labels are its `Label: value` lines, each with its page (pdfFields.ts).
   if (schema !== undefined) addLabelCandidates(map, schema, [...(result.document?.labelledValues ?? []), ...pdfLabelledValues(result)], issues)
   if (schema !== undefined) addDeclaredCandidates(map, schema, result, issues)
@@ -260,18 +263,61 @@ function titleFact(title: string, metadata: FetchResult['metadata']): Candidate[
   return { source: 'dom', path: metadata.title !== null && text(metadata.title) === text(title) ? 'title' : 'h1[0]' }
 }
 
+/** The schema keys each declared product field fills. */
+const PRODUCT_FIELD_KEYS: Readonly<Record<ProductFieldConflict['field'], readonly string[]>> = {
+  sku: ['asin', 'id', 'productid', 'subjectid', 'sku'],
+  name: ['title', 'name', 'productname'],
+  brand: ['brand'],
+  price: ['price', 'amount', 'currentprice'],
+  priceCurrency: ['currency', 'pricecurrency'],
+  availability: ['availability', 'stock'],
+}
+
+/**
+ * A product field the product's own sources state differently is left
+ * null by the extractor (ProductFacts.ambiguous); each top-level key that asks
+ * for it gets a `field_ambiguous` issue naming every statement and its path.
+ */
+function addProductConflicts(product: ProductFacts, root: JsonSchema, issues: StructuredExtractionIssue[]): void {
+  for (const conflict of product.ambiguous ?? []) {
+    for (const name of Object.keys(effective(root, root).properties ?? {})) {
+      if (!PRODUCT_FIELD_KEYS[conflict.field].includes(name.toLowerCase())) continue
+      issues.push({
+        code: 'field_ambiguous',
+        path: `/${name}`,
+        message: `the page states different values for /${name}: ${conflict.facts.map(fact => `${JSON.stringify(fact.value)} (${fact.source}${fact.path === undefined ? '' : `, ${fact.path}`})`).join(', ')}`,
+      })
+    }
+  }
+}
+
+/**
+ * A product page without a site adapter whose declared products could not be
+ * told apart (ProductFacts.identity): what was read is not verified as the
+ * requested product's, so the result is not complete. A site adapter reports
+ * its own subject through adapterValidation.
+ */
+function subjectIssues(result: FetchResult): StructuredExtractionIssue[] {
+  const identity = result.document?.product?.identity
+  if (identity === undefined || identity.status === 'matched' || result.document?.adapterValidation?.valid === false) return []
+  return [{
+    code: 'subject_unverified',
+    message: `product identity ${identity.status}: only what every candidate states alike was read (${identity.identityEvidence.join('; ')})`,
+  }]
+}
+
 function addProductCandidates(
   map: Map<string, Candidate>,
   product: ProductFacts,
   put: (keys: readonly string[], fact: ProductFact | null | undefined, read?: (fact: ProductFact) => Omit<Candidate, 'fact'>) => void,
 ): void {
-  put(['asin', 'id', 'productid', 'subjectid', 'sku'], product.subjectId ?? product.sku)
-  put(['title', 'name', 'productname'], product.name)
-  put(['brand'], product.brand)
-  put(['price', 'amount', 'currentprice'], product.price, fact => factNumber(fact, { currency: product.priceCurrency?.value }))
-  put(['currency', 'pricecurrency'], product.priceCurrency)
+  put(PRODUCT_FIELD_KEYS.sku, product.subjectId ?? product.sku)
+  put(PRODUCT_FIELD_KEYS.name, product.name)
+  put(PRODUCT_FIELD_KEYS.brand, product.brand)
+  put(PRODUCT_FIELD_KEYS.price, product.price, fact => factNumber(fact, { currency: product.priceCurrency?.value }))
+  put(PRODUCT_FIELD_KEYS.priceCurrency, product.priceCurrency)
   put(['seller', 'merchant'], product.seller)
-  put(['availability', 'stock'], product.availability)
+  put(PRODUCT_FIELD_KEYS.availability, product.availability)
   put(['deliverylocation', 'deliveryregion', 'region'], product.deliveryLocation)
   put(['rating'], product.rating, fact => factNumber(fact))
   put(['reviewcount', 'reviews'], product.reviewCount, fact => factNumber(fact, { count: true }))
@@ -683,7 +729,7 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
 function canonicalStructured(result: FetchResult): StructuredExtractionResult {
   const document = result.document
   const pageIssue = unsuccessfulPage(result)
-  const partial = partialPage(result)
+  const partial = [...partialPage(result), ...subjectIssues(result)]
   if (pageIssue !== null) {
     return {
       status: 'incomplete',
@@ -948,7 +994,7 @@ export async function extractStructured(
   const schemaSha256 = sha256Utf8(JSON.stringify(format.schema))
   const pageIssue = unsuccessfulPage(result)
   if (pageIssue !== null) return { status: 'incomplete', data: null, schemaSha256, evidence: [], issues: [pageIssue], modelUsage: null }
-  const partial = partialPage(result)
+  const partial = [...partialPage(result), ...subjectIssues(result)]
   if (result.document?.adapterValidation?.valid === false) {
     return {
       status: 'incomplete',

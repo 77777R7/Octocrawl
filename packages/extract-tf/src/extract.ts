@@ -149,7 +149,8 @@ export class ExtractTf implements Extractor {
     // Declared product facts share those carriers, so they are read from the
     // raw tree too. The visible-price fallback runs much later, after
     // recommendation pruning — see below.
-    const declaredFacts = collectDeclaredProductFacts(doc.document)
+    // The request URL and the canonical link say which declared product the page is about.
+    const declaredFacts = collectDeclaredProductFacts(doc.document, { url: options.url, canonical: metadata.canonicalUrl })
     const amazonProduct = isAmazonProductPage(doc.document, options.url)
     const sourceFacts = amazonProduct
       ? collectAmazonProductFacts(doc.document, options.url, declaredFacts)

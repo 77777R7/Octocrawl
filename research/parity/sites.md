@@ -132,6 +132,13 @@ J04–J05 were added on 2026-09-29 for numbers read as the page writes them ([co
 | J04 | Scrape of a jpc.de book page (`EUR 399,99*`, JSON-LD and microdata `399.99`) with a name, price and currency schema | `complete`; price 399.99 from the JSON-LD value, whose format writes `.` as the decimal point, with its text in `json.evidence` | scrape-formats.json |
 | J05 | Scrape of a product page of OXID's demo shop, whose only price is the visible `499,00 €`, with a title and price schema | Price 499, or reported missing with an issue; never another number | scrape-formats.json |
 
+J06–J07 were added on 2026-10-20 for PA D, the declared product chosen before its fields are read (`docs/pa-enhancement-tasks.md`, D5). Both are Shopify product pages whose one ld+json script is a ProductGroup and whose URL selects one variant; neither is matched by host or string, only by the request URL against the variants' `sku` and `url`. Reproduced on `main` `cea1d4cb` first ([2026-10-20-pa-d5-main-direct-cea1d4cb.md](runs/2026-10-20-pa-d5-main-direct-cea1d4cb.md)). On 2026-10-20 both stores answered HTTP 429 through the Clash proxy and 200 direct.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| J06 | Scrape of an Allbirds shoe page with `?size=10`, whose first Product node in document order is another colourway, with a name, sku, price and currency schema | `complete`; the size-10 variant of the page's own colourway (sku `A11928M100`, its name with "Size 10"), its sku located at its own node | scrape-formats.json |
+| J07 | Scrape of a Parachute sheet page with `?variant=` selecting the third of three variants (110, 140, 150 USD), with the same schema | `complete`; that variant's sku `FLTLNNEVGKNG` and name, a price that is neither other variant's, read from its own offer | scrape-formats.json |
+
 M01–M08 were added on 2026-09-29 for the remaining gaps of three core features in [core-status-2026-09-29.md](core-status-2026-09-29.md): the audit's Markdown check (MDN, Hacker News) and onlyMainContent check (BBC), and the response metadata the browser lane, the compact response and `/fc` report. The runner's `compareRequest` scrapes the same URL a second time into `compare`.
 
 | Case | Request | What it tests | Feature |
