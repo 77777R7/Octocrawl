@@ -4,6 +4,7 @@
  * also comes as an image block, and action captures) are not counted, as they cannot be cut; on a page list they are,
  * since the list stops before a page instead. get_scrape is not capped: it carries no page body.
  */
+import { createHash } from 'node:crypto'
 import type { VerifyContract } from '@w2l/contracts'
 import { resultProjection } from './resultVerification.js'
 
@@ -11,8 +12,6 @@ export const RESULT_TEXT_MAX = 50_000
 
 /** The fields that say what happened, serialised before the page body (W8.2). */
 const VERDICT_KEYS = ['status', 'failureReason', 'blockReason', 'verification', 'readiness', 'agentHints', 'truncated', 'truncatedAt'] as const
-/** The page bodies a cut shortens, the least needed first; truncatedAt is the offset in the last one cut. */
-const CUT_FIELDS = ['rawHtml', 'html', 'markdown'] as const
 const MAX_HINTS = 5
 
 export type ImageBlock = { type: 'image'; data: string; mimeType: string }
@@ -82,32 +81,92 @@ function screenshotImage(result: Json): ImageBlock[] {
 
 /**
  * A result over the budget with its page bodies shortened until it fits, rawHtml and html before markdown, with
- * truncated, truncatedAt (the offset in the last body cut) and a hint naming the body and how to narrow it.
+ * truncated, truncatedAt (the offset in the last body cut) and a hint naming the body and how to narrow it; then, if
+ * still over, its images, links and tables kept to the longest prefix that fits (a table cut by rows), each with a
+ * hint saying how many were kept. Every cut is re-verified against the request's contract.
  */
 function withinBudget(result: Json, max: number, measure: Measure, project = resultProjection(result)): Json {
   if (measure(result) <= max) return result
   let cut = result
   let cutAny = false
-  for (const field of CUT_FIELDS) {
-    const body = cut[field]
-    if (typeof body !== 'string' || body === '') continue
-    const base = cut
-    const keeping = (keep: number): Json => verdictFirst(project({ ...base, [field]: body.slice(0, keep), truncated: true, truncatedAt: keep, agentHints: hintsWith(base, field, keep) }))
-    // The longest prefix that fits; JSON escapes make the text longer than the body, so search rather than subtract.
-    let low = 0
-    let high = body.length
-    while (low < high) {
-      const mid = Math.ceil((low + high) / 2)
-      if (measure(keeping(mid)) <= max) low = mid
-      else high = mid - 1
-    }
-    cut = keeping(low)
+  for (const field of CUT_ORDER) {
+    const next = BODY_FIELDS.has(field) ? cutBody(cut, field, max, measure, project) : cutList(cut, field, max, measure, project)
+    if (next === null) continue
+    cut = next
     cutAny = true
     if (measure(cut) <= max) break
   }
-  // A result with no page body to shorten (a huge links list) goes out whole rather than marked cut.
+  // A result with nothing to shorten goes out whole rather than marked cut.
   return cutAny ? cut : result
 }
+
+/**
+ * What a cut shortens, the least needed first: the HTML bodies, then the structured lists (images, links, tables),
+ * then the Markdown, the page's content. Every cut is re-verified through `project`, so a check on what was cut (a
+ * table's rows, a phrase in the Markdown) no longer passes (F6).
+ */
+const CUT_ORDER = ['rawHtml', 'html', 'images', 'links', 'tables', 'markdown'] as const
+const BODY_FIELDS: ReadonlySet<string> = new Set(['rawHtml', 'html', 'markdown'])
+
+/** The longest prefix of a binary search's range for which `fits` holds; 0 when none does. */
+function longest(high: number, fits: (keep: number) => boolean): number {
+  let low = 0
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    if (fits(mid)) low = mid
+    else high = mid - 1
+  }
+  return low
+}
+
+/** A page body shortened to the longest prefix that fits, or null when there is none to shorten. */
+function cutBody(cut: Json, field: string, max: number, measure: Measure, project: (value: Json) => Json): Json | null {
+  const body = cut[field]
+  if (typeof body !== 'string' || body === '') return null
+  const keeping = (keep: number): Json => verdictFirst(project({ ...cut, [field]: body.slice(0, keep), truncated: true, truncatedAt: keep, agentHints: hintsWith(cut, field, keep) }))
+  // JSON escapes make the text longer than the body, so search rather than subtract.
+  return keeping(longest(body.length, keep => measure(keeping(keep)) <= max))
+}
+
+/** A list kept to the longest prefix that fits, a table that does not fit whole cut by rows; null when it fits or is empty. */
+function cutList(cut: Json, field: string, max: number, measure: Measure, project: (value: Json) => Json): Json | null {
+  const list = cut[field]
+  if (!Array.isArray(list) || list.length === 0) return null
+  const keeping = (keep: number, rows?: number): Json => {
+    const kept = rows !== undefined ? [...list.slice(0, keep), tableRows(list[keep], rows)] : list.slice(0, keep)
+    return verdictFirst(project({ ...cut, [field]: kept, truncated: true, agentHints: listHintsWith(cut, field, kept.length, list.length, rows === undefined ? null : { rows, of: rowCount(list[keep]) }) }))
+  }
+  const whole = longest(list.length, keep => measure(keeping(keep)) <= max)
+  if (whole === list.length) return null
+  if (field === 'tables' && rowCount(list[whole]) > 0) {
+    const rows = longest(rowCount(list[whole]), keep => measure(keeping(whole, keep)) <= max)
+    if (rows > 0) return keeping(whole, rows)
+  }
+  return keeping(whole)
+}
+
+function rowCount(table: unknown): number {
+  return isObject(table) && Array.isArray(table.rows) ? table.rows.length : 0
+}
+
+/** A table with its first `rows` rows, its CSV (RFC 4180, CRLF) and digest written again for them. */
+function tableRows(table: unknown, rows: number): unknown {
+  if (!isObject(table) || !Array.isArray(table.rows)) return table
+  const kept = (table.rows as unknown[][]).slice(0, rows)
+  const field = (cell: unknown): string => {
+    const text = String(cell ?? '')
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  }
+  const csv = kept.map((row) => row.map(field).join(',')).join('\r\n')
+  return { ...table, rows: kept, headerRows: Math.min(Number(table.headerRows) || 0, kept.length), csv, csvSha256: createHash('sha256').update(csv, 'utf8').digest('hex') }
+}
+
+function listHintsWith(result: Json, field: string, kept: number, of: number, rows: { rows: number; of: number } | null): string[] {
+  const hints = Array.isArray(result.agentHints) ? (result.agentHints as unknown[]).filter((hint): hint is string => typeof hint === 'string' && !LIST_CUT_HINT.test(hint)) : []
+  const which = rows === null ? `${kept} of ${of}` : `${kept} of ${of}, the last with ${rows.rows} of its ${rows.of} rows`
+  return [...hints.slice(0, MAX_HINTS - 1), `the ${field} were cut to ${which} to fit this answer; ask for fewer formats, or narrow the page with includeTags or excludeTags`]
+}
+const LIST_CUT_HINT = /^the (images|links|tables) were cut to \d+ of \d+/
 
 function hintsWith(result: Json, field: string, at: number): string[] {
   const hints = Array.isArray(result.agentHints) ? (result.agentHints as unknown[]).filter((hint): hint is string => typeof hint === 'string' && !CUT_HINT.test(hint)) : []
