@@ -35,6 +35,7 @@ import { INSTALLED_CHROME_INSTALL } from '../subjects/installedChrome.js'
 import type { RoutingHistory, VendorOutcome } from './vendorRouter.js'
 import { rankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
+import { decideNext, ladderActionDecisionEvent, type ActionDecision, type LadderAction } from './decideNext.js'
 import { loadSessionForHost, sessionCoversHost, type SessionSnapshot, type SessionStore } from './sessionStore.js'
 
 /** One attempt of the run: the rung that answered, its place in the run, when it was asked and answered. */
@@ -141,6 +142,12 @@ interface LadderProgress {
   ledger: SpendLedger | null
   /** The last page the ladder stepped past for a stronger rung (strongerRungMayAnswer), kept over a later failure with none. */
   steppedPast: { channel: string; result: FetchResult } | null
+  /**
+   * The shadow decision (decideNext, PA F4) on the last rung that answered, written as `ladder_action_decision` once
+   * the ladder's own action is known: the next rung starting (`next_rung`, or `keep_591_fallback` for #591's fallback),
+   * the run ending (`stop`) or a handoff (`handoff`). It drives nothing.
+   */
+  pendingDecision?: { channel: string; at: number; decision: ActionDecision } | null
 }
 
 /** A run's totals over its attempts: what every lane tried cost, each attempt kept as it was. */
@@ -526,6 +533,7 @@ export class LadderRunner {
     throwIfExecutionStopped(execution)
     const decision = evaluateGovernance(url, this.policy)
     const finish = (answer: FetchResult, handoffRequested: boolean): LadderRunResult => {
+      writeDecision(progress, 'stop')
       const result = withEgressProxyRefused(withBrowserNotInstalled(answer, attempts), attempts)
       const summary = summarize(channelsTried, attempts)
       return {
@@ -685,6 +693,7 @@ export class LadderRunner {
         try {
           fetched = await this.paidFetch(channel, channel.id, url, effectiveSession, callExecution, options, progress, () => {
             channelsTried.push(channel.id)
+            writeDecision(progress, fallback ? 'keep_591_fallback' : 'next_rung')
             ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_channel_started', channel: channel.id, detail: { vendorId: channel.vendorId ?? null, remainingMs: callExecution.deadlineAt === undefined ? null : Math.max(0, callExecution.deadlineAt - Date.now()) } })
           })
         } catch (error) {
@@ -709,6 +718,26 @@ export class LadderRunner {
         // Why a page failed its contract, asked once: it steers the ladder, and a vendor's history does not count a page
         // whose content came but was not extracted as that vendor failing (ADR 0007).
         const failedReadiness = checked?.verdict === 'failed' ? (this.options.classifyContractFailure ?? contractReadiness)(result, checked.verification) : null
+        // What decideNext would do with this page, beside what the ladder does (PA F4, shadow): written when the ladder acts.
+        const next = ordered.slice(ordered.indexOf(channel) + 1)[0] ?? null
+        progress.pendingDecision = {
+          channel: channel.id,
+          at: result.usage.wallMs,
+          decision: decideNext({
+            result,
+            failureClass: classifyFetchFailure(result),
+            readiness: failedReadiness,
+            verdict: checked?.verdict ?? null,
+            remainingMs: execution.deadlineAt === undefined ? null : execution.deadlineAt - Date.now(),
+            channel,
+            next,
+            ...(checked?.verdict === 'failed' ? { waitedMs: readinessOf({ ...result, verification: checked.verification }).waitedMs } : {}),
+            headersTimeout: initialHeadersTimeout(result, channel, channelsTried),
+            // Who can take a login wall, by the ladder's own rule (a handoff in authed mode); a saved login the site refused is not one.
+            handoff: result.handoff && sessionsPermitted ? 'person' : null,
+            reextracted: result.trace.some((event) => event.event === 'extraction_candidates'),
+          }),
+        }
       // A rung the deadline cut short ends the run: nothing after it has time.
       if ((!fallback && result.usage.deadlineExceeded === true) || ((fallback || result.failureReason === 'timeout') && deadlineReached(execution))) {
         return deadlineOutcome(url, progress, result)
@@ -901,6 +930,7 @@ export class LadderRunner {
           })
           continue
         }
+        writeDecision(progress, 'handoff')
         return await this.attemptHandoff(url, result, channelsTried, channel, effectiveSession, ladderTrace, best, attempts, execution, options, progress)
       }
 
@@ -1339,7 +1369,16 @@ function deadlineReached(execution: ExecutionContext): boolean {
  * content, with that page). Either way the result says the deadline ended
  * it, in its trace and usage.
  */
+/** The pending shadow decision, written beside the action the ladder took, once. */
+function writeDecision(progress: LadderProgress, actual: LadderAction): void {
+  const pending = progress.pendingDecision
+  if (pending === null || pending === undefined) return
+  progress.pendingDecision = null
+  progress.ladderTrace.push(ladderActionDecisionEvent(pending.at, pending.channel, pending.decision, actual))
+}
+
 function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchResult | null): LadderRunResult {
+  writeDecision(progress, 'stop')
   const { startedAt, channelsTried, ladderTrace, attempts } = progress
   const at = Math.max(0, performance.now() - startedAt)
   // The rung the deadline cut: the one that returned its timeout, or the one

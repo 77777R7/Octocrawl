@@ -78,9 +78,9 @@ function providerErrorResult(url: string, vendorId: string): FetchResult {
   }
 }
 
-/** The ladder's decisions, without the `ladder_channel_started` event each rung's start adds. */
+/** The ladder's decisions, without the `ladder_channel_started` event each rung's start adds, or the shadow decisions (F4). */
 function decisions<T extends { event: string }>(trace: readonly T[]): T[] {
-  return trace.filter((event) => event.event !== 'ladder_channel_started')
+  return trace.filter((event) => event.event !== 'ladder_channel_started' && event.event !== 'ladder_action_decision')
 }
 
 function channel(
@@ -518,7 +518,7 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     // The kept page says that the browser lane did not improve on it, after its own caveat; the count and confidence are the http lane's extract figures.
     expect(kept.result).toMatchObject({ status: 'success', lane: 'http', markdown: 'MAIN CONTENT', warnings: [{ code: 'client_rendered_suspected' }, { code: 'low_content_yield', message: 'The http lane extracted 12 tokens; the browser lane did not improve it.' }] })
     expect(kept.result.escalations).toEqual([{ from: 'http', to: 'browser_local', trigger: 'quality_client_rendered', improved: false }])
-    expect(kept.ladderTrace.at(-1)).toMatchObject({ event: 'ladder_best_kept', channel: 'http' })
+    expect(decisions(kept.ladderTrace).at(-1)).toMatchObject({ event: 'ladder_best_kept', channel: 'http' })
   })
 
   it('accepts the browser result even when it is also thin — one quality pass, not a loop', async () => {
@@ -1226,6 +1226,8 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(run.result.blockReason).toBe('login_wall')
     expect(http.calls).toEqual([])
     expect(run.ladderTrace.some((t) => t.event === 'ladder_session_rejected')).toBe(true)
+    // The refused login is nobody to hand the wall to: the shadow decision stops, as the ladder does.
+    expect(run.ladderTrace.filter((t) => t.event === 'ladder_action_decision').map((t) => t.detail)).toEqual([{ shadow: 'stop', reason: 'login_wall:no_authorization', actual: 'stop', differs: false }])
   })
 
   it('a redirect to the site\'s login page under the saved login is login_wall, never the page\'s content', async () => {
@@ -1784,5 +1786,39 @@ describe('LadderRunner — a task contract (ADR 0006)', () => {
     const bb = channel('provider', [page('provider', 'A page without the figure.')], 'browserbase')
     await new LadderRunner([blocked(), bb], { mode: 'authed' }, history).run(url)
     expect((await history.read('example.com')).vendors.browserbase).toMatchObject({ attempts: 1, contentful: 1 })
+  })
+})
+
+describe('LadderRunner — the shadow action decision (PA F4)', () => {
+  const url = 'https://example.com/p'
+  const page = (lane: FetchResult['lane'], markdown: string): FetchResult => ({ ...contentfulResult(url, lane), markdown })
+  const wants = { checks: [{ type: 'markdownIncludes' as const, text: 'Price' }] }
+  const shadow = (run: Awaited<ReturnType<LadderRunner['run']>>) => run.ladderTrace.filter((t) => t.event === 'ladder_action_decision').map((t) => ({ channel: t.channel, ...t.detail }))
+
+  it('records, for each rung that answered, decideNext\'s action beside the one the ladder took, and drives nothing', async () => {
+    const http = channel('http', [blockedResult(url, 'cloudflare_challenge')])
+    const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    const run = await new LadderRunner([http, browser], { mode: 'authed' }).run(url)
+    expect(run.result.lane).toBe('browser_local')
+    expect(shadow(run)).toEqual([
+      { channel: 'http', shadow: 'next_rung', reason: 'bot_gate', actual: 'next_rung', differs: false },
+      { channel: 'browser_local', shadow: 'stop', reason: 'delivered', actual: 'stop', differs: false },
+    ])
+  })
+
+  it('names the cases where the shadow decision and the ladder differ: a page there but not extracted is read again, not stepped past', async () => {
+    const vendor = channel('provider', [page('provider', 'Price 12')], 'steel')
+    const run = await new LadderRunner([channel('http', [page('http', 'No figure.')]), channel('browser_local', [page('browser_local', 'Still no figure.')]), vendor], { mode: 'authed' }, null, null, null, { verify: wants, classifyContractFailure: () => 'not_extracted' }).run(url)
+    expect(vendor.calls).toEqual([])
+    expect(shadow(run)).toEqual([
+      { channel: 'http', shadow: 'reextract', reason: 'not_extracted', actual: 'next_rung', differs: true },
+      { channel: 'browser_local', shadow: 'reextract', reason: 'not_extracted', actual: 'stop', differs: true },
+    ])
+  })
+
+  it('a rate limit: decideNext waits for Retry-After, the ladder stops', async () => {
+    const limited: FetchResult = { ...blockedResult(url, 'rate_limit'), evidence: { ...blockedResult(url, 'rate_limit').evidence, httpStatus: 429 }, retryAt: Date.now() + 5_000 }
+    const run = await new LadderRunner([channel('http', [limited]), channel('browser_local', [])], { mode: 'authed' }).run(url)
+    expect(shadow(run)).toEqual([{ channel: 'http', shadow: 'wait_retry_after', reason: 'retry_after', actual: 'stop', differs: true }])
   })
 })
