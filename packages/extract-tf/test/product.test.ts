@@ -286,6 +286,15 @@ describe('PDP facts: the subject is chosen before fields are merged', () => {
     expect(kettles.product?.price).toBeNull()
   })
 
+  it('still reads the visible price when the other declared products are only listed or related items', () => {
+    const html = page(ld({ '@type': 'Product', name: 'Harbour lamp', sku: 'HL-1' }) +
+      ld({ '@type': 'ItemList', itemListElement: [{ '@type': 'ListItem', item: { '@type': 'Product', name: 'Mirror', sku: 'HM-2' } }] }),
+      '<div class="product-price">£19.00</div>')
+    const out = extractTf.extract(html, { url: 'https://shop.example/lamp' })
+    expect(out.product?.identity?.status).toBe('matched')
+    expect(out.product?.price).toMatchObject({ value: '£19.00', source: 'text' })
+  })
+
   it('binds microdata that writes the same product differently', () => {
     const cases: Array<[string, string, Record<string, string>]> = [
       // An entity escaped twice in the JSON-LD; the microdata names no SKU.

@@ -631,7 +631,7 @@ function factsFromText(doc: Document): Partial<ProductFacts> {
 /** How many declared products are compared to find the subject; a page declaring more is a listing. */
 const MAX_COMPARED = 250
 
-/** Facts whose price must not be read from the page's text: the page declares other products, or the subject's own sources disagree on it. */
+/** Facts whose price must not be read from the page's text: the page declares other products beside the subject, or the subject's own sources disagree on it. */
 const textPriceBarred = new WeakSet<ProductFacts>()
 
 /** What singles a product out, strongest first: each step keeps the products it holds for, if it holds for some but not all. */
@@ -767,7 +767,9 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
   // several (a variant by its URL) still states its default in them.
   const metaIds = Object.values(meta.ids).flat().map(normId)
   const metaNamesSubject = metaIds.length > 0 && [...subject, ...bound].some((d) => allIds(d).some((v) => metaIds.includes(normId(v))))
-  const metaElsewhere = !metaNamesSubject && others.some((members) => members.some((d) => !d.nested))
+  // Other products beside the subject, not only related items nested in another node.
+  const siblings = others.some((members) => members.some((d) => !d.nested))
+  const metaElsewhere = !metaNamesSubject && siblings
   if (metaElsewhere && Object.keys(meta.fields).length > 0) evidence.push(`meta: the page declares other products and its meta tags name none of them, not merged`)
   evidence.unshift(`${label([...subject, ...bound])}: the subject, ${reason}`)
   const { facts, ambiguous } = mergeFields([...subject, ...bound, ...(metaElsewhere ? [] : [{ fields: meta.fields, ambiguous: {} }])])
@@ -787,14 +789,14 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
   }
   if (ambiguous.length > 0) facts.ambiguous = ambiguous
   if (ambiguous.some((a) => a.field === 'price')) facts.quoteState = 'conflicting' as QuoteState
-  if (others.length > 0 || facts.ambiguous?.some((a) => a.field === 'price')) textPriceBarred.add(facts)
+  if (siblings || facts.ambiguous?.some((a) => a.field === 'price')) textPriceBarred.add(facts)
   return facts
 }
 
 /**
  * Fill a still-missing price from rendered text. Weaker than every declared
  * path, so it only ever fills a null, and never when the declarations say
- * the null is not an omission: the page declares other products whose price
+ * the null is not an omission: the page declares other products beside it whose price
  * the text could be, or the product's own sources disagree on its price.
  *
  * MUST run AFTER recommendation pruning, not before: the deepest price-shaped

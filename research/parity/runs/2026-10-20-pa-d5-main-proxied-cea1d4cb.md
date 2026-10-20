@@ -45,3 +45,5 @@ Failed checks with the observed value:
 The runner ran from the D branch checkout, so "Source commit" above is the runner's and the case file's (`010994df`, which adds J06 and J07 and J04's new locator checks). The API it called on port 8787 ran `main` `cea1d4cb` from a detached checkout (`git worktree add --detach … origin/main`, before #620–#622 were merged); its responses report `evidenceRecord.extractor.version` `extract-tf/30`. This is the "reproduce on main first" run of PA D5.
 
 Through the Clash proxy, both Shopify stores (J06, J07) answered HTTP 429 (`rate_limit`) on the HTTP lane, and jpc.de (J04) HTTP 451 (`geo_restricted`) after the browser lane. A plain curl through the same proxy got 429 from both stores too, and 200 direct, so the direct runs (`2026-10-20-pa-d5-*-direct-*.md`) are the comparison.
+
+The file was renamed after the run to say it was proxied: the command above wrote it as the same name without `-proxied`.

@@ -45,3 +45,5 @@ Failed checks with the observed value:
 The API on port 8789 ran this checkout at the source commit above; its responses report `evidenceRecord.extractor.version` `extract-tf/31`.
 
 Blocked the same way as the main run through the proxy (J06, J07 HTTP 429; J04 HTTP 451). See the direct runs.
+
+The file was renamed after the run to say it was proxied: the command above wrote it as the same name without `-proxied`.
