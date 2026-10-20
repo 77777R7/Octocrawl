@@ -46,6 +46,20 @@ describe('locating a model value on the page', () => {
     expect(modelLocator(article('Battery 5000 mAh'))(5000)).toEqual({ evidencePath: 'markdown line 1', text: '5000', normalized: 5000, context: { unit: 'mAh' } })
   })
 
+  it('does not take a number of the other sign, a word in "in stock" as a unit, or text only a link target holds', () => {
+    const locate = modelLocator(article('Overnight low: -5 °C, model SC-10, sizes 8-12.\n\nOnly 7 in stock.\n\n[Buy now](https://shop.example/acme-red-xl?size=42) ![photo](https://cdn.example/lamp-blue.jpg)'))
+    expect(locate(5)).toBeNull()
+    expect(locate(-5)).toMatchObject({ evidencePath: 'markdown line 1', normalized: -5 })
+    // A hyphen joining a word or a range is no minus sign.
+    expect(locate(10)).toMatchObject({ evidencePath: 'markdown line 1', text: '10' })
+    expect(locate(12)).toMatchObject({ evidencePath: 'markdown line 1', text: '12' })
+    expect(locate(7)).toEqual({ evidencePath: 'markdown line 3', text: '7', normalized: 7 })
+    expect(locate('acme')).toBeNull()
+    expect(locate(42)).toBeNull()
+    expect(locate('blue')).toBeNull()
+    expect(locate('Buy now')).toEqual({ evidencePath: 'markdown line 5', text: 'Buy now' })
+  })
+
   it('matches an ISO date with the same day as the page writes it', () => {
     const locate = modelLocator(article('# Story\n\nPublished: 8 October 2026\n\nUpdated October 16, 2026'))
     expect(locate('2026-10-08')).toEqual({ evidencePath: 'markdown line 3', text: '8 October 2026', normalized: '2026-10-08' })

@@ -73,7 +73,7 @@ function datesIn(text: string): Array<{ index: number; text: string; iso: string
 
 const CURRENCY_BEFORE = /(?:([$£€¥₹₽₩฿₺₴₪₱₫₦]|[A-Z]{1,3}\$)|\b([A-Z]{3}))\s?$/u
 const CURRENCY_AFTER = /^\s?(?:([$£€¥₹₽₩฿₺₴₪₱₫₦円元])|([A-Z]{3})\b)/u
-const UNIT_AFTER = /^[\s ]?(%|(?:kg|g|mg|lbs?|oz|km|cm|mm|m|in|ft|ml|cl|l|kw|w|v|mah|wh|kwh|gb|tb|mb|hz|ghz|mhz|pcs|pieces|pack|units?|items?)(?![\p{L}\p{N}]))/iu
+const UNIT_AFTER = /^[\s ]?(%|(?:kg|g|mg|lbs?|oz|km|cm|mm|m|ft|ml|cl|l|kw|w|v|mah|wh|kwh|gb|tb|mb|hz|ghz|mhz|pcs|pieces|pack|units?|items?)(?![\p{L}\p{N}]))/iu
 const NUMBER_RUN = /(?<![\p{L}\p{N}.,])\d(?:[\d.,'’  ]*\d)?(?:[.,](?:--?|–|—))?(?![\p{N}])/gu
 
 /** The line of `text` that holds `index`. */
@@ -135,7 +135,9 @@ function declared(result: FetchResult): Haystack[] {
 function markdownHaystack(result: FetchResult): Haystack | null {
   const markdown = result.markdown
   if (typeof markdown !== 'string' || markdown.length === 0) return null
-  const text = subjectMarkdown(markdown, (result.document?.product ?? null) !== null)
+  // A link's or an image's target is not text the page shows: blanked, so no URL slug or query supports a value.
+  const shown = markdown.replace(/\]\([^()\n]*(?:\([^()\n]*\)[^()\n]*)*\)/g, target => `]${' '.repeat(target.length - 1)}`)
+  const text = subjectMarkdown(shown, (result.document?.product ?? null) !== null)
   return { text, at: index => `markdown line ${text.slice(0, index).split('\n').length}`, decimalPoint: false }
 }
 
@@ -167,9 +169,9 @@ function findNumber(hay: Haystack, value: number): ModelLocation | null {
   for (const match of hay.text.matchAll(NUMBER_RUN)) {
     let start = match.index!
     let end = start + match[0].length
-    if (value < 0) {
-      if (!/[-−]\s?$/u.test(hay.text.slice(Math.max(0, start - 2), start))) continue
-    }
+    // A minus sign, not a hyphen joining a word or a range ("SC-10", "5-10"): the number is negative.
+    const signed = /[-−]/u.test(hay.text[start - 1] ?? '') && !/[\p{L}\p{N}]/u.test(hay.text[start - 2] ?? '')
+    if (signed !== value < 0) continue
     // The amount with the currency written beside it, as numbers.ts reads it.
     const before = CURRENCY_BEFORE.exec(hay.text.slice(Math.max(0, start - 4), start))
     const after = CURRENCY_AFTER.exec(hay.text.slice(end, end + 5))

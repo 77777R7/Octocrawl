@@ -953,7 +953,7 @@ describe('structured JSON extraction', () => {
       { path: '/material', source: 'model', evidencePath: 'markdown line 3', text: 'aluminium' },
     ])
     expect(out.issues).toEqual([
-      { code: 'model_unsupported', path: '/warranty', message: 'the model answered "two years", which the page does not state; the field is left out' },
+      { code: 'model_unsupported', path: '/warranty', message: 'the model answered "two years", which the page does not state; it is left out' },
       { code: 'missing_required', path: '/warranty', message: 'required field unavailable: /warranty' },
     ])
   })
@@ -973,6 +973,21 @@ describe('structured JSON extraction', () => {
     expect(own.status).toBe('complete')
     expect(own.data).toEqual({ asin: 'B012345678', price: 9.99 })
     expect(own.evidence).toContainEqual({ path: '/price', source: 'model', evidencePath: 'markdown line 3', text: '£9.99', normalized: 9.99, context: { currency: '£' } })
+  })
+
+  it('keeps a key the model named for a map only where the page states it, and reports a dropped list item at the list', async () => {
+    const schema = json({
+      details: { type: 'object', additionalProperties: { type: 'string' } },
+      items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, price: { type: 'number' } } } },
+    }, ['details', 'items'], true)
+    const answer = { details: { 'Warranty years': '112', Pages: '112' }, items: [{ name: 'Zeta', price: 3 }, { name: 'Lamp', price: 9.5 }] }
+    const out = await extractStructured({ ...page(book), markdown: '# A Light in the Attic\n\nPages: 112\n\nLamp costs 9.50' }, schema, {}, {
+      baseUrl: 'https://model.example', model: 'extractor', fetch: openAiEndpoint(answer, []),
+    })
+    expect(out.status).toBe('incomplete')
+    expect(out.data).toEqual({ details: { Pages: '112' }, items: [{ name: 'Lamp', price: 9.5 }] })
+    expect(out.issues.map(issue => [issue.code, issue.path])).toEqual([['model_unsupported', '/details/Warranty years'], ['model_unsupported', '/items']])
+    expect(out.evidence.filter(item => item.source === 'model').map(item => item.path)).toEqual(['/details/Pages', '/items/0/name', '/items/0/price'])
   })
 
   it('sends OpenAI strict mode a strict-safe schema derived from an ordinary one', async () => {
