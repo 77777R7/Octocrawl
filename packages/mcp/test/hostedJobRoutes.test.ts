@@ -233,6 +233,24 @@ describe('hosted job routes', () => {
     expect(second.hasMore).toBe(false)
   })
 
+  it('lists the account\'s own jobs, newest first, a page at a time (H2 P1)', async () => {
+    const { call } = await start({ credits: new MemoryCreditsStore(100_000) })
+    const ids: string[] = []
+    for (let i = 0; i < 3; i++) { ids.push(((await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(1) })).json()) as { taskId: string }).taskId); await new Promise((resolve) => setTimeout(resolve, 5)) }
+    await call('POST', '/v1/batches', 'oc_two', { urls: urls(1) })
+    const first = await (await call('GET', '/v1/jobs?limit=2', 'oc_one')).json() as { items: Array<{ taskId: string; kind: string; status: string }>; nextBefore: string | null; hasMore: boolean }
+    expect(first.items.map((item) => item.taskId)).toEqual([ids[2], ids[1]])
+    // Two run at a time, so the newest waits its turn and is listed as such.
+    expect(first.items[0]).toMatchObject({ kind: 'batch', status: 'queued' })
+    expect(first.items[1]).toMatchObject({ kind: 'batch', status: 'running' })
+    expect(first.hasMore).toBe(true)
+    const second = await (await call('GET', `/v1/jobs?limit=2&before=${encodeURIComponent(first.nextBefore!)}`, 'oc_one')).json() as { items: Array<{ taskId: string }>; hasMore: boolean }
+    expect(second.items.map((item) => item.taskId)).toEqual([ids[0]])
+    expect(second.hasMore).toBe(false)
+    expect((await call('GET', '/v1/jobs', null)).status).toBe(403)
+    expect((await call('GET', '/v1/jobs?limit=0', 'oc_one')).status).toBe(400)
+  })
+
   it('cancels a job of the account, frees its slot and queues the first slice of the job that takes it', async () => {
     const { call, enqueued } = await start({ credits: new MemoryCreditsStore(100_000) })
     const ids: string[] = []
@@ -264,6 +282,6 @@ describe('hosted job routes', () => {
     expect(failed.status).toBe(503)
     expect([...down.store.jobs.values()].map((job) => [job.status, job.failureReason])).toEqual([['failed', 'not_queued']])
     // Its slot is free again.
-    expect([...down.store.slots.values()]).toEqual([{ running: [], queued: [] }])
+    expect([...down.store.slots.values()]).toMatchObject([{ running: [], queued: [] }])
   })
 })
