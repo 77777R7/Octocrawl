@@ -175,6 +175,11 @@ describe('toEvidenceRecord', () => {
     const used = { ...measured, proxyBytes: 4_200_000, solves: 1, proxyCountry: 'US' }
     expect(timed([used, { ...used, proxyBytes: null, solves: 1.5, proxyCountry: 'usa' }])).toEqual([used, { ...used, proxyBytes: null, solves: null, proxyCountry: null }])
     expect(timed([measured])![0]).not.toHaveProperty('proxyBytes')
+    // What the transport's meter counted the sessions' pages receiving stays on the record when the call carried it; a
+    // figure in another shape is unknown, never guessed at (PA G1).
+    const counted = { ...measured, bytesCounted: 3_900_000, bytesCapped: true }
+    expect(timed([counted, { ...counted, bytesCounted: -5, bytesCapped: 'yes' }])).toEqual([counted, { ...counted, bytesCounted: null, bytesCapped: null }])
+    expect(timed([measured])![0]).not.toHaveProperty('bytesCounted')
   })
 
   it('records the device the answering lane declared and the custom headers it sent, sorted by name', () => {

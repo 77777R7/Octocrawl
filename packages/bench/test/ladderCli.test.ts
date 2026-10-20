@@ -692,6 +692,17 @@ describe('buildChannels + LadderRunner session composition', () => {
     expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, usage: { proxyBytes: 1_000, solves: 0 } }], byMinute, 0.004).usage).not.toHaveProperty('vendorProxyBytes')
     // A proxy a plan includes (perGbUsd 0) still has its bytes on the result, and a solve the provider reported is never dropped.
     expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, usage: { proxyBytes: 1_000, solves: 2 } }], byMinute, 0.004, 'GB').usage).toMatchObject({ vendorProxyBytes: 1_000, vendorSolves: 2, vendorProxyCountry: 'GB' })
+    // What the transport's own meter counted the sessions' pages receiving goes on the result beside the provider's figures,
+    // and whether it ended one at the cap; one session it could not count makes the total unknown (PA G1).
+    const metered = withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, bytesCounted: 3_000_000, bytesCapped: false }, { sessionMs: 5_000, released: true, bytesCounted: 900_000, bytesCapped: true }], residential, ceiling).usage
+    expect(metered).toMatchObject({ vendorBytesCounted: 3_900_000, vendorBytesCapped: true })
+    expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, bytesCounted: 3_000_000, bytesCapped: false }, { sessionMs: 5_000, released: true, bytesCounted: null, bytesCapped: false }], residential, ceiling).usage).toMatchObject({ vendorBytesCounted: null, vendorBytesCapped: false })
+    // The count is the transport's, not the charge's: a release left unconfirmed keeps the ceiling as the charge, not the count.
+    const unreleased = withMeasuredSessions(base, [{ sessionMs: 1_000, released: false, bytesCounted: 2_000, bytesCapped: false }], residential, ceiling).usage
+    expect(unreleased).toMatchObject({ vendorBytesCounted: 2_000, vendorBytesCapped: false })
+    expect(unreleased.measuredCostUsd).toBe(base.usage.measuredCostUsd)
+    // No meter (a tariff without maxBytesPerCall): no count on the result.
+    expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true }], byMinute, 0.004).usage).not.toHaveProperty('vendorBytesCounted')
   })
 
   it('answers a provider error just before the request\'s deadline as the provider\'s failure, not a thrown error (ROADMAP PA item 4)', async () => {

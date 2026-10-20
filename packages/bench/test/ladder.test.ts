@@ -1531,6 +1531,12 @@ describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', ()
     const over = await new LadderRunner([blockedHttp(), priced(0.03, [answer({ externalCostUsd: null, measuredCostUsd: 0.05, vendorSessionMs: 5_000, vendorProxyBytes: 4_000_000, vendorSolves: 1, vendorProxyCountry: 'US' })])], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })
     expect(over.result.trace.find((event) => event.event === 'spend_settled')?.detail).toMatchObject({ chargedUsd: 0.05, basis: 'measured', proxyBytes: 4_000_000, solves: 1, proxyCountry: 'US', overCeiling: true })
     expect((over.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }).calls[0]).toMatchObject({ chargedUsd: 0.05, sessionMs: 5_000, proxyBytes: 4_000_000, solves: 1, proxyCountry: 'US' })
+    // What the transport's meter counted goes on the call too, measured charge or not; a call without a meter has none (PA G1).
+    const counted = await new LadderRunner([blockedHttp(), priced(0.03, [answer({ externalCostUsd: null, measuredCostUsd: 0.002, vendorSessionMs: 5_000, vendorBytesCounted: 3_900_000, vendorBytesCapped: true })])], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })
+    expect((counted.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }).calls[0]).toMatchObject({ bytesCounted: 3_900_000, bytesCapped: true })
+    const uncounted = await new LadderRunner([blockedHttp(), priced(0.03, [answer({ externalCostUsd: null, vendorBytesCounted: null, vendorBytesCapped: false })])], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1) })
+    expect((uncounted.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }).calls[0]).toMatchObject({ bytesCounted: null, bytesCapped: false })
+    expect((over.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }).calls[0]).not.toHaveProperty('bytesCounted')
   })
 
   it('puts every paid call of the run on the answer: the provider, its charge, what Octocrawl made of its page, and which is the answer', async () => {

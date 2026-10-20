@@ -202,7 +202,8 @@ export function providerFailure(url: string, wallMs: number, trace: TraceEvent[]
     },
     usage: {
       wallMs,
-      bytesWire: 0,
+      // The call went to the vendor before it broke, and its browser's traffic is not counted here: unknown, not 0.
+      bytesWire: null,
       bytesDecompressed: 0,
       requestCount: 1,
       attemptCount: 1,

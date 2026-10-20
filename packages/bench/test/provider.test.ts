@@ -121,6 +121,8 @@ describe('ProviderSubject robots gate', () => {
     expect(out.lane).toBe('provider')
     expect(out.markdown).toContain('four spouts for even infusion')
     expect(transport.calls).toHaveLength(1)
+    // The vendor's browser received the page; Octocrawl did not count those bytes: unknown, not 0 (PA G1).
+    expect(out.usage.bytesWire).toBeNull()
   })
 
   it('reports a page whose main region is only a heading as failed, not as content, and keeps the page as evidence (ROADMAP PA item 4)', async () => {
@@ -278,6 +280,8 @@ describe('ProviderSubject robots gate', () => {
     expect(transport.calls).toEqual([])
     // Its price is unknown, not 0: the vendor's session may already be open (see ladderCli's refusal-charge test).
     expect(out.usage.externalCostUsd).toBeNull()
+    // No page was asked for: its wire bytes are a measured 0 (PA G1).
+    expect(out.usage).toMatchObject({ bytesWire: 0, requestCount: 0 })
   })
 
   it('takes no recorded robots override: the rule still refuses, and the origin is not touched', async () => {
@@ -543,6 +547,8 @@ describe('ProviderSubject result mapping', () => {
     expect(out.status).toBe('failed')
     expect(out.failureReason).toBe('provider_error')
     expect(out.compliance).toBeNull()
+    // The call went to the vendor before it broke: what crossed the wire is unknown, not 0 (PA G1).
+    expect(out.usage.bytesWire).toBeNull()
   })
 
   it('reports a target the vendor browser cannot resolve as dns_error, not a vendor fault', async () => {
