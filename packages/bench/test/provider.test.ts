@@ -4,6 +4,7 @@ import { identityBundleFrom, modeIdentity } from '@w2l/contracts'
 import { LadderRunner } from '../src/routing/ladder.js'
 import {
   ProviderSubject,
+  providerRegion,
   robotsFetcherVia,
   type ProviderResponse,
   type ProviderTransport,
@@ -154,6 +155,27 @@ describe('ProviderSubject robots gate', () => {
     const plain = new CountingTransport()
     await new ProviderSubject(decl(), plain, 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST')
     expect(plain.regions).toEqual([undefined])
+  })
+
+  it('judges its region\'s row checks with the same table reading as its answer, and a selection not on the page as unjudged (PA C2, C3)', async () => {
+    const { fetcher } = robotsServing(AMAZON_SHAPED)
+    const verify = { checks: [{ type: 'markdownIncludes' as const, text: 'AAPL' }, { type: 'tableRowsMin' as const, tableIndex: 0, columns: [0, 1], min: 2 }] }
+    // Only row checks on the tables format get a reader: any other region is the one regionSpecOf gives.
+    expect(providerRegion({ verify })).toEqual({ contract: verify })
+    expect(providerRegion({ verify: { checks: [verify.checks[0]!] }, includeTables: true })).toEqual({ contract: { checks: [verify.checks[0]!] } })
+    const body = PAGE.replace('</article>', '<table><tr><th>Date</th><th>Close</th></tr><tr><td>2026-10-19</td><td>$252.29</td></tr><tr><td>2026-10-16</td><td>$247.45</td></tr></table></article>')
+    for (const options of [{ verify, includeTables: true }, { verify, includeTables: true, onlyMainContent: false }, { verify, includeTables: true, includeTags: ['article'] }]) {
+      const tablesOf = providerRegion(options)?.tablesOf
+      expect(tablesOf).toBeDefined()
+      const out = await new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, options)
+      expect(out.tables?.[0]?.rows).toHaveLength(3)
+      expect(tablesOf!(body, 'https://shop.example/dp/B0TEST')).toEqual(out.tables)
+    }
+    // A selection that names nothing on the page yet: the answer would hold no tables, the wait cannot tell.
+    const unmatched = { verify, includeTables: true, includeTags: ['#quotes'] }
+    const none = await new ProviderSubject(decl(), new CountingTransport({ body }), 'standard', null, fetcher).fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, unmatched)
+    expect(none.tables).toEqual([])
+    expect(providerRegion(unmatched)!.tablesOf!(body, 'https://shop.example/dp/B0TEST')).toBeUndefined()
   })
 
   it('returns the whole page for onlyMainContent false, with the same evidence', async () => {

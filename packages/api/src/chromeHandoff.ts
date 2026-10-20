@@ -707,7 +707,8 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       const overlap = hiddenFrom === null || hiddenTo === null ? 0 : Math.max(0, hiddenTo - Math.max(settleSince, hiddenFrom))
       const settle: SteadyOutcome = { waitedMs: Math.max(0, Date.now() - settleSince - overlap), loadingSeen, stillLoading: state.loading === true, steady }
       // Settled, the region the task needs is read once a poll until the contract's checks hold, within its bound and the
-      // caller's wait; a view that can judge none of them is not waited for, and its one read says why (`unjudged`).
+      // caller's wait; a view that can judge none of them is not waited for, and its one read says why (`unjudged`), nor is
+      // one whose only checks left are rows this lane has no table reader for (`settled`, `tablesUnjudged`).
       if (options.region !== undefined && regionView !== null) {
         region ??= new RegionTracker(options.region)
         regionSince ??= Date.now()
@@ -720,7 +721,7 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
           view = undefined
         }
         const ready = region.observe(view)
-        if (!ready && region.judgeable && Date.now() - regionSince < REGION_WAIT_MAX_MS && Date.now() - started + pollMs < waitMs) continue
+        if (!ready && region.judgeable && !region.settled && Date.now() - regionSince < REGION_WAIT_MAX_MS && Date.now() - started + pollMs < waitMs) continue
       }
       const regionOutcome = region !== null ? region.outcome() : undefined
       let html = state.html
