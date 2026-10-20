@@ -116,7 +116,8 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     const completed = job.counts.pages + job.counts.errors
     return {
       taskId: job.id, kind: job.kind, status: job.status, failureReason: job.failureReason, budgetExceeded: job.budgetExceeded ?? null,
-      pagesFetched: job.counts.pages, errors: job.counts.errors, completed,
+      // As a local crawl counts them: pagesFetched is every page read, failed ones included; succeeded and failed split them.
+      pagesFetched: completed, succeeded: job.counts.pages, failed: job.counts.errors, errors: job.counts.errors, completed,
       ...(requested === null ? {} : { requested, remaining: Math.max(0, requested - completed) }),
       credits: { used: job.credits.used, maxCredits: job.credits.maxCredits },
       createdAt: job.createdAt, finishedAt: job.finishedAt, expiresAt: job.expireAt,

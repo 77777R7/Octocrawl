@@ -206,6 +206,7 @@
 - [x] **V7** 查 A32（Wikipedia 的 crawl 只存了 1 页，期望 7 页）和 L11（`anyOf` 观测值 `okokx | xxx`）。
   - A32：本地也是 1/4、`stepCount` 1（例如 `research/parity/runs/2026-10-13-health-all-proxied-cb75f80c.md`），不是 hosted 的问题。爬取范围是文章路径下的子树，这篇文章没有子页面。这个用例本身要另外处理，不挡 H1。
   - L11：失败的是“每页 trace 里有 `robots_checked allowed`”这一项，原因同 V6。
+- [x] **V9**（V8 发现）hosted 的 `pagesFetched` 只算成功的页，本地算所有读过的页（失败的也算）。A14 和 A31 因此报 24、23 对 30。已改成和本地一样：`pagesFetched` 包括失败的页，另外加上 `succeeded` 和 `failed`。
 - [ ] **V8** V4–V7 做完后再跑一遍 V1（L02、L04、L11、A13–A15、A26–A35），A29 的不带 key 检查对 hosted 不适用，要注明。
 - [ ] **V3** 在 ROADMAP 的 H1 行下标记完成，链接到记录。要等 V8 通过。
 
