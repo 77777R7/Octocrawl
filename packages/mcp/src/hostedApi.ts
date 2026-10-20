@@ -235,6 +235,8 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
     schema.properties.mode = scrape.properties.mode!
     schema.properties.maxFileBytes = { ...schema.properties.maxFileBytes, maximum: HOSTED_MAX_FILE_BYTES }
   }
+  // An error list's items lose their usage and trace as pages do (H2 M8): debug asks for them back.
+  if (tool.name === 'get_batch_errors' || tool.name === 'get_crawl_errors') schema.properties.debug = { type: 'boolean', description: 'Keep each item\'s usage and trace. Default false.' }
   if (schema.properties.timeoutMs) schema.properties.timeoutMs = { ...schema.properties.timeoutMs, maximum: HOSTED_MCP_WAIT_MS }
   // A page of a hosted job's list is at most HOSTED_MCP_LIST_MAX items, and so is what maxResults follows.
   for (const key of ['limit', 'maxResults']) if (schema.properties[key] && Number(schema.properties[key].maximum) > HOSTED_MCP_LIST_MAX) schema.properties[key] = { ...schema.properties[key], maximum: HOSTED_MCP_LIST_MAX }
@@ -931,6 +933,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const call = { ...((args ?? {}) as Record<string, unknown>) }
           // The start's answer would carry the webhook's secret into the agent's transcript (H2 W2).
           if (call.webhook !== undefined && call.webhook !== null) throw new Error(`${name} on hosted Octocrawl takes no webhook over MCP, since the answer carries its signing secret; start the job with POST /v1/${name === 'crawl' ? 'crawl' : 'batches'} to have its end posted`)
+          // debug on an error list only keeps the items whole here (withoutTelemetry); the list itself takes none.
+          if (name === 'get_batch_errors' || name === 'get_crawl_errors') delete call.debug
           if (typeof call.timeoutMs === 'number') call.timeoutMs = Math.min(call.timeoutMs, HOSTED_MCP_WAIT_MS)
           for (const key of ['limit', 'maxResults']) if (typeof call[key] === 'number') call[key] = Math.min(call[key] as number, HOSTED_MCP_LIST_MAX)
           return call

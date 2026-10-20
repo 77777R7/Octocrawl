@@ -63,7 +63,7 @@
   - hosted 的 `get_batch_errors` 描述改成 `{ items, nextCursor, hasMore }`，说明每条和 `get_batch_items` 一样，robots 拒绝的 URL 以 blocked 出现。
   - `crawl` 和 `batch_scrape` 的 `formats` 直接用 hosted scrape 的那份：没有浏览器通道就没有截图。
 - [x] **M8** hosted MCP 的任务条目里带着 `usage` 和完整的 `trace`。hosted 的 scrape 会去掉这些，而 `get_crawl_pages` 的描述写的是“不带 debug 时不含 trace”。这一项在 A1 中发现。
-  - `withoutTelemetry`（`results.ts`）对 `get_batch_items`、`get_crawl_pages`、`get_*_errors` 的每条去掉 `usage` 和 `trace`，`debug: true` 时原样返回；Evidence Record 不动。
+  - `withoutTelemetry`（`results.ts`）对 `get_batch_items`、`get_crawl_pages`、`get_*_errors` 的每条去掉 `usage` 和 `trace`，`debug: true` 时原样返回；Evidence Record 不动。hosted 的两个 errors 工具为此加了 `debug` 参数。
 - [x] **M9** hosted 的 `batch_scrape` schema 还列着 `mode: authed`，`maxFileBytes` 的上限是 500 MB，描述里提到 `appendToId`。这一项在 A1 中发现。
   - `crawl` 和 `batch_scrape` 的 `mode` 只剩 standard 和 research，`maxFileBytes` 上限 5 MiB；描述去掉 `appendToId`、`actions` 和“保留多久没说明”（hosted 的说明里写了 7 天）。
   - 测试在 `packages/mcp/test/hostedJobMcp.test.ts`。

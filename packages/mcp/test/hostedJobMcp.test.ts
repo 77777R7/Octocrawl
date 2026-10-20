@@ -145,9 +145,11 @@ describe('hosted job tools over MCP', () => {
       expect(text(result), name).not.toMatch(/"usage"|"trace"/)
     }
     // debug asks for the whole.
-    for (const [name, id] of [['get_batch_items', batch], ['get_crawl_pages', crawl]] as const) {
-      const items = structured(await client.callTool({ name, arguments: { id, debug: true } })).items as Array<Record<string, unknown>>
-      expect(items[0], name).toMatchObject({ usage: { credits: 1 }, trace: [{ step: 'fetch', ms: 12 }], evidenceRecord })
+    for (const [name, id, ms] of [['get_batch_items', batch, 12], ['get_crawl_pages', crawl, 12], ['get_batch_errors', batch, 3], ['get_crawl_errors', crawl, 3]] as const) {
+      const result = await client.callTool({ name, arguments: { id, debug: true } })
+      expect(result.isError ?? false, `${name} ${text(result)}`).toBe(false)
+      const items = ((result as { structuredContent?: unknown }).structuredContent === undefined ? JSON.parse(text(result)) : structured(result)).items as Array<Record<string, unknown>>
+      expect(items[0], name).toMatchObject({ usage: { credits: 1 }, trace: [{ step: 'fetch', ms }], evidenceRecord })
     }
   })
 
