@@ -161,7 +161,8 @@ class ReservedV2Manifest(unittest.TestCase):
         slots={};[slots.__setitem__(c['stratum'],slots.get(c['stratum'],0)+c['fieldSlots']) for c in self.v2['cases']]
         for stratum,ids in self.v2['annotation']['spotCheck']['fields'].items():
             self.assertGreaterEqual(len(ids),0.2*slots[stratum])
-        self.assertIsNone(self.v2['annotation']['spotCheck']['by'])
+        check=self.v2['annotation']['spotCheck']
+        if check['by'] is not None:self.assertTrue((Path(__file__).parent.parent.parent/check['record']).exists())
         self.assertFalse(self.v2['candidateRuns'])
 
 if __name__=='__main__':unittest.main()

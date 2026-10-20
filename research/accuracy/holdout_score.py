@@ -380,8 +380,21 @@ def d_mapped(case,md,text,meta,tables,fixture_origin,put,duplicates):
    else:put(f,v,ref,unit='%' if v and norm(v).endswith('%') else None,period=norm(header[j]) if j is not None else None)
  else:raise ValueError('Unsupported development case '+cid)
 
+SCHEMA_AVAILABILITY=re.compile(r'https?://schema\.org/([A-Za-z]+)')
+def availability(s):
+ """schema.org ItemAvailability URL or its label, as one comparable token: InStock, 'In stock', 'IN STOCK' -> instock."""
+ t=norm(s);m=SCHEMA_AVAILABILITY.fullmatch(t)
+ return (m[1] if m else t).replace(' ','').replace('-','').casefold()
+def month_only(s):
+ """'YYYY-MM', 'June 2031' or 'Jun 2031' as YYYY-MM; None for anything with a day or no month."""
+ t=norm(s)
+ if re.fullmatch(r'\d{4}-\d{2}',t):return t
+ return date_of(t,True) if re.fullmatch(r'[A-Za-z]+\.?\s+\d{4}',t) else None
+
 def equal(value,expected,datatype):
  if value is None:return False
+ if expected is not None and SCHEMA_AVAILABILITY.fullmatch(norm(expected)):return availability(value)==availability(expected)
+ if expected is not None and month_only(expected) and month_only(value):return month_only(value)==month_only(expected)
  if expected is None:return False
  if datatype in ['integer','decimal']:
   try:return Decimal(norm(value).replace(',','').lstrip('$£€').strip())==Decimal(expected)

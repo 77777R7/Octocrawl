@@ -105,7 +105,7 @@ Records go to `runs/<YYYY-MM-DD>-<label>-<commit>.md` with the command, commit a
 
 ## Reserved set v2
 
-`reserved.v2.json` freezes 42 tasks (295 fields) in six strata of seven: article, product, list, table, dynamic region and document metadata. Each task names its fields and the record selection (one page subject, or the first three records). Each field records:
+`reserved.v2.json` freezes 42 tasks (295 field slots: 294 captured, one start time the page does not state) in six strata of seven: article, product, list, table, dynamic region and document metadata. Each task names its fields and the record selection (one page subject, or the first three records). Each field records:
 
 - subject: entity and record span;
 - value;
@@ -118,5 +118,6 @@ Which cases test which pitfalls is kept in the private annotations, so that nobo
 The tasks avoid every URL and registrable domain of the 92 frozen tasks, H01–H08, D01–D10 and the parity sites.
 
 - **Data:** raw pages, captures and labels are in `.w2l/field-gold/reserved-v2/` (git-ignored). The plan and seal hashes are in the JSON. `audit_gold.py .w2l/field-gold/reserved-v2` re-derives every value from the source bytes.
-- **Annotation:** this session (Claude Code, pa-r-eval-sets, 2026-10-20) picked and labelled the tasks. Howard or one outside reviewer still has to spot-check the 62 listed fields (20% of each stratum, seeded sample). The result goes in a new dated record under `runs/`, naming the reviewer; the frozen files stay unchanged.
+- **Offsets:** evidence offsets count characters of the source as stored. Read `source.html` with `open(p, encoding='utf-8', newline='')` (or decode the bytes); some sources (V08, V09, V14, V40) use CRLF line endings, and Python's default newline translation shifts every offset after the first line break.
+- **Annotation:** this session (Claude Code, pa-r-eval-sets, 2026-10-20) picked and labelled the tasks. Howard spot-checked the 62 sampled fields (20% of each stratum, seeded sample) on 2026-10-20 and agreed with all 62; see `runs/2026-10-20-reserved-v2-spot-check.md`. A correction to V31 outside the sample was made in the same reseal (`corrections` in the JSON). A later disagreement means a new seal and a new commit of the JSON, before any candidate runs.
 - **Not run:** no candidate and no Octocrawl code has seen these URLs; `candidateRuns` is empty. The first run is Phase 2's same-day pair. Before it, the request shape, the output-to-field mappings and the scorer commit are fixed. With zero false successes, the one-sided 95% upper bound at N=42 is 6.9% (7.2% at N=40).
