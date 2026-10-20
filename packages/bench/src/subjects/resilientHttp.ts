@@ -31,6 +31,7 @@ import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageE
 import { captureRawHtml } from '../rawArtifact.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
+import { withExtractionCandidates } from './candidateExtraction.js'
 
 /**
  * Resilient HTTP subject: the resilient transport engine (redirect following
@@ -825,7 +826,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       ? { html: body, options: { baseUrl: out.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
       : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, out.finalUrl, options, trace, 'http', wallMs)
 
-    return finish({
+    // A contract that fails on what was extracted reads this capture again before any other rung (candidateExtraction.ts).
+    return finish(withExtractionCandidates({
       ...base,
       status: 'success',
       failureReason: null,
@@ -853,7 +855,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       },
       ...htmlFormats(body, body, extracted.mainHtml, options),
       usage: { ...base.usage, contentTokens },
-    })
+    }, { html: body, url: out.finalUrl, options, lane: 'http', at: wallMs }))
   }
 
   private denied(url: string, start: number, trace: TraceEvent[], failureReason: FetchResult['failureReason']): FetchResult {

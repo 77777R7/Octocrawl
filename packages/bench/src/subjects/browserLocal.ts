@@ -59,6 +59,7 @@ import {
   type HonestyVerdict,
   type IdentityDevice,
 } from '@w2l/contracts'
+import { withExtractionCandidates } from './candidateExtraction.js'
 
 /**
  * Headers that never go into the as-sent record or the trace: a credential
@@ -1429,7 +1430,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const tables = tablesFormat(wholePageAsked(options)
         ? { html: converted, options: { baseUrl: pageUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
         : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, pageUrl, options, trace, 'browser_local', wallMs)
-      return {
+      // A contract that fails on what was extracted reads this capture again before any other rung (candidateExtraction.ts).
+      return withExtractionCandidates({
         ...base,
         status: waitCutShort ? 'partial' : 'success',
         failureReason: null,
@@ -1458,7 +1460,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         // rawHtml is the page as rendered; html comes from the copy extraction read, without its layout markers.
         ...htmlFormats(body, converted, extracted.mainHtml, options),
         usage: { ...base.usage, contentTokens: estimateTokens(markdown), ...(waitCutShort ? { deadlineExceeded: true } : {}) },
-      }
+      }, { html: converted, url: pageUrl, options, lane: 'browser_local', at: wallMs })
     } catch (err) {
       const wallMs = Date.now() - start
       // Playwright surfaces deadline misses as TimeoutError; map them to the

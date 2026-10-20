@@ -31,6 +31,7 @@ import { loadingWaitEvent, withStillLoadingWarning, type SettleOutcome } from '.
 import { regionSpecOf, regionWaitEvent, type RegionOutcome, type RegionSpec } from '../regionWait.js'
 import type { Dispatcher } from 'undici'
 import { captureEvent, newCapture, newView, selectionView, viewEvent, type ResponseMatch } from '../capture.js'
+import { withExtractionCandidates } from './candidateExtraction.js'
 
 /**
  * Provider lane: hand the fetch to a third-party that fights anti-bot systems
@@ -631,7 +632,8 @@ export class ProviderSubject implements SubjectAdapter {
     const tables = tablesFormat(wholePageAsked(options)
       ? { html: res.body, options: { baseUrl: res.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
       : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, res.finalUrl, options, trace, 'provider', wallMs)
-    return withListCaveat({
+    // A contract that fails on what was extracted reads this capture again before any other rung (candidateExtraction.ts).
+    return withListCaveat(withExtractionCandidates({
       ...base,
       status: 'success',
       failureReason: null,
@@ -659,7 +661,7 @@ export class ProviderSubject implements SubjectAdapter {
       ...extra,
       ...tables,
       usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
-    })
+    }, { html: res.body, url: res.finalUrl, options, lane: 'provider', at: wallMs }))
   }
 
   /**
