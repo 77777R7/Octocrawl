@@ -130,6 +130,17 @@ Likely cause, **not isolated**: D1–D5 (#628) leave a product field out with `f
   - F3a/F3b's same-capture candidates run when a contract fails with readiness `not_extracted`. Their output did not change any scored value here, because the json extraction does not read those candidates.
   - Most of the 0 and low scores come from the request: arrays left unfilled, and task field names the deterministic path does not know. Those parts are equal on both sides by construction and say nothing about the difference between the commits.
 
+## Decision (Howard, 2026-10-20)
+
+Added after the run; the results above are unchanged.
+
+1. **V12 `price` is an acceptable abstention, not a regression.** The control's answer had a value that matched only by coincidence, with the wrong currency. The candidate abstains with `field_ambiguous` on conflicting offers, which is what D is for.
+2. **The Phase 2 exit condition is met (2026-10-20, Howard's ruling on V12).** On the json/verify request, the candidate is not lower than the control.
+3. **The D/F gains are not proven.**
+   - No extraction model is configured here, so F2 was not measured.
+   - The deterministic json path does not fill arrays, so list records need an `itemSelector` or a model.
+   - Both measurements move to K1, where the comparison against competitors gets a model configuration (the same on both arms) and `itemSelector`s for the list and table tasks.
+
 ## Per-field marks
 
 The scorer's `fields.md` for each set is kept in the run directory under `.w2l/`. Every per-field mark is identical between the two sides, except V12 `price` above.
