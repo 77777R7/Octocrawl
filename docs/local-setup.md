@@ -60,6 +60,20 @@ permits loopback delivery and pins trust to the generated local certificate.
 The receiver and its SQLite inbox run as a separate LaunchAgent; neither
 service becomes reachable from another machine.
 
+The service reads an [access grant](access.md) as `octocrawl serve` and the
+`octocrawl` commands do: `W2L_ACCESS_GRANT` (a file path or the JSON itself),
+and with it `W2L_BROWSER_ENGINE`, `W2L_BROWSER_IDENTITY`, `W2L_COMPAT_HOSTS`,
+`W2L_EGRESS_PROXIES`, `W2L_EGRESS_ECHO_URL`, `W2L_WORKER_COUNT` and the
+`W2L_PER_HOST_*` pacing, so the same grant gives it the same rungs. Without a
+grant it answers `access: "enhanced"` with `unsupported_parameter`, as before.
+`npm run local:mcp:install` writes the `W2L_ACCESS_GRANT` of the shell it runs
+in into the LaunchAgent (a path made absolute), or put a
+`W2L_ACCESS_GRANT=...` line in `.w2l/local-mcp.env`; the service prints what
+the grant allows when it starts (`.w2l/local-mcp.stdout.log`). With
+`W2L_AMAZON_PUBLIC_STATE_FILE` set, a grant's `installed_chrome` builds no
+rung, since that state keeps the service's browser to Amazon.sg's hosts; the
+service says so at startup.
+
 ## The standalone REST API
 
 The legacy standalone REST API remains available for SDK and Firecrawl-shim

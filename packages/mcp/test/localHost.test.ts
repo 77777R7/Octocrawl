@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest'
 import { createServer, request } from 'node:http'
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -106,3 +106,89 @@ it('serves MCP 2026-07-28 without a session, still answers a 2025-11-25 initiali
     expect(listed.isError).not.toBe(true)
   } finally {await client.close()}
 })
+
+// An enhanced grant with a Steel tariff: the local host builds the provider rung from it (connectVendor waits for the first fetch, so nothing leaves this machine).
+const STEEL_GRANT={tier:'enhanced',capabilities:['vendor_remote_browser'],budget:{perRunUsd:0.05,perRequestUsd:0.05},tariffs:{steel:{perHourUsd:0.1,maxSessionMs:120000,minBilledMs:1,billingIncrementMs:1}},attestation:{principal:'test',at:'2026-10-20T00:00:00Z',statement:'test grant'}}
+
+const freePort=async()=>{
+  const probe=createServer()
+  probe.listen(0,'127.0.0.1');await once(probe,'listening')
+  const port=(probe.address() as AddressInfo).port
+  await new Promise<void>(done=>probe.close(()=>done()))
+  return port
+}
+
+const scrapeText=async(port:number,args:Record<string,unknown>)=>{
+  const client=new Client({name:'w2l-local-test',version:'1.0.0'})
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)))
+  try {
+    const result=await client.callTool({name:'scrape',arguments:args},undefined,{timeout:60_000})
+    const item=(result.content as CallToolResult['content']).find(entry=>entry.type==='text')
+    return {isError:result.isError===true,text:item?.type==='text'?item.text:''}
+  } finally {await client.close()}
+}
+
+/** A page on loopback, with no robots.txt; the vendor variables a test sets are put back after it. */
+const withSite=async(run:(url:string)=>Promise<void>)=>{
+  const saved={vendors:process.env.W2L_VENDORS,steel:process.env.STEEL_API_KEY}
+  process.env.W2L_VENDORS='steel'
+  process.env.STEEL_API_KEY='fake-steel-key'
+  const site=createServer((req,res)=>{
+    if(req.url==='/robots.txt'){res.writeHead(404).end();return}
+    res.writeHead(200,{'content-type':'text/html; charset=utf-8'}).end('<html><head><title>Tides</title></head><body><main><h1>Tide table</h1><p>High water at 06:12 and 18:40, low water at 00:05 and 12:27 on the harbour gauge.</p></main></body></html>')
+  })
+  site.listen(0,'127.0.0.1');await once(site,'listening')
+  try {await run(`http://127.0.0.1:${(site.address() as AddressInfo).port}/tides`)}
+  finally {
+    await new Promise<void>(done=>site.close(()=>done()))
+    for(const [name,value] of [['W2L_VENDORS',saved.vendors],['STEEL_API_KEY',saved.steel]] as const){if(value===undefined)delete process.env[name];else process.env[name]=value}
+  }
+}
+
+const startLocal=async(env:NodeJS.ProcessEnv)=>{
+  const port=await freePort()
+  root??=await mkdtemp(join(tmpdir(),'w2l-local-host-'))
+  const config=localConfigFromEnv({W2L_LOCAL_MCP_PORT:String(port),W2L_TASK_ROOT:root,...env})
+  const service=createLocalService(config)
+  close=service.close
+  if(!service.server.listening)await once(service.server,'listening')
+  return {port,config}
+}
+
+type Scraped={status:string;channelsTried:string[];ladderTrace:{event:string;detail:{dropped?:string[]}}[];metadata:{cacheState?:string}}
+const dropped=(response:Scraped)=>response.ladderTrace.filter(event=>event.event==='ladder_channels_filtered').flatMap(event=>event.detail.dropped ?? [])
+
+it('takes the access grant from W2L_ACCESS_GRANT: access enhanced reaches the provider rung the grant names',()=>withSite(async url=>{
+  const {port,config}=await startLocal({W2L_ACCESS_GRANT:JSON.stringify(STEEL_GRANT)})
+  expect(config.notices).toEqual([expect.stringMatching(/^access grant \(ADR 0005\): tier enhanced; vendor_remote_browser/)])
+  // A header keeps the page off the provider rungs: the audit names the rung it dropped, so the set is seen without a paid call.
+  const answer=await scrapeText(port,{url,access:'enhanced',headers:{'accept-language':'en'},debug:true,storeInCache:false})
+  expect(answer.isError,answer.text).toBe(false)
+  const response=JSON.parse(answer.text) as Scraped
+  expect(response.status).toBe('success')
+  expect(response.channelsTried).toEqual(['http'])
+  expect(dropped(response)).toEqual(['provider(steel)'])
+}))
+
+it('keeps a page read under the grant apart from one read without it in the page cache',()=>withSite(async url=>{
+  const read=async(port:number)=>JSON.parse((await scrapeText(port,{url,maxAge:600_000,debug:true})).text) as Scraped
+  const plain=await startLocal({})
+  expect((await read(plain.port)).metadata.cacheState).toBe('miss')
+  expect((await read(plain.port)).metadata.cacheState).toBe('hit')
+  await close?.();close=undefined
+  // The same task root, now with a grant: the grant is in the cache key, so the page is read again, then reused under it.
+  const granted=await startLocal({W2L_ACCESS_GRANT:JSON.stringify(STEEL_GRANT)})
+  expect((await read(granted.port)).metadata.cacheState).toBe('miss')
+  expect((await read(granted.port)).metadata.cacheState).toBe('hit')
+}))
+
+it('builds its rungs with the Amazon.sg state and an installed_chrome grant, leaving that rung out and saying so',()=>withSite(async url=>{
+  const state=join(root ??= await mkdtemp(join(tmpdir(),'w2l-local-host-')),'amazon-state.json')
+  await writeFile(state,JSON.stringify({cookies:[{name:'i18n-prefs',value:'SGD',domain:'.amazon.sg',path:'/',expires:-1,httpOnly:false,secure:true,sameSite:'Lax'}],origins:[]}))
+  const grant={tier:'enhanced',capabilities:['installed_chrome'],attestation:{principal:'test',at:'2026-10-20T00:00:00Z',statement:'test grant'}}
+  const {port,config}=await startLocal({W2L_ACCESS_GRANT:JSON.stringify(grant),W2L_AMAZON_PUBLIC_STATE_FILE:state})
+  expect(config.notices?.join('\n')).toMatch(/installed_chrome: no rung while W2L_AMAZON_PUBLIC_STATE_FILE is set/)
+  const answer=await scrapeText(port,{url,access:'enhanced',debug:true,storeInCache:false})
+  expect(answer.isError,answer.text).toBe(false)
+  expect((JSON.parse(answer.text) as Scraped).status).toBe('success')
+}))

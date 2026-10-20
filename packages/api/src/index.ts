@@ -10,6 +10,8 @@ export type { UserChrome, UserChromeOptions, UserChromeReadOptions } from './chr
 export type { ApiEngine, ApiEngineOptions, CrawlWithSteps, HandoffHooks, SliceCharge, SliceLimits, SliceResult } from './engine.js'
 export { compactScrapeResponse, extractStructured } from './structured.js'
 export { deliveryConfig, JOB_STREAMS_OFF_NOTICE, parseListen, parsePort } from './listen.js'
+export { loadEngineConfig, preloadEngineModules, tunedPolicy } from './engineConfig.js'
+export type { EngineConfig } from './engineConfig.js'
 export { runApiServer } from './cli.js'
 export { closeIdleOnlyWhenUnread } from './keepAlive.js'
 // The optional Patchright engine's loader, for the octocrawl commands' startup check (ADR 0005 enhanced_browser).
