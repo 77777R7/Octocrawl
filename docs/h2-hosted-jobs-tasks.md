@@ -59,7 +59,14 @@
     - 列表工具的 `limit` 和 `maxResults` 收紧到 100；
     - `maxCredits` 从工具 schema 去掉，见 M6。
 - [ ] **M6** MCP 的 `crawl` 和 `batch_scrape` 支持 `maxCredits`：contracts 的解析和 SDK 都要认这个参数。REST 已经接受它。
-- [ ] **M7** `get_batch_errors` 的描述写的是本地的 `{ errors, robotsBlocked }`，hosted 返回的是 `{ items, nextCursor, hasMore }`；没有浏览器通道的连接，schema 里还列着截图格式（REST 会拒绝并说明原因）。这两处要改。
+- [x] **M7** `get_batch_errors` 的描述写的是本地的 `{ errors, robotsBlocked }`，hosted 返回的是 `{ items, nextCursor, hasMore }`；没有浏览器通道的连接，schema 里还列着截图格式（REST 会拒绝并说明原因）。这两处要改。
+  - hosted 的 `get_batch_errors` 描述改成 `{ items, nextCursor, hasMore }`，说明每条和 `get_batch_items` 一样，robots 拒绝的 URL 以 blocked 出现。
+  - `crawl` 和 `batch_scrape` 的 `formats` 直接用 hosted scrape 的那份：没有浏览器通道就没有截图。
+- [x] **M8** hosted MCP 的任务条目里带着 `usage` 和完整的 `trace`。hosted 的 scrape 会去掉这些，而 `get_crawl_pages` 的描述写的是“不带 debug 时不含 trace”。这一项在 A1 中发现。
+  - `withoutTelemetry`（`results.ts`）对 `get_batch_items`、`get_crawl_pages`、`get_*_errors` 的每条去掉 `usage` 和 `trace`，`debug: true` 时原样返回；Evidence Record 不动。
+- [x] **M9** hosted 的 `batch_scrape` schema 还列着 `mode: authed`，`maxFileBytes` 的上限是 500 MB，描述里提到 `appendToId`。这一项在 A1 中发现。
+  - `crawl` 和 `batch_scrape` 的 `mode` 只剩 standard 和 research，`maxFileBytes` 上限 5 MiB；描述去掉 `appendToId`、`actions` 和“保留多久没说明”（hosted 的说明里写了 7 天）。
+  - 测试在 `packages/mcp/test/hostedJobMcp.test.ts`。
 
 ## P：任务进度数据
 
