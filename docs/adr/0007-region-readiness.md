@@ -93,6 +93,10 @@
 
 最终 verification/readiness/Evidence Record 仍从实际交付生成；等待通过只覆盖配置检查，不代表独立准确性验收。延迟组件的 localhost 回归不替代 Nasdaq 首失败、实站稳定性或正式发布门槛。
 
+### 2026-10-20：没有表格读取器的通道（PA C2，决定 12）
+
+上一节"其他通道保持已有局部视图"改为：任何通道带 `tableRowsMin` 时，行检查只有被表格读取器判定并通过才算就绪。没有读取器的通道（我的浏览器通道，以及没请求 `tables` 的请求）报 `tablesUnjudged`、永不 ready；其余能判定的检查连续两读通过后，等待就此结束，不再空等到上限。provider 通道接上了读取器：它的答案不做布局捕获，所以读取器读页面当前的 HTML（`page.content()` 同形，页面内超过 LAYOUT_MAX_ELEMENTS 或 1 MB 就拒绝），用与最终答案同一个函数（`regionTables`、`tablesSource`）取表。请求了选区（`includeTags`、列表的 itemSelector）而页面上还没有匹配的元素时，读取结果是未知，不是空表。readiness 和阶梯照旧：`tablesUnjudged` 走 `region_unjudged`，阶梯把它当 `not_served` 继续向上；最终交付的表格检查通过仍是 `ready`。
+
 ### 3. 结果说明是哪一种
 
 每个 scrape 结果和每个 crawl 页面都带：

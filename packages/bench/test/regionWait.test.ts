@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { VerifyContract } from '@w2l/contracts'
+import { verify } from '@w2l/runtime'
 import { MAX_REGION_SCROLLS, RegionTracker, regionSpecOf, regionWaitEvent, waitForRegion } from '../src/regionWait.js'
 
 /** A page whose region view is `views[n]` on its nth read (the last from then on), with a clock the waits move. */
@@ -296,6 +297,42 @@ describe('table contracts during the region wait', () => {
       expect(out.reads).toBe(3)
       expect(out.checks[1]?.passed).toBe(tables === undefined ? null : false)
       expect(out.tablesUnjudged).toBe(tables === undefined ? true : undefined)
+    }
+  })
+
+  it('judges no table check without a table reader (PA C2 (a))', async () => {
+    const shown = page([view('AAPL')])
+    const out = await waitForRegion(shown, { contract: { checks: [contract.checks[1]!] } }, { maxMs: 5_000, now: shown.now })
+    // Until decision 12 (2026-10-20) this read left tablesUnjudged out; the row check is now reported unjudged as such.
+    expect(out).toMatchObject({ ready: false, reads: 1, unjudged: 'checks_not_on_page', tablesUnjudged: true, checks: [{ passed: null }] })
+  })
+
+  it('never ends ready on the title alone when no table reader can judge the rows (PA C2 (b), decision 12)', async () => {
+    const shown = page([view('AAPL')])
+    const out = await waitForRegion(shown, { contract }, { maxMs: 5_000, now: shown.now })
+    expect(out.ready).toBe(false)
+    // Nothing further can be judged once the title has held twice: the wait ends there rather than at its bound.
+    expect(out).toMatchObject({ reads: 2, tablesUnjudged: true, checks: [{ passed: true }, { passed: null }] })
+    expect(out).not.toHaveProperty('unjudged')
+  })
+
+  it('judges rows by the same rule as the final verification, so the wait ends ready exactly when the answer would pass (PA C3)', () => {
+    const cases = [
+      table([['2026-01-01', '$100'], ['2026-01-02', '$101']]),
+      table([['2026-01-01', '$100']]),
+      table([['2026-01-01', ''], ['2026-01-02', '$101']]),
+      table([['2026-01-01'], ['2026-01-02']]),
+      [{ tableIndex: 0, headerRows: 0, rows: [['2026-01-01', '$100'], ['2026-01-02', '$101']] }],
+      [{ tableIndex: 0, headerRows: 1, rows: [['Date', 'Price']], omitted: 'too_large' as const }],
+      [],
+    ]
+    for (const tables of cases) {
+      const tracker = new RegionTracker({ contract, readTables: async () => tables })
+      tracker.observe(JSON.stringify(view('AAPL')), tables)
+      const live = tracker.observe(JSON.stringify(view('AAPL')), tables)
+      const final = verify(contract, { status: 'success', markdown: 'AAPL', tables })
+      expect(final.status === 'not_requested' ? null : final.checks[1]).toMatchObject(tracker.outcome().checks[1]!)
+      expect(live).toBe(final.status === 'passed')
     }
   })
 
