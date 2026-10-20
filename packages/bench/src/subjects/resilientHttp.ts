@@ -1,5 +1,5 @@
 import { sourceDataWarnings } from './sourceData.js'
-import { captureEvent, newCapture } from '../capture.js'
+import { captureEvent, documentOf, newCapture } from '../capture.js'
 import {
   estimateTokens,
   fileByteCap,
@@ -512,7 +512,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const rawBodySha256 = file === null && !undecoded && out.status !== null ? sha256Utf8(body) : null
     const rawArtifacts = rawBodySha256 === null ? [] : await captureRawHtml(body, rawBodySha256)
     // The body read is its own capture (PA B3), apart from any browser read of the same URL after it.
-    if (rawBodySha256 !== null) trace.push(captureEvent(newCapture({ sourceKind: 'http_body' }), Date.now() - start, 'http'))
+    const bodyCapture = rawBodySha256 === null ? null : newCapture({ sourceKind: 'http_body' })
+    if (bodyCapture !== null) trace.push(captureEvent(bodyCapture, Date.now() - start, 'http'))
 
     const base = {
       requestedUrl: url,
@@ -535,6 +536,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         setsCookie: out.headers?.get('set-cookie') != null,
         ...(this.networkPolicy.egressProxy ? { envProxy: this.envProxyFor(out.finalUrl) } : {}),
         ...(contentEncoding === undefined ? {} : { contentEncoding }),
+        ...(bodyCapture === null ? {} : { document: documentOf(bodyCapture) }),
       },
       usage: {
         wallMs,

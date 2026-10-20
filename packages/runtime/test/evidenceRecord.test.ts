@@ -67,6 +67,7 @@ describe('toEvidenceRecord', () => {
       access: { route: 'http', executor: 'undici', executorVersion: null, profile: null, externalCostUsd: null, completion: 'unattended', egress: { proxy: null, source: 'direct', switchedFrom: null, exit: null }, session: null, paidCalls: null, grant: null },
       verification: { status: 'not_requested', verifier: null, contractSha256: null, reason: null, failed: [] },
       readiness: { state: 'ready', basis: [] },
+      document: null,
     })
   })
 
@@ -320,6 +321,22 @@ describe('toEvidenceRecord', () => {
     expect(pdf.extractor).toEqual({ name: 'pdf-text', version: PDF_TEXT_VERSION, commit: null })
     const csv = toEvidenceRecord(result({ file: { ...file, kind: 'csv', contentType: 'text/csv', path: null } }), { mode: 'standard' }, {}, { sourceCommit: null })
     expect(csv).toMatchObject({ artifacts: [], extractor: { name: 'file-text', version: FILE_TEXT_VERSION } })
+  })
+
+  it('names the capture the content came from (PA G5): its id on every lane, the document count and response match where the lane saw them', () => {
+    const CAPTURE = '0b6c4f3e-2d0a-4b8e-9c1f-7a5d3e2b1c0a'
+    const documentOf = (lane: FetchResult['lane'], document: FetchResult['evidence']['document']) =>
+      toEvidenceRecord(result({ lane, evidence: { ...result().evidence, ...(document === undefined ? {} : { document }) } }), { mode: 'standard' }, {}).document
+    // The HTTP lane reads the response body itself: it states the capture, and no document count or match.
+    expect(documentOf('http', { captureId: CAPTURE, generation: null, responseMatch: null })).toEqual({ captureId: CAPTURE, generation: null, responseMatch: null })
+    expect(documentOf('browser_local', { captureId: CAPTURE, generation: 2, responseMatch: 'matched' })).toEqual({ captureId: CAPTURE, generation: 2, responseMatch: 'matched' })
+    // A vendor connector that opens no CDP session cannot see the documents: unobserved, never matched.
+    expect(documentOf('provider', { captureId: CAPTURE, generation: null, responseMatch: 'unobserved' })).toEqual({ captureId: CAPTURE, generation: null, responseMatch: 'unobserved' })
+    // No capture (no body read, a result stored before G5): null, not an invented id.
+    expect(documentOf('http', undefined)).toBeNull()
+    // Only the three public keys leave the evidence, whatever else a stored result carried.
+    const extra = { captureId: CAPTURE, generation: 1, responseMatch: 'mismatched', sourceHash: RAW, limits: { maxBytes: 1 } } as unknown as FetchResult['evidence']['document']
+    expect(documentOf('browser_local', extra)).toEqual({ captureId: CAPTURE, generation: 1, responseMatch: 'mismatched' })
   })
 
   it('records the environment proxy and the declared source commit', () => {

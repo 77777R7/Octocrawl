@@ -1,12 +1,7 @@
-import type { FetchOptions, Lane, TraceEvent } from '@w2l/contracts'
+import type { DocumentResponseMatch, EvidenceDocument, FetchOptions, Lane, TraceEvent } from '@w2l/contracts'
 
-/**
- * Whether the status and headers a result reports belong to the document whose content it read (PA B2):
- * `matched` when the lane saw that document's own response and no other document loaded while it read the page;
- * `mismatched` when it saw the page move on, or a document it could not pair with a response; `unobserved` when it
- * could not see the documents at all (a vendor connector that opens no CDP session). Unobserved is never matched.
- */
-export type ResponseMatch = 'matched' | 'mismatched' | 'unobserved'
+/** Whether the status and headers a result reports belong to the document it read (DocumentResponseMatch, PA B2). */
+export type ResponseMatch = DocumentResponseMatch
 
 /** What a capture's source can answer for: a layout copy, shadow tables, page actions, a screenshot. */
 export interface CaptureCapabilities {
@@ -70,7 +65,15 @@ export function selectionView(options: FetchOptions, parent: ViewRef): ViewRef |
   return newView({ captureId: parent.captureId, parentViewId: parent.viewId, selectionVersion: selection, transformVersion: parent.transformVersion })
 }
 
-/** The trace event that carries a capture (the public Evidence Record does not, until G5). */
+/**
+ * The public part of a capture, as `evidence.document` states it (PA G5): its id, the document count and the match.
+ * The rest (hashes, URLs, capabilities, limits) stays in the trace; a lane that stated neither leaves them null.
+ */
+export function documentOf(capture: CaptureRef): EvidenceDocument {
+  return { captureId: capture.captureId, generation: capture.documentGeneration ?? null, responseMatch: capture.responseMatch ?? null }
+}
+
+/** The trace event that carries a capture; the Evidence Record names it by `documentOf`. */
 export function captureEvent(capture: CaptureRef, at: number, lane: Lane): TraceEvent {
   return { at, lane, event: 'capture', detail: { ...capture } }
 }

@@ -118,6 +118,28 @@ export interface Meter {
   unknown: boolean
 }
 
+/**
+ * Whether the status and headers a result reports belong to the document whose content it read (PA B2):
+ * `matched` when the lane saw that document's own response and no other document loaded while it read the page;
+ * `mismatched` when it saw the page move on, or a document it could not pair with a response; `unobserved` when it
+ * could not see the documents at all (a vendor connector that opens no CDP session). Unobserved is never matched.
+ */
+export const DOCUMENT_RESPONSE_MATCHES = ['matched', 'mismatched', 'unobserved'] as const
+export type DocumentResponseMatch = (typeof DOCUMENT_RESPONSE_MATCHES)[number]
+
+/**
+ * The capture a result's content came from (PA G5, the public part of B3's CaptureRef): its id, which later reads,
+ * candidates and fields of the same document share, and what the lane saw of the document. Never the page's content.
+ */
+export interface EvidenceDocument {
+  /** A random id for this one read: each HTTP read and each browser read of a page gets its own. */
+  captureId: string
+  /** Documents the main frame loaded up to the read, as the browser lane counted them; null when the lane does not count (HTTP) or could not. */
+  generation: number | null
+  /** Null on the HTTP lane, which reads the response body itself and does not judge it against a document. */
+  responseMatch: DocumentResponseMatch | null
+}
+
 export interface Evidence {
   /**
    * Final URL after redirects: the last URL requested for the page, whose
@@ -192,6 +214,12 @@ export interface Evidence {
    * report its route (the provider lane).
    */
   envProxy?: string | null
+  /**
+   * The capture the content was read from (PA G5). Absent when the lane read
+   * no web page (no body, or a file) or keeps no capture (the my-browser lane), and on results stored
+   * before it.
+   */
+  document?: EvidenceDocument
 }
 
 export interface TraceEvent {

@@ -30,7 +30,7 @@ import type { VendorResumeContext } from '../vendors/transport.js'
 import { loadingWaitEvent, withStillLoadingWarning, type SettleOutcome } from '../browserSettle.js'
 import { regionSpecOf, regionWaitEvent, type RegionOutcome, type RegionSpec } from '../regionWait.js'
 import type { Dispatcher } from 'undici'
-import { captureEvent, newCapture, newView, selectionView, viewEvent, type ResponseMatch } from '../capture.js'
+import { captureEvent, documentOf, newCapture, newView, selectionView, viewEvent, type ResponseMatch } from '../capture.js'
 import { withExtractionCandidates } from './candidateExtraction.js'
 
 /**
@@ -463,6 +463,7 @@ export class ProviderSubject implements SubjectAdapter {
         rawBodySha256: sourceHash,
         artifacts: [],
         fetchedAt,
+        document: documentOf(pageCapture),
       },
       usage: {
         wallMs,

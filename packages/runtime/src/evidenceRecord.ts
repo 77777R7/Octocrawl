@@ -8,6 +8,7 @@
  */
 
 import {
+  DOCUMENT_RESPONSE_MATCHES,
   EVIDENCE_SCHEMA_VERSION,
   RESULT_STATUS,
   declaredContact,
@@ -21,6 +22,7 @@ import {
   type EvidenceVerification,
   type EvidencePaidCall,
   type EvidenceArtifact,
+  type EvidenceDocument,
   type EvidenceFieldLocation,
   type EvidencePageActions,
   type EvidenceRecord,
@@ -116,7 +118,20 @@ export function toEvidenceRecord(
     access: evidenceAccess(result),
     verification: evidenceVerification(result),
     readiness: evidenceReadiness(result),
+    document: evidenceDocument(evidence.document),
   }
+}
+
+/**
+ * The capture the lane read the content from (PA G5): its three public keys and nothing else a stored result
+ * carried; null without one, or with one that does not fit the schema (no id, a count or match out of range).
+ */
+function evidenceDocument(document: EvidenceDocument | undefined): EvidenceDocument | null {
+  if (document === undefined || typeof document.captureId !== 'string' || document.captureId === '') return null
+  const { captureId, generation, responseMatch } = document
+  if (generation !== null && !(Number.isInteger(generation) && generation >= 0)) return null
+  if (responseMatch !== null && !(DOCUMENT_RESPONSE_MATCHES as readonly string[]).includes(responseMatch)) return null
+  return { captureId, generation, responseMatch }
 }
 
 /** The result's readiness as the record states it: its state and basis, without the wait (ADR 0007). */

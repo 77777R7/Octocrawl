@@ -96,6 +96,10 @@ async function scrape(engine: ApiEngine, body: Record<string, unknown>): Promise
   return await res.json() as Record<string, unknown> & { evidenceRecord: EvidenceRecord; markdown?: string | null }
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+/** The capture the lane's trace names last (PA B3): the document a full response's `evidence.document` must name. */
+const tracedCapture = (full: Record<string, unknown>) => [...(full.trace as { event: string; detail: { captureId: string } }[])].reverse().find(event => event.event === 'capture')?.detail.captureId
+
 const robotsAllowed = { decision: 'allowed', robotsUrl: '', robotsSha256: sha256Utf8(ROBOTS), unreachable: null, crawlDelayMs: null, userOverride: false }
 const recently = (fetchedAt: string | null) => fetchedAt !== null && Math.abs(Date.parse(fetchedAt) - Date.now()) < 60_000
 
@@ -129,6 +133,20 @@ describe('Evidence Record: HTTP lane', () => {
     const compact = await scrape(http, { url: `${origin}/moved`, formats: ['markdown'], debug: false })
     expect(valid(compact.evidenceRecord)).toMatchObject({ finalUrl: `${origin}/article`, lane: 'http', outputSha256: { markdown: sha256Utf8(compact.markdown!) } })
     expect(compact).not.toHaveProperty('trace')
+  })
+
+  it('names the body it read as its capture, with no document count or match (PA G5)', async () => {
+    const full = await scrape(http, { url: `${origin}/article` })
+    const record = valid(full.evidenceRecord)
+    expect(record.document).toEqual({ captureId: expect.stringMatching(UUID), generation: null, responseMatch: null })
+    expect((full.evidence as { document?: unknown }).document).toEqual(record.document)
+    expect(record.document!.captureId).toBe(tracedCapture(full))
+    const compact = await scrape(http, { url: `${origin}/article`, debug: false })
+    expect(valid(compact.evidenceRecord).document).toEqual({ captureId: expect.stringMatching(UUID), generation: null, responseMatch: null })
+    // A record written before G5 has no document and stays valid; a match outside the enum does not.
+    const { document: _document, ...older } = record
+    valid(older as EvidenceRecord)
+    expect(validate({ ...record, document: { ...record.document, responseMatch: 'assumed' } })).toBe(false)
   })
 
   it('states the route and the client: undici on the http rung, impit on the compatible one, in the full and compact shapes', async () => {
@@ -179,6 +197,8 @@ describe('Evidence Record: HTTP lane', () => {
       status: 'failed', reason: 'policy_denied', finalUrl: null, redirectChain: { urls: [], complete: true }, httpStatus: null, fetchedAt: null, rawSha256: null,
       robotsDecision: { decision: 'disallowed', robotsUrl: `${origin}/robots.txt`, robotsSha256: sha256Utf8(ROBOTS), userOverride: false, overrideBasis: null },
       identity: { userAgent: null },
+      // No body was read, so no capture: null, not an invented id (PA G5).
+      document: null,
     })
   })
 
@@ -293,6 +313,15 @@ describe('Evidence Record: browser lane', () => {
     expect(valid(blocked.evidenceRecord)).toMatchObject({ status: 'blocked', httpStatus: 403, lane: 'browser_local' })
   })
 
+  it('names the document it read: its capture, how many documents the main frame loaded, and that the status is that document\'s own (PA G5)', async () => {
+    const full = await scrape(browser, { url: `${origin}/article`, formats: ['markdown'] })
+    const record = valid(full.evidenceRecord)
+    expect(record.document).toEqual({ captureId: expect.stringMatching(UUID), generation: expect.any(Number), responseMatch: 'matched' })
+    expect(record.document!.generation).toBeGreaterThanOrEqual(1)
+    expect((full.evidence as { document?: unknown }).document).toEqual(record.document)
+    expect(record.document!.captureId).toBe(tracedCapture(full))
+  })
+
   it('records the document a script or a meta refresh moved on to, in every response shape', async () => {
     const snapshot = { httpStatus: 404, contentType: 'text/html; charset=utf-8' }
     const full = await scrape(browser, { url: `${origin}/leaving`, formats: ['markdown'] })
@@ -355,6 +384,14 @@ describe('Evidence Record: provider lane', () => {
     expect(valid(missing.evidenceRecord)).toMatchObject({ status: 'failed', reason: 'http_error', httpStatus: 404, outputSha256: { markdown: sha256Utf8(missing.markdown!) } })
     const blocked = await scrape(provider, { url: `${origin}/challenge`, mode: 'research' })
     expect(valid(blocked.evidenceRecord)).toMatchObject({ status: 'blocked', httpStatus: 403, lane: 'provider' })
+  })
+
+  it('names its capture and, with no CDP session to see the documents, says the match is unobserved (PA G5)', async () => {
+    const full = await scrape(provider, { url: `${origin}/article`, mode: 'research' })
+    const record = valid(full.evidenceRecord)
+    expect(record.document).toEqual({ captureId: expect.stringMatching(UUID), generation: null, responseMatch: 'unobserved' })
+    expect((full.evidence as { document?: unknown }).document).toEqual(record.document)
+    expect(record.document!.captureId).toBe(tracedCapture(full))
   })
 
   it('lists each paid call, with what the ledger charged and what Octocrawl made of its page, and the grant it was made under (ROADMAP PA item 4)', async () => {
