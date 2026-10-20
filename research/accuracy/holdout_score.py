@@ -1,6 +1,6 @@
 """Frozen source-snapshot field review. Reads final SDK JSON; never runs the product."""
 from __future__ import annotations
-import argparse,datetime as dt,hashlib,html,json,re
+import argparse,datetime as dt,hashlib,html,json,math,re
 from collections import Counter
 from decimal import Decimal,InvalidOperation
 from pathlib import Path
@@ -183,39 +183,284 @@ def mapped(case,doc,fixture_origin):
     for i,line in enumerate(params.splitlines()):
      if re.fullmatch(r'(?:[-*]\s*)?'+re.escape(key)+r'(?:\s+Optional)?',norm(line)):v=key;r=pref+f'.line[{i}]';break
    put(f,v,r,date=date,entity=method is not None)
+ elif cid in DEV_CASES:
+  d_mapped(case,md,text,meta,tables,fixture_origin,put,duplicates)
  else:raise ValueError('Unsupported frozen case '+cid)
  return out,duplicates,notes
 
+# Development set D01-D10 (R3). Same rules as the H mappings: entity keys, record regions and
+# column headers come from the frozen task and entity IDs; values come only from the delivered output.
+DEV_CASES={f'D{i:02}' for i in range(1,11)}
+COINS={'coin-1':('Bitcoin','BTC'),'coin-2':('Ethereum','ETH'),'coin-3':('Tether','USDT')}  # named in D09's task text
+BOUNDARY={'D07':{'heading':r'Register/Sign in','boundary_instruction':r'Passkey'},'D08':{'heading':r'Security Verification','boundary_instruction':r'Fill each box with the required number of objects indicated'},
+ 'D10':{'error_type':r'\bFATAL\b','status_code':r'\bPOLARIS_\d+\b','status_message':r'\bINVALID_CAT_ID\b'}}  # optional boundary fields; never in task acceptance
+MDTARGET=re.compile(r'\]\((<?[^\s)]+>?)(?:\s+"[^"]*")?\)')
+IMAGE=re.compile(r'!\[([^\]]*)\]\([^)]*\)')
+WEEKDAY=r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)'
+
+def signed_percent(s):
+ m=re.fullmatch(r'([+-]?)\s*(\d+(?:\.\d+)?)\s*%',norm(s or ''))
+ if not m:return None
+ return Decimal(m[1]+m[2]) if m[1]=='-' else Decimal(m[2])
+
+def amount(raw,german=False):
+ """Displayed money/number text to a plain decimal string, without rounding."""
+ t=re.sub(r'\s+','',raw or '')
+ t=t.replace('.','').replace(',','.') if german else t.replace(',','')
+ try:Decimal(t)
+ except InvalidOperation:return None
+ return t
+
+def link_open(md,close):
+ """Index of the '[' that opens the link text ending at md[close] (']'), nested images allowed."""
+ depth=0
+ for i in range(close,-1,-1):
+  if md[i]==']':depth+=1
+  elif md[i]=='[':
+   depth-=1
+   if depth==0:return i-1 if i and md[i-1]=='!' else i
+ return close
+
+def link_records(md,pattern,source_url,fixture_origin,inside=False):
+ """Markdown links whose URL matches pattern, one record per run of adjacent links to the same URL.
+ inside=True: the card is the link, so a record's region ends at its URL. Otherwise it runs to the next record."""
+ hits=[]
+ for m in MDTARGET.finditer(md):
+  url=rebase_url(m[1],source_url,fixture_origin)
+  if url and re.search(pattern,url):
+   open_=link_open(md,m.start());hits.append({'url':url,'open':open_,'end':m.end(),'text':md[open_:m.start()+1]})
+ records=[]
+ for h in hits:
+  if records and records[-1]['url']==h['url']:records[-1]['texts'].append(h['text']);records[-1]['end']=h['end'];continue
+  records.append({'url':h['url'],'open':h['open'],'end':h['end'],'texts':[h['text']]})
+ for i,r in enumerate(records):
+  start=records[i-1]['end'] if inside and i else r['open'];stop=r['end'] if inside else (records[i+1]['open'] if i+1<len(records) else len(md))
+  r['region']=md[start:stop];r['ref']=f'markdown.chars[{start}:{stop}]'
+  names=[norm(IMAGE.sub('',t).lstrip('![').rstrip(']')) for t in r['texts']]
+  r['name']=max(names,key=len) if names else None
+ return records
+
+def first_price_records(md,source_url,fixture_origin):
+ """Any link followed by a displayed price before the next link: what a product card would look like."""
+ out=[]
+ for r in link_records(md,r'^https?://',source_url,fixture_origin):
+  m=re.search(r'(?:US\s*)?([$€£])\s*([\d.,]+)',plain(r['region']))
+  if m and r['name']:out.append({**r,'price':amount(m[2])})
+ return out
+
+def header_index(header,names):
+ for i,c in enumerate(header):
+  if norm(c).casefold() in names:return i
+ return None
+
+def d_mapped(case,md,text,meta,tables,fixture_origin,put,duplicates):
+ cid=case['id'];src=case['url'];fields=case['fields']
+ if cid=='D01':
+  hit=None
+  for table in tables:
+   for ri,row in enumerate(table['rows']):
+    m=re.search(r'Population estimates, (July 1, \d{4}), \((V\d{4})\)',row[0] if row else '')
+    if m and m[2]=='V20'+fields[0]['entityId'][-2:] and len(row)>1:
+     header=table['rows'][0];hit=(m,row[1],header[1] if len(header)>1 and header is not row else None,f'{table["ref"]}.rows[{ri}]');break
+   if hit:break
+  if not hit:
+   m=re.search(r'Population estimates, (July 1, \d{4}), \((V\d{4})\)[^\d\n]{0,40}([\d,]{5,})',text)
+   if m and m[2]=='V20'+fields[0]['entityId'][-2:]:hit=(m,m[3],None,f'markdown.chars[{m.start()}:{m.end()}]')
+  mnemonic,_=re.search(r'\b(PST\d{6})\b',text) and (re.search(r'\b(PST\d{6})\b',text)[1],None) or (None,None)
+  unit='ABS' if re.search(r'\bABS\b',text) else None
+  for f in fields:
+   if not hit:put(f,None,None,entity=False);continue
+   m,value,geo,ref=hit;n=f['name']
+   v=geo if n=='geography' else m[0] if n=='measure' else mnemonic if n=='mnemonic' else value if n=='population' else m[2]
+   put(f,v,ref,unit=unit if n=='population' else None,date=date_of(m[1]))
+ elif cid in ['D02','D05']:
+  german=cid=='D05'
+  pattern=r'^https://www\.newegg\.com/.+/p/([^/?#]+)' if cid=='D02' else r'^https://www\.otto\.de/p/[^?#]*-(\d{6,})/?(?:[?#]|$)'
+  records=link_records(md,pattern,src,fixture_origin)
+  for f in fields:
+   eid=f['entityId']
+   if cid=='D02':key=lambda r:(lambda t:t==eid or t.endswith(eid.replace('-','')))(re.search(pattern,r['url'])[1])
+   else:key=lambda r:re.search(pattern,r['url'])[1]==eid.split('/')[0]
+   found=[r for r in records if key(r)];duplicates[eid]=max(0,len(found)-1)
+   if not found:put(f,None,None,entity=False);continue
+   r=found[0];region=plain(IMAGE.sub(lambda m:m[1],r['region']));n=f['name'];unit=None
+   if n=='price':
+    if german:
+     m=re.search(r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*(€|EUR)',region);v=amount(m[1],True) if m else None;unit='EUR' if m else None
+    else:
+     cut=re.sub(r'Save:?\s*\$\s*[\d,.]+\s*(?:\(\d+%\))?','',region);m=re.search(r'\$\s*([\d,]+)\s*(\.\s*\d{2})?',cut)
+     v=amount(m[1]+(m[2] or '')) if m else None;unit='USD' if m and (re.search(r'\bUSD\b',region) or re.search(r'\bUSD\b',text)) else None
+   elif n=='url':v=r['url']
+   elif n=='name':v=r['name']
+   elif n=='sku':
+    m=re.search(r'Item\s*#\s*:?\s*([\w-]+)',region);v=m[1] if m else (eid if re.search(r'(?<![\w-])'+re.escape(eid)+r'(?![\w-])',region) else None)
+   elif n=='product_id':v=re.search(pattern,r['url'])[1]
+   elif n=='variation_id':m=re.search(r'variationId=(\d+)',r['url']);v=m[1] if m else None
+   else:v=None
+   put(f,v,r['ref'],unit=unit)
+ elif cid=='D03':
+  records=link_records(md,r'/transport/flights/[A-Z]{3}/[A-Z]{3}/\d{8}',src,fixture_origin,inside=True)
+  seen=Counter(r['url'] for r in records)
+  for f in fields:
+   i=int(f['entityId'].rsplit('-',1)[1])-1;r=records[i] if i<len(records) else None
+   if r is None:put(f,None,None,entity=False);continue
+   duplicates[f['entityId']]=seen[r['url']]-1
+   region=r['region'];flat=plain(IMAGE.sub(lambda m:m[1],region));n=f['name']
+   d=re.search(r'/(\d{4})(\d{2})(\d{2})(?:[/?#]|$)',r['url']);iso=f'{d[1]}-{d[2]}-{d[3]}' if d else None
+   route=re.search(r'\b([A-Z]{3} - [A-Z]{3} with .+?)(?=\s+from\b|\s*$)',flat,re.M)
+   price=re.search(r'from\s*(£|GBP)\s*([\d,]+(?:\.\d+)?)',flat)
+   if n=='url':v=r['url']
+   elif n=='departure_display':m=re.search(WEEKDAY+r', \d{1,2} [A-Z][a-z]{2}\b',flat);v=m[0] if m else None
+   elif n=='departure_iso':v=iso
+   elif n=='carrier':
+    alt=[a for a in IMAGE.findall(region) if a.strip()];v=alt[0] if alt else (re.search(r' with (.+)$',route[1])[1] if route else None)
+   elif n=='route':v=route[1] if route else None
+   elif n=='starting_price':v=price[2] if price else None
+   else:v=None
+   unit='GBP' if price and (price[1] in ['£','GBP'] or 'currency=GBP' in r['url']) else None
+   put(f,v,r['ref'],unit=unit,date=iso)
+ elif cid=='D04':
+  cols={'date':{'date'},'close':{'close/last','close'},'volume':{'volume'},'open':{'open'},'high':{'high'},'low':{'low'}}
+  for f in fields:
+   day=f['entityId'].split('/',1)[1];matches=[]
+   for table in tables:
+    header=table['rows'][0] if table['rows'] else []
+    if header_index(header,cols['close']) is None:continue
+    for ri,row in enumerate(table['rows'][1:],1):
+     if row and norm(row[0])==day:matches.append((row,header,f'{table["ref"]}.rows[{ri}]'))
+   duplicates[f['entityId']]=max(0,len(matches)-1)
+   if not matches:put(f,None,None,entity=False);continue
+   row,header,ref=matches[0];mo,dd,yy=day.split('/');iso=f'{yy}-{mo}-{dd}';i=header_index(header,cols[f['name']])
+   v=iso if f['name']=='date' else (row[i] if i is not None and i<len(row) else None)
+   put(f,v,ref,date=iso)
+ elif cid=='D06':
+  history=[]
+  for table in tables:
+   header=table['rows'][0] if table['rows'] else []
+   if header_index(header,{'date'}) is None or header_index(header,{'open'}) is None:continue
+   for ri,row in enumerate(table['rows'][1:],1):
+    if row and date_of(row[0]):history.append((row,header,f'{table["ref"]}.rows[{ri}]'))
+  cols={'date':{'date'},'open':{'open'},'high':{'high'},'low':{'low'},'close':{'close','close*'},'adjusted_close':{'adj close','adj close**','adj. close'},'volume':{'volume'}}
+  for f in fields:
+   n=f['name']
+   if n=='no_rows_message':m=re.search(r'There are no[^.\n]*in the selected time period\.?',text);put(f,norm(m[0]) if m else None,m and f'markdown.chars[{m.start()}:{m.end()}]');continue
+   if n=='date_header':
+    hdr=[(t,header_index(t['rows'][0],{'date'})) for t in tables if t['rows']];hdr=[(t,i) for t,i in hdr if i is not None]
+    put(f,t['rows'][0][hdr[0][1]] if hdr else None,hdr and hdr[0][0]['ref']+'.rows[0]');continue
+   if not f['entityId'].startswith('required-slot-'):put(f,None,None,entity=False);continue
+   i=int(f['entityId'].rsplit('-',1)[1])-1
+   if i>=len(history):put(f,None,None,entity=False);continue
+   row,header,ref=history[i];j=header_index(header,cols[n]);put(f,date_of(row[0]) if n=='date' else (row[j] if j is not None and j<len(row) else None),ref)
+ elif cid in ['D07','D08','D10']:
+  offers=first_price_records(md,src,fixture_origin)
+  for f in fields:
+   n=f['name']
+   if n in BOUNDARY[cid]:m=re.search(BOUNDARY[cid][n],text);put(f,m[0] if m else None,m and f'markdown.chars[{m.start()}:{m.end()}]');continue
+   i=int(f['entityId'].rsplit('-',1)[1])-1;r=offers[i] if i<len(offers) else None
+   put(f,None if r is None else r['url'] if n=='url' else r['name'] if n=='name' else r['price'],r and r['ref'],entity=r is not None)
+ elif cid=='D09':
+  usd='USD' if re.search(r'\bUSD\b',text) else None
+  cols={'price':{'price'},'change_1h':{'1h'},'change_24h':{'24h'},'change_7d':{'7d'},'change_30d':{'30d'}}
+  for f in fields:
+   name,sym=COINS[f['entityId']];matches=[]
+   for table in tables:
+    header=table['rows'][0] if table['rows'] else []
+    if header_index(header,{'1h'}) is None:continue
+    for ri,row in enumerate(table['rows'][1:],1):
+     cell=next((c for c in row if re.search(rf'\b{name}\b\W*\b{sym}\b',c)),None)
+     if cell:matches.append((row,header,cell,f'{table["ref"]}.rows[{ri}]'))
+   duplicates[f['entityId']]=max(0,len(matches)-1)
+   if not matches:put(f,None,None,entity=False);continue
+   row,header,cell,ref=matches[0];n=f['name']
+   if n=='coin':m=re.search(rf'\b({name})\b\W*\b({sym})\b',cell);put(f,f'{m[1]} {m[2]}',ref);continue
+   j=header_index(header,cols[n]);v=row[j] if j is not None and j<len(row) else None
+   if n=='price':put(f,v,ref,unit=usd if v else None)
+   else:put(f,v,ref,unit='%' if v and norm(v).endswith('%') else None,period=norm(header[j]) if j is not None else None)
+ else:raise ValueError('Unsupported development case '+cid)
+
 def equal(value,expected,datatype):
  if value is None:return False
+ if expected is None:return False
  if datatype in ['integer','decimal']:
-  try:return Decimal(value.replace(',',''))==Decimal(expected)
+  try:return Decimal(norm(value).replace(',','').lstrip('$£€').strip())==Decimal(expected)
   except InvalidOperation:return False
+ if datatype=='percent':
+  a,b=signed_percent(value),signed_percent(expected)
+  return a is not None and a==b
  return norm(value)==norm(expected)
 
 def score_case(case,doc,fixture_origin):
  observed,duplicates,notes=mapped(case,doc,fixture_origin)
  er=doc.get('evidenceRecord') or {};rawsha=er.get('rawSha256');same_source=rawsha==case['rawSha256'];rows=[]
+ haystack=norm(plain(doc.get('markdown') or '')+'\n'+'\n'.join(' '.join(c for row in t['rows'] for c in row) for t in table_views(doc)))
  for f in case['fields']:
-  o=observed.get(f['id'],{});value_ok=equal(o.get('observed'),f['value'],f['dataType'])
+  o=observed.get(f['id'],{});captured=f.get('availability','captured')=='captured'
+  value_ok=equal(o.get('observed'),f['value'],f['dataType'])
   checks={'value':value_ok,'entity':o.get('entityMatched',False),'sameSource':same_source}
   for label,collection,refkey,obskey in [('unit','units','unitRef','unit'),('date','dates','dateRef','businessDate'),('period','periods','periodRef','period')]:
    context=case[collection].get(f.get(refkey))
    checks[label]=True if not context or context['state']=='not_applicable' else None if context['state']=='unknown' else (norm(o.get(obskey) or '').casefold()==norm(context['value']).casefold() if label=='period' else norm(o.get(obskey) or '')==norm(context['value']))
-  complete=all(v is True for v in checks.values());locatable=value_ok and checks['entity'] and same_source and bool(o.get('outputLocation'))
-  rows.append({'fieldId':f['id'],'entityId':f['entityId'],'field':f['name'],'required':f['required'],'expected':f['value'],**o,'checks':checks,'fullyCorrect':complete,'independentlySourceLocatable':locatable,'sourceEvidence':f['evidence'],'contextEvidence':{k:case[k].get(f.get(ref)) for k,ref in [('units','unitRef'),('dates','dateRef'),('periods','periodRef')]}})
- totals={'fieldSlots':len(rows),'requiredFields':sum(f['required'] for f in rows),'observedFields':sum(r.get('observed') is not None for r in rows),'valueCorrect':sum(r['checks']['value'] and r['checks']['entity'] for r in rows),'fullyCorrect':sum(r['fullyCorrect'] for r in rows),'requiredFullyCorrect':sum(r['required'] and r['fullyCorrect'] for r in rows),'sourceLocatable':sum(r['independentlySourceLocatable'] for r in rows),'duplicateSelectedRecords':sum(duplicates.values())}
- return {'id':case['id'],'sameSource':same_source,'status':doc.get('status'),'configuredVerification':(doc.get('verification') or {}).get('status'),'readiness':(doc.get('readiness') or {}).get('state'),'totals':totals,'taskAccepted':all(r['fullyCorrect'] for r in rows if r['required']) and not totals['duplicateSelectedRecords'],'duplicateKeys':duplicates,'rows':rows,'notes':notes,'explicitProductFieldCitation':None,'nonAuthorReview':None}
+  # Field relation: the right value read from the record bound to its own subject.
+  checks['relation']=bool(value_ok and checks['entity'] and o.get('outputLocation'))
+  complete=captured and all(v is True for v in checks.values());locatable=value_ok and checks['entity'] and same_source and bool(o.get('outputLocation'))
+  others={g['value'] for g in case['fields'] if g['name']==f['name'] and g['entityId']!=f['entityId'] and g['value'] is not None and g['value']!=f['value']}
+  wrong_record=captured and not value_ok and o.get('observed') is not None and any(equal(o['observed'],v,f['dataType']) for v in others)
+  expected=norm(f['value']) if f['value'] is not None else ''
+  unbound=captured and not checks['relation'] and len(expected)>=4 and re.search(r'(?<![\w.])'+re.escape(expected)+r'(?![\w])',haystack) is not None
+  fabricated=not captured and o.get('observed') is not None
+  rows.append({'fieldId':f['id'],'entityId':f['entityId'],'field':f['name'],'required':f['required'],'availability':f.get('availability','captured'),'expected':f['value'],**o,'checks':checks,'fullyCorrect':complete,'independentlySourceLocatable':locatable,'wrongRecord':wrong_record,'unboundValuePresent':unbound,'fabricated':fabricated,'sourceEvidence':f['evidence'],'contextEvidence':{k:case[k].get(f.get(ref)) for k,ref in [('units','unitRef'),('dates','dateRef'),('periods','periodRef')]}})
+ cap=[r for r in rows if r['availability']=='captured']
+ def known(label):return sum(r['checks'][label] is not None and r['contextEvidence'][label+'s'] is not None and r['contextEvidence'][label+'s']['state']=='known' for r in cap)
+ totals={'fieldSlots':len(rows),'requiredFields':sum(f['required'] for f in rows),'observedFields':sum(r.get('observed') is not None for r in rows),'valueCorrect':sum(r['checks']['value'] and r['checks']['entity'] for r in rows),'fullyCorrect':sum(r['fullyCorrect'] for r in rows),'requiredFullyCorrect':sum(r['required'] and r['fullyCorrect'] for r in rows),'sourceLocatable':sum(r['independentlySourceLocatable'] for r in rows),'duplicateSelectedRecords':sum(duplicates.values()),
+  'capturedFields':len(cap),'requiredCaptured':sum(r['required'] for r in cap),'requiredNotCaptured':sum(r['required'] for r in rows if r['availability']!='captured'),
+  'entityMatched':sum(r['checks']['entity'] is True for r in cap),'relationCorrect':sum(r['checks']['relation'] for r in cap),
+  'unitKnown':known('unit'),'unitPreserved':sum(r['checks']['unit'] is True and r['contextEvidence']['units'] is not None and r['contextEvidence']['units']['state']=='known' for r in cap),
+  'dateKnown':known('date'),'datePreserved':sum(r['checks']['date'] is True and r['contextEvidence']['dates'] is not None and r['contextEvidence']['dates']['state']=='known' for r in cap),
+  'periodKnown':known('period'),'periodPreserved':sum(r['checks']['period'] is True and r['contextEvidence']['periods'] is not None and r['contextEvidence']['periods']['state']=='known' for r in cap),
+  'wrongRecord':sum(r['wrongRecord'] for r in rows),'unboundValuePresent':sum(r['unboundValuePresent'] for r in rows),'fabricated':sum(r['fabricated'] for r in rows)}
+ deliverable=totals['requiredNotCaptured']==0
+ accepted=deliverable and all(r['fullyCorrect'] for r in rows if r['required']) and not totals['duplicateSelectedRecords'] and not totals['fabricated']
+ verification=(doc.get('verification') or {}).get('status')
+ success=doc.get('status')=='success' and verification!='failed'
+ outcome='correct_success' if success and accepted else 'false_success' if success else 'missed' if deliverable else 'correct_non_success'
+ kind=None if outcome!='false_success' else 'field_error' if deliverable else 'no_target'
+ return {'id':case['id'],'sameSource':same_source,'status':doc.get('status'),'configuredVerification':verification,'readiness':(doc.get('readiness') or {}).get('state'),'totals':totals,'deliverable':deliverable,'taskAccepted':accepted,'outcome':outcome,'falseSuccessKind':kind,'duplicateKeys':duplicates,'rows':rows,'notes':notes,'explicitProductFieldCitation':None,'nonAuthorReview':None}
+
+def upper95(k,n):
+ """One-sided 95% upper bound on a proportion: 1-0.05^(1/n) at k=0, Clopper-Pearson otherwise."""
+ if not n:return None
+ if k==0:return 1-0.05**(1/n)
+ if k>=n:return 1.0
+ def cdf(p):return sum(math.comb(n,i)*p**i*(1-p)**(n-i) for i in range(k+1))
+ lo,hi=k/n,1.0
+ for _ in range(200):
+  mid=(lo+hi)/2
+  if cdf(mid)>0.05:lo=mid
+  else:hi=mid
+ return (lo+hi)/2
+
+def rate(k,n):return {'k':k,'n':n,'rate':k/n if n else None,'upper95':upper95(k,n)}
+
+def summarize(rows):
+ """Error among success results and false success per request are separate denominators."""
+ outcomes=Counter(r['outcome'] for r in rows);successes=outcomes['correct_success']+outcomes['false_success'];fs=outcomes['false_success'];totals=Counter()
+ for r in rows:totals.update(r['totals'])
+ return {'requests':len(rows),'successResults':successes,'falseSuccess':fs,'falseSuccessByKind':dict(Counter(r['falseSuccessKind'] for r in rows if r['falseSuccessKind'])),'outcomes':dict(outcomes),
+  'errorAmongSuccess':rate(fs,successes),'falseSuccessPerRequest':rate(fs,len(rows)),'zeroFalseSuccessUpper95':upper95(0,len(rows)),'deliverable':sum(r.get('deliverable',True) for r in rows),'accepted':sum(r.get('taskAccepted',False) for r in rows),'fields':dict(totals)}
 
 def main():
- p=argparse.ArgumentParser(description=__doc__);p.add_argument('dataset',type=Path);p.add_argument('outputs',type=Path);p.add_argument('--fixture-origin',required=True);p.add_argument('--out',required=True,type=Path);args=p.parse_args();results=[]
- for version in ['candidate','control']:
-  for cid in [f'H{i:02}' for i in range(1,9)]:
+ p=argparse.ArgumentParser(description=__doc__);p.add_argument('dataset',type=Path);p.add_argument('outputs',type=Path);p.add_argument('--fixture-origin',required=True);p.add_argument('--out',required=True,type=Path)
+ p.add_argument('--versions',default='candidate,control',help='Comma-separated output subdirectories (default: the #562 run).')
+ p.add_argument('--cases',default=','.join(f'H{i:02}' for i in range(1,9)),help='Comma-separated case IDs (default: H01-H08).')
+ args=p.parse_args();results=[];versions=args.versions.split(',');cases=args.cases.split(',')
+ for version in versions:
+  for cid in cases:
    case=json.loads((args.dataset/'cases'/cid/'gold.json').read_text());path=args.outputs/version/(cid+'.json');saved=json.loads(path.read_text()) if path.exists() else {};doc=saved.get('response') or {};r=score_case(case,doc,args.fixture_origin);r['version']=version;r['runError']=saved.get('error');results.append(r)
- report={'schema':'octocrawl.field-acceptance/1','scope':'Eight retained source snapshots, one fixed SDK call per version/case; no live access or independent human acceptance.','rows':results,'summaries':{}}
- for version in ['candidate','control']:
+ report={'schema':'octocrawl.field-acceptance/2','scope':'Retained source snapshots, one fixed SDK call per version/case; no live access or independent human acceptance.','rows':results,'summaries':{}}
+ for version in versions:
   subset=[r for r in results if r['version']==version];totals=Counter()
   for row in subset:totals.update(row['totals'])
-  report['summaries'][version]={'cases':8,'accepted':sum(r['taskAccepted'] for r in subset),'configuredPassed':sum(r['configuredVerification']=='passed' for r in subset),'configuredPassButFieldIncomplete':sum(r['configuredVerification']=='passed' and not r['taskAccepted'] for r in subset),**dict(totals)}
- args.out.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n');print(json.dumps(report['summaries'],indent=2))
+  groups={g:summarize([r for r in subset if r['id'][0]==g]) for g in sorted({r['id'][0] for r in subset})}
+  report['summaries'][version]={'cases':len(subset),'accepted':sum(r['taskAccepted'] for r in subset),'configuredPassed':sum(r['configuredVerification']=='passed' for r in subset),'configuredPassButFieldIncomplete':sum(r['configuredVerification']=='passed' and not r['taskAccepted'] for r in subset),**dict(totals),'byGroup':groups,'all':summarize(subset)}
+ args.out.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n');print(json.dumps({v:{k:x for k,x in s.items() if k not in('byGroup','all')} for v,s in report['summaries'].items()},indent=2))
 if __name__=='__main__':main()
