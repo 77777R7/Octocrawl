@@ -331,6 +331,37 @@ export function navigationTimeout(deadlineMs: number | undefined, nowMs: number)
   return Math.min(20_000, Math.max(1, deadlineMs - nowMs))
 }
 
+/**
+ * The page's whole HTML as the answer reads it (page.content()), or null past the bounds the browser lane's table reads
+ * keep (LAYOUT_MAX_ELEMENTS, SHADOW_TABLE_LIMITS.html): refused in the page, so a large page is not sent on every read.
+ */
+const PAGE_HTML = `(() => {
+  if ((document.body?.getElementsByTagName('*').length ?? 0) > ${LAYOUT_MAX_ELEMENTS}) return null
+  const html = (document.doctype === null ? '' : new XMLSerializer().serializeToString(document.doctype)) + document.documentElement.outerHTML
+  return html.length > ${SHADOW_TABLE_LIMITS.html} ? null : html
+})()`
+
+/**
+ * The region with its table reader (PA C2): a lane that says how its answer reads tables from the page's HTML
+ * (RegionSpec.tablesOf) has its row checks judged on this page, within the region's remaining time. A read past the
+ * bounds or the time is unknown, so the row checks stay unjudged (tablesUnjudged), never zero rows.
+ */
+function withPageTables(page: CdpPage, region: RegionSpec): RegionSpec {
+  const tablesOf = region.tablesOf
+  if (tablesOf === undefined || region.readTables !== undefined) return region
+  return {
+    ...region,
+    readTables: async (remainingMs) => {
+      if (remainingMs <= 0) return undefined
+      const deadlineAt = Date.now() + remainingMs
+      const html = await page.evaluate(PAGE_HTML)
+      if (typeof html !== 'string' || Date.now() >= deadlineAt) return undefined
+      const tables = tablesOf(html, page.url())
+      return Date.now() >= deadlineAt ? undefined : tables
+    },
+  }
+}
+
 export async function navigateOnce(
   browser: CdpBrowser,
   url: string,
@@ -376,7 +407,7 @@ export async function navigateOnce(
     const answered = before.status
     const gated = region === undefined || answered < 200 || answered >= 300
       || classifyGate({ status: answered, header: (name) => before.headers[name.toLowerCase()] ?? null, body: await raceWithSignal(page.content(), scope.signal), contentful: true }) !== null
-    const regionOutcome = gated ? undefined : await raceWithSignal(waitForRegion(page, region!, {
+    const regionOutcome = gated ? undefined : await raceWithSignal(waitForRegion(page, withPageTables(page, region!), {
       maxMs: deadlineMs === undefined ? REGION_WAIT_MAX_MS : Math.min(REGION_WAIT_MAX_MS, deadlineMs - 1_000 - Date.now()),
     }), scope.signal)
     throwIfExecutionStopped(scope)
@@ -438,5 +469,6 @@ export async function navigateOnce(
 }
 import { LOADING_WAIT_MAX_MS, waitForRenderedStability, type SettleOutcome } from '../browserSettle.js'
 import { REGION_WAIT_MAX_MS, waitForRegion, type RegionOutcome, type RegionSpec } from '../regionWait.js'
+import { LAYOUT_MAX_ELEMENTS, SHADOW_TABLE_LIMITS } from '../browserLayout.js'
 import { sameDocument } from '../subjects/browserDocuments.js'
 import type { ResponseMatch } from '../capture.js'

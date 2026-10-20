@@ -156,6 +156,10 @@ describe('the person\'s Chrome', () => {
     // A contract the page cannot judge (a json field alone) is not waited for: its one read is reported, saying why.
     const json = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80 })]).connect })).read('https://site.test/a', { pollMs: 1, waitMs: 5_000, region: { contract: { checks: [{ type: 'field', path: 'json.price', present: true }] } } })
     expect(json.region).toMatchObject({ ready: false, reads: 1, judged: 1, unjudged: 'checks_not_on_page' })
+    // Row checks this lane has no table reader for (decision 12): never ready, and not waited on once the rest held.
+    const rows = { contract: { checks: [{ type: 'markdownIncludes' as const, text: 'AAPL' }, { type: 'tableRowsMin' as const, tableIndex: 0, columns: [0], min: 2 }] } }
+    const titled = await (await openUserChrome({ userDataDir, connect: fakeChrome([at('https://site.test/a', PAGE, { active: true, text: 80, region: shows('AAPL') })]).connect })).read('https://site.test/a', { pollMs: 20, waitMs: 5_000, region: rows })
+    expect(titled.region).toMatchObject({ ready: false, reads: 2, tablesUnjudged: true, checks: [{ passed: true }, { passed: null }] })
   })
 
   it('a tab that stays out of sight is pointed out once, while one hidden for a moment is not', async () => {
