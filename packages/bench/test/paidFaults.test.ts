@@ -128,7 +128,7 @@ describe('paid calls through crashes, local SQLite and a simulated Steel (PA E7)
     expect((JSON.parse(run.stdout) as CrawlReport).paidCalls).toMatchObject({ knownChargedUsd: 0.7, overCeiling: 1 })
   }, 30_000)
 
-  it('settles each paid call once across repeated crashes and resumes, and Steel refuses a second session under the same name', async () => {
+  it('settles each paid call once across repeated crashes and resumes, each under its own id and session name', async () => {
     const t = task()
     const id = await crashed(t, 'after_session')
     // The resume settles the first call, then crashes after reserving its own; the next resume settles that one too.

@@ -76,7 +76,7 @@ const api: VendorApi = async (req) => {
   if (session === undefined) return { status: 404, json: null }
   if (tail === undefined) return { status: 200, json: { id, status: session.status } }
   if (tail === '/release') { await ops.releaseSession(decodeURIComponent(id!)); return { status: 200, json: { success: true } } }
-  if (tail === '/cost') return env.PAID_BILLING_DOWN === '1' || session.status !== 'released' ? { status: env.PAID_BILLING_DOWN === '1' ? 503 : 409, json: null } : { status: 200, json: { id, currency: 'usd', totalCost: session.costUsd } }
+  if (tail === '/cost') return env.PAID_BILLING_DOWN === '1' || session.status !== 'released' ? { status: env.PAID_BILLING_DOWN === '1' ? 503 : 409, json: null } : { status: 200, json: { id, currency: 'usd', totalCost: session.costUsd, usage: { browser: { value: 1, unit: 'minute' }, proxy: { bytes: 0 }, captcha: { solves: 0 } } } }
   return { status: 400, json: null }
 }
 
