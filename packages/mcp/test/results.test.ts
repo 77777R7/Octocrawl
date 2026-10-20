@@ -187,6 +187,46 @@ describe('MCP result budget', () => {
 
   const scrapeAnswering = (fields: Record<string, unknown>) => apiAnswering(() => ({ requestedUrl: 'https://example.com/', status: 'success', failureReason: null, blockReason: null, verification: { status: 'not_requested' }, truncated: false, truncatedAt: null, ...fields }))
 
+  it('keeps as many links as fit when the links alone are over the budget, and says how many', async () => {
+    const links = Array.from({ length: 3_000 }, (_, n) => `https://example.com/catalogue/item-${n}`)
+    const mcp = await connect(scrapeAnswering({ markdown: '# Catalogue', links }))
+    const result = (await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', formats: ['markdown', 'links'] } })) as ToolResult
+    expect(expectTyped('scrape', result).length).toBeLessThanOrEqual(RESULT_TEXT_MAX)
+    const kept = result.structuredContent!.links as string[]
+    expect(kept.length).toBeGreaterThan(0)
+    expect(kept).toEqual(links.slice(0, kept.length))
+    expect(result.structuredContent).toMatchObject({ truncated: true, markdown: '# Catalogue' })
+    expect((result.structuredContent!.agentHints as string[]).at(-1)).toBe(`the links were cut to ${kept.length} of 3000 to fit this answer; ask for fewer formats, or narrow the page with includeTags or excludeTags`)
+    await mcp.close()
+  })
+
+  it('cuts tables by whole tables, then by rows, and does not keep a pass that needed what was cut', async () => {
+    const table = (tableIndex: number, rows: number) => {
+      const cells = Array.from({ length: rows }, (_, r) => [`row ${r}`, 'x'.repeat(40)])
+      const csv = cells.map(row => row.join(',')).join('\r\n')
+      return { tableIndex, caption: null, sourceUrl: 'https://example.com/', headerRows: 0, columns: 2, rows: cells, csv, csvSha256: createHash('sha256').update(csv).digest('hex') }
+    }
+    const tables = [table(0, 200), table(1, 2_000)]
+    const contract = { checks: [{ type: 'tableRowsMin', tableIndex: 1, columns: [0], min: 2_000 }] }
+    const verification = { status: 'passed', verifier: 'verify/9', contractSha256: 'a'.repeat(64), reason: null, checks: [{ index: 0, type: 'tableRowsMin', data: true, passed: true, observed: '2000 rows', observedCount: 2000, asked: 2000 }] }
+    const mcp = await connect(scrapeAnswering({ markdown: '# Prices', tables, verification, readiness: { state: 'ready', basis: ['verified'] } }))
+    const result = (await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', formats: ['markdown', 'tables'], verify: contract } })) as ToolResult
+    expect(expectTyped('scrape', result).length).toBeLessThanOrEqual(RESULT_TEXT_MAX)
+    const kept = result.structuredContent!.tables as Array<{ tableIndex: number; rows: string[][]; csv: string; csvSha256: string }>
+    expect(kept.map(item => item.tableIndex)).toEqual([0, 1])
+    expect(kept[0]!.rows.length).toBe(200)
+    const rows = kept[1]!.rows.length
+    expect(rows).toBeGreaterThan(0)
+    expect(rows).toBeLessThan(2_000)
+    // As the lanes write a table's CSV: every row, the last too, ends in CRLF.
+    expect(kept[1]!.csv).toBe(kept[1]!.rows.map(row => `${row.join(',')}\r\n`).join(''))
+    expect(kept[1]!.csvSha256).toBe(createHash('sha256').update(kept[1]!.csv).digest('hex'))
+    expect((result.structuredContent!.agentHints as string[]).at(-1)).toBe(`the tables were cut to 2 of 2, the last with ${rows} of its 2000 rows to fit this answer; ask for fewer formats, or narrow the page with includeTags or excludeTags`)
+    // The contract asked for 2,000 rows of table 1: the cut result does not keep the pass.
+    expect(result.structuredContent).toMatchObject({ truncated: true, verification: { status: 'failed' }, readiness: { state: 'not_extracted', basis: ['checks_failed', 'mcp_result_truncated'] } })
+    await mcp.close()
+  })
+
   it('cuts rawHtml before markdown, and keeps the markdown whole when that is enough', async () => {
     const markdown = 'word '.repeat(2_000)
     const mcp = await connect(scrapeAnswering({ markdown, rawHtml: '<p>x</p>'.repeat(15_000) }))
