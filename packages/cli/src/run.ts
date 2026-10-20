@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, defaultSessionsFile, loadImpit, loadPatchrightEngine, parseListen, runApiServer, type ApiEngine, type HandoffHooks } from '@w2l/api'
+import { createApiEngine, defaultSessionsFile, parseListen, preloadEngineModules, runApiServer, type ApiEngine, type HandoffHooks } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -58,8 +58,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     let listen: ReturnType<typeof parseListen>
     try {
       listen = parseListen([], { ...io.env, W2L_API_HOST: '127.0.0.1' })
-      if (listen.browserEngine === 'patchright') await loadPatchrightEngine()
-      if (listen.compatHosts.length > 0) await loadImpit()
+      await preloadEngineModules(listen)
     } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)) }
     for (const notice of listen.notices) io.stderr(`octocrawl: ${notice}`)
     const engine = createApiEngine({
@@ -74,6 +73,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       resumeOnStart: false,
       accessGrant: listen.accessGrant,
       browserEngine: listen.browserEngine,
+      browserIdentity: listen.browserIdentity,
       compatHosts: listen.compatHosts,
       egressProxies: listen.egressProxies,
       egressEchoUrl: listen.egressEchoUrl,

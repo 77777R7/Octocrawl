@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { parseScrapeRequest } from '@w2l/contracts'
 import { createHostedService } from '../src/host.js'
 import { expectIsError } from './toolErrorChecks.js'
 
@@ -58,4 +59,16 @@ it('speaks real Streamable HTTP and enforces origin, bearer subject and scope',a
     expectIsError(await client.callTool({name:'batch_scrape',arguments:{urls:['https://www.amazon.com/dp/B000VW9PIK']}}), 'Amazon.sg')
     expectIsError(await client.callTool({name:'create_delivery_destination',arguments:{monitorId:'firecrawl-introduction',url:'https://elsewhere.example/webhook'}}), 'remote pilot only supports')
   } finally {await client.close()}
+})
+
+it('takes no access grant, whatever its environment holds: access enhanced and my-browser stay refused',async()=>{
+  vi.stubEnv('W2L_ACCESS_GRANT',JSON.stringify({tier:'enhanced',capabilities:['vendor_remote_browser'],budget:{perRunUsd:1},attestation:{principal:'test',at:'2026-10-20T00:00:00Z',statement:'test grant'}}))
+  try {
+    root=await mkdtemp(join(tmpdir(),'w2l-hosted-mcp-'))
+    const amazonPublicState=JSON.stringify({cookies:[{name:'i18n-prefs',value:'SGD',domain:'.amazon.sg',path:'/',expires:-1,httpOnly:false,secure:true,sameSite:'Lax'}],origins:[]})
+    const service=createHostedService({mcpUrl:'https://127.0.0.1:1/mcp',issuer:'https://auth.example',ownerSubject:'user-howard',receiverUrl:'https://receiver.example/webhook',amazonPublicState,taskRoot:root,port:0,host:'127.0.0.1',verifyToken:async()=>({sub:'user-howard',scope:'openid'})})
+    close=service.close
+    await expect(service.engine.scrape(parseScrapeRequest({url:'https://example.com/',access:'enhanced'}))).rejects.toThrow(/no approved budget for enhanced access/)
+    await expect(service.engine.scrape(parseScrapeRequest({url:'https://example.com/',lane:'my-browser'}))).rejects.toThrow(/does not read pages in your Chrome/)
+  } finally {vi.unstubAllEnvs()}
 })

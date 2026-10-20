@@ -34,6 +34,12 @@ LaunchAgent does not inherit your shell) and restart the service. Captures
 then follow them as described in [Behind a proxy](local-setup.md#behind-a-proxy); `W2L_PROXY=off` ignores them.
 The hosted process below never uses these variables.
 
+To let the local service use [enhanced access](access.md), name the grant in
+the same file (`W2L_ACCESS_GRANT=/path/to/grant.json`) or in the shell that runs
+`npm run local:mcp:install`, and restart the service; it reads the grant and
+the variables beside it as `octocrawl serve` does. The hosted process never
+takes a grant.
+
 For a signed HTTPS receiver on the **same Mac**, install the separate
 LaunchAgent and explicitly allow the local delivery worker to reach its
 verified loopback certificate:
