@@ -346,7 +346,7 @@ def d_mapped(case,md,text,meta,tables,fixture_origin,put,duplicates):
    if n=='no_rows_message':m=re.search(r'There are no[^.\n]*in the selected time period\.?',text);put(f,norm(m[0]) if m else None,m and f'markdown.chars[{m.start()}:{m.end()}]');continue
    if n=='date_header':
     hdr=[(t,header_index(t['rows'][0],{'date'})) for t in tables if t['rows']];hdr=[(t,i) for t,i in hdr if i is not None]
-    put(f,t['rows'][0][hdr[0][1]] if hdr else None,hdr and hdr[0][0]['ref']+'.rows[0]');continue
+    put(f,hdr[0][0]['rows'][0][hdr[0][1]] if hdr else None,hdr and hdr[0][0]['ref']+'.rows[0]');continue
    if not f['entityId'].startswith('required-slot-'):put(f,None,None,entity=False);continue
    i=int(f['entityId'].rsplit('-',1)[1])-1
    if i>=len(history):put(f,None,None,entity=False);continue

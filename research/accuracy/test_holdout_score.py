@@ -122,4 +122,11 @@ class DevelopmentMappings(unittest.TestCase):
   d=doc('[![easyJet](http://x/e.png) Thu, 7 Jan SEN - CDG with easyJet from £20](http://127.0.0.1:8862/transport/flights/SEN/CDG/20270107?currency=GBP)')
   self.assertEqual(score_case(c,d,ORIGIN)['totals']['fullyCorrect'],3)
 
+ def test_d06_header_without_rows_is_not_history(self):
+  c=gold('D06','https://finance.yahoo.com/quote/AAPL/history/',[field('D06','historical_table_boundary','date_header','Date',required=False),*[field('D06','required-slot-1',n,None,t,unit='missing',date='missing',availability='not_captured') for n,t in [('date','iso_date'),('open','decimal')]]])
+  r=score_case(c,doc(tables=[{'caption':'','rows':[['Date','Open','High'],['There are no in the selected time period.']]}],status='blocked'),ORIGIN)
+  self.assertEqual((r['totals']['fullyCorrect'],r['totals']['fabricated'],r['outcome']),(1,0,'correct_non_success'))
+  r=score_case(c,doc(tables=[{'caption':'','rows':[['Date','Open','High'],['Oct 15, 2026','346.95','347.85']]}]),ORIGIN)
+  self.assertEqual(r['totals']['fabricated'],2)
+
 if __name__=='__main__':unittest.main()
