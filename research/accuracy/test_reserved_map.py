@@ -57,4 +57,19 @@ class ReservedMappings(unittest.TestCase):
   o=self.obs('V14',[('product','ebook_price'),('product','ebook_list_price')],'# Book\n\nfree eBook with pBook. $2.99 per month $1.99 per month\n\neBook pdf, ePub $5.99 $3.99');self.assertEqual((o['product/ebook_price'],o['product/ebook_list_price']),('3.99','5.99'))
   o=self.obs('V17',[('news-1','title')],'October 15: [Banner](http://127.0.0.1:8863/about/news/banner-1/)\n\n## [Item](http://127.0.0.1:8863/about/news/item-2/)\n\nPosted on **2026-10-18** by me');self.assertEqual(o['news-1/title'],'Item')
 
+class JsonPlans(unittest.TestCase):
+ def gold(self):
+  return case('V99','https://example.org/news',[field('V99','page','updated','2026-01-02','iso_date','u'),*[field('V99',f'post-{k}',n,'x','decimal' if n=='price' else 'text') for k in (1,2) for n in ('title','price')]],{'u':{'state':'known','value':'2026-01-02'}},{'usd':{'state':'known','value':'USD'}})
+ def test_schema_and_checks_come_from_task_structure(self):
+  from json_plans import plan_case
+  g=self.gold();g['task']='Extract posts with price and declared currency.';g['fields'][1]['value']='SECRET';p=plan_case(g)
+  self.assertNotIn('SECRET',str(p));s=p['json']['schema']
+  self.assertEqual(sorted(s['properties']),['records','updated']);self.assertEqual(s['properties']['records']['items']['properties']['price'],{'type':'number'})
+  self.assertIn({'type':'field','path':'json.data.records.1.currency','present':True},p['verify']['checks']);self.assertFalse(p['json']['modelFallback'])
+ def test_json_mapping_reads_records_by_position_and_currency(self):
+  g=self.gold();g['fields'][2]['unitRef']='usd';g['fields'][2]['value']='9.5'
+  d=doc('');d['json']={'status':'complete','data':{'updated':'2 January 2026','records':[{'title':'a','price':9.5,'currency':'USD'}]},'evidence':[]}
+  r=score_case(g,d,O,'json');rows={x['fieldId']:x for x in r['rows']}
+  self.assertTrue(rows['V99/page/updated']['fullyCorrect']);self.assertTrue(rows['V99/post-1/price']['fullyCorrect']);self.assertFalse(rows['V99/post-2/title']['checks']['entity'])
+
 if __name__=='__main__':unittest.main()

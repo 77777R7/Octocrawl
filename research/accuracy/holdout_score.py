@@ -87,7 +87,7 @@ def rebase_url(value,source_url,fixture_origin):
  if (p.scheme,p.netloc)==(fixture.scheme,fixture.netloc):p=p._replace(scheme=urlparse(source_url).scheme,netloc=urlparse(source_url).netloc)
  return urlunparse(p)
 
-def mapped(case,doc,fixture_origin):
+def mapped(case,doc,fixture_origin,mapping='markdown'):
  """Named scopes and column mappings are frozen before candidate output exists."""
  cid=case['id'];md=doc.get('markdown') or '';text=plain(md);meta=doc.get('metadata') or {};tables=table_views(doc)
  out={};duplicates={};notes=[]
@@ -99,7 +99,10 @@ def mapped(case,doc,fixture_origin):
   raw,ref=regex(label+r'[\s:#*\-]*([^\n]+)');v=date_of(raw) if raw else None
   if not v and meta.get('modifiedTime'):return date_of(meta['modifiedTime']),'metadata.modifiedTime'
   return v,ref
- if cid=='H01':
+ if mapping=='json':
+  from json_map import json_mapped  # json/verify plans: values from json.data only
+  json_mapped(case,doc,put,duplicates)
+ elif cid=='H01':
   stop=re.search(r'^#{0,6}\s*(?:Abstract|Status of This Memo|Table of Contents)\s*$',text,re.M|re.I)
   head=text[:stop.start()] if stop else text[:8000]
   ident,iref=regex(r'\b(RFC\s+\d+)\b',head+'\n'+str(meta.get('title') or ''))
@@ -407,8 +410,8 @@ def equal(value,expected,datatype):
   return a is not None and a==b
  return norm(value)==norm(expected)
 
-def score_case(case,doc,fixture_origin):
- observed,duplicates,notes=mapped(case,doc,fixture_origin)
+def score_case(case,doc,fixture_origin,mapping='markdown'):
+ observed,duplicates,notes=mapped(case,doc,fixture_origin,mapping)
  er=doc.get('evidenceRecord') or {};rawsha=er.get('rawSha256');same_source=rawsha==case['rawSha256'];rows=[]
  haystack=norm(plain(doc.get('markdown') or '')+'\n'+'\n'.join(' '.join(c for row in t['rows'] for c in row) for t in table_views(doc)))
  for f in case['fields']:
@@ -494,11 +497,12 @@ def main():
  p.add_argument('--versions',default='candidate,control',help='Comma-separated output subdirectories (default: the #562 run).')
  p.add_argument('--markdown',type=Path,help='Also write per-field tables as Markdown (correctness marks only).')
  p.add_argument('--markdown-values',action='store_true',help='Include expected and observed values in the Markdown; keep such files under .w2l/.')
+ p.add_argument('--mapping',choices=['markdown','json'],default='markdown',help='markdown: the per-case mappings above; json: json_map.py for the json/verify plans.')
  p.add_argument('--cases',default=','.join(f'H{i:02}' for i in range(1,9)),help='Comma-separated case IDs (default: H01-H08).')
  args=p.parse_args();results=[];versions=args.versions.split(',');cases=args.cases.split(',')
  for version in versions:
   for cid in cases:
-   case=json.loads((args.dataset/'cases'/cid/'gold.json').read_text());path=args.outputs/version/(cid+'.json');saved=json.loads(path.read_text()) if path.exists() else {};doc=saved.get('response') or {};r=score_case(case,doc,args.fixture_origin);r['version']=version;r['runError']=saved.get('error');results.append(r)
+   case=json.loads((args.dataset/'cases'/cid/'gold.json').read_text());path=args.outputs/version/(cid+'.json');saved=json.loads(path.read_text()) if path.exists() else {};doc=saved.get('response') or {};r=score_case(case,doc,args.fixture_origin,args.mapping);r['version']=version;r['runError']=saved.get('error');results.append(r)
  report={'schema':'octocrawl.field-acceptance/2','scope':'Retained source snapshots, one fixed SDK call per version/case; no live access or independent human acceptance.','rows':results,'summaries':{}}
  for version in versions:
   subset=[r for r in results if r['version']==version];totals=Counter()

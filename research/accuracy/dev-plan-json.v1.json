@@ -1,0 +1,2381 @@
+{
+ "schema": "octocrawl.field-run-plan-json/1",
+ "scope": "One retained-source HTTP replay per case through the production engine, API and SDK of the checked-out commit. Measures extraction and delivery on saved bytes, not live access, routing or freshness. Each case adds a json format with a schema and a verify contract derived from its task (json_plans.py); the Markdown, tables and links request is otherwise unchanged.",
+ "datasetSealSha256": "2aa8c018ec2174f5e376458dd438e0149973debc5c3733a72b32dd8ab83a9c33",
+ "fixtureOrigin": "http://127.0.0.1:8862",
+ "request": {
+  "formats": [
+   "markdown",
+   "tables",
+   "links"
+  ],
+  "debug": false,
+  "onlyMainContent": true,
+  "fastMode": true,
+  "maxAge": 0,
+  "storeInCache": false,
+  "timeout": 30000
+ },
+ "verify": "Per case: json.status equals complete, every required field present, and the task's records present by index. A success result is status success with verification not failed.",
+ "name": "dev and regression sets, json/verify",
+ "modelFallback": "modelFallback is false on both sides: no extraction model (W2L_EXTRACT_BASE_URL, W2L_EXTRACT_MODEL) is configured where the pair runs, so the deterministic path is measured and F2 (model values kept only where the page states them) is not.",
+ "mappings": "research/accuracy/json_map.py",
+ "cases": [
+  {
+   "id": "D01",
+   "group": "development",
+   "url": "https://www.census.gov/quickfacts/fact/table/US/PST045224",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "geography": {
+         "type": "string"
+        },
+        "measure": {
+         "type": "string"
+        },
+        "mnemonic": {
+         "type": "string"
+        },
+        "population": {
+         "type": "number"
+        },
+        "vintage": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "geography",
+        "measure",
+        "mnemonic",
+        "population",
+        "vintage"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.geography",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.measure",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.mnemonic",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.population",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.vintage",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "D02",
+   "group": "development",
+   "url": "https://www.newegg.com/p/pl?d=laptop",
+   "checkNeedle": null,
+   "recordEntities": [
+    "34-236-753",
+    "1TS-000D-1TE80",
+    "1TS-000A-15W75"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "sku": {
+            "type": "string"
+           },
+           "name": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           },
+           "price": {
+            "type": "number"
+           },
+           "currency": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "sku",
+           "name",
+           "url",
+           "price",
+           "currency"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.sku",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.sku",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.sku",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "D03",
+   "group": "development",
+   "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
+   "checkNeedle": null,
+   "recordEntities": [
+    "offer-1",
+    "offer-2",
+    "offer-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "url": {
+            "type": "string"
+           },
+           "departure_display": {
+            "type": "string"
+           },
+           "departure_iso": {
+            "type": "string"
+           },
+           "carrier": {
+            "type": "string"
+           },
+           "route": {
+            "type": "string"
+           },
+           "starting_price": {
+            "type": "number"
+           },
+           "currency": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "url",
+           "departure_display",
+           "departure_iso",
+           "carrier",
+           "route",
+           "starting_price",
+           "currency"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.departure_display",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.departure_iso",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.carrier",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.route",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.starting_price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.departure_display",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.departure_iso",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.carrier",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.route",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.starting_price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.departure_display",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.departure_iso",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.carrier",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.route",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.starting_price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "D04",
+   "group": "development",
+   "url": "https://www.nasdaq.com/market-activity/stocks/aapl/historical",
+   "checkNeedle": null,
+   "recordEntities": [
+    "AAPL/10/15/2026",
+    "AAPL/10/14/2026",
+    "AAPL/10/13/2026"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "date": {
+            "type": "string"
+           },
+           "close": {
+            "type": "number"
+           },
+           "volume": {
+            "type": "number"
+           },
+           "open": {
+            "type": "number"
+           },
+           "high": {
+            "type": "number"
+           },
+           "low": {
+            "type": "number"
+           },
+           "currency": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "date",
+           "close",
+           "volume",
+           "open",
+           "high",
+           "low",
+           "currency"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.close",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.volume",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.open",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.high",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.low",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.close",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.volume",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.open",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.high",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.low",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.close",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.volume",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.open",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.high",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.low",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "D05",
+   "group": "development",
+   "url": "https://www.otto.de/technik/laptop/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "1996119966/1996119866",
+    "2085076160/2085076237",
+    "2035349268/2035349269"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "product_id": {
+            "type": "string"
+           },
+           "variation_id": {
+            "type": "string"
+           },
+           "name": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           },
+           "price": {
+            "type": "number"
+           }
+          },
+          "required": [
+           "product_id",
+           "variation_id",
+           "name",
+           "url",
+           "price"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.product_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.variation_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.product_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.variation_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.product_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.variation_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.price",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "D06",
+   "group": "development",
+   "url": "https://finance.yahoo.com/quote/AAPL/history/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "required-slot-1",
+    "required-slot-2",
+    "required-slot-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "no_rows_message": {
+         "type": "string"
+        },
+        "date_header": {
+         "type": "string"
+        },
+        "current_quote_price_not_history": {
+         "type": "number"
+        },
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "date": {
+            "type": "string"
+           },
+           "open": {
+            "type": "number"
+           },
+           "high": {
+            "type": "number"
+           },
+           "low": {
+            "type": "number"
+           },
+           "close": {
+            "type": "number"
+           },
+           "adjusted_close": {
+            "type": "number"
+           },
+           "volume": {
+            "type": "number"
+           }
+          },
+          "required": [
+           "date",
+           "open",
+           "high",
+           "low",
+           "close",
+           "adjusted_close",
+           "volume"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.open",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.high",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.low",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.close",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.adjusted_close",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.volume",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.open",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.high",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.low",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.close",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.adjusted_close",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.volume",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.open",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.high",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.low",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.close",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.adjusted_close",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.volume",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "D07",
+   "group": "development",
+   "url": "https://www.aliexpress.com/category/702/laptops.html",
+   "checkNeedle": null,
+   "recordEntities": [
+    "required-slot-1",
+    "required-slot-2",
+    "required-slot-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "heading": {
+         "type": "string"
+        },
+        "boundary_instruction": {
+         "type": "string"
+        },
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "name": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           },
+           "price": {
+            "type": "number"
+           }
+          },
+          "required": [
+           "name",
+           "url",
+           "price"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.price",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "D08",
+   "group": "development",
+   "url": "https://www.temu.com/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "required-slot-1",
+    "required-slot-2",
+    "required-slot-3",
+    "required-slot-4",
+    "required-slot-5"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "heading": {
+         "type": "string"
+        },
+        "boundary_instruction": {
+         "type": "string"
+        },
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "name": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           },
+           "price": {
+            "type": "number"
+           }
+          },
+          "required": [
+           "name",
+           "url",
+           "price"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.3.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.3.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.3.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.4.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.4.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.4.price",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "D09",
+   "group": "development",
+   "url": "https://www.coingecko.com/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "coin-1",
+    "coin-2",
+    "coin-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "coin": {
+            "type": "string"
+           },
+           "price": {
+            "type": "number"
+           },
+           "change_1h": {
+            "type": "number"
+           },
+           "change_24h": {
+            "type": "number"
+           },
+           "change_7d": {
+            "type": "number"
+           },
+           "change_30d": {
+            "type": "number"
+           },
+           "currency": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "coin",
+           "price",
+           "change_1h",
+           "change_24h",
+           "change_7d",
+           "change_30d",
+           "currency"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.coin",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.change_1h",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.change_24h",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.change_7d",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.change_30d",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.coin",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.change_1h",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.change_24h",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.change_7d",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.change_30d",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.coin",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.change_1h",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.change_24h",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.change_7d",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.change_30d",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "D10",
+   "group": "development",
+   "url": "https://www.walmart.com/browse/electronics/laptops/3944_3951_1089430_132960",
+   "checkNeedle": null,
+   "recordEntities": [
+    "required-slot-1",
+    "required-slot-2",
+    "required-slot-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "error_type": {
+         "type": "string"
+        },
+        "status_code": {
+         "type": "string"
+        },
+        "status_message": {
+         "type": "string"
+        },
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "name": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           },
+           "price": {
+            "type": "number"
+           }
+          },
+          "required": [
+           "name",
+           "url",
+           "price"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.price",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "H01",
+   "group": "regression",
+   "url": "https://www.rfc-editor.org/rfc/rfc9110.html",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "document_id": {
+         "type": "string"
+        },
+        "title": {
+         "type": "string"
+        },
+        "category": {
+         "type": "string"
+        },
+        "publication_month": {
+         "type": "string"
+        },
+        "author_1": {
+         "type": "string"
+        },
+        "author_2": {
+         "type": "string"
+        },
+        "author_3": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "document_id",
+        "title",
+        "category",
+        "publication_month",
+        "author_1",
+        "author_2",
+        "author_3"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.document_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.category",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.publication_month",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author_1",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author_2",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author_3",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "H02",
+   "group": "regression",
+   "url": "https://www.gutenberg.org/browse/scores/top",
+   "checkNeedle": null,
+   "recordEntities": [
+    "ebook-1342",
+    "ebook-84",
+    "ebook-2701"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "ebook_id": {
+            "type": "string"
+           },
+           "title": {
+            "type": "string"
+           },
+           "author": {
+            "type": "string"
+           },
+           "download_count": {
+            "type": "number"
+           },
+           "url": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "ebook_id",
+           "title",
+           "author",
+           "download_count",
+           "url"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.ebook_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.download_count",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.ebook_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.download_count",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.ebook_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.download_count",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "H03",
+   "group": "regression",
+   "url": "https://ssd.jpl.nasa.gov/astro_par.html",
+   "checkNeedle": null,
+   "recordEntities": [
+    "day",
+    "Julian_year",
+    "Julian_century"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "quantity": {
+            "type": "string"
+           },
+           "symbol": {
+            "type": "string"
+           },
+           "value": {
+            "type": "number"
+           }
+          },
+          "required": [
+           "quantity",
+           "symbol",
+           "value"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.quantity",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.symbol",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.value",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.quantity",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.symbol",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.value",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.quantity",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.symbol",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.value",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "H04",
+   "group": "regression",
+   "url": "https://www.gov.uk/bank-holidays",
+   "checkNeedle": null,
+   "recordEntities": [
+    "england-wales/1 January",
+    "england-wales/26 March",
+    "england-wales/29 March"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "date": {
+            "type": "string"
+           },
+           "weekday": {
+            "type": "string"
+           },
+           "holiday": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "date",
+           "weekday",
+           "holiday"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.weekday",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.holiday",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.weekday",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.holiday",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.weekday",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.holiday",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "H05",
+   "group": "regression",
+   "url": "https://www.nist.gov/pml/owm/metric-si-prefixes",
+   "checkNeedle": null,
+   "recordEntities": [
+    "quetta",
+    "ronna",
+    "ronto",
+    "quecto"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "page_updated": {
+         "type": "string"
+        },
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "prefix": {
+            "type": "string"
+           },
+           "symbol": {
+            "type": "string"
+           },
+           "decimal_factor": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "prefix",
+           "symbol",
+           "decimal_factor"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.prefix",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.symbol",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.decimal_factor",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.prefix",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.symbol",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.decimal_factor",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.prefix",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.symbol",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.decimal_factor",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.3.prefix",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.3.symbol",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.3.decimal_factor",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "H06",
+   "group": "regression",
+   "url": "https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml",
+   "checkNeedle": null,
+   "recordEntities": [
+    "http-status-200",
+    "http-status-404",
+    "http-status-429"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "registry_updated": {
+         "type": "string"
+        },
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "code": {
+            "type": "string"
+           },
+           "description": {
+            "type": "string"
+           },
+           "reference": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "code",
+           "description",
+           "reference"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.code",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.description",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.reference",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.code",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.description",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.reference",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.code",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.description",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.reference",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "H07",
+   "group": "regression",
+   "url": "https://www.w3.org/TR/WCAG22/",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "status": {
+         "type": "string"
+        },
+        "recommendation_date": {
+         "type": "string"
+        },
+        "conformance_level_1": {
+         "type": "string"
+        },
+        "conformance_level_2": {
+         "type": "string"
+        },
+        "conformance_level_3": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "status",
+        "recommendation_date",
+        "conformance_level_1",
+        "conformance_level_2",
+        "conformance_level_3"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.status",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.recommendation_date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.conformance_level_1",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.conformance_level_2",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.conformance_level_3",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "H08",
+   "group": "regression",
+   "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "method": {
+         "type": "string"
+        },
+        "last_modified": {
+         "type": "string"
+        },
+        "parameter_callbackFn": {
+         "type": "string"
+        },
+        "parameter_element": {
+         "type": "string"
+        },
+        "parameter_index": {
+         "type": "string"
+        },
+        "parameter_array": {
+         "type": "string"
+        },
+        "parameter_thisArg": {
+         "type": "string"
+        },
+        "return_value": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "method",
+        "last_modified",
+        "parameter_callbackFn",
+        "parameter_element",
+        "parameter_index",
+        "parameter_array",
+        "parameter_thisArg",
+        "return_value"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.method",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.last_modified",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.parameter_callbackFn",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.parameter_element",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.parameter_index",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.parameter_array",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.parameter_thisArg",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.return_value",
+       "present": true
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

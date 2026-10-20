@@ -1,0 +1,3920 @@
+{
+ "schema": "octocrawl.field-run-plan-json/1",
+ "name": "reserved-v2, json/verify",
+ "scope": "Reserved set v2 (R2), first and only run of Phase 2: one retained-source HTTP replay per case through the engine, API and SDK of each named commit, same request for both. Measures extraction and delivery on saved bytes, not live access, routing or freshness (that run belongs to K1). Each case adds a json format with a schema and a verify contract derived from its task (json_plans.py); the Markdown, tables and links request is otherwise unchanged.",
+ "datasetSealSha256": "1588c8d393e6326eae0796be9f97bcffea46ca2c31c1245ebb7c1f9e03b2f5e1",
+ "fixtureOrigin": "http://127.0.0.1:8863",
+ "request": {
+  "formats": [
+   "markdown",
+   "tables",
+   "links"
+  ],
+  "debug": false,
+  "onlyMainContent": true,
+  "fastMode": true,
+  "maxAge": 0,
+  "storeInCache": false,
+  "timeout": 30000
+ },
+ "verify": "Per case: json.status equals complete, every required field present, and the task's records present by index. A success result is status success with verification not failed.",
+ "mappings": "research/accuracy/json_map.py",
+ "modelFallback": "modelFallback is false on both sides: no extraction model (W2L_EXTRACT_BASE_URL, W2L_EXTRACT_MODEL) is configured where the pair runs, so the deterministic path is measured and F2 (model values kept only where the page states them) is not.",
+ "cases": [
+  {
+   "id": "V01",
+   "group": "reserved-v2",
+   "url": "https://go.dev/blog/http-connection-reuse",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "author_1": {
+         "type": "string"
+        },
+        "author_2": {
+         "type": "string"
+        },
+        "published": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "author_1",
+        "author_2",
+        "published"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author_1",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author_2",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.published",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V02",
+   "group": "reserved-v2",
+   "url": "https://blog.rust-lang.org/2026/10/01/Rust-1.99.0/",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "author": {
+         "type": "string"
+        },
+        "published": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "author",
+        "published"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.published",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V03",
+   "group": "reserved-v2",
+   "url": "https://nodejs.org/en/blog/vulnerability/october-2026-security-releases",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "author": {
+         "type": "string"
+        },
+        "updated": {
+         "type": "string"
+        },
+        "release_date": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "author",
+        "updated",
+        "release_date"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.updated",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.release_date",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V04",
+   "group": "reserved-v2",
+   "url": "https://theconversation.com/japans-mmx-mission-aims-to-swipe-soil-samples-from-mars-moon-phobos-294129",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "author": {
+         "type": "string"
+        },
+        "published": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "author",
+        "published"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.published",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V05",
+   "group": "reserved-v2",
+   "url": "https://kubernetes.io/blog/2026/10/06/kubernetes-cgroups-v2-shift/",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "author": {
+         "type": "string"
+        },
+        "published": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "author",
+        "published"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.published",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V06",
+   "group": "reserved-v2",
+   "url": "https://blog.cloudflare.com/obsessive-inference-optimization/",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "author": {
+         "type": "string"
+        },
+        "published": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "author",
+        "published"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.published",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V07",
+   "group": "reserved-v2",
+   "url": "https://www.eff.org/deeplinks/2026/10/require-police-get-warrant-search-alpr-data",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "author": {
+         "type": "string"
+        },
+        "published": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "author",
+        "published"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.published",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V08",
+   "group": "reserved-v2",
+   "url": "https://www.adafruit.com/product/6065",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "product_id": {
+         "type": "string"
+        },
+        "price": {
+         "type": "number"
+        },
+        "availability": {
+         "type": "string"
+        },
+        "currency": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "name",
+        "product_id",
+        "price",
+        "availability",
+        "currency"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.product_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.availability",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V09",
+   "group": "reserved-v2",
+   "url": "https://www.pishop.us/product/raspberry-pi-4-model-b-3gb/",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "sku": {
+         "type": "string"
+        },
+        "price": {
+         "type": "number"
+        },
+        "availability": {
+         "type": "string"
+        },
+        "currency": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "name",
+        "sku",
+        "price",
+        "availability",
+        "currency"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.sku",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.availability",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V10",
+   "group": "reserved-v2",
+   "url": "https://www.kiwi-electronics.com/en/bbc-microbit-v2-2-go-bundle-10th-anniversary-edition-20905",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "product_code": {
+         "type": "string"
+        },
+        "price": {
+         "type": "number"
+        },
+        "tax_basis": {
+         "type": "string"
+        },
+        "currency": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "name",
+        "product_code",
+        "price",
+        "tax_basis",
+        "currency"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.product_code",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.tax_basis",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V11",
+   "group": "reserved-v2",
+   "url": "https://store.steampowered.com/app/620/Portal_2/",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "price": {
+         "type": "number"
+        },
+        "release_date": {
+         "type": "string"
+        },
+        "currency": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "name",
+        "price",
+        "release_date",
+        "currency"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.release_date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V12",
+   "group": "reserved-v2",
+   "url": "https://www.gog.com/en/game/the_witcher_3_wild_hunt_game_of_the_year_edition",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "price": {
+         "type": "number"
+        },
+        "release_date": {
+         "type": "string"
+        },
+        "currency": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "name",
+        "price",
+        "release_date",
+        "currency"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.release_date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V13",
+   "group": "reserved-v2",
+   "url": "https://www.berrybase.de/en/raspberry-pi-5-8gb-ram",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "product_number": {
+         "type": "string"
+        },
+        "price": {
+         "type": "number"
+        },
+        "tax_basis": {
+         "type": "string"
+        },
+        "availability": {
+         "type": "string"
+        },
+        "currency": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "name",
+        "product_number",
+        "price",
+        "tax_basis",
+        "availability",
+        "currency"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.product_number",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.tax_basis",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.availability",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V14",
+   "group": "reserved-v2",
+   "url": "https://www.manning.com/books/rust-in-action",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "author": {
+         "type": "string"
+        },
+        "ebook_price": {
+         "type": "number"
+        },
+        "ebook_list_price": {
+         "type": "number"
+        },
+        "currency": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "name",
+        "author",
+        "ebook_price",
+        "ebook_list_price",
+        "currency"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.ebook_price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.ebook_list_price",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.currency",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V15",
+   "group": "reserved-v2",
+   "url": "https://www.debian.org/security/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "advisory-1",
+    "advisory-2",
+    "advisory-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "date": {
+            "type": "string"
+           },
+           "advisory_id": {
+            "type": "string"
+           },
+           "package": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "date",
+           "advisory_id",
+           "package",
+           "url"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.advisory_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.package",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.advisory_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.package",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.advisory_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.package",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V16",
+   "group": "reserved-v2",
+   "url": "https://ubuntu.com/security/notices",
+   "checkNeedle": null,
+   "recordEntities": [
+    "notice-1",
+    "notice-2",
+    "notice-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "notice_id": {
+            "type": "string"
+           },
+           "title": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           },
+           "published": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "notice_id",
+           "title",
+           "url",
+           "published"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.notice_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.published",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.notice_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.published",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.notice_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.published",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V17",
+   "group": "reserved-v2",
+   "url": "https://www.postgresql.org/about/newsarchive/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "news-1",
+    "news-2",
+    "news-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "title": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           },
+           "posted": {
+            "type": "string"
+           },
+           "posted_by": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "title",
+           "url",
+           "posted",
+           "posted_by"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.posted",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.posted_by",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.posted",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.posted_by",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.posted",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.posted_by",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V18",
+   "group": "reserved-v2",
+   "url": "https://www.freebsd.org/security/advisories/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "advisory-1",
+    "advisory-2",
+    "advisory-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "date": {
+            "type": "string"
+           },
+           "advisory_name": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "date",
+           "advisory_name",
+           "url"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.advisory_name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.advisory_name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.advisory_name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V19",
+   "group": "reserved-v2",
+   "url": "https://arxiv.org/list/cs.CL/new",
+   "checkNeedle": null,
+   "recordEntities": [
+    "paper-1",
+    "paper-2",
+    "paper-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "arxiv_id": {
+            "type": "string"
+           },
+           "title": {
+            "type": "string"
+           },
+           "first_author": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "arxiv_id",
+           "title",
+           "first_author"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.arxiv_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.first_author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.arxiv_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.first_author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.arxiv_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.first_author",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V20",
+   "group": "reserved-v2",
+   "url": "https://www.ruby-lang.org/en/news/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "post-1",
+    "post-2",
+    "post-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "title": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           },
+           "author": {
+            "type": "string"
+           },
+           "posted": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "title",
+           "url",
+           "author",
+           "posted"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.posted",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.posted",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.posted",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V21",
+   "group": "reserved-v2",
+   "url": "https://nodejs.org/en/blog",
+   "checkNeedle": null,
+   "recordEntities": [
+    "post-1",
+    "post-2",
+    "post-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "title": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           },
+           "author": {
+            "type": "string"
+           },
+           "published": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "title",
+           "url",
+           "author",
+           "published"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.published",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.published",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.published",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V22",
+   "group": "reserved-v2",
+   "url": "https://endoflife.date/python",
+   "checkNeedle": null,
+   "recordEntities": [
+    "cycle-1",
+    "cycle-2",
+    "cycle-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "cycle": {
+            "type": "string"
+           },
+           "released": {
+            "type": "string"
+           },
+           "security_support_until": {
+            "type": "string"
+           },
+           "latest_version": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "cycle",
+           "released",
+           "security_support_until",
+           "latest_version"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.cycle",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.released",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.security_support_until",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.latest_version",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.cycle",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.released",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.security_support_until",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.latest_version",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.cycle",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.released",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.security_support_until",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.latest_version",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V23",
+   "group": "reserved-v2",
+   "url": "https://devguide.python.org/versions/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "branch-1",
+    "branch-2",
+    "branch-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "branch": {
+            "type": "string"
+           },
+           "status": {
+            "type": "string"
+           },
+           "first_release": {
+            "type": "string"
+           },
+           "end_of_life": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "branch",
+           "status",
+           "first_release",
+           "end_of_life"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.branch",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.status",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.first_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.end_of_life",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.branch",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.status",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.first_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.end_of_life",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.branch",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.status",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.first_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.end_of_life",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V24",
+   "group": "reserved-v2",
+   "url": "https://www.worldometers.info/world-population/population-by-country/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "country-1",
+    "country-2",
+    "country-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "country": {
+            "type": "string"
+           },
+           "population": {
+            "type": "number"
+           },
+           "yearly_change": {
+            "type": "number"
+           },
+           "land_area": {
+            "type": "number"
+           }
+          },
+          "required": [
+           "country",
+           "population",
+           "yearly_change",
+           "land_area"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.country",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.population",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.yearly_change",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.land_area",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.country",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.population",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.yearly_change",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.land_area",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.country",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.population",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.yearly_change",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.land_area",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V25",
+   "group": "reserved-v2",
+   "url": "https://www.rba.gov.au/statistics/frequency/exchange-rates.html",
+   "checkNeedle": null,
+   "recordEntities": [
+    "currency-1",
+    "currency-2",
+    "currency-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "currency": {
+            "type": "string"
+           },
+           "rate": {
+            "type": "number"
+           }
+          },
+          "required": [
+           "currency",
+           "rate"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.rate",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.rate",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.rate",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V26",
+   "group": "reserved-v2",
+   "url": "https://www.kernel.org/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "release-1",
+    "release-2",
+    "release-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "kind": {
+            "type": "string"
+           },
+           "version": {
+            "type": "string"
+           },
+           "released": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "kind",
+           "version",
+           "released"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.kind",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.version",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.released",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.kind",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.version",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.released",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.kind",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.version",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.released",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V27",
+   "group": "reserved-v2",
+   "url": "https://www.php.net/supported-versions.php",
+   "checkNeedle": null,
+   "recordEntities": [
+    "branch-1",
+    "branch-2",
+    "branch-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "branch": {
+            "type": "string"
+           },
+           "initial_release": {
+            "type": "string"
+           },
+           "active_support_until": {
+            "type": "string"
+           },
+           "security_support_until": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "branch",
+           "initial_release",
+           "active_support_until",
+           "security_support_until"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.branch",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.initial_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.active_support_until",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.security_support_until",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.branch",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.initial_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.active_support_until",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.security_support_until",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.branch",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.initial_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.active_support_until",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.security_support_until",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V28",
+   "group": "reserved-v2",
+   "url": "https://www.postgresql.org/support/versioning/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "version-1",
+    "version-2",
+    "version-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "version": {
+            "type": "string"
+           },
+           "current_minor": {
+            "type": "string"
+           },
+           "first_release": {
+            "type": "string"
+           },
+           "final_release": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "version",
+           "current_minor",
+           "first_release",
+           "final_release"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.version",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.current_minor",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.first_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.final_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.version",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.current_minor",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.first_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.final_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.version",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.current_minor",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.first_release",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.final_release",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V29",
+   "group": "reserved-v2",
+   "url": "https://news.ycombinator.com/",
+   "checkNeedle": null,
+   "recordEntities": [
+    "story-1",
+    "story-2",
+    "story-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "title": {
+            "type": "string"
+           },
+           "url": {
+            "type": "string"
+           },
+           "points": {
+            "type": "number"
+           },
+           "submitted": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "title",
+           "url",
+           "points",
+           "submitted"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.points",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.submitted",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.points",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.submitted",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.url",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.points",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.submitted",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V30",
+   "group": "reserved-v2",
+   "url": "https://www.githubstatus.com/history",
+   "checkNeedle": null,
+   "recordEntities": [
+    "incident-1",
+    "incident-2",
+    "incident-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "name": {
+            "type": "string"
+           },
+           "impact": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "name",
+           "impact"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.impact",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.impact",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.impact",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V31",
+   "group": "reserved-v2",
+   "url": "https://www.cloudflarestatus.com/history",
+   "checkNeedle": null,
+   "recordEntities": [
+    "entry-1",
+    "entry-2",
+    "entry-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "title": {
+            "type": "string"
+           },
+           "state": {
+            "type": "string"
+           },
+           "impact": {
+            "type": "string"
+           },
+           "started": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "title",
+           "state"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.state",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.impact",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.started",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.state",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.state",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.started",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V32",
+   "group": "reserved-v2",
+   "url": "https://forecast.weather.gov/MapClick.php?lat=47.6062&lon=-122.3321",
+   "checkNeedle": null,
+   "recordEntities": [
+    "period-1",
+    "period-2",
+    "period-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "last_update": {
+         "type": "string"
+        },
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "period": {
+            "type": "string"
+           },
+           "temperature": {
+            "type": "number"
+           },
+           "short_description": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "period",
+           "temperature",
+           "short_description"
+          ]
+         }
+        }
+       },
+       "required": [
+        "last_update",
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.last_update",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.period",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.temperature",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.short_description",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.period",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.temperature",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.short_description",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.period",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.temperature",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.short_description",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V33",
+   "group": "reserved-v2",
+   "url": "https://pypi.org/project/requests/",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "latest_version": {
+         "type": "string"
+        },
+        "released": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "name",
+        "latest_version",
+        "released"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.name",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.latest_version",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.released",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V34",
+   "group": "reserved-v2",
+   "url": "https://www.x-rates.com/table/?from=USD&amount=1",
+   "checkNeedle": null,
+   "recordEntities": [
+    "rate-1",
+    "rate-2",
+    "rate-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "currency": {
+            "type": "string"
+           },
+           "rate": {
+            "type": "number"
+           }
+          },
+          "required": [
+           "currency",
+           "rate"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.rate",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.rate",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.currency",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.rate",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V35",
+   "group": "reserved-v2",
+   "url": "https://www.yr.no/en/forecast/daily-table/2-2643743/United%20Kingdom/England/London",
+   "checkNeedle": null,
+   "recordEntities": [
+    "day-1",
+    "day-2",
+    "day-3"
+   ],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "records": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "date": {
+            "type": "string"
+           },
+           "max_temperature": {
+            "type": "number"
+           },
+           "min_temperature": {
+            "type": "number"
+           }
+          },
+          "required": [
+           "date",
+           "max_temperature",
+           "min_temperature"
+          ]
+         }
+        }
+       },
+       "required": [
+        "records"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.max_temperature",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.0.min_temperature",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.max_temperature",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.1.min_temperature",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.date",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.max_temperature",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.records.2.min_temperature",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V36",
+   "group": "reserved-v2",
+   "url": "https://zenodo.org/records/23488905",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "first_creator": {
+         "type": "string"
+        },
+        "published": {
+         "type": "string"
+        },
+        "version": {
+         "type": "string"
+        },
+        "doi": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "first_creator",
+        "published",
+        "version",
+        "doi"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.first_creator",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.published",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.version",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.doi",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V37",
+   "group": "reserved-v2",
+   "url": "https://peps.python.org/pep-0008/",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "number": {
+         "type": "string"
+        },
+        "title": {
+         "type": "string"
+        },
+        "first_author": {
+         "type": "string"
+        },
+        "status": {
+         "type": "string"
+        },
+        "type": {
+         "type": "string"
+        },
+        "created": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "number",
+        "title",
+        "first_author",
+        "status",
+        "type",
+        "created"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.number",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.first_author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.status",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.type",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.created",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V38",
+   "group": "reserved-v2",
+   "url": "https://datatracker.ietf.org/doc/rfc9112/",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "rfc_number": {
+         "type": "string"
+        },
+        "std_alias": {
+         "type": "string"
+        },
+        "status": {
+         "type": "string"
+        },
+        "published": {
+         "type": "string"
+        },
+        "first_author": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "rfc_number",
+        "std_alias",
+        "status",
+        "published",
+        "first_author"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.rfc_number",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.std_alias",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.status",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.published",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.first_author",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V39",
+   "group": "reserved-v2",
+   "url": "https://openlibrary.org/works/OL45804W",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "edition_title": {
+         "type": "string"
+        },
+        "work_title": {
+         "type": "string"
+        },
+        "first_published": {
+         "type": "string"
+        },
+        "author": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "edition_title",
+        "work_title",
+        "first_published",
+        "author"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.edition_title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.work_title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.first_published",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.author",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V40",
+   "group": "reserved-v2",
+   "url": "https://www.osti.gov/biblio/1478744",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "first_author": {
+         "type": "string"
+        },
+        "published": {
+         "type": "string"
+        },
+        "doi": {
+         "type": "string"
+        },
+        "osti_id": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "first_author",
+        "published",
+        "doi",
+        "osti_id"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.first_author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.published",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.doi",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.osti_id",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V41",
+   "group": "reserved-v2",
+   "url": "https://arxiv.org/abs/2610.22428",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "first_author": {
+         "type": "string"
+        },
+        "submitted": {
+         "type": "string"
+        },
+        "arxiv_id": {
+         "type": "string"
+        },
+        "primary_subject": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "first_author",
+        "submitted",
+        "arxiv_id",
+        "primary_subject"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.first_author",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.submitted",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.arxiv_id",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.primary_subject",
+       "present": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "V42",
+   "group": "reserved-v2",
+   "url": "https://www.nature.com/articles/s41586-020-2649-2",
+   "checkNeedle": null,
+   "recordEntities": [],
+   "request": {
+    "formats": [
+     "markdown",
+     "tables",
+     "links",
+     {
+      "type": "json",
+      "schema": {
+       "type": "object",
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "journal": {
+         "type": "string"
+        },
+        "volume": {
+         "type": "string"
+        },
+        "published": {
+         "type": "string"
+        },
+        "doi": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "title",
+        "journal",
+        "volume",
+        "published",
+        "doi"
+       ]
+      },
+      "modelFallback": false
+     }
+    ],
+    "verify": {
+     "checks": [
+      {
+       "type": "field",
+       "path": "json.status",
+       "equals": "complete"
+      },
+      {
+       "type": "field",
+       "path": "json.data.title",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.journal",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.volume",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.published",
+       "present": true
+      },
+      {
+       "type": "field",
+       "path": "json.data.doi",
+       "present": true
+      }
+     ]
+    }
+   }
+  }
+ ]
+}
