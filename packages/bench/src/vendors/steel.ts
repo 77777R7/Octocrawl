@@ -157,8 +157,11 @@ export function steelOps(
       return null
     },
 
-    async createSession(resume?: VendorResumeContext | null, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSession> {
-      const body = steelSessionBody(decision, resume ?? null, config.sessionTimeoutMs, proxyCountry)
+    // Steel takes the caller's UUID as the session's id (`sessionId`, its session lifecycle docs: "Reserving a Session ID").
+    namesSessions: true,
+
+    async createSession(resume?: VendorResumeContext | null, deadlineMs?: number, signal?: AbortSignal, name?: string): Promise<VendorSession> {
+      const body = { ...(steelSessionBody(decision, resume ?? null, config.sessionTimeoutMs, proxyCountry) as Record<string, unknown>), ...(name === undefined ? {} : { sessionId: name }) }
       const res = await api({
         method: 'POST',
         url: `${base}/v1/sessions`,
@@ -176,6 +179,13 @@ export function steelOps(
       } | null
       if (typeof json?.id !== 'string') {
         throw new Error('steel: session create response missing id')
+      }
+      if (name !== undefined && json.id !== name) {
+        // A session not under the name it was asked for cannot be found by that name after a crash (PA E4): it is ended now
+        // and the call fails, so no session of a paid call is ever left where only its name would lead.
+        const released = await api({ method: 'POST', url: `${base}/v1/sessions/${encodeURIComponent(json.id)}/release`, headers, deadlineMs: Date.now() + 5_000 }).catch(() => null)
+        const ended = released !== null && released.status >= 200 && released.status < 300
+        throw new Error(`steel: session create did not take the sessionId it was given (it made ${json.id}, ${ended ? 'released' : 'release unconfirmed'})`)
       }
       // Constructed per Steel's docs rather than read from the response —
       // they explicitly warn against using the returned websocketUrl directly.

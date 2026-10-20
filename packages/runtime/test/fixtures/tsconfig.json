@@ -1,4 +1,4 @@
 {
   "extends": "../../../../tsconfig.base.json",
-  "compilerOptions": { "paths": { "@w2l/contracts": ["../../../contracts/src/index.ts"] } }
+  "compilerOptions": { "paths": { "@w2l/contracts": ["../../../contracts/src/index.ts"], "@w2l/http-core": ["../../../http-core/src/index.ts"] } }
 }

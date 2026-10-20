@@ -533,6 +533,11 @@
         "answer": {
           "description": "The record's own page is this call's.",
           "type": "boolean"
+        },
+        "paidCallId": {
+          "description": "The call's id in its task's paid_calls, {taskId}-{attemptId}-{ordinal}, fixed before the reservation and kept across a crash; absent for a call made outside a task (a single scrape).",
+          "type": "string",
+          "minLength": 1
         }
       }
     },

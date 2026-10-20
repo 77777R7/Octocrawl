@@ -12,7 +12,7 @@ import type { Evidence, FetchResult, FetchWarning, HandoffRequest, LadderRunAudi
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { Lane } from './status.js'
 import type { BudgetKind } from './status.js'
-import type { ExecutionContext } from './execution.js'
+import type { ExecutionContext, PaidCallState } from './execution.js'
 
 /**
  * How a crawl uses the site's sitemap: beside the links it finds (`include`,
@@ -265,6 +265,27 @@ export interface CrawlReport {
   attribution?: RequestAttribution
   /** The task's webhook and how its deliveries stand; absent when the request set none. */
   webhook?: JobWebhookStatus
+  /** The task's paid provider calls, every attempt counted, from its `paid_calls` (PA E5); absent when it made none. */
+  paidCalls?: PaidCallTotals
+}
+
+/**
+ * A task's paid calls in US dollars, kept apart so an unknown cost is never shown as a known one, nor as zero (PA E5).
+ * A call is in exactly one of the first three sums.
+ */
+export interface PaidCallTotals {
+  /** Ceilings of the calls in flight (`reserved`, `submitted`): a live run's, or ones a crash left before they were looked at. */
+  reservedUsd: number
+  /** What the calls whose charge is known were charged (`settled`). */
+  knownChargedUsd: number
+  /** What the calls whose cost nobody can state may have cost: an `unknown` call at its ceiling, a `usage_pending` one at the bound it was charged. */
+  unknownExposureUsd: number
+  /** Of `reservedUsd`, the ceilings of calls whose provider has named no session yet (`reserved`): the part that can still come back. */
+  refundableUsd: number
+  /** Settled calls charged above their ceiling (a measured charge can pass it; the record says so). */
+  overCeiling: number
+  /** The calls by state. */
+  calls: Partial<Record<PaidCallState, number>>
 }
 
 export interface CrawlPage {

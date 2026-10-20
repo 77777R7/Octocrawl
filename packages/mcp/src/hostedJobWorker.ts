@@ -3,7 +3,9 @@
  * of one job. It takes the job's lease for the delivery's generation, restores the job's checkpoint from GCS, runs the
  * engine a slice (packages/api runSlice) under the job's credits and the day's job pools, writes the slice's pages and the
  * checkpoint back, commits the job and settles the credits, then queues what comes next: the job's next slice, or, when
- * it has finished, its export, its expiry and the first slice of the job promoted into its slot.
+ * it has finished, its export, its expiry, its webhook and the first slice of the job promoted into its slot.
+ * The webhook is a delivery of its own (`/internal/jobs/:id/webhook`), so a receiver that is down is retried without
+ * running anything else again.
  *
  * A delivery is answered 200 when it was handled, whatever became of the job (Cloud Tasks would otherwise retry it), and
  * 503 only when the lease is held by a slice that may still be running: Cloud Tasks retries it until the lease expires.
@@ -15,12 +17,12 @@ import { join } from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { createApiEngine, type ApiEngineOptions, type SliceCharge } from '@w2l/api'
 import { hostedNetworkPolicy, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
-import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore } from '@w2l/runtime'
+import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore, webhookSignature, type WebhookTransport } from '@w2l/runtime'
 import { hostedPolicy, type HostedLeases } from './hostedApi.js'
 import { CREDITS, scrapeCharge, type CreditsStore, type Reservation, type UsageKind } from './hostedCredits.js'
 import type { UploadResult } from './hostedCloud.js'
-import type { HostedJob, HostedJobStore } from './hostedJobs.js'
-import { exportName, jobPrefix } from './hostedJobRoutes.js'
+import type { HostedJob, HostedJobStore, HostedWebhookDelivery } from './hostedJobs.js'
+import { exportName, jobPrefix, jobStatus } from './hostedJobRoutes.js'
 
 /** The bucket operations a slice needs; GcsBucket has them. */
 export interface WorkerFiles {
@@ -57,6 +59,10 @@ export interface JobWorkerDeps {
   enqueueSlice: (job: HostedJob, delaySeconds?: number) => Promise<void>
   /** Queues the job's expiry at its `expireAt`. */
   enqueueExpiry: (job: HostedJob) => Promise<void>
+  /** Queues the post of the job's end to its webhook, once by its name (`{jobId}-webhook`). */
+  enqueueWebhook?: (job: HostedJob) => Promise<void>
+  /** Sends a webhook: https to a public address, its DNS pinned, no redirects (createHttpsWebhookTransport). */
+  webhookTransport?: WebhookTransport
   /** Leases on hosts, so that two slices never read one site at once (`host-{host}`). */
   hostLeases: HostedLeases
   enabled?: () => Promise<boolean>
@@ -71,7 +77,12 @@ export interface JobWorkerDeps {
   pollMs?: number
 }
 
-export interface SliceOutcome { status: 200 | 503; outcome: string }
+export interface SliceOutcome { status: 200 | 500 | 503; outcome: string }
+
+/** Attempts at a job's webhook before it is recorded failed: about 20 minutes of the queue's backoff (10 s doubling to 10 min). */
+export const WEBHOOK_MAX_ATTEMPTS = 8
+const WEBHOOK_TIMEOUT_MS = 30_000
+const WEBHOOK_RETRYABLE = (status: number) => status === 408 || status === 425 || status === 429 || status >= 500
 
 /** Pages a slice may store past its limit: the engine's workers less one (workerCount 2 below). */
 const SLICE_HEADROOM = 1
@@ -304,6 +315,49 @@ export async function runJobExpiry(deps: Pick<JobWorkerDeps, 'store' | 'files' |
 
 const FINISHED = new Set(['completed', 'failed', 'cancelled', 'expired'])
 
+/**
+ * Posts a finished job's end to its webhook (H2 W3), signed as a local job's deliveries are: `x-w2l-signature` is
+ * `sha256=` and the hex HMAC-SHA256, under the job's secret, of `{x-w2l-timestamp}.{body}`, the timestamp in ms. A 2xx is
+ * delivered; 408, 425, 429, a 5xx or no answer answers 500 so that Cloud Tasks retries it, up to WEBHOOK_MAX_ATTEMPTS;
+ * any other answer is failed at once. Each outcome is recorded on the job. `attempt` counts from 0 (Cloud Tasks'
+ * X-CloudTasks-TaskRetryCount).
+ */
+export async function runJobWebhook(deps: Pick<JobWorkerDeps, 'store' | 'webhookTransport' | 'log' | 'now'>, jobId: string, attempt: number): Promise<SliceOutcome> {
+  const log = deps.log ?? ((line: string) => console.log(line))
+  const now = deps.now ?? (() => new Date())
+  const job = await deps.store.get(jobId)
+  if (job === null) return { status: 200, outcome: 'missing' }
+  const webhook = job.webhook
+  if (!webhook || !(webhook.events as string[]).includes(job.status)) return { status: 200, outcome: 'not_requested' }
+  if (webhook.delivery?.state === 'delivered' || webhook.delivery?.state === 'failed') return { status: 200, outcome: webhook.delivery.state }
+  if (!deps.webhookTransport) throw new Error('the worker has no webhook transport')
+  const body = JSON.stringify({
+    schemaVersion: 'w2l.job-event/v1', eventId: `${job.id}:${job.status}`,
+    // A local job numbers its started event 0 and each page after it; hosted posts its end alone, numbered as a local one is.
+    sequence: job.counts.pages + job.counts.errors + 1,
+    jobId: job.id, jobKind: job.kind, event: job.status, at: job.finishedAt ?? now().toISOString(), metadata: webhook.metadata,
+    report: jobStatus({ ...job, webhook: null }), ...(job.status === 'failed' && job.failureReason !== null ? { error: job.failureReason } : {}),
+  })
+  const timestamp = String(now().getTime())
+  const headers = {
+    'x-w2l-event-id': `${job.id}:${job.status}`, 'x-w2l-event-version': String(job.counts.pages + job.counts.errors + 1),
+    'x-w2l-delivery-id': `${job.id}-webhook-${attempt}`, 'x-w2l-timestamp': timestamp, 'x-w2l-signature': webhookSignature(webhook.secret, timestamp, body),
+  }
+  let httpStatus: number | null = null
+  let error: string | null = null
+  try { httpStatus = (await deps.webhookTransport({ url: webhook.url, body, headers, signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS) })).status }
+  catch (caught) { error = caught instanceof Error ? caught.message : String(caught) }
+  const attempts = attempt + 1
+  const ok = httpStatus !== null && httpStatus >= 200 && httpStatus < 300
+  const retry = !ok && (httpStatus === null || WEBHOOK_RETRYABLE(httpStatus)) && attempts < WEBHOOK_MAX_ATTEMPTS
+  // An address the policy refuses never becomes reachable by waiting.
+  const denied = error !== null && error.startsWith('webhook egress denied')
+  const state: HostedWebhookDelivery['state'] = ok ? 'delivered' : retry && !denied ? 'pending' : 'failed'
+  await deps.store.recordWebhook(job.id, { state, attempts, httpStatus, error: ok ? null : error ?? `HTTP ${httpStatus}`, at: now().toISOString() })
+  log(JSON.stringify({ severity: ok ? 'INFO' : 'WARNING', event: 'hosted_job_webhook', workspaceId: job.workspaceId, jobId: job.id, state, attempts, httpStatus, error }))
+  return state === 'pending' ? { status: 500, outcome: 'retry' } : { status: 200, outcome: state }
+}
+
 /** A finished job's export (every segment, in order, as one file) and its expiry; done again harmlessly on a retry. */
 async function finish(deps: JobWorkerDeps, job: HostedJob, log: (line: string) => void): Promise<void> {
   if (job.status === 'expired') return
@@ -315,6 +369,7 @@ async function finish(deps: JobWorkerDeps, job: HostedJob, log: (line: string) =
   }
   await deps.files.upload(exportName(job), new Uint8Array(gzipSync(lines.join('\n'))), { contentType: 'application/gzip' })
   await deps.enqueueExpiry(job)
+  if (job.webhook && deps.enqueueWebhook && (job.webhook.events as string[]).includes(job.status) && job.webhook.delivery?.state !== 'delivered' && job.webhook.delivery?.state !== 'failed') await deps.enqueueWebhook(job)
   // The job promoted into this one's slot, if it has not started: its first slice, by its name, so queueing it twice is once.
   if (job.promoted) {
     const promoted = await deps.store.get(job.promoted)
@@ -395,7 +450,7 @@ export function googleOidcVerifier(expected: { audience: string; email: string }
 
 /**
  * The worker's HTTP service: `POST /internal/jobs/:id/slice` with `{ generation }` runs a slice, `POST /internal/jobs/:id/expire`
- * expires a finished job, `GET /health` answers. Every other request, and any without a valid token, is refused.
+ * expires a finished job, `POST /internal/jobs/:id/webhook` posts its end, `GET /health` answers. Every other request, and any without a valid token, is refused.
  */
 export async function startJobWorker(options: { deps: JobWorkerDeps; verify: (authorization: string | null) => Promise<boolean>; port: number; host?: string }) {
   const { createServer } = await import('node:http')
@@ -404,13 +459,18 @@ export async function startJobWorker(options: { deps: JobWorkerDeps; verify: (au
     void (async () => {
       const send = (status: number, body: unknown) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body))
       if (req.method === 'GET' && req.url === '/health') return send(200, { ok: true, service: 'octocrawl-jobs' })
-      const match = req.method === 'POST' ? /^\/internal\/jobs\/([0-9a-f-]{36})\/(slice|expire)$/.exec(req.url ?? '') : null
+      const match = req.method === 'POST' ? /^\/internal\/jobs\/([0-9a-f-]{36})\/(slice|expire|webhook)$/.exec(req.url ?? '') : null
       if (match === null) return send(404, { error: 'not found' })
       if (!(await options.verify(req.headers.authorization ?? null))) return send(401, { error: 'unauthorized' })
       let body = ''
       for await (const chunk of req) { body += String(chunk); if (body.length > 10_000) return send(413, { error: 'body too large' }) }
       try {
         if (match[2] === 'expire') { const result = await runJobExpiry(options.deps, match[1]!); return send(result.status, { outcome: result.outcome }) }
+        if (match[2] === 'webhook') {
+          const retries = Number(req.headers['x-cloudtasks-taskretrycount'] ?? 0)
+          const result = await runJobWebhook(options.deps, match[1]!, Number.isSafeInteger(retries) && retries >= 0 ? retries : 0)
+          return send(result.status, { outcome: result.outcome })
+        }
         const generation = (JSON.parse(body || '{}') as { generation?: unknown }).generation
         if (!Number.isSafeInteger(generation) || (generation as number) < 0) return send(400, { error: 'generation must be a nonnegative integer' })
         const result = await runJobSlice(options.deps, match[1]!, generation as number)
