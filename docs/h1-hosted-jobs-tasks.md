@@ -190,12 +190,22 @@
 
 ## PR ⑥ 验收
 
-- [ ] **V1** 把 parity 的 crawl 和 batch 用例（L02、L04、L11、A13–A15、A26–A35）对 hosted 跑一遍，记录到 `research/hosted/`。
-- [ ] **V2** 跑一个 1,000 URL 的 batch。跑完后先把两个服务缩到 0，再从新实例和另一个 revision 的 tag URL 读回全部 1,000 项。
+- [x] **V1** 把 parity 的 crawl 和 batch 用例（L02、L04、L11、A13–A15、A26–A35）对 hosted 跑一遍，记录到 `research/hosted/`。
+- [x] **V2** 跑一个 1,000 URL 的 batch。跑完后先把两个服务缩到 0，再从新实例和另一个 revision 的 tag URL 读回全部 1,000 项。
   - 记录命令、commit 和花费。
-- [ ] **V3** 在 ROADMAP 的 H1 行下标记完成，链接到记录。
+- 2026-10-20 的结果见 [research/hosted/2026-10-20-h1-acceptance-d292501e.md](../research/hosted/2026-10-20-h1-acceptance-d292501e.md)：
+  - V1 第二轮 73/90，**没过**；
+  - V2 通过：1,000 个 URL 用 307 秒跑完，从新实例和正式域名读回的结果一样；
+  - 过程中修了 D8、D9、D10。
+- [ ] **V4** hosted 的任务状态要带上 `budgetExceeded`（L02、A32）。worker 从 `runSlice` 的结果里取出来，写进任务文档。
+- [ ] **V5** 任务跑的过程中要能看到进度（A14、A34）。现在只有一段提交后计数才变；要么段内定时写进度，要么改这两个用例的期望。先定做法。
+- [ ] **V6** hosted 返回的页面没有 trace，A15 和 A35 的间隔检查做不了。要么在页面上给出 crawl-delay 的证据，要么换成对 hosted 能做的检查。实测的间隔是够的：A15 两次请求隔了 3,902 ms，要求是 2,000 ms。
+- [ ] **V7** 查 A32（Wikipedia 的 crawl 只存了 1 页，期望 7 页）和 L11（`anyOf` 观测值 `okokx | xxx`）。
+- [ ] **V8** V4–V7 做完后再跑一遍 V1（L02、L04、L11、A13–A15、A26–A35），A29 的不带 key 检查对 hosted 不适用，要注明。
+- [ ] **V3** 在 ROADMAP 的 H1 行下标记完成，链接到记录。要等 V8 通过。
 
 ## 下次从这里继续
 
 - 方案和本清单已合并（#602）。PR ① 到 ④ 已合并（#605–#608），PR ⑤ 已部署（2026-10-20），全局开关关着。
-- 下一项是 **PR ⑥ 的 V1**：parity 的 crawl 和 batch 用例对 hosted 跑一遍。要先打开开关，并发一把测试 key。
+- PR ⑥ 已跑完（2026-10-20），H1 还没完成：V2 通过，V1 是 73/90。
+- 下一项是 **V4–V7**，然后做 V8，再做 V3。开关现在是关的。
