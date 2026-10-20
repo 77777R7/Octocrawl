@@ -364,7 +364,19 @@ Hosted phase 1 uses the API's existing hosted mode, which refuses private addres
 - Egress comparison: [2026-10-19-h0-egress-714af563.md](research/hosted/2026-10-19-h0-egress-714af563.md) (#600), direct and through the gateway. Both arms read 72 of 74 pages, and the gateway was about three times slower, so H1 starts without a proxy route. Blocking sites were not in the set.
 - The `W2L_SITE_DAILY` split is a code change (#599), not a record: keyless callers together get `W2L_KEYLESS_TOTAL_DAILY` (500) and each account `W2L_ACCOUNT_DAILY` (500). It is not deployed yet.
 
-**H1 under way.** PR ① the job store with the GCS and Cloud Tasks clients (#605), PR ② running a stored crawl or batch a slice at a time (#606) and PR ③ the hosted batch and crawl job routes for accounts (#607) are merged. Next is the worker, starting with W1 of the [H1 task list](docs/h1-hosted-jobs-tasks.md).
+**H1 done 2026-10-20.** Hosted `batch_scrape` (up to 1,000 URLs) and `crawl` (up to 500 pages) run for accounts' keys, a slice at a time:
+- the API service `octocrawl-api` takes the jobs;
+- the worker service `octocrawl-jobs` runs them;
+- they use Cloud Tasks, GCS and Firestore job documents.
+
+The work is in the [plan](docs/launch/2026-10-19-h1-hosted-jobs-plan.md) and the [task list](docs/h1-hosted-jobs-tasks.md): #605–#608, #611, #612, #614, #617 and #619. The exit:
+- **Tests:** `npm test` and `npm run typecheck` pass on CI.
+- **A 1,000-URL batch reads back from any instance:** it did, in 307 s, with the same 1,000 items read through a never-served revision and through api.octocrawl.dev. Record: [2026-10-20-h1-acceptance-d292501e.md](research/hosted/2026-10-20-h1-acceptance-d292501e.md).
+- **The parity crawl and batch cases pass on hosted:** 85/90 checks, 14 of 16 cases. Record: [2026-10-20-h1-v8-cea1d4cb.md](research/hosted/2026-10-20-h1-v8-cea1d4cb.md). Howard accepted the two exceptions:
+  - A29 expects a keyless call to be refused, which hosted does not do on purpose.
+  - A32 fails locally the same way.
+
+The global switch `hostedConfig/jobs.enabled` is off, so jobs are not yet open to anyone. Opening them to invited key holders is H2.
 
 ### P3 · Browser lane and Pro (weeks 11–14)
 
