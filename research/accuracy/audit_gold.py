@@ -17,6 +17,18 @@ def norm_decimal(value: str, locale='en') -> str:
     else:text=text.replace(',','')
     return str(Decimal(text))
 
+def english_date(text: str) -> str:
+    t=' '.join(text.replace('\u00a0',' ').split())
+    m=re.search(r'(?<!\d)(\d{4})([-/])(\d{2})\2(\d{2})(?!\d)',t)
+    if m:return dt.date(int(m[1]),int(m[3]),int(m[4])).isoformat()
+    def month(name):
+        key=name.lower().rstrip('.');full=[k for k in MONTHS if k==key or (len(key)>=3 and k.startswith(key))]
+        assert len(full)==1,'unknown month '+name;return MONTHS[full[0]]
+    m=re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?(?:\s+|-)([A-Za-z]{3,}\.?),?(?:\s+|-)(\d{4})\b',t)
+    if m:return dt.date(int(m[3]),month(m[2]),int(m[1])).isoformat()
+    m=re.search(r'\b([A-Za-z]{3,}\.?)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b',t)
+    assert m,'no explicit calendar date';return dt.date(int(m[3]),month(m[1]),int(m[2])).isoformat()
+
 def read_proof(source: str, proof: dict) -> str:
     start,end=proof['start'],proof['end']
     assert isinstance(start,int) and isinstance(end,int) and 0<=start<end<=len(source),'invalid source span'
@@ -58,6 +70,11 @@ def derive(source: str, value: dict) -> str:
         m=re.search(r'([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})',text)
         assert m,'no explicit English calendar date'
         return dt.date(int(m[3]),MONTHS[m[1].lower()],int(m[2])).isoformat()
+    if rule=='date_text':
+        # One explicit English or ISO calendar date, optionally picked out of the text by pattern/group first.
+        if value.get('pattern'):
+            m=re.search(value['pattern'],text);assert m,'source pattern absent';text=m[value.get('group',1)]
+        return english_date(text)
     if rule=='date_day_month_year_context':
         m=re.fullmatch(r'(\d{1,2})\s+([A-Za-z]+)',text)
         year=re.search(r'\b(20\d{2})\b',parts[1]);assert m and year
@@ -138,7 +155,8 @@ def audit_dataset(root: Path) -> dict:
         assert hashlib.sha256((root/'plan.json').read_bytes()).hexdigest()==seal['planSha256'],'sealed plan differs'
         for path,digest in seal['files'].items():
             assert hashlib.sha256((root/path).read_bytes()).hexdigest()==digest,'sealed source/annotation differs: '+path
-    assert len(plan['cases'])==18 and len({c['url'] for c in plan['cases']})==18,'task universe changed'
+    count=plan.get('caseCount',18)  # #556's set has 18; reserved v2 states its own count
+    assert len(plan['cases'])==count and len({c['url'] for c in plan['cases']})==count,'task universe changed'
     for definition in plan['cases']:
         folder=root/'cases'/definition['id'];case=json.loads((folder/'gold.json').read_text())
         assert case['task']==definition['task'] and case['url']==definition['url'],'task changed after planning'

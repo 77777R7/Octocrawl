@@ -145,4 +145,16 @@ class Report(unittest.TestCase):
   r=score_case(c,doc(tables=[{'caption':'','rows':[['Quantity','Symbol','Value'],['day','d','86399']]}]),ORIGIN);rep={'rows':[r]}
   self.assertNotIn('86399',markdown_report(rep));self.assertNotIn('day/value',markdown_report(rep));self.assertIn('r1/value',markdown_report(rep));self.assertNotIn('86400',markdown_report(rep));self.assertIn('86399',markdown_report(rep,True))
 
+
+class Equivalents(unittest.TestCase):
+ """Same value, different spelling: schema.org availability URLs and month-precision dates."""
+ def test_schema_org_availability_equals_its_label(self):
+  for shown in ['IN STOCK','In stock','instock','https://schema.org/InStock']:self.assertTrue(equal(shown,'http://schema.org/InStock','text'),shown)
+  self.assertTrue(equal('Out of stock','https://schema.org/OutOfStock','text'))
+  self.assertFalse(equal('Out of stock','http://schema.org/InStock','text'))
+  self.assertFalse(equal('In stock soon','http://schema.org/InStock','text'))
+ def test_month_precision_spellings_are_equal(self):
+  self.assertTrue(equal('2031-06','June 2031','text'));self.assertTrue(equal('June 2031','2031-06','year_month'));self.assertTrue(equal('Jun 2031','2031-06','year_month'))
+  self.assertFalse(equal('2031-06-15','June 2031','text'));self.assertFalse(equal('July 2031','2031-06','year_month'))
+
 if __name__=='__main__':unittest.main()
