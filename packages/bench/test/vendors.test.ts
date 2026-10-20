@@ -7,6 +7,7 @@ import { browserbaseOps, browserbaseSessionBody } from '../src/vendors/browserba
 import { countSolved, steelOps, steelSessionBody } from '../src/vendors/steel.js'
 import { CdpVendorTransport } from '../src/vendors/transport.js'
 import { connectVendor } from '../src/vendors/connect.js'
+import { captureOf } from '../src/capture.js'
 
 /**
  * Both vendors ship with evasion ON by default (Browserbase solves captchas
@@ -619,6 +620,28 @@ describe('vendor transport behind the provider gate', () => {
     // The record still says what went on the wire — the declared UA was the
     // only identity we had, and the trace says we could not confirm it.
     expect(out.compliance!.sentHeaders.headers).toEqual([{ name: 'user-agent', value: VENDOR_UA }])
+  })
+
+  it('records the document on screen as the evidence and the capture, and no wire bytes it did not measure (PA B2, B3, G1)', async () => {
+    const api = sessionServing('bb_1')
+    const bb = fakeBrowser({ documents: [
+      { url: 'https://shop.example/dp/B0TEST', status: 403, headers: { 'Content-Type': 'text/html', 'CF-Mitigated': 'challenge' } },
+      { url: 'https://shop.example/dp/B0TEST', status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+    ] })
+    const { declaration, transport } = await connectVendor(browserbaseOps({ apiKey: 'k' }, api.handler), connectorFor(bb).connector)
+    const subject = new ProviderSubject(declaration, transport, 'standard', null, robotsServing(AMAZON_SHAPED).fetcher)
+    const out = await subject.fetch('https://shop.example/dp/B0TEST', undefined, undefined, undefined, { includeTags: ['article'] })
+    expect(out.status).toBe('success')
+    expect(out.evidence).toMatchObject({ httpStatus: 200, contentType: 'text/html; charset=utf-8' })
+    expect(out.usage.bytesWire).toBeNull()
+    const capture = captureOf(out.trace)
+    expect(capture).toMatchObject({ sourceKind: 'browser_dom', finalUrl: 'https://shop.example/dp/B0TEST', documentGeneration: 2, responseMatch: 'matched', sourceHash: out.evidence.rawBodySha256 })
+    expect(out.trace.find(event => event.event === 'view')?.detail).toMatchObject({ captureId: capture!.captureId, selectionVersion: 'includeTags' })
+
+    // A transport that heard no documents is unobserved, never matched.
+    const blind = await connectVendor(browserbaseOps({ apiKey: 'k' }, sessionServing('bb_2').handler), connectorFor(fakeBrowser()).connector)
+    const unseen = await new ProviderSubject(blind.declaration, blind.transport, 'standard', null, robotsServing(AMAZON_SHAPED).fetcher).fetch('https://shop.example/dp/B0TEST')
+    expect(captureOf(unseen.trace)).toMatchObject({ responseMatch: 'unobserved', documentGeneration: null })
   })
 
   it('HeadlessChrome on the vendor wire is never success', async () => {

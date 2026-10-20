@@ -40,6 +40,8 @@ export interface CdpPage {
   content(): Promise<string>
   url(): string
   close(): Promise<void>
+  /** Playwright's page events, when the connector's page has them; the documents are heard over CDP (CdpMainFrameDocuments). */
+  on?(event: string, handler: (...args: unknown[]) => void): unknown
 }
 
 /**
@@ -104,19 +106,89 @@ export class ByteMeter {
 }
 
 /**
- * Attach the meter to a page over a raw CDP session, when the context can open one; the detach is the caller's, in
- * its finally. A context without `newCDPSession` leaves the meter at zero: the transport keeps the count with the
- * closed session (`bytesCounted`), and the charge is settled on the provider's own figure, not on this count.
+ * Attach the meter to a page's raw CDP session. A context without `newCDPSession` leaves the meter at zero: the
+ * transport keeps the count with the closed session (`bytesCounted`), and the charge is settled on the provider's own
+ * figure, not on this count.
  */
-export async function meterPage(context: CdpContext, page: CdpPage, meter: ByteMeter, signal: AbortSignal): Promise<CdpSessionLike | null> {
-  if (typeof context.newCDPSession !== 'function') return null
-  const session = await raceWithSignal(context.newCDPSession(page), signal)
+function meterSession(session: CdpSessionLike, meter: ByteMeter): void {
   session.on('Network.loadingFinished', (params) => {
     const length = (params as { encodedDataLength?: unknown } | null)?.encodedDataLength
     if (typeof length === 'number') meter.add(length)
   })
-  await raceWithSignal(session.send('Network.enable'), signal)
-  return session
+}
+
+/** A main-frame document's response, as CDP reported it (headers lowercased). */
+export interface CdpDocumentResponse {
+  url: string
+  status: number
+  headers: Record<string, string>
+}
+
+/**
+ * The documents a page's main frame showed, as a raw CDP session hears them (PA B2), the remote counterpart of the
+ * local lane's MainFrameDocuments: so that a result pairs the DOM it reads with that document's own response, not
+ * with the response of the `goto` W2L started, after a script or a challenge loaded another document. A Document
+ * response arrives before its frame commits (`Network.responseReceived`, then `Page.frameNavigated`), so a main-frame
+ * commit whose URL is its frame's latest Document response is that response's document; any other commit had none.
+ * The pattern is chromeHandoff's.
+ */
+export class CdpMainFrameDocuments {
+  private readonly pending = new Map<string, CdpDocumentResponse>()
+  /** The response of the document on screen; null when the last commit came without one. */
+  shown: CdpDocumentResponse | null = null
+  /** Documents the main frame loaded (its commits; a change within a document is not one). */
+  loads = 0
+
+  constructor(session: CdpSessionLike) {
+    session.on('Network.responseReceived', (params) => {
+      const p = params as { type?: string; frameId?: string; response?: { url?: string; status?: number; headers?: Record<string, unknown> } } | null
+      if (p?.type !== 'Document' || p.response === undefined || p.frameId === undefined) return
+      this.pending.set(p.frameId, {
+        url: String(p.response.url ?? ''),
+        status: Number(p.response.status ?? 0),
+        headers: Object.fromEntries(Object.entries(p.response.headers ?? {}).map(([name, value]) => [name.toLowerCase(), String(value)])),
+      })
+    })
+    session.on('Page.frameNavigated', (params) => {
+      const frame = (params as { frame?: { id?: string; parentId?: string; url?: string } } | null)?.frame
+      if (frame?.id === undefined || frame.parentId !== undefined) return
+      const response = this.pending.get(frame.id) ?? null
+      this.pending.delete(frame.id)
+      this.shown = response !== null && sameDocument(response.url, String(frame.url ?? '')) ? response : null
+      this.loads++
+    })
+  }
+}
+
+/**
+ * The page's raw CDP session, with the meter and the document tracker on it, when the context can open one; the
+ * detach is the caller's, in its finally. Without one, the documents are unobserved. A session that a metered call
+ * cannot open fails the call, as the meter has to count; an unmetered one goes on unobserved.
+ */
+async function observePage(context: CdpContext, page: CdpPage, meter: ByteMeter | undefined, signal: AbortSignal): Promise<{ session: CdpSessionLike | null; documents: CdpMainFrameDocuments | null }> {
+  if (typeof context.newCDPSession !== 'function') return { session: null, documents: null }
+  let session: CdpSessionLike
+  try {
+    session = await raceWithSignal(context.newCDPSession(page), signal)
+  } catch (err) {
+    if (meter !== undefined || signal.aborted) throw err
+    return { session: null, documents: null }
+  }
+  if (meter !== undefined) meterSession(session, meter)
+  const documents = new CdpMainFrameDocuments(session)
+  try {
+    await raceWithSignal(session.send('Network.enable'), signal)
+  } catch (err) {
+    await session.detach().catch(() => {})
+    if (meter !== undefined || signal.aborted) throw err
+    return { session: null, documents: null }
+  }
+  // Without the Page domain no commit is heard: the documents stay unobserved, the meter still counts.
+  const paged = await raceWithSignal(session.send('Page.enable'), signal).then(() => true, (err: unknown) => {
+    if (signal.aborted) throw err
+    return false
+  })
+  return { session, documents: paged ? documents : null }
 }
 
 export interface CdpBrowser {
@@ -209,7 +281,17 @@ export interface NavigationOutcome {
   settle?: SettleOutcome
   /** What the wait for the region the task needs saw (ADR 0007), when one was asked for. */
   region?: RegionOutcome
+  /**
+   * Documents the main frame loaded up to the read (PA B2); null when unobserved. `status` and `headers` are the
+   * response of the document on screen when the session heard it, else those `goto` answered with.
+   */
+  documentGeneration: number | null
+  /** Whether `status` and `headers` are the read document's own (see ResponseMatch). */
+  responseMatch: ResponseMatch
 }
+
+/** Reads of the page while a document loads under it, before the read is reported as mismatched. */
+const READ_ATTEMPTS = 3
 
 /**
  * Navigate one page in the vendor's default context and report what the
@@ -247,18 +329,19 @@ export async function navigateOnce(
   // no AbortSignal.timeout property is read anywhere.
   const scope = createExecutionScope({ signal, deadlineAt: deadlineMs })
   let page: CdpPage | undefined
-  let metering: CdpSessionLike | null = null
+  let observing: CdpSessionLike | null = null
   const abort = () => { void page?.close().catch(() => {}) }
   scope.signal.addEventListener('abort', abort, { once: true })
   try {
     throwIfExecutionStopped(scope)
     page = await createExecutionPage(browser, scope.signal)
     throwIfExecutionStopped(scope)
-    if (meter !== undefined) {
-      metering = await meterPage(defaultContext(browser), page, meter, scope.signal)
-      // Past the cap the page is closed: the navigation then fails, and the error below says why.
-      meter.onCap(abort)
-    }
+    // Opened before goto, so the page's documents are heard from its first one.
+    const observed = await observePage(defaultContext(browser), page, meter, scope.signal)
+    observing = observed.session
+    const documents = observed.documents
+    // Past the cap the page is closed: the navigation then fails, and the error below says why.
+    meter?.onCap(abort)
     const timeout = navigationTimeout(deadlineMs, Date.now())
     const response = await raceWithSignal(page.goto(url, { waitUntil: 'domcontentloaded', timeout }), scope.signal)
     if (meter?.capped != null) throw meter.error()
@@ -270,9 +353,13 @@ export async function navigateOnce(
     throwIfExecutionStopped(scope)
     // The region the task needs (ADR 0007): waited for on the same page, leaving a second to read it before the deadline,
     // only on a page that answered 2xx and shows no decisive check: a block page is not waited on, nor paid for.
-    const answered = response?.status() ?? 0
+    // The document on screen answers for itself when the session heard it, else the navigation's answer stands.
+    const onScreen = (): { status: number; headers: Record<string, string> } => documents?.shown
+      ?? { status: response?.status() ?? 0, headers: Object.fromEntries(Object.entries(response?.headers() ?? {}).map(([name, value]) => [name.toLowerCase(), value])) }
+    const before = onScreen()
+    const answered = before.status
     const gated = region === undefined || answered < 200 || answered >= 300
-      || classifyGate({ status: answered, header: (name) => response?.headers()[name.toLowerCase()] ?? null, body: await raceWithSignal(page.content(), scope.signal), contentful: true }) !== null
+      || classifyGate({ status: answered, header: (name) => before.headers[name.toLowerCase()] ?? null, body: await raceWithSignal(page.content(), scope.signal), contentful: true }) !== null
     const regionOutcome = gated ? undefined : await raceWithSignal(waitForRegion(page, region!, {
       maxMs: deadlineMs === undefined ? REGION_WAIT_MAX_MS : Math.min(REGION_WAIT_MAX_MS, deadlineMs - 1_000 - Date.now()),
     }), scope.signal)
@@ -280,10 +367,21 @@ export async function navigateOnce(
     // The settle and the region wait also fetched: past the cap here, the page is not read.
     if (meter?.capped != null) throw meter.error()
 
-    const headers: Record<string, string> = {}
-    for (const [name, value] of Object.entries(response?.headers() ?? {})) {
-      headers[name.toLowerCase()] = value
+    // The page as it is now, read while no new document loads, so that what is read and the response reported belong together.
+    let body = ''
+    let steady = false
+    for (let attempt = 1; attempt <= READ_ATTEMPTS && !steady; attempt++) {
+      if (attempt > 1) await raceWithSignal(page.waitForTimeout(250), scope.signal)
+      const loads = documents?.loads
+      body = await raceWithSignal(page.content(), scope.signal)
+      steady = documents === null || documents.loads === loads
     }
+    throwIfExecutionStopped(scope)
+    const { status, headers } = onScreen()
+    // Heard nothing: unobserved, never matched. A commit with no response, or a document that kept loading under the
+    // read, is mismatched: the status may not be the read document's.
+    const responseMatch: ResponseMatch = documents === null || documents.loads === 0 ? 'unobserved'
+      : documents.shown !== null && steady ? 'matched' : 'mismatched'
 
     let sentUserAgent: string | null = null
     const sentClientHints: Record<string, string> = {}
@@ -301,14 +399,16 @@ export async function navigateOnce(
     }
 
     return {
-      status: response?.status() ?? 0,
-      body: await raceWithSignal(page.content(), scope.signal),
+      status,
+      body,
       finalUrl: page.url(),
       headers,
       sentUserAgent,
       sentClientHints,
       settle,
       ...(regionOutcome === undefined ? {} : { region: regionOutcome }),
+      documentGeneration: documents === null ? null : documents.loads,
+      responseMatch,
     }
   } catch (err) {
     // Past the cap the page was closed under the navigation, the settle or the region wait: the error is the meter's, not the closed target's.
@@ -316,9 +416,11 @@ export async function navigateOnce(
   } finally {
     scope.signal.removeEventListener('abort', abort)
     scope.dispose()
-    await metering?.detach().catch(() => {})
+    await observing?.detach().catch(() => {})
     await page?.close().catch(() => {})
   }
 }
 import { LOADING_WAIT_MAX_MS, waitForRenderedStability, type SettleOutcome } from '../browserSettle.js'
 import { REGION_WAIT_MAX_MS, waitForRegion, type RegionOutcome, type RegionSpec } from '../regionWait.js'
+import { sameDocument } from '../subjects/browserDocuments.js'
+import type { ResponseMatch } from '../capture.js'

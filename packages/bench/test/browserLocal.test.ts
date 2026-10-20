@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type RobotsOverrideApplied } from '@w2l/contracts'
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
+import { captureOf } from '../src/capture.js'
 
 /**
  * Browser-local transport behaviour against a bespoke server:
@@ -815,6 +816,9 @@ describe('BrowserLocalSubject after the page moves on by itself', () => {
       })
       expect(gone.markdown).toContain('Page not found')
       expect(gone.compliance?.finalUrl).toBe(`${url}/client/gone`)
+      // The capture names the document read: the second one the main frame loaded, with its own response (PA B3).
+      expect(captureOf(gone.trace)).toMatchObject({ sourceKind: 'browser_dom', requestedUrl: `${url}/client/replace`, finalUrl: `${url}/client/gone`, documentGeneration: 2, responseMatch: 'matched', sourceHash: gone.evidence.rawBodySha256 })
+      expect(gone.trace.find(event => event.event === 'view')?.detail).toMatchObject({ captureId: captureOf(gone.trace)!.captureId, selectionVersion: 'none' })
 
       // A server redirect, then a script: every hop is listed and the last document answers.
       const onward = await subject.fetch(`${url}/client/hop`)

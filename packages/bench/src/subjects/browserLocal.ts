@@ -1,4 +1,5 @@
 import { sourceDataWarnings } from './sourceData.js'
+import { captureEvent, newCapture, newView, selectionView, viewEvent } from '../capture.js'
 import { mergeListPages } from './listMerge.js'
 import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type ListRun, type PageAction, fileByteCap, proxyFor, type ContextCookie, type CookieSession, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
@@ -1206,6 +1207,22 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const wallMs = Date.now() - start
       const browserMs = wallMs
       trace.push({ at: wallMs, lane: 'browser_local', event: 'rendered', detail: { status, attemptCount } })
+      // The document read (PA B3): read while no other loaded (steady), with its own response unless it came without one.
+      const pageCapture = newCapture({
+        sourceKind: 'browser_dom',
+        requestedUrl: url,
+        finalUrl,
+        capturedAt: fetchedAt,
+        sourceHash: rawBodySha256,
+        documentGeneration: documents.loads,
+        responseMatch: documentResponse !== null ? 'matched' : 'mismatched',
+        capabilities: { layout: layout.html !== null, shadowTables: layout.sourceHtml !== undefined, actions: true, screenshot: true },
+        limits: { maxBytes: this.networkPolicy.maxDecompressedBytes },
+      })
+      trace.push(captureEvent(pageCapture, wallMs, 'browser_local'))
+      // What extraction converts: the DOM, or the layout copy of it (with the shadow tables' source when captured).
+      const sourceView = newView({ captureId: pageCapture.captureId, selectionVersion: 'none', transformVersion: layout.html === null ? 'none' : layout.sourceHtml === undefined ? 'layout' : 'layout+shadow' })
+      trace.push(viewEvent(sourceView, wallMs, 'browser_local'))
 
       // What actually went on the wire, as Playwright saw it, credentials
       // excepted, with the custom headers the gate added (sentHeadersOf): the
@@ -1343,6 +1360,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       const extracted = extractTf.extract(converted, { url: pageUrl, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, converted.length), blockAds: options.blockAds })
       trace.push(...contentSelectionEvent(options, 'browser_local', wallMs, converted.length))
+      const selected = selectionView(options, sourceView)
+      if (selected !== null) trace.push(viewEvent(selected, wallMs, 'browser_local'))
       const links = collectLinks(body, pageUrl)
       trace.push({
         at: wallMs,
