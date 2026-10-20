@@ -157,8 +157,11 @@ export function steelOps(
       return null
     },
 
-    async createSession(resume?: VendorResumeContext | null, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSession> {
-      const body = steelSessionBody(decision, resume ?? null, config.sessionTimeoutMs, proxyCountry)
+    // Steel takes the caller's UUID as the session's id (`sessionId`, its session lifecycle docs: "Reserving a Session ID").
+    namesSessions: true,
+
+    async createSession(resume?: VendorResumeContext | null, deadlineMs?: number, signal?: AbortSignal, name?: string): Promise<VendorSession> {
+      const body = { ...(steelSessionBody(decision, resume ?? null, config.sessionTimeoutMs, proxyCountry) as Record<string, unknown>), ...(name === undefined ? {} : { sessionId: name }) }
       const res = await api({
         method: 'POST',
         url: `${base}/v1/sessions`,

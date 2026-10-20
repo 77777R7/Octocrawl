@@ -52,13 +52,19 @@ function page(url: string, chargedUsd: number | null): FetchResult {
   }
 }
 
-/** A page whose one paid call reserves its $1 ceiling first and settles at it, as the ladder makes a provider call. */
+/**
+ * A page whose one paid call reserves its $1 ceiling first and settles at it, as the ladder makes a provider call: the
+ * call's `reserved` row is written before the call goes out, and its `settled` row after.
+ */
 const atom: ScrapeAtom = {
   async scrape(url: string, context?: ExecutionContext): Promise<ScrapeOutcome> {
+    const row = context?.paidCalls?.open({ url, vendorId: 'fake', ceilingUsd: 1 })
     const reservation = context?.spend?.reserve(1) ?? null
     if (reservation === null) return { result: page(url, null), links: [] }
+    if (row !== undefined) await context!.paidCalls!.write(row)
     appendFileSync(callsFile, `${url}\n`)
     const charged = reservation.settle(null)
+    if (row !== undefined) await context!.paidCalls!.write({ ...row, state: 'settled', chargedUsd: charged, settledAt: new Date().toISOString() })
     return { result: page(url, charged), links: [] }
   },
   async close(): Promise<void> {},

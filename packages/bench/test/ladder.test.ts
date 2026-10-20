@@ -11,6 +11,8 @@ import {
   type FetchResult,
   type HandoffRequest,
   type IdentityBundle,
+  type PaidCallLog,
+  type PaidCallRecord,
   type RobotsOverrideApplied,
 } from '@w2l/contracts'
 import { egressProxyRefusedWarning, LadderRunner, sessionRejection, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
@@ -1573,6 +1575,83 @@ describe('a provider rung under the run\'s spend ledger (ROADMAP PA item 4)', ()
     await expect(new LadderRunner([blockedHttp(), throwing], ALLOWED_ALL).run(url, undefined, { spend: ledger })).rejects.toThrow('session dropped')
     expect(ledger.settledUsd).toBeCloseTo(0.3)
     expect(ledger.reservedUsd).toBe(0)
+  })
+})
+
+describe('a provider call\'s row in the task\'s paid_calls (PA E3)', () => {
+  const url = 'https://example.com/p'
+  const blockedHttp = () => channel('http', [blockedResult(url, 'cloudflare_challenge')])
+  /** A journal that keeps every write, in order, as the task store would. */
+  const journal = () => {
+    const writes: PaidCallRecord[] = []
+    let ordinal = 0
+    const log: PaidCallLog = {
+      open: (call) => ({ paidCallId: `task-attempt-${++ordinal}`, taskId: 'task', attemptId: 'attempt', url: call.url, vendorId: call.vendorId, ceilingUsd: call.ceilingUsd, state: 'reserved', chargedUsd: null, providerRequestId: null, providerSessionId: null, tariffVersion: call.tariffVersion ?? null, grantHash: call.grantHash ?? null, deadline: call.deadline ?? null, createdAt: '2026-10-20T00:00:00.000Z', settledAt: null }),
+      write: async (call) => { writes.push(call) },
+    }
+    return { log, writes }
+  }
+  /** A provider that answers once, naming its session first; what the journal held when it was called is kept. */
+  const provider = (answer: FetchResult | Error, session: string | null, seen: PaidCallRecord[][], writes: PaidCallRecord[]): Channel => ({
+    id: 'provider', vendorId: 'steel', priceCeilingUsd: 0.3, identity: COHERENT, tariffVersion: 'tariff-1', grant: { sha256: 'b'.repeat(64), tier: 'enhanced', attestedAt: null },
+    fetch: async (_url, _session, execution) => {
+      seen.push([...writes])
+      expect(execution?.paidCallId).toBe('task-attempt-1')
+      if (session !== null) execution?.onPaidSession?.({ providerSessionId: session, providerRequestId: session })
+      if (answer instanceof Error) throw answer
+      return answer
+    },
+  })
+
+  it('writes the reserved row before the call goes out, submitted once the session is named, and settled with the charge', async () => {
+    const { log, writes } = journal()
+    const seen: PaidCallRecord[][] = []
+    const reported = { ...contentfulResult(url, 'provider'), usage: { ...contentfulResult(url, 'provider').usage, externalCostUsd: 0.12 } }
+    const ledger = createSpendLedger(1)
+    const run = await new LadderRunner([blockedHttp(), provider(reported, 'sess-1', seen, writes)], ALLOWED_ALL).run(url, undefined, { spend: ledger, paidCalls: log })
+    // When the provider was called, its reserved row was already written.
+    expect(seen).toEqual([[expect.objectContaining({ paidCallId: 'task-attempt-1', state: 'reserved', ceilingUsd: 0.3, vendorId: 'steel', tariffVersion: 'tariff-1', grantHash: 'b'.repeat(64) })]])
+    expect(writes.map((row) => row.state)).toEqual(['reserved', 'submitted', 'settled'])
+    expect(writes.at(-1)).toMatchObject({ state: 'settled', chargedUsd: 0.12, providerSessionId: 'sess-1', providerRequestId: 'sess-1' })
+    expect(ledger.settledUsd).toBeCloseTo(0.12)
+    // The settled snapshot on the record names the row.
+    expect((run.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }).calls[0]).toMatchObject({ paidCallId: 'task-attempt-1', chargedUsd: 0.12 })
+  })
+
+  it('leaves a charge it could only bound as usage_pending when the session can be asked, and unknown when none was named, never as zero', async () => {
+    const ceilingOnly = contentfulResult(url, 'provider')
+    const named = journal()
+    await new LadderRunner([blockedHttp(), provider(ceilingOnly, 'sess-2', [], named.writes)], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1), paidCalls: named.log })
+    expect(named.writes.at(-1)).toMatchObject({ state: 'usage_pending', chargedUsd: 0.3, settledAt: null })
+    // A measure missing the provider's byte count is a bound too.
+    const partial = journal()
+    const unmeasured = { ...ceilingOnly, usage: { ...ceilingOnly.usage, measuredCostUsd: 0.01, vendorSessionMs: 4_000, vendorProxyBytes: null } }
+    await new LadderRunner([blockedHttp(), provider(unmeasured, 'sess-3', [], partial.writes)], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1), paidCalls: partial.log })
+    expect(partial.writes.at(-1)).toMatchObject({ state: 'usage_pending', chargedUsd: 0.01 })
+    // A call that threw before any session was named: what it cost is unknown, and the ledger holds its ceiling.
+    const thrown = journal()
+    const ledger = createSpendLedger(1)
+    await expect(new LadderRunner([blockedHttp(), provider(new Error('session dropped'), null, [], thrown.writes)], ALLOWED_ALL).run(url, undefined, { spend: ledger, paidCalls: thrown.log })).rejects.toThrow('session dropped')
+    expect(thrown.writes.map((row) => [row.state, row.chargedUsd])).toEqual([['reserved', null], ['unknown', null]])
+    expect(ledger.settledUsd).toBeCloseTo(0.3)
+  })
+
+  it('makes no call when its reserved row cannot be written, and gives the reservation back', async () => {
+    const ledger = createSpendLedger(1)
+    const calls: string[] = []
+    const failingLog: PaidCallLog = { ...journal().log, write: async () => { throw new Error('disk full') } }
+    const paid: Channel = { id: 'provider', vendorId: 'steel', priceCeilingUsd: 0.3, identity: COHERENT, fetch: async (target) => { calls.push(target); return contentfulResult(url, 'provider') } }
+    await expect(new LadderRunner([blockedHttp(), paid], ALLOWED_ALL).run(url, undefined, { spend: ledger, paidCalls: failingLog })).rejects.toThrow('disk full')
+    expect(calls).toEqual([])
+    expect(ledger.reservedUsd).toBe(0)
+    expect(ledger.settledUsd).toBe(0)
+  })
+
+  it('keeps the in-memory ledger alone for a scrape with no task store', async () => {
+    const ledger = createSpendLedger(1)
+    const run = await new LadderRunner([blockedHttp(), { ...channel('provider', [contentfulResult(url, 'provider')], 'steel'), priceCeilingUsd: 0.3 }], ALLOWED_ALL).run(url, undefined, { spend: ledger })
+    expect(ledger.settledUsd).toBeCloseTo(0.3)
+    expect((run.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }).calls[0]).not.toHaveProperty('paidCallId')
   })
 })
 

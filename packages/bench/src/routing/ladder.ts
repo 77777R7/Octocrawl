@@ -16,7 +16,7 @@
  * content is caught by the false-success checks upstream.
  */
 
-import type { EvidenceAccessGrant, EvidencePaidCall, ExecutionContext, SpendLedger, Escalation, FetchOptions, FetchResult, FetchWarning, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, ReadinessState, RobotsOverrideApplied, SpendReservation, TraceEvent, Verification, VerifyContract } from '@w2l/contracts'
+import type { EvidenceAccessGrant, EvidencePaidCall, ExecutionContext, PaidCallRecord, PaidCallState, SpendLedger, Escalation, FetchOptions, FetchResult, FetchWarning, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, ReadinessState, RobotsOverrideApplied, SpendReservation, TraceEvent, Verification, VerifyContract } from '@w2l/contracts'
 import { carryPaidCalls, CONTENTFUL_STATUS, identityBundleIssues, QUALITY_ESCALATION_MAX_CONFIDENCE, RENDERED_LOW_YIELD_MAX_TOKENS } from '@w2l/contracts'
 import {
   createExecutionScope,
@@ -87,6 +87,8 @@ export interface Channel {
   readonly grant?: EvidenceAccessGrant
   /** The ADR 0005 capabilities a provider rung's sessions are created with, for its paid calls' record. */
   readonly grantCapabilities?: readonly string[]
+  /** Which tariff priced `priceCeilingUsd` (a hash of it), for the paid call's row; absent when not known. */
+  readonly tariffVersion?: string
   /** Release the channel's resources (browser processes, vendor sessions).
    *  The owner of the channel list calls this when the run is over. */
   close?(): Promise<void>
@@ -1031,6 +1033,19 @@ export class LadderRunner {
       ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: label, detail: { vendorId: channel.vendorId ?? null, reason: 'no price ceiling: the access grant names no tariff for this provider, and a provider whose cost has no upper bound is not called' } })
       return null
     }
+    // The call's row in the task's paid_calls (PA E3), its id fixed before the reservation; none outside a task.
+    const log = ceiling === undefined ? undefined : execution.paidCalls
+    let row: PaidCallRecord | null = log === undefined || ceiling === undefined ? null : log.open({
+      url, vendorId: channel.vendorId ?? channel.id, ceilingUsd: ceiling, tariffVersion: channel.tariffVersion ?? null,
+      grantHash: channel.grant?.sha256 ?? null, deadline: execution.deadlineAt === undefined ? null : new Date(execution.deadlineAt).toISOString(),
+    })
+    // The row's writes in order: a session named mid-call is written without holding the call up, and the outcome after it.
+    let writing: Promise<void> = Promise.resolve()
+    const save = (next: PaidCallRecord): Promise<void> => {
+      row = next
+      writing = writing.then(() => log!.write(next))
+      return writing
+    }
     if (ceiling !== undefined) {
       // A caller with no budget gave no ledger: the run keeps one of its own, uncapped, so the call is still settled and on the record.
       const ledger = execution.spend ?? (progress.ledger ??= createSpendLedger(null))
@@ -1039,16 +1054,42 @@ export class LadderRunner {
         ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: label, detail: { vendorId: channel.vendorId ?? null, reason: 'budget: its price ceiling does not fit what the run (or this request) has left', ceilingUsd: ceiling, settledUsd: ledger.settledUsd, reservedUsd: ledger.reservedUsd, capUsd: ledger.capUsd } })
         return null
       }
+      if (row !== null) {
+        // Written before the call goes out: a crash after it leaves the reservation on the record (PA E3).
+        try { await save(row) } catch (error) { reservation.release(); throw error }
+        if (execution.signal?.aborted === true) {
+          // Cut before the call went out: the reservation comes back, and the row says so.
+          reservation.release()
+          await save({ ...row, state: 'released', settledAt: new Date().toISOString() }).catch(() => {})
+          throw execution.signal.reason
+        }
+      }
     }
     onCall()
+    const named = row === null ? execution : {
+      ...execution,
+      paidCallId: row.paidCallId,
+      onPaidSession: ({ providerSessionId, providerRequestId }: { providerSessionId: string; providerRequestId?: string }) => {
+        if (row === null) return
+        void save({ ...row, state: row.state === 'reserved' ? 'submitted' : row.state, providerSessionId, providerRequestId: row.providerRequestId ?? providerRequestId ?? null }).catch(() => {})
+      },
+    }
+    // The row as the call ended: settled when its charge is known, usage_pending when the provider can still be asked (a
+    // session is named), else unknown, its charge never written as known.
+    const settleRow = async (state: PaidCallState, chargedUsd: number): Promise<void> => {
+      if (row === null) return
+      const pending = state === 'settled' ? 'settled' : row.providerSessionId !== null || row.providerRequestId !== null ? 'usage_pending' : 'unknown'
+      await save({ ...row, state: pending, chargedUsd: pending === 'unknown' ? null : chargedUsd, settledAt: pending === 'usage_pending' ? null : new Date().toISOString() })
+    }
     let result: FetchResult
     try {
-      result = await raceWithSignal(channel.fetch(url, session, execution, options), execution.signal)
+      result = await raceWithSignal(channel.fetch(url, session, named, options), execution.signal)
     } catch (error) {
       // A call that threw, or that the deadline cut, may have opened a session that bills: it is charged at its ceiling.
       if (reservation !== null && ceiling !== undefined) {
         const charged = reservation.settle(null)
-        const call = paidCall(progress, channel, label, ceiling, charged, null, null)
+        await settleRow('unknown', charged).catch(() => {})
+        const call = paidCall(progress, channel, label, ceiling, charged, null, null, null, {}, row?.paidCallId)
         ladderTrace.push({ at: Math.max(0, performance.now() - progress.startedAt), event: 'spend_settled', channel: label, detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: 'ceiling', ended: 'without_an_answer', call } })
       }
       throw error
@@ -1058,16 +1099,20 @@ export class LadderRunner {
     const reported = result.usage.externalCostUsd
     const measured = reported === null && typeof result.usage.measuredCostUsd === 'number' ? result.usage.measuredCostUsd : null
     const charged = reservation.settle(reported ?? measured)
+    // Known: the provider's price, or a measure with every figure the provider was asked for. A figure it did not give was
+    // charged at the ceiling's allowance, and the row waits for the provider's word.
+    const known = reported !== null || (measured !== null && result.usage.vendorProxyBytes !== null && result.usage.vendorSolves !== null)
+    await settleRow(known ? 'settled' : 'usage_pending', charged)
     const sessionMs = measured === null ? null : result.usage.vendorSessionMs ?? null
     // What the provider reported the sessions used, when the charge is measured: bytes through its proxy, solves.
     const used = measured === null ? {} : { ...(result.usage.vendorProxyBytes === undefined ? {} : { proxyBytes: result.usage.vendorProxyBytes }), ...(result.usage.vendorSolves === undefined ? {} : { solves: result.usage.vendorSolves }), ...(result.usage.vendorProxyCountry === undefined ? {} : { proxyCountry: result.usage.vendorProxyCountry }) }
-    const call = paidCall(progress, channel, label, ceiling, charged, reported, result, sessionMs, used)
+    const call = paidCall(progress, channel, label, ceiling, charged, reported, result, sessionMs, used, row?.paidCallId)
     // A measured charge above the ceiling: the provider's proxy moved more than the page's count, or it solved more than allowed for.
     const overCeiling = charged > ceiling + 1e-9
     return {
       ...result,
       usage: { ...result.usage, externalCostChargedUsd: (result.usage.externalCostChargedUsd ?? 0) + charged },
-      trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'spend_settled', detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: reported !== null ? 'reported' : measured !== null ? 'measured' : 'ceiling', ...(sessionMs === null ? {} : { sessionMs }), ...used, ...(overCeiling ? { overCeiling: true } : {}), call } }],
+      trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'spend_settled', detail: { vendorId: channel.vendorId ?? null, ceilingUsd: ceiling, chargedUsd: charged, basis: reported !== null ? 'reported' : measured !== null ? 'measured' : 'ceiling', ...(sessionMs === null ? {} : { sessionMs }), ...used, ...(overCeiling ? { overCeiling: true } : {}), call, ...(row === null ? {} : { paidCallId: row.paidCallId }) } }],
     }
   }
 
@@ -1333,7 +1378,7 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
  * One call the ledger settled, added to the run's charge and to its paid calls: Octocrawl's verdict on the page the call
  * returned (null when it returned none), never the provider's word. Returns the call's number in the run.
  */
-function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceilingUsd: number, chargedUsd: number, reportedCostUsd: number | null, result: FetchResult | null, sessionMs: number | null = null, used: { proxyBytes?: number | null; solves?: number | null; proxyCountry?: string } = {}): number {
+function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceilingUsd: number, chargedUsd: number, reportedCostUsd: number | null, result: FetchResult | null, sessionMs: number | null = null, used: { proxyBytes?: number | null; solves?: number | null; proxyCountry?: string } = {}, paidCallId?: string): number {
   progress.charged = (progress.charged ?? 0) + chargedUsd
   progress.grant ??= channel.grant ?? null
   const call = progress.paidCalls.length + 1
@@ -1341,6 +1386,7 @@ function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceil
     provider: channel.vendorId ?? channel.id, rung, capabilities: [...(channel.grantCapabilities ?? [])], ceilingUsd, chargedUsd, reportedCostUsd, sessionMs,
     ...(used.proxyBytes === undefined ? {} : { proxyBytes: used.proxyBytes }), ...(used.solves === undefined ? {} : { solves: used.solves }), ...(used.proxyCountry === undefined ? {} : { proxyCountry: used.proxyCountry }),
     outcome: result?.status ?? null, reason: result === null ? null : result.failureReason ?? result.blockReason ?? result.budgetExceeded ?? null, call,
+    ...(paidCallId === undefined ? {} : { paidCallId }),
   })
   return call
 }

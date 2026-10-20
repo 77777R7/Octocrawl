@@ -47,6 +47,69 @@ export interface ExecutionContext {
    * Absent: nothing is reserved, as before (a run with no third-party rung).
    */
   spend?: SpendLedger
+  /**
+   * The task's durable record of its paid calls (PA E2, E3): a rung that pays a third party writes the call's `reserved`
+   * row here after reserving and before the call goes out, `submitted` once the provider names its session, and the
+   * outcome when it settles, so a crash between the call and the page's step leaves the call on the record. Absent (a
+   * single scrape with no task store): the ledger alone holds the call, in memory, as before.
+   */
+  paidCalls?: PaidCallLog
+  /**
+   * The paid call this fetch is (its `paid_calls` id), set by the ladder for a provider rung's call within a task: a
+   * provider that lets the caller name its session (Steel's `sessionId`) names it from this id, so the session can be
+   * found again after a crash (PA E4). Absent outside a task.
+   */
+  paidCallId?: string
+  /**
+   * Hear of each provider session a paid call opens, the moment the provider names it, so the call's row says which
+   * session to ask about after a crash: `providerRequestId` is the id the caller asked the provider to give it, when it
+   * asked. Set by the ladder with `paidCallId`; a listener's error is ignored.
+   */
+  onPaidSession?: (session: { providerSessionId: string; providerRequestId?: string }) => void
+}
+
+/**
+ * Where a paid call stands in its task's `paid_calls` (PA E2). `reserved`: written before the call went out. `submitted`:
+ * the provider named its session. `usage_pending`: the call ended and was charged at a bound (its ceiling, or a measure
+ * missing a provider figure) while the provider can still be asked what it cost. `settled`: the charge is known.
+ * `unknown`: nobody can say what it cost; it counts at its ceiling and is never released on its own. `released`: the
+ * reservation was given back, with evidence that no request went out.
+ */
+export type PaidCallState = 'reserved' | 'submitted' | 'usage_pending' | 'settled' | 'unknown' | 'released'
+
+/** One row of a task's `paid_calls`: the persistent state of one paid call. EvidencePaidCall is its settled snapshot on the page's record. */
+export interface PaidCallRecord {
+  /** `{taskId}-{attemptId}-{ordinal}`, fixed before the reservation; usable as the provider's idempotency key where it takes one. */
+  paidCallId: string
+  taskId: string
+  attemptId: string
+  url: string
+  vendorId: string
+  ceilingUsd: number
+  state: PaidCallState
+  /** What the ledger charged once the call ended (a reported, measured or ceiling charge); null while it is in flight, and for `unknown` and `released`. */
+  chargedUsd: number | null
+  /** The provider's id for the request, when it gives one; null otherwise. */
+  providerRequestId: string | null
+  /** The provider's session the call ran in, once named; null before, or when the provider names none. */
+  providerSessionId: string | null
+  /** Which tariff priced the ceiling (a hash of it); null when not known. */
+  tariffVersion: string | null
+  /** The access grant's SHA-256; null for a grant not read from text. */
+  grantHash: string | null
+  /** The latest the call's session could have run until (ISO 8601); null when no deadline was set. */
+  deadline: string | null
+  createdAt: string
+  /** When the row reached `settled`, `unknown` or `released`; null until then. */
+  settledAt: string | null
+}
+
+/** A task's paid-call journal, as a rung sees it. */
+export interface PaidCallLog {
+  /** The next call's row, state `reserved`, its id fixed now: the caller writes it once its reservation fits. */
+  open(call: { url: string; vendorId: string; ceilingUsd: number; tariffVersion?: string | null; grantHash?: string | null; deadline?: string | null }): PaidCallRecord
+  /** Write the row as it now is. A call goes out only after its `reserved` row is written. */
+  write(call: PaidCallRecord): Promise<void>
 }
 
 /**
