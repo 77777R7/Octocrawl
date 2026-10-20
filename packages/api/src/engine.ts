@@ -704,6 +704,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const afterFetch = (plan: CachePlan | null, answer: CacheAnswer, result: FetchResult): FetchResult => {
     let next = answer.kind === 'fetch' && answer.missed && plan?.bounds != null ? withCacheMiss(result, plan.bounds) : result
     if (plan?.store !== true) return next
+    // A page whose content the request's contract chose from its capture (candidateExtraction) is that request's
+    // answer: the key leaves the contract out, so another request must not get it.
+    if (result.trace.some(event => event.event === 'extraction_candidates' && event.detail?.selected !== 'main_content')) return next
     try {
       if (pageCache.store(plan.key, result)) next = withCacheStored(next)
     } catch (error) {
