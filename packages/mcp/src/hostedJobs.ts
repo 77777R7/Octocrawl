@@ -47,6 +47,8 @@ export interface HostedJob {
   segments?: string[]
   /** Slices in a row that stored no page; at the worker's limit the job fails (`no_progress`). */
   idleSlices?: number
+  /** The budget the job's last slice stopped at (`pages` once a crawl reached its maxPages), as a local crawl reports it. */
+  budgetExceeded?: string | null
   /** The queued job this one's end promoted into its slot: a later delivery of this job queues its first slice if no one did. */
   promoted?: string | null
   createdAt: string

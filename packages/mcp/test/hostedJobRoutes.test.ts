@@ -215,6 +215,7 @@ describe('hosted job routes', () => {
     expect(second).toMatchObject({ hasMore: false, nextCursor: null })
     expect(((await (await call('GET', `/v1/crawl/${taskId}/errors`, 'oc_one')).json()) as { items: Array<{ url: string }> }).items.map((item) => item.url)).toEqual(['b'])
     expect(await (await call('GET', `/v1/crawl/${taskId}`, 'oc_one')).json()).toMatchObject({ pagesFetched: 4, errors: 1, completed: 5 })
+    expect(await (await call('GET', `/v1/crawl/${taskId}`, 'oc_one')).json()).toMatchObject({ budgetExceeded: null })
     expect((await call('GET', `/v1/crawl/${taskId}/pages?limit=101`, 'oc_one')).status).toBe(400)
     expect((await call('GET', `/v1/crawl/${taskId}/pages?cursor=x`, 'oc_one')).status).toBe(400)
   })

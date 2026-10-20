@@ -197,10 +197,15 @@
   - V1 第二轮 73/90，**没过**；
   - V2 通过：1,000 个 URL 用 307 秒跑完，从新实例和正式域名读回的结果一样；
   - 过程中修了 D8、D9、D10。
-- [ ] **V4** hosted 的任务状态要带上 `budgetExceeded`（L02、A32）。worker 从 `runSlice` 的结果里取出来，写进任务文档。
-- [ ] **V5** 任务跑的过程中要能看到进度（A14、A34）。现在只有一段提交后计数才变；要么段内定时写进度，要么改这两个用例的期望。先定做法。
-- [ ] **V6** hosted 返回的页面没有 trace，A15 和 A35 的间隔检查做不了。要么在页面上给出 crawl-delay 的证据，要么换成对 hosted 能做的检查。实测的间隔是够的：A15 两次请求隔了 3,902 ms，要求是 2,000 ms。
-- [ ] **V7** 查 A32（Wikipedia 的 crawl 只存了 1 页，期望 7 页）和 L11（`anyOf` 观测值 `okokx | xxx`）。
+- [x] **V4** hosted 的任务状态要带上 `budgetExceeded`（L02、A32）。worker 从 `runSlice` 的结果里取出来，写进任务文档。
+  - 已做：`runSlice` 返回这一段 attempt 的 `budgetExceeded`，worker 记在任务上，状态接口也返回它。
+- [x] **V5** 任务跑的过程中要能看到进度（A14、A34）。现在只有一段提交后计数才变；要么段内定时写进度，要么改这两个用例的期望。先定做法。
+  - 定的做法：任务的第一段只读 10 页（`firstSlicePages`），之后每段 100 页。这样不论大小，任务跑的过程中都能看到页数和已经读到的页面。段内定时写进度就不做了。
+- [x] **V6** hosted 返回的页面没有 trace，A15 和 A35 的间隔检查做不了。要么在页面上给出 crawl-delay 的证据，要么换成对 hosted 能做的检查。实测的间隔是够的：A15 两次请求隔了 3,902 ms，要求是 2,000 ms。
+  - 已做：hosted 的页面保留 trace（L11 的 `robots_checked` 检查也靠它），只去掉路由审计。
+- [x] **V7** 查 A32（Wikipedia 的 crawl 只存了 1 页，期望 7 页）和 L11（`anyOf` 观测值 `okokx | xxx`）。
+  - A32：本地也是 1/4、`stepCount` 1（例如 `research/parity/runs/2026-10-13-health-all-proxied-cb75f80c.md`），不是 hosted 的问题。爬取范围是文章路径下的子树，这篇文章没有子页面。这个用例本身要另外处理，不挡 H1。
+  - L11：失败的是“每页 trace 里有 `robots_checked allowed`”这一项，原因同 V6。
 - [ ] **V8** V4–V7 做完后再跑一遍 V1（L02、L04、L11、A13–A15、A26–A35），A29 的不带 key 检查对 hosted 不适用，要注明。
 - [ ] **V3** 在 ROADMAP 的 H1 行下标记完成，链接到记录。要等 V8 通过。
 
