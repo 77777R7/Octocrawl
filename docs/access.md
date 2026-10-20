@@ -68,6 +68,7 @@ octocrawl serve --access-grant grant.json
     - `reportedCostUsd`, the price the provider stated, null when it stated none;
     - `sessionMs`, the sessions' measured time when the charge is by it, null otherwise;
     - `proxyBytes` and `solves`, what the provider reported the sessions used, under the grants that buy them (null when it reported none); `proxyCountry`, the country its residential proxy was asked for;
+    - `bytesCounted` and `bytesCapped`, under a tariff with `maxBytesPerCall`: the bytes Octocrawl's own count on the page saw arrive (not the provider's figure, which is `proxyBytes`), null when a session could not be counted, and whether a session was ended at the cap;
     - `outcome` and `reason`: what Octocrawl made of the page the call returned, by its own checks (a block page, an empty or unverified read, an identity it did not send). It is never the provider's word that it succeeded. Both are null when the call returned no page;
     - `answer`, which marks the call whose page is the record's.
   - **The grant on the record.** `access.grant` names the grant the calls were made under: the SHA-256 of its text (`shasum -a 256 grant.json` gives the same), its tier and its attestation time. It never names the attestation's principal or statement.

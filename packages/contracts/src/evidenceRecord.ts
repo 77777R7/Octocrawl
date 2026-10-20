@@ -144,6 +144,14 @@ export interface EvidencePaidCall {
    * across a crash: absent for a call made outside a task (a single scrape). Added after `proxyCountry`.
    */
   paidCallId?: string
+  /**
+   * Bytes the call's sessions' pages received, as Octocrawl's own transport counted them over CDP (PA G1): not the
+   * provider's figure (`proxyBytes`), and not all the session moved. Null when the transport could not count one of the
+   * sessions; absent when it did not count (a tariff with no maxBytesPerCall). Added after `paidCallId`.
+   */
+  bytesCounted?: number | null
+  /** True when the transport ended a session at the tariff's maxBytesPerCall; null when not known. Added with `bytesCounted`. */
+  bytesCapped?: boolean | null
 }
 
 /** The access grant paid calls were made under: enough to name it, not a copy. */
@@ -386,7 +394,7 @@ export const EVIDENCE_RECORD_KEYS = {
   accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit']),
   accessEgressExit: keysOf<EvidenceAccessEgressExit>()(['ip', 'country', 'observedAt']),
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
-  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer', 'paidCallId']),
+  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer', 'paidCallId', 'bytesCounted', 'bytesCapped']),
   accessGrant: keysOf<EvidenceAccessGrant>()(['sha256', 'tier', 'attestedAt']),
   verification: keysOf<EvidenceVerification>()(['status', 'verifier', 'contractSha256', 'reason', 'failed']),
   readiness: keysOf<EvidenceReadiness>()(['state', 'basis']),
@@ -403,5 +411,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   robotsDecision: ['overrideBasis'],
   access: ['completion', 'egress', 'session', 'paidCalls', 'grant'],
   accessEgress: ['exit'],
-  accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId'],
+  accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped'],
 }

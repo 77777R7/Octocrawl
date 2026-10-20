@@ -538,6 +538,15 @@
           "description": "The call's id in its task's paid_calls, {taskId}-{attemptId}-{ordinal}, fixed before the reservation and kept across a crash; absent for a call made outside a task (a single scrape).",
           "type": "string",
           "minLength": 1
+        },
+        "bytesCounted": {
+          "description": "Bytes the call's sessions' pages received, as Octocrawl's own transport counted them over CDP: not the provider's figure (proxyBytes), and not all the session moved. Null when the transport could not count one of the sessions; absent when it did not count (a tariff with no maxBytesPerCall). Added after paidCallId: optional here so that earlier records stay valid.",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "bytesCapped": {
+          "description": "True when the transport ended a session at the tariff's maxBytesPerCall; null when not known. Added with bytesCounted.",
+          "type": ["boolean", "null"]
         }
       }
     },

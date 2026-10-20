@@ -450,7 +450,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         queueMs = retryAt === undefined ? waited : 0
         cooldownWaitMs = retryAt === undefined ? 0 : waited
       }
-      return finish({ ...this.denied(url, start, [], new Error('aborted')), ...(retryAt === undefined ? {} : { retryAt }) })
+      // Cut before its turn came (no permit), nothing went out; after, the fetch may have sent its request.
+      return finish({ ...this.denied(url, start, [], new Error('aborted'), 'policy_denied', permit ? null : 0), ...(retryAt === undefined ? {} : { retryAt }) })
     } finally {
       this.activeExecutions--
       scope.dispose()
@@ -489,6 +490,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     let popupCloser: ((opened: Page) => void) | null = null
     // The task's cookie session, for a context of this fetch's own: a saved login or the managed profile keeps its own cookies.
     let taskCookies: { session: CookieSession; startedWith: ContextCookie[] } | null = null
+    // Set as the page's first navigation goes out: a failure before it (the URL check, the browser's launch) sent nothing for the page.
+    let navigationSent = false
     try {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
@@ -890,6 +893,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         if (envProxy !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_proxy', detail: { url: navigationUrl, proxy: envProxy.endpoint, source: this.networkPolicy.egressProxy?.source ?? 'environment' } })
         try {
           documents.restart()
+          navigationSent = true
           response = await page.goto(navigationUrl, { waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs })
         } catch (error) {
           if (!(error instanceof Error) || !error.message.includes('Download is starting')) throw error
@@ -1503,7 +1507,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
         },
         usage: {
           wallMs,
-          bytesWire: 0,
+          // Nothing sent for the page before its navigation went out (a refused URL, a browser that never started); after
+          // it, the browser lane does not count what came back: unknown, not 0.
+          bytesWire: navigationSent ? null : 0,
           bytesDecompressed: 0,
           requestCount: 1,
           attemptCount: 1,
@@ -1718,7 +1724,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       truncatedAt: null,
       compliance: null,
       evidence: { finalUrl, httpStatus: null, redirectChain: [], contentType: null, rawBodySha256: null, artifacts: [] },
-      usage: { wallMs: Date.now() - start, bytesWire: 0, bytesDecompressed: 0, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: Date.now() - start, externalCostUsd: 0 },
+      usage: { wallMs: Date.now() - start, bytesWire: null, bytesDecompressed: 0, requestCount: 1, attemptCount: 1, contentTokens: null, browserMs: Date.now() - start, externalCostUsd: 0 },
       trace,
     }
   }
@@ -1729,6 +1735,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     trace: TraceEvent[],
     err: unknown,
     failureReason: FetchResult['failureReason'] = 'policy_denied',
+    /** 0 only when no request went out for the page; after one did, what came back is not counted here, so null. */
+    bytesWire: number | null = null,
   ): FetchResult {
     const wallMs = Date.now() - start
     const reason = err instanceof Error && err.message === 'aborted'
@@ -1766,7 +1774,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       },
       usage: {
         wallMs,
-        bytesWire: 0,
+        bytesWire,
         bytesDecompressed: 0,
         requestCount: 0,
         attemptCount: 0,

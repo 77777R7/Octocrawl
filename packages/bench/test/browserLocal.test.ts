@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type RobotsOverrideApplied } from '@w2l/contracts'
+import { DEFAULT_NETWORK_POLICY, localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type RobotsOverrideApplied } from '@w2l/contracts'
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
 import { captureOf } from '../src/capture.js'
@@ -790,6 +790,17 @@ describe('BrowserLocalSubject transport', () => {
       expect(out).toMatchObject({ status: 'failed', failureReason: 'redirect_limit', evidence: { httpStatus: null } })
       // Twenty answers came back, and the browser lane does not count their bytes: unknown, not 0 (PA G1).
       expect(out.usage.bytesWire).toBeNull()
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('reports the wire bytes of a URL it refused before navigating as a measured 0 (PA G1)', async () => {
+    // Without the local policy a loopback target is refused by the URL check, before any browser starts.
+    const subject = new BrowserLocalSubject('standard', null, false, DEFAULT_NETWORK_POLICY)
+    try {
+      const out = await subject.fetch(`${url}/spa`)
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'policy_denied', usage: { bytesWire: 0 } })
     } finally {
       await subject.teardown()
     }
