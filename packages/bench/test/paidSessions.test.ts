@@ -80,7 +80,15 @@ describe('a paid call\'s provider sessions (PA E4)', () => {
 
   it('leaves a call unknown when Steel gives no finalized cost or does not answer, and a usage_pending one as it was', async () => {
     const name = paidSessionName(CALL.paidCallId, 1)
-    expect(await steelPaidCallReconciler({ apiKey: 'k' }, steelApi({ [name]: { status: 'released', cost: 'refused' } }))(CALL)).toMatchObject({ state: 'unknown', chargedUsd: null })
+    expect(await steelPaidCallReconciler({ apiKey: 'k', costReadWaitsMs: [1, 1] }, steelApi({ [name]: { status: 'released', cost: 'refused' } }))(CALL)).toMatchObject({ state: 'unknown', chargedUsd: null })
+    // A cost Steel finalizes a moment after the release is read again until it is there.
+    let reads = 0
+    const finalizing: VendorApi = async (req) => {
+      if (req.url.endsWith('/cost')) return ++reads < 3 ? { status: 409, json: null } : { status: 200, json: { totalCost: 0.0005, currency: 'usd' } }
+      return req.method === 'GET' && req.url.endsWith(name) ? { status: 200, json: { id: name, status: 'released' } } : { status: 404, json: null }
+    }
+    expect(await steelPaidCallReconciler({ apiKey: 'k', costReadWaitsMs: [1, 1, 1] }, finalizing)(CALL)).toMatchObject({ state: 'settled', chargedUsd: 0.0005 })
+    expect(reads).toBe(3)
     const down: VendorApi = async () => ({ status: 503, json: null })
     expect(await steelPaidCallReconciler({ apiKey: 'k' }, down)(CALL)).toMatchObject({ state: 'unknown' })
     const pending = { ...CALL, state: 'usage_pending' as const, chargedUsd: 0.02, providerSessionId: name }

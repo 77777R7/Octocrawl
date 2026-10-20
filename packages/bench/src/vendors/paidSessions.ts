@@ -48,6 +48,9 @@ export function namedForPaidCall(ops: VendorOps, execution: ExecutionContext | u
   }
 }
 
+/** The waits before each new read of a released session's cost that Steel has not finalized yet (409). */
+export const STEEL_COST_READ_WAITS_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000]
+
 interface SteelSessionState {
   id: string
   status: string
@@ -60,7 +63,7 @@ interface SteelSessionState {
  * so Steel bills nothing. Anything Steel does not answer plainly leaves the call `unknown` (a `usage_pending` one as it
  * was), never charged as known. A call to another provider is returned as it is.
  */
-export function steelPaidCallReconciler(config: { apiKey: string; baseUrl?: string }, api: VendorApi = fetchVendorApi): (call: PaidCallRecord) => Promise<PaidCallRecord> {
+export function steelPaidCallReconciler(config: { apiKey: string; baseUrl?: string; costReadWaitsMs?: readonly number[] }, api: VendorApi = fetchVendorApi): (call: PaidCallRecord) => Promise<PaidCallRecord> {
   const base = (config.baseUrl ?? 'https://api.steel.dev').replace(/\/$/, '')
   const headers = { 'steel-api-key': config.apiKey } as const
   const deadline = () => Date.now() + 10_000
@@ -94,7 +97,14 @@ export function steelPaidCallReconciler(config: { apiKey: string; baseUrl?: stri
           const released = await api({ method: 'POST', url: `${base}/v1/sessions/${encodeURIComponent(session.id)}/release`, headers, deadlineMs: deadline() })
           if (released.status < 200 || released.status >= 300) return unsettled
         }
-        const cost = await api({ method: 'GET', url: `${base}/v1/sessions/${encodeURIComponent(session.id)}/cost`, headers, deadlineMs: deadline() })
+        // Steel answers 409 until the released session's final usage is written ("retry once final usage has been written",
+        // its answer on 2026-10-20): the cost is read again after each wait.
+        let cost = await api({ method: 'GET', url: `${base}/v1/sessions/${encodeURIComponent(session.id)}/cost`, headers, deadlineMs: deadline() })
+        for (const waitMs of config.costReadWaitsMs ?? STEEL_COST_READ_WAITS_MS) {
+          if (cost.status !== 409) break
+          await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
+          cost = await api({ method: 'GET', url: `${base}/v1/sessions/${encodeURIComponent(session.id)}/cost`, headers, deadlineMs: deadline() })
+        }
         const json = cost.json as { totalCost?: unknown; currency?: unknown } | null
         if (cost.status !== 200 || typeof json?.totalCost !== 'number' || !Number.isFinite(json.totalCost) || json.totalCost < 0 || (json.currency !== undefined && json.currency !== 'usd')) return unsettled
         totalUsd += json.totalCost
