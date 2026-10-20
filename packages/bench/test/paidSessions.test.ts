@@ -20,7 +20,7 @@ function steelApi(sessions: Record<string, { status: string; cost?: number | 're
     if (session === undefined) return { status: 404, json: { message: 'not found' } }
     if (tail === undefined) return { status: 200, json: { id, status: session.status } }
     if (tail === '/release') { session.status = 'released'; return { status: 200, json: { success: true } } }
-    if (tail === '/cost') return session.cost === 'refused' || session.cost === undefined ? { status: 409, json: null } : { status: 200, json: { id, currency: 'usd', unit: 'dollar', totalCost: session.cost } }
+    if (tail === '/cost') return session.cost === 'refused' || session.cost === undefined ? { status: 409, json: null } : { status: 200, json: { id, currency: 'usd', unit: 'dollar', totalCost: session.cost, usage: { browser: { value: 1, unit: 'minute' }, proxy: { bytes: 0 }, captcha: { solves: 0 } } } }
     return { status: 400, json: null }
   }) as VendorApi & { requests: VendorApiRequest[] }
   api.requests = requests
@@ -81,14 +81,23 @@ describe('a paid call\'s provider sessions (PA E4)', () => {
   it('leaves a call unknown when Steel gives no finalized cost or does not answer, and a usage_pending one as it was', async () => {
     const name = paidSessionName(CALL.paidCallId, 1)
     expect(await steelPaidCallReconciler({ apiKey: 'k', costReadWaitsMs: [1, 1] }, steelApi({ [name]: { status: 'released', cost: 'refused' } }))(CALL)).toMatchObject({ state: 'unknown', chargedUsd: null })
-    // A cost Steel finalizes a moment after the release is read again until it is there.
+    // A cost Steel finalizes a moment after the release is read again until it is there: a 409 first, then a 200 that
+    // still says $0 with no browser time (as Steel answered in the E7 live run), then the minute it bills.
     let reads = 0
     const finalizing: VendorApi = async (req) => {
-      if (req.url.endsWith('/cost')) return ++reads < 3 ? { status: 409, json: null } : { status: 200, json: { totalCost: 0.0005, currency: 'usd' } }
+      if (req.url.endsWith('/cost')) {
+        reads++
+        if (reads === 1) return { status: 409, json: null }
+        if (reads === 2) return { status: 200, json: { totalCost: 0, currency: 'usd', usage: { browser: { value: 0, unit: 'minute' } } } }
+        return { status: 200, json: { totalCost: 0.0005, currency: 'usd', usage: { browser: { value: 1, unit: 'minute' } } } }
+      }
       return req.method === 'GET' && req.url.endsWith(name) ? { status: 200, json: { id: name, status: 'released' } } : { status: 404, json: null }
     }
     expect(await steelPaidCallReconciler({ apiKey: 'k', costReadWaitsMs: [1, 1, 1] }, finalizing)(CALL)).toMatchObject({ state: 'settled', chargedUsd: 0.0005 })
     expect(reads).toBe(3)
+    // A $0 that never becomes a billed minute is not a known charge: the call stays unknown, never settled at zero.
+    const zero: VendorApi = async (req) => req.url.endsWith('/cost') ? { status: 200, json: { totalCost: 0, currency: 'usd', usage: { browser: { value: 0, unit: 'minute' } } } } : req.url.endsWith(name) ? { status: 200, json: { id: name, status: 'released' } } : { status: 404, json: null }
+    expect(await steelPaidCallReconciler({ apiKey: 'k', costReadWaitsMs: [1, 1] }, zero)(CALL)).toMatchObject({ state: 'unknown', chargedUsd: null })
     const down: VendorApi = async () => ({ status: 503, json: null })
     expect(await steelPaidCallReconciler({ apiKey: 'k' }, down)(CALL)).toMatchObject({ state: 'unknown' })
     const pending = { ...CALL, state: 'usage_pending' as const, chargedUsd: 0.02, providerSessionId: name }

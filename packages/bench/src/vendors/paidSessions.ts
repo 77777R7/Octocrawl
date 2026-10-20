@@ -49,7 +49,7 @@ export function namedForPaidCall(ops: VendorOps, execution: ExecutionContext | u
 }
 
 /** The waits before each new read of a released session's cost that Steel has not finalized yet (409). */
-export const STEEL_COST_READ_WAITS_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000]
+export const STEEL_COST_READ_WAITS_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 15_000]
 
 interface SteelSessionState {
   id: string
@@ -98,16 +98,26 @@ export function steelPaidCallReconciler(config: { apiKey: string; baseUrl?: stri
           if (released.status < 200 || released.status >= 300) return unsettled
         }
         // Steel answers 409 until the released session's final usage is written ("retry once final usage has been written",
-        // its answer on 2026-10-20): the cost is read again after each wait.
-        let cost = await api({ method: 'GET', url: `${base}/v1/sessions/${encodeURIComponent(session.id)}/cost`, headers, deadlineMs: deadline() })
-        for (const waitMs of config.costReadWaitsMs ?? STEEL_COST_READ_WAITS_MS) {
-          if (cost.status !== 409) break
-          await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
-          cost = await api({ method: 'GET', url: `${base}/v1/sessions/${encodeURIComponent(session.id)}/cost`, headers, deadlineMs: deadline() })
+        // its answer on 2026-10-20), and just after a release it answered 200 with totalCost 0 for a session it billed a
+        // minute ($0.001667) when asked later (PA E7 live run). A session that existed bills at least its first minute, so a
+        // zero cost, or one without browser time, is not final either: it is read again after each wait, and one never
+        // final leaves the call unknown.
+        const readCost = () => api({ method: 'GET', url: `${base}/v1/sessions/${encodeURIComponent(session.id)}/cost`, headers, deadlineMs: deadline() })
+        const finalCost = (res: Awaited<ReturnType<VendorApi>>): number | null => {
+          const json = res.json as { totalCost?: unknown; currency?: unknown; usage?: { browser?: { value?: unknown } } } | null
+          if (res.status !== 200 || typeof json?.totalCost !== 'number' || !Number.isFinite(json.totalCost) || json.totalCost <= 0 || (json.currency !== undefined && json.currency !== 'usd')) return null
+          const browser = json.usage?.browser?.value
+          return typeof browser === 'number' && browser > 0 ? json.totalCost : null
         }
-        const json = cost.json as { totalCost?: unknown; currency?: unknown } | null
-        if (cost.status !== 200 || typeof json?.totalCost !== 'number' || !Number.isFinite(json.totalCost) || json.totalCost < 0 || (json.currency !== undefined && json.currency !== 'usd')) return unsettled
-        totalUsd += json.totalCost
+        let cost = await readCost()
+        for (const waitMs of config.costReadWaitsMs ?? STEEL_COST_READ_WAITS_MS) {
+          if (finalCost(cost) !== null || (cost.status !== 409 && cost.status !== 200)) break
+          await new Promise<void>((resolve) => setTimeout(resolve, waitMs))
+          cost = await readCost()
+        }
+        const charged = finalCost(cost)
+        if (charged === null) return unsettled
+        totalUsd += charged
       }
       return { ...call, state: 'settled', chargedUsd: totalUsd, providerSessionId: call.providerSessionId ?? sessions[0]!.id, settledAt: new Date().toISOString() }
     } catch {
