@@ -453,19 +453,23 @@ def summarize(rows):
 
 def markdown_report(report,values=False):
  """Per-field tables for a run record: one row per captured field, not-captured slots counted per case.
- Expected and observed values are labels and output, so they stay out unless values=True (for .w2l/ only)."""
+ Expected and observed values are labels and output, so they stay out unless values=True (for .w2l/ only);
+ so do entity IDs, which can carry label values (SKUs, product IDs): records are numbered in label order instead."""
  def cut(v,n=48):
   t='∅' if v is None else norm(v).replace('|','\\|');return t if len(t)<=n else t[:n-1]+'…'
  def mark(v):return '✓' if v is True else '✗' if v is False else '–'
- out=['✓ correct, ✗ wrong or missing, – unknown in the source (not scored), · not applicable.','']
+ out=['✓ correct, ✗ wrong or missing, – unknown in the source (not scored), · not applicable.'+('' if values else ' Fields are named rN/field, N the record in label order.'),'']
  for r in report['rows']:
   t=r['totals'];out+=[f"### {r['id']} ({r.get('version')}): {r['outcome']}"+(f" ({r['falseSuccessKind']})" if r['falseSuccessKind'] else ''),'',
    f"status `{r['status']}`, verification `{r['configuredVerification']}`, same source {mark(r['sameSource'])}; required fully correct {t['requiredFullyCorrect']}/{t['requiredCaptured']}, all captured {t['fullyCorrect']}/{t['capturedFields']}; duplicates {t['duplicateSelectedRecords']}; required not captured {t['requiredNotCaptured']}, fabricated {t['fabricated']}",'',
    '| Field | Req |'+(' Expected | Observed |' if values else '')+' Value | Subject | Relation | Unit | Date | Period | Fully |','| --- '*(11 if values else 9)+'|']
+  order={}
+  for f in r['rows']:order.setdefault(f['entityId'],len(order)+1)
   for f in r['rows']:
    if f['availability']!='captured':continue
+   label=f['fieldId'].split('/',1)[1] if values else f"r{order[f['entityId']]}/{f['field']}"
    c=f['checks'];ctx=lambda k:'·' if not f['contextEvidence'][k+'s'] or f['contextEvidence'][k+'s']['state']=='not_applicable' else mark(c[k])
-   out.append(f"| `{f['fieldId'].split('/',1)[1]}` | {'R' if f['required'] else 'o'} |{f" {cut(f['expected'])} | {cut(f.get('observed'))} |" if values else ''} {mark(c['value'])} | {mark(c['entity'])} | {mark(c['relation'])} | {ctx('unit')} | {ctx('date')} | {ctx('period')} | {mark(f['fullyCorrect'])} |")
+   out.append(f"| `{label}` | {'R' if f['required'] else 'o'} |{f" {cut(f['expected'])} | {cut(f.get('observed'))} |" if values else ''} {mark(c['value'])} | {mark(c['entity'])} | {mark(c['relation'])} | {ctx('unit')} | {ctx('date')} | {ctx('period')} | {mark(f['fullyCorrect'])} |")
   out.append('')
  return '\n'.join(out)
 

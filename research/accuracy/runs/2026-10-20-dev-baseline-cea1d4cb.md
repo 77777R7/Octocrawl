@@ -72,7 +72,7 @@ Upper bounds are one-sided 95%: 1−0.05^(1/N) at zero, Clopper–Pearson otherw
 
 ### What fails, by case (development)
 
-- **D01 Census** 3/5: the population cell carries two private-use icon-font characters (U+E840, U+E83F) before `341,784,857`, so the delivered value does not parse as the number; the mnemonic `PST045225` and unit `ABS` exist only as attributes.
+- **D01 Census** 3/5: the population cell carries two private-use icon-font characters (U+E840, U+E83F) before the number, so the delivered value does not parse as a number; the fact's mnemonic and its unit code exist only as attributes.
 - **D02 Newegg** 6/12: names and URLs right; SKUs exist only as attributes; prices right but the page's explicit `USD` is not delivered (`$` alone is not a currency).
 - **D03 Skyscanner** 2/18: the deal cards are not in the delivered Markdown; only the "Cheapest flight found" summary row links the first offer.
 - **D04 Nasdaq** 0/18: the history table is a shadow-DOM component; the delivered tables have the right shape but every cell is empty.
@@ -104,7 +104,7 @@ Both result files are kept in the output directory (`field-results.scorer-3769b6
 
 ## Per-field correctness
 
-✓ correct, ✗ wrong or missing, – unknown in the source (not scored), · not applicable. Values are left out (they are labels and output); `fields-with-values.md` in the output directory has them.
+✓ correct, ✗ wrong or missing, – unknown in the source (not scored), · not applicable. Fields are named `rN/field`, N the record in label order; values and entity IDs are left out (they are labels and output), and `fields-with-values.md` in the output directory has them.
 
 ### D01 (main): false_success (field_error)
 
@@ -112,11 +112,11 @@ status `success`, verification `not_requested`, same source ✓; required fully 
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `US/PST045225/geography` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `US/PST045225/measure` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `US/PST045225/mnemonic` | R | ✗ | ✓ | ✗ | · | ✓ | · | ✗ |
-| `US/PST045225/population` | R | ✗ | ✓ | ✗ | ✗ | ✓ | · | ✗ |
-| `US/PST045225/vintage` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/geography` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/measure` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/mnemonic` | R | ✗ | ✓ | ✗ | · | ✓ | · | ✗ |
+| `r1/population` | R | ✗ | ✓ | ✗ | ✗ | ✓ | · | ✗ |
+| `r1/vintage` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
 
 ### D02 (main): false_success (field_error)
 
@@ -124,18 +124,18 @@ status `success`, verification `not_requested`, same source ✓; required fully 
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `34-236-753/sku` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `34-236-753/name` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `34-236-753/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `34-236-753/price` | R | ✓ | ✓ | ✓ | ✗ | – | · | ✗ |
-| `1TS-000D-1TE80/sku` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `1TS-000D-1TE80/name` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `1TS-000D-1TE80/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `1TS-000D-1TE80/price` | R | ✓ | ✓ | ✓ | ✗ | – | · | ✗ |
-| `1TS-000A-15W75/sku` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `1TS-000A-15W75/name` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `1TS-000A-15W75/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `1TS-000A-15W75/price` | R | ✓ | ✓ | ✓ | ✗ | – | · | ✗ |
+| `r1/sku` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r1/name` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/price` | R | ✓ | ✓ | ✓ | ✗ | – | · | ✗ |
+| `r2/sku` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r2/name` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r2/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r2/price` | R | ✓ | ✓ | ✓ | ✗ | – | · | ✗ |
+| `r3/sku` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r3/name` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r3/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r3/price` | R | ✓ | ✓ | ✓ | ✗ | – | · | ✗ |
 
 ### D03 (main): false_success (field_error)
 
@@ -143,24 +143,24 @@ status `success`, verification `not_requested`, same source ✓; required fully 
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `offer-1/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `offer-1/departure_display` | R | ✗ | ✓ | ✗ | · | ✓ | · | ✗ |
-| `offer-1/departure_iso` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `offer-1/carrier` | R | ✗ | ✓ | ✗ | · | ✓ | · | ✗ |
-| `offer-1/route` | R | ✗ | ✓ | ✗ | · | ✓ | · | ✗ |
-| `offer-1/starting_price` | R | ✗ | ✓ | ✗ | ✗ | ✓ | · | ✗ |
-| `offer-2/url` | R | ✗ | ✗ | ✗ | · | · | · | ✗ |
-| `offer-2/departure_display` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `offer-2/departure_iso` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `offer-2/carrier` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `offer-2/route` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `offer-2/starting_price` | R | ✗ | ✗ | ✗ | ✗ | ✗ | · | ✗ |
-| `offer-3/url` | R | ✗ | ✗ | ✗ | · | · | · | ✗ |
-| `offer-3/departure_display` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `offer-3/departure_iso` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `offer-3/carrier` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `offer-3/route` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `offer-3/starting_price` | R | ✗ | ✗ | ✗ | ✗ | ✗ | · | ✗ |
+| `r1/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/departure_display` | R | ✗ | ✓ | ✗ | · | ✓ | · | ✗ |
+| `r1/departure_iso` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/carrier` | R | ✗ | ✓ | ✗ | · | ✓ | · | ✗ |
+| `r1/route` | R | ✗ | ✓ | ✗ | · | ✓ | · | ✗ |
+| `r1/starting_price` | R | ✗ | ✓ | ✗ | ✗ | ✓ | · | ✗ |
+| `r2/url` | R | ✗ | ✗ | ✗ | · | · | · | ✗ |
+| `r2/departure_display` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r2/departure_iso` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r2/carrier` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r2/route` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r2/starting_price` | R | ✗ | ✗ | ✗ | ✗ | ✗ | · | ✗ |
+| `r3/url` | R | ✗ | ✗ | ✗ | · | · | · | ✗ |
+| `r3/departure_display` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r3/departure_iso` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r3/carrier` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r3/route` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r3/starting_price` | R | ✗ | ✗ | ✗ | ✗ | ✗ | · | ✗ |
 
 ### D04 (main): false_success (field_error)
 
@@ -168,24 +168,24 @@ status `success`, verification `not_requested`, same source ✓; required fully 
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `AAPL/10/15/2026/date` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `AAPL/10/15/2026/close` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/15/2026/volume` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/15/2026/open` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/15/2026/high` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/15/2026/low` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/14/2026/date` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `AAPL/10/14/2026/close` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/14/2026/volume` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/14/2026/open` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/14/2026/high` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/14/2026/low` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/13/2026/date` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
-| `AAPL/10/13/2026/close` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/13/2026/volume` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/13/2026/open` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/13/2026/high` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| `AAPL/10/13/2026/low` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r1/date` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r1/close` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r1/volume` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r1/open` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r1/high` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r1/low` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r2/date` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r2/close` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r2/volume` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r2/open` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r2/high` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r2/low` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r3/date` | R | ✗ | ✗ | ✗ | · | ✗ | · | ✗ |
+| `r3/close` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r3/volume` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r3/open` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r3/high` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
+| `r3/low` | R | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
 
 ### D05 (main): false_success (field_error)
 
@@ -193,21 +193,21 @@ status `success`, verification `not_requested`, same source ✓; required fully 
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `1996119966/1996119866/product_id` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `1996119966/1996119866/variation_id` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `1996119966/1996119866/name` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `1996119966/1996119866/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `1996119966/1996119866/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
-| `2085076160/2085076237/product_id` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `2085076160/2085076237/variation_id` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `2085076160/2085076237/name` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `2085076160/2085076237/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `2085076160/2085076237/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
-| `2035349268/2035349269/product_id` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `2035349268/2035349269/variation_id` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `2035349268/2035349269/name` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `2035349268/2035349269/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `2035349268/2035349269/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
+| `r1/product_id` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/variation_id` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r1/name` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r1/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
+| `r2/product_id` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r2/variation_id` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r2/name` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r2/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r2/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
+| `r3/product_id` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r3/variation_id` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r3/name` | R | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r3/url` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r3/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
 
 ### D06 (main): false_success (no_target)
 
@@ -215,9 +215,9 @@ status `success`, verification `not_requested`, same source ✓; required fully 
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `historical_table_boundary/no_rows_message` | o | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `historical_table_boundary/date_header` | o | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `non_target_current_quote/current_quote_price_not_history` | o | ✗ | ✗ | ✗ | ✗ | – | · | ✗ |
+| `r1/no_rows_message` | o | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/date_header` | o | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r5/current_quote_price_not_history` | o | ✗ | ✗ | ✗ | ✗ | – | · | ✗ |
 
 ### D07 (main): correct_non_success
 
@@ -225,8 +225,8 @@ status `failed`, verification `not_requested`, same source ✓; required fully c
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `boundary/heading` | o | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `boundary/boundary_instruction` | o | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r1/heading` | o | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/boundary_instruction` | o | ✗ | ✓ | ✗ | · | · | · | ✗ |
 
 ### D08 (main): correct_non_success
 
@@ -234,8 +234,8 @@ status `failed`, verification `not_requested`, same source ✓; required fully c
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `boundary/heading` | o | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `boundary/boundary_instruction` | o | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/heading` | o | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/boundary_instruction` | o | ✓ | ✓ | ✓ | · | · | · | ✓ |
 
 ### D09 (main): false_success (field_error)
 
@@ -243,24 +243,24 @@ status `success`, verification `not_requested`, same source ✓; required fully 
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `coin-1/coin` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `coin-1/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
-| `coin-1/change_1h` | R | ✗ | ✓ | ✗ | ✓ | – | ✓ | ✗ |
-| `coin-1/change_24h` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
-| `coin-1/change_7d` | R | ✗ | ✓ | ✗ | ✓ | – | ✓ | ✗ |
-| `coin-1/change_30d` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
-| `coin-2/coin` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `coin-2/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
-| `coin-2/change_1h` | R | ✗ | ✓ | ✗ | ✓ | – | ✓ | ✗ |
-| `coin-2/change_24h` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
-| `coin-2/change_7d` | R | ✗ | ✓ | ✗ | ✓ | – | ✓ | ✗ |
-| `coin-2/change_30d` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
-| `coin-3/coin` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `coin-3/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
-| `coin-3/change_1h` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
-| `coin-3/change_24h` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
-| `coin-3/change_7d` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
-| `coin-3/change_30d` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
+| `r1/coin` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
+| `r1/change_1h` | R | ✗ | ✓ | ✗ | ✓ | – | ✓ | ✗ |
+| `r1/change_24h` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
+| `r1/change_7d` | R | ✗ | ✓ | ✗ | ✓ | – | ✓ | ✗ |
+| `r1/change_30d` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
+| `r2/coin` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r2/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
+| `r2/change_1h` | R | ✗ | ✓ | ✗ | ✓ | – | ✓ | ✗ |
+| `r2/change_24h` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
+| `r2/change_7d` | R | ✗ | ✓ | ✗ | ✓ | – | ✓ | ✗ |
+| `r2/change_30d` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
+| `r3/coin` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r3/price` | R | ✓ | ✓ | ✓ | ✓ | – | · | ✓ |
+| `r3/change_1h` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
+| `r3/change_24h` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
+| `r3/change_7d` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
+| `r3/change_30d` | R | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ |
 
 ### D10 (main): correct_non_success
 
@@ -268,9 +268,9 @@ status `failed`, verification `not_requested`, same source ✓; required fully c
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `source_error/error_type` | o | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `source_error/status_code` | o | ✗ | ✓ | ✗ | · | · | · | ✗ |
-| `source_error/status_message` | o | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r1/error_type` | o | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r1/status_code` | o | ✗ | ✓ | ✗ | · | · | · | ✗ |
+| `r1/status_message` | o | ✗ | ✓ | ✗ | · | · | · | ✗ |
 
 ### H01 (main): missed
 
@@ -278,13 +278,13 @@ status `success`, verification `failed`, same source ✓; required fully correct
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `RFC9110/document_id` | R | ✓ | ✓ | ✓ | · | ✗ | · | ✗ |
-| `RFC9110/title` | R | ✓ | ✓ | ✓ | · | ✗ | · | ✗ |
-| `RFC9110/category` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
-| `RFC9110/publication_month` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
-| `RFC9110/author_1` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
-| `RFC9110/author_2` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
-| `RFC9110/author_3` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
+| `r1/document_id` | R | ✓ | ✓ | ✓ | · | ✗ | · | ✗ |
+| `r1/title` | R | ✓ | ✓ | ✓ | · | ✗ | · | ✗ |
+| `r1/category` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
+| `r1/publication_month` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
+| `r1/author_1` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
+| `r1/author_2` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
+| `r1/author_3` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
 
 ### H02 (main): correct_success
 
@@ -292,21 +292,21 @@ status `success`, verification `passed`, same source ✓; required fully correct
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ebook-1342/ebook_id` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-1342/title` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-1342/author` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-1342/download_count` | R | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `ebook-1342/url` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-84/ebook_id` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-84/title` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-84/author` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-84/download_count` | R | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `ebook-84/url` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-2701/ebook_id` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-2701/title` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-2701/author` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ebook-2701/download_count` | R | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `ebook-2701/url` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/ebook_id` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/title` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/author` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/download_count` | R | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `r1/url` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r2/ebook_id` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r2/title` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r2/author` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r2/download_count` | R | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `r2/url` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r3/ebook_id` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r3/title` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r3/author` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r3/download_count` | R | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `r3/url` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
 
 ### H03 (main): correct_success
 
@@ -314,15 +314,15 @@ status `success`, verification `passed`, same source ✓; required fully correct
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `day/quantity` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `day/symbol` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `day/value` | R | ✓ | ✓ | ✓ | ✓ | · | · | ✓ |
-| `Julian_year/quantity` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `Julian_year/symbol` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `Julian_year/value` | R | ✓ | ✓ | ✓ | ✓ | · | · | ✓ |
-| `Julian_century/quantity` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `Julian_century/symbol` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
-| `Julian_century/value` | R | ✓ | ✓ | ✓ | ✓ | · | · | ✓ |
+| `r1/quantity` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/symbol` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r1/value` | R | ✓ | ✓ | ✓ | ✓ | · | · | ✓ |
+| `r2/quantity` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r2/symbol` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r2/value` | R | ✓ | ✓ | ✓ | ✓ | · | · | ✓ |
+| `r3/quantity` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r3/symbol` | R | ✓ | ✓ | ✓ | · | · | · | ✓ |
+| `r3/value` | R | ✓ | ✓ | ✓ | ✓ | · | · | ✓ |
 
 ### H04 (main): correct_success
 
@@ -330,15 +330,15 @@ status `success`, verification `passed`, same source ✓; required fully correct
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `england-wales/1 January/date` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
-| `england-wales/1 January/weekday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
-| `england-wales/1 January/holiday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
-| `england-wales/26 March/date` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
-| `england-wales/26 March/weekday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
-| `england-wales/26 March/holiday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
-| `england-wales/29 March/date` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
-| `england-wales/29 March/weekday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
-| `england-wales/29 March/holiday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
+| `r1/date` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
+| `r1/weekday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
+| `r1/holiday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
+| `r2/date` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
+| `r2/weekday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
+| `r2/holiday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
+| `r3/date` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
+| `r3/weekday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
+| `r3/holiday` | R | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ |
 
 ### H05 (main): correct_success
 
@@ -346,19 +346,19 @@ status `success`, verification `passed`, same source ✓; required fully correct
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `page/page_updated` | o | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `quetta/prefix` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `quetta/symbol` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `quetta/decimal_factor` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ronna/prefix` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ronna/symbol` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ronna/decimal_factor` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ronto/prefix` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ronto/symbol` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `ronto/decimal_factor` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `quecto/prefix` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `quecto/symbol` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `quecto/decimal_factor` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/page_updated` | o | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r2/prefix` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r2/symbol` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r2/decimal_factor` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r3/prefix` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r3/symbol` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r3/decimal_factor` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r4/prefix` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r4/symbol` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r4/decimal_factor` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r5/prefix` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r5/symbol` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r5/decimal_factor` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
 
 ### H06 (main): correct_success
 
@@ -366,16 +366,16 @@ status `success`, verification `passed`, same source ✓; required fully correct
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `registry/registry_updated` | o | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `http-status-200/code` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `http-status-200/description` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `http-status-200/reference` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `http-status-404/code` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `http-status-404/description` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `http-status-404/reference` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `http-status-429/code` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `http-status-429/description` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `http-status-429/reference` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/registry_updated` | o | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r2/code` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r2/description` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r2/reference` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r3/code` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r3/description` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r3/reference` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r4/code` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r4/description` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r4/reference` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
 
 ### H07 (main): false_success (field_error)
 
@@ -383,12 +383,12 @@ status `success`, verification `passed`, same source ✓; required fully correct
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `WCAG2.2/title` | R | ✓ | ✓ | ✓ | · | ✗ | · | ✗ |
-| `WCAG2.2/status` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
-| `WCAG2.2/recommendation_date` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
-| `WCAG2.2/conformance_level_1` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
-| `WCAG2.2/conformance_level_2` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
-| `WCAG2.2/conformance_level_3` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
+| `r1/title` | R | ✓ | ✓ | ✓ | · | ✗ | · | ✗ |
+| `r1/status` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
+| `r1/recommendation_date` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
+| `r1/conformance_level_1` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
+| `r1/conformance_level_2` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
+| `r1/conformance_level_3` | R | ✗ | ✓ | ✗ | · | ✗ | · | ✗ |
 
 ### H08 (main): correct_success
 
@@ -396,12 +396,12 @@ status `success`, verification `passed`, same source ✓; required fully correct
 
 | Field | Req | Value | Subject | Relation | Unit | Date | Period | Fully |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `Array.prototype.map()/method` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `Array.prototype.map()/last_modified` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `Array.prototype.map()/parameter_callbackFn` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `Array.prototype.map()/parameter_element` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `Array.prototype.map()/parameter_index` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `Array.prototype.map()/parameter_array` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `Array.prototype.map()/parameter_thisArg` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
-| `Array.prototype.map()/return_value` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/method` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/last_modified` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/parameter_callbackFn` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/parameter_element` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/parameter_index` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/parameter_array` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/parameter_thisArg` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
+| `r1/return_value` | R | ✓ | ✓ | ✓ | · | ✓ | · | ✓ |
 

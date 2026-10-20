@@ -52,13 +52,13 @@ def doc(markdown='',tables=None,status='success'):
 class DimensionScores(unittest.TestCase):
  """R3: subject, field relation, unit and date retention are counted apart."""
  def h03(self):
-  return gold('H03','https://example.org/constants',[field('H03','day','value','86400','decimal',unit='s'),field('H03','Julian_year','value','365.25','decimal',unit='d')],units={'s':{'state':'known','value':'s'},'d':{'state':'known','value':'d'}})
+  return gold('H03','https://example.org/constants',[field('H03','day','value','86400','decimal',unit='s'),field('H03','week','value','604800','decimal',unit='s2')],units={'s':{'state':'known','value':'s'},'s2':{'state':'known','value':'s'}})
  def test_dimension_totals_are_separate(self):
-  d=doc(tables=[{'caption':'Constants','rows':[['Quantity','Symbol','Value'],['day','d','86400 s'],['Julian year','','365.25']]}])
+  d=doc(tables=[{'caption':'Constants','rows':[['Quantity','Symbol','Value'],['day','d','86400 s'],['week','','604800']]}])
   t=score_case(self.h03(),d,ORIGIN)['totals']
   self.assertEqual((t['entityMatched'],t['relationCorrect'],t['unitKnown'],t['unitPreserved']),(2,2,2,1))
  def test_value_from_another_record_counts_as_wrong_record(self):
-  d=doc(tables=[{'caption':'Constants','rows':[['Quantity','Symbol','Value'],['day','d','365.25 d'],['Julian year','a','86400 s']]}])
+  d=doc(tables=[{'caption':'Constants','rows':[['Quantity','Symbol','Value'],['day','d','604800 s'],['week','w','86400 s']]}])
   r=score_case(self.h03(),d,ORIGIN);t=r['totals']
   self.assertEqual((t['valueCorrect'],t['relationCorrect'],t['wrongRecord']),(0,0,2))
  def test_value_present_without_its_subject_is_unbound(self):
@@ -66,10 +66,10 @@ class DimensionScores(unittest.TestCase):
   t=score_case(self.h03(),d,ORIGIN)['totals']
   self.assertEqual((t['entityMatched'],t['unboundValuePresent']),(0,1))
  def test_date_retention_is_counted_where_known(self):
-  c=gold('D04','https://www.nasdaq.com/market-activity/stocks/aapl/historical',[field('D04','AAPL/10/15/2026','close','342.00','decimal',date='d1')],dates={'d1':{'state':'known','value':'2026-10-15'}})
-  ok=doc(tables=[{'caption':'','rows':[['Date','Close/Last','Volume','Open','High','Low'],['10/15/2026','$342.00','39,767,260','$346.95','$347.85','$341.60']]}])
+  c=gold('D04','https://www.nasdaq.com/market-activity/stocks/aapl/historical',[field('D04','AAPL/01/02/2030','close','100.00','decimal',date='d1')],dates={'d1':{'state':'known','value':'2030-01-02'}})
+  ok=doc(tables=[{'caption':'','rows':[['Date','Close/Last','Volume','Open','High','Low'],['01/02/2030','$100.00','1,000','$101.00','$102.00','$99.00']]}])
   t=score_case(c,ok,ORIGIN)['totals'];self.assertEqual((t['dateKnown'],t['datePreserved'],t['fullyCorrect']),(1,1,1))
-  moved=doc(tables=[{'caption':'','rows':[['Date','Close/Last','Volume','Open','High','Low'],['10/14/2026','$342.00','1','1','1','1']]}])
+  moved=doc(tables=[{'caption':'','rows':[['Date','Close/Last','Volume','Open','High','Low'],['01/03/2030','$100.00','1','1','1','1']]}])
   t=score_case(c,moved,ORIGIN)['totals'];self.assertEqual((t['entityMatched'],t['datePreserved']),(0,0))
 
 class NotCapturedAndOutcomes(unittest.TestCase):
@@ -105,37 +105,37 @@ class Summary(unittest.TestCase):
 class DevelopmentMappings(unittest.TestCase):
  """Mappings for D01-D10 read the delivered output, never the labels."""
  def test_d01_vintage_and_population_from_row(self):
-  c=gold('D01','https://www.census.gov/quickfacts/fact/table/US/PST045224',[field('D01','US/PST045225','population','341784857','integer',date='day'),field('D01','US/PST045225','vintage','V2025',date='day'),field('D01','US/PST045225','geography','United States',date='day')],dates={'day':{'state':'known','value':'2025-07-01'}})
-  d=doc(tables=[{'caption':'','rows':[['Fact','United States'],['Population estimates, July 1, 2025, (V2025)','341,784,857'],['Population estimates, July 1, 2024, (V2024)','340,110,988']]}])
+  c=gold('D01','https://www.census.gov/quickfacts/fact/table/US/PST045224',[field('D01','US/PST045231','population','123456789','integer',date='day'),field('D01','US/PST045231','vintage','V2031',date='day'),field('D01','US/PST045231','geography','Example Nation',date='day')],dates={'day':{'state':'known','value':'2031-07-01'}})
+  d=doc(tables=[{'caption':'','rows':[['Fact','Example Nation'],['Population estimates, July 1, 2031, (V2031)','123,456,789'],['Population estimates, July 1, 2030, (V2030)','123,000,000']]}])
   self.assertEqual(score_case(c,d,ORIGIN)['totals']['fullyCorrect'],3)
  def test_d05_german_price_and_euro(self):
-  c=gold('D05','https://www.otto.de/technik/laptop/',[field('D05','1996119966/1996119866','price','1799.00','decimal',unit='eur'),field('D05','1996119966/1996119866','url','https://www.otto.de/p/lenovo-1996119966/','url')],units={'eur':{'state':'known','value':'EUR'}})
-  d=doc('[Lenovo LOQ](http://127.0.0.1:8862/p/lenovo-1996119966/)\n\n1.799,00 €\n\n[Apple](http://127.0.0.1:8862/p/apple-2085076160/)\n\n699,00 €')
+  c=gold('D05','https://www.otto.de/technik/laptop/',[field('D05','1234567890/1234567891','price','1234.50','decimal',unit='eur'),field('D05','1234567890/1234567891','url','https://www.otto.de/p/example-laptop-1234567890/','url')],units={'eur':{'state':'known','value':'EUR'}})
+  d=doc('[Example Laptop](http://127.0.0.1:8862/p/example-laptop-1234567890/)\n\n1.234,50 €\n\n[Other Laptop](http://127.0.0.1:8862/p/other-laptop-2234567890/)\n\n599,00 €')
   self.assertEqual(score_case(c,d,ORIGIN)['totals']['fullyCorrect'],2)
  def test_d09_lost_sign_fails_value_but_keeps_period(self):
-  c=gold('D09','https://www.coingecko.com/',[field('D09','coin-1','change_1h','-0.1%','percent',unit='pct',period='p1')],units={'pct':{'state':'known','value':'%'}},periods={'p1':{'state':'known','value':'1h'}})
-  d=doc(tables=[{'caption':'','rows':[['#','Coin','Price','1h','24h'],['1','Bitcoin BTC','$82,096.72','0.1%','0.9%']]}])
+  c=gold('D09','https://www.coingecko.com/',[field('D09','coin-1','change_1h','-0.4%','percent',unit='pct',period='p1')],units={'pct':{'state':'known','value':'%'}},periods={'p1':{'state':'known','value':'1h'}})
+  d=doc(tables=[{'caption':'','rows':[['#','Coin','Price','1h','24h'],['1','Bitcoin BTC','$1,000.00','0.4%','0.3%']]}])
   row=score_case(c,d,ORIGIN)['rows'][0];self.assertFalse(row['checks']['value']);self.assertTrue(row['checks']['period']);self.assertTrue(row['checks']['entity'])
  def test_d03_offer_by_flight_link(self):
-  url='https://www.skyscanner.net/transport/flights/SEN/CDG/20270107?currency=GBP'
-  c=gold('D03','https://www.skyscanner.net/routes/lond/pari/london-to-paris.html',[field('D03','offer-1','url',url,'url'),field('D03','offer-1','starting_price','20','decimal',unit='gbp',date='dep'),field('D03','offer-1','departure_iso','2027-01-07','iso_date',date='dep')],units={'gbp':{'state':'known','value':'GBP'}},dates={'dep':{'state':'known','value':'2027-01-07'}})
-  d=doc('[![easyJet](http://x/e.png) Thu, 7 Jan SEN - CDG with easyJet from £20](http://127.0.0.1:8862/transport/flights/SEN/CDG/20270107?currency=GBP)')
+  url='https://www.skyscanner.net/transport/flights/AAA/BBB/20300105?currency=GBP'
+  c=gold('D03','https://www.skyscanner.net/routes/lond/pari/london-to-paris.html',[field('D03','offer-1','url',url,'url'),field('D03','offer-1','starting_price','31','decimal',unit='gbp',date='dep'),field('D03','offer-1','departure_iso','2030-01-05','iso_date',date='dep')],units={'gbp':{'state':'known','value':'GBP'}},dates={'dep':{'state':'known','value':'2030-01-05'}})
+  d=doc('[![Example Air](http://x/e.png) Sat, 5 Jan AAA - BBB with Example Air from £31](http://127.0.0.1:8862/transport/flights/AAA/BBB/20300105?currency=GBP)')
   self.assertEqual(score_case(c,d,ORIGIN)['totals']['fullyCorrect'],3)
 
  def test_d06_header_without_rows_is_not_history(self):
   c=gold('D06','https://finance.yahoo.com/quote/AAPL/history/',[field('D06','historical_table_boundary','date_header','Date',required=False),*[field('D06','required-slot-1',n,None,t,unit='missing',date='missing',availability='not_captured') for n,t in [('date','iso_date'),('open','decimal')]]])
   r=score_case(c,doc(tables=[{'caption':'','rows':[['Date','Open','High'],['There are no in the selected time period.']]}],status='blocked'),ORIGIN)
   self.assertEqual((r['totals']['fullyCorrect'],r['totals']['fabricated'],r['outcome']),(1,0,'correct_non_success'))
-  r=score_case(c,doc(tables=[{'caption':'','rows':[['Date','Open','High'],['Oct 15, 2026','346.95','347.85']]}]),ORIGIN)
+  r=score_case(c,doc(tables=[{'caption':'','rows':[['Date','Open','High'],['Jan 2, 2030','10.00','11.00']]}]),ORIGIN)
   self.assertEqual(r['totals']['fabricated'],2)
 
  def test_unknown_context_is_not_scored(self):
-  c=gold('D02','https://www.newegg.com/p/pl?d=laptop',[field('D02','1TS-000A-15W75','price','319.99','decimal',date='quote')],dates={'quote':{'state':'unknown','value':None}})
-  d=doc('[Dell Latitude](https://www.newegg.com/dell/p/1TS-000A-15W75)\n\n$319.99\n\n[More options from $319.99](https://www.newegg.com/dell/p/1TS-000A-15W75?Item=1TS-000A-15W75#moreBuyOptions)\n\n[HP](https://www.newegg.com/hp/p/1TS-000D-1TE80)')
+  c=gold('D02','https://www.newegg.com/p/pl?d=laptop',[field('D02','ABC-000A-00001','price','101.50','decimal',date='quote')],dates={'quote':{'state':'unknown','value':None}})
+  d=doc('[Dell Latitude](https://www.newegg.com/dell/p/ABC-000A-00001)\n\n$101.50\n\n[More options from $101.50](https://www.newegg.com/dell/p/ABC-000A-00001?Item=ABC-000A-00001#moreBuyOptions)\n\n[HP](https://www.newegg.com/hp/p/ABC-000D-00002)')
   r=score_case(c,d,ORIGIN);self.assertEqual((r['totals']['fullyCorrect'],r['totals']['dateKnown'],r['totals']['duplicateSelectedRecords']),(1,0,0))
  def test_same_item_later_in_the_page_is_a_duplicate(self):
-  c=gold('D02','https://www.newegg.com/p/pl?d=laptop',[field('D02','1TS-000A-15W75','price','319.99','decimal')])
-  d=doc('[Dell](https://www.newegg.com/dell/p/1TS-000A-15W75)\n\n$319.99\n\n[HP](https://www.newegg.com/hp/p/1TS-000D-1TE80)\n\n$279.99\n\n[Dell](https://www.newegg.com/dell/p/1TS-000A-15W75)\n\n$319.99')
+  c=gold('D02','https://www.newegg.com/p/pl?d=laptop',[field('D02','ABC-000A-00001','price','101.50','decimal')])
+  d=doc('[Dell](https://www.newegg.com/dell/p/ABC-000A-00001)\n\n$101.50\n\n[HP](https://www.newegg.com/hp/p/ABC-000D-00002)\n\n$88.00\n\n[Dell](https://www.newegg.com/dell/p/ABC-000A-00001)\n\n$101.50')
   self.assertEqual(score_case(c,d,ORIGIN)['totals']['duplicateSelectedRecords'],1)
 
 
@@ -143,6 +143,6 @@ class Report(unittest.TestCase):
  def test_markdown_leaves_values_out_by_default(self):
   c=gold('H03','https://example.org/c',[field('H03','day','value','86400','decimal')])
   r=score_case(c,doc(tables=[{'caption':'','rows':[['Quantity','Symbol','Value'],['day','d','86399']]}]),ORIGIN);rep={'rows':[r]}
-  self.assertNotIn('86399',markdown_report(rep));self.assertNotIn('86400',markdown_report(rep));self.assertIn('86399',markdown_report(rep,True))
+  self.assertNotIn('86399',markdown_report(rep));self.assertNotIn('day/value',markdown_report(rep));self.assertIn('r1/value',markdown_report(rep));self.assertNotIn('86400',markdown_report(rep));self.assertIn('86399',markdown_report(rep,True))
 
 if __name__=='__main__':unittest.main()
