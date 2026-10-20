@@ -185,6 +185,9 @@ def mapped(case,doc,fixture_origin):
    put(f,v,r,date=date,entity=method is not None)
  elif cid in DEV_CASES:
   d_mapped(case,md,text,meta,tables,fixture_origin,put,duplicates)
+ elif re.fullmatch(r'V\d{2}',cid):
+  from reserved_map import v_mapped  # reserved set v2 (R2): frozen before its first run
+  v_mapped(case,doc,fixture_origin,put,duplicates)
  else:raise ValueError('Unsupported frozen case '+cid)
  return out,duplicates,notes
 
