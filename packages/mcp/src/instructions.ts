@@ -55,7 +55,9 @@ export function serverInstructions(toolNames: Iterable<string>, surface: Instruc
         : 'This connection reads over HTTP alone: it has no browser lane.'
       lines.push(`${spends} ${lane}`)
     }
-    lines.push('Crawls, batches, Monitors and saved logins run on a server on the person\'s computer: npx octocrawl serve, with the @octocrawl/mcp server.')
+    lines.push(has('crawl', 'batch_scrape')
+      ? 'Crawls and batches run here as jobs on the account, a slice at a time: at most 500 pages a crawl and 1,000 URLs a batch, each page priced as a scrape, results kept 7 days. Monitors and saved logins run on a server on the person\'s computer: npx octocrawl serve, with the @octocrawl/mcp server.'
+      : 'Crawls, batches, Monitors and saved logins run on a server on the person\'s computer: npx octocrawl serve, with the @octocrawl/mcp server.')
   }
   return lines.join('\n\n')
 }
