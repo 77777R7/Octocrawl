@@ -18,11 +18,13 @@
  * tie, so the main content stays unless another does better. The lane records
  * `extraction_candidates` with each candidate's checks, the choice and why, and
  * whether a limit left a candidate out; the ladder still judges the delivered
- * page with its own contractVerdict. A request that named its content
+ * page with its own contractVerdict. A page whose content a contract chose is
+ * that request's answer: the API engine does not store it in its page cache,
+ * whose key leaves the contract out. A request that named its content
  * (`includeTags`, the whole page, a list's items) is not re-read: what it named
  * is the answer.
  */
-import type { FetchOptions, FetchResult, Lane, Readiness, Verification } from '@w2l/contracts'
+import type { FetchOptions, FetchResult, Lane, Readiness, TraceEvent, Verification } from '@w2l/contracts'
 import { CONTENTFUL_STATUS, estimateTokens } from '@w2l/contracts'
 import { readinessOf, verify } from '@w2l/runtime'
 import { captureOf } from '../capture.js'
@@ -30,6 +32,8 @@ import { MAX_TASK_SELECTION_HTML, selectionAsked, wholePageAsked, wholePageMarkd
 
 export const EXTRACTION_CANDIDATES = ['main_content', 'document', 'declared_data'] as const
 export type ExtractionCandidateId = (typeof EXTRACTION_CANDIDATES)[number]
+
+const MARKDOWN_CHECKS: ReadonlySet<string> = new Set(['markdownIncludes', 'markdownMatches', 'markdownCountMin'])
 
 /** The longest Markdown a candidate may be: longer is not judged (the region wait's view limit, regionWait.ts MAX_VIEW_HTML). */
 export const MAX_CANDIDATE_CHARS = 5_000_000
@@ -111,6 +115,8 @@ export function withExtractionCandidates(result: FetchResult, source: CandidateS
   const { options } = source
   if (options.verify === undefined || !CONTENTFUL_STATUS.has(result.status) || typeof result.markdown !== 'string') return result
   if (selectionAsked(options) || wholePageAsked(options) || options.list?.itemSelector !== undefined) return result
+  // Only Markdown checks can change with the Markdown a candidate delivers.
+  if (!options.verify.checks.some(check => MARKDOWN_CHECKS.has(check.type))) return result
   const verification = verify(options.verify, result as unknown as Record<string, unknown>, { partial: true })
   if (verification.status !== 'failed' || verification.reason !== 'checks_failed') return result
   const readiness = readinessOf({ ...result, verification })
@@ -132,7 +138,7 @@ export function withExtractionCandidates(result: FetchResult, source: CandidateS
   const reason = best.id === 'main_content' ? 'main_content_kept' : best.failed === 0 && best.unjudged === 0 ? 'passes_contract' : 'more_checks_passed'
   const capture = captureOf(result.trace)
   const view = [...result.trace].reverse().find(event => event.event === 'view')
-  const event = {
+  const event: TraceEvent = {
     at: source.at,
     lane: source.lane,
     event: 'extraction_candidates',
@@ -148,6 +154,8 @@ export function withExtractionCandidates(result: FetchResult, source: CandidateS
       limits: { html: MAX_TASK_SELECTION_HTML, markdown: MAX_CANDIDATE_CHARS, candidates: EXTRACTION_CANDIDATES.length },
     },
   }
-  if (best.id === 'main_content' || best.markdown === null) return { ...result, trace: [...result.trace, event] }
-  return { ...result, markdown: best.markdown, usage: { ...result.usage, contentTokens: estimateTokens(best.markdown) }, trace: [...result.trace, event] }
+  // Appended to the lane's own trace array: a lane adds events after its result is built (browserLocal's session_cookies).
+  ;(result.trace as TraceEvent[]).push(event)
+  if (best.id === 'main_content' || best.markdown === null) return result
+  return { ...result, markdown: best.markdown, usage: { ...result.usage, contentTokens: estimateTokens(best.markdown) } }
 }

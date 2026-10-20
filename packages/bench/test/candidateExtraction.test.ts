@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { localNetworkPolicy } from '@w2l/contracts'
-import type { FetchOptions, FetchResult } from '@w2l/contracts'
+import type { FetchOptions, FetchResult, TraceEvent } from '@w2l/contracts'
 import { extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { readinessOf, verify } from '@w2l/runtime'
 import { captureEvent, newCapture } from '../src/capture.js'
@@ -79,8 +79,18 @@ describe('reading the same capture again when its contract fails on what was ext
     expect(out.trace.at(-1)).toMatchObject({ event: 'extraction_candidates', detail: { selected: 'main_content', reason: 'main_content_kept' } })
   })
 
+  it('adds its event to the lane\'s own trace, which the lane may still append to', () => {
+    const result = delivered(standard)
+    const out = withExtractionCandidates(result, source(ask([{ type: 'markdownIncludes', text: 'Proposed Standard' }])))
+    expect(out.trace).toBe(result.trace)
+    ;(result.trace as TraceEvent[]).push({ at: 10, lane: 'browser_local', event: 'session_cookies' })
+    expect(out.trace.map(event => event.event)).toEqual(['capture', 'extraction_candidates', 'session_cookies'])
+  })
+
   it('leaves the result alone without a contract, when it passes, or when the request named its content', () => {
     const result = delivered(standard)
+    // A contract with no Markdown check: no candidate's Markdown can change its verdict.
+    expect(withExtractionCandidates(result, source(ask([{ type: 'field', path: 'metadata.title', equals: 'nope' }])))).toBe(result)
     expect(withExtractionCandidates(result, source({}))).toBe(result)
     expect(withExtractionCandidates(result, source(ask([{ type: 'markdownIncludes', text: 'Introduction' }])))).toBe(result)
     const failing = [{ type: 'markdownIncludes' as const, text: 'Proposed Standard' }]

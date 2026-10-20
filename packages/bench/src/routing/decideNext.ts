@@ -132,7 +132,7 @@ export function decideNext(input: DecideNextInput): ActionDecision {
     }
     if (state === 'not_loaded') {
       const browser = channel.waitsFor === true || BROWSER_RUNGS.has(channel.id)
-      const waited = input.waitedMs ?? 0
+      const waited = input.waitedMs ?? (typeof input.readiness === 'object' && input.readiness !== null ? input.readiness.waitedMs : undefined) ?? 0
       if (browser && waited < SAME_SESSION_WAIT_MAX_MS && (remainingMs === null || remainingMs > FINAL_CAPTURE_RESERVE_MS)) {
         return { action: 'wait_same_session', reason: 'not_loaded' }
       }
