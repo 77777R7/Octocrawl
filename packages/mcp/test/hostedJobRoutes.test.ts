@@ -114,9 +114,9 @@ describe('hosted job routes', () => {
 
   it('refuses an option hosted jobs do not take by name, an authed mode, and a key without the browser lane asking for it', async () => {
     const { call } = await start()
-    const options = await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), webhook: { url: 'https://hooks.example/' }, robotsOverrides: [] })
+    const options = await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), robotsOverrides: [], useCached: true })
     expect(options.status).toBe(400)
-    expect(((await options.json()) as { error: string }).error).toBe('hosted batch jobs do not take webhook, robotsOverrides')
+    expect(((await options.json()) as { error: string }).error).toBe('hosted batch jobs do not take robotsOverrides, useCached')
     expect((await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', ignoreRobotsTxt: true })).status).toBe(400)
     expect((await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', mode: 'authed' })).status).toBe(400)
     expect((await call('POST', '/v1/batches', 'oc_http', { urls: urls(1), waitFor: 500 })).status).toBe(400)
@@ -249,6 +249,48 @@ describe('hosted job routes', () => {
     expect(second.hasMore).toBe(false)
     expect((await call('GET', '/v1/jobs', null)).status).toBe(403)
     expect((await call('GET', '/v1/jobs?limit=0', 'oc_one')).status).toBe(400)
+  })
+
+  it('takes a webhook for the job\'s end, returns its secret on the start alone, and no read shows it (H2 W1, W2)', async () => {
+    const { call, store, enqueued } = await start()
+    const webhook = { url: 'https://hooks.example.com/octocrawl', metadata: { run: 'r1' } }
+    const started = await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), webhook, idempotencyKey: 'hook-1' })
+    expect(started.status).toBe(202)
+    const body = await started.json() as { taskId: string; webhook: { url: string; events: string[]; secret: string; delivery: null } }
+    expect(body.webhook).toMatchObject({ url: webhook.url, events: ['completed', 'failed', 'cancelled'], delivery: null })
+    expect(body.webhook.secret).toMatch(/^whsec_[A-Za-z0-9_-]{43}$/)
+    // The secret is kept to sign with; the request the engine runs has no webhook.
+    expect(store.jobs.get(body.taskId)?.webhook?.secret).toBe(body.webhook.secret)
+    expect(enqueued[0]?.request).not.toHaveProperty('webhook')
+    // A retried start, whose first answer may have been lost, gets the same secret again.
+    expect(await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), webhook, idempotencyKey: 'hook-1' })).json()).toMatchObject({ taskId: body.taskId, replayed: true, webhook: { secret: body.webhook.secret } })
+    for (const read of [
+      await (await call('GET', `/v1/batches/${body.taskId}`, 'oc_one')).text(),
+      await (await call('GET', '/v1/jobs', 'oc_one')).text(),
+    ]) {
+      expect(read).toContain(webhook.url)
+      expect(read).not.toContain('whsec_')
+    }
+    // A string is the url alone; the events can be narrowed to the job's end.
+    expect((await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', webhook: { url: webhook.url, events: ['failed'] } })).status).toBe(202)
+  })
+
+  it('refuses a webhook hosted cannot send: not https, not public, with headers or secretEnv, or for events other than the end', async () => {
+    const { call, enqueued } = await start()
+    for (const [webhook, message] of [
+      ['http://hooks.example.com/', /https/],
+      ['https://127.0.0.1/hook', /public/],
+      ['https://10.0.0.8/hook', /public/],
+      [{ url: 'https://hooks.example.com/', headers: { authorization: 'x' } }, /headers/],
+      [{ url: 'https://hooks.example.com/', secretEnv: 'W2L_WEBHOOK_SECRET_A' }, /secretEnv/],
+      [{ url: 'https://hooks.example.com/', events: ['page'] }, /only their end/],
+      [{ url: 'https://hooks.example.com/', retries: 3 }, /unknown webhook option/],
+    ] as const) {
+      const refused = await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), webhook })
+      expect(refused.status, JSON.stringify(webhook)).toBe(400)
+      expect(((await refused.json()) as { error: string }).error).toMatch(message)
+    }
+    expect(enqueued).toEqual([])
   })
 
   it('cancels a job of the account, frees its slot and queues the first slice of the job that takes it', async () => {
