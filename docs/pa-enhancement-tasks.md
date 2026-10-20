@@ -175,10 +175,10 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 
 方案 §十一。目标：有一个未参与调参的保留集、一个独立评分器、一个"前"值。
 
-- [ ] **R1 开发集。** 从 `main` 拉新分支，cherry-pick #556：`research/accuracy/{README.md, audit_gold.py, test_gold.py, source_dom.py, field-gold-manifest.v1.json, field-gold-plan.v1.json, field-gold.schema.json, .gitignore}`；`.github/workflows/field-gold.yml` 只保留 `workflow_dispatch`；Python 在 `.w2l/pyenv` 里跑（AGENTS.md）。D01–D10 做开发集，H01–H08 降为回归集（#562 已打开它们）；原始页面继续放 `.w2l/field-gold/`。
-- [ ] **R1b 开发集基线。** R1 合入后、任何 D/F 代码改动合入前，用 R3 的评分器对 `main` `2ffd7f25`（或当时的 main）跑 D01–D10 和 H01–H08，命令、commit、逐字段正确性记录到 `research/accuracy/runs/`。这是 D、D6、F 验收的"前"值。
+- [x] **R1 开发集。** 从 `main` 拉新分支，cherry-pick #556：`research/accuracy/{README.md, audit_gold.py, test_gold.py, source_dom.py, field-gold-manifest.v1.json, field-gold-plan.v1.json, field-gold.schema.json, .gitignore}`；`.github/workflows/field-gold.yml` 只保留 `workflow_dispatch`；Python 在 `.w2l/pyenv` 里跑（AGENTS.md）。D01–D10 做开发集，H01–H08 降为回归集（#562 已打开它们）；原始页面继续放 `.w2l/field-gold/`。（2026-10-20 完成，#621）
+- [x] **R1b 开发集基线。** R1 合入后、任何 D/F 代码改动合入前，用 R3 的评分器对 `main` `2ffd7f25`（或当时的 main）跑 D01–D10 和 H01–H08，命令、commit、逐字段正确性记录到 `research/accuracy/runs/`。这是 D、D6、F 验收的"前"值。（2026-10-20 完成：`research/accuracy/runs/2026-10-20-dev-baseline-cea1d4cb.md`，`main` `cea1d4cb`）
 - [ ] **R2 保留集 v2。** 按文章、商品、列表、表格、动态区域、文档元数据分层，至少 40 题、每题逐字段标注：主体、值、来源关系（pointer/选择器/行列）、单位、日期、完整性、新鲜度；清单与 SHA 冻结在 `research/accuracy/reserved.v2.json`；标注与抽查按决定 3。不含 92 题里的任何 URL，不含 H01–H08。N=40 时零假成功的单侧 95% 上限约 7.2%，验收里写明；v3 扩到 ≥300 题分层是本轮之后的后续项。
-- [ ] **R3 独立评分。** 从 #562 取 `holdout_score.py`、`test_holdout_score.py`（`run_holdout.mjs`、`holdout-protocol.md` 可选；`field-acceptance.yml` 不要）；扩展为主体匹配、字段关系、单位/日期保留分别计分；报告 N 和零假成功的单侧 95% 上限 1−0.05^(1/N)；成功结果中的错误比例与每请求假成功概率分开报。
+- [x] **R3 独立评分。** 从 #562 取 `holdout_score.py`、`test_holdout_score.py`（`run_holdout.mjs`、`holdout-protocol.md` 可选；`field-acceptance.yml` 不要）；扩展为主体匹配、字段关系、单位/日期保留分别计分；报告 N 和零假成功的单侧 95% 上限 1−0.05^(1/N)；成功结果中的错误比例与每请求假成功概率分开报。（2026-10-20 完成，#621；`run_holdout.mjs` 未取，改用单版本的 `run_dev.mjs`）
 - 验收：v2 冻结记录（题数、分层、SHA）；评分器有测试；R1b 记录在案；v2 对任何候选都还没跑过。
 
 ## Phase 2 · 交付闭环
@@ -244,6 +244,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 - 2026-10-20：P0.1 基线跑完，在 `main` `1c4d9178`（#609、#610 之后）。92 题 enhanced（Steel 数据中心 grant，走 Clash）：verified 58/92，假成功 2（T010、T031），p50 6251 ms，p95 31203 ms，Steel 费用 $0.0251；健康 25 题 23 过（T027 http_error 400、T052 cloudflare_challenge）；T060 本轮 verified，不再是假成功，原因 unknown。记录 `research/access/runs/2026-10-20-pa-next-baseline-all-1c4d9178.md`。16 题 installed_chrome（Clash 出口，复用 10-14 验收的 grant）：12/16 过，未过 T045、T046、T068（DataDome）、T048（Cloudflare），假成功 0，费用 $0。记录 `research/access/runs/2026-10-20-pa-next-baseline-ic16-1c4d9178.md`。
 - 2026-10-20：P0.3 分流完成（#512、#514 关闭，其余见 P0.3 表）；P0.6 改为核查，托管 worker 不传 grant；每周计划任务 `octocrawl-pa-weekly-rerun` 已建。Phase 0 全部完成。
 - 2026-10-20：P0.4 每周脚本首次本地运行（代码 `main` `259bcef3` 加本 PR，记录名用 259bcef3；走 Clash，周 2026-W43，轮换第 3 组只有 6 题，共 47 题）。免费臂 36/47（健康 23/25，16 题 installed_chrome 10/16，高于验收下限 7、低于 11；轮换 3/6），假成功 0，$0；Steel 臂 28/47（16 题只过 2），假成功 1，$0.0049；Firecrawl 37/47，假成功 4，账户实扣 70 credits；ZenRows 34/47，假成功 3，实扣 338 credits（$0.338）。与最好竞品的差距：免费臂 1（16 题上 4），Steel 臂 9。记录 `research/access/runs/2026-10-20-weekly-{free,steel,firecrawl,zenrows,summary}-259bcef3.md`。计划任务未建，待 Howard 点头。
+- 2026-10-20：R1、R3、R1b 完成（#621）。开发集基线（`main` `cea1d4cb`，保存字节经 HTTP 通道回放，只走本机回环，$0）：D01–D10 必填字段完全正确 34/86，任务接受 0/6，10 次请求中假成功 7（字段错 6、无目标仍答 success 1，每请求上限 91.3%）；H01–H08 回归集 62/75、6/8，与 #562 在 10-17 的结果相同。评分器有三处是看过本次输出后修的（D06 崩溃、unknown 维度误计、同一商品卡片拆成两条），修前 D 为 20/86，记录里两组数字都在。记录 `research/accuracy/runs/2026-10-20-dev-baseline-cea1d4cb.md`。
 
 ## 下次从这里继续
 

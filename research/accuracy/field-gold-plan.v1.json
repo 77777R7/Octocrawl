@@ -1,0 +1,199 @@
+{
+  "schema": "octocrawl.field-gold-plan/1",
+  "createdAt": "2026-10-17T03:18:30.379807+00:00",
+  "sourceBranchBase": "a7f88cc876f2323f073a3836f0b4e7042023408b",
+  "candidateFrozen": "ca94fdd5e2fd28e892418ba6fa7938b94eeeb3aa",
+  "scope": "18 distinct real task URLs: 10 development snapshots, 8 reserved snapshots. Engineering source adjudication, not non-author human acceptance or economic truth.",
+  "capture": {
+    "reserved": "Raw HTTP only, no production extractor/verifier, no output generation; one planned capture per URL; failures/policy refusals remain.",
+    "maxBodyBytes": 4194304,
+    "timeoutSeconds": 30,
+    "robots": "Read robots first; respect disallow. No challenge solving, identity rotation, paid provider or model.",
+    "proxy": "http://127.0.0.1:7890",
+    "targetExit": "unknown",
+    "resourceGate": "No actual full tests, acceptance runner or API CLI active; never touch port8787 or another process."
+  },
+  "annotation": {
+    "grain": "One required field within one identified source record; context unit/date are explicit known/unknown/not_applicable states.",
+    "recordLimit": 3,
+    "nonAuthorReview": "pending",
+    "candidateEvaluationReserved": "not run; must explicitly unseal later; any tuning exposure reclassifies sample as development.",
+    "captureTimeIsNotBusinessDate": true,
+    "unknownIsNotZero": true,
+    "rawAndLabels": "Private ignored .w2l dataset and artifact archive; no raw pages or batch outputs committed."
+  },
+  "cases": [
+    {
+      "id": "D01",
+      "split": "development",
+      "legacyTaskId": "T052",
+      "kind": "table",
+      "url": "https://www.census.gov/quickfacts/fact/table/US/PST045224",
+      "task": "Extract the population estimate, its stated vintage/year and unit at the legacy Census URL; never relabel the current vintage as the URL year.",
+      "priorExposure": "Previously used for formal diagnostics or extraction/verification fixes; not a blind sample.",
+      "selection": "First three complete target records unless the task requires a negative boundary; all scope/missingness retained."
+    },
+    {
+      "id": "D02",
+      "split": "development",
+      "legacyTaskId": "T020",
+      "kind": "listing",
+      "url": "https://www.newegg.com/p/pl?d=laptop",
+      "task": "Extract the first three distinct complete laptop offers: SKU, title, URL and current displayed price, and declared currency; preserve missing price rows separately.",
+      "priorExposure": "Previously used for formal diagnostics or extraction/verification fixes; not a blind sample.",
+      "selection": "First three complete target records unless the task requires a negative boundary; all scope/missingness retained."
+    },
+    {
+      "id": "D03",
+      "split": "development",
+      "legacyTaskId": "T039",
+      "kind": "listing",
+      "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
+      "task": "Extract the first three complete London to Paris offers with associated URL, departure date, carrier, route, starting price and explicit currency/year if provided.",
+      "priorExposure": "Previously used for formal diagnostics or extraction/verification fixes; not a blind sample.",
+      "selection": "First three complete target records unless the task requires a negative boundary; all scope/missingness retained."
+    },
+    {
+      "id": "D04",
+      "split": "development",
+      "legacyTaskId": "T060",
+      "kind": "shadow_table",
+      "url": "https://www.nasdaq.com/market-activity/stocks/aapl/historical",
+      "task": "Extract the first three AAPL historical rows with date, close/last, volume, open, high and low; preserve table currency and scope.",
+      "priorExposure": "Previously used for formal diagnostics or extraction/verification fixes; not a blind sample.",
+      "selection": "First three complete target records unless the task requires a negative boundary; all scope/missingness retained."
+    },
+    {
+      "id": "D05",
+      "split": "development",
+      "legacyTaskId": "T027",
+      "kind": "duplicates",
+      "url": "https://www.otto.de/technik/laptop/",
+      "task": "Extract the first three complete laptop cards with identity/name/URL/price; distinguish duplicate cards and product variants at the declared grain.",
+      "priorExposure": "Previously used for formal diagnostics or extraction/verification fixes; not a blind sample.",
+      "selection": "First three complete target records unless the task requires a negative boundary; all scope/missingness retained."
+    },
+    {
+      "id": "D06",
+      "split": "development",
+      "legacyTaskId": "T058",
+      "kind": "empty_target",
+      "url": "https://finance.yahoo.com/quote/AAPL/history/",
+      "task": "Extract AAPL historical daily rows, not current/premarket quote or navigation; retain explicit no-row text and unavailable required cells.",
+      "priorExposure": "Previously used for formal diagnostics or extraction/verification fixes; not a blind sample.",
+      "selection": "First three complete target records unless the task requires a negative boundary; all scope/missingness retained."
+    },
+    {
+      "id": "D07",
+      "split": "development",
+      "legacyTaskId": "T030",
+      "kind": "login",
+      "url": "https://www.aliexpress.com/category/702/laptops.html",
+      "task": "Return at least three laptop offers if captured; otherwise identify the login boundary without inventing product fields.",
+      "priorExposure": "Previously used for formal diagnostics or extraction/verification fixes; not a blind sample.",
+      "selection": "First three complete target records unless the task requires a negative boundary; all scope/missingness retained."
+    },
+    {
+      "id": "D08",
+      "split": "development",
+      "legacyTaskId": "T031",
+      "kind": "captcha",
+      "url": "https://www.temu.com/",
+      "task": "Return at least five product offers if captured; otherwise identify the verification challenge without inventing product fields.",
+      "priorExposure": "Previously used for formal diagnostics or extraction/verification fixes; not a blind sample.",
+      "selection": "First three complete target records unless the task requires a negative boundary; all scope/missingness retained."
+    },
+    {
+      "id": "D09",
+      "split": "development",
+      "legacyTaskId": "T062",
+      "kind": "signed_table",
+      "url": "https://www.coingecko.com/",
+      "task": "Extract Bitcoin, Ethereum and Tether prices and visible percentage changes, preserving direction, column periods, declared currency and uncertain rounded zero directions.",
+      "priorExposure": "Previously used for formal diagnostics or extraction/verification fixes; not a blind sample.",
+      "selection": "First three complete target records unless the task requires a negative boundary; all scope/missingness retained."
+    },
+    {
+      "id": "D10",
+      "split": "development",
+      "legacyTaskId": "T012",
+      "kind": "source_error",
+      "url": "https://www.walmart.com/browse/electronics/laptops/3944_3951_1089430_132960",
+      "task": "Return at least three laptop offers if captured; distinguish the explicit source-data error and navigation from product data.",
+      "priorExposure": "Previously used for formal diagnostics or extraction/verification fixes; not a blind sample.",
+      "selection": "First three complete target records unless the task requires a negative boundary; all scope/missingness retained."
+    },
+    {
+      "id": "H01",
+      "split": "reserved",
+      "kind": "article",
+      "url": "https://www.rfc-editor.org/rfc/rfc9110.html",
+      "task": "Extract RFC identifier/title, publication month/year, status category and the named authors from the document header.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group."
+    },
+    {
+      "id": "H02",
+      "split": "reserved",
+      "kind": "listing",
+      "url": "https://www.gutenberg.org/browse/scores/top",
+      "task": "Extract the first three books in Top 100 EBooks yesterday: ebook ID, title/author display and download count, with the stated reporting date/period.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group."
+    },
+    {
+      "id": "H03",
+      "split": "reserved",
+      "kind": "scientific_table",
+      "url": "https://ssd.jpl.nasa.gov/astro_par.html",
+      "task": "Extract the first three stated astrodynamic constants with quantity name, exact value and unit, including uncertainties/definitions when supplied.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group."
+    },
+    {
+      "id": "H04",
+      "split": "reserved",
+      "kind": "dated_table",
+      "url": "https://www.gov.uk/bank-holidays",
+      "task": "Extract the first three England and Wales 2027 bank holidays with full calendar date and holiday name; keep the year and region attached.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group."
+    },
+    {
+      "id": "H05",
+      "split": "reserved",
+      "kind": "scientific_table",
+      "url": "https://www.nist.gov/pml/owm/metric-si-prefixes",
+      "task": "Extract quetta, ronna, ronto and quecto with symbol and decimal factor; preserve signs/exponents and stated source date if any.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group."
+    },
+    {
+      "id": "H06",
+      "split": "reserved",
+      "kind": "registry_table",
+      "url": "https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml",
+      "task": "Extract status codes 200, 404 and 429 with description and reference from their own registry rows; distinguish registry update date from HTTP response date.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group."
+    },
+    {
+      "id": "H07",
+      "split": "reserved",
+      "kind": "article",
+      "url": "https://www.w3.org/TR/WCAG22/",
+      "task": "Extract the exact WCAG version/title, displayed specification status/date and three named conformance levels from the source.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group."
+    },
+    {
+      "id": "H08",
+      "split": "reserved",
+      "kind": "article",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map",
+      "task": "Extract the method identity, callback parameter names, return-value statement and explicit last-modified date; do not use navigation or Array length as this method's value.",
+      "priorExposure": "Exact URL absent from frozen access and parity task inputs at planning; no claim about model training or all historical browsing.",
+      "selection": "Only the named document/rows/records; no candidate output inspected or generated for this group."
+    }
+  ]
+}
