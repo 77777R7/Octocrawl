@@ -655,10 +655,16 @@ export function buildChannels(
  * session at maxSessionMs. Its bytes and solves are what the provider reported after release (a figure it did not
  * report is priced at the ceiling's allowance), and can pass the ceiling: the provider's proxy also carries what the
  * page's own count does not, and it solves what appears. Not when a session's release went unconfirmed (it bills until
- * its timeout) or none was closed: the ceiling stays the charge.
+ * its timeout) or none was closed: the ceiling stays the charge. What the transport's own meter counted the sessions'
+ * pages receiving goes on the result either way (PA G1): it is a count, not a charge.
  */
 export function withMeasuredSessions(result: FetchResult, sessions: readonly ClosedVendorSession[], tariff: VendorTariff, ceilingUsd: number, proxyCountry: string | null = null): FetchResult {
-  if (sessions.length === 0 || sessions.some((session) => !session.released)) return result
+  // Counted only when every session was (a session the meter did not see makes the total unknown); none counted, none on the result.
+  const counted = sessions.some((session) => session.bytesCounted !== undefined) ? {
+    vendorBytesCounted: sessions.every((session) => typeof session.bytesCounted === 'number') ? sessions.reduce((sum, session) => sum + session.bytesCounted!, 0) : null,
+    vendorBytesCapped: sessions.some((session) => session.bytesCapped === true),
+  } : null
+  if (sessions.length === 0 || sessions.some((session) => !session.released)) return counted === null ? result : { ...result, usage: { ...result.usage, ...counted } }
   const vendorSessionMs = sessions.reduce((sum, session) => sum + session.sessionMs, 0)
   const timeOnly: VendorTariff = { ...tariff, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null }
   const timeCeilingUsd = ceilingUsd - (tariffCostUsd(tariff, 0) - tariffCostUsd(timeOnly, 0))
@@ -678,6 +684,7 @@ export function withMeasuredSessions(result: FetchResult, sessions: readonly Clo
       ...(tariff.perGbUsd > 0 || proxyCountry !== null ? { vendorProxyBytes: total((usage) => usage?.proxyBytes ?? null) } : {}),
       ...(tariff.perSolveUsd > 0 || sessions.some((session) => (session.usage?.solves ?? 0) > 0) ? { vendorSolves: total((usage) => usage?.solves ?? null) } : {}),
       ...(proxyCountry === null ? {} : { vendorProxyCountry: proxyCountry }),
+      ...counted,
     },
   }
 }

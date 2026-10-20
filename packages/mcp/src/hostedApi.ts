@@ -208,6 +208,17 @@ const HOSTED_MCP_LIST_MAX = 100
 const HOSTED_JOB_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled', 'expired'] as const
 const HOSTED_JOB_NOTE = ' On hosted Octocrawl a job runs in slices: a crawl reads at most 500 pages and a batch 1,000 URLs, each page costs credits as a scrape does (maxCredits caps the job), and results are kept 7 days after it ends.'
 
+/** get_batch_errors as hosted answers it (H2 M7): the job's failed items in a page list, not the local { errors, robotsBlocked }. */
+const HOSTED_BATCH_ERRORS_DESCRIPTION = `List a batch's items that did not succeed (status failed, blocked, cancelled or budget_exceeded), each as get_batch_items lists it: { items, nextCursor, hasMore }, in pages of up to ${HOSTED_MCP_LIST_MAX} (cursor, limit). A URL robots.txt refused is among them, blocked with its blockReason.`
+
+/** A start tool's local description less what hosted does not serve: appendToId, actions, and an unstated retention (HOSTED_JOB_NOTE states it). */
+function hostedStartDescription(description: string): string {
+  return description
+    .replace(' appendToId adds the urls to an existing batch;', '')
+    .replace(', actions and the rest', ' and the rest')
+    .replace(/ How long the server keeps (them|the results) is not stated\./, '')
+}
+
 /** A job tool as hosted serves it: its start options cut to what hosted takes, waits within the request's deadline, its status values. */
 function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
   const schema = structuredClone(tool.inputSchema) as { properties: Record<string, Record<string, unknown>>; required?: string[] }
@@ -217,7 +228,15 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
     // REST takes a webhook (H2 W1); a tool does not offer one yet, since its secret would land in the agent's transcript.
     for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || key === 'webhook' || (!browser && key === 'waitFor')) delete schema.properties[key]
     if (tool.name === 'crawl' && schema.properties.maxPages) schema.properties.maxPages = { ...schema.properties.maxPages, maximum: JOB_MAX_CRAWL_PAGES }
+    // A page in a job is read as a hosted scrape is (H2 M7, M9): its formats (no screenshot without the browser lane),
+    // no authed mode, files up to the hosted cap.
+    const scrape = hostedInputSchema('scrape', TOOLS.find((candidate) => candidate.name === 'scrape')!.inputSchema, browser) as { properties: Record<string, Record<string, unknown>> }
+    schema.properties.formats = scrape.properties.formats!
+    schema.properties.mode = scrape.properties.mode!
+    schema.properties.maxFileBytes = { ...schema.properties.maxFileBytes, maximum: HOSTED_MAX_FILE_BYTES }
   }
+  // An error list's items lose their usage and trace as pages do (H2 M8): debug asks for them back.
+  if (tool.name === 'get_batch_errors' || tool.name === 'get_crawl_errors') schema.properties.debug = { type: 'boolean', description: 'Keep each item\'s usage and trace. Default false.' }
   if (schema.properties.timeoutMs) schema.properties.timeoutMs = { ...schema.properties.timeoutMs, maximum: HOSTED_MCP_WAIT_MS }
   // A page of a hosted job's list is at most HOSTED_MCP_LIST_MAX items, and so is what maxResults follows.
   for (const key of ['limit', 'maxResults']) if (schema.properties[key] && Number(schema.properties[key].maximum) > HOSTED_MCP_LIST_MAX) schema.properties[key] = { ...schema.properties[key], maximum: HOSTED_MCP_LIST_MAX }
@@ -225,7 +244,7 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
   if (output?.properties?.status !== undefined) output.properties.status = { enum: [...HOSTED_JOB_STATUSES] }
   return {
     ...tool,
-    description: starts ? `${tool.description}${HOSTED_JOB_NOTE}` : tool.description.replace(/at most 120000/g, `at most ${HOSTED_MCP_WAIT_MS}`),
+    description: starts ? `${hostedStartDescription(tool.description)}${HOSTED_JOB_NOTE}` : tool.name === 'get_batch_errors' ? HOSTED_BATCH_ERRORS_DESCRIPTION : tool.description.replace(/at most 120000/g, `at most ${HOSTED_MCP_WAIT_MS}`),
     inputSchema: schema,
     ...(output === undefined ? {} : { outputSchema: output }),
   }
@@ -914,6 +933,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const call = { ...((args ?? {}) as Record<string, unknown>) }
           // The start's answer would carry the webhook's secret into the agent's transcript (H2 W2).
           if (call.webhook !== undefined && call.webhook !== null) throw new Error(`${name} on hosted Octocrawl takes no webhook over MCP, since the answer carries its signing secret; start the job with POST /v1/${name === 'crawl' ? 'crawl' : 'batches'} to have its end posted`)
+          // debug on an error list only keeps the items whole here (withoutTelemetry); the list itself takes none.
+          if (name === 'get_batch_errors' || name === 'get_crawl_errors') delete call.debug
           if (typeof call.timeoutMs === 'number') call.timeoutMs = Math.min(call.timeoutMs, HOSTED_MCP_WAIT_MS)
           for (const key of ['limit', 'maxResults']) if (typeof call[key] === 'number') call[key] = Math.min(call[key] as number, HOSTED_MCP_LIST_MAX)
           return call
