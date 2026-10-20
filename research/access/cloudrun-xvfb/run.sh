@@ -16,7 +16,8 @@ fi
 node --import tsx packages/api/src/cli.ts --port 8787 >/tmp/api.log 2>&1 &
 for _ in $(seq 1 120); do grep -q listening /tmp/api.log 2>/dev/null && break; sleep 1; done
 grep -E "grant|listening" /tmp/api.log
+# The 16 tasks are the challenge16 subset of research/access/subsets.v1.json.
 W2L_API_URL=http://127.0.0.1:8787 W2L_EGRESS_ECHO_URL=https://api.ipify.org node research/access/run-set.mjs --set all \
-  --only T001,T002,T005,T034,T038,T045,T046,T047,T048,T049,T053,T068,T071,T076,B001,B008 --access '"enhanced"' --save-responses
+  --only "$(node -e "process.stdout.write(require('./research/access/subsets.v1.json').subsets.challenge16.tasks.join(','))")" --access '"enhanced"' --save-responses
 node research/access/cloudrun-xvfb/summarize.mjs
 echo "api log tail:"; tail -20 /tmp/api.log

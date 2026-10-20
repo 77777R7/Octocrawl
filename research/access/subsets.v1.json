@@ -1,0 +1,11 @@
+{
+  "schema": "w2l.access-subsets/1",
+  "note": "Named subsets of research/access/tasks.v1.json, kept apart from it so the task file's SHA-256 (recorded by every run) does not change. A subset lists task ids in tasks.v1.json order; a script reads the list from here instead of copying it. run-set.mjs selects them with --set all --only <ids> (the default --set frozen leaves out the blind tasks).",
+  "subsets": {
+    "challenge16": {
+      "title": "The 16 challenge-page and bot-check tasks",
+      "source": "ROADMAP.md PA item 4, 2026-10-12: the 16 tasks two full enhanced runs (2026-10-11) answered with cloudflare_challenge or bot_detected_generic, attributed from the gate's signals in research/access/runs/2026-10-12-pa-gate-signals-{standard,enhanced}-56f9a0d1.md (Cloudflare on 8, DataDome on 7, no vendor header on 2); the task pool of docs/pa-challenge-botcheck-tasks.md and the acceptance set of ADR 0005's installed_chrome rung.",
+      "tasks": ["T001", "T002", "T005", "T034", "T038", "T045", "T046", "T047", "T048", "T049", "T053", "T068", "T071", "T076", "B001", "B008"]
+    }
+  }
+}
