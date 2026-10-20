@@ -147,6 +147,10 @@ export class SqliteRoutingHistory implements RoutingHistory {
   lastBasis: RouteReadBasis = 'fixed'
   /** Each vendor's basis in the last read. */
   lastBases: Record<string, RouteReadBasis> = {}
+  /** The vendors the last read left out for too few attempts, with the most it held of any one (route or host). */
+  lastThin: Record<string, number> = {}
+  /** The vendors whose rows the last read expired, with the reason it gave last. */
+  lastExpired: Record<string, RouteExpiryReason> = {}
 
   constructor(private readonly store: RoutingHistoryDatabase, private readonly scope: RouteScope, options: SqliteRoutingHistoryOptions = {}) {
     this.now = options.now ?? (() => Date.now())
@@ -159,7 +163,8 @@ export class SqliteRoutingHistory implements RoutingHistory {
     return this.store.db
   }
 
-  private expire(row: Pick<RouteRow, 'id'>, reason: RouteExpiryReason, detail: Record<string, unknown>, at: number): void {
+  private expire(row: Pick<RouteRow, 'id' | 'vendor'>, reason: RouteExpiryReason, detail: Record<string, unknown>, at: number): void {
+    this.expiring?.set(row.vendor, reason)
     this.db.prepare('UPDATE routes SET expired_at = ?, expired_reason = ? WHERE id = ? AND expired_at IS NULL').run(at, reason, row.id)
     this.db.prepare('INSERT INTO route_expiries (route_id, at, reason, detail_json) VALUES (?, ?, ?, ?)').run(row.id, at, reason, JSON.stringify(detail))
   }
@@ -186,22 +191,30 @@ export class SqliteRoutingHistory implements RoutingHistory {
     return live
   }
 
+  /** Collects the vendors whose rows a read expires; null outside a read. */
+  private expiring: Map<string, RouteExpiryReason> | null = null
+
   async read(domain: string, route: RouteContext = DEFAULT_ROUTE): Promise<DomainHistory> {
     const at = this.now()
     return this.db.transaction((): DomainHistory => {
-      const rows = this.liveRows(domain, route, at)
+      this.expiring = new Map()
+      let rows: RouteRow[]
+      try { rows = this.liveRows(domain, route, at) } finally { this.lastExpired = Object.fromEntries(this.expiring); this.expiring = null }
       const onRoute = this.byVendor(rows.filter((row) => row.family === route.family && row.formats === route.formats))
       const onHost = this.byVendor(rows)
       const vendors: Record<string, VendorHistoryEntry> = {}
       const bases: Record<string, RouteReadBasis> = {}
+      const thin: Record<string, number> = {}
       // Each vendor on its own: the route's attempts when there are enough, else the host's, else none.
       for (const [vendor, entry] of onHost) {
         const own = onRoute.get(vendor)
         if (own !== undefined && own.attempts >= this.minSamples) { vendors[vendor] = own; bases[vendor] = 'route' }
         else if (entry.attempts >= this.minSamples) { vendors[vendor] = entry; bases[vendor] = 'host_egress' }
+        else thin[vendor] = entry.attempts
       }
       const used = Object.values(bases)
       this.lastBases = bases
+      this.lastThin = thin
       this.lastBasis = used.includes('route') ? 'route' : used.includes('host_egress') ? 'host_egress' : 'fixed'
       const last = [...rows].reverse().find((row) => vendors[row.vendor] !== undefined)
       return { vendors, lastVendor: last?.vendor ?? null }
