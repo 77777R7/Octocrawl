@@ -1811,6 +1811,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
   private async getBrowser(execution: ExecutionContext): Promise<Browser> {
     throwIfExecutionStopped(execution)
+    // A browser that died (its process killed or crashed) is not reused: the next request launches another (PA B6).
+    if (this.browser !== null && !this.browser.isConnected()) this.dropBrowser(this.browser)
     if (this.browser !== null) return this.browser
     if (this.browserPromise === null) {
       // Startup belongs to the shared subject. Each caller has its own budget;
@@ -1836,6 +1838,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           throw new DOMException('Browser startup abandoned', 'AbortError')
         }
         this.browser = browser
+        browser.on('disconnected', () => this.dropBrowser(browser))
         return browser
       }).catch(error => {
         if (this.browserPromise === pending) this.browserPromise = null
@@ -1844,6 +1847,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
       this.browserPromise = pending
     }
     return this.browserPromise
+  }
+
+  /** Forget the shared browser when it is still `browser`; a request already running on it fails on its own. */
+  private dropBrowser(browser: Browser): void {
+    if (this.browser !== browser) return
+    this.browser = null
+    this.browserPromise = null
   }
 
   private async getManagedContext(execution: ExecutionContext): Promise<BrowserContext> {

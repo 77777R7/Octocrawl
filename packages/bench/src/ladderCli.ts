@@ -462,6 +462,16 @@ export function buildChannels(
       id: 'provider',
       vendorId,
       identity: identityForRoute(mode, { resume: true }),
+      // What the API engine drops vendor rungs for (engine.ts): the vendor's browser runs no steps, takes no screenshot, and
+      // sends its own request, so a phone identity, added headers or a relaxed certificate check would not reach the wire.
+      refusal: (_url, options) => {
+        const asked = [
+          ...((options.actions?.length ?? 0) > 0 ? ['actions'] : []), ...(options.screenshot !== undefined ? ['screenshot'] : []),
+          ...(options.mobile === true ? ['mobile'] : []), ...(Object.keys(options.headers ?? {}).length > 0 ? ['headers'] : []),
+          ...(options.skipTlsVerification === true ? ['skipTlsVerification'] : []),
+        ]
+        return asked.length === 0 ? null : `the ${vendorId} rung takes no ${asked.join(', ')}`
+      },
       fetch: async (url, session, execution, options) => {
         // Session resume acceptance is strict: only this vendor's own
         // material, only for this domain. A Steel profile never reaches

@@ -588,16 +588,16 @@ export class LadderRunner {
 
     const permitted = new Set(decision.permittedChannels)
     // Local lanes first, in declaration order, then providers (history-ranked).
-    // A local rung that does not take this URL with these options is left out. One that says why (`refusal`) is named
+    // A rung that does not take this URL with these options is left out. One that says why (`refusal`) is named
     // in the trace; the http/http_compat pair, which split every host between them (`serves`), is not.
-    const local = this.channels.filter((c) => {
-      if (c.vendorId !== undefined || !permitted.has(c.id)) return false
+    const served = (c: Channel): boolean => {
       if (c.refusal === undefined) return c.serves?.(url, options) ?? true
       const refused = c.refusal(url, options)
       if (refused !== null) ladderTrace.push({ at: 0, event: 'ladder_channel_not_served', channel: c.id, detail: { reason: refused } })
       return refused === null
-    })
-    const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id))
+    }
+    const local = this.channels.filter((c) => c.vendorId === undefined && permitted.has(c.id) && served(c))
+    const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id) && served(c))
 
     let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers), execution.signal))]
 
