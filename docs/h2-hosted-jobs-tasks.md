@@ -103,11 +103,17 @@
   - 在线上用一个测试 key 跑了一次 webhook：投递成功、签名有效、密钥没有泄露，记录见 [research/hosted/2026-10-20-h2-r1-webhook-dd218625.md](../research/hosted/2026-10-20-h2-r1-webhook-dd218625.md)。
   - 测试 key 已吊销，全局开关已关。
 - [ ] **R2** 打开全局开关，按名单邀请（见“待你决定”第 1 条）。
-- [ ] **R3** 更新 `apps/public-web/content/connect-mcp.md` 和 `docs/hosted-api.md`，写明 hosted 任务的用法和上限。
+- [x] **R3** 更新 `apps/public-web/content/connect-mcp.md` 和 `docs/hosted-api.md`，写明 hosted 任务的用法和上限。
+  - 另外改了 `apps/public-web/content/limits.md`：它原来写着 hosted 不跑 crawl 和 batch。
+  - 这几页要等下一次 public preview 部署才会上线。那是 UI 窗口的部署，这里没做。
 
 ## A：验收
 
-- [ ] **A1** Claude Code、Codex 和第三个客户端（OpenCode）各自端到端跑一次：启动、查询、取数据，并记下客户端版本。记录放 `research/hosted/`。
+- [x] **A1** Claude Code、Codex 和第三个客户端（OpenCode）各自端到端跑一次：启动、查询、取数据，并记下客户端版本。记录放 `research/hosted/`。
+  - 2026-10-20 在线上跑通，记录见 [research/hosted/2026-10-20-h2-a1-clients-d094e319.md](../research/hosted/2026-10-20-h2-a1-clients-d094e319.md)。
+  - 版本：Claude Code 2.1.301（`/mcp-oauth`）、Codex 0.162.1（`/mcp` 加 key）、OpenCode 1.18.26（`/mcp` 加 key）。
+- [ ] **M8** hosted MCP 的任务条目里带着 `usage` 和完整的 `trace`。hosted 的 scrape 会去掉这些，而 `get_crawl_pages` 的描述写的是“不带 debug 时不含 trace”。要么去掉，要么改描述。这一项在 A1 中发现。
+- [ ] **M9** hosted 的 `batch_scrape` schema 还列着 `mode: authed`，`maxFileBytes` 的上限是 500 MB，描述里提到 `appendToId`。hosted 会拒绝或者压低这三项，schema 和描述要跟着收紧。这一项在 A1 中发现，和 M7 一起做。
 - [ ] **A2** 外部用户在跑任务：日志里出现非测试账户的任务。
 
 ## 从 H1 带过来的后续项
@@ -119,4 +125,7 @@
 ## 下次从这里继续
 
 - M1–M5（#627）、P1（#629）、W1–W4（#636）已合并，R1 已部署并在线上验证。全局开关现在是关的。
-- 下一项：R3（更新 connect-mcp 和 hosted-api 文档里的任务用法）和 A1（三个客户端端到端跑一次）。R2（打开开关、发邀请）要等你给出邀请名单。
+- R3 和 A1 已完成（2026-10-20）。H2 剩下的：
+  - R2（打开开关、发邀请）要等你给出邀请名单；A2（外部用户在跑任务）在 R2 之后。
+  - 代码后续项：M6、M7、M8、M9，以及 webhook 的两个已知缺口。
+  - P2 进度页由 UI 窗口做。

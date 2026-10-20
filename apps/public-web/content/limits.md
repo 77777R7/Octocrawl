@@ -4,7 +4,7 @@ Octocrawl reports whether it captured a page and whether a requested structured 
 
 ## Hosted API and MCP
 
-Hosted Octocrawl (`https://api.octocrawl.dev`, `https://mcp.octocrawl.dev/mcp`) serves `POST /v1/scrape` and `POST /v1/map`, and the MCP tools `scrape`, `map` and `scrape_product`.
+Hosted Octocrawl (`https://api.octocrawl.dev`, `https://mcp.octocrawl.dev/mcp`) serves `POST /v1/scrape` and `POST /v1/map`, and the MCP tools `scrape`, `map` and `scrape_product`. With an account it also runs crawl and batch jobs (below).
 
 | | Without a key | With your account's key | With a key issued by hand |
 | --- | --- | --- | --- |
@@ -26,7 +26,7 @@ Hosted Octocrawl (`https://api.octocrawl.dev`, `https://mcp.octocrawl.dev/mcp`) 
 
 The monthly credits come back at 00:00 UTC on the 1st. An account with fewer than 5 credits left reads over HTTP only. Once none are left, a call is answered HTTP 429 until then. Each answer gives the credits it used and what is left, in `X-Credits-Used` and `X-Credits-Remaining`.
 
-Claude's connectors (claude.ai, the desktop and mobile apps, and the API's MCP connector) call from Anthropic's servers, not from your device, so their calls without a key share one allowance of 200 pages a day, at up to 60 starts a minute, instead of counting as one address. From Claude Code your calls come from your own address, with its own 20. The whole service serves 1,500 pages a day. Over an allowance the answer is HTTP 429 with `Retry-After` until 00:00 UTC, and a refused request still counts as a start. Every request, of any kind, is limited to 120 a minute per address. A file (PDF, CSV) is read up to 5 MiB. Nothing is kept for reuse: records and files are deleted within ten minutes. `crawl`, `batch`, Monitors, logins, `/fc` and every other route answer 403 with a hint to run Octocrawl on your computer. Proxies, CAPTCHA solving and stealth are not offered; a blocked page is reported as blocked. These numbers may change; this page says what applies.
+Claude's connectors (claude.ai, the desktop and mobile apps, and the API's MCP connector) call from Anthropic's servers, not from your device, so their calls without a key share one allowance of 200 pages a day, at up to 60 starts a minute, instead of counting as one address. From Claude Code your calls come from your own address, with its own 20. The whole service serves 1,500 pages a day. Over an allowance the answer is HTTP 429 with `Retry-After` until 00:00 UTC, and a refused request still counts as a start. Every request, of any kind, is limited to 120 a minute per address. A file (PDF, CSV) is read up to 5 MiB. Nothing is kept for reuse: records and files are deleted within ten minutes. Without an account's key, `crawl` and `batch` answer 403 and say a job needs one; Monitors, logins, `/fc` and every other route answer 403 with a hint to run Octocrawl on your computer. Proxies, CAPTCHA solving and stealth are not offered; a blocked page is reported as blocked. These numbers may change; this page says what applies.
 
 ## Availability and quotas (the page preview)
 
@@ -87,7 +87,8 @@ This is a support boundary, not a list of sites guaranteed to return content. Se
 | Amazon.sg `/dp/{ASIN}` → product JSON | Anonymous Singapore context, Cloud Run preview | Domain-limited browser | Main ASIN, region, currency, selected quote when verified; Beta | Public 200-page audit on `bb32cbf`: 171 complete, 29 incomplete, including two subject substitutions. Strict correctness gate remains open. |
 | X status / Reddit post → public post | Anonymous, Cloud Run preview | Restricted HTTP | Only a verified requested post if captured; conditional | Hosted success is not validated. Local proxy and adapter experiments are separate. |
 | Public page → Markdown or a site's URL list, from your agent or code | Hosted API and MCP, keyless or with a key | HTTP; browser with a key | `scrape` and `map` with the Evidence Record | Live since 2026-10-06; allowances above. |
-| Persistent Monitor or Batch | Your own computer, the published packages | Local MCP workflow | Durable task results; local only | Not hosted yet; a later phase of the roadmap. |
+| Crawl or batch job | Hosted API and MCP, with an account | HTTP; browser with a key | Pages as a scrape returns them, kept 7 days after the job ends | Crawls up to 500 pages, batches up to 1,000 URLs; two jobs at a time and ten waiting per account; 2,000 job pages a day per account; credits as a scrape. Opened in stages: a paused start answers `503 jobs_paused`. |
+| Persistent Monitor, or a larger crawl or batch | Your own computer, the published packages | Local MCP workflow | Durable task results; local only | Monitors are not hosted yet; a later phase of the roadmap. |
 
 The 200-page Amazon audit includes a fixed regression set and a separately frozen candidate set; neither cohort passed the 100/100 gate. The repository's R0 failure ledger records same-capture hashes and missing-evidence boundaries. Original HTML remains private on the operator's machine.
 
