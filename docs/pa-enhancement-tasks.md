@@ -109,15 +109,27 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - PH H1 行：PR ③ 已合入，下一项是 H1 清单的 W1。`docs/h1-hosted-jobs-tasks.md` 不动，由 H1 窗口改。
   - PA 节加一行链接到本清单。试用门按决定 9：去掉日期，改成"有人试用时记录到 `research/trials/`，试用的发现优先于新功能"，写明 10-17 期限已过、仓库里没有试用记录。
   - `docs/access.md:53`（standard+enhanced 也建 provider rung）、`:117`（403 不是 409）。
-- [ ] **P0.3 未合入 PR 的分流（按决定 2）。** 每个 PR 写一条处置理由：已被 #591 带入 / 拆入 D6 / 单独审 / 关闭。#584 剩余可拆的片段：RFC/WCAG 兄弟章节（归 D6）、OTTO 变体链接与起价、ESPN 拆分积分榜、带符号百分比、FT 头条卡片、聚合报价、来源不可用分类（#582）、验证码分类、示例合同。Nasdaq 影子表的源码已在 `main`（#516），只剩测试。
+- [x] **P0.3 未合入 PR 的分流（按决定 2；2026-10-20，核对基于 `main` `0ebe8cdf`）。** 处置如下，每个 PR 上留了同样的说明：
+
+  | PR | 状态 | 核对 | 处置 |
+  | --- | --- | --- | --- |
+  | #512 verify fields on the delivered scrape response | 开放，非草稿 | 它的 `packages/mcp/test/deliveryScope.integration.test.ts`、`packages/ai-sdk/test/deliveryScope.integration.test.ts` 已在 `main`（#591 带入）；`research/trials/` 的 README 和模板 `main` 上没有 | 关闭；`research/trials/` 三个文件由本 PR 带入（README 的期限一段按决定 9 改为不设日期） |
+  | #514 verify distinct list records by explicit identity fields | 开放，非草稿 | `uniqueBy`（`packages/runtime/src/verify.ts:106-113`）和 `packages/mcp/test/distinctRecordsDelivery.integration.test.ts` 已在 `main` | 关闭 |
+  | #515 classify Skyscanner human verification pages | 开放，非草稿 | `gate.ts` 的 Skyscanner 判定和它的两个测试文件 `main` 上没有 | 保留，单独审：rebase 到 `main`、补 `sites.md` 用例后合 |
+  | #582 classify explicit source outages as not served | 草稿 | `extract-tf/src/sourceUnavailable.ts` `main` 上没有；改 `readiness.ts` 与 ADR 0007 | 保留，转为独立小 PR（不属 D 类），rebase 后按 ADR 0007 审 |
+  | #584 align final delivery and bound HTTP timeout fallback | 草稿，NO-GO | #591 已带入最终交付复验与 #591 回退；剩余片段见下 | 保留作 D6 的来源，D6 各片段合入后关闭 |
+  | #528 verify final scrape delivery and preserve task records and standards | 草稿 | 与 #584 重叠（RFC/WCAG、百分比、聚合报价、Skyscanner 门、示例合同） | 保留作 D6 的来源，与 #584 一起在 D6 后关闭 |
+  | #556 / #562 字段金标准与保留集首轮 | 草稿 | `main` 上没有 `research/accuracy/` | 保留，R1/R3 cherry-pick 后关闭 |
+
+  原说明：每个 PR 写一条处置理由：已被 #591 带入 / 拆入 D6 / 单独审 / 关闭。#584 剩余可拆的片段：RFC/WCAG 兄弟章节（归 D6）、OTTO 变体链接与起价、ESPN 拆分积分榜、带符号百分比、FT 头条卡片、聚合报价、来源不可用分类（#582）、验证码分类、示例合同。Nasdaq 影子表的源码已在 `main`（#516），只剩测试。
   - 注意版本号：`main` 是 extract-tf/30、verify/9；#528 写 /32、#584 写 /36、#512/#514 写 verify/5、/6，移植时重新取号。
 - [x] **P0.4 每周重跑脚本（按决定 7；脚本、子集定义、单元测试和首次本地运行 2026-10-20，计划任务未建）。** `research/access/weekly.mjs`：同一组 51 题（25 健康 + 16 挑战 + 10 题轮换 frozen）跑三类臂：Octocrawl 免费臂、Steel enhanced 臂（数据中心 grant，不列 `vendor_residential_proxy`）、竞品臂（`--target firecrawl` / `zenrows`，用 `research/access/run-set.mjs` 已有的竞品 runner），每题带合同（竞品不收合同），每臂一份记录 `research/access/runs/<date>-weekly-<arm>-<commit>.md`，再汇总一份写差距数字。
   - 轮换规则：16 题之外的 frozen 题有 36 道（`tasks.v1.json` 里 part=frozen 的 50 道减去子集里的 14 道；不用 run-set 的 `--set frozen`，它还会带上 3 道 unstable），按文件顺序切 4 组（10/10/10/6），组号 = ISO 周数 mod 4，偏移由日期推出、不存文件；记录头写组号。16 题臂要带 `--set all`。
   - 脚本自己起 API（照 `sticky-vs-rotating.sh:17-18`：固定一个空闲端口，避开 8787、8791、8812–8814；等 listening 再跑；结束时关掉，失败也关）；Octocrawl 免费臂和 Steel 臂各起一次 API，grant 不同。16 题的免费臂用只列 installed_chrome 的 grant；每份记录写 Chrome 版本，大版本变化时再跑一次 16 题；与验收基线（ADR 0005 / 7b56397b：11 和 7 of 16，探针两次各 12）比较，低于基线就写记录并标"停止默认推荐，待重测"。
   - 16 题子集加机器可读定义：`research/access/subsets.v1.json`（不改 `tasks.v1.json`，免得任务文件 SHA 变化），`cloudrun-xvfb/run.sh:20`、`sticky-vs-rotating.sh:19`、`docs/pa-challenge-botcheck-tasks.md` 改为引用它。
   - 验收：脚本本地跑过一次、三类臂各有记录和一份汇总；计划任务只在你点头并确认竞品额度后建（名字、时间写进本清单）。
-  - [ ] 计划任务：只在你点头并确认竞品额度后建（名字、时间写进本清单）。第 4 组只有 6 题，所以四周里有一周是 47 题而不是 51。建议的命令 `node research/access/weekly.mjs`（在 `main` 的最新 checkout 里，shell 带 `HTTPS_PROXY`），建议时间每周一 10:30 本地时间（在 `octocrawl-cleanup-gone` 之后）；每周预期费用：Steel 约 $0.02–0.03，Firecrawl 约 47–51 credits，ZenRows 约 50–250 credits（auto 模式按成功的配置计费，1–25/页）。
-- [ ] **P0.6 给 H1 窗口的接口约定（一条消息，不改它的文件）。** 内容：PR ④ 的 worker 引擎不传 accessGrant（PH H5 之前保持 null）；托管切片的 USD 付费调用若将来存在，预留存 Firestore、挨着 `hostedJobs`，key `{jobId}-{slice}-{ordinal}`，credits 的幂等键 `{jobId}-{slice}` 不变、USD key 是它的子键；PR ④ 的 W5 验收要覆盖"旧租约提交不得改写预留"和"重复投递按 `{jobId}-{slice}-{ordinal}` 幂等、不重复预留"。
+  - [x] 计划任务（2026-10-20 建）：桌面 app 计划任务 `octocrawl-pa-weekly-rerun`，每周一 10:30（app 另加几分钟抖动），在专用 worktree `.claude/worktrees/pa-weekly`（detached 跟随 `origin/main`，`.w2l/access/` 里放 steel grant、竞品 key 和 10-14 验收那份 installed_chrome grant）里先 `npm ci` 和 `npx tsc --build`，再 `HTTPS_PROXY=http://127.0.0.1:7890 node research/access/weekly.mjs`，提交记录并开 PR（不自动合并）。代理必须带 `http://`：undici 的 EnvHttpProxyAgent 不认裸 `host:port`，竞品额度检查会报 Invalid URL。原说明：只在你点头并确认竞品额度后建。第 4 组只有 6 题，所以四周里有一周是 47 题而不是 51。建议的命令 `node research/access/weekly.mjs`（在 `main` 的最新 checkout 里，shell 带 `HTTPS_PROXY`），建议时间每周一 10:30 本地时间（在 `octocrawl-cleanup-gone` 之后）；每周预期费用：Steel 约 $0.02–0.03，Firecrawl 约 47–51 credits，ZenRows 约 50–250 credits（auto 模式按成功的配置计费，1–25/页）。
+- [x] **P0.6 给 H1 窗口的接口约定（2026-10-20 改为核查：H1 PR ④–⑥ 已合入，#608、#616、#617）。** `packages/mcp/src/hostedJobWorker.ts:200` 建引擎时 `hosted: true`、不传 accessGrant，生产入口 `hostedJobsCli.ts` 也不设 `engineOptions`，所以 PH H5 之前托管切片不会有付费调用，约定的第一条已成立。注意 `engineOptions` 是测试 seam，展开在 `createApiEngine` 参数里，能带进 grant；PH H5 开放前要给它加"托管 worker 不接受 grant"的断言。USD 预留的 key 约定和租约/重复投递验收没有发生的对象，移交 EH1 与 PH H5。原约定内容：PR ④ 的 worker 引擎不传 accessGrant（PH H5 之前保持 null）；托管切片的 USD 付费调用若将来存在，预留存 Firestore、挨着 `hostedJobs`，key `{jobId}-{slice}-{ordinal}`，credits 的幂等键 `{jobId}-{slice}` 不变、USD key 是它的子键；PR ④ 的 W5 验收要覆盖"旧租约提交不得改写预留"和"重复投递按 `{jobId}-{slice}-{ordinal}` 幂等、不重复预留"。
 
 ## Phase 1 · 三条并行线 + 评测基建
 
@@ -230,6 +242,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 - 2026-10-19：清单写成，核实基于 `2ffd7f25`。基线数字待 P0.1，开发集基线待 R1b。
 - 2026-10-20：决定 1、3、7、9 已定；P0.2 的 PR #609 已开，P0.5 进行中。
 - 2026-10-20：P0.1 基线跑完，在 `main` `1c4d9178`（#609、#610 之后）。92 题 enhanced（Steel 数据中心 grant，走 Clash）：verified 58/92，假成功 2（T010、T031），p50 6251 ms，p95 31203 ms，Steel 费用 $0.0251；健康 25 题 23 过（T027 http_error 400、T052 cloudflare_challenge）；T060 本轮 verified，不再是假成功，原因 unknown。记录 `research/access/runs/2026-10-20-pa-next-baseline-all-1c4d9178.md`。16 题 installed_chrome（Clash 出口，复用 10-14 验收的 grant）：12/16 过，未过 T045、T046、T068（DataDome）、T048（Cloudflare），假成功 0，费用 $0。记录 `research/access/runs/2026-10-20-pa-next-baseline-ic16-1c4d9178.md`。
+- 2026-10-20：P0.3 分流完成（#512、#514 关闭，其余见 P0.3 表）；P0.6 改为核查，托管 worker 不传 grant；每周计划任务 `octocrawl-pa-weekly-rerun` 已建。Phase 0 全部完成。
 - 2026-10-20：P0.4 每周脚本首次本地运行（代码 `main` `259bcef3` 加本 PR，记录名用 259bcef3；走 Clash，周 2026-W43，轮换第 3 组只有 6 题，共 47 题）。免费臂 36/47（健康 23/25，16 题 installed_chrome 10/16，高于验收下限 7、低于 11；轮换 3/6），假成功 0，$0；Steel 臂 28/47（16 题只过 2），假成功 1，$0.0049；Firecrawl 37/47，假成功 4，账户实扣 70 credits；ZenRows 34/47，假成功 3，实扣 338 credits（$0.338）。与最好竞品的差距：免费臂 1（16 题上 4），Steel 臂 9。记录 `research/access/runs/2026-10-20-weekly-{free,steel,firecrawl,zenrows,summary}-259bcef3.md`。计划任务未建，待 Howard 点头。
 
 ## 下次从这里继续
