@@ -761,10 +761,14 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
   // A declaration nested in another node's property is a related item unless it is provably this one.
   const bound = loose.filter((d) => !d.nested && relationToAll(subject, d) !== 'different')
   for (const d of loose) if (!bound.includes(d)) evidence.push(`${label([d])}: another product, not merged`)
-  // The meta tags are the page's own product unless they name another declared one.
+  // The meta tags are about the page, not one of its declared products: they
+  // are this product's when it is the only one, or when they name it. A page
+  // that selects one of several (a variant by its URL) still states its
+  // default in them.
   const metaIds = Object.values(meta.ids).flat().map(normId)
-  const metaElsewhere = metaIds.length > 0 && others.some((members) => members.some((d) => allIds(d).some((v) => metaIds.includes(normId(v)))))
-  if (metaElsewhere) evidence.push(`meta (sku ${meta.ids.sku?.[0]}): names another product, not merged`)
+  const metaNamesSubject = metaIds.length > 0 && [...subject, ...bound].some((d) => allIds(d).some((v) => metaIds.includes(normId(v))))
+  const metaElsewhere = !metaNamesSubject && others.length > 0
+  if (metaElsewhere && Object.keys(meta.fields).length > 0) evidence.push(`meta: the page declares other products and its meta tags name none of them, not merged`)
   evidence.unshift(`${label([...subject, ...bound])}: the subject, ${reason}`)
   const { facts, ambiguous } = mergeFields([...subject, ...bound, ...(metaElsewhere ? [] : [{ fields: meta.fields, ambiguous: {} }])])
 

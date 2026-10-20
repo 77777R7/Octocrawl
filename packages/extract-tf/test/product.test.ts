@@ -240,6 +240,10 @@ describe('PDP facts: the subject is chosen before fields are merged', () => {
     }))
     const out = extractTf.extract(html, { url: 'https://shop.example/products/tee?variant=T-XL' })
     expect(out.product?.sku).toEqual({ value: 'T-XL', source: 'jsonld', path: '/script/0/hasVariant/2/sku' })
+    // The page's product meta tags state its default variant's price; they name none of the declared products.
+    const withMeta = extractTf.extract(html.replace('</head>', '<meta property="og:price:amount" content="28.00"><meta property="og:price:currency" content="EUR"></head>'), { url: 'https://shop.example/products/tee?variant=T-XL' })
+    expect(withMeta.product?.price?.value).toBe('32.00')
+    expect(withMeta.product?.ambiguous).toBeUndefined()
     expect(out.product?.price).toEqual({ value: '32.00', source: 'jsonld', path: '/script/0/hasVariant/2/offers/price' })
     expect(out.product?.availability?.value).toBe('OutOfStock')
     // The group's own properties hold for each of its variants.

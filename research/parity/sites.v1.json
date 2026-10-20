@@ -1694,16 +1694,18 @@
       "feature": "scrape-formats.json",
       "url": "https://www.jpc.de/jpcng/books/detail/-/art/die-augenheilkunde/hnum/11617379",
       "request": { "formats": [{ "type": "json", "schema": { "type": "object", "properties": { "name": { "type": "string" }, "price": { "type": "number" }, "currency": { "type": "string" } }, "required": ["name", "price", "currency"] } }] },
-      "note": "Added 2026-09-29 for numbers read as the page writes them. A German book shop's product page (jpc.de; robots.txt allows /jpcng/books/detail/-/art/). On 2026-09-29 it showed the price as 'EUR 399,99*' and declared it as JSON-LD and microdata 399.99 with priceCurrency EUR; German fixed book prices keep it stable. W2L reads the JSON-LD value, whose format writes '.' as the decimal point: price must be 399.99, and json.evidence must quote the text it was read from.",
+      "note": "Added 2026-09-29 for numbers read as the page writes them. A German book shop's product page (jpc.de; robots.txt allows /jpcng/books/detail/-/art/). On 2026-09-29 it showed the price as 'EUR 399,99*' and declared it as JSON-LD and microdata 399.99 with priceCurrency EUR; German fixed book prices keep it stable. W2L reads the JSON-LD value, whose format writes '.' as the decimal point: price must be 399.99, and json.evidence must quote the text it was read from. 2026-10-20 (PA D3): the extractor now records where it read a JSON-LD value, a JSON Pointer /script/<n>/…, which the evidence entry and the Evidence Record carry; the checks that expected none (locator null, an evidence entry with no evidencePath) ask for it instead.",
       "checks": [
         { "item": "FS", "type": "field", "path": "status", "equals": "success" },
         { "item": "scrape-formats.json", "type": "field", "path": "json.status", "equals": "complete" },
         { "item": "scrape-formats.json", "type": "field", "path": "json.data.name", "equals": "Die Augenheilkunde" },
         { "item": "scrape-formats.json", "type": "field", "path": "json.data.price", "equals": 399.99 },
         { "item": "scrape-formats.json", "type": "field", "path": "json.data.currency", "equals": "EUR" },
-        { "item": "scrape-formats.json", "type": "jsonIssue", "path": "json.evidence", "includes": "\"path\":\"/price\",\"source\":\"jsonld\",\"text\":\"399.99\"" },
+        { "item": "scrape-formats.json", "type": "jsonIssue", "path": "json.evidence", "includes": "\"path\":\"/price\",\"source\":\"jsonld\",\"evidencePath\":\"/script/" },
+        { "item": "scrape-formats.json", "type": "jsonIssue", "path": "json.evidence", "includes": "\"text\":\"399.99\"" },
         { "item": "ER", "type": "evidenceSchema" },
-        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./price", "equals": { "source": "jsonld", "locator": null } }
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./price.source", "equals": "jsonld" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./price.locator", "includes": "/script/" }
       ]
     },
     {
@@ -1725,6 +1727,44 @@
           ]
         },
         { "item": "ER", "type": "evidenceSchema" }
+      ]
+    },
+    {
+      "id": "J06",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://www.allbirds.com/products/mens-tree-runner-nz-dark-navy?size=10",
+      "request": { "formats": [{ "type": "json", "schema": { "type": "object", "properties": { "name": { "type": "string" }, "sku": { "type": "string" }, "price": { "type": "number" }, "currency": { "type": "string" } }, "required": ["name", "sku", "price", "currency"] } }] },
+      "note": "Added 2026-10-20 for PA D (the subject before its fields). An Allbirds product page (Shopify; robots.txt disallows only oseid=, ls= and preview_ parameters and /products/*-<hex>-remote, not this path). Its one ld+json script is a ProductGroup of 207 variants across colourways. The first Product node in document order, /script/0/hasVariant/0, is another colourway (Blizzard/Verdant Green, size 8) that states only a url; the page's own colourway is hasVariant/124\u2013137, one per size, each with a url ending ?size=N. The request names size 10: sku A11928M100, 'Men's Tree Runner NZ - Dark Navy (Blizzard Sole) - Size 10', 100 USD on 2026-10-20 (out of stock that day). Before D, W2L read the first Product node and filled the name and price from the page's OpenGraph tags: no sku, the name without the size. The price is checked as a number with its currency, not its amount, which a sale can change.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.sku", "equals": "A11928M100" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.name", "includes": "Dark Navy" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.name", "includes": "Size 10" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.currency", "equals": "USD" },
+        { "item": "scrape-formats.json", "type": "fieldType", "path": "json.data.price", "equals": "number" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./sku.locator", "equals": "/script/0/hasVariant/128/sku" }
+      ]
+    },
+    {
+      "id": "J07",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://parachutehome.com/products/linen-top-sheet-evergreen?variant=39746728165637",
+      "request": { "formats": [{ "type": "json", "schema": { "type": "object", "properties": { "name": { "type": "string" }, "sku": { "type": "string" }, "price": { "type": "number" }, "currency": { "type": "string" } }, "required": ["name", "sku", "price", "currency"] } }] },
+      "note": "Added 2026-10-20 for PA D (a ProductGroup page). Parachute's Linen Top Sheet in Evergreen (Shopify; robots.txt disallows only oseid=, ls= and preview_ parameters). One ld+json ProductGroup (productGroupID 6700590661893) of three variants whose offers carry url \u2026?variant=<id>: Twin/Twin XL FLTLNNEVGTXL 110.00 USD, Full/Queen FLTLNNEVGQUE 140.00, King/Cal King FLTLNNEVGKNG 150.00 on 2026-10-20. The request selects King/Cal King, the third. The page's og:price:amount is 110.00, its default variant's, with or without the variant parameter. Before D, W2L read the first variant: sku FLTLNNEVGTXL, price 110. The price is checked as neither of the other variants' prices (110, 140) on 2026-10-20 and as read from the selected node.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.sku", "equals": "FLTLNNEVGKNG" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.name", "includes": "King/Cal King" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.currency", "equals": "USD" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.price", "notIn": [110, 140] },
+        { "item": "scrape-formats.json", "type": "fieldType", "path": "json.data.price", "equals": "number" },
+        { "item": "ER", "type": "evidenceSchema" },
+        { "item": "ER", "type": "field", "path": "evidenceRecord.fieldEvidence./price.locator", "equals": "/script/0/hasVariant/2/offers/price" }
       ]
     },
     {
