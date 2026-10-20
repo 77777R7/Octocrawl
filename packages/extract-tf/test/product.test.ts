@@ -339,6 +339,50 @@ describe('PDP facts: the subject is chosen before fields are merged', () => {
   })
 })
 
+describe('PDP facts: what each fact holds for (D3b field contract)', () => {
+  const ld = (json: object): string => `<script type="application/ld+json">${JSON.stringify(json)}</script>`
+  const page = (head: string, body = '') => `<!doctype html><html><head><title>Shop</title>${head}</head><body><main>
+<h1>Product</h1><p>A product page with a description long enough to read as one, about how the thing is made and used.</p>${body}
+</main></body></html>`
+
+  it('keeps the value as written beside the one reported, and the offer a price is stated in', () => {
+    const html = page(ld({ '@type': 'Product', name: 'Harbour lamp', sku: 'HL-1', offers: {
+      '@type': 'AggregateOffer', price: '19.00', priceCurrency: 'GBP', eligibleRegion: 'GB', availability: 'https://schema.org/InStock',
+    } }))
+    const out = extractTf.extract(html, { url: 'https://shop.example/lamp' })
+    expect(out.product?.price).toEqual({
+      value: '19.00', source: 'jsonld', path: '/script/0/offers/price', unit: 'GBP', context: { offerType: 'AggregateOffer', region: 'GB' },
+    })
+    expect(out.product?.availability).toEqual({
+      value: 'InStock', rawValue: 'https://schema.org/InStock', source: 'jsonld', path: '/script/0/offers/availability', context: { offerType: 'AggregateOffer', region: 'GB' },
+    })
+    // A name is about the product, not one of its offers.
+    expect(out.product?.name).toEqual({ value: 'Harbour lamp', source: 'jsonld', path: '/script/0/name' })
+  })
+
+  it('names the variant a ProductGroup variant\'s facts hold for', () => {
+    const html = page(ld({
+      '@type': 'ProductGroup', name: 'Organic cotton tee', productGroupID: 'TEE',
+      hasVariant: [
+        { '@type': 'Product', sku: 'T-S', offers: { '@type': 'Offer', price: '28.00', priceCurrency: 'EUR' } },
+        { '@type': 'Product', sku: 'T-XL', offers: { '@type': 'Offer', price: '32.00', priceCurrency: 'EUR' } },
+      ],
+    }))
+    const out = extractTf.extract(html, { url: 'https://shop.example/products/tee?variant=T-XL' })
+    expect(out.product?.price).toEqual({ value: '32.00', source: 'jsonld', path: '/script/0/hasVariant/1/offers/price', unit: 'EUR', context: { offerType: 'Offer', variant: 'T-XL' } })
+    expect(out.product?.sku?.context).toEqual({ variant: 'T-XL' })
+  })
+
+  it('marks a value the page states there is none of as absent, and leaves an unstated one null', () => {
+    const html = page('', `<div itemscope itemtype="https://schema.org/Product"><span itemprop="name">Cast iron kettle</span>
+<div itemprop="offers" itemscope itemtype="https://schema.org/Offer"><span itemprop="price">N/A</span></div></div>`)
+    const out = extractTf.extract(html, { url: 'https://shop.example/kettle' })
+    expect(out.product?.price).toEqual({ value: 'N/A', source: 'microdata', path: 'microdata[0] [itemprop~="price"]', absent: true })
+    // Unobserved: nothing on the page states a brand.
+    expect(out.product?.brand).toBeNull()
+  })
+})
+
 describe('PDP region selection', () => {
   it('picks the buy-box region, not the largest text container', () => {
     const doc = parse(PDP(PRODUCT_LD))

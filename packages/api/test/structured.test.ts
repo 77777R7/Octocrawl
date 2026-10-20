@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { CompactScrapeResponse, FetchResult, JsonFormatRequest, JsonSchema, ProductFacts, ScrapeResponse } from '@w2l/contracts'
 import { extractTf } from '@w2l/extract-tf'
-import { contractSha256 } from '@w2l/runtime'
+import { readFileSync } from 'node:fs'
+import Ajv2020 from 'ajv/dist/2020.js'
+import { contractSha256, toEvidenceRecord } from '@w2l/runtime'
 import { extractStructured, prepareScrapeResponse } from '../src/structured.js'
 
 const product: ProductFacts = {
@@ -1037,5 +1039,83 @@ describe('structured JSON extraction', () => {
     expect(requests[0]!.response_format.json_schema).toMatchObject({ strict: false, schema: schema.schema })
     expect(out).toMatchObject({ status: 'complete', data: { title: 'A Light in the Attic', details: { Pages: '112' } }, modelUsage: { strict: false } })
     expect(out.modelUsage?.strictReason).toContain('/properties/details')
+  })
+})
+
+describe('field contract: raw text, normalized value, unit, rule and context (PA D3b)', () => {
+  const recordSchema = JSON.parse(readFileSync(new URL('../../contracts/schemas/evidence-record.v1.json', import.meta.url), 'utf8')) as object
+  const AjvClass = Ajv2020 as unknown as new (options: object) => { compile(schema: object): ((data: unknown) => boolean) & { errors?: unknown } }
+  const validRecord = new AjvClass({ allErrors: true, allowUnionTypes: true }).compile(recordSchema)
+  const rows = (lang: string, cells: ReadonlyArray<[string, string]>) => `<html lang="${lang}"><head><title>Report</title></head><body><main><h1>Report</h1>
+<p>${'A report on the harbour office figures, published every morning with the tide, wind and visibility readings for each hour. '.repeat(2)}</p>
+<table>${cells.map(([label, value]) => `<tr><th>${label}</th><td>${value}</td></tr>`).join('')}</table></main></body></html>`
+
+  it('keeps a signed percentage\'s sign, number and unit, in the result and its Evidence Record', async () => {
+    const out = await extractStructured(page(rows('en', [['Change', '-3.2%'], ['Spread', '+0.5 pp'], ['Yield', '−1,25 %']]), 'https://stats.example/report'),
+      json({ change: { type: 'number' }, spread: { type: 'number' }, yield: { type: 'number' } }, ['change', 'spread', 'yield']), {}, null)
+    expect(out).toMatchObject({ status: 'complete', data: { change: -3.2, spread: 0.5, yield: -1.25 } })
+    expect(out.evidence).toEqual([
+      { path: '/change', source: 'dom', evidencePath: 'table[0] tr[0] "Change"', text: '-3.2%', normalized: -3.2, conversion: 'number/decimal', context: { unit: '%' } },
+      { path: '/spread', source: 'dom', evidencePath: 'table[0] tr[1] "Spread"', text: '+0.5 pp', normalized: 0.5, conversion: 'number/decimal', context: { unit: 'pp' } },
+      { path: '/yield', source: 'dom', evidencePath: 'table[0] tr[2] "Yield"', text: '−1,25 %', normalized: -1.25, conversion: 'number/decimal', context: { unit: '%' } },
+    ])
+    const record = toEvidenceRecord(page(rows('en', [])), { mode: 'standard' }, { markdown: null, json: out })
+    expect(validRecord(record), JSON.stringify(validRecord.errors)).toBe(true)
+    expect(record.fieldEvidence?.['/change']).toEqual({ source: 'dom', locator: 'table[0] tr[0] "Change"', reading: { raw: '-3.2%', normalized: -3.2, unit: '%', conversion: 'number/decimal', absent: false } })
+    expect(record.fieldEvidence?.['/spread']?.reading).toEqual({ raw: '+0.5 pp', normalized: 0.5, unit: 'pp', conversion: 'number/decimal', absent: false })
+  })
+
+  it('reads a lone separator before three digits by the page\'s language, keeping the text, but not in a currency amount', async () => {
+    const schema = json({ population: { type: 'number' }, ratio: { type: 'number' } }, ['population', 'ratio'])
+    const de = await extractStructured(page(rows('de-DE', [['Population', '1.299'], ['Ratio', '0,125']]), 'https://stats.example/de'), schema, {}, null)
+    expect(de.data).toEqual({ population: 1299, ratio: 0.125 })
+    expect(de.evidence[0]).toEqual({ path: '/population', source: 'dom', evidencePath: 'table[0] tr[0] "Population"', text: '1.299', normalized: 1299, conversion: 'number/language:de-DE' })
+    const en = await extractStructured(page(rows('en', [['Population', '1,299'], ['Ratio', '1.299']]), 'https://stats.example/en'), schema, {}, null)
+    expect(en.data).toEqual({ population: 1299, ratio: 1.299 })
+    expect(en.evidence.map(item => [item.text, item.conversion])).toEqual([['1,299', 'number/language:en'], ['1.299', 'number/language:en']])
+    // A page without a language settles nothing.
+    const none = await extractStructured(page(rows('', [['Population', '1.299']]), 'https://stats.example/none'), json({ population: { type: ['number', 'null'] } }, []), {}, null)
+    expect(none.data).toEqual({ population: null })
+    // A price keeps its rule: the page's language does not settle "1.299 €" (an English page of a German shop writes it too).
+    const price = await extractStructured(page(shop('1.299 €'), 'https://shop.example/lampe'), json({ price: { type: ['number', 'null'] } }, []), {}, null)
+    expect(price.data).toEqual({ price: null })
+  })
+
+  it('tells a value the page states there is none of from one no source states', async () => {
+    const out = await extractStructured(page(rows('en', [['Price', 'N/A'], ['Colour', 'Brass']]), 'https://shop.example/lamp'),
+      json({ price: { type: ['number', 'null'] }, colour: { type: 'string' }, weight: { type: ['number', 'null'] } }, ['price', 'colour', 'weight']), {}, null)
+    expect(out).toMatchObject({ status: 'complete', data: { price: null, colour: 'Brass', weight: null } })
+    // Absent: the page says so, and where.
+    expect(out.evidence).toContainEqual({ path: '/price', source: 'dom', evidencePath: 'table[0] tr[0] "Price"', text: 'N/A', absent: true })
+    expect(out.issues).toContainEqual({ code: 'field_absent', path: '/price', message: 'the page states there is no value for /price: "N/A" (dom, table[0] tr[0] "Price")' })
+    // Unobserved: no source on the page, so no evidence and the usual issue.
+    expect(out.evidence.some(item => item.path === '/weight')).toBe(false)
+    expect(out.issues).toContainEqual({ code: 'field_unavailable', path: '/weight', message: 'no verified source for this nullable field on the selected page' })
+    expect(out.issues.some(issue => issue.path === '/price' && issue.code === 'field_unavailable')).toBe(false)
+    const record = toEvidenceRecord(page(rows('en', [])), { mode: 'standard' }, { markdown: null, json: out })
+    expect(validRecord(record), JSON.stringify(validRecord.errors)).toBe(true)
+    expect(record.fieldEvidence?.['/price']).toEqual({ source: 'dom', locator: 'table[0] tr[0] "Price"', reading: { raw: 'N/A', normalized: null, unit: null, conversion: null, absent: true } })
+    expect(record.fieldEvidence?.['/colour']).toEqual({ source: 'dom', locator: 'table[0] tr[1] "Colour"', reading: null })
+    // A field that cannot be null is left out, and still says the page states none.
+    const strict = await extractStructured(page(rows('en', [['Price', 'n/a']]), 'https://shop.example/lamp'), json({ price: { type: 'number' } }, ['price']), {}, null)
+    expect(strict.data).toEqual({})
+    expect(strict.issues.map(issue => issue.code)).toEqual(['field_absent', 'missing_required'])
+  })
+
+  it('reports an Amazon quote the page shows as unavailable as absent, located at its availability', async () => {
+    const unavailable: FetchResult = { ...result, document: { ...result.document!, product: { ...product, price: null, prices: [], quoteState: 'absent_observed' as ProductFacts['quoteState'], availability: { value: 'Currently unavailable.', source: 'dom', path: '#availability' } } } }
+    const out = await extractStructured(unavailable, json({ asin: { type: 'string' }, price: { type: ['number', 'null'] } }, ['asin', 'price']), {}, null)
+    expect(out.data).toEqual({ asin: 'B012345678', price: null })
+    expect(out.evidence).toContainEqual({ path: '/price', source: 'dom', evidencePath: '#availability', text: 'Currently unavailable.', absent: true })
+    expect(out.issues.map(issue => issue.code)).toContain('field_absent')
+  })
+
+  it('carries a declared price\'s currency and offer, and a declared article value\'s dates, as its context', async () => {
+    const lampOut = await extractStructured(page(lamp, 'https://shop.example/lamp'), json({ price: { type: 'number' } }, ['price']), {}, null)
+    expect(lampOut.evidence).toEqual([{ path: '/price', source: 'jsonld', evidencePath: '/script/0/offers/price', text: '19.00', normalized: 19, conversion: 'number/decimal', context: { currency: 'GBP', offerType: 'Offer' } }])
+    const article = `<html lang="en"><head><title>Tide report</title><script type="application/ld+json">${JSON.stringify({ '@type': 'NewsArticle', headline: 'Spring tides return', datePublished: '2026-10-01', dateModified: '2026-10-03', version: '2' })}</script></head>
+<body><main><article><h1>Spring tides return</h1><p>${'The harbour office records tide height, wind and visibility for every hour of the day. '.repeat(4)}</p></article></main></body></html>`
+    const articleOut = await extractStructured(page(article, 'https://news.example/tides'), json({ datePublished: { type: 'string' } }, ['datePublished']), {}, null)
+    expect(articleOut.evidence).toContainEqual({ path: '/datePublished', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.datePublished', context: { published: '2026-10-01', revised: '2026-10-03', version: '2' } })
   })
 })
