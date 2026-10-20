@@ -187,10 +187,10 @@
 - [ ] **E7**（PR ⑥ 第二轮发现，引擎问题，本地也有）`application/octet-stream` 的压缩包被当成 `success`，Markdown 是一堆乱码。不认识的二进制类型应该判失败，不能算读到了内容。
 - [ ] **R7**（PR ⑥ 第二轮发现）`api.octocrawl.dev` 前面的 Cloudflare，会用 `error code: 1010`（浏览器签名）拦掉 Python `urllib` 默认的 User-Agent。Node 的 fetch 不受影响。要核对 Python SDK 的 UA 会不会被拦。
 - [x] **D7**（重试次数定下来时提出）worker 记下同一段连续失败的次数，到 N 次就把任务记为失败（`delivery_failed`），免得一段一直失败时每 10 分钟重试一次、持续 37 天。
+  - 已做（2026-10-20）：任务上记 `failedAttempts`，两种情况各加 1：一段死掉后它的租约过期被接手；一段出错后用 `abandon` 立即交还租约（重试不用再等 16 分钟）。一段成功提交就清零。到 5 次时，worker 把任务记为失败（`delivery_failed`），写好导出，让出名额。
 
 ## PR ⑥ 验收
 
-  - 已做（2026-10-20）：任务上记 `failedAttempts`，两种情况各加 1：一段死掉后它的租约过期被接手；一段出错后用 `abandon` 立即交还租约（重试不用再等 16 分钟）。一段成功提交就清零。到 5 次时，worker 把任务记为失败（`delivery_failed`），写好导出，让出名额。
 - [x] **V1** 把 parity 的 crawl 和 batch 用例（L02、L04、L11、A13–A15、A26–A35）对 hosted 跑一遍，记录到 `research/hosted/`。
 - [x] **V2** 跑一个 1,000 URL 的 batch。跑完后先把两个服务缩到 0，再从新实例和另一个 revision 的 tag URL 读回全部 1,000 项。
   - 记录命令、commit 和花费。
