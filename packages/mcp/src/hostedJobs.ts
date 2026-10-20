@@ -56,6 +56,8 @@ export interface HostedJob {
   budgetExceeded?: string | null
   /** The queued job this one's end promoted into its slot: a later delivery of this job queues its first slice if no one did. */
   promoted?: string | null
+  /** Where the job's end is posted, signed with its own secret (H2 W1–W3); never read back by any route. */
+  webhook?: HostedJobWebhook | null
   createdAt: string
   startedAt: string | null
   finishedAt: string | null
@@ -64,6 +66,19 @@ export interface HostedJob {
   /** The TTL deletes the record then: JOB_TOMBSTONE_DAYS after its expiry, or after its creation for a job never finished. */
   deleteAt: string
 }
+
+/** The events a hosted job's webhook can carry: its end. */
+export type HostedWebhookEvent = 'completed' | 'failed' | 'cancelled'
+export interface HostedJobWebhook {
+  url: string
+  events: HostedWebhookEvent[]
+  metadata: Record<string, string>
+  /** `whsec_…`, returned once by the start and used to sign each delivery. */
+  secret: string
+  /** The last attempt's outcome: `pending` while Cloud Tasks retries it; null before the first. */
+  delivery: HostedWebhookDelivery | null
+}
+export interface HostedWebhookDelivery { state: 'pending' | 'delivered' | 'failed'; attempts: number; httpStatus: number | null; error: string | null; at: string }
 
 export interface IdempotencyClaim {
   /** `{workspaceId}-{hex digest of the key}`. */
@@ -84,6 +99,7 @@ export type LeaseResult = { ok: true; job: HostedJob } | { ok: false; reason: 'm
 export type CommitResult = { ok: true; job: HostedJob; promoted: string | null } | { ok: false; reason: 'missing' | 'lost' }
 export type CancelResult = { ok: true; job: HostedJob; promoted: string | null } | { ok: false; reason: 'missing' }
 export type ExpireResult = { ok: true; job: HostedJob } | { ok: false; reason: 'missing' | 'not_finished' }
+export type WebhookRecordResult = { ok: true; job: HostedJob } | { ok: false; reason: 'missing' | 'no_webhook' }
 
 export interface HostedJobStore {
   /** Creates a job running or queued, by its workspace's slots; with a claim, a replay answers the job the key started. */
@@ -102,6 +118,8 @@ export interface HostedJobStore {
   cancel(id: string, workspaceId: string, now?: Date): Promise<CancelResult>
   /** Marks a finished job expired once its results are deleted. */
   expire(id: string, now?: Date): Promise<ExpireResult>
+  /** Records a webhook delivery's outcome on the job, whatever its status; nothing else of the job changes. */
+  recordWebhook(id: string, delivery: HostedWebhookDelivery): Promise<WebhookRecordResult>
   /** Fails a job not yet finished, with a reason, freeing its slot as a cancel does (a job whose slice could not be queued). */
   fail(id: string, reason: string, now?: Date): Promise<CancelResult>
 }
@@ -116,9 +134,9 @@ export const JOB_LIST_MAX = 200
 
 const days = (from: Date, n: number) => new Date(from.getTime() + n * 86_400_000).toISOString()
 
-export function newHostedJob(input: { id: string; workspaceId: string; uid: string; keyId: string; kind: HostedJobKind; request: unknown; maxCredits: number | null }, now = new Date()): HostedJob {
+export function newHostedJob(input: { id: string; workspaceId: string; uid: string; keyId: string; kind: HostedJobKind; request: unknown; maxCredits: number | null; webhook?: HostedJobWebhook | null }, now = new Date()): HostedJob {
   return {
-    id: input.id, workspaceId: input.workspaceId, uid: input.uid, keyId: input.keyId, kind: input.kind, request: input.request,
+    id: input.id, workspaceId: input.workspaceId, uid: input.uid, keyId: input.keyId, kind: input.kind, request: input.request, ...(input.webhook ? { webhook: input.webhook } : {}),
     status: 'queued', failureReason: null, counts: { pages: 0, errors: 0, slices: 0 }, credits: { reserved: 0, used: 0, maxCredits: input.maxCredits },
     generation: 0, lease: null, hosts: {}, createdAt: now.toISOString(), startedAt: null, finishedAt: null, expireAt: null, deleteAt: days(now, JOB_TOMBSTONE_DAYS),
   }
@@ -258,6 +276,14 @@ export class MemoryHostedJobStore implements HostedJobStore {
     if (!job) return { ok: false, reason: 'missing' }
     if (!FINISHED.has(job.status)) return { ok: false, reason: 'not_finished' }
     const next: HostedJob = { ...job, status: 'expired' }
+    this.jobs.set(id, next)
+    return { ok: true, job: next }
+  }
+  async recordWebhook(id: string, delivery: HostedWebhookDelivery): Promise<WebhookRecordResult> {
+    const job = this.jobs.get(id)
+    if (!job) return { ok: false, reason: 'missing' }
+    if (!job.webhook) return { ok: false, reason: 'no_webhook' }
+    const next: HostedJob = { ...job, webhook: { ...job.webhook, delivery } }
     this.jobs.set(id, next)
     return { ok: true, job: next }
   }
@@ -429,6 +455,17 @@ export class FirestoreHostedJobStore implements HostedJobStore {
       if (read.value === null) return { ok: false, reason: 'missing' }
       if (!FINISHED.has(read.value.status)) return { ok: false, reason: 'not_finished' }
       const job: HostedJob = { ...read.value, status: 'expired' }
+      return await this.commit(token, [this.jobWrite(job, { updateTime: read.updateTime! })]) ? { ok: true, job } : undefined
+    })
+  }
+
+  async recordWebhook(id: string, delivery: HostedWebhookDelivery): Promise<WebhookRecordResult> {
+    checkedId(id, 'job id')
+    return this.retry(async (token) => {
+      const read = await this.readJob(id, token)
+      if (read.value === null) return { ok: false, reason: 'missing' }
+      if (!read.value.webhook) return { ok: false, reason: 'no_webhook' }
+      const job: HostedJob = { ...read.value, webhook: { ...read.value.webhook, delivery } }
       return await this.commit(token, [this.jobWrite(job, { updateTime: read.updateTime! })]) ? { ok: true, job } : undefined
     })
   }

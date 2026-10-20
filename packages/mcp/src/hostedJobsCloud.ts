@@ -21,6 +21,7 @@ export interface JobsCloud {
   tasksAccount: string
   enqueueSlice: (job: HostedJob, delaySeconds?: number) => Promise<void>
   enqueueExpiry: (job: HostedJob) => Promise<void>
+  enqueueWebhook: (job: HostedJob) => Promise<void>
   /** The global switch, `hostedConfig/jobs` field `enabled` (absent: on), read at most every 30 s. */
   enabled: () => Promise<boolean>
 }
@@ -48,6 +49,7 @@ export async function jobsCloudFromEnv(env: NodeJS.ProcessEnv, fetcher: typeof f
     project, bucket, workerUrl, tasksAccount,
     enqueueSlice: (job, delaySeconds = 0) => deliver(`${job.id}-${job.generation}`, `/internal/jobs/${job.id}/slice`, { generation: job.generation }, delaySeconds > 0 ? new Date(Date.now() + delaySeconds * 1000) : undefined),
     enqueueExpiry: (job) => deliver(`${job.id}-expire`, `/internal/jobs/${job.id}/expire`, {}, job.expireAt === null ? undefined : new Date(job.expireAt)),
+    enqueueWebhook: (job) => deliver(`${job.id}-webhook`, `/internal/jobs/${job.id}/webhook`, {}),
     async enabled() {
       if (switchRead !== null && Date.now() - switchRead.at < 30_000) return switchRead.on
       try {

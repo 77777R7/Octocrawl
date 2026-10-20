@@ -214,7 +214,8 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
   const starts = tool.name === 'crawl' || tool.name === 'batch_scrape'
   if (starts) {
     const allowed = tool.name === 'crawl' ? HOSTED_CRAWL_KEYS : HOSTED_BATCH_KEYS
-    for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || (!browser && key === 'waitFor')) delete schema.properties[key]
+    // REST takes a webhook (H2 W1); a tool does not offer one yet, since its secret would land in the agent's transcript.
+    for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || key === 'webhook' || (!browser && key === 'waitFor')) delete schema.properties[key]
     if (tool.name === 'crawl' && schema.properties.maxPages) schema.properties.maxPages = { ...schema.properties.maxPages, maximum: JOB_MAX_CRAWL_PAGES }
   }
   if (schema.properties.timeoutMs) schema.properties.timeoutMs = { ...schema.properties.timeoutMs, maximum: HOSTED_MCP_WAIT_MS }
@@ -407,8 +408,8 @@ function requestedFormats(body: unknown): string[] {
 }
 
 /** A scrape result's outcome on its request line, from the result and its Evidence Record: never the page's content. */
-function noteScrape(note: RequestNote, result: unknown): void {
-  const r = (result ?? {}) as { status?: unknown; lane?: unknown; failureReason?: unknown; evidenceRecord?: { finalUrl?: unknown; httpStatus?: unknown; reason?: unknown; robotsDecision?: { decision?: unknown } | null; rawSha256?: unknown } }
+export function noteScrape(note: RequestNote, result: unknown): void {
+  const r = (result ?? {}) as { status?: unknown; lane?: unknown; failureReason?: unknown; scrapeId?: unknown; evidenceRecord?: { finalUrl?: unknown; httpStatus?: unknown; reason?: unknown; robotsDecision?: { decision?: unknown } | null; rawSha256?: unknown; access?: { paidCalls?: unknown } | null } }
   const evidence = r.evidenceRecord ?? {}
   const text = (value: unknown) => (typeof value === 'string' ? value : null)
   note.status = text(r.status) ?? 'error'
@@ -419,6 +420,13 @@ function noteScrape(note: RequestNote, result: unknown): void {
   const robots = evidence.robotsDecision?.decision
   note.robots = robots === 'allowed' || robots === 'disallowed' || robots === 'no_robots' ? robots : null
   note.sha256 = text(evidence.rawSha256)
+  // The scrape's record and its paid calls by id, so the line's credits and the record's USD can be joined (PA EH1).
+  note.scrapeId = text(r.scrapeId)
+  const paid = evidence.access?.paidCalls
+  note.paidCallIds = Array.isArray(paid) ? paid.flatMap((call: unknown) => {
+    const id = call !== null && typeof call === 'object' ? (call as { paidCallId?: unknown }).paidCallId : undefined
+    return typeof id === 'string' && id !== '' ? [id] : []
+  }) : []
 }
 
 export interface HostedCaller {
@@ -748,7 +756,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const reservation: Reservation = reserved.reservation
     let charge: ReturnType<typeof scrapeCharge> = { credits: 0, kind: 'unread' }
     // The call's line for the dashboard's Activity page: what was asked for, then what came back.
-    const note: RequestNote = { endpoint: isScrape ? 'scrape' : 'map', keyId: caller.id, url: '', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: null, ms: null }
+    const note: RequestNote = { endpoint: isScrape ? 'scrape' : 'map', keyId: caller.id, url: '', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: null, ms: null, scrapeId: null, paidCallIds: null }
     // From the call's arrival at the gate, so the reservation's round trip counts too.
     const started = now.getTime()
     const settle = async () => {
@@ -904,6 +912,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           if (!jobs) throw new Error(`${name} runs a hosted job, which needs an account: connect with an account's key from https://octocrawl.dev/dashboard/ or sign in at ${MCP_OAUTH_RESOURCE}, or run it on your computer: ${LOCAL_HINT}`)
           // A wait ends within this request's deadline, with the status so far.
           const call = { ...((args ?? {}) as Record<string, unknown>) }
+          // The start's answer would carry the webhook's secret into the agent's transcript (H2 W2).
+          if (call.webhook !== undefined && call.webhook !== null) throw new Error(`${name} on hosted Octocrawl takes no webhook over MCP, since the answer carries its signing secret; start the job with POST /v1/${name === 'crawl' ? 'crawl' : 'batches'} to have its end posted`)
           if (typeof call.timeoutMs === 'number') call.timeoutMs = Math.min(call.timeoutMs, HOSTED_MCP_WAIT_MS)
           for (const key of ['limit', 'maxResults']) if (typeof call[key] === 'number') call[key] = Math.min(call[key] as number, HOSTED_MCP_LIST_MAX)
           return call

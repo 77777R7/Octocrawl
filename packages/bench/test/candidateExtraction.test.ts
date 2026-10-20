@@ -21,6 +21,12 @@ ${'<p>This document specifies how widgets are exchanged between two parties, the
 
 const url = 'https://standards.example/wxf42'
 
+/** A shop's offers page: its terms sit in the page's main content, above the list of offers a list format names. */
+const offers = `<html lang="en"><head><title>Offers</title></head><body><nav><a href="/">Home</a></nav><main><h1>This week's offers</h1>
+<p>Offers valid until 30 June, while stocks last, for orders delivered within the country. Prices include tax and delivery to the door.</p>
+<ul>${['Brass lamp', 'Oak shelf', 'Linen throw', 'Wool rug'].map((name, n) => `<li class="offer"><a href="/p/${n}">${name}</a> <span>£${10 + n}.00</span></li>`).join('')}</ul>
+${'<p>Every item is checked before it leaves the workshop, and returns are free for thirty days after delivery. </p>'.repeat(3)}</main></body></html>`
+
 /** What a lane delivers for this capture: the main content as Markdown, with its capture in the trace. */
 function delivered(html: string, lane: FetchResult['lane'] = 'browser_local'): FetchResult {
   const out = extractTf.extract(html, { url })
@@ -51,7 +57,7 @@ describe('reading the same capture again when its contract fails on what was ext
     expect(out.markdown).toContain('WXF 42')
     expect(verify(options.verify, out as never, { partial: true }).status).toBe('passed')
     const event = out.trace.find(item => item.event === 'extraction_candidates')!
-    expect(event).toMatchObject({ at: 9, lane: 'browser_local', detail: { selected: 'document', reason: 'passes_contract', capped: false, readiness: 'not_extracted', trigger: 'not_extracted' } })
+    expect(event).toMatchObject({ at: 9, lane: 'browser_local', detail: { selected: 'document', reason: 'passes_contract', replaced: true, capped: false, readiness: 'not_extracted', trigger: 'not_extracted' } })
     expect(event.detail!.captureId).toBe((result.trace[0]!.detail as { captureId: string }).captureId)
     expect((event.detail!.candidates as Array<{ id: string; passed: number; failed: number }>).map(item => [item.id, item.passed, item.failed]))
       .toEqual([['main_content', 1, 1], ['document', 2, 0], ['declared_data', 1, 1]])
@@ -77,14 +83,14 @@ describe('reading the same capture again when its contract fails on what was ext
     const result = delivered(appendix)
     const out = withExtractionCandidates(result, { ...source(ask([{ type: 'markdownIncludes', text: 'WXF 42' }])), html: appendix })
     expect(out.markdown).toBe(result.markdown)
-    expect(out.trace.at(-1)).toMatchObject({ detail: { selected: 'main_content', reason: 'main_content_kept' } })
+    expect(out.trace.at(-1)).toMatchObject({ detail: { selected: 'main_content', reason: 'delivered_kept', replaced: false } })
   })
 
   it('keeps the main content when no candidate does better, and records that it looked', () => {
     const result = delivered(standard)
     const out = withExtractionCandidates(result, source(ask([{ type: 'markdownIncludes', text: 'nowhere on this page' }])))
     expect(out.markdown).toBe(result.markdown)
-    expect(out.trace.at(-1)).toMatchObject({ event: 'extraction_candidates', detail: { selected: 'main_content', reason: 'main_content_kept' } })
+    expect(out.trace.at(-1)).toMatchObject({ event: 'extraction_candidates', detail: { selected: 'main_content', reason: 'delivered_kept', replaced: false } })
   })
 
   it('adds its event to the lane\'s own trace, which the lane may still append to', () => {
@@ -124,12 +130,28 @@ describe('the HTTP lane reads its own capture again', () => {
   beforeAll(async () => {
     server = createServer((req, res) => {
       if (req.url === '/robots.txt') return void res.writeHead(404).end()
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(standard)
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(req.url === '/offers' ? offers : standard)
     })
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
   afterAll(() => new Promise<void>(resolve => server.close(() => resolve())))
+
+  it('offers the page\'s main content beside the list items a list format named, and delivers it when only it passes', async () => {
+    const http = new ResilientHttpSubject('standard', { ...localNetworkPolicy(), perHostMinDelayMs: 0 })
+    const list = { type: 'list' as const, itemSelector: 'li.offer' }
+    const verify = { checks: [{ type: 'markdownIncludes' as const, text: 'Offers valid until 30 June' }] }
+    const out = await http.fetch(`${origin}/offers`, undefined, undefined, {}, undefined, { list, verify })
+    expect(out.status).toBe('success')
+    expect(out.markdown).toContain('Offers valid until 30 June')
+    expect(out.markdown).toContain('Brass lamp')
+    expect(out.trace.find(event => event.event === 'extraction_candidates')).toMatchObject({ detail: { selected: 'main_content', replaced: true, reason: 'passes_contract' } })
+    expect((out.trace.find(event => event.event === 'extraction_candidates')!.detail!.candidates as Array<{ id: string }>).map(item => item.id)).toEqual(['list_items', 'main_content', 'document'])
+    // A contract the items pass keeps them.
+    const items = await http.fetch(`${origin}/offers`, undefined, undefined, {}, undefined, { list, verify: { checks: [{ type: 'markdownIncludes', text: 'Brass lamp' }] } })
+    expect(items.markdown).not.toContain('Offers valid until 30 June')
+    expect(items.trace.some(event => event.event === 'extraction_candidates')).toBe(false)
+  })
 
   it('delivers the document candidate from the same capture, with its capture in the event', async () => {
     const http = new ResilientHttpSubject('standard', { ...localNetworkPolicy(), perHostMinDelayMs: 0 })

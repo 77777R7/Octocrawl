@@ -52,6 +52,17 @@ export interface RequestNote {
   formats: string[] | null
   /** How long the call took, from its start to its answer, in milliseconds. */
   ms: number | null
+  /**
+   * The scrape's `scrapeId`, which names its record (GET /v1/scrapes/:id): the line's credits and the record's USD paid
+   * calls are joined by it (PA EH1). Null for a map, and for a scrape that ran nothing.
+   */
+  scrapeId: string | null
+  /**
+   * The ids of the provider calls the scrape paid for (`paidCallId` on its Evidence Record's `access.paidCalls`), so a
+   * paid call's USD and the credits it was answered for can be matched; empty when it made none or none was in a task;
+   * null for a map, and for a scrape that ran nothing.
+   */
+  paidCallIds: string[] | null
 }
 export interface RequestLine extends RequestNote { id: string; at: string; kind: UsageKind; credits: number }
 
@@ -67,6 +78,7 @@ function requestLine(note: RequestNote, id: string, now: Date, kind: UsageKind, 
   return {
     ...note, url: wellFormed(note.url.slice(0, ACTIVITY_URL_CHARS)), finalUrl: clean(note.finalUrl, ACTIVITY_URL_CHARS), lane: clean(note.lane), status: wellFormed(note.status.slice(0, 200)),
     reason: clean(note.reason), sha256: clean(note.sha256), formats: note.formats === null ? null : note.formats.slice(0, 20).map((name) => wellFormed(name.slice(0, 40))),
+    scrapeId: clean(note.scrapeId), paidCallIds: note.paidCallIds === null ? null : note.paidCallIds.slice(0, 20).map((id) => wellFormed(id.slice(0, 200))),
     id, at: now.toISOString(), kind, credits,
   }
 }
@@ -223,11 +235,12 @@ export function validAccountId(uid: string): boolean { return UID.test(uid) && !
 function requestLineFields(line: RequestLine, uid: string, now: Date): Record<string, unknown> {
   const expireAt = new Date(now.getTime() + ACTIVITY_RETENTION_DAYS * 86_400_000).toISOString()
   const fields: Record<string, unknown> = { uid: { stringValue: uid }, at: { timestampValue: line.at }, expireAt: { timestampValue: expireAt }, kind: { stringValue: line.kind }, credits: { integerValue: String(line.credits) } }
-  for (const name of ['endpoint', 'keyId', 'url', 'finalUrl', 'lane', 'status', 'reason', 'robots', 'sha256'] as const) {
+  for (const name of ['endpoint', 'keyId', 'url', 'finalUrl', 'lane', 'status', 'reason', 'robots', 'sha256', 'scrapeId'] as const) {
     const value = line[name]
     if (typeof value === 'string') fields[name] = { stringValue: value }
   }
   if (line.formats !== null) fields.formats = { arrayValue: line.formats.length ? { values: line.formats.map((stringValue) => ({ stringValue })) } : {} }
+  if (line.paidCallIds !== null) fields.paidCallIds = { arrayValue: line.paidCallIds.length ? { values: line.paidCallIds.map((stringValue) => ({ stringValue })) } : {} }
   for (const name of ['httpStatus', 'links', 'ms'] as const) {
     const value = line[name]
     if (typeof value === 'number' && Number.isSafeInteger(value)) fields[name] = { integerValue: String(value) }

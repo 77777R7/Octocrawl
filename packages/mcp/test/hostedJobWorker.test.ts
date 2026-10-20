@@ -9,10 +9,11 @@ import { localNetworkPolicy, parseBatchStartRequest, parseCrawlStartRequest } fr
 import { buildChannels } from '@w2l/bench'
 import { MemoryHostedLeases } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
-import { MemoryHostedJobStore, newHostedJob, type HostedJob } from '../src/hostedJobs.js'
+import { MemoryHostedJobStore, newHostedJob, type HostedJob, type HostedJobWebhook } from '../src/hostedJobs.js'
 import { exportName } from '../src/hostedJobRoutes.js'
-import { googleOidcVerifier, runJobExpiry, runJobSlice, startJobWorker, type JobWorkerDeps, type WorkerFiles } from '../src/hostedJobWorker.js'
-import { generateKeyPairSync, sign } from 'node:crypto'
+import { googleOidcVerifier, runJobExpiry, runJobSlice, runJobWebhook, startJobWorker, WEBHOOK_MAX_ATTEMPTS, type JobWorkerDeps, type WorkerFiles } from '../src/hostedJobWorker.js'
+import { createHmac, generateKeyPairSync, sign } from 'node:crypto'
+import type { WebhookTransportRequest } from '@w2l/runtime'
 
 // The hosted job worker (ROADMAP PH H1, docs/h1-hosted-jobs-tasks.md PR ④): deliveries run a job a slice at a time on a
 // real engine against a local site; the job store, the bucket and the queue are in memory.
@@ -64,6 +65,9 @@ describe('hosted job worker', () => {
     const files = new MemoryFiles()
     const queue: Array<{ jobId: string; generation: number; delaySeconds: number }> = []
     const expiries: string[] = []
+    const webhooks: string[] = []
+    const posts: WebhookTransportRequest[] = []
+    const receiver = { answer: (): number | Error => 204 }
     const hostLeases = new MemoryHostedLeases()
     const clock = options.clock ?? { t: NOW }
     const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
@@ -71,13 +75,15 @@ describe('hosted job worker', () => {
       store, credits, files, hostLeases, workRoot, pollMs: 20, log: () => {}, now: () => clock.t,
       enqueueSlice: async (job, delaySeconds = 0) => { queue.push({ jobId: job.id, generation: job.generation, delaySeconds }) },
       enqueueExpiry: async (job) => { expiries.push(job.id) },
+      enqueueWebhook: async (job) => { if (!webhooks.includes(job.id)) webhooks.push(job.id) },
+      webhookTransport: async (request) => { posts.push(request); const answer = receiver.answer(); if (answer instanceof Error) throw answer; return { status: answer, retryAfter: null } },
       engineOptions: () => ({ networkPolicy: policy, hosted: false, channelsFor: (mode) => buildChannels(mode, { networkPolicy: policy, localSubjects: { browser_local: { fetch: async () => { throw new Error('worker tests stay on HTTP') } } } }) }),
       limits: { slicePages: 2, sliceMs: 30_000, graceMs: 2_000, ...options.limits },
     }
     let n = 0
-    const create = async (request: unknown, kind: 'batch' | 'crawl' = 'batch', maxCredits: number | null = null) => {
+    const create = async (request: unknown, kind: 'batch' | 'crawl' = 'batch', maxCredits: number | null = null, webhook: HostedJobWebhook | null = null) => {
       const id = `6f1c2a4e-1b2c-4d3e-8f90-${String(++n).padStart(12, '0')}`
-      const created = await store.create(newHostedJob({ id, workspaceId: 'ws_account-1', uid: 'account-1', keyId: 'key-1', kind, request, maxCredits }, clock.t), { maxRunning: 2, maxQueued: 10 }, null, clock.t)
+      const created = await store.create(newHostedJob({ id, workspaceId: 'ws_account-1', uid: 'account-1', keyId: 'key-1', kind, request, maxCredits, webhook }, clock.t), { maxRunning: 2, maxQueued: 10 }, null, clock.t)
       if (!created.ok) throw new Error('not created')
       queue.push({ jobId: id, generation: 0, delaySeconds: 0 })
       return id
@@ -94,7 +100,7 @@ describe('hosted job worker', () => {
       return outcomes
     }
     const exportLines = (job: HostedJob) => { const object = files.objects.get(exportName(job)); return object === undefined ? null : gunzipSync(object.body).toString('utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { url: string; status: string }) }
-    return { origin, seen, store, credits, files, queue, expiries, hostLeases, deps, create, drain, exportLines, clock }
+    return { origin, seen, store, credits, files, queue, expiries, webhooks, posts, receiver, hostLeases, deps, create, drain, exportLines, clock }
   }
 
   it('runs a batch a slice at a time to the end: each URL read once, pages and credits counted, segments, export and expiry written', async () => {
@@ -347,6 +353,73 @@ describe('hosted job worker', () => {
     expect(await store.get(id)).toMatchObject({ status: 'expired' })
   })
 
+  const WEBHOOK: HostedJobWebhook = { url: 'https://hooks.example.com/octocrawl', events: ['completed', 'failed', 'cancelled'], metadata: { run: 'r1' }, secret: 'whsec_test', delivery: null }
+
+  it('posts a finished job\'s end to its webhook once, signed with the job\'s secret, and records it delivered (H2 W3)', async () => {
+    const { origin, store, webhooks, posts, deps, create, drain } = await setup()
+    const id = await create(parseBatchStartRequest({ urls: ['/a', '/b'].map((path) => `${origin}${path}`), fastMode: true }), 'batch', null, WEBHOOK)
+    expect((await drain(id)).at(-1)).toBe('completed')
+    // A later delivery of the finished job runs its end again; the webhook is queued by one name.
+    expect(await runJobSlice(deps, id, 0)).toMatchObject({ outcome: 'finished' })
+    expect(webhooks).toEqual([id])
+    expect(await runJobWebhook(deps, id, 0)).toEqual({ status: 200, outcome: 'delivered' })
+    expect(posts).toHaveLength(1)
+    const post = posts[0]!
+    expect(post.url).toBe(WEBHOOK.url)
+    const expected = `sha256=${createHmac('sha256', 'whsec_test').update(`${post.headers['x-w2l-timestamp']}.${post.body}`).digest('hex')}`
+    expect(post.headers['x-w2l-signature']).toBe(expected)
+    expect(post.headers['x-w2l-event-id']).toBe(`${id}:completed`)
+    const body = JSON.parse(post.body) as Record<string, unknown>
+    expect(body).toMatchObject({ schemaVersion: 'w2l.job-event/v1', eventId: `${id}:completed`, sequence: 3, jobId: id, jobKind: 'batch', event: 'completed', metadata: { run: 'r1' }, report: { taskId: id, status: 'completed', succeeded: 2 } })
+    expect(post.body).not.toContain('whsec_')
+    expect((await store.get(id))?.webhook?.delivery).toMatchObject({ state: 'delivered', attempts: 1, httpStatus: 204, error: null })
+    // A delivery Cloud Tasks repeats sends nothing more.
+    expect(await runJobWebhook(deps, id, 1)).toEqual({ status: 200, outcome: 'delivered' })
+    expect(posts).toHaveLength(1)
+  })
+
+  it('retries a receiver that is down up to its limit, fails a refusal at once, and posts only the events asked for', async () => {
+    const { origin, store, webhooks, posts, receiver, deps, create, drain } = await setup()
+    const urls = (path: string) => [`${origin}${path}`]
+    const down = await create(parseBatchStartRequest({ urls: urls('/a'), fastMode: true }), 'batch', null, WEBHOOK)
+    await drain(down)
+    receiver.answer = () => 503
+    expect(await runJobWebhook(deps, down, 0)).toEqual({ status: 500, outcome: 'retry' })
+    expect((await store.get(down))?.webhook?.delivery).toMatchObject({ state: 'pending', attempts: 1, httpStatus: 503 })
+    receiver.answer = () => new Error('connect ECONNREFUSED')
+    expect(await runJobWebhook(deps, down, 1)).toEqual({ status: 500, outcome: 'retry' })
+    expect(await runJobWebhook(deps, down, WEBHOOK_MAX_ATTEMPTS - 1)).toEqual({ status: 200, outcome: 'failed' })
+    expect((await store.get(down))?.webhook?.delivery).toMatchObject({ state: 'failed', attempts: WEBHOOK_MAX_ATTEMPTS, error: 'connect ECONNREFUSED' })
+
+    const refused = await create(parseBatchStartRequest({ urls: urls('/b'), fastMode: true }), 'batch', null, WEBHOOK)
+    await drain(refused)
+    receiver.answer = () => 404
+    expect(await runJobWebhook(deps, refused, 0)).toEqual({ status: 200, outcome: 'failed' })
+    const denied = await create(parseBatchStartRequest({ urls: urls('/c'), fastMode: true }), 'batch', null, WEBHOOK)
+    await drain(denied)
+    receiver.answer = () => new Error('webhook egress denied: private address')
+    expect(await runJobWebhook(deps, denied, 0)).toEqual({ status: 200, outcome: 'failed' })
+
+    // A job that asked for its failure only is not posted when it completes.
+    const quiet = await create(parseBatchStartRequest({ urls: urls('/d'), fastMode: true }), 'batch', null, { ...WEBHOOK, events: ['failed'] })
+    const sent = posts.length
+    await drain(quiet)
+    expect(webhooks).not.toContain(quiet)
+    expect(await runJobWebhook(deps, quiet, 0)).toEqual({ status: 200, outcome: 'not_requested' })
+    expect(posts).toHaveLength(sent)
+  })
+
+  it('posts a cancelled job\'s end on its last delivery', async () => {
+    const { origin, store, webhooks, posts, deps, create, drain } = await setup()
+    const id = await create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/'].map((path) => `${origin}${path}`), fastMode: true }), 'batch', null, WEBHOOK)
+    await drain(id, 1)
+    await store.cancel(id, 'ws_account-1', NOW)
+    await runJobSlice(deps, id, 1)
+    expect(webhooks).toEqual([id])
+    expect(await runJobWebhook(deps, id, 0)).toEqual({ status: 200, outcome: 'delivered' })
+    expect(JSON.parse(posts[0]!.body)).toMatchObject({ event: 'cancelled', report: { status: 'cancelled' } })
+  })
+
   it('deletes what a slice wrote when the account was erased while it ran', async () => {
     const { origin, store, files, deps, create } = await setup()
     const id = await create(parseBatchStartRequest({ urls: [`${origin}/a`], fastMode: true }))
@@ -382,7 +455,7 @@ describe('job worker service', () => {
     expect(await verify('Bearer nonsense')).toBe(false)
   })
 
-  it('answers a delivery only with a valid token, on its two routes, and runs the slice it names', async () => {
+  it('answers a delivery only with a valid token, on its routes, and runs the slice it names', async () => {
     const store = new MemoryHostedJobStore()
     const deps = { store, credits: new MemoryCreditsStore(), files: new MemoryFiles(), hostLeases: new MemoryHostedLeases(), workRoot: tmpdir(), enqueueSlice: async () => {}, enqueueExpiry: async () => {}, log: () => {} } as JobWorkerDeps
     const worker = await startJobWorker({ deps, verify: async (authorization) => authorization === 'Bearer ok', port: 0, host: '127.0.0.1' })
@@ -396,6 +469,8 @@ describe('job worker service', () => {
       expect((await post('/internal/jobs/not-a-job/slice', { generation: 0 }, 'Bearer ok')).status).toBe(404)
       expect(await (await post(`/internal/jobs/${job}/slice`, { generation: 0 }, 'Bearer ok')).json()).toEqual({ outcome: 'missing' })
       expect(await (await post(`/internal/jobs/${job}/expire`, {}, 'Bearer ok')).json()).toEqual({ outcome: 'missing' })
+      expect((await post(`/internal/jobs/${job}/webhook`, {})).status).toBe(401)
+      expect(await (await post(`/internal/jobs/${job}/webhook`, {}, 'Bearer ok')).json()).toEqual({ outcome: 'missing' })
     } finally { await worker.close() }
   })
 })

@@ -36,7 +36,7 @@ beforeAll(async () => {
     const path = req.url ?? ''
     hits.set(path, (hits.get(path) ?? 0) + 1)
     if (path === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
-    if (path === '/standard') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('Widget Exchange Format').replace('<main>', '<div class="doc-header"><dl><dt>Status</dt><dd>Proposed Standard</dd></dl></div><main>')); return }
+    if (path.startsWith('/standard')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('Widget Exchange Format').replace('<main>', '<div class="doc-header"><dl><dt>Status</dt><dd>Proposed Standard</dd></dl></div><main>')); return }
     if (path === '/missing') { res.writeHead(404, { 'content-type': 'text/html' }).end('<html><body><h1>Not found</h1></body></html>'); return }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(`Page ${path}`))
   })
@@ -132,6 +132,25 @@ describe('page cache: scrape', () => {
     expect(plain.metadata).toMatchObject({ cacheState: 'miss' })
     expect(plain.markdown).not.toContain('Proposed Standard')
     expect(hits.get('/standard')).toBe(2)
+  })
+
+  it('reads a stored page again under a contract only when it kept its source; a Markdown-only page is served as stored', async () => {
+    const contract = { checks: [{ type: 'markdownIncludes', text: 'Proposed Standard' }] }
+    // Stored with its rawHtml: the hit is read again from that source, and the contract's candidate is delivered.
+    const kept = `${origin}/standard?raw`
+    expect((await scrape({ url: kept, maxAge: HOUR, formats: ['markdown', 'rawHtml'] })).markdown).not.toContain('Proposed Standard')
+    const reread = await scrape({ url: kept, maxAge: HOUR, formats: ['markdown', 'rawHtml'], verify: contract })
+    expect(reread.metadata).toMatchObject({ cacheState: 'hit' })
+    expect(reread.markdown).toContain('Proposed Standard')
+    expect(reread.verification).toMatchObject({ status: 'passed' })
+    // Stored with its Markdown alone: served as stored, the contract failing on it.
+    const plain = `${origin}/standard?markdown`
+    await scrape({ url: plain, maxAge: HOUR })
+    const served = await scrape({ url: plain, maxAge: HOUR, verify: contract })
+    expect(served.metadata).toMatchObject({ cacheState: 'hit' })
+    expect(served.markdown).not.toContain('Proposed Standard')
+    expect(served.verification).toMatchObject({ status: 'failed' })
+    expect(hits.get('/standard?raw')).toBe(1)
   })
 
   it('keys a stored page by the access grant too: a page fetched under one grant is not reused under another', async () => {
