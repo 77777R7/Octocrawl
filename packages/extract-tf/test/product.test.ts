@@ -278,6 +278,9 @@ describe('PDP facts: the subject is chosen before fields are merged', () => {
       { '@type': 'Product', '@id': 'https://blog.example/best-kettles/#kettle-a', name: 'Kettle A', brand: 'Acme' },
       { '@type': 'Product', '@id': 'https://blog.example/best-kettles/#kettle-b', name: 'Kettle B', offers: { price: '49.99', priceCurrency: 'USD' } },
     ] }))
+    // The page's meta tags still describe its product when the others are only related items nested in it.
+    const withMeta = extractTf.extract(related.replace('</head>', '<meta property="product:brand" content="Harbour Clay"></head>'), { url: 'https://shop.example/p/a' })
+    expect(withMeta.product?.brand).toEqual({ value: 'Harbour Clay', source: 'meta', path: 'meta[property="product:brand"]' })
     const kettles = extractTf.extract(review, { url: 'https://blog.example/best-kettles/' })
     expect(kettles.product?.identity?.status).toBe('conflicting')
     expect(kettles.product?.price).toBeNull()
