@@ -56,7 +56,7 @@ async function start(options: { addressPerMinute?: number } = {}) {
     clients.push(client)
     return client
   }
-  const sliceWrote = (id: string, items: Array<{ url: string; status: string }>) => {
+  const sliceWrote = (id: string, items: Array<{ url: string; status: string } & Record<string, unknown>>) => {
     const job = store.jobs.get(id)!
     segments.set(`${id}/${job.counts.slices}`, items.map((item) => JSON.stringify(item)))
     store.jobs.set(id, { ...job, counts: { pages: job.counts.pages + items.length, errors: job.counts.errors, slices: job.counts.slices + 1 } })
@@ -92,6 +92,65 @@ describe('hosted job tools over MCP', () => {
     // A connection without the browser lane is not offered what needs it.
     const http = (await (await connect('oc_http')).listTools()).tools.find((tool) => tool.name === 'batch_scrape')!
     expect((http.inputSchema as { properties: Record<string, unknown> }).properties).not.toHaveProperty('waitFor')
+  })
+
+  it('describes and offers only what hosted serves: the errors list\'s shape, no screenshot without the browser lane, no authed mode, appendToId or large files (H2 M7, M9)', async () => {
+    const { connect } = await start()
+    const props = (tool: { inputSchema: unknown }) => (tool.inputSchema as { properties: Record<string, Record<string, unknown>> }).properties
+    for (const [key, browser] of [['oc_http', false], ['oc_account', true]] as const) {
+      const tools = (await (await connect(key)).listTools()).tools
+      const scrapeFormats = props(tools.find((tool) => tool.name === 'scrape')!).formats
+      for (const name of ['crawl', 'batch_scrape']) {
+        const tool = tools.find((candidate) => candidate.name === name)!
+        const properties = props(tool)
+        // The start tools' formats are hosted scrape's, so a connection without the browser lane is offered no screenshot.
+        expect(properties.formats, `${key} ${name}`).toEqual(scrapeFormats)
+        expect(JSON.stringify(properties.formats?.items).includes('screenshot'), `${key} ${name}`).toBe(browser)
+        expect(properties.mode?.enum, `${key} ${name}`).toEqual(['standard', 'research'])
+        expect(String(properties.mode?.description)).not.toMatch(/saved logins;/)
+        expect(properties.maxFileBytes?.maximum, `${key} ${name}`).toBe(5 * 1024 * 1024)
+        expect(tool.description).not.toMatch(/appendToId|actions|not stated/)
+      }
+      const errors = tools.find((tool) => tool.name === 'get_batch_errors')!
+      expect(errors.description).not.toMatch(/robotsBlocked|\berrors \[/)
+      expect(errors.description).toMatch(/\{ items, nextCursor, hasMore \}/)
+    }
+  })
+
+  it('answers job items without usage and trace unless debug is true, the Evidence Record whole (H2 M8)', async () => {
+    const { connect, sliceWrote } = await start()
+    const client = await connect('oc_account')
+    const evidenceRecord = { version: 'w2l.evidence/1', finalUrl: 'https://example.com/', fetchedAt: '2026-10-20T00:00:00.000Z', httpStatus: 200, contentSha256: 'a'.repeat(64) }
+    const page = { url: 'https://example.com/', status: 'success', markdown: '# Example', evidenceRecord, usage: { credits: 1 }, trace: [{ step: 'fetch', ms: 12 }] }
+    const failed = { url: 'https://example.com/gone', status: 'failed', failureReason: 'http_404', evidenceRecord, usage: { credits: 1 }, trace: [{ step: 'fetch', ms: 3 }] }
+    const batch = structured(await client.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/', 'https://example.com/gone'] } })).taskId as string
+    sliceWrote(batch, [page, failed])
+    const crawl = structured(await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/' } })).taskId as string
+    sliceWrote(crawl, [page, failed])
+    const calls = [
+      ['get_batch_items', { id: batch }], ['get_batch_items', { id: batch, maxResults: 10 }], ['get_batch_errors', { id: batch }],
+      ['get_crawl_pages', { id: crawl }], ['get_crawl_pages', { id: crawl, maxResults: 10 }], ['get_crawl_errors', { id: crawl }],
+    ] as const
+    for (const [name, args] of calls) {
+      const result = await client.callTool({ name, arguments: args })
+      expect(result.isError ?? false, `${name} ${text(result)}`).toBe(false)
+      // The error lists have no output schema, so their answer is the text alone.
+      const items = ((result as { structuredContent?: unknown }).structuredContent === undefined ? JSON.parse(text(result)) : structured(result)).items as Array<Record<string, unknown>>
+      expect(items.length, name).toBeGreaterThan(0)
+      for (const item of items) {
+        expect(item, name).not.toHaveProperty('usage')
+        expect(item, name).not.toHaveProperty('trace')
+        expect(item.evidenceRecord, name).toEqual(evidenceRecord)
+      }
+      expect(text(result), name).not.toMatch(/"usage"|"trace"/)
+    }
+    // debug asks for the whole.
+    for (const [name, id, ms] of [['get_batch_items', batch, 12], ['get_crawl_pages', crawl, 12], ['get_batch_errors', batch, 3], ['get_crawl_errors', crawl, 3]] as const) {
+      const result = await client.callTool({ name, arguments: { id, debug: true } })
+      expect(result.isError ?? false, `${name} ${text(result)}`).toBe(false)
+      const items = ((result as { structuredContent?: unknown }).structuredContent === undefined ? JSON.parse(text(result)) : structured(result)).items as Array<Record<string, unknown>>
+      expect(items[0], name).toMatchObject({ usage: { credits: 1 }, trace: [{ step: 'fetch', ms }], evidenceRecord })
+    }
   })
 
   it('starts, reads, pages through and cancels a crawl over MCP, its answers valid against the tools\' output schemas', async () => {

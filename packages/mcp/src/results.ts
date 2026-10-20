@@ -35,6 +35,10 @@ export function shapeResult(tool: string, result: unknown, contract?: VerifyCont
  */
 export function withoutTelemetry(tool: string, result: unknown, args: unknown, contract?: VerifyContract): unknown {
   if (!isObject(result) || (isObject(args) && args.debug === true)) return result
+  // A job's items (H2 M8) lose their usage and trace, as get_crawl_pages says pages do without debug; the Evidence Record stays whole.
+  if (JOB_ITEM_TOOLS.has(tool) && Array.isArray(result.items)) {
+    return { ...result, items: result.items.map((item) => isObject(item) ? (({ usage: _usage, trace: _trace, ...rest }) => rest)(item) : item) }
+  }
   if (tool !== 'scrape' && tool !== 'scrape_product') return result
   const { usage: _usage, channelsTried: _channels, ...rest } = result
   const untagged = Array.isArray(rest.agentHints) ? { ...rest, agentHints: rest.agentHints.map((hint) => (typeof hint === 'string' ? withoutCampaign(hint) : hint)) } : rest
@@ -45,6 +49,8 @@ export function withoutTelemetry(tool: string, result: unknown, args: unknown, c
   }
   return tool === 'scrape' && contract !== undefined ? resultProjection(result, contract, 'mcp_result_minimized')(minimized) : minimized
 }
+
+const JOB_ITEM_TOOLS: ReadonlySet<string> = new Set(['get_batch_items', 'get_batch_errors', 'get_crawl_pages', 'get_crawl_errors'])
 
 /** The links in a text without their utm_* parameters, which a model has no use for (REST keeps them); prose is left alone. */
 export function withoutCampaign(text: string): string {
