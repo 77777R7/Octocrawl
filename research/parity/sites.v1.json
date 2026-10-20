@@ -1888,6 +1888,47 @@
       ]
     },
     {
+      "id": "M14",
+      "batch": "api",
+      "feature": "scrape-formats.only-main-content",
+      "url": "https://www.rfc-editor.org/rfc/rfc9110.html",
+      "request": {"formats": ["markdown", "tables"]},
+      "note": "Added 2026-10-21 for PA D6 (a standards document's header). The RFC Editor's HTML of RFC 9110 lays out its publication header (a dl of stream, RFC number, category, publication month and authors), the two h1s and chapters 1-19 as siblings in <body>, with no article or main. Before D6 the default Markdown was the Collected ABNF appendix alone (the field gold set's H01, captured 2026-10-17). Not matched by host: the rule reads the body's numbered chapters (packages/extract-tf/src/main.ts, flatDocument).",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^# RFC 9110$"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^# HTTP Semantics$"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "Internet Engineering Task Force (IETF)"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "Standards Track"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "June 2022"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "R. Fielding, Ed."},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "M. Nottingham, Ed."},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "J. Reschke, Ed."},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^## \\[1\\.\\]\\(#section-1\\) \\[Introduction\\]"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^## \\[15\\.\\]\\(#section-15\\) \\[Status Codes\\]"},
+        {"item": "scrape-formats.markdown", "type": "markdownIncludes", "text": "| Method Name | Description | Section |"},
+        {"item": "scrape-formats.markdown", "type": "tablesConsistent", "min": 1}
+      ]
+    },
+    {
+      "id": "M15",
+      "batch": "api",
+      "feature": "scrape-formats.only-main-content",
+      "url": "https://www.w3.org/TR/WCAG22/",
+      "request": {"formats": ["markdown"]},
+      "note": "Added 2026-10-21 for PA D6. The WCAG 2.2 Recommendation (respec) lays out its header (div.head: the h1, 'W3C Recommendation' with the date, the details dl with the editors) and its numbered sections 1-7 as siblings in <body>, followed by about a hundred definition pop-ups (div.dfn-panel, 'Permalink', 'Referenced in:'). Before D6 the default Markdown was section 6, the Glossary, alone (the field gold set's H07, captured 2026-10-17): no status, no date, no conformance levels. Not matched by host.",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^# Web Content Accessibility Guidelines \\(WCAG\\) 2\\.2$"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "W3C Recommendation\\]\\([^)]*\\) \\d{1,2} \\w+ \\d{4}"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "Alastair Campbell"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^## 1\\. Perceivable$"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "^## 5\\. Conformance$"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "Level AAA"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownExcludes", "text": "Referenced in:"}
+      ]
+    },
+    {
       "id": "MP01",
       "batch": "map",
       "endpoint": "map",
