@@ -30,6 +30,7 @@ import type { VendorResumeContext } from '../vendors/transport.js'
 import { loadingWaitEvent, withStillLoadingWarning, type SettleOutcome } from '../browserSettle.js'
 import { regionSpecOf, regionWaitEvent, type RegionOutcome, type RegionSpec } from '../regionWait.js'
 import type { Dispatcher } from 'undici'
+import { captureEvent, newCapture, newView, selectionView, viewEvent, type ResponseMatch } from '../capture.js'
 
 /**
  * Provider lane: hand the fetch to a third-party that fights anti-bot systems
@@ -97,6 +98,13 @@ export interface ProviderResponse {
   settle?: SettleOutcome
   /** What the wait for the region the task needs saw (ADR 0007), when the request had a task contract and the transport waited for it. */
   region?: RegionOutcome
+  /**
+   * Documents the main frame loaded up to the read, when the transport counted them (PA B2); null or absent when it
+   * could not. `status` and `headers` are the response of the document read when `responseMatch` is `matched`.
+   */
+  documentGeneration?: number | null
+  /** Whether `status` and `headers` belong to the document `body` was read from; absent means unobserved. */
+  responseMatch?: ResponseMatch
   /** What the vendor billed us, when it says. Reported, never estimated. */
   costUsd?: number | null
   /**
@@ -348,6 +356,20 @@ export class ProviderSubject implements SubjectAdapter {
     }
 
     const wallMs = Date.now() - start
+    const sourceHash = sha256Hex(new TextEncoder().encode(res.body))
+    // The document this result reads (PA B3): its own response when the transport heard it, else unobserved.
+    const pageCapture = newCapture({
+      sourceKind: 'browser_dom',
+      requestedUrl: url,
+      finalUrl: res.finalUrl,
+      capturedAt: fetchedAt,
+      sourceHash,
+      documentGeneration: res.documentGeneration ?? null,
+      responseMatch: res.responseMatch ?? 'unobserved',
+      capabilities: { layout: false, shadowTables: false, actions: false, screenshot: false },
+      limits: { maxBytes: null },
+    })
+    trace.push(captureEvent(pageCapture, wallMs, 'provider'))
 
     // What the record should say went on the wire. The declared UA is what the
     // gate cleared; the observed one is what the transport actually saw. When
@@ -425,13 +447,14 @@ export class ProviderSubject implements SubjectAdapter {
         httpStatus: res.status,
         redirectChain: res.finalUrl !== url ? [url, res.finalUrl] : [],
         contentType: res.headers['content-type'] ?? null,
-        rawBodySha256: sha256Hex(new TextEncoder().encode(res.body)),
+        rawBodySha256: sourceHash,
         artifacts: [],
         fetchedAt,
       },
       usage: {
         wallMs,
-        bytesWire: Buffer.byteLength(res.body),
+        // The DOM as serialized is not what crossed the wire, which the vendor's browser fetched (G1): not measured here.
+        bytesWire: null,
         bytesDecompressed: Buffer.byteLength(res.body),
         requestCount: 1,
         attemptCount: 1,
@@ -524,6 +547,8 @@ export class ProviderSubject implements SubjectAdapter {
     }
 
     trace.push(...contentSelectionEvent(options, 'provider', wallMs, res.body.length))
+    const selected = selectionView(options, newView({ captureId: pageCapture.captureId, selectionVersion: 'none', transformVersion: 'none' }))
+    if (selected !== null) trace.push(viewEvent(selected, wallMs, 'provider'))
     const extracted = extractTf.extract(res.body, { url: res.finalUrl, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, res.body.length), blockAds: options.blockAds })
     const links = collectLinks(res.body, res.finalUrl)
     trace.push({

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
+import { captureOf } from '../src/capture.js'
 
 /**
  * Transport-resilience integration test against real fixture-server bytes:
@@ -37,6 +38,8 @@ describe('resilient subject on served fixture bytes', () => {
     expect(out.evidence.redirectChain).toHaveLength(4)
     expect(out.usage.requestCount).toBe(4)
     expect(out.usage.attemptCount).toBe(1)
+    // The HTTP read is a capture of its own, which sets no more than its id and kind (PA B3).
+    expect(captureOf(out.trace)).toEqual({ captureId: expect.any(String), sourceKind: 'http_body' })
   })
 
   it('redirect-loop: terminates with redirect_loop, never spins', async () => {

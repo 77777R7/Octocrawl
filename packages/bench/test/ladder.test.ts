@@ -472,6 +472,18 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     expect(mobile.ladderTrace.find((event) => event.event === 'ladder_channel_started')?.detail?.remainingMs).toBeNull()
   })
 
+  it('leaves out a provider rung that refuses the request, and says why (PA B4)', async () => {
+    const url = 'https://example.com/p'
+    const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'acme'), refusal: (_url: string, options: FetchOptions) => options.screenshot !== undefined ? 'provider takes no screenshot' : null }
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), provider], { mode: 'research' }).run(url, null, {}, { screenshot: {} })
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_not_served', channel: 'provider', detail: { reason: 'provider takes no screenshot' } }))
+    expect(run.channelsTried).toEqual(['http'])
+    expect(provider.calls).toEqual([])
+    // Without the option it asks for, the rung runs.
+    const served = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), { ...provider, calls: [] }], { mode: 'research' }).run(url)
+    expect(served.channelsTried).toEqual(['http', 'provider'])
+  })
+
   it('says the egress proxy refused the connection when no page was read, and not when one was', async () => {
     const url = 'https://example.com/p'
     const refused = (lane: 'http' | 'browser_local', status: number | null): FetchResult => ({ ...failedResult(url, 'connection_error'), lane, trace: [{ at: 1, lane, event: 'egress_proxy_refused', detail: { status } }] })
