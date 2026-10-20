@@ -44,8 +44,10 @@ export interface WorkerLimits {
   maxHostsPerSlice: number
   /** Slices in a row that store nothing before the job fails (`no_progress`). */
   idleSlicesToFail: number
+  /** Slices in a row that fail (an error, or a slice that died) before the job fails (`delivery_failed`). */
+  failedAttemptsToFail: number
 }
-export const WORKER_LIMITS: WorkerLimits = { slicePages: 100, firstSlicePages: 10, sliceMs: 8 * 60_000, graceMs: 60_000, jobsDaily: 10_000, jobsAccountDaily: 2_000, maxHostsPerSlice: 20, idleSlicesToFail: 2 }
+export const WORKER_LIMITS: WorkerLimits = { slicePages: 100, firstSlicePages: 10, sliceMs: 8 * 60_000, graceMs: 60_000, jobsDaily: 10_000, jobsAccountDaily: 2_000, maxHostsPerSlice: 20, idleSlicesToFail: 2, failedAttemptsToFail: 5 }
 
 export interface JobWorkerDeps {
   store: HostedJobStore
@@ -131,6 +133,8 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     if (!cleared.ok) return { status: 200, outcome: cleared.reason }
     job = cleared.job
   }
+  // A slice that keeps failing (the same error each time, or a crash) would be retried for as long as the job lives.
+  if ((job.failedAttempts ?? 0) >= limits.failedAttemptsToFail) { line('hosted_job_delivery_failed', { failedAttempts: job.failedAttempts }); return pass((j) => ({ ...j, status: 'failed', failureReason: 'delivery_failed' })) }
   if (deps.enabled !== undefined && !(await deps.enabled())) { line('hosted_job_switched_off'); return pass(unchanged, 300) }
 
   const request = job.request as (ParsedBatchStartRequest | ParsedCrawlStartRequest) & { fastMode?: boolean }
@@ -267,6 +271,8 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     return done.outcome
   } catch (error) {
     log(JSON.stringify({ severity: 'ERROR', event: 'hosted_job_slice_failed', jobId, generation, message: error instanceof Error ? error.message : String(error) }))
+    // The lease goes back at once, the failure counted; one whose commit may have applied keeps it, so nothing is undone.
+    if (!commitMayHaveApplied) await deps.store.abandon(jobId, holder).catch(() => {})
     throw error
   } finally {
     // A slice that ends without committing gives its credits back. One whose commit may have applied (it threw) leaves its
