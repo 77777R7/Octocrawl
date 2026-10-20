@@ -36,6 +36,7 @@ beforeAll(async () => {
     const path = req.url ?? ''
     hits.set(path, (hits.get(path) ?? 0) + 1)
     if (path === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
+    if (path === '/standard') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('Widget Exchange Format').replace('<main>', '<div class="doc-header"><dl><dt>Status</dt><dd>Proposed Standard</dd></dl></div><main>')); return }
     if (path === '/missing') { res.writeHead(404, { 'content-type': 'text/html' }).end('<html><body><h1>Not found</h1></body></html>'); return }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(`Page ${path}`))
   })
@@ -119,6 +120,18 @@ describe('page cache: scrape', () => {
     expect(verified.metadata).toMatchObject({ cacheState: 'hit' })
     // The stored page carries no wait for this contract's region: its readiness does not claim one.
     expect(verified.readiness.basis).not.toContain('region_ready')
+  })
+
+  it('does not store a page whose content the request\'s contract chose from its capture, since the key leaves the contract out', async () => {
+    const url = `${origin}/standard`
+    const chosen = await scrape({ url, maxAge: HOUR, verify: { checks: [{ type: 'markdownIncludes', text: 'Proposed Standard' }] } })
+    expect(chosen.markdown).toContain('Proposed Standard')
+    expect(chosen.metadata).toMatchObject({ cacheState: 'miss' })
+    // A request without the contract gets the page's main content, fetched again.
+    const plain = await scrape({ url, maxAge: HOUR })
+    expect(plain.metadata).toMatchObject({ cacheState: 'miss' })
+    expect(plain.markdown).not.toContain('Proposed Standard')
+    expect(hits.get('/standard')).toBe(2)
   })
 
   it('keys a stored page by the access grant too: a page fetched under one grant is not reused under another', async () => {
