@@ -25,7 +25,7 @@ import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '
 import type { SubjectAdapter } from '../subject.js'
 import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
-import { contentSelectors, contentSelectionEvent, listSelectionAsked, listRecordsFound, errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { contentSelectors, contentSelectionEvent, listSelectionAsked, listRecordsFound, errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, regionTables, tablesFormat, tablesSource, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import { loadingWaitEvent, withStillLoadingWarning, type SettleOutcome } from '../browserSettle.js'
 import { regionSpecOf, regionWaitEvent, type RegionOutcome, type RegionSpec } from '../regionWait.js'
@@ -214,6 +214,17 @@ export function providerFailure(url: string, wallMs: number, trace: TraceEvent[]
   }
 }
 
+/**
+ * The region wait the provider lane asks its transport for (ADR 0007): with row checks on the tables format, their rows
+ * are judged on the tables the answer would read from the page as it stands (regionTables), as the final answer reads
+ * them; a transport that cannot read the page leaves them unjudged (tablesUnjudged).
+ */
+export function providerRegion(options: FetchOptions): RegionSpec | undefined {
+  const region = regionSpecOf(options)
+  if (region === undefined || options.includeTables !== true || !region.contract.checks.some(check => check.type === 'tableRowsMin')) return region
+  return { ...region, tablesOf: (html, href) => regionTables(html, href, options, 'provider') }
+}
+
 export class ProviderSubject implements SubjectAdapter {
   readonly meta: SubjectAdapter['meta']
 
@@ -335,7 +346,7 @@ export class ProviderSubject implements SubjectAdapter {
     let res: ProviderResponse
     let fetchedAt: string
     try {
-      res = await raceWithSignal(this.transport.fetch(url, execution.deadlineAt, execution.signal, regionSpecOf(options)), execution.signal)
+      res = await raceWithSignal(this.transport.fetch(url, execution.deadlineAt, execution.signal, providerRegion(options)), execution.signal)
       fetchedAt = new Date().toISOString()
       const waited = loadingWaitEvent(res.settle, Date.now() - start, 'provider')
       if (waited !== null) trace.push(waited)
@@ -629,9 +640,7 @@ export class ProviderSubject implements SubjectAdapter {
     // The images and attributes formats read the page the vendor returned, like links.
     const extra = extraFormats(res.body, res.finalUrl, options, trace, 'provider', wallMs)
     // The tables format reads what the Markdown was written from, with the same options.
-    const tables = tablesFormat(wholePageAsked(options)
-      ? { html: res.body, options: { baseUrl: res.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
-      : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, res.finalUrl, options, trace, 'provider', wallMs)
+    const tables = tablesFormat(tablesSource(res.body, res.finalUrl, options, extracted), res.finalUrl, options, trace, 'provider', wallMs)
     // A contract that fails on what was extracted reads this capture again before any other rung (candidateExtraction.ts).
     return withListCaveat(withExtractionCandidates({
       ...base,

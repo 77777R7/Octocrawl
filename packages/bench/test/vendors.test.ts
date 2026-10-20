@@ -73,6 +73,8 @@ interface FakeScript {
   loadingSamples?: number
   /** What the region view reads on the page (ADR 0007), one per read, the last from then on. */
   regionViews?: string[]
+  /** The page's whole HTML as a table reader reads it, one per read, the last from then on (null: past the read's bounds). */
+  pageHtml?: (string | null)[]
   /** The context opens raw CDP sessions, and each navigation reports this many bytes received (Network.loadingFinished). */
   bytesPerNavigation?: number
   /**
@@ -110,6 +112,7 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
       let current = 'about:blank'
       let samples = 0
       let regionReads = 0
+      let htmlReads = 0
       return {
         async goto(url: string): Promise<CdpResponse | null> {
           if (script.gotoError) throw script.gotoError
@@ -137,6 +140,8 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
         async evaluate(expression: string) {
           if (expression === 'navigator.userAgent') return ua
           if (script.regionViews !== undefined && expression.includes('tableCount')) return script.regionViews[Math.min(regionReads++, script.regionViews.length - 1)]
+          if (script.pageHtml !== undefined && expression.includes('XMLSerializer')) return script.pageHtml[Math.min(htmlReads++, script.pageHtml.length - 1)]
+          if (script.pageHtml !== undefined && expression.includes('scrollBy')) return JSON.stringify({ moved: false, end: true })
           if (script.loadingSamples === undefined) return undefined
           const loading = samples++ < script.loadingSamples
           return JSON.stringify({ size: loading ? 10 : 90, text: loading ? 'Fetching...' : 'the data', loading })
@@ -365,6 +370,25 @@ describe('vendor identity', () => {
     const res = await transport.fetch('https://shop.example/dp/A', Date.now() + 20_000, undefined, region)
     expect(res.region).toMatchObject({ ready: true, reads: 3, checks: [{ passed: true, observedCount: 3 }] })
     expect((await transport.fetch('https://shop.example/dp/A', Date.now() + 20_000)).region).toBeUndefined()
+  })
+
+  it('judges row checks on the page\'s own tables when the lane says how its answer reads them, else leaves them unjudged (PA C2)', async () => {
+    const api = sessionServing('bb_1')
+    const titled = JSON.stringify({ loading: false, text: 4, href: 'https://site.test/a', html: '<html><body><p>AAPL</p></body></html>', tableCount: 0 })
+    const rows = (n: number) => `<html><body><p>AAPL</p><table><tr><th>Date</th><th>Price</th></tr>${'<tr><td>2026-01-01</td><td>$1</td></tr>'.repeat(n)}</table></body></html>`
+    const contract = { checks: [{ type: 'markdownIncludes' as const, text: 'AAPL' }, { type: 'tableRowsMin' as const, tableIndex: 0, columns: [0, 1], min: 2 }] }
+    const tablesOf = (html: string) => html.includes('<table>') ? [{ tableIndex: 0, headerRows: 1, rows: [['Date', 'Price'], ...Array.from(html.matchAll(/<td>2026/g), () => ['2026-01-01', '$1'])] }] : []
+    const delayed = fakeBrowser({ regionViews: [titled], pageHtml: [rows(0), rows(0), rows(2)] })
+    const res = await new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, api.handler), connectorFor(delayed).connector).fetch('https://shop.example/dp/A', Date.now() + 20_000, undefined, { contract, tablesOf })
+    expect(res.region).toMatchObject({ ready: true, reads: 4, checks: [{ passed: true }, { passed: true, observedCount: 2 }] })
+    // A page past the read's bounds is unknown: never zero rows, never ready on the title.
+    const large = fakeBrowser({ regionViews: [titled], pageHtml: [null] })
+    const unread = await new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, sessionServing('bb_2').handler), connectorFor(large).connector).fetch('https://shop.example/dp/A', Date.now() + 3_000, undefined, { contract, tablesOf })
+    expect(unread.region).toMatchObject({ ready: false, tablesUnjudged: true, checks: [{ passed: true }, { passed: null }] })
+    // Without the reader (decision 12) the title alone ends the wait unjudged, not ready.
+    const plain = fakeBrowser({ regionViews: [titled] })
+    const untold = await new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, sessionServing('bb_3').handler), connectorFor(plain).connector).fetch('https://shop.example/dp/A', Date.now() + 20_000, undefined, { contract })
+    expect(untold.region).toMatchObject({ ready: false, reads: 2, tablesUnjudged: true })
   })
 
   it('reports the status and URL of the document a script moved the page on to, not the first answer (PA B1)', async () => {

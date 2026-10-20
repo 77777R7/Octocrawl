@@ -161,3 +161,10 @@ it('keeps a bounded table capture unknown without losing the time actually waite
   const page = result({ verification: { status: 'failed', verifier: 'verify/9', contractSha256: 'c'.repeat(64), reason: 'checks_failed', checks: [] } }, [{ at: 1, lane: 'browser_local', event: 'region_wait', detail: { ready: false, empty: false, waitedMs: 3_000, reads: 7, judged: 7, loading: false, steady: true, contractSha256: 'c'.repeat(64), tablesUnjudged: true, checks: [{ type: 'markdownIncludes', passed: true }, { type: 'tableRowsMin', passed: null }] } }])
   expect(readinessOf(page)).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'], waitedMs: 3_000 })
 })
+
+it('reads a provider page whose row checks no table reader judged as region_unjudged, and a delivered table that passes as ready (PA C2, decision 12)', () => {
+  const sha = 'e'.repeat(64)
+  const titleOnly: TraceEvent = { at: 1, lane: 'provider', event: 'region_wait', detail: { ready: false, empty: false, waitedMs: 500, reads: 2, judged: 2, loading: false, steady: true, contractSha256: sha, tablesUnjudged: true, checks: [{ type: 'markdownIncludes', passed: true }, { type: 'tableRowsMin', passed: null }] } }
+  expect(readinessOf(result({ lane: 'provider', verification: { status: 'failed', verifier: 'verify/9', contractSha256: sha, reason: 'checks_failed', checks: [] } }, [titleOnly]))).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'], waitedMs: 500 })
+  expect(readinessOf(result({ lane: 'provider', verification: { status: 'passed', verifier: 'verify/9', contractSha256: sha, reason: null, checks: [] } }, [titleOnly]))).toEqual({ state: 'ready', basis: ['verified'], waitedMs: 500 })
+})

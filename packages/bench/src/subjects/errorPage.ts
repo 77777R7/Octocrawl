@@ -1,5 +1,5 @@
 import type { AttributeExtraction, FetchOptions, FetchResult, FetchWarning, Lane, ListExtraction, PageTable, TraceEvent } from '@w2l/contracts'
-import { collectImages, collectLinks, extractAttributes, extractListRecords, extractTf, listExtraction, resolveListSpec, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, htmlToMarkdown, htmlToTables, wholePageBody, visibleText, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
+import { collectImages, collectLinks, extractAttributes, extractListRecords, extractTf, listExtraction, resolveListSpec, MAX_LIST_RECORDS, MAX_LIST_VALUE_CHARS, htmlToMarkdown, htmlToTables, selectionBody, wholePageBody, visibleText, withoutLayoutMarkers, type MarkdownOptions } from '@w2l/extract-tf'
 import { sha256Utf8 } from '@w2l/http-core'
 
 /**
@@ -111,6 +111,26 @@ export function tablesFormat(source: { html: string; options: MarkdownOptions },
   const omitted = tables.filter((table) => table.omitted !== undefined).map((table) => table.tableIndex)
   trace.push({ at, lane, event: 'tables_extracted', detail: { count: tables.length, rows: tables.map((table) => table.rows.length), columns: tables.map((table) => table.columns), ...(omitted.length === 0 ? {} : { omitted }) } })
   return { tables }
+}
+
+/** The HTML the tables format reads, with its options: the whole page when asked for, else what the Markdown was written from (the selection or main content `extracted`). */
+export function tablesSource(html: string, url: string, options: FetchOptions, extracted: { mainHtml: string; baseUrl: string | null }): { html: string; options: MarkdownOptions } {
+  return wholePageAsked(options)
+    ? { html, options: { baseUrl: url, exclude: options.excludeTags, ...markdownOptions(options) } }
+    : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }
+}
+
+/**
+ * The tables an answer made from the live page's `html` would hold, read as the lane's answer reads them (tablesSource,
+ * tablesFormat), for a region wait's row checks (ADR 0007, PA C3). Undefined, so unjudged and never an empty set, when
+ * the request selects content (includeTags, a list's items) and the page shows none of it yet: no rows of a region not on
+ * the page is not proof the rows are absent.
+ */
+export function regionTables(html: string, url: string, options: FetchOptions, lane: Lane): readonly PageTable[] | undefined {
+  const selectors = contentSelectors(options, html.length)
+  if (selectors !== undefined && selectionBody(html, selectors, options.excludeTags).matched === 0) return undefined
+  const main = extractTf.extract(html, { url, pruneSelectors: options.excludeTags, includeSelectors: selectors, blockAds: options.blockAds })
+  return tablesFormat(tablesSource(html, url, options, main), url, options, [], lane, 0).tables
 }
 
 /** RFC 4180 CSV: CRLF line ends, a field quoted when it holds a comma, a quote, CR or LF, a quote doubled inside it. */
