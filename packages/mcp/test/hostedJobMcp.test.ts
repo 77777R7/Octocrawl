@@ -32,7 +32,7 @@ afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true }); root = undefined
 })
 
-async function start(options: { addressPerMinute?: number } = {}) {
+async function start(options: { addressPerMinute?: number; allowed?: readonly string[] } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-job-mcp-'))
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening')
   const port = (probe.address() as AddressInfo).port
@@ -45,7 +45,7 @@ async function start(options: { addressPerMinute?: number } = {}) {
   const service = createHostedApi({
     port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys, oauthTokens: new MemoryHostedOAuthTokens(new Map()), quota: new MemoryHostedQuota(),
     credits: new MemoryCreditsStore(1_000), networkPolicy: hostedNetworkPolicy(), log: () => {}, ...(options.addressPerMinute === undefined ? {} : { addressPerMinute: options.addressPerMinute }),
-    jobs: { store, files, enqueueSlice: async (job) => { enqueued.push(job) } },
+    jobs: { store, files, enqueueSlice: async (job) => { enqueued.push(job) }, ...(options.allowed === undefined ? {} : { allows: async (uid: string) => options.allowed!.includes(uid) }) },
   })
   close = service.close
   if (!service.server.listening) await once(service.server, 'listening')
@@ -206,6 +206,19 @@ describe('hosted job tools over MCP', () => {
     const refused = await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/', webhook: 'https://hooks.example.com/' } }).then((result) => { expect(result.isError).toBe(true); return text(result) }, (error: Error) => error.message)
     expect(refused).toMatch(/no webhook over MCP/)
     expect(refused).not.toContain('whsec_')
+    expect(enqueued).toEqual([])
+  })
+
+  it('offers the job tools only to the accounts on the list while it exists, and tells another account they are invite only (H2 R2)', async () => {
+    const { connect, enqueued } = await start({ allowed: ['account-1'] })
+    const invited = (await (await connect('oc_account')).listTools()).tools.map((tool) => tool.name)
+    for (const name of HOSTED_JOB_TOOLS) expect(invited, name).toContain(name)
+    const other = await connect('oc_http')
+    const names = (await other.listTools()).tools.map((tool) => tool.name)
+    for (const name of HOSTED_JOB_TOOLS) expect(names, name).not.toContain(name)
+    expect(names).toContain('scrape')
+    const refused = await other.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/'] } }).then((result) => { expect(result.isError).toBe(true); return text(result) }, (error: Error) => error.message)
+    expect(refused).toMatch(/invited accounts/)
     expect(enqueued).toEqual([])
   })
 

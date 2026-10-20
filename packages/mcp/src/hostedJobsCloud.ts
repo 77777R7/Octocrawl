@@ -24,6 +24,8 @@ export interface JobsCloud {
   enqueueWebhook: (job: HostedJob) => Promise<void>
   /** The global switch, `hostedConfig/jobs` field `enabled` (absent: on), read at most every 30 s. */
   enabled: () => Promise<boolean>
+  /** Whether an account may start jobs: on `hostedConfig/jobs.allowedUids` when that field exists (H2 R2), else every account. */
+  allows: (uid: string) => Promise<boolean>
 }
 
 export async function jobsCloudFromEnv(env: NodeJS.ProcessEnv, fetcher: typeof fetch = fetch): Promise<JobsCloud | null> {
@@ -44,20 +46,31 @@ export async function jobsCloudFromEnv(env: NodeJS.ProcessEnv, fetcher: typeof f
   const bucket = new GcsBucket(env.W2L_JOBS_BUCKET!.trim(), token, fetcher, signer)
   const queue = new CloudTasksQueue({ project, location, queue: queueName, serviceAccount: tasksAccount }, token, fetcher)
   const deliver = (id: string, path: string, body: unknown, at?: Date) => queue.enqueue({ id, url: `${workerUrl}${path}`, audience: workerUrl, body, deadlineSeconds: 900, ...(at === undefined ? {} : { scheduleTime: at }) }).then(() => {})
-  let switchRead: { at: number; on: boolean } | null = null
+  let switchRead: { at: number; on: boolean; allowed: ReadonlySet<string> | null } | null = null
+  /** `hostedConfig/jobs`: the switch (`enabled`, absent: on) and the accounts that may start jobs (`allowedUids`, absent: every account). */
+  const readSwitch = async () => {
+    if (switchRead !== null && Date.now() - switchRead.at < 30_000) return switchRead
+    try {
+      const response = await fetcher(`https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/documents/hostedConfig/jobs`, { headers: { authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(5_000) })
+      if (response.status === 404) switchRead = { at: Date.now(), on: true, allowed: null }
+      else if (!response.ok) throw new Error(`hostedConfig/jobs read failed (${response.status})`)
+      else {
+        const fields = (await response.json() as { fields?: { enabled?: { booleanValue?: boolean }; allowedUids?: { arrayValue?: { values?: Array<{ stringValue?: string }> } } } }).fields ?? {}
+        const allowed = fields.allowedUids === undefined ? null : new Set((fields.allowedUids.arrayValue?.values ?? []).flatMap((value) => typeof value.stringValue === 'string' ? [value.stringValue] : []))
+        switchRead = { at: Date.now(), on: fields.enabled?.booleanValue !== false, allowed }
+      }
+    } catch {
+      // A failed read keeps what was read last; with nothing read yet, the switch stays on and the list lets no one in.
+      switchRead = { at: Date.now(), on: switchRead?.on ?? true, allowed: switchRead?.allowed ?? new Set() }
+    }
+    return switchRead
+  }
   return {
     project, bucket, workerUrl, tasksAccount,
     enqueueSlice: (job, delaySeconds = 0) => deliver(`${job.id}-${job.generation}`, `/internal/jobs/${job.id}/slice`, { generation: job.generation }, delaySeconds > 0 ? new Date(Date.now() + delaySeconds * 1000) : undefined),
     enqueueExpiry: (job) => deliver(`${job.id}-expire`, `/internal/jobs/${job.id}/expire`, {}, job.expireAt === null ? undefined : new Date(job.expireAt)),
     enqueueWebhook: (job) => deliver(`${job.id}-webhook`, `/internal/jobs/${job.id}/webhook`, {}),
-    async enabled() {
-      if (switchRead !== null && Date.now() - switchRead.at < 30_000) return switchRead.on
-      try {
-        const response = await fetcher(`https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/documents/hostedConfig/jobs`, { headers: { authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(5_000) })
-        const on = response.status === 404 ? true : response.ok ? (await response.json() as { fields?: { enabled?: { booleanValue?: boolean } } }).fields?.enabled?.booleanValue !== false : (switchRead?.on ?? true)
-        switchRead = { at: Date.now(), on }
-      } catch { switchRead = { at: Date.now(), on: switchRead?.on ?? true } }
-      return switchRead.on
-    },
+    async enabled() { return (await readSwitch()).on },
+    async allows(uid) { const allowed = (await readSwitch()).allowed; return allowed === null || allowed.has(uid) },
   }
 }

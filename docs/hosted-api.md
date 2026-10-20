@@ -113,7 +113,21 @@ Hosted batch (1–1,000 URLs) and crawl (at most 500 pages) jobs (ROADMAP PH sta
 | `W2L_JOBS_WORKER_URL` | `https://octocrawl-jobs-c7fpmz73tq-as.a.run.app` |
 | `W2L_JOBS_TASKS_ACCOUNT` | `octocrawl-jobs-tasks@${W2L_PROJECT_ID}.iam.gserviceaccount.com` |
 
-The global switch is the Firestore document `hostedConfig/jobs`, field `enabled`; absent means on, and both services read it at most every 30 s. Off, a start answers 503 `jobs_paused` and a running job's slice stops at its next page and waits five minutes.
+The global switch is the Firestore document `hostedConfig/jobs`, field `enabled`; absent means on, and both services read it at most every 30 s.
+
+The same document's `allowedUids`, an array of account uids, makes jobs invite only (H2 R2). When the field is absent, every account may start jobs. When it exists, only the listed accounts may; an empty array lets no one. It is read together with `enabled`; a failed read keeps the last value, and with nothing read yet lets no one in.
+- **Starts.** A start from another account answers 403 `jobs_invite_only`, on REST and through MCP, which calls the same gate.
+- **MCP tool lists.** An MCP connection lists the job tools only to an allowed account. Another account gets a hint that jobs are open to invited accounts for now.
+- **Reads and cancels.** These stay open on REST, so an account taken off the list can still read and cancel its jobs there. Over MCP the tools are gone for it.
+- **Jobs already queued.** A job an account queued before it left the list still runs when its turn comes.
+- **Replays.** A start replayed by its idempotency key is refused like a new one.
+
+```sh
+# Invite only, for the accounts named (each is users/{uid}); remove the field to open jobs to every account.
+T=$(gcloud auth print-access-token); curl -s -X PATCH -H "authorization: Bearer $T" -H "x-goog-user-project: $W2L_PROJECT_ID" -H 'content-type: application/json' \
+  "https://firestore.googleapis.com/v1/projects/$W2L_PROJECT_ID/databases/(default)/documents/hostedConfig/jobs?updateMask.fieldPaths=allowedUids" \
+  -d '{"fields":{"allowedUids":{"arrayValue":{"values":[{"stringValue":"<uid>"}]}}}}'
+``` Off, a start answers 503 `jobs_paused` and a running job's slice stops at its next page and waits five minutes.
 
 The resources, made once on 2026-10-20:
 
