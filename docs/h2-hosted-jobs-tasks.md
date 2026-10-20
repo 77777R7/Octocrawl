@@ -98,7 +98,10 @@
 
 ## R：发布与开放
 
-- [ ] **R1** 按带 tag 的 revision 流程部署 API 和 worker，确认线上 revision。
+- [x] **R1** 按带 tag 的 revision 流程部署 API 和 worker，确认线上 revision。
+  - 2026-10-20 部署 main `dd218625`：API 用 `octocrawl-api-hook-dd21862`（tag `h32hook`，回滚用 `h31fetched`），worker 用 `octocrawl-jobs-w9-dd21862`（tag `w9hook`，回滚用 w8）。
+  - 在线上用一个测试 key 跑了一次 webhook：投递成功、签名有效、密钥没有泄露，记录见 [research/hosted/2026-10-20-h2-r1-webhook-dd218625.md](../research/hosted/2026-10-20-h2-r1-webhook-dd218625.md)。
+  - 测试 key 已吊销，全局开关已关。
 - [ ] **R2** 打开全局开关，按名单邀请（见“待你决定”第 1 条）。
 - [ ] **R3** 更新 `apps/public-web/content/connect-mcp.md` 和 `docs/hosted-api.md`，写明 hosted 任务的用法和上限。
 
@@ -115,4 +118,5 @@
 
 ## 下次从这里继续
 
-- M1–M5（#627）和 P1（#629）已合并，W1–W4 已提交。下一项是 **R1**：部署 API 和 worker，然后用一个测试 key 和一个公网接收端，把 webhook 在线上跑一遍。
+- M1–M5（#627）、P1（#629）、W1–W4（#636）已合并，R1 已部署并在线上验证。全局开关现在是关的。
+- 下一项：R3（更新 connect-mcp 和 hosted-api 文档里的任务用法）和 A1（三个客户端端到端跑一次）。R2（打开开关、发邀请）要等你给出邀请名单。
