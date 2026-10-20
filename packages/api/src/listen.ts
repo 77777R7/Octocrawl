@@ -1,7 +1,9 @@
-import { readFileSync } from 'node:fs'
-import { accessGrantFromText, type AccessGrant } from '@w2l/http-core'
-import { browserEngineChoice, browserIdentityChoice, type BrowserIdentityChoice, COMPAT_LIBRARY, compatHostsChoice, DEFAULT_COMPAT_PROFILE, type BrowserEngineName } from '@w2l/bench'
-import { describeEgressProxy, egressProxies, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, withEnvironmentProxy, withOperatorContact, type NetworkPolicy, type ProxyServer } from '@w2l/contracts'
+import type { AccessGrant } from '@w2l/http-core'
+import type { BrowserIdentityChoice, BrowserEngineName } from '@w2l/bench'
+import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, withEnvironmentProxy, withOperatorContact, type NetworkPolicy, type ProxyServer } from '@w2l/contracts'
+import { loadEngineConfig, readFlag, tunedPolicy } from './engineConfig.js'
+
+export { accessGrantNotice, MAX_WORKER_COUNT } from './engineConfig.js'
 
 export type ApiMode = 'local' | 'hosted'
 
@@ -87,54 +89,6 @@ export interface ListenConfig {
   egressEchoUrl: string | null
 }
 
-/** W2L_EGRESS_PROXIES, checked at startup: the grant must name egress_sessions; a hosted server refuses them. */
-function readEgressProxies(env: NodeJS.ProcessEnv, grant: AccessGrant | null, hosted: boolean): ProxyServer[] {
-  const proxies = egressProxies(env.W2L_EGRESS_PROXIES)
-  if (proxies.length === 0) return []
-  if (hosted) throw new Error('W2L_EGRESS_PROXIES is refused on a hosted server (ADR 0005: a hosted server connects direct, to addresses it checked)')
-  if (!(grant?.capabilities ?? []).includes('egress_sessions')) throw new Error('W2L_EGRESS_PROXIES needs an access grant that names egress_sessions (ADR 0005; --access-grant or W2L_ACCESS_GRANT)')
-  return proxies
-}
-
-/** W2L_EGRESS_ECHO_URL, checked at startup: an http(s) URL, and only beside W2L_EGRESS_PROXIES, the egresses it asks about. */
-function readEgressEchoUrl(env: NodeJS.ProcessEnv, egresses: readonly ProxyServer[]): string | null {
-  const raw = env.W2L_EGRESS_ECHO_URL?.trim() ?? ''
-  if (raw === '') return null
-  if (egresses.length === 0) throw new Error('W2L_EGRESS_ECHO_URL asks each egress proxy where it leaves from: it needs W2L_EGRESS_PROXIES')
-  let url: URL
-  try { url = new URL(raw) } catch { throw new Error('W2L_EGRESS_ECHO_URL must be an http(s) URL') }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('W2L_EGRESS_ECHO_URL must be an http(s) URL')
-  return url.href
-}
-
-/**
- * The server's access grant, validated. A grant with any problem stops startup with every problem
- * listed: a server that silently dropped a refused or deferred capability would run with less than
- * the operator thinks, or with more than they meant. A hosted server has no person's browser, so
- * tier `my_browser` is refused there.
- */
-function readAccessGrant(argv: readonly string[], env: NodeJS.ProcessEnv, hosted: boolean): AccessGrant | null {
-  const source = (readFlag(argv, '--access-grant') ?? env['W2L_ACCESS_GRANT'] ?? '').trim()
-  if (source === '') return null
-  let text: string
-  try {
-    text = source.startsWith('{') ? source : readFileSync(source, 'utf8')
-  } catch (error) {
-    throw new Error(`access grant: cannot read ${source}: ${error instanceof Error ? error.message : String(error)}`)
-  }
-  const grant = accessGrantFromText(text)
-  if (hosted && grant.tier === 'my_browser') {
-    throw new Error("access grant refused: tier my_browser reads the person's own Chrome, which a hosted server does not have")
-  }
-  return grant
-}
-
-/** The startup line that says what the grant allows. */
-export function accessGrantNotice(grant: AccessGrant): string {
-  const usd = (value: number | null) => (value === null ? 'none' : `${value} USD`)
-  return `access grant (ADR 0005): tier ${grant.tier}; ${grant.capabilities.length === 0 ? 'no capabilities' : grant.capabilities.join(', ')}; run budget ${usd(grant.budget.perRunUsd)}; per-request budget ${usd(grant.budget.perRequestUsd)}${grant.attestation === null ? '' : `; accepted by ${grant.attestation.principal}`}`
-}
-
 /** `W2L_JOB_STREAMS=off` is the one value that turns the stream routes off; anything else leaves them on. */
 function jobStreamsEnabled(env: NodeJS.ProcessEnv): boolean {
   return (env['W2L_JOB_STREAMS'] ?? '').trim().toLowerCase() !== 'off'
@@ -147,17 +101,8 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   const port = parsePort(argv, env)
   const tokens = readTokens(argv, env)
   const rateLimit = parseRateLimit(argv, env)
-  const workerCount = parseWorkerCount(env)
-  const accessGrant = readAccessGrant(argv, env, hosted)
-  const browserEngine = browserEngineChoice(env, accessGrant, hosted)
-  const browserIdentity = browserIdentityChoice(env, hosted)
-  const identityNotice = browserIdentity === 'declared' ? [] : ['browser identity: actual on the public browser rung (W2L_BROWSER_IDENTITY): the browser sends its own User-Agent and client hints, which the record declares; an experiment switch (docs/pa-challenge-botcheck-tasks.md G2)']
-  const engineNotice = browserEngine === 'playwright' ? [] : [`browser engine: ${browserEngine} on the public browser rung (ADR 0005 enhanced_browser); saved logins and managed sessions keep stock Playwright`]
-  const compatHosts = compatHostsChoice(env, accessGrant, hosted)
-  const egressList = readEgressProxies(env, accessGrant, hosted)
-  const egressEchoUrl = readEgressEchoUrl(env, egressList)
-  const egressNotice = egressList.length === 0 ? [] : [`egress proxies (ADR 0005 egress_sessions): ${egressList.map((proxy) => proxy.endpoint).join(', ')}; a batch or crawl keeps one for its run and moves on only when the proxy itself fails its probe (at most 2 times), never after a block, a challenge, a 429 or a site's reset; a scrape takes the next healthy one${egressEchoUrl === null ? '' : `; each is asked where it leaves from at ${new URL(egressEchoUrl).host}`}`]
-  const compatNotice = compatHosts.length === 0 ? [] : [`compatible transport (ADR 0005 compatible_transport): ${COMPAT_LIBRARY.name} ${COMPAT_LIBRARY.version}, profile ${DEFAULT_COMPAT_PROFILE}, in place of the http rung for standard-mode pages on ${compatHosts.join(', ')} and their subdomains${(env.W2L_COMPAT_HOSTS ?? '').trim() === '' ? ' (the hosts its acceptance showed it helps, research/access/benefit-hosts.v1.json; W2L_COMPAT_HOSTS names others, none turns it off)' : ''}; a request with custom headers or mobile keeps the http rung`]
+  // The engine's options, from the loader every entry point that runs the engine shares (engineConfig.ts).
+  const { accessGrant, browserEngine, browserIdentity, compatHosts, egressProxies: egressList, egressEchoUrl, workerCount, notices: engineNotices } = loadEngineConfig(env, { hosted, argv })
   if (hosted) {
     if (tokens.length === 0) {
       throw new Error('hosted mode requires --token, W2L_API_TOKEN or W2L_API_TOKENS')
@@ -174,7 +119,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       mapMaxLimit: HOSTED_MAP_MAX_LIMIT,
       mapMaxTimeoutMs: HOSTED_MAP_MAX_TIMEOUT_MS,
       allowRobotsOverride: false,
-      notices: [hostedProxyNotice(env), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)])].filter(notice => notice !== null),
+      notices: [hostedProxyNotice(env), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...engineNotices].filter(notice => notice !== null),
       ...(rateLimit === undefined ? {} : { rateLimit }),
       delivery: deliveryConfig('hosted', env),
       jobStreams: jobStreamsEnabled(env),
@@ -204,7 +149,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     mapMaxLimit: MAX_MAP_LIMIT,
     mapMaxTimeoutMs: MAX_MAP_TIMEOUT_MS,
     allowRobotsOverride: true,
-    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)]), ...engineNotice, ...identityNotice, ...compatNotice, ...egressNotice],
+    notices: [...(networkPolicy.egressProxy ? [describeEgressProxy(networkPolicy.egressProxy)] : []), ...(jobStreamsEnabled(env) ? [] : [JOB_STREAMS_OFF_NOTICE]), ...engineNotices],
     ...(rateLimit === undefined ? {} : { rateLimit }),
     delivery: deliveryConfig('local', env),
     jobStreams: jobStreamsEnabled(env),
@@ -250,24 +195,6 @@ function parseRateLimit(argv: readonly string[], env: NodeJS.ProcessEnv): { perM
   return { perMinute }
 }
 
-export const MAX_WORKER_COUNT = 64
-
-function parseWorkerCount(env: NodeJS.ProcessEnv): number {
-  const raw = (env['W2L_WORKER_COUNT'] ?? '').trim()
-  if (raw === '') return 4
-  const count = Number(raw)
-  if (!/^\d+$/.test(raw) || count < 1 || count > MAX_WORKER_COUNT) throw new Error(`W2L_WORKER_COUNT must be an integer from 1 to ${MAX_WORKER_COUNT}`)
-  return count
-}
-
-function tunedPolicy(base: NetworkPolicy, env: NodeJS.ProcessEnv): NetworkPolicy {
-  const concurrency = env['W2L_PER_HOST_CONCURRENCY'] === undefined ? base.perHostConcurrency : Number(env['W2L_PER_HOST_CONCURRENCY'])
-  const delay = env['W2L_PER_HOST_MIN_DELAY_MS'] === undefined ? base.perHostMinDelayMs : Number(env['W2L_PER_HOST_MIN_DELAY_MS'])
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('W2L_PER_HOST_CONCURRENCY must be 1, 2, 3, or 4')
-  if (!Number.isInteger(delay) || delay < 1 || delay > 60_000) throw new Error('W2L_PER_HOST_MIN_DELAY_MS must be 1..60000')
-  return { ...base, perHostConcurrency: concurrency, perHostMinDelayMs: delay }
-}
-
 export function parsePort(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): number {
   const raw = readFlag(argv, '--port') ?? env['W2L_API_PORT'] ?? '8787'
   const port = Number(raw)
@@ -296,12 +223,4 @@ function readTokens(argv: readonly string[], env: NodeJS.ProcessEnv): readonly s
   }
   const listed = flags.length > 0 ? flags : [env['W2L_API_TOKEN'] ?? '', ...(env['W2L_API_TOKENS'] ?? '').split(',')]
   return [...new Set(listed.map((token) => token.trim()).filter((token) => token.length > 0))]
-}
-
-function readFlag(argv: readonly string[], name: string): string | undefined {
-  const eq = argv.find((arg) => arg.startsWith(`${name}=`))
-  if (eq !== undefined) return eq.slice(name.length + 1)
-  const idx = argv.indexOf(name)
-  if (idx >= 0 && argv[idx + 1] !== undefined) return argv[idx + 1]
-  return undefined
 }

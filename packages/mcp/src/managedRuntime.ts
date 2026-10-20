@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createApp, createApiEngine, type UserChromeOptions } from '@w2l/api'
+import { createApp, createApiEngine, type EngineConfig, type UserChromeOptions } from '@w2l/api'
 import type { NetworkPolicy } from '@w2l/contracts'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
@@ -28,11 +28,22 @@ export interface ManagedRuntimeOptions {
   deliveryPollMs?: number
   /** Local single-user service only: tool errors keep an internal error's own message. */
   exposeInternalErrors?: boolean
+  /**
+   * The engine options the local host loaded (loadEngineConfig): the access grant and what it turns on. The hosted
+   * host passes none, so its engine has no grant and refuses access enhanced and my-browser.
+   */
+  accessGrant?: EngineConfig['accessGrant']
+  browserEngine?: EngineConfig['browserEngine']
+  browserIdentity?: EngineConfig['browserIdentity']
+  compatHosts?: EngineConfig['compatHosts']
+  egressProxies?: EngineConfig['egressProxies']
+  egressEchoUrl?: EngineConfig['egressEchoUrl']
 }
 
 /** The REST API stays in-process; both MCP transports share these durable workers. */
 export function createManagedRuntime(options: ManagedRuntimeOptions) {
-  const engine = createApiEngine({taskRoot:options.taskRoot,networkPolicy:options.networkPolicy,httpOnly:options.httpOnly,defaultMaxPages:options.defaultMaxPages,hosted:options.hosted,sessionsFile:options.sessionsFile,userChrome:options.userChrome,channelPolicy:options.channelPolicy,publicPreferenceState:options.publicPreferenceState,browserAllowedHosts:options.browserAllowedHosts,maxActiveBatches:options.maxActiveBatches,batchMaxWallMs:options.batchMaxWallMs,workerCount:options.workerCount})
+  const engine = createApiEngine({taskRoot:options.taskRoot,networkPolicy:options.networkPolicy,httpOnly:options.httpOnly,defaultMaxPages:options.defaultMaxPages,hosted:options.hosted,sessionsFile:options.sessionsFile,userChrome:options.userChrome,channelPolicy:options.channelPolicy,publicPreferenceState:options.publicPreferenceState,browserAllowedHosts:options.browserAllowedHosts,maxActiveBatches:options.maxActiveBatches,batchMaxWallMs:options.batchMaxWallMs,workerCount:options.workerCount,
+    accessGrant:options.accessGrant,browserEngine:options.browserEngine,browserIdentity:options.browserIdentity,compatHosts:options.compatHosts,egressProxies:options.egressProxies,egressEchoUrl:options.egressEchoUrl})
   const api = createApp(engine, {exposeInternalErrors:options.exposeInternalErrors})
   const client = new W2L({baseUrl:'http://w2l.internal',fetch:async(input,init)=>api.fetch(new Request(input,init))})
   const deliveryStore = DeliveryStore.open(join(options.taskRoot,'section-b-control.sqlite'))
