@@ -407,8 +407,8 @@ function requestedFormats(body: unknown): string[] {
 }
 
 /** A scrape result's outcome on its request line, from the result and its Evidence Record: never the page's content. */
-function noteScrape(note: RequestNote, result: unknown): void {
-  const r = (result ?? {}) as { status?: unknown; lane?: unknown; failureReason?: unknown; evidenceRecord?: { finalUrl?: unknown; httpStatus?: unknown; reason?: unknown; robotsDecision?: { decision?: unknown } | null; rawSha256?: unknown } }
+export function noteScrape(note: RequestNote, result: unknown): void {
+  const r = (result ?? {}) as { status?: unknown; lane?: unknown; failureReason?: unknown; scrapeId?: unknown; evidenceRecord?: { finalUrl?: unknown; httpStatus?: unknown; reason?: unknown; robotsDecision?: { decision?: unknown } | null; rawSha256?: unknown; access?: { paidCalls?: unknown } | null } }
   const evidence = r.evidenceRecord ?? {}
   const text = (value: unknown) => (typeof value === 'string' ? value : null)
   note.status = text(r.status) ?? 'error'
@@ -419,6 +419,13 @@ function noteScrape(note: RequestNote, result: unknown): void {
   const robots = evidence.robotsDecision?.decision
   note.robots = robots === 'allowed' || robots === 'disallowed' || robots === 'no_robots' ? robots : null
   note.sha256 = text(evidence.rawSha256)
+  // The scrape's record and its paid calls by id, so the line's credits and the record's USD can be joined (PA EH1).
+  note.scrapeId = text(r.scrapeId)
+  const paid = evidence.access?.paidCalls
+  note.paidCallIds = Array.isArray(paid) ? paid.flatMap((call: unknown) => {
+    const id = call !== null && typeof call === 'object' ? (call as { paidCallId?: unknown }).paidCallId : undefined
+    return typeof id === 'string' && id !== '' ? [id] : []
+  }) : []
 }
 
 export interface HostedCaller {
@@ -748,7 +755,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const reservation: Reservation = reserved.reservation
     let charge: ReturnType<typeof scrapeCharge> = { credits: 0, kind: 'unread' }
     // The call's line for the dashboard's Activity page: what was asked for, then what came back.
-    const note: RequestNote = { endpoint: isScrape ? 'scrape' : 'map', keyId: caller.id, url: '', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: null, ms: null }
+    const note: RequestNote = { endpoint: isScrape ? 'scrape' : 'map', keyId: caller.id, url: '', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: null, ms: null, scrapeId: null, paidCallIds: null }
     // From the call's arrival at the gate, so the reservation's round trip counts too.
     const started = now.getTime()
     const settle = async () => {

@@ -1,0 +1,12 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@w2l/contracts": ["../../../contracts/src/index.ts"],
+      "@w2l/http-core": ["../../../http-core/src/index.ts"],
+      "@w2l/extract-tf": ["../../../extract-tf/src/index.ts"],
+      "@w2l/fixtures": ["../../../fixtures/src/index.ts"],
+      "@w2l/runtime": ["../../../runtime/src/index.ts"]
+    }
+  }
+}

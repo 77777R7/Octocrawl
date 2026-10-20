@@ -189,7 +189,7 @@ describe('the Firestore ledger', () => {
     const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
     const reserved = await store.reserve('account-1', 5, [SITE], OCT)
     if (!reserved.ok) throw new Error('unreachable')
-    const note = { endpoint: 'scrape' as const, keyId: 'k'.repeat(64), url: `https://example.org/${'a'.repeat(3_000)}`, finalUrl: 'https://example.org/a', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed' as const, sha256: 'f'.repeat(64), links: null, formats: ['markdown', 'json'], ms: 1_234 }
+    const note = { endpoint: 'scrape' as const, keyId: 'k'.repeat(64), url: `https://example.org/${'a'.repeat(3_000)}`, finalUrl: 'https://example.org/a', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed' as const, sha256: 'f'.repeat(64), links: null, formats: ['markdown', 'json'], ms: 1_234, scrapeId: 'scrape-1', paidCallIds: ['task-attempt-1'] }
     await store.settle(reserved.reservation, 1, 'http', OCT, note)
     const settled = firestore.commits.at(-1) as { writes: Array<{ update: { name: string; fields: Record<string, Record<string, string>> } }> }
     expect(settled.writes).toHaveLength(3)
@@ -202,6 +202,9 @@ describe('the Firestore ledger', () => {
     // What the scrape asked for and how long it took; a scrape that named no format keeps an empty list, a map none.
     expect(line.fields.formats).toEqual({ arrayValue: { values: [{ stringValue: 'markdown' }, { stringValue: 'json' }] } })
     expect(line.fields.ms).toEqual({ integerValue: '1234' })
+    // The scrape's record and its paid calls by id, so its credits and the record's USD can be joined (PA EH1).
+    expect(line.fields.scrapeId).toEqual({ stringValue: 'scrape-1' })
+    expect(line.fields.paidCallIds).toEqual({ arrayValue: { values: [{ stringValue: 'task-attempt-1' }] } })
     for (const [formats, written] of [[[], { arrayValue: {} }], [null, undefined]] as const) {
       const next = await store.reserve('account-1', 1, [SITE], OCT)
       if (!next.ok) throw new Error('unreachable')

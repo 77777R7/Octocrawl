@@ -12,8 +12,8 @@ import { hostedNetworkPolicy, parseScrapeRequest, type CompactScrapeResponse } f
 import { MCP_VERSION } from '../src/server.js'
 import { expectUsableInstructions } from './instructionChecks.js'
 import { TOOL_NAMES } from '../src/tools.js'
-import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
-import { MemoryCreditsStore, type CreditsStore } from '../src/hostedCredits.js'
+import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, noteScrape, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
+import { MemoryCreditsStore, type CreditsStore, type RequestNote } from '../src/hostedCredits.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
 import { expectIsError } from './toolErrorChecks.js'
 
@@ -323,6 +323,10 @@ it('an account\'s key spends credits by what each result returned, and says what
   // The formats a scrape named (none named: an empty list; a map: none at all), and how long each call took.
   expect(lines.map(line => line.formats)).toEqual([null, null, [], [], [], [], ['markdown']])
   for (const line of lines) expect(line.ms).toEqual(expect.any(Number))
+  // A scrape that ran names its record and its paid calls (none here); a map, or a request that ran nothing, neither (PA EH1).
+  expect(read.scrapeId).toMatch(/^[0-9a-f-]{36}$/)
+  expect(lines.map(line => line.paidCallIds)).toEqual([null, null, null, null, [], [], []])
+  expect(lines.map(line => line.scrapeId === null)).toEqual([true, true, true, true, false, false, false])
   expect(lines.every(line => line.ms! >= 0)).toBe(true)
   // Never the page's content: its words appear nowhere in the lines.
   expect(JSON.stringify(lines)).not.toContain('Tides')
@@ -899,4 +903,13 @@ it('answers initialize on every hosted connection with instructions for the tool
     expect(instructions).toContain('npx octocrawl serve')
     expect(init.serverInfo).toMatchObject({ name: 'octocrawl', title: 'Octocrawl', version: MCP_VERSION, description: expect.any(String) })
   }
+})
+
+it('a request line names the scrape\'s record and the paid calls on its Evidence Record (PA EH1)', () => {
+  const note: RequestNote = { endpoint: 'scrape', keyId: 'k', url: 'https://example.com/', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: [], ms: null, scrapeId: null, paidCallIds: null }
+  noteScrape(note, { status: 'success', scrapeId: 'scrape-1', evidenceRecord: { access: { paidCalls: [{ provider: 'steel', paidCallId: 'task-attempt-1' }, { provider: 'steel' }, { provider: 'steel', paidCallId: 'task-attempt-2' }] } } })
+  expect(note).toMatchObject({ scrapeId: 'scrape-1', paidCallIds: ['task-attempt-1', 'task-attempt-2'] })
+  // A record with no paid calls: an empty list, not unknown.
+  noteScrape(note, { status: 'success', scrapeId: 'scrape-2', evidenceRecord: { access: null } })
+  expect(note).toMatchObject({ scrapeId: 'scrape-2', paidCallIds: [] })
 })
