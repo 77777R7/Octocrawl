@@ -129,4 +129,13 @@ class DevelopmentMappings(unittest.TestCase):
   r=score_case(c,doc(tables=[{'caption':'','rows':[['Date','Open','High'],['Oct 15, 2026','346.95','347.85']]}]),ORIGIN)
   self.assertEqual(r['totals']['fabricated'],2)
 
+ def test_unknown_context_is_not_scored(self):
+  c=gold('D02','https://www.newegg.com/p/pl?d=laptop',[field('D02','1TS-000A-15W75','price','319.99','decimal',date='quote')],dates={'quote':{'state':'unknown','value':None}})
+  d=doc('[Dell Latitude](https://www.newegg.com/dell/p/1TS-000A-15W75)\n\n$319.99\n\n[More options from $319.99](https://www.newegg.com/dell/p/1TS-000A-15W75?Item=1TS-000A-15W75#moreBuyOptions)\n\n[HP](https://www.newegg.com/hp/p/1TS-000D-1TE80)')
+  r=score_case(c,d,ORIGIN);self.assertEqual((r['totals']['fullyCorrect'],r['totals']['dateKnown'],r['totals']['duplicateSelectedRecords']),(1,0,0))
+ def test_same_item_later_in_the_page_is_a_duplicate(self):
+  c=gold('D02','https://www.newegg.com/p/pl?d=laptop',[field('D02','1TS-000A-15W75','price','319.99','decimal')])
+  d=doc('[Dell](https://www.newegg.com/dell/p/1TS-000A-15W75)\n\n$319.99\n\n[HP](https://www.newegg.com/hp/p/1TS-000D-1TE80)\n\n$279.99\n\n[Dell](https://www.newegg.com/dell/p/1TS-000A-15W75)\n\n$319.99')
+  self.assertEqual(score_case(c,d,ORIGIN)['totals']['duplicateSelectedRecords'],1)
+
 if __name__=='__main__':unittest.main()

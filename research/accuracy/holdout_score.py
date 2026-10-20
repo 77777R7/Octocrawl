@@ -222,17 +222,19 @@ def link_open(md,close):
  return close
 
 def link_records(md,pattern,source_url,fixture_origin,inside=False):
- """Markdown links whose URL matches pattern, one record per run of adjacent links to the same URL.
+ """Markdown links whose URL matches pattern, one record per run of adjacent links to the same item
+ (the pattern's first group, else the whole URL); the record keeps the first link's URL.
  inside=True: the card is the link, so a record's region ends at its URL. Otherwise it runs to the next record."""
  hits=[]
  for m in MDTARGET.finditer(md):
   url=rebase_url(m[1],source_url,fixture_origin)
-  if url and re.search(pattern,url):
-   open_=link_open(md,m.start());hits.append({'url':url,'open':open_,'end':m.end(),'text':md[open_:m.start()+1]})
+  hit=re.search(pattern,url) if url else None
+  if hit:
+   open_=link_open(md,m.start());hits.append({'url':url,'key':hit[1] if hit.groups() else url,'open':open_,'end':m.end(),'text':md[open_:m.start()+1]})
  records=[]
  for h in hits:
-  if records and records[-1]['url']==h['url']:records[-1]['texts'].append(h['text']);records[-1]['end']=h['end'];continue
-  records.append({'url':h['url'],'open':h['open'],'end':h['end'],'texts':[h['text']]})
+  if records and records[-1]['key']==h['key']:records[-1]['texts'].append(h['text']);records[-1]['end']=h['end'];continue
+  records.append({'url':h['url'],'key':h['key'],'open':h['open'],'end':h['end'],'texts':[h['text']]})
  for i,r in enumerate(records):
   start=records[i-1]['end'] if inside and i else r['open'];stop=r['end'] if inside else (records[i+1]['open'] if i+1<len(records) else len(md))
   r['region']=md[start:stop];r['ref']=f'markdown.chars[{start}:{stop}]'
@@ -402,7 +404,8 @@ def score_case(case,doc,fixture_origin):
    checks[label]=True if not context or context['state']=='not_applicable' else None if context['state']=='unknown' else (norm(o.get(obskey) or '').casefold()==norm(context['value']).casefold() if label=='period' else norm(o.get(obskey) or '')==norm(context['value']))
   # Field relation: the right value read from the record bound to its own subject.
   checks['relation']=bool(value_ok and checks['entity'] and o.get('outputLocation'))
-  complete=captured and all(v is True for v in checks.values());locatable=value_ok and checks['entity'] and same_source and bool(o.get('outputLocation'))
+  # Fully correct needs every known dimension; a context the source leaves unknown is not scored (None).
+  complete=captured and all(v is not False for v in checks.values());locatable=value_ok and checks['entity'] and same_source and bool(o.get('outputLocation'))
   others={g['value'] for g in case['fields'] if g['name']==f['name'] and g['entityId']!=f['entityId'] and g['value'] is not None and g['value']!=f['value']}
   wrong_record=captured and not value_ok and o.get('observed') is not None and any(equal(o['observed'],v,f['dataType']) for v in others)
   expected=norm(f['value']) if f['value'] is not None else ''
