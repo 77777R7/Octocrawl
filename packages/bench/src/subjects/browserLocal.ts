@@ -1,5 +1,5 @@
 import { sourceDataWarnings } from './sourceData.js'
-import { captureEvent, newCapture, newView, selectionView, viewEvent } from '../capture.js'
+import { captureEvent, documentOf, newCapture, newView, selectionView, viewEvent } from '../capture.js'
 import { mergeListPages } from './listMerge.js'
 import { CONTENTFUL_STATUS, estimateTokens, type ListFormatRequest, type ListRecord, type ListRun, type PageAction, fileByteCap, proxyFor, type ContextCookie, type CookieSession, type ExecutionContext, type FetchOptions, type FetchResult, type FetchWarning, type NetworkPolicy, type RobotsOverrideApplied, type TraceEvent } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
@@ -1279,6 +1279,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           artifacts: [...rawArtifacts, ...(capture?.artifacts ?? [])],
           fetchedAt,
           ...(this.networkPolicy.egressProxy ? { envProxy: proxyFor(finalUrl, this.networkPolicy)?.endpoint ?? null } : {}),
+          document: documentOf(pageCapture),
         },
         usage: {
           wallMs,

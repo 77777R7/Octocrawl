@@ -111,6 +111,13 @@
     "readiness": {
       "description": "Whether the page was ready for its task when it was read, from the result's own signals (ADR 0007). Added to v1 later: optional here so that earlier records stay valid; W2L writes it on every record.",
       "$ref": "#/$defs/readiness"
+    },
+    "document": {
+      "description": "The capture the content was read from (PA G5): its id, the documents the main frame loaded and whether the status is that document's own. Null when no web page was read (no response body, or a file, which rawSha256 identifies) or the lane keeps no capture. Never page content. Added to v1 later: optional here so that earlier records stay valid; W2L writes it on every record.",
+      "anyOf": [
+        { "$ref": "#/$defs/document" },
+        { "type": "null" }
+      ]
     }
   },
   "allOf": [
@@ -616,6 +623,29 @@
           "description": "The signal codes the state was read from, in the order found: warning codes, the failure, block or budget reason, and trace signals such as wait_cut_short. Codes only, never page text; empty for a page ready by every signal.",
           "type": "array",
           "items": { "type": "string" }
+        }
+      }
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["captureId", "generation", "responseMatch"],
+      "properties": {
+        "captureId": {
+          "description": "A random id for this one read of the page: each HTTP read and each browser read gets its own, so a later read of the same URL has another.",
+          "type": "string",
+          "minLength": 1
+        },
+        "generation": {
+          "description": "Documents the main frame loaded up to the read, as the browser lane counted them; null when the lane does not count (HTTP) or could not (a vendor connector with no CDP session).",
+          "anyOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "null" }
+          ]
+        },
+        "responseMatch": {
+          "description": "Whether httpStatus and contentType are the response of the document read: matched; mismatched, the page moved on or the document came without a response it could be paired with; unobserved, the lane could not see the documents. Null on the HTTP lane, which reads the response body itself.",
+          "enum": ["matched", "mismatched", "unobserved", null]
         }
       }
     }
