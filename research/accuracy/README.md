@@ -83,3 +83,22 @@ This audit establishes annotation/source coherence. It cannot independently prov
 | Evidence location | A delivered value maps to the correct same-capture record/cell/text. Count wrong-record citations separately from missing citations. |
 
 The later worksheet must include observed value, entity identity, unit/date/period, output location, source locator, decision and rationale. A production `passed`, a source audit, and independent accuracy acceptance remain separate states. Do not use this set to backfill old access outcomes or claim healthy 25/25, cross-date stability, deployment or an outside trial.
+
+## Scoring and runs
+
+`holdout_score.py` (from #562, extended for R3) reads the final SDK JSON and never runs the product. Per field it records value, subject (entity), relation (the right value read from its own subject's record), unit, date and period retention, plus diagnostics: a value taken from another record of the same field (`wrongRecord`), the right value present but not bound to its subject (`unboundValuePresent`), and a value delivered for a field the capture never had (`fabricated`). Fully correct needs every known dimension; a context the source leaves unknown is not scored. D01–D10 mappings follow the same rules as #562's H mappings: entity keys, record regions and column headers come from the frozen task and entity IDs, values only from the delivered output.
+
+Each case gets an outcome: `correct_success`, `false_success` (`field_error` when the capture had the targets, `no_target` when it had none and the API still answered success), `missed`, or `correct_non_success`. `summarize()` reports error among success results and false success per request on separate denominators, each with N and a one-sided 95% upper bound: 1−0.05^(1/N) when there are none (about 7.2% at N=40), Clopper–Pearson otherwise.
+
+`run_dev.mjs` replays each case of `dev-plan.v1.json` once from its retained bytes through this checkout's engine, API and SDK (HTTP channel, loopback only, proxy variables removed):
+
+```sh
+npx tsc --build
+node research/accuracy/run_dev.mjs .w2l/field-gold/2026-10-17 .w2l/field-gold/runs/<YYYY-MM-DD>-<label>-<commit> main
+.w2l/pyenv/bin/python research/accuracy/holdout_score.py .w2l/field-gold/2026-10-17 .w2l/field-gold/runs/<run> \
+  --fixture-origin http://127.0.0.1:8862 --versions main \
+  --cases D01,D02,D03,D04,D05,D06,D07,D08,D09,D10,H01,H02,H03,H04,H05,H06,H07,H08 \
+  --out .w2l/field-gold/runs/<run>/field-results.json --markdown .w2l/field-gold/runs/<run>/fields.md
+```
+
+Records go to `runs/<YYYY-MM-DD>-<label>-<commit>.md` with the command, commit and per-field marks; `--markdown` leaves expected and observed values out, and `--markdown-values` (for `.w2l/` only) puts them in. The R1b baseline is `runs/2026-10-20-dev-baseline-cea1d4cb.md`.
