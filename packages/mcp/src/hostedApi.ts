@@ -912,7 +912,10 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     })
     const post = trackPost(calls, req, res, parsed, [caller.id])
     // An account's connection, on a server that runs jobs, is offered the job tools too.
-    const jobs = jobRoutes !== null && caller.kind === 'key' && caller.uid !== undefined
+    const account = jobRoutes !== null && caller.kind === 'key' && caller.uid !== undefined
+    // While jobs are invite only (hostedConfig/jobs.allowedUids), an account not on the list is not offered them.
+    const invited = account && await jobRoutes!.allows(caller.uid!)
+    const jobs = account && invited
     const tools = oauth ? oauthTools(caller.browser, jobs) : hostedTools(caller.browser === true, jobs)
     const instructions = serverInstructions(tools.map((tool) => tool.name), { kind: 'hosted', connection: oauth ? 'oauth' : caller.kind === 'key' ? 'key' : 'keyless', browser: caller.browser === true, sharedPool: caller.kind === 'keyless' && caller.pool === 'claude' })
     await serveMcpPost(req, res, parsed, () => createMcpServer(client, {
@@ -923,7 +926,9 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       calls: post,
       unavailableHint: jobs
         ? 'Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.'
-        : jobRoutes !== null
+        : account
+          ? 'Hosted crawls and batches are open to invited accounts for now. They, Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.'
+          : jobRoutes !== null
           ? `Crawls and batches run on hosted Octocrawl for an account: connect with an account's key from https://octocrawl.dev/dashboard/ or sign in at ${MCP_OAUTH_RESOURCE}. Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.`
           : 'Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.',
       normalizeCall: (name, args) => {

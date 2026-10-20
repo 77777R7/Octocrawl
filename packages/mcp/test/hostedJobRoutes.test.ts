@@ -28,7 +28,7 @@ let close: (() => Promise<void>) | undefined
 let root: string | undefined
 afterEach(async () => { await close?.(); close = undefined; if (root) await rm(root, { recursive: true, force: true }); root = undefined })
 
-async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean; failEnqueue?: boolean | ((job: HostedJob) => boolean) } = {}) {
+async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean; allowed?: readonly string[]; failEnqueue?: boolean | ((job: HostedJob) => boolean) } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-job-routes-'))
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening')
   const port = (probe.address() as AddressInfo).port
@@ -49,6 +49,7 @@ async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean;
       store, files,
       enqueueSlice: async (job) => { if (options.failEnqueue === true || (typeof options.failEnqueue === 'function' && options.failEnqueue(job))) throw new Error('queue down'); enqueued.push(job) },
       enabled: async () => options.enabled ?? true,
+      ...(options.allowed === undefined ? {} : { allows: async (uid: string) => options.allowed!.includes(uid) }),
     },
   })
   close = service.close
@@ -249,6 +250,22 @@ describe('hosted job routes', () => {
     expect(second.hasMore).toBe(false)
     expect((await call('GET', '/v1/jobs', null)).status).toBe(403)
     expect((await call('GET', '/v1/jobs?limit=0', 'oc_one')).status).toBe(400)
+  })
+
+  it('starts jobs only for the accounts on the list while it exists, and still lets an account read and cancel its jobs (H2 R2)', async () => {
+    const { call, store, enqueued } = await start({ allowed: ['account-1'] })
+    const started = await call('POST', '/v1/batches', 'oc_one', { urls: urls(1) })
+    expect(started.status).toBe(202)
+    const taskId = ((await started.json()) as { taskId: string }).taskId
+    const refused = await call('POST', '/v1/crawl', 'oc_two', { url: 'https://example.com/' })
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toMatchObject({ code: 'jobs_invite_only', error: 'hosted batch and crawl jobs are open to invited accounts for now' })
+    expect(enqueued.map((job) => job.id)).toEqual([taskId])
+    // Taken off the list later, an account still reads, lists and cancels what it started.
+    store.jobs.set(taskId, { ...store.jobs.get(taskId)!, uid: 'account-3', workspaceId: 'ws_account-3' })
+    expect((await call('GET', `/v1/batches/${taskId}`, 'oc_two')).status).toBe(200)
+    expect((await call('GET', '/v1/jobs', 'oc_two')).status).toBe(200)
+    expect((await call('POST', `/v1/batches/${taskId}/cancel`, 'oc_two')).status).toBe(200)
   })
 
   it('takes a webhook for the job\'s end, returns its secret on the start alone, and no read shows it (H2 W1, W2)', async () => {

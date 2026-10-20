@@ -49,4 +49,19 @@ describe('jobs in the cloud, from the environment', () => {
     expect(await jobs.enabled()).toBe(false)
     expect(off.reads()).toBe(1)
   })
+
+  it('lets every account start jobs without allowedUids, only the listed ones with it, and no one when the first read fails (H2 R2)', async () => {
+    const open = (await jobsCloudFromEnv(ENV, cloud({ fields: { enabled: { booleanValue: true } } }).fetcher))!
+    expect(await open.allows('anyone')).toBe(true)
+    const listed = cloud({ fields: { enabled: { booleanValue: true }, allowedUids: { arrayValue: { values: [{ stringValue: 'account-1' }, { stringValue: 'account-2' }] } } } })
+    const invite = (await jobsCloudFromEnv(ENV, listed.fetcher))!
+    expect([await invite.allows('account-1'), await invite.allows('account-2'), await invite.allows('account-3'), await invite.enabled()]).toEqual([true, true, false, true])
+    // The list and the switch come from one read, kept 30 s.
+    expect(listed.reads()).toBe(1)
+    const empty = (await jobsCloudFromEnv(ENV, cloud({ fields: { allowedUids: { arrayValue: {} } } }).fetcher))!
+    expect(await empty.allows('account-1')).toBe(false)
+    const failing = cloud(null)
+    const broken = (async (input: string | URL | Request, init?: RequestInit) => String(input).endsWith('/documents/hostedConfig/jobs') ? new Response('{}', { status: 500 }) : failing.fetcher(input, init)) as typeof fetch
+    expect(await (await jobsCloudFromEnv(ENV, broken))!.allows('account-1')).toBe(false)
+  })
 })

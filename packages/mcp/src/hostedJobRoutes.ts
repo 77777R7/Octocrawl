@@ -53,6 +53,7 @@ export function jobStatus(job: HostedJob): Record<string, unknown> {
   }
 }
 
+export const JOBS_INVITE_ONLY = 'hosted batch and crawl jobs are open to invited accounts for now'
 export const JOB_DEFAULT_CRAWL_PAGES = 100
 export const JOB_MAX_CRAWL_PAGES = 500
 /** New pages a slice stores at most (docs/launch/2026-10-19-h1-hosted-jobs-plan.md §5): a start needs the credits for one. */
@@ -99,6 +100,8 @@ export interface HostedJobsConfig {
   enqueueSlice: (job: HostedJob) => Promise<void>
   /** The global switch (`hostedConfig/jobs.enabled`); absent: on. */
   enabled?: () => Promise<boolean>
+  /** Whether an account may start jobs (`hostedConfig/jobs.allowedUids`); absent: every account. Reads and cancels are not gated. */
+  allows?: (uid: string) => Promise<boolean>
   limits?: JobLimits
 }
 
@@ -153,6 +156,7 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
 
   async function start(kind: 'batch' | 'crawl', request: Request, caller: JobCaller): Promise<Response> {
     if (config.enabled !== undefined && !(await config.enabled())) return refusal(503, 'jobs_paused', 'hosted batch and crawl jobs are paused for now', ['run it on your computer meanwhile: npx octocrawl serve'], { 'Retry-After': '300' })
+    if (config.allows !== undefined && !(await config.allows(caller.uid))) return refusal(403, 'jobs_invite_only', JOBS_INVITE_ONLY, ['run it on your computer meanwhile: npx octocrawl serve'])
     let body: Record<string, unknown>
     try {
       const parsed = await request.json() as unknown
@@ -265,6 +269,8 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
   }
 
   return {
+    /** Whether the account may start jobs, so that an MCP connection lists the job tools only to an account that may. */
+    allows: async (uid: string) => config.allows === undefined || await config.allows(uid),
     async handle(request: Request, caller: JobCaller): Promise<Response> {
       const url = new URL(request.url)
       const method = request.method
