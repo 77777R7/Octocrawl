@@ -6,7 +6,9 @@ import {
   FileRoutingHistory,
   MemoryRoutingHistory,
   rankVendors,
+  shadowRankVendors,
   startingVendor,
+  unitDeliveryCost,
   type DomainHistory,
   type RouteObservation,
   type RoutingHistory,
@@ -367,5 +369,96 @@ describe('route observations (PA G2a)', () => {
     const kept = (await history.read('example.com')).vendors.steel!.observations
     expect(kept).toHaveLength(50)
     expect(kept[0]!.timings.totalMs).toBe(5)
+  })
+})
+
+describe('shadowRankVendors (PA G3)', () => {
+  const env = { browserMajor: 131, egressClass: 'vendor_default', egressConfigVersion: 'abc123def456' }
+  const seen = (verified: boolean | null, chargedUsd: number | null, environment = env): RouteObservation => ({
+    accessDelivered: true,
+    regionLoaded: verified === null ? null : true,
+    taskVerified: verified,
+    failureStage: verified === false ? 'task' : null,
+    readiness: verified === null ? null : verified ? 'ready' : 'not_served',
+    reason: null,
+    timings: { coldStartMs: null, navigationMs: null, challengeWaitMs: null, regionWaitMs: null, captureMs: null, extractMs: null, serializeMs: null, cleanupMs: null, sessionMs: null, totalMs: 1_000 },
+    environment,
+    chargedUsd,
+    chargeBasis: chargedUsd === null ? null : 'measured',
+  })
+  /** Records `passed` verified and `failed` failed attempts at `each` dollars a call (null: no settled charge). */
+  async function route(history: RoutingHistory, vendor: string, passed: number, failed: number, each: number | null, environment = env): Promise<void> {
+    for (const verified of [...Array<boolean>(passed).fill(true), ...Array<boolean>(failed).fill(false)]) {
+      await history.record('example.com', vendor, { contentful: true, verified, wallMs: 1_000, costUsd: each, failureClass: null, observation: seen(verified, each, environment) })
+    }
+  }
+
+  it('is what every attempt was charged over the verified deliveries, unknown with none, and an unknown charge is exposure, not free', async () => {
+    const history = new MemoryRoutingHistory()
+    await route(history, 'paid', 2, 2, 0.01)
+    await route(history, 'never', 0, 3, 0.01)
+    await route(history, 'hidden', 2, 0, 0.01)
+    await route(history, 'hidden', 1, 0, null)
+    const { vendors } = await history.read('example.com')
+    // $0.04 over 2 passed: the failed attempts' charge is part of what a delivery costs.
+    expect(unitDeliveryCost(vendors.paid!)).toEqual({ unitCostUsd: 0.02, knownChargedUsd: 0.04, unknownExposureAttempts: 0, verified: 2, judged: 4 })
+    // Nothing passed: unknown, neither zero nor infinite.
+    expect(unitDeliveryCost(vendors.never!).unitCostUsd).toBeNull()
+    // One attempt with no settled charge: the unit cost is not known, and the attempt is counted as exposure.
+    expect(unitDeliveryCost(vendors.hidden!)).toEqual({ unitCostUsd: null, knownChargedUsd: 0.02, unknownExposureAttempts: 1, verified: 3, judged: 3 })
+  })
+
+  it('ranks two vendors with the same unit cost alike, however often each was called (the cumulative cost does not)', async () => {
+    const history = new MemoryRoutingHistory()
+    await route(history, 'few', 3, 3, 0.01)
+    await route(history, 'many', 30, 30, 0.01)
+    const domain = await history.read('example.com')
+    for (const declared of [['few', 'many'], ['many', 'few']]) {
+      const shadow = shadowRankVendors(domain, declared)
+      expect(shadow.fallbackReasons).toEqual([])
+      expect(shadow.candidates.map((c) => c.unitCostUsd)).toEqual([0.02, 0.02])
+      // A tie keeps the declared order: neither the call count nor the total moves it.
+      expect(shadow.order).toEqual(declared)
+    }
+    // Today's formula scores the cumulative cost, so the vendor called more ranks lower on the same unit cost.
+    expect(rankVendors(domain, ['many', 'few']).map((r) => r.vendorId)).toEqual(['few', 'many'])
+  })
+
+  it('puts the lower unit cost first, and a vendor whose unit cost is unknown after the known ones', async () => {
+    const history = new MemoryRoutingHistory()
+    await route(history, 'dear', 3, 0, 0.05)
+    await route(history, 'cheap', 2, 2, 0.01)
+    await route(history, 'never', 0, 4, 0.001)
+    const shadow = shadowRankVendors(await history.read('example.com'), ['never', 'dear', 'cheap'])
+    expect(shadow.order).toEqual(['cheap', 'dear', 'never'])
+    expect(shadow.candidates.find((c) => c.vendorId === 'cheap')).toMatchObject({ unitCostUsd: 0.02, passRate: 0.5, samples: 4, fallbackReason: null })
+  })
+
+  it('falls back to the declared order, saying why, on a new host, a vendor with no or too few samples, or a new version', async () => {
+    expect(shadowRankVendors({ vendors: {}, lastVendor: null }, ['a', 'b'])).toMatchObject({ order: ['a', 'b'], fallbackReasons: ['new_host'] })
+
+    const history = new MemoryRoutingHistory()
+    await route(history, 'b', 3, 0, 0.01)
+    await route(history, 'c', 1, 0, 0.001)
+    const domain = await history.read('example.com')
+    const shadow = shadowRankVendors(domain, ['a', 'b', 'c'])
+    expect(shadow.order).toEqual(['a', 'b', 'c'])
+    expect(shadow.fallbackReasons).toEqual(['no_history', 'insufficient_samples'])
+    expect(shadow.candidates.map((c) => [c.vendorId, c.fallbackReason, c.samples])).toEqual([['a', 'no_history', 0], ['b', null, 3], ['c', 'insufficient_samples', 1]])
+
+    const moved = new MemoryRoutingHistory()
+    await route(moved, 'b', 3, 0, 0.05)
+    await route(moved, 'c', 3, 0, 0.01)
+    const upgraded = shadowRankVendors(await moved.read('example.com'), ['b', 'c'], { environments: { c: { ...env, browserMajor: 132 } } })
+    expect(upgraded.order).toEqual(['b', 'c'])
+    expect(upgraded.fallbackReasons).toEqual(['version_changed'])
+    // A store that leaves out what it holds too little of, or what a version change just expired, says so.
+    expect(shadowRankVendors({ vendors: {}, lastVendor: null }, ['a', 'b'], { thin: { a: 2 } })).toMatchObject({ fallbackReasons: ['insufficient_samples', 'no_history'] })
+    expect(shadowRankVendors({ vendors: {}, lastVendor: null }, ['a', 'b'], { thin: { a: 2 } }).candidates[0]).toMatchObject({ vendorId: 'a', samples: 2 })
+    expect(shadowRankVendors(await moved.read('example.com'), ['b', 'c', 'd'], { expired: { d: 'browser_version' } }).fallbackReasons).toEqual(['version_changed'])
+    // Rows past their TTL leave a host as good as new.
+    expect(shadowRankVendors({ vendors: {}, lastVendor: null }, ['d'], { expired: { d: 'ttl' } }).fallbackReasons).toEqual(['new_host'])
+    // The same environment, or one not known, is no change.
+    expect(shadowRankVendors(await moved.read('example.com'), ['b', 'c'], { environments: { b: { ...env, browserMajor: null }, c: env } }).order).toEqual(['c', 'b'])
   })
 })
