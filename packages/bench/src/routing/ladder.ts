@@ -733,7 +733,8 @@ export class LadderRunner {
             next,
             ...(checked?.verdict === 'failed' ? { waitedMs: readinessOf({ ...result, verification: checked.verification }).waitedMs } : {}),
             headersTimeout: initialHeadersTimeout(result, channel, channelsTried),
-            handoff: effectiveSession !== null ? 'authorized_session' : result.handoff && sessionsPermitted ? 'person' : null,
+            // Who can take a login wall, by the ladder's own rule (a handoff in authed mode); a saved login the site refused is not one.
+            handoff: result.handoff && sessionsPermitted ? 'person' : null,
             reextracted: result.trace.some((event) => event.event === 'extraction_candidates'),
           }),
         }

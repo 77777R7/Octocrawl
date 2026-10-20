@@ -1226,6 +1226,8 @@ describe('LadderRunner — a saved login goes first', () => {
     expect(run.result.blockReason).toBe('login_wall')
     expect(http.calls).toEqual([])
     expect(run.ladderTrace.some((t) => t.event === 'ladder_session_rejected')).toBe(true)
+    // The refused login is nobody to hand the wall to: the shadow decision stops, as the ladder does.
+    expect(run.ladderTrace.filter((t) => t.event === 'ladder_action_decision').map((t) => t.detail)).toEqual([{ shadow: 'stop', reason: 'login_wall:no_authorization', actual: 'stop', differs: false }])
   })
 
   it('a redirect to the site\'s login page under the saved login is login_wall, never the page\'s content', async () => {
