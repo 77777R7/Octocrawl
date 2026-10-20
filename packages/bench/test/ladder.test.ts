@@ -1828,3 +1828,54 @@ describe('LadderRunner — the shadow action decision (PA F4)', () => {
     expect(shadow(run)).toEqual([{ channel: 'http', shadow: 'wait_retry_after', reason: 'retry_after', actual: 'stop', differs: true }])
   })
 })
+
+describe('LadderRunner — route observations in the vendor\'s history (PA G2a)', () => {
+  const url = 'https://example.com/p'
+  const wants = { checks: [{ type: 'markdownIncludes' as const, text: 'Price' }] }
+  const chromeMajor = Number(/Chrome\/(\d+)/.exec(COHERENT.userAgent)![1])
+
+  it('writes the layers, the timings, the environment and the ledger\'s charge of a paid call, not the provider\'s null price', async () => {
+    const history = new MemoryRoutingHistory()
+    const held: FetchResult = {
+      ...contentfulResult(url, 'provider', 3_500),
+      markdown: 'No figure.',
+      usage: { ...contentfulResult(url, 'provider', 3_500).usage, externalCostUsd: null, measuredCostUsd: 0.004, vendorSessionMs: 3_100, vendorProxyBytes: null, vendorSolves: null, timings: { extractMs: 40, totalMs: 3_500 } },
+      trace: [{ at: 1, lane: 'provider', event: 'region_wait', detail: { ready: true, empty: false, loading: false, steady: true, judged: 3, reads: 3, waitedMs: 2_000, contractSha256: contractSha256(wants), checks: [] } }],
+    }
+    const steel = { ...channel('provider', [held], 'steel'), priceCeilingUsd: 0.01, grantCapabilities: ['vendor_remote_browser'] }
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), steel], { mode: 'authed' }, history, null, null, { verify: wants }).run(url)
+    expect(run.channelsTried).toEqual(['http', 'provider'])
+    const entry = (await history.read('example.com')).vendors.steel!
+    // A page that came but was not extracted is not the vendor failing (ADR 0007): counted as contentful, as before.
+    expect(entry).toMatchObject({ attempts: 1, contentful: 1, costUnknownAttempts: 1, chargedTotalUsd: 0.004, chargedUnknownAttempts: 0 })
+    expect(entry.observations).toHaveLength(1)
+    expect(entry.observations[0]).toMatchObject({
+      accessDelivered: true,
+      regionLoaded: true,
+      // There but not extracted: the vendor did not fail the task either (ADR 0007), so it is unknown, not a no.
+      taskVerified: null,
+      failureStage: 'extraction',
+      readiness: 'not_extracted',
+      reason: 'checks_failed',
+      chargedUsd: 0.004,
+      chargeBasis: 'measured',
+      costUsd: null,
+      timings: { regionWaitMs: 2_000, extractMs: 40, sessionMs: 3_100, totalMs: 3_500, navigationMs: null, coldStartMs: null },
+      environment: { browserMajor: chromeMajor, egressClass: 'vendor_default' },
+    })
+    expect(entry.observations[0]!.environment.egressConfigVersion).toMatch(/^[0-9a-f]{12}$/)
+    expect(entry.layers.taskVerified).toEqual({ yes: 0, no: 0, unknown: 1 })
+  })
+
+  it('names the stage a vendor\'s attempt failed at: access for a block, the task for a page that did not do it', async () => {
+    const history = new MemoryRoutingHistory()
+    const blocked = { ...blockedResult(url, 'cloudflare_challenge'), lane: 'provider' as const }
+    await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), channel('provider', [blocked], 'steel')], { mode: 'authed' }, history).run(url)
+    expect((await history.read('example.com')).vendors.steel!.observations[0]).toMatchObject({ accessDelivered: false, regionLoaded: null, taskVerified: null, failureStage: 'access', readiness: null, reason: 'cloudflare_challenge', chargedUsd: 0, chargeBasis: 'ceiling' })
+
+    const wrong = { ...contentfulResult(url, 'provider'), markdown: 'A page without the figure.' }
+    await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), channel('provider', [wrong], 'bb')], { mode: 'authed' }, history, null, null, { verify: wants, classifyContractFailure: () => 'not_served' }).run(url)
+    expect((await history.read('example.com')).vendors.bb!.observations[0]).toMatchObject({ accessDelivered: true, regionLoaded: false, taskVerified: false, failureStage: 'region', readiness: 'not_served' })
+    expect((await history.read('example.com')).vendors.bb).toMatchObject({ attempts: 1, contentful: 0 })
+  })
+})

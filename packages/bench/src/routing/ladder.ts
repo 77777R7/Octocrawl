@@ -30,9 +30,10 @@ import {
   type RoutingFailureClass,
 } from '@w2l/http-core'
 import { readinessOf, verify } from '@w2l/runtime'
+import { createHash } from 'node:crypto'
 import { BROWSER_INSTALL_COMMAND } from '../browserInstall.js'
 import { INSTALLED_CHROME_INSTALL } from '../subjects/installedChrome.js'
-import type { RoutingHistory, VendorOutcome } from './vendorRouter.js'
+import type { RouteObservation, RoutingHistory, VendorOutcome } from './vendorRouter.js'
 import { rankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
 import { decideNext, ladderActionDecisionEvent, type ActionDecision, type LadderAction } from './decideNext.js'
@@ -432,6 +433,61 @@ function verifiedOf(checked: ReturnType<typeof contractVerdict>): boolean | null
   return checked.verification.status === 'passed' && checked.verification.checks.length === 0 ? true : null
 }
 
+/** A number the last such trace event's detail holds, else null. */
+function detailMs(trace: readonly TraceEvent[], event: string, key: string): number | null {
+  const value = [...trace].reverse().find((t) => t.event === event)?.detail?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+/**
+ * What a vendor rung's attempt showed, for its routing history (PA G2a): each layer, the stage it stopped at, its times,
+ * what it ran on and what the run's ledger charged it (the settled paid call its `spend_settled` names, not the vendor's
+ * price, which a measured or ceiling charge leaves null). Codes and numbers only.
+ */
+function routeObservation(channel: Channel, result: FetchResult, verified: boolean | null, checked: ReturnType<typeof contractVerdict>, failedReadiness: ReadinessState | null, progress: LadderProgress): RouteObservation {
+  const accessDelivered = CONTENTFUL_STATUS.has(result.status)
+  const readiness = checked?.verdict === 'passed' ? 'ready' : checked?.verdict === 'failed' ? failedReadiness : null
+  const regionLoaded = readiness === null ? null : readiness === 'ready' || readiness === 'not_extracted'
+  const failureStage = !accessDelivered ? 'access' : regionLoaded === false ? 'region' : readiness === 'not_extracted' ? 'extraction' : verified === false ? 'task' : null
+  const reason = result.failureReason ?? result.blockReason ?? result.budgetExceeded ?? (checked?.verdict === 'failed' ? checked.verification.reason : null)
+  // The rung's own settlement is the last one: paidFetch appends it after the vendor's trace.
+  const settled = [...result.trace].reverse().find((t) => t.event === 'spend_settled')?.detail
+  const paid = typeof settled?.call === 'number' ? progress.paidCalls.find((c) => c.call === settled.call) ?? null : null
+  const basis = settled?.basis
+  const major = channel.identity === undefined ? null : /(?:Chrome|Chromium)\/(\d+)/.exec(channel.identity.userAgent)?.[1]
+  const capabilities = channel.grantCapabilities === undefined ? null : [...channel.grantCapabilities].sort()
+  // The configuration alone: the proxy country a paid call reports depends on how it was billed, so it is not hashed here.
+  const egress = capabilities === null ? null : { capabilities }
+  const timings = result.usage.timings
+  return {
+    accessDelivered,
+    regionLoaded,
+    taskVerified: verified,
+    failureStage,
+    readiness,
+    reason,
+    timings: {
+      coldStartMs: null,
+      navigationMs: null,
+      challengeWaitMs: detailMs(result.trace, 'challenge_wait', 'ms'),
+      regionWaitMs: detailMs(result.trace, 'region_wait', 'waitedMs'),
+      captureMs: null,
+      extractMs: timings?.extractMs ?? null,
+      serializeMs: timings?.serializeMs ?? null,
+      cleanupMs: null,
+      sessionMs: paid?.sessionMs ?? null,
+      totalMs: result.usage.wallMs,
+    },
+    environment: {
+      browserMajor: major == null ? null : Number(major),
+      egressClass: capabilities === null ? null : capabilities.includes('vendor_residential_proxy') ? 'vendor_residential' : 'vendor_default',
+      egressConfigVersion: egress === null ? null : createHash('sha256').update(JSON.stringify(egress)).digest('hex').slice(0, 12),
+    },
+    chargedUsd: paid?.chargedUsd ?? null,
+    chargeBasis: paid === null ? null : basis === 'reported' || basis === 'measured' || basis === 'ceiling' ? basis : null,
+  }
+}
+
 /**
  * Region readiness (ROADMAP PA item 11, ADR 0007) of a rung's page that failed its contract: never `ready`. A page read
  * without its scripts, or one still loading, is `not_loaded`; one whose region held on the live page but whose checks
@@ -770,8 +826,12 @@ export class LadderRunner {
       if (channel.vendorId !== undefined && this.history !== null) {
         const judged = sanitizeResult(result)
         const cls = classifyFetchFailure(judged)
-        const verified = verifiedOf(contractVerdict(this.options.verify, judged))
-        await this.recordVendorOutcome(url, channel.vendorId, judged, cls, verified === false && judged === result && failedReadiness === 'not_extracted' ? null : verified)
+        const judgedCheck = contractVerdict(this.options.verify, judged)
+        const verified = verifiedOf(judgedCheck)
+        // A page there but not extracted is not the vendor failing the task either (ADR 0007): unknown, on both counts.
+        const counted = verified === false && judged === result && failedReadiness === 'not_extracted' ? null : verified
+        const observation = routeObservation(channel, judged, counted, judgedCheck, judged === result ? failedReadiness : null, progress)
+        await this.recordVendorOutcome(url, channel.vendorId, judged, cls, counted, observation)
       }
 
       if (CONTENTFUL_STATUS.has(result.status)) {
@@ -1039,6 +1099,7 @@ export class LadderRunner {
     result: FetchResult,
     cls: RoutingFailureClass | null,
     verified: boolean | null,
+    observation: RouteObservation,
   ): Promise<void> {
     const outcome: VendorOutcome = {
       contentful: CONTENTFUL_STATUS.has(result.status),
@@ -1046,6 +1107,7 @@ export class LadderRunner {
       wallMs: result.usage.wallMs,
       costUsd: result.usage.externalCostUsd,
       failureClass: cls,
+      observation,
     }
     await this.history?.record(safeHost(url), vendorId, outcome)
   }
