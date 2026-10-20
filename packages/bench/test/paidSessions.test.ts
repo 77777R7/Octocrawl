@@ -59,7 +59,7 @@ describe('a paid call\'s provider sessions (PA E4)', () => {
     const requests: VendorApiRequest[] = []
     const api: VendorApi = async (req) => { requests.push(req); return req.url.endsWith('/v1/sessions') ? { status: 201, json: { id: 'steel-own-id' } } : { status: 200, json: { success: true } } }
     const named = namedForPaidCall(steelOps({ apiKey: 'k' }, api), { paidCallId: 'task-attempt-1', onPaidSession: () => {} })
-    await expect(named.createSession(null)).rejects.toThrow('did not take the sessionId')
+    await expect(named.createSession(null)).rejects.toThrow('did not take the sessionId it was given (it made steel-own-id, released)')
     expect(requests.map((req) => `${req.method} ${new URL(req.url).pathname}`)).toEqual(['POST /v1/sessions', 'POST /v1/sessions/steel-own-id/release'])
   })
 

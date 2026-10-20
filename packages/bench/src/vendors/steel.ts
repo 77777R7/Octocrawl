@@ -183,8 +183,9 @@ export function steelOps(
       if (name !== undefined && json.id !== name) {
         // A session not under the name it was asked for cannot be found by that name after a crash (PA E4): it is ended now
         // and the call fails, so no session of a paid call is ever left where only its name would lead.
-        await api({ method: 'POST', url: `${base}/v1/sessions/${encodeURIComponent(json.id)}/release`, headers, deadlineMs, signal }).catch(() => null)
-        throw new Error('steel: session create did not take the sessionId it was given')
+        const released = await api({ method: 'POST', url: `${base}/v1/sessions/${encodeURIComponent(json.id)}/release`, headers, deadlineMs: Date.now() + 5_000 }).catch(() => null)
+        const ended = released !== null && released.status >= 200 && released.status < 300
+        throw new Error(`steel: session create did not take the sessionId it was given (it made ${json.id}, ${ended ? 'released' : 'release unconfirmed'})`)
       }
       // Constructed per Steel's docs rather than read from the response —
       // they explicitly warn against using the returned websocketUrl directly.

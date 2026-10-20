@@ -1661,9 +1661,11 @@ describe('a provider call\'s row in the task\'s paid_calls (PA E3)', () => {
     const stuck = journal()
     let count = 0
     const failingSettle: PaidCallLog = { ...stuck.log, write: async (call) => { if (++count === 3) throw new Error('SQLITE_BUSY'); await stuck.log.write(call) } }
-    const again = await new LadderRunner([blockedHttp(), provider(reported, 'sess-2', [], stuck.writes)], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1), paidCalls: failingSettle })
+    const second = createSpendLedger(1)
+    const again = await new LadderRunner([blockedHttp(), provider(reported, 'sess-2', [], stuck.writes)], ALLOWED_ALL).run(url, undefined, { spend: second, paidCalls: failingSettle })
     expect(again.result.status).toBe('success')
     expect(stuck.writes.map((row) => row.state)).toEqual(['reserved', 'submitted'])
+    expect(second.settledUsd).toBeCloseTo(0.12)
     expect(ledger.settledUsd).toBeCloseTo(0.12)
   })
 
