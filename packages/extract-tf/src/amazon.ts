@@ -148,7 +148,7 @@ export function selectAmazonProduct(doc: Document): Element | null {
  * Returns identity verification result with evidence trail.
  */
 function verifyProductIdentity(doc: Document, url: string | undefined, selectedVariants: readonly ProductVariant[]): ProductIdentity {
-  const requestedId = amazonAsin(url) ?? ''
+  const requestedId = amazonAsin(url)
   const witnesses: Array<{ id: string; path: string }> = []
   const asin = (value: string | null | undefined): string | null => {
     const normalized = clean(value)?.toUpperCase()
@@ -175,7 +175,7 @@ function verifyProductIdentity(doc: Document, url: string | undefined, selectedV
   const selectedIds = [...new Set(witnesses.map(witness => witness.id))]
   // A matching URL or parent listing is never a substitute for a selected-product witness.
   // A vote among conflicting controls would silently assign another variant's quote.
-  const observedSelectedId = selectedIds.length === 1 ? selectedIds[0]! : ''
+  const observedSelectedId = selectedIds.length === 1 ? selectedIds[0]! : null
   let status: ProductIdentity['status'] = selectedIds.length === 0 ? 'unverified'
     : selectedIds.length > 1 ? 'conflicting'
       : observedSelectedId === requestedId ? 'matched' : 'mismatched'
@@ -184,7 +184,7 @@ function verifyProductIdentity(doc: Document, url: string | undefined, selectedV
   // establish selection by itself, and a different parent SKU is contextual.
   const jsonLd = jsonLdProduct(doc, null)
   const jsonId = asin(String(jsonLd?.node.asin ?? jsonLd?.node.sku ?? jsonLd?.node.productID ?? ''))
-  if (jsonId !== null && observedSelectedId && jsonId !== observedSelectedId && jsonId !== parentId) status = 'conflicting'
+  if (jsonId !== null && observedSelectedId !== null && jsonId !== observedSelectedId && jsonId !== parentId) status = 'conflicting'
 
   const identityEvidence = witnesses.map(witness => `${witness.path}=${witness.id}`)
   if (parentId !== null) identityEvidence.push(`parentASIN=${parentId} (context only)`)
@@ -359,7 +359,7 @@ export function collectAmazonProductFacts(doc: Document, url: string | undefined
 
   // RED LINE: If identity doesn't match, return incomplete immediately
   // Do NOT extract price/currency for wrong product
-  if (!identity.identityMatch) {
+  if (!identity.identityMatch || identity.observedSelectedId === null) {
     return {
       name: null,
       price: null,
@@ -426,8 +426,10 @@ export function collectAmazonProductFacts(doc: Document, url: string | undefined
   const subjectImages = images.length > 0 ? images : [jsonFact(jsonImage, `${jsonPath}/image`), metaFact(doc, 'meta[property="og:image"]')].filter((value): value is ProductFact => value !== null).slice(0, 1)
   const jsonAvailability = typeof offer?.availability === 'string' ? offer.availability.split('/').pop() : null
 
+  // The declared facts' field conflicts are the generic subject's; this adapter reads its own.
+  const { ambiguous: _generic, ...declaredFacts } = declared
   return {
-    ...declared,
+    ...declaredFacts,
     name: title,
     price: primary?.amount ?? null,
     priceCurrency: primary?.currency ?? null,

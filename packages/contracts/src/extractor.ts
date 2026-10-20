@@ -86,13 +86,18 @@ export interface ProductVariant {
 /**
  * Product identity verification result with multi-evidence approach.
  * R1-B: Ensures we never output data for the wrong product.
+ *
+ * On a page without a site adapter, the subject is the product the page
+ * declares (JSON-LD, microdata) that the request URL, the canonical link, a
+ * `mainEntity` reference or the page's structure singles out: `matched` when
+ * one is left, `conflicting` when several are and nothing tells them apart.
  */
 export interface ProductIdentity {
-  /** ASIN or SKU requested by the user (from URL). */
-  requestedId: string
-  /** ASIN or SKU observed as selected on the page (from DOM multi-evidence). */
-  observedSelectedId: string
-  /** Parent ASIN if this is a variant product. */
+  /** ASIN or SKU the request names (from its URL); null when the URL names none, as a generic shop's URL often does not. */
+  requestedId: string | null
+  /** ASIN or SKU of the product observed as selected on the page; null when none was observed or several were. */
+  observedSelectedId: string | null
+  /** Parent ASIN, or a ProductGroup's id, if this is a variant product. */
   parentId: string | null
   /** Selected variant attributes if applicable. */
   selectedVariants: readonly ProductVariant[]
@@ -102,6 +107,15 @@ export interface ProductIdentity {
   identityMatch: boolean
   /** CSS selectors or paths that contributed to identity determination. */
   identityEvidence: readonly string[]
+}
+
+/**
+ * A field whose sources, bound to the same product, state it differently: the
+ * field is reported null and every statement is kept here, each with its path.
+ */
+export interface ProductFieldConflict {
+  field: 'name' | 'price' | 'priceCurrency' | 'sku' | 'brand' | 'availability'
+  facts: readonly ProductFact[]
 }
 
 /**
@@ -148,6 +162,8 @@ export interface ProductFacts {
   identity?: ProductIdentity
   /** R1-C: Quote state classification. */
   quoteState?: QuoteState
+  /** Fields left null because the product's own sources disagree on them. */
+  ambiguous?: readonly ProductFieldConflict[]
 }
 
 /**

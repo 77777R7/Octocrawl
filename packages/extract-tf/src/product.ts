@@ -25,7 +25,7 @@
  * `woocommerce-Price-amount` without naming any of them.
  */
 
-import type { ProductFact, ProductFactSource, ProductFacts } from '@w2l/contracts'
+import type { ProductFact, ProductFactSource, ProductFacts, ProductFieldConflict, QuoteState } from '@w2l/contracts'
 import { commonAncestor, qsa, tagOf, textOf } from './dom.js'
 import type { TextBlock } from './classify.js'
 
@@ -91,24 +91,33 @@ function asString(v: unknown): string | null {
   return null
 }
 
+/** A JSON Pointer reference token (RFC 6901). */
+const pointerToken = (key: string | number): string => String(key).replace(/~/g, '~0').replace(/\//g, '~1')
+
 /**
  * schema.org allows a scalar, an object with a `name`, or an array of either
  * almost anywhere (`brand`, `availability`). Reduce to the first scalar we can
- * defend; never join an array into a synthetic string.
+ * defend, with the pointer it was read at; never join an array into a
+ * synthetic string.
  */
-function scalarOf(v: unknown): string | null {
+function scalarAt(v: unknown, path: string): { value: string; path: string } | null {
   if (Array.isArray(v)) {
-    for (const item of v) {
-      const s = scalarOf(item)
-      if (s !== null) return s
+    for (const [index, item] of v.entries()) {
+      const found = scalarAt(item, `${path}/${index}`)
+      if (found !== null) return found
     }
     return null
   }
   if (typeof v === 'object' && v !== null) {
     const rec = v as Record<string, unknown>
-    return asString(rec['name']) ?? asString(rec['@id']) ?? asString(rec['value'])
+    for (const key of ['name', '@id', 'value']) {
+      const s = asString(rec[key])
+      if (s !== null) return { value: s, path: `${path}/${pointerToken(key)}` }
+    }
+    return null
   }
-  return asString(v)
+  const s = asString(v)
+  return s === null ? null : { value: s, path }
 }
 
 /** Strip a schema.org enumeration IRI to its short name (…/InStock -> InStock). */
@@ -117,66 +126,339 @@ function shortEnum(v: string | null): string | null {
   return /[#/]([^#/]+)$/.exec(v.trim())?.[1] ?? v
 }
 
-/** Depth-first search of parsed JSON-LD for the first node typed Product. */
-function findProductNode(node: unknown): Record<string, unknown> | null {
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      const found = findProductNode(item)
-      if (found) return found
-    }
+type FactField = ProductFieldConflict['field']
+const FACT_FIELDS: readonly FactField[] = ['name', 'price', 'priceCurrency', 'sku', 'brand', 'availability']
+/** Fields two sources can contradict. A name is phrased differently by each source; a SKU binds the sources in the first place. */
+const COMPARED_FIELDS: ReadonlySet<FactField> = new Set(['price', 'priceCurrency', 'brand', 'availability'])
+
+/** Where the request and its page say they are: the URLs a declared product's `url` or `@id` can name. */
+export interface SubjectContext {
+  /** The URL that was requested (or fetched): its path segments and query values may name a SKU. */
+  url?: string
+  /** The page's `<link rel="canonical">`. */
+  canonical?: string | null
+}
+
+/** A URL as compared here: host without `www.`, path without a trailing slash, query sorted, no fragment or scheme. */
+interface UrlKey { full: string; path: string }
+
+function urlKey(raw: string, base: string | undefined): UrlKey | null {
+  try {
+    const u = new URL(raw.trim(), base)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    const at = `${u.hostname.toLowerCase().replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '') || '/'}`
+    const query = new URLSearchParams([...u.searchParams].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))).toString()
+    return { path: at, full: query === '' ? at : `${at}?${query}` }
+  } catch {
     return null
   }
-  if (typeof node !== 'object' || node === null) return null
-  const rec = node as Record<string, unknown>
-  const t = rec['@type']
-  const types = (Array.isArray(t) ? t : [t]).filter((x): x is string => typeof x === 'string')
-  // Product and its schema.org subtypes (IndividualProduct, ProductModel,
-  // SomeProducts) all describe one product; a ProductGroup does not.
-  if (types.some((x) => /(^|[#/:])(individual)?product(model)?$|someproducts$/i.test(x.trim()))) {
-    return rec
+}
+
+/** The request URL's path segments and query values, lower-cased: where a shop's URL names a SKU or variant. */
+function urlTokens(url: string | undefined): Set<string> {
+  if (url === undefined) return new Set()
+  try {
+    const u = new URL(url)
+    const segments = u.pathname.split('/').map((s) => {
+      try { return decodeURIComponent(s) } catch { return s }
+    })
+    return new Set([...segments, ...u.searchParams.values()].map(normId).filter((s) => s.length >= 2))
+  } catch {
+    return new Set()
   }
-  for (const value of Object.values(rec)) {
-    if (typeof value === 'object' && value !== null) {
-      const found = findProductNode(value)
-      if (found) return found
+}
+
+/** Letters and digits only, lower-cased: "In stock" and InStock are one availability. */
+const comparable = (v: string): string => v.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+const ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'", '#x27': "'" }
+/** The character references JSON-LD often carries escaped once too often (`Tom &amp;amp; Jerry`). */
+const decodeEntities = (v: string): string => v.replace(/&(amp|lt|gt|quot|apos|#39|#x27);/gi, (m, e: string) => ENTITIES[e.toLowerCase()] ?? m)
+/** An identifier as compared: letters and digits only, lower-cased, without leading zeros (a GTIN-13 is its GTIN-12 with one). */
+const normId = (v: string): string => comparable(v).replace(/^0+(?=.)/, '')
+
+/** The numbers an amount can be read as, with `.` or `,` as its decimal mark. */
+function amountReadings(text: string): Set<number> {
+  const run = /\d[\d.,'’\s]{0,30}/.exec(text)?.[0].replace(/[\s'’]/g, '').replace(/[.,]+$/, '') ?? ''
+  const out = new Set<number>()
+  for (const [mark, group] of [['.', ','], [',', '.']] as const) {
+    const parts = run.split(group).join('').split(mark)
+    if (parts.length > 2) continue
+    const n = Number(parts.join('.'))
+    if (run !== '' && Number.isFinite(n)) out.add(n)
+  }
+  return out
+}
+
+/** Whether two statements of a field say the same thing: one amount read either way, or one text up to case and punctuation. */
+function sameValue(field: FactField, a: string, b: string): boolean {
+  if (comparable(a) === comparable(b)) return true
+  if (field !== 'price') return false
+  const readings = amountReadings(b)
+  return [...amountReadings(a)].some((n) => readings.has(n))
+}
+
+/** The identifier kinds a product declares; a value shared under any kind is one product. */
+const ID_KINDS = { sku: ['sku'], mpn: ['mpn'], gtin: ['gtin', 'gtin8', 'gtin12', 'gtin13', 'gtin14'], productID: ['productID'] } as const
+type IdKind = keyof typeof ID_KINDS
+
+/**
+ * One product a page declares in one place (a JSON-LD node, a microdata
+ * scope): its fields with their paths, and what identifies it.
+ */
+interface DeclaredProduct {
+  /** Where it is declared: `/script/1`, `/script/0/hasVariant/2`, `microdata[0]`. */
+  where: string
+  source: 'jsonld' | 'microdata'
+  /** Its node identifier as written, fragment included: JSON-LD `@id`, microdata `itemid`. Two different ones are two products. */
+  node: string | null
+  /** The same as a URL, for the request and canonical tiers. */
+  nodeKey: UrlKey | null
+  fields: Partial<Record<FactField, ProductFact>>
+  /** Fields its offers state differently, none of them selected. */
+  ambiguous: Partial<Record<FactField, ProductFact[]>>
+  /** Its own identifiers. */
+  ids: Partial<Record<IdKind, string[]>>
+  /** Its offers' identifiers: a variant's SKU names the product too, but a parent SKU beside it does not contradict it. */
+  offerIds: string[]
+  /** Its `url` and its offers' `url`. */
+  urls: UrlKey[]
+  /** The page's mainEntity (or mainEntityOfPage names the page). */
+  main: boolean
+  /** Declared inside another node's property (a related item, a list), not at the top of its document. */
+  nested: boolean
+  parentId: string | null
+}
+
+const allIds = (d: DeclaredProduct): string[] => [...Object.values(d.ids).flat(), ...d.offerIds]
+const tierUrls = (d: DeclaredProduct): UrlKey[] => (d.nodeKey === null ? d.urls : [...d.urls, d.nodeKey])
+
+/** What relation() compares, computed once per declaration. */
+interface Keys { ids: Set<string>; kinds: Set<IdKind>; full: Set<string>; paths: Set<string>; name: string | null }
+const keyCache = new WeakMap<DeclaredProduct, Keys>()
+function keysOf(d: DeclaredProduct): Keys {
+  let keys = keyCache.get(d)
+  if (keys === undefined) {
+    keys = {
+      ids: new Set(allIds(d).map(normId)),
+      kinds: new Set(Object.keys(d.ids) as IdKind[]),
+      full: new Set(d.urls.map((u) => u.full)),
+      paths: new Set(d.urls.map((u) => u.path)),
+      name: d.fields.name === undefined ? null : comparable(decodeEntities(d.fields.name.value)),
     }
+    keyCache.set(d, keys)
   }
-  return null
+  return keys
+}
+function overlaps<T>(a: Set<T>, b: Set<T>): boolean {
+  for (const v of a) if (b.has(v)) return true
+  return false
 }
 
-/** The first Offer-ish object under a Product node's `offers`. */
-function firstOffer(product: Record<string, unknown>): Record<string, unknown> | null {
-  const offers = product['offers']
-  const list = Array.isArray(offers) ? offers : [offers]
-  for (const o of list) {
-    if (typeof o === 'object' && o !== null) return o as Record<string, unknown>
+/**
+ * Whether two declarations are the same product, provably different ones, or
+ * cannot be told apart: a shared identifier makes them one; two node
+ * identifiers, or two values of one identifier kind, that differ make them
+ * two; then their URLs; then their names, which differ between two syntaxes
+ * of one product ("Mug", "Mug - Blue") but not between two nodes of one.
+ */
+function relation(da: DeclaredProduct, db: DeclaredProduct): 'same' | 'different' | 'unknown' {
+  const a = keysOf(da)
+  const b = keysOf(db)
+  if (overlaps(a.ids, b.ids)) return 'same'
+  if (da.node !== null && db.node !== null) return da.node === db.node ? 'same' : 'different'
+  if (overlaps(a.kinds, b.kinds)) return 'different'
+  if (a.full.size > 0 && b.full.size > 0) {
+    if (overlaps(a.full, b.full)) return 'same'
+    return overlaps(a.paths, b.paths) ? 'unknown' : 'different'
   }
-  return null
+  if (a.name !== null && b.name !== null) return a.name === b.name ? 'same' : da.source === db.source ? 'different' : 'unknown'
+  return 'unknown'
 }
 
-function factsFromJsonLd(doc: Document): Partial<ProductFacts> {
+function relationToAll(members: readonly DeclaredProduct[], d: DeclaredProduct): 'same' | 'different' | 'unknown' {
+  let different = false
+  for (const m of members) {
+    const r = relation(m, d)
+    if (r === 'same') return 'same'
+    if (r === 'different') different = true
+  }
+  return different ? 'different' : 'unknown'
+}
+
+const typesOf = (rec: Record<string, unknown>): string[] =>
+  (Array.isArray(rec['@type']) ? rec['@type'] : [rec['@type']]).filter((x): x is string => typeof x === 'string').map((x) => x.trim())
+// Product and its schema.org subtypes (IndividualProduct, ProductModel,
+// SomeProducts) each describe one product; a ProductGroup is a family of them.
+const isProductType = (types: readonly string[]) => types.some((x) => /(^|[#/:])(individual)?product(model)?$|someproducts$/i.test(x))
+const isGroupType = (types: readonly string[]) => types.some((x) => /(^|[#/:])productgroup$/i.test(x))
+
+const record = (v: unknown): Record<string, unknown> | null =>
+  typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : null
+
+function idsOf(read: (name: string) => string | null): Partial<Record<IdKind, string[]>> {
+  const out: Partial<Record<IdKind, string[]>> = {}
+  for (const [kind, names] of Object.entries(ID_KINDS) as Array<[IdKind, readonly string[]]>) {
+    const values = names.map(read).filter((v): v is string => v !== null && v.trim() !== '').map((v) => v.trim())
+    if (values.length > 0) out[kind] = [...new Set(values)]
+  }
+  return out
+}
+
+function mergeIds(into: Partial<Record<IdKind, string[]>>, from: Partial<Record<IdKind, string[]>>): void {
+  for (const [kind, values] of Object.entries(from) as Array<[IdKind, string[]]>) into[kind] = [...new Set([...(into[kind] ?? []), ...values])]
+}
+
+/**
+ * The offer a product's `offers` states its price in. One offer is that
+ * offer; among several, the one the request URL selects (by its SKU, GTIN or
+ * MPN, or by its `url` with the query). Without a selection a field the offers
+ * agree on is still stated, and one they state differently is ambiguous.
+ */
+function offerFields(product: Record<string, unknown>, path: string, ctx: Resolved): Pick<DeclaredProduct, 'fields' | 'ambiguous'> & { ids: Partial<Record<IdKind, string[]>>; urls: UrlKey[] } {
+  const raw = product['offers']
+  const offers = (Array.isArray(raw) ? raw.map((o, i) => ({ offer: record(o), path: `${path}/offers/${i}` })) : [{ offer: record(raw), path: `${path}/offers` }])
+    .filter((o): o is { offer: Record<string, unknown>; path: string } => o.offer !== null)
+  const ids: Partial<Record<IdKind, string[]>> = {}
+  const urls: UrlKey[] = []
+  const urlsOf = (offer: Record<string, unknown>) => [asString(offer['url'])].flatMap((u) => (u === null ? [] : [urlKey(u, ctx.base)])).filter((u): u is UrlKey => u !== null)
+  for (const { offer } of offers) {
+    mergeIds(ids, idsOf((name) => asString(offer[name])))
+    urls.push(...urlsOf(offer))
+  }
+  let chosen = offers
+  if (offers.length > 1) {
+    const named = offers.filter(({ offer }) => Object.values(idsOf((name) => asString(offer[name]))).flat().some((v) => ctx.tokens.has(normId(v))))
+    const linked = offers.filter(({ offer }) => urlsOf(offer).some((u) => ctx.targets.some((t) => t.full === u.full)))
+    if (named.length === 1) chosen = named
+    else if (linked.length === 1) chosen = linked
+  }
+  const fields: Partial<Record<FactField, ProductFact>> = {}
+  const ambiguous: Partial<Record<FactField, ProductFact[]>> = {}
+  const readers: Array<[FactField, (o: Record<string, unknown>) => string | null, string]> = [
+    ['price', (o) => asString(o['price']), 'price'],
+    ['priceCurrency', (o) => asString(o['priceCurrency']), 'priceCurrency'],
+  ]
+  for (const [field, read, key] of readers) {
+    const facts = chosen.map(({ offer, path: at }) => fact(read(offer), 'jsonld', `${at}/${key}`)).filter((f): f is ProductFact => f !== null)
+    if (facts.length === 0) continue
+    if (facts.every((f) => sameValue(field, f.value, facts[0]!.value))) fields[field] = facts[0]!
+    else ambiguous[field] = facts
+  }
+  const availability = chosen.map(({ offer, path: at }) => {
+    const found = scalarAt(offer['availability'], `${at}/availability`)
+    return found === null ? null : fact(shortEnum(found.value), 'jsonld', found.path)
+  }).filter((f): f is ProductFact => f !== null)
+  if (availability.length > 0) {
+    if (availability.every((f) => sameValue('availability', f.value, availability[0]!.value))) fields.availability = availability[0]!
+    else ambiguous.availability = availability
+  }
+  return { fields, ambiguous, ids, urls }
+}
+
+/** The request as subject resolution reads it. */
+interface Resolved {
+  base: string | undefined
+  /** The request URL and the canonical link. */
+  targets: UrlKey[]
+  tokens: Set<string>
+}
+
+/**
+ * Every Product node of the page's JSON-LD, in document order, with its JSON
+ * Pointer (`/script/<n>` is the n-th ld+json script): top-level nodes, array
+ * members, `@graph` members, a ProductGroup's `hasVariant` (each variant
+ * taking the group's name and brand when it states none), and Products nested
+ * in other nodes' properties, marked as nested.
+ */
+function jsonLdProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
+  const parsed: unknown[] = []
   for (const el of qsa(doc, 'script[type="application/ld+json"]')) {
-    const text = (el.textContent ?? '').trim()
-    if (text.length === 0) continue
-    let parsed: unknown
     try {
-      parsed = JSON.parse(text)
+      parsed.push(JSON.parse(el.textContent ?? ''))
     } catch {
-      continue // Malformed JSON-LD is not evidence.
-    }
-    const product = findProductNode(parsed)
-    if (!product) continue
-    const offer = firstOffer(product)
-    return {
-      name: fact(scalarOf(product['name']), 'jsonld'),
-      price: fact(offer ? asString(offer['price']) : null, 'jsonld'),
-      priceCurrency: fact(offer ? asString(offer['priceCurrency']) : null, 'jsonld'),
-      sku: fact(asString(product['sku']) ?? asString(product['mpn']), 'jsonld'),
-      brand: fact(scalarOf(product['brand']), 'jsonld'),
-      availability: fact(offer ? shortEnum(scalarOf(offer['availability'])) : null, 'jsonld'),
+      parsed.push(undefined) // Malformed JSON-LD is not evidence; its index still counts.
     }
   }
-  return {}
+  // Nodes by @id, for a variant's isVariantOf reference; the ids mainEntity names.
+  const byId = new Map<string, { node: Record<string, unknown>; path: string }>()
+  const mainIds = new Set<string>()
+  const index = (v: unknown, path: string): void => {
+    if (Array.isArray(v)) return v.forEach((item, i) => index(item, `${path}/${i}`))
+    const rec = record(v)
+    if (rec === null) return
+    const id = asString(rec['@id'])
+    if (id !== null && Object.keys(rec).length > 1 && !byId.has(id)) byId.set(id, { node: rec, path })
+    const main = rec['mainEntity']
+    const mainId = asString(main) ?? asString(record(main)?.['@id'])
+    if (mainId !== null) mainIds.add(mainId)
+    for (const [key, value] of Object.entries(rec)) index(value, `${path}/${pointerToken(key)}`)
+  }
+  parsed.forEach((p, i) => index(p, `/script/${i}`))
+
+  const out: DeclaredProduct[] = []
+  const declare = (rec: Record<string, unknown>, path: string, nested: boolean, main: boolean, group: { node: Record<string, unknown>; path: string } | null): void => {
+    const own = (key: string) => scalarAt(rec[key], `${path}/${pointerToken(key)}`)
+    const inherited = (key: string) => own(key) ?? (group === null ? null : scalarAt(group.node[key], `${group.path}/${pointerToken(key)}`))
+    const sku = asString(rec['sku']) !== null ? own('sku') : asString(rec['mpn']) !== null ? own('mpn') : null
+    const offers = offerFields(rec, path, ctx)
+    const id = asString(rec['@id'])
+    const url = asString(rec['url'])
+    const urls = [url].flatMap((u) => (u === null ? [] : [urlKey(u, ctx.base)])).filter((u): u is UrlKey => u !== null)
+    const ofPage = asString(rec['mainEntityOfPage']) ?? asString(record(rec['mainEntityOfPage'])?.['@id']) ?? asString(record(rec['mainEntityOfPage'])?.['url'])
+    const ofPageKey = ofPage === null ? null : urlKey(ofPage, ctx.base)
+    const name = inherited('name')
+    const brand = inherited('brand')
+    out.push({
+      where: path,
+      fields: {
+        ...(name === null ? {} : { name: fact(name.value, 'jsonld', name.path)! }),
+        ...(sku === null ? {} : { sku: fact(sku.value, 'jsonld', sku.path)! }),
+        ...(brand === null ? {} : { brand: fact(brand.value, 'jsonld', brand.path)! }),
+        ...offers.fields,
+      },
+      source: 'jsonld',
+      node: id,
+      nodeKey: id === null ? null : urlKey(id, ctx.base),
+      ambiguous: offers.ambiguous,
+      ids: idsOf((name) => asString(rec[name])),
+      offerIds: Object.values(offers.ids).flat(),
+      urls: [...urls, ...offers.urls],
+      main: main || (id !== null && mainIds.has(id)) || (ofPageKey !== null && ctx.targets.some((t) => t.path === ofPageKey.path)),
+      nested,
+      parentId: group === null ? null : asString(group.node['productGroupID']) ?? asString(group.node['sku']) ?? asString(group.node['@id']),
+    })
+  }
+  const groupOf = (rec: Record<string, unknown>, path: string): { node: Record<string, unknown>; path: string } | null => {
+    const of = rec['isVariantOf']
+    const inline = record(of)
+    if (inline !== null && isGroupType(typesOf(inline))) return { node: inline, path: `${path}/isVariantOf` }
+    const ref = asString(of) ?? asString(inline?.['@id'])
+    return ref === null ? null : byId.get(ref) ?? null
+  }
+  const walk = (v: unknown, path: string, nested: boolean, main: boolean, group: { node: Record<string, unknown>; path: string } | null): void => {
+    if (Array.isArray(v)) return v.forEach((item, i) => walk(item, `${path}/${i}`, nested, main, group))
+    const rec = record(v)
+    if (rec === null) return
+    const types = typesOf(rec)
+    if (isProductType(types)) {
+      declare(rec, path, nested, main, group ?? groupOf(rec, path))
+      // A product's offers describe it, and its isVariantOf is its family; other products in it are related items.
+      for (const [key, value] of Object.entries(rec)) {
+        if (key !== 'offers' && key !== 'isVariantOf') walk(value, `${path}/${pointerToken(key)}`, true, false, null)
+      }
+      return
+    }
+    const family = isGroupType(types)
+    for (const [key, value] of Object.entries(rec)) {
+      const at = `${path}/${pointerToken(key)}`
+      if (family && key === 'hasVariant') walk(value, at, nested, main, { node: rec, path })
+      else if (key === '@graph') walk(value, at, nested, false, null)
+      else if (key === 'mainEntity') walk(value, at, nested, true, null)
+      else walk(value, at, true, false, null)
+    }
+  }
+  parsed.forEach((p, i) => walk(p, `/script/${i}`, false, false, null))
+  return out
 }
 
 /**
@@ -195,57 +477,98 @@ function microdataValue(el: Element): string | null {
   return textOf(el)
 }
 
+function isProductScope(el: Element): boolean {
+  const raw = el.getAttribute('itemtype') ?? ''
+  return raw.split(/[\t\n\f\r ]+/).some((token) => (/[#/]([^#/]+)$/.exec(token.trim())?.[1] ?? token.trim()).toLowerCase() === 'product')
+}
+
 /** The element scoping a microdata Product, if the page declares one. */
 export function microdataProductScope(doc: Document): Element | null {
-  for (const el of qsa(doc, '[itemscope][itemtype]')) {
-    const raw = el.getAttribute('itemtype') ?? ''
-    for (const token of raw.split(/[\t\n\f\r ]+/)) {
-      const short = (/[#/]([^#/]+)$/.exec(token.trim())?.[1] ?? token.trim()).toLowerCase()
-      if (short === 'product') return el
-    }
-  }
-  return null
+  return qsa(doc, '[itemscope][itemtype]').find(isProductScope) ?? null
 }
 
-function factsFromMicrodata(doc: Document): Partial<ProductFacts> {
-  const scope = microdataProductScope(doc)
-  if (!scope) return {}
-  const pick = (prop: string): string | null => {
-    for (const el of qsa(scope, `[itemprop~="${prop}"]`)) {
-      const v = microdataValue(el)
-      if (v !== null && v.trim().length > 0) return v
-    }
+/**
+ * Every microdata Product not inside another one, in document order
+ * (`microdata[<n>]`), with the properties it states itself: a Product scope
+ * inside it (a related item) keeps its own.
+ */
+function microdataProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
+  const scopes = new Set(qsa(doc, '[itemscope][itemtype]').filter(isProductScope))
+  /** The Product scope an element's property belongs to: its nearest one above it. */
+  const owner = (el: Element): Element | null => {
+    for (let p = el.parentElement; p !== null; p = p.parentElement) if (scopes.has(p)) return p
     return null
   }
-  return {
-    name: fact(pick('name'), 'microdata'),
-    price: fact(pick('price'), 'microdata'),
-    priceCurrency: fact(pick('priceCurrency'), 'microdata'),
-    sku: fact(pick('sku') ?? pick('mpn'), 'microdata'),
-    brand: fact(pick('brand'), 'microdata'),
-    availability: fact(shortEnum(pick('availability')), 'microdata'),
-  }
+  const outer = [...scopes].filter((el) => owner(el) === null)
+  return outer.map((scope, n) => {
+    const where = `microdata[${n}]`
+    const pick = (prop: string): { value: string; path: string } | null => {
+      for (const el of qsa(scope, `[itemprop~="${prop}"]`)) {
+        if (owner(el) !== scope) continue
+        const v = microdataValue(el)
+        if (v !== null && v.trim().length > 0) return { value: v, path: `${where} [itemprop~="${prop}"]` }
+      }
+      return null
+    }
+    const read = (prop: string, value: (s: string) => string | null = (s) => s) => {
+      const found = pick(prop)
+      return found === null ? null : fact(value(found.value), 'microdata', found.path)
+    }
+    const fields: Partial<Record<FactField, ProductFact>> = {}
+    const facts: Array<[FactField, ProductFact | null]> = [
+      ['name', read('name')],
+      ['price', read('price')],
+      ['priceCurrency', read('priceCurrency')],
+      ['sku', read('sku') ?? read('mpn')],
+      ['brand', read('brand')],
+      ['availability', read('availability', shortEnum)],
+    ]
+    for (const [field, f] of facts) if (f !== null) fields[field] = f
+    const itemid = scope.getAttribute('itemid')
+    const url = pick('url')?.value ?? null
+    const urls = [url].flatMap((u) => (u === null ? [] : [urlKey(u, ctx.base)])).filter((u): u is UrlKey => u !== null)
+    const props = (scope.getAttribute('itemprop') ?? '').split(/\s+/)
+    return {
+      where,
+      source: 'microdata' as const,
+      node: itemid,
+      nodeKey: itemid === null ? null : urlKey(itemid, ctx.base),
+      fields,
+      ambiguous: {},
+      ids: idsOf((name) => pick(name)?.value ?? null),
+      offerIds: [],
+      urls,
+      main: props.includes('mainEntity'),
+      nested: props.some((p) => p !== '' && p !== 'mainEntity'),
+      parentId: null,
+    }
+  })
 }
 
-/** OpenGraph / Facebook product meta tags, the third machine-readable path. */
-function factsFromMeta(doc: Document): Partial<ProductFacts> {
-  const meta = (names: readonly string[]): string | null => {
+/** OpenGraph / Facebook product meta tags, the third machine-readable path: about the page's own product. */
+function metaFacts(doc: Document): { fields: Partial<Record<FactField, ProductFact>>; ids: Partial<Record<IdKind, string[]>> } {
+  const meta = (names: readonly string[], value: (s: string) => string | null = (s) => s): ProductFact | null => {
     for (const name of names) {
       for (const el of qsa(doc, `meta[property="${name}"],meta[name="${name}"]`)) {
         const v = el.getAttribute('content')
-        if (v !== null && v.trim().length > 0) return v
+        if (v === null || v.trim().length === 0) continue
+        const attr = el.getAttribute('property') === name ? 'property' : 'name'
+        return fact(value(v), 'meta', `meta[${attr}="${name}"]`)
       }
     }
     return null
   }
-  return {
-    name: fact(meta(['og:title', 'product:title']), 'meta'),
-    price: fact(meta(['product:price:amount', 'og:price:amount']), 'meta'),
-    priceCurrency: fact(meta(['product:price:currency', 'og:price:currency']), 'meta'),
-    sku: fact(meta(['product:retailer_item_id', 'product:sku']), 'meta'),
-    brand: fact(meta(['product:brand', 'og:brand']), 'meta'),
-    availability: fact(shortEnum(meta(['product:availability', 'og:availability'])), 'meta'),
-  }
+  const fields: Partial<Record<FactField, ProductFact>> = {}
+  const facts: Array<[FactField, ProductFact | null]> = [
+    ['name', meta(['og:title', 'product:title'])],
+    ['price', meta(['product:price:amount', 'og:price:amount'])],
+    ['priceCurrency', meta(['product:price:currency', 'og:price:currency'])],
+    ['sku', meta(['product:retailer_item_id', 'product:sku'])],
+    ['brand', meta(['product:brand', 'og:brand'])],
+    ['availability', meta(['product:availability', 'og:availability'], shortEnum)],
+  ]
+  for (const [field, f] of facts) if (f !== null) fields[field] = f
+  return { fields, ids: fields.sku === undefined ? {} : { sku: [fields.sku.value] } }
 }
 
 /** An element carrying a `price` id/class token and a short, price-shaped text. */
@@ -305,24 +628,170 @@ function factsFromText(doc: Document): Partial<ProductFacts> {
   return { price: fact(matched, 'text', selectorOf(el)) }
 }
 
+/** How many declared products are compared to find the subject; a page declaring more is a listing. */
+const MAX_COMPARED = 250
+
+/** Facts whose price must not be read from the page's text: the page declares other products, or the subject's own sources disagree on it. */
+const textPriceBarred = new WeakSet<ProductFacts>()
+
+/** What singles a product out, strongest first: each step keeps the products it holds for, if it holds for some but not all. */
+const SUBJECT_TIERS: ReadonlyArray<[string, (members: readonly DeclaredProduct[], ctx: Resolved) => boolean]> = [
+  ['its identifier is in the request URL', (members, ctx) => members.some((d) => allIds(d).some((v) => ctx.tokens.has(normId(v))))],
+  ['its url is the request URL or the canonical link', (members, ctx) => members.some((d) => tierUrls(d).some((u) => ctx.targets.some((t) => t.full === u.full)))],
+  ['its url has the path of the request URL or the canonical link', (members, ctx) => members.some((d) => tierUrls(d).some((u) => ctx.targets.some((t) => t.path === u.path)))],
+  ['it is the page\'s mainEntity', (members) => members.some((d) => d.main)],
+  ['it is the only one not nested in another node', (members) => members.some((d) => !d.nested)],
+]
+
+/** A declaration's place and its first identifier, for identity evidence. */
+function label(members: readonly DeclaredProduct[]): string {
+  const where = members.map((d) => d.where).join(' + ')
+  for (const kind of Object.keys(ID_KINDS) as IdKind[]) {
+    const id = members.find((d) => d.ids[kind] !== undefined)?.ids[kind]?.[0]
+    if (id !== undefined) return `${where} (${kind} ${id})`
+  }
+  const name = members.find((d) => d.fields.name !== undefined)?.fields.name?.value
+  return name === undefined ? where : `${where} (${JSON.stringify(name)})`
+}
+
+/**
+ * One product's fields from the declarations bound to it, strongest first.
+ * A field its sources state differently (or its offers do, none selected) is
+ * null, with every statement kept in `ambiguous`.
+ */
+function mergeFields(sources: ReadonlyArray<Pick<DeclaredProduct, 'fields' | 'ambiguous'>>): { facts: ProductFacts; ambiguous: ProductFieldConflict[] } {
+  const facts = emptyFacts()
+  const ambiguous: ProductFieldConflict[] = []
+  for (const field of FACT_FIELDS) {
+    const stated = sources.flatMap((s) => (s.fields[field] === undefined ? [] : [s.fields[field]!]))
+    const offered = sources.flatMap((s) => s.ambiguous[field] ?? [])
+    if (offered.length > 0 || (COMPARED_FIELDS.has(field) && stated.some((f) => !sameValue(field, f.value, stated[0]!.value)))) {
+      ambiguous.push({ field, facts: [...offered, ...stated] })
+    } else if (stated.length > 0) facts[field] = stated[0]!
+  }
+  return { facts, ambiguous }
+}
+
 /**
  * Collect the facts the page DECLARES about the product, strongest evidence
  * first. Machine-readable paths only.
  *
+ * The product is chosen before any field is read: every Product the page
+ * declares (JSON-LD nodes, microdata scopes) is a candidate, declarations that
+ * share an identifier are one product, and the request URL, the canonical
+ * link, `mainEntity` and the page's structure single one out (SUBJECT_TIERS).
+ * Its fields come from its own declarations, then from declarations that
+ * cannot be told apart from it, then from the product meta tags, each filling
+ * what the stronger left null; where they disagree the field is ambiguous.
+ * When several products are left, `identity.status` is `conflicting` and only
+ * the fields every one of them states alike are reported.
+ *
  * MUST run on the raw document, before cleanTree: JSON-LD lives in
  * <script>, OpenGraph in <meta>, and cleanTree removes both carriers.
  */
-export function collectDeclaredProductFacts(doc: Document): ProductFacts {
-  const facts = emptyFacts()
-  fillMissing(facts, factsFromJsonLd(doc))
-  fillMissing(facts, factsFromMicrodata(doc))
-  fillMissing(facts, factsFromMeta(doc))
+export function collectDeclaredProductFacts(doc: Document, context: SubjectContext = {}): ProductFacts {
+  const base = context.url
+  const targets = [context.url, context.canonical ?? undefined]
+    .flatMap((u) => (u === undefined ? [] : [urlKey(u, base)])).filter((u): u is UrlKey => u !== null)
+  const ctx: Resolved = { base, targets, tokens: urlTokens(context.url) }
+  const meta = metaFacts(doc)
+  const all = [...jsonLdProducts(doc, ctx), ...microdataProducts(doc, ctx)]
+  if (all.length === 0) return mergeFields([{ fields: meta.fields, ambiguous: {} }]).facts
+  // Comparing declarations is quadratic: past MAX_COMPARED (a listing's worth), only the ones the request or the page names directly are compared.
+  const named = (d: DeclaredProduct) => SUBJECT_TIERS.slice(0, 4).some(([, holds]) => holds([d], ctx))
+  const declared = all.length <= MAX_COMPARED ? all : all.filter((d, i) => i < MAX_COMPARED || named(d))
+
+  // Declarations of one product form one subject; one that cannot be told apart from those before it waits.
+  const subjects: DeclaredProduct[][] = []
+  const loose: DeclaredProduct[] = []
+  for (const d of declared) {
+    let same: DeclaredProduct[] | null = null
+    let distinct = true
+    for (const members of subjects) {
+      const r = relationToAll(members, d)
+      if (r === 'same') {
+        same = members
+        break
+      }
+      if (r === 'unknown') distinct = false
+    }
+    if (same !== null) same.push(d)
+    else if (distinct) subjects.push([d])
+    else loose.push(d)
+  }
+
+  let left = subjects
+  let reason = 'it is the only product the page declares'
+  for (const [why, holds] of SUBJECT_TIERS) {
+    if (left.length === 1) break
+    const kept = left.filter((members) => holds(members, ctx))
+    if (kept.length > 0 && kept.length < left.length) {
+      left = kept
+      reason = why
+    }
+  }
+  const evidence: string[] = []
+  if (declared.length < all.length) evidence.push(`${all.length - declared.length} more declared products were not compared`)
+  const others = subjects.filter((members) => !left.includes(members))
+  for (const members of others.slice(0, 20)) evidence.push(`${label(members)}: another product, not merged`)
+  if (others.length > 20) evidence.push(`${others.length - 20} more declared products, not merged`)
+
+  if (left.length > 1) {
+    for (const members of left) evidence.push(`${label(members)}: a candidate nothing tells apart from the others`)
+    const merged = left.map((members) => mergeFields(members).facts)
+    const facts = emptyFacts()
+    for (const field of FACT_FIELDS) {
+      const first = merged[0]![field]
+      if (first !== null && merged.every((m) => m[field] !== null && sameValue(field, m[field]!.value, first.value))) facts[field] = first
+    }
+    textPriceBarred.add(facts)
+    facts.identity = {
+      requestedId: null,
+      observedSelectedId: null,
+      parentId: null,
+      selectedVariants: [],
+      status: 'conflicting',
+      identityMatch: false,
+      identityEvidence: evidence,
+    }
+    return facts
+  }
+
+  const subject = left[0]!
+  // A declaration nested in another node's property is a related item unless it is provably this one.
+  const bound = loose.filter((d) => !d.nested && relationToAll(subject, d) !== 'different')
+  for (const d of loose) if (!bound.includes(d)) evidence.push(`${label([d])}: another product, not merged`)
+  // The meta tags are the page's own product unless they name another declared one.
+  const metaIds = Object.values(meta.ids).flat().map(normId)
+  const metaElsewhere = metaIds.length > 0 && others.some((members) => members.some((d) => allIds(d).some((v) => metaIds.includes(normId(v)))))
+  if (metaElsewhere) evidence.push(`meta (sku ${meta.ids.sku?.[0]}): names another product, not merged`)
+  evidence.unshift(`${label([...subject, ...bound])}: the subject, ${reason}`)
+  const { facts, ambiguous } = mergeFields([...subject, ...bound, ...(metaElsewhere ? [] : [{ fields: meta.fields, ambiguous: {} }])])
+
+  const requested = SUBJECT_TIERS[0]![1](subject, ctx)
+    ? subject.flatMap(allIds).find((v) => ctx.tokens.has(normId(v))) ?? null
+    : null
+  const observed = (['sku', 'mpn', 'productID', 'gtin'] as const).map((kind) => subject.find((d) => d.ids[kind] !== undefined)?.ids[kind]?.[0]).find((v) => v !== undefined) ?? null
+  facts.identity = {
+    requestedId: requested,
+    observedSelectedId: observed,
+    parentId: subject.find((d) => d.parentId !== null)?.parentId ?? null,
+    selectedVariants: [],
+    status: 'matched',
+    identityMatch: true,
+    identityEvidence: evidence,
+  }
+  if (ambiguous.length > 0) facts.ambiguous = ambiguous
+  if (ambiguous.some((a) => a.field === 'price')) facts.quoteState = 'conflicting' as QuoteState
+  if (others.length > 0 || facts.ambiguous?.some((a) => a.field === 'price')) textPriceBarred.add(facts)
   return facts
 }
 
 /**
  * Fill a still-missing price from rendered text. Weaker than every declared
- * path, so it only ever fills a null.
+ * path, so it only ever fills a null, and never when the declarations say
+ * the null is not an omission: the page declares other products whose price
+ * the text could be, or the product's own sources disagree on its price.
  *
  * MUST run AFTER recommendation pruning, not before: the deepest price-shaped
  * element on an unpruned PDP is usually a recommendation card's price, and
@@ -330,6 +799,7 @@ export function collectDeclaredProductFacts(doc: Document): ProductFacts {
  * contamination this whole module exists to prevent.
  */
 export function fillPriceFromText(facts: ProductFacts, doc: Document): void {
+  if (textPriceBarred.has(facts)) return
   fillMissing(facts, factsFromText(doc))
 }
 

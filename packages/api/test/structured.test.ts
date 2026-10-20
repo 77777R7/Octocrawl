@@ -492,6 +492,35 @@ describe('structured JSON extraction', () => {
     expect(observed).toMatchObject({ status: 'complete', data: { images: ['https://images.example/subject.jpg'], variants: [] }, issues: [] })
   })
 
+  it('locates a declared product fact by its JSON Pointer', async () => {
+    const out = await extractStructured(page(lamp, 'https://shop.example/lamp'), json({ name: { type: 'string' }, price: { type: 'number' } }, ['name', 'price']), {}, null)
+    expect(out).toMatchObject({ status: 'complete', data: { name: 'Harbour lamp', price: 19 }, issues: [] })
+    expect(out.evidence).toEqual([
+      { path: '/name', source: 'jsonld', evidencePath: '/script/0/name' },
+      { path: '/price', source: 'jsonld', evidencePath: '/script/0/offers/price', text: '19.00' },
+    ])
+  })
+
+  it('leaves out a price the product\'s own sources state differently, naming both', async () => {
+    const html = lamp.replace('<body><main>', '<body><main><div itemscope itemtype="https://schema.org/Product"><meta itemprop="sku" content="HL-1"><meta itemprop="price" content="21.00"></div>')
+    const out = await extractStructured(page(html, 'https://shop.example/lamp'), json({ name: { type: 'string' }, price: { type: 'number' } }, ['name']), {}, null)
+    expect(out.data).toEqual({ name: 'Harbour lamp' })
+    expect(out.issues).toContainEqual({
+      code: 'field_ambiguous',
+      path: '/price',
+      message: 'the page states different values for /price: "19.00" (jsonld, /script/0/offers/price), "21.00" (microdata, microdata[0] [itemprop~="price"])',
+    })
+  })
+
+  it('reports subject_unverified when the page declares products nothing tells apart', async () => {
+    const other = '<script type="application/ld+json">{"@type":"Product","name":"Harbour mirror","sku":"HM-2","offers":{"price":"44.00","priceCurrency":"GBP"}}</script>'
+    const out = await extractStructured(page(lamp.replace('</head>', `${other}</head>`), 'https://shop.example/lamp'), json({ name: { type: 'string' }, price: { type: 'number' }, currency: { type: 'string' } }, ['name']), {}, null)
+    expect(out.status).toBe('incomplete')
+    // Only the currency both candidates state is read; neither name nor price is chosen.
+    expect(out.data).toEqual({ currency: 'GBP' })
+    expect(out.issues.find(issue => issue.code === 'subject_unverified')?.message).toMatch(/^product identity conflicting: .*\/script\/0 \(sku HL-1\).*\/script\/1 \(sku HM-2\)/)
+  })
+
   it('gives a list or map the adapter observed empty an evidence entry too', async () => {
     const empty: FetchResult = { ...result, document: { ...result.document!, product: { ...product, images: [], variants: [], specifications: {}, prices: [] } } }
     const out = await extractStructured(empty, json({ images: { type: 'array' }, variants: { type: 'array' }, specifications: { type: 'object' }, prices: { type: 'array' } }, ['images', 'variants', 'specifications', 'prices']), {}, null)
