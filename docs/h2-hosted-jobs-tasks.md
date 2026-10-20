@@ -119,8 +119,6 @@
 - [x] **A1** Claude Code、Codex 和第三个客户端（OpenCode）各自端到端跑一次：启动、查询、取数据，并记下客户端版本。记录放 `research/hosted/`。
   - 2026-10-20 在线上跑通，记录见 [research/hosted/2026-10-20-h2-a1-clients-d094e319.md](../research/hosted/2026-10-20-h2-a1-clients-d094e319.md)。
   - 版本：Claude Code 2.1.301（`/mcp-oauth`）、Codex 0.162.1（`/mcp` 加 key）、OpenCode 1.18.26（`/mcp` 加 key）。
-- [ ] **M8** hosted MCP 的任务条目里带着 `usage` 和完整的 `trace`。hosted 的 scrape 会去掉这些，而 `get_crawl_pages` 的描述写的是“不带 debug 时不含 trace”。要么去掉，要么改描述。这一项在 A1 中发现。
-- [ ] **M9** hosted 的 `batch_scrape` schema 还列着 `mode: authed`，`maxFileBytes` 的上限是 500 MB，描述里提到 `appendToId`。hosted 会拒绝或者压低这三项，schema 和描述要跟着收紧。这一项在 A1 中发现，和 M7 一起做。
 - [ ] **A2** 外部用户在跑任务：日志里出现非测试账户的任务。
 
 ## 从 H1 带过来的后续项
@@ -131,8 +129,13 @@
 
 ## 下次从这里继续
 
-- M1–M5（#627）、P1（#629）、W1–W4（#636）已合并，R1 已部署并在线上验证。全局开关现在是关的。
+- M1–M5（#627）、P1（#629）、W1–W4（#636）、M7–M9（#642）已合并，R1 已部署并在线上验证。全局开关现在是关的。
 - R3 和 A1 已完成（2026-10-20）。H2 剩下的：
   - R2（打开开关、发邀请）要等你给出邀请名单；A2（外部用户在跑任务）在 R2 之后。
-  - 代码后续项：M6、M7、M8、M9，以及 webhook 的两个已知缺口。
+  - M7–M9（#642）已部署：2026-10-21 上线 main `917d35f7` 的 API，revision `octocrawl-api-shapes-917d35f`（tag `h33shapes`，回滚用 `h32hook`）。worker 没变，仍是 w9。
+    - 先在不接流量的 tag 上，用一把临时的 HTTP 通道 key 对比 `tools/list`：h32hook 上 `batch_scrape` 的 `mode` 含 `authed`、`maxFileBytes` 上限 524288000、描述提到 `appendToId`；h33shapes 上 `mode` 只有 standard 和 research、上限 5242880、不再提 `appendToId`。`get_batch_errors` 改说 `{ items, nextCursor, hasMore }`，formats 的枚举里没有截图。
+    - 切流量后 `mcp.octocrawl.dev` 给出同样的结果。临时 key 已吊销。
+    - M8（任务条目去掉 `usage` 和 `trace`）要跑一个任务才看得到，这次开关没开，没有在线上验证，只有单元测试覆盖。
+  - 代码后续项：M6，以及 webhook 的两个已知缺口。
+  - 开放前要核对 R7（Python SDK 的 User-Agent）。
   - P2 进度页由 UI 窗口做。
