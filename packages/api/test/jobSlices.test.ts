@@ -91,6 +91,18 @@ describe('job slices', () => {
     try { expect(await store.countCompletedSteps(JOB_ID)).toBe(7) } finally { await store.close() }
   })
 
+  it('says a slice ended at the page budget, and keeps each item\'s trace with its robots.txt evidence (H1 V4, V6)', async () => {
+    const { origin, engineAfter } = await site()
+    const { engine } = await engineAfter(null)
+    await engine.startCrawl(parseCrawlStartRequest({ url: `${origin}/`, maxPages: 2 }))
+    const slice = await engine.runSlice(JOB_ID, { maxNewPages: 100, maxMs: 30_000 })
+    expect(slice).toMatchObject({ status: 'completed', budgetExceeded: 'pages' })
+    for (const item of slice!.items) {
+      expect(item.trace?.some((event) => event.event === 'robots_checked'), item.url).toBe(true)
+      expect(item).not.toHaveProperty('audit')
+    }
+  })
+
   it('runs a two-host batch one host per slice with batchHosts, pausing until the last host is read', async () => {
     const { origin, twin, seen, engineAfter } = await site()
     let { engine, root } = await engineAfter(null)

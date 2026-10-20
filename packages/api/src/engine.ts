@@ -76,6 +76,7 @@ import {
   type StepStatus,
   type Task,
   type TaskStatus,
+  type BudgetKind,
   type HostPacing,
   type CrawlPageQuery,
   type ExecutionContext,
@@ -2273,7 +2274,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       try {
         const task = await store.getTask(taskId)
         if (task === null) return null
-        if (isTerminalStatus(task.status)) return { status: task.status, attemptId: (await store.listAttempts(taskId)).at(-1)?.id ?? null, newPages: 0, items: [], charges: [] }
+        if (isTerminalStatus(task.status)) return { status: task.status, attemptId: (await store.listAttempts(taskId)).at(-1)?.id ?? null, newPages: 0, budgetExceeded: null, items: [], charges: [] }
         // At a limit the slice drains: no new page starts, the pages in flight are stored. Those still running after the grace are cut.
         const drain = new AbortController()
         const stop = new AbortController()
@@ -2327,11 +2328,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         const after = SqliteTaskStore.openReadOnly(join(taskRoot, taskId))
         try {
           const ended = await after.getTask(taskId)
-          const attemptId = (await after.listAttempts(taskId)).at(-1)?.id ?? null
+          const attempt = (await after.listAttempts(taskId)).at(-1)
+          const attemptId = attempt?.id ?? null
           const steps = attemptId === null || ended === null ? [] : await after.listSteps(taskId, attemptId)
           return {
-            status: ended?.status ?? 'failed', attemptId, newPages,
-            items: steps.map((step) => { const { audit: _audit, ...item } = toCrawlPage(step, ended!); return { ...item, trace: [] } as CrawlPage }),
+            status: ended?.status ?? 'failed', attemptId, newPages, budgetExceeded: attempt?.budgetExceeded ?? null,
+            // Each page keeps its trace (the robots.txt and Crawl-delay evidence a page is judged by); the routing audit is left out.
+            items: steps.map((step) => { const { audit: _audit, ...item } = toCrawlPage(step, ended!); return item as CrawlPage }),
             charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null })),
           }
         } finally { await after.close() }
@@ -2728,7 +2731,9 @@ export interface SliceResult {
   /** The slice's attempt, whose steps are the pages it stored; null when it ran none. */
   attemptId: string | null
   newPages: number
-  /** The pages the slice stored, as a batch's items are listed (no trace or audit), in the order they were stored. */
+  /** The budget the slice's run stopped at (`pages` once a crawl reached its maxPages); null when none. */
+  budgetExceeded: BudgetKind | null
+  /** The pages the slice stored, as a batch's items are listed with their trace (no routing audit), in the order they were stored. */
   items: CrawlPage[]
   /** What each of those pages was, for its price (hostedCredits.ts scrapeCharge), item for item. */
   charges: SliceCharge[]

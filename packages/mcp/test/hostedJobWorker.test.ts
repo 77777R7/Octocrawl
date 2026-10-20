@@ -142,6 +142,17 @@ describe('hosted job worker', () => {
     expect(archive.markdown ?? '').toHaveLength(0)
   })
 
+  it('records where a crawl stopped for its page budget, and reads a small first slice so progress shows early (H1 V4, V5)', async () => {
+    const { origin, store, create, drain } = await setup({ limits: { slicePages: 100, firstSlicePages: 2 } })
+    const crawl = await create(parseCrawlStartRequest({ url: `${origin}/`, maxPages: 3, fastMode: true }), 'crawl')
+    await drain(crawl, 1)
+    // The first slice stops after two pages (one more may finish in flight), and its pages are committed for reading.
+    expect((await store.get(crawl))?.counts.pages).toBeGreaterThanOrEqual(2)
+    expect((await store.get(crawl))?.counts.slices).toBe(1)
+    await drain(crawl)
+    expect(await store.get(crawl)).toMatchObject({ status: 'completed', budgetExceeded: 'pages' })
+  })
+
   it('runs a crawl in slices under its maxPages', async () => {
     const { origin, seen, store, create, drain } = await setup()
     const id = await create(parseCrawlStartRequest({ url: `${origin}/`, maxPages: 3, fastMode: true }), 'crawl')

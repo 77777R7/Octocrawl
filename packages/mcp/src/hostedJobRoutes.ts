@@ -115,7 +115,7 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     const requested = job.kind === 'batch' ? (job.request as { urls: readonly string[] }).urls.length : null
     const completed = job.counts.pages + job.counts.errors
     return {
-      taskId: job.id, kind: job.kind, status: job.status, failureReason: job.failureReason,
+      taskId: job.id, kind: job.kind, status: job.status, failureReason: job.failureReason, budgetExceeded: job.budgetExceeded ?? null,
       pagesFetched: job.counts.pages, errors: job.counts.errors, completed,
       ...(requested === null ? {} : { requested, remaining: Math.max(0, requested - completed) }),
       credits: { used: job.credits.used, maxCredits: job.credits.maxCredits },

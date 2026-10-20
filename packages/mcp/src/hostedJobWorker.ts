@@ -32,6 +32,8 @@ export interface WorkerFiles {
 export interface WorkerLimits {
   /** New pages a slice stores at most (the plan's N). */
   slicePages: number
+  /** New pages a job's first slice stores at most: small, so the first pages and the progress show early. */
+  firstSlicePages: number
   /** How long a slice reads before it drains (T). */
   sliceMs: number
   graceMs: number
@@ -43,7 +45,7 @@ export interface WorkerLimits {
   /** Slices in a row that store nothing before the job fails (`no_progress`). */
   idleSlicesToFail: number
 }
-export const WORKER_LIMITS: WorkerLimits = { slicePages: 100, sliceMs: 8 * 60_000, graceMs: 60_000, jobsDaily: 10_000, jobsAccountDaily: 2_000, maxHostsPerSlice: 20, idleSlicesToFail: 2 }
+export const WORKER_LIMITS: WorkerLimits = { slicePages: 100, firstSlicePages: 10, sliceMs: 8 * 60_000, graceMs: 60_000, jobsDaily: 10_000, jobsAccountDaily: 2_000, maxHostsPerSlice: 20, idleSlicesToFail: 2 }
 
 export interface JobWorkerDeps {
   store: HostedJobStore
@@ -136,7 +138,8 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
   const allowed = job.credits.maxCredits === null ? limits.slicePages : Math.floor((job.credits.maxCredits - job.credits.used) / price)
   if (allowed <= 0) return pass((j) => ({ ...j, status: 'completed', failureReason: 'max_credits' }))
   // Under maxCredits the headroom page must fit too.
-  let pages = Math.min(limits.slicePages, job.credits.maxCredits === null ? allowed : Math.max(1, allowed - SLICE_HEADROOM))
+  const slicePages = job.counts.slices === 0 ? Math.min(limits.firstSlicePages, limits.slicePages) : limits.slicePages
+  let pages = Math.min(slicePages, job.credits.maxCredits === null ? allowed : Math.max(1, allowed - SLICE_HEADROOM))
   // No more than the job has left: a batch's URLs not yet read, a crawl's pages under its maxPages. A slice that asks for
   // all of them gets no headroom, as there is no page past them; the day's pool and the credits are taken for what is left.
   const left = Math.max(1, (job.kind === 'batch' ? (request as ParsedBatchStartRequest).urls.length : ((request as ParsedCrawlStartRequest).maxPages ?? JOB_MAX_PAGES)) - job.counts.pages - job.counts.errors)
@@ -246,7 +249,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     const done: Committed = await commit((j) => ({
       ...j, status, failureReason: status === 'failed' ? (idleSlices >= limits.idleSlicesToFail ? 'no_progress' : 'task_failed') : j.failureReason,
       counts: { pages: j.counts.pages + result!.items.length - errors, errors: j.counts.errors + errors, slices: j.counts.slices + 1 },
-      credits: { ...j.credits, used: j.credits.used + used }, idleSlices,
+      credits: { ...j.credits, used: j.credits.used + used }, idleSlices, budgetExceeded: result!.budgetExceeded ?? j.budgetExceeded ?? null,
       segments: [...(j.segments ?? []), segment], checkpoint: nextCheckpoint,
       // Kept until settled: if the settle below fails, the next delivery settles it.
       reservation: { reservation: settled, used, perKind },
