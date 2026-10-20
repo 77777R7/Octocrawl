@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type RobotsOverrideApplied } from '@w2l/contracts'
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
+import { captureOf } from '../src/capture.js'
 
 /**
  * Browser-local transport behaviour against a bespoke server:
@@ -799,6 +800,29 @@ describe('BrowserLocalSubject transport', () => {
   })
 })
 
+describe('BrowserLocalSubject after its shared browser dies (PA B6)', () => {
+  it('launches a new browser for the next request instead of reusing the dead one', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      expect((await subject.fetch(`${url}/landing`)).status).toBe('success')
+      const shared = (subject as unknown as { browser: import('playwright').Browser | null }).browser!
+      const gone = new Promise<void>(resolve => shared.once('disconnected', () => resolve()))
+      // Playwright's Browser has no process handle: the browser is this worker's child launched with a debugging pipe.
+      const { execFileSync } = await import('node:child_process')
+      const children = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,command=']).toString().split('\n')
+        .map(line => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/)).filter(match => match !== null && Number(match[2]) === process.pid && match[3]!.includes('--remote-debugging-pipe'))
+      expect(children.length).toBeGreaterThan(0)
+      for (const child of children) process.kill(Number(child![1]), 'SIGKILL')
+      await gone
+      const again = await subject.fetch(`${url}/landing`, Date.now() + 30_000)
+      expect(again.status).toBe('success')
+      expect((subject as unknown as { browser: import('playwright').Browser | null }).browser).not.toBe(shared)
+    } finally {
+      await subject.teardown()
+    }
+  })
+})
+
 describe('BrowserLocalSubject after the page moves on by itself', () => {
   it('reports the status and content type of the document it shows, and judges it by them', async () => {
     const subject = new BrowserLocalSubject()
@@ -815,6 +839,9 @@ describe('BrowserLocalSubject after the page moves on by itself', () => {
       })
       expect(gone.markdown).toContain('Page not found')
       expect(gone.compliance?.finalUrl).toBe(`${url}/client/gone`)
+      // The capture names the document read: the second one the main frame loaded, with its own response (PA B3).
+      expect(captureOf(gone.trace)).toMatchObject({ sourceKind: 'browser_dom', requestedUrl: `${url}/client/replace`, finalUrl: `${url}/client/gone`, documentGeneration: 2, responseMatch: 'matched', sourceHash: gone.evidence.rawBodySha256 })
+      expect(gone.trace.find(event => event.event === 'view')?.detail).toMatchObject({ captureId: captureOf(gone.trace)!.captureId, selectionVersion: 'none' })
 
       // A server redirect, then a script: every hop is listed and the last document answers.
       const onward = await subject.fetch(`${url}/client/hop`)

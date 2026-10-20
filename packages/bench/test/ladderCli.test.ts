@@ -338,6 +338,10 @@ describe('lazy vendor connection', () => {
     expect(connected).toEqual([])
 
     const provider = channels.find((c) => c.vendorId === 'steel')!
+    // What the vendor's browser cannot do is refused before any session opens (PA B4).
+    expect(provider.refusal?.('https://example.com/p', { screenshot: {}, headers: { 'x-a': '1' } })).toBe('the steel rung takes no screenshot, headers')
+    expect(provider.refusal?.('https://example.com/p', {})).toBeNull()
+    expect(created).toEqual([])
     const result = await provider.fetch('https://example.com/p')
 
     // Fetch time: exactly one connection, and only now.

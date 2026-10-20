@@ -154,6 +154,20 @@ describe.each(stores)('%s job store', (_name, make) => {
     expect(await store.updateHeld('job-9', 'h1', (j) => j)).toEqual({ ok: false, reason: 'missing' })
   })
 
+  it('counts failed slices: an expired lease taken over and a lease given back count, a commit starts the count again (H1 D7)', async () => {
+    const store = make()
+    await store.create(job('job-1'), LIMITS, null, NOW)
+    await store.acquireLease('job-1', { generation: 0, holder: 'h1', ttlMs: 60_000 }, NOW)
+    // h1 dies: h2 takes the expired lease over.
+    const later = new Date(NOW.getTime() + 60_001)
+    expect(await store.acquireLease('job-1', { generation: 0, holder: 'h2', ttlMs: 60_000 }, later)).toMatchObject({ ok: true, job: { failedAttempts: 1 } })
+    // h2 fails and gives the lease back: the next delivery takes it at once.
+    expect(await store.abandon('job-1', 'h2')).toMatchObject({ ok: true, job: { failedAttempts: 2, lease: null } })
+    expect(await store.abandon('job-1', 'h2')).toEqual({ ok: false, reason: 'lost' })
+    expect(await store.acquireLease('job-1', { generation: 0, holder: 'h3', ttlMs: 60_000 }, later)).toMatchObject({ ok: true, job: { failedAttempts: 2 } })
+    expect(await store.commitSlice('job-1', 'h3', (j) => j, later)).toMatchObject({ ok: true, job: { failedAttempts: 0 } })
+  })
+
   it('marks a finished job expired, and nothing else', async () => {
     const store = make()
     await store.create(job('job-1'), LIMITS, null, NOW)
