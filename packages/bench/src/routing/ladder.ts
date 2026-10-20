@@ -29,11 +29,12 @@ import {
   type CrawlPolicy,
   type RoutingFailureClass,
 } from '@w2l/http-core'
-import { readinessOf, verify } from '@w2l/runtime'
+import { contractSha256, readinessOf, verify, VERIFIER_VERSION } from '@w2l/runtime'
+import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
 import { createHash } from 'node:crypto'
 import { BROWSER_INSTALL_COMMAND } from '../browserInstall.js'
 import { INSTALLED_CHROME_INSTALL } from '../subjects/installedChrome.js'
-import type { RouteObservation, RoutingHistory, VendorOutcome } from './vendorRouter.js'
+import type { RouteContext, RouteObservation, RoutingHistory, VendorOutcome } from './vendorRouter.js'
 import { rankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
 import { decideNext, ladderActionDecisionEvent, type ActionDecision, type LadderAction } from './decideNext.js'
@@ -433,6 +434,27 @@ function verifiedOf(checked: ReturnType<typeof contractVerdict>): boolean | null
   return checked.verification.status === 'passed' && checked.verification.checks.length === 0 ? true : null
 }
 
+/** A path segment kept as it is in a family: a short word of letters and hyphens (`products`, `en-us`). */
+const KIND_SEGMENT = /^[a-z][a-z-]{0,23}$/
+
+/**
+ * The route a URL's vendor statistics belong to (PA G2b): with a contract, its task (the contract's hash); else the
+ * path's family: its first segment when it is a short word of letters, else `*`, and `/*` when there is more. Never the
+ * URL itself, its query, a second segment (an id, a slug, a name) or anything with digits, `@`, `.` or `%` in it.
+ */
+function routeContextOf(url: string, options: FetchOptions, contract: VerifyContract | undefined): RouteContext {
+  let family: string
+  if (contract !== undefined) family = `task:${contractSha256(contract).slice(0, 12)}`
+  else {
+    let segments: string[] = []
+    try { segments = new URL(url).pathname.split('/').filter((segment) => segment !== '') } catch { /* not a URL: the root family */ }
+    const first = segments[0]
+    family = first === undefined ? 'path:/' : `path:/${KIND_SEGMENT.test(first.toLowerCase()) ? first.toLowerCase() : '*'}${segments.length > 1 ? '/*' : ''}`
+  }
+  const formats = ['markdown', ...(options.includeHtml ? ['html'] : []), ...(options.includeRawHtml ? ['rawHtml'] : []), ...(options.includeImages ? ['images'] : []), ...(options.includeTables ? ['tables'] : []), ...(options.attributes !== undefined && options.attributes.length > 0 ? ['attributes'] : []), ...(options.list !== undefined ? ['list'] : []), ...(options.screenshot !== undefined ? ['screenshot'] : [])].sort()
+  return { family, formats: formats.join(','), versions: `${EXTRACTOR_VERSION}|${VERIFIER_VERSION}` }
+}
+
 /** A number the last such trace event's detail holds, else null. */
 function detailMs(trace: readonly TraceEvent[], event: string, key: string): number | null {
   const value = [...trace].reverse().find((t) => t.event === event)?.detail?.[key]
@@ -665,7 +687,7 @@ export class LadderRunner {
     const local = this.channels.filter((c) => c.vendorId === undefined && permitted.has(c.id) && served(c))
     const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id) && served(c))
 
-    let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers), execution.signal))]
+    let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers, routeContextOf(url, options, this.options.verify)), execution.signal))]
 
     // A saved login for this host goes first: many sites answer a logged-out
     // visitor with a 200 (a login form, a public variant of the page), which
@@ -831,7 +853,7 @@ export class LadderRunner {
         // A page there but not extracted is not the vendor failing the task either (ADR 0007): unknown, on both counts.
         const counted = verified === false && judged === result && failedReadiness === 'not_extracted' ? null : verified
         const observation = routeObservation(channel, judged, counted, judgedCheck, judged === result ? failedReadiness : null, progress)
-        await this.recordVendorOutcome(url, channel.vendorId, judged, cls, counted, observation)
+        await this.recordVendorOutcome(url, channel.vendorId, judged, cls, counted, observation, routeContextOf(url, options, this.options.verify))
       }
 
       if (CONTENTFUL_STATUS.has(result.status)) {
@@ -1077,10 +1099,10 @@ export class LadderRunner {
 
   // -------------------------------------------------------------------------
 
-  private async orderProviders(url: string, providers: readonly Channel[]): Promise<readonly Channel[]> {
+  private async orderProviders(url: string, providers: readonly Channel[], route: RouteContext): Promise<readonly Channel[]> {
     if (providers.length <= 1 || this.history === null) return providers
     const host = safeHost(url)
-    const domainHistory = await this.history.read(host)
+    const domainHistory = await this.history.read(host, route)
     const ranked = rankVendors(
       domainHistory,
       providers.map((p) => p.vendorId!),
@@ -1100,6 +1122,7 @@ export class LadderRunner {
     cls: RoutingFailureClass | null,
     verified: boolean | null,
     observation: RouteObservation,
+    route: RouteContext,
   ): Promise<void> {
     const outcome: VendorOutcome = {
       contentful: CONTENTFUL_STATUS.has(result.status),
@@ -1109,7 +1132,7 @@ export class LadderRunner {
       failureClass: cls,
       observation,
     }
-    await this.history?.record(safeHost(url), vendorId, outcome)
+    await this.history?.record(safeHost(url), vendorId, outcome, route)
   }
 
   /**

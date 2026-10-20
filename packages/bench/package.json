@@ -28,10 +28,14 @@
     "@w2l/fixtures": "*",
     "@w2l/http-core": "*",
     "@w2l/runtime": "*",
+    "better-sqlite3": "^12.4.1",
     "impit": "0.14.5",
     "playwright": "^1.62.1",
     "tough-cookie": "6.0.2",
     "undici": "^7.4.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
   },
   "optionalDependencies": {
     "patchright": "1.63.0"

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createSpendLedger } from '@w2l/http-core'
-import { contractSha256 } from '@w2l/runtime'
+import { contractSha256, VERIFIER_VERSION } from '@w2l/runtime'
+import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
 import {
   CONTENTFUL_STATUS,
   identityBundleFrom,
@@ -17,7 +18,7 @@ import {
 } from '@w2l/contracts'
 import { egressProxyRefusedWarning, LadderRunner, sessionRejection, type Channel, type HumanHandoff } from '../src/routing/ladder.js'
 import { INSTALLED_CHROME_INSTALL } from '../src/subjects/installedChrome.js'
-import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
+import { MemoryRoutingHistory, type RoutingHistory } from '../src/routing/vendorRouter.js'
 import { loadSessionForHost, MemorySessionStore, sessionCoversHost, type SessionSnapshot } from '../src/routing/sessionStore.js'
 
 const COHERENT = identityBundleFrom(modeIdentity('standard'))
@@ -1871,5 +1872,41 @@ describe('LadderRunner — route observations in the vendor\'s history (PA G2a)'
     await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), channel('provider', [wrong], 'bb')], { mode: 'authed' }, history, null, null, { verify: wants, classifyContractFailure: () => 'not_served' }).run(url)
     expect((await history.read('example.com')).vendors.bb!.observations[0]).toMatchObject({ accessDelivered: true, regionLoaded: false, taskVerified: false, failureStage: 'region', readiness: 'not_served' })
     expect((await history.read('example.com')).vendors.bb).toMatchObject({ attempts: 1, contentful: 0 })
+  })
+})
+
+describe('LadderRunner — the route a vendor\'s history is kept under (PA G2b)', () => {
+  it('reads and records under the path or task family, the formats asked for and the extractor and verifier versions', async () => {
+    const seen: { op: string; domain: string; route: unknown }[] = []
+    const history: RoutingHistory = {
+      async read(domain, route) { seen.push({ op: 'read', domain, route }); return { vendors: {}, lastVendor: null } },
+      async record(domain, _vendor, _outcome, route) { seen.push({ op: 'record', domain, route }) },
+    }
+    const url = 'https://example.com/products/12345?ref=x'
+    const providers = () => [channel('provider', [contentfulResult(url, 'provider')], 'steel'), channel('provider', [contentfulResult(url, 'provider')], 'bb')]
+    await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), ...providers()], { mode: 'authed' }, history).run(url, null, {}, { includeTables: true, includeHtml: true })
+    const versions = `${EXTRACTOR_VERSION}|${VERIFIER_VERSION}`
+    expect(seen).toEqual([
+      { op: 'read', domain: 'example.com', route: { family: 'path:/products/*', formats: 'html,markdown,tables', versions } },
+      { op: 'record', domain: 'example.com', route: { family: 'path:/products/*', formats: 'html,markdown,tables', versions } },
+    ])
+    seen.length = 0
+    const wants = { checks: [{ type: 'markdownIncludes' as const, text: 'MAIN' }] }
+    await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), ...providers()], { mode: 'authed' }, history, null, null, { verify: wants }).run(url)
+    expect(seen.map((s) => s.route)).toEqual([0, 1].map(() => ({ family: `task:${contractSha256(wants).slice(0, 12)}`, formats: 'markdown', versions })))
+  })
+
+  it('keeps no name, address, token or id of a path in its family', async () => {
+    const families: string[] = []
+    const history: RoutingHistory = {
+      async read(_domain, route) { families.push(route!.family); return { vendors: {}, lastVendor: null } },
+      async record() {},
+    }
+    for (const path of ['/users/jane.doe@example.com', '/u/jane%40example.com', '/@janedoe/posts', '/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIi', '/share/AbCdEfGhIjKlMnOp', '/token=abcDEFghiJKLmno', '/jane.doe@example.com', '/12345', '/', '/Blog']) {
+      const url = `https://example.com${path}`
+      const providers = [channel('provider', [contentfulResult(url, 'provider')], 'steel'), channel('provider', [contentfulResult(url, 'provider')], 'bb')]
+      await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), ...providers], { mode: 'authed' }, history).run(url)
+    }
+    expect(families).toEqual(['path:/users/*', 'path:/u/*', 'path:/*/*', 'path:/reset/*', 'path:/share/*', 'path:/*', 'path:/*', 'path:/*', 'path:/', 'path:/blog'])
   })
 })

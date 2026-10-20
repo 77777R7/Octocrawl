@@ -127,9 +127,24 @@ export interface DomainHistory {
   lastVendor: string | null
 }
 
+/**
+ * The route within a host a run's statistics belong to (PA G2b): the path or task family, the formats asked for, and the
+ * extractor and verifier versions. Codes and templates only, never a URL. A store that keys by host alone ignores it.
+ */
+export interface RouteContext {
+  /** `path:/first/:id` (the first two path segments, ids folded) or `task:<contract hash>` for a request with a contract. */
+  family: string
+  /** The formats asked for, sorted, comma-joined. */
+  formats: string
+  /** `<extractor version>|<verifier version>`. */
+  versions: string
+  /** The site's template, when something identified it; a change expires the family's rows. */
+  siteTemplate?: string | null
+}
+
 export interface RoutingHistory {
-  read(domain: string): Promise<DomainHistory>
-  record(domain: string, vendorId: string, outcome: VendorOutcome): Promise<void>
+  read(domain: string, route?: RouteContext): Promise<DomainHistory>
+  record(domain: string, vendorId: string, outcome: VendorOutcome, route?: RouteContext): Promise<void>
 }
 
 export interface VendorOutcome {
@@ -154,7 +169,7 @@ function freshLayers(unknown = 0): Record<RouteLayer, LayerCount> {
 }
 
 /** Fresh history entry for a vendor a domain has never used. */
-function freshEntry(): VendorHistoryEntry {
+export function freshEntry(): VendorHistoryEntry {
   return {
     attempts: 0,
     contentful: 0,
@@ -180,7 +195,7 @@ const MAX_OBSERVATIONS = 50
 
 /** Apply one outcome to an entry. Shared by both stores so their arithmetic
  *  cannot drift apart. */
-function applyOutcome(entry: VendorHistoryEntry, outcome: VendorOutcome): void {
+export function applyOutcome(entry: VendorHistoryEntry, outcome: VendorOutcome): void {
   entry.attempts += 1
   if (outcome.verified ?? outcome.contentful) entry.contentful += 1
   entry.latencyTotalMs += outcome.wallMs
@@ -266,7 +281,7 @@ function normalizeObservation(raw: unknown): StoredRouteObservation | null {
  * such files must keep working — the samples are reconstructed as the mean of
  * the stored totals, and the ranker gets the same shape it always expects.
  */
-function normalizeEntry(raw: Partial<VendorHistoryEntry> | undefined): VendorHistoryEntry | undefined {
+export function normalizeEntry(raw: Partial<VendorHistoryEntry> | undefined): VendorHistoryEntry | undefined {
   if (raw === undefined) return undefined
   const entry = freshEntry()
   entry.attempts =
@@ -314,6 +329,32 @@ function normalizeEntry(raw: Partial<VendorHistoryEntry> | undefined): VendorHis
     )
   }
   return entry
+}
+
+/**
+ * One entry over several (a host's routes read together, PA G2b), oldest first: counts and totals add up, samples and
+ * observations keep the most recent ones, the last failure is the newest entry's.
+ */
+export function mergeEntries(entries: readonly VendorHistoryEntry[]): VendorHistoryEntry {
+  const merged = freshEntry()
+  for (const entry of entries) {
+    merged.attempts += entry.attempts
+    merged.contentful += entry.contentful
+    merged.latencyTotalMs += entry.latencyTotalMs
+    merged.latencySamplesMs.push(...entry.latencySamplesMs)
+    merged.costTotalUsd += entry.costTotalUsd
+    merged.costUnknownAttempts += entry.costUnknownAttempts
+    merged.lastFailureClass = entry.lastFailureClass
+    for (const layer of ROUTE_LAYERS) {
+      for (const key of ['yes', 'no', 'unknown'] as const) merged.layers[layer][key] += entry.layers[layer][key]
+    }
+    merged.chargedTotalUsd += entry.chargedTotalUsd
+    merged.chargedUnknownAttempts += entry.chargedUnknownAttempts
+    merged.observations.push(...entry.observations)
+  }
+  merged.latencySamplesMs = merged.latencySamplesMs.slice(-MAX_LATENCY_SAMPLES)
+  merged.observations = merged.observations.sort((a, b) => a.observedAt.localeCompare(b.observedAt)).slice(-MAX_OBSERVATIONS)
+  return merged
 }
 
 /** Normalize a whole domain history read from disk. */
