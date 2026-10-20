@@ -81,6 +81,8 @@ interface FakeScript {
    * The context opens raw CDP sessions when this is set.
    */
   documents?: { url: string; status: number; headers?: Record<string, string> }[]
+  /** The raw CDP session never answers Page.enable. */
+  hangPageEnable?: boolean
 }
 
 interface FakeState {
@@ -100,7 +102,7 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
     pages: () => [],
     ...(script.bytesPerNavigation === undefined && script.documents === undefined ? {} : {
       async newCDPSession() {
-        return { async send() { return {} }, on(event: string, handler: (params: unknown) => void) { listeners.set(event, [...listeners.get(event) ?? [], handler]) }, async detach() {} }
+        return { send: (method: string) => script.hangPageEnable === true && method === 'Page.enable' ? new Promise(() => {}) : Promise.resolve({}), on(event: string, handler: (params: unknown) => void) { listeners.set(event, [...listeners.get(event) ?? [], handler]) }, async detach() {} }
       },
     }),
     async newPage(): Promise<CdpPage> {
@@ -387,6 +389,14 @@ describe('vendor identity', () => {
     const res = await transport.fetch('https://shop.example/dp/A')
     expect(res).toMatchObject({ status: 200, finalUrl: 'https://shop.example/dp/A', documentGeneration: 2, responseMatch: 'matched' })
     expect(res.headers['cf-mitigated']).toBeUndefined()
+  })
+
+  it('goes on unobserved when the CDP session never enables its Page domain (PA B2)', async () => {
+    const api = sessionServing('bb_1')
+    const bb = fakeBrowser({ hangPageEnable: true, documents: [{ url: 'https://shop.example/dp/A', status: 200 }] })
+    const transport = new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, api.handler), connectorFor(bb).connector)
+    const res = await transport.fetch('https://shop.example/dp/A', Date.now() + 20_000)
+    expect(res).toMatchObject({ status: 200, responseMatch: 'unobserved', documentGeneration: null })
   })
 
   it('says unobserved, never matched, when the connector opens no CDP session (PA B1)', async () => {

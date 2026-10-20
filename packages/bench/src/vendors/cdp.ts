@@ -169,27 +169,43 @@ async function observePage(context: CdpContext, page: CdpPage, meter: ByteMeter 
   if (typeof context.newCDPSession !== 'function') return { session: null, documents: null }
   let session: CdpSessionLike
   try {
-    session = await raceWithSignal(context.newCDPSession(page), signal)
+    const opening = context.newCDPSession(page)
+    // A session that opens after the call was cancelled is still detached.
+    void opening.then(late => { if (signal.aborted) void late.detach().catch(() => {}) }, () => {})
+    session = await raceWithSignal(opening, signal)
   } catch (err) {
     if (meter !== undefined || signal.aborted) throw err
     return { session: null, documents: null }
   }
   if (meter !== undefined) meterSession(session, meter)
   const documents = new CdpMainFrameDocuments(session)
+  // An unmetered call does not wait on a CDP proxy that never answers: past this, it goes on unobserved.
+  const enable = (method: string) => raceWithSignal(meter !== undefined ? session.send(method) : new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${method} did not answer`)), OBSERVE_ENABLE_MS)
+    session.send(method).then(resolve, reject).finally(() => clearTimeout(timer))
+  }), signal)
   try {
-    await raceWithSignal(session.send('Network.enable'), signal)
+    await enable('Network.enable')
   } catch (err) {
     await session.detach().catch(() => {})
     if (meter !== undefined || signal.aborted) throw err
     return { session: null, documents: null }
   }
   // Without the Page domain no commit is heard: the documents stay unobserved, the meter still counts.
-  const paged = await raceWithSignal(session.send('Page.enable'), signal).then(() => true, (err: unknown) => {
-    if (signal.aborted) throw err
-    return false
-  })
-  return { session, documents: paged ? documents : null }
+  try {
+    await enable('Page.enable')
+  } catch (err) {
+    if (signal.aborted) {
+      await session.detach().catch(() => {})
+      throw err
+    }
+    return { session, documents: null }
+  }
+  return { session, documents }
 }
+
+/** How long an unmetered call waits for the CDP session to enable a domain before it goes on unobserved. */
+const OBSERVE_ENABLE_MS = 3_000
 
 export interface CdpBrowser {
   /** Contexts the vendor already provisioned. `[0]` is the default context. */
