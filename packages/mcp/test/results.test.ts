@@ -218,7 +218,8 @@ describe('MCP result budget', () => {
     const rows = kept[1]!.rows.length
     expect(rows).toBeGreaterThan(0)
     expect(rows).toBeLessThan(2_000)
-    expect(kept[1]!.csv).toBe(kept[1]!.rows.map(row => row.join(',')).join('\r\n'))
+    // As the lanes write a table's CSV: every row, the last too, ends in CRLF.
+    expect(kept[1]!.csv).toBe(kept[1]!.rows.map(row => `${row.join(',')}\r\n`).join(''))
     expect(kept[1]!.csvSha256).toBe(createHash('sha256').update(kept[1]!.csv).digest('hex'))
     expect((result.structuredContent!.agentHints as string[]).at(-1)).toBe(`the tables were cut to 2 of 2, the last with ${rows} of its 2000 rows to fit this answer; ask for fewer formats, or narrow the page with includeTags or excludeTags`)
     // The contract asked for 2,000 rows of table 1: the cut result does not keep the pass.

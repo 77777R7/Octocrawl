@@ -149,7 +149,7 @@ function rowCount(table: unknown): number {
   return isObject(table) && Array.isArray(table.rows) ? table.rows.length : 0
 }
 
-/** A table with its first `rows` rows, its CSV (RFC 4180, CRLF) and digest written again for them. */
+/** A table with its first `rows` rows, its CSV (RFC 4180, each row ending in CRLF) and digest written again for them. */
 function tableRows(table: unknown, rows: number): unknown {
   if (!isObject(table) || !Array.isArray(table.rows)) return table
   const kept = (table.rows as unknown[][]).slice(0, rows)
@@ -157,7 +157,8 @@ function tableRows(table: unknown, rows: number): unknown {
     const text = String(cell ?? '')
     return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
   }
-  const csv = kept.map((row) => row.map(field).join(',')).join('\r\n')
+  // As the lanes write it (bench errorPage.ts tableCsv): every row, the last too, ends in CRLF.
+  const csv = kept.map((row) => `${row.map(field).join(',')}\r\n`).join('')
   return { ...table, rows: kept, headerRows: Math.min(Number(table.headerRows) || 0, kept.length), csv, csvSha256: createHash('sha256').update(csv, 'utf8').digest('hex') }
 }
 
