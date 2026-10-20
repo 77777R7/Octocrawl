@@ -1040,10 +1040,11 @@ export class LadderRunner {
       grantHash: channel.grant?.sha256 ?? null, deadline: execution.deadlineAt === undefined ? null : new Date(execution.deadlineAt).toISOString(),
     })
     // The row's writes in order: a session named mid-call is written without holding the call up, and the outcome after it.
+    // A write that fails does not stop the ones after it.
     let writing: Promise<void> = Promise.resolve()
     const save = (next: PaidCallRecord): Promise<void> => {
       row = next
-      writing = writing.then(() => log!.write(next))
+      writing = writing.catch(() => {}).then(() => log!.write(next))
       return writing
     }
     if (ceiling !== undefined) {
@@ -1102,7 +1103,9 @@ export class LadderRunner {
     // Known: the provider's price, or a measure with every figure the provider was asked for. A figure it did not give was
     // charged at the ceiling's allowance, and the row waits for the provider's word.
     const known = reported !== null || (measured !== null && result.usage.vendorProxyBytes !== null && result.usage.vendorSolves !== null)
-    await settleRow(known ? 'settled' : 'usage_pending', charged)
+    // A settled row that cannot be written leaves the row open, for the next run to settle with the provider: the page
+    // it paid for is still the answer.
+    await settleRow(known ? 'settled' : 'usage_pending', charged).catch(() => {})
     const sessionMs = measured === null ? null : result.usage.vendorSessionMs ?? null
     // What the provider reported the sessions used, when the charge is measured: bytes through its proxy, solves.
     const used = measured === null ? {} : { ...(result.usage.vendorProxyBytes === undefined ? {} : { proxyBytes: result.usage.vendorProxyBytes }), ...(result.usage.vendorSolves === undefined ? {} : { solves: result.usage.vendorSolves }), ...(result.usage.vendorProxyCountry === undefined ? {} : { proxyCountry: result.usage.vendorProxyCountry }) }

@@ -55,6 +55,14 @@ describe('a paid call\'s provider sessions (PA E4)', () => {
     expect(heard).toEqual([{ providerSessionId: 'bb-1' }])
   })
 
+  it('ends a Steel session created under another id than the call asked for, and fails the call, so none is left that its name would not find', async () => {
+    const requests: VendorApiRequest[] = []
+    const api: VendorApi = async (req) => { requests.push(req); return req.url.endsWith('/v1/sessions') ? { status: 201, json: { id: 'steel-own-id' } } : { status: 200, json: { success: true } } }
+    const named = namedForPaidCall(steelOps({ apiKey: 'k' }, api), { paidCallId: 'task-attempt-1', onPaidSession: () => {} })
+    await expect(named.createSession(null)).rejects.toThrow('did not take the sessionId')
+    expect(requests.map((req) => `${req.method} ${new URL(req.url).pathname}`)).toEqual(['POST /v1/sessions', 'POST /v1/sessions/steel-own-id/release'])
+  })
+
   it('settles a crashed call from Steel\'s finalized cost, releasing a session still live', async () => {
     const name = paidSessionName(CALL.paidCallId, 1)
     const api = steelApi({ [name]: { status: 'live', cost: 0.0034 } })

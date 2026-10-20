@@ -1647,6 +1647,26 @@ describe('a provider call\'s row in the task\'s paid_calls (PA E3)', () => {
     expect(ledger.settledUsd).toBe(0)
   })
 
+  it('keeps the page a paid call returned when a later write of its row fails, and still writes the ones after it', async () => {
+    const { log, writes } = journal()
+    let attempt = 0
+    // The `submitted` write (the second) fails once, as a busy database would.
+    const flaky: PaidCallLog = { ...log, write: async (call) => { if (++attempt === 2) throw new Error('SQLITE_BUSY'); await log.write(call) } }
+    const reported = { ...contentfulResult(url, 'provider'), usage: { ...contentfulResult(url, 'provider').usage, externalCostUsd: 0.12 } }
+    const ledger = createSpendLedger(1)
+    const run = await new LadderRunner([blockedHttp(), provider(reported, 'sess-1', [], writes)], ALLOWED_ALL).run(url, undefined, { spend: ledger, paidCalls: flaky })
+    expect(run.result).toMatchObject({ status: 'success', lane: 'provider' })
+    expect(writes.map((row) => row.state)).toEqual(['reserved', 'settled'])
+    // And a settled write that fails leaves the page as the answer, its row open for the next run to settle.
+    const stuck = journal()
+    let count = 0
+    const failingSettle: PaidCallLog = { ...stuck.log, write: async (call) => { if (++count === 3) throw new Error('SQLITE_BUSY'); await stuck.log.write(call) } }
+    const again = await new LadderRunner([blockedHttp(), provider(reported, 'sess-2', [], stuck.writes)], ALLOWED_ALL).run(url, undefined, { spend: createSpendLedger(1), paidCalls: failingSettle })
+    expect(again.result.status).toBe('success')
+    expect(stuck.writes.map((row) => row.state)).toEqual(['reserved', 'submitted'])
+    expect(ledger.settledUsd).toBeCloseTo(0.12)
+  })
+
   it('keeps the in-memory ledger alone for a scrape with no task store', async () => {
     const ledger = createSpendLedger(1)
     const run = await new LadderRunner([blockedHttp(), { ...channel('provider', [contentfulResult(url, 'provider')], 'steel'), priceCeilingUsd: 0.3 }], ALLOWED_ALL).run(url, undefined, { spend: ledger })
