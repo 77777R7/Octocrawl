@@ -35,7 +35,7 @@ import { isNavigationError, LOADING_WAIT_MAX_MS, loadingWaitEvent, waitForRender
 import { REGION_WAIT_MAX_MS, regionSpecOf, regionWaitEvent, waitForRegion } from '../regionWait.js'
 import { captureLayout, LAYOUT_MAX_ELEMENTS, SHADOW_TABLE_LIMITS } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, regionTables, selectionAsked, tablesFormat, tablesSource, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { captureScreenshot, screenshotViewport } from './screenshot.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
@@ -1082,11 +1082,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           const captured = await captureLayout(shownPage, raw, { deadlineAt })
           if (captured.html === null || captured.html.length > SHADOW_TABLE_LIMITS.html || Date.now() >= deadlineAt ||
             (captured.detail.shadowTables !== undefined && !['none', 'captured'].includes(captured.detail.shadowTables.outcome))) return undefined
-          const href = shownPage.url()
-          const main = extractTf.extract(captured.html, { url: href, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, captured.html.length), blockAds: options.blockAds })
-          const tables = tablesFormat(wholePageAsked(options)
-            ? { html: captured.html, options: { baseUrl: href, exclude: options.excludeTags, ...markdownOptions(options) } }
-            : { html: main.mainHtml, options: { baseUrl: main.baseUrl, ...markdownOptions(options) } }, href, options, [], 'browser_local', 0).tables
+          const tables = regionTables(captured.html, shownPage.url(), options, 'browser_local')
           return Date.now() >= deadlineAt ? undefined : tables
         }
       }
@@ -1427,9 +1423,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // The images and attributes formats read the rendered DOM as received, like links.
       const extra = extraFormats(body, pageUrl, options, trace, 'browser_local', wallMs)
       // The tables format reads what the Markdown was written from, with the same options.
-      const tables = tablesFormat(wholePageAsked(options)
-        ? { html: converted, options: { baseUrl: pageUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
-        : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, pageUrl, options, trace, 'browser_local', wallMs)
+      const tables = tablesFormat(tablesSource(converted, pageUrl, options, extracted), pageUrl, options, trace, 'browser_local', wallMs)
       // A contract that fails on what was extracted reads this capture again before any other rung (candidateExtraction.ts).
       return withExtractionCandidates({
         ...base,

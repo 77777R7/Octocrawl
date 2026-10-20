@@ -76,6 +76,7 @@ const refusal = (status: number, code: string, error: string, agentHints: readon
 /** Whether a method and path are a job route; the gate hands those to handleJob. */
 export function isJobRoute(method: string, path: string): boolean {
   if (method === 'POST' && (path === '/v1/batches' || path === '/v1/crawl')) return true
+  if (method === 'GET' && path === '/v1/jobs') return true
   return /^\/v1\/(batches|crawl|jobs)\/[^/]+(\/(items|pages|errors|cancel|export))?$/.test(path) && (method === 'GET' || method === 'POST')
 }
 
@@ -216,12 +217,27 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     return json({ items, nextCursor: hasMore ? `${slice}:${line}` : null, hasMore })
   }
 
+  /** The account's jobs, newest first, a page at a time: `before` is the job the previous page ended at. */
+  async function listJobs(caller: JobCaller, url: URL): Promise<Response> {
+    const limitParam = url.searchParams.get('limit')
+    const limit = limitParam === null ? 20 : Number(limitParam)
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) return refusal(400, 'invalid_request', 'limit must be 1 to 50')
+    const before = url.searchParams.get('before')
+    const all = await config.store.list(personalWorkspace(caller.uid))
+    const from = before === null ? 0 : all.findIndex((job) => job.id === before) + 1
+    if (from === 0 && before !== null) return refusal(400, 'invalid_request', 'before must be a nextBefore this list returned, of a job still kept')
+    const jobs = all.slice(from)
+    const page = jobs.slice(0, limit)
+    return json({ items: page.map(status), nextBefore: jobs.length > limit ? page.at(-1)!.id : null, hasMore: jobs.length > limit })
+  }
+
   return {
     async handle(request: Request, caller: JobCaller): Promise<Response> {
       const url = new URL(request.url)
       const method = request.method
       if (method === 'POST' && url.pathname === '/v1/batches') return start('batch', request, caller)
       if (method === 'POST' && url.pathname === '/v1/crawl') return start('crawl', request, caller)
+      if (method === 'GET' && url.pathname === '/v1/jobs') return listJobs(caller, url)
       const [, , collection, id, action] = url.pathname.split('/') as [string, string, 'batches' | 'crawl' | 'jobs', string, string | undefined]
       const kind = collection === 'batches' ? 'batch' : collection === 'crawl' ? 'crawl' : null
       if (method === 'POST' && action === 'cancel' && kind !== null) {
