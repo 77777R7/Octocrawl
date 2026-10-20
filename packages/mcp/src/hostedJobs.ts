@@ -47,6 +47,11 @@ export interface HostedJob {
   segments?: string[]
   /** Slices in a row that stored no page; at the worker's limit the job fails (`no_progress`). */
   idleSlices?: number
+  /**
+   * Slices since the last commit that ended without one: a lease that expired and was taken over (a slice that died),
+   * or one given back after an error (abandon). A commit sets it back to 0; at the worker's limit the job fails.
+   */
+  failedAttempts?: number
   /** The budget the job's last slice stopped at (`pages` once a crawl reached its maxPages), as a local crawl reports it. */
   budgetExceeded?: string | null
   /** The queued job this one's end promoted into its slot: a later delivery of this job queues its first slice if no one did. */
@@ -85,6 +90,8 @@ export interface HostedJobStore {
   create(job: HostedJob, limits: JobLimits, claim: IdempotencyClaim | null, now?: Date): Promise<CreateResult>
   get(id: string): Promise<HostedJob | null>
   acquireLease(id: string, lease: { generation: number; holder: string; ttlMs: number }, now?: Date): Promise<LeaseResult>
+  /** Gives a lease back after a slice failed, counting the failure (failedAttempts); the next delivery takes it at once. */
+  abandon(id: string, holder: string): Promise<CommitResult>
   /** Changes a job while `holder` holds its lease, keeping the lease and the generation (a slice's reservation). */
   updateHeld(id: string, holder: string, patch: (job: HostedJob) => HostedJob): Promise<CommitResult>
   /** Writes a slice's outcome while `holder` still holds the lease. A job cancelled meanwhile stays cancelled. */
@@ -129,7 +136,9 @@ const transitions = {
     if (job.status === 'queued') return { ok: false, reason: 'queued' }
     if (lease.generation !== job.generation) return { ok: false, reason: 'stale' }
     if (job.lease !== null && Date.parse(job.lease.expireAt) > now.getTime()) return { ok: false, reason: 'busy' }
-    return { ok: true, job: { ...job, startedAt: job.startedAt ?? now.toISOString(), lease: { holder: lease.holder, expireAt: new Date(now.getTime() + lease.ttlMs).toISOString() } } }
+    // A lease still on the job has expired: the slice that held it died without a commit.
+    const failedAttempts = (job.failedAttempts ?? 0) + (job.lease !== null ? 1 : 0)
+    return { ok: true, job: { ...job, failedAttempts, startedAt: job.startedAt ?? now.toISOString(), lease: { holder: lease.holder, expireAt: new Date(now.getTime() + lease.ttlMs).toISOString() } } }
   },
   /**
    * A job leaving the slots: its own removed, and when it ran, the first queued one promoted to run. `alive` names the
@@ -151,8 +160,8 @@ const transitions = {
 function applySlice(job: HostedJob, patch: (job: HostedJob) => HostedJob, now: Date): { job: HostedJob; finishing: boolean } {
   const patched = patch(job)
   if (FINISHED.has(job.status)) return { job: { ...patched, status: job.status, finishedAt: job.finishedAt, expireAt: job.expireAt, deleteAt: job.deleteAt, lease: null }, finishing: false }
-  if (FINISHED.has(patched.status)) return { job: transitions.finish(patched, patched.status, now), finishing: true }
-  return { job: { ...patched, status: 'running', lease: null, generation: job.generation + 1 }, finishing: false }
+  if (FINISHED.has(patched.status)) return { job: { ...transitions.finish(patched, patched.status, now), failedAttempts: 0 }, finishing: true }
+  return { job: { ...patched, status: 'running', lease: null, generation: job.generation + 1, failedAttempts: 0 }, finishing: false }
 }
 
 export class MemoryHostedJobStore implements HostedJobStore {
@@ -186,6 +195,14 @@ export class MemoryHostedJobStore implements HostedJobStore {
     const result = transitions.lease(job, lease, now)
     if (result.ok) this.jobs.set(id, result.job)
     return result
+  }
+  async abandon(id: string, holder: string): Promise<CommitResult> {
+    const job = this.jobs.get(id)
+    if (!job) return { ok: false, reason: 'missing' }
+    if (job.lease?.holder !== holder) return { ok: false, reason: 'lost' }
+    const next = { ...job, lease: null, failedAttempts: (job.failedAttempts ?? 0) + 1 }
+    this.jobs.set(id, next)
+    return { ok: true, job: next, promoted: null }
   }
   async updateHeld(id: string, holder: string, patch: (job: HostedJob) => HostedJob): Promise<CommitResult> {
     const job = this.jobs.get(id)
@@ -319,6 +336,17 @@ export class FirestoreHostedJobStore implements HostedJobStore {
       const result = transitions.lease(read.value, lease, now)
       if (!result.ok) return result
       return await this.commit(token, [this.jobWrite(result.job, { updateTime: read.updateTime! })]) ? result : undefined
+    })
+  }
+
+  async abandon(id: string, holder: string): Promise<CommitResult> {
+    checkedId(id, 'job id')
+    return this.retry(async (token) => {
+      const read = await this.readJob(id, token)
+      if (read.value === null) return { ok: false, reason: 'missing' }
+      if (read.value.lease?.holder !== holder) return { ok: false, reason: 'lost' }
+      const job = { ...read.value, lease: null, failedAttempts: (read.value.failedAttempts ?? 0) + 1 }
+      return await this.commit(token, [this.jobWrite(job, { updateTime: read.updateTime! })]) ? { ok: true, job, promoted: null } : undefined
     })
   }
 

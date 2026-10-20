@@ -169,9 +169,12 @@ describe('hosted job worker', () => {
     // The first slice dies while writing its pages: its reservation stays on the job, its lease stays held.
     files.onUpload = (name) => { if (name.includes('/pages/')) { files.onUpload = undefined; throw new Error('instance died') } }
     await expect(runJobSlice(deps, id, 0)).rejects.toThrow(/died/)
-    // Its reservation stays on the job for the next delivery, and its credits came back as it ended.
+    // Its reservation stays on the job for the next delivery, its credits came back as it ended, and it gave the lease back.
     expect((await store.get(id))?.reservation).toMatchObject({ used: null })
+    expect(await store.get(id)).toMatchObject({ lease: null, failedAttempts: 1 })
     expect(await credits.balance('account-1', clock.t)).toBe(1_000)
+    // A slice that died without giving its lease back (a crash) holds it until it expires: deliveries meanwhile are 503.
+    await store.acquireLease(id, { generation: 0, holder: 'crashed', ttlMs: 30 * 60_000 }, clock.t)
     expect(await runJobSlice(deps, id, 0)).toEqual({ status: 503, outcome: 'busy' })
     clock.t = new Date(NOW.getTime() + 60 * 60_000)
     expect((await drain(id)).at(-1)).toBe('completed')
@@ -277,6 +280,18 @@ describe('hosted job worker', () => {
     expect(await runJobSlice(deps, id, 0)).toEqual({ status: 200, outcome: 'lost' })
     expect([...files.objects.keys()].filter((name) => name.includes(id))).toEqual([])
     expect(await credits.balance('account-1', NOW)).toBe(1_000)
+  })
+
+  it('fails a job whose slice fails five times in a row, gives its slot back and writes its export (H1 D7)', async () => {
+    const { origin, store, files, expiries, deps, create } = await setup()
+    const id = await create(parseBatchStartRequest({ urls: [`${origin}/a`], fastMode: true }))
+    files.onUpload = (name) => { if (name.includes('/pages/')) throw new Error('bucket down') }
+    for (let i = 0; i < 5; i++) await expect(runJobSlice(deps, id, 0)).rejects.toThrow(/bucket down/)
+    expect(await store.get(id)).toMatchObject({ status: 'running', failedAttempts: 5, lease: null })
+    files.onUpload = undefined
+    expect(await runJobSlice(deps, id, 0)).toEqual({ status: 200, outcome: 'failed' })
+    expect(await store.get(id)).toMatchObject({ status: 'failed', failureReason: 'delivery_failed' })
+    expect(expiries).toEqual([id])
   })
 
   it('reads what the credits allow, then fails the job for credits; and stops at the job\'s maxCredits', async () => {
