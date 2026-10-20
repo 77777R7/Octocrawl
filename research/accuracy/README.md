@@ -118,5 +118,5 @@ Which cases test which pitfalls is kept in the private annotations, so that nobo
 The tasks avoid every URL and registrable domain of the 92 frozen tasks, H01–H08, D01–D10 and the parity sites.
 
 - **Data:** raw pages, captures and labels are in `.w2l/field-gold/reserved-v2/` (git-ignored). The plan and seal hashes are in the JSON. `audit_gold.py .w2l/field-gold/reserved-v2` re-derives every value from the source bytes.
-- **Annotation:** this session (Claude Code, pa-r-eval-sets, 2026-10-20) picked and labelled the tasks. Howard or one outside reviewer still has to spot-check the 62 listed fields (20% of each stratum, seeded sample). The reviewer is recorded in `annotation.spotCheck` once the check is done.
+- **Annotation:** this session (Claude Code, pa-r-eval-sets, 2026-10-20) picked and labelled the tasks. Howard or one outside reviewer still has to spot-check the 62 listed fields (20% of each stratum, seeded sample). The result goes in a new dated record under `runs/`, naming the reviewer; the frozen files stay unchanged.
 - **Not run:** no candidate and no Octocrawl code has seen these URLs; `candidateRuns` is empty. The first run is Phase 2's same-day pair. Before it, the request shape, the output-to-field mappings and the scorer commit are fixed. With zero false successes, the one-sided 95% upper bound at N=42 is 6.9% (7.2% at N=40).
