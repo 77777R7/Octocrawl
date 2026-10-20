@@ -214,7 +214,8 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
   const starts = tool.name === 'crawl' || tool.name === 'batch_scrape'
   if (starts) {
     const allowed = tool.name === 'crawl' ? HOSTED_CRAWL_KEYS : HOSTED_BATCH_KEYS
-    for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || (!browser && key === 'waitFor')) delete schema.properties[key]
+    // REST takes a webhook (H2 W1); a tool does not offer one yet, since its secret would land in the agent's transcript.
+    for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || key === 'webhook' || (!browser && key === 'waitFor')) delete schema.properties[key]
     if (tool.name === 'crawl' && schema.properties.maxPages) schema.properties.maxPages = { ...schema.properties.maxPages, maximum: JOB_MAX_CRAWL_PAGES }
   }
   if (schema.properties.timeoutMs) schema.properties.timeoutMs = { ...schema.properties.timeoutMs, maximum: HOSTED_MCP_WAIT_MS }
@@ -911,6 +912,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           if (!jobs) throw new Error(`${name} runs a hosted job, which needs an account: connect with an account's key from https://octocrawl.dev/dashboard/ or sign in at ${MCP_OAUTH_RESOURCE}, or run it on your computer: ${LOCAL_HINT}`)
           // A wait ends within this request's deadline, with the status so far.
           const call = { ...((args ?? {}) as Record<string, unknown>) }
+          // The start's answer would carry the webhook's secret into the agent's transcript (H2 W2).
+          if (call.webhook !== undefined && call.webhook !== null) throw new Error(`${name} on hosted Octocrawl takes no webhook over MCP, since the answer carries its signing secret; start the job with POST /v1/${name === 'crawl' ? 'crawl' : 'batches'} to have its end posted`)
           if (typeof call.timeoutMs === 'number') call.timeoutMs = Math.min(call.timeoutMs, HOSTED_MCP_WAIT_MS)
           for (const key of ['limit', 'maxResults']) if (typeof call[key] === 'number') call[key] = Math.min(call[key] as number, HOSTED_MCP_LIST_MAX)
           return call

@@ -8,6 +8,8 @@
  *   W2L_JOBS_ACCOUNT_DAILY      job pages a UTC day for one account (default 2000)
  *   W2L_JOBS_WORK_ROOT          where slices keep task directories (default /tmp/octocrawl-jobs)
  */
+import { hostedNetworkPolicy } from '@w2l/contracts'
+import { createHttpsWebhookTransport } from '@w2l/runtime'
 import { FirestoreHostedLeases, serviceAccessToken } from './hostedApi.js'
 import { FirestoreCreditsStore } from './hostedCredits.js'
 import { FirestoreHostedJobStore } from './hostedJobs.js'
@@ -33,6 +35,8 @@ const worker = await startJobWorker({
     files: cloud.bucket,
     enqueueSlice: cloud.enqueueSlice,
     enqueueExpiry: cloud.enqueueExpiry,
+    enqueueWebhook: cloud.enqueueWebhook,
+    webhookTransport: createHttpsWebhookTransport(hostedNetworkPolicy()),
     hostLeases: new FirestoreHostedLeases(cloud.project),
     enabled: cloud.enabled,
     workRoot: process.env.W2L_JOBS_WORK_ROOT ?? '/tmp/octocrawl-jobs',

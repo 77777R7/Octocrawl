@@ -141,6 +141,15 @@ describe('hosted job tools over MCP', () => {
     expect(after.isError ?? false, text(after)).toBe(false)
   }, 30_000)
 
+  it('refuses a webhook passed to a job tool anyway, so its secret never reaches the transcript', async () => {
+    const { connect, enqueued } = await start()
+    const client = await connect('oc_account')
+    const refused = await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/', webhook: 'https://hooks.example.com/' } }).then((result) => { expect(result.isError).toBe(true); return text(result) }, (error: Error) => error.message)
+    expect(refused).toMatch(/no webhook over MCP/)
+    expect(refused).not.toContain('whsec_')
+    expect(enqueued).toEqual([])
+  })
+
   it('tells a keyless caller that jobs need an account, by name, without starting anything', async () => {
     const { connect, enqueued } = await start()
     const client = await connect(null)

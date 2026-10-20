@@ -152,6 +152,48 @@ The API takes the same variables with `--update-env-vars` on its next release. V
 
 `GET /v1/jobs?limit=&before=` lists an account's jobs, newest first, with the fields of a job's status (H2 P1, for the dashboard and MCP). `limit` is 1–50 (default 20); `before` is the `nextBefore` of the previous page, a job id, and `hasMore` says whether another page follows. A call without an account's key is 403. The list is the last 200 jobs the account started, kept in its slots document (`hostedJobWorkspaces/{workspaceId}.slots.recent`), so it needs no Firestore index; a job leaves it when its record is deleted (7 days of results and 30 more of record after it finishes). Jobs started before the list existed are not in it.
 
+### Job webhooks
+
+A start may name a webhook for the job's end (H2 W1–W4): `"webhook": "https://…"` or `"webhook": { "url": "https://…", "events": ["completed", "failed", "cancelled"], "metadata": { … } }`.
+
+- **What it accepts.** The url must be https to a public address. `events` may be any of the three end events, and all three is the default. `headers` and `secretEnv`, which a local server takes, are refused: a hosted job signs with a secret of its own instead.
+- **The secret.** The start's answer carries `webhook.secret`, `whsec_` and 43 characters. A start replayed by its idempotency key carries the same secret again, so a client that lost the first answer can still verify deliveries. Status and the list show the webhook's `url`, `events` and `delivery`, never the secret. Keep it the way you keep a key.
+- **When it is sent.** When the job ends, the worker queues one Cloud Tasks delivery, `{jobId}-webhook`, to `/internal/jobs/:id/webhook`. That delivery posts the event once.
+- **The body.** It is a local job's terminal event (`w2l.job-event/v1`): `eventId` `{jobId}:{status}`, `sequence` (the pages read plus one), `jobId`, `jobKind`, `event`, `at` (when the job finished), `metadata`, `report` (the job's status as `GET /v1/batches/:id` or `/v1/crawl/:id` shows it), and `error` on a failure. Hosted sends no `started` or `page` events.
+- **Headers.** `x-w2l-event-id`, `x-w2l-event-version` (the sequence), `x-w2l-delivery-id`, `x-w2l-timestamp` (milliseconds since the epoch), and `x-w2l-signature`. The signature is `sha256=` followed by the hex HMAC-SHA256, under the secret, of `{x-w2l-timestamp}.{raw body}`.
+- **Retries.**
+  - A 2xx is delivered.
+  - A 408, 425, 429, 5xx or no answer within 30 s is retried on the queue's backoff (10 s doubling to 10 min), up to 8 attempts, about 20 minutes. After the eighth it is recorded as failed.
+  - Any other answer, or an address the egress policy refuses, is failed at once.
+  - Each outcome is recorded on the job as `webhook.delivery`, `{ state, attempts, httpStatus, error, at }`, and logged as `hosted_job_webhook`.
+- **Over MCP.** The MCP tools do not offer a webhook, and a call that passes one anyway is refused, because the secret would land in the agent's transcript.
+- **Known gaps.** A job whose first slice could not be queued (`not_queued`) is never finished by the worker, so it posts nothing. A job cancelled while its next slice waits in the queue with a delay (until the next UTC day, for example) posts its end when that slice comes due.
+
+To verify a delivery, check the signature over the raw body before parsing it, compare in constant time, and reject an old timestamp:
+
+```js
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+export function verifyOctocrawl(rawBody, headers, secret, toleranceMs = 5 * 60_000) {
+  const timestamp = headers['x-w2l-timestamp']
+  const expected = Buffer.from(`sha256=${createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex')}`)
+  const given = Buffer.from(String(headers['x-w2l-signature'] ?? ''))
+  return given.length === expected.length && timingSafeEqual(given, expected) && Math.abs(Date.now() - Number(timestamp)) <= toleranceMs
+}
+```
+
+```python
+import hashlib, hmac, time
+
+def verify_octocrawl(raw_body: bytes, headers, secret: str, tolerance_ms: int = 300_000) -> bool:
+    timestamp = headers.get("x-w2l-timestamp", "")
+    expected = "sha256=" + hmac.new(secret.encode(), timestamp.encode() + b"." + raw_body, hashlib.sha256).hexdigest()
+    fresh = timestamp.isdigit() and abs(time.time() * 1000 - int(timestamp)) <= tolerance_ms
+    return fresh and hmac.compare_digest(expected, headers.get("x-w2l-signature", ""))
+```
+
+Deliveries can repeat (Cloud Tasks delivers at least once), so a receiver keys on `x-w2l-event-id`.
+
 ## Keys
 
 Keys are issued by hand from the waitlist in phase 1 (`scripts/public-preview/waitlist.mjs` lists it). A key is printed once; only its HMAC under `w2l-quota-hash-key` is stored, as the id of a document in Firestore's `hostedApiKeys` collection with `enabled`, `plan`, `dailyLimit`, `browser` and `label`. A start (`POST /v1/scrape`, `POST /v1/map`, and an MCP tool call, which goes through the same gate) reads the key's document fresh, so a key revoked by the script stops at its next start (ROADMAP PH item 2). What starts no work (the MCP tool list, reading a result by id) uses a lookup cached for a minute.
