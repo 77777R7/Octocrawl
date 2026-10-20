@@ -132,7 +132,7 @@ export interface DomainHistory {
  * extractor and verifier versions. Codes and templates only, never a URL. A store that keys by host alone ignores it.
  */
 export interface RouteContext {
-  /** `path:/first/:id` (the first two path segments, ids folded) or `task:<contract hash>` for a request with a contract. */
+  /** `path:/<first segment if a short word, else *>` with `/*` for a deeper path, or `task:<contract hash>` for a request with a contract. */
   family: string
   /** The formats asked for, sorted, comma-joined. */
   formats: string
