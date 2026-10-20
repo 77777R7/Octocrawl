@@ -186,10 +186,11 @@
 - [x] **D10**（PR ⑥ 第二轮发现）worker 建引擎时没有套用 hosted 的 5 MiB 文件上限（网关有）。docs.python.org 的 crawl 把 56 MB 的 `python-3.15-docs-html.tar.bz2` 当页面读了进来，worker 的内存（D8）就是被它撑爆的。另外 `/pages` 一次取 50 或 100 项时，响应超过 Cloud Run 的 32 MiB 上限，返回 500。已修：worker 改用网关同一个 `hostedPolicy()`；分页按大约 16 MB 的字节预算截断，单条超过预算时单独返回一条。
 - [ ] **E7**（PR ⑥ 第二轮发现，引擎问题，本地也有）`application/octet-stream` 的压缩包被当成 `success`，Markdown 是一堆乱码。不认识的二进制类型应该判失败，不能算读到了内容。
 - [ ] **R7**（PR ⑥ 第二轮发现）`api.octocrawl.dev` 前面的 Cloudflare，会用 `error code: 1010`（浏览器签名）拦掉 Python `urllib` 默认的 User-Agent。Node 的 fetch 不受影响。要核对 Python SDK 的 UA 会不会被拦。
-- [ ] **D7**（重试次数定下来时提出）worker 记下同一段连续失败的次数，到 N 次就把任务记为失败（`delivery_failed`），免得一段一直失败时每 10 分钟重试一次、持续 37 天。
+- [x] **D7**（重试次数定下来时提出）worker 记下同一段连续失败的次数，到 N 次就把任务记为失败（`delivery_failed`），免得一段一直失败时每 10 分钟重试一次、持续 37 天。
 
 ## PR ⑥ 验收
 
+  - 已做（2026-10-20）：任务上记 `failedAttempts`，两种情况各加 1：一段死掉后它的租约过期被接手；一段出错后用 `abandon` 立即交还租约（重试不用再等 16 分钟）。一段成功提交就清零。到 5 次时，worker 把任务记为失败（`delivery_failed`），写好导出，让出名额。
 - [x] **V1** 把 parity 的 crawl 和 batch 用例（L02、L04、L11、A13–A15、A26–A35）对 hosted 跑一遍，记录到 `research/hosted/`。
 - [x] **V2** 跑一个 1,000 URL 的 batch。跑完后先把两个服务缩到 0，再从新实例和另一个 revision 的 tag URL 读回全部 1,000 项。
   - 记录命令、commit 和花费。
@@ -219,4 +220,4 @@
 - PR ⑥ 已跑完（2026-10-20），H1 还没完成：V2 通过，V1 是 73/90。
 - V4–V9 已完成（#617、#619），V8 第 4 轮 85/90。
 - H1 已完成（2026-10-20，ROADMAP 已标记）。开关仍然关着，开放给受邀用户属于 H2。
-- 没做完的后续项：D7、E7、R7、W13（见上）。
+- 没做完的后续项：E7、R7、W13（见上）。
