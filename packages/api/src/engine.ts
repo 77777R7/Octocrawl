@@ -28,6 +28,7 @@ import {
   summarize,
   unreadInUserBrowser,
   type Channel,
+  withExtractionCandidates,
 } from '@w2l/bench'
 import { collectLinkDetails, EXTRACTOR_VERSION, FILE_TEXT_VERSION, invalidSelector, MAX_SELECTOR_PARTS, PDF_TEXT_VERSION, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
 import {
@@ -685,17 +686,27 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     return { key, bounds: lookup ? { minAgeMs: page.minAge ?? 0, maxAgeMs: page.maxAge ?? null } : null, lockdown: page.lockdown === true, store, robotsSetAside }
   }
   /**
+   * A stored page under this request's contract (F3b): one that kept its source (`rawHtml`, else `html`) is read again
+   * from it like a fresh capture (candidateExtraction); one that kept only its Markdown is served as stored, its
+   * freshness bounded by maxAge, since the cache is keyed by the request's shape and is no re-extraction source.
+   */
+  const rereadHit = (result: FetchResult, options: FetchOptions | undefined): FetchResult => {
+    const source = typeof result.rawHtml === 'string' ? result.rawHtml : typeof result.html === 'string' ? result.html : null
+    if (options?.verify === undefined || source === null) return result
+    return withExtractionCandidates({ ...result, trace: [...result.trace] }, { html: source, url: result.evidence.finalUrl, options, lane: result.lane, at: 0 })
+  }
+  /**
    * The cache's answer before a fetch. A URL governance refuses is never
    * looked up: the ladder refuses it before any request, as it would
    * without the cache, lockdown or not.
    */
-  const consultCache = (plan: CachePlan | null, url: string, policy: CrawlPolicy): CacheAnswer => {
+  const consultCache = (plan: CachePlan | null, url: string, policy: CrawlPolicy, options?: FetchOptions): CacheAnswer => {
     if (plan === null || plan.bounds === null || !evaluateGovernance(url, policy).allowed) return { kind: 'fetch', missed: false }
     // The key holds a recorded override, not the one a named URL or ignoreRobotsTxt applies, so a page robots.txt
     // refuses can sit under the key an obeying request looks up (a crawl's link, a hosted engine on the same task root):
     // such a request never gets it.
     const hit = pageCache.lookup(plan.key, plan.bounds)
-    if (hit !== null && (plan.robotsSetAside || !fetchedPastRobots(hit.result))) return { kind: 'hit', result: cacheHitResult(hit) }
+    if (hit !== null && (plan.robotsSetAside || !fetchedPastRobots(hit.result))) return { kind: 'hit', result: rereadHit(cacheHitResult(hit), options) }
     if (plan.lockdown) return { kind: 'lockdown_miss', result: cacheMissResult(url, plan.bounds) }
     return { kind: 'fetch', missed: true }
   }
@@ -705,7 +716,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     if (plan?.store !== true) return next
     // A page whose content the request's contract chose from its capture (candidateExtraction) is that request's
     // answer: the key leaves the contract out, so another request must not get it.
-    if (result.trace.some(event => event.event === 'extraction_candidates' && event.detail?.selected !== 'main_content')) return next
+    if (result.trace.some(event => event.event === 'extraction_candidates' && event.detail?.replaced === true)) return next
     try {
       if (pageCache.store(plan.key, result)) next = withCacheStored(next)
     } catch (error) {
@@ -1814,7 +1825,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // A scrape's paid calls are held to the grant's per-request cap, else its run cap (ROADMAP PA item 4).
       const scrapeCap = accessGrant?.budget.perRequestUsd ?? accessGrant?.budget.perRunUsd ?? null
       const scrapeSpend = scrapeCap === null ? undefined : createSpendLedger(scrapeCap)
-      const answer = consultCache(plan, req.url, policy)
+      const answer = consultCache(plan, req.url, policy, fetchOptions(req, req.formats))
       const run = answer.kind === 'fetch'
         ? await runner.run(req.url, undefined, scrapeSpend === undefined ? scope : { ...scope, spend: scrapeSpend }, { ...fetchOptions(req, req.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) })
           .then(async (fetched) => ({ ...fetched, result: afterFetch(plan, answer, await withEgressExit(fetched.result, scrapeEgress, scope)) }))

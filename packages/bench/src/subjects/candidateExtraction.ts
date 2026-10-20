@@ -10,28 +10,32 @@
  * - `document`: the document as a whole, cleaned as for `onlyMainContent: false`,
  *   so a standard's or a paper's header (number, status, dates) that the main
  *   content left out is there;
+ * - for a request whose list's items (`itemSelector`) the lane delivered, those
+ *   items come first (`list_items`) and the page's main content, extracted
+ *   without the selection, takes the declarations' place;
  * - `declared_data`: the main content with what the page declares about its
  *   subject written under it: its citation tags and article JSON-LD, and a
  *   product's facts when the product is the one the page is about (never the
  *   page's `<title>`).
  *
  * The candidate that passes the most checks is delivered, the first one on a
- * tie, so the main content stays unless another does better. The lane records
+ * tie, so what the lane delivered stays unless another does better. The lane records
  * `extraction_candidates` with each candidate's checks, the choice and why, and
  * whether a limit left a candidate out; the ladder still judges the delivered
  * page with its own contractVerdict. A page whose content a contract chose is
  * that request's answer: the API engine does not store it in its page cache,
  * whose key leaves the contract out. A request that named its content
- * (`includeTags`, the whole page, a list's items) is not re-read: what it named
- * is the answer.
+ * (`includeTags`, the whole page) is not re-read: what it named is the answer;
+ * nor is a list paged through, whose records come from several captures.
  */
 import type { FetchOptions, FetchResult, Lane, Readiness, TraceEvent, Verification } from '@w2l/contracts'
 import { CONTENTFUL_STATUS, estimateTokens } from '@w2l/contracts'
 import { readinessOf, verify } from '@w2l/runtime'
 import { captureOf } from '../capture.js'
-import { MAX_TASK_SELECTION_HTML, selectionAsked, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { extractTf, htmlToMarkdown } from '@w2l/extract-tf'
+import { listSelectionAsked, markdownOptions, MAX_TASK_SELECTION_HTML, selectionAsked, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 
-export const EXTRACTION_CANDIDATES = ['main_content', 'document', 'declared_data'] as const
+export const EXTRACTION_CANDIDATES = ['main_content', 'list_items', 'document', 'declared_data'] as const
 export type ExtractionCandidateId = (typeof EXTRACTION_CANDIDATES)[number]
 
 const MARKDOWN_CHECKS: ReadonlySet<string> = new Set(['markdownIncludes', 'markdownMatches', 'markdownCountMin'])
@@ -115,7 +119,8 @@ function candidateTrigger(result: FetchResult, readiness: Readiness): 'not_extra
 export function withExtractionCandidates(result: FetchResult, source: CandidateSource): FetchResult {
   const { options } = source
   if (options.verify === undefined || !CONTENTFUL_STATUS.has(result.status) || typeof result.markdown !== 'string') return result
-  if (selectionAsked(options) || wholePageAsked(options) || options.list?.itemSelector !== undefined) return result
+  // A list paged through is merged from several captures, not this one.
+  if (selectionAsked(options) || wholePageAsked(options) || (options.actions ?? []).some(action => action.type === 'paginate')) return result
   // Only Markdown checks can change with the Markdown a candidate delivers.
   if (!options.verify.checks.some(check => MARKDOWN_CHECKS.has(check.type))) return result
   const verification = verify(options.verify, result as unknown as Record<string, unknown>, { partial: true })
@@ -124,19 +129,34 @@ export function withExtractionCandidates(result: FetchResult, source: CandidateS
   const trigger = candidateTrigger(result, readiness)
   if (trigger === null) return result
 
-  const main = candidate('main_content', result.markdown, result, options)
+  // The lane delivered the items a list format named when it could select them (errorPage.ts listSelectionAsked).
+  const listed = listSelectionAsked(options, source.html.length)
+  const main = candidate(listed ? 'list_items' : 'main_content', result.markdown, result, options)
   const tooLarge = source.html.length > MAX_TASK_SELECTION_HTML
   const whole = tooLarge ? null : wholePageMarkdown(source.html, source.url, options)
   const document = tooLarge ? candidate('document', null, result, options, 'html_too_large')
     : whole === result.markdown ? candidate('document', null, result, options, 'same_as_main')
       : candidate('document', whole, result, options)
-  const lines = declaredLines(result)
-  const declared = lines.length === 0 ? candidate('declared_data', null, result, options, 'empty')
-    : candidate('declared_data', `${result.markdown}\n\n${lines.join('\n\n')}`, result, options)
-  const all = [main, document, declared]
+  // A request whose list's items the lane delivered (itemSelector) has the page's main content as a candidate in place
+  // of the declarations, extracted from the capture without the selection; the first candidate is then those items.
+  let third: Scored
+  if (listed) {
+    if (tooLarge) third = candidate('main_content', null, result, options, 'html_too_large')
+    else {
+      const out = extractTf.extract(source.html, { url: source.url, pruneSelectors: options.excludeTags, blockAds: options.blockAds })
+      const markdown = htmlToMarkdown(out.mainHtml, { baseUrl: out.baseUrl, ...markdownOptions(options) })
+      third = candidate('main_content', markdown === result.markdown ? null : markdown, result, options, markdown === result.markdown ? 'same_as_main' : undefined)
+    }
+  } else {
+    const lines = declaredLines(result)
+    third = lines.length === 0 ? candidate('declared_data', null, result, options, 'empty')
+      : candidate('declared_data', `${result.markdown}\n\n${lines.join('\n\n')}`, result, options)
+  }
+  // The narrower read first: on a tie the main content beats the whole document.
+  const all = listed ? [main, third, document] : [main, document, third]
   // Most checks passed wins; fewer failed breaks a tie; the earlier candidate (the main content first) keeps it.
   const best = all.filter(item => item.markdown !== null).reduce((a, b) => (b.passed > a.passed || (b.passed === a.passed && b.failed < a.failed) ? b : a))
-  const reason = best.id === 'main_content' ? 'main_content_kept' : best.failed === 0 && best.unjudged === 0 ? 'passes_contract' : 'more_checks_passed'
+  const reason = best === main ? 'delivered_kept' : best.failed === 0 && best.unjudged === 0 ? 'passes_contract' : 'more_checks_passed'
   const capture = captureOf(result.trace)
   const view = [...result.trace].reverse().find(event => event.event === 'view')
   const event: TraceEvent = {
@@ -150,13 +170,15 @@ export function withExtractionCandidates(result: FetchResult, source: CandidateS
       trigger,
       candidates: all.map(({ markdown: _markdown, ...rest }) => rest),
       selected: best.id,
+      // Whether the delivered Markdown is another candidate's: such a page is that request's answer alone.
+      replaced: best !== main,
       reason,
       capped: all.some(item => item.skipped === 'html_too_large' || item.skipped === 'markdown_too_large'),
-      limits: { html: MAX_TASK_SELECTION_HTML, markdown: MAX_CANDIDATE_CHARS, candidates: EXTRACTION_CANDIDATES.length },
+      limits: { html: MAX_TASK_SELECTION_HTML, markdown: MAX_CANDIDATE_CHARS, candidates: all.length },
     },
   }
   // Appended to the lane's own trace array: a lane adds events after its result is built (browserLocal's session_cookies).
   ;(result.trace as TraceEvent[]).push(event)
-  if (best.id === 'main_content' || best.markdown === null) return result
+  if (best === main || best.markdown === null) return result
   return { ...result, markdown: best.markdown, usage: { ...result.usage, contentTokens: estimateTokens(best.markdown) } }
 }
