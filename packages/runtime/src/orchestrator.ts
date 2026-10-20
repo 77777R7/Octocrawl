@@ -49,11 +49,13 @@ import {
   type SitemapMode,
   type SitemapSource,
   type ListPageRead,
+  type PaidCallLog,
+  type PaidCallRecord,
   type StepRecord,
   type Task,
 } from '@w2l/contracts'
 import { abortableSleep, createExecutionScope, createSpendLedger, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
-import { reportFromTaskAttempt } from './crawlReport.js'
+import { paidCallExposureUsd, paidCallTotals, reportFromTaskAttempt } from './crawlReport.js'
 import { Frontier, type FrontierEnqueueResult, type FrontierItem } from './frontier.js'
 import { canonicalizeUrl, hostOf } from './canonicalize.js'
 import type { TaskStore } from './taskStore.js'
@@ -113,6 +115,13 @@ export interface OrchestratorOptions {
    * listener whose failure must not stop the crawl catches its own.
    */
   onStep?: (step: StepRecord) => void | Promise<void>
+  /**
+   * Ask the provider what a paid call an earlier run left open cost (PA E4): given a row in `reserved`, `submitted` or
+   * `usage_pending`, the row as the provider's answer settles it (`settled` with its charge, `released` when the provider
+   * shows no session was opened) or `unknown`. Without one, or when it throws, such a row becomes `unknown` (a
+   * `usage_pending` one stays as it is): it counts at its ceiling, and nothing releases it on its own.
+   */
+  reconcilePaidCall?: (call: PaidCallRecord) => Promise<PaidCallRecord>
 }
 
 const EMPTY_USAGE = {
@@ -139,6 +148,7 @@ export class CrawlOrchestrator {
   private readonly drainSignal?: AbortSignal
   private readonly sitemapSource?: SitemapSource
   private readonly onStep?: (step: StepRecord) => void | Promise<void>
+  private readonly reconcilePaidCall?: (call: PaidCallRecord) => Promise<PaidCallRecord>
   private ahead: (() => number) | null = null
 
   constructor(options: OrchestratorOptions) {
@@ -154,6 +164,7 @@ export class CrawlOrchestrator {
     this.drainSignal = options.drainSignal
     this.sitemapSource = options.sitemapSource
     this.onStep = options.onStep
+    this.reconcilePaidCall = options.reconcilePaidCall
   }
 
   /**
@@ -239,7 +250,11 @@ export class CrawlOrchestrator {
       attempt = opened.attempt
       if (spec.budget.maxCostUsd !== null || (spec.budget.maxCostPerPageUsd ?? null) !== null) {
         const openedId = attempt.id
-        priorChargedUsd = (await this.store.listAttempts(task.id)).filter((earlier) => earlier.id !== openedId).reduce((sum, earlier) => sum + (earlier.chargedUsd ?? 0), 0)
+        // Each earlier attempt at what it was charged, and no less than its paid calls' rows hold: a call made just before a
+        // crash is on its row though no counter was written after it (PA E4).
+        const rows = await this.store.listPaidCalls(task.id)
+        priorChargedUsd = (await this.store.listAttempts(task.id)).filter((earlier) => earlier.id !== openedId)
+          .reduce((sum, earlier) => sum + Math.max(earlier.chargedUsd ?? 0, paidCallExposureUsd(rows.filter((row) => row.attemptId === earlier.id))), 0)
         spend = createSpendLedger(spec.budget.maxCostUsd, priorChargedUsd)
       }
       // A crawl runs with the options it stored; a batch, and a crawl stored
@@ -275,6 +290,7 @@ export class CrawlOrchestrator {
       if (sitemapMode !== 'only') for (const step of restoredLinks) for (const href of linksOf(step.result!)) frontier.enqueue(href, step.depth + 1, step.canonicalUrl)
       const runningTask = task
       const runningAttempt = attempt
+      const paidCalls = this.paidCallLog(runningTask.id, runningAttempt.id)
       // The page budget is the task's: every URL it already has counts once,
       // and a page it has fetched before may be fetched again for free.
       const maxPages = task.budget.maxPages
@@ -378,7 +394,7 @@ export class CrawlOrchestrator {
               // at page N resumes from them. The whole URL is still the step; the pages are its progress until it is stored.
               const pagesRead = listsPages(runningTask) ? await this.store.listPagesRead(runningTask.id, item.canonicalUrl) : []
               pageLedger = spend?.child(spec.budget.maxCostPerPageUsd ?? null)
-              const pageSpend = pageLedger === undefined ? {} : { spend: pageLedger }
+              const pageSpend = { paidCalls, ...(pageLedger === undefined ? {} : { spend: pageLedger }) }
               const pageScope = !listsPages(runningTask) ? { ...scope, ...pageSpend } : {
                 ...scope,
                 ...pageSpend,
@@ -544,7 +560,41 @@ export class CrawlOrchestrator {
     }
     if (failed !== null && !cancelled && !interrupted) throw failed
 
-    return reportFromTaskAttempt(finished, finishedAttempt, cachedPages)
+    const report = reportFromTaskAttempt(finished, finishedAttempt, cachedPages)
+    const rows = await this.store.listPaidCalls(task.id).catch(() => [])
+    return rows.length === 0 ? report : { ...report, paidCalls: paidCallTotals(rows) }
+  }
+
+  /** The attempt's paid-call journal: ids numbered in the order calls open, each row written to the task's store. */
+  private paidCallLog(taskId: string, attemptId: string): PaidCallLog {
+    let ordinal = 0
+    return {
+      open: (call) => ({
+        paidCallId: `${taskId}-${attemptId}-${++ordinal}`, taskId, attemptId, url: call.url, vendorId: call.vendorId, ceilingUsd: call.ceilingUsd,
+        state: 'reserved', chargedUsd: null, providerRequestId: null, providerSessionId: null,
+        tariffVersion: call.tariffVersion ?? null, grantHash: call.grantHash ?? null, deadline: call.deadline ?? null,
+        createdAt: new Date().toISOString(), settledAt: null,
+      }),
+      write: (call) => this.store.putPaidCall(call),
+    }
+  }
+
+  /**
+   * The paid calls earlier runs left open (PA E4): each asked about through `reconcilePaidCall` when there is one, else
+   * `unknown`; a `usage_pending` row the provider could not settle keeps its bound. Never released without evidence.
+   */
+  private async closeOpenPaidCalls(taskId: string, at: string): Promise<void> {
+    for (const row of await this.store.listPaidCalls(taskId)) {
+      if (row.state !== 'reserved' && row.state !== 'submitted' && row.state !== 'usage_pending') continue
+      let next: PaidCallRecord | null = null
+      if (this.reconcilePaidCall !== undefined) {
+        try { next = await this.reconcilePaidCall(row) } catch { next = null }
+      }
+      if (next === null || next.state === 'reserved' || next.state === 'submitted' || (next.state === 'usage_pending' && row.state !== 'usage_pending')) {
+        next = row.state === 'usage_pending' ? row : { ...row, state: 'unknown', chargedUsd: null, settledAt: at }
+      }
+      if (next !== row) await this.store.putPaidCall({ ...next, paidCallId: row.paidCallId, taskId: row.taskId, attemptId: row.attemptId, settledAt: next.settledAt ?? at })
+    }
   }
 
   private async openRun(spec: CrawlSpec, startedAt: string): Promise<{ task: Task; attempt: Attempt }> {
@@ -595,17 +645,25 @@ export class CrawlOrchestrator {
   }
 
   private async interruptOpenAttempts(taskId: string, endedAt: string): Promise<string | null> {
+    await this.closeOpenPaidCalls(taskId, endedAt)
     const prior = await this.store.listAttempts(taskId)
+    const rows = await this.store.listPaidCalls(taskId)
     let recoveredFrom: string | null = prior.filter(attempt => attempt.status === 'interrupted').at(-1)?.id ?? null
     for (const attempt of prior) {
       if (attempt.status !== 'running') continue
       const steps = await this.store.listSteps(taskId, attempt.id)
+      // The attempt's paid calls are folded into it: what they were charged or may have cost, and an unknown one makes its cost unknown.
+      const own = rows.filter((row) => row.attemptId === attempt.id)
+      const exposure = paidCallExposureUsd(own)
+      const unknownCost = own.some((row) => row.state === 'unknown' || row.state === 'usage_pending')
       await this.store.putAttempt({
         ...attempt,
         status: 'interrupted',
         endedAt,
         pagesFetched: steps.length,
-        costUsd: attempt.costUnknown === true ? null : attempt.costUsd,
+        costUsd: attempt.costUnknown === true || unknownCost ? null : attempt.costUsd,
+        ...(unknownCost ? { costUnknown: true } : {}),
+        ...(own.length === 0 ? {} : { chargedUsd: Math.max(attempt.chargedUsd ?? 0, exposure) }),
       })
       recoveredFrom = attempt.id
     }

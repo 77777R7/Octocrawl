@@ -72,14 +72,29 @@
 
 ## W：任务结束的 webhook
 
-- [ ] **W1** hosted 任务接受 `webhook: { url, events? }`。
+- [x] **W1** hosted 任务接受 `webhook: { url, events? }`。
   - 只允许公网 https 地址，和本地 hosted 模式的规则一样。
   - 不接受 headers 和 secretEnv。
-- [ ] **W2** 启动时生成签名密钥，只返回一次（见“待你决定”第 2 条），存在任务文档里，不回显。
-- [ ] **W3** worker 在任务结束（completed、failed、cancelled）时发一次签名的 POST。
+- [x] **W2** 启动时生成签名密钥，只返回一次（见“待你决定”第 2 条），存在任务文档里，不回显。
+- [x] **W3** worker 在任务结束（completed、failed、cancelled）时发一次签名的 POST。
   - 失败就交给 Cloud Tasks 重试，最多若干次。
   - 记下送达结果。
-- [ ] **W4** 文档：签名的验证方法和示例。
+- [x] **W4** 文档：签名的验证方法和示例。
+
+- W 做成的样子（2026-10-20 决定：每个任务一个 `whsec_` 密钥）：
+  - 路由 `readHostedWebhook` 校验 webhook，`webhook` 不进入引擎跑的请求。
+  - 启动的响应里返回 `webhook.secret`。用同一个 idempotency key 重放的启动，会再返回同一个密钥，因为第一次的响应可能丢了；只有同一个账户能触发重放。
+  - 状态和列表只显示 `url`、`events`、`delivery`，不显示密钥。
+  - 任务结束时，worker 的 `finish` 排一个 Cloud Tasks 投递 `{jobId}-webhook`，由 `runJobWebhook` 发送。
+    - 2xx 算送达；408、425、429、5xx 或没有回应，交给 Cloud Tasks 重试，最多 8 次（约 20 分钟）；其他回应和被出口策略拒绝的地址直接记为失败。
+    - 每次结果记在任务的 `webhook.delivery` 上。
+  - 签名和本地一致：`x-w2l-signature` = `sha256=` 加上对 `{x-w2l-timestamp}.{body}` 的 HMAC-SHA256。
+  - 验证示例（Node 和 Python）在 `docs/hosted-api.md` 的 Job webhooks 一节。
+  - MCP 工具不提供 webhook：schema 里不列，硬传会被拒绝，因为密钥会落进 agent 的对话记录。要不要提供，以后再定。
+  - 已知缺口（后续项）：
+    - 第一个 slice 没排上队（`not_queued`）的任务，worker 不会走到结束这一步，所以不发 webhook。
+    - 任务取消时，如果下一个 slice 正带着延迟在队列里等（比如等到 UTC 次日），webhook 要等那个 slice 到期才发。
+  - 要上线，需要重新部署 API 和 worker（R1）。不用新建资源：沿用同一个队列和服务账号。
 
 ## R：发布与开放
 
@@ -100,4 +115,4 @@
 
 ## 下次从这里继续
 
-- M1–M5 已合并（#627），P1 已提交。下一项是 **W**（webhook），先用“待你决定”第 2 条的默认做法。
+- M1–M5（#627）和 P1（#629）已合并，W1–W4 已提交。下一项是 **R1**：部署 API 和 worker，然后用一个测试 key 和一个公网接收端，把 webhook 在线上跑一遍。

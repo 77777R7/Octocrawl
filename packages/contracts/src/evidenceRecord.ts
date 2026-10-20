@@ -139,6 +139,11 @@ export interface EvidencePaidCall {
   reason: FailureReason | BlockReason | BudgetKind | null
   /** The record's own page is this call's. */
   answer: boolean
+  /**
+   * The call's id in its task's `paid_calls` (PA E2), `{taskId}-{attemptId}-{ordinal}`, fixed before the reservation and kept
+   * across a crash: absent for a call made outside a task (a single scrape). Added after `proxyCountry`.
+   */
+  paidCallId?: string
 }
 
 /** The access grant paid calls were made under: enough to name it, not a copy. */
@@ -381,7 +386,7 @@ export const EVIDENCE_RECORD_KEYS = {
   accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit']),
   accessEgressExit: keysOf<EvidenceAccessEgressExit>()(['ip', 'country', 'observedAt']),
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
-  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer']),
+  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer', 'paidCallId']),
   accessGrant: keysOf<EvidenceAccessGrant>()(['sha256', 'tier', 'attestedAt']),
   verification: keysOf<EvidenceVerification>()(['status', 'verifier', 'contractSha256', 'reason', 'failed']),
   readiness: keysOf<EvidenceReadiness>()(['state', 'basis']),
@@ -398,5 +403,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   robotsDecision: ['overrideBasis'],
   access: ['completion', 'egress', 'session', 'paidCalls', 'grant'],
   accessEgress: ['exit'],
-  accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry'],
+  accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId'],
 }

@@ -507,7 +507,7 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
     const model = createServer((req, res) => {
       calls++
       req.resume()
-      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: '{"secret":"from-model"}' } }] }))
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: '{"secret":"behind the check"}' } }] }))
     })
     await new Promise<void>((resolve) => model.listen(0, '127.0.0.1', resolve))
     vi.stubEnv('W2L_EXTRACT_BASE_URL', `http://127.0.0.1:${(model.address() as AddressInfo).port}`)
@@ -518,7 +518,7 @@ describe('handing a page a check stopped to the person, in their own Chrome', ()
     try {
       const formats = [{ type: 'json', schema: { type: 'object', properties: { secret: { type: 'string' } }, required: ['secret'] }, modelFallback: true }]
       const response = await engine.scrape({ url: `${base}/slowpass`, timeout: 3_000, formats, handoff: { waitMs: 30_000 } } as never) as Record<string, any>
-      expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed', json: { status: 'complete', data: { secret: 'from-model' } } })
+      expect(response).toMatchObject({ status: 'success', lane: 'browser_local_authed', json: { status: 'complete', data: { secret: 'behind the check' } } })
       expect(calls).toBe(1)
     } finally {
       stop()

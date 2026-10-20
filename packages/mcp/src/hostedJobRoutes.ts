@@ -5,18 +5,53 @@
  * reads here page through. Nothing runs here but the bookkeeping.
  */
 
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
-import { CRAWL_SCOPE_KEYS, parseBatchStartRequest, parseCrawlStartRequest, RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
+import { CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, parseBatchStartRequest, parseCrawlStartRequest, readWebhook, RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import type { CreditsStore } from './hostedCredits.js'
 import { CREDITS } from './hostedCredits.js'
 import type { GcsBucket } from './hostedCloud.js'
-import { newHostedJob, type HostedJob, type HostedJobStore, type JobLimits } from './hostedJobs.js'
+import { newHostedJob, type HostedJob, type HostedJobStore, type HostedJobWebhook, type HostedWebhookEvent, type JobLimits } from './hostedJobs.js'
 
 /** The options of a page in a job, as hosted serves them on a scrape (HOSTED_SCRAPE_KEYS), less the scrape's own. */
 const JOB_PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'fastMode', 'blockAds', 'removeBase64Images', 'verify', 'origin', 'integration'] as const
-export const HOSTED_BATCH_KEYS: ReadonlySet<string> = new Set(['urls', 'mode', 'formats', 'includeLinks', 'maxConcurrency', 'ignoreInvalidURLs', 'idempotencyKey', 'maxCredits', ...JOB_PAGE_KEYS])
-export const HOSTED_CRAWL_KEYS: ReadonlySet<string> = new Set(['url', 'mode', 'maxPages', 'maxDepth', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'maxCredits', ...JOB_PAGE_KEYS])
+export const HOSTED_BATCH_KEYS: ReadonlySet<string> = new Set(['urls', 'mode', 'formats', 'includeLinks', 'maxConcurrency', 'ignoreInvalidURLs', 'idempotencyKey', 'maxCredits', 'webhook', ...JOB_PAGE_KEYS])
+export const HOSTED_CRAWL_KEYS: ReadonlySet<string> = new Set(['url', 'mode', 'maxPages', 'maxDepth', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'maxCredits', 'webhook', ...JOB_PAGE_KEYS])
+const WEBHOOK_EVENTS: readonly HostedWebhookEvent[] = ['completed', 'failed', 'cancelled']
+
+/**
+ * A start's `webhook` as hosted takes it (H2 W1): the local shape (readWebhook), to a public https address, for the job's
+ * end only, without headers or secretEnv (the job signs with a secret of its own). A string is the url alone.
+ */
+export function readHostedWebhook(value: unknown): Omit<HostedJobWebhook, 'secret' | 'delivery'> | undefined {
+  const config = readWebhook(value)
+  if (config === undefined) return undefined
+  if (config.headers !== undefined) throw new RequestError('hosted jobs do not send webhook.headers; verify a delivery by its x-w2l-signature, made with the secret the start returns')
+  if (config.secretEnv !== undefined) throw new RequestError('hosted jobs do not take webhook.secretEnv; each job signs with a secret the start returns')
+  const url = new URL(config.url)
+  if (url.protocol !== 'https:') throw new RequestError('webhook.url must be https')
+  const decision = evaluateHostname(url.hostname, hostedNetworkPolicy())
+  if (decision !== null && !decision.allowed) throw new RequestError('webhook.url must be a public address')
+  const events = config.events ?? WEBHOOK_EVENTS
+  const other = events.filter((event) => !(WEBHOOK_EVENTS as readonly string[]).includes(event))
+  if (other.length > 0) throw new RequestError(`hosted jobs post only their end (completed, failed, cancelled), not ${other.join(', ')}`)
+  return { url: config.url, events: [...events] as HostedWebhookEvent[], metadata: { ...(config.metadata ?? {}) } }
+}
+
+/** A job's status as its routes, its list and its webhook report it; the webhook's secret is never in it. */
+export function jobStatus(job: HostedJob): Record<string, unknown> {
+  const requested = job.kind === 'batch' ? (job.request as { urls: readonly string[] }).urls.length : null
+  const completed = job.counts.pages + job.counts.errors
+  return {
+    taskId: job.id, kind: job.kind, status: job.status, failureReason: job.failureReason, budgetExceeded: job.budgetExceeded ?? null,
+    // As a local crawl counts them: pagesFetched is every page read, failed ones included; succeeded and failed split them.
+    pagesFetched: completed, succeeded: job.counts.pages, failed: job.counts.errors, errors: job.counts.errors, completed,
+    ...(requested === null ? {} : { requested, remaining: Math.max(0, requested - completed) }),
+    credits: { used: job.credits.used, maxCredits: job.credits.maxCredits },
+    ...(job.webhook ? { webhook: { url: job.webhook.url, events: job.webhook.events, delivery: job.webhook.delivery } } : {}),
+    createdAt: job.createdAt, finishedAt: job.finishedAt, expiresAt: job.expireAt,
+  }
+}
 
 export const JOB_DEFAULT_CRAWL_PAGES = 100
 export const JOB_MAX_CRAWL_PAGES = 500
@@ -112,18 +147,9 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     return job
   }
 
-  function status(job: HostedJob): Record<string, unknown> {
-    const requested = job.kind === 'batch' ? (job.request as { urls: readonly string[] }).urls.length : null
-    const completed = job.counts.pages + job.counts.errors
-    return {
-      taskId: job.id, kind: job.kind, status: job.status, failureReason: job.failureReason, budgetExceeded: job.budgetExceeded ?? null,
-      // As a local crawl counts them: pagesFetched is every page read, failed ones included; succeeded and failed split them.
-      pagesFetched: completed, succeeded: job.counts.pages, failed: job.counts.errors, errors: job.counts.errors, completed,
-      ...(requested === null ? {} : { requested, remaining: Math.max(0, requested - completed) }),
-      credits: { used: job.credits.used, maxCredits: job.credits.maxCredits },
-      createdAt: job.createdAt, finishedAt: job.finishedAt, expiresAt: job.expireAt,
-    }
-  }
+  const status = jobStatus
+  /** A start's answer: the job's status, with its webhook's secret, the only place any route shows it. */
+  const withSecret = (job: HostedJob) => job.webhook ? { ...status(job), webhook: { ...(status(job).webhook as object), secret: job.webhook.secret } } : status(job)
 
   async function start(kind: 'batch' | 'crawl', request: Request, caller: JobCaller): Promise<Response> {
     if (config.enabled !== undefined && !(await config.enabled())) return refusal(503, 'jobs_paused', 'hosted batch and crawl jobs are paused for now', ['run it on your computer meanwhile: npx octocrawl serve'], { 'Retry-After': '300' })
@@ -140,6 +166,11 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     if (headerKey !== null && body.idempotencyKey === undefined) body.idempotencyKey = headerKey
     const maxCredits = body.maxCredits
     delete body.maxCredits
+    // The webhook stays out of the request the engine runs: the worker posts the job's end, not the engine.
+    let webhook: ReturnType<typeof readHostedWebhook>
+    try { webhook = readHostedWebhook(body.webhook) }
+    catch (error) { return refusal(400, 'invalid_request', error instanceof Error ? error.message : String(error)) }
+    delete body.webhook
     if (maxCredits !== undefined && (!Number.isSafeInteger(maxCredits) || (maxCredits as number) < 1)) return refusal(400, 'invalid_request', 'maxCredits must be a positive integer')
     if (body.mode === 'authed') return refusal(400, 'invalid_request', 'hosted Octocrawl holds no saved logins, so it has no authed mode')
     // A key without the browser lane reads every page over HTTP alone, as its scrapes do.
@@ -173,19 +204,21 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     const { idempotencyKey: _key, ...stored } = parsed as typeof parsed & { idempotencyKey?: string }
     const claim = idempotencyKey === undefined ? null : {
       id: `${workspaceId}-${createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 32)}`,
-      fingerprint: createHash('sha256').update(JSON.stringify({ kind, stored, maxCredits })).digest('hex'),
+      fingerprint: createHash('sha256').update(JSON.stringify({ kind, stored, maxCredits, ...(webhook === undefined ? {} : { webhook }) })).digest('hex'),
       expireAt: new Date(at.getTime() + IDEMPOTENCY_TTL_MS).toISOString(),
     }
-    const job = newHostedJob({ id: randomUUID(), workspaceId, uid: caller.uid, keyId: caller.keyId.slice(0, 16), kind, request: stored, maxCredits: (maxCredits as number | undefined) ?? null }, at)
+    const secret = webhook === undefined ? null : `whsec_${randomBytes(32).toString('base64url')}`
+    const job = newHostedJob({ id: randomUUID(), workspaceId, uid: caller.uid, keyId: caller.keyId.slice(0, 16), kind, request: stored, maxCredits: (maxCredits as number | undefined) ?? null, webhook: webhook === undefined ? null : { ...webhook, secret: secret!, delivery: null } }, at)
     const created = await config.store.create(job, limits, claim, at)
     if (!created.ok && created.reason === 'conflict') return refusal(409, 'idempotency_conflict', 'this idempotency key started a different job in the last 24 hours')
     if (!created.ok) return refusal(429, 'jobs_busy', `this account has ${created.running} jobs running and ${created.queued} waiting, the most it may`, ['wait for one to finish, or cancel one'], { 'Retry-After': '60' })
-    if (created.replayed) return json({ taskId: created.job.id, replayed: true, ...status(created.job) }, 202)
+    // A replay is the same account retrying a start whose answer it may never have read: it gets the job's secret again.
+    if (created.replayed) return json({ taskId: created.job.id, replayed: true, ...withSecret(created.job) }, 202)
     if (created.job.status === 'running' && !(await queueOrFail(created.job))) {
       return refusal(503, 'jobs_unavailable', 'the job could not be queued; nothing was charged', ['retry in a minute'], { 'Retry-After': '60' })
     }
     log(JSON.stringify({ severity: 'INFO', event: 'hosted_job_started', workspaceId, jobId: job.id, kind, pages, status: created.job.status }))
-    return json({ ...status(created.job), estimatedCredits, ...(kind === 'batch' && (parsed as ParsedBatchStartRequest).invalidURLs !== undefined ? { invalidURLs: (parsed as ParsedBatchStartRequest).invalidURLs } : {}) }, 202)
+    return json({ ...withSecret(created.job), estimatedCredits, ...(kind === 'batch' && (parsed as ParsedBatchStartRequest).invalidURLs !== undefined ? { invalidURLs: (parsed as ParsedBatchStartRequest).invalidURLs } : {}) }, 202)
   }
 
   /** A page of a job's items from its slice files, from a cursor `slice:line`. */

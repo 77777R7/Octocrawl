@@ -23,6 +23,7 @@
  * vendor before the first fetch.
  */
 
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { EvidenceAccessGrant, ExecutionContext, FetchOptions, FetchResult, IdentityBundle, SessionConfig, TraceEvent } from '@w2l/contracts'
@@ -52,6 +53,7 @@ import { FileStore } from './fileStore.js'
 import { defaultNetworkPolicy, EgressRoutes } from './egress.js'
 import { robotsFetcherVia } from './subjects/provider.js'
 import { connectVendor } from './vendors/connect.js'
+import { namedForPaidCall } from './vendors/paidSessions.js'
 import { scrubSecret } from './vendors/api.js'
 import { BROWSERBASE_MIN_SESSION_MS, browserbaseOps } from './vendors/browserbase.js'
 import { STEEL_MIN_SESSION_MS, steelOps } from './vendors/steel.js'
@@ -439,7 +441,8 @@ export function buildChannels(
     const tariff = opts.vendorTariffs?.[vendorId] ?? null
     const connectOwn = (execution?: ExecutionContext) => {
       opts.onVendorConnect?.(vendorId)
-      return connectVendor(ops, opts.vendorConnector, pendingResume ?? null, execution?.deadlineAt, execution?.signal, opts.vendorPolicy?.authorized ?? [])
+      // A paid call's sessions are named from its id and told to its row, so a crash leaves them findable (PA E4).
+      return connectVendor(namedForPaidCall(ops, execution), opts.vendorConnector, pendingResume ?? null, execution?.deadlineAt, execution?.signal, opts.vendorPolicy?.authorized ?? [])
     }
 
     const ensureConnected = async (execution?: ExecutionContext) => {
@@ -613,6 +616,7 @@ export function buildChannels(
       grantCapabilities,
       ...(opts.vendorGrant === undefined ? {} : { grant: opts.vendorGrant }),
       priceCeilingUsd: tariff === null ? null : tariffCeilingUsd(tariff, sessionFloorMs),
+      ...(tariff === null ? {} : { tariffVersion: createHash('sha256').update(JSON.stringify(tariff)).digest('hex').slice(0, 16) }),
       fetch: async (url, session, execution, options) => {
         if (tariff === null || tariff.maxSessionMs === null) return raw.fetch(url, session, execution, options)
         const held: ExecutionContext = { ...execution, deadlineAt: Math.min(execution?.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + tariff.maxSessionMs) }

@@ -6,7 +6,7 @@
  * A repeated put of the same id does not create a second row.
  */
 
-import type { Attempt, ListPageRead, StepRecord, StepStatus, Task } from '@w2l/contracts'
+import type { Attempt, ListPageRead, PaidCallRecord, StepRecord, StepStatus, Task } from '@w2l/contracts'
 
 export type StepPageKind = 'pages' | 'errors' | 'all'
 
@@ -69,6 +69,13 @@ export interface TaskStore {
   putPageRead(taskId: string, canonicalUrl: string, page: ListPageRead): Promise<void>
   listPagesRead(taskId: string, canonicalUrl: string): Promise<readonly ListPageRead[]>
   clearPagesRead(taskId: string, canonicalUrl: string): Promise<void>
+  /**
+   * The task's paid calls (PA E2): one row per `paidCallId`, written before the call goes out and again at each change of
+   * state, so a crash between a call and its page's step leaves the call on the record. A put of the same id replaces it.
+   */
+  putPaidCall(call: PaidCallRecord): Promise<void>
+  /** A task's paid calls (one attempt's with attemptId), oldest first. */
+  listPaidCalls(taskId: string, attemptId?: string): Promise<readonly PaidCallRecord[]>
   close(): Promise<void>
 }
 

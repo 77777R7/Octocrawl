@@ -2,11 +2,13 @@ import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import Database from 'better-sqlite3'
 import {
   DEFAULT_CRAWL_BUDGET,
   type Attempt,
   type FetchResult,
   type ListPageRead,
+  type PaidCallRecord,
   type StepRecord,
   type Task,
 } from '@w2l/contracts'
@@ -136,6 +138,20 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       await store.clearPagesRead('task-1', 'https://example.com/list')
       expect(await store.listPagesRead('task-1', 'https://example.com/list')).toEqual([])
       expect(await store.listPagesRead('task-1', 'https://example.com/other')).toHaveLength(1)
+    })
+
+    it('keeps a task\'s paid calls by id, each write replacing the row, and refuses one of an unknown attempt (PA E2)', async () => {
+      ;({ store, cleanup } = await open())
+      await seed(store)
+      const call: PaidCallRecord = { paidCallId: 'task-1-attempt-1-1', taskId: 'task-1', attemptId: 'attempt-1', url: 'https://example.com/p', vendorId: 'steel', ceilingUsd: 0.3, state: 'reserved', chargedUsd: null, providerRequestId: null, providerSessionId: null, tariffVersion: 'abc', grantHash: 'f'.repeat(64), deadline: LATER, createdAt: NOW, settledAt: null }
+      await store.putPaidCall(call)
+      await store.putPaidCall({ ...call, paidCallId: 'task-1-attempt-1-2', createdAt: LATER })
+      const settled = { ...call, state: 'settled' as const, chargedUsd: 0.012, providerSessionId: 'sess-1', providerRequestId: 'sess-1', settledAt: LATER }
+      await store.putPaidCall(settled)
+      expect(await store.listPaidCalls('task-1')).toEqual([settled, { ...call, paidCallId: 'task-1-attempt-1-2', createdAt: LATER }])
+      expect(await store.listPaidCalls('task-1', 'attempt-1')).toHaveLength(2)
+      expect(await store.listPaidCalls('task-1', 'attempt-2')).toEqual([])
+      await expect(store.putPaidCall({ ...call, paidCallId: 'x', attemptId: 'attempt-9' })).rejects.toThrow('unknown attempt')
     })
 
     it('round-trips task, attempt, and a URL-granularity step', async () => {
@@ -336,6 +352,29 @@ describe('SqliteTaskStore file layout', () => {
       expect(await second.listSteps('task-1')).toHaveLength(1)
     } finally {
       await second.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('SqliteTaskStore paid_calls migration (PA E2)', () => {
+  it('adds the table to a checkpoint written before it existed', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'w2l-checkpoint-'))
+    try {
+      const first = SqliteTaskStore.open(dir)
+      await first.putTask(task({ taskDir: dir }))
+      await first.putAttempt(attempt())
+      await first.close()
+      // A checkpoint from before PA E2: no paid_calls table.
+      const old = new Database(join(dir, CHECKPOINT_FILENAME))
+      old.exec('DROP TABLE paid_calls')
+      old.close()
+      const reopened = SqliteTaskStore.open(dir)
+      expect(await reopened.listPaidCalls('task-1')).toEqual([])
+      await reopened.putPaidCall({ paidCallId: 'p1', taskId: 'task-1', attemptId: 'attempt-1', url: 'https://example.com/', vendorId: 'steel', ceilingUsd: 1, state: 'unknown', chargedUsd: null, providerRequestId: null, providerSessionId: null, tariffVersion: null, grantHash: null, deadline: null, createdAt: NOW, settledAt: NOW })
+      expect(await reopened.listPaidCalls('task-1')).toHaveLength(1)
+      await reopened.close()
+    } finally {
       await rm(dir, { recursive: true, force: true })
     }
   })

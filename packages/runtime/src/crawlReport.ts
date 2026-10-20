@@ -1,4 +1,4 @@
-import type { Attempt, CrawlReport, Task } from '@w2l/contracts'
+import type { Attempt, CrawlReport, PaidCallRecord, PaidCallTotals, Task } from '@w2l/contracts'
 import type { TaskStore } from './taskStore.js'
 
 export async function crawlReportFromStore(store: TaskStore, taskId: string): Promise<CrawlReport | null> {
@@ -32,7 +32,34 @@ export async function crawlReportFromStore(store: TaskStore, taskId: string): Pr
     steps.some((step) => step.result?.failureReason === 'loop_detected'),
   )
   // A batch counts its contract over every attempt, where it counts succeeded and failed.
-  return task.batch === undefined && task.crawl?.verify !== undefined ? { ...report, ...(await store.countVerifications(taskId, latest.id)) } : report
+  const counted = task.batch === undefined && task.crawl?.verify !== undefined ? { ...report, ...(await store.countVerifications(taskId, latest.id)) } : report
+  const paid = await store.listPaidCalls(taskId)
+  return paid.length === 0 ? counted : { ...counted, paidCalls: paidCallTotals(paid) }
+}
+
+/**
+ * What a set of paid calls may have cost, for a budget: a settled call at its charge, a released one at nothing, any other
+ * at its ceiling or the charge it already holds, whichever is higher. Never less than the provider could bill.
+ */
+export function paidCallExposureUsd(calls: readonly PaidCallRecord[]): number {
+  return calls.reduce((sum, call) => sum + (call.state === 'released' ? 0 : call.state === 'settled' ? call.chargedUsd ?? call.ceilingUsd : Math.max(call.ceilingUsd, call.chargedUsd ?? 0)), 0)
+}
+
+/** A task's paid calls as its status shows them (PA E5). */
+export function paidCallTotals(calls: readonly PaidCallRecord[]): PaidCallTotals {
+  const totals: PaidCallTotals = { reservedUsd: 0, knownChargedUsd: 0, unknownExposureUsd: 0, refundableUsd: 0, overCeiling: 0, calls: {} }
+  for (const call of calls) {
+    totals.calls[call.state] = (totals.calls[call.state] ?? 0) + 1
+    if (call.state === 'reserved' || call.state === 'submitted') {
+      totals.reservedUsd += call.ceilingUsd
+      if (call.state === 'reserved') totals.refundableUsd += call.ceilingUsd
+    } else if (call.state === 'settled') {
+      totals.knownChargedUsd += call.chargedUsd ?? 0
+      if ((call.chargedUsd ?? 0) > call.ceilingUsd + 1e-9) totals.overCeiling++
+    } else if (call.state === 'unknown') totals.unknownExposureUsd += Math.max(call.ceilingUsd, call.chargedUsd ?? 0)
+    else if (call.state === 'usage_pending') totals.unknownExposureUsd += call.chargedUsd ?? call.ceilingUsd
+  }
+  return totals
 }
 
 export function reportFromTaskAttempt(
