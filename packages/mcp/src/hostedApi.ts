@@ -29,7 +29,7 @@ import { scrapeSchemaWithout } from './toolsets.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
 import { CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
-import { createJobRoutes, isJobRoute, type HostedJobsConfig } from './hostedJobRoutes.js'
+import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, type HostedJobsConfig } from './hostedJobRoutes.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
 export interface HostedKeyRecord {
@@ -183,15 +183,51 @@ export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', '
 /** The tools hosted Octocrawl lists to a caller: scrape_product only to a key with the browser lane, since it needs one,
  * so every tool a client sees can answer. All are read-only here: hosted Octocrawl refuses page actions and logins.
  * scrape's description does not name get_scrape, which is not served here. */
-export function hostedTools(browser: boolean) {
-  return TOOLS.filter((tool) => HOSTED_API_TOOLS.has(tool.name) && (browser || tool.name !== 'scrape_product'))
-    .map((tool) => ({
+export function hostedTools(browser: boolean, jobs = false) {
+  return TOOLS.filter((tool) => (HOSTED_API_TOOLS.has(tool.name) && (browser || tool.name !== 'scrape_product')) || (jobs && HOSTED_JOB_TOOLS.has(tool.name)))
+    .map((tool) => HOSTED_JOB_TOOLS.has(tool.name) ? hostedJobTool(tool, browser) : ({
       ...tool,
       description: tool.description.replace(SCRAPE_RECORD_HINT, ''),
       inputSchema: hostedInputSchema(tool.name, tool.inputSchema, browser),
       annotations: { ...tool.annotations, readOnlyHint: true },
       _meta: { ...('_meta' in tool ? tool._meta : {}), ...HOSTED_INVOCATION[tool.name as keyof typeof HOSTED_INVOCATION] },
     }))
+}
+
+/**
+ * The job tools an account's connection lists (ROADMAP PH H2, docs/h2-hosted-jobs-tasks.md M1): crawl and batch jobs run
+ * a slice at a time on hosted Octocrawl and are read back through these. Keyless callers and keys without an account
+ * have no credits to spend, so they are not offered.
+ */
+export const HOSTED_JOB_TOOLS: ReadonlySet<string> = new Set(['crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'wait_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'get_batch_errors', 'cancel_batch', 'wait_batch'])
+/** A hosted wait ends within the MCP request's deadline (HOSTED_MCP_SCRAPE_TIMEOUT_MS) and answers the status so far. */
+export const HOSTED_MCP_WAIT_MS = 90_000
+/** The most items a hosted job list answers at once (hostedJobRoutes.ts PAGE_LIST_MAX). */
+const HOSTED_MCP_LIST_MAX = 100
+/** A hosted job's statuses: queued while the account's running slots are taken, expired once its results are deleted. */
+const HOSTED_JOB_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancelled', 'expired'] as const
+const HOSTED_JOB_NOTE = ' On hosted Octocrawl a job runs in slices: a crawl reads at most 500 pages and a batch 1,000 URLs, each page costs credits as a scrape does (maxCredits caps the job), and results are kept 7 days after it ends.'
+
+/** A job tool as hosted serves it: its start options cut to what hosted takes, waits within the request's deadline, its status values. */
+function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
+  const schema = structuredClone(tool.inputSchema) as { properties: Record<string, Record<string, unknown>>; required?: string[] }
+  const starts = tool.name === 'crawl' || tool.name === 'batch_scrape'
+  if (starts) {
+    const allowed = tool.name === 'crawl' ? HOSTED_CRAWL_KEYS : HOSTED_BATCH_KEYS
+    for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || (!browser && key === 'waitFor')) delete schema.properties[key]
+    if (tool.name === 'crawl' && schema.properties.maxPages) schema.properties.maxPages = { ...schema.properties.maxPages, maximum: JOB_MAX_CRAWL_PAGES }
+  }
+  if (schema.properties.timeoutMs) schema.properties.timeoutMs = { ...schema.properties.timeoutMs, maximum: HOSTED_MCP_WAIT_MS }
+  // A page of a hosted job's list is at most HOSTED_MCP_LIST_MAX items, and so is what maxResults follows.
+  for (const key of ['limit', 'maxResults']) if (schema.properties[key] && Number(schema.properties[key].maximum) > HOSTED_MCP_LIST_MAX) schema.properties[key] = { ...schema.properties[key], maximum: HOSTED_MCP_LIST_MAX }
+  const output = 'outputSchema' in tool && tool.outputSchema !== undefined ? structuredClone(tool.outputSchema) as { properties?: Record<string, Record<string, unknown>> } : undefined
+  if (output?.properties?.status !== undefined) output.properties.status = { enum: [...HOSTED_JOB_STATUSES] }
+  return {
+    ...tool,
+    description: starts ? `${tool.description}${HOSTED_JOB_NOTE}` : tool.description.replace(/at most 120000/g, `at most ${HOSTED_MCP_WAIT_MS}`),
+    inputSchema: schema,
+    ...(output === undefined ? {} : { outputSchema: output }),
+  }
 }
 
 /**
@@ -257,10 +293,10 @@ const HOSTED_INVOCATION = {
  * The tools /mcp-oauth lists: each declares that it needs OAuth with the `mcp` scope, top level and mirrored in `_meta`
  * for clients that read only `_meta`, as ChatGPT asks (https://developers.openai.com/apps-sdk/build/auth, read 2026-10-16).
  */
-export function oauthTools(browser: boolean) {
+export function oauthTools(browser: boolean, jobs = false) {
   const securitySchemes = [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]
   // Merged, not replaced: the hosted copies' own _meta (status lines) stays beside securitySchemes.
-  return hostedTools(browser).map((tool) => ({ ...tool, securitySchemes, _meta: { ...tool._meta, securitySchemes } }))
+  return hostedTools(browser, jobs).map((tool) => ({ ...tool, securitySchemes, _meta: { ...('_meta' in tool ? tool._meta : {}), securitySchemes } }))
 }
 /** /mcp-oauth's Protected Resource Metadata (RFC 9728). */
 export function oauthResourceMetadata() {
@@ -336,6 +372,8 @@ export interface HostedApiConfig {
   /** Shared with the Cloudflare Worker; proves CF-Connecting-IP. Absent: the socket address is the keyless identity. */
   proxySecret?: string
   keylessDaily?: number
+  /** Requests a minute one address may make (ADDRESS_PER_MINUTE); a test lowers it. */
+  addressPerMinute?: number
   /** Keyless pages a UTC day for every caller in Claude's egress range together (see CLAUDE_EGRESS). */
   claudeDaily?: number
   siteDaily?: number
@@ -507,7 +545,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const keylessLimiter = new SlidingWindowLimiter(KEYLESS_PER_MINUTE)
   const keyLimiter = new SlidingWindowLimiter(KEY_PER_MINUTE)
   const claudeLimiter = new SlidingWindowLimiter(CLAUDE_PER_MINUTE)
-  const addressLimiter = new SlidingWindowLimiter(ADDRESS_PER_MINUTE)
+  const addressLimiter = new SlidingWindowLimiter(config.addressPerMinute ?? ADDRESS_PER_MINUTE)
   const sweeper = setInterval(() => { sweepTaskRoot(config.taskRoot).catch((error) => log(JSON.stringify({ severity: 'WARNING', event: 'hosted_sweep_failed', message: String(error) }))) }, SWEEP_EVERY_MS)
   sweeper.unref()
 
@@ -586,8 +624,11 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       caller = { kind: 'key', id: `playground:${uid}`, uid, dailyLimit: 0, browser: true, plan: 'account' }
     } else {
       // Every request counts against its address first, before any lookup, so a flood of made-up keys reaches no store.
-      const addressWait = addressLimiter.retryAfterSeconds(digest(config.hashKey, 'ip', c.env.socketAddress))
-      if (addressWait !== null) return refuse(c, 429, 'rate_limited', `too many requests from this address: at most ${ADDRESS_PER_MINUTE} a minute`, [`retry after ${addressWait} s`], { 'Retry-After': String(addressWait) })
+      // A call the MCP handler makes in this process (a wait's polls among them) was counted with its MCP POST.
+      const internal = c.req.header(INTERNAL_SECRET_HEADER)
+      const fromInside = internal !== undefined && sameSecret(internal, internalSecret)
+      const addressWait = fromInside ? null : addressLimiter.retryAfterSeconds(digest(config.hashKey, 'ip', c.env.socketAddress))
+      if (addressWait !== null) return refuse(c, 429, 'rate_limited', `too many requests from this address: at most ${config.addressPerMinute ?? ADDRESS_PER_MINUTE} a minute`, [`retry after ${addressWait} s`], { 'Retry-After': String(addressWait) })
       caller = await identify(c.req.raw.headers, c.env.socketAddress, starts || jobStart)
     }
     if (caller === 'oauth_token') return refuse(c, 401, 'unauthorized', `an OAuth access token works only at the MCP endpoint ${MCP_OAUTH_RESOURCE}`, ['call the API with an account key (oc_...) from https://octocrawl.dev/dashboard/'])
@@ -834,23 +875,39 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       ...(typeof authorization === 'string' ? { token: authorization.replace(/^Bearer\s+/i, '') } : {}),
       fetch: async (input, init) => {
         const request = new Request(input, init)
-        if (caller.kind === 'keyless') { request.headers.set(INTERNAL_SECRET_HEADER, internalSecret); request.headers.set(INTERNAL_CLIENT_HEADER, address) }
+        // Every call from here is this handler's own: the MCP POST that carries it was counted against the address already.
+        request.headers.set(INTERNAL_SECRET_HEADER, internalSecret)
+        if (caller.kind === 'keyless') request.headers.set(INTERNAL_CLIENT_HEADER, address)
         // The gate takes an access token only from this handler, and reads it again there (fresh for a start).
         if (oauth) request.headers.set(OAUTH_SECRET_HEADER, oauthSecret)
         return gate.fetch(request, { socketAddress: address })
       },
     })
     const post = trackPost(calls, req, res, parsed, [caller.id])
-    const tools = oauth ? oauthTools(caller.browser) : hostedTools(caller.browser === true)
+    // An account's connection, on a server that runs jobs, is offered the job tools too.
+    const jobs = jobRoutes !== null && caller.kind === 'key' && caller.uid !== undefined
+    const tools = oauth ? oauthTools(caller.browser, jobs) : hostedTools(caller.browser === true, jobs)
     const instructions = serverInstructions(tools.map((tool) => tool.name), { kind: 'hosted', connection: oauth ? 'oauth' : caller.kind === 'key' ? 'key' : 'keyless', browser: caller.browser === true, sharedPool: caller.kind === 'keyless' && caller.pool === 'claude' })
     await serveMcpPost(req, res, parsed, () => createMcpServer(client, {
-      allowedTools: HOSTED_API_TOOLS,
+      allowedTools: jobs ? new Set([...HOSTED_API_TOOLS, ...HOSTED_JOB_TOOLS]) : HOSTED_API_TOOLS,
       tools,
       instructions,
       minimalResults: true,
       calls: post,
-      unavailableHint: 'Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.',
+      unavailableHint: jobs
+        ? 'Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.'
+        : jobRoutes !== null
+          ? `Crawls and batches run on hosted Octocrawl for an account: connect with an account's key from https://octocrawl.dev/dashboard/ or sign in at ${MCP_OAUTH_RESOURCE}. Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.`
+          : 'Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.',
       normalizeCall: (name, args) => {
+        if (HOSTED_JOB_TOOLS.has(name)) {
+          if (!jobs) throw new Error(`${name} runs a hosted job, which needs an account: connect with an account's key from https://octocrawl.dev/dashboard/ or sign in at ${MCP_OAUTH_RESOURCE}, or run it on your computer: ${LOCAL_HINT}`)
+          // A wait ends within this request's deadline, with the status so far.
+          const call = { ...((args ?? {}) as Record<string, unknown>) }
+          if (typeof call.timeoutMs === 'number') call.timeoutMs = Math.min(call.timeoutMs, HOSTED_MCP_WAIT_MS)
+          for (const key of ['limit', 'maxResults']) if (typeof call[key] === 'number') call[key] = Math.min(call[key] as number, HOSTED_MCP_LIST_MAX)
+          return call
+        }
         if (!HOSTED_API_TOOLS.has(name)) throw new Error(`${name} is not served by hosted Octocrawl: scrape, map and scrape_product only; ${LOCAL_HINT}`)
         if (name === 'scrape_product' && !caller.browser) throw new Error('scrape_product reads Amazon.sg in a browser, which needs a key; keyless callers use scrape over HTTP')
         return name === 'scrape' ? hostedScrapeArguments(args) : args
