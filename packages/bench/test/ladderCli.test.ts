@@ -207,7 +207,8 @@ describe('buildChannels', () => {
     expect(buildChannels('standard', { ...granted, enhanced: true }).map((c) => c.id)).toEqual(['http', 'browser_local'])
     expect(buildChannels('research', { ...granted, installedChrome: true, enhanced: true }).map((c) => c.id)).not.toContain('installed_chrome')
     expect(() => buildChannels('standard', { ...granted, installedChrome: true, enhanced: true, previewProductToken: true })).toThrow(/not the hosted preview/)
-    expect(() => buildChannels('standard', { ...granted, installedChrome: true, enhanced: true, browserAllowedHosts: ['example.com'] })).toThrow(/not the hosted preview/)
+    // A browser kept to a list of hosts (a local host's Amazon.sg state) leaves the rung out instead of stopping the whole set.
+    expect(buildChannels('standard', { ...granted, installedChrome: true, enhanced: true, browserAllowedHosts: ['example.com'] }).map((c) => c.id)).toEqual(['http', 'browser_local'])
     // The Chrome reads the page as it opened it: no actions, screenshot, phone identity, added headers or relaxed certificates.
     const rung = built.find((c) => c.id === 'installed_chrome')!
     const url = 'https://example.com/'

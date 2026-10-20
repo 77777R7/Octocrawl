@@ -2,7 +2,7 @@ import { createServer, type Server as HttpServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { hostedNetworkPolicy, localNetworkPolicy, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
-import { closeIdleOnlyWhenUnread, defaultSessionsFile } from '@w2l/api'
+import { closeIdleOnlyWhenUnread, defaultSessionsFile, loadEngineConfig, tunedPolicy, type EngineConfig } from '@w2l/api'
 import { createManagedRuntime } from './managedRuntime.js'
 import { createMcpServer } from './server.js'
 import { validateAmazonPublicState } from './amazonState.js'
@@ -17,6 +17,10 @@ export interface LocalConfig {
   networkPolicy?: NetworkPolicy
   deliveryNetworkPolicy?: NetworkPolicy
   amazonPublicState?: string
+  /** The engine options from the environment (loadEngineConfig): the access grant and what it turns on, the worker count. Absent: none, as before a grant. */
+  engine?: EngineConfig
+  /** Startup lines about the configuration, printed once by the service's command. */
+  notices?: string[]
 }
 
 export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalConfig {
@@ -32,15 +36,21 @@ export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalC
     : undefined
   const amazonPublicState=env.W2L_AMAZON_PUBLIC_STATE_FILE ? readFileSync(env.W2L_AMAZON_PUBLIC_STATE_FILE,'utf8') : undefined
   if (amazonPublicState !== undefined) validateAmazonPublicState(amazonPublicState)
-  // Capture follows the operator's HTTPS_PROXY/HTTP_PROXY/NO_PROXY and declares W2L_CONTACT; delivery keeps its own explicit proxy setting.
-  const networkPolicy=withOperatorContact(withEnvironmentProxy(localNetworkPolicy(),env),env)
-  return {taskRoot:resolve(env.W2L_TASK_ROOT ?? '.w2l/api'),port,monitorPollMs,deliveryPollMs,deliveryNetworkPolicy,amazonPublicState,...(networkPolicy.egressProxy||networkPolicy.contact?{networkPolicy}:{})}
+  // The same engine options the API server and the octocrawl command read (W2L_ACCESS_GRANT, W2L_BROWSER_*, W2L_COMPAT_HOSTS, W2L_EGRESS_*, W2L_WORKER_COUNT).
+  const engine=loadEngineConfig(env,{hosted:false})
+  // The Amazon.sg state limits the public browser to Amazon's hosts, which leaves no installed_chrome rung (buildChannels).
+  const notices=[...engine.notices,...(amazonPublicState!==undefined && (engine.accessGrant?.capabilities ?? []).includes('installed_chrome') ? ['installed_chrome: no rung while W2L_AMAZON_PUBLIC_STATE_FILE is set: that state keeps the browser to Amazon.sg\'s hosts, and the person\'s Chrome is not limited that way (ADR 0005)'] : [])]
+  // Capture follows the operator's HTTPS_PROXY/HTTP_PROXY/NO_PROXY, the W2L_PER_HOST_* pacing and declares W2L_CONTACT; delivery keeps its own explicit proxy setting.
+  const tuned=env.W2L_PER_HOST_CONCURRENCY!==undefined || env.W2L_PER_HOST_MIN_DELAY_MS!==undefined
+  const networkPolicy=withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(),env),env),env)
+  return {taskRoot:resolve(env.W2L_TASK_ROOT ?? '.w2l/api'),port,monitorPollMs,deliveryPollMs,deliveryNetworkPolicy,amazonPublicState,engine,notices,...(networkPolicy.egressProxy||networkPolicy.contact||tuned?{networkPolicy}:{})}
 }
 
 /** Single-user local service. It never binds a public interface or exposes REST. */
 export function createLocalService(config: LocalConfig): {server: HttpServer; close: () => Promise<void>} {
   if (!Number.isSafeInteger(config.port) || config.port < 0 || config.port > 65535) throw new Error('port must be 0..65535')
   const runtime=createManagedRuntime({taskRoot:config.taskRoot,networkPolicy:config.networkPolicy ?? localNetworkPolicy(),deliveryNetworkPolicy:config.deliveryNetworkPolicy,monitorPollMs:config.monitorPollMs,deliveryPollMs:config.deliveryPollMs,exposeInternalErrors:true,sessionsFile:defaultSessionsFile(),userChrome:{},
+    ...(config.engine === undefined ? {} : {accessGrant:config.engine.accessGrant,browserEngine:config.engine.browserEngine,browserIdentity:config.engine.browserIdentity,compatHosts:config.engine.compatHosts,egressProxies:config.engine.egressProxies,egressEchoUrl:config.engine.egressEchoUrl,workerCount:config.engine.workerCount}),
     ...(config.amazonPublicState === undefined ? {} : {publicPreferenceState:config.amazonPublicState,
       browserAllowedHosts:['www.amazon.sg','m.media-amazon.com','images-na.ssl-images-amazon.com','images-eu.ssl-images-amazon.com'],
       channelPolicy:(url:string)=>new URL(url).hostname === 'www.amazon.sg' ? 'browser_only' as const : ['docs.firecrawl.dev','modelcontextprotocol.io'].includes(new URL(url).hostname) ? 'http_only' as const : 'ladder' as const})})

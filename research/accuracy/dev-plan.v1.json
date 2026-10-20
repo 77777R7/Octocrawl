@@ -1,0 +1,130 @@
+{
+ "schema": "octocrawl.field-dev-plan/1",
+ "scope": "One retained-source HTTP replay per case through the production engine, API and SDK of the checked-out commit. Measures extraction and delivery on saved bytes, not live access, routing or freshness.",
+ "datasetSealSha256": "2aa8c018ec2174f5e376458dd438e0149973debc5c3733a72b32dd8ab83a9c33",
+ "fixtureOrigin": "http://127.0.0.1:8862",
+ "request": {
+  "formats": [
+   "markdown",
+   "tables",
+   "links"
+  ],
+  "debug": false,
+  "onlyMainContent": true,
+  "fastMode": true,
+  "maxAge": 0,
+  "storeInCache": false,
+  "timeout": 30000
+ },
+ "verify": "H cases keep #562's identity check (markdownIncludes checkNeedle) so the regression numbers stay comparable; D cases send no verify. A success result is status success with verification not failed.",
+ "cases": [
+  {
+   "id": "D01",
+   "group": "development",
+   "url": "https://www.census.gov/quickfacts/fact/table/US/PST045224",
+   "checkNeedle": null
+  },
+  {
+   "id": "D02",
+   "group": "development",
+   "url": "https://www.newegg.com/p/pl?d=laptop",
+   "checkNeedle": null
+  },
+  {
+   "id": "D03",
+   "group": "development",
+   "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
+   "checkNeedle": null
+  },
+  {
+   "id": "D04",
+   "group": "development",
+   "url": "https://www.nasdaq.com/market-activity/stocks/aapl/historical",
+   "checkNeedle": null
+  },
+  {
+   "id": "D05",
+   "group": "development",
+   "url": "https://www.otto.de/technik/laptop/",
+   "checkNeedle": null
+  },
+  {
+   "id": "D06",
+   "group": "development",
+   "url": "https://finance.yahoo.com/quote/AAPL/history/",
+   "checkNeedle": null
+  },
+  {
+   "id": "D07",
+   "group": "development",
+   "url": "https://www.aliexpress.com/category/702/laptops.html",
+   "checkNeedle": null
+  },
+  {
+   "id": "D08",
+   "group": "development",
+   "url": "https://www.temu.com/",
+   "checkNeedle": null
+  },
+  {
+   "id": "D09",
+   "group": "development",
+   "url": "https://www.coingecko.com/",
+   "checkNeedle": null
+  },
+  {
+   "id": "D10",
+   "group": "development",
+   "url": "https://www.walmart.com/browse/electronics/laptops/3944_3951_1089430_132960",
+   "checkNeedle": null
+  },
+  {
+   "id": "H01",
+   "group": "regression",
+   "url": "https://www.rfc-editor.org/rfc/rfc9110.html",
+   "checkNeedle": "RFC 9110"
+  },
+  {
+   "id": "H02",
+   "group": "regression",
+   "url": "https://www.gutenberg.org/browse/scores/top",
+   "checkNeedle": "Top 100 EBooks"
+  },
+  {
+   "id": "H03",
+   "group": "regression",
+   "url": "https://ssd.jpl.nasa.gov/astro_par.html",
+   "checkNeedle": "Astrodynamic"
+  },
+  {
+   "id": "H04",
+   "group": "regression",
+   "url": "https://www.gov.uk/bank-holidays",
+   "checkNeedle": "bank holidays"
+  },
+  {
+   "id": "H05",
+   "group": "regression",
+   "url": "https://www.nist.gov/pml/owm/metric-si-prefixes",
+   "checkNeedle": "Metric"
+  },
+  {
+   "id": "H06",
+   "group": "regression",
+   "url": "https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml",
+   "checkNeedle": "HTTP Status"
+  },
+  {
+   "id": "H07",
+   "group": "regression",
+   "url": "https://www.w3.org/TR/WCAG22/",
+   "checkNeedle": "WCAG"
+  },
+  {
+   "id": "H08",
+   "group": "regression",
+   "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map",
+   "checkNeedle": "map()"
+  }
+ ]
+}

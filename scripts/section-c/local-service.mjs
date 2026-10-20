@@ -6,6 +6,7 @@ import { get as httpsGet } from 'node:https'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { localServicePlist, xml } from './local-service-plist.mjs'
 
 if(process.platform!=='darwin')throw new Error('Local background management uses macOS launchd; use npm run local:mcp on other systems')
 const command=process.argv[2]??'status'
@@ -21,7 +22,6 @@ const receiverRoot=join(root,'.w2l/local-receiver')
 const receiverCert=join(receiverRoot,'receiver.crt')
 const receiverKey=join(receiverRoot,'receiver.key')
 const secretFile=join(root,'.w2l/local-mcp.env')
-const xml=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;')
 const launch=(...args)=>execFileSync('launchctl',args,{encoding:'utf8'})
 
 if(command==='install') {
@@ -30,13 +30,8 @@ if(command==='install') {
   if(allowLocalDelivery&&!readable(receiverCert))throw new Error('install the local HTTPS receiver first')
   const amazonStateFile=process.env.W2L_AMAZON_PUBLIC_STATE_FILE?resolve(process.env.W2L_AMAZON_PUBLIC_STATE_FILE):null
   if(amazonStateFile&&!readable(amazonStateFile))throw new Error('anonymous Amazon.sg state file is unreadable')
-  const amazonStateEnv=amazonStateFile?`<key>W2L_AMAZON_PUBLIC_STATE_FILE</key><string>${xml(amazonStateFile)}</string>`:''
-  const rawCaptureEnv=process.env.W2L_CAPTURE_RAW_DIR?`<key>W2L_CAPTURE_RAW_DIR</key><string>${xml(resolve(process.env.W2L_CAPTURE_RAW_DIR))}</string>`:''
-  const extraEnv=allowLocalDelivery
-    ? `<key>W2L_LOCAL_DELIVERY_LOOPBACK</key><string>1</string><key>W2L_DELIVERY_CA_FILE</key><string>${xml(receiverCert)}</string>`
-    : ''
-  const monitorPoll=process.env.W2L_LOCAL_MONITOR_POLL_MS
-  const pollEnv=monitorPoll?`<key>W2L_LOCAL_MONITOR_POLL_MS</key><string>${xml(monitorPoll)}</string>`:''
+  const grant=(process.env.W2L_ACCESS_GRANT??'').trim()
+  if(grant!==''&&!grant.startsWith('{')&&!readable(resolve(grant)))throw new Error('access grant file (W2L_ACCESS_GRANT) is unreadable')
   mkdirSync(dirname(plist),{recursive:true})
   mkdirSync(join(root,'.w2l'),{recursive:true})
   if(readable(plist)) {
@@ -46,20 +41,9 @@ if(command==='install') {
     }
     try{launch('bootout',domain,plist)}catch{}
   }
-  writeFileSync(plist,`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>${label}</string>
-<key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(join(root,'packages/mcp/dist/localHostCli.js'))}</string></array>
-<key>WorkingDirectory</key><string>${xml(root)}</string>
-<key>EnvironmentVariables</key><dict><key>W2L_TASK_ROOT</key><string>${xml(taskRoot)}</string><key>W2L_LOCAL_MCP_PORT</key><string>${port}</string>${extraEnv}${pollEnv}${amazonStateEnv}${rawCaptureEnv}</dict>
-<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer>
-<key>StandardOutPath</key><string>${xml(join(root,'.w2l/local-mcp.stdout.log'))}</string>
-<key>StandardErrorPath</key><string>${xml(join(root,'.w2l/local-mcp.stderr.log'))}</string>
-</dict></plist>
-`,{mode:0o600})
+  writeFileSync(plist,localServicePlist({label,nodePath:process.execPath,root,taskRoot,port,env:process.env,receiverCert}),{mode:0o600})
   launch('bootstrap',domain,plist)
-  console.log(JSON.stringify({installed:true,url:`http://127.0.0.1:${port}/mcp`,plist,taskRoot,localHttpsDelivery:allowLocalDelivery,amazonPublicState:amazonStateFile!==null}))
+  console.log(JSON.stringify({installed:true,url:`http://127.0.0.1:${port}/mcp`,plist,taskRoot,localHttpsDelivery:allowLocalDelivery,amazonPublicState:amazonStateFile!==null,accessGrant:grant!==''}))
 } else if(command==='install-receiver') {
   mkdirSync(dirname(receiverPlist),{recursive:true})
   mkdirSync(receiverRoot,{recursive:true,mode:0o700})

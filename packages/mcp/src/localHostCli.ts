@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describeEgressProxy } from '@w2l/contracts'
+import { preloadEngineModules } from '@w2l/api'
 import { localConfigFromEnv, createLocalService } from './localHost.js'
 
 // A LaunchAgent does not inherit an interactive shell's secrets. The optional
@@ -18,6 +19,9 @@ if(existsSync(secretFile)) {
 }
 const config=localConfigFromEnv()
 if(config.networkPolicy?.egressProxy)console.log(`w2l-local-mcp: ${describeEgressProxy(config.networkPolicy.egressProxy)}`)
+for(const notice of config.notices ?? [])console.log(`w2l-local-mcp: ${notice}`)
+// Patchright and impit are checked to load before the service listens, not on the first page.
+if(config.engine!==undefined){const loaded=await preloadEngineModules(config.engine);if(loaded!==null)console.log(`w2l-local-mcp: ${loaded}`)}
 const service=createLocalService(config)
 service.server.once('listening',()=>console.log(JSON.stringify({service:'w2l-local-mcp',url:`http://127.0.0.1:${config.port}/mcp`,taskRoot:config.taskRoot})))
 service.server.once('error',error=>{console.error(error);process.exitCode=1;void service.close()})

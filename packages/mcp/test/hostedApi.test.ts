@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from '@modelcontextprotocol/client'
-import { hostedNetworkPolicy, type CompactScrapeResponse } from '@w2l/contracts'
+import { hostedNetworkPolicy, parseScrapeRequest, type CompactScrapeResponse } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
 import { expectUsableInstructions } from './instructionChecks.js'
 import { TOOL_NAMES } from '../src/tools.js'
@@ -64,7 +64,7 @@ async function start(options: { keylessDaily?: number; claudeDaily?: number; key
   })
   close = service.close
   if (!service.server.listening) await once(service.server, 'listening')
-  return { url: `http://127.0.0.1:${port}`, quota, server: service.server }
+  return { url: `http://127.0.0.1:${port}`, quota, server: service.server, engine: service.engine }
 }
 
 const post = (url: string, path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -88,6 +88,15 @@ it('serves scrape and map only, and refuses the rest by name with a hint to run 
   const refused = await metadata.json() as { status: string }
   expect(refused.status).not.toBe('success')
   expect(JSON.stringify(refused)).toMatch(/private|policy|link.?local|metadata/i)
+})
+
+it('takes no access grant, whatever its environment holds: access enhanced and my-browser stay refused', async () => {
+  vi.stubEnv('W2L_ACCESS_GRANT', JSON.stringify({ tier: 'enhanced', capabilities: ['vendor_remote_browser'], budget: { perRunUsd: 1 }, attestation: { principal: 'test', at: '2026-10-20T00:00:00Z', statement: 'test grant' } }))
+  try {
+    const { engine } = await start()
+    await expect(engine.scrape(parseScrapeRequest({ url: `${origin}/`, access: 'enhanced' }))).rejects.toThrow(/no approved budget for enhanced access/)
+    await expect(engine.scrape(parseScrapeRequest({ url: `${origin}/`, lane: 'my-browser' }))).rejects.toThrow(/does not read pages in your Chrome/)
+  } finally { vi.unstubAllEnvs() }
 })
 
 it('keyless: reads a page over the HTTP lane alone, within a daily allowance, then answers 429 until UTC midnight', async () => {
