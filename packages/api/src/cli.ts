@@ -5,11 +5,11 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DeliveryStore, DeliveryWorker } from '@w2l/runtime'
-import { loadImpit, loadPatchrightEngine } from '@w2l/bench'
 import { createApp, injectJobWebSockets, isLoopbackAuthority } from './app.js'
 import { createApiEngine, defaultSessionsFile } from './engine.js'
 import { closeIdleOnlyWhenUnread } from './keepAlive.js'
 import { parseListen, parsePort } from './listen.js'
+import { preloadEngineModules } from './engineConfig.js'
 
 export { parseListen, parsePort }
 
@@ -25,13 +25,9 @@ export { parseListen, parsePort }
 export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessEnv = process.env, options: { signals?: boolean; log?: (line: string) => void } = {}): Promise<{ url: string; close: () => Promise<void> }> {
   const log = options.log ?? ((line: string) => console.log(line))
   const listen = parseListen([...argv], env)
-  // Patchright is an optional install: a server asked for it checks it loads before it listens, not on the first browser page.
-  if (listen.browserEngine === 'patchright') {
-    const engine = await loadPatchrightEngine()
-    log(`w2l-api: patchright ${engine.version ?? '(version unknown)'} loaded`)
-  }
-  // impit is a native module: a server asked for the compatible transport checks it loads before it listens.
-  if (listen.compatHosts.length > 0) await loadImpit()
+  // Patchright (an optional install) and impit (a native module) are checked to load before the server listens, not on the first page.
+  const loaded = await preloadEngineModules(listen)
+  if (loaded !== null) log(`w2l-api: ${loaded}`)
   const taskRoot = env.W2L_TASK_ROOT ?? '.w2l/api'
   // The user's saved logins are read by a local server that listens on loopback alone, and it then answers loopback requests only.
   const servesLogins = listen.mode === 'local' && isLoopbackAuthority(listen.host.includes(':') && !listen.host.startsWith('[') ? `[${listen.host}]` : listen.host, false)

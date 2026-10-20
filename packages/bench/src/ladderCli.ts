@@ -232,8 +232,9 @@ export function buildChannels(
   const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared')
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
   if (opts.compatTransport === true && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('the compatible transport is for a local server, not the hosted preview')
-  if (opts.installedChrome === true && (preview || opts.browserAllowedHosts !== undefined || opts.localPreviewProxyUrl !== undefined)) throw new Error('installed_chrome is for a local server, not the hosted preview (ADR 0005)')
-  const installedChrome = opts.installedChrome === true && mode === 'standard' && opts.enhanced === true && (opts.vendorPolicy?.authorized ?? []).includes('installed_chrome')
+  if (opts.installedChrome === true && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('installed_chrome is for a local server, not the hosted preview (ADR 0005)')
+  // A browser kept to a list of hosts (a local host's Amazon.sg state) gets no installed_chrome rung: the person's Chrome is not kept to them.
+  const installedChrome = opts.installedChrome === true && opts.browserAllowedHosts === undefined && mode === 'standard' && opts.enhanced === true && (opts.vendorPolicy?.authorized ?? []).includes('installed_chrome')
     ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', opts.installedChromeSeams ?? {})
     : null
   const compat = opts.compatTransport === true && mode === 'standard' ? new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, undefined, false, fileStore, false, opts.robotsCache, new CompatTransport(opts.networkPolicy ?? defaultNetworkPolicy())) : null

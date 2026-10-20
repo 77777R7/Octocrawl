@@ -1,10 +1,18 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer, type AddressInfo } from 'node:net'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+// The options each one-off command gives the engine, recorded on the way through (the engine itself is the real one).
+const engineOptions = vi.hoisted(() => [] as Record<string, unknown>[])
+vi.mock('@w2l/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@w2l/api')>()
+  return { ...actual, createApiEngine: (options: Parameters<typeof actual.createApiEngine>[0]) => { engineOptions.push({ ...options }); return actual.createApiEngine(options) } }
+})
+
 import { COMMANDS, EVIDENCE_COLUMNS, flagName, optionKeys, parseCommandLine, runCli, usage } from '../src/index.js'
 
 describe('flags', () => {
@@ -180,6 +188,15 @@ describe('octocrawl against a local site', () => {
     expect(badGrant).toBe(2)
     expect(grantErr.join('\n')).toMatch(/access grant refused \(ADR 0005\):\n  - capabilities\.camoufox: camoufox is deferred/)
     expect(grantErr.join('\n')).not.toMatch(/\n\s+at /)
+  })
+
+  it('gives the engine the browser identity W2L_BROWSER_IDENTITY names, as the API server does', async () => {
+    engineOptions.length = 0
+    const err: string[] = []
+    const code = await runCli(['scrape', `${origin}/tides/a`, '--markdown'], { env: { W2L_TASK_ROOT: join(root, 'tasks'), W2L_BROWSER_IDENTITY: 'actual' }, stdout: () => {}, stderr: (text) => err.push(text) })
+    expect(code).toBe(0)
+    expect(err.join('\n')).toMatch(/browser identity: actual/)
+    expect(engineOptions.map((options) => options.browserIdentity)).toEqual(['actual'])
   })
 
   it('runs a batch and a crawl to the end and answers with the report and every page; maps a site', async () => {
