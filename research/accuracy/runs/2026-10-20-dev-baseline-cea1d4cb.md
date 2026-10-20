@@ -12,7 +12,7 @@
 | Request | `dev-plan.v1.json`: formats markdown, tables, links; `onlyMainContent`, `fastMode`, `maxAge: 0`, no cache, 30 s timeout; HTTP channel only. H cases keep #562's identity check (`markdownIncludes`); D cases send no `verify` |
 | Network | Loopback only: each case is served alone at `http://127.0.0.1:8862`, the runner deletes `HTTP(S)_PROXY`/`ALL_PROXY` and sets `NO_PROXY=127.0.0.1,localhost`. Neither proxied nor direct to any site: no request left the machine (19 fixture reads: 18 sources, one 404 for `/robots.txt`) |
 | Grant, browser, model, vendors | None. Cost $0 |
-| Scorer | `holdout_score.py` at `3f56e02a` (same scoring as `e4b671d5`; later commits changed only the Markdown report) |
+| Scorer | `holdout_score.py`, scoring as of `e4b671d5`; later commits on this branch changed only the Markdown report and the tests |
 | Outputs | `.w2l/field-gold/runs/2026-10-20-dev-baseline-cea1d4cb/` (raw SDK responses, `field-results.json`, `fields-with-values.md`; not committed) |
 
 Commands, from the repository root:
