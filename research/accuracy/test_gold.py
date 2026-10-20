@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from audit_gold import audit_case, derive, norm_decimal, read_proof
+from audit_gold import audit_case, derive, english_date, norm_decimal, read_proof
 from source_dom import Document
 
 
@@ -127,5 +127,41 @@ class AuditControls(unittest.TestCase):
         self.assertEqual(sum(c['split']=='reserved' for c in plan['cases']),8)
         self.assertEqual(sum(c['split']=='development' for c in plan['cases']),10)
         self.assertEqual(plan['candidateFrozen'],'ca94fdd5e2fd28e892418ba6fa7938b94eeeb3aa')
+
+    def test_english_dates_keep_the_stated_day(self):
+        for text,iso in [('3 March 2031','2031-03-03'),('Nov. 2, 2031 · Team','2031-11-02'),('Friday, January 9, 2032','2032-01-09'),
+                         ('7 Feb, 2033','2033-02-07'),('11-Aug-2030','2030-08-11'),('2031-05-06T00:00','2031-05-06'),('2032/04/12','2032-04-12'),('Sept. 4, 2031','2031-09-04')]:
+            self.assertEqual(english_date(text),iso)
+        for text in ['May 2031','2031-05/06','31 February 2031','Jun 2031']:
+            with self.assertRaises((AssertionError,ValueError)):english_date(text)
+
+    def test_date_text_rule_can_select_a_part(self):
+        html='<td>1 week ago (12 Mar 2031)</td>'
+        proof={'start':0,'end':len(html),'byteStart':0,'byteEnd':len(html),'quote':html,'mode':'text'}
+        self.assertEqual(derive(html,{'evidence':[proof],'normalization':'date_text','pattern':r'\(([^)]+)\)'}),'2031-03-12')
+
+class ReservedV2Manifest(unittest.TestCase):
+    def setUp(self):
+        here=Path(__file__).parent
+        self.v2=json.loads((here/'reserved.v2.json').read_text())
+        self.old={c['url'] for c in json.loads((here/'field-gold-plan.v1.json').read_text())['cases']}
+        self.old|={t['url'] for t in json.loads((here.parent/'access'/'tasks.v1.json').read_text())['tasks']}
+
+    def test_size_strata_and_exclusions(self):
+        cases=self.v2['cases'];self.assertGreaterEqual(len(cases),40);self.assertEqual(len(cases),self.v2['caseCount'])
+        self.assertEqual(len({c['url'] for c in cases}),len(cases))
+        self.assertEqual({c['stratum'] for c in cases},{'article','product','list','table','dynamic','document_metadata'})
+        self.assertFalse({c['url'] for c in cases}&self.old)
+
+    def test_stated_bound_matches_n(self):
+        n=self.v2['caseCount'];self.assertAlmostEqual(self.v2['acceptance']['zeroFalseSuccessUpper95'],round(1-0.05**(1/n),4))
+        self.assertAlmostEqual(1-0.05**(1/40),0.0722,places=4)
+
+    def test_spot_check_covers_a_fifth_of_each_stratum(self):
+        slots={};[slots.__setitem__(c['stratum'],slots.get(c['stratum'],0)+c['fieldSlots']) for c in self.v2['cases']]
+        for stratum,ids in self.v2['annotation']['spotCheck']['fields'].items():
+            self.assertGreaterEqual(len(ids),0.2*slots[stratum])
+        self.assertIsNone(self.v2['annotation']['spotCheck']['by'])
+        self.assertFalse(self.v2['candidateRuns'])
 
 if __name__=='__main__':unittest.main()

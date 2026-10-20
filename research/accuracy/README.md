@@ -10,7 +10,7 @@ This set was prepared in #556 and is taken into `main` by the PA enhancement tas
 | --- | --- | --- |
 | Development set | D01–D10 | Used for tuning before; the "before" value for D, D6 and F acceptance is the R1b baseline in `runs/` |
 | Regression set | H01–H08 | Opened by #562's first acceptance run on 2026-10-17 (candidate v7 and a main control, both 6/8 tasks and 62/75 required fields fully correct). It is no longer an untouched holdout and is kept as regression data |
-| Reserved set v2 | see `reserved.v2.json` once frozen | The untouched holdout for Phase 2 acceptance (R2) |
+| Reserved set v2 | V01–V42 in `reserved.v2.json` | The untouched holdout for Phase 2 acceptance (R2); see [Reserved set v2](#reserved-set-v2) |
 
 The sections below describe the set as #556 prepared it; "reserved" there means H01–H08 before #562 opened them. Raw pages, captures and annotations stay in `.w2l/field-gold/2026-10-17/` (git-ignored). The scorer is `holdout_score.py` and the runner is `run_dev.mjs`, described in [Scoring and runs](#scoring-and-runs). `.github/workflows/field-gold.yml` runs the offline controls on manual dispatch only.
 
@@ -102,3 +102,21 @@ node research/accuracy/run_dev.mjs .w2l/field-gold/2026-10-17 .w2l/field-gold/ru
 ```
 
 Records go to `runs/<YYYY-MM-DD>-<label>-<commit>.md` with the command, commit and per-field marks; `--markdown` leaves expected and observed values out, and `--markdown-values` (for `.w2l/` only) puts them in. The R1b baseline is `runs/2026-10-20-dev-baseline-cea1d4cb.md`.
+
+## Reserved set v2
+
+`reserved.v2.json` freezes 42 tasks (295 fields) in six strata of seven: article, product, list, table, dynamic region and document metadata. Each task names its fields and the record selection (one page subject, or the first three records). Each field records:
+
+- subject: entity and record span;
+- value;
+- source relation: structural path, quote, character and byte offsets, and the attribute or regex rule;
+- unit, date and period where the page states them;
+- freshness class: static, versioned, yearly, daily, hourly, live, volatile or stale.
+
+Which cases test which pitfalls is kept in the private annotations, so that nobody tunes for them.
+
+The tasks avoid every URL and registrable domain of the 92 frozen tasks, H01–H08, D01–D10 and the parity sites.
+
+- **Data:** raw pages, captures and labels are in `.w2l/field-gold/reserved-v2/` (git-ignored). The plan and seal hashes are in the JSON. `audit_gold.py .w2l/field-gold/reserved-v2` re-derives every value from the source bytes.
+- **Annotation:** this session (Claude Code, pa-r-eval-sets, 2026-10-20) picked and labelled the tasks. Howard or one outside reviewer still has to spot-check the 62 listed fields (20% of each stratum, seeded sample). The reviewer is recorded in `annotation.spotCheck` once the check is done.
+- **Not run:** no candidate and no Octocrawl code has seen these URLs; `candidateRuns` is empty. The first run is Phase 2's same-day pair. Before it, the request shape, the output-to-field mappings and the scorer commit are fixed. With zero false successes, the one-sided 95% upper bound at N=42 is 6.9% (7.2% at N=40).
