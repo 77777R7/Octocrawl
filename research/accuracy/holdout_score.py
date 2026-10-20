@@ -451,26 +451,29 @@ def summarize(rows):
  return {'requests':len(rows),'successResults':successes,'falseSuccess':fs,'falseSuccessByKind':dict(Counter(r['falseSuccessKind'] for r in rows if r['falseSuccessKind'])),'outcomes':dict(outcomes),
   'errorAmongSuccess':rate(fs,successes),'falseSuccessPerRequest':rate(fs,len(rows)),'zeroFalseSuccessUpper95':upper95(0,len(rows)),'deliverable':sum(r.get('deliverable',True) for r in rows),'accepted':sum(r.get('taskAccepted',False) for r in rows),'fields':dict(totals)}
 
-def markdown_report(report):
- """Per-field tables for a run record: one row per captured field, not-captured slots counted per case."""
+def markdown_report(report,values=False):
+ """Per-field tables for a run record: one row per captured field, not-captured slots counted per case.
+ Expected and observed values are labels and output, so they stay out unless values=True (for .w2l/ only)."""
  def cut(v,n=48):
   t='∅' if v is None else norm(v).replace('|','\\|');return t if len(t)<=n else t[:n-1]+'…'
  def mark(v):return '✓' if v is True else '✗' if v is False else '–'
- out=[]
+ out=['✓ correct, ✗ wrong or missing, – unknown in the source (not scored), · not applicable.','']
  for r in report['rows']:
   t=r['totals'];out+=[f"### {r['id']} ({r.get('version')}): {r['outcome']}"+(f" ({r['falseSuccessKind']})" if r['falseSuccessKind'] else ''),'',
    f"status `{r['status']}`, verification `{r['configuredVerification']}`, same source {mark(r['sameSource'])}; required fully correct {t['requiredFullyCorrect']}/{t['requiredCaptured']}, all captured {t['fullyCorrect']}/{t['capturedFields']}; duplicates {t['duplicateSelectedRecords']}; required not captured {t['requiredNotCaptured']}, fabricated {t['fabricated']}",'',
-   '| Field | Req | Expected | Observed | Value | Subject | Relation | Unit | Date | Period | Fully |','| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |']
+   '| Field | Req |'+(' Expected | Observed |' if values else '')+' Value | Subject | Relation | Unit | Date | Period | Fully |','| --- '*(11 if values else 9)+'|']
   for f in r['rows']:
    if f['availability']!='captured':continue
-   c=f['checks'];out.append(f"| `{f['fieldId'].split('/',1)[1]}` | {'R' if f['required'] else 'o'} | {cut(f['expected'])} | {cut(f.get('observed'))} | {mark(c['value'])} | {mark(c['entity'])} | {mark(c['relation'])} | {mark(c['unit'])} | {mark(c['date'])} | {mark(c['period'])} | {mark(f['fullyCorrect'])} |")
+   c=f['checks'];ctx=lambda k:'·' if not f['contextEvidence'][k+'s'] or f['contextEvidence'][k+'s']['state']=='not_applicable' else mark(c[k])
+   out.append(f"| `{f['fieldId'].split('/',1)[1]}` | {'R' if f['required'] else 'o'} |{f" {cut(f['expected'])} | {cut(f.get('observed'))} |" if values else ''} {mark(c['value'])} | {mark(c['entity'])} | {mark(c['relation'])} | {ctx('unit')} | {ctx('date')} | {ctx('period')} | {mark(f['fullyCorrect'])} |")
   out.append('')
  return '\n'.join(out)
 
 def main():
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('dataset',type=Path);p.add_argument('outputs',type=Path);p.add_argument('--fixture-origin',required=True);p.add_argument('--out',required=True,type=Path)
  p.add_argument('--versions',default='candidate,control',help='Comma-separated output subdirectories (default: the #562 run).')
- p.add_argument('--markdown',type=Path,help='Also write per-field tables as Markdown.')
+ p.add_argument('--markdown',type=Path,help='Also write per-field tables as Markdown (correctness marks only).')
+ p.add_argument('--markdown-values',action='store_true',help='Include expected and observed values in the Markdown; keep such files under .w2l/.')
  p.add_argument('--cases',default=','.join(f'H{i:02}' for i in range(1,9)),help='Comma-separated case IDs (default: H01-H08).')
  args=p.parse_args();results=[];versions=args.versions.split(',');cases=args.cases.split(',')
  for version in versions:
@@ -483,6 +486,6 @@ def main():
   groups={g:summarize([r for r in subset if r['id'][0]==g]) for g in sorted({r['id'][0] for r in subset})}
   report['summaries'][version]={'cases':len(subset),'accepted':sum(r['taskAccepted'] for r in subset),'configuredPassed':sum(r['configuredVerification']=='passed' for r in subset),'configuredPassButFieldIncomplete':sum(r['configuredVerification']=='passed' and not r['taskAccepted'] for r in subset),**dict(totals),'byGroup':groups,'all':summarize(subset)}
  args.out.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
- if args.markdown:args.markdown.write_text(markdown_report(report)+'\n')
+ if args.markdown:args.markdown.write_text(markdown_report(report,args.markdown_values)+'\n')
  print(json.dumps({v:{k:x for k,x in s.items() if k not in('byGroup','all')} for v,s in report['summaries'].items()},indent=2))
 if __name__=='__main__':main()

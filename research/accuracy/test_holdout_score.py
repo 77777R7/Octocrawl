@@ -1,7 +1,7 @@
 """Synthetic scorer controls only. No reserved product output is loaded."""
 import unittest
 from copy import deepcopy
-from holdout_score import date_of,equal,power_of_ten,rebase_url,score_case,section,summarize,upper95
+from holdout_score import markdown_report,date_of,equal,power_of_ten,rebase_url,score_case,section,summarize,upper95
 
 class ScoreControls(unittest.TestCase):
  def case(self):
@@ -137,5 +137,12 @@ class DevelopmentMappings(unittest.TestCase):
   c=gold('D02','https://www.newegg.com/p/pl?d=laptop',[field('D02','1TS-000A-15W75','price','319.99','decimal')])
   d=doc('[Dell](https://www.newegg.com/dell/p/1TS-000A-15W75)\n\n$319.99\n\n[HP](https://www.newegg.com/hp/p/1TS-000D-1TE80)\n\n$279.99\n\n[Dell](https://www.newegg.com/dell/p/1TS-000A-15W75)\n\n$319.99')
   self.assertEqual(score_case(c,d,ORIGIN)['totals']['duplicateSelectedRecords'],1)
+
+
+class Report(unittest.TestCase):
+ def test_markdown_leaves_values_out_by_default(self):
+  c=gold('H03','https://example.org/c',[field('H03','day','value','86400','decimal')])
+  r=score_case(c,doc(tables=[{'caption':'','rows':[['Quantity','Symbol','Value'],['day','d','86399']]}]),ORIGIN);rep={'rows':[r]}
+  self.assertNotIn('86399',markdown_report(rep));self.assertNotIn('86400',markdown_report(rep));self.assertIn('86399',markdown_report(rep,True))
 
 if __name__=='__main__':unittest.main()
