@@ -210,6 +210,8 @@ export class CdpVendorTransport implements ProviderTransport {
         sentClientHints: res.sentClientHints,
         ...(res.settle === undefined ? {} : { settle: res.settle }),
         ...(res.region === undefined ? {} : { region: res.region }),
+        documentGeneration: res.documentGeneration,
+        responseMatch: res.responseMatch,
         declaredUserAgent: declared,
         // Neither vendor states a per-request price in its API response, and
         // an estimate in this field would read as a measurement.

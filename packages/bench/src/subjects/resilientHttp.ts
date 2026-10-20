@@ -1,4 +1,5 @@
 import { sourceDataWarnings } from './sourceData.js'
+import { captureEvent, newCapture } from '../capture.js'
 import {
   estimateTokens,
   fileByteCap,
@@ -509,6 +510,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     // No response, no body: a connection that failed before one is not an empty page.
     const rawBodySha256 = file === null && !undecoded && out.status !== null ? sha256Utf8(body) : null
     const rawArtifacts = rawBodySha256 === null ? [] : await captureRawHtml(body, rawBodySha256)
+    // The body read is its own capture (PA B3), apart from any browser read of the same URL after it.
+    if (rawBodySha256 !== null) trace.push(captureEvent(newCapture({ sourceKind: 'http_body' }), Date.now() - start, 'http'))
 
     const base = {
       requestedUrl: url,
