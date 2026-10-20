@@ -18,7 +18,7 @@ import {
   HttpSitemapSource,
   LadderRunner,
   LadderScrapeAtom,
-  MemoryRoutingHistory,
+  RoutingHistoryDatabase,
   ResilientHttpSubject,
   OriginScheduler,
   TaskCookieSession,
@@ -28,6 +28,7 @@ import {
   summarize,
   unreadInUserBrowser,
   type Channel,
+  type SqliteRoutingHistory,
   withExtractionCandidates,
 } from '@w2l/bench'
 import { collectLinkDetails, EXTRACTOR_VERSION, FILE_TEXT_VERSION, invalidSelector, MAX_SELECTOR_PARTS, PDF_TEXT_VERSION, selectorParts, SUPPORTED_SELECTORS } from '@w2l/extract-tf'
@@ -900,11 +901,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
-  const historiesByMode = new Map<string, MemoryRoutingHistory>()
+  /** One set of rungs per mode, egress and access enhanced; its routing history is kept under the same key. */
+  const channelsKey = (mode: 'standard' | 'research' | 'authed', egress: Egress | undefined, enhanced: boolean): string =>
+    `${egress === undefined ? mode : `${mode}|${egress.id}`}${enhanced && mode === 'standard' ? '|enhanced' : ''}`
   const channelsFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced = false): Channel[] => {
     // A request that chose access enhanced gets mode standard's rungs with the provider ones the grant allows: a set of its own.
     const asEnhanced = enhanced && mode === 'standard'
-    const key = `${egress === undefined ? mode : `${mode}|${egress.id}`}${asEnhanced ? '|enhanced' : ''}`
+    const key = channelsKey(mode, egress, enhanced)
     const existing = channelsByMode.get(key)
     if (existing !== undefined) return existing
     const channels = asEnhanced ? createChannels(mode, egress, true) : createChannels(mode, egress)
@@ -995,11 +998,25 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     return { channels: selected, filtered }
   }
-  const historyFor = (mode: string): MemoryRoutingHistory => {
-    const existing = historiesByMode.get(mode)
+  // The vendors' routing history, kept on disk beside the tasks (PA G2b): statistics only, read back after a restart.
+  const routingHistory = RoutingHistoryDatabase.open(taskRoot)
+  const historiesByKey = new Map<string, SqliteRoutingHistory>()
+  /**
+   * The history of one set of rungs, under the key its channels are kept by (mode, egress, access enhanced). The file
+   * records how the egress leaves (pool, environment or direct), never the proxy's address.
+   */
+  const historyFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced = false): SqliteRoutingHistory => {
+    const key = channelsKey(mode, egress, enhanced)
+    const existing = historiesByKey.get(key)
     if (existing !== undefined) return existing
-    const history = new MemoryRoutingHistory()
-    historiesByMode.set(mode, history)
+    const env = networkPolicy.egressProxy ?? null
+    const egressClass = egress !== undefined ? 'pool' : env === null ? 'direct' : 'environment'
+    // The exit by a salted id of its endpoint, never the address: each pool exit keeps its own rows, and a change of the
+    // environment's proxy expires the old one's.
+    const endpoint = egress !== undefined ? egress.id : env === null ? null : (env.https ?? env.http)?.endpoint ?? null
+    const egressConfig = endpoint === null ? null : routingHistory.exitId(endpoint)
+    const history = routingHistory.scoped({ lanes: `${mode}${enhanced && mode === 'standard' ? '|enhanced' : ''}`, egressClass, region: null, egressConfig })
+    historiesByKey.set(key, history)
     return history
   }
 
@@ -1531,7 +1548,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
-    const runnerFor = (lane: ReturnType<typeof channelsForUrl>) => new LadderRunner(lane.channels, { mode, ...(selection?.access === 'enhanced' ? { enhanced: true } : {}), ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered, ...(selection?.verify === undefined ? {} : { verify: selection.verify }) })
+    const runnerFor = (lane: ReturnType<typeof channelsForUrl>, egress: Egress | undefined) => new LadderRunner(lane.channels, { mode, ...(selection?.access === 'enhanced' ? { enhanced: true } : {}), ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode, egress, selection?.access === 'enhanced'), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered, ...(selection?.verify === undefined ? {} : { verify: selection.verify }) })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -1539,7 +1556,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // Every other URL a batch names is fetched as a scrape's is; a crawl's pages are links it discovered, and obey robots.txt unless it was started with ignoreRobotsTxt.
     const namedOverride = task.batch === undefined ? ignoreRobotsOverride(task.crawl?.ignoreRobotsTxt) : namedUrlOverride
     const robotsOverrideFor = recordedOverrideFor === null && namedOverride === undefined ? null : (url: string) => recordedOverrideFor?.(url) ?? namedOverride
-    const ladderFor = (lane: ReturnType<typeof channelsForUrl>) => new LadderScrapeAtom(runnerFor(lane), robotsOverrideFor === null ? fetchOptions(selection, selection?.formats) : (url) => {
+    const ladderFor = (lane: ReturnType<typeof channelsForUrl>, egress: Egress | undefined) => new LadderScrapeAtom(runnerFor(lane, egress), robotsOverrideFor === null ? fetchOptions(selection, selection?.formats) : (url) => {
       const robotsOverride = robotsOverrideFor(url)
       return { ...fetchOptions(selection, selection?.formats), ...(robotsOverride === undefined ? {} : { robotsOverride }) }
     })
@@ -1552,7 +1569,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const laneFor = (egress: Egress | undefined): Lane => {
       const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, true, egress)
       const sessionFile = cookieSessionFileFor(task.taskDir, routeOf(egress))
-      return { egress, rungs, ladder: ladderFor(rungs), cookieSession: egressSessions && mode !== 'authed' ? new TaskCookieSession(sessionFile) : undefined }
+      return { egress, rungs, ladder: ladderFor(rungs, egress), cookieSession: egressSessions && mode !== 'authed' ? new TaskCookieSession(sessionFile) : undefined }
     }
     // A session file of another route (the task ran on another egress, or none) holds cookies this run must not send.
     removeCookieSessions(task.taskDir, cookieSessionFileFor(task.taskDir, routeOf(firstEgress)))
@@ -1789,7 +1806,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ? { allowlistedDomains: req.allowlistedDomains }
         : {}),
     }
-    const runner = new LadderRunner(rungs.channels, policy, historyFor(mode), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, ...(req.verify === undefined ? {} : { verify: req.verify }) })
+    const runner = new LadderRunner(rungs.channels, policy, historyFor(mode, scrapeEgress, req.access === 'enhanced'), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, ...(req.verify === undefined ? {} : { verify: req.verify }) })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
     // The URL a scrape names; a Monitor's capture (no record) re-reads its URL on a schedule, as a crawler does.
     const robotsOverride = req.robotsOverride ?? (record ? namedUrlOverride : undefined)
@@ -1888,7 +1905,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const userAgentFor = (url: string): string => prepareHttpIdentity(mode, networkPolicy.contact ?? null, new URL(url).hostname).identity.userAgent
     const robots = robotsCacheFor(mode, egress)
     const lookups = new Map<string, ReturnType<RobotsOriginCache['lookup']>>()
-    const runner = rungs === null ? null : new LadderRunner(rungs.channels, { mode }, historyFor(mode), null, null, { channelsFiltered: rungs.filtered })
+    const runner = rungs === null ? null : new LadderRunner(rungs.channels, { mode }, historyFor(mode, egress), null, null, { channelsFiltered: rungs.filtered })
     const sitemap = req.sitemap === 'skip' ? null : new HttpSitemapSource({ mode, networkPolicy: egress?.policy ?? networkPolicy, scheduler: originScheduler, robots, ignoreRobotsTxt: robotsOverride !== undefined })
     const sources: MapSources = {
       async readStartPage(url, scope) {
@@ -2508,6 +2525,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       deliveryStore.close()
       idempotency.close()
       pageCache.close()
+      routingHistory.close()
     },
   }
 
