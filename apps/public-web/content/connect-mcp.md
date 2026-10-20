@@ -1,8 +1,8 @@
 # Connect Octocrawl MCP
 
-Connect your AI agent to Octocrawl at `https://mcp.octocrawl.dev/mcp`. Hosted MCP supports `scrape` for page content and `map` for site URLs. An account key enables browser-backed scraping and the Amazon.sg `scrape_product` tool, subject to service limits. Without a key, hosted access reads over HTTP within a daily allowance.
+Connect your AI agent to Octocrawl at `https://mcp.octocrawl.dev/mcp`. Hosted MCP supports `scrape` for page content and `map` for site URLs. An account key enables browser-backed scraping and the Amazon.sg `scrape_product` tool, subject to service limits. With an account (a key or sign-in), it also runs [crawl and batch jobs](#crawl-and-batch-jobs). Without a key, hosted access reads over HTTP within a daily allowance.
 
-For crawl, batch and Monitor workflows, start the local API with `npx octocrawl serve` and connect it through the `@octocrawl/mcp` package. Scheduled monitoring also requires local workers. Successful scrape results include an Evidence Record describing the capture; inspect any separate verification result before relying on extracted fields.
+For Monitor workflows, and for crawls and batches larger than hosted takes, start the local API with `npx octocrawl serve` and connect it through the `@octocrawl/mcp` package. Scheduled monitoring also requires local workers. Successful scrape results include an Evidence Record describing the capture; inspect any separate verification result before relying on extracted fields.
 
 Octocrawl's official website is [octocrawl.dev](https://octocrawl.dev/), and its official source repository is [github.com/77777R7/Octocrawl](https://github.com/77777R7/Octocrawl). See the [introduction](/docs/#official-project-and-connections) for REST, SDK and MCP entry points.
 
@@ -97,9 +97,40 @@ The tool descriptions keep each option to a line or two. Every option's full beh
 
 If the client lists no tools, check the selected server's connection error. If the tool returns a quota or access refusal, follow that reason. Changing the MCP client does not establish that the target content can be read. See [result states](/docs/limits/) and the [Evidence Record reference](/docs/reference/#evidence-record).
 
+## Crawl and batch jobs
+
+A connection with an account (a key on `/mcp`, or sign-in on `/mcp-oauth`) also lists the job tools:
+
+- `crawl` and `batch_scrape` start a job;
+- `get_crawl` and `get_batch` report its status;
+- `get_crawl_pages`, `get_batch_items`, `get_crawl_errors` and `get_batch_errors` page through what it read;
+- `wait_crawl` and `wait_batch` wait for it;
+- `cancel_crawl` and `cancel_batch` stop it.
+
+Without an account the tools are not listed, and a call says it needs one. A job runs on Octocrawl's servers in slices, so it keeps going after the client disconnects:
+
+- A crawl reads at most 500 pages, and a batch at most 1,000 URLs.
+- Each page costs credits as a scrape does: 1 over HTTP and 5 in a browser.
+- An account runs two jobs at a time, with up to ten more waiting.
+- Results are kept 7 days after the job ends.
+- A wait returns after at most 90 seconds with the status so far. Call it again, or check later with `get_crawl` or `get_batch`.
+
+```text
+Use Octocrawl's batch_scrape tool on https://example.com/ and https://books.toscrape.com/ with fastMode true. Wait for it, then list its items with each URL, status and first heading.
+```
+
+Claude Code, Codex and OpenCode each ran a job end to end through these tools on 2026-10-20 ([record](https://github.com/77777R7/Octocrawl/blob/main/research/hosted/2026-10-20-h2-a1-clients-d094e319.md)). Codex asks before it runs `batch_scrape`, since starting a job is not read-only. In `codex exec`, which cannot ask, set `default_tools_approval_mode = "approve"` on the server's entry.
+
+Over REST the same jobs are `POST https://api.octocrawl.dev/v1/batches` and `POST /v1/crawl` with a key. `GET /v1/jobs` lists your jobs, newest first. Two options are REST only:
+
+- `maxCredits` caps what a job spends.
+- `webhook` posts the job's end to an https address, signed with a secret the start returns. The [hosted API reference](https://github.com/77777R7/Octocrawl/blob/main/docs/hosted-api.md#job-webhooks) has the signature and a verification example.
+
+Hosted jobs open in stages. While they are paused, a start answers `503 jobs_paused` with `Retry-After`, and the same job runs on your computer meanwhile.
+
 ## What hosted Octocrawl does not do
 
-- `crawl`, `batch_scrape` and the Monitor tools: on your computer (below), where they run without limit. The hosted answer names this.
+- The Monitor tools, and crawls over 500 pages or batches over 1,000 URLs: on your computer (below), where they run without these limits. The hosted answer names this.
 - Proxies, CAPTCHA solving and stealth: not offered on the hosted service. A page that blocks a plain request comes back as `blocked` with the reason; the [access grant](https://github.com/77777R7/Octocrawl/blob/main/docs/access.md#enhanced-access-an-access-grant) for those routes works on your own server.
 - Private network addresses, robots.txt overrides and saved logins: refused in hosted mode; robots.txt is obeyed for every URL.
 
