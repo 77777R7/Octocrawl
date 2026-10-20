@@ -74,6 +74,12 @@ interface FakeScript {
   regionViews?: string[]
   /** The context opens raw CDP sessions, and each navigation reports this many bytes received (Network.loadingFinished). */
   bytesPerNavigation?: number
+  /**
+   * The documents the main frame shows after `goto`, in order, as a raw CDP session hears them (Network.responseReceived
+   * of type Document, then Page.frameNavigated): the first is the one `goto` answers with, the last the one on screen.
+   * The context opens raw CDP sessions when this is set.
+   */
+  documents?: { url: string; status: number; headers?: Record<string, string> }[]
 }
 
 interface FakeState {
@@ -87,12 +93,13 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
   const state: FakeState = { navigations: [], pagesOpened: 0, pagesClosed: 0, closed: false }
   const ua = script.userAgent ?? VENDOR_UA
 
-  const listeners: ((params: unknown) => void)[] = []
+  const listeners = new Map<string, ((params: unknown) => void)[]>()
+  const emit = (event: string, params: unknown) => { for (const listener of listeners.get(event) ?? []) listener(params) }
   const context: CdpContext = {
     pages: () => [],
-    ...(script.bytesPerNavigation === undefined ? {} : {
+    ...(script.bytesPerNavigation === undefined && script.documents === undefined ? {} : {
       async newCDPSession() {
-        return { async send() { return {} }, on(event: string, handler: (params: unknown) => void) { if (event === 'Network.loadingFinished') listeners.push(handler) }, async detach() {} }
+        return { async send() { return {} }, on(event: string, handler: (params: unknown) => void) { listeners.set(event, [...listeners.get(event) ?? [], handler]) }, async detach() {} }
       },
     }),
     async newPage(): Promise<CdpPage> {
@@ -105,10 +112,17 @@ function fakeBrowser(script: FakeScript = {}): { browser: CdpBrowser; state: Fak
           if (script.gotoError) throw script.gotoError
           state.navigations.push(url)
           current = script.finalUrl ?? url
-          for (const listener of listeners) listener({ requestId: '1', encodedDataLength: script.bytesPerNavigation })
+          emit('Network.loadingFinished', { requestId: '1', encodedDataLength: script.bytesPerNavigation })
+          // goto answers with the first document; a script or a challenge then loads the others.
+          for (const [i, doc] of (script.documents ?? []).entries()) {
+            emit('Network.responseReceived', { requestId: `doc${i}`, type: 'Document', frameId: 'main', response: { url: doc.url, status: doc.status, headers: doc.headers ?? { 'Content-Type': 'text/html' } } })
+            emit('Page.frameNavigated', { frame: { id: 'main', url: doc.url } })
+            current = doc.url
+          }
+          const first = script.documents?.[0]
           return {
-            status: () => script.status ?? 200,
-            headers: () => script.headers ?? { 'Content-Type': 'text/html; charset=utf-8' },
+            status: () => first?.status ?? script.status ?? 200,
+            headers: () => first?.headers ?? script.headers ?? { 'Content-Type': 'text/html; charset=utf-8' },
             request: () => ({
               headers: () => {
                 if (script.hideRequestHeaders) throw new Error('request headers unavailable over CDP')
@@ -348,6 +362,39 @@ describe('vendor identity', () => {
     const res = await transport.fetch('https://shop.example/dp/A', Date.now() + 20_000, undefined, region)
     expect(res.region).toMatchObject({ ready: true, reads: 3, checks: [{ passed: true, observedCount: 3 }] })
     expect((await transport.fetch('https://shop.example/dp/A', Date.now() + 20_000)).region).toBeUndefined()
+  })
+
+  it('reports the status and URL of the document a script moved the page on to, not the first answer (PA B1)', async () => {
+    const api = sessionServing('bb_1')
+    const bb = fakeBrowser({ documents: [
+      { url: 'https://shop.example/dp/A', status: 200 },
+      { url: 'https://shop.example/gone', status: 410, headers: { 'Content-Type': 'text/html; charset=iso-8859-1' } },
+    ] })
+    const transport = new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, api.handler), connectorFor(bb).connector)
+    const res = await transport.fetch('https://shop.example/dp/A')
+    expect(res).toMatchObject({ status: 410, finalUrl: 'https://shop.example/gone', documentGeneration: 2, responseMatch: 'matched' })
+    expect(res.headers['content-type']).toBe('text/html; charset=iso-8859-1')
+  })
+
+  it('reports the page a challenge let through, not the challenge (PA B1)', async () => {
+    const api = sessionServing('bb_1')
+    const bb = fakeBrowser({ documents: [
+      { url: 'https://shop.example/dp/A', status: 403, headers: { 'Content-Type': 'text/html', 'CF-Mitigated': 'challenge' } },
+      { url: 'https://shop.example/dp/A', status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+    ] })
+    const transport = new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, api.handler), connectorFor(bb).connector)
+    const res = await transport.fetch('https://shop.example/dp/A')
+    expect(res).toMatchObject({ status: 200, finalUrl: 'https://shop.example/dp/A', documentGeneration: 2, responseMatch: 'matched' })
+    expect(res.headers['cf-mitigated']).toBeUndefined()
+  })
+
+  it('says unobserved, never matched, when the connector opens no CDP session (PA B1)', async () => {
+    const api = sessionServing('bb_1')
+    const transport = new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, api.handler), connectorFor(fakeBrowser()).connector)
+    const res = await transport.fetch('https://shop.example/dp/A')
+    expect(res.status).toBe(200)
+    expect(res.responseMatch).toBe('unobserved')
+    expect(res.documentGeneration).toBeNull()
   })
 
   it('fails clearly when the vendor provisioned no context', async () => {
