@@ -153,8 +153,15 @@ export interface StructuredFieldEvidence {
    */
   source: ProductFactSource | 'hydration' | 'fetch' | 'pdf'
   evidencePath?: string
-  /** For a number read from the page's text: that text, whitespace collapsed (`1.299,00 €`), so the reading can be checked. */
+  /**
+   * For a number read from the page's text: that text, whitespace collapsed (`1.299,00 €`), so the reading can be checked.
+   * For a value the model wrote: the page text it was located in, as written (`In Stock` for `in_stock`).
+   */
   text?: string
+  /** For a number or an ISO date the model wrote: the value `text` was read as. */
+  normalized?: number | string
+  /** What stands beside `text` on the page, as written: a currency or unit next to a number, a date in the same line, the delivery region a price is for. */
+  context?: { currency?: string; unit?: string; date?: string; region?: string }
 }
 
 export type StructuredIssueCode =
@@ -169,6 +176,8 @@ export type StructuredIssueCode =
   | 'model_provider_error'
   | 'model_output_invalid'
   | 'model_timeout'
+  /** A value the model wrote that the page does not state (or states only for another product): the field is left out. */
+  | 'model_unsupported'
   /** The page status is neither `success` nor `partial`, so no fields were read from it. */
   | 'page_unsuccessful'
   /** The page is `partial` (a timeout ended the scrape): fields come from the content fetched so far, never a complete result. */

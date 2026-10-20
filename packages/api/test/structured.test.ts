@@ -421,7 +421,7 @@ describe('structured JSON extraction', () => {
     expect(calls).toBe(1)
     expect(out.status).toBe('complete')
     expect(out.data).toMatchObject({ asin: 'B012345678', material: 'aluminium' })
-    expect(out.evidence).toContainEqual({ path: '/material', source: 'model' })
+    expect(out.evidence).toContainEqual({ path: '/material', source: 'model', evidencePath: 'markdown line 3', text: 'aluminium' })
     expect(out.modelUsage).toMatchObject({ model: 'extractor', attempts: 1, inputTokens: 50, outputTokens: 5, externalCostUsd: null })
   })
 
@@ -690,18 +690,18 @@ describe('structured JSON extraction', () => {
 
   it('runs the model fallback when a required array has no deterministic source', async () => {
     let calls = 0
-    const out = await extractStructured(page(book), json({ title: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } }, ['title', 'tags'], true), {}, {
+    const out = await extractStructured({ ...page(book), markdown: '# A Light in the Attic\n\nShort poems and line drawings.' }, json({ title: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } }, ['title', 'tags'], true), {}, {
       baseUrl: 'https://model.example', model: 'extractor',
       fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
         calls++
         expect(JSON.parse(JSON.parse(String(init?.body)).messages[1].content).deterministic).toEqual({ title: 'A Light in the Attic' })
-        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ tags: ['poetry'] }) } }] }), { status: 200 })
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ tags: ['poems'] }) } }] }), { status: 200 })
       }) as typeof fetch,
     })
     expect(calls).toBe(1)
     expect(out.status).toBe('complete')
-    expect(out.data).toEqual({ title: 'A Light in the Attic', tags: ['poetry'] })
-    expect(out.evidence).toContainEqual({ path: '/tags', source: 'model' })
+    expect(out.data).toEqual({ title: 'A Light in the Attic', tags: ['poems'] })
+    expect(out.evidence).toContainEqual({ path: '/tags/0', source: 'model', evidencePath: 'markdown line 3', text: 'poems' })
   })
 
   it('never reports JSON complete for a page that was not fetched successfully', async () => {
@@ -919,7 +919,7 @@ describe('structured JSON extraction', () => {
     expect(await extractStructured(page(book), schema, {}, null)).toMatchObject({ status: 'complete', data: { title: 'A Light in the Attic' } })
   })
 
-  it('keeps every page value and its evidence when the model answers every field, and marks what the model wrote', async () => {
+  it('keeps every page value and its evidence when the model answers every field, and keeps only what the model wrote that the page supports', async () => {
     let deterministic: unknown
     const schema: JsonFormatRequest = { type: 'json', modelFallback: true, schema: {
       type: 'object', additionalProperties: false,
@@ -939,19 +939,40 @@ describe('structured JSON extraction', () => {
         return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(answer) } }] }), { status: 200 })
       }) as typeof fetch,
     })
-    expect(out.status).toBe('complete')
-    // The page's "In Stock" is not in the enum: the model's value replaces it, and only the model is named as its source.
+    // The page's "In Stock" is not in the enum: the model's in_stock replaces it and is located in that declared fact.
+    // "aluminium" is in the page's text; "two years" is nowhere on the page, so /warranty stays missing (not null).
     expect(deterministic).toEqual({ asin: 'B012345678', title: 'Subject headphones', price: 1299, specifications: { Model: 'SC-10' } })
-    expect(out.data).toEqual({ asin: 'B012345678', title: 'Subject headphones', price: 1299, availability: 'in_stock', specifications: { Model: 'SC-10' }, warranty: 'two years', material: 'aluminium' })
+    expect(out.status).toBe('incomplete')
+    expect(out.data).toEqual({ asin: 'B012345678', title: 'Subject headphones', price: 1299, availability: 'in_stock', specifications: { Model: 'SC-10' }, material: 'aluminium' })
     expect(out.evidence).toEqual([
       { path: '/asin', source: 'dom', evidencePath: 'url:/dp/{asin}' },
       { path: '/title', source: 'dom', evidencePath: '#productTitle' },
       { path: '/price', source: 'dom', evidencePath: '#corePrice_feature_div', text: '1299.00' },
       { path: '/specifications', source: 'dom', evidencePath: '#productDetails' },
-      { path: '/availability', source: 'model' },
-      { path: '/warranty', source: 'model' },
-      { path: '/material', source: 'model' },
+      { path: '/availability', source: 'model', evidencePath: '#availability', text: 'In Stock' },
+      { path: '/material', source: 'model', evidencePath: 'markdown line 3', text: 'aluminium' },
     ])
+    expect(out.issues).toEqual([
+      { code: 'model_unsupported', path: '/warranty', message: 'the model answered "two years", which the page does not state; the field is left out' },
+      { code: 'missing_required', path: '/warranty', message: 'required field unavailable: /warranty' },
+    ])
+  })
+
+  it('does not take a model number that the page states only among other products', async () => {
+    const unpriced: FetchResult = { ...result, document: { ...result.document!, product: { ...product, price: null, priceCurrency: null } } }
+    const schema = json({ asin: { type: 'string' }, price: { type: 'number' } }, ['asin', 'price'], true)
+    const ask = (markdown: string) => extractStructured({ ...unpriced, markdown }, schema, {}, {
+      baseUrl: 'https://model.example', model: 'extractor', fetch: openAiEndpoint({ asin: 'B012345678', price: 9.99 }, []),
+    })
+    const elsewhere = await ask('# Subject headphones\n\nA lightweight product made from aluminium.\n\n## Customers also bought\n\nOther headphones\n\n£9.99\n\n## Product details\n\nWeight 120 g')
+    expect(elsewhere.status).toBe('incomplete')
+    expect(elsewhere.data).toEqual({ asin: 'B012345678' })
+    expect(elsewhere.issues.map(issue => [issue.code, issue.path])).toEqual([['model_unsupported', '/price'], ['missing_required', '/price']])
+    // The same number in the product's own part of the page is taken, with its currency beside it.
+    const own = await ask('# Subject headphones\n\nNow £9.99 while stocks last.\n\n## Customers also bought\n\nOther headphones\n\n£4.99')
+    expect(own.status).toBe('complete')
+    expect(own.data).toEqual({ asin: 'B012345678', price: 9.99 })
+    expect(own.evidence).toContainEqual({ path: '/price', source: 'model', evidencePath: 'markdown line 3', text: '£9.99', normalized: 9.99, context: { currency: '£' } })
   })
 
   it('sends OpenAI strict mode a strict-safe schema derived from an ordinary one', async () => {
@@ -969,7 +990,8 @@ describe('structured JSON extraction', () => {
       $defs: { Publisher: { title: 'Publisher', type: 'object', properties: { name: { type: 'string' }, city: { type: 'string' } }, required: ['name'] } },
     }
     const answer = { title: 'A Light in the Attic', price: 51.77, publisher: { name: 'HarperCollins', city: null }, tags: null, edition: '20th anniversary' }
-    const out = await extractStructured(page(bookInformation), { type: 'json', schema, modelFallback: true }, {}, {
+    const markdown = '# A Light in the Attic\n\nPublished by HarperCollins in a 20th anniversary edition.'
+    const out = await extractStructured({ ...page(bookInformation), markdown }, { type: 'json', schema, modelFallback: true }, {}, {
       baseUrl: 'https://model.example', model: 'extractor', fetch: openAiEndpoint(answer, requests),
     })
     expect(out.issues).toEqual([])
@@ -986,15 +1008,15 @@ describe('structured JSON extraction', () => {
     expect(out.evidence).toEqual([
       { path: '/title', source: 'dom', evidencePath: 'h1[0]' },
       { path: '/price', source: 'text', evidencePath: 'p.price_color', text: '£51.77' },
-      { path: '/publisher', source: 'model' },
-      { path: '/edition', source: 'model' },
+      { path: '/publisher/name', source: 'model', evidencePath: 'markdown line 3', text: 'HarperCollins' },
+      { path: '/edition', source: 'model', evidencePath: 'markdown line 3', text: '20th anniversary' },
     ])
   })
 
   it('sends a schema strict mode cannot express without strict, and records why', async () => {
     const requests: Array<Record<string, any>> = []
     const schema = json({ title: { type: 'string' }, details: { type: 'object', additionalProperties: { type: 'string' } } }, ['title', 'details'], true)
-    const out = await extractStructured(page(bookInformation), schema, {}, {
+    const out = await extractStructured({ ...page(bookInformation), markdown: '# A Light in the Attic\n\nPages: 112' }, schema, {}, {
       baseUrl: 'https://model.example', model: 'extractor', fetch: openAiEndpoint({ title: 'Another title', details: { Pages: '112' } }, requests),
     })
     expect(requests[0]!.response_format.json_schema).toMatchObject({ strict: false, schema: schema.schema })

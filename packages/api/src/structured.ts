@@ -33,6 +33,7 @@ import { browserFingerprintFor, cacheStateOf, CONTENTFUL_STATUS, defaultApiMode,
 import { compilePathFilter, readinessOf, toEvidenceRecord, verify } from '@w2l/runtime'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
+import { modelLocator } from './modelEvidence.js'
 
 export interface StructuredModelConfig {
   baseUrl: string
@@ -961,25 +962,73 @@ function withoutPaths(value: JsonValue | null, paths: ReadonlySet<string>, path 
     .map(([key, child]) => [key, withoutPaths(child, paths, `${path}/${key}`)]))
 }
 
+/** What the model wrote that the page states, and what it does not. */
+interface ModelCheck {
+  evidence: StructuredFieldEvidence[]
+  unsupported: Array<{ path: string; value: JsonValue }>
+}
+
+/**
+ * A value the model wrote, kept only where the page states it (F2,
+ * modelEvidence.ts): a scalar is kept when located, with its location as
+ * evidence; an object or array keeps its located members (an array's kept
+ * items renumbered) and is dropped when none is left. A null says
+ * unavailable and is kept without evidence.
+ */
+function supportedValue(value: JsonValue, path: string, locate: ReturnType<typeof modelLocator>, check: ModelCheck): JsonValue | undefined {
+  if (value === null) return null
+  if (Array.isArray(value)) {
+    const kept: JsonValue[] = []
+    for (const item of value) {
+      const before = check.unsupported.length
+      const next = supportedValue(item, `${path}/${kept.length}`, locate, check)
+      if (next !== undefined) kept.push(next)
+      else if (check.unsupported.length === before) check.unsupported.push({ path, value: item })
+    }
+    if (kept.length === 0 && value.length === 0) check.unsupported.push({ path, value })
+    return kept.length > 0 ? kept : undefined
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, JsonValue> = {}
+    for (const [key, child] of Object.entries(value)) {
+      const next = supportedValue(child, `${path}/${key}`, locate, check)
+      if (next !== undefined) out[key] = next
+    }
+    if (Object.keys(out).length === 0 && Object.keys(value).length === 0) check.unsupported.push({ path, value })
+    return Object.keys(out).length > 0 ? out : undefined
+  }
+  const location = locate(value)
+  if (location === null) {
+    check.unsupported.push({ path, value })
+    return undefined
+  }
+  check.evidence.push({ path, source: 'model', ...location })
+  return value
+}
+
+/** A locator that takes every value: the answer as the model wrote it, for the schema check. */
+const TAKE_ALL: ReturnType<typeof modelLocator> = value => ({ evidencePath: '', text: String(value) })
+
 /**
  * The model's answer merged into the data read from the page, key by key at
  * every level. A value at a kept path stays as it was read, whatever the
- * model says; the rest of the answer is taken, and the path of every value
- * the model wrote (a null says unavailable, so it has none) goes to `written`.
+ * model says; the rest of the answer is taken where the page states it
+ * (supportedValue), and a value the page does not state leaves the field out,
+ * also a nullable one the page had no value for.
  */
-function mergeModel(base: JsonValue | undefined, patch: JsonValue | undefined, path: string, kept: ReadonlySet<string>, written: string[]): JsonValue | undefined {
+function mergeModel(base: JsonValue | undefined, patch: JsonValue | undefined, path: string, kept: ReadonlySet<string>, locate: ReturnType<typeof modelLocator>, check: ModelCheck): JsonValue | undefined {
   if (patch === undefined || kept.has(path)) return base
   if (isPlainObject(base) && isPlainObject(patch)) {
     const out: Record<string, JsonValue> = { ...base }
     for (const [key, value] of Object.entries(patch)) {
-      const next = mergeModel(base[key], value, `${path}/${key}`, kept, written)
+      const next = mergeModel(base[key], value, `${path}/${key}`, kept, locate, check)
       if (next !== undefined) out[key] = next
+      else delete out[key]
     }
     return out
   }
   if (isPlainObject(base) && [...kept].some(item => item.startsWith(`${path}/`))) return base
-  if (patch !== null) written.push(path)
-  return patch
+  return supportedValue(patch, path, locate, check)
 }
 
 export async function extractStructured(
@@ -1063,6 +1112,7 @@ export async function extractStructured(
   const baseEvidence = evidence.filter(item => !broken.has(item.path))
   const deterministic = withoutPaths(mapped, broken)
   const request = modelSchema(format.schema)
+  const locate = modelLocator(result)
   let attempts = 0
   let inputTokens = 0
   let outputTokens = 0
@@ -1086,15 +1136,34 @@ export async function extractStructured(
         inputTokens += model.inputTokens
         outputTokens += model.outputTokens
       }
-      const written: string[] = []
-      const merged = mergeModel(base, withoutDisallowedNulls(format.schema, format.schema, model.value), '', kept, written) ?? null
-      if (validate(merged)) {
+      const answer = withoutDisallowedNulls(format.schema, format.schema, model.value)
+      // Schema-valid and supported by the page are two states: the answer is
+      // first checked against the schema as written, then each value the
+      // model wrote is kept only where the page states it.
+      if (validate(mergeModel(base, answer, '', kept, TAKE_ALL, { evidence: [], unsupported: [] }) ?? null)) {
+        const check: ModelCheck = { evidence: [], unsupported: [] }
+        const merged = mergeModel(base, answer, '', kept, locate, check) ?? null
+        const unsupported = check.unsupported.map(({ path, value }) => ({
+          code: 'model_unsupported' as const,
+          path,
+          message: `the model answered ${JSON.stringify(value)}, which the page does not state; the field is left out`,
+        }))
+        const stillMissing = requiredMissing(format.schema, format.schema, merged)
+        const valid = validate(merged)
+        const failedChecks = valid ? [] : (validate.errors ?? []).filter(error => error.keyword !== 'required')
+        const issues = [
+          ...readIssues,
+          ...unsupported,
+          ...stillMissing.map(path => ({ code: 'missing_required' as const, path, message: `required field unavailable: ${path}` })),
+          ...(failedChecks.length > 0 ? [{ code: 'field_unavailable' as const, message: validationMessage(failedChecks) }] : []),
+          ...unavailable(merged),
+        ]
         return {
-          status: 'complete',
+          status: valid && unsupported.length === 0 ? 'complete' : 'incomplete',
           data: merged,
           schemaSha256,
-          evidence: [...baseEvidence, ...written.map(path => ({ path, source: 'model' as const }))],
-          issues: [...readIssues, ...unavailable(merged)],
+          evidence: [...baseEvidence, ...check.evidence],
+          issues,
           modelUsage: modelUsage(),
         }
       }
