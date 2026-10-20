@@ -2,6 +2,7 @@
 // Usage: node research/accuracy/run_dev.mjs <dataset dir> <output dir> [label] [--plan=<plan.json>] [--engine=<checkout>]
 // --plan defaults to dev-plan.v1.json; --engine (default: this checkout) is a built checkout whose engine, API and SDK run,
 // so one driver can replay the same plan through two commits (reserved-plan.v2.json's paired run).
+// A case's own `request` (the json plans) is merged over the plan's request.
 // Build first (npx tsc --build). Each case is served alone at the fixture origin, so two cases with the
 // same path (D08 and D09 are both "/") never share a server. A started case is not rerun.
 import {readFile,writeFile,mkdir,access} from 'node:fs/promises';
@@ -47,7 +48,7 @@ try{
   const output=dir+'/'+item.id+'.json';if(await exists(output))continue;
   const capture=JSON.parse(await readFile(dataset+'/cases/'+item.id+'/capture.json','utf8'));const u=new URL(item.url);
   current={id:item.id,path:u.pathname,body:await readFile(dataset+'/cases/'+item.id+'/'+capture.sourceFile)};
-  const request={...plan.request,url:plan.fixtureOrigin+u.pathname+u.search,...(item.checkNeedle?{verify:{checks:[{type:'markdownIncludes',text:item.checkNeedle}]}}:{})};
+  const request={...plan.request,...(item.request??{}),url:plan.fixtureOrigin+u.pathname+u.search,...(item.checkNeedle?{verify:{checks:[{type:'markdownIncludes',text:item.checkNeedle}]}}:{})};
   const startedAt=new Date().toISOString();let response=null,error=null;
   try{const {url,...options}=request;response=JSON.parse(JSON.stringify(await sdk.scrape(url,options)));}
   catch(e){error={name:e.name,message:e.message,code:e.code??null};}
