@@ -1758,6 +1758,14 @@ describe('LadderRunner — a task contract (ADR 0006)', () => {
     expect((await history.read('example.com')).vendors.steel).toMatchObject({ attempts: 1, contentful: 1 })
   })
 
+  it('goes on to a paid rung from a page whose row checks no table reader judged (PA C2, decision 12)', async () => {
+    const titleOnly: FetchResult = { ...page('browser_local', 'No figure.'), trace: [{ at: 1, lane: 'browser_local', event: 'region_wait', detail: { ready: false, empty: false, loading: false, steady: true, judged: 2, reads: 2, waitedMs: 500, contractSha256: contractSha256(wants), tablesUnjudged: true, checks: [{ index: 0, type: 'tableRowsMin', passed: null }] } }] }
+    const vendor = channel('provider', [page('provider', 'Price 12')], 'steel')
+    const run = await new LadderRunner([channel('http', [page('http', 'No figure.')]), channel('browser_local', [titleOnly]), vendor], { mode: 'authed' }, null, null, null, { verify: wants }).run(url)
+    expect(run.result.lane).toBe('provider')
+    expect(steps(run, 'ladder_step').map((t) => t.detail.readiness)).toEqual(['not_loaded', 'not_served', undefined])
+  })
+
   it('decides nothing on a check the ladder cannot judge yet (one on the JSON a format extracts after the run)', async () => {
     const browser = channel('browser_local', [page('browser_local', 'Price 12')])
     const run = await new LadderRunner([channel('http', [page('http', 'No figure.')]), browser], { mode: 'authed' }, null, null, null, { verify: { checks: [{ type: 'field', path: 'json.data.price', present: true }] } }).run(url)

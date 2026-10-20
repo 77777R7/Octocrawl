@@ -38,6 +38,11 @@ function fakeFirestore() {
       }
       return new Response(JSON.stringify({ writeResults: body.writes.map(() => ({})) }), { status: 200 })
     }
+    if (url.endsWith(':batchGet')) {
+      const names = (JSON.parse(String(init?.body)) as { documents: string[] }).documents
+      // Firestore answers a batchGet in any order; reversed here so a store that relies on it fails.
+      return new Response(JSON.stringify(names.map((name) => docs.has(name) ? { found: { name, ...docs.get(name)! } } : { missing: name }).reverse()), { status: 200 })
+    }
     const name = decodeURIComponent(url.replace('https://firestore.googleapis.com/v1/', ''))
     const doc = docs.get(name)
     if (!doc) return new Response(JSON.stringify({ error: { status: 'NOT_FOUND' } }), { status: 404 })
@@ -166,6 +171,23 @@ describe.each(stores)('%s job store', (_name, make) => {
     expect(await store.abandon('job-1', 'h2')).toEqual({ ok: false, reason: 'lost' })
     expect(await store.acquireLease('job-1', { generation: 0, holder: 'h3', ttlMs: 60_000 }, later)).toMatchObject({ ok: true, job: { failedAttempts: 2 } })
     expect(await store.commitSlice('job-1', 'h3', (j) => j, later)).toMatchObject({ ok: true, job: { failedAttempts: 0 } })
+  })
+
+  it('lists a workspace\'s jobs, newest first, and no other workspace\'s (H2 P1)', async () => {
+    const store = make()
+    const at = (minutes: number) => new Date(NOW.getTime() + minutes * 60_000)
+    await store.create(job('job-1'), LIMITS, null, at(0))
+    await store.create({ ...job('job-2'), createdAt: at(2).toISOString() }, LIMITS, null, at(2))
+    await store.create({ ...job('job-3', 'ws_account-2'), createdAt: at(1).toISOString() }, LIMITS, null, at(1))
+    expect((await store.list('ws_account-1')).map((j) => j.id)).toEqual(['job-2', 'job-1'])
+    expect((await store.list('ws_account-2')).map((j) => j.id)).toEqual(['job-3'])
+    expect(await store.list('ws_account-9')).toEqual([])
+    // A finished job stays listed while its record lasts; one a TTL deleted is left out.
+    await store.cancel('job-2', 'ws_account-1', at(3))
+    expect((await store.list('ws_account-1')).map((j) => [j.id, j.status])).toEqual([['job-2', 'cancelled'], ['job-1', 'running']])
+    if (store instanceof MemoryHostedJobStore) store.jobs.delete('job-1')
+    else await (store as unknown as { removeForTest(id: string): Promise<void> }).removeForTest('job-1')
+    expect((await store.list('ws_account-1')).map((j) => j.id)).toEqual(['job-2'])
   })
 
   it('marks a finished job expired, and nothing else', async () => {

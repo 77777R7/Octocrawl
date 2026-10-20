@@ -3,7 +3,7 @@
  *
  * A job document `hostedJobs/{jobId}` holds its owner, status, counts, credits and the lease of the slice running it.
  * A workspace's slots `hostedJobWorkspaces/{workspaceId}` name the jobs it runs and queues, so at most `maxRunning` run
- * and `maxQueued` wait; an `Idempotency-Key` is `hostedJobIdempotency/{workspaceId}-{keyHash}`. Every change that touches
+ * and `maxQueued` wait, and its `recent` jobs, newest first, are the ones its list shows; an `Idempotency-Key` is `hostedJobIdempotency/{workspaceId}-{keyHash}`. Every change that touches
  * more than one of them is one commit with update-time preconditions, retried on a conflict.
  *
  * A slice holds the lease for the job's current `generation`: a delivery for an older generation is stale (Cloud Tasks
@@ -89,6 +89,8 @@ export interface HostedJobStore {
   /** Creates a job running or queued, by its workspace's slots; with a claim, a replay answers the job the key started. */
   create(job: HostedJob, limits: JobLimits, claim: IdempotencyClaim | null, now?: Date): Promise<CreateResult>
   get(id: string): Promise<HostedJob | null>
+  /** A workspace's jobs, newest first: the last JOB_LIST_MAX it started whose records a TTL has not deleted. */
+  list(workspaceId: string): Promise<HostedJob[]>
   acquireLease(id: string, lease: { generation: number; holder: string; ttlMs: number }, now?: Date): Promise<LeaseResult>
   /** Gives a lease back after a slice failed, counting the failure (failedAttempts); the next delivery takes it at once. */
   abandon(id: string, holder: string): Promise<CommitResult>
@@ -109,6 +111,9 @@ function checkClaim(job: HostedJob, claim: IdempotencyClaim | null): void {
   if (claim !== null && !claim.id.startsWith(`${job.workspaceId}-`)) throw new Error('idempotency key id must start with its workspace id')
 }
 
+/** The most jobs a workspace's list shows: the newest it started, while their records last. */
+export const JOB_LIST_MAX = 200
+
 const days = (from: Date, n: number) => new Date(from.getTime() + n * 86_400_000).toISOString()
 
 export function newHostedJob(input: { id: string; workspaceId: string; uid: string; keyId: string; kind: HostedJobKind; request: unknown; maxCredits: number | null }, now = new Date()): HostedJob {
@@ -119,16 +124,18 @@ export function newHostedJob(input: { id: string; workspaceId: string; uid: stri
   }
 }
 
-interface Slots { running: string[]; queued: string[] }
+/** `recent` is absent on a workspace whose slots were written before the list (H2 P1); its earlier jobs are not listed. */
+interface Slots { running: string[]; queued: string[]; recent?: string[] }
 
 /** Slots without the jobs whose records are gone (a TTL deleted a job that never finished). */
-const pruned = (slots: Slots, alive: (id: string) => boolean): Slots => ({ running: slots.running.filter(alive), queued: slots.queued.filter(alive) })
+const pruned = (slots: Slots, alive: (id: string) => boolean): Slots => ({ ...slots, running: slots.running.filter(alive), queued: slots.queued.filter(alive) })
+const withRecent = (slots: Slots, id: string): Slots => ({ ...slots, recent: [id, ...(slots.recent ?? [])].slice(0, JOB_LIST_MAX) })
 
 /** The pure transitions both stores apply, so they cannot drift apart. */
 const transitions = {
   create(job: HostedJob, slots: Slots, limits: JobLimits): { job: HostedJob; slots: Slots } | { busy: true } {
-    if (slots.running.length < limits.maxRunning) return { job: { ...job, status: 'running' }, slots: { ...slots, running: [...slots.running, job.id] } }
-    if (slots.queued.length < limits.maxQueued) return { job: { ...job, status: 'queued' }, slots: { ...slots, queued: [...slots.queued, job.id] } }
+    if (slots.running.length < limits.maxRunning) return { job: { ...job, status: 'running' }, slots: withRecent({ ...slots, running: [...slots.running, job.id] }, job.id) }
+    if (slots.queued.length < limits.maxQueued) return { job: { ...job, status: 'queued' }, slots: withRecent({ ...slots, queued: [...slots.queued, job.id] }, job.id) }
     return { busy: true }
   },
   lease(job: HostedJob, lease: { generation: number; holder: string; ttlMs: number }, now: Date): LeaseResult {
@@ -149,7 +156,7 @@ const transitions = {
     const running = slots.running.filter((other) => other !== id && alive(other))
     const queued = slots.queued.filter((other) => other !== id && alive(other))
     const promoted = ran ? queued[0] ?? null : null
-    return { slots: { running: promoted === null ? running : [...running, promoted], queued: promoted === null ? queued : queued.slice(1) }, promoted }
+    return { slots: { ...slots, running: promoted === null ? running : [...running, promoted], queued: promoted === null ? queued : queued.slice(1) }, promoted }
   },
   finish(job: HostedJob, status: HostedJobStatus, now: Date): HostedJob {
     return { ...job, status, lease: null, finishedAt: now.toISOString(), expireAt: days(now, JOB_RETENTION_DAYS), deleteAt: days(now, JOB_RETENTION_DAYS + JOB_TOMBSTONE_DAYS) }
@@ -189,6 +196,9 @@ export class MemoryHostedJobStore implements HostedJobStore {
     return { ok: true, job: next.job, replayed: false }
   }
   async get(id: string): Promise<HostedJob | null> { return this.jobs.get(id) ?? null }
+  async list(workspaceId: string): Promise<HostedJob[]> {
+    return (this.slots.get(workspaceId)?.recent ?? []).flatMap((id) => this.jobs.get(id) ?? [])
+  }
   async acquireLease(id: string, lease: { generation: number; holder: string; ttlMs: number }, now = new Date()): Promise<LeaseResult> {
     const job = this.jobs.get(id)
     if (!job) return { ok: false, reason: 'missing' }
@@ -321,6 +331,25 @@ export class FirestoreHostedJobStore implements HostedJobStore {
       }
       return applied ? { ok: true, job: next.job, replayed: false } : undefined
     })
+  }
+
+  async list(workspaceId: string): Promise<HostedJob[]> {
+    checkedId(workspaceId, 'workspace id', WORKSPACE_ID)
+    // The workspace's slots name its recent jobs in order, so the list needs no query or index: one read and one batchGet.
+    const token = await this.token()
+    const ids = (await this.readSlots(workspaceId, token)).value?.recent ?? []
+    if (ids.length === 0) return []
+    const response = await this.fetcher(`${this.endpoint}:batchGet`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(10_000),
+      body: JSON.stringify({ documents: ids.map((id) => this.name('hostedJobs', id)) }),
+    })
+    if (!response.ok) throw new Error(`job list failed (${response.status})`)
+    const found = new Map<string, HostedJob>()
+    for (const row of await response.json() as Array<{ found?: FirestoreDoc }>) {
+      const raw = row.found?.fields?.job?.stringValue
+      if (raw) { const job = JSON.parse(raw) as HostedJob; if (job.workspaceId === workspaceId) found.set(job.id, job) }
+    }
+    return ids.flatMap((id) => found.get(id) ?? [])
   }
 
   async get(id: string): Promise<HostedJob | null> {

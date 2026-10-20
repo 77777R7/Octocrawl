@@ -63,7 +63,11 @@
 
 ## P：任务进度数据
 
-- [ ] **P1** `GET /v1/jobs` 列出账户的任务：最近的在前，分页；返回和状态接口一样的字段。dashboard 和 MCP 都可以用。
+- [x] **P1** `GET /v1/jobs` 列出账户的任务：最近的在前，分页；返回和状态接口一样的字段。dashboard 和 MCP 都可以用。
+  - 做成的样子：`?limit=1–50&before=<上一页的 nextBefore>`，返回 `{ items, nextBefore, hasMore }`；不带账户 key 时返回 403。
+  - 列表来自 workspace 的 slots 文档里的 `recent`：账户最近启动的 200 个任务的 id，在启动任务的同一次提交里写入。这样不需要 Firestore 复合索引，顺序也准。
+  - 记录被 TTL 删掉的任务不再列出。这个改动之前启动的任务不在列表里，只有 H1 验收时跑的那几个。
+  - 接口说明在 `docs/hosted-api.md` 的 Batch and crawl jobs 一节，可以直接交给 UI 窗口做 P2。
 - [ ] **P2** 进度页（UI 窗口），见“待你决定”第 3 条。
 
 ## W：任务结束的 webhook
@@ -96,4 +100,4 @@
 
 ## 下次从这里继续
 
-- M1–M5 已提交。下一项是 **P1**，然后做 W。
+- M1–M5 已合并（#627），P1 已提交。下一项是 **W**（webhook），先用“待你决定”第 2 条的默认做法。
