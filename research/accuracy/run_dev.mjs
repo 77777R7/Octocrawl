@@ -1,5 +1,7 @@
 // One retained-source replay per case of dev-plan.v1.json through this checkout's engine, API and SDK.
-// Usage: node research/accuracy/run_dev.mjs <dataset dir> <output dir> [label]
+// Usage: node research/accuracy/run_dev.mjs <dataset dir> <output dir> [label] [--plan=<plan.json>] [--engine=<checkout>]
+// --plan defaults to dev-plan.v1.json; --engine (default: this checkout) is a built checkout whose engine, API and SDK run,
+// so one driver can replay the same plan through two commits (reserved-plan.v2.json's paired run).
 // Build first (npx tsc --build). Each case is served alone at the fixture origin, so two cases with the
 // same path (D08 and D09 are both "/") never share a server. A started case is not rerun.
 import {readFile,writeFile,mkdir,access} from 'node:fs/promises';
@@ -7,20 +9,24 @@ import {createServer} from 'node:http';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
+import {createRequire} from 'node:module';
+import {resolve} from 'node:path';
 import assert from 'node:assert/strict';
-const [dataset,out,label='main']=process.argv.slice(2);
+const flags=Object.fromEntries(process.argv.slice(2).filter(a=>a.startsWith('--')).map(a=>a.slice(2).split(/=(.*)/s,2)));
+const [dataset,out,label='main']=process.argv.slice(2).filter(a=>!a.startsWith('--'));
 assert.ok(dataset&&out,'usage: run_dev.mjs <dataset dir> <output dir> [label]');
-const root=fileURLToPath(new URL('../../',import.meta.url));
+const root=flags.engine?resolve(flags.engine)+'/':fileURLToPath(new URL('../../',import.meta.url));
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const exists=async p=>{try{await access(p);return true;}catch{return false;}};
-const plan=JSON.parse(await readFile(new URL('./dev-plan.v1.json',import.meta.url),'utf8'));
+assert.ok(await exists(root+'node_modules'),'engine checkout has no node_modules of its own: '+root);
+const plan=JSON.parse(await readFile(flags.plan??new URL('./dev-plan.v1.json',import.meta.url),'utf8'));
 const sealBytes=await readFile(dataset+'/seal.json');assert.equal(hash(sealBytes),plan.datasetSealSha256,'dataset seal differs');
 const seal=JSON.parse(sealBytes);for(const [rel,expected]of Object.entries(seal.files))assert.equal(hash(await readFile(dataset+'/'+rel)),expected,'sealed source or label changed: '+rel);
 for(const k of ['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'])delete process.env[k];
 process.env.NO_PROXY='127.0.0.1,localhost';
 const commit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();process.env.W2L_SOURCE_COMMIT=commit;
 const imp=p=>import(pathToFileURL(root+p).href);
-const {serve}=await import('@hono/node-server');
+const {serve}=await import(pathToFileURL(createRequire(root+'packages/api/package.json').resolve('@hono/node-server')).href);
 const {createApiEngine,createApp}=await imp('packages/api/dist/index.js');
 const {localNetworkPolicy}=await imp('packages/contracts/dist/index.js');
 const {buildChannels}=await imp('packages/bench/dist/index.js');

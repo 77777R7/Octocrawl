@@ -1,0 +1,276 @@
+{
+ "schema": "octocrawl.field-run-plan/1",
+ "name": "reserved-v2 paired run",
+ "scope": "Reserved set v2 (R2), first and only run of Phase 2: one retained-source HTTP replay per case through the engine, API and SDK of each named commit, same request for both. Measures extraction and delivery on saved bytes, not live access, routing or freshness (that run belongs to K1).",
+ "datasetSealSha256": "1588c8d393e6326eae0796be9f97bcffea46ca2c31c1245ebb7c1f9e03b2f5e1",
+ "fixtureOrigin": "http://127.0.0.1:8863",
+ "request": {
+  "formats": [
+   "markdown",
+   "tables",
+   "links"
+  ],
+  "debug": false,
+  "onlyMainContent": true,
+  "fastMode": true,
+  "maxAge": 0,
+  "storeInCache": false,
+  "timeout": 30000
+ },
+ "verify": "No verify is sent: reserved-v2 tasks have no identity needle. A success result is status success with verification not failed.",
+ "mappings": "research/accuracy/reserved_map.py, committed before the run; no mapping change after it",
+ "cases": [
+  {
+   "id": "V01",
+   "group": "reserved-v2",
+   "url": "https://go.dev/blog/http-connection-reuse",
+   "checkNeedle": null
+  },
+  {
+   "id": "V02",
+   "group": "reserved-v2",
+   "url": "https://blog.rust-lang.org/2026/10/01/Rust-1.99.0/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V03",
+   "group": "reserved-v2",
+   "url": "https://nodejs.org/en/blog/vulnerability/october-2026-security-releases",
+   "checkNeedle": null
+  },
+  {
+   "id": "V04",
+   "group": "reserved-v2",
+   "url": "https://theconversation.com/japans-mmx-mission-aims-to-swipe-soil-samples-from-mars-moon-phobos-294129",
+   "checkNeedle": null
+  },
+  {
+   "id": "V05",
+   "group": "reserved-v2",
+   "url": "https://kubernetes.io/blog/2026/10/06/kubernetes-cgroups-v2-shift/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V06",
+   "group": "reserved-v2",
+   "url": "https://blog.cloudflare.com/obsessive-inference-optimization/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V07",
+   "group": "reserved-v2",
+   "url": "https://www.eff.org/deeplinks/2026/10/require-police-get-warrant-search-alpr-data",
+   "checkNeedle": null
+  },
+  {
+   "id": "V08",
+   "group": "reserved-v2",
+   "url": "https://www.adafruit.com/product/6065",
+   "checkNeedle": null
+  },
+  {
+   "id": "V09",
+   "group": "reserved-v2",
+   "url": "https://www.pishop.us/product/raspberry-pi-4-model-b-3gb/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V10",
+   "group": "reserved-v2",
+   "url": "https://www.kiwi-electronics.com/en/bbc-microbit-v2-2-go-bundle-10th-anniversary-edition-20905",
+   "checkNeedle": null
+  },
+  {
+   "id": "V11",
+   "group": "reserved-v2",
+   "url": "https://store.steampowered.com/app/620/Portal_2/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V12",
+   "group": "reserved-v2",
+   "url": "https://www.gog.com/en/game/the_witcher_3_wild_hunt_game_of_the_year_edition",
+   "checkNeedle": null
+  },
+  {
+   "id": "V13",
+   "group": "reserved-v2",
+   "url": "https://www.berrybase.de/en/raspberry-pi-5-8gb-ram",
+   "checkNeedle": null
+  },
+  {
+   "id": "V14",
+   "group": "reserved-v2",
+   "url": "https://www.manning.com/books/rust-in-action",
+   "checkNeedle": null
+  },
+  {
+   "id": "V15",
+   "group": "reserved-v2",
+   "url": "https://www.debian.org/security/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V16",
+   "group": "reserved-v2",
+   "url": "https://ubuntu.com/security/notices",
+   "checkNeedle": null
+  },
+  {
+   "id": "V17",
+   "group": "reserved-v2",
+   "url": "https://www.postgresql.org/about/newsarchive/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V18",
+   "group": "reserved-v2",
+   "url": "https://www.freebsd.org/security/advisories/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V19",
+   "group": "reserved-v2",
+   "url": "https://arxiv.org/list/cs.CL/new",
+   "checkNeedle": null
+  },
+  {
+   "id": "V20",
+   "group": "reserved-v2",
+   "url": "https://www.ruby-lang.org/en/news/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V21",
+   "group": "reserved-v2",
+   "url": "https://nodejs.org/en/blog",
+   "checkNeedle": null
+  },
+  {
+   "id": "V22",
+   "group": "reserved-v2",
+   "url": "https://endoflife.date/python",
+   "checkNeedle": null
+  },
+  {
+   "id": "V23",
+   "group": "reserved-v2",
+   "url": "https://devguide.python.org/versions/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V24",
+   "group": "reserved-v2",
+   "url": "https://www.worldometers.info/world-population/population-by-country/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V25",
+   "group": "reserved-v2",
+   "url": "https://www.rba.gov.au/statistics/frequency/exchange-rates.html",
+   "checkNeedle": null
+  },
+  {
+   "id": "V26",
+   "group": "reserved-v2",
+   "url": "https://www.kernel.org/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V27",
+   "group": "reserved-v2",
+   "url": "https://www.php.net/supported-versions.php",
+   "checkNeedle": null
+  },
+  {
+   "id": "V28",
+   "group": "reserved-v2",
+   "url": "https://www.postgresql.org/support/versioning/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V29",
+   "group": "reserved-v2",
+   "url": "https://news.ycombinator.com/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V30",
+   "group": "reserved-v2",
+   "url": "https://www.githubstatus.com/history",
+   "checkNeedle": null
+  },
+  {
+   "id": "V31",
+   "group": "reserved-v2",
+   "url": "https://www.cloudflarestatus.com/history",
+   "checkNeedle": null
+  },
+  {
+   "id": "V32",
+   "group": "reserved-v2",
+   "url": "https://forecast.weather.gov/MapClick.php?lat=47.6062&lon=-122.3321",
+   "checkNeedle": null
+  },
+  {
+   "id": "V33",
+   "group": "reserved-v2",
+   "url": "https://pypi.org/project/requests/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V34",
+   "group": "reserved-v2",
+   "url": "https://www.x-rates.com/table/?from=USD&amount=1",
+   "checkNeedle": null
+  },
+  {
+   "id": "V35",
+   "group": "reserved-v2",
+   "url": "https://www.yr.no/en/forecast/daily-table/2-2643743/United%20Kingdom/England/London",
+   "checkNeedle": null
+  },
+  {
+   "id": "V36",
+   "group": "reserved-v2",
+   "url": "https://zenodo.org/records/23488905",
+   "checkNeedle": null
+  },
+  {
+   "id": "V37",
+   "group": "reserved-v2",
+   "url": "https://peps.python.org/pep-0008/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V38",
+   "group": "reserved-v2",
+   "url": "https://datatracker.ietf.org/doc/rfc9112/",
+   "checkNeedle": null
+  },
+  {
+   "id": "V39",
+   "group": "reserved-v2",
+   "url": "https://openlibrary.org/works/OL45804W",
+   "checkNeedle": null
+  },
+  {
+   "id": "V40",
+   "group": "reserved-v2",
+   "url": "https://www.osti.gov/biblio/1478744",
+   "checkNeedle": null
+  },
+  {
+   "id": "V41",
+   "group": "reserved-v2",
+   "url": "https://arxiv.org/abs/2610.22428",
+   "checkNeedle": null
+  },
+  {
+   "id": "V42",
+   "group": "reserved-v2",
+   "url": "https://www.nature.com/articles/s41586-020-2649-2",
+   "checkNeedle": null
+  }
+ ]
+}
