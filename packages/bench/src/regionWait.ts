@@ -57,6 +57,12 @@ export interface RegionSpec {
   answerMarkdown?: (html: string, href: string) => string | null
   /** A lane that captures tables can judge row contracts on the same bounded capture/selection as its answer. */
   readTables?: (remainingMs: number) => Promise<RegionTables | undefined>
+  /**
+   * For a lane whose answer reads its tables from the page's HTML as it stands (the provider lane, without a layout
+   * capture): the tables that HTML would give the answer (regionTables), undefined when it cannot tell. The code that
+   * drives the page reads the HTML and makes `readTables` of it.
+   */
+  tablesOf?: (html: string, href: string) => RegionTables | undefined
 }
 
 /**
@@ -210,7 +216,10 @@ export interface RegionOutcome {
   unjudged?: RegionUnjudged
   /** Screens the wait scrolled down for a region that loads as it comes into view; absent from a lane that does not scroll (the my-browser lane: the person's own tab). */
   scrolls?: number
-  /** A requested table capture remained unavailable; other judged checks cannot prove its absence. */
+  /**
+   * A row check (`tableRowsMin`) was left unjudged: the lane's table reader had nothing to give at the last read, or the
+   * lane has none (decision 12, 2026-10-20). Other judged checks cannot prove the rows absent, and never make it ready.
+   */
   tablesUnjudged?: true
   /**
    * Set when the wait ran out while it was scrolling toward the region, before the page ended (or MAX_REGION_SCROLLS,
@@ -242,6 +251,11 @@ export class RegionTracker {
   private answered: { html: string; markdown: string | null } | null = null
   private last: Omit<RegionOutcome, 'waitedMs' | 'reads' | 'judged' | 'contractSha256'> = { ready: false, empty: false, loading: false, steady: null, checks: [] }
   judgeable = true
+  /**
+   * The region cannot change any more for this lane: every check it can judge held on two reads in a row, and what is
+   * left is a row check without a table reader, which no further read can judge. The wait ends there, not ready.
+   */
+  settled = false
   unjudged: RegionUnjudged | undefined
 
   constructor(private readonly spec: RegionSpec, private readonly now: () => number = Date.now) {
@@ -264,6 +278,7 @@ export class RegionTracker {
       this.previousKey = null
       this.previousText = undefined
       this.sameReads = 0
+      this.settled = false
       this.last = { ...this.last, ready: false, empty: false, steady: null }
       return false
     }
@@ -272,8 +287,8 @@ export class RegionTracker {
     const verifyView: VerifyView = { status: 'success', ...(tables === undefined ? {} : { tables }), tableCount: tables === undefined ? view.tableCount ?? 0 : tables.filter(table => table.omitted === undefined).length, ...(markdown === undefined ? {} : { markdown }), ...(view.list === undefined ? {} : { list: view.list }) }
     const verification = verify(this.spec.contract, verifyView, { partial: true })
     const checks = verification.status === 'not_requested' ? [] : verification.checks.map(({ index, type, passed, observedCount }) => ({ index, type, passed, ...(observedCount === undefined ? {} : { observedCount }) }))
-    // A lane without a table reader may skip unavailable checks. A bounded capture can be temporarily
-    // unavailable, so its table checks are retried within the same region budget, never counted as passed.
+    // A view that can judge none of the checks is not waited on. A lane with a table reader is: a bounded capture can be
+    // unavailable for a while, so its table checks are retried within the same region budget, never counted as passed.
     if (this.judged === 1 && this.spec.readTables === undefined && checks.every((check) => check.passed === null)) {
       this.judgeable = false
       // The Markdown checks went unjudged because the page's HTML was too large to send or convert: the page had one.
@@ -285,8 +300,10 @@ export class RegionTracker {
     const loading = view.loading === true
     // Reads in a row with the same counts and the same text, this one included.
     this.sameReads = key === this.previousKey && steady === true ? this.sameReads + 1 : 1
-    let passed = verification.status === 'passed' && key === this.previousKey
-      && (this.spec.readTables === undefined || checks.every(check => check.type !== 'tableRowsMin' || check.passed === true))
+    // A row check is ready only when judged and held: without a table reader (decision 12) the title alone never is.
+    const held = verification.status === 'passed' && key === this.previousKey
+    let passed = held && checks.every(check => check.type !== 'tableRowsMin' || check.passed === true)
+    this.settled = held && !passed && this.spec.readTables === undefined
     let reported = checks
     // A read the whole page would end the wait on is judged again on what the answer will hold (spec.answerMarkdown):
     // only such reads, as extraction is not cheap, and only on a page up to MAX_ANSWER_HTML; its time counts in the read's,
@@ -326,7 +343,7 @@ export class RegionTracker {
   }
 
   outcome(): RegionOutcome {
-    const tablesUnjudged = this.spec.readTables !== undefined && this.last.checks.some(check => check.type === 'tableRowsMin' && check.passed === null)
+    const tablesUnjudged = this.last.checks.some(check => check.type === 'tableRowsMin' && check.passed === null)
     return { ...this.last, waitedMs: this.now() - this.started, reads: this.reads, judged: this.judged, contractSha256: this.sha, ...(tablesUnjudged ? { tablesUnjudged: true as const } : {}), ...(this.unjudged === undefined ? {} : { unjudged: this.unjudged }) }
   }
 }
@@ -372,7 +389,7 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
       json = undefined
     }
     const ready = tracker.observe(json, tables)
-    if (!tracker.judgeable) return await outcome()
+    if (!tracker.judgeable || tracker.settled) return await outcome()
     // A read takes what the last one took (a large page's HTML, its Markdown): none is begun that would end past the bound.
     const readMs = now() - readStarted
     const pause = Math.max(1, Math.min(sampleMs, deadline - now()))
