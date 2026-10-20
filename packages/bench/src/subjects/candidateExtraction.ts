@@ -12,7 +12,8 @@
  *   content left out is there;
  * - `declared_data`: the main content with what the page declares about its
  *   subject written under it: its citation tags and article JSON-LD, and a
- *   product's facts when the product is the one the page is about.
+ *   product's facts when the product is the one the page is about (never the
+ *   page's `<title>`).
  *
  * The candidate that passes the most checks is delivered, the first one on a
  * tie, so the main content stays unless another does better. The lane records
@@ -71,9 +72,9 @@ function judge(result: FetchResult, markdown: string, options: FetchOptions): { 
 
 /** What the page declares about its subject, one `name: value` line each. */
 function declaredLines(result: FetchResult): string[] {
+  // Not the page's <title>: it names the page, not content, and would let a check for the page's name pass on a
+  // main content that is some other part of it (an appendix).
   const lines: string[] = []
-  const metadata = result.metadata
-  if (metadata?.title) lines.push(`title: ${metadata.title}`)
   for (const item of result.document?.declaredValues ?? []) lines.push(`${item.name}: ${item.values.join('; ')}`)
   const product = result.document?.product ?? null
   // A product's facts only when the page is about that product (D2's identity, or a site adapter's).

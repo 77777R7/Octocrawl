@@ -72,6 +72,14 @@ describe('reading the same capture again when its contract fails on what was ext
     expect(out.markdown).toContain('citation_date: 2026/06/14')
   })
 
+  it('does not pass a check for the page\'s name with its <title> under a main content that is another part of the page', () => {
+    const appendix = `<html><head><title>WXF 42: Widget Exchange Format</title></head><body><main><h1>Appendix A. Collected grammar</h1>${'<p>widget = name SP version SP payload; payload = 1*OCTET; version = 1*DIGIT. </p>'.repeat(8)}</main></body></html>`
+    const result = delivered(appendix)
+    const out = withExtractionCandidates(result, { ...source(ask([{ type: 'markdownIncludes', text: 'WXF 42' }])), html: appendix })
+    expect(out.markdown).toBe(result.markdown)
+    expect(out.trace.at(-1)).toMatchObject({ detail: { selected: 'main_content', reason: 'main_content_kept' } })
+  })
+
   it('keeps the main content when no candidate does better, and records that it looked', () => {
     const result = delivered(standard)
     const out = withExtractionCandidates(result, source(ask([{ type: 'markdownIncludes', text: 'nowhere on this page' }])))
