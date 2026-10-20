@@ -13,7 +13,7 @@ import json,sys
 from pathlib import Path
 
 HERE=Path(__file__).parent
-NUMERIC={'integer','decimal','percent'}
+NUMERIC={'integer','decimal'}  # a percent stays the page's text (sign and % kept), as the task asks for the visible change
 MODEL_NOTE=('modelFallback is false on both sides: no extraction model (W2L_EXTRACT_BASE_URL, W2L_EXTRACT_MODEL) is '
  'configured where the pair runs, so the deterministic path is measured and F2 (model values kept only where the page '
  'states them) is not.')

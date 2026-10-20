@@ -1231,16 +1231,16 @@
             "type": "number"
            },
            "change_1h": {
-            "type": "number"
+            "type": "string"
            },
            "change_24h": {
-            "type": "number"
+            "type": "string"
            },
            "change_7d": {
-            "type": "number"
+            "type": "string"
            },
            "change_30d": {
-            "type": "number"
+            "type": "string"
            },
            "currency": {
             "type": "string"
