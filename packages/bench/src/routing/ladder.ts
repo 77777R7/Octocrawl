@@ -34,8 +34,8 @@ import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
 import { createHash } from 'node:crypto'
 import { BROWSER_INSTALL_COMMAND } from '../browserInstall.js'
 import { INSTALLED_CHROME_INSTALL } from '../subjects/installedChrome.js'
-import type { RouteContext, RouteObservation, RoutingHistory, VendorOutcome } from './vendorRouter.js'
-import { rankVendors, startingVendor } from './vendorRouter.js'
+import type { DomainHistory, RouteContext, RouteEnvironment, RouteObservation, RoutingHistory, VendorOutcome } from './vendorRouter.js'
+import { rankVendors, shadowRankVendors, startingVendor } from './vendorRouter.js'
 import { identityCompromised } from './identity.js'
 import { decideNext, ladderActionDecisionEvent, type ActionDecision, type LadderAction } from './decideNext.js'
 import { loadSessionForHost, sessionCoversHost, type SessionSnapshot, type SessionStore } from './sessionStore.js'
@@ -461,6 +461,19 @@ function detailMs(trace: readonly TraceEvent[], event: string, key: string): num
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+/** What a vendor's rung runs on: its declared Chrome major version and its grant's egress configuration. */
+function rungEnvironment(channel: Channel): RouteEnvironment {
+  const major = channel.identity === undefined ? null : /(?:Chrome|Chromium)\/(\d+)/.exec(channel.identity.userAgent)?.[1]
+  const capabilities = channel.grantCapabilities === undefined ? null : [...channel.grantCapabilities].sort()
+  // The configuration alone: the proxy country a paid call reports depends on how it was billed, so it is not hashed here.
+  const egress = capabilities === null ? null : { capabilities }
+  return {
+    browserMajor: major == null ? null : Number(major),
+    egressClass: capabilities === null ? null : capabilities.includes('vendor_residential_proxy') ? 'vendor_residential' : 'vendor_default',
+    egressConfigVersion: egress === null ? null : createHash('sha256').update(JSON.stringify(egress)).digest('hex').slice(0, 12),
+  }
+}
+
 /**
  * What a vendor rung's attempt showed, for its routing history (PA G2a): each layer, the stage it stopped at, its times,
  * what it ran on and what the run's ledger charged it (the settled paid call its `spend_settled` names, not the vendor's
@@ -476,10 +489,6 @@ function routeObservation(channel: Channel, result: FetchResult, verified: boole
   const settled = [...result.trace].reverse().find((t) => t.event === 'spend_settled')?.detail
   const paid = typeof settled?.call === 'number' ? progress.paidCalls.find((c) => c.call === settled.call) ?? null : null
   const basis = settled?.basis
-  const major = channel.identity === undefined ? null : /(?:Chrome|Chromium)\/(\d+)/.exec(channel.identity.userAgent)?.[1]
-  const capabilities = channel.grantCapabilities === undefined ? null : [...channel.grantCapabilities].sort()
-  // The configuration alone: the proxy country a paid call reports depends on how it was billed, so it is not hashed here.
-  const egress = capabilities === null ? null : { capabilities }
   const timings = result.usage.timings
   return {
     accessDelivered,
@@ -500,11 +509,7 @@ function routeObservation(channel: Channel, result: FetchResult, verified: boole
       sessionMs: paid?.sessionMs ?? null,
       totalMs: result.usage.wallMs,
     },
-    environment: {
-      browserMajor: major == null ? null : Number(major),
-      egressClass: capabilities === null ? null : capabilities.includes('vendor_residential_proxy') ? 'vendor_residential' : 'vendor_default',
-      egressConfigVersion: egress === null ? null : createHash('sha256').update(JSON.stringify(egress)).digest('hex').slice(0, 12),
-    },
+    environment: rungEnvironment(channel),
     chargedUsd: paid?.chargedUsd ?? null,
     chargeBasis: paid === null ? null : basis === 'reported' || basis === 'measured' || basis === 'ceiling' ? basis : null,
   }
@@ -687,7 +692,7 @@ export class LadderRunner {
     const local = this.channels.filter((c) => c.vendorId === undefined && permitted.has(c.id) && served(c))
     const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id) && served(c))
 
-    let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers, routeContextOf(url, options, this.options.verify)), execution.signal))]
+    let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers, routeContextOf(url, options, this.options.verify), ladderTrace), execution.signal))]
 
     // A saved login for this host goes first: many sites answer a logged-out
     // visitor with a 200 (a login form, a public variant of the page), which
@@ -1099,10 +1104,54 @@ export class LadderRunner {
 
   // -------------------------------------------------------------------------
 
-  private async orderProviders(url: string, providers: readonly Channel[], route: RouteContext): Promise<readonly Channel[]> {
-    if (providers.length <= 1 || this.history === null) return providers
+  private async orderProviders(url: string, providers: readonly Channel[], route: RouteContext, ladderTrace: LadderProgress['ladderTrace']): Promise<readonly Channel[]> {
+    if (providers.length === 0 || this.history === null) return providers
+    const declared = providers.map((p) => p.vendorId!)
     const host = safeHost(url)
-    const domainHistory = await this.history.read(host, route)
+    let domainHistory: DomainHistory
+    try {
+      domainHistory = await this.history.read(host, route)
+    } catch (error) {
+      // One provider needs no history to be ordered: a read made only for the shadow does not stop the run.
+      if (providers.length > 1) throw error
+      ladderTrace.push({ at: 0, event: 'vendor_rank_shadow', channel: '—', detail: { family: route.family, declared, actual: declared, shadow: null, differs: null, fallbackReasons: [], candidates: [], error: 'history_unreadable' } })
+      return providers
+    }
+    // What the store says of its read (the route history's): taken at once, before anything else reads it.
+    const told = this.history as { lastBases?: Record<string, string>; lastThin?: Record<string, number>; lastExpired?: Record<string, string> }
+    const readBases = told.lastBases === undefined ? null : { ...told.lastBases }
+    const thin = told.lastThin === undefined ? undefined : { ...told.lastThin }
+    const expired = told.lastExpired === undefined ? undefined : { ...told.lastExpired }
+    const ordered = this.rankedProviders(providers, domainHistory)
+    // The unit-cost ranking (PA G3) is a shadow: written beside the order taken, never taking it.
+    const shadow = shadowRankVendors(domainHistory, declared, {
+      environments: Object.fromEntries(providers.map((p) => [p.vendorId!, rungEnvironment(p)])),
+      ...(thin === undefined ? {} : { thin }),
+      ...(expired === undefined ? {} : { expired }),
+    })
+    const actual = ordered.map((p) => p.vendorId!)
+    ladderTrace.push({
+      at: 0,
+      event: 'vendor_rank_shadow',
+      channel: '—',
+      detail: {
+        family: route.family,
+        declared,
+        actual,
+        shadow: shadow.order,
+        // A fallback ranked nothing, so there is nothing to compare: null, not a disagreement.
+        differs: shadow.fallbackReasons.length > 0 ? null : shadow.order.some((id, i) => id !== actual[i]),
+        fallbackReasons: shadow.fallbackReasons,
+        candidates: shadow.candidates,
+        readBases,
+      },
+    })
+    return ordered
+  }
+
+  /** The order the ladder takes: rankVendors' ranking with startingVendor's rotation. */
+  private rankedProviders(providers: readonly Channel[], domainHistory: DomainHistory): readonly Channel[] {
+    if (providers.length <= 1) return providers
     const ranked = rankVendors(
       domainHistory,
       providers.map((p) => p.vendorId!),

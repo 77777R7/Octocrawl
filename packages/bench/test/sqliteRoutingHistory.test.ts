@@ -180,3 +180,22 @@ describe('SqliteRoutingHistory (PA G2b)', () => {
     store.close()
   })
 })
+
+describe('what a read leaves out, for the shadow ranking (PA G3)', () => {
+  it('names the vendors it read too few attempts of, and those whose rows a version change just expired', async () => {
+    const db = RoutingHistoryDatabase.open(await root())
+    let now = 1_000
+    const history = db.scoped(scope, { now: () => now })
+    for (let i = 0; i < 3; i++) await history.record('example.com', 'steel', outcome(), route)
+    await history.record('example.com', 'bb', outcome(), route)
+    await history.read('example.com', route)
+    expect(history.lastBases).toEqual({ steel: 'route' })
+    expect(history.lastThin).toEqual({ bb: 1 })
+    expect(history.lastExpired).toEqual({})
+    now += 1
+    await history.read('example.com', { ...route, versions: 'extract-tf/32|verify/9' })
+    expect(history.lastExpired).toEqual({ steel: 'extractor_version', bb: 'extractor_version' })
+    expect(history.lastThin).toEqual({})
+    db.close()
+  })
+})

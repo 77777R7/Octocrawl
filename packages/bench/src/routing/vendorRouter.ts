@@ -521,3 +521,147 @@ export function startingVendor(ranked: readonly VendorScore[], history: DomainHi
   }
   return ranked[0]!.vendorId
 }
+
+/**
+ * What one verified delivery cost a vendor on a route (PA G3): everything the run's ledger charged its attempts, failed
+ * ones included, over the attempts whose page did the task. Unknown (null) when none did, never zero or infinite, and
+ * unknown when any attempt has no settled charge: such an attempt is unknown exposure, not a free one.
+ */
+export interface UnitDeliveryCost {
+  unitCostUsd: number | null
+  /** What the ledger charged the attempts whose charge is known. */
+  knownChargedUsd: number
+  /** Attempts with no settled charge. */
+  unknownExposureAttempts: number
+  /** Attempts whose page did the task. */
+  verified: number
+  /** Attempts whose task was judged, passed or not. */
+  judged: number
+}
+
+/** Dollars to the nanodollar, so that sums of the same price compare equal. */
+const usd = (value: number): number => Math.round(value * 1e9) / 1e9
+
+export function unitDeliveryCost(entry: VendorHistoryEntry): UnitDeliveryCost {
+  const { yes, no } = entry.layers.taskVerified
+  const unknownExposureAttempts = entry.chargedUnknownAttempts
+  return {
+    unitCostUsd: yes === 0 || unknownExposureAttempts > 0 ? null : usd(entry.chargedTotalUsd / yes),
+    knownChargedUsd: usd(entry.chargedTotalUsd),
+    unknownExposureAttempts,
+    verified: yes,
+    judged: yes + no,
+  }
+}
+
+/**
+ * Why the shadow ranking kept the declared order: no vendor has history on this host (`new_host`), a vendor has none
+ * on it (`no_history`; a store that expires rows on a version change reads that way too), a vendor has fewer than the
+ * minimum attempts (`insufficient_samples`), or the vendor's latest attempt ran on another browser or egress
+ * configuration than its rung declares now (`version_changed`).
+ */
+export type ShadowFallbackReason = 'new_host' | 'no_history' | 'insufficient_samples' | 'version_changed'
+
+export interface ShadowCandidate extends UnitDeliveryCost {
+  vendorId: string
+  /** Verified over judged attempts; null when none was judged. */
+  passRate: number | null
+  /** Attempts on record. */
+  samples: number
+  medianLatencyMs: number | null
+  fallbackReason: ShadowFallbackReason | null
+}
+
+export interface ShadowRanking {
+  /** Vendor ids, best first; the declared order when `fallbackReasons` is not empty. */
+  order: string[]
+  /** In the declared order. */
+  candidates: ShadowCandidate[]
+  /** Each distinct reason the ranking fell back, in the order the candidates first gave it; empty when it ranked. */
+  fallbackReasons: ShadowFallbackReason[]
+}
+
+/** The attempts a vendor needs on record before the shadow ranks it; the same minimum the route history reads with. */
+export const SHADOW_MIN_SAMPLES = 3
+
+/** What a vendor's rung runs on now. */
+export type RungEnvironment = Pick<RouteEnvironment, 'browserMajor' | 'egressConfigVersion'>
+
+export interface ShadowRankOptions {
+  minSamples?: number
+  /** Each vendor's rung now; a known value that differs from its latest attempt's is a version change. */
+  environments?: Record<string, RungEnvironment>
+  /** Vendors the store held attempts of but left out of the read for too few, with how many (the route history's `lastThin`). */
+  thin?: Record<string, number>
+  /** Vendors whose rows the read expired, with the reason (the route history's `lastExpired`). */
+  expired?: Record<string, string>
+}
+
+/** Expiry reasons that mean the vendor, the extractor, the verifier or the policy moved on: a new version, not a new host. */
+const VERSION_EXPIRIES = new Set(['browser_version', 'egress_config', 'site_template', 'extractor_version', 'policy_version'])
+
+function medianOf(samples: readonly number[]): number | null {
+  if (samples.length === 0) return null
+  const sorted = [...samples].sort((a, b) => a - b)
+  const half = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[half - 1]! + sorted[half]!) / 2 : sorted[half]!
+}
+
+function versionChanged(entry: VendorHistoryEntry, now: RungEnvironment | undefined): boolean {
+  const last = entry.observations.at(-1)?.environment
+  if (now === undefined || last === undefined) return false
+  const differs = (a: string | number | null, b: string | number | null): boolean => a !== null && b !== null && a !== b
+  return differs(last.browserMajor, now.browserMajor) || differs(last.egressConfigVersion, now.egressConfigVersion)
+}
+
+/**
+ * The shadow ranking (PA G3): by unit delivery cost, lowest first, a vendor whose unit cost is unknown after those whose
+ * is known; ties on pass rate, then median latency, then the declared order. It falls back to the declared order when
+ * any candidate cannot be judged on its record (see ShadowFallbackReason). It decides nothing: the ladder writes it to
+ * its trace beside the order rankVendors gave, until two windows show the same gain.
+ */
+export function shadowRankVendors(domainHistory: DomainHistory, vendorIds: readonly string[], options: ShadowRankOptions = {}): ShadowRanking {
+  const minSamples = Math.max(1, options.minSamples ?? SHADOW_MIN_SAMPLES)
+  const thin = options.thin ?? {}
+  const expired = options.expired ?? {}
+  const held = (id: string): number => domainHistory.vendors[id]?.attempts ?? thin[id] ?? 0
+  const newHost = [...Object.keys(domainHistory.vendors), ...Object.keys(thin)].every((id) => held(id) === 0)
+    && !Object.values(expired).some((reason) => VERSION_EXPIRIES.has(reason))
+  const candidates = vendorIds.map((vendorId): ShadowCandidate => {
+    const entry = domainHistory.vendors[vendorId] ?? freshEntry()
+    const cost = unitDeliveryCost(entry)
+    const samples = held(vendorId)
+    const fallbackReason: ShadowFallbackReason | null = newHost
+      ? 'new_host'
+      : entry.attempts === 0 && VERSION_EXPIRIES.has(expired[vendorId] ?? '')
+        ? 'version_changed'
+        : samples === 0
+          ? 'no_history'
+          : entry.attempts > 0 && versionChanged(entry, options.environments?.[vendorId])
+            ? 'version_changed'
+            : samples < minSamples
+              ? 'insufficient_samples'
+              : null
+    return {
+      vendorId,
+      ...cost,
+      passRate: cost.judged === 0 ? null : cost.verified / cost.judged,
+      samples,
+      medianLatencyMs: medianOf(entry.latencySamplesMs),
+      fallbackReason,
+    }
+  })
+  const fallbackReasons = [...new Set(candidates.flatMap((c) => (c.fallbackReason === null ? [] : [c.fallbackReason])))]
+  if (fallbackReasons.length > 0) return { order: [...vendorIds], candidates, fallbackReasons }
+  // Nulls last on every key: an unknown is never read as the best value.
+  const ascending = (a: number | null, b: number | null): number => (a === null ? (b === null ? 0 : 1) : b === null ? -1 : a - b)
+  const order = candidates
+    .map((c, index) => ({ c, index }))
+    .sort((x, y) =>
+      ascending(x.c.unitCostUsd, y.c.unitCostUsd)
+      || ascending(x.c.passRate === null ? null : -x.c.passRate, y.c.passRate === null ? null : -y.c.passRate)
+      || ascending(x.c.medianLatencyMs, y.c.medianLatencyMs)
+      || x.index - y.index)
+    .map(({ c }) => c.vendorId)
+  return { order, candidates, fallbackReasons }
+}

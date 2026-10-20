@@ -1916,3 +1916,88 @@ describe('LadderRunner — the route a vendor\'s history is kept under (PA G2b)'
     expect(families).toEqual(['path:/users/*', 'path:/u/*', 'path:/*/*', 'path:/reset/*', 'path:/share/*', 'path:/*', 'path:/*', 'path:/*', 'path:/', 'path:/blog'])
   })
 })
+
+describe('LadderRunner — the shadow vendor ranking (PA G3)', () => {
+  const url = 'https://example.com/p'
+  const chromeMajor = Number(/Chrome\/(\d+)/.exec(COHERENT.userAgent)![1])
+  async function route(history: RoutingHistory, vendor: string, passed: number, failed: number, each: number): Promise<void> {
+    for (const verified of [...Array<boolean>(passed).fill(true), ...Array<boolean>(failed).fill(false)]) {
+      await history.record('example.com', vendor, {
+        contentful: true, verified, wallMs: 1_000, costUsd: null, failureClass: null,
+        observation: {
+          accessDelivered: true, regionLoaded: true, taskVerified: verified, failureStage: verified ? null : 'task', readiness: verified ? 'ready' : 'not_served', reason: null,
+          timings: { coldStartMs: null, navigationMs: null, challengeWaitMs: null, regionWaitMs: null, captureMs: null, extractMs: null, serializeMs: null, cleanupMs: null, sessionMs: null, totalMs: 1_000 },
+          environment: { browserMajor: chromeMajor, egressClass: null, egressConfigVersion: null },
+          chargedUsd: each, chargeBasis: 'measured',
+        },
+      })
+    }
+  }
+  const providers = () => {
+    const bb = channel('provider', [contentfulResult(url, 'provider')], 'browserbase')
+    const steel = channel('provider', [contentfulResult(url, 'provider')], 'steel')
+    return { bb, steel }
+  }
+
+  it('writes the unit-cost ranking beside the order the ladder took, and does not change that order', async () => {
+    const history = new MemoryRoutingHistory()
+    // Steel passes every time at $0.05 a call; Browserbase passes 4 in 5 at $0.01: $0.0125 a delivery.
+    await route(history, 'steel', 5, 0, 0.05)
+    await route(history, 'browserbase', 4, 1, 0.01)
+    const { bb, steel } = providers()
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), bb, steel], { mode: 'authed' }, history).run(url)
+    // The order main takes: today's formula puts the higher success rate first.
+    expect(steel.calls).toHaveLength(1)
+    expect(bb.calls).toHaveLength(0)
+    const shadow = run.ladderTrace.filter((t) => t.event === 'vendor_rank_shadow')
+    expect(shadow).toHaveLength(1)
+    expect(shadow[0]!.detail).toMatchObject({
+      declared: ['browserbase', 'steel'],
+      actual: ['steel', 'browserbase'],
+      shadow: ['browserbase', 'steel'],
+      differs: true,
+      fallbackReasons: [],
+    })
+    expect(shadow[0]!.detail!.candidates).toEqual([
+      expect.objectContaining({ vendorId: 'browserbase', unitCostUsd: 0.0125, passRate: 0.8, samples: 5, unknownExposureAttempts: 0, fallbackReason: null }),
+      expect.objectContaining({ vendorId: 'steel', unitCostUsd: 0.05, passRate: 1, samples: 5, unknownExposureAttempts: 0, fallbackReason: null }),
+    ])
+  })
+
+  it('ranks in the shadow for a single provider too, falling back to the declared order on a new host', async () => {
+    const history = new MemoryRoutingHistory()
+    const { steel } = providers()
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), steel], { mode: 'authed' }, history).run(url)
+    expect(run.channelsTried).toEqual(['http', 'provider'])
+    expect(run.ladderTrace.find((t) => t.event === 'vendor_rank_shadow')?.detail).toMatchObject({
+      declared: ['steel'], actual: ['steel'], shadow: ['steel'], differs: null, fallbackReasons: ['new_host'],
+    })
+  })
+
+  it('compares nothing when it fell back: differs is null, not a disagreement', async () => {
+    const history = new MemoryRoutingHistory()
+    await route(history, 'steel', 3, 0, 0.01)
+    await route(history, 'browserbase', 0, 1, 0.01)
+    const { bb, steel } = providers()
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), bb, steel], { mode: 'authed' }, history).run(url)
+    expect(steel.calls).toHaveLength(1)
+    expect(run.ladderTrace.find((t) => t.event === 'vendor_rank_shadow')?.detail).toMatchObject({
+      actual: ['steel', 'browserbase'], shadow: ['browserbase', 'steel'], differs: null, fallbackReasons: ['insufficient_samples'],
+    })
+  })
+
+  it('goes on without the shadow when a single provider\'s history cannot be read', async () => {
+    const history: RoutingHistory = { async read() { throw new Error('database is locked') }, async record() {} }
+    const { steel } = providers()
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), steel], { mode: 'authed' }, history).run(url)
+    expect(run.result.status).toBe('success')
+    expect(run.ladderTrace.find((t) => t.event === 'vendor_rank_shadow')?.detail).toMatchObject({ declared: ['steel'], actual: ['steel'], shadow: null, differs: null, error: 'history_unreadable' })
+  })
+
+  it('writes nothing without a routing history', async () => {
+    const { bb, steel } = providers()
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), bb, steel], { mode: 'authed' }).run(url)
+    expect(run.ladderTrace.some((t) => t.event === 'vendor_rank_shadow')).toBe(false)
+    expect(bb.calls).toHaveLength(1)
+  })
+})
