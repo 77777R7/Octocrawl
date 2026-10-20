@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
-import type { Attempt, AttemptStatus, CrawlBudget, CrawlMode, FetchResult, Lane, LadderRunAudit, ListPageRead, StepRecord, StepStatus, Task, TaskStatus } from '@w2l/contracts'
+import type { Attempt, AttemptStatus, CrawlBudget, CrawlMode, FetchResult, Lane, LadderRunAudit, ListPageRead, PaidCallRecord, PaidCallState, StepRecord, StepStatus, Task, TaskStatus } from '@w2l/contracts'
 import { assertId, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore, type VerificationCounts, VERIFICATION_COUNTED_STATUSES } from './taskStore.js'
 
 export const CHECKPOINT_FILENAME = 'checkpoint.sqlite'
@@ -125,6 +125,26 @@ CREATE TABLE IF NOT EXISTS list_pages (
   created_at TEXT NOT NULL,
   PRIMARY KEY (task_id, canonical_url, step, page)
 );
+
+CREATE TABLE IF NOT EXISTS paid_calls (
+  paid_call_id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id),
+  attempt_id TEXT NOT NULL REFERENCES attempts(id),
+  url TEXT NOT NULL,
+  vendor_id TEXT NOT NULL,
+  ceiling_usd REAL NOT NULL,
+  state TEXT NOT NULL,
+  charged_usd REAL,
+  provider_request_id TEXT,
+  provider_session_id TEXT,
+  tariff_version TEXT,
+  grant_hash TEXT,
+  deadline TEXT,
+  created_at TEXT NOT NULL,
+  settled_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS paid_calls_task ON paid_calls(task_id, created_at, paid_call_id);
 `
 
 /**
@@ -446,8 +466,60 @@ export class SqliteTaskStore implements TaskStore {
     this.db.prepare(`DELETE FROM list_pages WHERE task_id = ? AND canonical_url = ?`).run(taskId, canonicalUrl)
   }
 
+  async putPaidCall(call: PaidCallRecord): Promise<void> {
+    assertId('paidCall.paidCallId', call.paidCallId)
+    const attempt = this.db.prepare(`SELECT task_id FROM attempts WHERE id = ?`).get(call.attemptId) as { task_id: string } | undefined
+    if (attempt === undefined || attempt.task_id !== call.taskId) throw new Error(`putPaidCall: unknown attempt ${call.attemptId} of task ${call.taskId}`)
+    this.db
+      .prepare(
+        `INSERT INTO paid_calls (paid_call_id, task_id, attempt_id, url, vendor_id, ceiling_usd, state, charged_usd, provider_request_id, provider_session_id, tariff_version, grant_hash, deadline, created_at, settled_at)
+         VALUES (@paid_call_id, @task_id, @attempt_id, @url, @vendor_id, @ceiling_usd, @state, @charged_usd, @provider_request_id, @provider_session_id, @tariff_version, @grant_hash, @deadline, @created_at, @settled_at)
+         ON CONFLICT(paid_call_id) DO UPDATE SET
+           state = excluded.state, charged_usd = excluded.charged_usd, provider_request_id = excluded.provider_request_id, provider_session_id = excluded.provider_session_id,
+           tariff_version = excluded.tariff_version, grant_hash = excluded.grant_hash, deadline = excluded.deadline, settled_at = excluded.settled_at`,
+      )
+      .run({
+        paid_call_id: call.paidCallId, task_id: call.taskId, attempt_id: call.attemptId, url: call.url, vendor_id: call.vendorId, ceiling_usd: call.ceilingUsd, state: call.state,
+        charged_usd: call.chargedUsd, provider_request_id: call.providerRequestId, provider_session_id: call.providerSessionId, tariff_version: call.tariffVersion,
+        grant_hash: call.grantHash, deadline: call.deadline, created_at: call.createdAt, settled_at: call.settledAt,
+      })
+  }
+
+  async listPaidCalls(taskId: string, attemptId?: string): Promise<readonly PaidCallRecord[]> {
+    const rows = this.db
+      .prepare(`SELECT * FROM paid_calls WHERE task_id = ?${attemptId === undefined ? '' : ' AND attempt_id = ?'} ORDER BY created_at ASC, paid_call_id ASC`)
+      .all(taskId, ...(attemptId === undefined ? [] : [attemptId])) as PaidCallRow[]
+    return rows.map(paidCallFromRow)
+  }
+
   async close(): Promise<void> {
     this.db.close()
+  }
+}
+
+interface PaidCallRow {
+  paid_call_id: string
+  task_id: string
+  attempt_id: string
+  url: string
+  vendor_id: string
+  ceiling_usd: number
+  state: string
+  charged_usd: number | null
+  provider_request_id: string | null
+  provider_session_id: string | null
+  tariff_version: string | null
+  grant_hash: string | null
+  deadline: string | null
+  created_at: string
+  settled_at: string | null
+}
+
+function paidCallFromRow(row: PaidCallRow): PaidCallRecord {
+  return {
+    paidCallId: row.paid_call_id, taskId: row.task_id, attemptId: row.attempt_id, url: row.url, vendorId: row.vendor_id, ceilingUsd: row.ceiling_usd,
+    state: row.state as PaidCallState, chargedUsd: row.charged_usd, providerRequestId: row.provider_request_id, providerSessionId: row.provider_session_id,
+    tariffVersion: row.tariff_version, grantHash: row.grant_hash, deadline: row.deadline, createdAt: row.created_at, settledAt: row.settled_at,
   }
 }
 

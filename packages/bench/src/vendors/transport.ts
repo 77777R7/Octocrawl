@@ -87,7 +87,13 @@ export interface VendorOps {
   secrets: readonly string[]
   /** The policy decision this ops instance obeys (three-layer split). */
   decision: PolicyDecision
-  createSession(resume?: VendorResumeContext | null, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSession>
+  /**
+   * Open a session. With `name`, a provider that lets the caller choose its session's id (`namesSessions`) gives the
+   * session that id, so a paid call's session can be found again after a crash (PA E4); one that cannot ignores it.
+   */
+  createSession(resume?: VendorResumeContext | null, deadlineMs?: number, signal?: AbortSignal, name?: string): Promise<VendorSession>
+  /** The provider gives a session the id `createSession` is asked for (Steel's `sessionId`). */
+  namesSessions?: boolean
   releaseSession(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<void>
   /**
    * What a released session used besides time, as the provider reports it (ROADMAP PA item 4): the bytes its proxy

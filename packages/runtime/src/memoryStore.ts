@@ -1,4 +1,4 @@
-import type { Attempt, ListPageRead, StepRecord, StepStatus, Task } from '@w2l/contracts'
+import type { Attempt, ListPageRead, PaidCallRecord, StepRecord, StepStatus, Task } from '@w2l/contracts'
 import { assertId, cloneJson, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore, type VerificationCounts, VERIFICATION_COUNTED_STATUSES } from './taskStore.js'
 
 /**
@@ -10,6 +10,7 @@ export class MemoryTaskStore implements TaskStore {
   private readonly attempts = new Map<string, Attempt>()
   private readonly steps = new Map<string, StepRecord>()
   private readonly pagesRead = new Map<string, Map<string, ListPageRead>>()
+  private readonly paidCalls = new Map<string, PaidCallRecord>()
 
   async putTask(task: Task): Promise<void> {
     assertId('task.id', task.id)
@@ -158,6 +159,20 @@ export class MemoryTaskStore implements TaskStore {
 
   async clearPagesRead(taskId: string, canonicalUrl: string): Promise<void> {
     this.pagesRead.delete(`${taskId}\0${canonicalUrl}`)
+  }
+
+  async putPaidCall(call: PaidCallRecord): Promise<void> {
+    assertId('paidCall.paidCallId', call.paidCallId)
+    const attempt = this.attempts.get(call.attemptId)
+    if (attempt === undefined || attempt.taskId !== call.taskId) throw new Error(`putPaidCall: unknown attempt ${call.attemptId} of task ${call.taskId}`)
+    this.paidCalls.set(call.paidCallId, cloneJson(call))
+  }
+
+  async listPaidCalls(taskId: string, attemptId?: string): Promise<readonly PaidCallRecord[]> {
+    return [...this.paidCalls.values()]
+      .filter((call) => call.taskId === taskId && (attemptId === undefined || call.attemptId === attemptId))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.paidCallId.localeCompare(b.paidCallId))
+      .map(cloneJson)
   }
 
   async close(): Promise<void> {

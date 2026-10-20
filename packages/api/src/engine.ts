@@ -25,6 +25,7 @@ import {
   prepareHttpIdentity,
   RobotsOriginCache,
   pageFromUserBrowser,
+  steelPaidCallReconciler,
   summarize,
   unreadInUserBrowser,
   type Channel,
@@ -1663,6 +1664,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       signal: controller.signal,
       ...(sitemapSource === undefined ? {} : { sitemapSource }),
       onStep,
+      // Steel calls an earlier run of the task left open are settled from what Steel says of their sessions (PA E4).
+      ...(current.rungs.channels.some((channel) => channel.vendorId === 'steel') && (process.env.STEEL_API_KEY ?? '') !== '' ? { reconcilePaidCall: steelPaidCallReconciler({ apiKey: process.env.STEEL_API_KEY! }) } : {}),
     })
     const job = (async () => {
       // A resumed or restarted job offers its persisted steps to the webhook again before fetching more; those already enqueued are ignored.
