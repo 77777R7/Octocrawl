@@ -93,7 +93,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 
 ## Phase 0 · 基线与整理（≤1 天，不改引擎）
 
-- [ ] **P0.5 runner 的分母（先做，P0.1 的记录要用它）。** 把 `research/access/run-set.mjs` 里的提前停止计数、planned / attempted / not_run 计算、记录头（含 `Grant:` 一行：grant 文件 SHA-256 与能力名）抽成纯模块 `research/access/runSetReport.mjs`；提前停止时把没跑的任务按 id 写进记录（`not_run`），删掉"不在分母里"那句；每题记录 `channelsTried`（ROADMAP item 11 未了点：T076 跳过 Steel 时 runner 没留 ladder trace）。
+- [x] **P0.5 runner 的分母（#610）（先做，P0.1 的记录要用它）。** 把 `research/access/run-set.mjs` 里的提前停止计数、planned / attempted / not_run 计算、记录头（含 `Grant:` 一行：grant 文件 SHA-256 与能力名）抽成纯模块 `research/access/runSetReport.mjs`；提前停止时把没跑的任务按 id 写进记录（`not_run`），删掉"不在分母里"那句；每题记录 `channelsTried`（ROADMAP item 11 未了点：T076 跳过 Steel 时 runner 没留 ladder trace）。
   - 测试落点：`packages/runtime/test/runSetReport.test.ts`，照 `verify.test.ts:6` 导入 judge.mjs 的写法导入 `../../../research/access/runSetReport.mjs`，喂一串带 proxyRefused 的合成 rows；`npm test` 自然包含它。
   - 同时按方案 §五.7 给旧 bench 指标改名，免得被当成正式准入数：`packages/bench/src/runner.ts:236` 的 `verifiedCompletionRate`（只计有真值标注的结果，或改名 contentfulWithTruthRate）、`phase3ScoreCli.ts:47/61` 的 `verifiedCompletion`、`liveCompareCli.ts:404` 过滤无 result 的 arm 改为计入 `no_result`；加一个小测试；文档写明唯一的正式准入协议是 run-set.mjs + 合同。不动已归档的 92 题报告。
   - 验收：`npx vitest run packages/runtime/test/runSetReport.test.ts` 绿；用 `--only` 两题 + 模拟连续 proxyRefused 跑出的记录里能看到 not_run 列表和 Grant 行。
@@ -103,7 +103,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - 16 题挑战子集（installed_chrome）：API 启动行照 `research/access/sticky-vs-rotating.sh:17-19` 的形式（`W2L_ACCESS_GRANT=.w2l/access/installed-chrome-grant.json`，`--port 8797`），但出口照验收记录 7b56397b 用 Clash（`HTTPS_PROXY=127.0.0.1:7890`），不是脚本里转发到 Webshare 住宅网关的 8796；`W2L_API_URL=http://127.0.0.1:8797`，`--set all --only T001,T002,T005,T034,T038,T045,T046,T047,T048,T049,T053,T068,T071,T076,B001,B008 --access '"enhanced"' --record …-pa-next-baseline-ic16-2ffd7f25.md`（默认 `--set frozen` 会筛掉 blind 的 B001/B008）。
   - 顺带记下 T060（ROADMAP item 4 未了点：每臂假成功）在这一轮是否仍是假成功，原因写 unknown 不猜。
   - 验收：两份记录，各有命令、commit、代理/直连、Grant 行、费用、planned/attempted/not_run；92 题的 verified/假成功/p50/p95 和健康 25 题的逐题结果写进本清单"进度"节。
-- [ ] **P0.2 ROADMAP 与文档修正（一个 docs PR，只改 ROADMAP 和 docs/access.md）。**
+- [x] **P0.2 ROADMAP 与文档修正（#609）（一个 docs PR，只改 ROADMAP 和 docs/access.md）。**
   - PA item 5 状态行：installed_chrome 已建成（`ladderCli.ts:306-324`），引用 ADR 0005 的实现/验收 2026-10-14、CHANGELOG 0.5.0、验收记录 7b56397b；每周重跑和出口按检测类型选择仍开放。不写未核实的记录数。
   - PA item 9：每周重跑按决定 7 的口径（三类臂：Octocrawl 免费、Steel enhanced、Firecrawl/ZenRows；差距数字每周刷新，K1 是正式两窗口对照）。
   - PH H1 行：PR ③ 已合入，下一项是 H1 清单的 W1。`docs/h1-hosted-jobs-tasks.md` 不动，由 H1 窗口改。
