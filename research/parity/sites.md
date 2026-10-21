@@ -213,6 +213,12 @@ F01–F16 were added on 2026-09-29 for P2 file download and PDF text. The PDFs a
 | F15 | Scrape of a World Bank API JSON | A JSON file saved, its text as Markdown | file download |
 | F16 | Scrape of a GOV.UK Energy Trends XLSX | An XLSX saved as received with its hash and size, no Markdown | file download |
 
+G01 was added on 2026-10-22 for the Skyscanner human verification rule (#515, [P0.3 of the PA task list](../../docs/pa-enhancement-tasks.md)), frozen before its first run. Skyscanner serves the route page or, depending on the exit, its dedicated challenge at `/sttc/px/captcha-v2/index.html`, so either honest answer passes. Run it with `--only G01`.
+
+| Case | URL | What it tests | Feature |
+| --- | --- | --- | --- |
+| G01 | [Skyscanner: London to Paris](https://www.skyscanner.net/routes/lond/pari/london-to-paris.html) | Either the route's content, with a final URL that is not the challenge, or `blocked`/`captcha` with no Markdown and readiness `not_served`; never `success` on the challenge page | scrape-execution.error-model |
+
 ## Later batches
 
 About 40 sites in total, plus the seed user's URLs. These were reachable on 2026-09-29; their checks are written when the feature they test is worked on.
