@@ -2,7 +2,7 @@
 # The 2026-10-14 image (research/access/cloudrun-xvfb/) took node:22-bookworm and Chrome stable by tag; here the base
 # image is pinned by digest, Chrome by version and SHA-256, Playwright by package-lock.json, and the rest is recorded in
 # /app/.g4-image-manifest.txt at build time and fixed by the pushed image's digest. Not a service: a Cloud Run job runs
-# entry.sh once per execution. Build context: a shallow clone of the commit measured (build.sh).
+# round.sh once per execution. Build context: a shallow clone of the commit measured (build.sh).
 # Node 26.8.1 is the Node of the local arm on Howard's Mac, so the HTTP lane's TLS stack matches between the two sides.
 FROM node:26.8.1-bookworm@sha256:53eaddc9c421e3e33f5365bb605cb4d85477886745573216219933e22ac13ab0
 
@@ -34,4 +34,4 @@ ENV LANG=C.UTF-8 TZ=Etc/UTC
 RUN useradd --create-home octo && chown -R octo /app
 USER octo
 ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
-CMD ["bash", "research/access/g4-cloudrun/entry.sh"]
+CMD ["bash", "research/access/g4-cloudrun/round.sh"]

@@ -229,7 +229,15 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 - [x] **G2a RouteObservation 字段。** `VendorOutcome`（`vendorRouter.ts:59-70`）加 accessDelivered / regionLoaded / taskVerified / failureStage / readiness / reason、每次尝试的时间分解（G4 量的那些阶段名）、环境版本（浏览器大版本、出口配置版本），以及账本的 chargedUsd（取 `progress.paidCalls` 里已结算的值，`ladder.ts:1336-1340`，不是恒为 null 的 `result.usage.externalCostUsd`），在 `recordVendorOutcome`（`ladder.ts:1005-1018`）写入；Memory 与 File 两个 RoutingHistory 同步。失败测试放 `vendorRouter.test.ts` 和 `ladder.test.ts`，`ladderCli.test.ts`、`crawlCli.test.ts` 只改类型。
 - [x] **G2b 持久化与路线键。** 新文件 `packages/bench/src/routing/sqliteRoutingHistory.ts`（better-sqlite3 在 runtime 已用），文件在 `<taskRoot>/routing-history.sqlite`，实现 `RoutingHistory`；键从 host 扩成 (host, 路径族或任务族, 所需格式, 地区与出口类别, 浏览器/传输版本, 提取器/验证器版本, 策略版本)，带 TTL 和最小样本量，样本不足时回退到 (host, 出口类别) 再回退到固定阶梯，每次过期写失效原因（TTL、版本变化、出口变化）；浏览器大版本、站点模板或出口配置变更使相关记录过期；引擎在 `engine.ts:982-988` 用它替换 Memory；FileRoutingHistory 保留给 bench CLI；修掉 history 按 mode、channel 按 `mode|enhanced` 的 key 不一致。只存统计，不存 URL/cookie/凭据。
 - [ ] **G3 排序。** 单位有效交付成本代替累计成本；新 host、新版本或样本不足时用现有固定阶梯；先影子排序（只记日志，保持声明顺序），两个窗口一致收益后才固化。影子排序已上线，固化等两个窗口：`shadowRankVendors`（`vendorRouter.ts`）按单位有效交付成本排，阶梯仍按 `rankVendors` 走，每次写 `vendor_rank_shadow` trace（见进度 2026-10-21）。
-- [ ] **G4 Cloud Run 固定运行时（研究，按决定 5；2026-10-21 定：K2、K3、D6 OTTO 片段完成后开，预算 $10，项目 `octopus-w2l-20260924-7r7`、区域 `asia-southeast1`，直连和 Webshare 各一轮本机对云端配对，跑完删临时资源）。** 镜像 digest、Chrome/Playwright 版本、字体、locale、显示参数固定，影响指纹或检测的参数只用 ADR 0005 测量过的那一组；启动自检分项（Xvfb、CDP、浏览器、DNS、代理控制页）；init 子进程回收与信号转发、admission control、保留非 root；分别计时冷启动、导航、challenge wait、region wait、捕获、提取、序列化、取消清理；资源配置用困难页负载曲线定；做一次本地 vs Cloud Run 同 16 题同出口的配对运行，隔离 Xvfb/出口/CDP 的归因（方案 §四.3）。只出记录，不开放托管 PA。出口成功率的测量与云功能计划 step 0 用同一 parity 站点集，记录可共用。
+- [x] **G4 Cloud Run 固定运行时（研究，按决定 5；2026-10-21 定：K2、K3、D6 OTTO 片段完成后开，预算 $10，项目 `octopus-w2l-20260924-7r7`、区域 `asia-southeast1`，直连和 Webshare 各一轮本机对云端配对，跑完删临时资源）。** 镜像 digest、Chrome/Playwright 版本、字体、locale、显示参数固定，影响指纹或检测的参数只用 ADR 0005 测量过的那一组；启动自检分项（Xvfb、CDP、浏览器、DNS、代理控制页）；init 子进程回收与信号转发、admission control、保留非 root；分别计时冷启动、导航、challenge wait、region wait、捕获、提取、序列化、取消清理；资源配置用困难页负载曲线定；做一次本地 vs Cloud Run 同 16 题同出口的配对运行，隔离 Xvfb/出口/CDP 的归因（方案 §四.3）。只出记录，不开放托管 PA。出口成功率的测量与云功能计划 step 0 用同一 parity 站点集，记录可共用。
+  - 结果（2026-10-21，`6de7c370`，记录 `research/access/runs/2026-10-21-g4-cloudrun-fixed-runtime-22c9e1ca.md`）：
+    - 固定镜像在 Cloud Run 上全部自检通过，每个走到 installed_chrome 的任务都正常启动了 Chrome。
+    - 自有出口两轮各过 3/16 和 1/16；同时段本机走 Clash 过 10/16。两边出口不同，不能拆分归因。
+    - Webshare 两轮各过 9/16 和 8/16，其中每轮由 installed_chrome 交付的是 5 题。
+    - 本机 Webshare 只过 2/16：本机经网关入口 23.81.42.155 的连接在 installed_chrome 里报 `ERR_EMPTY_RESPONSE` 等连接层错误，断在哪一段不知道。同出口配对没有做成，Xvfb 与出口的归因仍未定。
+    - 已知费用约 $0.33–$0.36，Webshare 流量 unknown。
+    - 临时资源已删除。
+  - 本轮没有做到的：困难页负载曲线（仍是 4 vCPU / 8 GiB 一档、并发 1）、每题清理计时、Xvfb/出口/CDP 的归因。需要时另开一项。
 - [x] **G5 公开的捕获字段（B3 经 F3a 用过、稳定后）。** Evidence 和 Evidence Record 加可选 `document: { captureId, generation, responseMatch }`，登记 `EVIDENCE_RECORD_ADDED_KEYS` 与 `packages/contracts/schemas/evidence-record.v1.json`，`w2l.evidence/1` 保持有效；测试在 `packages/contracts/test/evidenceRecord.test.ts`。
 - 验收：每周重跑的 Steel 臂记录含 G2a 字段和单位成本；G1 的测试；G5 的 key 列表测试；路线决策不变。
 
@@ -278,6 +286,15 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 - 2026-10-21：K2 资格复查（`main` `5beacbf3`，curl 调 Browserbase API（不经 Octocrawl 代码）、走 Clash，计 1 browser minute，Free 套餐下 $0，套餐本身 unknown）：verified 仍 403（Enterprise plan 原文同 10-13），文档写 Scale；本账户不可用，不做配对实验。记录 `research/access/runs/2026-10-21-k2-browserbase-entitlement-5beacbf3.md`。
 - 2026-10-21：D6 第二片段（OTTO 变体与起价）完成（一个 PR，分支 `claude/pa-d6-otto-variant-e2c51a`，从 `main` `5beacbf3` 拉）。测试先在 `main` 上失败 3 例（提交 `5c0dbb7c`），改后通过（`878c2d81`）；干净审查找出 4 个阻止合并的问题（只有起价时会读成旁边的运费价、整行任意位置的"Raten"和西班牙 PVP 把唯一现价变成 null、描述性属性写法不同把同一商品拆开、兜底逐对比较成平方复杂度），在 `23c50125` 修好并各加回归测试（三例在上一版失败），12,000 个价格的页面从 130 倍解析时间降到约 2 倍（`main` 1.5 倍）；复审又找出行内另一金额的标签（"statt 29,99 €"）被当成本价格的、价格旁深层嵌套导致栈溢出，在 `7c1cdeca`、`196ad38f` 修好，注释不算页面文字在 `1115ea72`；最后一次复审没有阻止合并的问题。#584 的做法是在列表页按 OTTO 的 `oc-link-v2`/`reptile-price` 恢复变体链接，按站点载体写的，没有取；按 `main` 的主体解析重写成两条通用规则。一、主体：JSON-LD 的 PropertyValue（`additionalProperty`、`identifier`）名字和值正好是请求 URL 的查询参数（`?variationId=V201` 对 `{name: variationId, value: V201}`）时选中该节点，作为第一层 SUBJECT_TIERS；同名属性值不相交的两个声明是两件商品；选中的属性进 `identity.selectedVariants` 和各 fact 的 `context.variant`；只有值相同、名字不同不选（`?variant=blue` 不选 `color: blue`）。URL 不选变体时按 D2 保持 `conflicting`，只报各候选一致的字段。二、可见价格兜底：每个价格元素按金额前后的词（多语词表，同 `absence.ts` 的做法）和删除线分成现价、划线/UVP、起价（ab/from）、分期（mtl./Raten）；价格取最深的现价，起价、划线价、分期永远不当现价，只有起价时价格为 null；价格框里出现非现价时全部写进 `prices`，种类在 `context.offerType`；普通单品页不变。`EXTRACTOR_VERSION` 升到 `extract-tf/34`（Markdown 摘要不变）。同日配对（R3 评分器，本机回环，$0，对照 `main` `5beacbf3`、候选 `878c2d81`，每次修复后在 `23c50125`、`7c1cdeca`、`196ad38f`、`1115ea72` 重跑，结果相同）：markdown 请求 D 34/86、H 75/75、v2 229/294，json/verify 请求 D 0/86、H 0/75、v2 29/294，两边逐字段、逐题相同，120 次请求的 status/Markdown/tables/links/json 完全一致；这些集合里没有这类商品页，测不到本改动。实站 J08（OTTO 笔记本页 `?variationId=1996119866`）：`main` 与分支（`878c2d81`，修复后 `23c50125` 再跑一次；之后的修复只改文本兜底，页面在抽取前就被拒，没有再跑）各跑代理、直连，六次都是 `failed`/`http_error` HTTP 400（只试 http 通道；同 URL 的 curl 拿到 Kasada 挑战页），照实记录、未换页面；检查项按 OTTO 列表页（D05）对同一变体的声明写。记录 `research/accuracy/runs/2026-10-21-d6-otto-paired-5beacbf3-878c2d81.md`、`research/parity/runs/2026-10-21-pa-d6-otto-*.md`。延后：JSON-LD `priceSpecification`（`priceType` StrikethroughPrice/ListPrice、按月 UnitPriceSpecification）未读，现在只读 offer 的 `price`；只声明 AggregateOffer `lowPrice` 时可见的不带 ab 的价格仍会被兜底读成现价，归"聚合报价"片段；J08 要等能读到 OTTO 商品页（2026-10-21 走 HTTP 和本机浏览器 `waitFor` 都是 HTTP 400）。
 - 2026-10-21：K3 完成（一个 PR，分支 `claude/pa-k3-egress-pairs-a3be45`，从 `main` `5beacbf3` 拉）。16 题配对（`d29e2ba3`，两臂只差出口，四轮交替，控制页 8/8 通过）：Cloudflare 组 Clash 24/32 对 Webshare 5/32（达门槛），DataDome 组 5/28 对 0/28（未达，Webshare 可评估的只有 12 次），全部 37/64 对 7/64；不支持按检测类型选出口，交 K4。出口切换后 pacing 不重置（测试守护），单页 timeout 会重新计时，已修。记录 `research/access/runs/2026-10-21-k3-egress-by-detection-5beacbf3.md` 与 9 份每臂记录。
+- 2026-10-21：G4 完成（一个 PR，分支 `claude/pa-g4-cloudrun`，从 `main` `ab2d9bad` 拉，开跑前 rebase 到 `22c9e1ca`（#659））。
+  - 设计先提交，然后用固定镜像（digest `2e32005b…`）建 Cloud Run Job `octocrawl-g4-20261021`（4 vCPU / 8 GiB）。
+  - 配对结果，按本机对云端：
+    - 直连：本机经 Clash 10/16，云端 3/16 和 1/16。
+    - Webshare：本机 2/16，云端 9/16 和 8/16。
+    - 两臂假成功都是 0。
+  - 本机前两轮用的是旧 `dist/` 构建，保留并标注，补跑了一轮本机加一次云端执行。
+  - 第一次执行因 CMD 写错退出 127，保留在记录里。
+  - Job、两个镜像、临时 Secret 和构建源码包都已删除，删除命令和确认输出写在记录里。
 
 ## 下次从这里继续
 
