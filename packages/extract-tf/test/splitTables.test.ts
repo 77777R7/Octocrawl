@@ -15,7 +15,7 @@ const TEAMS = [
 ]
 const HEAD = ['W', 'L', 'PCT', 'GB']
 
-interface Options { order?: number[]; keys?: boolean; nameKeys?: (i: number) => string; between?: string; nameCols?: (t: typeof TEAMS[number], i: number) => string; valueCols?: (t: typeof TEAMS[number]) => string; valueHead?: string; nameHead?: string; rows?: number }
+interface Options { order?: number[]; keys?: boolean; nameKeys?: (i: number) => string; between?: string; nameCols?: (t: typeof TEAMS[number], i: number) => string; valueCols?: (t: typeof TEAMS[number]) => string; valueHead?: string; nameHead?: string; rows?: number /** name rows only */ }
 function group(title: string, o: Options = {}): string {
   const keys = o.keys ?? true
   const teams = TEAMS.slice(0, o.rows ?? TEAMS.length)
@@ -25,7 +25,7 @@ function group(title: string, o: Options = {}): string {
     `<table class="fixed-left"><thead><tr>${o.nameHead ?? '<th></th>'}</tr></thead><tbody>${teams.map(nameRow).join('')}</tbody></table>` +
     (o.between ?? '') +
     `<div class="scroller"><div class="shadow"></div><div class="inner"><table><thead><tr>${o.valueHead ?? HEAD.map((h) => `<th>${h}</th>`).join('')}</tr></thead>` +
-    `<tbody>${(o.order ?? teams.map((_, i) => i)).map(valueRow).join('')}</tbody></table></div></div></div></div>`
+    `<tbody>${(o.order ?? TEAMS.map((_, i) => i)).map(valueRow).join('')}</tbody></table></div></div></div></div>`
 }
 const page = (body: string) => `<!doctype html><html><head><title>League standings</title></head><body><main><h1>League Standings 2026-27</h1>${body}</main></body></html>`
 const URL = 'https://sport.fixture.test/league/standings'

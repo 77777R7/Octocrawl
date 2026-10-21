@@ -28,6 +28,7 @@ import { collectLabelledValues } from './labels.js'
 import { collectDeclaredValues } from './declared.js'
 import { collectPageMetadata } from './metadata.js'
 import { resolveReactStreaming } from './streaming.js'
+import { joinSplitTables } from './splitTables.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -180,6 +181,8 @@ export class ExtractTf implements Extractor {
     cleanTree(doc.document, excluded)
     pruneTree(doc.document, { blockAds })
     detachAll(excluded)
+    // A table drawn as a fixed name column beside its scrolling values is read as the one table it is.
+    joinSplitTables(doc.document)
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
     settleOptionGroups(optionGroups, decision.type === 'product')
