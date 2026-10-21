@@ -186,6 +186,12 @@ M16 was added on 2026-10-22 for PA D6, aggregate offers (`docs/pa-enhancement-ta
 | --- | --- | --- | --- |
 | M16 | Scrape of Skyscanner's London to Paris route page | The default Markdown keeps "Flight deals from London to Paris" with at least five deal cards, each with its "£… per passenger" price and its absolute `/transport/flights/…` link | scrape-formats.only-main-content |
 
+M17 was added on 2026-10-22 for PA D6, split standings tables (`docs/pa-enhancement-tasks.md`, D6). ESPN's NBA standings draw each conference as two tables side by side, a fixed one-column table of teams and a scrolling table of their statistics whose rows carry the same `data-idx`; before D6 the Markdown had the team names and the statistics in separate tables, so no row said whose record it was (task B010's checks, a table and a team name, passed all the same).
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M17 | Scrape of ESPN's NBA standings | Each conference is one GFM table whose header is the empty team column and W, L, PCT, GB, HOME, AWAY, DIV, CONF, PPG, OPP PPG, DIFF, STRK, L10, at least 15 rows; the Boston Celtics row holds its team link and its W and L; no one-column table is left | scrape-formats.markdown |
+
 M18 was added on 2026-10-22 for PA D6, the lead cards of a news collection (`docs/pa-enhancement-tasks.md`, D6). FT's technology section shows its lead story and its News and Opinion & Analysis cards above the chronological stream of 25 cards of the same teaser template, with Recommended and Most Read in a sidebar; before D6 the default Markdown was the stream alone. Plain HTTP got a security check proxied and no connection direct on 2026-10-22; the page is read on the browser lane, proxied. The check uses `markdownCountMin`, added to the runner with this case (distinct matches when `distinct` is set).
 
 | Case | Request | What it tests | Feature |
