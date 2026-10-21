@@ -8,12 +8,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPreviewServer } from '../src/server.js'
 import { createAuthRoutes, MemoryAccountStore, type IdentityProvider } from '../src/auth.js'
-import { createAccountRoutes, FirestoreAccountData, MAX_ACTIVE_KEYS, MemoryAccountData, playgroundRequest, type AccountRoutesOptions } from '../src/account.js'
+import { createAccountRoutes, FirestoreAccountData, hostedJobPath, MAX_ACTIVE_KEYS, MemoryAccountData, playgroundRequest, type AccountRoutesOptions } from '../src/account.js'
 import { accountConnections, MemoryOAuthStore, type GrantRecord } from '../src/oauth.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 // The hosted API itself, so the Playground's signed header is checked by the code that serves it.
-import { createHostedApi, MemoryHostedKeys, MemoryHostedQuota } from '../../mcp/src/hostedApi.js'
+import { createHostedApi, keyDigest, MemoryHostedKeys, MemoryHostedQuota } from '../../mcp/src/hostedApi.js'
 import { MemoryCreditsStore } from '../../mcp/src/hostedCredits.js'
+import { MemoryHostedJobStore, newHostedJob } from '../../mcp/src/hostedJobs.js'
 
 const SECRET = 's'.repeat(40)
 const servers: Server[] = []
@@ -381,5 +382,89 @@ describe('the Playground', () => {
       expect(playgroundRequest({ endpoint: 'scrape', url: 'https://example.org/', ...extra }), JSON.stringify(extra)).toBeNull()
     }
     expect(playgroundRequest({ endpoint: 'map', url: 'https://example.org', limit: 999_999, search: ' docs ' })).toEqual({ endpoint: 'map', body: { url: 'https://example.org/', limit: 5_000, search: 'docs' } })
+  })
+})
+
+describe('the Jobs page', () => {
+  // The hosted API with jobs on and no worker, and a key of another account; the page reads the signed-in account's
+  // (account-0001) jobs through the site's signed header.
+  async function hosted() {
+    const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening')
+    const port = (probe.address() as AddressInfo).port
+    await new Promise<void>(resolve => probe.close(() => resolve()))
+    const taskRoot = await mkdtemp(join(tmpdir(), 'w2l-jobs-page-')); dirs.push(taskRoot)
+    const store = new MemoryHostedJobStore()
+    const keys = new MemoryHostedKeys(new Map([
+      [keyDigest(SECRET, 'oc_theirs'), { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-0002' }],
+    ]))
+    const service = createHostedApi({
+      port, host: '127.0.0.1', taskRoot, hashKey: SECRET, keys, quota: new MemoryHostedQuota(), credits: new MemoryCreditsStore(1_000), networkPolicy: hostedNetworkPolicy(), log: () => {},
+      // Starts are invite only and the signed-in account is not invited: its reads still answer.
+      jobs: { store, files: { segment: async () => null, exportUrl: async job => `https://storage.example/${job.id}.jsonl.gz?signed` }, enqueueSlice: async () => {}, allows: async () => false },
+    })
+    if (!service.server.listening) await once(service.server, 'listening')
+    closers.push(service.close)
+    const origin = `http://127.0.0.1:${port}`
+    return { origin, store }
+  }
+  const closers: Array<() => Promise<void>> = []
+  afterEach(async () => { await Promise.all(closers.splice(0).map(close => close())) })
+  const read = async (url: string, cookie: string, path: string) => { const response = await fetch(`${url}${path}`, { headers: { cookie } }); return [response.status, await response.json()] as [number, Record<string, unknown>] }
+  /** A job of `uid`, as a start writes it (the gate refuses starts here, so the store takes it directly), one page read. */
+  const job = async (store: MemoryHostedJobStore, id: string, uid: string, kind: 'batch' | 'crawl', createdAt: string) => {
+    const request = kind === 'batch' ? { urls: ['https://example.com/a', 'https://example.com/b'] } : { url: 'https://example.com/', maxPages: 100 }
+    await store.create(newHostedJob({ id, workspaceId: `ws_${uid}`, uid, keyId: 'oc_mine', kind, request, maxCredits: null }, new Date(createdAt)), { maxRunning: 2, maxQueued: 10 }, null)
+    const made = store.jobs.get(id)!
+    store.jobs.set(id, { ...made, status: 'running', counts: { pages: 1, errors: 0, slices: 1 }, credits: { ...made.credits, used: 1 } })
+  }
+  const A = '6f1c2a4e-1b2c-4d3e-8f90-0123456789aa'
+  const B = '6f1c2a4e-1b2c-4d3e-8f90-0123456789bb'
+  const OTHER = '6f1c2a4e-1b2c-4d3e-8f90-0123456789cc'
+
+  it('lists the account\'s jobs a page at a time, reads one job, and gives a finished job\'s export link', async () => {
+    const api = await hosted()
+    await job(api.store, A, 'account-0001', 'batch', '2026-10-21T08:00:00.000Z')
+    await job(api.store, B, 'account-0001', 'crawl', '2026-10-21T09:00:00.000Z')
+    await job(api.store, OTHER, 'account-0002', 'crawl', '2026-10-21T10:00:00.000Z')
+    const { url, cookie } = await start(new Date(), { origin: api.origin })
+    const [status, first] = await read(url, cookie, '/api/account/jobs?limit=1')
+    expect(status).toBe(200)
+    expect(first).toMatchObject({ items: [{ taskId: B, kind: 'crawl', status: 'running', pagesFetched: 1 }], nextBefore: B, hasMore: true })
+    const [, second] = await read(url, cookie, `/api/account/jobs?limit=1&before=${B}`)
+    expect(second).toMatchObject({ items: [{ taskId: A, kind: 'batch', requested: 2, remaining: 1, credits: { used: 1, maxCredits: null } }], nextBefore: null, hasMore: false })
+    expect(await read(url, cookie, `/api/account/jobs/batches/${A}`)).toMatchObject([200, { taskId: A, status: 'running' }])
+    // Another account's job, or a job asked for under the other kind, is not found.
+    expect((await read(url, cookie, `/api/account/jobs/crawl/${OTHER}`))[0]).toBe(404)
+    expect((await read(url, cookie, `/api/account/jobs/crawl/${A}`))[0]).toBe(404)
+    // A running job has no export yet; a finished one has a link.
+    expect((await read(url, cookie, `/api/account/jobs/${A}/export`))[0]).toBe(409)
+    api.store.jobs.set(A, { ...api.store.jobs.get(A)!, status: 'completed', finishedAt: '2026-10-21T08:05:00.000Z', expireAt: new Date(Date.now() + 86_400_000).toISOString() })
+    expect(await read(url, cookie, `/api/account/jobs/${A}/export`)).toEqual([200, { url: `https://storage.example/${A}.jsonl.gz?signed`, expiresInSeconds: 900 }])
+  })
+
+  it('needs a session, reads only, refuses a bad id or query, and answers 503 without a hosted API and 502 when it refuses the site', async () => {
+    const api = await hosted()
+    const { url, cookie } = await start(new Date(), { origin: api.origin })
+    expect((await fetch(`${url}/api/account/jobs`)).status).toBe(401)
+    expect(await read(url, cookie, '/api/account/jobs')).toEqual([200, { items: [], nextBefore: null, hasMore: false }])
+    expect((await fetch(`${url}/api/account/jobs/batches/${A}`, { method: 'POST', headers: { cookie, origin: url } })).status).toBe(405)
+    for (const path of ['/api/account/jobs?limit=0', '/api/account/jobs?limit=51', '/api/account/jobs?before=x', `/api/account/jobs/batches/${A}/cancel`, '/api/account/jobs/x/export']) {
+      expect((await read(url, cookie, path))[0], path).toBe(400)
+    }
+    const without = await start(new Date())
+    expect((await read(without.url, without.cookie, '/api/account/jobs'))[0]).toBe(503)
+    const refused = await start(new Date(), { origin: 'http://127.0.0.1:9', fetcher: async () => new Response('{"code":"unauthorized"}', { status: 401 }) })
+    expect(await read(refused.url, refused.cookie, '/api/account/jobs')).toEqual([502, { error: 'hosted_refused' }])
+  })
+
+  it('maps only the reads the page makes', () => {
+    const q = (search = '') => new URLSearchParams(search)
+    expect(hostedJobPath('/api/account/jobs', q())).toBe('/v1/jobs?limit=20')
+    expect(hostedJobPath('/api/account/jobs', q(`limit=50&before=${A}`))).toBe(`/v1/jobs?limit=50&before=${A}`)
+    expect(hostedJobPath(`/api/account/jobs/crawl/${A}`, q())).toBe(`/v1/crawl/${A}`)
+    expect(hostedJobPath(`/api/account/jobs/${A}/export`, q())).toBe(`/v1/jobs/${A}/export`)
+    expect(hostedJobPath('/api/account/jobs', q('limit=05'))).toBeNull()
+    expect(hostedJobPath(`/api/account/jobs/jobs/${A}`, q())).toBeNull()
+    expect(hostedJobPath('/api/account/activity', q())).toBeUndefined()
   })
 })

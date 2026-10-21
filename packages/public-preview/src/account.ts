@@ -20,8 +20,13 @@
  *                                         takes it, or { endpoint: map, url, search?, limit? }
  *                                         →  the hosted API's answer, with X-Credits-Used and X-Credits-Remaining
  *
+ *   GET  /api/account/jobs?limit=&before= the account's hosted batch and crawl jobs, newest first: GET /v1/jobs
+ *   GET  /api/account/jobs/{batches|crawl}/{id}   one job's status: GET /v1/{batches|crawl}/{id}
+ *   GET  /api/account/jobs/{id}/export    { url, expiresInSeconds }: a finished job's export link, GET /v1/jobs/{id}/export
+ *
  * The Playground's run is the hosted API's own scrape or map, charged and logged there: this server names the account
- * in a header signed with W2L_QUOTA_HASH_KEY (hostedApi.ts, SITE_ACCOUNT_HEADER), so no key changes hands.
+ * in a header signed with W2L_QUOTA_HASH_KEY (hostedApi.ts, SITE_ACCOUNT_HEADER), so no key changes hands. The Jobs
+ * page reads the account's jobs (hostedJobRoutes.ts) the same way; it starts and cancels none.
  */
 import { createHmac, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -364,6 +369,29 @@ export function playgroundRequest(body: Record<string, unknown>): { endpoint: 's
   return { endpoint, body: { url: url.href, formats: options.formats ?? ['markdown', 'links'], ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}) } }
 }
 
+/** A job read waits this long for the hosted API, which answers it from Firestore. */
+const JOB_READ_TIMEOUT_MS = 15_000
+/** A job's id as the hosted API makes them (hostedJobRoutes.ts, JOB_ID: a UUID). */
+const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+/**
+ * The hosted API path a Jobs page read maps to: undefined for a path that is not one, null for one with a bad id or
+ * query. Only reads: the list, one job's status and a finished job's export link.
+ */
+export function hostedJobPath(pathname: string, query: URLSearchParams): string | null | undefined {
+  if (pathname === '/api/account/jobs') {
+    const limit = query.get('limit') ?? '20'
+    const before = query.get('before')
+    if (!/^[1-9]\d?$/.test(limit) || Number(limit) > 50 || (before !== null && !JOB_ID.test(before))) return null
+    return `/v1/jobs?limit=${limit}${before === null ? '' : `&before=${before}`}`
+  }
+  const status = /^\/api\/account\/jobs\/(batches|crawl)\/([^/]+)$/.exec(pathname)
+  if (status) return JOB_ID.test(status[2]!) ? `/v1/${status[1]}/${status[2]}` : null
+  const exported = /^\/api\/account\/jobs\/([^/]+)\/export$/.exec(pathname)
+  if (exported) return JOB_ID.test(exported[1]!) ? `/v1/jobs/${exported[1]}/export` : null
+  return pathname.startsWith('/api/account/jobs/') ? null : undefined
+}
+
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' }
 const send = (res: ServerResponse, status: number, body: unknown) => { res.writeHead(status, JSON_HEADERS).end(JSON.stringify(body)) }
 
@@ -426,6 +454,28 @@ export function createAccountRoutes(options: AccountRoutesOptions) {
       const since = new Date(at.getTime() - ACTIVITY_DAYS * 86_400_000).toISOString()
       const requests = (await options.data.requests(session.uid, ACTIVITY_LIMIT)).filter(line => line.at >= since)
       send(res, 200, { requests, limit: ACTIVITY_LIMIT, retentionDays: ACTIVITY_DAYS })
+      return true
+    }
+
+    const jobRead = hostedJobPath(pathname, new URL(req.url ?? '/', 'http://site').searchParams)
+    if (jobRead !== undefined) {
+      if (req.method !== 'GET') { res.writeHead(405, { allow: 'GET' }).end(); return true }
+      if (jobRead === null) { send(res, 400, { error: 'invalid_request' }); return true }
+      const hosted = options.hostedApi
+      if (hosted === undefined) { send(res, 503, { error: 'jobs_unavailable' }); return true }
+      try {
+        const response = await (hosted.fetcher ?? fetch)(`${hosted.origin.replace(/\/+$/, '')}${jobRead}`, {
+          headers: { accept: 'application/json', [SITE_ACCOUNT_HEADER]: siteAccountAssertion(options.hashKey, session.uid, at.getTime()) },
+          signal: AbortSignal.timeout(JOB_READ_TIMEOUT_MS),
+        })
+        let answer: unknown
+        try { answer = JSON.parse(await response.text()) } catch { send(res, 502, { error: 'hosted_unavailable' }); return true }
+        // As for a run: the hosted API refusing the site's header is not the visitor's session ending.
+        if (response.status === 401) { send(res, 502, { error: 'hosted_refused' }); return true }
+        send(res, response.status, answer)
+      } catch {
+        if (!res.writableEnded && !res.destroyed) send(res, 502, { error: 'hosted_unavailable' })
+      }
       return true
     }
 

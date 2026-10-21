@@ -4,12 +4,13 @@ import MarkdownIt from 'markdown-it'
 
 const escape = new MarkdownIt().utils.escapeHtml
 
-// The dashboard: one sidebar, eight pages, all filled by dashboard.js from GET /api/account; the Playground's two run
-// through POST /api/account/run. A dark page of its own, with
+// The dashboard: one sidebar, nine pages, all filled by dashboard.js from GET /api/account; the Playground's two run
+// through POST /api/account/run, and Jobs reads GET /api/account/jobs. A dark page of its own, with
 // no site header: the logo goes back to the site.
 export const DASHBOARD_PAGES = [
   ['/dashboard/', 'Overview', 'Workspace'],
   ['/dashboard/activity/', 'Activity', 'Workspace'],
+  ['/dashboard/jobs/', 'Jobs', 'Workspace'],
   ['/dashboard/usage/', 'Usage', 'Workspace'],
   ['/dashboard/scrape/', 'Scrape', 'Playground'],
   ['/dashboard/map/', 'Map', 'Playground'],
@@ -78,6 +79,20 @@ const activityBody = `<section class="panel" aria-labelledby="activity-title"><d
 <form class="filters" id="activity-filters"><label for="f-search">URL contains<input id="f-search" name="search" type="search" autocomplete="off" placeholder="example.com" /></label><label for="f-endpoint">Endpoint<select id="f-endpoint" name="endpoint"><option value="">All</option><option value="scrape">/scrape</option><option value="map">/map</option></select></label><label for="f-key">Key<select id="f-key" name="key"><option value="">All keys</option></select></label><label for="f-result">Result<select id="f-result" name="result"><option value="">All</option><option value="read">Read</option><option value="free">Not charged</option></select></label><button class="button quiet" type="button" id="export-csv">Export CSV</button></form>
 ${requestTable('activity', 0)}
 <p class="dash-small">Lines are kept 30 days and only you see them: the URL asked for, what came back and what it cost, with the body's SHA-256 from the Evidence Record. Never the page's content. The page shows the latest 1,000. Runs in the Playground show under the key Playground.</p></section>`
+/**
+ * Jobs (ROADMAP PH H2 P2): the account's hosted batch and crawl jobs from GET /api/account/jobs, newest first, a page at
+ * a time. dashboard.js fills the table, refreshes a queued or running job every few seconds while the page is open, and
+ * fetches a finished job's export link when its button is pressed. Starting a job stays with MCP, REST and the SDKs.
+ */
+const jobsBody = `<section class="panel" aria-labelledby="jobs-title"><div class="panel-head"><h2 id="jobs-title">Batch and crawl jobs</h2><span class="dash-small" id="jobs-count">&nbsp;</span></div>
+<div class="table-scroll" id="jobs-table"><table class="dash-table jobs"><thead><tr><th class="time-head">Started</th><th>Job</th><th>Status</th><th>Progress</th><th class="num">Credits</th><th>Finished</th><th>Results</th></tr></thead><tbody id="jobs-body"></tbody></table></div>
+<div class="jobs-empty" id="jobs-empty" hidden><p><strong>No jobs yet.</strong> Hosted crawl and batch jobs are open to invited accounts for now.</p><p>To start one, connect an MCP client with this account (<a href="/dashboard/connect/">Connect</a>) and ask it to crawl a site or batch-scrape a list of URLs: <a href="/docs/connect-mcp/#crawl-and-batch-jobs">Crawl and batch jobs</a> has the tools and limits. Each job shows here as it runs. On your own computer they run free and without an invite: <code>npx octocrawl serve</code>.</p></div>
+<div class="jobs-more"><button class="button quiet" type="button" id="jobs-more" hidden>Load more</button></div>
+<p class="dash-small">A job reads its pages a slice at a time, each priced as a scrape: 1 credit over HTTP, 5 in a browser. A running job's progress refreshes here every few seconds. Results are kept 7 days after a job finishes.</p></section>
+<section class="panel" aria-labelledby="jobs-read-title"><div class="panel-head"><h2 id="jobs-read-title">Read a job's results</h2><a href="/docs/connect-mcp/#crawl-and-batch-jobs">Docs →</a></div>
+<p><strong>Export</strong> on a finished job downloads every page it read as one gzipped JSON Lines file, one result with its Evidence Record a line. The link it opens works for 15 minutes.</p>
+<div class="field-box"><p class="field-label">MCP, with the job's id</p>${dashCode('jobs-mcp', 'get_batch_items { "id": "<job id>" }\nget_crawl_pages { "id": "<job id>" }')}</div>
+<div class="field-box"><p class="field-label">REST, with a key from API keys</p>${dashCode('jobs-rest', `curl https://api.octocrawl.dev/v1/batches/<job id>/items \\\n  -H 'authorization: Bearer oc_YOUR_KEY'\ncurl https://api.octocrawl.dev/v1/crawl/<job id>/pages \\\n  -H 'authorization: Bearer oc_YOUR_KEY'\ncurl https://api.octocrawl.dev/v1/jobs/<job id>/export \\\n  -H 'authorization: Bearer oc_YOUR_KEY'`)}</div></section>`
 const usageBody = `<section class="summary" aria-label="Summary">
 <div class="summary-main"><p class="kpi-label">Credits remaining</p><p class="summary-figure" id="sum-left">…</p><p class="dash-small" id="sum-renews">&nbsp;</p>${creditBar('sum-meter', 'Credits left of this month\'s grant')}</div>
 <div class="summary-cell"><p class="kpi-label">Credits used · 30 days</p><p class="kpi-value" id="sum-used">…</p></div>
@@ -236,6 +251,7 @@ const settingsBody = `<div class="settings-grid">
 export const DASHBOARD_BODIES = [
   ['/dashboard/', 'Overview', 'This month\'s credits, the last 30 days of use, and the lines to connect an agent.', overviewBody],
   ['/dashboard/activity/', 'Activity', 'Every call made with your keys in the last 30 days: what was asked for, what came back, and what it cost.', activityBody],
+  ['/dashboard/jobs/', 'Jobs', 'Hosted batch and crawl jobs on this account: their progress, what they cost and where their results are.', jobsBody],
   ['/dashboard/usage/', 'Usage', 'What the hosted API and MCP read for this account, day by day, and what it cost.', usageBody],
   ['/dashboard/scrape/', 'Scrape', 'Read one page as Markdown, with its Evidence Record, on this account\'s credits at the API\'s price.', playgroundBody('scrape')],
   ['/dashboard/map/', 'Map', 'List the URLs of a site from its sitemap and links, on this account\'s credits at the API\'s price.', playgroundBody('map')],
