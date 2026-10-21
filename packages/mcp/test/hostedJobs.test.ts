@@ -134,8 +134,11 @@ describe.each(stores)('%s job store', (_name, make) => {
     expect(await store.cancel('job-1', 'ws_account-1', NOW)).toMatchObject({ ok: true, promoted: 'job-2', job: { status: 'cancelled' } })
     expect(await store.cancel('job-3', 'ws_account-1', NOW)).toMatchObject({ ok: true, promoted: null, job: { status: 'cancelled' } })
     expect(await store.cancel('job-3', 'ws_account-1', NOW)).toMatchObject({ ok: true, promoted: null, job: { status: 'cancelled' } })
+    // While that slice still holds its lease, a delivery for the cancelled job is busy, not finished.
+    expect(await store.acquireLease('job-1', { generation: 0, holder: 'h2', ttlMs: 60_000 }, NOW)).toEqual({ ok: false, reason: 'busy' })
     // The slice that was running when the cancel came in writes its pages, but the job stays cancelled and nothing is promoted twice.
     expect(await store.commitSlice('job-1', 'h1', (j) => ({ ...j, status: 'completed', counts: { ...j.counts, pages: 7 } }), NOW)).toMatchObject({ ok: true, promoted: null, job: { status: 'cancelled', counts: { pages: 7 }, lease: null } })
+    expect(await store.acquireLease('job-1', { generation: 0, holder: 'h2', ttlMs: 60_000 }, NOW)).toEqual({ ok: false, reason: 'finished' })
     // job-2 got the slot; a new job queues behind it.
     expect(await store.create(job('job-4'), { maxRunning: 1, maxQueued: 2 }, null, NOW)).toMatchObject({ ok: true, job: { status: 'queued' } })
   })
