@@ -186,6 +186,12 @@ M16 was added on 2026-10-22 for PA D6, aggregate offers (`docs/pa-enhancement-ta
 | --- | --- | --- | --- |
 | M16 | Scrape of Skyscanner's London to Paris route page | The default Markdown keeps "Flight deals from London to Paris" with at least five deal cards, each with its "£… per passenger" price and its absolute `/transport/flights/…` link | scrape-formats.only-main-content |
 
+M17 was added on 2026-10-22 for PA D6, split standings tables (`docs/pa-enhancement-tasks.md`, D6). ESPN's NBA standings draw each conference as two tables side by side, a fixed one-column table of teams and a scrolling table of their statistics whose rows carry the same `data-idx`; before D6 the Markdown had the team names and the statistics in separate tables, so no row said whose record it was (task B010's checks, a table and a team name, passed all the same).
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M17 | Scrape of ESPN's NBA standings | Each conference is one GFM table whose header is the empty team column and W, L, PCT, GB, HOME, AWAY, DIV, CONF, PPG, OPP PPG, DIFF, STRK, L10, at least 15 rows; the Boston Celtics row holds its team link and its W and L; no one-column table is left | scrape-formats.markdown |
+
 A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when `W2L_CONTACT` is set in the runner's environment and the API was started with the same value (`requiresEnv`); otherwise the runner reports it as skipped, never as passed. The record shows the value as `<W2L_CONTACT>`.
 
 | Case | Request | What it tests | P1 items |
