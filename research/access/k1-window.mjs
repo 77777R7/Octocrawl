@@ -206,6 +206,8 @@ try {
     await Promise.all(comp)
     await checkAwake(since, `block ${b}`)
   }
+  for (const c of COMPETITORS) manifest.credits.afterFirst = { ...manifest.credits.afterFirst, [c]: await usage(c) }
+  await saveManifest()
   if (!args.includes('--no-retry')) {
     const retry = {}
     for (const name of [...LOCAL, ...COMPETITORS]) retry[name] = await notVerified(name, tasks, 'first')
