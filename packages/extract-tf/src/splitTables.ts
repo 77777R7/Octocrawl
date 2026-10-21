@@ -79,6 +79,9 @@ function plan(left: Element, right: Element): { head: Array<[Element, Element]>;
   // A wide table that starts with the names, or with the name column's heading, is a table of its own (or the whole table, of which the narrow one is a fixed copy).
   if (l.body.every((row, i) => said(row, nameWidth) === said(values[i]!, nameWidth))) return null
   if (l.head.some((row, i) => said(row, nameWidth).replace(/\|/g, '') !== '' && said(row, nameWidth) === said(r.head[i]!, nameWidth))) return null
+  // A wide table whose first column is names of its own (distinct texts without a digit in every row) is a second list, not values.
+  const firsts = values.map((row) => textOf(cells(row)[0]!).replace(/\s+/g, ' ').trim())
+  if (firsts.every((t) => t !== '' && !/\d/.test(t)) && new Set(firsts).size === firsts.length) return null
   if (left.querySelector('caption') !== null && right.querySelector('caption') !== null) return null
   return { head: l.head.map((row, i) => [row, r.head[i]!]), body: l.body.map((row, i) => [row, values[i]!]) }
 }
@@ -96,10 +99,11 @@ function targetedIds(doc: Document): Set<string> {
   return ids
 }
 
-/** A wrapper that marks a region of its own: a tab panel, a labelled or hidden part, one the page's controls point at. */
+/** A wrapper that marks a region of its own: a tab panel, a labelled or hidden part (by attribute or inline style), one the page's controls point at. */
 function ownRegion(el: Element, targeted: ReadonlySet<string>): boolean {
   const role = (el.getAttribute('role') ?? '').toLowerCase()
   return role === 'tabpanel' || role === 'tab' || role === 'dialog' || el.hasAttribute('aria-labelledby') || el.hasAttribute('hidden') ||
+    el.getAttribute('aria-hidden') === 'true' || /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)/i.test(el.getAttribute('style') ?? '') ||
     (el.id !== '' && targeted.has(el.id))
 }
 
