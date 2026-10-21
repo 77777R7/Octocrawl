@@ -290,20 +290,21 @@ function overlaps<T>(a: Set<T>, b: Set<T>): boolean {
  * Whether two declarations are the same product, provably different ones, or
  * cannot be told apart: a shared identifier makes them one; two node
  * identifiers, or two values of one identifier kind, that differ make them
- * two, as do two values of one named property (a `variationId`, a size)
- * that share none; then their URLs; then their names, which differ between
+ * two, as do two values of a property the request URL names as a query
+ * parameter (a `variationId`) that share none; then their URLs; then their names, which differ between
  * two syntaxes of one product ("Mug", "Mug - Blue") but not between two nodes
  * of one. A shared property value proves nothing: two products can both be
- * 16 GB.
+ * 16 GB. Nor does a descriptive property written two ways ("Stoneware",
+ * "Stoneware (glazed)") that the request does not select by.
  */
-function relation(da: DeclaredProduct, db: DeclaredProduct): 'same' | 'different' | 'unknown' {
+function relation(da: DeclaredProduct, db: DeclaredProduct, query: ReadonlyMap<string, unknown>): 'same' | 'different' | 'unknown' {
   const a = keysOf(da)
   const b = keysOf(db)
   if (overlaps(a.ids, b.ids)) return 'same'
   if (da.node !== null && db.node !== null) return da.node === db.node ? 'same' : 'different'
   if (overlaps(a.kinds, b.kinds)) return 'different'
   for (const [name, values] of a.params) {
-    const other = b.params.get(name)
+    const other = query.has(name) ? b.params.get(name) : undefined
     if (other !== undefined && !overlaps(values, other)) return 'different'
   }
   if (a.full.size > 0 && b.full.size > 0) {
@@ -314,10 +315,10 @@ function relation(da: DeclaredProduct, db: DeclaredProduct): 'same' | 'different
   return 'unknown'
 }
 
-function relationToAll(members: readonly DeclaredProduct[], d: DeclaredProduct): 'same' | 'different' | 'unknown' {
+function relationToAll(members: readonly DeclaredProduct[], d: DeclaredProduct, query: ReadonlyMap<string, unknown>): 'same' | 'different' | 'unknown' {
   let different = false
   for (const m of members) {
-    const r = relation(m, d)
+    const r = relation(m, d, query)
     if (r === 'same') return 'same'
     if (r === 'different') different = true
   }
@@ -734,12 +735,11 @@ export function findPriceElement(scope: ParentNode): Element | null {
  * or its class names beyond the strike-through.
  */
 type PriceKind = 'current' | 'list' | 'from' | 'installment'
-const LIST_BEFORE = /(?:^|[\s(])(?:uvp|rrp|msrp|srp|pvp|list(?:en)?\s?pre?is|list price|statt|was|war|vorher|ursprünglich|originally|regular price|reg\.|prix conseillé|prix barré|prezzo consigliato)\s*:?\s*$/iu
+const LIST_BEFORE = /(?:^|[\s(])(?:uvp|rrp|msrp|srp|list(?:en)?\s?pre?is|list price|statt|was|war|vorher|ursprünglich|originally|regular price|reg\.|prix conseillé|prix barré|prezzo consigliato)\s*:?\s*$/iu
 const FROM_BEFORE = /(?:^|[\s(])(?:ab|from|starting (?:at|from)|as low as|à partir de|dès|desde|a partir de|da|vanaf|vana|od|från|fra|alkaen)\s*:?\s*$/iu
 const FROM_AFTER = /^\s*(?:起|から|～|~)/u
 const INSTALLMENT_BEFORE = /(?:\d\s?[x×]|raten?\s+(?:à|a|zu|von|of)|monthly|monatlich|mtl\.)\s*:?\s*$/iu
 const INSTALLMENT_AFTER = /^\s*(?:\/\s*(?:mo|mth|month|monat|mon|mois|mes|mese|maand)\b|(?:mtl|monatl)\.|monatlich|monthly|(?:per|a|pro|im|par|al|im)\s+(?:month|monat|mois|mes|mese)\b|x\s?\d)/iu
-const INSTALLMENT_ANYWHERE = /(?:^|[\s(])(?:\d+\s+)?(?:raten|instal+ments?|mensualités?|cuotas|rate mensili)(?:[\s).,]|$)/iu
 const STRUCK_TAGS: ReadonlySet<string> = new Set(['s', 'del', 'strike'])
 const STRUCK_TOKEN = /^(?:strike|strikethrough|striked|struck|crossed|crossedout|linethrough)$/i
 
@@ -749,16 +749,21 @@ function struck(el: Element): boolean {
   return (el.getAttribute('class') ?? '').split(/[\s_-]+/).some((token) => STRUCK_TOKEN.test(token))
 }
 
+/** How far up a price element's line is read for its label: a struck amount's "UVP" is a level or two up. */
+const LINE_LEVELS = 3
+
 /**
  * A price element's line: its text with the words around it that belong to
- * it alone, read up its ancestors while they hold no other shown price and
- * stay price-label short ("UVP" before a struck amount).
+ * it alone, read up to LINE_LEVELS ancestors while they hold no other shown
+ * price (`leavesIn` counts them) and stay price-label short ("UVP" before a
+ * struck amount). An ancestor holding one price only is disjoint from every
+ * other's, so the texts read add up to the page once.
  */
-function priceLine(el: Element, leaves: readonly Element[], doc: Document): { line: Element; text: string } {
+function priceLine(el: Element, leavesIn: ReadonlyMap<Element, number>, doc: Document): { line: Element; text: string } {
   let line = el
-  for (let up = el.parentElement; up !== null && !isRootish(doc, up); up = up.parentElement) {
-    // Another price inside it first: an ancestor holding one price only is disjoint from every other's, so the texts read add up to the page once.
-    if (leaves.some((other) => other !== el && up!.contains(other)) || textOf(up).trim().length > 60) break
+  let up = el.parentElement
+  for (let level = 0; level < LINE_LEVELS && up !== null && !isRootish(doc, up); level++, up = up.parentElement) {
+    if ((leavesIn.get(up) ?? 0) > 1 || textOf(up).trim().length > 60) break
     line = up
   }
   return { line, text: collapse(textOf(line)) }
@@ -770,7 +775,7 @@ function priceKind(el: Element, line: Element, text: string): PriceKind {
   const before = amount === null ? text : text.slice(0, amount.index)
   const after = amount === null ? '' : text.slice(amount.index + amount[0].length)
   if (LIST_BEFORE.test(before)) return 'list'
-  if (INSTALLMENT_BEFORE.test(before) || INSTALLMENT_AFTER.test(after) || INSTALLMENT_ANYWHERE.test(text)) return 'installment'
+  if (INSTALLMENT_BEFORE.test(before) || INSTALLMENT_AFTER.test(after)) return 'installment'
   if (FROM_BEFORE.test(before) || FROM_AFTER.test(after)) return 'from'
   return 'current'
 }
@@ -782,33 +787,70 @@ const PRICE_TYPE: Readonly<Record<PriceKind, ProductPrice['priceType']>> = { cur
  * machine-readable path above, and labelled as such, with the element it was
  * read from.
  *
- * The price is the deepest shown price that is the price to pay now: a list
- * price, a starting price or an instalment is not, however deep. When the
- * price box (the outermost price element holding it, with the price boxes
- * beside it) shows such other kinds, every price in it is reported in
- * `prices` with its kind as `context.offerType`, and the price carries
- * `current`; without one, the price is reported as before. When the box shows
- * no price to pay now, the price stays null.
+ * The deepest shown price names the price box: the outermost price element
+ * holding it, with the price boxes beside it. The price is the deepest price
+ * in that box that is the price to pay now: a list price, a starting price or
+ * an instalment is not, however deep, and a price outside the box (shipping,
+ * an add-on) is never read in its place. When the box shows such other kinds,
+ * every price in it is reported in `prices` with its kind as
+ * `context.offerType`, and the price carries `current`; without one, the price
+ * is reported as before. When the box shows no price to pay now, the price
+ * stays null.
  */
 function factsFromText(doc: Document): Partial<ProductFacts> {
   const all = qsa(doc, '[id],[class]').filter(isPriceElement)
-  const leaves = all.filter((el) => !all.some((other) => other !== el && el.contains(other)))
-  if (leaves.length === 0) return {}
-  const depth = (el: Element) => {
-    let n = 0
-    for (let p = el.parentElement; p; p = p.parentElement) n++
-    return n
+  if (all.length === 0) return {}
+  const priced = new Set(all)
+  // Elements holding a price element: marked up each one's ancestors, stopping where an earlier one marked them.
+  const holders = new Set<Element>()
+  for (const el of all) for (let p = el.parentElement; p !== null && !holders.has(p); p = p.parentElement) holders.add(p)
+  const leaves = all.filter((el) => !holders.has(el))
+  // Whether an element sits inside a price element (memoized for the non-price elements on the path read), and how deep it is.
+  const inside = new Map<Element, boolean>()
+  const insidePrice = (el: Element): boolean => {
+    const path: Element[] = []
+    let p = el.parentElement
+    let known = false
+    for (; p !== null; p = p.parentElement) {
+      if (priced.has(p)) { known = true; break }
+      const memo = inside.get(p)
+      if (memo !== undefined) { known = memo; break }
+      path.push(p)
+    }
+    for (const q of path.reverse()) inside.set(q, known || priced.has(q))
+    inside.set(el, known)
+    return known
+  }
+  const depths = new Map<Element, number>()
+  const depth = (el: Element): number => {
+    const path: Element[] = []
+    let p: Element | null = el
+    let base = -1
+    for (; p !== null; p = p.parentElement) {
+      const memo = depths.get(p)
+      if (memo !== undefined) { base = memo; break }
+      path.push(p)
+    }
+    for (const q of path.reverse()) depths.set(q, ++base)
+    return depths.get(el)!
   }
   const deepest = (els: readonly Element[]): Element | null => els.reduce<Element | null>((best, el) => (best === null || depth(el) > depth(best) ? el : best), null)
-  const kinds = new Map(leaves.map((el) => {
-    const { line, text } = priceLine(el, leaves, doc)
+  // The price the page shows deepest (the buy box's, once neighbours are pruned) names the price box; its kinds are read there only.
+  const anchor = deepest(leaves)!
+  let box = anchor
+  for (let p = anchor.parentElement; p !== null; p = p.parentElement) if (priced.has(p)) box = p
+  const boxes = all.filter((el) => el.parentElement === box.parentElement && !insidePrice(el))
+  const shown = boxes.flatMap((b) => (holders.has(b) ? qsa(b, '[id],[class]').filter((el) => priced.has(el) && !holders.has(el)) : [b]))
+  const leavesIn = new Map<Element, number>()
+  for (const el of leaves) {
+    let p = el.parentElement
+    for (let level = 0; level < LINE_LEVELS && p !== null; level++, p = p.parentElement) leavesIn.set(p, (leavesIn.get(p) ?? 0) + 1)
+  }
+  const kinds = new Map(shown.map((el) => {
+    const { line, text } = priceLine(el, leavesIn, doc)
     return [el, { kind: priceKind(el, line, text), text }] as const
   }))
-  const chosen = deepest(leaves.filter((el) => kinds.get(el)!.kind === 'current'))
-  const anchor = chosen ?? deepest(leaves)!
-  const box = all.filter((el) => el.contains(anchor)).find((el) => !all.some((other) => other !== el && other.contains(el))) ?? anchor
-  const boxes = all.filter((el) => el.parentElement === box.parentElement && !all.some((other) => other !== el && other.contains(el)))
-  const shown = leaves.filter((el) => boxes.some((b) => b.contains(el)))
+  const chosen = deepest(shown.filter((el) => kinds.get(el)!.kind === 'current'))
   const amountOf = (el: Element): string | null => PRICE_RE.exec(collapse(textOf(el)))?.[0] ?? null
   if (shown.every((el) => kinds.get(el)!.kind === 'current')) {
     return chosen === null ? {} : { price: fact(amountOf(chosen), 'text', selectorOf(chosen)) }
@@ -905,7 +947,7 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
     let same: DeclaredProduct[] | null = null
     let distinct = true
     for (const members of subjects) {
-      const r = relationToAll(members, d)
+      const r = relationToAll(members, d, ctx.query)
       if (r === 'same') {
         same = members
         break
@@ -956,7 +998,7 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
 
   const subject = left[0]!
   // A declaration nested in another node's property is a related item unless it is provably this one.
-  const bound = loose.filter((d) => !d.nested && relationToAll(subject, d) !== 'different')
+  const bound = loose.filter((d) => !d.nested && relationToAll(subject, d, ctx.query) !== 'different')
   for (const d of loose) if (!bound.includes(d)) evidence.push(`${label([d])}: another product, not merged`)
   // The meta tags are about the page, not one of its declared products: they
   // are this product's when no other one stands beside it (related items

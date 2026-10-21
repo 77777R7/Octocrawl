@@ -499,6 +499,42 @@ describe('PDP facts: a selected variant and the kinds of price a page shows (D6)
       { url: 'https://shop.example/p/mug?variant=blue' })
     expect(mug.product?.identity?.status).toBe('conflicting')
   })
+
+  it('reads the price kinds in the buy box only, never a shipping or add-on price in its place', () => {
+    const head = ld({ '@type': 'Product', name: 'Sofa Lund', sku: 'SL-1' })
+    const sofa = (beside: string) => `<!doctype html><html><head>${head}</head><body><main><h1>Sofa Lund</h1>
+<div class="buybox"><div class="wrap"><div class="inner"><span class="price">ab 999,00 €</span></div></div>${beside}
+<p>A three-seat sofa in woven wool, its frame of solid oak, delivered assembled.</p></div></main></body></html>`
+    for (const beside of ['<p class="shipping">Versand <span class="shipping-price">4,95 €</span></p>', '<div class="addon"><span class="price">49,00 €</span></div>']) {
+      const out = extractTf.extract(sofa(beside), { url: 'https://shop.fixture.test/p/sofa' })
+      expect(out.product?.price).toBeNull()
+      expect(out.product?.prices?.map((p) => [p.amount.value, p.amount.context?.offerType])).toEqual([['999,00 €', 'from']])
+    }
+  })
+
+  it('keeps a lone price whose label or note names no other kind', () => {
+    const head = ld({ '@type': 'Product', name: 'Lamp', sku: 'LP-1' })
+    const lamp = (box: string) => `<!doctype html><html><head>${head}</head><body><main><h1>Lamp</h1>${box}
+<p>A brass reading lamp with a linen shade, wired for any European socket.</p></main></body></html>`
+    // A note after the amount that financing exists, and Spain's statutory retail price label.
+    for (const [box, price] of [['<div><span class="price">499,00 €</span> <small>auch in Raten</small></div>', '499,00 €'], ['<div class="product-price">PVP: 19,99 €</div>', '19,99 €']]) {
+      const out = extractTf.extract(lamp(box!), { url: 'https://shop.fixture.test/p/lamp' })
+      expect(out.product?.price?.value).toBe(price)
+      expect(out.product?.prices).toBeUndefined()
+    }
+  })
+
+  it('does not split one product over a descriptive property written two ways', () => {
+    const html = `<!doctype html><html><head>${ld({ '@type': 'Product', name: 'Mug', sku: 'MUG-1', url: 'https://s.test/p/mug',
+      additionalProperty: [{ '@type': 'PropertyValue', name: 'Material', value: 'Stoneware' }], offers: { '@type': 'Offer', price: '9.00', priceCurrency: 'EUR' } })}${ld({
+      '@type': 'Product', name: 'Mug', url: 'https://s.test/p/mug', additionalProperty: [{ '@type': 'PropertyValue', name: 'Material', value: 'Stoneware (glazed)' }],
+      aggregateRating: { '@type': 'AggregateRating', ratingValue: 4.5, reviewCount: 10 } })}</head><body><main><h1>Mug</h1>
+<p>A stoneware mug glazed by hand, fired twice, holding a third of a litre.</p></main></body></html>`
+    const out = extractTf.extract(html, { url: 'https://s.test/p/mug' })
+    expect(out.product?.identity?.status).toBe('matched')
+    expect(out.product?.price?.value).toBe('9.00')
+    expect(out.product?.sku?.value).toBe('MUG-1')
+  })
 })
 
 describe('PDP region selection', () => {
