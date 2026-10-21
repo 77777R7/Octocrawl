@@ -58,7 +58,7 @@
 2. **未合入 PR 的处置。** 草稿：#584（106 文件，NO-GO）、#528、#582；非草稿的开放 PR：#512、#514、#515；研究草稿 #556、#562 见 R1/R3。默认：#512/#514 的内容 #591 已带入 `main`（verify/9 含 uniqueBy），关闭；#584/#528/#582 的 D 类片段按 D6 拆成小 PR 后关闭原 PR；#515（Skyscanner 验证码分类）单独审。影响 P0.3、D6。
 3. **保留字段集由谁标注。已定（2026-10-20）：本窗口选题并标注，Howard 或一位外部人抽查 20%，标注记录写明谁标谁查。** 方案 §十一.1 要求独立标注、不参与修复的人复核。原默认：#556 的 D01–D10 做开发集、H01–H08 降为回归集；新保留集 v2 由本窗口选 URL 并标注，你或一位外部人抽查 20% 的字段。影响 R2、Phase 2 验收。
 4. **PA 与 H1 的时间分配。** ROADMAP 写"尚未设定"。默认：Phase 0–2 的 PA 任务先行，H1 PR ④ 在另一个窗口并行。`packages/mcp/src/hostedCredits.ts` 只由 PR ④ 窗口改，本清单 EH1 的字段改动排在 PR ④ 之后；给 PR ④ 的接口约定由 P0.6 送达，`docs/h1-hosted-jobs-tasks.md` 由 H1 窗口自己改。
-5. **Cloud Run 固定运行时实验（G4）。** 要起 Cloud Run Job、花钱。默认：从 Phase 1 起可并行做，起任何 `gcloud` 之前问你。
+5. **Cloud Run 固定运行时实验（G4）。已定（2026-10-21，Howard）：等 K2、K3 和 D6 的 OTTO 片段都完成后开 G4；预算上限 $10，超出先问；在项目 `octopus-w2l-20260924-7r7`、区域 `asia-southeast1` 建一个固定镜像的 Cloud Run Job，每条 `gcloud` 命令都带 `--project`；本机与云端在同 16 题、同出口上配对，直连和 Webshare 各一轮；跑完删掉临时资源；只出记录，不开放托管增强访问。** 原说明：要起 Cloud Run Job、花钱，起任何 `gcloud` 之前问你。
 6. **Browserbase 资格复查（K2）。** 官方文档已把 Verified 写成 Scale 可用。默认：只查账户页面和一次 403/200 探测，不买任何套餐；要买先问。
 7. **每周重跑的范围、费用和调度。已定（2026-10-20）：三类臂都跑：Octocrawl 免费臂（25 健康 + 16 挑战用只列 installed_chrome 的 grant + 10 题轮换 frozen，健康与轮换组 standard）、Steel enhanced 臂（同 51 题，约 $0.02/周，持续花费，不在决定 1 的 $10 里）、竞品臂（Firecrawl Cloud、ZenRows 各跑同 51 题，每周约 51 次调用/家，额度见决定 10）。差距数字每周刷新，K1 仍是正式的两窗口对照。** 调度用桌面 app 的计划任务跑在你的 Mac（launchd 被 TCC 挡，同 `octocrawl-cleanup-gone` 的做法），建计划任务前仍要你点头。影响 P0.4、P0.2 的 item 9 措辞。
 8. **8791 本地 host 何时重启。** A 合入后它要重启才读到 grant；CLAUDE.local.md 说不要动它，A4 也不会运行 `local-service.mjs install`（它会 bootout 再 bootstrap）。默认：A 的验收在 8797 起第二个 host 做、用完关掉，8791 由你自己择时重启。
@@ -93,7 +93,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 
 ## Phase 0 · 基线与整理（≤1 天，不改引擎）
 
-- [ ] **P0.5 runner 的分母（先做，P0.1 的记录要用它）。** 把 `research/access/run-set.mjs` 里的提前停止计数、planned / attempted / not_run 计算、记录头（含 `Grant:` 一行：grant 文件 SHA-256 与能力名）抽成纯模块 `research/access/runSetReport.mjs`；提前停止时把没跑的任务按 id 写进记录（`not_run`），删掉"不在分母里"那句；每题记录 `channelsTried`（ROADMAP item 11 未了点：T076 跳过 Steel 时 runner 没留 ladder trace）。
+- [x] **P0.5 runner 的分母（#610）（先做，P0.1 的记录要用它）。** 把 `research/access/run-set.mjs` 里的提前停止计数、planned / attempted / not_run 计算、记录头（含 `Grant:` 一行：grant 文件 SHA-256 与能力名）抽成纯模块 `research/access/runSetReport.mjs`；提前停止时把没跑的任务按 id 写进记录（`not_run`），删掉"不在分母里"那句；每题记录 `channelsTried`（ROADMAP item 11 未了点：T076 跳过 Steel 时 runner 没留 ladder trace）。
   - 测试落点：`packages/runtime/test/runSetReport.test.ts`，照 `verify.test.ts:6` 导入 judge.mjs 的写法导入 `../../../research/access/runSetReport.mjs`，喂一串带 proxyRefused 的合成 rows；`npm test` 自然包含它。
   - 同时按方案 §五.7 给旧 bench 指标改名，免得被当成正式准入数：`packages/bench/src/runner.ts:236` 的 `verifiedCompletionRate`（只计有真值标注的结果，或改名 contentfulWithTruthRate）、`phase3ScoreCli.ts:47/61` 的 `verifiedCompletion`、`liveCompareCli.ts:404` 过滤无 result 的 arm 改为计入 `no_result`；加一个小测试；文档写明唯一的正式准入协议是 run-set.mjs + 合同。不动已归档的 92 题报告。
   - 验收：`npx vitest run packages/runtime/test/runSetReport.test.ts` 绿；用 `--only` 两题 + 模拟连续 proxyRefused 跑出的记录里能看到 not_run 列表和 Grant 行。
@@ -103,7 +103,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - 16 题挑战子集（installed_chrome）：API 启动行照 `research/access/sticky-vs-rotating.sh:17-19` 的形式（`W2L_ACCESS_GRANT=.w2l/access/installed-chrome-grant.json`，`--port 8797`），但出口照验收记录 7b56397b 用 Clash（`HTTPS_PROXY=127.0.0.1:7890`），不是脚本里转发到 Webshare 住宅网关的 8796；`W2L_API_URL=http://127.0.0.1:8797`，`--set all --only T001,T002,T005,T034,T038,T045,T046,T047,T048,T049,T053,T068,T071,T076,B001,B008 --access '"enhanced"' --record …-pa-next-baseline-ic16-2ffd7f25.md`（默认 `--set frozen` 会筛掉 blind 的 B001/B008）。
   - 顺带记下 T060（ROADMAP item 4 未了点：每臂假成功）在这一轮是否仍是假成功，原因写 unknown 不猜。
   - 验收：两份记录，各有命令、commit、代理/直连、Grant 行、费用、planned/attempted/not_run；92 题的 verified/假成功/p50/p95 和健康 25 题的逐题结果写进本清单"进度"节。
-- [ ] **P0.2 ROADMAP 与文档修正（一个 docs PR，只改 ROADMAP 和 docs/access.md）。**
+- [x] **P0.2 ROADMAP 与文档修正（#609）（一个 docs PR，只改 ROADMAP 和 docs/access.md）。**
   - PA item 5 状态行：installed_chrome 已建成（`ladderCli.ts:306-324`），引用 ADR 0005 的实现/验收 2026-10-14、CHANGELOG 0.5.0、验收记录 7b56397b；每周重跑和出口按检测类型选择仍开放。不写未核实的记录数。
   - PA item 9：每周重跑按决定 7 的口径（三类臂：Octocrawl 免费、Steel enhanced、Firecrawl/ZenRows；差距数字每周刷新，K1 是正式两窗口对照）。
   - PH H1 行：PR ③ 已合入，下一项是 H1 清单的 W1。`docs/h1-hosted-jobs-tasks.md` 不动，由 H1 窗口改。
@@ -228,7 +228,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 - [x] **G2a RouteObservation 字段。** `VendorOutcome`（`vendorRouter.ts:59-70`）加 accessDelivered / regionLoaded / taskVerified / failureStage / readiness / reason、每次尝试的时间分解（G4 量的那些阶段名）、环境版本（浏览器大版本、出口配置版本），以及账本的 chargedUsd（取 `progress.paidCalls` 里已结算的值，`ladder.ts:1336-1340`，不是恒为 null 的 `result.usage.externalCostUsd`），在 `recordVendorOutcome`（`ladder.ts:1005-1018`）写入；Memory 与 File 两个 RoutingHistory 同步。失败测试放 `vendorRouter.test.ts` 和 `ladder.test.ts`，`ladderCli.test.ts`、`crawlCli.test.ts` 只改类型。
 - [x] **G2b 持久化与路线键。** 新文件 `packages/bench/src/routing/sqliteRoutingHistory.ts`（better-sqlite3 在 runtime 已用），文件在 `<taskRoot>/routing-history.sqlite`，实现 `RoutingHistory`；键从 host 扩成 (host, 路径族或任务族, 所需格式, 地区与出口类别, 浏览器/传输版本, 提取器/验证器版本, 策略版本)，带 TTL 和最小样本量，样本不足时回退到 (host, 出口类别) 再回退到固定阶梯，每次过期写失效原因（TTL、版本变化、出口变化）；浏览器大版本、站点模板或出口配置变更使相关记录过期；引擎在 `engine.ts:982-988` 用它替换 Memory；FileRoutingHistory 保留给 bench CLI；修掉 history 按 mode、channel 按 `mode|enhanced` 的 key 不一致。只存统计，不存 URL/cookie/凭据。
 - [ ] **G3 排序。** 单位有效交付成本代替累计成本；新 host、新版本或样本不足时用现有固定阶梯；先影子排序（只记日志，保持声明顺序），两个窗口一致收益后才固化。影子排序已上线，固化等两个窗口：`shadowRankVendors`（`vendorRouter.ts`）按单位有效交付成本排，阶梯仍按 `rankVendors` 走，每次写 `vendor_rank_shadow` trace（见进度 2026-10-21）。
-- [ ] **G4 Cloud Run 固定运行时（研究，按决定 5，可从 Phase 1 起并行）。** 镜像 digest、Chrome/Playwright 版本、字体、locale、显示参数固定，影响指纹或检测的参数只用 ADR 0005 测量过的那一组；启动自检分项（Xvfb、CDP、浏览器、DNS、代理控制页）；init 子进程回收与信号转发、admission control、保留非 root；分别计时冷启动、导航、challenge wait、region wait、捕获、提取、序列化、取消清理；资源配置用困难页负载曲线定；做一次本地 vs Cloud Run 同 16 题同出口的配对运行，隔离 Xvfb/出口/CDP 的归因（方案 §四.3）。只出记录，不开放托管 PA。出口成功率的测量与云功能计划 step 0 用同一 parity 站点集，记录可共用。
+- [ ] **G4 Cloud Run 固定运行时（研究，按决定 5；2026-10-21 定：K2、K3、D6 OTTO 片段完成后开，预算 $10，项目 `octopus-w2l-20260924-7r7`、区域 `asia-southeast1`，直连和 Webshare 各一轮本机对云端配对，跑完删临时资源）。** 镜像 digest、Chrome/Playwright 版本、字体、locale、显示参数固定，影响指纹或检测的参数只用 ADR 0005 测量过的那一组；启动自检分项（Xvfb、CDP、浏览器、DNS、代理控制页）；init 子进程回收与信号转发、admission control、保留非 root；分别计时冷启动、导航、challenge wait、region wait、捕获、提取、序列化、取消清理；资源配置用困难页负载曲线定；做一次本地 vs Cloud Run 同 16 题同出口的配对运行，隔离 Xvfb/出口/CDP 的归因（方案 §四.3）。只出记录，不开放托管 PA。出口成功率的测量与云功能计划 step 0 用同一 parity 站点集，记录可共用。
 - [x] **G5 公开的捕获字段（B3 经 F3a 用过、稳定后）。** Evidence 和 Evidence Record 加可选 `document: { captureId, generation, responseMatch }`，登记 `EVIDENCE_RECORD_ADDED_KEYS` 与 `packages/contracts/schemas/evidence-record.v1.json`，`w2l.evidence/1` 保持有效；测试在 `packages/contracts/test/evidenceRecord.test.ts`。
 - 验收：每周重跑的 Steel 臂记录含 G2a 字段和单位成本；G1 的测试；G5 的 key 列表测试；路线决策不变。
 
