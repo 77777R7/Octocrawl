@@ -312,6 +312,27 @@ describe('hosted job routes', () => {
     expect(enqueued).toEqual([])
   })
 
+  it('reads on from the cursor an MCP answer cut for size gives, after the page it names, across slices', async () => {
+    const { call, sliceWrote } = await start()
+    const taskId = ((await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(5) })).json()) as { taskId: string }).taskId
+    const page = (n: number) => ({ id: `step-${n}`, createdAt: `2026-10-21T18:20:4${n}.000Z`, url: `https://example.com/p/${n}`, status: 'success' })
+    await sliceWrote(taskId, [page(0), page(1), page(2)])
+    await sliceWrote(taskId, [page(3), page(4)])
+    // The MCP layer cuts an answer at its size budget and names the last page it kept, as the local API's cursors do.
+    const after = (n: number) => Buffer.from(JSON.stringify({ createdAt: page(n).createdAt, id: page(n).id }), 'utf8').toString('base64url')
+    const rest = await (await call('GET', `/v1/batches/${taskId}/items?limit=100&cursor=${after(1)}`, 'oc_one')).json() as { items: Array<{ url: string }>; hasMore: boolean; nextCursor: string | null }
+    expect(rest.items.map((item) => item.url)).toEqual([2, 3, 4].map((n) => `https://example.com/p/${n}`))
+    expect(rest).toMatchObject({ hasMore: false, nextCursor: null })
+    const limited = await (await call('GET', `/v1/batches/${taskId}/items?limit=1&cursor=${after(2)}`, 'oc_one')).json() as { items: Array<{ url: string }>; nextCursor: string }
+    expect(limited.items.map((item) => item.url)).toEqual(['https://example.com/p/3'])
+    // The cursor it answers is its own again, and reads on from there.
+    expect((await (await call('GET', `/v1/batches/${taskId}/items?limit=100&cursor=${limited.nextCursor}`, 'oc_one')).json() as { items: Array<{ url: string }> }).items.map((item) => item.url)).toEqual(['https://example.com/p/4'])
+    // A page the job does not hold, or a cursor of neither kind, is refused.
+    const gone = Buffer.from(JSON.stringify({ createdAt: '2026-10-21T00:00:00.000Z', id: 'step-9' }), 'utf8').toString('base64url')
+    expect((await call('GET', `/v1/batches/${taskId}/items?cursor=${gone}`, 'oc_one')).status).toBe(400)
+    expect((await call('GET', `/v1/batches/${taskId}/items?cursor=nonsense`, 'oc_one')).status).toBe(400)
+  })
+
   it('cancels a job of the account, frees its slot and queues the first slice of the job that takes it', async () => {
     const { call, enqueued } = await start({ credits: new MemoryCreditsStore(100_000) })
     const ids: string[] = []

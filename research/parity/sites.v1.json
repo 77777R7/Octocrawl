@@ -1945,6 +1945,46 @@
       ]
     },
     {
+      "id": "M16",
+      "batch": "api",
+      "feature": "scrape-formats.only-main-content",
+      "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
+      "request": {"formats": ["markdown"]},
+      "note": "Added 2026-10-22 for PA D6 (aggregate offers). The route page declares one Product whose only offer is an AggregateOffer (lowPrice, priceCurrency GBP, no price) and shows the offers it sums up as a grid of linked, priced deal cards ('£18 per passenger', a /transport/flights/<from>/<to>/<date> link) with no heading of their own. Before D6 the product page's unlabelled-grid rule cut those cards as recommendations: the default Markdown kept the section's heading and text and none of its deals. Not matched by host: the rule reads the subject's declared offers (packages/extract-tf/src/product.ts, aggregateOnly). Direct, plain HTTP got a 708-byte script shell on 2026-10-22; proxied, the full page.",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "Flight deals from London to Paris"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "(?:£\\d+ per passenger[\\s\\S]*){5}"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "\\]\\(https://www\\.skyscanner\\.net/transport/flights/[A-Z]{3}/[A-Z]{3}/\\d{8}"}
+      ]
+    },
+    {
+      "id": "M17",
+      "batch": "api",
+      "feature": "scrape-formats.markdown",
+      "url": "https://www.espn.com/nba/standings",
+      "request": {"formats": ["markdown"]},
+      "note": "Added 2026-10-22 for PA D6 (split standings tables). The standings lay out each conference as two tables side by side: a fixed one-column table of teams and a scrolling table of their statistics (W, L, PCT, ... L10), whose rows match by position and by the same data-idx. Before D6 the Markdown had four tables, two of team names alone and two of statistics with no team, so no row said whose record it was (task B010's checks, a table and a team name, passed all the same). Not matched by host: the rule joins two adjacent tables with nothing between them whose body rows match one to one (packages/extract-tf/src/splitTables.ts). The header is checked as the page wrote it on 2026-10-22, each column name as text or as its sort link; values change daily, so rows are checked by shape.",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.markdown", "type": "table", "header": ["^$", "^\\[?W(?:\\]\\([^)]*\\))?$", "^\\[?L(?:\\]\\([^)]*\\))?$", "^\\[?PCT(?:\\]\\([^)]*\\))?$", "^\\[?GB(?:\\]\\([^)]*\\))?$", "^\\[?HOME(?:\\]\\([^)]*\\))?$", "^\\[?AWAY(?:\\]\\([^)]*\\))?$", "^\\[?DIV(?:\\]\\([^)]*\\))?$", "^\\[?CONF(?:\\]\\([^)]*\\))?$", "^\\[?PPG(?:\\]\\([^)]*\\))?$", "^\\[?OPP PPG(?:\\]\\([^)]*\\))?$", "^\\[?DIFF(?:\\]\\([^)]*\\))?$", "^\\[?STRK(?:\\]\\([^)]*\\))?$", "^\\[?L10(?:\\]\\([^)]*\\))?$"], "minRows": 15},
+        {"item": "scrape-formats.markdown", "type": "markdownMatches", "pattern": "^\\| [^|]*\\[Boston Celtics\\]\\(https://www\\.espn\\.com/nba/team/[^)]*\\) \\| \\d+ \\| \\d+ \\| "},
+        {"item": "scrape-formats.markdown", "type": "markdownCount", "pattern": "^\\|\\s*\\|$", "equals": 0}
+      ]
+    },
+    {
+      "id": "M18",
+      "batch": "api",
+      "feature": "scrape-formats.only-main-content",
+      "url": "https://www.ft.com/technology",
+      "request": {"formats": ["markdown"]},
+      "note": "Added 2026-10-22 for PA D6 (lead cards of a news collection). FT's section page shows its lead story and its News and Opinion & Analysis cards above the chronological stream ('More Technology', a list of 25 cards of the same teaser template), with Recommended and Most Read in a sidebar. Before D6 the default Markdown was the stream alone: 25 distinct article links, no lead story (browser lane, proxied, 2026-10-22). Not matched by host: the rule adds the cards before a selected list that share its items' card template within the same main, leaving out sidebars and recommendation sections (packages/extract-tf/src/collection.ts). Headlines change hourly, so the check counts distinct article links. Plain HTTP got a 403 security check proxied and no connection direct on 2026-10-22; the page was read on the browser lane.",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownCountMin", "pattern": "https://www\\.ft\\.com/content/[0-9a-f-]{36}", "distinct": true, "min": 30}
+      ]
+    },
+    {
       "id": "MP01",
       "batch": "map",
       "endpoint": "map",

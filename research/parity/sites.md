@@ -180,6 +180,24 @@ M14–M15 were added on 2026-10-21 for PA D6, a standards document's header (`do
 | M14 | Scrape of RFC 9110 on rfc-editor.org with `tables` | The default Markdown keeps the header (stream, RFC number, category, June 2022, the three authors) and both h1s ahead of chapters 1–19; the methods table keeps its heading row, and every table is a GFM table | scrape-formats.only-main-content |
 | M15 | Scrape of the WCAG 2.2 Recommendation on w3.org | The default Markdown keeps the h1, "W3C Recommendation" with its date and the editors, the numbered sections with the conformance levels; none of the definition pop-ups after the last section | scrape-formats.only-main-content |
 
+M16 was added on 2026-10-22 for PA D6, aggregate offers (`docs/pa-enhancement-tasks.md`, D6). The route page declares one Product whose only offer is an AggregateOffer (a lowPrice, no price) and shows the offers it sums up as a grid of linked, priced deal cards with no heading of their own; before D6 the product page's unlabelled-grid rule cut those cards as recommendations, so the default Markdown kept the section's heading and none of its deals. Plain HTTP got a script shell direct on 2026-10-22 and the full page proxied.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M16 | Scrape of Skyscanner's London to Paris route page | The default Markdown keeps "Flight deals from London to Paris" with at least five deal cards, each with its "£… per passenger" price and its absolute `/transport/flights/…` link | scrape-formats.only-main-content |
+
+M17 was added on 2026-10-22 for PA D6, split standings tables (`docs/pa-enhancement-tasks.md`, D6). ESPN's NBA standings draw each conference as two tables side by side, a fixed one-column table of teams and a scrolling table of their statistics whose rows carry the same `data-idx`; before D6 the Markdown had the team names and the statistics in separate tables, so no row said whose record it was (task B010's checks, a table and a team name, passed all the same).
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M17 | Scrape of ESPN's NBA standings | Each conference is one GFM table whose header is the empty team column and W, L, PCT, GB, HOME, AWAY, DIV, CONF, PPG, OPP PPG, DIFF, STRK, L10, at least 15 rows; the Boston Celtics row holds its team link and its W and L; no one-column table is left | scrape-formats.markdown |
+
+M18 was added on 2026-10-22 for PA D6, the lead cards of a news collection (`docs/pa-enhancement-tasks.md`, D6). FT's technology section shows its lead story and its News and Opinion & Analysis cards above the chronological stream of 25 cards of the same teaser template, with Recommended and Most Read in a sidebar; before D6 the default Markdown was the stream alone. Plain HTTP got a security check proxied and no connection direct on 2026-10-22; the page is read on the browser lane, proxied. The check uses `markdownCountMin`, added to the runner with this case (distinct matches when `distinct` is set).
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M18 | Scrape of FT's technology section | The default Markdown holds at least 30 distinct article links (`/content/<uuid>`): the lead and top cards beside the stream's 25 | scrape-formats.only-main-content |
+
 A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when `W2L_CONTACT` is set in the runner's environment and the API was started with the same value (`requiresEnv`); otherwise the runner reports it as skipped, never as passed. The record shows the value as `<W2L_CONTACT>`.
 
 | Case | Request | What it tests | P1 items |

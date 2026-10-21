@@ -19,7 +19,7 @@ import { detectRenderSignals, hasLoadingText, hydrationShown, rawSignals } from 
 import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { hiddenRegion, selectMain } from './main.js'
-import { collectDeclaredProductFacts, fillPriceFromText, markOptionGroups, selectProduct, settleOptionGroups } from './product.js'
+import { collectDeclaredProductFacts, fillPriceFromText, markOptionGroups, aggregateRange, selectProduct, settleOptionGroups } from './product.js'
 import { pageSignalsFor, routePage, selectCardList, selectDetectedList, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
@@ -28,6 +28,8 @@ import { collectLabelledValues } from './labels.js'
 import { collectDeclaredValues } from './declared.js'
 import { collectPageMetadata } from './metadata.js'
 import { resolveReactStreaming } from './streaming.js'
+import { prepareSplitTables } from './splitTables.js'
+import { includeCollectionLeads } from './collection.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -174,12 +176,15 @@ export class ExtractTf implements Extractor {
     // What is cleaned and pruned is decided on that page too, and the
     // excluded elements are removed after it, with everything inside them.
     const excluded = namedBy(doc.document, pruneSelectors ?? [])
+    // A table drawn as a fixed name column beside its scrolling values: found on the page as received, joined once it is cleaned.
+    const joinSplitTables = prepareSplitTables(doc.document)
     // A product's options shown as controls are kept aside before cleaning
     // removes the controls, and shown once the page is known to be a product's.
     const optionGroups = markOptionGroups(doc.document, excluded)
     cleanTree(doc.document, excluded)
     pruneTree(doc.document, { blockAds })
     detachAll(excluded)
+    joinSplitTables()
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
     settleOptionGroups(optionGroups, decision.type === 'product')
@@ -190,8 +195,9 @@ export class ExtractTf implements Extractor {
 
     // Recommendation carousels are cut only on product pages. On a listing
     // page the priced cards ARE the content, and pruning them would delete
-    // the answer.
-    if (decision.type === 'product') pruneRecommendations(doc.document)
+    // the answer. Nor are the priced cards of a product that declares
+    // aggregate offers only, when their prices fill its range: they are its offers.
+    if (decision.type === 'product') pruneRecommendations(doc.document, { offers: amazonProduct ? null : aggregateRange(sourceFacts) })
 
     const classifyOptions: ClassifyOptions = { ...DEFAULT_CLASSIFY, favorPrecision }
     if (favorPrecision) classifyOptions.minTextLength = 60
@@ -248,6 +254,8 @@ export class ExtractTf implements Extractor {
       }
       if (main !== null) strategy = 'list'
     }
+    // A news collection's lead cards above its chronological list are its content too: written out with the list (only).
+    const leads = main !== null && strategy === 'list' && (decision.type === 'collection' || decision.type === 'listing') ? includeCollectionLeads(main) : null
 
     let product: ProductFacts | null = null
     if (decision.type === 'product') {
@@ -284,7 +292,7 @@ export class ExtractTf implements Extractor {
     const selected = selection !== null && !selection.blank
     const output: ExtractorOutput = {
       title: pickTitle(doc.document, main),
-      mainHtml: selection !== null ? selection.html : main ? outerHtml(main) : '',
+      mainHtml: selection !== null ? selection.html : leads !== null ? outerHtml(leads) : main ? outerHtml(main) : '',
       baseUrl,
       metadata,
       confidence: selected ? 1 : confidenceOf(
