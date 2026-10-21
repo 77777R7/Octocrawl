@@ -526,6 +526,13 @@ describe('PDP facts: a selected variant and the kinds of price a page shows (D6)
     }
   })
 
+  it('reads a price beside thousands of nested empty elements without exhausting the stack', () => {
+    const html = `<!doctype html><html><head>${ld({ '@type': 'Product', name: 'Lamp', sku: 'LP-1' })}</head><body><main><h1>Lamp</h1>
+<div><span class="price">19,99 €</span>${'<span>'.repeat(20_000)}${'</span>'.repeat(20_000)}</div>
+<p>A brass reading lamp with a linen shade, wired for any European socket.</p></main></body></html>`
+    expect(extractTf.extract(html, { url: 'https://s.test/p/x' }).product?.price?.value).toBe('19,99 €')
+  })
+
   it('does not split one product over a descriptive property written two ways', () => {
     const html = `<!doctype html><html><head>${ld({ '@type': 'Product', name: 'Mug', sku: 'MUG-1', url: 'https://s.test/p/mug',
       additionalProperty: [{ '@type': 'PropertyValue', name: 'Material', value: 'Stoneware' }], offers: { '@type': 'Offer', price: '9.00', priceCurrency: 'EUR' } })}${ld({

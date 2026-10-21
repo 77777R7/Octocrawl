@@ -769,24 +769,18 @@ function priceLine(el: Element, leavesIn: ReadonlyMap<Element, number>, doc: Doc
   return { line, text: collapse(textOf(line)) }
 }
 
-/** The line's text before and after the element: what is written around its own amount, not around another amount on the line. */
+/**
+ * The line's text before and after the element: what is written around its
+ * own amount, not around another amount on the line. Read from the siblings
+ * at each level up to the line (at most LINE_LEVELS), never by recursion.
+ */
 function around(line: Element, el: Element): { before: string; after: string } {
   let before = ''
   let after = ''
-  let seen = false
-  const walk = (node: Node): void => {
-    if (node === el) {
-      seen = true
-      return
-    }
-    if (node.nodeType === 3) {
-      if (seen) after += node.textContent ?? ''
-      else before += node.textContent ?? ''
-      return
-    }
-    for (const child of Array.from(node.childNodes)) walk(child)
+  for (let at: Element = el; at !== line && at.parentElement !== null; at = at.parentElement) {
+    for (let sib = at.previousSibling; sib !== null; sib = sib.previousSibling) before = `${sib.textContent ?? ''}${before}`
+    for (let sib = at.nextSibling; sib !== null; sib = sib.nextSibling) after += sib.textContent ?? ''
   }
-  if (line !== el) walk(line)
   return { before: collapse(before), after: collapse(after) }
 }
 
