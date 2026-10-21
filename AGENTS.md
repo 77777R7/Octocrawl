@@ -19,6 +19,7 @@ The product is **Octocrawl** (decided 2026-10-05). Write Octocrawl, never `W2L`,
 ## Real-site runs
 
 - Start the local API with `npm run api` (port 8787, `W2L_API_PORT` to change), then run `node research/parity/run-sites.mjs --batch L --record research/parity/runs/<YYYY-MM-DD>-<label>-<commit>.md`.
+- The local API loads the workspace packages from their compiled, git-ignored `packages/*/dist/`, not from `src/`. Run `npx tsc --build` after every rebase, merge or branch switch, and restart the API, before a real-site run (`npm run api` builds before it starts; `node --import tsx packages/api/src/cli.ts` does not); otherwise the run executes older engine code than the commit its record names. `research/access/run-set.mjs` refuses to start when this checkout's `dist/` does not match its source, and records the check in every record.
 - Local mode follows `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` from the shell. Say in every record whether the run was proxied or direct; a site can pass one way and fail the other.
 - Run `research/**/*.py` in a virtualenv (for example `.w2l/pyenv`), never with system `pip`.
 
