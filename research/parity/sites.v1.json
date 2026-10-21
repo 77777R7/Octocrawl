@@ -1945,6 +1945,20 @@
       ]
     },
     {
+      "id": "M16",
+      "batch": "api",
+      "feature": "scrape-formats.only-main-content",
+      "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
+      "request": {"formats": ["markdown"]},
+      "note": "Added 2026-10-22 for PA D6 (aggregate offers). The route page declares one Product whose only offer is an AggregateOffer (lowPrice, priceCurrency GBP, no price) and shows the offers it sums up as a grid of linked, priced deal cards ('£18 per passenger', a /transport/flights/<from>/<to>/<date> link) with no heading of their own. Before D6 the product page's unlabelled-grid rule cut those cards as recommendations: the default Markdown kept the section's heading and text and none of its deals. Not matched by host: the rule reads the subject's declared offers (packages/extract-tf/src/product.ts, aggregateOnly). Direct, plain HTTP got a 708-byte script shell on 2026-10-22; proxied, the full page.",
+      "checks": [
+        {"item": "FS", "type": "field", "path": "status", "equals": "success"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownIncludes", "text": "Flight deals from London to Paris"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "(?:£\\d+ per passenger[\\s\\S]*){5}"},
+        {"item": "scrape-formats.only-main-content", "type": "markdownMatches", "pattern": "\\]\\(https://www\\.skyscanner\\.net/transport/flights/[A-Z]{3}/[A-Z]{3}/\\d{8}"}
+      ]
+    },
+    {
       "id": "M18",
       "batch": "api",
       "feature": "scrape-formats.only-main-content",

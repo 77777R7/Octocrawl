@@ -256,13 +256,31 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
   }
 
   /** A page of a job's items from its slice files, from a cursor `slice:line`. */
+  /**
+   * The position after a page named by the local API's cursor (base64url of its createdAt and id): the cursor an MCP
+   * answer cut for size gives (results.ts pageListWithinBudget), which names the last page it kept. Null when the job
+   * holds no such page.
+   */
+  async function afterStep(job: HostedJob, cursor: string): Promise<[number, number] | null> {
+    let id: unknown
+    try { id = (JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { id?: unknown }).id } catch { return null }
+    if (typeof id !== 'string' || id.length === 0) return null
+    for (let slice = 0; slice < job.counts.slices; slice++) {
+      const lines = await config.files.segment(job, slice) ?? []
+      for (let line = 0; line < lines.length; line++) {
+        if ((JSON.parse(lines[line]!) as { id?: unknown }).id === id) return line + 1 < lines.length ? [slice, line + 1] : [slice + 1, 0]
+      }
+    }
+    return null
+  }
+
   async function list(job: HostedJob, filter: 'all' | 'pages' | 'errors', url: URL): Promise<Response> {
     const limitParam = url.searchParams.get('limit')
     const limit = limitParam === null ? PAGE_LIST_DEFAULT : Number(limitParam)
     if (!Number.isInteger(limit) || limit < 1 || limit > PAGE_LIST_MAX) return refusal(400, 'invalid_request', `limit must be 1 to ${PAGE_LIST_MAX}`)
     const cursor = url.searchParams.get('cursor')
-    const from = cursor === null ? [0, 0] : cursor.split(':').map(Number)
-    if (from.length !== 2 || !from.every((n) => Number.isSafeInteger(n) && n >= 0)) return refusal(400, 'invalid_request', 'cursor is not one this API issued')
+    const from = cursor === null ? [0, 0] : /^\d+:\d+$/.test(cursor) ? cursor.split(':').map(Number) : await afterStep(job, cursor)
+    if (from === null || from.length !== 2 || !from.every((n) => Number.isSafeInteger(n) && n >= 0)) return refusal(400, 'invalid_request', 'cursor is not one this API issued')
     const items: unknown[] = []
     let bytes = 0
     let full = false

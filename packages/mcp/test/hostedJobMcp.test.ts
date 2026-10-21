@@ -178,6 +178,26 @@ describe('hosted job tools over MCP', () => {
     expect(structured(await client.callTool({ name: 'get_crawl', arguments: { id: taskId } }))).toMatchObject({ status: 'cancelled' })
   })
 
+  it('pages through a crawl whose pages fill an answer: the cursor of an answer cut for size reads on (H2 launch run)', async () => {
+    const { connect, sliceWrote } = await start()
+    const client = await connect('oc_account')
+    const taskId = structured(await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/', maxPages: 10 } })).taskId as string
+    // Ten pages of 15,000 characters: an answer of 50,000 holds three at most.
+    const page = (n: number) => ({ id: `step-${n}`, createdAt: `2026-10-21T18:20:${String(10 + n)}.000Z`, url: `https://example.com/p/${n}`, status: 'success', markdown: `# Page ${n}\n\n${'x'.repeat(15_000)}` })
+    sliceWrote(taskId, Array.from({ length: 10 }, (_, n) => page(n)))
+    const seen: string[] = []
+    let cursor: string | undefined
+    for (let round = 0; round < 10; round++) {
+      const answer = await client.callTool({ name: 'get_crawl_pages', arguments: { id: taskId, ...(cursor === undefined ? {} : { cursor }) } })
+      expect(answer.isError ?? false, text(answer)).toBe(false)
+      const list = structured(answer) as { items: Array<{ url: string }>; nextCursor: string | null; hasMore: boolean }
+      seen.push(...list.items.map((item) => item.url))
+      if (!list.hasMore) break
+      cursor = list.nextCursor!
+    }
+    expect(seen).toEqual(Array.from({ length: 10 }, (_, n) => `https://example.com/p/${n}`))
+  })
+
   it('answers a queued job\'s status within the status schema, and a wait that ends at its limit with the status so far', async () => {
     const { connect, store } = await start()
     const client = await connect('oc_account')
