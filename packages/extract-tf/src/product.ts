@@ -244,6 +244,8 @@ interface DeclaredProduct {
   offerIds: string[]
   /** The named values it declares as PropertyValues (`additionalProperty`, `identifier`): a variant's `variationId`, a size. */
   params: DeclaredParam[]
+  /** Its offers are AggregateOffers only (aggregateOnly): their lowPrice bounds several offers' prices and is no price of its own. */
+  aggregate: boolean
   /** Its `url` and its offers' `url`. */
   urls: UrlKey[]
   /** The page's mainEntity (or mainEntityOfPage names the page). */
@@ -331,9 +333,23 @@ const typesOf = (rec: Record<string, unknown>): string[] =>
 // SomeProducts) each describe one product; a ProductGroup is a family of them.
 const isProductType = (types: readonly string[]) => types.some((x) => /(^|[#/:])(individual)?product(model)?$|someproducts$/i.test(x))
 const isGroupType = (types: readonly string[]) => types.some((x) => /(^|[#/:])productgroup$/i.test(x))
+const isAggregateType = (types: readonly string[]) => types.some((x) => /(^|[#/:])aggregateoffer$/i.test(x))
 
 const record = (v: unknown): Record<string, unknown> | null =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : null
+
+/**
+ * Whether a product's offers are AggregateOffers only, each with a lowPrice (a
+ * number, not negative) and no price: offers of several sellers or departures
+ * summed up by their lowest price, which bounds their prices and is the price
+ * of none of them. A typed offer is required; a lowPrice alone is not one.
+ */
+function aggregateOnly(product: Record<string, unknown>): boolean {
+  const raw = product['offers']
+  const offers = (Array.isArray(raw) ? raw : [raw]).map(record)
+  return offers.length > 0 && offers.every((o) => o !== null && isAggregateType(typesOf(o)) && asString(o['price']) === null &&
+    /^\d+(?:\.\d+)?$/.test(asString(o['lowPrice'])?.trim() ?? ''))
+}
 
 function idsOf(read: (name: string) => string | null): Partial<Record<IdKind, string[]>> {
   const out: Partial<Record<IdKind, string[]>> = {}
@@ -531,6 +547,7 @@ function jsonLdProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
       ids: idsOf((name) => asString(rec[name])),
       offerIds: Object.values(offers.ids).flat(),
       params,
+      aggregate: aggregateOnly(rec),
       urls: [...urls, ...offers.urls],
       main: main || (id !== null && mainIds.has(id)) || (ofPageKey !== null && ctx.targets.some((t) => t.path === ofPageKey.path)),
       nested,
@@ -647,6 +664,7 @@ function microdataProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
       ids: idsOf((name) => pick(name)?.value ?? null),
       offerIds: [],
       params: [],
+      aggregate: false,
       urls,
       main: props.includes('mainEntity'),
       nested: props.some((p) => p !== '' && p !== 'mainEntity'),
@@ -892,6 +910,18 @@ const MAX_COMPARED = 250
 /** Facts whose price must not be read from the page's text: the page declares other products beside the subject, or the subject's own sources disagree on it. */
 const textPriceBarred = new WeakSet<ProductFacts>()
 
+/** Facts of a subject that declares aggregate offers only: the priced cards its page shows are those offers (offersAggregate). */
+const aggregateOffered = new WeakSet<ProductFacts>()
+
+/**
+ * Whether the subject declares aggregate offers only and no price of its own:
+ * the grid of linked, priced cards on its page is its offers, not products
+ * recommended beside it, and no visible price is its one price.
+ */
+export function offersAggregate(facts: ProductFacts | null): boolean {
+  return facts !== null && aggregateOffered.has(facts)
+}
+
 /** What singles a product out, strongest first: each step keeps the products it holds for, if it holds for some but not all. */
 const SUBJECT_TIERS: ReadonlyArray<[string, (members: readonly DeclaredProduct[], ctx: Resolved) => boolean]> = [
   ['a property it declares is the request URL\'s query parameter of that name', (members, ctx) => members.some((d) => selectedParams(d, ctx).length > 0)],
@@ -1049,6 +1079,13 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
   if (ambiguous.length > 0) facts.ambiguous = ambiguous
   if (ambiguous.some((a) => a.field === 'price')) facts.quoteState = 'conflicting' as QuoteState
   if (siblings || facts.ambiguous?.some((a) => a.field === 'price')) textPriceBarred.add(facts)
+  // Aggregate offers alone, and no price stated anywhere else: a lowPrice bounds the offers' prices, and a price the page shows is one offer's.
+  const declaring = [...subject, ...bound]
+  if (facts.price === null && declaring.some((d) => d.aggregate) && declaring.every((d) => d.aggregate || (d.fields.price === undefined && d.ambiguous.price === undefined))) {
+    aggregateOffered.add(facts)
+    textPriceBarred.add(facts)
+    evidence.push(`${label(declaring.filter((d) => d.aggregate))}: offers an AggregateOffer only, whose lowPrice bounds its offers' prices; no price is read for the subject`)
+  }
   return facts
 }
 

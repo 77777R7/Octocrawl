@@ -213,7 +213,7 @@ function recommendationRegion(heading: Element): Element[] {
  * prevents is an LLM summarizing the wrong product's features; the failure it
  * must not cause is deleting the product being described.
  */
-export function pruneRecommendations(doc: Document): void {
+export function pruneRecommendations(doc: Document, options: { keepOfferGrids?: boolean } = {}): void {
   // The element that holds the page's one h1 holds the product: the grid and
   // token triggers never cut it. A page of several h1s (cards that each carry
   // one) has no such title to keep.
@@ -229,8 +229,9 @@ export function pruneRecommendations(doc: Document): void {
 
   // Trigger 2: unlabelled grids of priced, linked cards. Walk deepest-first
   // so the tightest qualifying container is cut, not a page-level wrapper
-  // that happens to contain one.
-  const containers = qsa(doc, 'div,section,ul,ol')
+  // that happens to contain one. Not on a page whose product declares
+  // aggregate offers only (keepOfferGrids): its priced cards are those offers.
+  const containers = options.keepOfferGrids ? [] : qsa(doc, 'div,section,ul,ol')
   for (const el of containers.reverse()) {
     if (!el.isConnected) continue
     if (!holdsH1(el) && isProductGrid(el)) detach(el)
