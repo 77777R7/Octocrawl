@@ -30,6 +30,18 @@ Read 2026-10-21 without signing in, proxied. The public pages and the API disagr
 - How Verified is billed: **unknown**. No page lists a Verified surcharge or rate; Scale is priced per contract.
 - The project's `concurrency: 3` matches the Free plan's listed limit. That is an inference, not a plan read from the account.
 
+## Trial request to Browserbase
+
+Read from Howard's mailbox on 2026-10-21; dates and status only.
+
+| Date | Status |
+| --- | --- |
+| 2026-10-13 | Howard asked Browserbase for a short Verified trial (the 16 challenge pages, one run plus one repeat on another day, about 32 sessions) and a rough Scale price. |
+| 2026-10-15 | Browserbase support answered that the request was passed to its sales team; Howard acknowledged the same day. |
+| 2026-10-21 | No answer from sales yet. The only later Browserbase mail (2026-10-19) is a marketing follow-up with no word on the trial or pricing; nothing in spam. |
+
+So no trial has been granted and no Scale price is known.
+
 ## Comparison with 2026-10-13
 
 | | 2026-10-13 | 2026-10-21 |
