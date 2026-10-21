@@ -10,7 +10,7 @@
 //
 // Usage: node research/access/run-set.mjs [--set frozen|healthy|blind|candidate|all] [--only T01,T02] [--warm]
 //          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--no-contract] [--raw-html] [--save-responses]
-//          [--grant <grant file>] [--record research/access/runs/<date>-<label>-<commit>.md]
+//          [--grant <grant file>] [--stale-build] [--record research/access/runs/<date>-<label>-<commit>.md]
 //        node research/access/run-set.mjs --rejudge .w2l/access/runs/<timestamp> [--record research/access/runs/<new file>.md]
 //   --target     who fetches the pages (ROADMAP PA item 9, the competitor baseline). octocrawl (the default) is the local
 //                API. firecrawl is Firecrawl Cloud's POST /v2/scrape with FIRECRAWL_API_KEY: the task's own formats,
@@ -50,6 +50,12 @@
 //   beside them. A task removed from tasks.v1.json, or whose URL changed, after the run stays in
 //   the denominator with the run's own verdict, marked as not rejudged.
 //   --record never replaces a file that exists: a committed record is not rewritten.
+//   Engine build (octocrawl): the local API loads the workspace packages from their compiled, git-ignored dist/, so
+//   the commit says nothing about the code that ran when dist/ predates it. The runner asks `tsc --build --dry`
+//   (runSetBuild.mjs) whether this checkout's dist/ matches its source, records the answer in the environment and
+//   the record, and refuses to start when it does not: run `npx tsc --build` and restart the API, or pass
+//   --stale-build to run anyway with the record saying so. It cannot see an API started from another checkout, or
+//   one left running from before a rebuild.
 //   Proxy settings are recorded as scheme, host and port only, never a user name, password, path or
 //   query; every file the runner writes is also cleared of the raw proxy values and of credentials in
 //   any URL (an error message that quotes one).
@@ -124,6 +130,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isData, judge } from './judge.mjs'
 import { channelsCell, denominator, denominatorLines, grantLine, grantOf, plannedAttempts, stopReason } from './runSetReport.mjs'
+import { buildLine, buildState } from './runSetBuild.mjs'
 
 // Every file the runner writes goes through scrub() (defined below, before the first write), except a page's own Markdown.
 const writeFile = (file, text) => writeRaw(file, scrub(text))
@@ -143,6 +150,7 @@ const access = flag('--access') === undefined ? undefined : JSON.parse(flag('--a
 const extraRequest = flag('--request') === undefined ? null : JSON.parse(flag('--request'))
 if (extraRequest !== null && (typeof extraRequest !== 'object' || Array.isArray(extraRequest))) throw new Error('--request is a JSON object of request options')
 const recordFile = flag('--record')
+const allowStaleBuild = args.includes('--stale-build')
 const rejudgeDir = flag('--rejudge')
 const api = process.env.W2L_API_URL ?? 'http://127.0.0.1:8787'
 const target = flag('--target') ?? 'octocrawl'
@@ -259,6 +267,11 @@ async function paced(send) {
 // A competitor's API is on the internet: reached through the shell's proxy when one is set (Node's fetch ignores it).
 const outbound = target === 'octocrawl' || !environment.proxied ? undefined : new (await import('undici')).EnvHttpProxyAgent()
 environment.target = target
+if (rejudgeDir === undefined && target === 'octocrawl') {
+  environment.build = buildState(repo)
+  if (environment.build.upToDate === false && !allowStaleBuild) throw new Error(`packages/*/dist is older than its source (${environment.build.stale.join(', ')}): run npx tsc --build and restart the API, or pass --stale-build to run and record it`)
+  if (environment.build.upToDate !== true) console.warn(buildLine(environment.build).slice(2))
+}
 const runDir = rejudgeDir === undefined ? join(repo, '.w2l/access/runs', environment.startedAt.replace(/[:.]/g, '-')) : join(repo, rejudgeDir)
 await mkdir(join(runDir, 'pages'), { recursive: true })
 if (saveResponses) await mkdir(join(runDir, 'responses'), { recursive: true })
@@ -653,6 +666,7 @@ if (recordFile !== undefined) {
     `- API: ${(environment.target ?? 'octocrawl') === 'octocrawl' ? environment.api : 'the provider\'s'}; access option: ${(priorRun === null ? access ?? null : priorRun.access) === null ? 'none' : `\`${JSON.stringify(priorRun === null ? access : priorRun.access)}\``}${(priorRun === null ? extraRequest : priorRun.request ?? null) === null ? '' : `; request options added to every task: \`${JSON.stringify(priorRun === null ? extraRequest : priorRun.request)}\``}`,
     `- Exit address: ${environment.exitIp ?? 'not recorded'}`,
     grantLine(environment.grant),
+    ...((environment.target ?? 'octocrawl') === 'octocrawl' ? [buildLine(environment.build)] : []),
     `- Run: ${environment.startedAt} → ${finishedAt}`,
     `- Tasks: ${rows.filter((r) => r.temperature === 'cold').length} (set \`${priorRun?.set ?? setFilter}\`${only ? `, only ${only.join(', ')}` : ''}); task file SHA-256 at fetch time: ${environment.tasksSha256 === undefined ? 'not recorded (run before the hash was added)' : `\`${environment.tasksSha256}\``}; method in the header of run-set.mjs`,
     ...denominatorLines(runDenominator, environment.stoppedEarly), '',
