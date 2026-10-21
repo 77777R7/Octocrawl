@@ -79,8 +79,8 @@ describe('hosted job tools over MCP', () => {
     const crawl = tools.find((tool) => tool.name === 'crawl')!
     const properties = (crawl.inputSchema as { properties: Record<string, { maximum?: number }> }).properties
     for (const refused of ['webhook', 'ignoreRobotsTxt', 'access', 'useCached']) expect(properties, refused).not.toHaveProperty(refused)
-    // maxCredits is a REST option the MCP tool's parser does not take yet (H2 M6).
-    expect(properties).not.toHaveProperty('maxCredits')
+    // A job's credit cap is offered over MCP too (H2 M6).
+    expect(properties.maxCredits).toMatchObject({ type: 'integer', minimum: 1 })
     expect(properties.maxPages?.maximum).toBe(500)
     const wait = tools.find((tool) => tool.name === 'wait_crawl')!
     expect((wait.inputSchema as unknown as { properties: { timeoutMs: { maximum: number } } }).properties.timeoutMs.maximum).toBe(90_000)
@@ -156,11 +156,13 @@ describe('hosted job tools over MCP', () => {
   it('starts, reads, pages through and cancels a crawl over MCP, its answers valid against the tools\' output schemas', async () => {
     const { connect, enqueued, sliceWrote } = await start()
     const client = await connect('oc_account')
-    const started = await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/', maxPages: 5 } })
+    const started = await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/', maxPages: 5, maxCredits: 3 } })
     expect(started.isError ?? false, text(started)).toBe(false)
     const taskId = structured(started).taskId as string
     expect(taskId).toMatch(/^[0-9a-f-]{36}$/)
     expect(enqueued.map((job) => job.id)).toEqual([taskId])
+    expect(enqueued[0]!.credits.maxCredits).toBe(3)
+    expect(structured(started)).toMatchObject({ credits: { maxCredits: 3 } })
     sliceWrote(taskId, [{ url: 'https://example.com/', status: 'success' }, { url: 'https://example.com/a', status: 'success' }])
     const status = await client.callTool({ name: 'get_crawl', arguments: { id: taskId } })
     expect(status.isError ?? false, text(status)).toBe(false)
@@ -182,6 +184,9 @@ describe('hosted job tools over MCP', () => {
     const ids: string[] = []
     for (let i = 0; i < 3; i++) ids.push(structured(await client.callTool({ name: 'batch_scrape', arguments: { urls: [`https://example.com/${i}`] } })).taskId as string)
     expect(store.jobs.get(ids[2]!)?.status).toBe('queued')
+    // A batch takes the credit cap over MCP as a crawl does.
+    const capped = structured(await client.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/capped'], maxCredits: 2 } })).taskId as string | undefined
+    expect(capped === undefined ? null : store.jobs.get(capped)?.credits.maxCredits).toBe(2)
     const queued = await client.callTool({ name: 'get_batch', arguments: { id: ids[2] } })
     expect(queued.isError ?? false, text(queued)).toBe(false)
     expect(structured(queued)).toMatchObject({ status: 'queued' })

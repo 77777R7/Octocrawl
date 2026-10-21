@@ -227,6 +227,18 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseBatchErrorsQuery({ cursor: '' })).toThrow('cursor must not be empty')
   })
 
+  it('takes a job\'s credit cap on batch and crawl as a positive integer, and not on an append (H2 M6)', () => {
+    const url = 'https://example.com/'
+    expect(parseBatchStartRequest({ urls: [url], maxCredits: 50 })).toMatchObject({ maxCredits: 50 })
+    expect(parseCrawlStartRequest({ url, maxCredits: 1 })).toMatchObject({ maxCredits: 1 })
+    expect(parseBatchStartRequest({ urls: [url] })).not.toHaveProperty('maxCredits')
+    for (const maxCredits of [0, -1, 1.5, '5', null, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => parseBatchStartRequest({ urls: [url], maxCredits }), JSON.stringify(maxCredits)).toThrow('maxCredits must be a positive integer')
+      expect(() => parseCrawlStartRequest({ url, maxCredits }), JSON.stringify(maxCredits)).toThrow('maxCredits must be a positive integer')
+    }
+    expect(() => parseBatchStartRequest({ appendToId: 'batch-1', urls: [url], maxCredits: 5 })).toThrow("appendToId keeps the job's options; maxCredits cannot be changed")
+  })
+
   it('takes an idempotency key on batch and crawl, and appendToId with only the entries and what binds to them', () => {
     const url = 'https://example.com/'
     expect(parseBatchStartRequest({ urls: [url], idempotencyKey: 'nightly-2026-10-02' })).toMatchObject({ idempotencyKey: 'nightly-2026-10-02' })
