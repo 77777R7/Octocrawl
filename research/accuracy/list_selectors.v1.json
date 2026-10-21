@@ -1,0 +1,587 @@
+{
+ "schema": "octocrawl.list-selectors/1",
+ "writtenBy": "a Claude Code subagent of the K1 session, 2026-10-21",
+ "rule": "Selectors were written from each capture's page structure and the case's task text (and entity ids); label values in gold.json were not read.",
+ "cases": {
+  "D02": {
+   "list": {
+    "type": "list",
+    "itemSelector": "div.goods-container[data-itemnumber]",
+    "fields": [
+     {
+      "name": "sku",
+      "attribute": "data-itemnumber"
+     },
+     {
+      "name": "name",
+      "selector": "a.goods-title"
+     },
+     {
+      "name": "url",
+      "selector": "a.goods-title",
+      "attribute": "href"
+     },
+     {
+      "name": "price",
+      "selector": ".goods-price-current .goods-price-value"
+     },
+     {
+      "name": "currency",
+      "selector": ".goods-price-current .goods-price-symbol"
+     }
+    ]
+   },
+   "note": "currency is the card's own price symbol ($), not an ISO code; the page states no per-card currency code."
+  },
+  "D03": {
+   "list": {
+    "type": "list",
+    "itemSelector": "a[data-testid^=dealCard_]",
+    "fields": [
+     {
+      "name": "url",
+      "attribute": "href"
+     },
+     {
+      "name": "departure_display",
+      "selector": "[data-testid=deal-leg-date]"
+     },
+     {
+      "name": "carrier",
+      "selector": "[class*=Flight_Flight__flightProviderImage] img",
+      "attribute": "alt"
+     },
+     {
+      "name": "route",
+      "selector": "[class*=Flight_Flight__flightInfo] [class*=bpk-text--text-secondary]"
+     },
+     {
+      "name": "starting_price",
+      "selector": "[class*=PriceButton_PriceButton__button] > span"
+     }
+    ]
+   },
+   "note": "departure_iso left out: the ISO date appears only inside the card's href path (e.g. /20270107), not as an element. currency left out: only in the href query (currency=GBP); the card shows the £ sign inside the price text. starting_price is the button text ('from £20'), which the engine's number reading does not accept."
+  },
+  "D04": {
+   "list": null,
+   "note": "Records cannot be selected: the historical rows are inside a declarative shadow root (<template shadowrootmode=\"open\">) of the table component, which the list extractor does not match (0 items on the capture); the cells also carry no attribute that tells the columns apart."
+  },
+  "D05": {
+   "list": {
+    "type": "list",
+    "itemSelector": "article.reptile-tile-item[data-product-id]:not([data-list-position=\"3\"])",
+    "fields": [
+     {
+      "name": "product_id",
+      "attribute": "data-product-id"
+     },
+     {
+      "name": "variation_id",
+      "attribute": "data-variation-id"
+     },
+     {
+      "name": "name",
+      "selector": "a[data-link-type=tile]",
+      "attribute": "aria-label"
+     },
+     {
+      "name": "url",
+      "selector": "a[data-link-type=tile]",
+      "attribute": "href"
+     },
+     {
+      "name": "price",
+      "selector": ".reptile-price__retailPrice"
+     }
+    ]
+   },
+   "note": "The itemSelector leaves out the card at data-list-position=\"3\", a duplicate of the card at position 2 (same data-product-id and data-variation-id), per the task's 'distinguish duplicate cards'. This is an exclusion specific to this capture. The first two cards are sponsored and are kept: they are the first cards on the page. A price shown as 'ab 699,00 €' (a from-price) is not read as a number by the engine."
+  },
+  "D06": {
+   "list": null,
+   "note": "Records cannot be selected: the capture's history table holds only the no-row message ('There are no in the selected time period.'); no daily rows are in the DOM."
+  },
+  "D07": {
+   "list": null,
+   "note": "Records cannot be selected: the capture is the AliExpress register/sign-in wall; no product cards are in the DOM."
+  },
+  "D08": {
+   "list": null,
+   "note": "Records cannot be selected: the capture is Temu's security verification page; no product cards are in the DOM."
+  },
+  "D09": {
+   "list": {
+    "type": "list",
+    "itemSelector": "table.gecko-homepage-coin-table > tbody > tr",
+    "fields": [
+     {
+      "name": "coin",
+      "selector": "td.gecko-sticky a[href^=\"/en/coins/\"] div"
+     },
+     {
+      "name": "price",
+      "selector": "td.tw-text-end > span[data-price-target=price]"
+     },
+     {
+      "name": "change_1h",
+      "selector": "span[data-attr=price_change_percentage_1h]"
+     },
+     {
+      "name": "change_24h",
+      "selector": "span[data-attr=price_change_percentage_24h]"
+     },
+     {
+      "name": "change_7d",
+      "selector": "span[data-attr=price_change_percentage_7d]"
+     },
+     {
+      "name": "change_30d",
+      "selector": "span[data-attr=price_change_percentage_30d]"
+     }
+    ]
+   },
+   "note": "currency left out: no per-row currency element (prices carry a $ sign; the page currency is not stated per row). coin is the name cell's text, which includes the ticker child ('Bitcoin BTC'). The change_* texts are unsigned ('0.1%'): the direction is only in the span's class (gecko-up/gecko-down) and data-json attribute, which a text field does not carry."
+  },
+  "D10": {
+   "list": null,
+   "note": "Records cannot be selected: the capture is Walmart's 'This page couldn't be found' error page; no product cards are in the DOM."
+  },
+  "H02": {
+   "list": {
+    "type": "list",
+    "itemSelector": "ol > li",
+    "fields": [
+     {
+      "name": "title",
+      "selector": "a[href^=\"/ebooks/\"]"
+     },
+     {
+      "name": "url",
+      "selector": "a[href^=\"/ebooks/\"]",
+      "attribute": "href"
+     }
+    ]
+   },
+   "note": "title is the whole link text 'Title by Author (count)': title, author and download count are one text node, so author and download_count are left out. ebook_id is left out: it appears only in the href (/ebooks/1342), and an attribute gives the whole URL. The first ol is 'Top 100 EBooks yesterday' (h2#books-last1)."
+  },
+  "H03": {
+   "list": {
+    "type": "list",
+    "itemSelector": "table.astro-par-table > tbody > tr",
+    "fields": [
+     {
+      "name": "quantity",
+      "selector": "td"
+     },
+     {
+      "name": "symbol",
+      "selector": "td.text-center"
+     },
+     {
+      "name": "value",
+      "selector": "td.text-nowrap"
+     }
+    ]
+   },
+   "note": "value is the cell text with its unit ('86400 s'), which the engine does not read as a number; no element holds the number alone."
+  },
+  "H04": {
+   "list": {
+    "type": "list",
+    "itemSelector": "#england-and-wales table#table-id-c0c649ac > tbody > tr",
+    "fields": [
+     {
+      "name": "date",
+      "selector": "th time",
+      "attribute": "datetime"
+     },
+     {
+      "name": "weekday",
+      "selector": "td.govuk-table__cell"
+     }
+    ]
+   },
+   "note": "The table is selected by its id (table-id-c0c649ac), which is the England and Wales 2027 table by its caption. The id looks generated, so it is specific to this capture. holiday left out: weekday and holiday are sibling cells with the same class (td.govuk-table__cell), and Octocrawl's selectors have no positional pseudo-class, so only the first (weekday) can be named. date is the time element's datetime attribute (full ISO date)."
+  },
+  "H05": {
+   "list": null,
+   "note": "Records cannot be selected: the four records are not next to each other: they are the first two and the last two rows of the prefix table. The rows carry no attributes that tell them apart, and Octocrawl's selector subset has no :nth-child or sibling combinator. The factor and name cells also share align=left."
+  },
+  "H06": {
+   "list": null,
+   "note": "Records cannot be selected: rows 200, 404 and 429 are not next to each other in the registry table. The rows carry no ids or classes, and Octocrawl's selector subset has no :nth-child or sibling combinator."
+  },
+  "V15": {
+   "list": {
+    "type": "list",
+    "itemSelector": "#content p > strong",
+    "fields": [
+     {
+      "name": "advisory_id",
+      "selector": "a[href*=\"/debian-security-announce/\"]"
+     },
+     {
+      "name": "url",
+      "selector": "a[href*=\"/debian-security-announce/\"]",
+      "attribute": "href"
+     }
+    ]
+   },
+   "note": "The list is flat markup inside one <p>: each advisory is a <strong> with the date <tt> outside it, so date is left out. advisory_id is the link text, which also holds the package ('DSA-6571-1 xen'); package is left out because it is in the same text node."
+  },
+  "V16": {
+   "list": {
+    "type": "list",
+    "itemSelector": "#notices-list > section.p-section--shallow",
+    "fields": [
+     {
+      "name": "title",
+      "selector": "h3 a[href^=\"/security/notices/\"]"
+     },
+     {
+      "name": "url",
+      "selector": "h3 a[href^=\"/security/notices/\"]",
+      "attribute": "href"
+     },
+     {
+      "name": "published",
+      "selector": "div.col-6 > p.u-text--muted"
+     }
+    ]
+   },
+   "note": "title is the link text including the 'USN-8911-1: ' prefix. notice_id is left out: it is in the same text node (and in the URL)."
+  },
+  "V17": {
+   "list": {
+    "type": "list",
+    "itemSelector": "#pgContentWrap h2.news",
+    "fields": [
+     {
+      "name": "title",
+      "selector": "a"
+     },
+     {
+      "name": "url",
+      "selector": "a",
+      "attribute": "href"
+     }
+    ]
+   },
+   "note": "The archive has no per-entry wrapper: h2.news is followed by a sibling div.newsdate. posted and posted_by are in that sibling, outside the item, and the poster is a bare text node, so both are left out."
+  },
+  "V18": {
+   "list": {
+    "type": "list",
+    "itemSelector": "#contentwrap table > tbody > tr",
+    "fields": [
+     {
+      "name": "date",
+      "selector": "td.txtdate"
+     },
+     {
+      "name": "advisory_name",
+      "selector": "td a"
+     },
+     {
+      "name": "url",
+      "selector": "td a",
+      "attribute": "href"
+     }
+    ]
+   }
+  },
+  "V19": {
+   "list": {
+    "type": "list",
+    "itemSelector": "dl#articles > dd",
+    "fields": [
+     {
+      "name": "title",
+      "selector": "div.list-title"
+     },
+     {
+      "name": "first_author",
+      "selector": "div.list-authors a"
+     }
+    ]
+   },
+   "note": "Each entry is a dt (ID) followed by a sibling dd (metadata); the item is the dd. arxiv_id is left out: it is in the preceding dt. title includes the 'Title:' descriptor."
+  },
+  "V20": {
+   "list": {
+    "type": "list",
+    "itemSelector": "#content > div.not-prose",
+    "fields": [
+     {
+      "name": "title",
+      "selector": "h3 a"
+     },
+     {
+      "name": "url",
+      "selector": "h3 a",
+      "attribute": "href"
+     },
+     {
+      "name": "author",
+      "selector": "p.text-stone-500 strong"
+     },
+     {
+      "name": "posted",
+      "selector": "p.text-stone-500"
+     }
+    ]
+   },
+   "note": "posted is the whole byline text ('Posted by naruse on 12 Oct 2026'); no element holds the date alone."
+  },
+  "V21": {
+   "list": {
+    "type": "list",
+    "itemSelector": "main article",
+    "fields": [
+     {
+      "name": "title",
+      "selector": "a[class*=__title]"
+     },
+     {
+      "name": "url",
+      "selector": "a[class*=__title]",
+      "attribute": "href"
+     },
+     {
+      "name": "author",
+      "selector": "div[class*=__author] > p"
+     },
+     {
+      "name": "published",
+      "selector": "div[class*=__author] > time"
+     }
+    ]
+   },
+   "note": "published is the displayed text of the time element (its datetime attribute holds the ISO timestamp)."
+  },
+  "V22": {
+   "list": {
+    "type": "list",
+    "itemSelector": "table.lifecycle tr.release",
+    "fields": [
+     {
+      "name": "cycle",
+      "selector": "td"
+     },
+     {
+      "name": "released",
+      "selector": "td div"
+     },
+     {
+      "name": "latest_version",
+      "selector": "td a[title^=\"Release Notes\"]"
+     }
+    ]
+   },
+   "note": "security_support_until left out: the active-support and security-support cells can share the same class (td.bg-green-000 on the first rows), so no selector names the security cell alone. released is the date line under the relative phrase, with parentheses ('(09 Oct 2026)')."
+  },
+  "V23": {
+   "list": {
+    "type": "list",
+    "itemSelector": "section#supported-versions table > tbody > tr",
+    "fields": [
+     {
+      "name": "branch",
+      "selector": "td"
+     }
+    ]
+   },
+   "note": "status, first_release and end_of_life left out: they are plain td > p cells with no attributes. The <em> wrapping is not consistent across rows (first_release is em in one row and plain in the next)."
+  },
+  "V24": {
+   "list": {
+    "type": "list",
+    "itemSelector": "table.datatable > tbody > tr",
+    "fields": [
+     {
+      "name": "country",
+      "selector": "td a"
+     },
+     {
+      "name": "population",
+      "selector": "td.font-bold[dir=ltr]"
+     },
+     {
+      "name": "yearly_change",
+      "selector": "td[dir=ltr]:not(.font-bold)"
+     }
+    ]
+   },
+   "note": "land_area left out: it is one of several identical td[dir=ltr] cells with no distinguishing class."
+  },
+  "V25": {
+   "list": {
+    "type": "list",
+    "itemSelector": "table.table-linear > tbody > tr",
+    "fields": [
+     {
+      "name": "currency",
+      "selector": "th[scope=row]"
+     },
+     {
+      "name": "rate",
+      "selector": "td.highlight"
+     }
+    ]
+   },
+   "note": "currency is the row header's currency name ('United States dollar'); the row id holds the code. rate is the highlighted (latest-day) cell."
+  },
+  "V26": {
+   "list": {
+    "type": "list",
+    "itemSelector": "table#releases tr",
+    "fields": [
+     {
+      "name": "kind",
+      "selector": "td"
+     },
+     {
+      "name": "version",
+      "selector": "td strong"
+     }
+    ]
+   },
+   "note": "released left out: it is a plain td between the version and the links. kind includes its colon ('mainline:')."
+  },
+  "V27": {
+   "list": {
+    "type": "list",
+    "itemSelector": "table.standard > tbody > tr",
+    "fields": [
+     {
+      "name": "branch",
+      "selector": "td a[href^=\"/downloads.php\"]"
+     }
+    ]
+   },
+   "note": "initial_release, active_support_until and security_support_until left out: they are plain td cells, the same as the branch cell. The first td without class is the branch cell, so no selector names one date cell alone. The itemSelector also matches the status-key table below (7 items); the first three are the branches."
+  },
+  "V28": {
+   "list": {
+    "type": "list",
+    "itemSelector": "table.table-striped > tbody > tr",
+    "fields": [
+     {
+      "name": "version",
+      "selector": "td"
+     }
+    ]
+   },
+   "note": "current_minor, first_release and final_release left out: all cells are plain td with no attributes; only the first (version) can be named."
+  },
+  "V29": {
+   "list": {
+    "type": "list",
+    "itemSelector": "tr.athing.submission",
+    "fields": [
+     {
+      "name": "title",
+      "selector": "span.titleline > a"
+     },
+     {
+      "name": "url",
+      "selector": "span.titleline > a",
+      "attribute": "href"
+     }
+    ]
+   },
+   "note": "points and submitted left out: they are in the following sibling tr (td.subtext), outside the story row."
+  },
+  "V30": {
+   "list": null,
+   "note": "Records cannot be selected: the incident history is only in the data-react-props JSON attribute of the HistoryIndex container (rendered client-side); no incident elements are in the DOM."
+  },
+  "V31": {
+   "list": {
+    "type": "list",
+    "itemSelector": "a.history-card",
+    "fields": [
+     {
+      "name": "title",
+      "selector": "p.history-card-title"
+     },
+     {
+      "name": "state",
+      "selector": ".history-card-meta > span:not(.history-card-impact)"
+     },
+     {
+      "name": "impact",
+      "selector": "span.history-card-impact"
+     },
+     {
+      "name": "started",
+      "selector": ".history-card-meta time",
+      "attribute": "datetime"
+     }
+    ]
+   },
+   "note": "impact is null on maintenance cards, which carry no impact label (as the task says). started is the time element's datetime attribute (UTC ISO)."
+  },
+  "V32": {
+   "list": {
+    "type": "list",
+    "itemSelector": "#seven-day-forecast-list li.forecast-tombstone",
+    "fields": [
+     {
+      "name": "period",
+      "selector": "p.period-name"
+     },
+     {
+      "name": "temperature",
+      "selector": "p.temp"
+     },
+     {
+      "name": "short_description",
+      "selector": "p.short-desc"
+     }
+    ]
+   },
+   "note": "temperature is the text 'Low: 47 °F', which the engine does not read as a number; no element holds the number alone."
+  },
+  "V34": {
+   "list": {
+    "type": "list",
+    "itemSelector": "table.ratesTable:not(.tablesorter) > tbody > tr",
+    "fields": [
+     {
+      "name": "currency",
+      "selector": "td"
+     },
+     {
+      "name": "rate",
+      "selector": "td.rtRates a[href*=\"from=USD\"]"
+     }
+    ]
+   },
+   "note": "The Top 10 table is the ratesTable without the tablesorter class. rate is the 1.00 USD column (link to from=USD)."
+  },
+  "V35": {
+   "list": {
+    "type": "list",
+    "itemSelector": "li.daily-weather-list-item",
+    "fields": [
+     {
+      "name": "date",
+      "selector": "a.daily-weather-list-item__item-date time",
+      "attribute": "datetime"
+     },
+     {
+      "name": "max_temperature",
+      "selector": "span.min-max-temperature__max"
+     },
+     {
+      "name": "min_temperature",
+      "selector": "span.min-max-temperature__min"
+     }
+    ]
+   },
+   "note": "The temperatures read '13°': the degree sign is a child span, so the text is not read as a number by the engine. date is the time element's datetime attribute."
+  }
+ }
+}
