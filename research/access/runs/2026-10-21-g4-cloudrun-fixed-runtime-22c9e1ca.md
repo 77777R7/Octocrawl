@@ -13,7 +13,7 @@ The question comes from the plan's §四.3. The 2026-10-14 job ([record](2026-10
 
 ### What is fixed
 
-**Code.** Branch `claude/pa-g4-cloudrun`, cut from main `ab2d9bad`, with this design and `research/access/g4-cloudrun/`. Product code (`packages/`) is main's. The Mac and the job run the same commit, the one this design is committed in. Both sides record it through run-set's `environment.commit`, and both must show `dirty: false`.
+**Code.** Branch `claude/pa-g4-cloudrun`, cut from main `ab2d9bad` and rebased onto main `22c9e1ca` before any run (see the amendment below), with this design and `research/access/g4-cloudrun/`. Product code (`packages/`) is main's. The Mac and the job run the same commit, the one this design is committed in. Both sides record it through run-set's `environment.commit`, and both must show `dirty: false`.
 
 **Image** (`research/access/g4-cloudrun/Dockerfile`, built by `build.sh` on Cloud Build). The pushed image's digest is the pin. The run section lists it.
 - **Base:** `node:26.8.1-bookworm`, pinned by its amd64 manifest digest `sha256:53eaddc9…`. Node 26.8.1 is the Node of the local arm, so the HTTP lane's TLS stack is the same on both sides. The 10-14 image ran `node:22-bookworm`, by tag.
@@ -73,6 +73,13 @@ Two exit arms, with one Mac round and one Cloud Run round each. All four rounds 
 - **Timing.** Each arm's two rounds run at the same time, the Mac round and the Cloud Run execution started together: direct first, then Webshare. This keeps time of day and site state out of the pair, as far as one round can.
 
 **The ladder confounder (K3).** On Webshare the bundled browser lane often failed with `net::ERR_EMPTY_RESPONSE` (`connection_error`), and the ladder stopped there before `installed_chrome`. The fix is in [Ladder stops after browser_local connection_error](https://github.com/77777R7/Octocrawl/pull/659), still open when this design was committed. If it merges before the first round, the branch is rebuilt from the merged main and this section is amended before running. Otherwise every round counts the tasks that were not verified and stopped at `browser_local` without starting `installed_chrome`. `phases.mjs` gives each task `stoppedAtBrowserLocal`, and the results report those counts beside the verified counts.
+
+**Amendment, before any run (2026-10-21).** The fix ([#659](https://github.com/77777R7/Octocrawl/pull/659)) merged as main `22c9e1ca` at 09:54:49 UTC. That was while the first image (`172b5fa6`, built from `ab2d9bad` plus this design) was building. No job had been created and no round had run. So:
+- the branch is rebased onto `22c9e1ca`, and this record is renamed after it;
+- the image is rebuilt from the rebased commit, and that image is the one measured;
+- the job is pointed at the new digest.
+
+The `172b5fa6` image is never executed, and it is deleted with the rest. `stoppedAtBrowserLocal` is still counted: after the fix it should be 0. Any task that still stops there is reported.
 
 ### Each round, in order
 

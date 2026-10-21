@@ -1,5 +1,5 @@
 #!/bin/bash
-# One G4 round (research/access/runs/2026-10-21-g4-cloudrun-fixed-runtime-ab2d9bad.md): the same steps on Cloud Run (the
+# One G4 round (research/access/runs/2026-10-21-g4-cloudrun-fixed-runtime-22c9e1ca.md): the same steps on Cloud Run (the
 # image's CMD) and on the Mac (local.sh), with the exit the arm names. Every line it prints is JSON or a log line:
 #   marks    {"mark": <step>, "ms": <since start>}: container/process start, Xvfb, forwarder, self-check, API, run.
 #   controls selfcheck.mjs (display, grant, DNS, fonts, Chrome, CDP, the egress control page in that Chrome), then the

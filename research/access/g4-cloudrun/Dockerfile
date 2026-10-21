@@ -1,4 +1,4 @@
-# G4: installed_chrome on Cloud Run with a fixed runtime (research/access/runs/2026-10-21-g4-cloudrun-fixed-runtime-ab2d9bad.md).
+# G4: installed_chrome on Cloud Run with a fixed runtime (research/access/runs/2026-10-21-g4-cloudrun-fixed-runtime-22c9e1ca.md).
 # The 2026-10-14 image (research/access/cloudrun-xvfb/) took node:22-bookworm and Chrome stable by tag; here the base
 # image is pinned by digest, Chrome by version and SHA-256, Playwright by package-lock.json, and the rest is recorded in
 # /app/.g4-image-manifest.txt at build time and fixed by the pushed image's digest. Not a service: a Cloud Run job runs
