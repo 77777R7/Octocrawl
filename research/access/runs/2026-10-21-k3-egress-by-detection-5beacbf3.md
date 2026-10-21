@@ -86,4 +86,166 @@ The rounds below run on the commit that adds this amendment (no code change from
 
 ## Results
 
-Not run yet.
+Raw runs: `.w2l/access/runs/2026-10-21T03-45-43-703Z/` to `2026-10-21T05-11-40-357Z/` in this worktree, copied to `~/Code/w2l/.w2l/access/archive/2026-10-21/k3/` (outside the repository). One record per arm run: `2026-10-21-k3-r<round>-<arm>-<exit>-<commit>.md` beside this file.
+
+### Round 0: the first attempt, stopped (kept, not in the four rounds)
+
+- **When and how far:** 03:45:37–04:26 UTC on `5c2c5254`. Arm A of round 1 (r0-A here) finished, 03:45:43–03:49:22. Arm B started at 03:50:28 and was stopped at 04:26 after 11 of its 16 tasks; the other five (T068, T071, T076, B001, B008) were never sent. Rounds 2–4 of that attempt never started.
+- **Why it stopped:** the forwarder resolved `p.webshare.io` through this Mac's DNS, which answers with forged addresses today (see the amendment), so no connection reached the gateway. Both controls failed (no echo address; the API control got nothing in 60 s), and each of the 11 tasks ended at run-set's 180 s client timeout with no API answer. r0-B also started with a dirty working tree (an uncommitted test file, not loaded by the API or run-set).
+- **What changed after it:** only the amendment above: arm B's upstream is the gateway's address 23.81.42.155 instead of its name, and the four rounds start again in the designed order.
+- **Results, as they came:**
+
+| Task | Guard | r0-A Clash (exit 103.142.140.155, control passed) | r0-B Webshare (no exit, control failed) |
+| --- | --- | --- | --- |
+| T001 | Cloudflare | captcha 403 | no API answer in 180 s |
+| T002 | Cloudflare | **✓** | no API answer in 180 s |
+| T005 | DataDome | **✓** | no API answer in 180 s |
+| T034 | DataDome | **✓** | no API answer in 180 s |
+| T038 | DataDome | captcha 403 | no API answer in 180 s |
+| T045 | DataDome | captcha 403 | no API answer in 180 s |
+| T046 | DataDome | captcha 403 | no API answer in 180 s |
+| T047 | Cloudflare | **✓** | no API answer in 180 s |
+| T048 | Cloudflare | **✓** | no API answer in 180 s |
+| T049 | DataDome | **✓** | no API answer in 180 s |
+| T053 | — | **✓** | no API answer in 180 s |
+| T068 | Cloudflare + DataDome | bot_detected_generic 403 | not sent |
+| T071 | Cloudflare | **✓** | not sent |
+| T076 | Cloudflare | **✓** | not sent |
+| B001 | Cloudflare | **✓** | not sent |
+| B008 | — | **✓** | not sent |
+| **Verified** | | **11 of 16** (p50 10224 ms, p95 25626 ms, $0) | **0 of 16** (5 not sent, counted as not verified) |
+
+Counting round 0 in, every arm run of the day: A 48 of 80 (11, 9, 9, 9, 10), B 7 of 80 (0, 1, 1, 3, 2).
+
+### The four rounds
+
+Commit `d29e2ba3` for all eight arm runs (no code change from `5beacbf3`), each started on a clean tree. Chrome 155.0.8059.85 before and after (`--version`). In arm A every verified answer was delivered by the installed_chrome rung; a lane is named only where another delivered it.
+
+| Run | Arm | Start → end (UTC) | Echo exit (run-set) | API control exit | Control | Verified of 16 | False success | p50 / p95 ms | Working tree at start |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| r1-A | A Clash | 04:27:00 → 04:30:59 | 103.142.140.155 | 103.142.140.155 | passed | 9 | 0 | 13088 / 25368 | clean |
+| r1-B | B Webshare | 04:31:13 → 04:40:02 | 173.219.135.138 | 47.147.245.37 | passed | 1 | 0 | 20292 / 180004 | clean |
+| r2-B | B Webshare | 04:40:16 → 04:46:59 | 76.38.58.169 | 73.36.141.159 | passed | 1 | 0 | 13435 / 180004 | clean |
+| r2-A | A Clash | 04:47:05 → 04:51:14 | 103.142.140.155 | 103.142.140.155 | passed | 9 | 0 | 13927 / 25093 | clean |
+| r3-A | A Clash | 04:51:21 → 04:55:22 | 103.142.140.155 | 103.142.140.155 | passed | 9 | 0 | 12541 / 25202 | clean |
+| r3-B | B Webshare | 04:55:35 → 05:03:51 | 47.18.208.126 | 38.40.94.208 | passed | 3 | 0 | 18610 / 180006 | clean |
+| r4-B | B Webshare | 05:04:05 → 05:11:33 | 73.210.37.128 | 73.155.101.51 | passed | 2 | 0 | 16976 / 180006 | clean |
+| r4-A | A Clash | 05:11:40 → 05:15:29 | 103.142.140.155 | 103.142.140.155 | passed | 10 | 0 | 9758 / 25204 | clean |
+
+The control passed in all eight arm runs, so the "control-passed" columns below equal the totals. In arm B the two echo checks of the same run left from two different US residential addresses, as the rotating gateway gives a new exit per connection.
+
+| Task | Guard | r1-A | r1-B | r2-B | r2-A | r3-A | r3-B | r4-B | r4-A |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T001 | Cloudflare | captcha 403 | cloudflare_challenge 403 | connection_error | captcha 403 | captcha 403 | **✓** | connection_error | captcha 403 |
+| T002 | Cloudflare | **✓** | **✓** (http) | **✓** (http) | **✓** | **✓** | **✓** (http) | **✓** (http) | **✓** |
+| T005 | DataDome | captcha 403 | connection_error | connection_error | captcha 403 | captcha 403 | connection_error | connection_error | captcha 403 |
+| T034 | DataDome | captcha 403 | connection_error | connection_error | captcha 403 | captcha 403 | connection_error | connection_error | **✓** |
+| T038 | DataDome | captcha 403 | connection_error | connection_error | captcha 403 | captcha 403 | connection_error | connection_error | captcha 403 |
+| T045 | DataDome | captcha 403 | connection_error | connection_error | captcha 403 | captcha 403 | connection_error | connection_error | captcha 403 |
+| T046 | DataDome | captcha 403 | bot_detected_generic 403 | connection_error | captcha 403 | captcha 403 | bot_detected_generic 403 | connection_error | captcha 403 |
+| T047 | Cloudflare | **✓** | cloudflare_challenge 403 | cloudflare_challenge 403 | **✓** | **✓** | connection_error | connection_error | **✓** |
+| T048 | Cloudflare | **✓** | connection_error | connection_error | **✓** | **✓** | connection_error | cloudflare_challenge 403 | **✓** |
+| T049 | DataDome | **✓** | bot_detected_generic 403 | connection_error | **✓** | **✓** | bot_detected_generic 403 | connection_error | **✓** |
+| T053 | — | **✓** | connection_error | connection_error | **✓** | **✓** | **✓** | **✓** | **✓** |
+| T068 | Cloudflare + DataDome | bot_detected_generic 403 | no API answer in 180 s | no API answer in 180 s | bot_detected_generic 403 | bot_detected_generic 403 | no API answer in 180 s | no API answer in 180 s | bot_detected_generic 403 |
+| T071 | Cloudflare | **✓** | connection_error | connection_error | **✓** | **✓** | connection_error | connection_error | **✓** |
+| T076 | Cloudflare | **✓** | connection_error | connection_error | **✓** | **✓** | connection_error | connection_error | **✓** |
+| B001 | Cloudflare | **✓** | connection_error | connection_error | **✓** | **✓** | connection_error | connection_error | **✓** |
+| B008 | — | **✓** | connection_error | connection_error | **✓** | **✓** | connection_error | connection_error | **✓** |
+| **Verified** | | **9** | **1** | **1** | **9** | **9** | **3** | **2** | **10** |
+
+`no API answer in 180 s` is run-set's client timeout (`task.timeoutMs`, 180 s by default; `research/access/run-set.mjs:414`): T068 on Webshare got no answer in all four rounds, so its cost and verification are unknown, not zero.
+
+### By detection type, every attempt
+
+| Group | Tasks | A Clash, all rounds | B Webshare, all rounds | A, per round (r1–r4) | B, per round (r1–r4) | A, control-passed runs | B, control-passed runs | Discordant pairs A only / B only | Sign test p (two-sided) | Bar met |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Cloudflare | 8 | 24/32 | 5/32 | 6, 6, 6, 6 | 1, 1, 2, 1 | 24/32 (4 runs) | 5/32 (4 runs) | 20 / 1 | 0.000 | **yes, A ahead** |
+| DataDome | 7 | 5/28 | 0/28 | 1, 1, 1, 2 | 0, 0, 0, 0 | 5/28 (4 runs) | 0/28 (4 runs) | 5 / 0 | 0.063 | no (A ahead by 5, ahead or level in 4 of 4 rounds, 1 tasks ahead by ≥2) |
+| No vendor header | 2 | 8/8 | 2/8 | 2, 2, 2, 2 | 0, 0, 1, 1 | 8/8 (4 runs) | 2/8 (4 runs) | 6 / 0 | 0.031 | **yes, A ahead** |
+| All | 16 | 37/64 | 7/64 | 9, 9, 9, 10 | 1, 1, 3, 2 | 37/64 (4 runs) | 7/64 (4 runs) | 31 / 1 | 0.000 | **yes, A ahead** |
+
+Bar, as fixed before the run: the arm ahead leads by at least 4 attempts, is ahead or level in at least 3 of 4 rounds, and at least two of the group's tasks are each ahead by at least 2 of 4. T068 is in both vendor groups; "All" counts it once.
+
+| Task | Guard | A Clash | B Webshare |
+| --- | --- | --- | --- |
+| T001 | Cloudflare | 0/4 | 1/4 |
+| T002 | Cloudflare | 4/4 | 4/4 |
+| T005 | DataDome | 0/4 | 0/4 |
+| T034 | DataDome | 1/4 | 0/4 |
+| T038 | DataDome | 0/4 | 0/4 |
+| T045 | DataDome | 0/4 | 0/4 |
+| T046 | DataDome | 0/4 | 0/4 |
+| T047 | Cloudflare | 4/4 | 0/4 |
+| T048 | Cloudflare | 4/4 | 0/4 |
+| T049 | DataDome | 4/4 | 0/4 |
+| T053 | — | 4/4 | 2/4 |
+| T068 | Cloudflare + DataDome | 0/4 | 0/4 |
+| T071 | Cloudflare | 4/4 | 0/4 |
+| T076 | Cloudflare | 4/4 | 0/4 |
+| B001 | Cloudflare | 4/4 | 0/4 |
+| B008 | — | 4/4 | 0/4 |
+
+### Confounder: Webshare runs that stopped before installed_chrome
+
+On Webshare the bundled browser lane often failed to open the page at all: `page.goto: net::ERR_EMPTY_RESPONSE` through the forwarder, `failureReason: connection_error`. After that the ladder stopped, so installed_chrome, the rung this experiment is about, never ran for that task. Clash had none of these.
+
+| Run | Stopped | Of which connection_error | No API answer | Tasks |
+| --- | --- | --- | --- | --- |
+| r1-A | 0 | 0 | 0 | — |
+| r1-B | 8 | 7 | 1 | T005 (connection_error; http → browser_local), T034 (connection_error; http → browser_local), T045 (connection_error; http → browser_local), T068 (no API answer in 180 s), T071 (connection_error; http → browser_local), T076 (connection_error; http → browser_local), B001 (connection_error; http → browser_local), B008 (connection_error; http → browser_local) |
+| r2-B | 10 | 9 | 1 | T005 (connection_error; http → browser_local), T034 (connection_error; http → browser_local), T038 (connection_error; http → browser_local), T048 (connection_error; http → browser_local), T049 (connection_error; http → browser_local), T068 (no API answer in 180 s), T071 (connection_error; http → browser_local), T076 (connection_error; http → browser_local), B001 (connection_error; http → browser_local), B008 (connection_error; http → browser_local) |
+| r2-A | 0 | 0 | 0 | — |
+| r3-A | 0 | 0 | 0 | — |
+| r3-B | 7 | 5 | 1 | T005 (connection_error; http → browser_local), T034 (connection_error; http → browser_local), T049 (bot_detected_generic; http → browser_local), T068 (no API answer in 180 s), T071 (connection_error; http → browser_local), T076 (connection_error; http → browser_local), B008 (connection_error; http → browser_local) |
+| r4-B | 6 | 5 | 1 | T005 (connection_error; http → browser_local), T034 (connection_error; http → browser_local), T068 (no API answer in 180 s), T071 (connection_error; http → browser_local), T076 (connection_error; http → browser_local), B008 (connection_error; http → browser_local) |
+| r4-A | 0 | 0 | 0 | — |
+
+"Stopped" means not verified and installed_chrome never started. Two examples from the saved responses:
+
+- r1-B T005 (etsy.com): http `failed / connection_error` → `ladder_action_decision` actual `next_rung`; browser_local `navigate_failed` `net::ERR_EMPTY_RESPONSE` → `ladder_step` failed, `ladder_action_decision` shadow `stop`, actual `stop`. `channelsTried: http, browser_local`.
+- r2-B B001 (bhphotovideo.com): http `blocked`, 403, `failureClass: bot_gate` → `next_rung`; browser_local `navigate_failed` `net::ERR_EMPTY_RESPONSE` → `stop`. `channelsTried: http, browser_local`.
+
+So arm B measured the gateway's connections as much as the sites' bot checks. The same tables counted only on attempts where installed_chrome ran or an earlier lane delivered a verified answer ("evaluable"), and on the (task, round) pairs evaluable in both arms:
+
+| Group | A evaluable: verified/evaluable | B evaluable: verified/evaluable | Pairs both evaluable | A only / B only on those pairs | Sign test p |
+| --- | --- | --- | --- | --- | --- |
+| Cloudflare | 24/32 | 5/17 | 17 | 9 / 1 | 0.021 |
+| DataDome | 5/28 | 0/12 | 12 | 2 / 0 | 0.500 |
+| No vendor header | 8/8 | 2/4 | 4 | 2 / 0 | 0.500 |
+| All | 37/64 | 7/33 | 33 | 13 / 1 | 0.002 |
+
+## What this shows
+
+Only what these eight arm runs, in one 48-minute window on one machine, support:
+
+- **Cloudflare: Clash ahead, outside the window's spread.** 24 of 32 on Clash against 5 of 32 on Webshare; Clash was ahead in every round (6, 6, 6, 6 against 1, 1, 2, 1) and five tasks led by 4 of 4 (T047, T048, T071, T076, B001). The bar is met. On the pairs where both arms reached installed_chrome or delivered earlier, 9 pairs went to Clash only and 1 to Webshare only (T001 in r3). This repeats the Cloudflare half of 2026-10-14 (Webshare 0 of 2 on T047, T048 and B001 then; 0 of 4 each now).
+- **DataDome: no lead for Webshare; too few evaluable Webshare attempts to say more.** Clash 5 of 28 (T049 4 of 4, T034 1 of 4), Webshare 0 of 28. Only 12 Webshare DataDome attempts reached installed_chrome or delivered earlier, and none was verified; on the 12 pairs evaluable in both arms the split is 2 to Clash, 0 to Webshare. The bar is not met. The 2026-10-14 lead (Webshare passing T038 and T046 in both runs) did not repeat: T038 and T046 were 0 of 4 on both exits. On the four DataDome tasks of 2026-10-16 (T038, T045, T046, T068), both exits were 0 of 16 here, against 5 of 16 (Clash) and 1 of 16 (Webshare) then.
+- **The crossover that exit selection by detection type needs did not appear.** That would need Webshare ahead on DataDome and Clash ahead on Cloudflare in the same window. Here Clash was ahead or level in every group: overall 37 of 64 against 7 of 64 (31 pairs Clash only, 1 Webshare only). These data do not support building it; K4 decides.
+- **Day-to-day spread is larger than these runs show.** Clash gave 11 in round 0 and 9–10 in the four rounds, but DataDome tasks moved between days: T005 and T034 passed in round 0 and on 10-14, T038 and T046 passed on Clash 2 and 3 times of 4 on 10-16, and none of those did here. A window of one hour cannot say how often each exit wins on DataDome.
+- **Webshare's own failures dominate arm B.** 31 of its 64 attempts stopped before installed_chrome: 26 on browser-lane connection errors and 4 with no API answer at all, plus T049 in r3-B stopped as `bot_detected_generic` on browser_local. The controls passed every time, so a control page at the start of a run does not show that the gateway will carry a browser's tunnels for the next ten minutes.
+- **No false successes in any arm run.** p50 9.8–13.9 s on Clash, 13.4–20.3 s on Webshare; Webshare's p95 is the 180 s client timeout.
+
+## Pacing and budget across the exit switch: result
+
+- **Per-host pacing does not reset.** `packages/api/test/egressPool.test.ts` "keeps the site's pacing across a switch": one engine with the default rungs, a per-host delay of 1.5 s, two pool proxies. The first proxy answers one page and then drops the next request and goes down; the page moves to the second proxy (`egress_switched`, `unreachable`) and its first request to the site there came at least 1.4 s after the dropped one. It passes on `main` (`5beacbf3` code): the engine's rungs share one `OriginScheduler` keyed by origin across egresses (`packages/api/src/engine.ts:857`, `:899`). The test helper that builds its own rungs (`httpOnly()` in that file) gives each egress a scheduler of its own; the first draft of the test used it and saw no wait, so that draft measured the helper, not the engine.
+- **The page's time budget did reset. Fixed here.** "keeps the page's time budget across a switch": the first proxy holds the page 2 s before it drops it, the site takes 1.5 s, the page has `timeout: 3000`. On `main` the page succeeded after about 3.5 s: the egress wrapper read the page again with `pageAtom.scrape`, which set a new deadline, `Date.now() + timeout` (`engine.ts:1584`), so a page could take up to three timeouts (`MAX_EGRESS_SWITCHES` = 2). The test failed on `main` (commit `c0c213b7`) and passes after the fix (`393ecabe`): the deadline is set once per page before the first read, and the read on the new egress gets what is left of it. The task's own deadline was already a cap. One consequence: a page that spends its whole timeout on an egress that hangs now fails `timeout` after the switch instead of being read again with a new timeout on the healthy egress.
+- **Spend budget: not reset, by the code, not by a test.** The page's ledger (`spend.child(...)`, `packages/runtime/src/orchestrator.ts:396`) and the run's ledger come in through the context that both reads share, and the read given up keeps its paid calls on the page's record (`givenUpPaidCalls`). No test here makes a paid call across a switch: the egress-pool tests have no paid rung.
+- The paired run itself could not show any of this: each arm run was its own API process, and the exit was the process's environment.
+
+## Cost
+
+- Spend ledger: $0 on every Clash run. On every Webshare run `unknown`, because T068 got no API answer; the 15 answered attempts in each carried no paid call, and the grant names no paid capability.
+- Webshare bandwidth: unknown (not metered by Octocrawl, not read from the Webshare dashboard).
+
+## Not shown
+
+- Other days, other times of day, other machines. The 10-14 and 10-16 differences say a one-hour window is not enough for DataDome.
+- Webshare through another gateway address or by its name with honest DNS; sticky sessions; other residential providers. Whether the `ERR_EMPTY_RESPONSE` failures come from the gateway node 23.81.42.155, from rotating mode, or from the forwarder is not isolated.
+- How Webshare would do on DataDome if installed_chrome had run on the 16 attempts that stopped before it.
+
+## Follow-ups (not done here)
+
+- **Ladder: a browser-lane connection error ends the ladder** (not isolated). On Webshare, 26 attempts stopped after `browser_local` failed with `connection_error` (`net::ERR_EMPTY_RESPONSE`), with `ladder_action_decision` actual `stop` and installed_chrome, the next rung, never started; see the two examples above. Whether a connection error on the bundled browser should go on to installed_chrome (it shares the exit, so it may fail the same way) is a ladder question for another session.
+- **robots.txt is re-read after a switch.** `robotsCacheFor(mode, egress)` keys the cache by egress (`engine.ts:872`), so a new egress reads robots.txt again; the rules it applies come from the site, but ROADMAP item 3 lists robots.txt among the state that should not reset. Not tested here.
+- **Local DNS for the gateway.** This Mac's DNS forges `p.webshare.io` today; `research/access/sticky-vs-rotating.sh` and any run through `forward.mjs` by name will fail the same way until that is handled.
