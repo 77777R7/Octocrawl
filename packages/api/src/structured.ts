@@ -31,6 +31,7 @@ import type {
 import { sha256Utf8 } from '@w2l/http-core'
 import { browserFingerprintFor, cacheStateOf, CONTENTFUL_STATUS, defaultApiMode, RequestError, warningOf } from '@w2l/contracts'
 import { compilePathFilter, readinessOf, toEvidenceRecord, verify } from '@w2l/runtime'
+import { statesAbsence } from '@w2l/extract-tf'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
 import { modelLocator } from './modelEvidence.js'
@@ -60,7 +61,35 @@ interface Candidate {
   unread?: string
   /** The same for members of the value, such as a price list's amounts, by JSON Pointer below it. */
   unreadMembers?: ReadonlyArray<{ path: string; message: string }>
+  /** The rule a number was read from `text` by (numbers.ts). */
+  conversion?: string
+  /** The unit stated with the value and what it holds for (StructuredFieldEvidence.context). */
+  context?: StructuredFieldEvidence['context']
+  /** The source states there is no value: `value` is null and `text` is that statement (`N/A`). */
+  absent?: true
 }
+
+/** Keys, reduced by labelKey, that can name an amount of money. */
+const MONEY_KEY = /price|amount|cost|fee|total|charge|tax|preis|prix|precio|prezzo|betrag|kosten|gebühr/
+
+/** Units a percentage is written in; any other unit beside a number is its currency. */
+const PERCENT_UNITS: ReadonlySet<string> = new Set(['%', 'pp', 'p.p.'])
+
+/** The candidate's context: what the fact holds for, with the unit its number is in. A currency the declaration states wins over the mark in the text. */
+function readingContext(fact: Pick<ProductFact, 'unit' | 'context'> | undefined, unit: string | undefined): Candidate['context'] | undefined {
+  const currency = fact?.unit ?? (unit !== undefined && !PERCENT_UNITS.has(unit) ? unit : undefined)
+  const context = {
+    ...fact?.context,
+    ...(currency === undefined ? {} : { currency }),
+    ...(unit !== undefined && PERCENT_UNITS.has(unit) ? { unit } : {}),
+  }
+  return Object.keys(context).length > 0 ? context : undefined
+}
+
+/** A fact the source states there is none of, as a candidate: null, quoting the statement. */
+const absentCandidate = (fact: ProductFact | { source: StructuredFieldEvidence['source']; path?: string; value: string }): Candidate => ({
+  value: null, fact: { source: fact.source, ...(fact.path === undefined ? {} : { path: fact.path }) }, text: fact.value, absent: true,
+})
 
 /** Sources whose format writes `.` as the decimal point: JSON-LD and OpenGraph product meta. Microdata may hold visible text. */
 const DECIMAL_POINT_SOURCES: ReadonlySet<string> = new Set(['jsonld', 'meta'])
@@ -69,10 +98,12 @@ function unreadMessage(text: string, where: NonNullable<Candidate['fact']>, why:
   return `the page states ${JSON.stringify(text)} (${where.source}${where.path === undefined ? '' : `, ${where.path}`}): ${why}; no number was read`
 }
 
-/** A product fact's number and the text it was read from, or its text and why no number was read (numbers.ts). */
+/** A product fact's number and the text it was read from, with its rule and unit, or its text and why no number was read (numbers.ts). */
 function factNumber(fact: ProductFact, context: NumberContext = {}): Omit<Candidate, 'fact' | 'unreadMembers'> {
   const reading = readNumber(fact.value, { ...context, decimalPoint: DECIMAL_POINT_SOURCES.has(fact.source) })
-  return 'value' in reading ? { value: reading.value, text: fact.value } : { value: fact.value, unread: unreadMessage(fact.value, fact, reading.message) }
+  if (!('value' in reading)) return { value: fact.value, unread: unreadMessage(fact.value, fact, reading.message) }
+  const evidenceContext = readingContext(fact, reading.unit)
+  return { value: reading.value, text: fact.value, conversion: reading.conversion, ...(evidenceContext === undefined ? {} : { context: evidenceContext }) }
 }
 
 /** Evidence for a list or map the product extractor reported empty: nothing was read, the extractor observed none. */
@@ -95,13 +126,19 @@ function baseLabelKey(text: string): string {
  * cleanly that type ("In stock (22 available)", "4.7 out of 5", "HL-1" and a
  * URL are not numbers).
  */
-function labelValue(text: string, schema: JsonSchema): { value: JsonValue; number?: true } | { unsettled: string } | undefined {
+type LabelReading = { value: JsonValue; number?: { conversion: string; unit?: string } } | { unsettled: string } | { absent: true }
+
+function labelValue(text: string, schema: JsonSchema, language: string | null): LabelReading | undefined {
+  // "N/A" is the page saying there is none, whatever type the field is.
+  if (statesAbsence(text)) return { absent: true }
   const types = schemaTypes(schema)
   if (types.length === 0 || types.includes('string')) return { value: text }
   if (types.includes('number') || types.includes('integer')) {
-    const reading = readNumber(text)
+    const reading = readNumber(text, { language })
     if (!('value' in reading)) return reading.reason === 'unsettled' ? { unsettled: reading.message } : undefined
-    return types.includes('number') || Number.isInteger(reading.value) ? { value: reading.value, number: true } : undefined
+    return types.includes('number') || Number.isInteger(reading.value)
+      ? { value: reading.value, number: { conversion: reading.conversion, ...(reading.unit === undefined ? {} : { unit: reading.unit }) } }
+      : undefined
   }
   if (types.includes('boolean')) return /^(true|yes)$/i.test(text) ? { value: true } : /^(false|no)$/i.test(text) ? { value: false } : undefined
   return undefined
@@ -120,6 +157,7 @@ function addLabelCandidates(
   root: JsonSchema,
   labels: readonly (LabelledValue & { source?: 'pdf' })[],
   issues: StructuredExtractionIssue[],
+  language: string | null,
 ): void {
   for (const [name, child] of Object.entries(effective(root, root).properties ?? {})) {
     const key = labelKey(name)
@@ -128,10 +166,16 @@ function addLabelCandidates(
     const exact = labels.filter(item => labelKey(item.label) === key)
     const matched = exact.length > 0 ? exact : labels.filter(item => baseLabelKey(item.label) === key)
     if (matched.length === 0) continue
-    const readings = matched.map(item => labelValue(item.value, effective(root, child)))
+    // The page's language never settles money: not on a product page, not for a key that names an amount.
+    const notation = MONEY_KEY.test(key) ? null : language
+    const readings = matched.map(item => labelValue(item.value, effective(root, child), notation))
     if (readings.every(reading => reading === undefined)) continue
     const first = matched[0]!
     const fact: NonNullable<Candidate['fact']> = { source: first.source ?? 'dom', path: `${first.path} ${JSON.stringify(first.label)}` }
+    if (readings.every(reading => reading !== undefined && 'absent' in reading)) {
+      map.set(name.toLowerCase(), absentCandidate({ ...fact, value: first.value }))
+      continue
+    }
     const unsettled = readings[0] !== undefined && 'unsettled' in readings[0] ? readings[0].unsettled : undefined
     if (unsettled !== undefined && matched.every(item => item.value === first.value)) {
       map.set(name.toLowerCase(), { value: first.value, fact, unread: unreadMessage(first.value, fact, unsettled) })
@@ -146,8 +190,11 @@ function addLabelCandidates(
       })
       continue
     }
-    const number = readings[0] !== undefined && 'number' in readings[0]
-    map.set(name.toLowerCase(), { value: values[0]!, fact, ...(number ? { text: first.value } : {}) })
+    const number = readings[0] !== undefined && 'number' in readings[0] ? readings[0].number : undefined
+    const context = readingContext(undefined, number?.unit)
+    map.set(name.toLowerCase(), {
+      value: values[0]!, fact, ...(number === undefined ? {} : { text: first.value, conversion: number.conversion }), ...(context === undefined ? {} : { context }),
+    })
   }
 }
 
@@ -199,6 +246,7 @@ function addDeclaredCandidates(
     if (entries === undefined || entries.length === 0) continue
     const first = entries[0]!
     const fact: NonNullable<Candidate['fact']> = { source: first.source, path: first.path }
+    const context = first.context === undefined ? {} : { context: first.context }
     if (entries.some(item => JSON.stringify(item.values) !== JSON.stringify(first.values))) {
       issues.push({
         code: 'field_ambiguous',
@@ -210,6 +258,7 @@ function addDeclaredCandidates(
     map.set(name.toLowerCase(), {
       value: first.values.length === 1 && !schemaTypes(effective(root, child)).includes('array') ? first.values[0]! : [...first.values],
       fact,
+      ...context,
       ...(first.values.length > 1 ? { unread: `the page declares ${first.values.length} values for ${first.name} (${first.path}); a string holds one, so none was chosen` } : {}),
     })
   }
@@ -226,9 +275,12 @@ function candidates(result: FetchResult, schema?: JsonSchema, issues: Structured
   const product = result.document?.product ?? null
   const put = (keys: readonly string[], fact: ProductFact | null | undefined, read?: (fact: ProductFact) => Omit<Candidate, 'fact'>): void => {
     if (fact === null || fact === undefined) return
-    const candidate = { value: fact.value, fact, ...read?.(fact) }
+    const context = readingContext({ context: fact.context }, undefined)
+    const candidate: Candidate = fact.absent === true ? absentCandidate(fact)
+      : { value: fact.value, fact: { source: fact.source, ...(fact.path === undefined ? {} : { path: fact.path }) }, ...(context === undefined ? {} : { context }), ...read?.(fact) }
     for (const key of keys) map.set(key.toLowerCase(), candidate)
   }
+  const language = result.metadata?.language ?? null
   // The fetch's own URLs, the content title and the page type W2L inferred:
   // each says where it came from, like a value read from the page.
   map.set('url', { value: result.evidence.finalUrl, fact: { source: 'fetch', path: 'finalUrl' } })
@@ -244,10 +296,10 @@ function candidates(result: FetchResult, schema?: JsonSchema, issues: Structured
     map.set('pagetitle', { value: result.document.title, fact })
   }
   if (result.document?.pageType) map.set('pagetype', { value: result.document.pageType, fact: { source: 'inferred', path: 'document.pageType' } })
-  if (product !== null) addProductCandidates(map, product, put)
+  if (product !== null) addProductCandidates(map, product, put, language)
   if (product !== null && schema !== undefined) addProductConflicts(product, schema, issues)
   // A PDF's labels are its `Label: value` lines, each with its page (pdfFields.ts).
-  if (schema !== undefined) addLabelCandidates(map, schema, [...(result.document?.labelledValues ?? []), ...pdfLabelledValues(result)], issues)
+  if (schema !== undefined) addLabelCandidates(map, schema, [...(result.document?.labelledValues ?? []), ...pdfLabelledValues(result)], issues, product === null ? language : null)
   if (schema !== undefined) addDeclaredCandidates(map, schema, result, issues)
   return map
 }
@@ -311,17 +363,22 @@ function addProductCandidates(
   map: Map<string, Candidate>,
   product: ProductFacts,
   put: (keys: readonly string[], fact: ProductFact | null | undefined, read?: (fact: ProductFact) => Omit<Candidate, 'fact'>) => void,
+  language: string | null,
 ): void {
   put(PRODUCT_FIELD_KEYS.sku, product.subjectId ?? product.sku)
   put(PRODUCT_FIELD_KEYS.name, product.name)
   put(PRODUCT_FIELD_KEYS.brand, product.brand)
   put(PRODUCT_FIELD_KEYS.price, product.price, fact => factNumber(fact, { currency: product.priceCurrency?.value }))
+  // A site adapter that observed the quote absent ("Currently unavailable") states that there is no price, at its availability.
+  if (product.price === null && product.quoteState === 'absent_observed' && product.availability !== null) {
+    for (const key of PRODUCT_FIELD_KEYS.price) map.set(key, absentCandidate(product.availability))
+  }
   put(PRODUCT_FIELD_KEYS.priceCurrency, product.priceCurrency)
   put(['seller', 'merchant'], product.seller)
   put(PRODUCT_FIELD_KEYS.availability, product.availability)
   put(['deliverylocation', 'deliveryregion', 'region'], product.deliveryLocation)
-  put(['rating'], product.rating, fact => factNumber(fact))
-  put(['reviewcount', 'reviews'], product.reviewCount, fact => factNumber(fact, { count: true }))
+  put(['rating'], product.rating, fact => factNumber(fact, { language }))
+  put(['reviewcount', 'reviews'], product.reviewCount, fact => factNumber(fact, { count: true, language }))
   map.set('kind', { value: product.kind ?? 'unknown', fact: { source: 'inferred', ...(product.kind === undefined ? {} : { path: 'document.product.kind' }) } })
   // A list is a source only when the extractor read it from the page. The
   // Amazon adapter reports what it observed on the verified subject, possibly
@@ -484,13 +541,17 @@ function mapSchema(
     const value = coerce(direct.value, schema, direct.unread === undefined)
     if (value !== undefined) {
       if (direct.fact !== undefined) {
-        // A number read from page text quotes that text.
-        const text = typeof value !== 'number' ? undefined : direct.text ?? (typeof direct.value === 'string' ? direct.value : undefined)
+        // A number read from page text quotes that text, with the value and rule it was read by; a stated absence quotes the statement.
+        const text = direct.absent === true ? direct.text : typeof value !== 'number' ? undefined : direct.text ?? (typeof direct.value === 'string' ? direct.value : undefined)
+        const reading = typeof value !== 'number' || text === undefined ? undefined : direct.conversion !== undefined ? { conversion: direct.conversion } : readNumber(text)
         evidence.push({
           path,
           source: direct.fact.source,
           ...(direct.fact.path === undefined ? {} : { evidencePath: direct.fact.path }),
           ...(text === undefined ? {} : { text }),
+          ...(reading !== undefined && 'conversion' in reading ? { normalized: value as number, conversion: reading.conversion } : {}),
+          ...(direct.context === undefined ? {} : { context: direct.context }),
+          ...(direct.absent === true ? { absent: true as const } : {}),
         })
       }
       filled.add(path)
@@ -523,6 +584,11 @@ function unreadIssues(root: JsonSchema, source: ReadonlyMap<string, Candidate>, 
     const candidate = source.get(name.toLowerCase())
     const path = `/${name}`
     if (candidate === undefined) continue
+    if (candidate.absent === true) {
+      const where = candidate.fact === undefined ? '' : ` (${candidate.fact.source}${candidate.fact.path === undefined ? '' : `, ${candidate.fact.path}`})`
+      issues.push({ code: 'field_absent', path, message: `the page states there is no value for ${path}: ${JSON.stringify(candidate.text)}${where}` })
+      continue
+    }
     if (!filled.has(path)) {
       if (candidate.unread !== undefined) issues.push({ code: 'field_unavailable', path, message: candidate.unread })
       continue

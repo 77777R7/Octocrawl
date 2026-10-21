@@ -143,8 +143,8 @@ describe('file download on scrape', () => {
     const body = await scrape({ url: `${origin}/report.pdf`, formats: [format] })
     expect(body.json).toMatchObject({ status: 'incomplete', data: { portfolioPue: 1.32, reportingYear: 2024 }, issues: [{ code: 'missing_required', path: '/owner' }] })
     expect(valid(body.evidenceRecord).fieldEvidence).toEqual({
-      '/portfolioPue': { source: 'pdf', locator: 'page 2 "Portfolio PUE"' },
-      '/reportingYear': { source: 'pdf', locator: 'page 2 "Reporting year"' },
+      '/portfolioPue': { source: 'pdf', locator: 'page 2 "Portfolio PUE"', reading: { raw: '1.32', normalized: 1.32, unit: null, conversion: 'number/decimal', absent: false } },
+      '/reportingYear': { source: 'pdf', locator: 'page 2 "Reporting year"', reading: { raw: '2024', normalized: 2024, unit: null, conversion: 'number/plain', absent: false } },
     })
     let modelCalls = 0
     const fallback = await extractStructured(body, { ...format, modelFallback: true }, {}, { baseUrl: 'http://model.invalid', model: 'm', fetch: (async () => { modelCalls++; throw new Error('no model') }) as typeof fetch })

@@ -60,10 +60,14 @@ function articleProperties(document: Document): DeclaredValue[] {
     for (const node of topNodes(parsed)) {
       const type = articleType(node)
       if (type === null) continue
+      // What every value of the node holds for: the version and dates the node states (DeclaredValue.context).
+      const stated = (key: string): string => (typeof node[key] === 'string' || typeof node[key] === 'number' ? collapse(String(node[key])) : '')
+      const context = Object.fromEntries(([['version', 'version'], ['published', 'datePublished'], ['revised', 'dateModified']] as const)
+        .map(([as, key]) => [as, stated(key)] as const).filter(([, value]) => value.length > 0))
       for (const name of ARTICLE_PROPERTIES) {
         const raw = node[name]
         const value = typeof raw === 'string' ? collapse(raw) : ''
-        if (value.length > 0) out.push({ name, values: [value], source: 'jsonld', path: `ld+json[${index}] ${type}.${name}` })
+        if (value.length > 0) out.push({ name, values: [value], source: 'jsonld', path: `ld+json[${index}] ${type}.${name}`, ...(Object.keys(context).length > 0 ? { context } : {}) })
       }
     }
   }
