@@ -52,7 +52,9 @@ async function secret(name) {
 const keys = { steel: await secret('STEEL_API_KEY'), firecrawl: await secret('FIRECRAWL_API_KEY'), zenrows: await secret('ZENROWS_API_KEY') }
 for (const [k, v] of Object.entries(keys)) if (!v) throw new Error(`${k} key not found`)
 const steelGrant = flag('--steel-grant') ?? localFile('.w2l/access/steel-grant.json')
-const icGrant = flag('--ic-grant') ?? localFile('.w2l/access/installed-chrome-grant.json')
+// After window 1 (which ran the 16-task grant outside its declared scope) the K1 grant is required; --ic-grant overrides.
+const icGrant = flag('--ic-grant') ?? localFile('.w2l/access/installed-chrome-grant-k1.json')
+if (icGrant === null) throw new Error('no installed_chrome grant: K1 needs .w2l/access/installed-chrome-grant-k1.json (or --ic-grant)')
 const head = sh('git rev-parse HEAD')
 const LOCAL = {
   standard: { port: ports[0], cwd: repo, commit: head, access: 'standard', env: {} },

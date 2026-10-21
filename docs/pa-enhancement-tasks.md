@@ -309,7 +309,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - 保留集 v2 冻结捕获（本机回环，$0）：加 itemSelector（`list_selectors.v1.json`，34 题选 26，运行前提交 `d81544ae`）后，v2 json 的必填完全正确 29→120/294、D 0→21/86、H 0→6/75，两个 commit 相同。新增 4 个假成功（V20、V21、V25、V34），verify 只查字段在不在。记录 `research/accuracy/runs/2026-10-21-k1-w1-frozen-2ffd7f25-7ba113c9.md`。
   - v2 实站（13:59–14:23 UTC）：Octocrawl 确定性 json 加 itemSelector，四臂都是 69/294、接受 2 题、假成功 3–4/42。Firecrawl 自己的 json 格式（LLM 抽取，属竞品抽取，不是 F2）118/294、接受 13 题、假成功 23/42。按 10-20 金标准评分，列表首项已变，漂移未隔离。记录 `research/accuracy/runs/2026-10-21-k1-w1-live-v2-322de68e.md`。
   - F2 没测到（null）：本机没有抽取模型接口。冻结捕获和实站原始 HTML 都保留，可以以后补测。
-  - installed_chrome grant 的声明写的是 16 题，K1 在 92 题上用了它，是否另写 grant 由 Howard 定。
+  - 窗口 1 超出声明范围使用了 installed_chrome grant `09fdeafe…`：它的声明只写了 16 道挑战题，窗口 1 用在了 92 题和保留集 v2 上，记录里已写明。Howard 2026-10-21 决定：窗口 2 另用一份 K1 grant，设置不变，只把声明改为 K1 的 92 题加 v2，文件放在 `.w2l/access/installed-chrome-grant-k1.json`（git-ignored，不提交），SHA-256 写进窗口 2 的记录。驱动在窗口 2 缺这份文件时拒绝启动。每周重跑的 16 题 grant 不动。
 
 ## 下次从这里继续
 

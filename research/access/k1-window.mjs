@@ -72,7 +72,10 @@ const COMPETITORS = ['firecrawl', 'zenrows']
 const rotated = (b) => LOCAL.map((_, i) => LOCAL[(i + b) % LOCAL.length])
 
 const steelGrant = flag('--steel-grant') ?? localFile('.w2l/access/steel-grant.json')
-const icGrant = flag('--ic-grant') ?? localFile('.w2l/access/installed-chrome-grant.json')
+// Window 1 ran the 16-task grant (09fdeafe…) outside its declared scope; from window 2 the installed_chrome arm takes the
+// K1 grant Howard decided on 2026-10-21 (same settings, a statement naming K1), and the run refuses to start without it.
+const icGrant = flag('--ic-grant') ?? (windowNo === '1' ? localFile('.w2l/access/installed-chrome-grant.json') : localFile('.w2l/access/installed-chrome-grant-k1.json'))
+if (icGrant === null) throw new Error('no installed_chrome grant: window 2 needs .w2l/access/installed-chrome-grant-k1.json (or --ic-grant)')
 const steel = grantOf(await readFile(steelGrant, 'utf8'))
 const ic = grantOf(await readFile(icGrant, 'utf8'))
 if (!steel.capabilities?.includes('vendor_remote_browser') || steel.capabilities.includes('vendor_residential_proxy')) throw new Error(`${steelGrant}: the Steel datacenter grant (vendor_remote_browser, never vendor_residential_proxy)`)

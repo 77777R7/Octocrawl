@@ -2,6 +2,8 @@
 
 The runner's own records of this arm's runs in the window, copied whole; the comparison is in `2026-10-21-k1-w1-322de68e-summary.md`.
 
+**The installed_chrome grant was used outside its declared scope in window 1.** Grant `09fdeafe0cb2c77cbf8c771f596ff9ab5be5fc253322a1d32b682ab0c83bd818` attests launching the installed Chrome for the 16 challenge tasks (Howard, 2026-10-14). Window 1 ran it on all 92 access tasks and on reserved set v2 (`research/accuracy/runs/2026-10-21-k1-w1-live-v2-322de68e.md`). Howard decided (2026-10-21, in chat, relayed by the coordinating session) that window 2 uses a separate K1 grant with the same settings and a statement naming K1's 92 tasks plus reserved v2 (git-ignored, never committed; its SHA-256 goes in window 2's records). The weekly rerun keeps the 16-task grant, unchanged.
+
 ## installed_chrome-first-b0 (2026-10-21T12:32:31.465Z → 2026-10-21T12:36:36.886Z, exit 0)
 
 Raw run: `.w2l/access/runs/2026-10-21T12-32-31-545Z`.
