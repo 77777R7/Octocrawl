@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractTf } from '../src/index.js'
+import { extractTf, htmlToMarkdown } from '../src/index.js'
 import {
   collectProductFacts,
   findPriceElement,
@@ -544,6 +544,79 @@ describe('PDP facts: a selected variant and the kinds of price a page shows (D6)
     expect(out.product?.identity?.status).toBe('matched')
     expect(out.product?.price?.value).toBe('9.00')
     expect(out.product?.sku?.value).toBe('MUG-1')
+  })
+})
+
+/**
+ * A route page shaped like a flight-comparison site's (D6, aggregate offers):
+ * the page declares one Product whose only offer is an AggregateOffer with a
+ * lowPrice, and shows the offers it aggregates as a grid of linked, priced
+ * cards with no heading of their own, beside one bigger "from" price. The
+ * cards are the subject's offers, not recommendations, and the lowPrice is a
+ * bound across them, not a price of the subject. Synthetic: no retained page.
+ */
+describe('PDP facts: a product that declares only aggregate offers (D6)', () => {
+  const ld = (json: object): string => `<script type="application/ld+json">${JSON.stringify(json)}</script>`
+  const cards = (prefix = 'Offer') => `<div class="deal-grid">${[1, 2, 3].map((i) =>
+    `<div class="deal-card"><a href="/offers/${prefix}-${i}">${prefix} ${i}, departing ${i} January, one way</a><span class="deal-price">£${20 + i}</span>` +
+    `<p>Direct travel from North to South with carrier ${i}, taxes and charges included.</p></div>`).join('')}</div>`
+  const AGGREGATE = { '@type': 'AggregateOffer', lowPrice: 21, priceCurrency: 'GBP' }
+  const page = (offers: unknown, extra = '') => `<!doctype html><html><head>${ld({ '@context': 'https://schema.org', '@type': 'Product', name: 'Travel from North to South', offers })}</head>
+<body><main><h1>Travel from North to South</h1><p>Compare the travel offers for this route found in the last days, and choose the departure that suits your journey.</p>
+<div class="hero"><span class="hero-price">£64</span></div>${cards()}${extra}</main></body></html>`
+  const URL = 'https://travel.fixture.test/routes/north/south/'
+  const markdown = (html: string) => {
+    const out = extractTf.extract(html, { url: URL })
+    return { out, md: htmlToMarkdown(out.mainHtml, { baseUrl: out.baseUrl }) }
+  }
+
+  it('keeps every aggregated offer card and reads no visible price as the subject price', () => {
+    const { out, md } = markdown(page(AGGREGATE))
+    expect(out.pageType).toBe('product')
+    for (const i of [1, 2, 3]) {
+      expect(md).toContain(`[Offer ${i}, departing ${i} January, one way](https://travel.fixture.test/offers/Offer-${i})`)
+      expect(md).toContain(`£${20 + i}`)
+    }
+    // Neither the lowPrice (a bound across offers) nor a visible price is the subject's one price.
+    expect(out.product?.price).toBeNull()
+    expect(out.product?.prices).toBeUndefined()
+    expect(out.product?.priceCurrency?.value).toBe('GBP')
+    expect(out.product?.identity?.identityEvidence.some((e) => /AggregateOffer/.test(e))).toBe(true)
+  })
+
+  it('recognises the aggregate type however it is written', () => {
+    for (const type of ['https://schema.org/AggregateOffer', 'schema:AggregateOffer', ['AggregateOffer']]) {
+      expect(markdown(page({ ...AGGREGATE, '@type': type })).md).toContain('Offer 1, departing 1 January')
+    }
+    expect(markdown(page([AGGREGATE, { ...AGGREGATE, lowPrice: '23.50', priceCurrency: 'GBP' }])).md).toContain('Offer 3, departing 3 January')
+  })
+
+  it('still removes a labelled recommendation section beside the aggregated offers', () => {
+    const { md } = markdown(page(AGGREGATE, `<section><h2>Customers also viewed</h2>${cards('Unrelated')}</section>`))
+    expect(md).toContain('Offer 1, departing 1 January')
+    expect(md).not.toContain('Unrelated 1, departing')
+  })
+
+  it('leaves a product with a single declared price as it was: the unlabelled grid is cut, the declared price kept', () => {
+    const { out, md } = markdown(page({ '@type': 'Offer', price: 84, priceCurrency: 'GBP' }))
+    expect(md).not.toContain('Offer 1, departing')
+    expect(out.product?.price?.value).toBe('84')
+  })
+
+  it('does not take an untyped, invalid or priced aggregate as aggregate offers', () => {
+    for (const offers of [{ lowPrice: 21, priceCurrency: 'GBP' }, { ...AGGREGATE, lowPrice: '' }, { ...AGGREGATE, lowPrice: 'unknown' }, { ...AGGREGATE, lowPrice: -1 },
+      { '@type': 'AggregateOffer', priceCurrency: 'GBP' }, [AGGREGATE, { '@type': 'Offer', price: 84, priceCurrency: 'GBP' }]]) {
+      expect(markdown(page(offers)).md).not.toContain('Offer 1, departing')
+    }
+  })
+
+  it('does not let a related product with aggregate offers protect the grid of the page subject', () => {
+    const own = { '@type': 'Product', name: 'Travel from North to South', url: URL, offers: { '@type': 'Offer', price: 84, priceCurrency: 'GBP' } }
+    const related = { '@type': 'Product', name: 'Travel from East to West', url: 'https://travel.fixture.test/routes/east/west/', offers: AGGREGATE }
+    const html = page(AGGREGATE).replace(/<script type="application\/ld\+json">.*?<\/script>/, ld({ '@graph': [own, related] }))
+    const { out, md } = markdown(html)
+    expect(out.product?.price?.value).toBe('84')
+    expect(md).not.toContain('Offer 1, departing')
   })
 })
 
