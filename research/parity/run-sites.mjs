@@ -668,6 +668,12 @@ function check(doc, spec, response) {
       const count = (markdown.match(new RegExp(spec.pattern, `${(spec.flags ?? 'm').replace('g', '')}g`)) ?? []).length
       return { pass: count === spec.equals, actual: count }
     }
+    case 'markdownCountMin': {
+      // At least spec.min matches, or distinct matched texts when spec.distinct.
+      const matches = markdown.match(new RegExp(spec.pattern, `${(spec.flags ?? 'm').replace('g', '')}g`)) ?? []
+      const count = spec.distinct ? new Set(matches).size : matches.length
+      return { pass: count >= spec.min, actual: count }
+    }
     case 'tableShape': {
       // Every GFM table row has as many cells as its header; tables = exact count, minTables = at least.
       const tables = gfmTables(markdown)
