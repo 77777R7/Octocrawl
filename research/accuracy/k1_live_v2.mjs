@@ -146,11 +146,27 @@ async function zenrows(item) {
   console.log('zenrows', item.id, response?.status ?? error?.code ?? 'error', response?.zenrows?.requestCost ?? '')
 }
 
+/** Sleeps in pmset's log since a time (a machine that slept stalls every arm: not the sites' failure). */
+function sleepsSince(fromMs) {
+  let log = ''
+  try { log = execSync('pmset -g log', { maxBuffer: 256 * 1024 * 1024 }).toString() } catch { return null }
+  return log.split('\n').flatMap((l) => {
+    const m = l.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-]\d{2})(\d{2}) Sleep\s+(Entering Sleep state due to '[^']*')/)
+    const at = m && Date.parse(`${m[1]}T${m[2]}${m[3]}:${m[4]}`)
+    return m && at >= fromMs ? [`${new Date(at).toISOString()} ${m[5]}`] : []
+  })
+}
+const runStart = Date.now()
 try {
   for (const name of names) await startApi(name)
   for (const [i, item] of plan.cases.entries()) {
     const comp = Promise.all([firecrawl(item), zenrows(item)])
     for (let k = 0; k < names.length; k++) await octocrawl(names[(i + k) % names.length], item)
     await comp
+    const slept = sleepsSince(runStart)
+    if (slept !== null && slept.length > 0) throw new Error(`the machine slept: ${slept.slice(0, 3).join('; ')}`)
   }
-} finally { killAll() }
+} finally {
+  killAll()
+  await writeFile(join(out, 'run.json'), JSON.stringify({ plan: flag('--plan') ?? 'research/accuracy/reserved-plan-json.v2.json', timeout, ports, commits: Object.fromEntries(names.map((n) => [n, LOCAL[n].commit])), startedAt: new Date(runStart).toISOString(), finishedAt: new Date().toISOString(), sleeps: sleepsSince(runStart), proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null } }, null, 2) + '\n')
+}
