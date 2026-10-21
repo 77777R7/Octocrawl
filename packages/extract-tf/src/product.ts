@@ -769,11 +769,34 @@ function priceLine(el: Element, leavesIn: ReadonlyMap<Element, number>, doc: Doc
   return { line, text: collapse(textOf(line)) }
 }
 
-function priceKind(el: Element, line: Element, text: string): PriceKind {
+/** The line's text before and after the element: what is written around its own amount, not around another amount on the line. */
+function around(line: Element, el: Element): { before: string; after: string } {
+  let before = ''
+  let after = ''
+  let seen = false
+  const walk = (node: Node): void => {
+    if (node === el) {
+      seen = true
+      return
+    }
+    if (node.nodeType === 3) {
+      if (seen) after += node.textContent ?? ''
+      else before += node.textContent ?? ''
+      return
+    }
+    for (const child of Array.from(node.childNodes)) walk(child)
+  }
+  if (line !== el) walk(line)
+  return { before: collapse(before), after: collapse(after) }
+}
+
+function priceKind(el: Element, line: Element): PriceKind {
   for (let at: Element | null = el; at !== null; at = at === line ? null : at.parentElement) if (struck(at)) return 'list'
-  const amount = PRICE_RE.exec(text)
-  const before = amount === null ? text : text.slice(0, amount.index)
-  const after = amount === null ? '' : text.slice(amount.index + amount[0].length)
+  const own = collapse(textOf(el))
+  const amount = PRICE_RE.exec(own)
+  const outside = around(line, el)
+  const before = collapse(`${outside.before} ${amount === null ? own : own.slice(0, amount.index)}`)
+  const after = collapse(`${amount === null ? '' : own.slice(amount.index + amount[0].length)} ${outside.after}`)
   if (LIST_BEFORE.test(before)) return 'list'
   if (INSTALLMENT_BEFORE.test(before) || INSTALLMENT_AFTER.test(after)) return 'installment'
   if (FROM_BEFORE.test(before) || FROM_AFTER.test(after)) return 'from'
@@ -848,7 +871,7 @@ function factsFromText(doc: Document): Partial<ProductFacts> {
   }
   const kinds = new Map(shown.map((el) => {
     const { line, text } = priceLine(el, leavesIn, doc)
-    return [el, { kind: priceKind(el, line, text), text }] as const
+    return [el, { kind: priceKind(el, line), text }] as const
   }))
   const chosen = deepest(shown.filter((el) => kinds.get(el)!.kind === 'current'))
   const amountOf = (el: Element): string | null => PRICE_RE.exec(collapse(textOf(el)))?.[0] ?? null

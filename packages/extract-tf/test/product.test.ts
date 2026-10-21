@@ -512,12 +512,14 @@ describe('PDP facts: a selected variant and the kinds of price a page shows (D6)
     }
   })
 
-  it('keeps a lone price whose label or note names no other kind', () => {
+  it('keeps a lone price whose label or note names no other kind of its own amount', () => {
     const head = ld({ '@type': 'Product', name: 'Lamp', sku: 'LP-1' })
     const lamp = (box: string) => `<!doctype html><html><head>${head}</head><body><main><h1>Lamp</h1>${box}
 <p>A brass reading lamp with a linen shade, wired for any European socket.</p></main></body></html>`
     // A note after the amount that financing exists, and Spain's statutory retail price label.
-    for (const [box, price] of [['<div><span class="price">499,00 €</span> <small>auch in Raten</small></div>', '499,00 €'], ['<div class="product-price">PVP: 19,99 €</div>', '19,99 €']]) {
+    // A former price written as plain text before it ("statt", "UVP"): the label is that amount's, not this one's.
+    for (const [box, price] of [['<div><span class="price">499,00 €</span> <small>auch in Raten</small></div>', '499,00 €'], ['<div class="product-price">PVP: 19,99 €</div>', '19,99 €'],
+      ['<p>statt 29,99 € <span class="price">19,99 €</span></p>', '19,99 €'], ['<div><span class="old">UVP 29,00 €</span> <span class="price">19,99 €</span></div>', '19,99 €']]) {
       const out = extractTf.extract(lamp(box!), { url: 'https://shop.fixture.test/p/lamp' })
       expect(out.product?.price?.value).toBe(price)
       expect(out.product?.prices).toBeUndefined()
