@@ -178,12 +178,33 @@ const notVerified = async (name, ids, phase) => {
   return ids.filter((id) => !ok.has(id))
 }
 
+// A Mac that sleeps (a closed lid on battery: the first attempt of window 1 on 2026-10-21) stalls every arm at once and
+// is not the sites' failure. pmset's log is read after each block; a sleep inside it stops the window, and the manifest
+// names it, so no number is taken from a run the machine slept through.
+function sleepsSince(fromMs) {
+  let log = ''
+  try { log = execSync('pmset -g log', { maxBuffer: 256 * 1024 * 1024 }).toString() } catch { return null }
+  return log.split('\n').flatMap((l) => {
+    const m = l.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-]\d{2})(\d{2}) Sleep\s+(Entering Sleep state due to '[^']*')/)
+    const at = m && Date.parse(`${m[1]}T${m[2]}${m[3]}:${m[4]}`)
+    return m && at >= fromMs ? [`${new Date(at).toISOString()} ${m[5]}`] : []
+  })
+}
+const checkAwake = async (since, what) => {
+  const s = sleepsSince(since)
+  manifest.sleepChecks = [...(manifest.sleepChecks ?? []), { what, since: new Date(since).toISOString(), sleeps: s }]
+  await saveManifest()
+  if (s !== null && s.length > 0) throw new Error(`the machine slept during ${what}: ${s.slice(0, 3).join('; ')}`)
+}
+
 try {
   for (const name of LOCAL) await startApi(name)
   for (const [b, ids] of blockIds.entries()) {
+    const since = Date.now()
     const comp = COMPETITORS.map((c) => runSet(c, `${c}-first-b${b}`, ids))
     for (const name of rotated(b)) await runSet(name, `${name}-first-b${b}`, ids)
     await Promise.all(comp)
+    await checkAwake(since, `block ${b}`)
   }
   if (!args.includes('--no-retry')) {
     const retry = {}
@@ -191,8 +212,10 @@ try {
     manifest.retryPlanned = retry
     await saveManifest()
     const comp = COMPETITORS.filter((c) => retry[c].length > 0).map((c) => runSet(c, `${c}-retry`, retry[c]))
+    const since = Date.now()
     for (const name of rotated(blockIds.length)) if (retry[name].length > 0) await runSet(name, `${name}-retry`, retry[name])
     await Promise.all(comp)
+    await checkAwake(since, 'the retry pass')
   }
 } catch (e) {
   manifest.failures.push(`window stopped: ${e.message}`)
