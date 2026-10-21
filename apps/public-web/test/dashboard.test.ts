@@ -582,12 +582,13 @@ describe('the Jobs page', () => {
   const listed = (items: unknown[], nextBefore: string | null = null) => [200, { items, nextBefore, hasMore: nextBefore !== null }] as [number, unknown]
   const rows = ($: Page['$']) => [...$('jobs-body').querySelectorAll('tr')]
 
-  it('says jobs are open to invited accounts, and how to start one from an MCP client, while the account has none', async () => {
+  it('says jobs run on the account\'s credits, and how to start one from an MCP client, while the account has none', async () => {
     const { $ } = await page('/dashboard/jobs/', '', OCTOBER.now, octoberAnswers())
     expect($('jobs-empty').hidden).toBe(false)
     expect($('jobs-table').hidden).toBe(true)
     expect($('jobs-more').hidden).toBe(true)
-    expect($('jobs-empty').textContent).toContain('open to invited accounts for now')
+    expect($('jobs-empty').textContent).toContain('run on this account\'s credits')
+    expect($('jobs-empty').textContent).not.toContain('invite')
     expect($('jobs-empty').querySelector('a[href="/docs/connect-mcp/#crawl-and-batch-jobs"]')).not.toBeNull()
     expect($('dash-message').textContent).toBe('')
   })
