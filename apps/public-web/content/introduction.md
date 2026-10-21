@@ -16,8 +16,8 @@ The official website is [octocrawl.dev](https://octocrawl.dev/). The official so
 
 | Connection | Address or package | What it does |
 | --- | --- | --- |
-| Hosted REST API | `https://api.octocrawl.dev` | `POST /v1/scrape` for one page and `POST /v1/map` for site URLs. |
-| Hosted MCP | `https://mcp.octocrawl.dev/mcp` | Connect your agent to hosted scrape and map. An account key enables the browser lane and Amazon.sg `scrape_product`, subject to limits. |
+| Hosted REST API | `https://api.octocrawl.dev` | `POST /v1/scrape` for one page and `POST /v1/map` for site URLs; with an account, `POST /v1/crawl` and `POST /v1/batches` jobs. |
+| Hosted MCP | `https://mcp.octocrawl.dev/mcp` | Connect your agent to hosted scrape and map. An account adds crawl and batch jobs; a key also enables the browser lane and Amazon.sg `scrape_product`, subject to limits. |
 | TypeScript SDK | `@octocrawl/sdk` | Call an Octocrawl API with an explicit base URL. |
 | Python client | `octocrawl-client` | Call an Octocrawl API with an explicit base URL. |
 | Local API | `npx octocrawl serve` | Start the API on `http://127.0.0.1:8787`. |
@@ -25,9 +25,9 @@ The official website is [octocrawl.dev](https://octocrawl.dev/). The official so
 
 ## Hosted or local?
 
-Hosted Octocrawl supports single-page scraping and site URL mapping. Keyless requests use HTTP within a daily allowance. An account key enables the browser lane, subject to credits and service limits.
+Hosted Octocrawl supports single-page scraping and site URL mapping. Keyless requests use HTTP within a daily allowance. An account adds crawl and batch jobs (up to 500 pages a crawl and 1,000 URLs a batch), and a key enables the browser lane, subject to credits and service limits.
 
-Run Octocrawl locally for site crawling, URL batches, browser actions, saved login sessions and monitoring workflows. Browser actions require browser setup; scheduled monitoring requires local workers from a repository checkout. See [Connect MCP](/docs/connect-mcp/#run-it-on-your-computer) and the [Monitor guide](/docs/guides/monitor-webhook/).
+Run Octocrawl locally for larger crawls and batches, browser actions, saved login sessions and monitoring workflows. Browser actions require browser setup; scheduled monitoring requires local workers from a repository checkout. See [Connect MCP](/docs/connect-mcp/#run-it-on-your-computer) and the [Monitor guide](/docs/guides/monitor-webhook/).
 
 Installing an SDK or connecting an MCP client does not expand the capabilities of the server it uses. The website preview is a single-page trial with its own limits. See [Limits and result states](/docs/limits/) for the differences.
 

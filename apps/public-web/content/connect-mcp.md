@@ -123,7 +123,7 @@ Claude Code, Codex and OpenCode each ran a job end to end through these tools on
 
 Over REST the same jobs are `POST https://api.octocrawl.dev/v1/batches` and `POST /v1/crawl` with a key. `GET /v1/jobs` lists your jobs, newest first. Signed in on octocrawl.dev, [Jobs](/dashboard/jobs/) in the dashboard shows each job's progress while it runs, what it cost, and an export of its results once it ends. `maxCredits` caps what a job spends, on the tools and over REST. `webhook` is REST only: it posts the job's end to an https address, signed with a secret the start returns. The [hosted API reference](https://github.com/77777R7/Octocrawl/blob/main/docs/hosted-api.md#job-webhooks) has the signature and a verification example.
 
-Hosted jobs open in stages. While they are paused, a start answers `503 jobs_paused` with `Retry-After`, and the same job runs on your computer meanwhile.
+Every signed-in account can run hosted jobs. If they are ever paused, a start answers `503 jobs_paused` with `Retry-After`, and the same job runs on your computer meanwhile.
 
 ## What hosted Octocrawl does not do
 
