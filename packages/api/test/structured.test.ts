@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { CompactScrapeResponse, FetchResult, JsonFormatRequest, JsonSchema, ProductFacts, ScrapeResponse } from '@w2l/contracts'
 import { extractTf } from '@w2l/extract-tf'
-import { contractSha256 } from '@w2l/runtime'
+import { readFileSync } from 'node:fs'
+import Ajv2020 from 'ajv/dist/2020.js'
+import { contractSha256, toEvidenceRecord } from '@w2l/runtime'
 import { extractStructured, prepareScrapeResponse } from '../src/structured.js'
 
 const product: ProductFacts = {
@@ -386,7 +388,7 @@ describe('structured JSON extraction', () => {
     const out = await extractStructured(result, format(), {}, null)
     expect(out.status).toBe('complete')
     expect(out.data).toMatchObject({ asin: 'B012345678', title: 'Subject headphones', price: 1299, currency: 'INR', seller: 'SoundCo Direct' })
-    expect(out.evidence).toContainEqual({ path: '/price', source: 'dom', evidencePath: '#corePrice_feature_div', text: '1299.00' })
+    expect(out.evidence).toContainEqual({ path: '/price', source: 'dom', evidencePath: '#corePrice_feature_div', text: '1299.00', normalized: 1299, conversion: 'number/decimal' })
     expect(out.modelUsage).toBeNull()
   })
 
@@ -497,7 +499,7 @@ describe('structured JSON extraction', () => {
     expect(out).toMatchObject({ status: 'complete', data: { name: 'Harbour lamp', price: 19 }, issues: [] })
     expect(out.evidence).toEqual([
       { path: '/name', source: 'jsonld', evidencePath: '/script/0/name' },
-      { path: '/price', source: 'jsonld', evidencePath: '/script/0/offers/price', text: '19.00' },
+      { path: '/price', source: 'jsonld', evidencePath: '/script/0/offers/price', text: '19.00', normalized: 19, conversion: 'number/decimal', context: { currency: 'GBP', offerType: 'Offer' } },
     ])
   })
 
@@ -549,10 +551,10 @@ describe('structured JSON extraction', () => {
     expect(out.issues).toEqual([{ code: 'missing_required', path: '/isbn', message: 'required field unavailable: /isbn' }])
     expect(out.evidence).toEqual([
       { path: '/title', source: 'dom', evidencePath: 'h1[0]' },
-      { path: '/price', source: 'text', evidencePath: 'p.price_color', text: '£51.77' },
+      { path: '/price', source: 'text', evidencePath: 'p.price_color', text: '£51.77', normalized: 51.77, conversion: 'number/decimal', context: { currency: '£' } },
       { path: '/availability', source: 'dom', evidencePath: 'table[0] tr[5] "Availability"' },
       { path: '/upc', source: 'dom', evidencePath: 'table[0] tr[0] "UPC"' },
-      { path: '/numberOfReviews', source: 'dom', evidencePath: 'table[0] tr[6] "Number of reviews"', text: '0' },
+      { path: '/numberOfReviews', source: 'dom', evidencePath: 'table[0] tr[6] "Number of reviews"', text: '0', normalized: 0, conversion: 'number/plain' },
     ])
   })
 
@@ -628,9 +630,9 @@ describe('structured JSON extraction', () => {
     expect(out.evidence).toEqual([
       { path: '/title', source: 'dom', evidencePath: 'h1[0]' },
       { path: '/description', source: 'meta', evidencePath: 'meta[name="description"]' },
-      { path: '/headline', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.name' },
-      { path: '/datePublished', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.datePublished' },
-      { path: '/dateModified', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.dateModified' },
+      { path: '/headline', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.name', context: { published: '2026-10-08T15:53:00+01:00', revised: '2026-10-16T13:00:37+01:00' } },
+      { path: '/datePublished', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.datePublished', context: { published: '2026-10-08T15:53:00+01:00', revised: '2026-10-16T13:00:37+01:00' } },
+      { path: '/dateModified', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.dateModified', context: { published: '2026-10-08T15:53:00+01:00', revised: '2026-10-16T13:00:37+01:00' } },
       { path: '/published', source: 'dom', evidencePath: 'dl[0] dt[1] "Published:"' },
     ])
   })
@@ -771,7 +773,7 @@ describe('structured JSON extraction', () => {
     expect(out.issues).toEqual([{ code: 'field_unavailable', path: '/isbn', message: 'no verified source for this nullable field on the selected page' }])
     expect(out.evidence).toEqual([
       { path: '/title', source: 'dom', evidencePath: 'h1[0]' },
-      { path: '/price', source: 'text', evidencePath: 'p.price_color', text: '£51.77' },
+      { path: '/price', source: 'text', evidencePath: 'p.price_color', text: '£51.77', normalized: 51.77, conversion: 'number/decimal', context: { currency: '£' } },
       { path: '/availability', source: 'dom', evidencePath: 'table[0] tr[5] "Availability"' },
       { path: '/upc', source: 'dom', evidencePath: 'table[0] tr[0] "UPC"' },
       { path: '/url', source: 'fetch', evidencePath: 'finalUrl' },
@@ -803,16 +805,16 @@ describe('structured JSON extraction', () => {
 
   it('reads a visible price as the page writes it: decimal comma, thousands groups, currency before or after', async () => {
     const schema = json({ title: { type: 'string' }, price: { type: 'number' } }, ['title', 'price'])
-    const cases: Array<[string, number, string]> = [
-      ['12,99 €', 12.99, '12,99 €'], ['€12,99', 12.99, '€12,99'], ['1.299,00 €', 1299, '1.299,00 €'],
-      ['1 299,00 €', 1299, '1 299,00 €'], ["CHF 1'299.00", 1299, "CHF 1'299.00"], ['$1,299.00', 1299, '$1,299.00'], ['£51.77', 51.77, '£51.77'],
+    const cases: Array<[string, number, string, string, string]> = [
+      ['12,99 €', 12.99, '12,99 €', 'decimal', '€'], ['€12,99', 12.99, '€12,99', 'decimal', '€'], ['1.299,00 €', 1299, '1.299,00 €', 'grouped', '€'],
+      ['1 299,00 €', 1299, '1 299,00 €', 'grouped', '€'], ["CHF 1'299.00", 1299, "CHF 1'299.00", 'grouped', 'CHF'], ['$1,299.00', 1299, '$1,299.00', 'grouped', '$'], ['£51.77', 51.77, '£51.77', 'decimal', '£'],
     ]
-    for (const [shown, value, text] of cases) {
+    for (const [shown, value, text, rule, currency] of cases) {
       const out = await extractStructured(page(shop(shown), 'https://shop.example/lampe'), schema, {}, null)
       expect(out.data, shown).toEqual({ title: 'Messinglampe', price: value })
       expect(out.status, shown).toBe('complete')
       // The text the number was read from stays in its evidence.
-      expect(out.evidence, shown).toContainEqual({ path: '/price', source: 'text', evidencePath: 'p.price', text })
+      expect(out.evidence, shown).toContainEqual({ path: '/price', source: 'text', evidencePath: 'p.price', text, normalized: value, conversion: `number/${rule}`, context: { currency } })
     }
   })
 
@@ -838,7 +840,7 @@ describe('structured JSON extraction', () => {
     // A review count is whole, so "1.234" groups thousands; "4,5" has one decimal digit.
     const counted = await read({ reviewCount: { value: '1.234', source: 'dom', path: '#acrCustomerReviewText' }, rating: { value: '4,5', source: 'dom', path: '#acrPopover' } })
     expect(counted).toMatchObject({ status: 'complete', data: { price: 1299, rating: 4.5, reviewCount: 1234 } })
-    expect(counted.evidence).toContainEqual({ path: '/reviewCount', source: 'dom', evidencePath: '#acrCustomerReviewText', text: '1.234' })
+    expect(counted.evidence).toContainEqual({ path: '/reviewCount', source: 'dom', evidencePath: '#acrCustomerReviewText', text: '1.234', normalized: 1234, conversion: 'number/count' })
     // A yen amount has no minor unit, whether the text or the page's currency says JPY.
     expect((await read({ price: { value: '1.299', source: 'dom', path: '.price' }, priceCurrency: { value: 'JPY', source: 'jsonld' } })).data).toMatchObject({ price: 1299 })
     expect((await read({ price: { value: '1,299円', source: 'text', path: '.price' } })).data).toMatchObject({ price: 1299 })
@@ -878,7 +880,7 @@ describe('structured JSON extraction', () => {
 <table><tr><th>Preis</th><td>1.299,– €</td></tr><tr><th>Gewicht</th><td>1.250</td></tr><tr><th>Bestand</th><td>12 Stück</td></tr></table></main></body></html>`
     const out = await extractStructured(page(html, 'https://shop.example/lampe'), json({ preis: { type: 'number' }, gewicht: { type: 'number' }, bestand: { type: 'integer' } }, ['preis']), {}, null)
     expect(out).toMatchObject({ status: 'complete', data: { preis: 1299 } })
-    expect(out.evidence).toContainEqual({ path: '/preis', source: 'dom', evidencePath: 'table[0] tr[0] "Preis"', text: '1.299,– €' })
+    expect(out.evidence).toContainEqual({ path: '/preis', source: 'dom', evidencePath: 'table[0] tr[0] "Preis"', text: '1.299,– €', normalized: 1299, conversion: 'number/grouped', context: { currency: '€' } })
     // "12 Stück" is not one amount and is skipped as before; "1.250" is a number whose notation the page does not settle.
     expect(out.issues).toEqual([{ code: 'field_unavailable', path: '/gewicht', message: 'the page states "1.250" (dom, table[0] tr[1] "Gewicht"): "." before three digits can separate thousands or decimals, and nothing on the page says which; no number was read' }])
   })
@@ -947,7 +949,7 @@ describe('structured JSON extraction', () => {
     expect(out.evidence).toEqual([
       { path: '/asin', source: 'dom', evidencePath: 'url:/dp/{asin}' },
       { path: '/title', source: 'dom', evidencePath: '#productTitle' },
-      { path: '/price', source: 'dom', evidencePath: '#corePrice_feature_div', text: '1299.00' },
+      { path: '/price', source: 'dom', evidencePath: '#corePrice_feature_div', text: '1299.00', normalized: 1299, conversion: 'number/decimal' },
       { path: '/specifications', source: 'dom', evidencePath: '#productDetails' },
       { path: '/availability', source: 'model', evidencePath: '#availability', text: 'In Stock' },
       { path: '/material', source: 'model', evidencePath: 'markdown line 3', text: 'aluminium' },
@@ -1022,7 +1024,7 @@ describe('structured JSON extraction', () => {
     expect(sent.schema.$defs.Publisher).toEqual({ type: 'object', properties: { name: { type: 'string' }, city: { type: ['string', 'null'] } }, required: ['name', 'city'], additionalProperties: false })
     expect(out.evidence).toEqual([
       { path: '/title', source: 'dom', evidencePath: 'h1[0]' },
-      { path: '/price', source: 'text', evidencePath: 'p.price_color', text: '£51.77' },
+      { path: '/price', source: 'text', evidencePath: 'p.price_color', text: '£51.77', normalized: 51.77, conversion: 'number/decimal', context: { currency: '£' } },
       { path: '/publisher/name', source: 'model', evidencePath: 'markdown line 3', text: 'HarperCollins' },
       { path: '/edition', source: 'model', evidencePath: 'markdown line 3', text: '20th anniversary' },
     ])
@@ -1037,5 +1039,92 @@ describe('structured JSON extraction', () => {
     expect(requests[0]!.response_format.json_schema).toMatchObject({ strict: false, schema: schema.schema })
     expect(out).toMatchObject({ status: 'complete', data: { title: 'A Light in the Attic', details: { Pages: '112' } }, modelUsage: { strict: false } })
     expect(out.modelUsage?.strictReason).toContain('/properties/details')
+  })
+})
+
+describe('field contract: raw text, normalized value, unit, rule and context (PA D3b)', () => {
+  const recordSchema = JSON.parse(readFileSync(new URL('../../contracts/schemas/evidence-record.v1.json', import.meta.url), 'utf8')) as object
+  const AjvClass = Ajv2020 as unknown as new (options: object) => { compile(schema: object): ((data: unknown) => boolean) & { errors?: unknown } }
+  const validRecord = new AjvClass({ allErrors: true, allowUnionTypes: true }).compile(recordSchema)
+  const recordOf = (out: Awaited<ReturnType<typeof extractStructured>>) => {
+    const read = page(rows('en', []))
+    return toEvidenceRecord({ ...read, evidence: { ...read.evidence, rawBodySha256: 'a'.repeat(64) } }, { mode: 'standard' }, { markdown: null, json: out })
+  }
+  const rows = (lang: string, cells: ReadonlyArray<[string, string]>) => `<html lang="${lang}"><head><title>Report</title></head><body><main><h1>Report</h1>
+<p>${'A report on the harbour office figures, published every morning with the tide, wind and visibility readings for each hour. '.repeat(2)}</p>
+<table>${cells.map(([label, value]) => `<tr><th>${label}</th><td>${value}</td></tr>`).join('')}</table></main></body></html>`
+
+  it('keeps a signed percentage\'s sign, number and unit, in the result and its Evidence Record', async () => {
+    const out = await extractStructured(page(rows('en', [['Change', '-3.2%'], ['Spread', '+0.5 pp'], ['Yield', '−1,25 %']]), 'https://stats.example/report'),
+      json({ change: { type: 'number' }, spread: { type: 'number' }, yield: { type: 'number' } }, ['change', 'spread', 'yield']), {}, null)
+    expect(out).toMatchObject({ status: 'complete', data: { change: -3.2, spread: 0.5, yield: -1.25 } })
+    expect(out.evidence).toEqual([
+      { path: '/change', source: 'dom', evidencePath: 'table[0] tr[0] "Change"', text: '-3.2%', normalized: -3.2, conversion: 'number/decimal', context: { unit: '%' } },
+      { path: '/spread', source: 'dom', evidencePath: 'table[0] tr[1] "Spread"', text: '+0.5 pp', normalized: 0.5, conversion: 'number/decimal', context: { unit: 'pp' } },
+      { path: '/yield', source: 'dom', evidencePath: 'table[0] tr[2] "Yield"', text: '−1,25 %', normalized: -1.25, conversion: 'number/decimal', context: { unit: '%' } },
+    ])
+    const record = recordOf(out)
+    expect(validRecord(record), JSON.stringify(validRecord.errors)).toBe(true)
+    expect(record.fieldEvidence?.['/change']).toEqual({ source: 'dom', locator: 'table[0] tr[0] "Change"', reading: { raw: '-3.2%', normalized: -3.2, unit: '%', conversion: 'number/decimal', absent: false } })
+    expect(record.fieldEvidence?.['/spread']?.reading).toEqual({ raw: '+0.5 pp', normalized: 0.5, unit: 'pp', conversion: 'number/decimal', absent: false })
+  })
+
+  it('reads a lone separator before three digits by the page\'s language, keeping the text, but not in a currency amount', async () => {
+    const schema = json({ population: { type: 'number' }, ratio: { type: 'number' } }, ['population', 'ratio'])
+    const de = await extractStructured(page(rows('de-DE', [['Population', '1.299'], ['Ratio', '0,125']]), 'https://stats.example/de'), schema, {}, null)
+    expect(de.data).toEqual({ population: 1299, ratio: 0.125 })
+    expect(de.evidence[0]).toEqual({ path: '/population', source: 'dom', evidencePath: 'table[0] tr[0] "Population"', text: '1.299', normalized: 1299, conversion: 'number/language:de-DE' })
+    const en = await extractStructured(page(rows('en', [['Population', '1,299'], ['Ratio', '1.299']]), 'https://stats.example/en'), schema, {}, null)
+    expect(en.data).toEqual({ population: 1299, ratio: 1.299 })
+    expect(en.evidence.map(item => [item.text, item.conversion])).toEqual([['1,299', 'number/language:en'], ['1.299', 'number/language:en']])
+    // A page without a language settles nothing.
+    const none = await extractStructured(page(rows('', [['Population', '1.299']]), 'https://stats.example/none'), json({ population: { type: ['number', 'null'] } }, []), {}, null)
+    expect(none.data).toEqual({ population: null })
+    // A price keeps its rule: the page's language does not settle "1.299 €" (an English page of a German shop writes it too).
+    const price = await extractStructured(page(shop('1.299 €'), 'https://shop.example/lampe'), json({ price: { type: ['number', 'null'] } }, []), {}, null)
+    expect(price.data).toEqual({ price: null })
+    // Nor a label that names money without a mark, or any label on a product page.
+    const priced = await extractStructured(page(rows('en', [['Price', '1.299'], ['Total cost', '1,299']]), 'https://shop.example/lamp'), json({ price: { type: ['number', 'null'] }, totalCost: { type: ['number', 'null'] } }, []), {}, null)
+    expect(priced.data).toEqual({ price: null, totalCost: null })
+    const productPage = rows('en', [['Weight', '1.250']]).replace('</head>', `<script type="application/ld+json">${JSON.stringify({ '@type': 'Product', name: 'Lamp', offers: { price: '19.00', priceCurrency: 'GBP' } })}</script></head>`)
+    expect((await extractStructured(page(productPage, 'https://shop.example/lamp'), json({ weight: { type: ['number', 'null'] } }, []), {}, null)).data).toEqual({ weight: null })
+  })
+
+  it('tells a value the page states there is none of from one no source states', async () => {
+    const out = await extractStructured(page(rows('en', [['Price', 'N/A'], ['Colour', 'Brass']]), 'https://shop.example/lamp'),
+      json({ price: { type: ['number', 'null'] }, colour: { type: 'string' }, weight: { type: ['number', 'null'] } }, ['price', 'colour', 'weight']), {}, null)
+    expect(out).toMatchObject({ status: 'complete', data: { price: null, colour: 'Brass', weight: null } })
+    // Absent: the page says so, and where.
+    expect(out.evidence).toContainEqual({ path: '/price', source: 'dom', evidencePath: 'table[0] tr[0] "Price"', text: 'N/A', absent: true })
+    expect(out.issues).toContainEqual({ code: 'field_absent', path: '/price', message: 'the page states there is no value for /price: "N/A" (dom, table[0] tr[0] "Price")' })
+    // Unobserved: no source on the page, so no evidence and the usual issue.
+    expect(out.evidence.some(item => item.path === '/weight')).toBe(false)
+    expect(out.issues).toContainEqual({ code: 'field_unavailable', path: '/weight', message: 'no verified source for this nullable field on the selected page' })
+    expect(out.issues.some(issue => issue.path === '/price' && issue.code === 'field_unavailable')).toBe(false)
+    const record = recordOf(out)
+    expect(validRecord(record), JSON.stringify(validRecord.errors)).toBe(true)
+    expect(record.fieldEvidence?.['/price']).toEqual({ source: 'dom', locator: 'table[0] tr[0] "Price"', reading: { raw: 'N/A', normalized: null, unit: null, conversion: null, absent: true } })
+    expect(record.fieldEvidence?.['/colour']).toEqual({ source: 'dom', locator: 'table[0] tr[1] "Colour"', reading: null })
+    // A field that cannot be null is left out, and still says the page states none.
+    const strict = await extractStructured(page(rows('en', [['Price', 'n/a']]), 'https://shop.example/lamp'), json({ price: { type: 'number' } }, ['price']), {}, null)
+    expect(strict.data).toEqual({})
+    expect(strict.issues.map(issue => issue.code)).toEqual(['field_absent', 'missing_required'])
+  })
+
+  it('reports an Amazon quote the page shows as unavailable as absent, located at its availability', async () => {
+    const unavailable: FetchResult = { ...result, document: { ...result.document!, product: { ...product, price: null, prices: [], quoteState: 'absent_observed' as ProductFacts['quoteState'], availability: { value: 'Currently unavailable.', source: 'dom', path: '#availability' } } } }
+    const out = await extractStructured(unavailable, json({ asin: { type: 'string' }, price: { type: ['number', 'null'] } }, ['asin', 'price']), {}, null)
+    expect(out.data).toEqual({ asin: 'B012345678', price: null })
+    expect(out.evidence).toContainEqual({ path: '/price', source: 'dom', evidencePath: '#availability', text: 'Currently unavailable.', absent: true })
+    expect(out.issues.map(issue => issue.code)).toContain('field_absent')
+  })
+
+  it('carries a declared price\'s currency and offer, and a declared article value\'s dates, as its context', async () => {
+    const lampOut = await extractStructured(page(lamp, 'https://shop.example/lamp'), json({ price: { type: 'number' } }, ['price']), {}, null)
+    expect(lampOut.evidence).toEqual([{ path: '/price', source: 'jsonld', evidencePath: '/script/0/offers/price', text: '19.00', normalized: 19, conversion: 'number/decimal', context: { currency: 'GBP', offerType: 'Offer' } }])
+    const article = `<html lang="en"><head><title>Tide report</title><script type="application/ld+json">${JSON.stringify({ '@type': 'NewsArticle', headline: 'Spring tides return', datePublished: '2026-10-01', dateModified: '2026-10-03', version: '2' })}</script></head>
+<body><main><article><h1>Spring tides return</h1><p>${'The harbour office records tide height, wind and visibility for every hour of the day. '.repeat(4)}</p></article></main></body></html>`
+    const articleOut = await extractStructured(page(article, 'https://news.example/tides'), json({ datePublished: { type: 'string' } }, ['datePublished']), {}, null)
+    expect(articleOut.evidence).toContainEqual({ path: '/datePublished', source: 'jsonld', evidencePath: 'ld+json[0] NewsArticle.datePublished', context: { published: '2026-10-01', revised: '2026-10-03', version: '2' } })
   })
 })

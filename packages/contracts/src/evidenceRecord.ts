@@ -252,6 +252,25 @@ export interface EvidenceFieldLocation {
   source: FieldEvidenceSource
   /** JSON-LD path, DOM selector, `table[i] tr[j] "label"`, `h1[0]`, a result field such as `finalUrl`, or `page N "label"` for a PDF; null when the source gives none. */
   locator: string | null
+  /**
+   * How the value was read from the page's text (PA D3b): a number with its
+   * rule and unit, or the page's statement that there is none. Null for a
+   * value taken as the page states it. Added to v1 later (EVIDENCE_RECORD_ADDED_KEYS).
+   */
+  reading: EvidenceFieldReading | null
+}
+
+export interface EvidenceFieldReading {
+  /** The text as the page writes it, whitespace collapsed (`json.evidence[].text`). */
+  raw: string
+  /** The value `raw` was read as; null when it is the page's statement that there is none. */
+  normalized: number | string | null
+  /** The currency or unit stated with it (`GBP`, `£`, `%`, `pp`); null when none is. */
+  unit: string | null
+  /** The rule `raw` was read by (`number/decimal`, `number/language:de`); null when none was applied. */
+  conversion: string | null
+  /** True when the page states there is no value (`N/A`): the field is null on the page's word. */
+  absent: boolean
 }
 
 export interface EvidenceArtifact {
@@ -391,7 +410,8 @@ export const EVIDENCE_RECORD_KEYS = {
   robotsDecision: keysOf<EvidenceRobotsDecision>()(['decision', 'robotsUrl', 'robotsSha256', 'unreachable', 'crawlDelayMs', 'userOverride', 'overrideBasis']),
   outputSha256: keysOf<EvidenceOutputSha256>()(['markdown', 'json']),
   extractor: keysOf<EvidenceExtractor>()(['name', 'version', 'commit']),
-  fieldEvidence: keysOf<EvidenceFieldLocation>()(['source', 'locator']),
+  fieldEvidence: keysOf<EvidenceFieldLocation>()(['source', 'locator', 'reading']),
+  fieldReading: keysOf<EvidenceFieldReading>()(['raw', 'normalized', 'unit', 'conversion', 'absent']),
   artifact: keysOf<EvidenceArtifact>()(['kind', 'path', 'sha256', 'bytes', 'contentType']),
   identity: keysOf<EvidenceIdentity>()(['userAgent', 'mode', 'contact', 'device', 'requestHeaders']),
   pageActions: keysOf<EvidencePageActions>()(['steps', 'scriptRan']),
@@ -417,6 +437,7 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   artifact: ['bytes', 'contentType'],
   identity: ['device', 'requestHeaders'],
   robotsDecision: ['overrideBasis'],
+  fieldEvidence: ['reading'],
   access: ['completion', 'egress', 'session', 'paidCalls', 'grant'],
   accessEgress: ['exit'],
   accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped'],

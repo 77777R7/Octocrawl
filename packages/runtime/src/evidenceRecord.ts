@@ -24,6 +24,7 @@ import {
   type EvidenceArtifact,
   type EvidenceDocument,
   type EvidenceFieldLocation,
+  type EvidenceFieldReading,
   type EvidencePageActions,
   type EvidenceRecord,
   type EvidenceRequestHeader,
@@ -37,6 +38,7 @@ import {
   type RobotsUnreachable,
   type ScreenshotEvidence,
   type StructuredExtractionResult,
+  type StructuredFieldEvidence,
   type TraceEvent,
 } from '@w2l/contracts'
 import { EXTRACTOR_VERSION, FILE_TEXT_VERSION, PDF_TEXT_VERSION } from '@w2l/extract-tf'
@@ -61,6 +63,22 @@ export interface EvidenceRecordOptions {
  * browser lane says so on its evidence (`redirectChainComplete`).
  */
 const EVERY_HOP_LANES: ReadonlySet<Lane> = new Set<Lane>(['http'])
+
+/**
+ * A value read from the page's text: a number with its rule, or the page's
+ * statement that there is none. A model value quotes the text it was located
+ * in, not text it was read from, and gets none.
+ */
+function fieldReading(item: StructuredFieldEvidence): EvidenceFieldReading | null {
+  if (item.text === undefined || item.source === 'model' || (item.absent !== true && item.conversion === undefined)) return null
+  return {
+    raw: item.text,
+    normalized: item.absent === true ? null : item.normalized ?? null,
+    unit: item.context?.currency ?? item.context?.unit ?? null,
+    conversion: item.conversion ?? null,
+    absent: item.absent === true,
+  }
+}
 
 export function toEvidenceRecord(
   result: FetchResult,
@@ -103,7 +121,7 @@ export function toEvidenceRecord(
       commit: options.sourceCommit !== undefined ? options.sourceCommit : sourceCommitFromEnv(),
     },
     fieldEvidence: output.json === undefined || output.json === null ? null : Object.fromEntries(
-      output.json.evidence.map((item): [string, EvidenceFieldLocation] => [item.path, { source: item.source, locator: item.evidencePath ?? null }]),
+      output.json.evidence.map((item): [string, EvidenceFieldLocation] => [item.path, { source: item.source, locator: item.evidencePath ?? null, reading: fieldReading(item) }]),
     ),
     artifacts: evidence.artifacts.map(path => artifact(path, result.file, result.screenshot ?? undefined, result.actions)),
     proxy: evidence.envProxy ?? null,

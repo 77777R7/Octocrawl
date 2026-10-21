@@ -69,7 +69,7 @@
       "$ref": "#/$defs/extractor"
     },
     "fieldEvidence": {
-      "description": "For a JSON request: a JSON Pointer into json.data mapped to where that value was read. Every value has an entry: one read from the page (the content title included), one W2L took from the fetch itself (the URL), the page type W2L inferred, and one given by the model fallback. A field that is absent or null has none. An empty object when no value has one; null when JSON was not requested.",
+      "description": "For a JSON request: a JSON Pointer into json.data mapped to where that value was read. Every value has an entry: one read from the page (the content title included), one W2L took from the fetch itself (the URL), the page type W2L inferred, and one given by the model fallback. A field that is absent or null has none, except a null the page itself states (N/A), whose entry says so in reading.absent. An empty object when no value has one; null when JSON was not requested.",
       "anyOf": [
         {
           "type": "object",
@@ -245,6 +245,37 @@
         "locator": {
           "description": "Where the value was read: a JSON Pointer or JSON-LD path, a CSS selector (title for the page's <title>), table[i] tr[j] \"label\" (dl[i] dt[j] \"label\") for a label/value row of the main content and h1[0] for its first heading, zero-based in document order; for fetch, the result field (finalUrl, requestedUrl); for inferred, the result field holding W2L's inference (document.pageType, document.product.kind); for pdf, page N \"label\", N being the page's 1-based position in the file (the <!-- page N --> marker in the Markdown). A declared product fact is located by /script/N/… (a JSON Pointer into the N-th ld+json script, zero-based), microdata[N] [itemprop~=\"name\"] (the N-th microdata Product) or meta[property=\"name\"] (meta[name=\"name\"] when the tag uses name). Null when the source gives no location: model.",
           "type": ["string", "null"]
+        },
+        "reading": {
+          "description": "How the value was read from the page's text: a number with the text it was read from, its rule and its unit, or the page's own statement that there is no value (N/A), which is why the field is null. Null for a value taken as the page states it. Absent on records written before W2L recorded it.",
+          "anyOf": [{ "$ref": "#/$defs/fieldReading" }, { "type": "null" }]
+        }
+      }
+    },
+    "fieldReading": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw", "normalized", "unit", "conversion", "absent"],
+      "properties": {
+        "raw": {
+          "description": "The page's text, whitespace collapsed, exactly as json.evidence[].text quotes it: -3.2%, 1.299,00 €, N/A.",
+          "type": "string"
+        },
+        "normalized": {
+          "description": "The value raw was read as, the value json.data holds at this pointer; null when raw is the page's statement that there is no value.",
+          "type": ["number", "string", "null"]
+        },
+        "unit": {
+          "description": "The currency or unit stated with the value, as written: a currency symbol or code next to the number or the priceCurrency the same declaration states (GBP, £), a percent sign or percentage points (%, pp). Null when none is stated.",
+          "type": ["string", "null"]
+        },
+        "conversion": {
+          "description": "The rule raw was read by: number/plain (digits only), number/decimal (one separator the text itself settles as decimal), number/grouped (separators the text itself settles), number/decimal-point (a JSON-LD or OpenGraph price, whose format writes . as its decimal point), number/count (a whole count), number/no-minor-unit (a currency without minor units) or number/language:<tag> (the page's declared language settled a lone separator before three digits; never for money: a currency amount, a product page's labels or a key naming an amount). Null when no rule was applied.",
+          "type": ["string", "null"]
+        },
+        "absent": {
+          "description": "True when the page states there is no value (N/A, none, not applicable, 无): json.data holds null at this pointer on the page's word, and json.issues has a field_absent issue. A field no source states has no entry at all.",
+          "type": "boolean"
         }
       }
     },

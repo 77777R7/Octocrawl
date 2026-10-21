@@ -572,11 +572,11 @@ describe('REST /v1/scrape and /v1/crawl', () => {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ url: origin + path, formats: [{ type: 'json', schema }], debug: false }),
       })).json()
-      for (const [path, price, text] of [['/a', 12.99, '12,99 €'], ['/b', 1299, '1.299,00 €'], ['/c', 1299, '1 299,00 €']] as const) {
+      for (const [path, price, text, rule] of [['/a', 12.99, '12,99 €', 'decimal'], ['/b', 1299, '1.299,00 €', 'grouped'], ['/c', 1299, '1 299,00 €', 'grouped']] as const) {
         const out = await scrape(path)
         expect(out.json, path).toMatchObject({ status: 'complete', data: { title: 'Messinglampe', price } })
-        expect(out.json.evidence, path).toContainEqual({ path: '/price', source: 'text', evidencePath: 'p.price', text })
-        expect(out.evidenceRecord.fieldEvidence['/price'], path).toEqual({ source: 'text', locator: 'p.price' })
+        expect(out.json.evidence, path).toContainEqual({ path: '/price', source: 'text', evidencePath: 'p.price', text, normalized: price, conversion: `number/${rule}`, context: { currency: '€' } })
+        expect(out.evidenceRecord.fieldEvidence['/price'], path).toEqual({ source: 'text', locator: 'p.price', reading: { raw: text, normalized: price, unit: '€', conversion: `number/${rule}`, absent: false } })
       }
       const unsettled = await scrape('/d')
       expect(unsettled.json).toMatchObject({ status: 'incomplete', data: { title: 'Messinglampe' } })
