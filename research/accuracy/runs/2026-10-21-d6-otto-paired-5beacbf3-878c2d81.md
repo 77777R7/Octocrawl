@@ -50,3 +50,9 @@ Per field: no field of any case changed in value, subject, relation, unit, date,
 
 - No regression on the development, regression or reserved v2 sets.
 - It does not measure the change. None of the 60 cases is a product page that declares several variants by a PropertyValue, or that shows a starting price, a list price or an instalment beside its price without declaring one; D05 (OTTO) is a listing, scored on Markdown. The change's evidence is the D6 fixtures in `packages/extract-tf/test/product.test.ts` (three fail on `main`, at `5c0dbb7c`) and the real-site case J08 in `research/parity/sites.md`, which OTTO refused with HTTP 400 on 2026-10-21 on main and on the branch, proxied and direct ([records](../../parity/runs/)).
+
+## Re-run after the review fixes (`23c50125`)
+
+A clean-context review of `878c2d81` found four blocking cases in the visible-price fallback and in telling declarations apart; `23c50125` fixes them (commit message and the three new fixtures and perf test in `packages/extract-tf/test/product*.test.ts`). The candidate side was replayed again on `23c5012535a761f6e8d1d4ebe686b38bc71075b4`, same four requests, same commands with `--engine=<this worktree>` and the control outputs above copied unchanged; outputs `.w2l/field-gold/runs/2026-10-21-d6-otto-paired-5beacbf3-23c50125/`.
+
+The result is the same as the table above: D 34/86 (0/10 accepted), H 75/75 (8/8), v2 229/294 (23/42) on the Markdown request; D 0/86, H 0/75, v2 29/294 (1/42) on the json/verify request; no field, outcome or response (status, Markdown, tables, links, json) differs from the control.
