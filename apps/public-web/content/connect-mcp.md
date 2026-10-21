@@ -121,10 +121,7 @@ Use Octocrawl's batch_scrape tool on https://example.com/ and https://books.tosc
 
 Claude Code, Codex and OpenCode each ran a job end to end through these tools on 2026-10-20 ([record](https://github.com/77777R7/Octocrawl/blob/main/research/hosted/2026-10-20-h2-a1-clients-d094e319.md)). Codex asks before it runs `batch_scrape`, since starting a job is not read-only. In `codex exec`, which cannot ask, set `default_tools_approval_mode = "approve"` on the server's entry.
 
-Over REST the same jobs are `POST https://api.octocrawl.dev/v1/batches` and `POST /v1/crawl` with a key. `GET /v1/jobs` lists your jobs, newest first. Two options are REST only:
-
-- `maxCredits` caps what a job spends.
-- `webhook` posts the job's end to an https address, signed with a secret the start returns. The [hosted API reference](https://github.com/77777R7/Octocrawl/blob/main/docs/hosted-api.md#job-webhooks) has the signature and a verification example.
+Over REST the same jobs are `POST https://api.octocrawl.dev/v1/batches` and `POST /v1/crawl` with a key. `GET /v1/jobs` lists your jobs, newest first. `maxCredits` caps what a job spends, on the tools and over REST. `webhook` is REST only: it posts the job's end to an https address, signed with a secret the start returns. The [hosted API reference](https://github.com/77777R7/Octocrawl/blob/main/docs/hosted-api.md#job-webhooks) has the signature and a verification example.
 
 Hosted jobs open in stages. While they are paused, a start answers `503 jobs_paused` with `Retry-After`, and the same job runs on your computer meanwhile.
 

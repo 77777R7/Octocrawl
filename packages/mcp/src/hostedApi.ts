@@ -228,6 +228,8 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
     // REST takes a webhook (H2 W1); a tool does not offer one yet, since its secret would land in the agent's transcript.
     for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || key === 'webhook' || (!browser && key === 'waitFor')) delete schema.properties[key]
     if (tool.name === 'crawl' && schema.properties.maxPages) schema.properties.maxPages = { ...schema.properties.maxPages, maximum: JOB_MAX_CRAWL_PAGES }
+    // The job's credit cap, offered where credits are spent: the local tools leave it out, a server on the computer spends none (H2 M6).
+    schema.properties.maxCredits = { type: 'integer', minimum: 1, description: 'The most credits this job may spend; it stops when the next page would pass it.' }
     // A page in a job is read as a hosted scrape is (H2 M7, M9): its formats (no screenshot without the browser lane),
     // no authed mode, files up to the hosted cap.
     const scrape = hostedInputSchema('scrape', TOOLS.find((candidate) => candidate.name === 'scrape')!.inputSchema, browser) as { properties: Record<string, Record<string, unknown>> }
