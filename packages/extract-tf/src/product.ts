@@ -774,12 +774,15 @@ function priceLine(el: Element, leavesIn: ReadonlyMap<Element, number>, doc: Doc
  * own amount, not around another amount on the line. Read from the siblings
  * at each level up to the line (at most LINE_LEVELS), never by recursion.
  */
+const writtenOnPage = (node: Node): boolean => node.nodeType === 1 || node.nodeType === 3
+
 function around(line: Element, el: Element): { before: string; after: string } {
   let before = ''
   let after = ''
   for (let at: Element = el; at !== line && at.parentElement !== null; at = at.parentElement) {
-    for (let sib = at.previousSibling; sib !== null; sib = sib.previousSibling) before = `${sib.textContent ?? ''}${before}`
-    for (let sib = at.nextSibling; sib !== null; sib = sib.nextSibling) after += sib.textContent ?? ''
+    // Text and elements only: a comment (a framework's `<!--[-1-->` marker) is not written on the page.
+    for (let sib = at.previousSibling; sib !== null; sib = sib.previousSibling) if (writtenOnPage(sib)) before = `${sib.textContent ?? ''}${before}`
+    for (let sib = at.nextSibling; sib !== null; sib = sib.nextSibling) if (writtenOnPage(sib)) after += sib.textContent ?? ''
   }
   return { before: collapse(before), after: collapse(after) }
 }

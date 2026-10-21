@@ -519,7 +519,8 @@ describe('PDP facts: a selected variant and the kinds of price a page shows (D6)
     // A note after the amount that financing exists, and Spain's statutory retail price label.
     // A former price written as plain text before it ("statt", "UVP"): the label is that amount's, not this one's.
     for (const [box, price] of [['<div><span class="price">499,00 €</span> <small>auch in Raten</small></div>', '499,00 €'], ['<div class="product-price">PVP: 19,99 €</div>', '19,99 €'],
-      ['<p>statt 29,99 € <span class="price">19,99 €</span></p>', '19,99 €'], ['<div><span class="old">UVP 29,00 €</span> <span class="price">19,99 €</span></div>', '19,99 €']]) {
+      ['<p>statt 29,99 € <span class="price">19,99 €</span></p>', '19,99 €'], ['<div><span class="old">UVP 29,00 €</span> <span class="price">19,99 €</span></div>', '19,99 €'],
+      ['<div><!--ab--><span class="price">19,99 €</span><!--[-1--></div>', '19,99 €']]) {
       const out = extractTf.extract(lamp(box!), { url: 'https://shop.fixture.test/p/lamp' })
       expect(out.product?.price?.value).toBe(price)
       expect(out.product?.prices).toBeUndefined()
