@@ -338,8 +338,8 @@ const isAggregateType = (types: readonly string[]) => types.some((x) => /(^|[#/:
 const record = (v: unknown): Record<string, unknown> | null =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : null
 
-/** The prices a product's aggregate offers range over: the lowest lowPrice, and the highest highPrice when every one states one. */
-export interface OfferRange { low: number; high: number | null }
+/** The prices a product's aggregate offers range over: the lowest lowPrice, and the highest highPrice when every one states one; with the product's name. */
+export interface OfferRange { low: number; high: number | null; name?: string | null }
 
 const plainAmount = (v: unknown): number | null => {
   const text = asString(v)?.trim() ?? ''
@@ -936,11 +936,19 @@ export function aggregateRange(facts: ProductFacts | null): OfferRange | null {
   return facts === null ? null : aggregateOffered.get(facts) ?? null
 }
 
-const PRICE_ALL = new RegExp(PRICE_RE.source, 'gu')
+const SYMBOL_FIRST = new RegExp(`(?:${CURRENCY_SYMBOLS}|${CURRENCY_CODES})\\s{0,3}${AMOUNT}`, 'gu')
+const SYMBOL_AFTER = new RegExp(`${AMOUNT}\\s{0,3}(?:${CURRENCY_SYMBOLS}|${CURRENCY_CODES})`, 'gu')
 
-/** The numbers each price-shaped run in a text can be read as, in order. */
+/**
+ * The numbers each price in one text can be read as, in order. Where the text
+ * writes a currency before an amount ("£64"), only those are read: a number
+ * before that symbol is something else ("07:45 £64", "Size 10 £20"). Read one
+ * text node at a time; joined texts run a card's other numbers into its price.
+ */
 export function priceReadings(text: string): Array<Set<number>> {
-  return Array.from(text.matchAll(PRICE_ALL), (m) => amountReadings(m[0])).filter((r) => r.size > 0)
+  const first = Array.from(text.matchAll(SYMBOL_FIRST), (m) => m[0])
+  const runs = first.length > 0 ? first : Array.from(text.matchAll(SYMBOL_AFTER), (m) => m[0])
+  return runs.map(amountReadings).filter((r) => r.size > 0)
 }
 
 /** What singles a product out, strongest first: each step keeps the products it holds for, if it holds for some but not all. */
@@ -1105,7 +1113,7 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
   const ranges = declaring.flatMap((d) => (d.aggregate === null ? [] : [d.aggregate]))
   if (facts.price === null && ranges.length > 0 && declaring.every((d) => d.aggregate !== null || (d.fields.price === undefined && d.ambiguous.price === undefined))) {
     const highs = ranges.map((r) => r.high)
-    aggregateOffered.set(facts, { low: Math.min(...ranges.map((r) => r.low)), high: highs.every((h) => h !== null) ? Math.max(...(highs as number[])) : null })
+    aggregateOffered.set(facts, { low: Math.min(...ranges.map((r) => r.low)), high: highs.every((h) => h !== null) ? Math.max(...(highs as number[])) : null, name: facts.name?.value ?? null })
     textPriceBarred.add(facts)
     evidence.push(`${label(declaring.filter((d) => d.aggregate !== null))}: offers an AggregateOffer only, whose lowPrice bounds its offers' prices; no price is read for the subject`)
   }

@@ -188,14 +188,56 @@ function isProductGrid(el: Element): boolean {
 /** How far apart two amounts may be and still be one (a cent's half). */
 const SAME_AMOUNT = 0.005
 
+const HEADING = 'h1,h2,h3,h4,h5,h6'
+
+/** The last heading before an element in document order, outside it; null when there is none. */
+function headingBefore(el: Element): Element | null {
+  for (let node: Element | null = el; node !== null && node.localName !== 'body';) {
+    const prev: Element | null = node.previousElementSibling
+    if (prev === null) {
+      node = node.parentElement
+      continue
+    }
+    node = prev
+    if (node.matches(HEADING)) return node
+    const inside = qsa(node, HEADING)
+    if (inside.length > 0) return inside[inside.length - 1]!
+  }
+  return null
+}
+
+const words = (text: string): Set<string> => new Set((text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3))
+
+/** Whether a heading names the product: it has at least half the product name's words (of three letters or more). */
+function namesProduct(heading: string, name: string): boolean {
+  const named = words(name)
+  const said = words(heading)
+  const shared = [...named].filter((w) => said.has(w)).length
+  return shared > 0 && shared * 2 >= named.size
+}
+
+/** The texts of an element's text nodes, each apart: a loop, not recursion. */
+function texts(el: Element): string[] {
+  const out: string[] = []
+  const stack: Node[] = [el]
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    if (node.nodeType === 3) out.push(node.textContent ?? '')
+    else for (let child = node.lastChild; child !== null; child = child.previousSibling) stack.push(child)
+  }
+  return out
+}
+
 /**
- * Whether a grid's prices are the offers an aggregate range sums up: one of
- * them is its lowPrice, and none is below it or, when it states one, above its
- * highPrice. A grid of other products beside a product whose variants span a
- * range rarely starts at exactly its lowest price.
+ * Whether a grid is the offers an aggregate range sums up: the heading that
+ * introduces it names the product (a grid under "Pairs well with" is other
+ * products), one of its prices is the lowPrice, and none is below it or, when
+ * the range states one, above its highPrice.
  */
 function showsOffers(grid: Element, range: OfferRange): boolean {
-  const prices = priceReadings(textOf(grid))
+  const heading = headingBefore(grid)
+  if (heading === null || !range.name || !namesProduct(textOf(heading), range.name)) return false
+  const prices = texts(grid).flatMap(priceReadings)
   const outside = (n: number) => n < range.low - SAME_AMOUNT || (range.high !== null && n > range.high + SAME_AMOUNT)
   return prices.some((readings) => [...readings].some((n) => Math.abs(n - range.low) <= SAME_AMOUNT)) &&
     !prices.some((readings) => [...readings].every(outside))

@@ -633,6 +633,26 @@ describe('PDP facts: a product that declares only aggregate offers (D6)', () => 
     expect(out.product?.price).toBeNull()
   })
 
+  it('cuts a grid under a heading that names something else, even when its prices fall inside the range', () => {
+    const range = { '@type': 'AggregateOffer', lowPrice: '20.00', highPrice: '30.00', offerCount: 4, priceCurrency: 'GBP' }
+    const items = [20, 20, 25, 30].map((p, i) => `<li class="item"><a href="/product/other-${i}">Other tee ${'ABCD'[i]}</a> <span class="amount">£${p}.00</span></li>`).join('')
+    for (const offers of [range, { ...range, highPrice: undefined }]) {
+      const html = `<!doctype html><html><head>${ld({ '@type': 'Product', name: 'Basic Tee', sku: 'BT-1', offers })}</head><body><main><div class="product">
+<h1>Basic Tee</h1><p class="price"><span class="amount">£20.00</span> – <span class="amount">£30.00</span></p>
+<p>A heavyweight cotton tee with a relaxed fit, a ribbed collar and double-stitched hems; larger sizes cost more.</p>
+<section class="look"><h2>Pairs well with</h2><ul class="items">${items}</ul></section></div></main></body></html>`
+      const out = extractTf.extract(html, { url: 'https://shop.fixture.test/product/basic-tee/' })
+      expect(htmlToMarkdown(out.mainHtml, { baseUrl: out.baseUrl })).not.toContain('Other tee A')
+    }
+  })
+
+  it('reads each card\'s price, not a time, size or count written before it', () => {
+    // The text before each price ends in a number: a departure time.
+    const html = page(AGGREGATE).replace(/, one way<\/a>/g, ', one way, departs 07:45</a>')
+    expect(markdown(html).md).toContain('Offer 2, departing 2 January, one way, departs 07:45')
+    expect(markdown(html.replace(/<\/a><span/g, '</a> <span')).md).toContain('Offer 3, departing 3 January')
+  })
+
   it('does not let a related product with aggregate offers protect the grid of the page subject', () => {
     const own = { '@type': 'Product', name: 'Travel from North to South', url: URL, offers: { '@type': 'Offer', price: 84, priceCurrency: 'GBP' } }
     const related = { '@type': 'Product', name: 'Travel from East to West', url: 'https://travel.fixture.test/routes/east/west/', offers: AGGREGATE }
