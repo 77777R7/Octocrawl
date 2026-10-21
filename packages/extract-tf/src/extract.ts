@@ -29,6 +29,7 @@ import { collectDeclaredValues } from './declared.js'
 import { collectPageMetadata } from './metadata.js'
 import { resolveReactStreaming } from './streaming.js'
 import { prepareSplitTables } from './splitTables.js'
+import { includeCollectionLeads } from './collection.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -253,6 +254,8 @@ export class ExtractTf implements Extractor {
       }
       if (main !== null) strategy = 'list'
     }
+    // A news collection's lead cards above its chronological list are its content too: written out with the list (only).
+    const leads = main !== null && strategy === 'list' && (decision.type === 'collection' || decision.type === 'listing') ? includeCollectionLeads(main) : null
 
     let product: ProductFacts | null = null
     if (decision.type === 'product') {
@@ -289,7 +292,7 @@ export class ExtractTf implements Extractor {
     const selected = selection !== null && !selection.blank
     const output: ExtractorOutput = {
       title: pickTitle(doc.document, main),
-      mainHtml: selection !== null ? selection.html : main ? outerHtml(main) : '',
+      mainHtml: selection !== null ? selection.html : leads !== null ? outerHtml(leads) : main ? outerHtml(main) : '',
       baseUrl,
       metadata,
       confidence: selected ? 1 : confidenceOf(

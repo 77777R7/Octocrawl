@@ -192,6 +192,12 @@ M17 was added on 2026-10-22 for PA D6, split standings tables (`docs/pa-enhancem
 | --- | --- | --- | --- |
 | M17 | Scrape of ESPN's NBA standings | Each conference is one GFM table whose header is the empty team column and W, L, PCT, GB, HOME, AWAY, DIV, CONF, PPG, OPP PPG, DIFF, STRK, L10, at least 15 rows; the Boston Celtics row holds its team link and its W and L; no one-column table is left | scrape-formats.markdown |
 
+M18 was added on 2026-10-22 for PA D6, the lead cards of a news collection (`docs/pa-enhancement-tasks.md`, D6). FT's technology section shows its lead story and its News and Opinion & Analysis cards above the chronological stream of 25 cards of the same teaser template, with Recommended and Most Read in a sidebar; before D6 the default Markdown was the stream alone. Plain HTTP got a security check proxied and no connection direct on 2026-10-22; the page is read on the browser lane, proxied. The check uses `markdownCountMin`, added to the runner with this case (distinct matches when `distinct` is set).
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M18 | Scrape of FT's technology section | The default Markdown holds at least 30 distinct article links (`/content/<uuid>`): the lead and top cards beside the stream's 25 | scrape-formats.only-main-content |
+
 A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when `W2L_CONTACT` is set in the runner's environment and the API was started with the same value (`requiresEnv`); otherwise the runner reports it as skipped, never as passed. The record shows the value as `<W2L_CONTACT>`.
 
 | Case | Request | What it tests | P1 items |
