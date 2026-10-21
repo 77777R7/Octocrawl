@@ -173,7 +173,9 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 - [ ] **D6 从 #584/#528 拆出的 D 类片段（滚动项，每个一个小 PR，各带自己的负例 fixture；依赖 R1，不在 D 的验收和 Phase 1 退出条件内）：** RFC/WCAG 文档头信息与状态/日期保留（F3a 复用这个 fixture）；OTTO 变体与起价；ESPN 拆分积分榜；FT 头条卡片；聚合报价。每个 PR：fixture + `sites.md` 用例 + 开发集 D01–D10 相对 R1b 无退步（R1 合入前改为对应 `sites.md` 用例 + 本 PR 的负例）；每个片段必须经通用规则（主体、字段关系、情境）生效，不得按 host 或字符串匹配。
   - [x] RFC/WCAG 文档头信息与状态/日期保留（2026-10-21，分支 `claude/pa-d6-doc-header-3e7f16`，`extract-tf/33`）。fixture `packages/extract-tf/test/fixtures/standards/`（F3a 复用），实站用例 M14、M15。
   - [x] OTTO 变体与起价（2026-10-21，分支 `claude/pa-d6-otto-variant-e2c51a`，`extract-tf/34`，最后引擎提交 `1115ea72`）。fixture 在 `packages/extract-tf/test/product.test.ts`（D6 一组，内联 HTML），实站用例 J08（OTTO 拒绝，HTTP 400）。
-  - [ ] ESPN 拆分积分榜；FT 头条卡片；聚合报价。
+  - [ ] ESPN 拆分积分榜。
+  - [ ] FT 头条卡片。
+  - [x] 聚合报价（2026-10-22，分支 `claude/pa-d6-aggregate-offers`，`extract-tf/36`（#671 先合入占了 `/35`），最后引擎提交 `42fce5cb`）。fixture 在 `packages/extract-tf/test/product.test.ts`（D6 聚合报价一组，内联 HTML），实站用例 M16（Skyscanner 伦敦—巴黎）。
 - 验收：D1 五例通过；`EXTRACTOR_VERSION` 升号；D5 两行实站用例通过；开发集字段正确率相对 R1b 不退步；rawValue/unit/转换规则能往返；保留集 v2 在 Phase 2 结束前不跑。
 
 ### R 评测基建（研究文件，不改引擎）
@@ -310,6 +312,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - v2 实站（13:59–14:23 UTC）：Octocrawl 确定性 json 加 itemSelector，四臂都是 69/294、接受 2 题、假成功 3–4/42。Firecrawl 自己的 json 格式（LLM 抽取，属竞品抽取，不是 F2）118/294、接受 13 题、假成功 23/42。按 10-20 金标准评分，列表首项已变，漂移未隔离。记录 `research/accuracy/runs/2026-10-21-k1-w1-live-v2-322de68e.md`。
   - F2 没测到（null）：本机没有抽取模型接口。冻结捕获和实站原始 HTML 都保留，可以以后补测。
   - 窗口 1 超出声明范围使用了 installed_chrome grant `09fdeafe…`：它的声明只写了 16 道挑战题，窗口 1 用在了 92 题和保留集 v2 上，记录里已写明。Howard 2026-10-21 决定：窗口 2 另用一份 K1 grant，设置不变，只把声明改为 K1 的 92 题加 v2，文件放在 `.w2l/access/installed-chrome-grant-k1.json`（git-ignored，不提交），SHA-256 写进窗口 2 的记录。驱动在窗口 2 缺这份文件时拒绝启动。每周重跑的 16 题 grant 不动。
+- 2026-10-22：D6 聚合报价片段完成（一个 PR，分支 `claude/pa-d6-aggregate-offers`，从 `main` `d0653e9c` 拉）。测试先在 `main` 上失败 3 例（提交 `cf175b15`），改后通过（`81adf9c3`）。#584/#528 的 `hasAggregateProductOffers` 按 `main` 的主体解析重写：主体的声明 offer 全是带数值 lowPrice、没有 price 的 AggregateOffer 时，lowPrice 是多份报价的下界、不是主体的价，可见价格兜底不再读（Kayak 实页上 `main` 读成 `$88`，分支为 null，补上 OTTO 片段的延后项）；页面上无标题的带价卡片网格是这些报价，商品页的"无标签网格"规则不再把它当推荐删掉（有推荐标题的区块和推荐 token 仍删）。干净审查指出单商家用 AggregateOffer 声明变体价格区间（WooCommerce 一类）时旁边别的商品网格也会留下，`7aee862a` 改为网格里有一个价格等于 lowPrice、且没有价格低于 lowPrice 或高于声明的 highPrice 才保留；复审又指出价格碰巧落在区间内的邻近网格仍会留下、卡片里价格前的数字（时刻、尺码）会被读成价格，`42fce5cb` 再要求网格前最近的标题含商品名一半以上的词，价格按文本节点读、优先币种在前的写法；每次修复的回归测试都在上一提交上失败，第三次审查无阻止合并的问题。`EXTRACTOR_VERSION` 升到 `extract-tf/35`，合并 main 后因 #671 已占 `/35` 改为 `extract-tf/36`（下面的运行都在合并之前，构建是 `/35`；ESPN、FT 片段另开 PR，按顺序取 `/37`、`/38`）。同日配对（R3 评分器，本机回环，$0，对照 `main` `d0653e9c`、候选 `81adf9c3`、`7aee862a`、`42fce5cb` 结果相同）：markdown 请求 D 34/86 → **47/86**（D03 Skyscanner 2/18 → 15/18，13 个字段由错变对，无字段变差），H 75/75、v2 229/294 不变；json/verify 请求 D 0/86、H 0/75、v2 29/294 不变；除 D03 的 Markdown 外 120 次请求的 status/Markdown/tables/links/json 完全一致。实站 M16：`main` 直连 3/4（有页面、无报价卡片），代理 1/4（那次拿到 Skyscanner 的机器人验证页，却报 `success`，是假成功，不在 D6 内，列为后续）；分支在 `81adf9c3`、`7aee862a`、`42fce5cb` 代理、直连都是 4/4（14 张卡片的价格）。记录 `research/accuracy/runs/2026-10-22-d6-aggregate-paired-d0653e9c-42fce5cb.md`、`research/parity/runs/2026-10-22-pa-d6-{rest-main,aggregate-branch}-*.md`（`rest-main` 两份同时记了 M17、M18 在 `main` 上的结果）。延后：lowPrice 本身不作为 fact 输出（只用来判断网格）；价格拆在几个元素里（`<b>£</b>21`）或报价分在各自小标题下（按月份）时网格仍被删，同 `main`；紧挨商品 h1、无标签、价格碰巧从 lowPrice 起且在区间内的邻近网格会留下；微数据声明的 AggregateOffer 不读；Skyscanner 卡片的 ARIA 描述文字相邻 span 之间没有空格（"Paris.£18 per passenger.Departing…"），属 Markdown 转换，未改。
 
 ## 下次从这里继续
 
