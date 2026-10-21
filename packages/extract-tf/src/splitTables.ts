@@ -5,7 +5,8 @@
  * apart, the names lose their values and the values their names. They are put
  * back together only when nothing says they are two tables: on the page as
  * received, the smallest element holding both holds nothing else but empty
- * div/span wrappers (no text, heading, image, icon, button or tab); their
+ * div/span wrappers (no text, heading, image, icon, button or tab, and no
+ * wrapper that is a region of its own, such as a tab panel); their
  * header rows and body rows match one to one (by a row key both declare, or by
  * position when neither declares one); and the narrow one does not repeat in
  * the wide one. Nothing is matched by host.
@@ -82,8 +83,32 @@ function plan(left: Element, right: Element): { head: Array<[Element, Element]>;
   return { head: l.head.map((row, i) => [row, r.head[i]!]), body: l.body.map((row, i) => [row, values[i]!]) }
 }
 
-/** Whether the smallest element holding both tables holds nothing else but empty div/span wrappers (a loop, not recursion). */
-function adjacent(left: Element, right: Element): boolean {
+/** The ids the page's controls point at (`href="#id"`, `aria-controls`, a tab's `data-target`): the panels of tabs, an accordion's sections. */
+function targetedIds(doc: Document): Set<string> {
+  const ids = new Set<string>()
+  for (const el of qsa(doc, '[href^="#"],[aria-controls],[aria-owns],[data-target],[data-bs-target]')) {
+    for (const name of ['href', 'data-target', 'data-bs-target']) {
+      const v = el.getAttribute(name)
+      if (v !== null && v.startsWith('#') && v.length > 1) ids.add(v.slice(1))
+    }
+    for (const name of ['aria-controls', 'aria-owns']) for (const id of (el.getAttribute(name) ?? '').split(/\s+/)) if (id !== '') ids.add(id)
+  }
+  return ids
+}
+
+/** A wrapper that marks a region of its own: a tab panel, a labelled or hidden part, one the page's controls point at. */
+function ownRegion(el: Element, targeted: ReadonlySet<string>): boolean {
+  const role = (el.getAttribute('role') ?? '').toLowerCase()
+  return role === 'tabpanel' || role === 'tab' || role === 'dialog' || el.hasAttribute('aria-labelledby') || el.hasAttribute('hidden') ||
+    (el.id !== '' && targeted.has(el.id))
+}
+
+/**
+ * Whether the smallest element holding both tables holds nothing else but
+ * empty div/span wrappers, none of them a region of its own (a loop, not
+ * recursion). Two tables in two tab panels are two tables.
+ */
+function adjacent(left: Element, right: Element, targeted: () => ReadonlySet<string>): boolean {
   const shared = commonAncestor(left, right)
   if (shared === null) return false
   const stack: Node[] = Array.from(shared.childNodes)
@@ -95,7 +120,7 @@ function adjacent(left: Element, right: Element): boolean {
       continue
     }
     if (node.nodeType !== 1) continue
-    if (!WRAPPERS.has((node as Element).localName)) return false
+    if (!WRAPPERS.has((node as Element).localName) || ownRegion(node as Element, targeted())) return false
     stack.push(...Array.from(node.childNodes))
   }
   return true
@@ -130,11 +155,13 @@ function join(doc: Document, left: Element, right: Element, rows: NonNullable<Re
 export function prepareSplitTables(doc: Document): () => void {
   const tables = qsa(doc, 'table').filter((t) => t.parentElement?.closest('table') == null)
   const pairs: Array<[Element, Element]> = []
+  let ids: Set<string> | null = null
+  const targeted = () => (ids ??= targetedIds(doc))
   for (let i = 0; i + 1 < tables.length; i++) {
     const left = tables[i]!
     const right = tables[i + 1]!
     // The cheap structural checks first; the walk of what lies between only for a pair that passes them.
-    if (plan(left, right) === null || !adjacent(left, right)) continue
+    if (plan(left, right) === null || !adjacent(left, right, targeted)) continue
     pairs.push([left, right])
     i++
   }

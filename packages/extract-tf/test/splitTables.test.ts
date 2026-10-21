@@ -86,6 +86,13 @@ describe('a table split into a fixed name column and its scrolling values (D6)',
       const { tables } = extract(html)
       expect(tables.length, head).toBe(2)
     }
+    // Two tab panels, each a table: the tabs sit outside the element holding both, the panels are regions of their own.
+    const tabs = (pane: (id: string, i: number) => string) => page('<ul role="tablist"><li><a href="#goals" role="tab">Goals</a></li><li><a href="#cards" role="tab">Cards</a></li></ul>' +
+      `<div class="tab-content"><div ${pane('goals', 0)}>${board('', '', ['Alice', 'Bob', 'Cara'], ['Name', 'Goals'], [['9'], ['7'], ['5']])}</div>` +
+      `<div ${pane('cards', 1)}>${board('', '', ['Dan', 'Eve', 'Finn'], ['Player', 'YC', 'RC'], [['4', '1'], ['3', '0'], ['2', '0']])}</div></div>`)
+    for (const pane of [(id: string) => `id="${id}" class="tab-pane" role="tabpanel"`, (id: string) => `id="${id}" class="tab-pane"`, (id: string, i: number) => `class="pane"${i === 1 ? ' hidden' : ''}`]) {
+      expect(extract(tabs(pane)).tables.length, pane('x', 1)).toBe(2)
+    }
     // The wide table repeats the name column's heading: a table of its own.
     const repeated = page(`<div>${board('', '', ['Alice', 'Bob', 'Cara'], ['Player'], [[], [], []])}${board('', '', ['Dan', 'Eve', 'Finn'], ['Player', 'YC', 'RC'], [['4', '1'], ['3', '0'], ['2', '0']])}</div>`)
     expect(extract(repeated).tables).toHaveLength(2)
