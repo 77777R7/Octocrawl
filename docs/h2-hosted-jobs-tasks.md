@@ -58,7 +58,10 @@
     - MCP 处理器在进程内的调用不再计入调用方地址的限额（`wait_*` 每 500 毫秒查一次，原来 60 秒左右就会被 429）；
     - 列表工具的 `limit` 和 `maxResults` 收紧到 100；
     - `maxCredits` 从工具 schema 去掉，见 M6。
-- [ ] **M6** MCP 的 `crawl` 和 `batch_scrape` 支持 `maxCredits`：contracts 的解析和 SDK 都要认这个参数。REST 已经接受它。
+- [x] **M6** MCP 的 `crawl` 和 `batch_scrape` 支持 `maxCredits`：contracts 的解析和 SDK 都要认这个参数。REST 已经接受它。
+  - contracts 的 `parseBatchStartRequest` 和 `parseCrawlStartRequest` 接受 `maxCredits`（正整数）；追加 URL（`appendToId`）时不接受。
+  - SDK 的 `CrawlStartRequest`、`BatchStartRequest` 类型加了这个参数，SDK 原样放进请求体发出。MCP 的 `crawl` 和 `batch_scrape` 会把它传给 REST。
+  - 只有 hosted 的任务工具在 schema 里列出它。本地工具列表已经顶在 50,000 字节的上限上，而且本地服务器不花额度：本地收到这个参数时照常接受，但不会因此停下任务。
 - [x] **M7** `get_batch_errors` 的描述写的是本地的 `{ errors, robotsBlocked }`，hosted 返回的是 `{ items, nextCursor, hasMore }`；没有浏览器通道的连接，schema 里还列着截图格式（REST 会拒绝并说明原因）。这两处要改。
   - hosted 的 `get_batch_errors` 描述改成 `{ items, nextCursor, hasMore }`，说明每条和 `get_batch_items` 一样，robots 拒绝的 URL 以 blocked 出现。
   - `crawl` 和 `batch_scrape` 的 `formats` 直接用 hosted scrape 的那份：没有浏览器通道就没有截图。
@@ -142,6 +145,6 @@
     - 先在不接流量的 tag 上，用一把临时的 HTTP 通道 key 对比 `tools/list`：h32hook 上 `batch_scrape` 的 `mode` 含 `authed`、`maxFileBytes` 上限 524288000、描述提到 `appendToId`；h33shapes 上 `mode` 只有 standard 和 research、上限 5242880、不再提 `appendToId`。`get_batch_errors` 改说 `{ items, nextCursor, hasMore }`，formats 的枚举里没有截图。
     - 切流量后 `mcp.octocrawl.dev` 给出同样的结果。临时 key 已吊销。
     - M8（任务条目去掉 `usage` 和 `trace`）要跑一个任务才看得到，这次开关没开，没有在线上验证，只有单元测试覆盖。
-  - 代码后续项：M6，以及 webhook 的两个已知缺口。
+  - 代码后续项：webhook 的两个已知缺口。M6 已完成，部署 API 后在线上生效。
   - 开放前要核对 R7（Python SDK 的 User-Agent）。
   - P2 进度页由 UI 窗口做。

@@ -708,8 +708,8 @@ describe('MCP tools', () => {
   })
 
   it('takes on scrape, batch_scrape and crawl every key the request takes, verify among them, but origin and parsers', () => {
-    // origin is the host's own; parsers (PDF options) are not offered over MCP.
-    const notOffered = ['origin', 'parsers']
+    // origin is the host's own; parsers (PDF options) are not offered over MCP; maxCredits is offered by the hosted tools only (H2 M6).
+    const notOffered = ['origin', 'parsers', 'maxCredits']
     for (const [name, keys] of [['scrape', SCRAPE_KEYS], ['batch_scrape', BATCH_KEYS], ['crawl', CRAWL_KEYS]] as const) {
       const tool = TOOLS.find((t) => t.name === name)!
       const properties = Object.keys(tool.inputSchema.properties)
