@@ -168,3 +168,17 @@ it('reads a provider page whose row checks no table reader judged as region_unju
   expect(readinessOf(result({ lane: 'provider', verification: { status: 'failed', verifier: 'verify/9', contractSha256: sha, reason: 'checks_failed', checks: [] } }, [titleOnly]))).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'region_unjudged'], waitedMs: 500 })
   expect(readinessOf(result({ lane: 'provider', verification: { status: 'passed', verifier: 'verify/9', contractSha256: sha, reason: null, checks: [] } }, [titleOnly]))).toEqual({ state: 'ready', basis: ['verified'], waitedMs: 500 })
 })
+
+describe('explicit source outage readiness', () => {
+  const extract = (unavailable: boolean): TraceEvent => ({ at: 1, lane: 'http', event: 'extract', detail: { sourceUnavailable: unavailable } })
+  it('keeps a fetched outage not served ahead of loading/empty signals, without changing a configured pass', () => {
+    const outage = result({ lane: 'http', warnings: warned('page_still_loading') }, [extract(true)])
+    expect(readinessOf(outage)).toEqual({ state: 'not_served', basis: ['source_unavailable'] })
+    expect(readinessOf({ ...outage, status: 'failed', failureReason: 'empty_unverified' })).toEqual({ state: 'not_served', basis: ['source_unavailable'] })
+    expect(readinessOf({ ...outage, verification: { status: 'passed', verifier: 'test', contractSha256: 'x', reason: null, checks: [] } })).toEqual({ state: 'ready', basis: ['verified'] })
+  })
+  it('uses only the last extraction and preserves access failures', () => {
+    expect(readinessOf(result({}, [extract(true), extract(false)]))).toEqual({ state: 'ready', basis: [] })
+    expect(readinessOf(result({ status: 'blocked', blockReason: 'captcha' }, [extract(true)]))).toEqual({ state: 'not_served', basis: ['captcha'] })
+  })
+})
