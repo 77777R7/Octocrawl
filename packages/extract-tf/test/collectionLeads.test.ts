@@ -62,6 +62,38 @@ describe('the lead cards of a news collection above its chronological list (D6)'
     expect(extract(page({ leadClass: 'promo-card' })).md).not.toContain(LEADS[0]![0])
   })
 
+  it('takes one story per card, never a layout wrapper of several that shares a utility class', () => {
+    const html = page().replace(/class="teaser teaser--article"/g, 'class="teaser flex"').replace('<div class="grid-top" id="leads">',
+      '<div class="grid-top" id="leads"><div class="flex gap-8"><section><h2>Top stories</h2>' + card('Wrapped top story with a long enough title', '/content/wrapped').replace('teaser teaser--article', 'teaser flex') + '</section>' +
+      '<div><section><h2>Most read</h2><ol><li><a href="/mr1">Most-read marker story with a long title</a></li></ol></section>' +
+      '<section><h2>Sponsored</h2><p><a href="/ad">Sponsored marker: buy our cloud product today and save</a></p></section></div></div>')
+    const { md } = extract(html)
+    expect(md).toContain('Wrapped top story with a long enough title')
+    for (const marker of ['Most-read marker', 'Sponsored marker']) expect(md).not.toContain(marker)
+  })
+
+  it('leaves out cards under a heading of paid, partner, ranked or other sections\' content', () => {
+    for (const heading of ['Partner content', 'Paid content', 'From our partners', 'Sponsored by Acme', 'Advertisement', 'Trending now', "Editor's picks", 'Most shared', 'Recently viewed', 'More from Markets']) {
+      const html = page().replace('<div class="grid-sidebar">', `<section><h2>${heading}</h2>${card('Extra marker story with a long enough title', '/content/extra')}</section><div class="grid-sidebar">`)
+      expect(extract(html).md, heading).not.toContain('Extra marker')
+    }
+    for (const name of ['right-rail', 'trending', 'partner-content', 'paid-post', 'popular']) {
+      const html = page().replace('<div class="grid-sidebar">', `<div class="${name}">${card('Extra marker story with a long enough title', '/content/extra')}</div><div class="grid-sidebar">`)
+      expect(extract(html).md, name).not.toContain('Extra marker')
+    }
+  })
+
+  it('leaves the page as it was for the checks that read it after selection', () => {
+    // The page's hydration data lists ten headlines; the HTML shows them all, as cards, an "In brief" list and the stream.
+    const records = Array.from({ length: 10 }, (_, k) => ({ title: `Headline ${k + 1}: a story on the technology industry` }))
+    const html = page().replace('<title>Technology</title>', `<title>Technology</title><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { stories: records } })}</script>`)
+      .replace('<div class="grid-sidebar">', `<div class="in-brief"><h3>In brief</h3><ul>${records.slice(3, 10).map((r, k) => `<li><a href="/content/brief-${k}">${r.title}</a></li>`).join('')}</ul></div><div class="grid-sidebar">`)
+      .replace(LEADS[0]![0], records[0]!.title).replace(LEADS[1]![0], records[1]!.title).replace(LEADS[2]![0], records[2]!.title)
+    const { out, md } = extract(html)
+    expect(md).toContain(records[0]!.title)
+    expect(out.render?.clientRendered ?? false).toBe(false)
+  })
+
   it('does not bring back excluded cards or widen a caller\'s selection', () => {
     const excluded = extract(page(), { pruneSelectors: ['#leads'] })
     expect(excluded.md).toContain('Chronological report 24 on')

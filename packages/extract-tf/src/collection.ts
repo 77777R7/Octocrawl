@@ -18,8 +18,9 @@ const CARD_TAGS = 'article,div,section'
 const MIN_REPEATS = 3
 /** A card's link names a story: at least this many characters. */
 const MIN_LINK_CHARS = 20
-const SECONDARY_NAME = /(?:^|[\s_-])(?:sidebar|side-bar|related|recommend(?:ed|ations?)?|most-read|promoted|sponsored|advert(?:isement)?s?)(?:$|[\s_-])/i
-const SECONDARY_HEADING = /^(?:recommended|related|popular|promoted|sponsored)(?:\s+(?:stories|articles|news|content))?$|^most\s+(?:read|popular|viewed)$/i
+const SECONDARY_NAME = /(?:^|[\s_-])(?:sidebar|side-bar|rail|secondary|related|recommend(?:ed|ations?)?|most-(?:read|popular|viewed|shared)|trending|popular|promo(?:ted|tion)?|sponsor(?:ed)?|partner|paid|advert(?:isement|orial)?s?)(?:$|[\s_-])/i
+/** Headings of what a news page shows beside its own collection: recommendations, rankings, paid and partner content, other sections. */
+const SECONDARY_HEADING = /^(?:recommended|related|popular|trending|promoted|sponsored|advertisement|advertorial|partner content|paid (?:content|post)|from our partners|editor'?s picks|recently viewed|you may (?:also )?like|more from|most (?:read|popular|viewed|shared|commented))\b/i
 
 /** Whether an element sits, below `scope`, in a hidden, navigation, sidebar, recommendation or promoted region (memoized per ancestor). */
 function secondary(el: Element, scope: Element, cache: Map<Element, boolean>): boolean {
@@ -45,24 +46,36 @@ function secondary(el: Element, scope: Element, cache: Map<Element, boolean>): b
   return remember(false)
 }
 
-/** A card: a heading or a paragraph, and a link long enough to name a story; not a layout or image wrapper. */
-function contentCard(el: Element): boolean {
-  return el.querySelector('p,h2,h3,h4,h5,h6,[role="heading"]') !== null &&
-    qsa(el, 'a[href]').some((a) => textOf(a).trim().length >= MIN_LINK_CHARS)
-}
+/** The most places a card's long links may go: its story, and its topic's page. */
+const MAX_CARD_TARGETS = 2
 
 /**
- * The list widened to the lead cards before it, as one region holding the
- * cards and the list and nothing else; the list itself when there are none.
- * The region keeps the original nodes and the headings beside them, and drops
- * the rest of their common ancestor, so confidence and field evidence read the
- * same DOM.
+ * A card: one story, with a heading or a paragraph and links long enough to
+ * name it; not a layout wrapper holding several stories (or a ranking, or an
+ * advert beside them). It has at most one heading, and its long links go to
+ * its story and at most one other page (a topic tag).
  */
-export function includeCollectionLeads(list: Element): Element {
-  if (!list.matches('ul,ol') || list.closest('article') !== null) return list
+function contentCard(el: Element): boolean {
+  if (el.querySelector('p,h2,h3,h4,h5,h6,[role="heading"]') === null || qsa(el, 'h1,h2,h3,h4,h5,h6,[role="heading"]').length > 1) return false
+  const targets = new Set(qsa(el, 'a[href]').filter((a) => textOf(a).trim().length >= MIN_LINK_CHARS).map((a) => a.getAttribute('href')!.trim()))
+  return targets.size >= 1 && targets.size <= MAX_CARD_TARGETS
+}
+
+const KEEP = 'data-w2l-collection-keep'
+
+/**
+ * The list widened to the lead cards before it, as a detached copy of their
+ * common ancestor holding the cards, the list, the paths to them and the
+ * section headings on those paths, and nothing else; null when there are no
+ * such cards. The page itself is left as it was: the checks that read it
+ * after this (rendering signals, confidence, labelled values) see the page and
+ * the list as before, and only the content written out is wider.
+ */
+export function includeCollectionLeads(list: Element): Element | null {
+  if (!list.matches('ul,ol') || list.closest('article') !== null) return null
   const scope = list.closest('main,[role="main"]')
   const cache = new Map<Element, boolean>()
-  if (scope === null || secondary(list, scope, cache)) return list
+  if (scope === null || secondary(list, scope, cache)) return null
   // Card templates (tag and class) and the list items each appears in.
   const templates = new Map<string, Set<Element>>()
   for (const item of qsa(list, ':scope > li')) {
@@ -74,7 +87,7 @@ export function includeCollectionLeads(list: Element): Element {
     }
   }
   const repeated = new Set([...templates].filter(([, items]) => items.size >= MIN_REPEATS).map(([key]) => key))
-  if (repeated.size === 0) return list
+  if (repeated.size === 0) return null
   const all = qsa(scope, '*')
   const before = all.slice(0, all.indexOf(list))
   const cards = new Set(before.filter((el) => !el.contains(list) &&
@@ -85,30 +98,43 @@ export function includeCollectionLeads(list: Element): Element {
     for (let up = el.parentElement; up !== null && up !== scope; up = up.parentElement) if (cards.has(up)) return false
     return true
   })
-  if (leads.length === 0) return list
+  if (leads.length === 0) return null
   let region: Element = list
   for (const lead of leads) {
     if (region.contains(lead)) continue
     const shared = commonAncestor(region, lead)
-    if (shared === null || !scope.contains(shared)) return list
+    if (shared === null || !scope.contains(shared)) return null
     region = shared
   }
-  const roots = new Set<Element>([list, ...leads])
-  const paths = new Set<Element>()
-  for (const root of roots) {
-    for (let up: Element | null = root; up !== null; up = up.parentElement) {
-      paths.add(up)
+  // Mark what stays (the cards and the list whole, the paths to them), copy the region, and prune the copy by the marks.
+  const marked: Element[] = []
+  const mark = (el: Element, how: string) => {
+    if (el.getAttribute(KEEP) === 'root') return
+    el.setAttribute(KEEP, how)
+    marked.push(el)
+  }
+  for (const root of [list, ...leads]) {
+    mark(root, 'root')
+    for (let up = root.parentElement; up !== null; up = up.parentElement) {
+      mark(up, 'path')
       if (up === region) break
     }
   }
-  const pending: Element[] = [region]
+  const copy = region.cloneNode(true) as Element
+  for (const el of marked) el.removeAttribute(KEEP)
+  const pending: Element[] = [copy]
   for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
-    if (roots.has(node)) continue
+    const how = node.getAttribute(KEEP)
+    node.removeAttribute(KEEP)
+    if (how === 'root') {
+      for (const el of qsa(node, `[${KEEP}]`)) el.removeAttribute(KEEP)
+      continue
+    }
     for (const child of Array.from(node.childNodes)) {
-      if (child.nodeType === 1 && paths.has(child as Element)) pending.push(child as Element)
+      if (child.nodeType === 1 && (child as Element).hasAttribute(KEEP)) pending.push(child as Element)
       // A section's own heading ("News", "Opinion") stays with its cards.
       else if (child.nodeType !== 1 || !(child as Element).matches('h1,h2,h3,h4,h5,h6')) child.parentNode?.removeChild(child)
     }
   }
-  return region
+  return copy
 }
