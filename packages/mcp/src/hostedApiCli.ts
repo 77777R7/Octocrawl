@@ -68,7 +68,7 @@ const service = createHostedApi({
   port, host: '0.0.0.0',
   taskRoot: process.env.W2L_TASK_ROOT ?? '/tmp/octocrawl-hosted',
   hashKey, keys, oauthTokens, quota, leases, credits,
-  ...(jobsCloud === null ? {} : { jobs: { store: new FirestoreHostedJobStore(jobsCloud.project, serviceAccessToken()), files: gcsJobFiles(jobsCloud.bucket), enqueueSlice: jobsCloud.enqueueSlice, enabled: jobsCloud.enabled, allows: jobsCloud.allows } }),
+  ...(jobsCloud === null ? {} : { jobs: { store: new FirestoreHostedJobStore(jobsCloud.project, serviceAccessToken()), files: gcsJobFiles(jobsCloud.bucket), enqueueSlice: jobsCloud.enqueueSlice, enqueueFinish: jobsCloud.enqueueFinish, enabled: jobsCloud.enabled, allows: jobsCloud.allows } }),
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
   keylessDaily: positive('W2L_KEYLESS_DAILY', 20),
   claudeDaily: positive('W2L_CLAUDE_DAILY', 200),

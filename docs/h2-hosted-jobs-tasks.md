@@ -106,9 +106,10 @@
   - 签名和本地一致：`x-w2l-signature` = `sha256=` 加上对 `{x-w2l-timestamp}.{body}` 的 HMAC-SHA256。
   - 验证示例（Node 和 Python）在 `docs/hosted-api.md` 的 Job webhooks 一节。
   - MCP 工具不提供 webhook：schema 里不列，硬传会被拒绝，因为密钥会落进 agent 的对话记录。要不要提供，以后再定。
-  - 已知缺口（后续项）：
-    - 第一个 slice 没排上队（`not_queued`）的任务，worker 不会走到结束这一步，所以不发 webhook。
-    - 任务取消时，如果下一个 slice 正带着延迟在队列里等（比如等到 UTC 次日），webhook 要等那个 slice 到期才发。
+  - 原来的两个已知缺口，2026-10-21 补上（行为说明见 `docs/hosted-api.md` 的 Job webhooks）：
+    - **`not_queued`。** 启动时就没排上队的任务，启动请求收到的是 503，所以不发 webhook，并在 `webhook.delivery` 里写明原因。先排队、被提升后才没排上队的任务，会立即用 `{jobId}-finish` 投递走结束流程并发出 webhook；这个投递也被拒绝时，记为“未发送”。
+    - **取消。** 没有 slice 持有租约时，取消会立即用 `{jobId}-finish` 投递结束任务，不再被带延迟等着的 slice 拖住。有 slice 正在运行时，由那个 slice 提交时结束任务。
+    - “未发送”只在还没有任何投递记录时写入，不会盖掉进行中或已送达的记录。
   - 要上线，需要重新部署 API 和 worker（R1）。不用新建资源：沿用同一个队列和服务账号。
 
 ## R：发布与开放
@@ -153,6 +154,6 @@
     - 先在不接流量的 tag 上，用一把临时的 HTTP 通道 key 对比 `tools/list`：h32hook 上 `batch_scrape` 的 `mode` 含 `authed`、`maxFileBytes` 上限 524288000、描述提到 `appendToId`；h33shapes 上 `mode` 只有 standard 和 research、上限 5242880、不再提 `appendToId`。`get_batch_errors` 改说 `{ items, nextCursor, hasMore }`，formats 的枚举里没有截图。
     - 切流量后 `mcp.octocrawl.dev` 给出同样的结果。临时 key 已吊销。
     - M8（任务条目去掉 `usage` 和 `trace`）要跑一个任务才看得到，这次开关没开，没有在线上验证，只有单元测试覆盖。
-  - 代码后续项：webhook 的两个已知缺口。M6 已完成，部署 API 后在线上生效。
+  - webhook 的两个已知缺口已补上，M6 已完成。两者都要部署 API 才在线上生效。
   - 开放前要核对 R7（Python SDK 的 User-Agent）。
   - P2 进度页已完成（dashboard 的 Jobs 页）。
