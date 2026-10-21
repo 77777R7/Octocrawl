@@ -197,11 +197,24 @@ const checkAwake = async (since, what) => {
   if (s !== null && s.length > 0) throw new Error(`the machine slept during ${what}: ${s.slice(0, 3).join('; ')}`)
 }
 
+// ZenRows' trial is shared with window 2 (Howard, 2026-10-21): an arm whose worst case (25 credits a page, its JS and
+// premium-proxy price) would take the account past --zenrows-cap used credits (default 4700) is not started, and the
+// manifest says so.
+const zenrowsCap = Number(flag('--zenrows-cap') ?? 4700)
+async function withinCap(c, pages, what) {
+  if (c !== 'zenrows') return true
+  const u = await usage('zenrows')
+  const ok = typeof u.usage_credits === 'number' && u.usage_credits + 25 * pages <= zenrowsCap
+  if (!ok) { manifest.failures.push(`zenrows not started for ${what}: ${u.usage_credits ?? 'unknown'} credits used, worst case +${25 * pages} would pass the cap ${zenrowsCap}`); await saveManifest() }
+  return ok
+}
+
 try {
   for (const name of LOCAL) await startApi(name)
   for (const [b, ids] of blockIds.entries()) {
     const since = Date.now()
-    const comp = COMPETITORS.map((c) => runSet(c, `${c}-first-b${b}`, ids))
+    const comp = []
+    for (const c of COMPETITORS) if (await withinCap(c, ids.length, `block ${b}`)) comp.push(runSet(c, `${c}-first-b${b}`, ids))
     for (const name of rotated(b)) await runSet(name, `${name}-first-b${b}`, ids)
     await Promise.all(comp)
     await checkAwake(since, `block ${b}`)
@@ -213,7 +226,8 @@ try {
     for (const name of [...LOCAL, ...COMPETITORS]) retry[name] = await notVerified(name, tasks, 'first')
     manifest.retryPlanned = retry
     await saveManifest()
-    const comp = COMPETITORS.filter((c) => retry[c].length > 0).map((c) => runSet(c, `${c}-retry`, retry[c]))
+    const comp = []
+    for (const c of COMPETITORS) if (retry[c].length > 0 && await withinCap(c, retry[c].length, 'the retry pass')) comp.push(runSet(c, `${c}-retry`, retry[c]))
     const since = Date.now()
     for (const name of rotated(blockIds.length)) if (retry[name].length > 0) await runSet(name, `${name}-retry`, retry[name])
     await Promise.all(comp)
