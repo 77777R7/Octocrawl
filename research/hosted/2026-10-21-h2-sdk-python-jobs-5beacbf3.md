@@ -26,7 +26,7 @@ The JS script read `status` where the SDK names the field `report`, so its own o
 
 - **Both published clients work against hosted jobs unchanged.** That covers start, waiting, and paging the items. The hosted `queued` status is not terminal to either client, so both kept waiting.
 - **R7 does not touch the published clients.** Neither default User-Agent was refused. The Python client sends its own User-Agent over httpx; urllib's default, which Cloudflare refused, is not used.
-- **`maxCredits` reached the server from both clients 0.7.0.** The JS SDK spreads unknown options into the body, and the Python client maps `max_credits` to `maxCredits`. The SDK's TypeScript types in 0.7.0 do not declare it: a TypeScript caller gets a type error, although the call works at runtime. M6 (#this PR) adds it to the types.
+- **`maxCredits` reached the server from both clients 0.7.0.** The JS SDK spreads unknown options into the body, and the Python client maps `max_credits` to `maxCredits`. The SDK's TypeScript types in 0.7.0 do not declare it: a TypeScript caller gets a type error, although the call works at runtime. M6 (#656) adds it to the types.
 - **No duplicate pages from the Python client's crawl.** It joins `/pages` and `/errors`; hosted `/pages` leaves failed and duplicate items out (`hostedJobRoutes.ts` `list`), so a failed page is not counted twice. This run had no failed pages, so that case was read from the code, not observed.
 
 ## Not covered
