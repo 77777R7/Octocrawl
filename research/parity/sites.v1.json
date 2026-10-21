@@ -1768,6 +1768,22 @@
       ]
     },
     {
+      "id": "J08",
+      "batch": "api",
+      "feature": "scrape-formats.json",
+      "url": "https://www.otto.de/p/lenovo-loq-17irx10-rtx-5050-5060-5070-gaming-notebook-43-9-cm-17-3-zoll-intel-core-i7-13650hx-geforce-rtx-5060-32-gb-1000-gb-ssd-1996119966/?variationId=1996119866",
+      "request": { "formats": [{ "type": "json", "schema": { "type": "object", "properties": { "name": { "type": "string" }, "sku": { "type": "string" }, "price": { "type": "number" }, "currency": { "type": "string" } }, "required": ["name", "sku", "price", "currency"] } }] },
+      "note": "Added 2026-10-21 for PA D6 (OTTO selected variant and starting price). An OTTO notebook family page (product 1996119966; robots.txt disallows only /gate/, /onex/, /cdn-cgi/ and its bot-check script path, not /p/) with ?variationId= selecting one configuration. The family slug names an RTX 5060 and an i7-13650HX; the variation selected is the RTX 5070 / i7 14700HX configuration, as OTTO's own laptop listing declared it on 2026-10-16 (field gold D05: a Product with additionalProperty variationId 1996119866 and url …?variationId=1996119866, 1799.00 EUR). OTTO shows starting prices as 'ab 699,00 €', a struck UVP and monthly instalments beside the price. The product page itself has not been seen: on 2026-10-21 it answered HTTP 400 with its Kasada bot check to plain HTTP (curl, proxied and direct) and to the local browser (proxied), so the checks follow the listing's declaration, and the case stays failed until the page is read. The price is checked as a number with its currency, not its amount, which a sale can change.",
+      "checks": [
+        { "item": "FS", "type": "field", "path": "status", "equals": "success" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.status", "equals": "complete" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.name", "includes": "RTX 5070" },
+        { "item": "scrape-formats.json", "type": "field", "path": "json.data.currency", "equals": "EUR" },
+        { "item": "scrape-formats.json", "type": "fieldType", "path": "json.data.price", "equals": "number" },
+        { "item": "ER", "type": "evidenceSchema" }
+      ]
+    },
+    {
       "id": "T06",
       "batch": "api",
       "feature": "scrape-execution.timeout",
