@@ -28,7 +28,7 @@ import { collectLabelledValues } from './labels.js'
 import { collectDeclaredValues } from './declared.js'
 import { collectPageMetadata } from './metadata.js'
 import { resolveReactStreaming } from './streaming.js'
-import { joinSplitTables } from './splitTables.js'
+import { prepareSplitTables } from './splitTables.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -175,14 +175,15 @@ export class ExtractTf implements Extractor {
     // What is cleaned and pruned is decided on that page too, and the
     // excluded elements are removed after it, with everything inside them.
     const excluded = namedBy(doc.document, pruneSelectors ?? [])
+    // A table drawn as a fixed name column beside its scrolling values: found on the page as received, joined once it is cleaned.
+    const joinSplitTables = prepareSplitTables(doc.document)
     // A product's options shown as controls are kept aside before cleaning
     // removes the controls, and shown once the page is known to be a product's.
     const optionGroups = markOptionGroups(doc.document, excluded)
     cleanTree(doc.document, excluded)
     pruneTree(doc.document, { blockAds })
     detachAll(excluded)
-    // A table drawn as a fixed name column beside its scrolling values is read as the one table it is.
-    joinSplitTables(doc.document)
+    joinSplitTables()
 
     const decision = amazonProduct ? { type: 'product' as const, strategy: 'product' as const } : routePage(doc.document, signals)
     settleOptionGroups(optionGroups, decision.type === 'product')

@@ -76,6 +76,21 @@ describe('a table split into a fixed name column and its scrolling values (D6)',
     }
   })
 
+  it('keeps two side-by-side tables apart when only a heading without text, an image, an icon or a tab tells them apart', () => {
+    const board = (head: string, label: string, names: string[], heads: string[], values: string[][]) =>
+      `<div class="card">${head.replace('LABEL', label)}<table><thead><tr>${heads.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>` +
+      names.map((n, i) => `<tr><td>${n}</td>${values[i]!.map((v) => `<td>${v}</td>`).join('')}</tr>`).join('') + '</tbody></table></div>'
+    for (const head of ['<h3 aria-label="LABEL"><svg viewBox="0 0 1 1"><path d="M0 0"/></svg></h3>', '<h3><img alt="LABEL" src="/i.png"></h3>', '<button role="tab">LABEL</button>']) {
+      const html = page(`<section>${board(head, 'Top scorers', ['Alice', 'Bob', 'Cara'], ['Player', 'G'], [['9'], ['7'], ['5']])}` +
+        `${board(head, 'Discipline', ['Dan', 'Eve', 'Finn'], ['Name', 'YC', 'RC'], [['4', '1'], ['3', '0'], ['2', '0']])}</section>`)
+      const { tables } = extract(html)
+      expect(tables.length, head).toBe(2)
+    }
+    // The wide table repeats the name column's heading: a table of its own.
+    const repeated = page(`<div>${board('', '', ['Alice', 'Bob', 'Cara'], ['Player'], [[], [], []])}${board('', '', ['Dan', 'Eve', 'Finn'], ['Player', 'YC', 'RC'], [['4', '1'], ['3', '0'], ['2', '0']])}</div>`)
+    expect(extract(repeated).tables).toHaveLength(2)
+  })
+
   it('does not restore an excluded half or join inside a caller\'s selection', () => {
     const excluded = extract(page(group('Eastern Conference')), { pruneSelectors: ['.scroller'] })
     expect(excluded.md).not.toContain('.833')
