@@ -152,6 +152,7 @@ async function runSet(name, label, ids) {
   const env = { ...process.env, ...(local ? { W2L_API_URL: `http://127.0.0.1:${arm[name].port}` } : { [name === 'firecrawl' ? 'FIRECRAWL_API_KEY' : 'ZENROWS_API_KEY']: keys[name === 'firecrawl' ? 'FIRECRAWL_API_KEY' : 'ZENROWS_API_KEY'] }), ...(local ? { W2L_EGRESS_ECHO_URL: 'https://api.ipify.org' } : {}) }
   const startedAt = new Date().toISOString()
   const out = createWriteStream(join(work, `${label}.log`))
+  await new Promise((r) => out.once('open', r))
   return new Promise((res) => {
     const p = spawn('node', argv, { cwd: repo, env, stdio: ['ignore', out, out] })
     p.once('exit', async (code) => {
