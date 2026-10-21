@@ -167,6 +167,13 @@ M12–M13 were added on 2026-09-30 for the two defects that kept `scrape-formats
 | M12 | Scrape of the EIA Electric Power Annual's table 1.1: a title, two data tables and the notes and sources, each in its own table, no `<h1>` | The default Markdown keeps the title, both data tables with their heading rows and figures, and the notes and sources; every row as wide as its header | scrape-formats.only-main-content |
 | M13 | Scrape of the Hacker News front page | The story table's rows keep their link targets, absolute: at least 60, 30 of them discussion links; the first story row links its story; every row as wide as the first, so each `\|` in a cell is escaped | scrape-formats.markdown |
 
+M14–M15 were added on 2026-10-21 for PA D6, a standards document's header (`docs/pa-enhancement-tasks.md`, D6). Both pages lay out their publication header and their numbered chapters as siblings in `<body>`, with no article or main; before D6 the default Markdown was one chapter or appendix, without the header (the field gold set's H01 and H07, replayed on `main` `cea1d4cb` in [the R1b baseline](../accuracy/runs/2026-10-20-dev-baseline-cea1d4cb.md)). Neither is matched by host: the rule reads the body's numbered chapters.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M14 | Scrape of RFC 9110 on rfc-editor.org with `tables` | The default Markdown keeps the header (stream, RFC number, category, June 2022, the three authors) and both h1s ahead of chapters 1–19; the methods table keeps its heading row, and every table is a GFM table | scrape-formats.only-main-content |
+| M15 | Scrape of the WCAG 2.2 Recommendation on w3.org | The default Markdown keeps the h1, "W3C Recommendation" with its date and the editors, the numbered sections with the conformance levels; none of the definition pop-ups after the last section | scrape-formats.only-main-content |
+
 A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when `W2L_CONTACT` is set in the runner's environment and the API was started with the same value (`requiresEnv`); otherwise the runner reports it as skipped, never as passed. The record shows the value as `<W2L_CONTACT>`.
 
 | Case | Request | What it tests | P1 items |

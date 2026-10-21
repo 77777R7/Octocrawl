@@ -4,7 +4,7 @@
  * longest run of consecutive blocks when no container dominates.
  */
 
-import { qsa, tagOf } from './dom.js'
+import { detach, qsa, tagOf } from './dom.js'
 import type { TextBlock } from './classify.js'
 import { LAYOUT_MARKERS } from './markdown.js'
 
@@ -36,6 +36,56 @@ function layoutParent(el: Element): Element | null {
     parent = parent.parentElement
   }
   return parent
+}
+
+/** A chapter's number as its heading starts with it: "1. Introduction", "12. References". */
+const CHAPTER_NUMBER = /^(\d+)\.\s+\S/
+
+/**
+ * Whether the body is one document whose parts it lays out as siblings: a header (title, status, publication date,
+ * authors) and then chapters numbered 1, 2, 3… in order, with no article or main around them. An IETF RFC and a W3C
+ * Recommendation are built this way, and the scoring below picks their longest chapter or appendix, dropping the
+ * header and every other chapter (PA D6: RFC 9110 lost its publication header, WCAG 2.2 its status and date).
+ *
+ * The structure is read strictly, so that a page of independent sections is not widened to its body: every h1 of the
+ * page sits before the first chapter; a chapter is a <div> or <section> child of the body with no h1, whose first h2
+ * starts with its number; the numbers run from 1 without a gap, and at least three of the chapters hold prose. The
+ * chapters together hold most of the page's text, so an appendix or index cannot carry the decision. A final chapter
+ * of short linked entries (references) holds no prose and still counts in the sequence.
+ *
+ * What the body lays out after its last headed part and holds no prose is not part of the document: a respec page
+ * appends a definition pop-up per term ("Permalink", "Referenced in: …") and a back-to-top link. It is removed.
+ */
+function flatDocument(doc: Document, blocks: TextBlock[], totalLength: number): boolean {
+  const body = doc.body
+  if (!body || body.querySelector('article,main,[role="main"]')) return false
+  const children = Array.from(body.children)
+  const chapters: Element[] = []
+  for (const child of children) {
+    const tag = tagOf(child)
+    if ((tag !== 'div' && tag !== 'section') || child.querySelector('h1') !== null || hiddenRegion(child)) continue
+    const number = CHAPTER_NUMBER.exec(headingText(child.querySelector('h2')))
+    if (number === null) continue
+    if (Number(number[1]) !== chapters.length + 1) return false
+    chapters.push(child)
+  }
+  if (chapters.length < 3) return false
+  const header = children.slice(0, children.indexOf(chapters[0]!))
+  const titles = qsa(body, 'h1')
+  if (titles.length === 0 || !titles.every((h1) => !hiddenRegion(h1) && header.some((child) => child.contains(h1)))) return false
+  const inChapters = blocks.filter((b) => chapters.some((chapter) => chapter.contains(b.el)))
+  if (chapters.filter((chapter) => inChapters.some((b) => chapter.contains(b.el))).length < 3) return false
+  if (inChapters.reduce((sum, b) => sum + b.length, 0) < totalLength * 0.5) return false
+  for (let i = children.length - 1; i >= 0 && children[i]!.querySelector('h1,h2,h3,h4,h5,h6') === null; i--) {
+    const child = children[i]!
+    if (!blocks.some((b) => child.contains(b.el))) detach(child)
+  }
+  return true
+}
+
+/** A heading's text with its runs of white space made one space, trimmed; empty for none. */
+function headingText(el: Element | null): string {
+  return (el?.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 
 /**
@@ -80,6 +130,9 @@ function pickRegion(doc: Document, blocks: TextBlock[]): Element | null {
   const totalLength = blocks.reduce((sum, b) => sum + b.length, 0)
   const bodyText = blocks.filter((b) => layoutParent(b.el) === doc.body).reduce((sum, b) => sum + b.length, 0)
   if (doc.body && bodyText >= totalLength * 0.5) return doc.body
+
+  // A document laid out flat in the body, its header beside its numbered chapters: the whole body (see flatDocument).
+  if (flatDocument(doc, blocks, totalLength)) return doc.body
 
   // Score every container that holds at least one block.
   const candidates = new Map<Element, Candidate>()
