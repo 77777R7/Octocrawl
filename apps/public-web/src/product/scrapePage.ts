@@ -455,7 +455,7 @@ function cost(): string {
 
 /** Questions people ask about scraping a page, answered for Octocrawl. */
 export const SCRAPE_FAQ: ReadonlyArray<readonly [question: string, answer: string]> = [
-  ['What’s the difference between scrape, map and crawl?', 'Scrape reads one page. Map lists a site’s URLs without reading each page. Crawl follows links from a start page and scrapes each one; it runs on your own computer with <code>npx octocrawl serve</code>, as does batch.'],
+  ['What’s the difference between scrape, map and crawl?', 'Scrape reads one page. Map lists a site’s URLs without reading each page. Crawl follows links from a start page and scrapes each one; with an account it runs on hosted Octocrawl up to 500 pages, as does batch up to 1,000 URLs, and larger jobs run on your own computer with <code>npx octocrawl serve</code>.'],
   ['Does it read pages that need JavaScript?', 'Yes. It reads over HTTP first and switches to a browser when the HTML is an empty shell. Hosted, browser reads need an API key and cost 5 credits.'],
   ['Does it respect robots.txt?', 'Hosted, yes: it never requests a disallowed page. On your own computer, a URL you give it is read, and the robots.txt decision is recorded.'],
   ['Can it read PDFs?', 'The text layer, page by page. No OCR. Files up to 5 MiB hosted.'],

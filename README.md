@@ -42,14 +42,14 @@ Octocrawl is an open-source web scraping and crawling toolkit for AI agents, RAG
 | --- | --- |
 | **Scrape a page** | Readable Markdown for LLM context, plus HTML, links, image URLs and page metadata. Request a screenshot on the browser lane. |
 | **Map a website** | Discover URLs from sitemaps and page links, and filter them by a search term to find the pages you need. |
-| **Crawl a site or section** · local | Follow links from a starting URL and collect each page's content, with path filters, depth and page limits. |
-| **Scrape a list of URLs** · local | Submit a batch, retrieve results as they arrive, and keep the outcome of every URL, including failures. |
+| **Crawl a site or section** | Follow links from a starting URL and collect each page's content, with path filters, depth and page limits. |
+| **Scrape a list of URLs** | Submit a batch, retrieve results as they arrive, and keep the outcome of every URL, including failures. |
 | **Extract structured data** | Get tables and repeated listings as JSON and CSV, or pass a JSON Schema for supported fields such as product names, prices and page labels. [Extraction guide](docs/json-extraction.md). |
 | **Read dynamic pages** · local actions | Render JavaScript, click controls, scroll, load more items and follow pagination before extracting content. [Browser actions](docs/scrape-options.md#actions). |
 | **Read PDF reports** | Extract a PDF's text layer with page markers for citations. CSV, JSON and plain-text URLs also return their text. [File support](docs/files.md). |
 | **Revisit sources on a schedule** · local workers | Run Monitors and send their events to an HTTPS endpoint with retried delivery. [Monitor setup](docs/monitors.md). |
 
-Hosted Octocrawl offers **scrape and map**; keyless requests use HTTP, and an account key enables the browser lane. Run locally for crawl, batch, page actions and Monitors; see [Running Octocrawl](docs/local-setup.md) for setup and self-hosting options. The [web preview](docs/public-preview.md) is a single-page trial, with five pages a day and up to 20 named fields.
+Hosted Octocrawl offers **scrape and map**, and with an account **crawl and batch jobs** (up to 500 pages a crawl, 1,000 URLs a batch); keyless requests use HTTP, and an account key enables the browser lane. Run locally for larger jobs, page actions and Monitors; see [Running Octocrawl](docs/local-setup.md) for setup and self-hosting options. The [web preview](docs/public-preview.md) is a single-page trial, with five pages a day and up to 20 named fields.
 
 ## Why Octocrawl?
 
@@ -93,7 +93,7 @@ npx octocrawl serve                                  # keep it running: the API 
 claude mcp add octocrawl -- npx -y @octocrawl/mcp    # the published stdio server, a client of that API
 ```
 
-The hosted service offers scrape and map. The local server adds crawl, batch, the Amazon.sg product tool and the Monitor tools. To serve other machines yourself, `npx octocrawl serve --hosted --token <token>` refuses private addresses, robots overrides and saved logins as the hosted service does. [Running Octocrawl](docs/local-setup.md) covers all three; [Docker Compose](docs/self-host-docker.md) runs one on your own server. An agent installing Octocrawl for you (Cline, for one) can follow [llms-install.md](llms-install.md).
+The hosted service offers scrape and map, and with an account crawl and batch jobs. The local server adds larger jobs, the Amazon.sg product tool and the Monitor tools. To serve other machines yourself, `npx octocrawl serve --hosted --token <token>` refuses private addresses, robots overrides and saved logins as the hosted service does. [Running Octocrawl](docs/local-setup.md) covers all three; [Docker Compose](docs/self-host-docker.md) runs one on your own server. An agent installing Octocrawl for you (Cline, for one) can follow [llms-install.md](llms-install.md).
 
 ## What a failure looks like
 
