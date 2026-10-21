@@ -1629,7 +1629,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const atom: ScrapeAtom = egressPool === null || firstEgress === undefined ? pageAtom : {
       async scrape(url, context) {
         let used = current
-        let outcome = await pageAtom.scrape(url, context)
+        // The page's own deadline is set once: a read again on another egress gets what is left of it, not a new timeout.
+        const pageContext = selection === undefined || myBrowser !== null ? context : { ...context, deadlineAt: Math.min(context?.deadlineAt ?? Infinity, Date.now() + (selection.timeout ?? DEFAULT_SCRAPE_TIMEOUT_MS)) }
+        let outcome = await pageAtom.scrape(url, pageContext)
         const events: TraceEvent[] = []
         const carried: TraceEvent[] = []
         while (egressInDoubt(outcome)) {
@@ -1656,7 +1658,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           // The read given up still paid for its provider calls: they stay on the page's record, none of them its answer.
           carried.push(...givenUpPaidCalls(outcome.result.trace))
           used = current
-          outcome = await pageAtom.scrape(url, context)
+          outcome = await pageAtom.scrape(url, pageContext)
         }
         const result = await withEgressExit(events.length === 0 ? outcome.result : { ...outcome.result, trace: [...carried, ...outcome.result.trace, ...events] }, used.egress, context)
         return result === outcome.result ? outcome : { ...outcome, result }
