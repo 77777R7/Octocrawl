@@ -180,6 +180,12 @@ M14–M15 were added on 2026-10-21 for PA D6, a standards document's header (`do
 | M14 | Scrape of RFC 9110 on rfc-editor.org with `tables` | The default Markdown keeps the header (stream, RFC number, category, June 2022, the three authors) and both h1s ahead of chapters 1–19; the methods table keeps its heading row, and every table is a GFM table | scrape-formats.only-main-content |
 | M15 | Scrape of the WCAG 2.2 Recommendation on w3.org | The default Markdown keeps the h1, "W3C Recommendation" with its date and the editors, the numbered sections with the conformance levels; none of the definition pop-ups after the last section | scrape-formats.only-main-content |
 
+M16 was added on 2026-10-22 for PA D6, aggregate offers (`docs/pa-enhancement-tasks.md`, D6). The route page declares one Product whose only offer is an AggregateOffer (a lowPrice, no price) and shows the offers it sums up as a grid of linked, priced deal cards with no heading of their own; before D6 the product page's unlabelled-grid rule cut those cards as recommendations, so the default Markdown kept the section's heading and none of its deals. Plain HTTP got a script shell direct on 2026-10-22 and the full page proxied.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M16 | Scrape of Skyscanner's London to Paris route page | The default Markdown keeps "Flight deals from London to Paris" with at least five deal cards, each with its "£… per passenger" price and its absolute `/transport/flights/…` link | scrape-formats.only-main-content |
+
 M17 was added on 2026-10-22 for PA D6, split standings tables (`docs/pa-enhancement-tasks.md`, D6). ESPN's NBA standings draw each conference as two tables side by side, a fixed one-column table of teams and a scrolling table of their statistics whose rows carry the same `data-idx`; before D6 the Markdown had the team names and the statistics in separate tables, so no row said whose record it was (task B010's checks, a table and a team name, passed all the same).
 
 | Case | Request | What it tests | Feature |

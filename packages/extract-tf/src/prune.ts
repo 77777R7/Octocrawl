@@ -14,7 +14,7 @@
 import { detach, detachAll, outerHtml, parse, qsa, tagOf, textOf } from './dom.js'
 import { namedBy } from './selectors.js'
 import { LAYOUT_MARKERS } from './markdown.js'
-import { looksLikePrice } from './product.js'
+import { looksLikePrice, priceReadings, type OfferRange } from './product.js'
 
 const MANUALLY_CLEANED = [
   'script',
@@ -185,6 +185,64 @@ function isProductGrid(el: Element): boolean {
   return Math.max(0, ...pricedByTag.values()) >= 3 && priced >= kids.length * 0.6
 }
 
+/** How far apart two amounts may be and still be one (a cent's half). */
+const SAME_AMOUNT = 0.005
+
+const HEADING = 'h1,h2,h3,h4,h5,h6'
+
+/** The last heading before an element in document order, outside it; null when there is none. */
+function headingBefore(el: Element): Element | null {
+  for (let node: Element | null = el; node !== null && node.localName !== 'body';) {
+    const prev: Element | null = node.previousElementSibling
+    if (prev === null) {
+      node = node.parentElement
+      continue
+    }
+    node = prev
+    if (node.matches(HEADING)) return node
+    const inside = qsa(node, HEADING)
+    if (inside.length > 0) return inside[inside.length - 1]!
+  }
+  return null
+}
+
+const words = (text: string): Set<string> => new Set((text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3))
+
+/** Whether a heading names the product: it has at least half the product name's words (of three letters or more). */
+function namesProduct(heading: string, name: string): boolean {
+  const named = words(name)
+  const said = words(heading)
+  const shared = [...named].filter((w) => said.has(w)).length
+  return shared > 0 && shared * 2 >= named.size
+}
+
+/** The texts of an element's text nodes, each apart: a loop, not recursion. */
+function texts(el: Element): string[] {
+  const out: string[] = []
+  const stack: Node[] = [el]
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    if (node.nodeType === 3) out.push(node.textContent ?? '')
+    else for (let child = node.lastChild; child !== null; child = child.previousSibling) stack.push(child)
+  }
+  return out
+}
+
+/**
+ * Whether a grid is the offers an aggregate range sums up: the heading that
+ * introduces it names the product (a grid under "Pairs well with" is other
+ * products), one of its prices is the lowPrice, and none is below it or, when
+ * the range states one, above its highPrice.
+ */
+function showsOffers(grid: Element, range: OfferRange): boolean {
+  const heading = headingBefore(grid)
+  if (heading === null || !range.name || !namesProduct(textOf(heading), range.name)) return false
+  const prices = texts(grid).flatMap(priceReadings)
+  const outside = (n: number) => n < range.low - SAME_AMOUNT || (range.high !== null && n > range.high + SAME_AMOUNT)
+  return prices.some((readings) => [...readings].some((n) => Math.abs(n - range.low) <= SAME_AMOUNT)) &&
+    !prices.some((readings) => [...readings].every(outside))
+}
+
 /**
  * The region a recommendation heading introduces: the heading plus the
  * sibling run that follows it, up to the next heading of the same or higher
@@ -213,7 +271,7 @@ function recommendationRegion(heading: Element): Element[] {
  * prevents is an LLM summarizing the wrong product's features; the failure it
  * must not cause is deleting the product being described.
  */
-export function pruneRecommendations(doc: Document): void {
+export function pruneRecommendations(doc: Document, options: { offers?: OfferRange | null } = {}): void {
   // The element that holds the page's one h1 holds the product: the grid and
   // token triggers never cut it. A page of several h1s (cards that each carry
   // one) has no such title to keep.
@@ -229,11 +287,14 @@ export function pruneRecommendations(doc: Document): void {
 
   // Trigger 2: unlabelled grids of priced, linked cards. Walk deepest-first
   // so the tightest qualifying container is cut, not a page-level wrapper
-  // that happens to contain one.
+  // that happens to contain one. On a page whose product declares aggregate
+  // offers only (options.offers), a grid whose prices fill their range is
+  // those offers, and stays.
+  const offers = options.offers ?? null
   const containers = qsa(doc, 'div,section,ul,ol')
   for (const el of containers.reverse()) {
     if (!el.isConnected) continue
-    if (!holdsH1(el) && isProductGrid(el)) detach(el)
+    if (!holdsH1(el) && isProductGrid(el) && (offers === null || !showsOffers(el, offers))) detach(el)
   }
 
   // Trigger 3: id/class tokens, for carousels rendered without a heading and
