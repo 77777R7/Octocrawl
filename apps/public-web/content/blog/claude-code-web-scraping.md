@@ -14,7 +14,7 @@ claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp
 
 The server is added for that project only, which is the default `--scope local`. Use `--scope user` to have it in every project, or `--scope project` to share it with your team through the repository's `.mcp.json`. `claude mcp list` checks that it connects. The [Claude Code MCP docs](https://code.claude.com/docs/en/mcp) cover the scopes in more detail.
 
-Without a key, Claude Code then lists two tools from hosted Octocrawl, `map` and `scrape`; a key with the browser lane adds `scrape_product`:
+Without a key, Claude Code then lists two tools from hosted Octocrawl, `map` and `scrape`; an account's key adds the crawl and batch job tools, and a key with the browser lane adds `scrape_product`:
 
 | Tool | What it does | Without a key |
 | --- | --- | --- |
@@ -78,7 +78,7 @@ Use something else, or another part of Octocrawl, in these cases:
 
 - **A quick look at one page, no citation needed.** Claude Code's own `WebFetch` is already there and costs nothing to set up.
 - **Pages behind your login.** The hosted server refuses them. On your computer, Octocrawl can [read pages signed in as you in your own Chrome](/blog/scrape-website-with-login/).
-- **Hundreds of pages.** Hosted Octocrawl has no batch or crawl. Run it locally instead: start `npx octocrawl serve`, then `claude mcp add octocrawl -- npx -y @octocrawl/mcp`. That gives Claude every tool with no daily limit. Use another name, such as `octocrawl-local`, if you keep the hosted one.
+- **Hundreds of pages.** With an account's key, hosted Octocrawl runs `crawl` (up to 500 pages) and `batch_scrape` (up to 1,000 URLs) as jobs on your credits. For more, run it locally: start `npx octocrawl serve`, then `claude mcp add octocrawl -- npx -y @octocrawl/mcp`. That gives Claude every tool with no daily limit. Use another name, such as `octocrawl-local`, if you keep the hosted one.
 - **Sites that block automated readers.** A page that refuses a plain request comes back `blocked`. Hosted Octocrawl does not try to get past checks.
 
 ## FAQ
@@ -97,6 +97,6 @@ The site refused the request, often because it blocks automated readers. Octocra
 
 ### Can Claude Code scrape a whole site?
 
-It can list a whole site with `map` on the hosted server. To read every page, run Octocrawl locally and use `crawl` or `batch_scrape`, which the hosted server doesn't offer.
+It can list a whole site with `map` on the hosted server, and with an account read every page with `crawl` or `batch_scrape` there too, up to 500 pages a crawl and 1,000 URLs a batch. Larger sites run on your computer.
 
 Claude found the right page on its second try because `map` told it which pages existed. Give it that list and a record of every fetch, and its answers come with a place you can check. Setup for Cursor, OpenCode and Codex is on [Connect MCP](/docs/connect-mcp/).

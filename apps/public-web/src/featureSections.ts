@@ -236,7 +236,7 @@ export function startMarkup(bar: string): string {
             <p class="start-lead">Try a single page at <a href="https://octocrawl.dev/">octocrawl.dev</a>. Connect through MCP, use the REST API, or work with the TypeScript and Python clients.</p>
             <button class="sea-play" type="button" hidden><span aria-hidden="true">( </span>play with the octopus<span aria-hidden="true"> )</span></button>
           </div>
-          <p class="start-scope">Hosted Octocrawl supports scrape and map. Run locally for crawl, batch, browser actions and scheduled monitoring with local workers. <a href="/docs/limits/#hosted-api-and-mcp">See hosted limits</a>.</p>
+          <p class="start-scope">Hosted Octocrawl supports scrape and map, and with an account crawl and batch jobs. Run locally for larger jobs, browser actions and scheduled monitoring with local workers. <a href="/docs/limits/#hosted-api-and-mcp">See hosted limits</a>.</p>
           <p class="start-identity">Octocrawl is an open-source web scraping tool for AI agents and developers. Its official website is <a href="https://octocrawl.dev/">octocrawl.dev</a>, and its source code is maintained at <a href="https://github.com/77777R7/Octocrawl">github.com/77777R7/Octocrawl</a>. The local MCP package is <code>@octocrawl/mcp</code>; the API, SDK and hosted MCP examples are below.</p>
           ${clientPanels()}
         </div>

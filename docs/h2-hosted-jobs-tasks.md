@@ -127,6 +127,10 @@
   - 名单外的测试账户启动任务收到 403 `jobs_invite_only`，MCP 也不列出任务工具；Howard 的账户经 REST 和 MCP 各跑了一个任务，都完成了。
   - 记录见 [research/hosted/2026-10-21-h2-r2-invite-7f935dc5.md](../research/hosted/2026-10-21-h2-r2-invite-7f935dc5.md)。
   - 以后加人：把 uid 加进 `allowedUids` 即可，不用部署。
+- [x] **R2b** 对所有账户开放（2026-10-22 决定）：删掉了 `allowedUids` 字段，现在所有已登录的账户都能启动任务。成本靠三层上限兜住：每个账户每月 1,000 credit、每个账户每天 2,000 个任务页、全站每天 10,000 个任务页。
+  - 验证：用一个从没进过名单的临时账户，MCP 能列出 12 个任务工具，REST 启动任务返回 202，任务完成，用了 1 个 credit。
+  - 收尾：临时 key 已吊销；这个账户在 Firestore 里的 `users`、`credits`、`creditUsage`、`hostedJobWorkspaces`、`hostedJobs` 记录，以及它在 GCS 里的任务文件，都已删除。
+  - 要收回：重新写入 `allowedUids` 即可，30 秒内生效。
 - [x] **R3** 更新 `apps/public-web/content/connect-mcp.md` 和 `docs/hosted-api.md`，写明 hosted 任务的用法和上限。
   - 另外改了 `apps/public-web/content/limits.md`：它原来写着 hosted 不跑 crawl 和 batch。
   - 这几页要等下一次 public preview 部署才会上线。那是 UI 窗口的部署，这里没做。
@@ -157,7 +161,7 @@
 
 - M1–M5（#627）、P1（#629）、W1–W4（#636）、M7–M9（#642）已合并，R1 已部署并在线上验证。全局开关现在是关的。
 - R3 和 A1 已完成（2026-10-20）。H2 剩下的：
-  - R2 已完成：开关已开，名单只有 Howard 的账户。A2（外部用户在跑任务）要等有了邀请的人，并把他们加进 `allowedUids`。
+  - R2 已完成，2026-10-22 起对所有账户开放（R2b）。A2（外部用户在跑任务）要等第一个外部账户跑任务；发布文案和各个目录的描述更新已经起草，等 Howard 审。
   - 后续部署（2026-10-21）：
     - API `octocrawl-api-credits-3354110`（tag `h35credits`，main `3354110f`，含 M6；回滚用 `h34invite`）。在 tag 地址上，用 MCP 跑了一个 `maxCredits: 1` 的任务，用量正好 1 个 credit；`mcp.octocrawl.dev` 的 `crawl` 和 `batch_scrape` 都列出了 `maxCredits`。
     - 官网先部署了 `w2l-public-preview-jobs-5beacbf3`（tag `r109jobs`，任务文档），再部署了 `w2l-public-preview-credits-3354110f`（tag `r110credits`，回滚用 `r109jobs`）。connect-mcp 页和 limits 页的新内容都在线上核对过。

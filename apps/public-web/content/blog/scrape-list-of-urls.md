@@ -70,7 +70,7 @@ From an agent, the local MCP server has the same batch: `batch_scrape` starts it
 
 ## When is a batch the wrong tool?
 
-- **On hosted Octocrawl.** It serves `scrape` and `map` only. A batch runs on your computer, with no daily limit.
+- **On hosted Octocrawl.** With an account, `batch_scrape` runs up to 1,000 URLs as a job on your credits. Larger lists run on your computer, with no daily limit.
 - **More than 1,000 URLs.** Split the list into several batches.
 - **Pages behind a login.** Add `--lane my-browser` to [read them in your own Chrome](/blog/scrape-website-with-login/), one at a time.
 - **You don't have the URLs.** A batch reads only the list. To follow links from a start page, use `npx octocrawl crawl`.

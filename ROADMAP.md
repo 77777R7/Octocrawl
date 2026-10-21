@@ -378,7 +378,7 @@ The work is in the [plan](docs/launch/2026-10-19-h1-hosted-jobs-plan.md) and the
 
 At H1's end the global switch `hostedConfig/jobs.enabled` was off, so jobs were not open to anyone. Opening them to invited key holders is H2.
 
-**H2 status 2026-10-21.** Hosted jobs are on and invite only: `hostedConfig/jobs.allowedUids` holds Howard's account alone, and any other account's start is refused with 403 `jobs_invite_only`. The work and records are in the [task list](docs/h2-hosted-jobs-tasks.md).
+**H2 status 2026-10-21.** Hosted jobs are on and invite only: `hostedConfig/jobs.allowedUids` holds Howard's account alone, and any other account's start is refused with 403 `jobs_invite_only`. **2026-10-22:** opened to every signed-in account (Howard's decision; `allowedUids` removed), within each account's credits and the daily job page pools. The work and records are in the [task list](docs/h2-hosted-jobs-tasks.md).
 - **Done:**
   - the MCP job tools: #627, #642, and `maxCredits` in #656;
   - `GET /v1/jobs`: #629;
@@ -390,7 +390,7 @@ At H1's end the global switch `hostedConfig/jobs.enabled` was off, so jobs were 
   - also the published `@octocrawl/sdk` 0.7.0 and `octocrawl-client` 0.7.0 ([record](research/hosted/2026-10-21-h2-sdk-python-jobs-5beacbf3.md)).
 - **Left:**
   - the job progress page on the dashboard (P2);
-  - the exit's second part, outside users running jobs (A2), which waits for the first invited accounts.
+  - the exit's second part, outside users running jobs (A2), which waits for the first outside accounts to run a job.
 
 ### P3 · Browser lane and Pro (weeks 11–14)
 
