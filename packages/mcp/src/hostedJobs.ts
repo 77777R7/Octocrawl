@@ -160,10 +160,13 @@ const transitions = {
     return { busy: true }
   },
   lease(job: HostedJob, lease: { generation: number; holder: string; ttlMs: number }, now: Date): LeaseResult {
-    if (FINISHED.has(job.status)) return { ok: false, reason: 'finished' }
+    const held = job.lease !== null && Date.parse(job.lease.expireAt) > now.getTime()
+    // A job cancelled or failed while a slice runs keeps that slice's lease until it commits: finishing it meanwhile would
+    // settle the slice's reservation as unread, and the pages it reads would go uncharged.
+    if (FINISHED.has(job.status)) return { ok: false, reason: held ? 'busy' : 'finished' }
     if (job.status === 'queued') return { ok: false, reason: 'queued' }
     if (lease.generation !== job.generation) return { ok: false, reason: 'stale' }
-    if (job.lease !== null && Date.parse(job.lease.expireAt) > now.getTime()) return { ok: false, reason: 'busy' }
+    if (held) return { ok: false, reason: 'busy' }
     // A lease still on the job has expired: the slice that held it died without a commit.
     const failedAttempts = (job.failedAttempts ?? 0) + (job.lease !== null ? 1 : 0)
     return { ok: true, job: { ...job, failedAttempts, startedAt: job.startedAt ?? now.toISOString(), lease: { holder: lease.holder, expireAt: new Date(now.getTime() + lease.ttlMs).toISOString() } } }

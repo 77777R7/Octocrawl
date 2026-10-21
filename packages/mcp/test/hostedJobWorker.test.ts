@@ -353,6 +353,50 @@ describe('hosted job worker', () => {
     expect(await store.get(id)).toMatchObject({ status: 'expired' })
   })
 
+  it('answers 503 to a cancelled job\'s delivery while its slice still holds the lease, so the slice\'s pages are charged once', async () => {
+    const clock = { t: NOW }
+    const { origin, store, credits, files, deps, create, exportLines } = await setup({ clock })
+    const id = await create(parseBatchStartRequest({ urls: [`${origin}/a`, `${origin}/b`], fastMode: true }))
+    // The job is cancelled after the slice read its pages and before it committed; another delivery arrives meanwhile.
+    const upload = files.upload.bind(files)
+    let during: Awaited<ReturnType<typeof runJobSlice>> | null = null
+    deps.files = { ...files, download: files.download.bind(files), deletePrefix: files.deletePrefix.bind(files), upload: async (name, body, options) => {
+      if (during === null && name.includes('/pages/')) {
+        await store.cancel(id, 'ws_account-1', clock.t)
+        during = await runJobSlice(deps, id, 0)
+      }
+      return upload(name, body, options)
+    } }
+    expect(await runJobSlice(deps, id, 0)).toEqual({ status: 200, outcome: 'cancelled' })
+    const job = (await store.get(id))!
+    expect(job).toMatchObject({ status: 'cancelled', lease: null, counts: { pages: 2 }, credits: { used: 2 } })
+    expect(await credits.balance('account-1', clock.t)).toBe(998)
+    expect(exportLines(job)).toHaveLength(2)
+    expect(during).toEqual({ status: 503, outcome: 'busy' })
+    // Cloud Tasks retries the delivery: the slice committed, so it finishes the job again and charges nothing more.
+    expect(await runJobSlice(deps, id, 0)).toEqual({ status: 200, outcome: 'finished' })
+    expect(await credits.balance('account-1', clock.t)).toBe(998)
+  })
+
+  it('finishes a cancelled job whose slice died holding the lease once the lease expires, giving the slice\'s credits back', async () => {
+    const clock = { t: NOW }
+    const { origin, store, credits, expiries, deps, create } = await setup({ clock })
+    const id = await create(parseBatchStartRequest({ urls: [`${origin}/a`], fastMode: true }))
+    // A slice reserved its credits and died (a crash): its lease and its reservation stay on the job; then the job is cancelled.
+    const leased = await store.acquireLease(id, { generation: 0, holder: 'crashed', ttlMs: 30 * 60_000 }, clock.t)
+    if (!leased.ok) throw new Error('not leased')
+    const reserved = await credits.reserve('account-1', 5, [], clock.t, `${id}-0-crashed`)
+    if (!reserved.ok) throw new Error('not reserved')
+    await store.updateHeld(id, 'crashed', (j) => ({ ...j, reservation: { reservation: reserved.reservation, used: null } }))
+    await store.cancel(id, 'ws_account-1', clock.t)
+    expect(await runJobSlice(deps, id, 0)).toEqual({ status: 503, outcome: 'busy' })
+    expect(expiries).toEqual([])
+    clock.t = new Date(NOW.getTime() + 60 * 60_000)
+    expect(await runJobSlice(deps, id, 0)).toEqual({ status: 200, outcome: 'finished' })
+    expect(expiries).toEqual([id])
+    expect(await credits.balance('account-1', clock.t)).toBe(1_000)
+  })
+
   const WEBHOOK: HostedJobWebhook = { url: 'https://hooks.example.com/octocrawl', events: ['completed', 'failed', 'cancelled'], metadata: { run: 'r1' }, secret: 'whsec_test', delivery: null }
 
   it('posts a finished job\'s end to its webhook once, signed with the job\'s secret, and records it delivered (H2 W3)', async () => {
