@@ -197,17 +197,20 @@ export function summarize(channelsTried: readonly string[], attempts: readonly {
  * A failure with no routing class that a stronger rung may still answer (ROADMAP PA item 4): a 403 or 405 answered
  * without a gate Octocrawl recognises (a site's bot defence often answers so), a page a browser rendered with no main
  * content it could verify, and on an http rung a refused connection (a defence that drops a client by its TLS does so;
- * the browser is another client, and a paid provider is not asked for a network failure). Not a general timeout: the bounded
+ * the browser is another client, and a paid provider is not asked for a network failure). On a browser rung a refused
+ * connection goes on only to a free rung next, the installed Chrome: another client on the same exit, so neither egress
+ * nor identity changes (ADR 0005), and a provider is still not asked (K3). Not a general timeout: the bounded
  * initial-header exception is separate. Nor a rate limit, which asks for fewer requests
  * rather than another client; nor an error status that is the page's own answer (404, 410, 5xx). Null when the failure
  * stands; else what the ladder steps up for.
  */
-function strongerRungMayAnswer(result: FetchResult, channelId: string): string | null {
+function strongerRungMayAnswer(result: FetchResult, channelId: string, next: Channel | null): string | null {
   if (result.status !== 'failed') return null
   const status = result.evidence.httpStatus
   if (result.failureReason === 'http_error' && (status === 403 || status === 405)) return `http_${status}`
   if (result.failureReason === 'empty_unverified' && !HTTP_CHANNELS.has(channelId)) return 'empty_unverified'
   if (result.failureReason === 'connection_error' && HTTP_CHANNELS.has(channelId)) return 'connection_error'
+  if (result.failureReason === 'connection_error' && next?.id === 'installed_chrome' && next.vendorId === undefined) return 'connection_error'
   return null
 }
 
@@ -1032,7 +1035,7 @@ export class LadderRunner {
         if (headersTimeoutFallback !== null) ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_headers_timeout_fallback', channel: channel.id, detail: { to: 'browser_local', remainingMs: execution.deadlineAt! - Date.now(), maxMs: HEADERS_TIMEOUT_FALLBACK_MS } })
       }
       const stronger = headersTimeoutFallback !== null ? 'http_headers_timeout'
-        : cls === null && !subjectAsked && best === null && channel !== sessionFirst && channel.id !== 'authed_session' ? strongerRungMayAnswer(result, channel.id) : null
+        : cls === null && !subjectAsked && best === null && channel !== sessionFirst && channel.id !== 'authed_session' ? strongerRungMayAnswer(result, channel.id, next) : null
       if (stronger !== null && (result.evidence.httpStatus != null || result.markdown !== null)) progress.steppedPast = { channel: channel.id, result }
 
       ladderTrace.push({
