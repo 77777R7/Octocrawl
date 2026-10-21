@@ -18,7 +18,7 @@ const KINDS: Readonly<Record<string, Kind>> = {
   blockAds: 'boolean', removeBase64Images: 'boolean', storeInCache: 'boolean', lockdown: 'boolean', useCached: 'boolean', ignoreInvalidURLs: 'boolean',
   regexOnFullURL: 'boolean', ignoreQueryParameters: 'boolean', deduplicateSimilarURLs: 'boolean', crawlEntireDomain: 'boolean',
   allowSubdomains: 'boolean', allowExternalLinks: 'boolean', includeSubdomains: 'boolean', handoff: 'boolean', ignoreRobotsTxt: 'boolean',
-  waitFor: 'int', timeout: 'int', maxFileBytes: 'int', maxAge: 'int', minAge: 'int', maxPages: 'int', maxDepth: 'int', maxConcurrency: 'int', limit: 'int',
+  waitFor: 'int', timeout: 'int', maxFileBytes: 'int', maxAge: 'int', minAge: 'int', maxPages: 'int', maxDepth: 'int', maxConcurrency: 'int', maxCredits: 'int', limit: 'int',
   mode: 'string', lane: 'string', access: 'string', sitemap: 'string', idempotencyKey: 'string', appendToId: 'string', search: 'string', integration: 'string',
   allowlistedDomains: 'list', includeTags: 'list', excludeTags: 'list',
   // A path pattern is a regex and may hold a comma: one per flag.

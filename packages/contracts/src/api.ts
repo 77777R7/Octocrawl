@@ -472,6 +472,11 @@ export interface CrawlStartRequest extends PageOptions, RequestAttribution {
    * with a different request is HTTP 409 `conflict`. Keys live 24 hours.
    */
   idempotencyKey?: string
+  /**
+   * The most credits the job may spend on hosted Octocrawl (H2 M6): the job stops when the next page would pass it. A
+   * server on your computer spends no credits, so there it never stops a job.
+   */
+  maxCredits?: number
   /** A receiver for the crawl's events (`started`, one `page` per page recorded, then `completed`, `failed` or `cancelled`); see WebhookConfig. */
   webhook?: WebhookOption
   /**
@@ -640,6 +645,11 @@ export interface BatchStartRequest extends PageOptions, RequestAttribution {
    * `conflict`. Keys live 24 hours, per task root.
    */
   idempotencyKey?: string
+  /**
+   * The most credits the job may spend on hosted Octocrawl (H2 M6): the job stops when the next page would pass it. A
+   * server on your computer spends no credits, so there it never stops a job.
+   */
+  maxCredits?: number
   /**
    * The id of an existing batch to add `urls` to instead of starting a new
    * job. The body may then carry only `urls`, `ignoreInvalidURLs`,
@@ -984,10 +994,10 @@ export const SCRAPE_KEYS = ['url', 'mode', 'allowlistedDomains', 'formats', 'inc
 /** The lanes a request may ask for by name. */
 export const REQUEST_LANES = ['my-browser'] as const
 export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'deduplicateSimilarURLs', 'crawlEntireDomain', 'allowSubdomains', 'allowExternalLinks'] as const
-export const CRAWL_KEYS = ['url', 'mode', 'access', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'webhook', 'ignoreRobotsTxt', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const CRAWL_KEYS = ['url', 'mode', 'access', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'maxCredits', 'webhook', 'ignoreRobotsTxt', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
 const BATCH_SCOPE_NOOP_KEYS = { allowExternalLinks: 'allowExternalLinks', includeSubdomains: 'allowSubdomains' } as const
-export const BATCH_KEYS = ['urls', 'mode', 'lane', 'access', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const BATCH_KEYS = ['urls', 'mode', 'lane', 'access', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'maxCredits', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
 export const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
@@ -1058,6 +1068,13 @@ function readUrl(value: unknown, name = 'url'): string {
     if (err instanceof RequestError) throw err
     throw new RequestError(`${name} must be http(s)`)
   }
+  return value
+}
+
+/** A job's credit cap: a positive integer. */
+function readMaxCredits(value: unknown): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) throw new RequestError('maxCredits must be a positive integer')
   return value
 }
 
@@ -2075,6 +2092,7 @@ export function parseCrawlStartRequest(body: unknown): ParsedCrawlStartRequest {
   if (page.lockdown === true && sitemap !== 'skip') throw new RequestError('lockdown fetches nothing, so a crawl in it reads no sitemap: set sitemap to "skip"')
   const maxConcurrency = readConcurrency(rec.maxConcurrency)
   const idempotencyKey = readIdempotencyKey(rec.idempotencyKey)
+  const maxCredits = readMaxCredits(rec.maxCredits)
   const webhook = readWebhook(rec.webhook)
   const ignoreRobotsTxt = readBoolean(rec.ignoreRobotsTxt, 'ignoreRobotsTxt')
   const { access } = readAccessChoice(rec, false)
@@ -2094,6 +2112,7 @@ export function parseCrawlStartRequest(body: unknown): ParsedCrawlStartRequest {
     ...(sitemap === undefined ? {} : { sitemap }),
     ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(maxCredits === undefined ? {} : { maxCredits }),
     ...(webhook === undefined ? {} : { webhook }),
     ...(ignoreRobotsTxt === undefined ? {} : { ignoreRobotsTxt }),
     ...page,
@@ -2175,6 +2194,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
     if (changed !== undefined) throw new RequestError(`appendToId keeps the job's options; ${changed} cannot be changed`)
   }
   const idempotencyKey = readIdempotencyKey(rec.idempotencyKey)
+  const maxCredits = readMaxCredits(rec.maxCredits)
   if (!Array.isArray(rec.urls) || rec.urls.length < 1 || rec.urls.length > 1000) {
     throw new RequestError('urls must contain 1 to 1000 URLs')
   }
@@ -2216,6 +2236,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
     ...(allowExternalLinks === undefined ? {} : { allowExternalLinks }),
     ...(includeSubdomains === undefined ? {} : { includeSubdomains }),
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(maxCredits === undefined ? {} : { maxCredits }),
     ...(appendToId === undefined ? {} : { appendToId }),
     ...(webhook === undefined ? {} : { webhook }),
     ...choice,
