@@ -28,6 +28,8 @@ let holdStarted: (() => void) | null = null
 const holdCookies: string[] = []
 let engine: ApiEngine | null = null
 let echoIp = '203.0.113.7'
+// When each request reached the site, by path.
+const arrivals: { path: string; at: number }[] = []
 
 /** A forward proxy that sends every request, tunnel or plain, to an origin server (the shared one by default), and counts them. */
 async function liveProxy(target = () => originPort): Promise<ProxyServer & { stop(): Promise<void> }> {
@@ -54,6 +56,31 @@ async function liveProxy(target = () => originPort): Promise<ProxyServer & { sto
   return { ...server, stop: () => new Promise<void>((resolve) => { proxy.close(() => resolve()); proxy.closeAllConnections() }) }
 }
 
+/**
+ * A proxy that forwards to the shared origin until it has answered one page (robots.txt aside), then goes down: the
+ * next request it gets is held `holdMs` and dropped, and from then on it refuses connections. Each drop is timed.
+ */
+async function proxyDownAfterOnePage(holdMs = 0): Promise<ProxyServer & { dropped: number[] }> {
+  let down = false
+  const dropped: number[] = []
+  const proxy = createServer((req, res) => {
+    if (down) {
+      dropped.push(Date.now())
+      return void setTimeout(() => { proxy.close(); req.socket.destroy() }, holdMs)
+    }
+    const path = new URL(req.url ?? '/').pathname
+    const forward = httpRequest({ host: '127.0.0.1', port: originPort, path, method: req.method, headers: req.headers }, (answer) => {
+      res.writeHead(answer.statusCode ?? 502, answer.headers)
+      answer.pipe(res)
+      if (path !== '/robots.txt') res.on('finish', () => { down = true })
+    })
+    req.pipe(forward)
+  })
+  await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve))
+  proxies.push(proxy)
+  return { ...egressProxies(`http://127.0.0.1:${(proxy.address() as AddressInfo).port}`)[0]!, dropped }
+}
+
 /** A proxy address nothing listens on: every connection is refused. */
 async function deadProxy(): Promise<ProxyServer> {
   const probe = netServer()
@@ -65,6 +92,7 @@ async function deadProxy(): Promise<ProxyServer> {
 
 beforeAll(async () => {
   origin = createServer((req, res) => {
+    arrivals.push({ path: req.url ?? '', at: Date.now() })
     if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n')
     if (req.url === '/start') return void res.writeHead(200, { 'content-type': 'text/html', 'set-cookie': 'token=t1; Path=/' }).end(PAGE)
     if (req.url === '/needs') {
@@ -85,6 +113,7 @@ beforeAll(async () => {
     // An echo that never answers.
     if (req.url === '/echo-hold') return
     if (req.url === '/busy') return void res.writeHead(429, { 'content-type': 'text/html', 'retry-after': '1' }).end('<h1>Too many requests</h1>')
+    if (req.url === '/slow') return void setTimeout(() => res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE), 1_500)
     res.writeHead(404).end()
   })
   await new Promise<void>((resolve) => origin.listen(0, '127.0.0.1', resolve))
@@ -110,16 +139,17 @@ type Item = { url: string; status: string; failureReason?: string | null; eviden
 type Channels = NonNullable<NonNullable<Parameters<typeof createApiEngine>[0]>['channelsFor']>
 const httpOnly = (policy: ReturnType<typeof localNetworkPolicy>): Channels => (mode, egress) => buildChannels(mode, { networkPolicy: egress?.policy ?? policy }).filter((channel) => channel.id === 'http')
 
-async function batch(pool: ProxyServer[], paths: string[], options: { channels?: Channels; maxConcurrency?: number; during?: () => Promise<void>; request?: Record<string, unknown>; echoUrl?: string } = {}): Promise<{ status: string | undefined; items: Record<string, Item> }> {
+async function batch(pool: ProxyServer[], paths: string[], options: { channels?: Channels; maxConcurrency?: number; during?: () => Promise<void>; request?: Record<string, unknown>; echoUrl?: string; perHostMinDelayMs?: number; engineChannels?: boolean } = {}): Promise<{ status: string | undefined; items: Record<string, Item> }> {
   root = await mkdtemp(join(tmpdir(), 'w2l-egress-pool-'))
-  const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+  const policy = { ...localNetworkPolicy(), perHostMinDelayMs: options.perHostMinDelayMs ?? 0 }
   engine = createApiEngine({
     taskRoot: join(root, 'tasks'),
     networkPolicy: policy,
     accessGrant: accessGrantFromText(JSON.stringify({ tier: 'standard', capabilities: ['egress_sessions'] })),
     egressProxies: pool,
     egressEchoUrl: options.echoUrl ?? null,
-    channelsFor: options.channels ?? httpOnly(policy),
+    // The engine's own rungs share its origin scheduler across egresses; httpOnly() builds each egress a scheduler of its own.
+    ...(options.engineChannels === true ? { httpOnly: true } : { channelsFor: options.channels ?? httpOnly(policy) }),
   })
   // A name only the proxies resolve: a request that skipped its egress could not reach the site.
   const site = `http://site.test:${originPort}`
@@ -235,6 +265,34 @@ describe('a task on egress proxies', () => {
     expect(Object.values(items).filter((item) => item.evidenceRecord?.proxy === two.endpoint).length).toBeGreaterThan(0)
     expect(cookiesAtSecond.length).toBeGreaterThan(0)
     expect(cookiesAtSecond.filter((cookie) => cookie.includes('token=first'))).toEqual([])
+  })
+
+  // ROADMAP PA item 3: per-host pacing and budgets do not reset when the egress changes.
+  it('keeps the site\'s pacing across a switch: the page read again on the new egress waits out the delay its old egress started', async () => {
+    const first = await proxyDownAfterOnePage()
+    const second = await liveProxy()
+    arrivals.length = 0
+    const { items } = await batch([first, second], ['/start', '/hold'], { perHostMinDelayMs: 1_500, engineChannels: true })
+    expect(items['/hold']).toMatchObject({ status: 'success' })
+    expect(switched(items['/hold']!)).toEqual([{ from: first.endpoint, to: second.endpoint, reason: 'unreachable', switches: 1 }])
+    expect(items['/hold']!.evidenceRecord?.proxy).toBe(second.endpoint)
+    // The request the old egress dropped started the site's interval; the new egress's first request to the site waited it out.
+    expect(first.dropped).toHaveLength(1)
+    const afterSwitch = arrivals.find((arrival) => arrival.at >= first.dropped[0]!)
+    expect(afterSwitch).toBeDefined()
+    expect(afterSwitch!.at - first.dropped[0]!).toBeGreaterThanOrEqual(1_400)
+  })
+
+  it('keeps the page\'s time budget across a switch: the read on the new egress gets what is left, not a new timeout', async () => {
+    // The old egress holds the page 2 s before it drops it; the site takes 1.5 s; the page has 3 s in all.
+    const first = await proxyDownAfterOnePage(2_000)
+    const second = await liveProxy()
+    arrivals.length = 0
+    const { items } = await batch([first, second], ['/start', '/slow'], { request: { timeout: 3_000 }, engineChannels: true })
+    expect(switched(items['/slow']!)).toEqual([{ from: first.endpoint, to: second.endpoint, reason: 'unreachable', switches: 1 }])
+    // The site was asked again through the new egress, and the page ran out of time there.
+    expect(arrivals.filter((arrival) => arrival.path === '/slow')).toHaveLength(1)
+    expect(items['/slow']).toMatchObject({ status: 'failed', failureReason: 'timeout' })
   })
 
   it('switches at most twice a run, then lets the page fail', async () => {
