@@ -72,6 +72,18 @@ So the assertion is a code-level test in `packages/api/test/egressPool.test.ts`,
 
 It is written and run on `main` first. If it passes there, the behaviour is already right and the test is kept as the guard; the record says so rather than calling it a fix.
 
+## Amendment, 2026-10-21 04:30 UTC (written and committed before the rounds below are run)
+
+The first pair of arm runs went out as designed (r1-A 03:45:43–03:49:22, r1-B from 03:50:28) and r1-B failed on the exit itself, not on the sites:
+
+- **Why.** This Mac's DNS answers for `p.webshare.io` are forged today: the system resolver, and queries sent to 1.1.1.1 and 223.5.5.5, return Twitter/Facebook addresses (199.59.148.97, 174.37.175.229, 31.13.86.21 and others) that refuse TCP on port 80. The forwarder resolved the gateway's name locally, so no connection reached Webshare. Google's DNS-over-HTTPS, asked through Clash, gives `p.webshare.io` → `ap-northeast-1.proxy.socks5.webshare.io` → 23.81.42.155 and seven other addresses; port 80 on them answers from here, and three requests through 23.81.42.155 left from three US residential addresses (50.5.82.217, 198.89.187.225, 68.184.165.130).
+- **What r1-B showed.** Both controls failed: the run-set echo found no exit, and the API control got no answer in 60 s (curl's limit). All 11 tasks it reached before it was stopped at 04:26 ended at the runner's 180 s client timeout with no API answer.
+- **r1-B also started with a dirty working tree:** `packages/api/test/egressPool.test.ts` had uncommitted edits from 03:48 to 03:50:39 (the pacing test, then moved to a separate worktree). No file the API or run-set loads was changed. r1-A started clean.
+
+So that pair is kept and reported as **round 0**, outside the four rounds below and inside the "every arm run" totals. The four rounds start again in the same order, A B | B A | A B | B A, with one change to arm B: the forwarder's upstream is the gateway at **23.81.42.155:80** (the address the gateway's own DNS gave at 04:2x UTC), not its name. The login, the `-us-rotate` mode and everything else stay as designed. Arm A is unchanged (Clash resolves names itself). In both arms the sites' names are still resolved by the upstream, not by this Mac.
+
+The rounds below run on the commit that adds this amendment (no code change from `5beacbf3`); round 0 ran on `5c2c5254` (also no code change).
+
 ## Results
 
 Not run yet.
