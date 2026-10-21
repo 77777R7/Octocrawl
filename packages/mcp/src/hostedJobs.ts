@@ -99,7 +99,7 @@ export type LeaseResult = { ok: true; job: HostedJob } | { ok: false; reason: 'm
 export type CommitResult = { ok: true; job: HostedJob; promoted: string | null } | { ok: false; reason: 'missing' | 'lost' }
 export type CancelResult = { ok: true; job: HostedJob; promoted: string | null } | { ok: false; reason: 'missing' }
 export type ExpireResult = { ok: true; job: HostedJob } | { ok: false; reason: 'missing' | 'not_finished' }
-export type WebhookRecordResult = { ok: true; job: HostedJob } | { ok: false; reason: 'missing' | 'no_webhook' }
+export type WebhookRecordResult = { ok: true; job: HostedJob } | { ok: false; reason: 'missing' | 'no_webhook' | 'already_set' }
 
 export interface HostedJobStore {
   /** Creates a job running or queued, by its workspace's slots; with a claim, a replay answers the job the key started. */
@@ -118,8 +118,11 @@ export interface HostedJobStore {
   cancel(id: string, workspaceId: string, now?: Date): Promise<CancelResult>
   /** Marks a finished job expired once its results are deleted. */
   expire(id: string, now?: Date): Promise<ExpireResult>
-  /** Records a webhook delivery's outcome on the job, whatever its status; nothing else of the job changes. */
-  recordWebhook(id: string, delivery: HostedWebhookDelivery): Promise<WebhookRecordResult>
+  /**
+   * Records a webhook delivery's outcome on the job, whatever its status; nothing else of the job changes. With
+   * `onlyIfUnset`, only while no outcome is recorded yet (a "not sent" never overwrites a delivery under way or done).
+   */
+  recordWebhook(id: string, delivery: HostedWebhookDelivery, options?: { onlyIfUnset?: boolean }): Promise<WebhookRecordResult>
   /** Fails a job not yet finished, with a reason, freeing its slot as a cancel does (a job whose slice could not be queued). */
   fail(id: string, reason: string, now?: Date): Promise<CancelResult>
 }
@@ -279,10 +282,11 @@ export class MemoryHostedJobStore implements HostedJobStore {
     this.jobs.set(id, next)
     return { ok: true, job: next }
   }
-  async recordWebhook(id: string, delivery: HostedWebhookDelivery): Promise<WebhookRecordResult> {
+  async recordWebhook(id: string, delivery: HostedWebhookDelivery, options: { onlyIfUnset?: boolean } = {}): Promise<WebhookRecordResult> {
     const job = this.jobs.get(id)
     if (!job) return { ok: false, reason: 'missing' }
     if (!job.webhook) return { ok: false, reason: 'no_webhook' }
+    if (options.onlyIfUnset && job.webhook.delivery !== null) return { ok: false, reason: 'already_set' }
     const next: HostedJob = { ...job, webhook: { ...job.webhook, delivery } }
     this.jobs.set(id, next)
     return { ok: true, job: next }
@@ -459,12 +463,14 @@ export class FirestoreHostedJobStore implements HostedJobStore {
     })
   }
 
-  async recordWebhook(id: string, delivery: HostedWebhookDelivery): Promise<WebhookRecordResult> {
+  async recordWebhook(id: string, delivery: HostedWebhookDelivery, options: { onlyIfUnset?: boolean } = {}): Promise<WebhookRecordResult> {
     checkedId(id, 'job id')
     return this.retry(async (token) => {
       const read = await this.readJob(id, token)
       if (read.value === null) return { ok: false, reason: 'missing' }
       if (!read.value.webhook) return { ok: false, reason: 'no_webhook' }
+      // Checked in the read the commit's precondition pins, so a delivery recorded meanwhile is never overwritten.
+      if (options.onlyIfUnset && read.value.webhook.delivery !== null) return { ok: false, reason: 'already_set' }
       const job: HostedJob = { ...read.value, webhook: { ...read.value.webhook, delivery } }
       return await this.commit(token, [this.jobWrite(job, { updateTime: read.updateTime! })]) ? { ok: true, job } : undefined
     })

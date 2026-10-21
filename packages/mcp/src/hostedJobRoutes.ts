@@ -98,6 +98,11 @@ export interface HostedJobsConfig {
   files: JobFiles
   /** Queues a running job's next slice (its current generation) for the worker. */
   enqueueSlice: (job: HostedJob) => Promise<void>
+  /**
+   * Queues a finished job's last delivery at once, by a name of its own (`{jobId}-finish`), so that a slice waiting in
+   * the queue with a delay does not hold back its export and its webhook. Absent: the slice's own name is used.
+   */
+  enqueueFinish?: (job: HostedJob) => Promise<void>
   /** The global switch (`hostedConfig/jobs.enabled`); absent: on. */
   enabled?: () => Promise<boolean>
   /** Whether an account may start jobs (`hostedConfig/jobs.allowedUids`); absent: every account. Reads and cancels are not gated. */
@@ -125,18 +130,43 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
    * Queues a running job's slice. A running job with no slice queued would hold its slot forever, so one that cannot be
    * queued fails (`not_queued`, nothing charged), and the job promoted into its slot is queued in turn.
    */
-  async function queueOrFail(job: HostedJob): Promise<boolean> {
+  /**
+   * Queues a running job's first slice, or fails it (`not_queued`). A job failed at its own start is answered 503, so its
+   * caller never had its id or its webhook's secret: nothing is posted, and its webhook says why. A job promoted from the
+   * queue was answered 202 long ago: its end is delivered as any job's is, so that its webhook is posted.
+   */
+  async function queueOrFail(job: HostedJob, from: 'start' | 'promoted'): Promise<boolean> {
     try { await config.enqueueSlice(job); return true }
     catch (error) {
       log(JSON.stringify({ severity: 'ERROR', event: 'hosted_job_enqueue_failed', workspaceId: job.workspaceId, jobId: job.id, message: error instanceof Error ? error.message : String(error) }))
       const failed = await config.store.fail(job.id, 'not_queued', now()).catch(() => null)
+      if (failed?.ok === true && failed.job.webhook) {
+        if (from === 'start') await notPosted(failed.job, 'not sent: the job was never queued, and its start was answered 503')
+        else await finishNow(failed.job, true)
+      }
       await queuePromoted(failed?.ok === true ? failed.promoted : null)
       return false
     }
   }
+  /**
+   * A finished job's last delivery, at once. When the queue refuses it and no other delivery of the job can come
+   * (`onlyDelivery`), its webhook records that it was not sent; a timeout is not a refusal, as the task may exist.
+   */
+  async function finishNow(job: HostedJob, onlyDelivery: boolean): Promise<void> {
+    try { await (config.enqueueFinish ?? config.enqueueSlice)(job) }
+    catch (error) {
+      log(JSON.stringify({ severity: 'ERROR', event: 'hosted_job_enqueue_failed', workspaceId: job.workspaceId, jobId: job.id, message: error instanceof Error ? error.message : String(error) }))
+      const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+      if (onlyDelivery && !timedOut && job.webhook) await notPosted(job, 'not sent: the job\'s last delivery could not be queued')
+    }
+  }
+  /** Records that a job's webhook was not sent, only while nothing is recorded: never over a delivery under way or done. */
+  async function notPosted(job: HostedJob, error: string): Promise<void> {
+    await config.store.recordWebhook(job.id, { state: 'failed', attempts: 0, httpStatus: null, error, at: now().toISOString() }, { onlyIfUnset: true }).catch(() => null)
+  }
   async function queuePromoted(id: string | null): Promise<void> {
     const promoted = id === null ? null : await config.store.get(id)
-    if (promoted !== null && promoted.status === 'running') await queueOrFail(promoted)
+    if (promoted !== null && promoted.status === 'running') await queueOrFail(promoted, 'promoted')
   }
 
   /** The job a read names, when it is this account's and still served; otherwise the refusal to answer. */
@@ -218,7 +248,7 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     if (!created.ok) return refusal(429, 'jobs_busy', `this account has ${created.running} jobs running and ${created.queued} waiting, the most it may`, ['wait for one to finish, or cancel one'], { 'Retry-After': '60' })
     // A replay is the same account retrying a start whose answer it may never have read: it gets the job's secret again.
     if (created.replayed) return json({ taskId: created.job.id, replayed: true, ...withSecret(created.job) }, 202)
-    if (created.job.status === 'running' && !(await queueOrFail(created.job))) {
+    if (created.job.status === 'running' && !(await queueOrFail(created.job, 'start'))) {
       return refusal(503, 'jobs_unavailable', 'the job could not be queued; nothing was charged', ['retry in a minute'], { 'Retry-After': '60' })
     }
     log(JSON.stringify({ severity: 'INFO', event: 'hosted_job_started', workspaceId, jobId: job.id, kind, pages, status: created.job.status }))
@@ -285,9 +315,12 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
         const cancelled = await config.store.cancel(id, found.workspaceId, now())
         if (!cancelled.ok) return refusal(404, 'not_found', `no ${kind} ${id} for this account`)
         await queuePromoted(cancelled.promoted)
-        // One more delivery for the cancelled job: the worker writes its export and schedules its expiry (a slice queued or
-        // running for this generation already is the same task, and does it).
-        await config.enqueueSlice(cancelled.job).catch((error: unknown) => log(JSON.stringify({ severity: 'ERROR', event: 'hosted_job_enqueue_failed', workspaceId: cancelled.job.workspaceId, jobId: id, message: String(error) })))
+        // A slice that holds the lease finishes the job when it commits, with its pages counted. Otherwise one more delivery,
+        // at once and by its own name, writes the export, schedules the expiry and posts the webhook: a slice waiting in the
+        // queue with a delay (the next UTC day, a busy host) would hold them back until it came due.
+        const sliceRunning = cancelled.job.lease !== null && Date.parse(cancelled.job.lease.expireAt) > now().getTime()
+        // A slice still queued for the job finishes it later if this delivery is refused, so nothing is recorded then.
+        if (!sliceRunning) await finishNow(cancelled.job, false)
         return json(status(cancelled.job))
       }
       if (method !== 'GET') return refusal(404, 'not_found', `${method} ${url.pathname} is not a job route`)

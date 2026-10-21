@@ -181,7 +181,11 @@ A start may name a webhook for the job's end (H2 W1–W4): `"webhook": "https://
   - Any other answer, or an address the egress policy refuses, is failed at once.
   - Each outcome is recorded on the job as `webhook.delivery`, `{ state, attempts, httpStatus, error, at }`, and logged as `hosted_job_webhook`.
 - **Over MCP.** The MCP tools do not offer a webhook, and a call that passes one anyway is refused, because the secret would land in the agent's transcript.
-- **Known gaps.** A job whose first slice could not be queued (`not_queued`) is never finished by the worker, so it posts nothing. A job cancelled while its next slice waits in the queue with a delay (until the next UTC day, for example) posts its end when that slice comes due.
+- **A job never queued.** A job whose first slice could not be queued fails with `not_queued`, and how its end is handled depends on when that happened.
+  - **At its own start:** the start answered 503, so nothing is posted, and `webhook.delivery` says why. A start replayed by its idempotency key gets this job and its secret back.
+  - **After it waited in the queue:** it is finished at once by a delivery of its own (`{jobId}-finish`), which posts its end. If the queue refuses that delivery too, `webhook.delivery` says it was not sent.
+  - A "not sent" record never replaces a delivery under way or done.
+- **Cancel.** A job cancelled while no slice holds its lease is finished at once by `{jobId}-finish`, so that a slice waiting in the queue with a delay (until the next UTC day, for example) does not hold back its export and webhook. A slice that holds the lease finishes the job when it commits, with its pages counted. If the finish delivery is refused, the waiting slice still finishes the job later.
 
 To verify a delivery, check the signature over the raw body before parsing it, compare in constant time, and reject an old timestamp:
 

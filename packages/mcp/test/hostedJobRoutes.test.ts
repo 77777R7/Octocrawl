@@ -28,7 +28,7 @@ let close: (() => Promise<void>) | undefined
 let root: string | undefined
 afterEach(async () => { await close?.(); close = undefined; if (root) await rm(root, { recursive: true, force: true }); root = undefined })
 
-async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean; allowed?: readonly string[]; failEnqueue?: boolean | ((job: HostedJob) => boolean) } = {}) {
+async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean; allowed?: readonly string[]; failEnqueue?: boolean | ((job: HostedJob) => boolean); finish?: boolean; failFinish?: boolean } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-job-routes-'))
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening')
   const port = (probe.address() as AddressInfo).port
@@ -40,6 +40,7 @@ async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean;
     exportUrl: async (job) => `https://storage.example/${job.id}/export.jsonl.gz?signed`,
   }
   const enqueued: HostedJob[] = []
+  const finished: HostedJob[] = []
   const credits = options.credits ?? new MemoryCreditsStore(1_000)
   const keys = new MemoryHostedKeys(new Map(Object.entries(KEYS).map(([key, record]) => [keyDigest(HASH_KEY, key), record])))
   const service = createHostedApi({
@@ -49,6 +50,7 @@ async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean;
       store, files,
       enqueueSlice: async (job) => { if (options.failEnqueue === true || (typeof options.failEnqueue === 'function' && options.failEnqueue(job))) throw new Error('queue down'); enqueued.push(job) },
       enabled: async () => options.enabled ?? true,
+      ...(options.finish ? { enqueueFinish: async (job: HostedJob) => { if (options.failFinish) throw new Error('queue down'); finished.push(job) } } : {}),
       ...(options.allowed === undefined ? {} : { allows: async (uid: string) => options.allowed!.includes(uid) }),
     },
   })
@@ -64,7 +66,7 @@ async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean;
     const errors = items.filter((item) => ['failed', 'blocked'].includes(item.status)).length
     store.jobs.set(id, { ...job, counts: { pages: job.counts.pages + items.length - errors, errors: job.counts.errors + errors, slices: job.counts.slices + 1 } })
   }
-  return { call, store, enqueued, credits, sliceWrote }
+  return { call, store, enqueued, finished, credits, sliceWrote }
 }
 
 const urls = (n: number) => Array.from({ length: n }, (_, i) => `https://example.com/p/${i}`)
@@ -319,6 +321,60 @@ describe('hosted job routes', () => {
     // The two running jobs, the promoted one, and the cancelled one's last delivery.
     expect(enqueued.map((job) => job.id)).toEqual([ids[0], ids[1], ids[2], ids[0]])
     expect(await (await call('GET', `/v1/batches/${ids[2]}`, 'oc_one')).json()).toMatchObject({ status: 'running' })
+  })
+
+  it('finishes a cancelled job at once by its own delivery, unless a slice holding the lease will (H2 webhook gaps)', async () => {
+    const { call, store, enqueued, finished } = await start({ credits: new MemoryCreditsStore(100_000), finish: true })
+    const ids: string[] = []
+    for (let i = 0; i < 2; i++) ids.push(((await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(1) })).json()) as { taskId: string }).taskId)
+    // Waiting for a delayed slice (no lease): its last delivery goes at once, by the finish route, not the slice's name.
+    await call('POST', `/v1/batches/${ids[0]}/cancel`, 'oc_one')
+    expect(finished.map((job) => [job.id, job.status])).toEqual([[ids[0], 'cancelled']])
+    // A slice holds the lease: it finishes the job when it commits, so nothing more is queued.
+    store.jobs.set(ids[1]!, { ...store.jobs.get(ids[1]!)!, lease: { holder: 'h1', expireAt: new Date(Date.now() + 60_000).toISOString() } })
+    await call('POST', `/v1/batches/${ids[1]}/cancel`, 'oc_one')
+    expect(finished.map((job) => job.id)).toEqual([ids[0]])
+    expect(enqueued.map((job) => job.id)).toEqual([ids[0], ids[1]])
+  })
+
+  it('posts nothing for a job its start answered 503, and says why; finishes a promoted job the queue then refused (H2 webhook gaps)', async () => {
+    const webhook = { url: 'https://hooks.example.com/octocrawl' }
+    const atStart = await start({ failEnqueue: true, finish: true })
+    expect((await atStart.call('POST', '/v1/batches', 'oc_one', { urls: urls(1), webhook })).status).toBe(503)
+    const [failedAtStart] = [...atStart.store.jobs.values()]
+    expect(failedAtStart).toMatchObject({ status: 'failed', failureReason: 'not_queued', webhook: { delivery: { state: 'failed', attempts: 0, error: expect.stringMatching(/never queued.*503/) } } })
+    expect(atStart.finished).toEqual([])
+    // Two run and a third waits with a webhook; the queue refuses the third when it is promoted, so its end is delivered.
+    let calls = 0
+    const promotedLater = await start({ credits: new MemoryCreditsStore(100_000), finish: true, failEnqueue: () => ++calls === 3 })
+    const ids: string[] = []
+    for (let i = 0; i < 3; i++) ids.push(((await (await promotedLater.call('POST', '/v1/batches', 'oc_one', { urls: urls(1), ...(i === 2 ? { webhook } : {}) })).json()) as { taskId: string }).taskId)
+    await promotedLater.call('POST', `/v1/batches/${ids[0]}/cancel`, 'oc_one')
+    expect(promotedLater.store.jobs.get(ids[2]!)).toMatchObject({ status: 'failed', failureReason: 'not_queued' })
+    // The promoted job is handled before the cancelled one's own last delivery.
+    expect(promotedLater.finished.map((job) => job.id)).toEqual([ids[2], ids[0]])
+    // When the finish delivery is refused as well, the webhook records that it was not sent.
+    let more = 0
+    const queueGone = await start({ credits: new MemoryCreditsStore(100_000), finish: true, failFinish: true, failEnqueue: () => ++more === 3 })
+    const others: string[] = []
+    for (let i = 0; i < 3; i++) others.push(((await (await queueGone.call('POST', '/v1/batches', 'oc_one', { urls: urls(1), ...(i === 2 ? { webhook } : {}) })).json()) as { taskId: string }).taskId)
+    await queueGone.call('POST', `/v1/batches/${others[0]}/cancel`, 'oc_one')
+    expect(queueGone.store.jobs.get(others[2]!)?.webhook?.delivery).toMatchObject({ state: 'failed', error: expect.stringMatching(/could not be queued/) })
+  })
+
+  it('never records a webhook as not sent over one delivered, nor when a queued slice can still post it', async () => {
+    const webhook = { url: 'https://hooks.example.com/octocrawl' }
+    const { call, store } = await start({ credits: new MemoryCreditsStore(100_000), finish: true, failFinish: true })
+    const ids: string[] = []
+    for (let i = 0; i < 2; i++) ids.push(((await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), webhook })).json()) as { taskId: string }).taskId)
+    // A job already finished and posted: a cancel's refused delivery leaves "delivered" as it was.
+    const done = store.jobs.get(ids[0]!)!
+    store.jobs.set(ids[0]!, { ...done, status: 'completed', finishedAt: new Date().toISOString(), webhook: { ...done.webhook!, delivery: { state: 'delivered', attempts: 1, httpStatus: 200, error: null, at: new Date().toISOString() } } })
+    await call('POST', `/v1/batches/${ids[0]}/cancel`, 'oc_one')
+    expect(store.jobs.get(ids[0]!)?.webhook?.delivery).toMatchObject({ state: 'delivered' })
+    // A running job cancelled while its slice waits in the queue: a refused delivery records nothing, the slice posts it later.
+    await call('POST', `/v1/batches/${ids[1]}/cancel`, 'oc_one')
+    expect(store.jobs.get(ids[1]!)).toMatchObject({ status: 'cancelled', webhook: { delivery: null } })
   })
 
   it('exports a finished job by a signed link, and not one still running', async () => {

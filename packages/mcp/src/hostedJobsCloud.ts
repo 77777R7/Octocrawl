@@ -22,6 +22,8 @@ export interface JobsCloud {
   enqueueSlice: (job: HostedJob, delaySeconds?: number) => Promise<void>
   enqueueExpiry: (job: HostedJob) => Promise<void>
   enqueueWebhook: (job: HostedJob) => Promise<void>
+  /** A finished job's last delivery at once (`{jobId}-finish`, to the slice route, which finishes a job that has). */
+  enqueueFinish: (job: HostedJob) => Promise<void>
   /** The global switch, `hostedConfig/jobs` field `enabled` (absent: on), read at most every 30 s. */
   enabled: () => Promise<boolean>
   /** Whether an account may start jobs: on `hostedConfig/jobs.allowedUids` when that field exists (H2 R2), else every account. */
@@ -70,6 +72,7 @@ export async function jobsCloudFromEnv(env: NodeJS.ProcessEnv, fetcher: typeof f
     enqueueSlice: (job, delaySeconds = 0) => deliver(`${job.id}-${job.generation}`, `/internal/jobs/${job.id}/slice`, { generation: job.generation }, delaySeconds > 0 ? new Date(Date.now() + delaySeconds * 1000) : undefined),
     enqueueExpiry: (job) => deliver(`${job.id}-expire`, `/internal/jobs/${job.id}/expire`, {}, job.expireAt === null ? undefined : new Date(job.expireAt)),
     enqueueWebhook: (job) => deliver(`${job.id}-webhook`, `/internal/jobs/${job.id}/webhook`, {}),
+    enqueueFinish: (job) => deliver(`${job.id}-finish`, `/internal/jobs/${job.id}/slice`, { generation: job.generation }),
     async enabled() { return (await readSwitch()).on },
     async allows(uid) { const allowed = (await readSwitch()).allowed; return allowed === null || allowed.has(uid) },
   }

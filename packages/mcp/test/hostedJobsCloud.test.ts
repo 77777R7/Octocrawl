@@ -39,6 +39,10 @@ describe('jobs in the cloud, from the environment', () => {
     expect(tasks[0]!.task).toMatchObject({ name: expect.stringMatching(/\/tasks\/6f1c2a4e-1b2c-4d3e-8f90-000000000001-3$/), httpRequest: { url: 'https://octocrawl-jobs-abc.a.run.app/internal/jobs/6f1c2a4e-1b2c-4d3e-8f90-000000000001/slice', oidcToken: { serviceAccountEmail: ENV.W2L_JOBS_TASKS_ACCOUNT, audience: 'https://octocrawl-jobs-abc.a.run.app' } } })
     expect(Buffer.from(tasks[0]!.task.httpRequest.body, 'base64').toString()).toBe('{"generation":3}')
     expect(tasks[1]!.task).toMatchObject({ name: expect.stringMatching(/-expire$/), scheduleTime: '2026-10-26T08:00:00.000Z' })
+    // A finished job's last delivery goes at once, by a name of its own, to the slice route (H2 webhook gaps).
+    await jobs.enqueueFinish(job)
+    expect(tasks[2]!.task).toMatchObject({ name: expect.stringMatching(/\/tasks\/6f1c2a4e-1b2c-4d3e-8f90-000000000001-finish$/), httpRequest: { url: 'https://octocrawl-jobs-abc.a.run.app/internal/jobs/6f1c2a4e-1b2c-4d3e-8f90-000000000001/slice' } })
+    expect(tasks[2]!.task.scheduleTime).toBeUndefined()
   })
 
   it('reads the switch, on when its document is absent, and at most every 30 s', async () => {

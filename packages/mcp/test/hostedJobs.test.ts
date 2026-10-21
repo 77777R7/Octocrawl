@@ -173,6 +173,20 @@ describe.each(stores)('%s job store', (_name, make) => {
     expect(await store.commitSlice('job-1', 'h3', (j) => j, later)).toMatchObject({ ok: true, job: { failedAttempts: 0 } })
   })
 
+  it('records a webhook\'s outcome, and a "not sent" only while nothing is recorded', async () => {
+    const store = make()
+    const webhook = { url: 'https://hooks.example.com/', events: ['completed', 'failed', 'cancelled'] as Array<'completed' | 'failed' | 'cancelled'>, metadata: {}, secret: 'whsec_x', delivery: null }
+    await store.create({ ...job('job-1'), webhook }, LIMITS, null, NOW)
+    const at = NOW.toISOString()
+    const notSent = { state: 'failed' as const, attempts: 0, httpStatus: null, error: 'not sent', at }
+    expect(await store.recordWebhook('job-1', { state: 'delivered', attempts: 1, httpStatus: 200, error: null, at })).toMatchObject({ ok: true })
+    expect(await store.recordWebhook('job-1', notSent, { onlyIfUnset: true })).toEqual({ ok: false, reason: 'already_set' })
+    expect((await store.get('job-1'))?.webhook?.delivery).toMatchObject({ state: 'delivered' })
+    await store.create({ ...job('job-2'), webhook }, LIMITS, null, NOW)
+    expect(await store.recordWebhook('job-2', notSent, { onlyIfUnset: true })).toMatchObject({ ok: true, job: { webhook: { delivery: { state: 'failed', error: 'not sent' } } } })
+    expect(await store.recordWebhook('job-9', notSent)).toEqual({ ok: false, reason: 'missing' })
+  })
+
   it('lists a workspace\'s jobs, newest first, and no other workspace\'s (H2 P1)', async () => {
     const store = make()
     const at = (minutes: number) => new Date(NOW.getTime() + minutes * 60_000)
