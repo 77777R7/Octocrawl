@@ -376,7 +376,21 @@ The work is in the [plan](docs/launch/2026-10-19-h1-hosted-jobs-plan.md) and the
   - A29 expects a keyless call to be refused, which hosted does not do on purpose.
   - A32 fails locally the same way.
 
-The global switch `hostedConfig/jobs.enabled` is off, so jobs are not yet open to anyone. Opening them to invited key holders is H2.
+At H1's end the global switch `hostedConfig/jobs.enabled` was off, so jobs were not open to anyone. Opening them to invited key holders is H2.
+
+**H2 status 2026-10-21.** Hosted jobs are on and invite only: `hostedConfig/jobs.allowedUids` holds Howard's account alone, and any other account's start is refused with 403 `jobs_invite_only`. The work and records are in the [task list](docs/h2-hosted-jobs-tasks.md).
+- **Done:**
+  - the MCP job tools: #627, #642, and `maxCredits` in #656;
+  - `GET /v1/jobs`: #629;
+  - signed job webhooks: #636;
+  - the allowlist: #647;
+  - the job docs on octocrawl.dev: #640, #656.
+- **Exit, first part, met.** Start, poll and fetch were recorded end to end from three clients, each with its version:
+  - Claude Code 2.1.301, Codex 0.162.1 and OpenCode 1.18.26 ([A1](research/hosted/2026-10-20-h2-a1-clients-d094e319.md));
+  - also the published `@octocrawl/sdk` 0.7.0 and `octocrawl-client` 0.7.0 ([record](research/hosted/2026-10-21-h2-sdk-python-jobs-5beacbf3.md)).
+- **Left:**
+  - the job progress page on the dashboard (P2);
+  - the exit's second part, outside users running jobs (A2), which waits for the first invited accounts.
 
 ### P3 · Browser lane and Pro (weeks 11–14)
 

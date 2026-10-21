@@ -141,6 +141,9 @@
 - M1–M5（#627）、P1（#629）、W1–W4（#636）、M7–M9（#642）已合并，R1 已部署并在线上验证。全局开关现在是关的。
 - R3 和 A1 已完成（2026-10-20）。H2 剩下的：
   - R2 已完成：开关已开，名单只有 Howard 的账户。A2（外部用户在跑任务）要等有了邀请的人，并把他们加进 `allowedUids`。
+  - 后续部署（2026-10-21）：
+    - API `octocrawl-api-credits-3354110`（tag `h35credits`，main `3354110f`，含 M6；回滚用 `h34invite`）。在 tag 地址上，用 MCP 跑了一个 `maxCredits: 1` 的任务，用量正好 1 个 credit；`mcp.octocrawl.dev` 的 `crawl` 和 `batch_scrape` 都列出了 `maxCredits`。
+    - 官网先部署了 `w2l-public-preview-jobs-5beacbf3`（tag `r109jobs`，任务文档），再部署了 `w2l-public-preview-credits-3354110f`（tag `r110credits`，回滚用 `r109jobs`）。connect-mcp 页和 limits 页的新内容都在线上核对过。
   - M7–M9（#642）已部署：2026-10-21 上线 main `917d35f7` 的 API，revision `octocrawl-api-shapes-917d35f`（tag `h33shapes`，回滚用 `h32hook`）。worker 没变，仍是 w9。
     - 先在不接流量的 tag 上，用一把临时的 HTTP 通道 key 对比 `tools/list`：h32hook 上 `batch_scrape` 的 `mode` 含 `authed`、`maxFileBytes` 上限 524288000、描述提到 `appendToId`；h33shapes 上 `mode` 只有 standard 和 research、上限 5242880、不再提 `appendToId`。`get_batch_errors` 改说 `{ items, nextCursor, hasMore }`，formats 的枚举里没有截图。
     - 切流量后 `mcp.octocrawl.dev` 给出同样的结果。临时 key 已吊销。
