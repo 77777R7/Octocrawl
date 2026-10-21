@@ -244,7 +244,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 ## Phase 4 · 对照与受控开放
 
 - [ ] **K1 两窗口对照。** Phase 2 合入后，同一 UTC 日交错跑：Octocrawl standard / enhanced / installed_chrome 三臂加一个固定在 `2ffd7f25` 的 main 对照臂，Firecrawl Cloud、ZenRows 两臂（key 与额度按决定 10 先确认）；92 题（含健康 25）+ 保留集 v2；固定 commit、任务集 SHA、地区、出口、缓存、模式、超时、预算；首次调用为主指标，重试改善单列。提取器与字段正确率的比较在冻结的不可变捕获（B3 的 captureId）上做、访问评估重读真实页面，两类实验分开记录；保留集 v2 各跑一次冻结捕获和实站。报告项见"完成标准"。另一天再跑一次，这次也替代 10-11 四臂 23 题欠的第二窗口。另加两项（2026-10-20，Howard，从 Phase 2 挪来）：配上抽取模型（`W2L_EXTRACT_BASE_URL`/`W2L_EXTRACT_MODEL`，两臂同一模型配置，记费用）在带 json/verify 的请求上测 F2，并给列表/表格题加 itemSelector 测列表记录（确定性 json 路径不填数组，见 `research/accuracy/runs/2026-10-20-json-verify-paired-2ffd7f25-d094e319.md`）。
-  - 窗口 1 完成（2026-10-21，见进度同日一行）；窗口 2 在 Firecrawl 计费周期重置（2026-10-22 17:13 UTC）之后另一天跑，跑完才勾。ZenRows 按 Howard 2026-10-21 的选择：两窗口都跑，每周一重跑的 ZenRows 臂停到窗口 2 完成，驱动不启动会让用量超过 4,700/5,000 的 ZenRows 运行。
+  - 窗口 1 完成（2026-10-21，见进度同日一行）；窗口 2 在 Firecrawl 计费周期重置（2026-10-22 17:13 UTC）之后另一天跑，跑完才勾。ZenRows 按 Howard 2026-10-21 的选择：两窗口都跑，每周一重跑的 ZenRows 臂停到窗口 2 完成，窗口驱动 `k1-window.mjs` 不启动会让用量超过 4,700/5,000 的 ZenRows 运行（v2 实站驱动没有这道检查，窗口 1 的 v2 只用了 80）。
 - [x] **K2 Browserbase 资格复查（按决定 6）。** 只查 entitlement；可用则在 16 题挑战子集上做最小配对实验，一次只变一个变量。资格查询是单独的小运行，可早做，决定留在这里。
   - 2026-10-21 结果：本账户仍不可用。`verified: true` 建 session 得 403 "Verified mode is only available on the Enterprise plan"（与 10-13 原文相同），不带 verified 的 session 201 并立即释放；API 不返回套餐名（project `concurrency: 3` 与 Free 相符，属推断）；官方文档把 Verified 写成 Scale（定制价、需联系销售确认资格），Developer/Startup 不含；Verified 计费方式 unknown。不做配对实验。记录 `research/access/runs/2026-10-21-k2-browserbase-entitlement-5beacbf3.md`。
 - [x] **K3 出口按检测类型。** 10-14 的 exits 记录（Webshare 过 T038/T046 两次）和 10-16 的 DataDome 记录（Webshare 1/16 vs Clash 5/16）互相矛盾；做一次配对实验再决定是否按检测类型选出口，否则不建。按检测类型选出口只能是请求前按 host 的已记录类型选，不是被拦后在同一 rung/会话内换出口重试（ADR 0005 永不做）。同一运行里顺带断言出口切换后 per-host pacing 与预算不重置（ROADMAP item 3 未测点）。配对实验是单独的小运行（不在每周脚本里），可早做。
@@ -302,7 +302,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - 假成功（已交付 / 全部请求）：standard 2/47、2/92；enhanced 1/57、1/92；installed_chrome 2/62、2/92；对照 4/60、4/92；Firecrawl 12/81、12/92；ZenRows 20/75、20/92。上限见记录。
   - 与最好竞品（Firecrawl）的差距：installed_chrome 9，enhanced 13，standard 24。重试轮单列：enhanced +5、installed_chrome +7、Firecrawl +1、ZenRows +3。
   - 对照与 enhanced 同 grant、同 access `enhanced`，按它配对。92 题都是 56；健康 25 题 enhanced 21、对照 22，差在 T016：当前 commit 三臂都 `connection_error`，对照（块 0 最后跑）通过，未隔离。这一窗口健康 25 题低于对照 1 题，等窗口 2。
-  - 两臂相差的 10 题多是 Steel `provider_error`（enhanced 11 次、对照 8 次，原因未隔离）。
+  - 两臂相差的 10 题里 5 题是 Steel `provider_error`（首次调用中 enhanced 11 次、对照 8 次，原因未隔离）。
   - 费用：Steel 账本 $0.2855（92 题与 v2 合计）；Firecrawl 152 credits；ZenRows 1117 credits。
   - 记录 `research/access/runs/2026-10-21-k1-w1-322de68e-{summary,standard,enhanced,installed_chrome,control,firecrawl,zenrows}.md`。
   - 同日三次中止，不计入任何数字：驱动 bug 0 花费；合盖休眠 Firecrawl 13、ZenRows 100；按协调会话暂停 Firecrawl 12、ZenRows 3；Steel 都是 $0。

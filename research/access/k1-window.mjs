@@ -160,7 +160,10 @@ async function runSet(name, label, ids) {
       const runsDir = join(repo, '.w2l/access/runs')
       for (const d of (await readdir(runsDir)).sort().reverse()) {
         const f = join(runsDir, d, 'summary.json')
-        if (existsSync(f) && JSON.parse(await readFile(f, 'utf8')).command.includes(record)) { entry.runDir = `.w2l/access/runs/${d}`; break }
+        // the same record path recurs when an aborted window is moved aside and rerun: take only a run this invocation started
+        if (!existsSync(f)) continue
+        const sm = JSON.parse(await readFile(f, 'utf8'))
+        if (sm.command.includes(record) && Date.parse(sm.environment.startedAt) >= Date.parse(startedAt) - 5000) { entry.runDir = `.w2l/access/runs/${d}`; break }
       }
       if (code !== 0) manifest.failures.push(`${label}: run-set exited with ${code}; see ${workRel}/${label}.log`)
       manifest.runs.push(entry)
