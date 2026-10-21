@@ -1422,6 +1422,21 @@ describe('a failure a stronger rung may still answer (ROADMAP PA item 4)', () =>
     expect((await new LadderRunner([channel('http', [failed('timeout', null)]), slow], { mode: 'standard' }).run(url)).channelsTried).toEqual(['http'])
   })
 
+  it('offers the bundled browser\'s refused connection to the installed Chrome, never a provider (K3)', async () => {
+    // K3 on Webshare: browser_local ended on net::ERR_EMPTY_RESPONSE and the run stopped before installed_chrome.
+    const chrome = channel('installed_chrome', [contentfulResult(url, 'browser_local')])
+    const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'steel'), priceCeilingUsd: 0.01 }
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [failed('connection_error', null, 'browser_local')]), chrome, provider], { mode: 'standard', enhanced: true }).run(url)
+    expect(run.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome'])
+    expect(run.result.status).toBe('success')
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_step', channel: 'browser_local', detail: expect.objectContaining({ escalate: 'connection_error' }) }))
+    expect(provider.calls).toEqual([])
+    // The installed Chrome shares the exit: its own refused connection is not offered on to a paid provider either.
+    const down = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [failed('connection_error', null, 'browser_local')]), channel('installed_chrome', [failed('connection_error', null, 'browser_local')]), { ...provider, calls: [] }], { mode: 'standard', enhanced: true }).run(url)
+    expect(down.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome'])
+    expect(down.result).toMatchObject({ status: 'failed', failureReason: 'connection_error' })
+  })
+
   it('leaves an http rung\'s own empty page to that rung, which asks for the browser itself when it should', async () => {
     const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
     const run = await new LadderRunner([channel('http', [failed('empty_unverified', 200)]), browser], { mode: 'standard' }).run(url)
