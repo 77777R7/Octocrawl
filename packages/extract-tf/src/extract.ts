@@ -28,6 +28,7 @@ import { collectLabelledValues } from './labels.js'
 import { collectDeclaredValues } from './declared.js'
 import { collectPageMetadata } from './metadata.js'
 import { resolveReactStreaming } from './streaming.js'
+import { includeCollectionLeads } from './collection.js'
 
 const DEFAULT_CLASSIFY: ClassifyOptions = {
   minTextLength: 25,
@@ -248,6 +249,8 @@ export class ExtractTf implements Extractor {
       }
       if (main !== null) strategy = 'list'
     }
+    // A news collection's lead cards above its chronological list are its content too.
+    if (main !== null && strategy === 'list' && (decision.type === 'collection' || decision.type === 'listing')) main = includeCollectionLeads(main)
 
     let product: ProductFacts | null = null
     if (decision.type === 'product') {

@@ -180,6 +180,12 @@ M14–M15 were added on 2026-10-21 for PA D6, a standards document's header (`do
 | M14 | Scrape of RFC 9110 on rfc-editor.org with `tables` | The default Markdown keeps the header (stream, RFC number, category, June 2022, the three authors) and both h1s ahead of chapters 1–19; the methods table keeps its heading row, and every table is a GFM table | scrape-formats.only-main-content |
 | M15 | Scrape of the WCAG 2.2 Recommendation on w3.org | The default Markdown keeps the h1, "W3C Recommendation" with its date and the editors, the numbered sections with the conformance levels; none of the definition pop-ups after the last section | scrape-formats.only-main-content |
 
+M18 was added on 2026-10-22 for PA D6, the lead cards of a news collection (`docs/pa-enhancement-tasks.md`, D6). FT's technology section shows its lead story and its News and Opinion & Analysis cards above the chronological stream of 25 cards of the same teaser template, with Recommended and Most Read in a sidebar; before D6 the default Markdown was the stream alone. Plain HTTP got a security check proxied and no connection direct on 2026-10-22; the page is read on the browser lane, proxied. The check uses `markdownCountMin`, added to the runner with this case (distinct matches when `distinct` is set).
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| M18 | Scrape of FT's technology section | The default Markdown holds at least 30 distinct article links (`/content/<uuid>`): the lead and top cards beside the stream's 25 | scrape-formats.only-main-content |
+
 A36 was added on 2026-09-29 for SEC.gov's declared User-Agent. It runs only when `W2L_CONTACT` is set in the runner's environment and the API was started with the same value (`requiresEnv`); otherwise the runner reports it as skipped, never as passed. The record shows the value as `<W2L_CONTACT>`.
 
 | Case | Request | What it tests | P1 items |
