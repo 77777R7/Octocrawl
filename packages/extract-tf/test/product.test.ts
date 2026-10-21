@@ -295,6 +295,16 @@ describe('PDP facts: the subject is chosen before fields are merged', () => {
     expect(out.product?.price).toMatchObject({ value: '£19.00', source: 'text' })
   })
 
+  it('reads a listing whose declared products have an empty name (Zara, T016)', () => {
+    // Zara's category page (2026-10-21) lists products with `"name": ""` beside named ones; comparing those declarations threw.
+    const item = (name: string, price: number) => ({ '@type': 'ListItem', item: { '@type': 'Product', name, offers: { '@type': 'Offer', price, priceCurrency: 'USD' } } })
+    const html = page(ld({ '@type': 'ItemList', itemListElement: [item('', 0), item('', 0), item('RELAXED FIT FLUID SHIRT', 99.9), item('LINEN SHIRT', 49.9)] }),
+      '<h1>Shirts</h1><ul><li>RELAXED FIT FLUID SHIRT $99.90</li><li>LINEN SHIRT $49.90</li></ul>')
+    const out = extractTf.extract(html, { url: 'https://www.zara.com/us/en/man-shirts-l737.html' })
+    expect(out.mainHtml).toContain('LINEN SHIRT')
+    expect(out.product?.name?.value ?? null).not.toBe('')
+  })
+
   it('binds microdata that writes the same product differently', () => {
     const cases: Array<[string, string, Record<string, string>]> = [
       // An entity escaped twice in the JSON-LD; the microdata names no SKU.

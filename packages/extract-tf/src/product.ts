@@ -514,14 +514,17 @@ function jsonLdProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
     const urls = [url].flatMap((u) => (u === null ? [] : [urlKey(u, ctx.base)])).filter((u): u is UrlKey => u !== null)
     const ofPage = asString(rec['mainEntityOfPage']) ?? asString(record(rec['mainEntityOfPage'])?.['@id']) ?? asString(record(rec['mainEntityOfPage'])?.['url'])
     const ofPageKey = ofPage === null ? null : urlKey(ofPage, ctx.base)
-    const name = inherited('name')
-    const brand = inherited('brand')
+    // fact() is null for a value that is only whitespace (Zara lists products with `"name": ""`): such a field is not declared.
+    const declared = (at: { value: string; path: string } | null) => (at === null ? null : fact(at.value, 'jsonld', at.path, { context: variant }))
+    const name = declared(inherited('name'))
+    const skuFact = declared(sku)
+    const brand = declared(inherited('brand'))
     out.push({
       where: path,
       fields: {
-        ...(name === null ? {} : { name: fact(name.value, 'jsonld', name.path, { context: variant })! }),
-        ...(sku === null ? {} : { sku: fact(sku.value, 'jsonld', sku.path, { context: variant })! }),
-        ...(brand === null ? {} : { brand: fact(brand.value, 'jsonld', brand.path, { context: variant })! }),
+        ...(name === null ? {} : { name }),
+        ...(skuFact === null ? {} : { sku: skuFact }),
+        ...(brand === null ? {} : { brand }),
         ...offers.fields,
       },
       source: 'jsonld',
