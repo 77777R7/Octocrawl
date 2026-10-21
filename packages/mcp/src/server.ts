@@ -42,7 +42,7 @@ export const MCP_VERSION = '0.7.0'
 export const SERVER_IDENTITY = {
   name: 'octocrawl',
   title: 'Octocrawl',
-  description: 'Web pages as clean Markdown and JSON for AI agents, in fewer tokens, with an Evidence Record.',
+  description: 'Pages, crawls and URL batches as clean Markdown and JSON for AI agents, with an Evidence Record.',
 } as const
 
 /**
