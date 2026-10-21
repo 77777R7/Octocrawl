@@ -377,6 +377,8 @@ export interface RenderSignals {
 }
 
 export interface ExtractorOutput {
+  /** Title and visible dominant notice declare a page-wide outage; independent of extraction success. */
+  sourceUnavailable?: true
   /** Page title, or null when none could be found. */
   title: string | null
   /** Extracted main content as HTML. Markdown conversion happens later in the pipeline. */

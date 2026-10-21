@@ -128,7 +128,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   const extracted = extractTf.extract(body, { url: finalUrl, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, body.length), blockAds: options.blockAds })
   trace.push(...contentSelectionEvent(options, LANE, wallMs, body.length))
   const links = collectLinks(body, finalUrl)
-  trace.push({ at: wallMs, lane: LANE, event: 'extract', detail: { pageType: extracted.pageType, strategy: extracted.strategy, confidence: extracted.confidence, escalate: extracted.escalate, linkCount: links.length, ...(extracted.render === undefined ? {} : { textChars: extracted.render.textChars }), ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}), ...tagOptions(options) } })
+  trace.push({ at: wallMs, lane: LANE, event: 'extract', detail: { pageType: extracted.pageType, strategy: extracted.strategy, confidence: extracted.confidence, escalate: extracted.escalate, linkCount: links.length, ...(extracted.render === undefined ? {} : { textChars: extracted.render.textChars }), ...(extracted.sourceUnavailable === true ? { sourceUnavailable: true } : {}), ...(options.onlyMainContent === false ? { onlyMainContent: false } : {}), ...tagOptions(options) } })
   const sourceWarnings = sourceDataWarnings(body, finalUrl)
   let wholePage: string | null = null
   let listPage = false
