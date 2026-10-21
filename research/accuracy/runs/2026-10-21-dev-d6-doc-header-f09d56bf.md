@@ -66,3 +66,10 @@ In the 16 other cases the delivered `markdown`, `tables` and `links` are byte-fo
 
 - Same as R1b: replays of the bytes captured on 2026-10-17 through the HTTP channel only; the set was used for tuning and H01–H08 are regression data, not a holdout. The reserved set v2 was not run.
 - H01 and H07 are the pages this slice was written for, so their gain shows the slice works on them, not that it generalizes. The fixtures in `packages/extract-tf/test/documentHeader.test.ts` are synthetic and the negative cases there are what guards other pages.
+
+## Re-run after merging D3b (`4f29d319`, `extract-tf/33`)
+
+D3b (#652) merged into `main` first and took `extract-tf/32`, so this branch merged `main` `97b5e7a1` and moved to `extract-tf/33`. The same commands, with the output directory `.w2l/field-gold/runs/2026-10-21-dev-d6-doc-header-4f29d319/`, ran on `4f29d319` (loopback, no proxy, $0).
+
+- `fields.md` is identical to the `f09d56bf` run above: D01–D10 34/86, H01–H08 75/75, H tasks 8/8, H false successes 0; D unchanged (0/6 accepted, 7 false successes, 0 / 7 / 0 wrong record / unbound / fabricated).
+- Against R1b, `markdown`, `tables` and `links` differ only in H01 and H07; H01's and H07's are byte-for-byte the `f09d56bf` run's. The responses report `extract-tf/33`.
