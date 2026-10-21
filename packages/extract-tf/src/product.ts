@@ -25,7 +25,7 @@
  * `woocommerce-Price-amount` without naming any of them.
  */
 
-import type { FactContext, ProductFact, ProductFactSource, ProductFacts, ProductFieldConflict, QuoteState } from '@w2l/contracts'
+import type { FactContext, ProductFact, ProductFactSource, ProductFacts, ProductFieldConflict, ProductPrice, ProductVariant, QuoteState } from '@w2l/contracts'
 import { statesAbsence } from './absence.js'
 import { commonAncestor, qsa, tagOf, textOf } from './dom.js'
 import type { TextBlock } from './classify.js'
@@ -242,6 +242,8 @@ interface DeclaredProduct {
   ids: Partial<Record<IdKind, string[]>>
   /** Its offers' identifiers: a variant's SKU names the product too, but a parent SKU beside it does not contradict it. */
   offerIds: string[]
+  /** The named values it declares as PropertyValues (`additionalProperty`, `identifier`): a variant's `variationId`, a size. */
+  params: DeclaredParam[]
   /** Its `url` and its offers' `url`. */
   urls: UrlKey[]
   /** The page's mainEntity (or mainEntityOfPage names the page). */
@@ -251,11 +253,14 @@ interface DeclaredProduct {
   parentId: string | null
 }
 
+/** A PropertyValue a product declares: its name (or propertyID), its value, where the value is. */
+interface DeclaredParam { name: string; value: string; path: string }
+
 const allIds = (d: DeclaredProduct): string[] => [...Object.values(d.ids).flat(), ...d.offerIds]
 const tierUrls = (d: DeclaredProduct): UrlKey[] => (d.nodeKey === null ? d.urls : [...d.urls, d.nodeKey])
 
 /** What relation() compares, computed once per declaration. */
-interface Keys { ids: Set<string>; kinds: Set<IdKind>; full: Set<string>; paths: Set<string>; name: string | null }
+interface Keys { ids: Set<string>; kinds: Set<IdKind>; full: Set<string>; paths: Set<string>; name: string | null; params: Map<string, Set<string>> }
 const keyCache = new WeakMap<DeclaredProduct, Keys>()
 function keysOf(d: DeclaredProduct): Keys {
   let keys = keyCache.get(d)
@@ -266,6 +271,11 @@ function keysOf(d: DeclaredProduct): Keys {
       full: new Set(d.urls.map((u) => u.full)),
       paths: new Set(d.urls.map((u) => u.path)),
       name: d.fields.name === undefined ? null : comparable(decodeEntities(d.fields.name.value)),
+      params: new Map(),
+    }
+    for (const p of d.params) {
+      const at = keys.params.get(comparable(p.name)) ?? new Set<string>()
+      keys.params.set(comparable(p.name), at.add(normId(p.value)))
     }
     keyCache.set(d, keys)
   }
@@ -280,15 +290,23 @@ function overlaps<T>(a: Set<T>, b: Set<T>): boolean {
  * Whether two declarations are the same product, provably different ones, or
  * cannot be told apart: a shared identifier makes them one; two node
  * identifiers, or two values of one identifier kind, that differ make them
- * two; then their URLs; then their names, which differ between two syntaxes
- * of one product ("Mug", "Mug - Blue") but not between two nodes of one.
+ * two, as do two values of a property the request URL names as a query
+ * parameter (a `variationId`) that share none; then their URLs; then their names, which differ between
+ * two syntaxes of one product ("Mug", "Mug - Blue") but not between two nodes
+ * of one. A shared property value proves nothing: two products can both be
+ * 16 GB. Nor does a descriptive property written two ways ("Stoneware",
+ * "Stoneware (glazed)") that the request does not select by.
  */
-function relation(da: DeclaredProduct, db: DeclaredProduct): 'same' | 'different' | 'unknown' {
+function relation(da: DeclaredProduct, db: DeclaredProduct, query: ReadonlyMap<string, unknown>): 'same' | 'different' | 'unknown' {
   const a = keysOf(da)
   const b = keysOf(db)
   if (overlaps(a.ids, b.ids)) return 'same'
   if (da.node !== null && db.node !== null) return da.node === db.node ? 'same' : 'different'
   if (overlaps(a.kinds, b.kinds)) return 'different'
+  for (const [name, values] of a.params) {
+    const other = query.has(name) ? b.params.get(name) : undefined
+    if (other !== undefined && !overlaps(values, other)) return 'different'
+  }
   if (a.full.size > 0 && b.full.size > 0) {
     if (overlaps(a.full, b.full)) return 'same'
     return overlaps(a.paths, b.paths) ? 'unknown' : 'different'
@@ -297,10 +315,10 @@ function relation(da: DeclaredProduct, db: DeclaredProduct): 'same' | 'different
   return 'unknown'
 }
 
-function relationToAll(members: readonly DeclaredProduct[], d: DeclaredProduct): 'same' | 'different' | 'unknown' {
+function relationToAll(members: readonly DeclaredProduct[], d: DeclaredProduct, query: ReadonlyMap<string, unknown>): 'same' | 'different' | 'unknown' {
   let different = false
   for (const m of members) {
-    const r = relation(m, d)
+    const r = relation(m, d, query)
     if (r === 'same') return 'same'
     if (r === 'different') different = true
   }
@@ -399,6 +417,54 @@ interface Resolved {
   /** The request URL and the canonical link. */
   targets: UrlKey[]
   tokens: Set<string>
+  /** The request URL's query parameters: each name as compared, with its values as identifiers are compared. */
+  query: Map<string, Set<string>>
+}
+
+/** The request URL's query parameters by name (letters and digits, lower-cased), each with its values as normId reads them. */
+function urlQuery(url: string | undefined): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>()
+  if (url === undefined) return out
+  try {
+    for (const [name, value] of new URL(url).searchParams) {
+      const key = comparable(name)
+      if (key === '' || normId(value) === '') continue
+      out.set(key, (out.get(key) ?? new Set<string>()).add(normId(value)))
+    }
+  } catch {
+    // Not a URL: it selects nothing.
+  }
+  return out
+}
+
+/**
+ * The properties of a declaration the request URL selects: a PropertyValue
+ * whose name is one of the URL's query parameters and whose value is that
+ * parameter's (`?variationId=V201` and `{ name: "variationId", value: "V201" }`).
+ * A value alone does not select: `?variant=blue` is not a property named `color`.
+ */
+function selectedParams(d: Pick<DeclaredProduct, 'params'>, ctx: Resolved): DeclaredParam[] {
+  return d.params.filter((p) => ctx.query.get(comparable(p.name))?.has(normId(p.value)) === true)
+}
+
+/**
+ * The PropertyValues a JSON-LD node declares in `additionalProperty` and
+ * `identifier`, each with a name (or propertyID) and a scalar value.
+ */
+function paramsOf(rec: Record<string, unknown>, path: string): DeclaredParam[] {
+  const out: DeclaredParam[] = []
+  for (const key of ['additionalProperty', 'identifier']) {
+    const raw = rec[key]
+    const items = Array.isArray(raw) ? raw.map((v, i) => [v, `${path}/${key}/${i}`] as const) : [[raw, `${path}/${key}`] as const]
+    for (const [item, at] of items) {
+      const prop = record(item)
+      if (prop === null) continue
+      const name = asString(prop['name']) ?? asString(prop['propertyID'])
+      const value = asString(prop['value'])
+      if (name !== null && value !== null && name.trim() !== '' && value.trim() !== '') out.push({ name: collapse(name), value: collapse(value), path: `${at}/value` })
+    }
+  }
+  return out
 }
 
 /**
@@ -438,8 +504,9 @@ function jsonLdProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
     const own = (key: string) => scalarAt(rec[key], `${path}/${pointerToken(key)}`)
     const inherited = (key: string) => own(key) ?? (group === null ? null : scalarAt(group.node[key], `${group.path}/${pointerToken(key)}`))
     const sku = asString(rec['sku']) !== null ? own('sku') : asString(rec['mpn']) !== null ? own('mpn') : null
-    // A ProductGroup's variant: its facts hold for that variant.
-    const variantId = group === null ? null : asString(rec['sku']) ?? asString(rec['@id'])
+    const params = paramsOf(rec, path)
+    // A ProductGroup's variant, or the variant the request URL selects by a property the node declares: its facts hold for that variant.
+    const variantId = group === null ? selectedParams({ params }, ctx)[0]?.value ?? null : asString(rec['sku']) ?? asString(rec['@id'])
     const variant: FactContext = variantId === null ? {} : { variant: collapse(variantId) }
     const offers = offerFields(rec, path, ctx, variant)
     const id = asString(rec['@id'])
@@ -463,6 +530,7 @@ function jsonLdProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
       ambiguous: offers.ambiguous,
       ids: idsOf((name) => asString(rec[name])),
       offerIds: Object.values(offers.ids).flat(),
+      params,
       urls: [...urls, ...offers.urls],
       main: main || (id !== null && mainIds.has(id)) || (ofPageKey !== null && ctx.targets.some((t) => t.path === ofPageKey.path)),
       nested,
@@ -578,6 +646,7 @@ function microdataProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
       ambiguous: {},
       ids: idsOf((name) => pick(name)?.value ?? null),
       offerIds: [],
+      params: [],
       urls,
       main: props.includes('mainEntity'),
       nested: props.some((p) => p !== '' && p !== 'mainEntity'),
@@ -658,16 +727,163 @@ export function findPriceElement(scope: ParentNode): Element | null {
 }
 
 /**
+ * What a shown price is: the price to pay now, a list price struck through or
+ * labelled as one (UVP, RRP, "was"), a starting price ("ab", "from"), or one
+ * instalment of several ("mtl.", "/mo", "in 48 Raten"). Read from the words
+ * written right before and after the amount, in the languages storefronts
+ * write them in, and from a struck-through element; never from a site's name
+ * or its class names beyond the strike-through.
+ */
+type PriceKind = 'current' | 'list' | 'from' | 'installment'
+const LIST_BEFORE = /(?:^|[\s(])(?:uvp|rrp|msrp|srp|list(?:en)?\s?pre?is|list price|statt|was|war|vorher|ursprünglich|originally|regular price|reg\.|prix conseillé|prix barré|prezzo consigliato)\s*:?\s*$/iu
+const FROM_BEFORE = /(?:^|[\s(])(?:ab|from|starting (?:at|from)|as low as|à partir de|dès|desde|a partir de|da|vanaf|vana|od|från|fra|alkaen)\s*:?\s*$/iu
+const FROM_AFTER = /^\s*(?:起|から|～|~)/u
+const INSTALLMENT_BEFORE = /(?:\d\s?[x×]|raten?\s+(?:à|a|zu|von|of)|monthly|monatlich|mtl\.)\s*:?\s*$/iu
+const INSTALLMENT_AFTER = /^\s*(?:\/\s*(?:mo|mth|month|monat|mon|mois|mes|mese|maand)\b|(?:mtl|monatl)\.|monatlich|monthly|(?:per|a|pro|im|par|al|im)\s+(?:month|monat|mois|mes|mese)\b|x\s?\d)/iu
+const STRUCK_TAGS: ReadonlySet<string> = new Set(['s', 'del', 'strike'])
+const STRUCK_TOKEN = /^(?:strike|strikethrough|striked|struck|crossed|crossedout|linethrough)$/i
+
+function struck(el: Element): boolean {
+  if (STRUCK_TAGS.has(tagOf(el))) return true
+  if (/line-through/i.test(el.getAttribute('style') ?? '')) return true
+  return (el.getAttribute('class') ?? '').split(/[\s_-]+/).some((token) => STRUCK_TOKEN.test(token))
+}
+
+/** How far up a price element's line is read for its label: a struck amount's "UVP" is a level or two up. */
+const LINE_LEVELS = 3
+
+/**
+ * A price element's line: its text with the words around it that belong to
+ * it alone, read up to LINE_LEVELS ancestors while they hold no other shown
+ * price (`leavesIn` counts them) and stay price-label short ("UVP" before a
+ * struck amount). An ancestor holding one price only is disjoint from every
+ * other's, so the texts read add up to the page once.
+ */
+function priceLine(el: Element, leavesIn: ReadonlyMap<Element, number>, doc: Document): { line: Element; text: string } {
+  let line = el
+  let up = el.parentElement
+  for (let level = 0; level < LINE_LEVELS && up !== null && !isRootish(doc, up); level++, up = up.parentElement) {
+    if ((leavesIn.get(up) ?? 0) > 1 || textOf(up).trim().length > 60) break
+    line = up
+  }
+  return { line, text: collapse(textOf(line)) }
+}
+
+/**
+ * The line's text before and after the element: what is written around its
+ * own amount, not around another amount on the line. Read from the siblings
+ * at each level up to the line (at most LINE_LEVELS), never by recursion.
+ */
+const writtenOnPage = (node: Node): boolean => node.nodeType === 1 || node.nodeType === 3
+
+function around(line: Element, el: Element): { before: string; after: string } {
+  let before = ''
+  let after = ''
+  for (let at: Element = el; at !== line && at.parentElement !== null; at = at.parentElement) {
+    // Text and elements only: a comment (a framework's `<!--[-1-->` marker) is not written on the page.
+    for (let sib = at.previousSibling; sib !== null; sib = sib.previousSibling) if (writtenOnPage(sib)) before = `${sib.textContent ?? ''}${before}`
+    for (let sib = at.nextSibling; sib !== null; sib = sib.nextSibling) if (writtenOnPage(sib)) after += sib.textContent ?? ''
+  }
+  return { before: collapse(before), after: collapse(after) }
+}
+
+function priceKind(el: Element, line: Element): PriceKind {
+  for (let at: Element | null = el; at !== null; at = at === line ? null : at.parentElement) if (struck(at)) return 'list'
+  const own = collapse(textOf(el))
+  const amount = PRICE_RE.exec(own)
+  const outside = around(line, el)
+  const before = collapse(`${outside.before} ${amount === null ? own : own.slice(0, amount.index)}`)
+  const after = collapse(`${amount === null ? '' : own.slice(amount.index + amount[0].length)} ${outside.after}`)
+  if (LIST_BEFORE.test(before)) return 'list'
+  if (INSTALLMENT_BEFORE.test(before) || INSTALLMENT_AFTER.test(after)) return 'installment'
+  if (FROM_BEFORE.test(before) || FROM_AFTER.test(after)) return 'from'
+  return 'current'
+}
+
+const PRICE_TYPE: Readonly<Record<PriceKind, ProductPrice['priceType']>> = { current: 'current', list: 'list', from: 'other', installment: 'other' }
+
+/**
  * Last-resort price: our reading of rendered text. Weaker than every
  * machine-readable path above, and labelled as such, with the element it was
  * read from.
+ *
+ * The deepest shown price names the price box: the outermost price element
+ * holding it, with the price boxes beside it. The price is the deepest price
+ * in that box that is the price to pay now: a list price, a starting price or
+ * an instalment is not, however deep, and a price outside the box (shipping,
+ * an add-on) is never read in its place. When the box shows such other kinds,
+ * every price in it is reported in `prices` with its kind as
+ * `context.offerType`, and the price carries `current`; without one, the price
+ * is reported as before. When the box shows no price to pay now, the price
+ * stays null.
  */
 function factsFromText(doc: Document): Partial<ProductFacts> {
-  const el = findPriceElement(doc)
-  if (!el) return {}
-  const text = textOf(el).trim().replace(/\s+/g, ' ')
-  const matched = PRICE_RE.exec(text)?.[0] ?? null
-  return { price: fact(matched, 'text', selectorOf(el)) }
+  const all = qsa(doc, '[id],[class]').filter(isPriceElement)
+  if (all.length === 0) return {}
+  const priced = new Set(all)
+  // Elements holding a price element: marked up each one's ancestors, stopping where an earlier one marked them.
+  const holders = new Set<Element>()
+  for (const el of all) for (let p = el.parentElement; p !== null && !holders.has(p); p = p.parentElement) holders.add(p)
+  const leaves = all.filter((el) => !holders.has(el))
+  // Whether an element sits inside a price element (memoized for the non-price elements on the path read), and how deep it is.
+  const inside = new Map<Element, boolean>()
+  const insidePrice = (el: Element): boolean => {
+    const path: Element[] = []
+    let p = el.parentElement
+    let known = false
+    for (; p !== null; p = p.parentElement) {
+      if (priced.has(p)) { known = true; break }
+      const memo = inside.get(p)
+      if (memo !== undefined) { known = memo; break }
+      path.push(p)
+    }
+    for (const q of path.reverse()) inside.set(q, known || priced.has(q))
+    inside.set(el, known)
+    return known
+  }
+  const depths = new Map<Element, number>()
+  const depth = (el: Element): number => {
+    const path: Element[] = []
+    let p: Element | null = el
+    let base = -1
+    for (; p !== null; p = p.parentElement) {
+      const memo = depths.get(p)
+      if (memo !== undefined) { base = memo; break }
+      path.push(p)
+    }
+    for (const q of path.reverse()) depths.set(q, ++base)
+    return depths.get(el)!
+  }
+  const deepest = (els: readonly Element[]): Element | null => els.reduce<Element | null>((best, el) => (best === null || depth(el) > depth(best) ? el : best), null)
+  // The price the page shows deepest (the buy box's, once neighbours are pruned) names the price box; its kinds are read there only.
+  const anchor = deepest(leaves)!
+  let box = anchor
+  for (let p = anchor.parentElement; p !== null; p = p.parentElement) if (priced.has(p)) box = p
+  const boxes = all.filter((el) => el.parentElement === box.parentElement && !insidePrice(el))
+  const shown = boxes.flatMap((b) => (holders.has(b) ? qsa(b, '[id],[class]').filter((el) => priced.has(el) && !holders.has(el)) : [b]))
+  const leavesIn = new Map<Element, number>()
+  for (const el of leaves) {
+    let p = el.parentElement
+    for (let level = 0; level < LINE_LEVELS && p !== null; level++, p = p.parentElement) leavesIn.set(p, (leavesIn.get(p) ?? 0) + 1)
+  }
+  const kinds = new Map(shown.map((el) => {
+    const { line, text } = priceLine(el, leavesIn, doc)
+    return [el, { kind: priceKind(el, line), text }] as const
+  }))
+  const chosen = deepest(shown.filter((el) => kinds.get(el)!.kind === 'current'))
+  const amountOf = (el: Element): string | null => PRICE_RE.exec(collapse(textOf(el)))?.[0] ?? null
+  if (shown.every((el) => kinds.get(el)!.kind === 'current')) {
+    return chosen === null ? {} : { price: fact(amountOf(chosen), 'text', selectorOf(chosen)) }
+  }
+  const prices = shown.flatMap((el): ProductPrice[] => {
+    const { kind, text } = kinds.get(el)!
+    const amount = fact(amountOf(el), 'text', selectorOf(el), { raw: text, context: { offerType: kind } })
+    return amount === null ? [] : [{ amount, currency: null, priceType: PRICE_TYPE[kind], seller: null }]
+  })
+  return {
+    price: chosen === null ? null : fact(amountOf(chosen), 'text', selectorOf(chosen), { context: { offerType: 'current' } }),
+    prices,
+  }
 }
 
 /** How many declared products are compared to find the subject; a page declaring more is a listing. */
@@ -678,6 +894,7 @@ const textPriceBarred = new WeakSet<ProductFacts>()
 
 /** What singles a product out, strongest first: each step keeps the products it holds for, if it holds for some but not all. */
 const SUBJECT_TIERS: ReadonlyArray<[string, (members: readonly DeclaredProduct[], ctx: Resolved) => boolean]> = [
+  ['a property it declares is the request URL\'s query parameter of that name', (members, ctx) => members.some((d) => selectedParams(d, ctx).length > 0)],
   ['its identifier is in the request URL', (members, ctx) => members.some((d) => allIds(d).some((v) => ctx.tokens.has(normId(v))))],
   ['its url is the request URL or the canonical link', (members, ctx) => members.some((d) => tierUrls(d).some((u) => ctx.targets.some((t) => t.full === u.full)))],
   ['its url has the path of the request URL or the canonical link', (members, ctx) => members.some((d) => tierUrls(d).some((u) => ctx.targets.some((t) => t.path === u.path)))],
@@ -735,12 +952,12 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
   const base = context.url
   const targets = [context.url, context.canonical ?? undefined]
     .flatMap((u) => (u === undefined ? [] : [urlKey(u, base)])).filter((u): u is UrlKey => u !== null)
-  const ctx: Resolved = { base, targets, tokens: urlTokens(context.url) }
+  const ctx: Resolved = { base, targets, tokens: urlTokens(context.url), query: urlQuery(context.url) }
   const meta = metaFacts(doc)
   const all = [...jsonLdProducts(doc, ctx), ...microdataProducts(doc, ctx)]
   if (all.length === 0) return mergeFields([{ fields: meta.fields, ambiguous: {} }]).facts
   // Comparing declarations is quadratic: past MAX_COMPARED (a listing's worth), only the ones the request or the page names directly are compared.
-  const named = (d: DeclaredProduct) => SUBJECT_TIERS.slice(0, 4).some(([, holds]) => holds([d], ctx))
+  const named = (d: DeclaredProduct) => SUBJECT_TIERS.slice(0, 5).some(([, holds]) => holds([d], ctx))
   const declared = all.length <= MAX_COMPARED ? all : all.filter((d, i) => i < MAX_COMPARED || named(d))
 
   // Declarations of one product form one subject; one that cannot be told apart from those before it waits.
@@ -750,7 +967,7 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
     let same: DeclaredProduct[] | null = null
     let distinct = true
     for (const members of subjects) {
-      const r = relationToAll(members, d)
+      const r = relationToAll(members, d, ctx.query)
       if (r === 'same') {
         same = members
         break
@@ -801,7 +1018,7 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
 
   const subject = left[0]!
   // A declaration nested in another node's property is a related item unless it is provably this one.
-  const bound = loose.filter((d) => !d.nested && relationToAll(subject, d) !== 'different')
+  const bound = loose.filter((d) => !d.nested && relationToAll(subject, d, ctx.query) !== 'different')
   for (const d of loose) if (!bound.includes(d)) evidence.push(`${label([d])}: another product, not merged`)
   // The meta tags are about the page, not one of its declared products: they
   // are this product's when no other one stands beside it (related items
@@ -816,15 +1033,15 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
   evidence.unshift(`${label([...subject, ...bound])}: the subject, ${reason}`)
   const { facts, ambiguous } = mergeFields([...subject, ...bound, ...(metaElsewhere ? [] : [{ fields: meta.fields, ambiguous: {} }])])
 
-  const requested = SUBJECT_TIERS[0]![1](subject, ctx)
-    ? subject.flatMap(allIds).find((v) => ctx.tokens.has(normId(v))) ?? null
-    : null
+  // The variant the request URL selects by a property the subject declares, once per property name.
+  const selected = [...new Map(subject.flatMap((d) => selectedParams(d, ctx)).map((p) => [comparable(p.name), p])).values()]
+  const requested = selected[0]?.value ?? subject.flatMap(allIds).find((v) => ctx.tokens.has(normId(v))) ?? null
   const observed = (['sku', 'mpn', 'productID', 'gtin'] as const).map((kind) => subject.find((d) => d.ids[kind] !== undefined)?.ids[kind]?.[0]).find((v) => v !== undefined) ?? null
   facts.identity = {
     requestedId: requested,
-    observedSelectedId: observed,
+    observedSelectedId: observed ?? selected[0]?.value ?? null,
     parentId: subject.find((d) => d.parentId !== null)?.parentId ?? null,
-    selectedVariants: [],
+    selectedVariants: selected.map((p): ProductVariant => ({ name: p.name, value: p.value, selected: true, source: 'jsonld', path: p.path })),
     status: 'matched',
     identityMatch: true,
     identityEvidence: evidence,
@@ -847,8 +1064,10 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
  * contamination this whole module exists to prevent.
  */
 export function fillPriceFromText(facts: ProductFacts, doc: Document): void {
-  if (textPriceBarred.has(facts)) return
-  fillMissing(facts, factsFromText(doc))
+  if (textPriceBarred.has(facts) || facts.price !== null) return
+  const read = factsFromText(doc)
+  fillMissing(facts, read)
+  if (read.prices !== undefined && facts.prices === undefined) facts.prices = read.prices
 }
 
 /**

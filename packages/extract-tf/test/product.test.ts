@@ -394,6 +394,159 @@ describe('PDP facts: what each fact holds for (D3b field contract)', () => {
   })
 })
 
+/**
+ * A multi-variant product page shaped like OTTO's (D6): one Product node per
+ * variant, each naming its variant by a `variationId` PropertyValue, the
+ * family page as the canonical link, and a buy box showing a starting price
+ * ("ab"), a struck-through UVP and a monthly instalment beside the price.
+ * Synthetic: no retained page.
+ */
+describe('PDP facts: a selected variant and the kinds of price a page shows (D6)', () => {
+  const ld = (json: object): string => `<script type="application/ld+json">${JSON.stringify(json)}</script>`
+  const FAMILY = 'https://shop.fixture.test/p/notebook-n15-40-6-cm-16-zoll-1000000001/'
+  const VARIANTS = [
+    { variation: 'V200', article: '56390001', name: 'Notebook N15 (40,6 cm/16 Zoll, 16 GB RAM, 512 GB SSD)', price: '1299.00' },
+    { variation: 'V201', article: '56390002', name: 'Notebook N15 (40,6 cm/16 Zoll, 32 GB RAM, 1000 GB SSD)', price: '1599.00' },
+    { variation: 'V202', article: '56390003', name: 'Notebook N15 (40,6 cm/16 Zoll, 64 GB RAM, 2000 GB SSD)', price: '1999.00' },
+  ]
+  const node = (v: typeof VARIANTS[number], url: string) => ({
+    '@context': 'https://schema.org', '@type': 'Product', name: v.name, sku: v.article, url, brand: { '@type': 'Brand', name: 'Fixture' },
+    additionalProperty: [{ '@type': 'PropertyValue', name: 'variationId', value: v.variation }],
+    offers: [{ '@type': 'Offer', price: v.price, priceCurrency: 'EUR', availability: 'https://schema.org/InStock', url }],
+  })
+  const box = (retail: string) => `<div class="pdp-price"><span class="pdp-price__retail">${retail}</span>` +
+    '<span class="pdp-price__uvp">UVP <span class="pdp-price__value pdp-price__value--strikethrough">2.199,00 €</span></span></div>' +
+    '<div class="pdp-installment-price">20,00 € mtl. in 48 Raten</div>'
+  // The meta tags state the default variant, as a family page's do.
+  const META = `<meta property="og:title" content="${VARIANTS[0]!.name}"><meta property="og:price:amount" content="1299.00"><meta property="og:price:currency" content="EUR">`
+  const page = (head: string, retail: string) => `<!doctype html><html><head><title>Notebook N15</title><link rel="canonical" href="${FAMILY}">${head}</head>
+<body><main><h1>Notebook N15</h1>${box(retail)}
+<p>A sixteen-inch notebook whose configurations differ in memory and storage; the chosen configuration has its own article number and price.</p>
+</main></body></html>`
+  const declared = (urlOf: (v: typeof VARIANTS[number]) => string) => VARIANTS.map((v) => ld(node(v, urlOf(v)))).join('')
+
+  it('delivers the name, SKU and price of the variant the URL selects by its declared variationId', () => {
+    const url = `${FAMILY}?variationId=V201`
+    // Each variant's node names the family page, as the canonical link does; only its variationId tells them apart.
+    const out = extractTf.extract(page(META + declared(() => FAMILY), 'ab 1.299,00 €'), { url })
+    expect(out.product?.identity).toMatchObject({
+      status: 'matched', requestedId: 'V201', observedSelectedId: '56390002',
+      selectedVariants: [{ name: 'variationId', value: 'V201', selected: true, source: 'jsonld', path: '/script/1/additionalProperty/0/value' }],
+    })
+    expect(out.product?.name).toEqual({ value: VARIANTS[1]!.name, source: 'jsonld', path: '/script/1/name', context: { variant: 'V201' } })
+    expect(out.product?.sku?.value).toBe('56390002')
+    expect(out.product?.price).toEqual({ value: '1599.00', source: 'jsonld', path: '/script/1/offers/0/price', unit: 'EUR', context: { offerType: 'Offer', variant: 'V201' } })
+    // The page's meta tags state its default variant; they name none of the declared products.
+    expect(out.product?.ambiguous).toBeUndefined()
+    // Nodes whose url carries the selection too, as OTTO's listing cards do.
+    const linked = extractTf.extract(page(declared((v) => `${FAMILY}?variationId=${v.variation}`), 'ab 1.299,00 €'), { url })
+    expect(linked.product?.sku?.value).toBe('56390002')
+    expect(linked.product?.price?.value).toBe('1599.00')
+  })
+
+  it('keeps the subject conflicting when the URL selects no variant, and never reads the starting price as its price', () => {
+    // D2: the family URL names no variant, so nothing tells the three apart; only what all of them state alike is reported.
+    const out = extractTf.extract(page(META + declared(() => FAMILY), 'ab 1.299,00 €'), { url: FAMILY })
+    expect(out.product?.identity?.status).toBe('conflicting')
+    expect(out.product?.identity?.selectedVariants).toEqual([])
+    expect(out.product?.name).toBeNull()
+    expect(out.product?.sku).toBeNull()
+    expect(out.product?.price).toBeNull()
+    expect(out.product?.priceCurrency?.value).toBe('EUR')
+    // A variationId that no declared node carries selects nothing either.
+    const unknown = extractTf.extract(page(declared(() => FAMILY), 'ab 1.299,00 €'), { url: `${FAMILY}?variationId=V999` })
+    expect(unknown.product?.identity?.status).toBe('conflicting')
+  })
+
+  it('reads the current price beside a struck-through UVP and a monthly instalment, and names each kind', () => {
+    // No declared offer and no price meta: the price is read from the visible buy box.
+    const head = ld({ '@type': 'Product', name: VARIANTS[1]!.name, sku: VARIANTS[1]!.article })
+    const out = extractTf.extract(page(head, '1.599,00 €'), { url: `${FAMILY}?variationId=V201` })
+    expect(out.product?.price).toMatchObject({ value: '1.599,00 €', source: 'text', context: { offerType: 'current' } })
+    expect(out.product?.prices?.map((p) => [p.amount.value, p.amount.rawValue ?? null, p.priceType, p.amount.context?.offerType])).toEqual([
+      ['1.599,00 €', null, 'current', 'current'],
+      ['2.199,00 €', 'UVP 2.199,00 €', 'list', 'list'],
+      ['20,00 €', '20,00 € mtl. in 48 Raten', 'other', 'installment'],
+    ])
+  })
+
+  it('reports no price when the buy box shows only a starting price, a UVP and an instalment', () => {
+    const head = ld({ '@type': 'Product', name: VARIANTS[1]!.name, sku: VARIANTS[1]!.article })
+    const out = extractTf.extract(page(head, 'ab 1.299,00 €'), { url: FAMILY })
+    expect(out.product?.price).toBeNull()
+    expect(out.product?.prices?.map((p) => [p.amount.value, p.amount.rawValue ?? null, p.priceType, p.amount.context?.offerType])).toEqual([
+      ['1.299,00 €', 'ab 1.299,00 €', 'other', 'from'],
+      ['2.199,00 €', 'UVP 2.199,00 €', 'list', 'list'],
+      ['20,00 €', '20,00 € mtl. in 48 Raten', 'other', 'installment'],
+    ])
+  })
+
+  it('leaves a single product page as it was: its price, no price kinds, no variant', () => {
+    const out = extractTf.extract(PDP(PRODUCT_LD), { url: 'https://shop.example/p/teapot?variationId=TP-4S-600-B' })
+    expect(out.product?.price).toEqual({ value: '84.00', source: 'jsonld', path: '/script/0/offers/price', unit: 'USD', context: { offerType: 'Offer' } })
+    expect(out.product?.identity).toMatchObject({ status: 'matched', selectedVariants: [] })
+    expect(out.product?.prices).toBeUndefined()
+    const doc = parse(PDP())
+    pruneRecommendations(doc.document)
+    const text = collectProductFacts(doc.document)
+    doc.close()
+    expect(text.price).toEqual({ value: '$84.00', source: 'text', path: 'span.a-price' })
+    expect(text.prices).toBeUndefined()
+    // A declared property whose name is not the query parameter's selects nothing.
+    const colours = ['blue', 'green'].map((colour) => ld({ '@type': 'Product', name: `Mug ${colour}`, sku: `MUG-${colour}`, url: 'https://shop.example/p/mug',
+      additionalProperty: [{ '@type': 'PropertyValue', name: 'color', value: colour }], offers: { '@type': 'Offer', price: '9.00', priceCurrency: 'USD' } })).join('')
+    const mug = extractTf.extract(`<!doctype html><html><head>${colours}</head><body><main><h1>Mug</h1><p>A stoneware mug glazed by hand in two colours, each fired twice.</p></main></body></html>`,
+      { url: 'https://shop.example/p/mug?variant=blue' })
+    expect(mug.product?.identity?.status).toBe('conflicting')
+  })
+
+  it('reads the price kinds in the buy box only, never a shipping or add-on price in its place', () => {
+    const head = ld({ '@type': 'Product', name: 'Sofa Lund', sku: 'SL-1' })
+    const sofa = (beside: string) => `<!doctype html><html><head>${head}</head><body><main><h1>Sofa Lund</h1>
+<div class="buybox"><div class="wrap"><div class="inner"><span class="price">ab 999,00 €</span></div></div>${beside}
+<p>A three-seat sofa in woven wool, its frame of solid oak, delivered assembled.</p></div></main></body></html>`
+    for (const beside of ['<p class="shipping">Versand <span class="shipping-price">4,95 €</span></p>', '<div class="addon"><span class="price">49,00 €</span></div>']) {
+      const out = extractTf.extract(sofa(beside), { url: 'https://shop.fixture.test/p/sofa' })
+      expect(out.product?.price).toBeNull()
+      expect(out.product?.prices?.map((p) => [p.amount.value, p.amount.context?.offerType])).toEqual([['999,00 €', 'from']])
+    }
+  })
+
+  it('keeps a lone price whose label or note names no other kind of its own amount', () => {
+    const head = ld({ '@type': 'Product', name: 'Lamp', sku: 'LP-1' })
+    const lamp = (box: string) => `<!doctype html><html><head>${head}</head><body><main><h1>Lamp</h1>${box}
+<p>A brass reading lamp with a linen shade, wired for any European socket.</p></main></body></html>`
+    // A note after the amount that financing exists, and Spain's statutory retail price label.
+    // A former price written as plain text before it ("statt", "UVP"): the label is that amount's, not this one's.
+    for (const [box, price] of [['<div><span class="price">499,00 €</span> <small>auch in Raten</small></div>', '499,00 €'], ['<div class="product-price">PVP: 19,99 €</div>', '19,99 €'],
+      ['<p>statt 29,99 € <span class="price">19,99 €</span></p>', '19,99 €'], ['<div><span class="old">UVP 29,00 €</span> <span class="price">19,99 €</span></div>', '19,99 €'],
+      ['<div><!--ab--><span class="price">19,99 €</span><!--[-1--></div>', '19,99 €']]) {
+      const out = extractTf.extract(lamp(box!), { url: 'https://shop.fixture.test/p/lamp' })
+      expect(out.product?.price?.value).toBe(price)
+      expect(out.product?.prices).toBeUndefined()
+    }
+  })
+
+  it('reads a price beside thousands of nested empty elements without exhausting the stack', () => {
+    const html = `<!doctype html><html><head>${ld({ '@type': 'Product', name: 'Lamp', sku: 'LP-1' })}</head><body><main><h1>Lamp</h1>
+<div><span class="price">19,99 €</span>${'<span>'.repeat(20_000)}${'</span>'.repeat(20_000)}</div>
+<p>A brass reading lamp with a linen shade, wired for any European socket.</p></main></body></html>`
+    expect(extractTf.extract(html, { url: 'https://s.test/p/x' }).product?.price?.value).toBe('19,99 €')
+  })
+
+  it('does not split one product over a descriptive property written two ways', () => {
+    const html = `<!doctype html><html><head>${ld({ '@type': 'Product', name: 'Mug', sku: 'MUG-1', url: 'https://s.test/p/mug',
+      additionalProperty: [{ '@type': 'PropertyValue', name: 'Material', value: 'Stoneware' }], offers: { '@type': 'Offer', price: '9.00', priceCurrency: 'EUR' } })}${ld({
+      '@type': 'Product', name: 'Mug', url: 'https://s.test/p/mug', additionalProperty: [{ '@type': 'PropertyValue', name: 'Material', value: 'Stoneware (glazed)' }],
+      aggregateRating: { '@type': 'AggregateRating', ratingValue: 4.5, reviewCount: 10 } })}</head><body><main><h1>Mug</h1>
+<p>A stoneware mug glazed by hand, fired twice, holding a third of a litre.</p></main></body></html>`
+    const out = extractTf.extract(html, { url: 'https://s.test/p/mug' })
+    expect(out.product?.identity?.status).toBe('matched')
+    expect(out.product?.price?.value).toBe('9.00')
+    expect(out.product?.sku?.value).toBe('MUG-1')
+  })
+})
+
 describe('PDP region selection', () => {
   it('picks the buy-box region, not the largest text container', () => {
     const doc = parse(PDP(PRODUCT_LD))

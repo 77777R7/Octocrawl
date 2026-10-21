@@ -139,6 +139,12 @@ J06–J07 were added on 2026-10-20 for PA D, the declared product chosen before 
 | J06 | Scrape of an Allbirds shoe page with `?size=10`, whose first Product node in document order is another colourway, with a name, sku, price and currency schema | `complete`; the size-10 variant of the page's own colourway (sku `A11928M100`, its name with "Size 10"), its sku located at its own node | scrape-formats.json |
 | J07 | Scrape of a Parachute sheet page with `?variant=` selecting the third of three variants (110, 140, 150 USD), with the same schema | `complete`; that variant's sku `FLTLNNEVGKNG` and name, a price that is neither other variant's, read from its own offer | scrape-formats.json |
 
+J08 was added on 2026-10-21 for PA D6, OTTO's selected variant and starting price (`docs/pa-enhancement-tasks.md`, D6). An OTTO product URL selects one configuration with `?variationId=`, which OTTO's JSON-LD declares as a `variationId` PropertyValue; its family slug names other hardware than the selected configuration. The rule is not matched by host or string: a declared PropertyValue selects when its name and value are the request URL's query parameter. On 2026-10-21 the page answered HTTP 400 with its bot check to every lane tried, proxied and direct, so its checks follow OTTO's listing declaration of the same variation (field gold D05) and the case is recorded as refused until the page is read.
+
+| Case | Request | What it tests | Feature |
+| --- | --- | --- | --- |
+| J08 | Scrape of an OTTO notebook page with `?variationId=` selecting one configuration, with the J06 schema | `complete`; the selected configuration's name ("RTX 5070", not the slug's RTX 5060), a price as a number in EUR | scrape-formats.json |
+
 M01–M08 were added on 2026-09-29 for the remaining gaps of three core features in [core-status-2026-09-29.md](core-status-2026-09-29.md): the audit's Markdown check (MDN, Hacker News) and onlyMainContent check (BBC), and the response metadata the browser lane, the compact response and `/fc` report. The runner's `compareRequest` scrapes the same URL a second time into `compare`.
 
 | Case | Request | What it tests | Feature |
