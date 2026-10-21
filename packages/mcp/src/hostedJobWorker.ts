@@ -106,7 +106,8 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     const job = leased.reason === 'missing' ? null : await deps.store.get(jobId)
     // A finished job's later delivery (a cancel queues one, Cloud Tasks retries one) settles what is left, writes its export,
     // schedules its expiry and makes sure the job promoted into its slot got its first slice. One that comes while a slice
-    // still holds the lease is busy above: the slice settles and finishes the job when it commits.
+    // still holds the lease is busy above: the slice settles and finishes the job when it commits. One that comes after the
+    // lease expired has cleared it, so that slice, if it is still running, can no longer commit what this gives back.
     if (leased.reason === 'finished' && job !== null) await finish(deps, job, log)
     // A delivery for a generation already committed: the job's next slice may not have been queued (a queue error after the
     // commit), so it is queued again; the same task already queued is the same name, and nothing changes.

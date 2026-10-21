@@ -378,6 +378,31 @@ describe('hosted job worker', () => {
     expect(await credits.balance('account-1', clock.t)).toBe(998)
   })
 
+  it('keeps a slice that outlived its lease on a cancelled job from committing pages the job\'s finish already gave back', async () => {
+    const clock = { t: NOW }
+    const { origin, store, credits, files, deps, create, exportLines } = await setup({ clock })
+    const id = await create(parseBatchStartRequest({ urls: [`${origin}/a`, `${origin}/b`], fastMode: true }))
+    // The job is cancelled while its slice runs; the slice is still alive past its lease when another delivery arrives.
+    const upload = files.upload.bind(files)
+    let during: Awaited<ReturnType<typeof runJobSlice>> | null = null
+    deps.files = { ...files, download: files.download.bind(files), deletePrefix: files.deletePrefix.bind(files), upload: async (name, body, options) => {
+      if (during === null && name.includes('/pages/')) {
+        await store.cancel(id, 'ws_account-1', clock.t)
+        clock.t = new Date(NOW.getTime() + 20 * 60_000)
+        during = await runJobSlice(deps, id, 0)
+      }
+      return upload(name, body, options)
+    } }
+    // That delivery finished the job and gave the slice's reservation back: the slice commits nothing, so nothing it read
+    // is counted or exported without being charged.
+    expect(await runJobSlice(deps, id, 0)).toEqual({ status: 200, outcome: 'lost' })
+    expect(during).toEqual({ status: 200, outcome: 'finished' })
+    const job = (await store.get(id))!
+    expect(job).toMatchObject({ status: 'cancelled', lease: null, counts: { pages: 0 }, credits: { used: 0 } })
+    expect(await credits.balance('account-1', clock.t)).toBe(1_000)
+    expect(exportLines(job)).toEqual([])
+  })
+
   it('finishes a cancelled job whose slice died holding the lease once the lease expires, giving the slice\'s credits back', async () => {
     const clock = { t: NOW }
     const { origin, store, credits, expiries, deps, create } = await setup({ clock })

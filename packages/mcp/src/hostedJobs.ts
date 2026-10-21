@@ -172,6 +172,14 @@ const transitions = {
     return { ok: true, job: { ...job, failedAttempts, startedAt: job.startedAt ?? now.toISOString(), lease: { holder: lease.holder, expireAt: new Date(now.getTime() + lease.ttlMs).toISOString() } } }
   },
   /**
+   * What a delivery that found the job finished writes before it finishes it: the expired lease cleared (a held one is
+   * busy). The slice that held it may still be running past it; it then can no longer commit pages whose reservation the
+   * finish gives back.
+   */
+  unleased(job: HostedJob): HostedJob | null {
+    return FINISHED.has(job.status) && job.lease !== null ? { ...job, lease: null } : null
+  },
+  /**
    * A job leaving the slots: its own removed, and when it ran, the first queued one promoted to run. `alive` names the
    * jobs whose records still exist: one a TTL deleted holds no slot and is never promoted.
    */
@@ -228,6 +236,8 @@ export class MemoryHostedJobStore implements HostedJobStore {
     if (!job) return { ok: false, reason: 'missing' }
     const result = transitions.lease(job, lease, now)
     if (result.ok) this.jobs.set(id, result.job)
+    const unleased = !result.ok && result.reason === 'finished' ? transitions.unleased(job) : null
+    if (unleased !== null) this.jobs.set(id, unleased)
     return result
   }
   async abandon(id: string, holder: string): Promise<CommitResult> {
@@ -396,6 +406,8 @@ export class FirestoreHostedJobStore implements HostedJobStore {
       const read = await this.readJob(id, token)
       if (read.value === null) return { ok: false, reason: 'missing' }
       const result = transitions.lease(read.value, lease, now)
+      const unleased = !result.ok && result.reason === 'finished' ? transitions.unleased(read.value) : null
+      if (unleased !== null) return await this.commit(token, [this.jobWrite(unleased, { updateTime: read.updateTime! })]) ? result : undefined
       if (!result.ok) return result
       return await this.commit(token, [this.jobWrite(result.job, { updateTime: read.updateTime! })]) ? result : undefined
     })
