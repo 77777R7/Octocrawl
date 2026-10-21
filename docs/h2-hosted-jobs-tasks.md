@@ -110,7 +110,12 @@
   - 在线上用一个测试 key 跑了一次 webhook：投递成功、签名有效、密钥没有泄露，记录见 [research/hosted/2026-10-20-h2-r1-webhook-dd218625.md](../research/hosted/2026-10-20-h2-r1-webhook-dd218625.md)。
   - 测试 key 已吊销，全局开关已关。
 - [x] **R1b** 按账户放行（2026-10-21 决定：先加白名单，只放名单内的账户）：`hostedConfig/jobs.allowedUids`。没有这个字段时所有账户都能启动任务；有这个字段时只放行名单内的账户，空数组谁都不放。不在名单上的账户启动任务会收到 403 `jobs_invite_only`，MCP 也不列出任务工具；读取和取消在 REST 上照常可用。说明见 `docs/hosted-api.md`。要部署 API 才在线上生效，和 R2 一起做。
-- [ ] **R2** 打开全局开关，按名单邀请（见“待你决定”第 1 条）。顺序：先写 `allowedUids`，确认生效，再开开关。
+- [x] **R2** 打开全局开关，按名单邀请（见“待你决定”第 1 条）。顺序：先写 `allowedUids`，确认生效，再开开关。
+  - 2026-10-21：暂时没有人选，名单只放 Howard 的账户，开关已打开并保持开着。
+  - API 部署为 `octocrawl-api-invite-7f935dc`（tag `h34invite`，回滚用 `h33shapes`）。
+  - 名单外的测试账户启动任务收到 403 `jobs_invite_only`，MCP 也不列出任务工具；Howard 的账户经 REST 和 MCP 各跑了一个任务，都完成了。
+  - 记录见 [research/hosted/2026-10-21-h2-r2-invite-7f935dc5.md](../research/hosted/2026-10-21-h2-r2-invite-7f935dc5.md)。
+  - 以后加人：把 uid 加进 `allowedUids` 即可，不用部署。
 - [x] **R3** 更新 `apps/public-web/content/connect-mcp.md` 和 `docs/hosted-api.md`，写明 hosted 任务的用法和上限。
   - 另外改了 `apps/public-web/content/limits.md`：它原来写着 hosted 不跑 crawl 和 batch。
   - 这几页要等下一次 public preview 部署才会上线。那是 UI 窗口的部署，这里没做。
@@ -132,7 +137,7 @@
 
 - M1–M5（#627）、P1（#629）、W1–W4（#636）、M7–M9（#642）已合并，R1 已部署并在线上验证。全局开关现在是关的。
 - R3 和 A1 已完成（2026-10-20）。H2 剩下的：
-  - R2（打开开关、发邀请）要等你给出邀请名单；A2（外部用户在跑任务）在 R2 之后。
+  - R2 已完成：开关已开，名单只有 Howard 的账户。A2（外部用户在跑任务）要等有了邀请的人，并把他们加进 `allowedUids`。
   - M7–M9（#642）已部署：2026-10-21 上线 main `917d35f7` 的 API，revision `octocrawl-api-shapes-917d35f`（tag `h33shapes`，回滚用 `h32hook`）。worker 没变，仍是 w9。
     - 先在不接流量的 tag 上，用一把临时的 HTTP 通道 key 对比 `tools/list`：h32hook 上 `batch_scrape` 的 `mode` 含 `authed`、`maxFileBytes` 上限 524288000、描述提到 `appendToId`；h33shapes 上 `mode` 只有 standard 和 research、上限 5242880、不再提 `appendToId`。`get_batch_errors` 改说 `{ items, nextCursor, hasMore }`，formats 的枚举里没有截图。
     - 切流量后 `mcp.octocrawl.dev` 给出同样的结果。临时 key 已吊销。
