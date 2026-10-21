@@ -86,6 +86,15 @@ function decl(over: Partial<ProviderDeclaration> = {}): ProviderDeclaration {
 }
 
 describe('ProviderSubject robots gate', () => {
+  it('keeps the final challenge URL when judging extractable Skyscanner verification text', async () => {
+    const body = '<html><body><h1>Are you a person or a robot?</h1><p>Please don’t take this personally - some scripts and bots are remarkably lifelike these days!</p><div id="px-captcha"><iframe title="Human verification challenge"></iframe></div></body></html>'
+    const { fetcher } = robotsServing('User-agent: *\nAllow: /')
+    const transport = new CountingTransport({ body, finalUrl: 'https://www.skyscanner.net/sttc/px/captcha-v2/index.html?url=L3JvdXRlcw==' })
+    const out = await new ProviderSubject(decl(), transport, 'standard', null, fetcher).fetch('https://www.skyscanner.net/routes/lond/pari/london-to-paris.html')
+    expect(out).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+    expect(transport.calls).toHaveLength(1)
+  })
+
   it('retains the source error on a provider capture with no extracted main content', async () => {
     const state = { page: '/browse/[...seo]', query: { seo: ['electronics', 'laptops', '123'] }, props: { pageProps: { initialData: {
       searchResult: { itemStacks: [] }, pageMetadata: { pageContext: { browseContext: { errorResponse: { errors: [{ errorType: 'FATAL', statusCode: 'POLARIS_1001', statusMsg: 'INVALID_CAT_ID' }] } } } },

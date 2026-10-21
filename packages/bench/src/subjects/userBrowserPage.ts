@@ -142,7 +142,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
       return { ...base, status: 'failed', failureReason: 'empty_unverified', blockReason: null, budgetExceeded: null, lane: LANE, escalations: [], markdown: wholePage, ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}), ...(wholePage === null ? {} : { links }) }
     }
   }
-  const decisive = classifyGate({ status, header: () => null, body: whole, contentful: true })
+  const decisive = classifyGate({ status, header: () => null, body: whole, finalUrl, contentful: true })
   if (decisive !== null) return blocked(decisive)
   const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, body.length))
     ? wholePage ?? htmlToMarkdown(body, { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) })
