@@ -143,6 +143,18 @@ describe.each(stores)('%s job store', (_name, make) => {
     expect(await store.create(job('job-4'), { maxRunning: 1, maxQueued: 2 }, null, NOW)).toMatchObject({ ok: true, job: { status: 'queued' } })
   })
 
+  it('clears a cancelled job\'s expired lease when a delivery finds it finished, so the slice that held it can no longer commit', async () => {
+    const store = make()
+    await store.create(job('job-1'), LIMITS, null, NOW)
+    await store.acquireLease('job-1', { generation: 0, holder: 'h1', ttlMs: 60_000 }, NOW)
+    await store.cancel('job-1', 'ws_account-1', NOW)
+    const later = new Date(NOW.getTime() + 120_000)
+    expect(await store.acquireLease('job-1', { generation: 0, holder: 'h2', ttlMs: 60_000 }, later)).toEqual({ ok: false, reason: 'finished' })
+    expect(await store.get('job-1')).toMatchObject({ status: 'cancelled', lease: null })
+    expect(await store.commitSlice('job-1', 'h1', (j) => ({ ...j, counts: { ...j.counts, pages: 7 } }), later)).toEqual({ ok: false, reason: 'lost' })
+    expect(await store.get('job-1')).toMatchObject({ status: 'cancelled', counts: { pages: 0 } })
+  })
+
   it('fails a job with a reason and frees its slot for the next queued one, leaving a finished job as it was', async () => {
     const store = make()
     await store.create(job('job-1'), { maxRunning: 1, maxQueued: 1 }, null, NOW)
