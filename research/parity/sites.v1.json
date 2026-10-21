@@ -3591,6 +3591,32 @@
         {"item": "action-scroll", "type": "field", "path": "actions.javascriptReturns.0.value", "min": 1},
         {"item": "action-scroll", "type": "field", "path": "actions.lists.0.items", "abovePath": "actions.javascriptReturns.0.value"}
       ]
+    },
+    {
+      "id": "G01",
+      "batch": "gates",
+      "feature": "scrape-execution.error-model",
+      "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
+      "request": {"formats": ["markdown"], "maxAge": 0, "debug": true},
+      "note": "Added 2026-10-22 for #515 (docs/pa-enhancement-tasks.md P0.3), frozen before its first run. The route is research/access task T039 and accuracy development case D03. Depending on the exit, Skyscanner serves the route page or sends the reader to its dedicated human check at /sttc/px/captcha-v2/index.html (a 200 page with the heading 'Are you a person or a robot?', a px-captcha container and a loader or 'Human verification challenge' iframe, and no _pxAppId). Either answer passes: the route's content, or an honest blocked/captcha with no Markdown and readiness not_served. A success whose final URL is the challenge page, or whose Markdown is the challenge text, fails.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "2", "type": "anyOf", "checks": [
+          [
+            {"type": "field", "path": "status", "equals": "blocked"},
+            {"type": "field", "path": "blockReason", "equals": "captcha"},
+            {"type": "field", "path": "markdown", "present": false},
+            {"type": "field", "path": "readiness.state", "equals": "not_served"}
+          ],
+          [
+            {"type": "field", "path": "status", "equals": "success"},
+            {"type": "field", "path": "evidence.finalUrl", "excludes": "/sttc/px/captcha-v2/"},
+            {"type": "markdownMatches", "pattern": "London", "flags": "m"},
+            {"type": "markdownMatches", "pattern": "Paris", "flags": "m"},
+            {"type": "markdownExcludes", "text": "Are you a person or a robot?"}
+          ]
+        ]}
+      ]
     }
   ]
 }
