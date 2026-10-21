@@ -1237,5 +1237,128 @@
     if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(() => { if (!document.hidden) draw(performance.now() / 1000) }, 125)
   }
 
+  // Jobs: the account's hosted batch and crawl jobs from GET /api/account/jobs, newest first, a page at a time. A queued
+  // or running job is read again every few seconds while the page is open and shown, and not once every job shown has
+  // ended. A finished job's Export asks for its signed link (good for 15 minutes) and opens it, which downloads the file.
+  const jobsBody = $('jobs-body')
+  if (jobsBody) {
+    const JOB_POLL_MS = 5_000
+    const JOB_PAGE = 20
+    const ACTIVE = new Set(['queued', 'running'])
+    const MARK = { completed: 'ok', running: 'on', queued: 'off', failed: 'bad', cancelled: 'warn', expired: 'off' }
+    const WEBHOOK = { pending: 'Webhook pending', delivered: 'Webhook delivered', failed: 'Webhook failed' }
+    let jobs = []
+    let nextBefore = null
+    let polling = null
+    const active = (job) => ACTIVE.has(job.status)
+    const expired = (job) => job.status === 'expired' || (Boolean(job.expiresAt) && Date.parse(job.expiresAt) <= Date.now())
+    const plural = (n, word) => `${number(n)} ${word}${n === 1 ? '' : 's'}`
+    const small = (text) => { const note = document.createElement('span'); note.className = 'job-note'; note.textContent = text; return note }
+    const exportJob = async (job, button) => {
+      button.disabled = true
+      try {
+        const response = await fetch(`/api/account/jobs/${job.taskId}/export`, { credentials: 'same-origin' })
+        const answer = await response.json().catch(() => ({}))
+        if (response.ok && typeof answer.url === 'string' && answer.url.startsWith('https://')) { location.assign(answer.url); return }
+        if (response.status === 410) { job.status = 'expired'; renderJobs(); say('This job\'s results were kept 7 days and are gone.', true); return }
+        say(response.status === 409 ? 'This job has not finished writing its export. Try again in a minute.' : 'The export link could not be made. Try again in a minute.', true)
+      } catch { say('The export link could not be made. Try again in a minute.', true) }
+      button.disabled = false
+    }
+    const jobRow = (job) => {
+      const row = document.createElement('tr')
+      cell(row, timeOf(job.createdAt))
+      const name = cell(row, '')
+      const kind = document.createElement('strong'); kind.textContent = job.kind === 'batch' ? 'Batch' : 'Crawl'
+      const id = document.createElement('code'); id.className = 'job-id'; id.textContent = job.taskId
+      name.append(kind, ' ', id)
+      const state = expired(job) && !active(job) ? 'expired' : job.status
+      const status = cell(row, '')
+      const pill = document.createElement('span'); pill.className = `status ${MARK[state] ?? 'off'}`; pill.textContent = state; status.append(pill)
+      if (job.failureReason) status.append(small(job.failureReason))
+      // A batch counts against the URLs it was given; a crawl's total is not known until it ends, so its bar runs
+      // without a value (indeterminate) while it reads.
+      const progress = cell(row, '', 'job-progress')
+      const bar = document.createElement('progress'); bar.className = 'credit-bar job-bar'
+      const read = job.pagesFetched ?? 0
+      if (job.kind === 'batch') { setBar(bar, read, job.requested ?? read); bar.setAttribute('aria-label', `${number(read)} of ${number(job.requested ?? read)} URLs read`) }
+      else if (active(job)) { bar.removeAttribute('value'); bar.setAttribute('aria-label', `${number(read)} pages read so far`) }
+      else { setBar(bar, 1, 1); bar.setAttribute('aria-label', `${number(read)} pages read`) }
+      const failed = job.failed ? ` · ${number(job.failed)} failed` : ''
+      progress.append(bar, small(job.kind === 'batch' ? `${number(read)} of ${plural(job.requested ?? read, 'URL')}${failed}` : `${plural(read, 'page')}${failed}`))
+      const credits = job.credits ?? { used: 0, maxCredits: null }
+      const spent = cell(row, `${number(credits.used)}${credits.maxCredits ? ` of ${number(credits.maxCredits)}` : ''}`, 'num')
+      if (job.budgetExceeded) spent.title = 'Stopped at its maxCredits'
+      cell(row, job.finishedAt ? timeOf(job.finishedAt) : '—')
+      const results = cell(row, '')
+      if (active(job)) results.append(small('when it ends'))
+      else if (state === 'expired') results.append(small('kept 7 days; gone'))
+      else {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'button quiet'; button.textContent = 'Export'
+        button.setAttribute('aria-label', `Export ${job.kind} ${job.taskId}`)
+        button.addEventListener('click', () => exportJob(job, button))
+        results.append(button)
+      }
+      if (job.webhook && job.webhook.delivery) results.append(small(WEBHOOK[job.webhook.delivery.state] ?? ''))
+      return row
+    }
+    // A row is drawn again only when its job changed, so a poll leaves the others alone: an ended job's Export button
+    // keeps its focus while a running job above it moves on.
+    const drawn = new Map()
+    const rowOf = (job) => {
+      const key = JSON.stringify(job)
+      const kept = drawn.get(job.taskId)
+      if (kept && kept.key === key) return kept.row
+      const row = jobRow(job)
+      drawn.set(job.taskId, { key, row })
+      return row
+    }
+    const renderJobs = () => {
+      const rows = jobs.map(rowOf)
+      rows.forEach((row, i) => { const at = jobsBody.children[i]; if (at !== row) { if (at) jobsBody.replaceChild(row, at); else jobsBody.append(row) } })
+      while (jobsBody.children.length > rows.length) jobsBody.lastElementChild.remove()
+      $('jobs-empty').hidden = jobs.length > 0
+      $('jobs-table').hidden = jobs.length === 0
+      $('jobs-more').hidden = nextBefore === null
+      const running = jobs.filter(active).length
+      set('jobs-count', jobs.length === 0 ? '' : `${plural(jobs.length, 'job')}${nextBefore === null ? '' : ' shown'}${running ? ` · ${number(running)} running or queued` : ''}`)
+      if (running && polling === null) polling = setTimeout(pollJobs, JOB_POLL_MS)
+    }
+    const pollJobs = async () => {
+      polling = null
+      if (!document.hidden) {
+        await Promise.all(jobs.filter(active).map(async (job) => {
+          try {
+            const response = await fetch(`/api/account/jobs/${job.kind === 'batch' ? 'batches' : 'crawl'}/${job.taskId}`, { credentials: 'same-origin' })
+            if (response.status === 410) { job.status = 'expired'; return }
+            if (!response.ok) return
+            const fresh = await response.json()
+            const at = jobs.indexOf(job)
+            if (fresh && fresh.taskId === job.taskId && at >= 0) jobs[at] = fresh
+          } catch { /* Read again on the next tick. */ }
+        }))
+      }
+      renderJobs()
+      if (polling === null && jobs.some(active)) polling = setTimeout(pollJobs, JOB_POLL_MS)
+    }
+    const loadJobs = async (before) => {
+      const more = $('jobs-more')
+      more.disabled = true
+      try {
+        const response = await fetch(`/api/account/jobs?limit=${JOB_PAGE}${before ? `&before=${before}` : ''}`, { credentials: 'same-origin' })
+        if (response.status === 401) return
+        if (!response.ok) throw new Error(String(response.status))
+        const answer = await response.json()
+        const known = new Set(jobs.map((job) => job.taskId))
+        jobs = jobs.concat(answer.items.filter((job) => !known.has(job.taskId)))
+        nextBefore = answer.hasMore ? answer.nextBefore : null
+        renderJobs()
+      } catch { say('Your jobs could not be loaded. Reload the page in a minute.', true) }
+      more.disabled = false
+    }
+    $('jobs-more').addEventListener('click', () => loadJobs(nextBefore))
+    loadJobs(null)
+  }
+
   load()
 })()

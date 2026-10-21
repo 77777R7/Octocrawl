@@ -78,7 +78,12 @@
   - 列表来自 workspace 的 slots 文档里的 `recent`：账户最近启动的 200 个任务的 id，在启动任务的同一次提交里写入。这样不需要 Firestore 复合索引，顺序也准。
   - 记录被 TTL 删掉的任务不再列出。这个改动之前启动的任务不在列表里，只有 H1 验收时跑的那几个。
   - 接口说明在 `docs/hosted-api.md` 的 Batch and crawl jobs 一节，可以直接交给 UI 窗口做 P2。
-- [ ] **P2** 进度页（UI 窗口），见“待你决定”第 3 条。
+- [x] **P2** 进度页（UI 窗口），见“待你决定”第 3 条。
+  - 做成的样子：dashboard 的 `/dashboard/jobs/`（Workspace 组，Activity 之后）。列出账户的任务，最近的在前，每页 20 个，可以“Load more”；每行有类型、id、状态（失败时带 failureReason）、实心 `<progress>`（batch 按 requested 算；运行中的 crawl 总数未知，进度条不带 value）、额度（有 maxCredits 时写“of N”）、开始和结束时间。
+  - 有任务在 queued 或 running 时，每 5 秒重读这些任务（`GET /v1/{batches|crawl}/:id`），页面隐藏时不读，全部结束后停止。只重绘变了的行，所以 Export 按钮不会在轮询时丢焦点。
+  - 结束的任务有 Export 按钮：取 `GET /v1/jobs/:id/export` 的签名链接（15 分钟有效）并打开，下载 gzip 的 JSON Lines；页面下方写了用 MCP（`get_batch_items`、`get_crawl_pages`）和 REST 读取的方法。过期的任务显示已删除。
+  - 没有任务时说明任务目前只对受邀账户开放，以及怎样从 MCP 客户端启动（链接到 `/docs/connect-mcp/#crawl-and-batch-jobs`）。读取不受邀请名单限制。
+  - 站点服务端（`packages/public-preview/src/account.ts`）加了三个只读代理：`GET /api/account/jobs`、`/api/account/jobs/{batches|crawl}/:id`、`/api/account/jobs/:id/export`，和 Playground 一样用签名的账户头访问 hosted API。hosted API 的网关本来就对这个头放行任务读取，所以 API 不需要改动和部署。
 
 ## W：任务结束的 webhook
 
@@ -147,4 +152,4 @@
     - M8（任务条目去掉 `usage` 和 `trace`）要跑一个任务才看得到，这次开关没开，没有在线上验证，只有单元测试覆盖。
   - 代码后续项：webhook 的两个已知缺口。M6 已完成，部署 API 后在线上生效。
   - 开放前要核对 R7（Python SDK 的 User-Agent）。
-  - P2 进度页由 UI 窗口做。
+  - P2 进度页已完成（dashboard 的 Jobs 页）。

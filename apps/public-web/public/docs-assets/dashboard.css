@@ -134,6 +134,20 @@ a:hover{color:#fff}
 .requests td.url a{color:var(--ink);text-decoration:none}
 .requests td.url a:hover{color:var(--orange-soft);text-decoration:underline}
 .requests .hash{color:var(--muted);font:12px var(--mono)}
+/* Jobs: a solid bar per job; a crawl's runs without a value (its total is not known) and sweeps while it reads. */
+.jobs td{vertical-align:top}
+.jobs .job-id{display:block;margin-top:3px;font-size:11.5px;user-select:all}
+.jobs .job-progress{min-width:170px}
+.job-bar{margin:6px 0 4px}
+.job-bar:indeterminate{background:linear-gradient(90deg,var(--rule) 0 30%,var(--orange) 50%,var(--rule) 70% 100%) 0 0/250% 100%}
+.job-bar:indeterminate::-webkit-progress-bar{background:transparent}
+.job-bar:indeterminate::-moz-progress-bar{background:transparent}
+@media (prefers-reduced-motion:no-preference){.job-bar:indeterminate{animation:job-sweep 1.6s linear infinite}}
+@keyframes job-sweep{from{background-position:100% 0}to{background-position:0 0}}
+.job-note{display:block;margin-top:4px;color:var(--muted);font-size:12px;white-space:normal}
+.jobs-empty{padding:6px 0 4px}
+.jobs-empty p{max-width:72ch}
+.jobs-more{margin:12px 0 4px}
 .dash-grid.even{grid-template-columns:repeat(2,minmax(0,1fr))}
 .filters{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:end;margin-bottom:12px}
 .filters label{display:grid;gap:5px;color:var(--muted);font-size:12.5px;font-weight:600}

@@ -343,7 +343,7 @@ const PROXY_SECRET_HEADER = 'x-w2l-proxy-secret'
  * The dashboard's Playground (packages/public-preview account.ts) runs a scrape or a map for the signed-in account: the
  * site's server names the account in this header, signed with W2L_QUOTA_HASH_KEY, which both services hold. The call
  * then spends that account's credits and leaves its request line as a key's call does, under the key id
- * `playground:{uid}`, without a key the person would have to hold or count against their five.
+ * `playground:{uid}`, without a key the person would have to hold or count against their five. * The dashboard's Jobs page reads the account's jobs (GET /v1/jobs, a job's status and its export link) the same way.
  */
 export const SITE_ACCOUNT_HEADER = 'x-w2l-site-account'
 /** How long a signed account header is good for; the site signs one per call. */

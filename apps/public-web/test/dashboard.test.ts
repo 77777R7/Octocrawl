@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { Window } from 'happy-dom'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DASHBOARD_BODIES, dashboardPageHtml } from '../scripts/dashboardPages.mjs'
 
 // The dashboard's pages as build-docs.mjs writes them, with dashboard.js run on them in a browser-like window
@@ -49,10 +49,11 @@ afterEach(async () => { await Promise.all(open.splice(0).map(window => window.ha
  * A dashboard page at `now`, its API answering from `answers` (path → [status, body]). `width` gives every element that
  * width, for the charts, which draw nothing in a window without layout; `stored` is this browser's localStorage.
  */
-async function page(path: string, search: string, now: string, answers: Record<string, [number, unknown]>, options: { width?: number; stored?: Record<string, string> } = {}): Promise<Page> {
+async function page(path: string, search: string, now: string, answers: Record<string, [number, unknown]>, options: { width?: number; stored?: Record<string, string>; maxTimeout?: number } = {}): Promise<Page> {
   const [, title, lead, body] = DASHBOARD_BODIES.find(([p]) => p === path)!
   const html = dashboardPageHtml(path, title, lead, body, new Proxy({}, { get: () => 'test' })).replace(/<script\b[^>]*><\/script>/g, '')
-  const window = new Window({ url: `https://octocrawl.dev${path}${search}`, settings: { disableJavaScriptFileLoading: true, disableCSSFileLoading: true } })
+  // maxTimeout shortens the page's timers (the Jobs page's polls) to that many milliseconds.
+  const window = new Window({ url: `https://octocrawl.dev${path}${search}`, settings: { disableJavaScriptFileLoading: true, disableCSSFileLoading: true, ...(options.maxTimeout === undefined ? {} : { timer: { maxTimeout: options.maxTimeout } }) } as never })
   open.push(window)
   window.document.write(html)
   if (options.width) Object.defineProperty(window.HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => options.width })
@@ -82,6 +83,7 @@ const octoberLines = () => [line('2026-10-20T11:55:00.000Z', KEY_A, 1), line('20
 const octoberAnswers = (lines = octoberLines(), usage = usageOf(lines)) => ({
   'GET /api/account': [200, account(OCTOBER.resetsAt, usage)] as [number, unknown],
   'GET /api/account/activity': [200, { requests: lines, limit: 1000, retentionDays: 30 }] as [number, unknown],
+  'GET /api/account/jobs?limit=20': [200, { items: [], nextBefore: null, hasMore: false }] as [number, unknown],
 })
 
 describe('the dashboard pages render', () => {
@@ -565,5 +567,102 @@ describe('Settings', () => {
     const handed = await page('/dashboard/scrape/', '?url=https%3A%2F%2Fdocs.example%2F', OCTOBER.now, octoberAnswers(), { stored })
     const chosen = new handed.window.FormData(handed.$('play-form') as never)
     expect([chosen.get('view'), chosen.get('scope')]).toEqual(['markdown', 'main'])
+  })
+})
+
+describe('the Jobs page', () => {
+  const id = (n: number) => `6f1c2a4e-1b2c-4d3e-8f90-${String(n).padStart(12, '0')}`
+  /** A job's status as GET /v1/jobs and GET /v1/{batches|crawl}/:id give it (hostedJobRoutes.ts, jobStatus). */
+  const job = (n: number, kind: 'batch' | 'crawl', status: string, read: number, extra: Record<string, unknown> = {}) => ({
+    taskId: id(n), kind, status, failureReason: null, budgetExceeded: null, pagesFetched: read, succeeded: read, failed: 0, errors: 0, completed: read,
+    ...(kind === 'batch' ? { requested: 10, remaining: 10 - read } : {}), credits: { used: read, maxCredits: null },
+    createdAt: `2026-10-20T0${n}:00:00.000Z`, finishedAt: ['completed', 'failed', 'cancelled'].includes(status) ? `2026-10-20T0${n}:30:00.000Z` : null,
+    expiresAt: ['completed', 'failed', 'cancelled'].includes(status) ? '2026-10-27T00:00:00.000Z' : null, ...extra,
+  })
+  const listed = (items: unknown[], nextBefore: string | null = null) => [200, { items, nextBefore, hasMore: nextBefore !== null }] as [number, unknown]
+  const rows = ($: Page['$']) => [...$('jobs-body').querySelectorAll('tr')]
+
+  it('says jobs are open to invited accounts, and how to start one from an MCP client, while the account has none', async () => {
+    const { $ } = await page('/dashboard/jobs/', '', OCTOBER.now, octoberAnswers())
+    expect($('jobs-empty').hidden).toBe(false)
+    expect($('jobs-table').hidden).toBe(true)
+    expect($('jobs-more').hidden).toBe(true)
+    expect($('jobs-empty').textContent).toContain('open to invited accounts for now')
+    expect($('jobs-empty').querySelector('a[href="/docs/connect-mcp/#crawl-and-batch-jobs"]')).not.toBeNull()
+    expect($('dash-message').textContent).toBe('')
+  })
+
+  it('lists the jobs newest first with a solid bar for each, the export for a finished one, and loads more', async () => {
+    const answers = {
+      ...octoberAnswers(),
+      'GET /api/account/jobs?limit=20': listed([
+        job(5, 'crawl', 'running', 7),
+        job(4, 'batch', 'queued', 0, { credits: { used: 0, maxCredits: 40 } }),
+        job(3, 'batch', 'completed', 10, { failed: 2, webhook: { url: 'https://hooks.example/a', events: ['completed'], delivery: { state: 'delivered', attempts: 1, httpStatus: 200, error: null, at: '2026-10-20T03:30:01.000Z' } } }),
+      ], id(3)),
+      [`GET /api/account/jobs?limit=20&before=${id(3)}`]: listed([job(2, 'crawl', 'failed', 3, { failureReason: 'no_progress' }), job(1, 'crawl', 'expired', 4)]),
+    }
+    const { $, window } = await page('/dashboard/jobs/', '', OCTOBER.now, answers)
+    const [crawl, queued, done] = rows($)
+    const bar = (row: Element) => row.querySelector('progress') as unknown as HTMLProgressElement
+    expect([...crawl!.querySelectorAll('td')].map(td => td.textContent)).toEqual([`Oct 20 05:00`, `Crawl ${id(5)}`, 'running', '7 pages', '7', '—', 'when it ends'])
+    // A running crawl's total is not known: its bar has no value. A batch counts against its URLs.
+    expect(bar(crawl!).hasAttribute('value')).toBe(false)
+    expect([bar(queued!).value, bar(queued!).max]).toEqual([0, 10])
+    expect([bar(done!).value, bar(done!).max, bar(done!).className]).toEqual([10, 10, 'credit-bar job-bar'])
+    expect(queued!.querySelectorAll('td')[4]!.textContent).toBe('0 of 40')
+    expect(done!.querySelectorAll('td')[3]!.textContent).toBe('10 of 10 URLs · 2 failed')
+    expect(done!.querySelector('button')!.textContent).toBe('Export')
+    expect(done!.querySelectorAll('td')[6]!.textContent).toBe('ExportWebhook delivered')
+    expect($('jobs-count').textContent).toBe('3 jobs shown · 2 running or queued')
+    expect($('jobs-more').hidden).toBe(false)
+    $('jobs-more').click()
+    await settle()
+    const [, , , failed, gone] = rows($)
+    expect(failed!.querySelectorAll('td')[2]!.textContent).toBe('failedno_progress')
+    expect(bar(failed!).value).toBe(1)
+    expect(gone!.querySelectorAll('td')[2]!.textContent).toBe('expired')
+    expect(gone!.querySelector('button')).toBeNull()
+    expect($('jobs-more').hidden).toBe(true)
+    expect($('jobs-count').textContent).toBe('5 jobs · 2 running or queued')
+    // No text bar anywhere: every bar is a <progress>.
+    expect(window.document.body.textContent).not.toMatch(/\[[#=.\s]{4,}\]/)
+  })
+
+  it('reads a running job again until it ends, then stops', async () => {
+    const answers: Record<string, [number, unknown]> = { ...octoberAnswers(), 'GET /api/account/jobs?limit=20': listed([job(3, 'batch', 'running', 2)]), [`GET /api/account/jobs/batches/${id(3)}`]: [200, job(3, 'batch', 'running', 6)] }
+    answers['GET /api/account/jobs?limit=20'] = listed([job(3, 'batch', 'running', 2), job(2, 'crawl', 'completed', 9)])
+    const { $, calls } = await page('/dashboard/jobs/', '', OCTOBER.now, answers, { maxTimeout: 1 })
+    // The ended job's row, and its Export button, stay the same elements while the running job above it is drawn again.
+    const ended = rows($)[1]!
+    const polls = () => calls.filter(call => call.path === `/api/account/jobs/batches/${id(3)}`).length
+    await vi.waitFor(() => expect((rows($)[0]!.querySelector('progress') as unknown as HTMLProgressElement).value).toBe(6))
+    expect(polls()).toBeGreaterThan(0)
+    expect(rows($)[1]).toBe(ended)
+    answers[`GET /api/account/jobs/batches/${id(3)}`] = [200, job(3, 'batch', 'completed', 10)]
+    await vi.waitFor(() => expect(rows($)[0]!.querySelector('button')?.textContent).toBe('Export'))
+    const after = polls()
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(polls()).toBe(after)
+    // A page with no running job reads nothing again.
+    const still = await page('/dashboard/jobs/', '', OCTOBER.now, { ...octoberAnswers(), 'GET /api/account/jobs?limit=20': listed([job(3, 'batch', 'completed', 10)]) }, { maxTimeout: 1 })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(still.calls.filter(call => call.path.startsWith('/api/account/jobs/'))).toEqual([])
+  })
+
+  it('opens a finished job\'s export link, and says so when the job has not written it yet', async () => {
+    const link = `https://storage.googleapis.com/octocrawl-jobs/w/ws_u/jobs/${id(3)}/export.jsonl.gz?X-Goog-Signature=abc`
+    const answers: Record<string, [number, unknown]> = { ...octoberAnswers(), 'GET /api/account/jobs?limit=20': listed([job(3, 'batch', 'completed', 10)]), [`GET /api/account/jobs/${id(3)}/export`]: [409, { code: 'job_running' }] }
+    const { $, window } = await page('/dashboard/jobs/', '', OCTOBER.now, answers)
+    const opened: string[] = []
+    Object.defineProperty(window.location, 'assign', { configurable: true, value: (url: string) => { opened.push(url) } })
+    const button = () => rows($)[0]!.querySelector('button') as unknown as HTMLButtonElement
+    button().click()
+    await settle()
+    expect([opened, $('dash-message').textContent, button().disabled]).toEqual([[], 'This job has not finished writing its export. Try again in a minute.', false])
+    answers[`GET /api/account/jobs/${id(3)}/export`] = [200, { url: link, expiresInSeconds: 900 }]
+    button().click()
+    await settle()
+    expect(opened).toEqual([link])
   })
 })
