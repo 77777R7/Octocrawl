@@ -208,7 +208,7 @@ async function waitOutChallenge(page: Page, documents: MainFrameDocuments, respo
     if (body === null) return undefined
     // Only decisive evidence (a vendor's challenge header or plumbing, its widget, a wall): a page that merely loads a
     // captcha script for a form, or says "please wait", is no check to wait out, and would never stop looking like one.
-    return classifyGate({ status: answered?.status() || 200, header: (name) => answered?.headers()[name.toLowerCase()] ?? null, body, contentful: true })
+    return classifyGate({ status: answered?.status() || 200, header: (name) => answered?.headers()[name.toLowerCase()] ?? null, body, finalUrl: page.url(), contentful: true })
   }
   const first = await raceWithSignal(gateNow(), signal)
   if (first === undefined || first === null || !WAITABLE_GATES.has(first.reason)) return null
@@ -1095,7 +1095,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const answered = region === undefined ? null : reported(documents.shown() ?? { url: page.url(), response, kind: 'document' }).response
       const answeredStatus = answered?.status() ?? 0
       const gated = region !== undefined && (answeredStatus === 0 || isSuccessStatus(answeredStatus))
-        ? classifyGate({ status: answeredStatus || 200, header: (name) => answered?.headers()[name.toLowerCase()] ?? null, body: await page.content().catch(() => ''), contentful: true }) !== null
+        ? classifyGate({ status: answeredStatus || 200, header: (name) => answered?.headers()[name.toLowerCase()] ?? null, body: await page.content().catch(() => ''), finalUrl: page.url(), contentful: true }) !== null
         : true
       if (region !== undefined && !gated) {
         const maxMs = Math.min(REGION_WAIT_MAX_MS, execution.deadlineAt === undefined ? REGION_WAIT_MAX_MS : execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now())
@@ -1416,6 +1416,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         status,
         header: (name) => documentHeaders[name.toLowerCase()] ?? null,
         body,
+        finalUrl,
         contentful: true,
       })
       if (decisive !== null) return blocked(decisive)
