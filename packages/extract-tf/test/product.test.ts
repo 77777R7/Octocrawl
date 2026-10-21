@@ -394,6 +394,113 @@ describe('PDP facts: what each fact holds for (D3b field contract)', () => {
   })
 })
 
+/**
+ * A multi-variant product page shaped like OTTO's (D6): one Product node per
+ * variant, each naming its variant by a `variationId` PropertyValue, the
+ * family page as the canonical link, and a buy box showing a starting price
+ * ("ab"), a struck-through UVP and a monthly instalment beside the price.
+ * Synthetic: no retained page.
+ */
+describe('PDP facts: a selected variant and the kinds of price a page shows (D6)', () => {
+  const ld = (json: object): string => `<script type="application/ld+json">${JSON.stringify(json)}</script>`
+  const FAMILY = 'https://shop.fixture.test/p/notebook-n15-40-6-cm-16-zoll-1000000001/'
+  const VARIANTS = [
+    { variation: 'V200', article: '56390001', name: 'Notebook N15 (40,6 cm/16 Zoll, 16 GB RAM, 512 GB SSD)', price: '1299.00' },
+    { variation: 'V201', article: '56390002', name: 'Notebook N15 (40,6 cm/16 Zoll, 32 GB RAM, 1000 GB SSD)', price: '1599.00' },
+    { variation: 'V202', article: '56390003', name: 'Notebook N15 (40,6 cm/16 Zoll, 64 GB RAM, 2000 GB SSD)', price: '1999.00' },
+  ]
+  const node = (v: typeof VARIANTS[number], url: string) => ({
+    '@context': 'https://schema.org', '@type': 'Product', name: v.name, sku: v.article, url, brand: { '@type': 'Brand', name: 'Fixture' },
+    additionalProperty: [{ '@type': 'PropertyValue', name: 'variationId', value: v.variation }],
+    offers: [{ '@type': 'Offer', price: v.price, priceCurrency: 'EUR', availability: 'https://schema.org/InStock', url }],
+  })
+  const box = (retail: string) => `<div class="pdp-price"><span class="pdp-price__retail">${retail}</span>` +
+    '<span class="pdp-price__uvp">UVP <span class="pdp-price__value pdp-price__value--strikethrough">2.199,00 €</span></span></div>' +
+    '<div class="pdp-installment-price">20,00 € mtl. in 48 Raten</div>'
+  // The meta tags state the default variant, as a family page's do.
+  const META = `<meta property="og:title" content="${VARIANTS[0]!.name}"><meta property="og:price:amount" content="1299.00"><meta property="og:price:currency" content="EUR">`
+  const page = (head: string, retail: string) => `<!doctype html><html><head><title>Notebook N15</title><link rel="canonical" href="${FAMILY}">${head}</head>
+<body><main><h1>Notebook N15</h1>${box(retail)}
+<p>A sixteen-inch notebook whose configurations differ in memory and storage; the chosen configuration has its own article number and price.</p>
+</main></body></html>`
+  const declared = (urlOf: (v: typeof VARIANTS[number]) => string) => VARIANTS.map((v) => ld(node(v, urlOf(v)))).join('')
+
+  it('delivers the name, SKU and price of the variant the URL selects by its declared variationId', () => {
+    const url = `${FAMILY}?variationId=V201`
+    // Each variant's node names the family page, as the canonical link does; only its variationId tells them apart.
+    const out = extractTf.extract(page(META + declared(() => FAMILY), 'ab 1.299,00 €'), { url })
+    expect(out.product?.identity).toMatchObject({
+      status: 'matched', requestedId: 'V201', observedSelectedId: '56390002',
+      selectedVariants: [{ name: 'variationId', value: 'V201', selected: true, source: 'jsonld', path: '/script/1/additionalProperty/0/value' }],
+    })
+    expect(out.product?.name).toEqual({ value: VARIANTS[1]!.name, source: 'jsonld', path: '/script/1/name', context: { variant: 'V201' } })
+    expect(out.product?.sku?.value).toBe('56390002')
+    expect(out.product?.price).toEqual({ value: '1599.00', source: 'jsonld', path: '/script/1/offers/0/price', unit: 'EUR', context: { offerType: 'Offer', variant: 'V201' } })
+    // The page's meta tags state its default variant; they name none of the declared products.
+    expect(out.product?.ambiguous).toBeUndefined()
+    // Nodes whose url carries the selection too, as OTTO's listing cards do.
+    const linked = extractTf.extract(page(declared((v) => `${FAMILY}?variationId=${v.variation}`), 'ab 1.299,00 €'), { url })
+    expect(linked.product?.sku?.value).toBe('56390002')
+    expect(linked.product?.price?.value).toBe('1599.00')
+  })
+
+  it('keeps the subject conflicting when the URL selects no variant, and never reads the starting price as its price', () => {
+    // D2: the family URL names no variant, so nothing tells the three apart; only what all of them state alike is reported.
+    const out = extractTf.extract(page(META + declared(() => FAMILY), 'ab 1.299,00 €'), { url: FAMILY })
+    expect(out.product?.identity?.status).toBe('conflicting')
+    expect(out.product?.identity?.selectedVariants).toEqual([])
+    expect(out.product?.name).toBeNull()
+    expect(out.product?.sku).toBeNull()
+    expect(out.product?.price).toBeNull()
+    expect(out.product?.priceCurrency?.value).toBe('EUR')
+    // A variationId that no declared node carries selects nothing either.
+    const unknown = extractTf.extract(page(declared(() => FAMILY), 'ab 1.299,00 €'), { url: `${FAMILY}?variationId=V999` })
+    expect(unknown.product?.identity?.status).toBe('conflicting')
+  })
+
+  it('reads the current price beside a struck-through UVP and a monthly instalment, and names each kind', () => {
+    // No declared offer and no price meta: the price is read from the visible buy box.
+    const head = ld({ '@type': 'Product', name: VARIANTS[1]!.name, sku: VARIANTS[1]!.article })
+    const out = extractTf.extract(page(head, '1.599,00 €'), { url: `${FAMILY}?variationId=V201` })
+    expect(out.product?.price).toMatchObject({ value: '1.599,00 €', source: 'text', context: { offerType: 'current' } })
+    expect(out.product?.prices?.map((p) => [p.amount.value, p.amount.rawValue ?? null, p.priceType, p.amount.context?.offerType])).toEqual([
+      ['1.599,00 €', null, 'current', 'current'],
+      ['2.199,00 €', 'UVP 2.199,00 €', 'list', 'list'],
+      ['20,00 €', '20,00 € mtl. in 48 Raten', 'other', 'installment'],
+    ])
+  })
+
+  it('reports no price when the buy box shows only a starting price, a UVP and an instalment', () => {
+    const head = ld({ '@type': 'Product', name: VARIANTS[1]!.name, sku: VARIANTS[1]!.article })
+    const out = extractTf.extract(page(head, 'ab 1.299,00 €'), { url: FAMILY })
+    expect(out.product?.price).toBeNull()
+    expect(out.product?.prices?.map((p) => [p.amount.value, p.amount.rawValue ?? null, p.priceType, p.amount.context?.offerType])).toEqual([
+      ['1.299,00 €', 'ab 1.299,00 €', 'other', 'from'],
+      ['2.199,00 €', 'UVP 2.199,00 €', 'list', 'list'],
+      ['20,00 €', '20,00 € mtl. in 48 Raten', 'other', 'installment'],
+    ])
+  })
+
+  it('leaves a single product page as it was: its price, no price kinds, no variant', () => {
+    const out = extractTf.extract(PDP(PRODUCT_LD), { url: 'https://shop.example/p/teapot?variationId=TP-4S-600-B' })
+    expect(out.product?.price).toEqual({ value: '84.00', source: 'jsonld', path: '/script/0/offers/price', unit: 'USD', context: { offerType: 'Offer' } })
+    expect(out.product?.identity).toMatchObject({ status: 'matched', selectedVariants: [] })
+    expect(out.product?.prices).toBeUndefined()
+    const doc = parse(PDP())
+    pruneRecommendations(doc.document)
+    const text = collectProductFacts(doc.document)
+    doc.close()
+    expect(text.price).toEqual({ value: '$84.00', source: 'text', path: 'span.a-price' })
+    expect(text.prices).toBeUndefined()
+    // A declared property whose name is not the query parameter's selects nothing.
+    const colours = ['blue', 'green'].map((colour) => ld({ '@type': 'Product', name: `Mug ${colour}`, sku: `MUG-${colour}`, url: 'https://shop.example/p/mug',
+      additionalProperty: [{ '@type': 'PropertyValue', name: 'color', value: colour }], offers: { '@type': 'Offer', price: '9.00', priceCurrency: 'USD' } })).join('')
+    const mug = extractTf.extract(`<!doctype html><html><head>${colours}</head><body><main><h1>Mug</h1><p>A stoneware mug glazed by hand in two colours, each fired twice.</p></main></body></html>`,
+      { url: 'https://shop.example/p/mug?variant=blue' })
+    expect(mug.product?.identity?.status).toBe('conflicting')
+  })
+})
+
 describe('PDP region selection', () => {
   it('picks the buy-box region, not the largest text container', () => {
     const doc = parse(PDP(PRODUCT_LD))
