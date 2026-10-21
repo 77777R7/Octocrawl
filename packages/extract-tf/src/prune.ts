@@ -14,7 +14,7 @@
 import { detach, detachAll, outerHtml, parse, qsa, tagOf, textOf } from './dom.js'
 import { namedBy } from './selectors.js'
 import { LAYOUT_MARKERS } from './markdown.js'
-import { looksLikePrice } from './product.js'
+import { looksLikePrice, priceReadings, type OfferRange } from './product.js'
 
 const MANUALLY_CLEANED = [
   'script',
@@ -185,6 +185,22 @@ function isProductGrid(el: Element): boolean {
   return Math.max(0, ...pricedByTag.values()) >= 3 && priced >= kids.length * 0.6
 }
 
+/** How far apart two amounts may be and still be one (a cent's half). */
+const SAME_AMOUNT = 0.005
+
+/**
+ * Whether a grid's prices are the offers an aggregate range sums up: one of
+ * them is its lowPrice, and none is below it or, when it states one, above its
+ * highPrice. A grid of other products beside a product whose variants span a
+ * range rarely starts at exactly its lowest price.
+ */
+function showsOffers(grid: Element, range: OfferRange): boolean {
+  const prices = priceReadings(textOf(grid))
+  const outside = (n: number) => n < range.low - SAME_AMOUNT || (range.high !== null && n > range.high + SAME_AMOUNT)
+  return prices.some((readings) => [...readings].some((n) => Math.abs(n - range.low) <= SAME_AMOUNT)) &&
+    !prices.some((readings) => [...readings].every(outside))
+}
+
 /**
  * The region a recommendation heading introduces: the heading plus the
  * sibling run that follows it, up to the next heading of the same or higher
@@ -213,7 +229,7 @@ function recommendationRegion(heading: Element): Element[] {
  * prevents is an LLM summarizing the wrong product's features; the failure it
  * must not cause is deleting the product being described.
  */
-export function pruneRecommendations(doc: Document, options: { keepOfferGrids?: boolean } = {}): void {
+export function pruneRecommendations(doc: Document, options: { offers?: OfferRange | null } = {}): void {
   // The element that holds the page's one h1 holds the product: the grid and
   // token triggers never cut it. A page of several h1s (cards that each carry
   // one) has no such title to keep.
@@ -229,12 +245,14 @@ export function pruneRecommendations(doc: Document, options: { keepOfferGrids?: 
 
   // Trigger 2: unlabelled grids of priced, linked cards. Walk deepest-first
   // so the tightest qualifying container is cut, not a page-level wrapper
-  // that happens to contain one. Not on a page whose product declares
-  // aggregate offers only (keepOfferGrids): its priced cards are those offers.
-  const containers = options.keepOfferGrids ? [] : qsa(doc, 'div,section,ul,ol')
+  // that happens to contain one. On a page whose product declares aggregate
+  // offers only (options.offers), a grid whose prices fill their range is
+  // those offers, and stays.
+  const offers = options.offers ?? null
+  const containers = qsa(doc, 'div,section,ul,ol')
   for (const el of containers.reverse()) {
     if (!el.isConnected) continue
-    if (!holdsH1(el) && isProductGrid(el)) detach(el)
+    if (!holdsH1(el) && isProductGrid(el) && (offers === null || !showsOffers(el, offers))) detach(el)
   }
 
   // Trigger 3: id/class tokens, for carousels rendered without a heading and

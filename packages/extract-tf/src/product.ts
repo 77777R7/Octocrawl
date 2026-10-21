@@ -244,8 +244,8 @@ interface DeclaredProduct {
   offerIds: string[]
   /** The named values it declares as PropertyValues (`additionalProperty`, `identifier`): a variant's `variationId`, a size. */
   params: DeclaredParam[]
-  /** Its offers are AggregateOffers only (aggregateOnly): their lowPrice bounds several offers' prices and is no price of its own. */
-  aggregate: boolean
+  /** Its offers are AggregateOffers only (aggregateOnly): the range their lowPrice and highPrice bound, which is no price of its own. */
+  aggregate: OfferRange | null
   /** Its `url` and its offers' `url`. */
   urls: UrlKey[]
   /** The page's mainEntity (or mainEntityOfPage names the page). */
@@ -338,17 +338,30 @@ const isAggregateType = (types: readonly string[]) => types.some((x) => /(^|[#/:
 const record = (v: unknown): Record<string, unknown> | null =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : null
 
+/** The prices a product's aggregate offers range over: the lowest lowPrice, and the highest highPrice when every one states one. */
+export interface OfferRange { low: number; high: number | null }
+
+const plainAmount = (v: unknown): number | null => {
+  const text = asString(v)?.trim() ?? ''
+  return /^\d+(?:\.\d+)?$/.test(text) ? Number(text) : null
+}
+
 /**
- * Whether a product's offers are AggregateOffers only, each with a lowPrice (a
- * number, not negative) and no price: offers of several sellers or departures
- * summed up by their lowest price, which bounds their prices and is the price
- * of none of them. A typed offer is required; a lowPrice alone is not one.
+ * The range of a product whose offers are AggregateOffers only, each with a
+ * lowPrice (a number, not negative) and no price: offers of several sellers,
+ * departures or variants summed up by their lowest price, which bounds their
+ * prices and is the price of none of them. Null for any other product. A typed
+ * offer is required; a lowPrice alone is not one.
  */
-function aggregateOnly(product: Record<string, unknown>): boolean {
+function aggregateOnly(product: Record<string, unknown>): OfferRange | null {
   const raw = product['offers']
   const offers = (Array.isArray(raw) ? raw : [raw]).map(record)
-  return offers.length > 0 && offers.every((o) => o !== null && isAggregateType(typesOf(o)) && asString(o['price']) === null &&
-    /^\d+(?:\.\d+)?$/.test(asString(o['lowPrice'])?.trim() ?? ''))
+  if (offers.length === 0 || !offers.every((o) => o !== null && isAggregateType(typesOf(o)) && asString(o['price']) === null && plainAmount(o['lowPrice']) !== null)) return null
+  const highs = offers.map((o) => plainAmount(o!['highPrice']))
+  return {
+    low: Math.min(...offers.map((o) => plainAmount(o!['lowPrice'])!)),
+    high: highs.every((h) => h !== null) ? Math.max(...(highs as number[])) : null,
+  }
 }
 
 function idsOf(read: (name: string) => string | null): Partial<Record<IdKind, string[]>> {
@@ -664,7 +677,7 @@ function microdataProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
       ids: idsOf((name) => pick(name)?.value ?? null),
       offerIds: [],
       params: [],
-      aggregate: false,
+      aggregate: null,
       urls,
       main: props.includes('mainEntity'),
       nested: props.some((p) => p !== '' && p !== 'mainEntity'),
@@ -910,16 +923,24 @@ const MAX_COMPARED = 250
 /** Facts whose price must not be read from the page's text: the page declares other products beside the subject, or the subject's own sources disagree on it. */
 const textPriceBarred = new WeakSet<ProductFacts>()
 
-/** Facts of a subject that declares aggregate offers only: the priced cards its page shows are those offers (offersAggregate). */
-const aggregateOffered = new WeakSet<ProductFacts>()
+/** Facts of a subject that declares aggregate offers only, with the range they bound (aggregateRange). */
+const aggregateOffered = new WeakMap<ProductFacts, OfferRange>()
 
 /**
- * Whether the subject declares aggregate offers only and no price of its own:
- * the grid of linked, priced cards on its page is its offers, not products
- * recommended beside it, and no visible price is its one price.
+ * The range of the subject's aggregate offers when it declares those only and
+ * no price of its own, else null: no visible price is its one price, and a
+ * grid of linked, priced cards whose prices fill that range (showsOffers in
+ * prune.ts) is its offers, not products recommended beside it.
  */
-export function offersAggregate(facts: ProductFacts | null): boolean {
-  return facts !== null && aggregateOffered.has(facts)
+export function aggregateRange(facts: ProductFacts | null): OfferRange | null {
+  return facts === null ? null : aggregateOffered.get(facts) ?? null
+}
+
+const PRICE_ALL = new RegExp(PRICE_RE.source, 'gu')
+
+/** The numbers each price-shaped run in a text can be read as, in order. */
+export function priceReadings(text: string): Array<Set<number>> {
+  return Array.from(text.matchAll(PRICE_ALL), (m) => amountReadings(m[0])).filter((r) => r.size > 0)
 }
 
 /** What singles a product out, strongest first: each step keeps the products it holds for, if it holds for some but not all. */
@@ -1081,10 +1102,12 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
   if (siblings || facts.ambiguous?.some((a) => a.field === 'price')) textPriceBarred.add(facts)
   // Aggregate offers alone, and no price stated anywhere else: a lowPrice bounds the offers' prices, and a price the page shows is one offer's.
   const declaring = [...subject, ...bound]
-  if (facts.price === null && declaring.some((d) => d.aggregate) && declaring.every((d) => d.aggregate || (d.fields.price === undefined && d.ambiguous.price === undefined))) {
-    aggregateOffered.add(facts)
+  const ranges = declaring.flatMap((d) => (d.aggregate === null ? [] : [d.aggregate]))
+  if (facts.price === null && ranges.length > 0 && declaring.every((d) => d.aggregate !== null || (d.fields.price === undefined && d.ambiguous.price === undefined))) {
+    const highs = ranges.map((r) => r.high)
+    aggregateOffered.set(facts, { low: Math.min(...ranges.map((r) => r.low)), high: highs.every((h) => h !== null) ? Math.max(...(highs as number[])) : null })
     textPriceBarred.add(facts)
-    evidence.push(`${label(declaring.filter((d) => d.aggregate))}: offers an AggregateOffer only, whose lowPrice bounds its offers' prices; no price is read for the subject`)
+    evidence.push(`${label(declaring.filter((d) => d.aggregate !== null))}: offers an AggregateOffer only, whose lowPrice bounds its offers' prices; no price is read for the subject`)
   }
   return facts
 }

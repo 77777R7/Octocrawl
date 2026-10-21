@@ -19,7 +19,7 @@ import { detectRenderSignals, hasLoadingText, hydrationShown, rawSignals } from 
 import { namedBy } from './selectors.js'
 import { classifyBlocks, type ClassifyOptions } from './classify.js'
 import { hiddenRegion, selectMain } from './main.js'
-import { collectDeclaredProductFacts, fillPriceFromText, markOptionGroups, offersAggregate, selectProduct, settleOptionGroups } from './product.js'
+import { collectDeclaredProductFacts, fillPriceFromText, markOptionGroups, aggregateRange, selectProduct, settleOptionGroups } from './product.js'
 import { pageSignalsFor, routePage, selectCardList, selectDetectedList, selectList, selectTable } from './route.js'
 import { collectAmazonProductFacts, inferAmazonCurrency, isAmazonProductPage, selectAmazonProduct } from './amazon.js'
 import { adapterFor } from './adapters.js'
@@ -191,8 +191,8 @@ export class ExtractTf implements Extractor {
     // Recommendation carousels are cut only on product pages. On a listing
     // page the priced cards ARE the content, and pruning them would delete
     // the answer. Nor are the priced cards of a product that declares
-    // aggregate offers only: they are its offers.
-    if (decision.type === 'product') pruneRecommendations(doc.document, { keepOfferGrids: !amazonProduct && offersAggregate(sourceFacts) })
+    // aggregate offers only, when their prices fill its range: they are its offers.
+    if (decision.type === 'product') pruneRecommendations(doc.document, { offers: amazonProduct ? null : aggregateRange(sourceFacts) })
 
     const classifyOptions: ClassifyOptions = { ...DEFAULT_CLASSIFY, favorPrecision }
     if (favorPrecision) classifyOptions.minTextLength = 60

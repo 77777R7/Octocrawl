@@ -610,6 +610,29 @@ describe('PDP facts: a product that declares only aggregate offers (D6)', () => 
     }
   })
 
+  it('keeps only a grid whose prices fill the aggregate range', () => {
+    // Cards at 21, 22, 23: one at the lowPrice, none outside the range.
+    expect(markdown(page({ ...AGGREGATE, highPrice: 23 })).md).toContain('Offer 3, departing 3 January')
+    // Not starting at the lowPrice, a price below it, a price above the highPrice: other products.
+    for (const offers of [{ ...AGGREGATE, lowPrice: 19 }, { ...AGGREGATE, lowPrice: 22 }, { ...AGGREGATE, highPrice: 22 }]) {
+      expect(markdown(page(offers)).md).not.toContain('Offer 1, departing')
+    }
+  })
+
+  it('still cuts other products beside a product whose variants span a declared range', () => {
+    // A single shop's product declares its variants' price range as an AggregateOffer; the grid beside it is other products.
+    const range = { '@type': 'AggregateOffer', lowPrice: '20.00', highPrice: '30.00', offerCount: 3, priceCurrency: 'GBP' }
+    const items = [1, 2, 3, 4].map((i) => `<li class="item"><a href="/product/other-${i}">Other jacket ${i}</a><span class="amount">£${40 + i}.00</span></li>`).join('')
+    const html = `<!doctype html><html><head>${ld({ '@type': 'Product', name: 'Rain Jacket', sku: 'RJ-1', offers: range })}</head><body><main><div class="product">
+<h1>Rain Jacket</h1><p class="price"><span class="amount">£20.00</span> – <span class="amount">£30.00</span></p>
+<p>A lightweight waterproof rain jacket with taped seams, an adjustable hood and two zipped pockets.</p>
+<section class="look"><h2>Complete the look</h2><ul class="items">${items}</ul></section></div></main></body></html>`
+    const out = extractTf.extract(html, { url: 'https://shop.fixture.test/product/rain-jacket/' })
+    expect(htmlToMarkdown(out.mainHtml, { baseUrl: out.baseUrl })).not.toContain('Other jacket 1')
+    // The range's low end is no price of the product.
+    expect(out.product?.price).toBeNull()
+  })
+
   it('does not let a related product with aggregate offers protect the grid of the page subject', () => {
     const own = { '@type': 'Product', name: 'Travel from North to South', url: URL, offers: { '@type': 'Offer', price: 84, priceCurrency: 'GBP' } }
     const related = { '@type': 'Product', name: 'Travel from East to West', url: 'https://travel.fixture.test/routes/east/west/', offers: AGGREGATE }
