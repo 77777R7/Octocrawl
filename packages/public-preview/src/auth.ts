@@ -445,10 +445,13 @@ export function createAuthRoutes(options: AuthOptions) {
   }
 
   /** What a sign-in knows of how its browser first reached the site: the `w2l_src` cookie, and whether it is on its way
-   * to an MCP client's authorization (oauth.ts). Null for a visitor who sent Do Not Track or Global Privacy Control. */
+   * to an MCP client's authorization (oauth.ts). Null when it knows neither, so most sign-ins of an existing account read
+   * nothing more, and for a visitor who sent Do Not Track or Global Privacy Control. */
   function signInSource(req: IncomingMessage, next: string): FirstSource | null {
     if (optedOut(req)) return null
-    return { ...readSourceCookie(req), ...(next.startsWith('/oauth/authorize') ? { via: 'mcp-oauth' } : {}) }
+    const cookie = readSourceCookie(req)
+    const mcp = next.startsWith('/oauth/authorize')
+    return cookie === null && !mcp ? null : { ...cookie, ...(mcp ? { via: 'mcp-oauth' } : {}) }
   }
 
   /** The account a deletion is waiting to delete, from its signed cookie; null when there is none or it is old. */

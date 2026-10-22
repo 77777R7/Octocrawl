@@ -112,7 +112,7 @@ export function summarizeFunnel(sources, { now, days, internal }) {
 
 /** A first source's short name, as packages/public-preview/src/site.ts sourceLabel gives it. */
 export function firstSourceLabel(value) {
-  if (value === undefined) return 'not recorded (signed up before it was)'
+  if (value === undefined) return 'not recorded (before it was, no w2l_src cookie, or Do Not Track)'
   const fields = value.mapValue?.fields ?? {}
   const text = name => fields[name]?.stringValue
   return text('utmSource') ?? text('ref') ?? (text('from') ? `from:${text('from')}` : text('via') ? `via:${text('via')}` : text('landing') ? 'direct' : 'unknown')

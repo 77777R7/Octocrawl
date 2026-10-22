@@ -913,10 +913,10 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       if (connection === null) { sendJson(res, 401, OAUTH_ENDED, { 'www-authenticate': challenge('invalid_token') }); return }
       caller = connection
     }
-    // Which MCP clients connect (GTM gate R5): the name and version each gives when it initializes, and nothing else of it.
-    for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
-      if (message === null || typeof message !== 'object' || (message as { method?: unknown }).method !== 'initialize') continue
-      const info = (message as { params?: { clientInfo?: { name?: unknown; version?: unknown } } }).params?.clientInfo
+    // Which MCP clients connect (GTM gate R5): the name and version a client gives when it initializes, and nothing else
+    // of it. Only a body that is one initialize: the protocol never batches it, and a batch could fill the log.
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as { method?: unknown }).method === 'initialize') {
+      const info = (parsed as { params?: { clientInfo?: { name?: unknown; version?: unknown } } }).params?.clientInfo
       log(JSON.stringify({ severity: 'INFO', event: 'hosted_mcp_initialize', endpoint: oauth ? '/mcp-oauth' : '/mcp', caller: oauth ? 'oauth' : caller.kind, client: clientText(info?.name), clientVersion: clientText(info?.version) }))
     }
     // The tools call the API in-process through the gate, so quota, lane and refusals are the REST ones.

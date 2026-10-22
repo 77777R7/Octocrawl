@@ -119,7 +119,8 @@ export function landingSource(req: IncomingMessage, pathname: string, search: st
 /** The source a `w2l_src` cookie holds, or null when there is none or it is not one this site wrote. */
 export function readSourceCookie(req: IncomingMessage): FirstSource | null {
   const raw = req.headers.cookie?.split(';').map(part => part.trim()).find(part => part.startsWith(`${SOURCE_COOKIE}=`))?.slice(SOURCE_COOKIE.length + 1)
-  if (!raw || raw.length > 800 || !/^[A-Za-z0-9_-]+$/.test(raw)) return null
+  // Every field at its longest is about 1,100 characters once encoded.
+  if (!raw || raw.length > 1_500 || !/^[A-Za-z0-9_-]+$/.test(raw)) return null
   try { return cleanSource(JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'))) } catch { return null }
 }
 

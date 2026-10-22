@@ -446,6 +446,8 @@ it('logs the name and version an MCP client gives when it connects, cut to plain
   expect((await initialize({ name: 'claude-code', version: '2.1.301' })).status).toBe(200)
   expect((await initialize({ name: 'cursor', version: '1.7' }, { authorization: 'Bearer oc_http' })).status).toBe(200)
   expect((await initialize({ name: `odd\nname${'x'.repeat(100)}`, version: 7 })).status).toBe(200)
+  // A batch is not an initialize the protocol allows: many in one body log nothing.
+  await post(url, '/mcp', Array.from({ length: 50 }, (_, id) => ({ jsonrpc: '2.0', id, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'flood' } } })), { accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' })
   const connects = lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.event === 'hosted_mcp_initialize')
   expect(connects).toEqual([
     { severity: 'INFO', event: 'hosted_mcp_initialize', endpoint: '/mcp', caller: 'keyless', client: 'claude-code', clientVersion: '2.1.301' },

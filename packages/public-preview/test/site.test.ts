@@ -265,6 +265,10 @@ describe('first-party analytics', () => {
     expect(source(await fetch(`${url}/robots.txt?utm_source=x`))).toBeUndefined()
     expect(source(await fetch(`${url}/?utm_source=x`, { headers: { dnt: '1' } }))).toBeUndefined()
     expect(source(await fetch(`${url}/?utm_source=x`, { headers: { 'sec-gpc': '1' } }))).toBeUndefined()
+    // A signed-in browser had its cookie deleted at sign-in and gets no new one.
+    expect(source(await fetch(`${url}/?utm_source=x`, { headers: { cookie: 'w2l_account=1' } }))).toBeUndefined()
+    expect(source(await fetch(`${url}/?utm_source=x`, { headers: { cookie: 'a=1; w2l_session=abc' } }))).toBeUndefined()
+    expect(source(await fetch(`${url}/?utm_source=x`, { headers: { cookie: 'w2l_account=' } }))).toBeDefined()
     // A cookie this site did not write reads as none.
     expect(readSourceCookie({ headers: { cookie: 'w2l_src=bm90IGpzb24' } } as never)).toBeNull()
   })

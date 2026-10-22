@@ -162,6 +162,10 @@ describe('signing in with GitHub or Google', () => {
     await signIn('', '/oauth/authorize?client_id=c1&response_type=code')
     expect(accounts.users.get('github-user-0003')!.firstSource).toEqual({ via: 'mcp-oauth' })
     expect(lines).toContainEqual({ event: 'w2l_auth', step: 'first_source', outcome: 'recorded', source: 'via:mcp-oauth' })
+    // Without a cookie, and not for an MCP client, there is nothing to write and the record is not read.
+    fake.answer({ uid: 'github-user-0005', email: 'ed@example.org', provider: 'github.com' })
+    await signIn('')
+    expect(accounts.users.get('github-user-0005')!.firstSource).toBeUndefined()
     // Do Not Track or Global Privacy Control: nothing is written.
     fake.answer({ uid: 'github-user-0004', email: 'di@example.org', provider: 'github.com' })
     await signIn(source('reddit'), '/dashboard/', { 'sec-gpc': '1' })

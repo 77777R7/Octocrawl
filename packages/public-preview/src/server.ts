@@ -170,10 +170,12 @@ function setInternalCookie(req: IncomingMessage, res: ServerResponse, search: st
 }
 
 /** The first page a browser opens without `w2l_src` remembers how it got here (site.ts, GTM gate R5); files are not pages,
- * and a visitor who sent Do Not Track or Global Privacy Control gets no cookie. */
+ * and a visitor who sent Do Not Track or Global Privacy Control gets no cookie, nor does a signed-in browser, whose
+ * cookie was deleted at sign-in (auth.ts). */
 function setSourceCookie(req: IncomingMessage, res: ServerResponse, pathname: string, search: string, ownHost: string): void {
   if (/\.[A-Za-z0-9]+$/.test(pathname) && !pathname.endsWith('.html')) return
   if (optedOut(req) || readSourceCookie(req) !== null) return
+  if (/(?:^|;\s*)(?:w2l_session=[^;\s]|w2l_account=1)/.test(req.headers.cookie ?? '')) return
   const secure = !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host ?? '')
   const existing = res.getHeader('set-cookie')
   res.setHeader('set-cookie', [...(Array.isArray(existing) ? existing : typeof existing === 'string' ? [existing] : []), sourceCookie(landingSource(req, pathname, search, ownHost), secure)])
