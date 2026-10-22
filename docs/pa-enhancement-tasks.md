@@ -318,11 +318,11 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 
 - 2026-10-22：K1 窗口 2（记录分支 `claude/pa-k1-window2`，从 `origin/main` `fb2db7cc` 拉）。
   - runner 用 `b233d232`（#665 的分支头）的独立检出。它的 `packages/` 与窗口 1 的 `322de68e` 相同，两个窗口跑的是同一个引擎；驱动是修过的版本。没有用 `fb2db7cc`，因为它的 extract-tf、bench、http-core、runtime 已经改了。对照仍是 `2ffd7f25`，两处都先跑了 `npx tsc --build`。
-  - installed_chrome 用 K1 grant `e3ec29ef…`。走 Clash，出口在 103.142.140.0/24 内按运行变化。06:39–10:39 UTC，各块和重试轮之后都没有休眠，没有中止。
+  - installed_chrome 用 K1 grant `e3ec29ef…`。走 Clash，每次运行开始时取样的出口地址在 103.142.140.0/24 内变化（运行中途是否变化没有测）。06:39–10:39 UTC，各块和重试轮之后都没有休眠，没有中止。
   - 首次调用 verified：standard 46、enhanced 49、installed_chrome 68、对照 52、Firecrawl 70、ZenRows 59。
   - 假成功（已交付 / 全部 92 题）：standard 3/49、3/92；enhanced 2/51、2/92；installed_chrome 1/69、1/92；对照 2/54、2/92；Firecrawl 12/82、12/92；ZenRows 18/77、18/92。
   - 与 Firecrawl 的差距：installed_chrome 2，enhanced 21，standard 24。
-  - enhanced 从 56 降到 49：首次调用里 enhanced 有 12 次、对照有 9 次在 Steel 那一级超时，p50 约 156 s，原因没有隔离。
+  - enhanced 从 56 降到 49：首次调用里 enhanced 有 12 次、对照有 9 次在 provider（Steel）那一级超时，p50 约 156 s，原因没有隔离。
   - 两窗口都成立的边际收益（相对 standard）：installed_chrome 增 15 题、退 0 题，$0；enhanced 增 3 题、退 1 题，另有 14 题不稳；Firecrawl 增 28 题、退 7 题；ZenRows 增 19 题、退 10 题。
   - 两窗口合计假成功（共 184 次请求）：Octocrawl 各臂 3–6，Firecrawl 24（上限 17.9%），ZenRows 38。
   - 健康 25 题：两个窗口都是候选比对照少 1 题（21 对 22、22 对 23），差在 T016（zara.com）。当前 commit 的三臂六次都在 `browser_local` 报 `Cannot read properties of null (reading 'value')`，紧接在 `view` 追踪事件之后，被归为 `connection_error`；`2ffd7f25` 两次都通过。这是 `2ffd7f25` 之后的回退，未隔离，需要修，完成标准这一项未达。
