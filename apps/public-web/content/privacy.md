@@ -2,7 +2,7 @@
 
 This page covers the public Octocrawl page and its preview service. When you run Octocrawl on your own computer, none of it applies: requests, results and logs stay on your machine.
 
-Last updated 12 October 2026.
+Last updated 23 October 2026.
 
 ## What you submit
 
@@ -14,7 +14,7 @@ When the page opens, and after each preview, it asks `GET /api/quota` how many p
 
 ## What the page records
 
-- **The visitor cookie, `w2l_visitor`.** A random identifier, signed by the service, kept for a year. It counts your five previews a day, and the same identifier (or, without the cookie, your IP address), hashed per day, is the pseudonym on page events and preview outcomes (below). It is not shared with anyone. A second cookie, `w2l_internal`, is set only when a page is opened with `?internal=1`; the operator uses it to mark their own browser, and `?internal=0` removes it.
+- **The visitor cookie, `w2l_visitor`.** A random identifier, signed by the service, kept for a year. It counts your five previews a day, and the same identifier (or, without the cookie, your IP address), hashed per day, is the pseudonym on page events and preview outcomes (below). It is not shared with anyone. A second cookie, `w2l_internal`, is set only when a page is opened with `?internal=1`; the operator uses it to mark their own browser, and `?internal=0` removes it. A third, `w2l_src`, is set by the first page you open here: the `utm_` and `from` tags on its address, the referring site's host (never its path), the page's path and the day. It stays in your browser for 90 days; if you make an account in that time, the service writes it on the account (below) and deletes the cookie. It is not set when your browser sends Do Not Track or Global Privacy Control.
 - **A daily preview counter.** For each UTC day, a count of previews under a keyed hash of that day and your cookie (or, without the cookie, your IP address). Without the service's secret key, the hash cannot be turned back into either. These counters are kept in Google Cloud Firestore and expire one day after the day they count; Firestore then deletes them, usually within a day.
 - **Page events.** The page tells its own service when it is opened and when you choose an example, change the output view, switch the Markdown between source and preview, copy or download a result, open Get code or copy code from it or from the docs, pick an MCP client in the docs, open or send the waitlist form, or follow a link. Each event names the page path, the referring site's host (never its path), any `utm_` or `from` tags on the address, the view or Markdown mode, Get code tab, client or waitlist entry point involved, and for a link, where it leads: its path on this site, or another site's host and path (never a query).
 - **Preview outcomes.** For each preview: its state (for example `success` or `blocked`), the diagnostic code, the **host** of the page you asked for (never its path or query), whether you set options, and the server time.
@@ -39,6 +39,7 @@ Calls to `api.octocrawl.dev` and `mcp.octocrawl.dev` pass through Cloudflare and
 
 - **A daily counter** under a keyed hash of the UTC day and your address, or of your key, one for the calls from Claude's connectors together (they come from Anthropic's servers, so that counter holds no address of yours), and one for the whole service; without the service's secret the hash cannot be turned back into either. They are kept in Firestore and deleted two days on.
 - **Your key's record**, if you have one: a hash of the key (never the key), the label you gave when you asked for it, its plan and allowance, and when it was issued.
+- **Usage lines** in the service's logs, kept 30 days: for each call without a key, the first 16 characters of the keyed hash of your address that the daily counter uses (it cannot be turned back into your address), or that the call came from Claude's connectors, with the kind of call and the day; and when an MCP client connects, the name and version it gives (for example `claude-code` and `2.1.301`).
 - **The result of each call** for ten minutes, so that `GET /v1/scrapes/:id` can return it, then deleted with any file it read. The page you asked for is not kept for reuse by anyone else.
 
 The request log carries the path of the call and, for a scrape, the address you asked for is in its body, which the log does not record. A call made with an account's key is also listed for that account, as **Accounts** below says.
@@ -58,7 +59,7 @@ A sign-in link is sent by Firebase. GitHub and Google show you what they share b
 
 **This service.** The service keeps these in Google Cloud Firestore in Singapore:
 
-- **Your account:** your email address, when you first and last signed in, and which ways you signed in.
+- **Your account:** your email address, when you first and last signed in, and which ways you signed in. When the sign-in makes the account, also how your browser first reached the site, from the `w2l_src` cookie (above), and whether the sign-in was for an MCP client. Nothing is written when your browser sends Do Not Track or Global Privacy Control.
 - **A session for each sign-in:** a keyed hash of the session's id (never the id), your account, your email address and when it ends. It is deleted 30 days on, or when you sign out.
 - **Your credits:** this month's balance, and for each UTC day the number of calls by kind and the credits they cost. Daily counts are deleted after 90 days.
 - **Your requests:** for each call made with one of your keys or in your dashboard's Playground, a line with the address you asked for and the one finally read, when, which key (or the Playground), the formats a scrape asked for, the result (status, HTTP status, robots.txt decision, the reading route), how long the call took and the SHA-256 of what was read, with the credits it cost. Never the page's content. Only you see these lines, on your dashboard's Activity page, and each one is deleted 30 days after the call.

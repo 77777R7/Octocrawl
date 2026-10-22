@@ -507,6 +507,12 @@ export async function sweepTaskRoot(taskRoot: string, ttlMs = HOSTED_RECORD_TTL_
 }
 
 function utcDay(now: Date): string { return now.toISOString().slice(0, 10) }
+/** A name or version an MCP client gave, as printable text of at most 64 characters; null when it gave none. */
+function clientText(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const text = value.replace(/[^\x20-\x7e]/g, '?').trim().slice(0, 64)
+  return text === '' ? null : text
+}
 function secondsToUtcMidnight(now: Date): number {
   return Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime()) / 1000))
 }
@@ -704,8 +710,16 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     return body !== null && typeof body === 'object' && body.fastMode === true
   }
 
-  /** The day's usage line for a key's start, counted per key (its digest's first 16 characters, never the key) and per UTC day. */
+  /**
+   * The day's usage line for a start: a key's per key (its digest's first 16 characters, never the key); a keyless one
+   * per address, by the first 16 characters of the address's keyed hash, the daily counter's (never the address), or as
+   * Claude's pool, so active keyless addresses can be counted (GTM gate R5).
+   */
   function logUsage(caller: HostedCaller, path: string, day: string): void {
+    if (caller.kind === 'keyless') {
+      log(JSON.stringify({ severity: 'INFO', event: 'hosted_keyless_usage', address: caller.pool === 'claude' ? null : caller.id.slice(0, 16), pool: caller.pool === 'claude' ? 'claude' : 'address', endpoint: path === '/v1/scrape' ? 'scrape' : 'map', day }))
+      return
+    }
     if (caller.kind !== 'key') return
     log(JSON.stringify({ severity: 'INFO', event: 'hosted_usage', key: caller.id.slice(0, 16), plan: caller.plan, ...(caller.uid === undefined ? {} : { uid: caller.uid }), endpoint: path === '/v1/scrape' ? 'scrape' : 'map', day }))
   }
@@ -898,6 +912,12 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const connection = await identifyOAuth(oauthPresented(authorization), true)
       if (connection === null) { sendJson(res, 401, OAUTH_ENDED, { 'www-authenticate': challenge('invalid_token') }); return }
       caller = connection
+    }
+    // Which MCP clients connect (GTM gate R5): the name and version each gives when it initializes, and nothing else of it.
+    for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
+      if (message === null || typeof message !== 'object' || (message as { method?: unknown }).method !== 'initialize') continue
+      const info = (message as { params?: { clientInfo?: { name?: unknown; version?: unknown } } }).params?.clientInfo
+      log(JSON.stringify({ severity: 'INFO', event: 'hosted_mcp_initialize', endpoint: oauth ? '/mcp-oauth' : '/mcp', caller: oauth ? 'oauth' : caller.kind, client: clientText(info?.name), clientVersion: clientText(info?.version) }))
     }
     // The tools call the API in-process through the gate, so quota, lane and refusals are the REST ones.
     const client = new W2L({

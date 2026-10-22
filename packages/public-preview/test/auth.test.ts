@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { createPreviewServer } from '../src/server.js'
 import { MemoryAccountData } from '../src/account.js'
 import { createAuthRoutes, creditCarryKey, FirestoreAccountStore, IdentityToolkit, MemoryAccountStore, safeNext, SignInRefused, type AuthOptions, type IdentityProvider, type SignedIn } from '../src/auth.js'
-import type { LogLine } from '../src/site.js'
+import { sourceCookie, type LogLine } from '../src/site.js'
 
 const SECRET = 's'.repeat(40)
 const servers: Server[] = []
@@ -134,6 +134,38 @@ describe('signing in with GitHub or Google', () => {
     const signed = await fetch(`${url}/auth/email/finish`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: url, cookie: `w2l_link=${waiting}` }, body: 'email=ada%40example.org&oobCode=code-0123456789' })
     expect(signed.headers.get('location')).toBe('/dashboard/?linked=github')
     expect(accounts.users.get('email-user-0001')?.providers).toEqual(new Set(['emailLink', 'github.com']))
+  })
+
+  it('writes how a new account first reached the site on its record, once, then deletes the cookie that held it', async () => {
+    const { url, fake, accounts, lines } = await start()
+    const source = (utmSource?: string) => sourceCookie({ ...(utmSource ? { utmSource } : {}), landing: '/', landedOn: '2026-10-20' }, false).split(';')[0]!
+    const signIn = async (cookie: string, next = '/dashboard/', headers: Record<string, string> = {}) => {
+      const begin = await fetch(`${url}/auth/github?next=${encodeURIComponent(next)}`, { redirect: 'manual' })
+      const oauth = begin.headers.getSetCookie()[0]!.split(';')[0]!
+      return fetch(`${url}/__/auth/handler?code=abc&state=xyz`, { redirect: 'manual', headers: { cookie: [oauth, cookie].filter(Boolean).join('; '), ...headers } })
+    }
+    const back = await signIn(source('reddit'))
+    expect(back.status).toBe(303)
+    expect(accounts.users.get('github-user-0001')!.firstSource).toEqual({ utmSource: 'reddit', landing: '/', landedOn: '2026-10-20' })
+    expect(back.headers.getSetCookie().find(line => line.startsWith('w2l_src='))).toMatch(/^w2l_src=; Path=\/; HttpOnly; SameSite=Lax; Max-Age=0$/)
+    expect(lines).toContainEqual({ event: 'w2l_auth', step: 'first_source', outcome: 'recorded', source: 'reddit' })
+    // A later sign-in keeps the first source.
+    await signIn(source('hn'))
+    expect(accounts.users.get('github-user-0001')!.firstSource).toEqual({ utmSource: 'reddit', landing: '/', landedOn: '2026-10-20' })
+    // An account made before this sign-in gets none: its first touch was never seen.
+    accounts.users.set('github-user-0002', { email: 'bo@example.org', providers: new Set(['github.com']), createdAt: new Date('2026-10-01T00:00:00Z'), lastSignInAt: new Date('2026-10-01T00:00:00Z') })
+    fake.answer({ uid: 'github-user-0002', email: 'bo@example.org', provider: 'github.com' })
+    await signIn(source('reddit'))
+    expect(accounts.users.get('github-user-0002')!.firstSource).toBeUndefined()
+    // A sign-in on its way to an MCP client's authorization says so, with or without a cookie.
+    fake.answer({ uid: 'github-user-0003', email: 'cy@example.org', provider: 'github.com' })
+    await signIn('', '/oauth/authorize?client_id=c1&response_type=code')
+    expect(accounts.users.get('github-user-0003')!.firstSource).toEqual({ via: 'mcp-oauth' })
+    expect(lines).toContainEqual({ event: 'w2l_auth', step: 'first_source', outcome: 'recorded', source: 'via:mcp-oauth' })
+    // Do Not Track or Global Privacy Control: nothing is written.
+    fake.answer({ uid: 'github-user-0004', email: 'di@example.org', provider: 'github.com' })
+    await signIn(source('reddit'), '/dashboard/', { 'sec-gpc': '1' })
+    expect(accounts.users.get('github-user-0004')!.firstSource).toBeUndefined()
   })
 
   it('keeps the way back on this site: another host or a protocol-relative path is the dashboard', () => {
@@ -473,6 +505,34 @@ describe('Firebase\'s REST API', () => {
     expect(sent.at(-1)).toEqual({ url: 'https://identitytoolkit.googleapis.com/v1/accounts:delete?key=AIzaSyTestKey0123456789abcdef', body: { idToken: 'id-token-1' } })
     answers.push({ status: 400, body: { error: { message: 'CREDENTIAL_TOO_OLD_LOGIN_AGAIN' } } })
     await expect(toolkit.deleteAccount('id-token-1')).rejects.toMatchObject({ code: 'unavailable' })
+  })
+
+  it('writes a first source in Firestore only on the sign-in that made the account, under the record\'s update time', async () => {
+    const sent: Array<{ method: string; url: string; body: unknown }> = []
+    const record: { fields: Record<string, unknown>; updateTime: string } = { fields: { createdAtMs: { integerValue: '1760000000000' } }, updateTime: '2026-10-23T00:00:00.000001Z' }
+    let patchStatus = 200
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
+      sent.push({ method: init?.method ?? 'GET', url, body: init?.body ? JSON.parse(String(init.body)) : null })
+      if ((init?.method ?? 'GET') === 'GET') return Response.json({ name: 'projects/octocrawl-test/databases/(default)/documents/users/github-user-0001', ...record })
+      return patchStatus === 200 ? Response.json(record) : Response.json({ error: { status: 'FAILED_PRECONDITION' } }, { status: patchStatus })
+    }) as typeof fetch
+    const store = new FirestoreAccountStore('octocrawl-test', fetcher)
+    const source = { utmSource: 'reddit', landedOn: '2026-10-22' }
+    expect(await store.recordFirstSource('github-user-0001', source, new Date(1760000000000))).toBe('recorded')
+    const name = 'https://firestore.googleapis.com/v1/projects/octocrawl-test/databases/(default)/documents/users/github-user-0001'
+    expect(sent[0]).toEqual({ method: 'GET', url: `${name}?mask.fieldPaths=createdAtMs&mask.fieldPaths=firstSource`, body: null })
+    expect(sent[1]).toEqual({ method: 'PATCH', url: `${name}?updateMask.fieldPaths=firstSource&currentDocument.updateTime=2026-10-23T00%3A00%3A00.000001Z`, body: { fields: { firstSource: { mapValue: { fields: { utmSource: { stringValue: 'reddit' }, landedOn: { stringValue: '2026-10-22' } } } } } } })
+    // Another sign-in time: the account was made before this sign-in.
+    expect(await store.recordFirstSource('github-user-0001', source, new Date(1760000000001))).toBe('not_new')
+    // A record that has a source keeps it, and one changed between the read and the write keeps what it has.
+    record.fields.firstSource = { mapValue: { fields: { utmSource: { stringValue: 'hn' } } } }
+    expect(await store.recordFirstSource('github-user-0001', source, new Date(1760000000000))).toBe('kept')
+    delete record.fields.firstSource
+    patchStatus = 400
+    expect(await store.recordFirstSource('github-user-0001', source, new Date(1760000000000))).toBe('kept')
+    expect(sent.filter(request => request.method === 'PATCH')).toHaveLength(2)
   })
 
   it('forgets an account in Firestore: its record and every session it has, in one commit', async () => {

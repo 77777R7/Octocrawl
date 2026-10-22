@@ -62,6 +62,77 @@ export function optedOut(req: IncomingMessage): boolean {
   return req.headers.dnt === '1' || req.headers['sec-gpc'] === '1'
 }
 
+/**
+ * First-touch attribution (GTM gate R5): how a browser first reached the site, kept in the `w2l_src` cookie until it signs
+ * in, when auth.ts writes it on an account that sign-in made and deletes the cookie. The first page a browser opens without
+ * the cookie sets it; a visitor who sent Do Not Track or Global Privacy Control gets none.
+ */
+export const SOURCE_COOKIE = 'w2l_src'
+export const SOURCE_COOKIE_SECONDS = 90 * 86_400
+export interface FirstSource {
+  utmSource?: string
+  utmMedium?: string
+  utmCampaign?: string
+  /** A `from` tag on the address: a link on this site or in a package that names where it was. */
+  from?: string
+  /** The referring site's host, never its path; this site's own host is left out. */
+  ref?: string
+  /** The path of the first page the browser opened here. */
+  landing?: string
+  /** The UTC day it did. */
+  landedOn?: string
+  /** `mcp-oauth` when the sign-in was on its way to an MCP client's authorization. */
+  via?: string
+}
+const TAG = /^[A-Za-z0-9._~-]{1,60}$/
+const SOURCE_CHECKS: Record<keyof FirstSource, RegExp> = {
+  utmSource: TAG, utmMedium: TAG, utmCampaign: TAG, from: /^[a-z0-9-]{1,60}$/, ref: /^[a-z0-9.-]{1,253}$/,
+  landing: /^\/[A-Za-z0-9/._~-]{0,119}$/, landedOn: /^\d{4}-\d{2}-\d{2}$/, via: /^[a-z-]{1,20}$/,
+}
+
+/** The fields that pass their check; anything else, from an address or a cookie, is dropped. */
+export function cleanSource(value: unknown): FirstSource | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  const source: FirstSource = {}
+  for (const [key, check] of Object.entries(SOURCE_CHECKS) as Array<[keyof FirstSource, RegExp]>) {
+    const field = (value as Record<string, unknown>)[key]
+    if (typeof field === 'string' && check.test(field)) source[key] = field
+  }
+  return source
+}
+
+/** How this request reached the site: its `utm_` and `from` tags, the referring host when it is another site, the page and the day. */
+export function landingSource(req: IncomingMessage, pathname: string, search: string, ownHost: string, now = new Date()): FirstSource {
+  const params = new URLSearchParams(search)
+  const own = ownHost.toLowerCase().replace(/:\d+$/, '').replace(/^www\./, '')
+  let ref: string | undefined
+  try {
+    const host = new URL(String(req.headers.referer ?? '')).hostname.toLowerCase()
+    if (host !== own && host !== `www.${own}`) ref = host
+  } catch { /* no referrer, or not a URL */ }
+  return cleanSource({
+    utmSource: params.get('utm_source') ?? undefined, utmMedium: params.get('utm_medium') ?? undefined, utmCampaign: params.get('utm_campaign') ?? undefined,
+    from: params.get('from') ?? undefined, ref, landing: pathname, landedOn: now.toISOString().slice(0, 10),
+  })!
+}
+
+/** The source a `w2l_src` cookie holds, or null when there is none or it is not one this site wrote. */
+export function readSourceCookie(req: IncomingMessage): FirstSource | null {
+  const raw = req.headers.cookie?.split(';').map(part => part.trim()).find(part => part.startsWith(`${SOURCE_COOKIE}=`))?.slice(SOURCE_COOKIE.length + 1)
+  if (!raw || raw.length > 800 || !/^[A-Za-z0-9_-]+$/.test(raw)) return null
+  try { return cleanSource(JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'))) } catch { return null }
+}
+
+export function sourceCookie(source: FirstSource, secure: boolean): string {
+  return `${SOURCE_COOKIE}=${Buffer.from(JSON.stringify(source)).toString('base64url')}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SOURCE_COOKIE_SECONDS}${secure ? '; Secure' : ''}`
+}
+
+/** A short name for a source, for log lines and the funnel: its utm_source, else the referring host, its from tag, the way it signed in, or direct. */
+export function sourceLabel(source: FirstSource | null): string {
+  if (source === null) return 'unknown'
+  return source.utmSource ?? source.ref ?? (source.from ? `from:${source.from}` : source.via ? `via:${source.via}` : source.landing ? 'direct' : 'unknown')
+}
+
 /** Tools that name themselves, including monitors that do not say "bot" (Dataprovider.com, DomainMonitor). */
 const AUTOMATED_AGENT = /bot|crawl|spider|slurp|headless|preview|fetch|curl|wget|python|node|go-http|java\/|dataprovider|domainmonitor/i
 /** Browsers no one runs any more. A client that claims iOS before 15 or Chrome before 110 in 2026 is a scanner with a

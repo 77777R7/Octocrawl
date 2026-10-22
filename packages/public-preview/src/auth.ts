@@ -32,7 +32,7 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { metadataAccessToken } from './quota.js'
-import type { Logger } from './site.js'
+import { optedOut, readSourceCookie, SOURCE_COOKIE, sourceLabel, type FirstSource, type Logger } from './site.js'
 
 export type Provider = 'github.com' | 'google.com' | 'emailLink'
 
@@ -137,14 +137,19 @@ export interface AccountStore {
   endSession(sessionHash: string): Promise<void>
   /** Deletes the account's record and every session it has. */
   forget(uid: string): Promise<void>
+  /**
+   * Writes how the account first reached the site (site.ts FirstSource) on its record, when the sign-in at `signedInAt`
+   * made the account and the record has none yet: `not_new` for an account made before, `kept` for one that has a source.
+   */
+  recordFirstSource?(uid: string, source: FirstSource, signedInAt: Date): Promise<'recorded' | 'kept' | 'not_new'>
 }
 
 export class MemoryAccountStore implements AccountStore {
-  readonly users = new Map<string, { email: string | null; providers: Set<Provider>; createdAt: Date; lastSignInAt: Date }>()
+  readonly users = new Map<string, { email: string | null; providers: Set<Provider>; createdAt: Date; lastSignInAt: Date; firstSource?: FirstSource }>()
   readonly sessions = new Map<string, Session & { expiresAt: Date }>()
   async signIn(user: SignedIn, sessionHash: string, expiresAt: Date, now: Date) {
     const known = this.users.get(user.uid)
-    this.users.set(user.uid, { email: user.email ?? known?.email ?? null, providers: new Set([...(known?.providers ?? []), user.provider, ...(user.linked ?? [])]), createdAt: known?.createdAt ?? now, lastSignInAt: now })
+    this.users.set(user.uid, { ...known, email: user.email ?? known?.email ?? null, providers: new Set([...(known?.providers ?? []), user.provider, ...(user.linked ?? [])]), createdAt: known?.createdAt ?? now, lastSignInAt: now })
     this.sessions.set(sessionHash, { uid: user.uid, email: user.email, expiresAt })
   }
   async session(sessionHash: string, now: Date) {
@@ -155,6 +160,13 @@ export class MemoryAccountStore implements AccountStore {
   async forget(uid: string) {
     this.users.delete(uid)
     for (const [hash, session] of this.sessions) if (session.uid === uid) this.sessions.delete(hash)
+  }
+  async recordFirstSource(uid: string, source: FirstSource, signedInAt: Date): Promise<'recorded' | 'kept' | 'not_new'> {
+    const user = this.users.get(uid)
+    if (user === undefined || user.createdAt.getTime() !== signedInAt.getTime()) return 'not_new'
+    if (user.firstSource !== undefined) return 'kept'
+    user.firstSource = source
+    return 'recorded'
   }
 }
 
@@ -218,6 +230,27 @@ export class FirestoreAccountStore implements AccountStore {
     const rows = await call(':runQuery', { structuredQuery: { from: [{ collectionId: 'sessions' }], where: { fieldFilter: { field: { fieldPath: 'uid' }, op: 'EQUAL', value: { stringValue: uid } } }, limit: 500 } }) as Array<{ document?: { name: string } }>
     const names = [`${this.resource}/users/${uid}`, ...rows.flatMap(row => row.document ? [row.document.name] : [])]
     await call(':commit', { writes: names.map(name => ({ delete: name })) })
+  }
+  async recordFirstSource(uid: string, source: FirstSource, signedInAt: Date): Promise<'recorded' | 'kept' | 'not_new'> {
+    if (!/^[A-Za-z0-9_-]{8,128}$/.test(uid) || /^__.*__$/.test(uid)) throw new Error('account id is malformed')
+    const token = await metadataAccessToken(this.fetcher, AbortSignal.timeout(3_000))
+    const name = `https://firestore.googleapis.com/v1/${this.resource}/users/${uid}`
+    const read = await this.fetcher(`${name}?mask.fieldPaths=createdAtMs&mask.fieldPaths=firstSource`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5_000) })
+    if (read.status === 404) return 'not_new'
+    if (!read.ok) throw new Error(`account read failed (${read.status})`)
+    const doc = await read.json() as { fields?: { createdAtMs?: { integerValue?: string }; firstSource?: unknown }; updateTime?: string }
+    if (doc.fields?.firstSource !== undefined) return 'kept'
+    // signIn() set createdAtMs to the smaller of what it held and this sign-in's time: equal only when this sign-in made it.
+    if (Number(doc.fields?.createdAtMs?.integerValue) !== signedInAt.getTime() || !doc.updateTime) return 'not_new'
+    const fields = Object.fromEntries(Object.entries(source).map(([key, value]) => [key, { stringValue: value }]))
+    // Under the update time just read, so a source another sign-in wrote meanwhile is never replaced.
+    const write = await this.fetcher(`${name}?updateMask.fieldPaths=firstSource&currentDocument.updateTime=${encodeURIComponent(doc.updateTime)}`, {
+      method: 'PATCH', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
+      body: JSON.stringify({ fields: { firstSource: { mapValue: { fields } } } }),
+    })
+    if (write.ok) return 'recorded'
+    if (write.status === 400 || write.status === 409 || write.status === 412) return 'kept'
+    throw new Error(`account source write failed (${write.status})`)
   }
 }
 
@@ -389,11 +422,19 @@ export function createAuthRoutes(options: AuthOptions) {
     }
   }
 
-  async function startSession(res: ServerResponse, origin: string, user: SignedIn, extraCookies: string[] = []): Promise<void> {
+  async function startSession(res: ServerResponse, origin: string, user: SignedIn, extraCookies: string[] = [], source: FirstSource | null = null): Promise<void> {
     const id = randomBytes(32).toString('base64url')
     const at = now()
     const expiresAt = new Date(at.getTime() + SESSION_DAYS * 86_400_000)
     await options.accounts.signIn(user, sessionHash(options.secret, id), expiresAt, at)
+    // How a new account first reached the site (GTM gate R5); a failure here never stops the sign-in.
+    if (source !== null && options.accounts.recordFirstSource) {
+      const outcome = await options.accounts.recordFirstSource(user.uid, source, at).catch((error: unknown) => {
+        log({ event: 'w2l_auth', step: 'first_source', outcome: 'failed', reason: error instanceof Error ? error.message.slice(0, 200) : 'unknown' })
+        return null
+      })
+      if (outcome === 'recorded') log({ event: 'w2l_auth', step: 'first_source', outcome, source: sourceLabel(source) })
+    }
     // A new account for an address whose account was deleted this month goes on with that month's free credits.
     if (options.creditCarry && user.email) {
       await options.creditCarry.carry(user.uid, creditCarryKey(options.secret, user.email)).catch((error: unknown) => {
@@ -401,6 +442,13 @@ export function createAuthRoutes(options: AuthOptions) {
       })
     }
     res.setHeader('set-cookie', [cookie(origin, SESSION_COOKIE, id, '/', SESSION_DAYS * 86_400), hintCookie(origin, true), ...extraCookies])
+  }
+
+  /** What a sign-in knows of how its browser first reached the site: the `w2l_src` cookie, and whether it is on its way
+   * to an MCP client's authorization (oauth.ts). Null for a visitor who sent Do Not Track or Global Privacy Control. */
+  function signInSource(req: IncomingMessage, next: string): FirstSource | null {
+    if (optedOut(req)) return null
+    return { ...readSourceCookie(req), ...(next.startsWith('/oauth/authorize') ? { via: 'mcp-oauth' } : {}) }
   }
 
   /** The account a deletion is waiting to delete, from its signed cookie; null when there is none or it is old. */
@@ -418,17 +466,20 @@ export function createAuthRoutes(options: AuthOptions) {
    * deletion that fails before Firebase's step signs the visitor in and says so on Settings, so they can try again; one
    * that fails at Firebase's step signs no one in. `clear` are the sign-in's own cookies to remove either way.
    */
-  async function finishSignIn(req: IncomingMessage, res: ServerResponse, origin: string, user: SignedIn, clear: string[], next: string): Promise<void> {
+  async function finishSignIn(req: IncomingMessage, res: ServerResponse, origin: string, user: SignedIn, clearOwn: string[], next: string): Promise<void> {
+    const source = signInSource(req, next)
+    // The source cookie has done its work once the browser is signed in.
+    const clear = [...clearOwn, ...(cookieValue(req, SOURCE_COOKIE) === null ? [] : [cookie(origin, SOURCE_COOKIE, '', '/', 0)])]
     const deleting = pendingDeletion(req)
     if (deleting === null) {
-      await startSession(res, origin, user, clear)
+      await startSession(res, origin, user, clear, source)
       res.writeHead(303, { ...NO_STORE, location: next }).end()
       return
     }
     const clearDelete = cookie(origin, DELETE_COOKIE, '', '/', 0)
     if (deleting !== user.uid || !user.idToken || options.eraseAccountData === undefined) {
       log({ event: 'w2l_auth', step: 'delete', outcome: deleting !== user.uid ? 'other_account' : 'unavailable' })
-      await startSession(res, origin, user, [...clear, clearDelete])
+      await startSession(res, origin, user, [...clear, clearDelete], source)
       res.writeHead(303, { ...NO_STORE, location: `/dashboard/settings/?delete=${deleting !== user.uid ? 'other_account' : 'failed'}` }).end()
       return
     }

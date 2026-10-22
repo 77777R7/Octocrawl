@@ -439,19 +439,44 @@ it('a key runs one browser-lane scrape at a time; a second waits with Retry-Afte
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)).status).toBe(200)
 })
 
-it('logs each key start per key and UTC day by the digest\'s prefix, never the key, and nothing for keyless calls', async () => {
+it('logs the name and version an MCP client gives when it connects, cut to plain text, and nothing else of the handshake', async () => {
+  const lines: string[] = []
+  const { url } = await start({ log: (line) => lines.push(line), keys: { oc_http: { enabled: true, plan: 'free', dailyLimit: 5, browser: false } } })
+  const initialize = (clientInfo: Record<string, unknown>, headers: Record<string, string> = {}) => post(url, '/mcp', { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo } }, { accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18', ...headers })
+  expect((await initialize({ name: 'claude-code', version: '2.1.301' })).status).toBe(200)
+  expect((await initialize({ name: 'cursor', version: '1.7' }, { authorization: 'Bearer oc_http' })).status).toBe(200)
+  expect((await initialize({ name: `odd\nname${'x'.repeat(100)}`, version: 7 })).status).toBe(200)
+  const connects = lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.event === 'hosted_mcp_initialize')
+  expect(connects).toEqual([
+    { severity: 'INFO', event: 'hosted_mcp_initialize', endpoint: '/mcp', caller: 'keyless', client: 'claude-code', clientVersion: '2.1.301' },
+    { severity: 'INFO', event: 'hosted_mcp_initialize', endpoint: '/mcp', caller: 'key', client: 'cursor', clientVersion: '1.7' },
+    { severity: 'INFO', event: 'hosted_mcp_initialize', endpoint: '/mcp', caller: 'keyless', client: `odd?name${'x'.repeat(56)}`, clientVersion: null },
+  ])
+  expect(lines.join('\n')).not.toContain('oc_http')
+})
+
+it('logs each key start per key and UTC day by the digest\'s prefix, never the key, and each keyless start by its address\'s keyed hash', async () => {
   const lines: string[] = []
   const { url } = await start({ log: (line) => lines.push(line), keys: { oc_logged_key: { enabled: true, plan: 'trial', dailyLimit: 5, browser: false } } })
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_logged_key' })).status).toBe(200)
   expect((await post(url, '/v1/map', { url: `${origin}/page` }, { authorization: 'Bearer oc_logged_key' })).status).toBe(200)
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` })).status).toBe(200)
-  const usage = lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.event === 'hosted_usage')
+  expect((await post(url, '/v1/map', { url: `${origin}/page` })).status).toBe(200)
+  const parsed = lines.map((line) => JSON.parse(line) as Record<string, unknown>)
+  const usage = parsed.filter((line) => line.event === 'hosted_usage')
   const day = new Date().toISOString().slice(0, 10)
   expect(usage).toEqual([
     { severity: 'INFO', event: 'hosted_usage', key: keyDigest(HASH_KEY, 'oc_logged_key').slice(0, 16), plan: 'trial', endpoint: 'scrape', day },
     { severity: 'INFO', event: 'hosted_usage', key: keyDigest(HASH_KEY, 'oc_logged_key').slice(0, 16), plan: 'trial', endpoint: 'map', day },
   ])
+  // Keyless starts: the address's keyed hash (the daily counter's), never the address.
+  const keyless = parsed.filter((line) => line.event === 'hosted_keyless_usage')
+  expect(keyless).toEqual([
+    { severity: 'INFO', event: 'hosted_keyless_usage', address: expect.stringMatching(/^[a-f0-9]{16}$/), pool: 'address', endpoint: 'scrape', day },
+    { severity: 'INFO', event: 'hosted_keyless_usage', address: keyless[0]!.address, pool: 'address', endpoint: 'map', day },
+  ])
   expect(lines.join('\n')).not.toContain('oc_logged_key')
+  expect(JSON.stringify(keyless)).not.toContain('127.0.0.1')
 })
 
 /** A Firestore REST stand-in: documents by name, reads, and commits whose preconditions are checked, as the service's stores use them. */
