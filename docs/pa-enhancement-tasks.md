@@ -158,8 +158,8 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   | --- | --- | --- | --- |
   | #512 verify fields on the delivered scrape response | 开放，非草稿 | 它的 `packages/mcp/test/deliveryScope.integration.test.ts`、`packages/ai-sdk/test/deliveryScope.integration.test.ts` 已在 `main`（#591 带入）；`research/trials/` 的 README 和模板 `main` 上没有 | 关闭；`research/trials/` 三个文件由本 PR 带入（README 的期限一段按决定 9 改为不设日期） |
   | #514 verify distinct list records by explicit identity fields | 开放，非草稿 | `uniqueBy`（`packages/runtime/src/verify.ts:106-113`）和 `packages/mcp/test/distinctRecordsDelivery.integration.test.ts` 已在 `main` | 关闭 |
-  | #515 classify Skyscanner human verification pages | 开放，非草稿 | `gate.ts` 的 Skyscanner 判定和它的两个测试文件 `main` 上没有 | 保留，单独审：rebase 到 `main`、补 `sites.md` 用例后合 |
-  | #582 classify explicit source outages as not served | 草稿 | `extract-tf/src/sourceUnavailable.ts` `main` 上没有；改 `readiness.ts` 与 ADR 0007 | 保留，转为独立小 PR（不属 D 类），rebase 后按 ADR 0007 审 |
+  | #515 classify Skyscanner human verification pages | 已关闭（2026-10-21） | `gate.ts` 的 Skyscanner 判定和它的两个测试文件 `main` 上没有 | 保留，单独审：rebase 到 `main`、补 `sites.md` 用例后合。结果：由 #676（`91f7257d`）按 `main` 重做合入，带 `sites.md` G01 和直连、代理两份实站记录 |
+  | #582 classify explicit source outages as not served | 已关闭（2026-10-21） | `extract-tf/src/sourceUnavailable.ts` `main` 上没有；改 `readiness.ts` 与 ADR 0007 | 保留，转为独立小 PR（不属 D 类），rebase 后按 ADR 0007 审。结果：由 #675（`3f498f63`）按 `main` 重做合入，`EXTRACTOR_VERSION` 重新取号为 `extract-tf/39` |
   | #584 align final delivery and bound HTTP timeout fallback | 草稿，NO-GO | #591 已带入最终交付复验与 #591 回退；剩余片段见下 | 保留作 D6 的来源，D6 各片段合入后关闭 |
   | #528 verify final scrape delivery and preserve task records and standards | 草稿 | 与 #584 重叠（RFC/WCAG、百分比、聚合报价、Skyscanner 门、示例合同） | 保留作 D6 的来源，与 #584 一起在 D6 后关闭 |
   | #556 / #562 字段金标准与保留集首轮 | 草稿 | `main` 上没有 `research/accuracy/` | 保留，R1/R3 cherry-pick 后关闭 |
