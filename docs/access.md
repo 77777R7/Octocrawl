@@ -3,7 +3,7 @@
 By default Octocrawl reads public pages with its own HTTP client and its own browser. This page covers four ways to go further:
 
 - **Your own login.** Octocrawl reads a site signed in as you, with the cookies you import from Chrome.
-- **Enhanced access.** An operator's access grant allows paid providers, within a budget.
+- **Enhanced access.** An operator's access grant allows stronger routes: the Google Chrome installed on your machine, which Octocrawl recommends there, and paid providers, within a budget.
 - **Handoff.** A page that stops at a check opens in your Chrome, and you get through it yourself.
 - **Your own Chrome.** Octocrawl reads the page in your Chrome, on the sites you allow.
 
@@ -23,10 +23,55 @@ Mode `authed` reads a page with the login you saved for its site, in Octocrawl's
 For people who do not want the technical switches, one option chooses how pages are reached: `"access": "standard"`, `"enhanced"` or `"my-browser"` on `POST /v1/scrape` and `POST /v1/batches` (`standard` or `enhanced` on `POST /v1/crawl`), the MCP `scrape`, `batch_scrape` and `crawl` tools, and `--access` on the command line.
 
 - `standard`: Octocrawl's own fetching and its local browser. No rung that costs a third party runs; the routing audit says which it dropped (`ladder_channels_filtered`, reason `access standard`).
-- `enhanced`: also what the server's access grant of tier enhanced approves: the paid providers below, in any mode, mode standard included. The grant's run budget caps a batch or a crawl; a single scrape calls each provider the server names at most once. A server without such a grant refuses it by name (`unsupported_parameter`).
+- `enhanced`: also what the server's access grant of tier enhanced approves: on your own machine the installed Google Chrome (below), and the paid providers below, in any mode, mode standard included. The grant's run budget caps a batch or a crawl; a single scrape calls each provider the server names at most once. A server without such a grant refuses it by name (`unsupported_parameter`).
 - `my-browser`: your own Chrome, the same as `"lane": "my-browser"` (below). A crawl does not take it.
 
 Without `access`, a request runs as the server is configured. A batch or crawl keeps its choice, so a resumed run makes the same one. The per-route options below stay for developers.
+
+### The recommended route on your own machine
+
+On a server that runs on your machine, the enhanced route Octocrawl recommends is `installed_chrome`. It reads a page that stopped at a check in the Google Chrome installed on that machine. It is a recommendation, not a default: it stays off until you turn it on, and Octocrawl never writes the grant for you.
+
+To turn it on:
+
+1. Write a grant that names it, with your own attestation, and start the server with it. The `octocrawl` commands and the local MCP service read the same grant from `W2L_ACCESS_GRANT` ([local setup](local-setup.md#the-managed-local-service)).
+
+   ```json
+   {
+     "tier": "enhanced",
+     "capabilities": ["installed_chrome"],
+     "attestation": { "principal": "you@example.com", "at": "2026-10-23T12:00:00Z", "statement": "I accept that Octocrawl opens Google Chrome windows on this machine." }
+   }
+   ```
+
+   ```bash
+   octocrawl serve --access-grant grant.json
+   ```
+
+2. Ask for it on the request: `"access": "enhanced"`, `--access enhanced` on the command line, or `access: "enhanced"` on the MCP tools.
+
+The route then runs after Octocrawl's own browser and before any paid provider, in mode standard. How it launches, and the requests it does not take, are under `installed_chrome` below.
+
+Why Octocrawl recommends it: in K1, two windows on 2026-10-21 and 2026-10-22 ([record](../research/access/runs/2026-10-22-k1-two-windows-b233d232.md)), it was the only large gain over standard that held in both windows. First calls on the same 92 tasks:
+
+- In both windows it verified 15 tasks that standard verified in neither. No task went the other way, and 11 differed between the windows. It paid no third-party fees.
+- It verified 60 and 68 of the 92. Firecrawl verified 69 and 70.
+- It gave 3 false successes in 184 answers. Firecrawl gave 24.
+
+What to know before you turn it on:
+
+- It was measured on one Mac, behind one datacenter exit (Clash, 103.142.140.0/24). How it does on your network is unknown. In another test, a residential exit did worse than that one on Cloudflare-checked tasks: 5 of 32 against 24 of 32 ([K3](../research/access/runs/2026-10-21-k3-egress-by-detection-5beacbf3.md)).
+- It opens Chrome windows on your screen. In K1, 38 and 35 of the 92 tasks reached it. At most 2 of its windows are open at once.
+- It is slower. Its p95 time was 26.2 s and 25.3 s, against standard's 13.9 s and 15.9 s.
+- It needs Google Chrome on the machine. Chrome updates itself, and an update can make the route work less well.
+- The hosted service and the remote MCP cannot use it. A hosted server refuses a grant that names it.
+- It has not been measured together with a paid provider in one grant.
+
+When the recommendation stops: Octocrawl reruns the route on 16 challenge tasks every week, and again when Chrome's major version changes. A week with fewer than 7 of the 16 verified falls below its acceptance baseline. Octocrawl then withdraws this recommendation until a new run reaches 7 again ([ADR 0005, revision of 2026-10-23](adr/0005-enhanced-access-policy.md)). A grant you wrote keeps working either way.
+
+A server on your machine also says this in its answers. A page can stop at a check that Octocrawl's own browser met too. If the server's grant does not name `installed_chrome`, the answer's `agentHints` then point to this route and how to grant it ([agentHints](scrape-options.md#agenthints)). A hosted answer never does.
+
+### Access grants and their routes
 
 By default a server uses none of the capabilities [ADR 0005](adr/0005-enhanced-access-policy.md) puts behind a grant: no provider browser, no challenge solving, no provider stealth. An operator who wants them starts the server with a grant, a JSON file the server checks at startup; a grant with any problem stops startup with every problem listed.
 
@@ -86,7 +131,7 @@ octocrawl serve --access-grant grant.json
   - **Limits.** At most two of its windows are open at once. A proxy that needs a login is refused, since Chrome takes no proxy credentials on its command line.
   - **Finding Chrome.** It looks where Google Chrome installs on macOS, Windows and Linux; `W2L_CHROME_PATH` names another executable. Without Chrome, the answer carries a `browser_not_installed` warning that says to install it.
   - **On the record.** A page read on it has `access.route` `installed_chrome`, with Chrome's version as `executorVersion`, and the trace's `browser_engine` names both.
-  - **Status.** Its acceptance runs (ADR 0005) are still to come.
+  - **Status.** Its acceptance runs passed on 2026-10-14: 11 and 7 of the 16 challenge tasks ([record](../research/access/runs/2026-10-14-installed-chrome-acceptance-7b56397b.md)). It is the route recommended on your own machine ([above](#the-recommended-route-on-your-own-machine)).
 - `W2L_BROWSER_IDENTITY=actual` makes the public browser rung send the browser's own identity instead of the mode's declared one: no User-Agent, client hints or CDP override on the context, so Chromium sends its `HeadlessChrome` User-Agent and its own `sec-ch-ua`, and the record declares the User-Agent read from the browser (`identity_declared` says `identity: actual`), so the honesty check still holds a declaration against what was sent; robots.txt is matched against that User-Agent too, so a `User-agent: HeadlessChrome` group governs, and the record names it. An experiment switch (docs/pa-challenge-botcheck-tasks.md, G2): on 2026-10-12 imf.org's edge refused a headless Chromium claiming Google Chrome and served one saying what it is ([record](../research/access/runs/2026-10-12-t053-identity-204c8a76.md)), while a site that refuses `HeadlessChrome` by name loses what the claim gets, so it is measured on item 1's set and the health batches before any default changes. Standard and authed desktop identities on an unmanaged context take it; research mode, the mobile identity, the hosted preview's token and a managed profile keep the declared identity; a hosted server refuses it.
 - `W2L_COMPAT_HOSTS=example.com,shop.example` sends those hosts' pages, and their subdomains', over a browser-compatible HTTP transport ([impit](https://github.com/apify/impit)) when the grant names `compatible_transport`: the `http` rung becomes `http_compat`, in standard mode on a local server; a hosted server refuses it. The request carries Chrome's own headers and TLS handshake, so the page records that Chrome identity (`identity_sent`) and the transport (`transport`). A request with custom `headers` or `mobile` keeps the `http` rung, since the transport cannot send them without changing Chrome's header set, and so does a map's start page, read under the identity the map reports. impit decodes compressed bodies itself, so such a page reports its wire size as unknown. Without `W2L_COMPAT_HOSTS`, a grant that names `compatible_transport` uses it for the hosts its acceptance showed it helps: five hosts (`research/access/benefit-hosts.v1.json`) whose blocked task it verified in both G1 windows with no regression (`research/access/runs/2026-10-07-g1-acceptance-5afe577.md`). It is not for every host: across the whole task set it also turned refusals into answers whose data was wrong. `W2L_COMPAT_HOSTS=none` turns it off; naming hosts replaces the list.
 - `egress_sessions` gives each batch and crawl (not a single scrape, nor mode `authed`, which has your saved login) a cookie session: the cookies its pages set are sent again to their site on its later pages, by the HTTP rung, the compatible transport and the browser alike, so a page whose check the browser cleared lets the task's next page of that site go over HTTP. Cookies are matched to domain and path as a browser does, kept in the task's directory (`cookie-session.<route>.json`, one per egress route, readable by you alone) so a batch or crawl resumed after a restart goes on with them, deleted when the task ends, and never recorded: a page's trace names the session's random id and counts (`session_cookies`). A page read with a session is not cached.

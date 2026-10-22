@@ -74,6 +74,35 @@ the grant allows when it starts (`.w2l/local-mcp.stdout.log`). With
 rung, since that state keeps the service's browser to Amazon.sg's hosts; the
 service says so at startup.
 
+## Pages that stop at a check
+
+A server on your computer can read a page that stopped at a bot check in the
+Google Chrome installed there. This is the `installed_chrome` route, the
+enhanced route Octocrawl recommends on your own machine. It stays off until
+you turn it on:
+
+- Write an access grant that names `installed_chrome`, with your own
+  attestation. Octocrawl never writes it for you.
+- Start the server with it: `octocrawl serve --access-grant grant.json`, or
+  `W2L_ACCESS_GRANT` for the `octocrawl` commands and the managed local
+  service above.
+- Send `"access": "enhanced"` on the request.
+
+Know its limits before you turn it on:
+
+- It was measured on one Mac, behind one datacenter exit. How it does on
+  your network is unknown.
+- It opens Chrome windows on your screen, at most 2 at once, and it is slower
+  than a plain read.
+- It needs Google Chrome, which updates itself.
+- The hosted service and the remote MCP cannot use it.
+
+Until a server's grant names the route, its answers point to it: a page that
+stopped at a check Octocrawl's own browser met too carries an `agentHints`
+line that says how to grant it. The grant's format, the measurements, and
+when Octocrawl stops recommending the route are in
+[the recommended route on your own machine](access.md#the-recommended-route-on-your-own-machine).
+
 ## The standalone REST API
 
 The legacy standalone REST API remains available for SDK and Firecrawl-shim

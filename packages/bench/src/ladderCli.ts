@@ -48,6 +48,7 @@ import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import type { RobotsOriginCache } from './robotsLookup.js'
 import { BrowserLocalSubject } from './subjects/browserLocal.js'
+import { installedChromeRefusal } from './subjects/installedChrome.js'
 import { OriginScheduler } from './subjects/originScheduler.js'
 import { FileStore } from './fileStore.js'
 import { defaultNetworkPolicy, EgressRoutes } from './egress.js'
@@ -313,14 +314,7 @@ export function buildChannels(
       waitsFor: true,
       // The Chrome reads the page as it opened it (ADR 0005): no actions, screenshot, phone identity, added headers or
       // relaxed certificate check, each of which would drive or dress the window beyond what was measured.
-      refusal: (_url: string, options: FetchOptions) => {
-        const asked = [
-          ...((options.actions?.length ?? 0) > 0 ? ['actions'] : []), ...(options.screenshot !== undefined ? ['screenshot'] : []),
-          ...(options.mobile === true ? ['mobile'] : []), ...(Object.keys(options.headers ?? {}).length > 0 ? ['headers'] : []),
-          ...(options.skipTlsVerification === true ? ['skipTlsVerification'] : []),
-        ]
-        return asked.length === 0 ? null : `installed_chrome reads the page as Chrome opened it and takes no ${asked.join(', ')} (ADR 0005)`
-      },
+      refusal: (_url: string, options: FetchOptions) => installedChromeRefusal(options),
       fetch: (url: string, _session: SessionSnapshot | null | undefined, execution?: ExecutionContext, options?: FetchOptions) =>
         installedChrome.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume }),
       close: () => installedChrome.teardown(),

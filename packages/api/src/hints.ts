@@ -31,6 +31,13 @@ export const BROWSER_NOT_INSTALLED_HINT = browserNotInstalledHint()
 /** The hint the installed_chrome rung's `browser_not_installed` warning carries (ADR 0005): it needs Google Chrome itself. */
 export const INSTALLED_CHROME_MISSING_HINT = `Google Chrome is not installed where Octocrawl runs, so the installed_chrome rung could not start; ${INSTALLED_CHROME_INSTALL}, then scrape again`
 
+/**
+ * The route Octocrawl recommends on the person's own machine for a check the bundled browser met too (ADR 0005, revision
+ * of 2026-10-23), said by a server there whose grant does not name it. The person writes the grant, with their own
+ * attestation; Octocrawl never does, and the route stays off until they do.
+ */
+export const INSTALLED_CHROME_RECOMMENDED_HINT = 'installed_chrome is the enhanced route Octocrawl recommends on your own machine for a check like this, and this server\'s access grant does not name it: it reads the page in this machine\'s Google Chrome, in a window it opens (at most 2 at once); to use it, write an access grant of tier enhanced that names installed_chrome, with your own attestation, start the server with it (octocrawl serve --access-grant <file>, or W2L_ACCESS_GRANT) and send the request again with access: "enhanced"; it was measured on one machine behind one exit, so what it gets past is unknown on yours (https://github.com/77777R7/Octocrawl/blob/main/docs/access.md#the-recommended-route-on-your-own-machine)'
+
 /** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */
 export const SCREENSHOT_UNAVAILABLE_HINT = "the screenshot could not be captured, so screenshot is null while the page result stands; the trace's screenshot_failed event names the error; a viewport capture (fullPage false) is the lighter request, and a longer timeout gives a slow page more time"
 
@@ -63,6 +70,15 @@ export type HintedRun = Pick<LadderRunAudit, 'channelsTried'> & Partial<Pick<Lad
 
 /** The most hints one result carries; the table's order decides which stay. */
 export const MAX_AGENT_HINTS = 5
+
+/** What the answering server can still offer the request beyond the lanes the run tried; the engine decides each. */
+export interface HintOffers {
+  /**
+   * The installed_chrome route (ADR 0005, revision of 2026-10-23): true on a server on the person's machine whose grant
+   * does not name it, for a request its rung would take. Never on a hosted server.
+   */
+  installedChrome?: boolean
+}
 
 /** A fastMode the scrape's caller pinned, not the person asking (the hosted gate, for a caller without the browser lane). */
 export interface FastModePin {
@@ -167,11 +183,11 @@ const ROBOTS_ROUTE = 'A local Octocrawl server fetches a URL a scrape or batch n
 
 /**
  * The hints of one scrape, in the order they apply; empty when there is
- * nothing to say. A pure function of the result and the request: the same
- * result gives the same hints on the full and compact responses, on batch
- * items and crawl pages, and in the scrape record.
+ * nothing to say. A pure function of the result, the request and what the
+ * server offers it: the same result gives the same hints on the full and
+ * compact responses, on batch items and crawl pages, and in the scrape record.
  */
-export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedRun): string[] {
+export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedRun, offers: HintOffers = {}): string[] {
   const { result } = run
   const hints: string[] = []
   const host = hostOf(result)
@@ -191,6 +207,9 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
   }
   if (result.status === 'blocked' && result.blockReason !== null && GATES.has(result.blockReason)) {
     hints.push(`${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); Octocrawl does not solve challenges or change its identity unless this server's access grant names a provider that does (--access-grant, ADR 0005); a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)`)
+    // The bundled browser met the check too: the rung after it, on the person's machine, is their installed Chrome; a run
+    // that already tried it (a stored page read before the server's grant changed) is not told to try it.
+    if (offers.installedChrome === true && run.channelsTried.includes('browser_local') && !run.channelsTried.includes('installed_chrome')) hints.push(INSTALLED_CHROME_RECOMMENDED_HINT)
   }
   const escalated = laneEscalatedHint(run, host)
   if (escalated !== null) hints.push(escalated)
