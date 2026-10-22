@@ -127,6 +127,14 @@
 
 无契约或契约未通过时，该信号给出 `not_served`，basis 为 `source_unavailable`，优先于加载/空壳推断。只读最后一次提取，旧通道的诊断不能污染后续正常捕获；已配置检查通过仍为 `ready/verified`，不把一个关键词契约通过称为独立准确性通过。抓取 `status`、正文、验证契约及 passed/failed/not_requested 语义不变；API、SDK、MCP 及 Evidence Record 保持相同状态。仅改分类，不代表目标数据恢复，旧记录/缓存与验收成绩不回写；需要新捕获时用 `maxAge: 0`。
 
+### 2026-10-22：页面抓到之后，我们自己的代码抛错
+
+K1 窗口 1 的 T016（Zara）：区域等待已就绪、页面已截取，随后 extract-tf 抛了 TypeError（#671 已修）。浏览器通道却把它报成 `connection_error`，看起来像网站连不上。
+
+- **失败原因：** browser_local（含 installed Chrome）在页面截取之后抛出的错误，记为 `failed`/`internal_error`，trace 事件是 `extraction_failed`（不再是 `navigate_failed`）。截取之前的错误照旧按导航、TLS、DNS、重定向、超时分类。
+- **就绪：** 带 `extraction_failed` 的 `internal_error` 是 `not_extracted`，basis 为 `internal_error`、`extraction_failed`：页面来了，是我们没读出来。没有这条事件的 `internal_error`（抛错不在浏览器通道截取的页面上，例如 HTTP 通道自己的抽取抛错，它没有这条事件）仍是 `not_served`。
+- **阶梯：** 停下，免费和付费的级别都不再走。第 4 节允许 `not_extracted` 走免费级别，那是对"抽取器没找到正文"而言：换一种渲染，页面可能不同。抛错是代码缺陷，每个级别跑的是同一套抽取，再走一级只会多花时间、多读一次站点，或者用另一级的答案把缺陷盖住。之前的级别已经有内容时，那份内容照旧是答案。
+
 ### 4. 执行阶梯
 
 ADR 0006 已经在质量跳级前面留了一个位置：带契约时遇到 `checks_failed`，先问这里的分类器。

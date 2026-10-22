@@ -2,9 +2,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_NETWORK_POLICY, localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type RobotsOverrideApplied } from '@w2l/contracts'
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
+import { extractTf } from '@w2l/extract-tf'
 import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
 import { captureOf } from '../src/capture.js'
 
@@ -823,6 +824,21 @@ describe('BrowserLocalSubject transport', () => {
       const out = await subject.fetch('http://w2l-dns-failure.invalid/page')
       expect(out).toMatchObject({ status: 'failed', failureReason: 'dns_error' })
     } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('reports its own extraction crash on a captured page as internal_error, not a connection_error', async () => {
+    const subject = new BrowserLocalSubject()
+    // The K1 T016 crash (#671): the page was captured, then extraction threw.
+    const extract = vi.spyOn(extractTf, 'extract').mockImplementation(() => { throw new TypeError("Cannot read properties of null (reading 'value')") })
+    try {
+      const out = await subject.fetch(`${url}/spa`)
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'internal_error' })
+      expect(out.trace.find(event => event.event === 'navigate_failed')).toBeUndefined()
+      expect(out.trace.find(event => event.event === 'extraction_failed')?.detail).toMatchObject({ error: "Cannot read properties of null (reading 'value')" })
+    } finally {
+      extract.mockRestore()
       await subject.teardown()
     }
   })

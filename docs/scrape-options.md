@@ -174,8 +174,8 @@ Where it appears: full and compact scrape responses, batch items and crawl pages
 
 - `ready`.
 - `not_loaded`: the page was read before what it shows had come, so waiting or acting in the same session may change it. The signals: `page_still_loading`, `client_rendered_suspected`, `page_still_changing`, `wait_cut_short`, `list_not_exhausted`, `deadline_exceeded` on a `partial` result, a `timeout` the deadline ended on a page that had answered, `action_failed`, or `empty_unverified` with `not_rendered` (read by the http lane without its scripts) or `little_text` (a rendered page of at most 4,000 visible characters, such as OECD's Data Explorer before its data arrived).
-- `not_extracted`: the page came but was not read into content, which no other route mends: `empty_unverified` in a rendered page with more visible text than that, a file with no text, or one that could not be read.
-- `not_served`: the route, the access or the region did not serve it: a block reason, `http_error`, `policy_denied`, a network failure, a `timeout` with no answer, `internal_error`, a spent budget, or a fetched page that declares the whole site unavailable (`source_unavailable`, below).
+- `not_extracted`: the page came but was not read into content, which no other route mends: `empty_unverified` in a rendered page with more visible text than that, a file with no text, one that could not be read, or `internal_error` with `extraction_failed` (Octocrawl's own code threw on the page the browser lane had captured; the ladder stops there rather than reading the page again on another rung).
+- `not_served`: the route, the access or the region did not serve it: a block reason, `http_error`, `policy_denied`, a network failure, a `timeout` with no answer, any other `internal_error` (the scrape threw outside the browser lane's captured page), a spent budget, or a fetched page that declares the whole site unavailable (`source_unavailable`, below).
 
 `basis` lists the codes in the order found. `waitedMs` is the lane's last recorded wait for the page to settle.
 
