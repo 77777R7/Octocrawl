@@ -2,7 +2,7 @@
 
 This page covers the public Octocrawl page and its preview service. When you run Octocrawl on your own computer, none of it applies: requests, results and logs stay on your machine.
 
-Last updated 12 October 2026.
+Last updated 23 October 2026.
 
 ## What you submit
 
@@ -40,6 +40,7 @@ Calls to `api.octocrawl.dev` and `mcp.octocrawl.dev` pass through Cloudflare and
 - **A daily counter** under a keyed hash of the UTC day and your address, or of your key, one for the calls from Claude's connectors together (they come from Anthropic's servers, so that counter holds no address of yours), and one for the whole service; without the service's secret the hash cannot be turned back into either. They are kept in Firestore and deleted two days on.
 - **Your key's record**, if you have one: a hash of the key (never the key), the label you gave when you asked for it, its plan and allowance, and when it was issued.
 - **The result of each call** for ten minutes, so that `GET /v1/scrapes/:id` can return it, then deleted with any file it read. The page you asked for is not kept for reuse by anyone else.
+- **Crawl and batch jobs**, which only an account can start. The job's record is kept in Firestore in Singapore: what you asked for, its status, page counts and credits, and the webhook you gave, if any (its address, events, labels, signing secret, and how its delivery went). The pages the job read and its export are kept in Google Cloud Storage in Singapore. The pages and the export are deleted 7 days after the job ends, and the record 30 days after that. A job that never ends is deleted 30 days after it started. If you gave a webhook, the service sends the job's end, with its status and counts, to that address.
 
 The request log carries the path of the call and, for a scrape, the address you asked for is in its body, which the log does not record. A call made with an account's key is also listed for that account, as **Accounts** below says.
 
@@ -68,7 +69,7 @@ A sign-in link is sent by Firebase. GitHub and Google show you what they share b
 
 **Logs.** The service's own log lines say that a sign-in happened, the way it happened and whether it worked, without your email address. The request log (above, 30 days) keeps each request's path and query, so it holds the one-time code a sign-in carried back. Such a code works once and expires within an hour. For an account's key, the hosted API logs one line per call with the account's id, the kind of call and the credits it cost.
 
-**Deleting your account.** In your dashboard, Settings → Delete account: type the account's email address, then sign in once more the way you usually do. As soon as you are signed in, the service deletes your keys (they stop working within a minute), your credits, bought ones included, your daily usage, your request lines, your account record and its sessions, and then your Firebase account. Service logs that name the account's id are deleted with the rest of the logs, 30 days on. If the deletion stops part way, sign in and delete again to finish it. If you used some of this month's free credits, the service keeps a keyed hash of your email address (not the address), the month and how many free credits were left, until the month ends (Firestore deletes it within about a day after); an account made again with the same address this month starts with what was left instead of a new grant, and the record is then deleted. You can also email [hello@octocrawl.dev](mailto:hello@octocrawl.dev) from the account's address and we delete it for you.
+**Deleting your account.** In your dashboard, Settings → Delete account: type the account's email address, then sign in once more the way you usually do. As soon as you are signed in, the service deletes your keys (they stop working within a minute), your credits, bought ones included, your daily usage, your request lines, your hosted jobs' records, your account record and its sessions, and then your Firebase account. The pages and exports your jobs kept are not deleted at that moment: they are deleted by the storage's own expiry, within 30 days of being written. Service logs that name the account's id are deleted with the rest of the logs, 30 days on. If the deletion stops part way, sign in and delete again to finish it. If you used some of this month's free credits, the service keeps a keyed hash of your email address (not the address), the month and how many free credits were left, until the month ends (Firestore deletes it within about a day after); an account made again with the same address this month starts with what was left instead of a new grant, and the record is then deleted. You can also email [hello@octocrawl.dev](mailto:hello@octocrawl.dev) from the account's address and we delete it for you.
 
 ## Waitlist
 

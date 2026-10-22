@@ -2,7 +2,7 @@
 
 These terms cover the public Octocrawl page at this address and its preview service (“the preview”). They do not cover the Octocrawl software: its code is licensed under the [GNU AGPL-3.0](https://github.com/77777R7/Octocrawl/blob/main/LICENSE), and nothing here limits your rights under that licence. When you run Octocrawl on your own computer, these terms do not apply.
 
-Last updated 11 October 2026.
+Last updated 23 October 2026.
 
 ## Who runs the preview
 
@@ -17,8 +17,8 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 
 ## The hosted API and MCP
 
-- `api.octocrawl.dev` and `mcp.octocrawl.dev` are a free, limited service: a daily allowance without a key, and with a key the allowance it was issued with. There is no payment yet; keys are issued at our discretion and can be revoked.
-- It serves scrape and map only, obeys robots.txt for every page, refuses private addresses, and does not offer proxies, CAPTCHA solving or stealth. It may be changed, slowed down, paused or stopped at any time, without notice.
+- `api.octocrawl.dev` and `mcp.octocrawl.dev` are a free, limited service: a daily allowance without a key, and with a key its account's monthly credits or the allowance the key was issued with. There is no payment yet. An account makes its own keys in its dashboard, and keys can be revoked.
+- It serves scrape and map, and to an account crawl jobs of up to 500 pages and batch jobs of up to 1,000 URLs. It obeys robots.txt for every page, refuses private addresses, and does not offer proxies, CAPTCHA solving or stealth. It may be changed, slowed down, paused or stopped at any time, without notice.
 - The same responsibilities below apply to what you fetch through it.
 
 ## Accounts and credits
@@ -33,7 +33,8 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 
 - Results are provided as they are. A preview can come back blocked, incomplete or timed out, and a successful one does not guarantee that every field is correct. Amazon.sg product records are in Beta.
 - Check a result's status, final address and any field issues before you rely on it.
-- The service does not save results. What it does record is described in [Privacy](/docs/privacy/).
+- A call's result is kept for ten minutes. The pages a crawl or batch job reads are kept for 7 days after the job ends, so that you can read and export them, and are then deleted. What the service records is described in [Privacy](/docs/privacy/).
+- If you give a job a webhook, the service sends the job's end to the address you gave. You are responsible for that address.
 
 ## Your responsibilities
 
