@@ -100,6 +100,9 @@ describe('readinessOf (ADR 0007, ROADMAP PA item 11)', () => {
     for (const reason of ['body_too_large', 'decompressed_too_large', 'unsupported_content_type', 'unsupported_content_encoding', 'parse_error'] as const) {
       expect(readinessOf(failed(reason)), reason).toEqual({ state: 'not_extracted', basis: [reason] })
     }
+    // Octocrawl's own code threw on the captured page (K1 T016): the page came, and no other route reads it differently.
+    const crashed = { at: 1, lane: 'browser_local' as const, event: 'extraction_failed', detail: { error: "Cannot read properties of null (reading 'value')" } }
+    expect(readinessOf(failed('internal_error', {}, [crashed]))).toEqual({ state: 'not_extracted', basis: ['internal_error', 'extraction_failed'] })
   })
 
   it('reads a proven empty page and a crawl duplicate as ready, and a cancelled read as not loaded', () => {

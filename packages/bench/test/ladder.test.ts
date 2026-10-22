@@ -1437,6 +1437,17 @@ describe('a failure a stronger rung may still answer (ROADMAP PA item 4)', () =>
     expect(down.result).toMatchObject({ status: 'failed', failureReason: 'connection_error' })
   })
 
+  it('stops on Octocrawl\'s own crash after the browser captured the page: no other rung, free or paid (K1 T016)', async () => {
+    // Every rung runs the same extraction: another rung would read the page again only to throw the same way.
+    const chrome = channel('installed_chrome', [contentfulResult(url, 'browser_local')])
+    const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'steel'), priceCeilingUsd: 0.01 }
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [failed('internal_error', null, 'browser_local')]), chrome, provider], { mode: 'standard', enhanced: true }).run(url)
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(run.result).toMatchObject({ status: 'failed', failureReason: 'internal_error', lane: 'browser_local' })
+    expect(chrome.calls).toEqual([])
+    expect(provider.calls).toEqual([])
+  })
+
   it('leaves an http rung\'s own empty page to that rung, which asks for the browser itself when it should', async () => {
     const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
     const run = await new LadderRunner([channel('http', [failed('empty_unverified', 200)]), browser], { mode: 'standard' }).run(url)

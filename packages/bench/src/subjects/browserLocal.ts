@@ -492,6 +492,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     let taskCookies: { session: CookieSession; startedWith: ContextCookie[] } | null = null
     // Set as the page's first navigation goes out: a failure before it (the URL check, the browser's launch) sent nothing for the page.
     let navigationSent = false
+    // Set once the page is captured: from then on the page is not read again, and a throw is Octocrawl's own (internal_error).
+    let pageCaptured = false
     try {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
@@ -1198,6 +1200,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         maxShadowHtml: Math.min(1_000_000, Math.floor(this.networkPolicy.maxDecompressedBytes / 4)),
       })
       trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'layout', detail: layout.detail })
+      pageCaptured = true
       // A supported shadow table's source is included in this same live read,
       // before the evidence is hashed. It never borrows values from another visit.
       body = layout.sourceHtml ?? body
@@ -1469,8 +1472,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // stops following redirects after 20, a loop included, and reports a
       // certificate or handshake failure as net::ERR_CERT_* / net::ERR_SSL_*,
       // a fact about the host (tls_error). Every other navigation failure is
-      // a connection_error.
-      const reason = signal?.aborted || err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'timeout'
+      // a connection_error. A throw after the page was captured (extraction,
+      // conversion, storing the raw HTML) is Octocrawl's own bug, not the
+      // site's: internal_error, traced as extraction_failed, and the ladder
+      // does not take it to another rung (strongerRungMayAnswer).
+      const deadline = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+      const reason = pageCaptured && !deadline ? 'internal_error'
+        : signal?.aborted || deadline ? 'timeout'
         : err instanceof Error && err.name === 'SsrfDeniedError' ? 'policy_denied'
           : err instanceof Error && (err.name === 'DnsLookupError' || err.message.includes('net::ERR_NAME_NOT_RESOLVED')) ? 'dns_error'
             : err instanceof Error && err.message.includes('net::ERR_TOO_MANY_REDIRECTS') ? 'redirect_limit'
@@ -1479,7 +1487,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       trace.push({
         at: wallMs,
         lane: 'browser_local',
-        event: 'navigate_failed',
+        event: reason === 'internal_error' ? 'extraction_failed' : 'navigate_failed',
         detail: { error: err instanceof Error ? err.message.slice(0, 200) : String(err) },
       })
       // No browser to start: a new install that has not run `npx playwright install chromium`. Still a connection_error

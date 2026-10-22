@@ -205,10 +205,15 @@ function failedReadiness(result: FetchResult): Readiness {
     // The request's own step did not reach the region it acts on.
     case 'action_failed':
       return readiness('not_loaded', [...signals, reason], result)
+    // Octocrawl's own code threw on a page it had captured (the browser lane's `extraction_failed`): the page came, and
+    // another route would read it with the same code. Any other throw (no lane recorded it on a captured page) is not served, as before.
+    case 'internal_error':
+      if (result.trace.some((event) => event.event === 'extraction_failed')) return readiness('not_extracted', [reason, 'extraction_failed'], result)
+      return readiness('not_served', [reason], result)
     default:
       if (reason !== null && NOT_EXTRACTED.has(reason)) return readiness('not_extracted', [reason], result)
       // Every other failure: the route, the access or the region did not serve the page (http_error, policy_denied, a
-      // network failure, provider_error, cache_miss), or nothing arrived at all (internal_error: the scrape threw).
+      // network failure, provider_error, cache_miss).
       return readiness('not_served', [reason ?? 'failed'], result)
   }
 }
