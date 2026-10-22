@@ -9,9 +9,11 @@ import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { identityForRoute, localNetworkPolicy, REFUSAL_HINTS, type FetchOptions, type ScreenshotEvidence } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { buildChannels } from '@w2l/bench'
+import { accessGrantFromText } from '@w2l/http-core'
 import { SqliteTaskStore } from '@w2l/runtime'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngine } from '../src/engine.js'
+import { INSTALLED_CHROME_RECOMMENDED_HINT } from '../src/hints.js'
 import { parseListen } from '../src/listen.js'
 
 function httpOnlyChannels(mode: 'standard' | 'research' | 'authed') {
@@ -483,6 +485,62 @@ describe('REST /v1/scrape and /v1/crawl', () => {
       local.closeAllConnections()
       await new Promise<void>(resolve => local.close(() => resolve()))
       await rm(hintRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('recommends installed_chrome for a check the bundled browser met too, on a server on your machine whose grant does not name it, and never on a hosted one (ADR 0005, 2026-10-23)', async () => {
+    // A stand-in for the browser rung: the http rung's own answer, the fixture's Cloudflare challenge, read again as the browser's.
+    const gated = (mode: Parameters<typeof buildChannels>[0]) => {
+      const http = httpOnlyChannels(mode).filter((channel) => channel.id === 'http')
+      const browser = { id: 'browser_local', identity: http[0]!.identity, waitsFor: true, fetch: async (...args: Parameters<typeof http[0]['fetch']>) => ({ ...(await http[0]!.fetch(...args)), lane: 'browser_local' as const }) }
+      return [...http, browser]
+    }
+    const root = await mkdtemp(join(tmpdir(), 'w2l-api-chrome-hint-'))
+    const chrome = accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['installed_chrome'], attestation: { principal: 'operator@example.test', at: '2026-10-23T00:00:00Z', statement: 'I accept that Google Chrome windows open on this machine.' } }))
+    const local = createApiEngine({ taskRoot: join(root, 'local'), channelsFor: gated, userChrome: {} })
+    const hosted = createApiEngine({ taskRoot: join(root, 'hosted'), channelsFor: gated, hosted: true })
+    const granted = createApiEngine({ taskRoot: join(root, 'granted'), channelsFor: gated, userChrome: {}, accessGrant: chrome })
+    const challenge = `${server.url}/block/challenge`
+    const post = async (engine: ApiEngine, path: string, body: Record<string, unknown>) => {
+      const res = await createApp(engine).request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      return await res.json() as Record<string, any>
+    }
+    try {
+      const said = await post(local, '/v1/scrape', { url: challenge, debug: true })
+      expect(said).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge', channelsTried: ['http', 'browser_local'] })
+      expect(said.agentHints).toHaveLength(2)
+      expect(said.agentHints[0]).toContain('gates automated access on the lanes tried (http, browser_local)')
+      expect(said.agentHints[1]).toBe(INSTALLED_CHROME_RECOMMENDED_HINT)
+      // The same in the compact answer, the scrape record and the Firecrawl shape.
+      expect((await post(local, '/v1/scrape', { url: challenge, debug: false })).agentHints).toContain(INSTALLED_CHROME_RECOMMENDED_HINT)
+      expect(await (await createApp(local).request(`/v1/scrapes/${said.scrapeId}`)).json()).toMatchObject({ agentHints: expect.arrayContaining([INSTALLED_CHROME_RECOMMENDED_HINT]) })
+      expect((await post(local, '/fc/v1/scrape', { url: challenge })).data.agent_hints).toContain(INSTALLED_CHROME_RECOMMENDED_HINT)
+      // A request the rung would not take is not told to try it: a phone identity, or another mode.
+      expect((await post(local, '/v1/scrape', { url: challenge, mobile: true, debug: false })).agentHints ?? []).not.toContain(INSTALLED_CHROME_RECOMMENDED_HINT)
+      expect((await post(local, '/v1/scrape', { url: challenge, mode: 'research', debug: false })).agentHints ?? []).not.toContain(INSTALLED_CHROME_RECOMMENDED_HINT)
+      // A hosted server never says it, and a server whose grant names installed_chrome has nothing to recommend.
+      const hostedSaid = await post(hosted, '/v1/scrape', { url: challenge, debug: false })
+      expect(hostedSaid).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge' })
+      expect(hostedSaid.agentHints).toHaveLength(1)
+      expect(hostedSaid.agentHints).not.toContain(INSTALLED_CHROME_RECOMMENDED_HINT)
+      const grantedSaid = await post(granted, '/v1/scrape', { url: challenge, debug: false })
+      expect(grantedSaid).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge' })
+      expect(grantedSaid.agentHints ?? []).not.toContain(INSTALLED_CHROME_RECOMMENDED_HINT)
+      // A batch item a check stopped carries the hint its scrape would; on a hosted server it does not.
+      const localBatch = await post(local, '/v1/batches', { urls: [challenge] })
+      const hostedBatch = await post(hosted, '/v1/batches', { urls: [challenge] })
+      await local.close()
+      await hosted.close()
+      const [localItem] = (await (await createApp(local).request(`/v1/batches/${localBatch.taskId}/items`)).json()).items
+      expect(localItem).toMatchObject({ status: 'blocked', agentHints: expect.arrayContaining([INSTALLED_CHROME_RECOMMENDED_HINT]) })
+      const [hostedItem] = (await (await createApp(hosted).request(`/v1/batches/${hostedBatch.taskId}/items`)).json()).items
+      expect(hostedItem.status).toBe('blocked')
+      expect(hostedItem.agentHints ?? []).not.toContain(INSTALLED_CHROME_RECOMMENDED_HINT)
+    } finally {
+      await local.close()
+      await hosted.close()
+      await granted.close()
+      await rm(root, { recursive: true, force: true })
     }
   })
 

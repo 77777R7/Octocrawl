@@ -24,6 +24,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { chromium, type Browser, type LaunchOptions } from 'playwright'
+import type { FetchOptions } from '@w2l/contracts'
 
 /** The flags that shape detection, as measured: nodriver 0.50.6's defaults less `--remote-allow-origins`. */
 export const DETECTION_FLAGS: readonly string[] = [
@@ -43,6 +44,20 @@ export const INSTALLED_CHROME_INSTALL = 'install Google Chrome from https://www.
 
 /** Windows the route may hold open at once, across the whole process (ADR 0005: at most 2). */
 export const INSTALLED_CHROME_MAX_WINDOWS = 2
+
+/**
+ * Why the rung does not take a request, or null when it does. The Chrome reads the page as it opened it (ADR 0005): no
+ * actions, screenshot, phone identity, added headers or relaxed certificate check, each of which would drive or dress
+ * the window beyond what was measured. The rung's refusal and the hint that recommends the route read the same rule.
+ */
+export function installedChromeRefusal(options: Pick<FetchOptions, 'actions' | 'screenshot' | 'mobile' | 'headers' | 'skipTlsVerification'>): string | null {
+  const asked = [
+    ...((options.actions?.length ?? 0) > 0 ? ['actions'] : []), ...(options.screenshot !== undefined ? ['screenshot'] : []),
+    ...(options.mobile === true ? ['mobile'] : []), ...(Object.keys(options.headers ?? {}).length > 0 ? ['headers'] : []),
+    ...(options.skipTlsVerification === true ? ['skipTlsVerification'] : []),
+  ]
+  return asked.length === 0 ? null : `installed_chrome reads the page as Chrome opened it and takes no ${asked.join(', ')} (ADR 0005)`
+}
 
 /** The error a launch fails with when no Google Chrome is found; browserNotInstalled (browserInstall.ts) reads it. */
 export class InstalledChromeMissingError extends Error {
