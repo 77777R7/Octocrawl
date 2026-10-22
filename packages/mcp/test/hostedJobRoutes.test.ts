@@ -108,8 +108,18 @@ describe('hosted job routes', () => {
     for (const key of [null, 'oc_plain']) {
       const response = await call('POST', '/v1/batches', key, { urls: urls(1) })
       expect(response.status, String(key)).toBe(403)
-      expect(((await response.json()) as { code: string }).code).toBe('jobs_need_account')
+      const refused = await response.json() as { code: string; agentHints: string[] }
+      expect(refused.code).toBe('jobs_need_account')
+      expect(refused.agentHints[0]).toContain('sign in free for 1,000 credits a month')
+      expect(refused.agentHints[0]).toContain('https://octocrawl.dev/signin/')
     }
+    // Another route is refused with what hosted Octocrawl does serve, the jobs included.
+    const monitors = await call('GET', '/v1/monitors', 'oc_one')
+    expect(monitors.status).toBe(403)
+    const unavailable = await monitors.json() as { code: string; error: string; agentHints: string[] }
+    expect(unavailable).toMatchObject({ code: 'hosted_unavailable' })
+    expect(unavailable.error).toContain('is not served by hosted Octocrawl: scrape and map, and with an account crawl and batch jobs')
+    expect(unavailable.agentHints.join(' ')).not.toContain('later phase')
     expect((await call('POST', '/v1/batches', 'oc_nobody', { urls: urls(1) })).status).toBe(401)
     // Resume, handoff and the event streams are not hosted.
     for (const [method, path] of [['POST', '/v1/crawl/6f1c2a4e-1b2c-4d3e-8f90-0123456789ab/resume'], ['GET', '/v1/crawl/6f1c2a4e-1b2c-4d3e-8f90-0123456789ab/events']]) expect((await call(method!, path!, 'oc_one')).status, path).toBe(403)
