@@ -8,7 +8,9 @@ jobs:
   linux:
     name: linux (${{ matrix.project }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The timed test step alone takes 12-13 minutes, so the timed job gets room
+    # for a slow npm ci; its test step keeps its own bound below.
+    timeout-minutes: ${{ matrix.project == 'timed' && 25 || 15 }}
     strategy:
       fail-fast: false
       matrix:
@@ -21,10 +23,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # The packages come from the npm cache. The audit is a registry request whose
+      # result CI never reads, and it never finished in the 6-7 minute installs.
+      - run: npm ci --no-audit
       - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
       - run: npm test -- --project=${{ matrix.project }} --reporter=default --reporter=json --outputFile=test-results/${{ matrix.project }}.json
+        timeout-minutes: ${{ matrix.project == 'timed' && 17 || 15 }}
       - name: A batch of 1,000 URLs over 20 hosts survives kill -9 (0 lost, 0 duplicated)
         if: matrix.project == 'unit'
         run: npm run verify:batch-crash-1000
