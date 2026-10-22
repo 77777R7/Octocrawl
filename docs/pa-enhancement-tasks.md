@@ -325,7 +325,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - enhanced 从 56 降到 49：首次调用里 enhanced 有 12 次、对照有 9 次在 provider（Steel）那一级超时，p50 约 156 s，原因没有隔离。
   - 两窗口都成立的边际收益（相对 standard）：installed_chrome 增 15 题、退 0 题，$0；enhanced 增 3 题、退 1 题，另有 14 题不稳；Firecrawl 增 28 题、退 7 题；ZenRows 增 19 题、退 10 题。
   - 两窗口合计假成功（共 184 次请求）：Octocrawl 各臂 3–6，Firecrawl 24（上限 17.9%），ZenRows 38。
-  - 健康 25 题：两个窗口都是候选比对照少 1 题（21 对 22、22 对 23），差在 T016（zara.com）。当前 commit 的三臂六次都在 `browser_local` 报 `Cannot read properties of null (reading 'value')`，紧接在 `view` 追踪事件之后，被归为 `connection_error`；`2ffd7f25` 两次都通过。这是 `2ffd7f25` 之后的回退，未隔离，需要修，完成标准这一项未达。
+  - 健康 25 题：两个窗口都是候选比对照少 1 题（21 对 22、22 对 23），差在 T016（zara.com）。当前 commit 的三臂六次都在 `browser_local` 报 `Cannot read properties of null (reading 'value')`，紧接在 `view` 追踪事件之后，被归为 `connection_error`；`2ffd7f25` 两次都通过。这是 `2ffd7f25` 之后的回退，已在 `main` 上由 #671 修好（`33f2c174`，`extract-tf/35`）：Zara 的 JSON-LD ItemList 声明的 Product 带 `"name": ""`，#628 之后 `declare()` 存了一个 null fact，`keysOf()` 读取了它的 `.value`。被归为 `connection_error` 的分类问题由 #679（`dbb1fbab`）改成 `internal_error` / `extraction_failed`。两个 K1 窗口有意把 runner 的 packages 固定为 `322de68e`，都在修复之前，所以这一项在两个窗口里都没达，原因是这个已知、已修的回退。按 #671 的报告，它的分支上 T016 实站 4/4 verified（走代理、access `standard`），本会话没有重跑。测得的数字不改。
   - 保留集 v2 实站（10:39–11:13 UTC）：Octocrawl 确定性 json 加 itemSelector 为 56/294、接受 1 题、假成功 5/42；Firecrawl 自己的 json 为 121/294、接受 13 题、假成功 26/42。窗口 1 是 69 对 118，两个窗口排序相同。Octocrawl 的下降来自页面变化（V20 等），引擎相同。
   - 费用：Steel 账本 $0.2839；Firecrawl 349 credits；ZenRows 1020 credits，已用 3054/5000。
   - 记录：`research/access/runs/2026-10-22-k1-w2-b233d232-*.md`、`research/access/runs/2026-10-22-k1-two-windows-b233d232.md`、`research/accuracy/runs/2026-10-22-k1-w2-live-v2-b233d232.md`。
