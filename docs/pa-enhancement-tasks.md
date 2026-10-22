@@ -246,7 +246,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 ## Phase 4 · 对照与受控开放
 
 - [x] **K1 两窗口对照。** Phase 2 合入后，同一 UTC 日交错跑：Octocrawl standard / enhanced / installed_chrome 三臂加一个固定在 `2ffd7f25` 的 main 对照臂，Firecrawl Cloud、ZenRows 两臂（key 与额度按决定 10 先确认）；92 题（含健康 25）+ 保留集 v2；固定 commit、任务集 SHA、地区、出口、缓存、模式、超时、预算；首次调用为主指标，重试改善单列。提取器与字段正确率的比较在冻结的不可变捕获（B3 的 captureId）上做、访问评估重读真实页面，两类实验分开记录；保留集 v2 各跑一次冻结捕获和实站。报告项见"完成标准"。另一天再跑一次，这次也替代 10-11 四臂 23 题欠的第二窗口。另加两项（2026-10-20，Howard，从 Phase 2 挪来）：配上抽取模型（`W2L_EXTRACT_BASE_URL`/`W2L_EXTRACT_MODEL`，两臂同一模型配置，记费用）在带 json/verify 的请求上测 F2，并给列表/表格题加 itemSelector 测列表记录（确定性 json 路径不填数组，见 `research/accuracy/runs/2026-10-20-json-verify-paired-2ffd7f25-d094e319.md`）。
-  - 两个窗口都完成：窗口 1 在 2026-10-21，窗口 2 在 2026-10-22，见进度两日各一行。两窗口对照记录 `research/access/runs/2026-10-22-k1-two-windows-b233d232.md`。窗口 2 按 Howard 2026-10-22 的要求改在当天跑，没有等 Firecrawl 计费周期重置；周期内剩余额度够用。K1 勾的是"两个窗口都已记录"，完成标准里"健康 25 题不低于同窗口 main"一项两个窗口都没过（T016，见进度 2026-10-22），F2 也没测到。ZenRows 按 Howard 2026-10-21 的选择：两窗口都跑，每周一重跑的 ZenRows 臂停到窗口 2 完成，窗口驱动 `k1-window.mjs` 不启动会让用量超过 4,700/5,000 的 ZenRows 运行（v2 实站驱动没有这道检查，窗口 1 的 v2 只用了 80）。
+  - 两个窗口都完成：窗口 1 在 2026-10-21，窗口 2 在 2026-10-22，见进度两日各一行。两窗口对照记录 `research/access/runs/2026-10-22-k1-two-windows-b233d232.md`。窗口 2 按 Howard 2026-10-22 的要求改在当天跑，没有等 Firecrawl 计费周期重置；周期内剩余额度够用。K1 勾的是"两个窗口都已记录"，完成标准里"健康 25 题不低于同窗口 main"一项两个窗口都没过（T016，见进度 2026-10-22），F2 也没测到。修复后的 `main` 上这一项已达标：2026-10-22 补跑健康 25 题，`fb2db7cc` 22/25，对照 `2ffd7f25` 20/25，T016 两边都通过（见进度同日补跑一行）。ZenRows 按 Howard 2026-10-21 的选择：两窗口都跑，每周一重跑的 ZenRows 臂停到窗口 2 完成，窗口驱动 `k1-window.mjs` 不启动会让用量超过 4,700/5,000 的 ZenRows 运行（v2 实站驱动没有这道检查，窗口 1 的 v2 只用了 80）。
 - [x] **K2 Browserbase 资格复查（按决定 6）。** 只查 entitlement；可用则在 16 题挑战子集上做最小配对实验，一次只变一个变量。资格查询是单独的小运行，可早做，决定留在这里。
   - 2026-10-21 结果：本账户仍不可用。`verified: true` 建 session 得 403 "Verified mode is only available on the Enterprise plan"（与 10-13 原文相同），不带 verified 的 session 201 并立即释放；API 不返回套餐名（project `concurrency: 3` 与 Free 相符，属推断）；官方文档把 Verified 写成 Scale（定制价、需联系销售确认资格），Developer/Startup 不含；Verified 计费方式 unknown。不做配对实验。记录 `research/access/runs/2026-10-21-k2-browserbase-entitlement-5beacbf3.md`。
 - [x] **K3 出口按检测类型。** 10-14 的 exits 记录（Webshare 过 T038/T046 两次）和 10-16 的 DataDome 记录（Webshare 1/16 vs Clash 5/16）互相矛盾；做一次配对实验再决定是否按检测类型选出口，否则不建。按检测类型选出口只能是请求前按 host 的已记录类型选，不是被拦后在同一 rung/会话内换出口重试（ADR 0005 永不做）。同一运行里顺带断言出口切换后 per-host pacing 与预算不重置（ROADMAP item 3 未测点）。配对实验是单独的小运行（不在每周脚本里），可早做。
@@ -330,6 +330,8 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - 费用：Steel 账本 $0.2839；Firecrawl 349 credits；ZenRows 1020 credits，已用 3054/5000。
   - 记录：`research/access/runs/2026-10-22-k1-w2-b233d232-*.md`、`research/access/runs/2026-10-22-k1-two-windows-b233d232.md`、`research/accuracy/runs/2026-10-22-k1-w2-live-v2-b233d232.md`。
   - 每周 ZenRows 臂可以恢复（窗口 2 已完成）。
+
+- 2026-10-22：健康 25 题补跑（Howard 要求，确认 T016 修复后候选不低于对照）。候选 `main` `fb2db7cc`（含 #671、#679），对照 `2ffd7f25`，两臂都不带 grant、access `standard`；5 块各 5 题、两臂轮流先跑，走 Clash，出口 103.142.140.131，12:03–12:05 UTC，没有休眠，$0。候选 22/25、假成功 0，对照 20/25、假成功 1（T039）。**候选不低于对照，T016 两臂都 verified**（browser_local）。两臂相差的 T020、T067 都是对照遇到 `cloudflare_challenge`，只跑了一次，未隔离。记录 `research/access/runs/2026-10-22-k1-healthy25-2ffd7f25-fb2db7cc.md`。
 
 ## 下次从这里继续
 
