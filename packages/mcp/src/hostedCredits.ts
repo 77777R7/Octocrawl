@@ -222,7 +222,7 @@ export class MemoryCreditsStore implements CreditsStore {
   }
 }
 
-// ---- Firestore: `credits/{uid}` holds the balance, `hostedQuotas/{day}-site` the site's starts and `hostedQuotas/{day}-account-{uid}` the account's, `creditUsage/{uid}-{day}` the day's use ----
+// ---- Firestore: `credits/{uid}` holds the balance, `hostedQuotas/{day}-accounts` every account's starts and `hostedQuotas/{day}-account-{uid}` the account's (a job's slice: `{day}-jobs` and `{day}-jobs-account-{uid}`), `creditUsage/{uid}-{day}` the day's use ----
 
 interface Value { integerValue?: string; stringValue?: string; timestampValue?: string }
 interface FirestoreDoc { name: string; fields?: Record<string, Value>; updateTime?: string }
