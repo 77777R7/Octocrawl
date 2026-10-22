@@ -297,7 +297,9 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - pacing/预算（ROADMAP item 3 未测点）：出口切换后 per-host pacing 不重置（`egressPool.test.ts` 新测试，main 上即通过，留作守护）；单页 `timeout` 在切换后会重新计时（新测试在 main 上失败），已修：每页的截止时间只定一次，新出口上的重读用剩余时间。花费账本在两次读取间是同一个（读代码，未用付费 rung 测）。
 - [x] **K4 决定默认值。** 路线历史是否驱动排序；installed_chrome 是否进默认推荐；hosted PA（PH H5）是否开。计价按决定 11 不在本轮改。每条引用 K1 的边际收益表，要 ADR 0005 修订或 ROADMAP 决定。
   - 2026-10-22 定（Howard，全部按默认），记在"待你决定"13–16：路线历史保持 `rankVendors`，G3 保持影子；installed_chrome 进本机的默认推荐；托管 PA 不开；不按检测类型选出口。后续：决定 14 的 ADR 0005 修订与文档/agentHints 改动（单独一个 PR），然后 K5。
-- [ ] **K5 ROADMAP 收口。** 在 PA 的 bar 下写：冻结集与最好竞品的差距数字、补法、本轮关闭了哪些缺口；不写"达到竞品水平"除非两窗口、多任务类型、实际部署环境都支持。
+- [x] **K5 ROADMAP 收口。** 在 PA 的 bar 下写：冻结集与最好竞品的差距数字、补法、本轮关闭了哪些缺口；不写"达到竞品水平"除非两窗口、多任务类型、实际部署环境都支持。
+  - 2026-10-23 完成（一个 docs PR，分支 `claude/pa-k5-roadmap-closeout`，从 `main` `d1eb4647` 拉，只改 ROADMAP 和本清单）。ROADMAP 的 bar 下写了 K1 两窗口在冻结 50 题和全部 92 题上的差距与假成功（一张表）、每周重跑和保留集 v2 的数字、补法（分已定 / 待测 / 待 Howard 定 / 不做四类）；PA 节写了 A–G 各自的关闭情况和没达到的完成标准；摘要加了一条 "PA on 2026-10-22"。决定 13–16 记在 PA item 4、5、3 和 PH H5 下；决定 14 的 ADR 0005 修订与文档在另一个 PR。没有写"达到竞品水平"：只有本机证据（一台 Mac、一种数据中心出口），没有托管臂。
+  - 本轮留下的尾巴：G3 保持影子（重开条件见 G3 一行）；F2 没测（null，不是 0：本机没有抽取模型接口；冻结捕获和实站原始页面保留着，可以补测）；ZenRows 试用账户 2026-11-13 到期（K1 窗口 2 记录的 `period_ends_at`），到期后每周的 ZenRows 臂还能不能跑 unknown，续不续由 Howard 定。
 - 验收：两份窗口记录；ROADMAP 更新；任何默认路线改变都有两窗口证据。
 
 ## 进度
@@ -377,8 +379,10 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
 
 - 2026-10-22：健康 25 题补跑（Howard 要求，确认 T016 修复后候选不低于对照）。候选 `main` `fb2db7cc`（含 #671、#679），对照 `2ffd7f25`，两臂都不带 grant、access `standard`；5 块各 5 题、两臂轮流先跑，走 Clash，出口 103.142.140.131，12:03–12:05 UTC，没有休眠，$0。候选 22/25、假成功 0，对照 20/25、假成功 1（T039）。**候选不低于对照，T016 两臂都 verified**（browser_local）。两臂相差的 T020、T067 都是对照遇到 `cloudflare_challenge`，只跑了一次，未隔离。记录 `research/access/runs/2026-10-22-k1-healthy25-2ffd7f25-fb2db7cc.md`。
 - 2026-10-22：K4 完成（分支 `claude/k4-g3-recommendations`，从 `main` `fe60be3e` 拉）。四条决定写进"待你决定"13–16，Howard 同日全部按默认定：路线历史不换排序公式，**G3 保持影子、不固化**（273 条 `vendor_rank_shadow` 都只有 Steel 一个候选，`differs` 没有一次为 true，"两窗口一致收益"在单厂商配置下测不出），G3 不勾，重开条件写在 G3 一行；installed_chrome 进本机的默认推荐，仍要 grant（两窗口增 15、退 0、$0），先做 ADR 0005 修订和文档/agentHints 改动，另开 PR；托管 PA 不开；按检测类型选出口不建。本 PR 没有改任何默认值、路线、ADR 或 ROADMAP 结论；下一项是决定 14 的 PR 和 K5。
+- 2026-10-23：K5 完成（分支 `claude/pa-k5-roadmap-closeout`，从 `main` `d1eb4647` 拉，只改 ROADMAP 和本清单，没有新的运行）。差距按 K1 首次调用，窗口 1 / 窗口 2，两个窗口在两个集合上最好的竞品都是 Firecrawl：冻结 50 题 installed_chrome 25 / 31 对 33 / 34，差 8 / 3；enhanced 23 / 18，差 10 / 16；standard 14 / 15，差 19 / 19；全部 92 题 installed_chrome 60 / 68 对 69 / 70，差 9 / 2。假成功：冻结集 installed_chrome 1 / 1、Firecrawl 8 / 8；全部 92 题两窗口合计 installed_chrome 3/184（enhanced 同为 3/184）、Firecrawl 24/184、ZenRows 38/184。冻结集的数字是本会话从两窗口记录的逐题表、按 `tasks.v1.json` 的 part 数出来的，并用两个窗口各自 summary 的逐题表复核过（全部 92 题的合计与记录的表一致），记录里没有这一列。每周重跑 47 题：免费臂差 1 / 2（16 题挑战子集差 4 / 4），Steel 臂差 9 / 10。补法：已定的是 installed_chrome 进本机默认推荐；待测的是 installed_chrome 与 enhanced 路线写进同一份 grant 的两窗口运行、配上抽取模型测 F2；待 Howard 定的是供应商隐身浏览器（Browserbase verified 要 Scale 套餐，K2）和 CAPTCHA 是否满足 item 6 自研 solver 的条件（在 Firecrawl 过、installed_chrome 没过的冻结题里，CAPTCHA 是最多的原因：窗口 1 15 题里 6 题，窗口 2 12 题里 3 题）。整轮完成标准对照：任务除 G3 外都已完成（D3b 第一轮有延后项；E7 的"同一 paidCallId 提交两次"只在实站试过一次，不在本地集里）。没达到的有四项：健康 25 题两个 K1 窗口都比对照少 1 题（T016，#671 已修，补跑 22/25 对 20/25，一天一次）；F 的验收要"D6 的 RFC/WCAG fixture 经候选被选中"，没有测试让这个 fixture 走候选（只有 `packages/extract-tf/test/documentHeader.test.ts` 读它）；G 的验收和 Phase 3 退出条件要"每周 Steel 臂记录含 G2a 的分层结果和单位成本"，G2a 之后唯一一次每周 Steel 运行（2026-10-21，`db80379b`）两样都没有（没有分层字段，每千次有效交付成本 unknown）；G3 未固化。F2 未测。D6 片段在开发集 Markdown 请求上的提升：H01–H08 62/75 → 75/75（#649），D01–D10 34/86 → 47/86（#672）；D1–D5 的提升仍未证明。
 
 ## 下次从这里继续
 
-- 决定 1、3、7、9 已定（2026-10-20），其余按默认。
-- 下一项是 **P0.5**（runner 分母，P0.1 的记录格式靠它）和 **P0.2**（ROADMAP 修正），两者可同时开；P0.5 合入后跑 **P0.1**；A1、B1、D1 的失败测试和 R1 不等基线，可各开一个窗口。
+- 本轮的任务除 G3 外都已完成，K5 于 2026-10-23 收口（见进度同日一行）；G3 没勾，按决定 13 保持影子。F、G 各有一项验收没达到，健康 25 题在两个 K1 窗口都没达到，都写在进度同日一行和 ROADMAP 的 PA 节。决定 14 的 ADR 0005 修订、`docs/access.md`、`docs/local-setup.md` 和本地 agentHints 在另一个 PR。
+- 留下的尾巴：G3 保持影子；F2 没测；ZenRows 试用 2026-11-13 到期。
+- ROADMAP bar 下"补法"里待测的两项（installed_chrome 与 enhanced 路线同一份 grant 的两窗口运行、配上抽取模型测 F2）和待 Howard 定的两项（供应商隐身浏览器的套餐、CAPTCHA 是否满足 item 6 的条件）是下一轮的候选，都还没有立项。
