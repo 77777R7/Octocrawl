@@ -67,6 +67,49 @@
 11. **托管计价。** 现状核对发现 `hostedCredits.ts` 的 scrapeCharge 把 provider 通道按 5 credits 平价，与 ROADMAP"成本加 margin"不一致，但 10-18 的商业计划正提议浏览器页 5→2 credits，ROADMAP 写两份提案未决前什么都不改。默认：本轮只产出成本数字，不改任何计价；浏览器页 5 还是 2 随商业计划一起决定。
 12. **`waitForRegion` 对无表格读取器通道的行为（C2）。** 现在只有 `readTables` 存在时才可能报 `tablesUnjudged`，provider 通道带 `tableRowsMin` 合同时可以凭标题 ready。默认：改成没有表格读取器就报 `tablesUnjudged`、永不 ready；这会改变所有不传 readTables 的通道的等待行为，PR 里写明。
 
+13–16 是 K4 的建议草稿（2026-10-22，基于 `main` `fe60be3e`），等你定。按下面的默认什么都不改：没有改任何默认值、路线、ADR 或 ROADMAP 结论。"边际收益表"指 `research/access/runs/2026-10-22-k1-two-windows-b233d232.md` 的 "Marginal gain against the standard arm, held in both windows"：相对 standard，两窗口都通过、standard 两窗口都没通过算增，反过来算退，其余算不稳。
+
+13. **K4①：路线历史是否驱动供应商排序（含 G3 能否固化）。**
+    - 现状（读代码）：两家以上供应商时，实际顺序已经由路线历史决定。`rankVendors`（`packages/bench/src/routing/vendorRouter.ts:450`）按成功率、中位延迟、累计费用打分，`startingVendor`（`:508`）在供应商级失败后轮换，阶梯照此排（`ladder.ts:1155-1167`）。只有一家时不排序（`ladder.ts:1157`）。G3 的 `shadowRankVendors`（`vendorRouter.ts:623`）只写 trace。所以这一问实际是：要不要把实际顺序从 `rankVendors` 换成 G3 的单位有效交付成本。
+    - 建议默认：不换。**G3 判定：保持影子，不固化**，G3 不勾；影子 trace 照写（已合入，不花钱）。K5 里写明 G3 未固化及原因。
+    - 证据（`vendor_rank_shadow`，读本 worktree 的 `.w2l/access/runs/` 原始响应）：
+      - 共 273 条，每个响应一条：K1 窗口 1 enhanced 臂首次 92、重试 36；窗口 2 首次 92、重试 43；窗口 1 中止的一次 3 条；G3 自己的实站 7 条（`1753ecbd`）。
+      - 每一条的 declared、actual、shadow 都是 `["steel"]`，只有一个候选。`differs` 272 条为 null（回退原因 `new_host` 或 `insufficient_samples`），1 条为 false（G3 实站第 4 次 T047），**没有一条为 true**。影子与实际顺序从未不同，K1 里只有单测里出现过分歧（见进度 2026-10-21 的 G3 一行）。
+      - 其余臂没有这条 trace：standard 不带 grant；installed_chrome 的 grant（`e3ec29ef…`，窗口 1 是 `09fdeafe…`）只列 `installed_chrome`，没有供应商；对照 `2ffd7f25`、每周重跑的 `259bcef3`/`db80379b` 都早于 G3（#650，`8d391552`）；健康 25 题补跑不带 grant。
+    - 证据（实际配置了几家付费供应商）：一家。K1 enhanced 与对照用的 Steel grant `67acb9bc…` 的 tariffs 只有 `steel`（只读查看了 `~/Code/w2l/.w2l/access/steel-grant.json`）。Browserbase 适配器在代码里（`ladderCli.ts:629-633`，要 `W2L_VENDORS` 点名），本轮没有任何 grant 给它 tariff，K2 也证实 verified 在本账户不可用。每个窗口每个臂用一个新的 taskRoot（`.w2l/access/k1/<窗口>/api-enhanced/routing-history.sqlite`），所以每个窗口都从 `new_host` 开始，重试轮每个 host 最多 2 个样本，低于 `SHADOW_MIN_SAMPLES` 3（`vendorRouter.ts:585`）。现行的 `rankVendors` 排序同样没有在实站上排过两家。
+    - 证据（"两个窗口一致收益"）：不满足，而且在一家供应商的配置下测不出来：没有分歧，就无从比较两种顺序的收益。边际收益表里跟供应商有关的只有 enhanced 臂：增 3（T003、T007、T018）、退 1（T008）、不稳 14，首次调用费用 $0.0673 / $0.0731，p95（全部）35937 / 166128 ms。窗口 2 首次调用有 12 次在 provider 级超时，p50 约 156 s（`research/access/runs/2026-10-22-k1-w2-b233d232-summary.md:26`、`:111`）。这是 Steel 本身不稳，排序公式改不了它。
+    - 风险：不换的话，以后接上第二家时用的仍是累计费用，可能偏向便宜但交付少的一家。目前只有一家，没有实际影响。换的话没有任何实站证据，违反整轮完成标准的最后一条。
+    - 重开条件（建议）：grant 里有第二家付费供应商、两家 tariff 都齐全；历史跨窗口保留（同一 taskRoot，或先预热）；两个窗口里都有 `differs: true` 的 host，并且影子顺序在这些 host 上的通过数不少于实际顺序，每千次有效交付成本更低。
+    - 要你批准的：按默认不用批。要固化（实际顺序换成 `shadowRankVendors`），需要一条 ROADMAP 决定（PA item 4）。ADR 0005 只管能力分级，不管排序公式，不用改。
+    - 未核实：Browserbase 不带 verified 能否作为第二家来测，本轮没有测，只看了 K2 记录 `research/access/runs/2026-10-21-k2-browserbase-entitlement-5beacbf3.md`。
+14. **K4②：installed_chrome 是否进默认推荐。**
+    - 建议默认：进，但只当作"本机运行时首选的增强路线"，写进文档和本地服务的 agentHints。仍然要 grant 和 attestation，仍然默认关，托管照样拒绝，最多 2 个窗口。不替用户写 grant，阶梯顺序也不改（它本来就排在 browser_local 之后、provider 之前）。ADR 0005 的"定期重测"已经写了"低于验收基线时……停止默认推荐这条路线"，但没定义推荐本身，这里补上。
+    - 证据（边际收益表）：相对 standard 增 15、退 0、不稳 11，首次调用账本 $0 / $0。通过数 60、68，与 Firecrawl 差 9、2。假成功 2/92、1/92，两窗口合计 3/184，上限 4.2%；Firecrawl 是 24/184，上限 17.9%。p95（全部）26162 / 25275 ms，standard 是 13887 / 15918 ms。每千次有效交付成本 $0.00，不含 Clash 带宽和本机算力（unknown exposure）；enhanced 是 $1.20 / $1.49，Firecrawl 1594 / 1600 credits，ZenRows $13.42 / $11.46（两个窗口 summary 的表）。
+    - 证据（本机上的另一条增强路线）：enhanced（Steel）增 3、退 1、不稳 14（同表）。本机两窗口都成立的大收益，只有 installed_chrome 这一条。
+    - 证据（读原始 `attempts.jsonl` 的 `deliveredBy`/`channelsTried`）：通过的题里，由 installed_chrome 这一级交付的，窗口 1 16/60，窗口 2 20/68。走到这一级（要开 Chrome 窗口）的请求，窗口 1 38/92，窗口 2 35/92。
+    - 证据（每周 16 题）：10/16 两次（Chrome 155.0.8059.80 → .85），不低于验收里较低的一次（7），低于较高的一次（11）（`research/access/runs/2026-10-2{0,1}-weekly-summary-*.md`）。健康 25 题这一臂两窗口都是 22/25，没过的 T016、T027、T052 在 standard 臂两窗口也都没过；T016 是 #671 已修的回退。
+    - 风险：
+      - 只在一台机器（Howard 的 Mac）、一种出口（Clash 数据中心，103.142.140.0/24）上测过。住宅出口反而更差：K3 Cloudflare 组 Webshare 5/32、Clash 24/32；G4 本机走 Webshare 2/16，报连接层错误，未隔离。在用户自己的网络上效果如何，unknown。
+      - 会在用户屏幕上开 Chrome 窗口（92 题里约 35–38 次），最多同时 2 个，p95 比 standard 长约 10 s。
+      - 要本机装有 Google Chrome。Chrome 会自动升级，可能某次升级后效果变差，ADR 0005 已规定每周重测、低于基线停止推荐。
+      - 托管和远程 MCP 的用户用不上。
+    - 要你批准的：先做 ADR 0005 修订，写明"默认推荐"是什么：在哪里推荐，引用哪组数字，沿用每周 16 题低于验收基线就停止推荐的规则。再在 ROADMAP 的 PA item 5 下记一条决定。改 `docs/access.md`、`docs/local-setup.md` 和本地 agentHints 另开一个 PR。
+    - 未核实：installed_chrome 与 Steel 写进同一份 grant 的组合，K1 没有测过（两臂各用各的 grant）。
+15. **K4③：是否开放托管 PA（ROADMAP PH H5 的 hosted enhanced access）。**
+    - 建议默认：不开。托管服务继续不读 grant（`docs/access.md` 的 grant 一节），installed_chrome、enhanced_browser、compatible_transport 在托管上继续被拒。
+    - 证据（托管上能用的路线）：ADR 0005 把 installed_chrome 定为只在本地运行（ADR 0005 修订 2026-10-13 的"使用条件"），托管上剩下的只有付费供应商（PA item 4）和出口。边际收益表里，供应商路线 enhanced 增 3、退 1、不稳 14。读原始 `attempts.jsonl`：通过的题里由供应商交付的，窗口 1 10 题，窗口 2 只有 1 题（12 次 provider 级超时）。
+    - 证据（托管环境本身）：K1 只在本机跑，没有托管臂。托管上的数字只有 G4（`research/access/runs/2026-10-21-g4-cloudrun-fixed-runtime-22c9e1ca.md`）：固定镜像的 Cloud Run 上，installed_chrome 走自有出口 3/16、1/16，走 Webshare 9/16、8/16（流量 unknown）；同时段本机走 Clash 10/16。同出口配对没做成，归因未定。
+    - 证据（PH 的条件）：H5 的退出条件是"每项按 H4 的使用数据决定"。H4（团队与付款）没开始。H2 的第二部分（外部用户跑 job）未达。云功能计划 step 0 的 30 天日志没有外部需求（ROADMAP PH 节）。托管侧的 USD 预留属 PH H5，还没做（进度 2026-10-20 EH1 一行）。计价按决定 11 不在本轮。
+    - 风险：不开的话，托管用户在挑战页上只有 standard 的能力，standard 与 Firecrawl 的差距两窗口都是 24。开的话，没有付款和计价就收不回供应商费用；Steel 在 K1 不稳；托管 installed_chrome 要住宅出口，流量费用 unknown。
+    - 重开条件（建议）：先满足 ROADMAP 自己的条件（H4 有使用数据），再有一个从 Cloud Run 跑的托管增强臂，两窗口都比托管 standard 多通过，并且做完按 key 的 USD 预留。
+    - 要你批准的：不开不用批，与 ROADMAP 现状一致。要开，需要一条 ROADMAP 决定（PH H5 提前，绕过"按 H4 数据"的条件）。开放内容里如果有 installed_chrome 或其他只在本地运行的能力，还要 ADR 0005 修订（改"只在本地运行"）。
+    - 未核实：Steel 在托管环境（Cloud Run 出口）上的表现，K1 和 G4 都没有托管 Steel 臂。
+16. **K3 留给 K4 的：按检测类型选出口。**
+    - 建议默认：不建。
+    - 证据：K3 配对（`research/access/runs/2026-10-21-k3-egress-by-detection-5beacbf3.md`）里，Cloudflare 组 Clash 24/32、Webshare 5/32；DataDome 组 5/28 对 0/28。建这个需要的交叉（Webshare 赢 DataDome、Clash 赢 Cloudflare）没有出现。K1 两窗口都只走 Clash，不提供出口对照。
+    - 风险：DataDome 组证据弱，Webshare 臂可评估的 DataDome 尝试只有 12 次。Webshare 全部 64 次里有 31 次停在 installed_chrome 之前，这个混杂因素没有隔离。10-14 Webshare 过 T038、T046，这次没有重现。
+    - 要你批准的：不建不用批。要建，需要一条 ROADMAP 决定（PA item 3）。只在请求前按 host 已记录的检测类型选出口时，不用改 ADR 0005；被拦后在同一 rung 或会话里换出口重试，仍然永不做。
+
 ## 总原则
 
 - **流程：** 每个任务一个分支、一个 PR，从当前 `origin/main` 拉，在 `.claude/worktrees/` 下开 worktree；分支落后 `main` 不超过一个 PR。commit 加 `-s`，conventional 格式。开 PR 后马上开 Auto-fix。
@@ -332,6 +375,7 @@ A、B、D 互不依赖，可各开一个窗口；R 只写研究文件，可同�
   - 每周 ZenRows 臂可以恢复（窗口 2 已完成）。
 
 - 2026-10-22：健康 25 题补跑（Howard 要求，确认 T016 修复后候选不低于对照）。候选 `main` `fb2db7cc`（含 #671、#679），对照 `2ffd7f25`，两臂都不带 grant、access `standard`；5 块各 5 题、两臂轮流先跑，走 Clash，出口 103.142.140.131，12:03–12:05 UTC，没有休眠，$0。候选 22/25、假成功 0，对照 20/25、假成功 1（T039）。**候选不低于对照，T016 两臂都 verified**（browser_local）。两臂相差的 T020、T067 都是对照遇到 `cloudflare_challenge`，只跑了一次，未隔离。记录 `research/access/runs/2026-10-22-k1-healthy25-2ffd7f25-fb2db7cc.md`。
+- 2026-10-22：K4 建议草稿与 G3 判定写进"待你决定"13–16（分支 `claude/k4-g3-recommendations`，从 `main` `fe60be3e` 拉，只写建议）。建议：路线历史不换排序公式，**G3 保持影子、不固化**（273 条 `vendor_rank_shadow` 都只有 Steel 一个候选，`differs` 没有一次为 true，"两窗口一致收益"在单厂商配置下测不出）；installed_chrome 进本机的默认推荐，仍要 grant，要 ADR 0005 修订（两窗口增 15、退 0、$0）；托管 PA 不开；按检测类型选出口不建。没有改任何默认值、路线、ADR 或 ROADMAP 结论，K4 不勾，等 Howard 定。
 
 ## 下次从这里继续
 
