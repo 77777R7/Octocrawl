@@ -7,7 +7,7 @@ import { glyphCloud } from './glyphArt'
  * What the sections claim was checked against the product on 2026-10-09 (origin/main c25c126):
  * - Hosted Octocrawl serves scrape and map, and to an account crawl jobs of up to 500 pages and batch jobs of up to 1,000
  *   URLs (packages/mcp/src/hostedApi.ts refuses every other route by name; rechecked 2026-10-23, origin/main d1eb4647);
- *   larger crawls and batches, Monitor, logins and the handoff to Chrome run on the person's computer.
+ *   larger crawls, Monitor, logins and the handoff to Chrome run on the person's computer.
  * - Allowances: five previews a visitor a day (VISITOR_DAILY_PREVIEWS, packages/public-preview/src/quota.ts); 20 pages a
  *   day per address without a key and 10 starts a minute (DEFAULT_KEYLESS_DAILY, KEYLESS_PER_MINUTE); an account's
  *   1,000 credits a month and 60 a minute (DEFAULT_MONTHLY_CREDITS in packages/mcp/src/hostedCredits.ts, KEY_PER_MINUTE);

@@ -33,7 +33,7 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 
 - Results are provided as they are. A preview can come back blocked, incomplete or timed out, and a successful one does not guarantee that every field is correct. Amazon.sg product records are in Beta.
 - Check a result's status, final address and any field issues before you rely on it.
-- A call's result is kept for ten minutes. The pages a crawl or batch job reads are kept for 7 days after the job ends, so that you can read and export them, and are then deleted. What the service records is described in [Privacy](/docs/privacy/).
+- A call's result is kept for ten minutes. The pages a crawl or batch job reads are kept for 7 days after the job ends, so that you can read and export them. What the service records, and when it is deleted, is described in [Privacy](/docs/privacy/).
 - If you give a job a webhook, the service sends the job's end to the address you gave. You are responsible for that address.
 
 ## Your responsibilities

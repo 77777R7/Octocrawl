@@ -73,5 +73,5 @@ The preview did not return readable feed content in this result. A separate X re
 ## Choose your next step
 
 - [Extract structured data from a web page](/blog/extract-structured-data-from-web-page/), in the browser or over the API.
-- [Connect MCP](/docs/connect-mcp/) to scrape, map, crawl and batch from your agent, or connect a local server for larger jobs.
+- [Connect MCP](/docs/connect-mcp/) to scrape, map, crawl and batch from your agent, or connect a local server for larger crawls, Monitors and logins.
 - [Check Amazon.sg product JSON](/docs/guides/amazon-product/) when subject identity, region, and currency matter.
