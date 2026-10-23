@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk'
 import Ajv from 'ajv'
 import type { CodeOptions, ErrorObject, ValidateFunction } from 'ajv'
 import type {
@@ -36,18 +37,52 @@ import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
 import { modelLocator } from './modelEvidence.js'
 
-export interface StructuredModelConfig {
+export type StructuredModelConfig = OpenAiModelConfig | ClaudeModelConfig
+
+/** An OpenAI-compatible Chat Completions endpoint: the default provider. */
+export interface OpenAiModelConfig {
+  provider?: 'openai'
   baseUrl: string
   model: string
   apiKey?: string
   fetch?: typeof fetch
 }
 
+/** How much a Claude model thinks before it answers (`output_config.effort`). */
+export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+const CLAUDE_EFFORTS: ReadonlySet<string> = new Set<ClaudeEffort>(['low', 'medium', 'high', 'xhigh', 'max'])
+
+/** Anthropic's Messages API, called through the official SDK. */
+export interface ClaudeModelConfig {
+  provider: 'anthropic'
+  model: string
+  apiKey: string
+  /** The SDK's own when unset: ANTHROPIC_BASE_URL, else https://api.anthropic.com. */
+  baseUrl?: string
+  /** `low` when unset (CLAUDE_DEFAULT_EFFORT). */
+  effort?: ClaudeEffort
+  fetch?: typeof fetch
+}
+
+/**
+ * The extraction model the environment names, or null. W2L_EXTRACT_PROVIDER
+ * picks the API: `openai` (or unset) for an OpenAI-compatible endpoint at
+ * W2L_EXTRACT_BASE_URL, `anthropic` for Claude's Messages API, whose key is
+ * W2L_EXTRACT_API_KEY, else ANTHROPIC_API_KEY. A provider or effort the code
+ * does not know, or a Claude model without a key, is no configuration.
+ */
 export function structuredModelConfigFromEnv(): StructuredModelConfig | null {
+  const provider = process.env.W2L_EXTRACT_PROVIDER?.trim().toLowerCase() || 'openai'
   const baseUrl = process.env.W2L_EXTRACT_BASE_URL?.trim()
   const model = process.env.W2L_EXTRACT_MODEL?.trim()
-  if (!baseUrl || !model) return null
   const apiKey = process.env.W2L_EXTRACT_API_KEY?.trim()
+  if (provider === 'anthropic') {
+    const key = apiKey || process.env.ANTHROPIC_API_KEY?.trim()
+    const effort = process.env.W2L_EXTRACT_EFFORT?.trim().toLowerCase()
+    if (!model || !key || (effort && !CLAUDE_EFFORTS.has(effort))) return null
+    return { provider, model, apiKey: key, ...(baseUrl ? { baseUrl } : {}), ...(effort ? { effort: effort as ClaudeEffort } : {}) }
+  }
+  if (provider !== 'openai' || !baseUrl || !model) return null
   return { baseUrl, model, ...(apiKey ? { apiKey } : {}) }
 }
 
@@ -944,6 +979,33 @@ function modelSchema(root: JsonSchema): ModelSchema {
   }
 }
 
+/** What a model call answered, with the tokens and price it was billed at; null where the provider does not say. */
+interface ModelAnswer {
+  value: JsonValue
+  inputTokens: number | null
+  outputTokens: number | null
+  costUsd: number | null
+}
+
+/** A reply without an answer (a refusal, an answer cut off), with what it was billed for. */
+class ModelNoAnswer extends Error {
+  constructor(message: string, readonly usage: Omit<ModelAnswer, 'value'>) {
+    super(message)
+  }
+}
+
+const MODEL_SYSTEM = 'Return only facts supported by the supplied subject content. Do not infer from recommendations or unrelated products.'
+
+/** The user message: the task, the values already read, the page's Markdown and, on the second call, what to repair. */
+function modelInput(result: FetchResult, format: JsonFormatRequest, deterministic: JsonValue, repair: string | null): Record<string, JsonValue> {
+  return {
+    prompt: format.prompt ?? 'Complete the missing schema fields.',
+    deterministic,
+    subject: result.markdown ?? '',
+    ...(repair === null ? {} : { repair }),
+  }
+}
+
 async function callModel(
   result: FetchResult,
   format: JsonFormatRequest,
@@ -952,8 +1014,9 @@ async function callModel(
   execution: ExecutionContext,
   config: StructuredModelConfig,
   repair: string | null,
-): Promise<{ value: JsonValue; inputTokens: number | null; outputTokens: number | null }> {
+): Promise<ModelAnswer> {
   execution.signal?.throwIfAborted()
+  if (config.provider === 'anthropic') return callClaude(result, format, request, deterministic, execution, config, repair)
   const fetchImpl = config.fetch ?? fetch
   const response = await fetchImpl(`${config.baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
     method: 'POST',
@@ -965,19 +1028,8 @@ async function callModel(
     body: JSON.stringify({
       model: config.model,
       messages: [
-        {
-          role: 'system',
-          content: 'Return only facts supported by the supplied subject content. Do not infer from recommendations or unrelated products.',
-        },
-        {
-          role: 'user',
-          content: JSON.stringify({
-            prompt: format.prompt ?? 'Complete the missing schema fields.',
-            deterministic,
-            subject: result.markdown ?? '',
-            ...(repair === null ? {} : { repair }),
-          }),
-        },
+        { role: 'system', content: MODEL_SYSTEM },
+        { role: 'user', content: JSON.stringify(modelInput(result, format, deterministic, repair)) },
       ],
       response_format: {
         type: 'json_schema',
@@ -993,6 +1045,95 @@ async function callModel(
     value: JSON.parse(content) as JsonValue,
     inputTokens: payload.usage?.prompt_tokens ?? null,
     outputTokens: payload.usage?.completion_tokens ?? null,
+    costUsd: null,
+  }
+}
+
+/**
+ * Extraction is a lookup in the supplied Markdown, and every value the model
+ * writes is checked against the page afterwards: thinking at `low` keeps the
+ * output tokens it bills (thinking counts as output) and the latency down.
+ * Claude Haiku 5.5 defaults to `medium`, Claude Sonnet 5.5 to `high`.
+ */
+const CLAUDE_DEFAULT_EFFORT: ClaudeEffort = 'low'
+/** Room for adaptive thinking and the answer without streaming. */
+const CLAUDE_MAX_TOKENS = 16_000
+
+/**
+ * Published prices in USD per million tokens (platform.claude.com/docs/en/about-claude/pricing,
+ * read 2026-10-23). Claude Haiku 5.5 bills a prompt of over 100,000 tokens at its long-prompt prices.
+ */
+const CLAUDE_PRICES: Readonly<Record<string, { input: number; output: number; long?: { above: number; input: number; output: number } }>> = {
+  'claude-haiku-5-5': { input: 0.10, output: 0.50, long: { above: 100_000, input: 0.50, output: 2.50 } },
+  'claude-sonnet-5-5': { input: 2, output: 10 },
+}
+
+/**
+ * One call's price from its usage, or null when it is not known: a model not
+ * in the table, or a call billed at other rates than the table's (cached
+ * input, a region or service tier with its own multiplier).
+ */
+function claudeCostUsd(model: string, usage: Anthropic.Usage): number | null {
+  const price = CLAUDE_PRICES[model]
+  if (price === undefined || (usage.cache_creation_input_tokens ?? 0) > 0 || (usage.cache_read_input_tokens ?? 0) > 0) return null
+  if ((usage.inference_geo ?? 'global') !== 'global' || (usage.service_tier ?? 'standard') !== 'standard') return null
+  const rates = price.long !== undefined && usage.input_tokens > price.long.above ? price.long : price
+  return (usage.input_tokens * rates.input + usage.output_tokens * rates.output) / 1e6
+}
+
+/**
+ * The Messages API with structured outputs. Claude takes the same strict-safe
+ * schema as OpenAI strict mode (closed objects, every property required,
+ * optional ones nullable, only type, properties, required, items, enum,
+ * const, anyOf, $ref, $defs and description). A schema that cannot be made
+ * strict-safe, such as an open map, is sent in the message instead, with the
+ * answer asked for as JSON, because structured outputs take only closed
+ * objects. No other model answers for a refusal: modelUsage names the model
+ * that answered.
+ */
+async function callClaude(
+  result: FetchResult,
+  format: JsonFormatRequest,
+  request: ModelSchema,
+  deterministic: JsonValue,
+  execution: ExecutionContext,
+  config: ClaudeModelConfig,
+  repair: string | null,
+): Promise<ModelAnswer> {
+  const client = new Anthropic({
+    apiKey: config.apiKey,
+    authToken: null,
+    ...(config.baseUrl === undefined ? {} : { baseURL: config.baseUrl }),
+    ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
+  })
+  const input = modelInput(result, format, deterministic, repair)
+  const message = await client.messages.create({
+    model: config.model,
+    max_tokens: CLAUDE_MAX_TOKENS,
+    system: request.strict ? MODEL_SYSTEM : `${MODEL_SYSTEM} Answer with one JSON object that the JSON Schema in "schema" accepts, and nothing else.`,
+    messages: [{ role: 'user', content: JSON.stringify(request.strict ? input : { ...input, schema: request.schema }) }],
+    output_config: {
+      effort: config.effort ?? CLAUDE_DEFAULT_EFFORT,
+      ...(request.strict ? { format: { type: 'json_schema' as const, schema: request.schema as Record<string, unknown> } } : {}),
+    },
+  }, { signal: execution.signal })
+  const usage = {
+    inputTokens: message.usage.input_tokens + (message.usage.cache_creation_input_tokens ?? 0) + (message.usage.cache_read_input_tokens ?? 0),
+    outputTokens: message.usage.output_tokens,
+    costUsd: claudeCostUsd(config.model, message.usage),
+  }
+  if (message.stop_reason === 'refusal') {
+    const category = message.stop_details?.category
+    throw new ModelNoAnswer(`the model declined to answer (stop_reason refusal${category ? `, category ${category}` : ''})`, usage)
+  }
+  if (message.stop_reason === 'max_tokens' || message.stop_reason === 'model_context_window_exceeded') {
+    throw new ModelNoAnswer(`the model's answer was cut off (stop_reason ${message.stop_reason})`, usage)
+  }
+  const text = message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('').trim()
+  try {
+    return { value: JSON.parse(text.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1')) as JsonValue, ...usage }
+  } catch {
+    throw new ModelNoAnswer('the model answered with text that is not JSON', usage)
   }
 }
 
@@ -1197,13 +1338,23 @@ export async function extractStructured(
   let inputTokens = 0
   let outputTokens = 0
   let tokensKnown = true
+  // Only Claude calls are priced (claudeCostUsd): an OpenAI-compatible endpoint's price is unknown, also for a call that failed.
+  let costUsd: number | null = modelConfig.provider === 'anthropic' ? 0 : null
   let repair: string | null = null
+  const count = (usage: Omit<ModelAnswer, 'value'>): void => {
+    if (usage.inputTokens === null || usage.outputTokens === null) tokensKnown = false
+    else {
+      inputTokens += usage.inputTokens
+      outputTokens += usage.outputTokens
+    }
+    costUsd = costUsd === null || usage.costUsd === null ? null : costUsd + usage.costUsd
+  }
   const modelUsage = (): StructuredModelUsage => ({
     model: modelConfig.model,
     attempts,
     inputTokens: tokensKnown ? inputTokens : null,
     outputTokens: tokensKnown ? outputTokens : null,
-    externalCostUsd: null,
+    externalCostUsd: costUsd,
     strict: request.strict,
     ...(request.reason === undefined ? {} : { strictReason: request.reason }),
   })
@@ -1211,11 +1362,7 @@ export async function extractStructured(
     attempts++
     try {
       const model = await callModel(result, format, request, deterministic, execution, modelConfig, repair)
-      if (model.inputTokens === null || model.outputTokens === null) tokensKnown = false
-      else {
-        inputTokens += model.inputTokens
-        outputTokens += model.outputTokens
-      }
+      count(model)
       const answer = withoutDisallowedNulls(format.schema, format.schema, model.value)
       // Schema-valid and supported by the page are two states: the answer is
       // first checked against the schema as written, then each value the
@@ -1252,6 +1399,9 @@ export async function extractStructured(
         return { status: 'invalid', data, schemaSha256, evidence, issues: [...readIssues, { code: 'model_output_invalid', message: repair }, ...missingIssues], modelUsage: modelUsage() }
       }
     } catch (error) {
+      if (error instanceof ModelNoAnswer) count(error.usage)
+      // A Claude call that failed may still have been billed, for one cut off by the deadline: its tokens and price are unknown, not 0.
+      else if (modelConfig.provider === 'anthropic') count({ inputTokens: null, outputTokens: null, costUsd: null })
       const aborted = execution.signal?.aborted === true || (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'TimeoutError')
       return {
         status: 'incomplete',
