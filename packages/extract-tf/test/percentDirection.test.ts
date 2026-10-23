@@ -42,7 +42,8 @@ describe('percent direction in final text and table cells', () => {
     ['contradictory source, direct', direct('1.3%', '1.25'), '1.3%'],
     ['invalid source', wrapped('1.3%', '-1oops'), '1.3%'],
     ['sort key on another element', '<td><span data-sort="-1.25"><i class="fa-caret-down"></i>1.3%</span></td>', '1.3%'],
-    ['caret outside a table cell', '<td><div data-sort="-1.25"><i class="fa-caret-down"></i>1.3%</div></td>', '1.3%'],
+    ['sort key on a wrapper inside the cell', '<td><div data-sort="-1.25"><i class="fa-caret-down"></i>1.3%</div></td>', '1.3%'],
+    ['caret after the value', direct('1.3%', '-1.25', '').replace('1.3%', '1.3%<i class="fa-caret-down"></i>'), '1.3%'],
     ['colour only', wrapped('1.3%', '-1.25', '').replace('<span ', '<span class="red gecko-down" '), '1.3%'],
     ['ordinary arrow', wrapped('1.3%', '-1.25', '<i class="arrow-down"></i>'), '1.3%'],
     ['suffix lookalike', wrapped('1.3%', '-1.25', '<i class="fa-caret-downward"></i>'), '1.3%'],
@@ -57,6 +58,12 @@ describe('percent direction in final text and table cells', () => {
     expect(htmlToTables(table(cells))[0]?.rows[1]).toEqual([expected])
     // Emphasis in a nonempty <i> is flattened in table cells.
     expect(htmlToMarkdown(table(cells))).toContain(`| ${expected} |`)
+  })
+
+  it('keeps a linked percentage as its link, unsigned, and leaves a caret outside a table alone', () => {
+    const linked = '<td data-sort="-1.25"><a href="https://percent.fixture.test/c"><i class="fa fa-caret-down"></i>1.3%</a></td>'
+    expect(htmlToMarkdown(table(linked))).toContain('| [1.3%](https://percent.fixture.test/c) |')
+    expect(htmlToMarkdown('<p><span data-sort="-1.25"><i class="fa-caret-down"></i>1.3%</span> today</p>')).toBe('1.3% today')
   })
 
   it('does not revive excluded or browser-hidden percent content', () => {

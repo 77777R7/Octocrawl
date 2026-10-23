@@ -1202,7 +1202,7 @@ function caretPercent(el: Element, ctx: Context): string | null {
   for (let child = el.firstChild; child !== null; child = child.nextSibling) {
     if (child.nodeType === TEXT_NODE) text += (child as Text).data
     else if (child.nodeType !== ELEMENT_NODE) continue
-    else if (icon !== null) return null
+    else if (icon !== null || text.trim() !== '') return null
     else {
       icon = child as Element
       if ((icon.localName !== 'i' && icon.localName !== 'span') || icon.firstChild !== null || skipped(icon, ctx) || cssBlock(icon, ctx)) return null
@@ -1224,7 +1224,8 @@ function openInline(el: Element, out: Inline, ctx: Context, marks: Marks): Inlin
   // their boundaries become spaces.
   const block = BLOCK.has(tag) || cssBlock(el, ctx)
   if (block) out.space()
-  const signed = caretPercent(el, ctx)
+  // A wrapper written otherwise than by its text (a link keeps its target) is left to its own writing.
+  const signed = SPECIAL_INLINE.has(tag) ? null : caretPercent(el, ctx)
   if (signed !== null) {
     out.text(signed)
     if (block) out.space()

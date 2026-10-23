@@ -250,7 +250,7 @@ Markdown leaves out `data:` URIs, as Firecrawl's `removeBase64Images` does by de
 
 ## Percentage direction
 
-Some pages draw a percentage's minus as an icon: an empty down caret (`<i class="fa-caret-down">`) before an unsigned `1.3%`, with the signed value only in the table cell's sort key (`data-sort="-1.25"`), as CoinGecko's change columns do. Markdown and `tables` write such a cell as `-1.3%` when the cell's sort key is negative and the element holds only that caret and one unsigned, nonzero percentage. The displayed magnitude and its precision stay as shown; the sort key's unrounded value is never substituted. A caret without a negative sort key, colour, another arrow, a literal sign, a rounded `0.0%` or a percentage outside a table cell stays as written. Other icon-only signs are not read.
+Some pages draw a percentage's minus as an icon: an empty down caret (`<i class="fa-caret-down">`) before an unsigned `1.3%`, with the signed value only in the table cell's sort key (`data-sort="-1.25"`), as CoinGecko's change columns do. Markdown and `tables` write such a cell as `-1.3%` when the cell's sort key is negative and the element holds only that caret and one unsigned, nonzero percentage. The displayed magnitude and its precision stay as shown; the sort key's unrounded value is never substituted. A caret without a negative sort key or after the number, colour, another arrow, a literal sign, a rounded `0.0%`, a percentage inside a link (written as the link, unsigned) or a percentage outside a table cell stays as written. Other icon-only signs are not read.
 
 ## Metadata
 
