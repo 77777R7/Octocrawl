@@ -1043,6 +1043,14 @@ describe('structured JSON extraction', () => {
     expect(out.modelUsage?.strictReason).toContain('/properties/details')
   })
 
+  it('leaves the price of an OpenAI-compatible call unknown, also when it fails', async () => {
+    const out = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), {}, {
+      baseUrl: 'https://model.example', model: 'extractor', fetch: (async () => new Response('oops', { status: 500 })) as typeof fetch,
+    })
+    expect(out.issues.map(issue => issue.code)).toContain('model_provider_error')
+    expect(out.modelUsage).toMatchObject({ attempts: 1, externalCostUsd: null })
+  })
+
   it('sends the OpenAI-compatible endpoint the same request as before Claude support', async () => {
     const sent: Array<{ url: string; headers: unknown; body: string }> = []
     await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), {}, {

@@ -1338,7 +1338,8 @@ export async function extractStructured(
   let inputTokens = 0
   let outputTokens = 0
   let tokensKnown = true
-  let costUsd: number | null = 0
+  // Only Claude calls are priced (claudeCostUsd): an OpenAI-compatible endpoint's price is unknown, also for a call that failed.
+  let costUsd: number | null = modelConfig.provider === 'anthropic' ? 0 : null
   let repair: string | null = null
   const count = (usage: Omit<ModelAnswer, 'value'>): void => {
     if (usage.inputTokens === null || usage.outputTokens === null) tokensKnown = false
