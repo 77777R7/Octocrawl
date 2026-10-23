@@ -10,9 +10,15 @@
 // Interleaving is per case: the four local arms one after another in a rotated order, the two competitors at the same
 // time. The Octocrawl request is the plan's with fastMode removed (the replay kept the HTTP lane; live, the arm's ladder
 // runs), the arm's access, maxAge 0 and --timeout (default 120 s, also Firecrawl's timeout). First calls only.
+// --arms picks a subset in the same order. The model arm (not in the default set) is standard with every json format's
+// modelFallback set to true: Octocrawl's F2. Only its API gets W2L_EXTRACT_* and ANTHROPIC_API_KEY from the shell; the
+// other local arms run with them removed. --firecrawl-cap and --model-cap-usd stop the run before a case that could pass
+// them (a Firecrawl answer counted at 9 credits when it reports none; a model answer without a known cost stops the run).
 //
-// Usage: node research/accuracy/k1_live_v2.mjs <output dir> --control <dir> [--plan <plan.json>] [--ports 8831,8832,8833,8834]
-//          [--timeout 120000] [--steel-grant <file>] [--ic-grant <file>]
+// Usage: node research/accuracy/k1_live_v2.mjs <output dir> [--control <dir>] [--plan <plan.json>] [--ports 8831,8832,8833,8834]
+//          [--timeout 120000] [--steel-grant <file>] [--ic-grant <file>] [--arms standard,model,firecrawl]
+//          [--firecrawl-cap <credits>] [--model-cap-usd <usd>]
+//   --ports are taken by the selected local arms in order; --control is needed only with the control arm.
 //   Each answer goes to <output dir>/<arm>/<case>.json ({caseId, arm, request, startedAt, finishedAt, response, error});
 //   a case already saved for an arm is not sent again. Keys and grants are found as k1-window.mjs finds them, and keys are
 //   never written. Firecrawl's answer is saved as {status, markdown, json: {data}, firecrawl: {metadata, creditsUsed}}.
@@ -28,8 +34,12 @@ const args = process.argv.slice(2)
 const flag = (name) => { const i = args.indexOf(name); return i === -1 ? undefined : args[i + 1] }
 const out = args[0] && !args[0].startsWith('--') ? resolve(args[0]) : null
 if (!out) throw new Error('usage: k1_live_v2.mjs <output dir> --control <dir>')
+const arms = (flag('--arms') ?? 'standard,enhanced,installed_chrome,control,firecrawl,zenrows').split(',')
+for (const a of arms) if (!['standard', 'model', 'enhanced', 'installed_chrome', 'control', 'firecrawl', 'zenrows'].includes(a)) throw new Error(`unknown arm ${a}`)
 const control = flag('--control') && resolve(flag('--control'))
-if (!control || !existsSync(join(control, 'packages/api/dist/index.js'))) throw new Error('--control <dir>: a built checkout of the control commit')
+if (arms.includes('control') && (!control || !existsSync(join(control, 'packages/api/dist/index.js')))) throw new Error('--control <dir>: a built checkout of the control commit')
+const caps = { firecrawl: Number(flag('--firecrawl-cap') ?? Infinity), modelUsd: Number(flag('--model-cap-usd') ?? Infinity) }
+for (const [k, v] of Object.entries(caps)) if (Number.isNaN(v) || v < 0) throw new Error(`${k} cap must be a number`)
 const plan = JSON.parse(await readFile(flag('--plan') ?? join(here, 'reserved-plan-json.v2.json'), 'utf8'))
 const ports = (flag('--ports') ?? '8831,8832,8833,8834').split(',').map(Number)
 for (const p of ports) if ([8787, 8791, 8799, 8812, 8813, 8814].includes(p)) throw new Error(`port ${p} is reserved on this machine`)
@@ -50,21 +60,27 @@ async function secret(name) {
   return null
 }
 const keys = { steel: await secret('STEEL_API_KEY'), firecrawl: await secret('FIRECRAWL_API_KEY'), zenrows: await secret('ZENROWS_API_KEY') }
-for (const [k, v] of Object.entries(keys)) if (!v) throw new Error(`${k} key not found`)
+const needs = { steel: arms.includes('enhanced') || arms.includes('control'), firecrawl: arms.includes('firecrawl'), zenrows: arms.includes('zenrows') }
+for (const [k, v] of Object.entries(keys)) if (needs[k] && !v) throw new Error(`${k} key not found`)
 const steelGrant = flag('--steel-grant') ?? localFile('.w2l/access/steel-grant.json')
 // After window 1 (which ran the 16-task grant outside its declared scope) the K1 grant is required; --ic-grant overrides.
 const icGrant = flag('--ic-grant') ?? localFile('.w2l/access/installed-chrome-grant-k1.json')
-if (icGrant === null) throw new Error('no installed_chrome grant: K1 needs .w2l/access/installed-chrome-grant-k1.json (or --ic-grant)')
+if (arms.includes('installed_chrome') && icGrant === null) throw new Error('no installed_chrome grant: K1 needs .w2l/access/installed-chrome-grant-k1.json (or --ic-grant)')
 const head = sh('git rev-parse HEAD')
-const LOCAL = {
-  standard: { port: ports[0], cwd: repo, commit: head, access: 'standard', env: {} },
-  enhanced: { port: ports[1], cwd: repo, commit: head, access: 'enhanced', env: { W2L_ACCESS_GRANT: steelGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.steel } },
-  installed_chrome: { port: ports[2], cwd: repo, commit: head, access: 'enhanced', env: { W2L_ACCESS_GRANT: icGrant } },
-  control: { port: ports[3], cwd: control, commit: sh('git rev-parse HEAD', control), access: 'enhanced', env: { W2L_ACCESS_GRANT: steelGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.steel } },
+const MODEL_ENV = ['W2L_EXTRACT_PROVIDER', 'W2L_EXTRACT_BASE_URL', 'W2L_EXTRACT_MODEL', 'W2L_EXTRACT_API_KEY', 'W2L_EXTRACT_EFFORT', 'ANTHROPIC_API_KEY']
+if (arms.includes('model') && !process.env.W2L_EXTRACT_MODEL) throw new Error('the model arm needs W2L_EXTRACT_MODEL (and its provider and key) in the environment')
+const ALL = {
+  standard: { cwd: repo, commit: head, access: 'standard', env: {} },
+  model: { cwd: repo, commit: head, access: 'standard', env: {}, model: true },
+  enhanced: { cwd: repo, commit: head, access: 'enhanced', env: { W2L_ACCESS_GRANT: steelGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.steel } },
+  installed_chrome: { cwd: repo, commit: head, access: 'enhanced', env: { W2L_ACCESS_GRANT: icGrant } },
+  control: { cwd: control, access: 'enhanced', env: { W2L_ACCESS_GRANT: steelGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.steel } },
 }
-const names = Object.keys(LOCAL)
+const names = arms.filter((a) => a in ALL)
+const LOCAL = Object.fromEntries(names.map((n, i) => [n, { ...ALL[n], port: ports[i], commit: n === 'control' ? sh('git rev-parse HEAD', control) : ALL[n].commit }]))
+if (names.some((n) => !Number.isInteger(LOCAL[n].port))) throw new Error(`--ports needs one port per local arm (${names.join(', ')})`)
 await mkdir(out, { recursive: true })
-for (const a of [...names, 'firecrawl', 'zenrows']) await mkdir(join(out, a), { recursive: true })
+for (const a of arms) await mkdir(join(out, a), { recursive: true })
 
 const procs = []
 async function startApi(name) {
@@ -72,7 +88,9 @@ async function startApi(name) {
   const log = join(out, `api-${name}.log`)
   const o = createWriteStream(log)
   await new Promise((r) => o.once('open', r))
-  const p = spawn('node', ['--import', 'tsx', 'packages/api/src/cli.ts', '--port', String(a.port)], { cwd: a.cwd, env: { ...process.env, ...a.env, W2L_TASK_ROOT: join(out, `api-${name}`), W2L_SOURCE_COMMIT: a.commit }, stdio: ['ignore', o, o] })
+  const env = { ...process.env, ...a.env, W2L_TASK_ROOT: join(out, `api-${name}`), W2L_SOURCE_COMMIT: a.commit }
+  if (!a.model) for (const k of MODEL_ENV) delete env[k]
+  const p = spawn('node', ['--import', 'tsx', 'packages/api/src/cli.ts', '--port', String(a.port)], { cwd: a.cwd, env, stdio: ['ignore', o, o] })
   procs.push(p)
   for (let i = 0; i < 90; i++) {
     await new Promise((r) => setTimeout(r, 2000))
@@ -88,7 +106,9 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { killAll(); proc
 const { fetch: pfetch, EnvHttpProxyAgent } = await import('undici')
 const agent = new EnvHttpProxyAgent()
 const save = async (arm, item, request, startedAt, response, error) => {
-  const strip = JSON.parse(JSON.stringify(request).replaceAll(keys.firecrawl, '[key]').replaceAll(keys.zenrows, '[key]'))
+  let text = JSON.stringify(request)
+  for (const k of [keys.firecrawl, keys.zenrows]) if (k) text = text.replaceAll(k, '[key]')
+  const strip = JSON.parse(text)
   await writeFile(join(out, arm, `${item.id}.json`), JSON.stringify({ caseId: item.id, arm, request: strip, startedAt, finishedAt: new Date().toISOString(), response, error }, null, 2) + '\n', { flag: 'wx' })
 }
 const done = (arm, item) => existsSync(join(out, arm, `${item.id}.json`))
@@ -100,6 +120,7 @@ async function octocrawl(name, item) {
   const { fastMode, ...base } = plan.request
   const { url: _u, ...own } = item.request ?? {}
   const request = { ...base, ...own, url: item.url, maxAge: 0, timeout, access: LOCAL[name].access }
+  if (LOCAL[name].model) request.formats = request.formats.map((f) => (typeof f === 'object' && f.type === 'json' ? { ...f, modelFallback: true } : f))
   const startedAt = new Date().toISOString()
   let response = null, error = null
   try {
@@ -109,7 +130,9 @@ async function octocrawl(name, item) {
     else error = { name: 'api', message: JSON.stringify(body).slice(0, 2000), code: res.status }
   } catch (e) { error = { name: e.name, message: e.message, code: e.code ?? null } }
   await save(name, item, request, startedAt, response, error)
-  console.log(name, item.id, response?.status ?? error?.code ?? 'error', response?.verification?.status ?? '')
+  const usage = response?.json?.modelUsage
+  if (usage) spent.modelUsd = typeof usage.externalCostUsd === 'number' ? spent.modelUsd + usage.externalCostUsd : NaN
+  console.log(name, item.id, response?.status ?? error?.code ?? 'error', response?.verification?.status ?? '', usage ? `$${usage.externalCostUsd}` : '')
 }
 
 async function firecrawl(item) {
@@ -127,6 +150,8 @@ async function firecrawl(item) {
     response = { status: claimed ? 'success' : 'failed', failureReason: claimed ? null : (meta.error ?? body?.error ?? (code !== null ? `http_${code}` : `api_${res.status}`)), markdown: typeof data?.markdown === 'string' ? data.markdown : null, json: data?.json === undefined ? null : { data: data.json }, evidence: { httpStatus: code, finalUrl: meta.url ?? meta.sourceURL ?? null }, firecrawl: { apiStatus: res.status, creditsUsed: meta.creditsUsed ?? null, proxyUsed: meta.proxyUsed ?? null, cacheState: meta.cacheState ?? null, scrapeId: meta.scrapeId ?? null } }
   } catch (e) { error = { name: e.name, message: e.message, code: e.code ?? null } }
   await save('firecrawl', item, request, startedAt, response, error)
+  const used = response?.firecrawl?.creditsUsed
+  spent.firecrawl += typeof used === 'number' ? used : 9
   console.log('firecrawl', item.id, response?.status ?? error?.code ?? 'error', response?.firecrawl?.creditsUsed ?? '')
 }
 
@@ -158,11 +183,26 @@ function sleepsSince(fromMs) {
     return m && at >= fromMs ? [`${new Date(at).toISOString()} ${m[5]}`] : []
   })
 }
+// A resumed run counts what its saved answers already spent.
+const spent = { firecrawl: 0, modelUsd: 0 }
+for (const item of plan.cases) {
+  if (arms.includes('firecrawl') && done('firecrawl', item)) {
+    const used = JSON.parse(await readFile(join(out, 'firecrawl', `${item.id}.json`), 'utf8')).response?.firecrawl?.creditsUsed
+    spent.firecrawl += typeof used === 'number' ? used : 9
+  }
+  if (arms.includes('model') && done('model', item)) {
+    const usage = JSON.parse(await readFile(join(out, 'model', `${item.id}.json`), 'utf8')).response?.json?.modelUsage
+    if (usage) spent.modelUsd = typeof usage.externalCostUsd === 'number' ? spent.modelUsd + usage.externalCostUsd : NaN
+  }
+}
 const runStart = Date.now()
 try {
   for (const name of names) await startApi(name)
   for (const [i, item] of plan.cases.entries()) {
-    const comp = Promise.all([firecrawl(item), zenrows(item)])
+    if (arms.includes('firecrawl') && !(spent.firecrawl + 9 <= caps.firecrawl)) throw new Error(`stopped before ${item.id}: Firecrawl ${spent.firecrawl} credits, cap ${caps.firecrawl}`)
+    // One model call on these pages cost at most $0.0043 on the frozen captures (Haiku); 0.05 leaves room for a larger live page.
+    if (arms.includes('model') && !(spent.modelUsd + 0.05 <= caps.modelUsd)) throw new Error(`stopped before ${item.id}: model spend $${spent.modelUsd}, cap $${caps.modelUsd}`)
+    const comp = Promise.all([arms.includes('firecrawl') && firecrawl(item), arms.includes('zenrows') && zenrows(item)])
     for (let k = 0; k < names.length; k++) await octocrawl(names[(i + k) % names.length], item)
     await comp
     const slept = sleepsSince(runStart)
@@ -170,5 +210,5 @@ try {
   }
 } finally {
   killAll()
-  await writeFile(join(out, 'run.json'), JSON.stringify({ plan: flag('--plan') ?? 'research/accuracy/reserved-plan-json.v2.json', timeout, ports, commits: Object.fromEntries(names.map((n) => [n, LOCAL[n].commit])), startedAt: new Date(runStart).toISOString(), finishedAt: new Date().toISOString(), sleeps: sleepsSince(runStart), proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null } }, null, 2) + '\n')
+  await writeFile(join(out, 'run.json'), JSON.stringify({ plan: flag('--plan') ?? 'research/accuracy/reserved-plan-json.v2.json', arms, timeout, ports, commits: Object.fromEntries(names.map((n) => [n, LOCAL[n].commit])), spent, startedAt: new Date(runStart).toISOString(), finishedAt: new Date().toISOString(), sleeps: sleepsSince(runStart), proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null } }, null, 2) + '\n')
 }
