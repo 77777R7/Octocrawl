@@ -325,6 +325,8 @@ export interface PageMetadata {
 
 export interface DocumentExtraction {
   title: string | null
+  /** Where `title` was read (ExtractorOutput.titlePath). */
+  titlePath?: string
   pageType: PageType
   strategy: ExtractStrategy
   confidence: number
@@ -381,6 +383,8 @@ export interface ExtractorOutput {
   sourceUnavailable?: true
   /** Page title, or null when none could be found. */
   title: string | null
+  /** Where the title was read: the main content's heading (`h1[0]`, `h1[1]`, `h2[0]`, counted in the main content) or `title` (the page's `<title>`). */
+  titlePath?: string
   /** Extracted main content as HTML. Markdown conversion happens later in the pipeline. */
   mainHtml: string
   /**

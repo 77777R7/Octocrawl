@@ -126,7 +126,7 @@ function page(html: string, url = 'https://books.example/catalogue/a-light-in-th
   const out = extractTf.extract(html, { url })
   return {
     ...result, requestedUrl: url, markdown: 'page', evidence: { ...result.evidence, finalUrl: url }, metadata: out.metadata,
-    document: { title: out.title, pageType: out.pageType, strategy: out.strategy, confidence: out.confidence, product: out.product ?? null, adapter: out.adapter, entities: out.entities, adapterValidation: out.adapterValidation, labelledValues: out.labelledValues, declaredValues: out.declaredValues },
+    document: { title: out.title, titlePath: out.titlePath, pageType: out.pageType, strategy: out.strategy, confidence: out.confidence, product: out.product ?? null, adapter: out.adapter, entities: out.entities, adapterValidation: out.adapterValidation, labelledValues: out.labelledValues, declaredValues: out.declaredValues },
   }
 }
 const json = (properties: Record<string, JsonSchema>, required: string[], modelFallback = false): JsonFormatRequest => ({
@@ -571,6 +571,64 @@ describe('structured JSON extraction', () => {
     expect(out.issues.map(issue => [issue.code, issue.path])).toEqual([['field_ambiguous', '/price'], ['missing_required', '/price']])
     expect(out.issues[0]?.message).toContain('"Price (excl. tax)" = "£40.00"')
     expect(out.issues[0]?.message).toContain('"Price (incl. tax)" = "£48.00"')
+  })
+
+  it('takes the heading the page\'s declared title names, not a site, archive or subtitle heading (F2 false successes)', async () => {
+    const body = `<p>${'Reusing one HTTP/1 connection for many requests saves a handshake for each of them. '.repeat(4)}</p>`
+    const title = async (html: string, url: string, extra: Record<string, JsonSchema> = {}) => {
+      const out = await extractStructured(page(html, url), json({ title: { type: 'string' }, ...extra }, ['title']), {}, null)
+      return { title: (out.data as { title?: string } | undefined)?.title, evidence: out.evidence.filter((e) => e.path === '/title') }
+    }
+    // Go blog: the archive's own heading comes first, and is a link to the archive.
+    expect(await title(`<html><head><title>Better HTTP/1 connection reuse - The Go Programming Language</title></head><body><main>
+<h1 class="small"><a href="/blog/">The Go Blog</a></h1><h1>Better HTTP/1 connection reuse</h1>${body}</main></body></html>`, 'https://go.dev/blog/http-connection-reuse'))
+      .toEqual({ title: 'Better HTTP/1 connection reuse', evidence: [{ path: '/title', source: 'dom', evidencePath: 'h1[1]' }] })
+    // Rust blog: no h1; the post's h2 opens the <title>, which adds the blog's name.
+    expect(await title(`<html><head><title>Announcing Rust 1.99.0 | Rust Blog</title></head><body><main>
+<header><h2>Announcing Rust 1.99.0</h2></header>${body}<h2>What's in 1.99.0 stable</h2>${body}</main></body></html>`, 'https://blog.rust-lang.org/2026/10/01/Rust-1.99.0/'))
+      .toEqual({ title: 'Announcing Rust 1.99.0', evidence: [{ path: '/title', source: 'dom', evidencePath: 'h2[0]' }] })
+    // IETF datatracker: a <small> subtitle inside the heading is not the title.
+    expect(await title(`<html><head><title>RFC 9112 - HTTP/1.1</title></head><body><main>
+<h1>
+    HTTP/1.1
+    <br>
+    <small class="text-body-secondary">RFC 9112
+     also known as <a href="/doc/std99/">STD 99</a>
+    </small>
+</h1>${body}</main></body></html>`, 'https://datatracker.ietf.org/doc/rfc9112/'))
+      .toEqual({ title: 'HTTP/1.1', evidence: [{ path: '/title', source: 'dom', evidencePath: 'h1[0]' }] })
+    // PEP: a schema that asks for the number beside the title takes the title without it; one that does not keeps the heading.
+    const pep = `<html><head><title>PEP 8 – Style Guide for Python Code | peps.python.org</title></head><body><main>
+<h1 class="page-title">PEP 8 – Style Guide for Python Code</h1>${body}</main></body></html>`
+    expect(await title(pep, 'https://peps.python.org/pep-0008/', { number: { type: 'string' } }))
+      .toEqual({ title: 'Style Guide for Python Code', evidence: [{ path: '/title', source: 'dom', evidencePath: 'h1[0]' }] })
+    expect((await title(pep, 'https://peps.python.org/pep-0008/')).title).toBe('PEP 8 – Style Guide for Python Code')
+    expect((await title(`<html><head><title>COVID-19: Vaccines and boosters | State Health</title></head><body><main><h1>COVID-19: Vaccines and boosters</h1>${body}</main></body></html>`, 'https://health.example.gov/covid-19/')).title)
+      .toBe('COVID-19: Vaccines and boosters')
+    expect((await title(pep, 'https://peps.python.org/pep-0008/', { pep_number: { type: 'string' } })).title).toBe('Style Guide for Python Code')
+    // A number field about something else (a phone, a case, a model) is not the document's number.
+    for (const [heading, extra] of [['NHS 111 – Get urgent help', 'phoneNumber'], ['COVID-19: Vaccines and boosters', 'caseNumber'], ['RTX 4090 – Founders Edition', 'modelNumber']] as const) {
+      expect((await title(`<html><head><title>${heading}</title></head><body><main><h1>${heading}</h1>${body}</main></body></html>`, 'https://site.example/page', { [extra]: { type: 'string' } })).title, extra).toBe(heading)
+    }
+    // PyPI: og:title "requests" is not the README's "Requests"; the project header stays the title.
+    expect((await title(`<html><head><title>requests · PyPI</title><meta property="og:title" content="requests"></head><body><main>
+<h1 class="project-header__name">requests 2.34.2</h1>${body}<h1 id="user-content-requests">Requests<a href="#user-content-requests"></a></h1>${body}</main></body></html>`, 'https://pypi.org/project/requests/')).title)
+      .toBe('requests 2.34.2')
+    // A site's name closes the <title>: a heading naming it is not the title, however long it is; the first h1 stays.
+    for (const [declared, headings, expected] of [
+      ['Release notes for version 3 - Acme Docs', '<h2>Acme Docs</h2><h2>New features</h2>', 'Release notes for version 3 - Acme Docs'],
+      ['About | Contoso Pharmaceuticals Ltd', '<h2>Contoso Pharmaceuticals Ltd</h2><h2>Our history</h2>', 'About | Contoso Pharmaceuticals Ltd'],
+      ['About us | Contoso Pharmaceuticals Ltd', '<h1>About us</h1><h1>Contoso Pharmaceuticals Ltd</h1>', 'About us'],
+      ['Kiln notes | Harbour Pottery', '<h1>Kiln temperatures</h1><h2>Harbour Pottery</h2>', 'Kiln temperatures'],
+      // A site's name that opens the <title> is shorter than the subject after it.
+      ['Acme Blog: How we scaled Postgres', '<h2>Acme Blog</h2><h2>Results</h2>', 'Acme Blog: How we scaled Postgres'],
+      // A first h1 that is not a link to another page stays the title, whatever a later one matches.
+      ['Shoes | Nike', '<h1>Air Max 90</h1><h1>Shoes</h1>', 'Air Max 90'],
+      ['Home - Acme', '<h1>Welcome</h1><h1>Home</h1>', 'Welcome'],
+      ['Star Wars: Episode IV – A New Hope (1977) - IMDb', '<h1>Cast</h1><h1>Star Wars</h1>', 'Cast'],
+    ] as const) {
+      expect((await title(`<html><head><title>${declared}</title></head><body><main>${headings.replace(/<\/h(\d)>/g, `</h$1>${body}`)}</main></body></html>`, 'https://site.example/about')).title, declared).toBe(expected)
+    }
   })
 
   it('takes a scholarly page\'s title, authors and date from its citation_* tags, never from a heading above the title', async () => {
