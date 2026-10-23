@@ -39,6 +39,7 @@ for (const a of arms) if (!['standard', 'model', 'enhanced', 'installed_chrome',
 const control = flag('--control') && resolve(flag('--control'))
 if (arms.includes('control') && (!control || !existsSync(join(control, 'packages/api/dist/index.js')))) throw new Error('--control <dir>: a built checkout of the control commit')
 const caps = { firecrawl: Number(flag('--firecrawl-cap') ?? Infinity), modelUsd: Number(flag('--model-cap-usd') ?? Infinity) }
+for (const [k, v] of Object.entries(caps)) if (Number.isNaN(v) || v < 0) throw new Error(`${k} cap must be a number`)
 const plan = JSON.parse(await readFile(flag('--plan') ?? join(here, 'reserved-plan-json.v2.json'), 'utf8'))
 const ports = (flag('--ports') ?? '8831,8832,8833,8834').split(',').map(Number)
 for (const p of ports) if ([8787, 8791, 8799, 8812, 8813, 8814].includes(p)) throw new Error(`port ${p} is reserved on this machine`)
@@ -105,7 +106,9 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { killAll(); proc
 const { fetch: pfetch, EnvHttpProxyAgent } = await import('undici')
 const agent = new EnvHttpProxyAgent()
 const save = async (arm, item, request, startedAt, response, error) => {
-  const strip = JSON.parse(JSON.stringify(request).replaceAll(keys.firecrawl, '[key]').replaceAll(keys.zenrows, '[key]'))
+  let text = JSON.stringify(request)
+  for (const k of [keys.firecrawl, keys.zenrows]) if (k) text = text.replaceAll(k, '[key]')
+  const strip = JSON.parse(text)
   await writeFile(join(out, arm, `${item.id}.json`), JSON.stringify({ caseId: item.id, arm, request: strip, startedAt, finishedAt: new Date().toISOString(), response, error }, null, 2) + '\n', { flag: 'wx' })
 }
 const done = (arm, item) => existsSync(join(out, arm, `${item.id}.json`))
@@ -180,12 +183,23 @@ function sleepsSince(fromMs) {
     return m && at >= fromMs ? [`${new Date(at).toISOString()} ${m[5]}`] : []
   })
 }
+// A resumed run counts what its saved answers already spent.
 const spent = { firecrawl: 0, modelUsd: 0 }
+for (const item of plan.cases) {
+  if (arms.includes('firecrawl') && done('firecrawl', item)) {
+    const used = JSON.parse(await readFile(join(out, 'firecrawl', `${item.id}.json`), 'utf8')).response?.firecrawl?.creditsUsed
+    spent.firecrawl += typeof used === 'number' ? used : 9
+  }
+  if (arms.includes('model') && done('model', item)) {
+    const usage = JSON.parse(await readFile(join(out, 'model', `${item.id}.json`), 'utf8')).response?.json?.modelUsage
+    if (usage) spent.modelUsd = typeof usage.externalCostUsd === 'number' ? spent.modelUsd + usage.externalCostUsd : NaN
+  }
+}
 const runStart = Date.now()
 try {
   for (const name of names) await startApi(name)
   for (const [i, item] of plan.cases.entries()) {
-    if (arms.includes('firecrawl') && spent.firecrawl + 9 > caps.firecrawl) throw new Error(`stopped before ${item.id}: Firecrawl ${spent.firecrawl} credits, cap ${caps.firecrawl}`)
+    if (arms.includes('firecrawl') && !(spent.firecrawl + 9 <= caps.firecrawl)) throw new Error(`stopped before ${item.id}: Firecrawl ${spent.firecrawl} credits, cap ${caps.firecrawl}`)
     // One model call on these pages cost at most $0.0043 on the frozen captures (Haiku); 0.05 leaves room for a larger live page.
     if (arms.includes('model') && !(spent.modelUsd + 0.05 <= caps.modelUsd)) throw new Error(`stopped before ${item.id}: model spend $${spent.modelUsd}, cap $${caps.modelUsd}`)
     const comp = Promise.all([arms.includes('firecrawl') && firecrawl(item), arms.includes('zenrows') && zenrows(item)])
