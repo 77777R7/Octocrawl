@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CompactScrapeResponse, FetchResult, JsonFormatRequest, JsonSchema, ProductFacts, ScrapeResponse } from '@w2l/contracts'
 import { extractTf } from '@w2l/extract-tf'
 import { readFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import Ajv2020 from 'ajv/dist/2020.js'
 import { contractSha256, toEvidenceRecord } from '@w2l/runtime'
-import { extractStructured, prepareScrapeResponse } from '../src/structured.js'
+import { extractStructured, prepareScrapeResponse, structuredModelConfigFromEnv } from '../src/structured.js'
 
 const product: ProductFacts = {
   name: { value: 'Subject headphones', source: 'dom', path: '#productTitle' },
@@ -1039,6 +1041,218 @@ describe('structured JSON extraction', () => {
     expect(requests[0]!.response_format.json_schema).toMatchObject({ strict: false, schema: schema.schema })
     expect(out).toMatchObject({ status: 'complete', data: { title: 'A Light in the Attic', details: { Pages: '112' } }, modelUsage: { strict: false } })
     expect(out.modelUsage?.strictReason).toContain('/properties/details')
+  })
+
+  it('sends the OpenAI-compatible endpoint the same request as before Claude support', async () => {
+    const sent: Array<{ url: string; headers: unknown; body: string }> = []
+    await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), {}, {
+      baseUrl: 'https://model.example/', model: 'extractor', apiKey: 'secret',
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        sent.push({ url: String(input), headers: init?.headers, body: String(init?.body) })
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ material: 'aluminium' }) } }] }), { status: 200 })
+      }) as typeof fetch,
+    })
+    expect(sent).toEqual([{
+      url: 'https://model.example/v1/chat/completions',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer secret' },
+      body: OPENAI_REQUEST_BEFORE_CLAUDE,
+    }])
+  })
+})
+
+/** The body main sent for `format({ requireMaterial: true, modelFallback: true })` on `result` before Claude support. */
+const OPENAI_REQUEST_BEFORE_CLAUDE = JSON.stringify({
+  model: 'extractor',
+  messages: [
+    { role: 'system', content: 'Return only facts supported by the supplied subject content. Do not infer from recommendations or unrelated products.' },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        prompt: 'Complete the missing schema fields.',
+        deterministic: { asin: 'B012345678', title: 'Subject headphones', price: 1299, currency: 'INR', seller: 'SoundCo Direct' },
+        subject: '# Subject headphones\n\nA lightweight product made from aluminium.',
+      }),
+    },
+  ],
+  response_format: {
+    type: 'json_schema',
+    json_schema: {
+      name: 'w2l_extract',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {
+          asin: { type: 'string' }, title: { type: 'string' }, price: { type: 'number' }, currency: { type: 'string' }, seller: { type: 'string' },
+          material: { type: 'string', description: 'Product material' },
+        },
+        required: ['asin', 'title', 'price', 'currency', 'seller', 'material'],
+        additionalProperties: false,
+      },
+    },
+  },
+})
+
+/** A fake Anthropic Messages API: the n-th call gets the n-th reply (the last one after that); requests are kept. */
+const messagesEndpoint = (replies: Array<Record<string, unknown>>, requests: Array<{ url: string; headers: Headers; body: Record<string, any> }>) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const body = JSON.parse(String(init?.body))
+  requests.push({ url: input instanceof Request ? input.url : String(input), headers: new Headers(init?.headers), body })
+  const reply = replies[Math.min(requests.length, replies.length) - 1]
+  return new Response(JSON.stringify({ id: `msg_${requests.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null, stop_details: null, ...reply }), { status: 200, headers: { 'content-type': 'application/json' } })
+}) as typeof fetch
+
+/** A Claude reply: an omitted thinking block, then the answer as JSON text. */
+const claudeAnswer = (answer: unknown, usage = { input_tokens: 1_200, output_tokens: 40 }) => ({
+  content: [{ type: 'thinking', thinking: '', signature: 'sig' }, { type: 'text', text: JSON.stringify(answer), citations: null }],
+  stop_reason: 'end_turn',
+  usage,
+})
+
+describe('model fallback through the Claude Messages API (F2, provider anthropic)', () => {
+  const claude = (fetchImpl: typeof fetch, model = 'claude-haiku-5-5') => ({ provider: 'anthropic' as const, model, apiKey: 'sk-ant-test-key', fetch: fetchImpl })
+
+  it('asks for structured output with the strict-safe schema and keeps only what the page states', async () => {
+    const requests: Array<{ url: string; headers: Headers; body: Record<string, any> }> = []
+    const out = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), {}, claude(messagesEndpoint([claudeAnswer({ material: 'aluminium', seller: 'Someone else' })], requests)))
+    expect(requests).toHaveLength(1)
+    const [{ url, headers, body }] = requests as [typeof requests[number]]
+    expect(url).toBe('https://api.anthropic.com/v1/messages')
+    expect(headers.get('x-api-key')).toBe('sk-ant-test-key')
+    expect(headers.get('authorization')).toBeNull()
+    expect(Object.keys(body).sort()).toEqual(['max_tokens', 'messages', 'model', 'output_config', 'system'])
+    expect(body).toMatchObject({ model: 'claude-haiku-5-5', max_tokens: 16_000 })
+    expect(body.output_config.effort).toBe('low')
+    expect(body.output_config.format.type).toBe('json_schema')
+    expect(body.output_config.format.schema).toMatchObject({ additionalProperties: false, required: ['asin', 'title', 'price', 'currency', 'seller', 'material'] })
+    expect(body.output_config.format.schema.properties.material).toEqual({ type: 'string', description: 'Product material' })
+    expect(body.messages).toHaveLength(1)
+    expect(body.messages[0].role).toBe('user')
+    expect(JSON.parse(body.messages[0].content)).toMatchObject({ prompt: 'Complete the missing schema fields.', subject: result.markdown, deterministic: { asin: 'B012345678', seller: 'SoundCo Direct' } })
+    // A value read from the page stays whatever the model answers; the model's own value has model evidence.
+    expect(out.status).toBe('complete')
+    expect(out.data).toMatchObject({ asin: 'B012345678', seller: 'SoundCo Direct', material: 'aluminium' })
+    expect(out.evidence).toContainEqual({ path: '/material', source: 'model', evidencePath: 'markdown line 3', text: 'aluminium' })
+    expect(out.modelUsage).toMatchObject({ model: 'claude-haiku-5-5', attempts: 1, inputTokens: 1_200, outputTokens: 40, strict: true })
+    // Claude Haiku 5.5 at $0.10 / $0.50 per million tokens for a prompt up to 100,000 tokens.
+    expect(out.modelUsage?.externalCostUsd).toBeCloseTo(0.00014, 10)
+    expect(JSON.stringify(out)).not.toContain('sk-ant-test-key')
+  })
+
+  it('repairs an answer that breaks the caller schema once, counting both calls', async () => {
+    const requests: Array<{ url: string; headers: Headers; body: Record<string, any> }> = []
+    const out = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), {}, claude(messagesEndpoint([
+      claudeAnswer({ material: 42 }, { input_tokens: 1_000, output_tokens: 20 }),
+      claudeAnswer({ material: 'aluminium' }, { input_tokens: 1_100, output_tokens: 30 }),
+    ], requests), 'claude-sonnet-5-5'))
+    expect(requests).toHaveLength(2)
+    expect(JSON.parse(requests[0]!.body.messages[0].content)).not.toHaveProperty('repair')
+    expect(JSON.parse(requests[1]!.body.messages[0].content).repair).toContain('/material')
+    expect(out.status).toBe('complete')
+    expect(out.data).toMatchObject({ material: 'aluminium' })
+    expect(out.modelUsage).toMatchObject({ model: 'claude-sonnet-5-5', attempts: 2, inputTokens: 2_100, outputTokens: 50 })
+    // Claude Sonnet 5.5 at $2 / $10 per million tokens.
+    expect(out.modelUsage?.externalCostUsd).toBeCloseTo((2_100 * 2 + 50 * 10) / 1e6, 10)
+  })
+
+  it('reports a refusal as a provider error without a repair round, keeping the page values and the billed tokens', async () => {
+    const requests: Array<{ url: string; headers: Headers; body: Record<string, any> }> = []
+    const out = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), {}, claude(messagesEndpoint([{
+      content: [], stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'cyber', explanation: null }, usage: { input_tokens: 900, output_tokens: 0 },
+    }], requests)))
+    expect(requests).toHaveLength(1)
+    expect(out.status).toBe('incomplete')
+    expect(out.data).toMatchObject({ asin: 'B012345678', seller: 'SoundCo Direct' })
+    expect(out.data).not.toHaveProperty('material')
+    const provider = out.issues.find(issue => issue.code === 'model_provider_error')
+    expect(provider?.message).toContain('refusal')
+    expect(provider?.message).toContain('cyber')
+    expect(out.issues).toContainEqual({ code: 'missing_required', path: '/material', message: 'required field unavailable: /material' })
+    expect(out.modelUsage).toMatchObject({ attempts: 1, inputTokens: 900, outputTokens: 0 })
+    expect(out.modelUsage?.externalCostUsd).toBeCloseTo(0.00009, 10)
+  })
+
+  it('reports an answer cut off at max_tokens as a provider error', async () => {
+    const out = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), {}, claude(messagesEndpoint([{
+      content: [{ type: 'text', text: '{"material": "alum', citations: null }], stop_reason: 'max_tokens', usage: { input_tokens: 900, output_tokens: 16_000 },
+    }], [])))
+    expect(out.status).toBe('incomplete')
+    expect(out.issues.find(issue => issue.code === 'model_provider_error')?.message).toContain('max_tokens')
+    expect(out.modelUsage).toMatchObject({ attempts: 1, inputTokens: 900, outputTokens: 16_000 })
+  })
+
+  it('asks for JSON in the prompt when strict structured output cannot express the schema, and records why', async () => {
+    const requests: Array<{ url: string; headers: Headers; body: Record<string, any> }> = []
+    const schema = json({ title: { type: 'string' }, details: { type: 'object', additionalProperties: { type: 'string' } } }, ['title', 'details'], true)
+    const reply = { content: [{ type: 'text', text: '```json\n{"title": "Another title", "details": {"Pages": "112"}}\n```', citations: null }], stop_reason: 'end_turn', usage: { input_tokens: 500, output_tokens: 30 } }
+    const out = await extractStructured({ ...page(bookInformation), markdown: '# A Light in the Attic\n\nPages: 112' }, schema, {}, claude(messagesEndpoint([reply], requests)))
+    expect(requests[0]!.body.output_config).toEqual({ effort: 'low' })
+    expect(JSON.parse(requests[0]!.body.messages[0].content).schema).toEqual(schema.schema)
+    expect(requests[0]!.body.system).toContain('JSON')
+    expect(out).toMatchObject({ status: 'complete', data: { title: 'A Light in the Attic', details: { Pages: '112' } }, modelUsage: { strict: false } })
+    expect(out.modelUsage?.strictReason).toContain('/properties/details')
+  })
+
+  it('leaves the price unknown for a model without a published price in the table', async () => {
+    const out = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), {}, claude(messagesEndpoint([claudeAnswer({ material: 'aluminium' })], []), 'claude-opus-5-5'))
+    expect(out.modelUsage).toMatchObject({ model: 'claude-opus-5-5', inputTokens: 1_200, outputTokens: 40, externalCostUsd: null })
+  })
+
+  describe('configuration from the environment', () => {
+    afterEach(() => { vi.unstubAllEnvs() })
+    const env = (values: Record<string, string>) => {
+      for (const name of ['W2L_EXTRACT_PROVIDER', 'W2L_EXTRACT_BASE_URL', 'W2L_EXTRACT_MODEL', 'W2L_EXTRACT_API_KEY', 'W2L_EXTRACT_EFFORT', 'ANTHROPIC_API_KEY']) vi.stubEnv(name, values[name] ?? '')
+    }
+
+    it('reports model_unavailable when no key is set, and never sends the page', async () => {
+      env({ W2L_EXTRACT_PROVIDER: 'anthropic', W2L_EXTRACT_MODEL: 'claude-haiku-5-5' })
+      expect(structuredModelConfigFromEnv()).toBeNull()
+      const out = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), {}, structuredModelConfigFromEnv())
+      expect(out.status).toBe('incomplete')
+      expect(out.issues.map(issue => issue.code)).toEqual(expect.arrayContaining(['model_unavailable', 'missing_required']))
+      expect(out.modelUsage).toBeNull()
+    })
+
+    it('takes W2L_EXTRACT_API_KEY, else ANTHROPIC_API_KEY, and an optional base URL and effort', () => {
+      env({ W2L_EXTRACT_PROVIDER: 'anthropic', W2L_EXTRACT_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'from-anthropic' })
+      expect(structuredModelConfigFromEnv()).toEqual({ provider: 'anthropic', model: 'claude-sonnet-5-5', apiKey: 'from-anthropic' })
+      env({ W2L_EXTRACT_PROVIDER: 'anthropic', W2L_EXTRACT_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'from-anthropic', W2L_EXTRACT_API_KEY: 'from-w2l', W2L_EXTRACT_BASE_URL: 'http://127.0.0.1:9', W2L_EXTRACT_EFFORT: 'medium' })
+      expect(structuredModelConfigFromEnv()).toEqual({ provider: 'anthropic', model: 'claude-sonnet-5-5', apiKey: 'from-w2l', baseUrl: 'http://127.0.0.1:9', effort: 'medium' })
+      // An effort or provider the code does not know is not a configuration.
+      env({ W2L_EXTRACT_PROVIDER: 'anthropic', W2L_EXTRACT_MODEL: 'claude-sonnet-5-5', ANTHROPIC_API_KEY: 'k', W2L_EXTRACT_EFFORT: 'extreme' })
+      expect(structuredModelConfigFromEnv()).toBeNull()
+      env({ W2L_EXTRACT_PROVIDER: 'gemini', W2L_EXTRACT_BASE_URL: 'https://model.example', W2L_EXTRACT_MODEL: 'm' })
+      expect(structuredModelConfigFromEnv()).toBeNull()
+    })
+
+    it('keeps the OpenAI-compatible endpoint the default, and does not read ANTHROPIC_API_KEY for it', () => {
+      env({ W2L_EXTRACT_BASE_URL: 'https://model.example', W2L_EXTRACT_MODEL: 'extractor', ANTHROPIC_API_KEY: 'from-anthropic' })
+      expect(structuredModelConfigFromEnv()).toEqual({ baseUrl: 'https://model.example', model: 'extractor' })
+      env({ W2L_EXTRACT_PROVIDER: 'openai', W2L_EXTRACT_BASE_URL: 'https://model.example', W2L_EXTRACT_MODEL: 'extractor', W2L_EXTRACT_API_KEY: 'secret' })
+      expect(structuredModelConfigFromEnv()).toEqual({ baseUrl: 'https://model.example', model: 'extractor', apiKey: 'secret' })
+    })
+
+    it('calls the Messages API at the configured base URL with the key from the environment', async () => {
+      const seen: Array<{ path: string | undefined; key: string | string[] | undefined; body: Record<string, any> }> = []
+      const server = createServer((req, res) => {
+        let raw = ''
+        req.on('data', chunk => { raw += chunk })
+        req.on('end', () => {
+          const body = JSON.parse(raw)
+          seen.push({ path: req.url, key: req.headers['x-api-key'], body })
+          res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: body.model, stop_sequence: null, stop_details: null, ...claudeAnswer({ material: 'aluminium' }) }))
+        })
+      })
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+      try {
+        env({ W2L_EXTRACT_PROVIDER: 'anthropic', W2L_EXTRACT_MODEL: 'claude-haiku-5-5', ANTHROPIC_API_KEY: 'sk-ant-env-key', W2L_EXTRACT_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}` })
+        const out = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), {}, structuredModelConfigFromEnv())
+        expect(seen).toHaveLength(1)
+        expect(seen[0]).toMatchObject({ path: '/v1/messages', key: 'sk-ant-env-key', body: { model: 'claude-haiku-5-5' } })
+        expect(out).toMatchObject({ status: 'complete', data: { material: 'aluminium' } })
+        expect(JSON.stringify(out)).not.toContain('sk-ant-env-key')
+      } finally {
+        await new Promise<void>(resolve => server.close(() => resolve()))
+      }
+    })
   })
 })
 
