@@ -689,6 +689,33 @@ function microdataProducts(doc: Document, ctx: Resolved): DeclaredProduct[] {
   })
 }
 
+/** schema.org's ItemAvailability values, as compared: `Out of stock` and OutOfStock are one. */
+const ITEM_AVAILABILITY = new Set(['BackOrder', 'Discontinued', 'InStock', 'InStoreOnly', 'LimitedAvailability', 'MadeToOrder', 'OnlineOnly', 'OutOfStock', 'PreOrder', 'PreSale', 'Reserved', 'SoldOut'].map(comparable))
+
+/**
+ * The availability the page states with `itemprop="availability"` outside any
+ * itemscope (`<span itemprop="availability">In stock</span>` beside a JSON-LD
+ * Product), each statement a source of its own: about the page's own product,
+ * so read only when the page declares no other product at all, not even one
+ * nested in it as a related item, whose card could carry it. Only
+ * words that name an ItemAvailability value state one (`Out of stock`); others
+ * (`Auf Lager`, `In stock (12 available)`) cannot be compared with an offer's,
+ * so they are not read. The path counts every such element in the document.
+ */
+function unscopedAvailability(doc: Document): Array<Pick<DeclaredProduct, 'fields' | 'ambiguous'>> {
+  const scoped = (el: Element): boolean => el.closest('[itemscope]') !== null
+  return qsa(doc, '[itemprop~="availability"]').flatMap((el, n) => {
+    const v = microdataValue(el)
+    if (scoped(el) || v === null) return []
+    const value = shortEnum(collapse(v))
+    const f = value === null || !ITEM_AVAILABILITY.has(comparable(value)) ? null : fact(value, 'microdata', `[itemprop~="availability"][${n}]`, { raw: collapse(v) })
+    return f === null ? [] : [{ fields: { availability: f }, ambiguous: {} }]
+  })
+}
+
+/** An availability the page shows in words (`In stock`): microdata text, not a schema.org name (`InStock`), an IRI or a meta tag's value. */
+const inWords = (f: ProductFact): boolean => f.source === 'microdata' && /\s/.test(f.rawValue ?? f.value) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(f.rawValue ?? f.value)
+
 /** OpenGraph / Facebook product meta tags, the third machine-readable path: about the page's own product. */
 function metaFacts(doc: Document): { fields: Partial<Record<FactField, ProductFact>>; ids: Partial<Record<IdKind, string[]>> } {
   const meta = (names: readonly string[], value: (s: string) => string | null = (s) => s, extra: FactExtra = {}): ProductFact | null => {
@@ -988,7 +1015,10 @@ function mergeFields(sources: ReadonlyArray<Pick<DeclaredProduct, 'fields' | 'am
     const offered = sources.flatMap((s) => s.ambiguous[field] ?? [])
     if (offered.length > 0 || (COMPARED_FIELDS.has(field) && stated.some((f) => !sameValue(field, f.value, stated[0]!.value)))) {
       ambiguous.push({ field, facts: [...offered, ...stated] })
-    } else if (stated.length > 0) facts[field] = stated[0]!
+    } else if (stated.length > 0) {
+      // Statements that agree: an availability the page writes in words is reported as written, before a schema.org name.
+      facts[field] = (field === 'availability' ? stated.find(inWords) : undefined) ?? stated[0]!
+    }
   }
   return { facts, ambiguous }
 }
@@ -1093,7 +1123,7 @@ export function collectDeclaredProductFacts(doc: Document, context: SubjectConte
   const metaElsewhere = !metaNamesSubject && siblings
   if (metaElsewhere && Object.keys(meta.fields).length > 0) evidence.push(`meta: the page declares other products and its meta tags name none of them, not merged`)
   evidence.unshift(`${label([...subject, ...bound])}: the subject, ${reason}`)
-  const { facts, ambiguous } = mergeFields([...subject, ...bound, ...(metaElsewhere ? [] : [{ fields: meta.fields, ambiguous: {} }])])
+  const { facts, ambiguous } = mergeFields([...subject, ...bound, ...(metaElsewhere ? [] : [{ fields: meta.fields, ambiguous: {} }]), ...(others.length > 0 || bound.length < loose.length ? [] : unscopedAvailability(doc))])
 
   // The variant the request URL selects by a property the subject declares, once per property name.
   const selected = [...new Map(subject.flatMap((d) => selectedParams(d, ctx)).map((p) => [comparable(p.name), p])).values()]
