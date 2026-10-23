@@ -1451,6 +1451,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         metadata: extracted.metadata,
         document: {
           title: extracted.title,
+          ...(extracted.titlePath === undefined ? {} : { titlePath: extracted.titlePath }),
           pageType: extracted.pageType,
           strategy: extracted.strategy,
           confidence: extracted.confidence,

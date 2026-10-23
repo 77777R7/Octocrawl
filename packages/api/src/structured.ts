@@ -299,6 +299,25 @@ function addDeclaredCandidates(
   }
 }
 
+/**
+ * A title that opens with a document series' number (`PEP 8 – Style Guide
+ * for Python Code`, `RFC 9112: HTTP/1.1`), without it, for a schema that asks
+ * for that number in a field of its own: `number`, `no` or `num`, or one named
+ * after the series (`pep_number`, `rfcNumber`, `pep`). The number is the
+ * document's identifier there, not part of its title. A number field about
+ * something else (`phoneNumber`, `caseNumber`) does not ask for it.
+ */
+function withoutDocumentNumber(title: string, root: JsonSchema): string {
+  const m = /^([A-Z]{2,6})[ -]?\d+\s*[:–—-]\s+(\S.*)$/.exec(title)
+  if (m === null) return title
+  const series = m[1]!.toLowerCase()
+  const asked = Object.keys(effective(root, root).properties ?? {}).some((name) => {
+    const key = name.toLowerCase().replace(/[^a-z0-9]/g, '')
+    return ['number', 'no', 'num', series, `${series}number`, `${series}no`, `${series}num`].includes(key)
+  })
+  return asked ? m[2]! : title
+}
+
 /** A scholarly page's own title, from its citation_title tag: the first heading may name the archive's subject instead (arXiv). */
 function citationTitle(result: FetchResult): Candidate | null {
   const tag = result.document?.declaredValues?.find(item => item.name === 'citation_title')
@@ -326,9 +345,10 @@ function candidates(result: FetchResult, schema?: JsonSchema, issues: Structured
     map.set('title', citation)
     map.set('pagetitle', citation)
   } else if (result.document?.title) {
-    const fact = titleFact(result.document.title, result.metadata)
-    map.set('title', { value: result.document.title, fact })
-    map.set('pagetitle', { value: result.document.title, fact })
+    const fact = titleFact(result.document.title, result.document.titlePath, result.metadata)
+    const value = schema === undefined ? result.document.title : withoutDocumentNumber(result.document.title, schema)
+    map.set('title', { value, fact })
+    map.set('pagetitle', { value, fact })
   }
   if (result.document?.pageType) map.set('pagetype', { value: result.document.pageType, fact: { source: 'inferred', path: 'document.pageType' } })
   if (product !== null) addProductCandidates(map, product, put, language)
@@ -340,12 +360,14 @@ function candidates(result: FetchResult, schema?: JsonSchema, issues: Structured
 }
 
 /**
- * Where the content title was read. The extractor takes the first heading of
- * the main content (`h1[0]`, counted like label rows) and falls back to the
- * page's `<title>`, which the page metadata holds as written. Without the
- * metadata the place is unknown.
+ * Where the content title was read: the extractor says which heading of the
+ * main content (`h1[1]`, `h2[0]`, counted like label rows) or the page's
+ * `<title>`. A document without that record took the first heading (`h1[0]`)
+ * and fell back to the `<title>`, which the page metadata holds as written.
+ * Without either the place is unknown.
  */
-function titleFact(title: string, metadata: FetchResult['metadata']): Candidate['fact'] {
+function titleFact(title: string, path: string | undefined, metadata: FetchResult['metadata']): Candidate['fact'] {
+  if (path !== undefined) return { source: 'dom', path }
   if (metadata === undefined || metadata === null) return { source: 'dom' }
   const text = (value: string): string => value.replace(/\s+/g, ' ').trim()
   return { source: 'dom', path: metadata.title !== null && text(metadata.title) === text(title) ? 'title' : 'h1[0]' }

@@ -66,6 +66,7 @@ export class ExtractTfSubject implements SubjectAdapter {
         const out = extractTf.extract(body, { url })
         document = {
           title: out.title,
+          ...(out.titlePath === undefined ? {} : { titlePath: out.titlePath }),
           pageType: out.pageType,
           strategy: out.strategy,
           confidence: out.confidence,
