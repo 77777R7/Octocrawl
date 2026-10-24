@@ -82,6 +82,7 @@ import {
   type HostPacing,
   type CrawlPageQuery,
   type ExecutionContext,
+  type StructuredModelGate,
   type AppliedRobotsOverride,
   type RobotsOverride,
   type RobotsUrlOverride,
@@ -427,6 +428,17 @@ export interface ApiEngineOptions {
   batchMaxWallMs?: number | null
   /** Pages the orchestrator fetches at once per crawl, and the most a crawl's `maxConcurrency` may ask for. Default 4. */
   workerCount?: number
+  /**
+   * Asked before each page's json model fallback calls the model, where a call's context names no gate of its own: a
+   * hosted job's slice passes the hosted switch, daily cap and credits here. Absent: the model is called whenever it is
+   * configured, as before, unless `requireModelGate`.
+   */
+  modelGate?: StructuredModelGate
+  /**
+   * Hosted Octocrawl's own service (hostedApi.ts): a call whose context names no gate, with no engine gate either, calls
+   * no model. A self-hosted `serve --hosted` leaves it unset and keeps calling its own configured model.
+   */
+  requireModelGate?: boolean
   perHostConcurrency?: number
   perHostMinDelayMs?: number
   crawlDelayMsByHost?: ReadonlyMap<string, number>
@@ -579,8 +591,16 @@ type CacheAnswer =
   | { kind: 'lockdown_miss'; result: FetchResult }
   | { kind: 'fetch'; missed: boolean }
 
+/** The gate for a call that came with none on an engine that requires one: it calls no model it cannot charge or budget. */
+const HOSTED_MODEL_UNGATED: StructuredModelGate = { admit: async () => ({ ok: false, message: 'this hosted server calls the json model fallback only for a call it can charge and budget, and this one has neither' }) }
+
 export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const taskRoot = options.taskRoot ?? '.w2l/api'
+  /** `scope` with the model gate its json extraction asks: the call's own (`from`), else the engine's, else a refusal where one is required. */
+  const modelGated = <C extends ExecutionContext>(scope: C, from: ExecutionContext = scope): C => {
+    const gate = from.modelGate ?? options.modelGate ?? (options.requireModelGate === true ? HOSTED_MODEL_UNGATED : undefined)
+    return gate === undefined ? scope : { ...scope, modelGate: gate }
+  }
   prepareTaskRoot(taskRoot)
   const monitorStore = MonitorStore.open(join(taskRoot, 'section-b-control.sqlite'), {leaseMs: options.monitorLeaseMs, attemptTimeoutMs: options.monitorAttemptTimeoutMs})
   const deliveryStore = DeliveryStore.open(join(taskRoot, 'section-b-control.sqlite'))
@@ -1487,7 +1507,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                 const read = listRun === null ? await readThrough(chrome, step.url, step.result!, fetchOpts, req.waitMs, hooks, signal) : await continueList(chrome, step, listRun, selection, fetchOpts, req.waitMs, hooks, signal)
                 if ('reason' in read) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: read.reason }); continue }
                 const result = read.result
-                const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv(), listFormat(formats)) : undefined
+                const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), modelGated(createExecutionScope({})), structuredModelConfigFromEnv(), listFormat(formats)) : undefined
                 const stored = verifiedJobResult(task, {
                   ...result,
                   markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
@@ -1610,7 +1630,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           const outcome: ScrapeOutcome = answer.kind === 'fetch'
             ? await (myBrowser !== null ? myBrowser.scrape(url, context) : lane.ladder.scrape(url, page)).then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
             : { result: answer.result, links: answer.result.links ?? [], cached: answer.kind === 'hit' }
-          const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv(), listFormat(formats)) : undefined
+          const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, modelGated(page), structuredModelConfigFromEnv(), listFormat(formats)) : undefined
           return { outcome, json }
         })().finally(() => page.dispose())
         // The stored audit repeats no page body; a screenshot's base64 is stored once, on the result, and its attempt copy says null; what actions produced is stored once, on the result.
@@ -1833,7 +1853,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // A pinned fastMode's reason replaces the engine's "retry without fastMode" in the answer and the record alike.
       const pinned = context.fastModePin === undefined ? [] : pinnedFastModeHints(run.agentHints ?? [], context.fastModePin)
       const full: ScrapeRun = pinned.length === 0 ? run : { ...run, agentHints: pinned }
-      const response = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
+      const response = await prepareScrapeResponse(full, req, modelGated(shapeScope, context), null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
       if (!record) return response
       // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
       try {
@@ -2383,7 +2403,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             status: ended?.status ?? 'failed', attemptId, newPages, budgetExceeded: attempt?.budgetExceeded ?? null,
             // Each page keeps its trace (the robots.txt and Crawl-delay evidence a page is judged by); the routing audit is left out.
             items: steps.map((step) => { const { audit: _audit, ...item } = toCrawlPage(step, ended!, false, taskHintOffers(ended!, step.url)); return item as CrawlPage }),
-            charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null })),
+            charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null, modelCalled: (step.result?.json?.modelUsage?.attempts ?? 0) > 0 })),
           }
         } finally { await after.close() }
       } finally {
@@ -2790,7 +2810,8 @@ export interface SliceResult {
   charges: SliceCharge[]
 }
 
-export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null }
+/** `modelCalled`: the page's json model fallback called the model (its json's `modelUsage` names an attempt). */
+export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null; modelCalled: boolean }
 
 /** A batch never discovers: its frontier takes the whole host and exact canonical URLs. */
 const BATCH_SCOPE: CrawlScopeOptions = { regexOnFullURL: false, ignoreQueryParameters: false, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false }

@@ -111,7 +111,7 @@ describe('job slices', () => {
     expect(first?.status).toBe('paused')
     // The slice's pages come back as a batch lists its items, each with what it was for its price.
     expect(first?.items.map((item) => item.url).sort()).toEqual([`${origin}/a`, `${origin}/c`])
-    expect(first?.charges).toEqual([{ status: 'success', lane: 'http', failureReason: null, httpStatus: 200 }, { status: 'success', lane: 'http', failureReason: null, httpStatus: 200 }])
+    expect(first?.charges).toEqual([{ status: 'success', lane: 'http', failureReason: null, httpStatus: 200, modelCalled: false }, { status: 'success', lane: 'http', failureReason: null, httpStatus: 200, modelCalled: false }])
     expect(seen.map((request) => `${request.host}${request.path}`).sort()).toEqual(['127.0.0.1/a', '127.0.0.1/c'])
     await engine.close({ cancelActive: true });
     ({ engine, root } = await engineAfter(root))

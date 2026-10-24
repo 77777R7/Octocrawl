@@ -229,6 +229,22 @@ export interface StructuredModelUsage {
   strictReason?: string
 }
 
+/**
+ * Whether a page's json model fallback may call the model (ExecutionContext.modelGate). `maxCostUsd` is the most the
+ * page's calls could cost (both attempts, at the model's published prices), or null when that is not known.
+ */
+export interface StructuredModelGate {
+  admit(request: { model: string; maxCostUsd: number | null }): Promise<StructuredModelAdmission>
+}
+
+/**
+ * An admitted page settles once with the usage its calls reported (null when no call was made); a refused one says
+ * why, in words for the `model_unavailable` issue.
+ */
+export type StructuredModelAdmission =
+  | { ok: true; settle(usage: StructuredModelUsage | null): Promise<void> }
+  | { ok: false; message: string }
+
 export interface CanonicalStructuredData {
   adapter: AdapterDescriptor
   pageType: string

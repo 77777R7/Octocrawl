@@ -7,7 +7,10 @@
  *   W2L_JOBS_DAILY              job pages a UTC day for every account together (default 10000)
  *   W2L_JOBS_ACCOUNT_DAILY      job pages a UTC day for one account (default 2000)
  *   W2L_JOBS_WORK_ROOT          where slices keep task directories (default /tmp/octocrawl-jobs)
+ *   W2L_EXTRACT_PROVIDER, W2L_EXTRACT_MODEL, W2L_EXTRACT_API_KEY
+ *                               as the hosted API's: the json model fallback for a job's pages (hostedModel.ts)
  */
+import { structuredModelConfigFromEnv } from '@w2l/api'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { createHttpsWebhookTransport } from '@w2l/runtime'
 import { FirestoreHostedLeases, serviceAccessToken } from './hostedApi.js'
@@ -15,6 +18,7 @@ import { FirestoreCreditsStore } from './hostedCredits.js'
 import { FirestoreHostedJobStore } from './hostedJobs.js'
 import { jobsCloudFromEnv } from './hostedJobsCloud.js'
 import { googleOidcVerifier, startJobWorker } from './hostedJobWorker.js'
+import { FirestoreModelSpend, firestoreModelSettings, HostedModel } from './hostedModel.js'
 
 function positive(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -39,9 +43,10 @@ const worker = await startJobWorker({
     webhookTransport: createHttpsWebhookTransport(hostedNetworkPolicy()),
     hostLeases: new FirestoreHostedLeases(cloud.project),
     enabled: cloud.enabled,
+    model: new HostedModel({ model: structuredModelConfigFromEnv(), settings: firestoreModelSettings(cloud.project, serviceAccessToken()), spend: new FirestoreModelSpend(cloud.project, serviceAccessToken()) }),
     workRoot: process.env.W2L_JOBS_WORK_ROOT ?? '/tmp/octocrawl-jobs',
     limits: { jobsDaily: positive('W2L_JOBS_DAILY', 10_000), jobsAccountDaily: positive('W2L_JOBS_ACCOUNT_DAILY', 2_000) },
   },
 })
-console.log(JSON.stringify({ service: 'octocrawl-jobs', port: worker.server.address(), project: cloud.project, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
+console.log(JSON.stringify({ service: 'octocrawl-jobs', port: worker.server.address(), project: cloud.project, extractModel: structuredModelConfigFromEnv()?.model ?? null, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void worker.close().then(() => process.exit(0)) })

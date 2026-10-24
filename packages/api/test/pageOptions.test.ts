@@ -338,6 +338,28 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     expect(modelCalls).toHaveLength(2)
   })
 
+  it('a self-hosted --hosted engine still calls its own model; only an engine that requires a gate calls none without one', async () => {
+    let modelCalls = 0
+    const model = createServer((req, res) => {
+      modelCalls++
+      req.resume()
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: '{"sku":"from-model"}' } }] }))
+    })
+    await new Promise<void>(resolve => model.listen(0, '127.0.0.1', resolve))
+    cleanup.push(async () => { vi.unstubAllEnvs(); model.closeAllConnections(); await new Promise<void>(resolve => model.close(() => resolve())) })
+    vi.stubEnv('W2L_EXTRACT_BASE_URL', `http://127.0.0.1:${(model.address() as AddressInfo).port}`)
+    vi.stubEnv('W2L_EXTRACT_MODEL', 'own-model')
+    const formats: JsonFormatRequest[] = [{ type: 'json', schema: { type: 'object', properties: { sku: { type: 'string' } }, required: ['sku'] }, modelFallback: true }]
+    const own = await setup(unreachableBrowser, { hosted: true })
+    const asked = (await own.post('/v1/scrape', { url: `${own.origin}/chrome`, formats })).body
+    expect(modelCalls).toBe(1)
+    expect(asked.json.modelUsage).toMatchObject({ model: 'own-model', attempts: 1 })
+    const gated = await setup(unreachableBrowser, { hosted: true, requireModelGate: true })
+    const refused = (await gated.post('/v1/scrape', { url: `${gated.origin}/chrome`, formats })).body
+    expect(modelCalls).toBe(1)
+    expect(refused.json.issues).toContainEqual(expect.objectContaining({ code: 'model_unavailable' }))
+  })
+
   it('batch and crawl apply the options to every page', async () => {
     const seen: Seen[] = []
     const { origin, engine } = await setup(recordingBrowser(seen))

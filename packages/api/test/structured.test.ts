@@ -1307,6 +1307,65 @@ describe('model fallback through the Claude Messages API (F2, provider anthropic
     expect(out.modelUsage).toMatchObject({ model: 'claude-opus-5-5', inputTokens: 1_200, outputTokens: 40, externalCostUsd: null })
   })
 
+  describe('a model gate (ExecutionContext.modelGate: hosted Octocrawl\'s switch, daily cap and credits)', () => {
+    it('calls no model for a page the gate refuses: the json is the deterministic one, with model_unavailable giving the reason', async () => {
+      const requests: Array<{ url: string; headers: Headers; body: Record<string, any> }> = []
+      const asked: Array<{ model: string; maxCostUsd: number | null }> = []
+      const modelGate = { admit: async (request: { model: string; maxCostUsd: number | null }) => { asked.push(request); return { ok: false as const, message: 'switched off for now' } } }
+      const out = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), { modelGate }, claude(messagesEndpoint([claudeAnswer({ material: 'aluminium' })], requests)))
+      expect(requests).toHaveLength(0)
+      expect(asked).toHaveLength(1)
+      expect(out).toMatchObject({ status: 'incomplete', data: { asin: 'B012345678', seller: 'SoundCo Direct' }, modelUsage: null })
+      expect(out.issues).toContainEqual({ code: 'model_unavailable', message: 'switched off for now' })
+      expect(out.issues).toContainEqual(expect.objectContaining({ code: 'missing_required', path: '/material' }))
+    })
+
+    it('settles an admitted page once with its calls\' usage, after a bound no smaller than what they cost', async () => {
+      const requests: Array<{ url: string; headers: Headers; body: Record<string, any> }> = []
+      const settled: Array<unknown> = []
+      let bound: number | null = null
+      const modelGate = { admit: async ({ maxCostUsd }: { model: string; maxCostUsd: number | null }) => { bound = maxCostUsd; return { ok: true as const, settle: async (usage: unknown) => { settled.push(usage) } } } }
+      const out = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), { modelGate }, claude(messagesEndpoint([
+        claudeAnswer({ material: 42 }, { input_tokens: 1_000, output_tokens: 20 }),
+        claudeAnswer({ material: 'aluminium' }, { input_tokens: 1_100, output_tokens: 30 }),
+      ], requests)))
+      expect(requests).toHaveLength(2)
+      expect(settled).toEqual([out.modelUsage])
+      expect(out.modelUsage).toMatchObject({ attempts: 2 })
+      expect(bound).toBeGreaterThan(out.modelUsage!.externalCostUsd!)
+      // Both attempts at the most output a call may write (16,000 tokens at $0.50 per million) and a byte bound on the input.
+      expect(bound).toBeGreaterThan(2 * 16_000 * 0.5 / 1e6)
+      expect(bound).toBeLessThan(0.05)
+    })
+
+    it('keeps a gated page\'s second call within the bound its gate reserved, however many errors the first answer had', async () => {
+      const requests: Array<{ url: string; headers: Headers; body: Record<string, any> }> = []
+      let bound = 0
+      const modelGate = { admit: async ({ maxCostUsd }: { model: string; maxCostUsd: number | null }) => { bound = maxCostUsd!; return { ok: true as const, settle: async () => {} } } }
+      const pattern = `^(?:${'abcdefgh'.repeat(120)})$`
+      const codes: JsonFormatRequest = { type: 'json', modelFallback: true, schema: { type: 'object', properties: { codes: { type: 'array', items: { type: 'string', pattern } } }, required: ['codes'], additionalProperties: false } }
+      const wrong = claudeAnswer({ codes: Array.from({ length: 300 }, (_, i) => `x${i}`) })
+      await extractStructured(result, codes, { modelGate }, claude(messagesEndpoint([wrong, wrong], requests)))
+      expect(requests).toHaveLength(2)
+      // The bound buys this many input tokens a call at Claude Haiku 5.5's short-prompt prices, beside 16,000 output.
+      const inputTokens = (bound / 2 * 1e6 - 16_000 * 0.5) / 0.1
+      for (const request of requests) expect(Buffer.byteLength(JSON.stringify(request.body))).toBeLessThanOrEqual(inputTokens)
+      // Without a gate the repair is sent whole, as before.
+      const ungated: typeof requests = []
+      await extractStructured(result, codes, {}, claude(messagesEndpoint([wrong, wrong], ungated)))
+      expect(Buffer.byteLength(JSON.stringify(ungated[1]!.body))).toBeGreaterThan(inputTokens)
+    })
+
+    it('asks no gate when the page\'s own data completes the json, or when no model is configured', async () => {
+      const modelGate = { admit: vi.fn(async () => ({ ok: false as const, message: 'never' })) }
+      const complete = await extractStructured(result, format({ modelFallback: true }), { modelGate }, claude(messagesEndpoint([], [])))
+      expect(complete.status).toBe('complete')
+      const unconfigured = await extractStructured(result, format({ requireMaterial: true, modelFallback: true }), { modelGate }, null)
+      expect(unconfigured.issues).toContainEqual(expect.objectContaining({ code: 'model_unavailable', message: expect.stringContaining('not configured') }))
+      expect(modelGate.admit).not.toHaveBeenCalled()
+    })
+  })
+
   describe('configuration from the environment', () => {
     afterEach(() => { vi.unstubAllEnvs() })
     const env = (values: Record<string, string>) => {
