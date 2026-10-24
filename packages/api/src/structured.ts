@@ -37,7 +37,7 @@ import { statesAbsence } from '@w2l/extract-tf'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
 import { modelLocator } from './modelEvidence.js'
-import { tableStatements, type TableStatement } from './tableContext.js'
+import { agreesWithText, tableStatements, type TableStatement } from './tableContext.js'
 
 export type StructuredModelConfig = OpenAiModelConfig | ClaudeModelConfig
 
@@ -844,23 +844,25 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
     if (!('value' in reading)) return { text: raw }
     const context: NonNullable<StructuredFieldEvidence['context']> = { ...readingContext(undefined, reading.unit) }
     const contextEvidence: NonNullable<StructuredFieldEvidence['contextEvidence']> = {}
-    const { units, dates } = tableStatements(under)
-    const stated = (key: 'unit' | 'date', statements: TableStatement[], own?: TableStatement): void => {
-      const all = own === undefined || statements.length === 0 ? statements : [own, ...statements]
-      if (all.length === 0) return
-      if (all.some(statement => statement.value !== all[0]!.value)) {
-        const states = own === undefined ? 'the table states' : 'the number\'s own text and its table state'
-        issues.push({ code: 'field_ambiguous', path: valuePath, message: `${states} different ${key === 'unit' ? 'units' : 'dates'} for ${valuePath}: ${all.map(statement => `${JSON.stringify(statement.value)} (${statement.where})`).join(', ')}; ${own === undefined ? 'none was given' : 'only the text\'s own is given'}` })
-        return
-      }
-      if (own !== undefined) return
-      context[key] = all[0]!.value
-      chars += all[0]!.text.length + all[0]!.where.length
-      contextEvidence[key] = { text: all[0]!.text, evidencePath: `${recordLocation(index)} ${all[0]!.where}` }
+    const { units, dates } = tableStatements(under, result.listTables ?? [])
+    const ambiguous = (key: 'unit' | 'date', statements: readonly TableStatement[], own: boolean): void => {
+      const states = own ? 'the number\'s own text and its table state' : 'the table states'
+      issues.push({ code: 'field_ambiguous', path: valuePath, message: `${states} different ${key === 'unit' ? 'units' : 'dates'} for ${valuePath}: ${statements.map(statement => `${JSON.stringify(statement.value)} (${statement.where})`).join(', ')}; ${own ? 'only the text\'s own is given' : 'none was given'}` })
     }
-    // A percent the number's own text states is its unit; a table that states another is in doubt.
-    stated('unit', units, context.unit === undefined ? undefined : { value: context.unit, text: raw, where: 'the value\'s own text' })
-    stated('date', dates)
+    const given = (key: 'unit' | 'date', statement: TableStatement): void => {
+      context[key] = statement.value
+      chars += statement.text.length + statement.where.length
+      contextEvidence[key] = { text: statement.text, evidencePath: `${recordLocation(index)} ${statement.where}` }
+    }
+    if (units.length > 0) {
+      // The currency or percent the number's own text states (D3b) is weighed against the table's unit.
+      const own = context.currency ?? context.unit
+      if (units.some(unit => unit.value !== units[0]!.value)) ambiguous('unit', units, false)
+      else if (own !== undefined && !agreesWithText(context, units[0]!.value)) ambiguous('unit', [{ value: own, text: raw, where: 'the value\'s own text' }, ...units], true)
+      else if (context.unit === undefined) given('unit', units[0]!)
+    }
+    if (dates.some(date => date.value !== dates[0]!.value)) ambiguous('date', dates, false)
+    else if (dates.length > 0) given('date', dates[0]!)
     return {
       text: raw, normalized: reading.value, conversion: reading.conversion,
       ...(Object.keys(context).length === 0 ? {} : { context }),
@@ -1587,9 +1589,9 @@ function withoutRepeatedBodies(summary: ScrapeResponse['summary'], debug: boolea
   return {
     ...summary,
     attempts: summary.attempts.map(({ result, ...attempt }) => {
-      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, listColumns: _listColumns, ...rest } = result
+      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, listColumns: _listColumns, listTables: _listTables, ...rest } = result
       // What the actions produced travels once too, on the response.
-      const { actions: _kept, list: _records, listColumns: _columns, ...whole } = result
+      const { actions: _kept, list: _records, listColumns: _columns, listTables: _columnTables, ...whole } = result
       return {
         ...attempt,
         result: { ...(debug ? whole : { ...rest, markdown: null, links: [] }), ...(screenshot === undefined ? {} : { screenshot: null }) },
@@ -1626,7 +1628,7 @@ export async function prepareScrapeResponse(
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
   const warning = warningOf(result.warnings)
   // What JSON read from the selected rows' columns is not a format of its own.
-  const { listColumns: _listColumns, ...run } = result
+  const { listColumns: _listColumns, listTables: _listTables, ...run } = result
   const next: ScrapeRun = {
     ...run,
     markdown: hasFormat(formats, 'markdown') ? result.markdown : null,

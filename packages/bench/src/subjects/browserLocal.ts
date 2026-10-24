@@ -1942,7 +1942,7 @@ function withActions(result: FetchResult, ran: ActionRun | undefined, list?: Lis
     const merged = mergeListPages(pages, list!)!
     const rescued = merged.valued && result.status === 'failed' && result.failureReason === 'empty_unverified'
     // The columns read with the page as it stands are not the merged pages' records.
-    const { listColumns: _listColumns, ...unmerged } = result
+    const { listColumns: _listColumns, listTables: _listTables, ...unmerged } = result
     result = {
       ...unmerged,
       list: merged.list,

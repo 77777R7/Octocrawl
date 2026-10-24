@@ -16,13 +16,14 @@
  *
  * A unit is a currency code, sign or measure W2L knows (UNIT_WORDS), with a
  * scale (`millions`) and a per (`P/Km²`): `(est.)`, `(2024)` and a caption of
- * prose are none. An as-of date is a caption, header, qualifier or block that
- * is one day and at most a time and zone (`19 Oct 2026`, `Jan 01, 2026 03:50
- * UTC`, `As at 19 October 2026`), read as its ISO day; a year, a month, a
- * range and a date in a sentence are none. A column of dates is the rows'
- * data, never an as-of date.
+ * prose are none. An as-of date is a header, qualifier or caption that is one
+ * day and at most a time and zone (`19 Oct 2026`), or a block before the table
+ * that is a timestamp or says it is one (`Jan 01, 2026 03:50 UTC`, `As at 19
+ * October 2026`), read as its ISO day; a year, a month, a range, a day alone
+ * in a block and a date in a sentence are none. A column of dates is the
+ * rows' data, never an as-of date.
  */
-import type { ListColumn } from '@w2l/contracts'
+import type { ListColumn, ListTableText } from '@w2l/contracts'
 import { CURRENCY_CODES } from './numbers.js'
 
 /** One statement: what it was read as, the page's text it was read in, and where that text stands. */
@@ -32,9 +33,14 @@ export interface TableStatement {
   where: string
 }
 
-const MEASURES = new Set(['km', 'm', 'cm', 'mm', 'µm', 'μm', 'nm', 'mi', 'ft', 'yd', 'ha', 'acre', 'acres', 'kg', 'g', 'mg', 'µg', 'μg', 't', 'tonne', 'tonnes', 'lb', 'lbs', 'oz',
-  'l', 'ml', 'cl', 'gal', 's', 'ms', 'min', 'h', 'hr', 'hrs', 'kw', 'kwh', 'mw', 'mwh', 'gw', 'gwh', 'w', 'wh', 'v', 'mah', 'hz', 'khz', 'mhz', 'ghz',
-  'kb', 'mb', 'gb', 'tb', 'kbps', 'mbps', 'gbps', '°c', '°f', '℃', '℉'])
+/**
+ * Measures as they are written, case and all: a header's `(HR)`, `(G)`, `(T)`
+ * or `(W)` abbreviates a column (home runs, games, tries, wins), so a capital
+ * letter alone is never read as a unit (no `W`, `V` or `L`).
+ */
+const MEASURES = new Set(['km', 'Km', 'KM', 'm', 'cm', 'mm', 'µm', 'μm', 'nm', 'mi', 'ft', 'yd', 'ha', 'acres', 'kg', 'Kg', 'KG', 'g', 'mg', 'µg', 'μg', 't', 'tonnes', 'lb', 'lbs', 'oz',
+  'l', 'ml', 'mL', 'cl', 'gal', 's', 'ms', 'min', 'h', 'hr', 'hrs', 'kW', 'kWh', 'MW', 'MWh', 'GW', 'GWh', 'Wh', 'mAh', 'Hz', 'kHz', 'MHz', 'GHz',
+  'kB', 'KB', 'MB', 'GB', 'TB', 'kbps', 'Mbps', 'Gbps', '°C', '°F', '℃', '℉'])
 const SCALES = new Set(['thousand', 'thousands', 'million', 'millions', 'billion', 'billions', 'trillion', 'trillions', 'mn', 'mln', 'bn', 'tn', '000', '000s', "'000", "'000s", 'crore', 'crores', 'lakh', 'lakhs'])
 const PERCENT = /^(?:%|pp|p\.p\.|‰|percent|per ?cent|percentage points|basis points|bps)$/iu
 const CURRENCY_SIGN = /^(?:[$£€¥₹₽₩฿₺₴₪₱₫₦円元]|[A-Z]{1,3}\$)$/u
@@ -43,7 +49,29 @@ const CODES: ReadonlySet<string> = new Set(CURRENCY_CODES)
 /** A currency: an ISO code W2L knows, as written in capitals, or a currency sign. */
 const isCurrency = (word: string): boolean => CODES.has(word) || CURRENCY_SIGN.test(word)
 /** A measure, with a power after it (`km²`, `m3`, `m^2`). */
-const isMeasure = (word: string): boolean => MEASURES.has(word.toLowerCase().replace(/(?:\^?[23]|[²³])$/u, ''))
+const isMeasure = (word: string): boolean => MEASURES.has(word.replace(/(?:\^?[23]|[²³])$/u, ''))
+
+/** The ISO codes a currency sign can stand for; a code stands for itself. */
+const SIGN_CODES: Readonly<Record<string, readonly string[]>> = {
+  '$': ['USD', 'AUD', 'CAD', 'NZD', 'SGD', 'HKD', 'TWD', 'MXN', 'CLP', 'COP', 'ARS'], 'US$': ['USD'], 'A$': ['AUD'], 'AU$': ['AUD'], 'C$': ['CAD'], 'CA$': ['CAD'],
+  'NZ$': ['NZD'], 'S$': ['SGD'], 'HK$': ['HKD'], 'NT$': ['TWD'], 'R$': ['BRL'], 'MX$': ['MXN'], '€': ['EUR'], '£': ['GBP'], '¥': ['JPY', 'CNY', 'RMB'], '円': ['JPY'],
+  '元': ['CNY', 'RMB'], '₹': ['INR'], '₩': ['KRW'], '฿': ['THB'], '₺': ['TRY'], '₴': ['UAH'], '₪': ['ILS'], '₱': ['PHP'], '₫': ['VND'], 'kr': ['SEK', 'NOK', 'DKK', 'ISK'],
+  'kr.': ['SEK', 'NOK', 'DKK', 'ISK'], 'zł': ['PLN'], 'Kč': ['CZK'], 'Fr.': ['CHF'], 'SFr.': ['CHF'],
+}
+const codesOf = (currency: string): readonly string[] => CODES.has(currency) ? [currency] : SIGN_CODES[currency] ?? []
+
+/**
+ * Whether a unit the table states can be the one the number's own text
+ * states: a percent for a percent; for a currency (`$`, `EUR`), a unit naming
+ * a currency it can stand for (`$` and `USD`, `€` and `EUR millions`). A sign
+ * Octocrawl cannot map stands for no code, so it agrees only with itself.
+ */
+export function agreesWithText(own: { currency?: string; unit?: string }, unit: string): boolean {
+  if (own.unit !== undefined) return PERCENT.test(unit.replace(/^in\s+/iu, ''))
+  if (own.currency === undefined) return true
+  const codes = codesOf(own.currency)
+  return unit.split(/[\s/()]+/u).some(word => word === own.currency || (isCurrency(word) && codesOf(word).some(code => codes.includes(code))))
+}
 const isScale = (word: string): boolean => SCALES.has(word.toLowerCase())
 
 /**
@@ -70,7 +98,8 @@ function isUnit(text: string): boolean {
 export function unitStatement(text: string): string | null {
   const statement = text.trim().replace(/[.:]$/u, '').trim()
   if (statement.length > 100 || /[;!?]/u.test(statement)) return null
-  if (/^units?\s+of\s+\p{L}/iu.test(statement)) return statement
+  // A rate's unit, as the RBA's caption writes it; "Units of study" is not one.
+  if (/^units?\s+of\s+[\p{L}' -]{1,60}?\s+per\s+[\p{L}\p{N}' -]{1,60}$/iu.test(statement)) return statement
   const labelled = /^(?:units?|currency)\s*:\s*(.+)$/iu.exec(statement)
   if (labelled !== null) return isUnit(labelled[1]!) ? labelled[1]!.trim() : null
   const lead = /^\(?\s*(?:(?:all\s+)?(?:figures|amounts|values|prices|rates|numbers|data)\s+(?:are\s+)?)?(?:in|expressed\s+in|shown\s+in|measured\s+in|quoted\s+in|reported\s+in)\s+(.+?)\s*\)?$/iu.exec(statement)
@@ -102,12 +131,21 @@ const TIME = /^(?:(?:,?\s*(?:at\s+)?|T)\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*[
 const AS_OF = /^(?:(?:data|rates?|prices?|figures|values)\s+)?(?:as\s+(?:of|at|on)|effective(?:\s+(?:from|on|as\s+of))?|(?:last\s+)?updated(?:\s+on)?|valid\s+(?:on|as\s+of|from))\s*:?\s*/iu
 const WEEKDAY = /^(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+/iu
 
-/** The ISO day a caption, header or block is, with at most a time and zone after it and an "as of" before it; null when it is not one day. */
-export function dateStatement(text: string): string | null {
-  const statement = text.trim().replace(/\.$/u, '').replace(AS_OF, '').replace(WEEKDAY, '')
+/**
+ * The ISO day a caption, header or block is, with at most a time and zone
+ * after it and an "as of" before it; null when it is not one day. With
+ * `stated`, a day alone is not enough: the text says what it is (an "as of")
+ * or is a timestamp (a time after it), since a bare day just before a table can
+ * be the page's own date, such as a post's.
+ */
+export function dateStatement(text: string, stated = false): string | null {
+  const trimmed = text.trim().replace(/\.$/u, '')
+  const statement = trimmed.replace(AS_OF, '').replace(WEEKDAY, '')
+  const asOf = AS_OF.test(trimmed)
   for (const { pattern, read } of DAYS) {
     const match = pattern.exec(statement)
-    if (match === null || !TIME.test(statement.slice(match[0].length))) continue
+    const rest = match === null ? '' : statement.slice(match[0].length)
+    if (match === null || !TIME.test(rest) || (stated && !asOf && rest.trim() === '')) continue
     const [year, monthText, day] = read(match)
     const month = typeof monthText === 'number' ? monthText : MONTHS.indexOf(monthText.toLowerCase().slice(0, 3)) + 1
     // A day the calendar has: 31 Feb is not one.
@@ -123,18 +161,19 @@ export function dateStatement(text: string): string | null {
  * columns: each column's header (its qualifier, or itself), then the table's
  * caption and the blocks before it, which hold for all its columns.
  */
-export function tableStatements(columns: readonly ListColumn[]): { units: TableStatement[]; dates: TableStatement[] } {
+export function tableStatements(columns: readonly ListColumn[], tables: readonly ListTableText[]): { units: TableStatement[]; dates: TableStatement[] } {
   const units: TableStatement[] = []
   const dates: TableStatement[] = []
   const add = (text: string, where: string, header: boolean): void => {
     const unit = header ? headerUnit(text) : unitStatement(text)
     if (unit !== null) units.push({ value: unit, text, where })
     const qualifier = header ? qualifierOf(text) : null
-    const date = dateStatement(text) ?? (qualifier === null ? null : dateStatement(qualifier))
+    const date = dateStatement(text, !header) ?? (qualifier === null ? null : dateStatement(qualifier))
     if (date !== null) dates.push({ value: date, text, where })
   }
   for (const column of columns) add(column.header, `column ${column.column} ${JSON.stringify(column.header)} header`, true)
-  const table = columns.find(column => column.table !== undefined)?.table
+  const index = columns.find(column => column.table !== undefined)?.table
+  const table = index === undefined ? undefined : tables[index]
   if (table !== undefined && table.caption !== null) add(table.caption, 'table caption', false)
   for (const block of table?.before ?? []) add(block.text, `table, block ${block.distance} before it (${block.element})`, false)
   return { units, dates }

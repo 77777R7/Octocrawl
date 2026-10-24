@@ -528,6 +528,8 @@ export interface FetchResult {
    * do not name; it is not part of the `list` format's output.
    */
   listColumns?: readonly (readonly ListColumn[] | null)[]
+  /** What each table of `listColumns` states about itself, once per table, in the order first seen (`ListColumn.table` is its index). Read and dropped with `listColumns`. */
+  listTables?: readonly ListTableText[]
   /**
    * A PDF's pages, each as the Markdown has it (without its marker), when a
    * `pdf` parser entry asked for them (`pages: true`) and the text layer was
@@ -615,13 +617,14 @@ export interface ListColumn {
   value: string | null
   /** The list's fields whose value was read from a cell under this header; absent when none was. */
   fields?: readonly string[]
-  /** What the row's table states around its rows (`ListTableText`), the same for each of its columns; absent when it states nothing there. */
-  table?: ListTableText
+  /** The index in `FetchResult.listTables` of what the row's table states about itself; absent when it states nothing. */
+  table?: number
 }
 
 /**
  * The text a table states about itself, as the page writes it, whitespace
- * collapsed: its caption, and the short blocks just before it, nearest first,
+ * collapsed: its caption (null when it has none or one longer than a block
+ * may be), and the short blocks just before it, nearest first,
  * back to and including the heading that introduces it (`before`). Each block
  * names its element (`span.ratesTimestamp`) and how many blocks before the
  * table it stands (1 is the nearest). Read for the unit and as-of date of the

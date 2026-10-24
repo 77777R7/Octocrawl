@@ -124,11 +124,13 @@ describe('extractListRecords, the columns of a selected table row', () => {
       '<table class="table-linear"><caption>Units of Foreign  Currencies per Australian Dollar</caption><thead><tr><td></td><th scope="col">16 Oct 2026</th><th scope="col"><strong>19 Oct 2026</strong></th></tr></thead>' +
       '<tbody><tr><th scope="row">United States dollar</th><td>0.6947</td><td class="highlight">0.6975</td></tr></tbody></table></section>'
     const rateSpec: ListSpec = { type: 'list', itemSelector: 'table.table-linear > tbody > tr', fields: [{ name: 'currency', selector: 'th[scope=row]' }, { name: 'rate', selector: 'td.highlight' }] }
-    const table = { caption: 'Units of Foreign Currencies per Australian Dollar', before: [{ text: 'Latest Exchange Rates', element: 'h2', distance: 1 }] }
-    expect(extractListRecords(rates, 'https://x.test/', rateSpec, 1, undefined, {}, { columns: true }).columns).toEqual([[
-      { header: '16 Oct 2026', column: 2, value: '0.6947', table },
-      { header: '19 Oct 2026', column: 3, value: '0.6975', fields: ['rate'], table },
-    ]])
+    const read = extractListRecords(rates.replace('</tbody>', '<tr><th scope="row">Japanese yen</th><td>109.67</td><td class="highlight">110.27</td></tr></tbody>'), 'https://x.test/', rateSpec, 1, undefined, {}, { columns: true })
+    expect(read.columns).toEqual([
+      [{ header: '16 Oct 2026', column: 2, value: '0.6947', table: 0 }, { header: '19 Oct 2026', column: 3, value: '0.6975', fields: ['rate'], table: 0 }],
+      [{ header: '16 Oct 2026', column: 2, value: '109.67', table: 0 }, { header: '19 Oct 2026', column: 3, value: '110.27', fields: ['rate'], table: 0 }],
+    ])
+    // Once per table, not per row or column.
+    expect(read.tables).toEqual([{ caption: 'Units of Foreign Currencies per Australian Dollar', before: [{ text: 'Latest Exchange Rates', element: 'h2', distance: 1 }] }])
     // Minimized from reserved v2 V34 (x-rates.com): no caption, a timestamp between the heading and the table, a field inside a link.
     const top = '<div class="grid"><div class="moduleContent"><h1 class="basicH1 ratestableH1"><span>US Dollar Exchange Rates Table</span> <a href="#converter">Converter</a></h1>' +
       '<span class="ratesTablePopu">Top 10</span>\n<span class="ratesTimestamp">Jan 01, 2026 03:50 UTC</span>' +
@@ -140,21 +142,29 @@ describe('extractListRecords, the columns of a selected table row', () => {
       { text: 'Top 10', element: 'span.ratesTablePopu', distance: 2 },
       { text: 'US Dollar Exchange Rates Table Converter', element: 'h1.basicH1', distance: 3 },
     ]
-    expect(extractListRecords(top, 'https://x.test/', topSpec, 1, undefined, {}, { columns: true }).columns).toEqual([[
-      { header: 'US Dollar', column: 1, value: 'Euro', fields: ['currency'], table: { caption: null, before } },
-      { header: '1.00 USD', column: 2, value: '0.890579', fields: ['rate'], table: { caption: null, before } },
-      { header: 'inv. 1.00 USD', column: 3, value: '1.122865', table: { caption: null, before } },
+    const topRead = extractListRecords(top, 'https://x.test/', topSpec, 1, undefined, {}, { columns: true })
+    expect(topRead.columns).toEqual([[
+      { header: 'US Dollar', column: 1, value: 'Euro', fields: ['currency'], table: 0 },
+      { header: '1.00 USD', column: 2, value: '0.890579', fields: ['rate'], table: 0 },
+      { header: 'inv. 1.00 USD', column: 3, value: '1.122865', table: 0 },
     ]])
+    expect(topRead.tables).toEqual([{ caption: null, before }])
   })
 
   it('reads before a table only short blocks back to its heading: a long paragraph, a list or another table ends them, and a table first in its wrapper looks before the wrapper', () => {
     const body = '<table class="r"><thead><tr><th>Rate</th></tr></thead><tbody><tr><td>1.5</td></tr></tbody></table>'
-    const tableOf = (html: string) => extractListRecords(html, 'https://x.test/', spec('table.r tbody tr'), 1, undefined, {}, { columns: true }).columns![0]![0]!.table
+    const tableOf = (html: string) => {
+      const read = extractListRecords(html, 'https://x.test/', spec('table.r tbody tr'), 1, undefined, {}, { columns: true })
+      const index = read.columns![0]![0]!.table
+      return index === undefined ? undefined : read.tables![index]
+    }
     expect(tableOf(`<p>${'Rates are published daily. '.repeat(12)}</p><p>As at 19 Oct 2026</p>${body}`)).toEqual({ caption: null, before: [{ text: 'As at 19 Oct 2026', element: 'p', distance: 1 }] })
     expect(tableOf(`<h3>Rates</h3><ul><li>Updated 18 Oct 2026</li></ul>${body}`)).toBeUndefined()
     expect(tableOf(`<h3>Rates</h3><table><tr><td>19 Oct 2026</td></tr></table>${body}`)).toBeUndefined()
     expect(tableOf(`<h2 id="r">Rates</h2><script>var x = 1</script><div class="shell"><div>${body}</div></div>`)).toEqual({ caption: null, before: [{ text: 'Rates', element: 'h2#r', distance: 1 }] })
     expect(tableOf(body)).toBeUndefined()
+    // A caption longer than a block is prose, not what a table states about itself.
+    expect(tableOf(body.replace('<thead>', `<caption>${'Rates. '.repeat(40)}</caption><thead>`))).toBeUndefined()
   })
 
   it('stops reading columns once their text would pass the characters budget', () => {
@@ -162,6 +172,11 @@ describe('extractListRecords, the columns of a selected table row', () => {
     const read = extractListRecords(wide, 'https://x.test/', spec('tbody tr'), 1, { records: 10, chars: 250 }, {}, { columns: true })
     expect(read.map(record => record.values.version)).toEqual(['abcdefghi', 'abcdefghi', 'abcdefghi'])
     expect(read.columns!.map(row => row?.length ?? null)).toEqual([10, 10, null])
+    // A table's own text counts once, with its first row.
+    const captioned = wide.replace('<thead>', `<caption>${'u'.repeat(150)}</caption><thead>`)
+    const once = extractListRecords(captioned, 'https://x.test/', spec('tbody tr'), 1, { records: 10, chars: 250 }, {}, { columns: true })
+    expect(once.columns!.map(row => row?.length ?? null)).toEqual([10, null, null])
+    expect(once.tables).toHaveLength(1)
   })
 })
 
