@@ -38,7 +38,7 @@
  },
  "annotation": {
   "annotatedBy": "Claude Code session f2-eval-sameday (2026-10-24), from the run-day source bytes only, by each case's reserved-v2 annotation block",
-  "status": "engineering_source_checked; spot check pending"
+  "status": "engineering_source_checked; spot check done 2026-10-24 (Howard, 36 of 36 agreed)"
  },
  "spotCheck": {
   "seed": 20261024,
@@ -51,7 +51,9 @@
    "document_metadata": 3
   },
   "reviewer": "Howard (decision 3)",
-  "status": "pending"
+  "status": "done: 36 of 36 sampled fields agreed",
+  "checkedAt": "2026-10-24",
+  "record": "research/accuracy/runs/2026-10-24-sameday-v2-spot-check.md"
  },
  "fieldSlots": 164,
  "fieldsDifferingFromGold": 63,
