@@ -169,8 +169,21 @@ export interface StructuredFieldEvidence {
    * the fact holds for (FactContext: variant, offer type, a document's version and dates).
    */
   context?: { currency?: string; unit?: string; date?: string; region?: string } & FactContext
+  /**
+   * Where a `context` entry the value's table states was read, for a number read from a selected table row: the
+   * unit (as written, such as a caption `Units of Foreign Currencies per Australian Dollar` or a header's `(Km²)`)
+   * and the as-of date (`context.date` holds its ISO day), each with the page's text it was read from and where
+   * that text stands (`table caption`, a column header, a block just before the table).
+   */
+  contextEvidence?: { unit?: StructuredContextEvidence; date?: StructuredContextEvidence }
   /** The page states there is no value (`text`, such as "N/A"): the value is null for that reason, not for want of a source. */
   absent?: true
+}
+
+/** The page's text a context entry was read from, whitespace collapsed, and where it stands. */
+export interface StructuredContextEvidence {
+  text: string
+  evidencePath: string
 }
 
 export type StructuredIssueCode =

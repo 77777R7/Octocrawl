@@ -278,8 +278,10 @@ export class FirestoreAccountData implements AccountData {
     // account's uid, a page at a time until none is left; the keys stop working within a minute, as a revoked one does
     // (the hosted API caches lookups that long).
     // Hosted jobs (packages/mcp/src/hostedJobs.ts) and their idempotency keys go the same way; a slice still running finds
-    // its job gone and writes nothing more. The workspace's running and queued slots go with them.
-    for (const collection of ['hostedApiKeys', 'creditUsage', 'oauthGrants', 'oauthCodes', 'oauthTokens', 'oauthRefresh', 'hostedJobs', 'hostedJobIdempotency']) {
+    // its job gone and writes nothing more. The workspace's running and queued slots go with them. So do the records of
+    // the jobs' settled charges (hostedCredits.ts, `creditSettles`: the uid and the credits used), which a settle cannot
+    // write again once the balance is gone.
+    for (const collection of ['hostedApiKeys', 'creditUsage', 'oauthGrants', 'oauthCodes', 'oauthTokens', 'oauthRefresh', 'hostedJobs', 'hostedJobIdempotency', 'creditSettles']) {
       for (let pass = 0; ; pass++) {
         const docs = await this.byUid(collection, uid)
         if (docs.length === 0) break

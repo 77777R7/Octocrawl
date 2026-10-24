@@ -329,6 +329,8 @@ export interface FetchOptions {
   attributes?: readonly AttributeSelector[]
   /** The `list` format's request, set from the requested formats, not by a caller; the API has checked its selectors. */
   list?: ListFormatRequest
+  /** Read each selected list record's table columns too (`FetchResult.listColumns`): set when a JSON schema reads a list with an `itemSelector`, not by a caller. */
+  listColumns?: boolean
   /**
    * The request's task contract (ADR 0006), for the browser lanes' wait for the region the task needs (ADR 0007): its
    * checks run on the live page until they hold, within a bound. It does not shape a successful result's content, so

@@ -1,7 +1,9 @@
+import Anthropic from '@anthropic-ai/sdk'
 import Ajv from 'ajv'
 import type { CodeOptions, ErrorObject, ValidateFunction } from 'ajv'
 import type {
   AttributesFormatRequest,
+  ListColumn,
   ListFormatRequest,
   CompactScrapeResponse,
   ExecutionContext,
@@ -35,19 +37,54 @@ import { statesAbsence } from '@w2l/extract-tf'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
 import { modelLocator } from './modelEvidence.js'
+import { agreesWithText, tableStatements, type TableStatement } from './tableContext.js'
 
-export interface StructuredModelConfig {
+export type StructuredModelConfig = OpenAiModelConfig | ClaudeModelConfig
+
+/** An OpenAI-compatible Chat Completions endpoint: the default provider. */
+export interface OpenAiModelConfig {
+  provider?: 'openai'
   baseUrl: string
   model: string
   apiKey?: string
   fetch?: typeof fetch
 }
 
+/** How much a Claude model thinks before it answers (`output_config.effort`). */
+export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+const CLAUDE_EFFORTS: ReadonlySet<string> = new Set<ClaudeEffort>(['low', 'medium', 'high', 'xhigh', 'max'])
+
+/** Anthropic's Messages API, called through the official SDK. */
+export interface ClaudeModelConfig {
+  provider: 'anthropic'
+  model: string
+  apiKey: string
+  /** The SDK's own when unset: ANTHROPIC_BASE_URL, else https://api.anthropic.com. */
+  baseUrl?: string
+  /** `low` when unset (CLAUDE_DEFAULT_EFFORT). */
+  effort?: ClaudeEffort
+  fetch?: typeof fetch
+}
+
+/**
+ * The extraction model the environment names, or null. W2L_EXTRACT_PROVIDER
+ * picks the API: `openai` (or unset) for an OpenAI-compatible endpoint at
+ * W2L_EXTRACT_BASE_URL, `anthropic` for Claude's Messages API, whose key is
+ * W2L_EXTRACT_API_KEY, else ANTHROPIC_API_KEY. A provider or effort the code
+ * does not know, or a Claude model without a key, is no configuration.
+ */
 export function structuredModelConfigFromEnv(): StructuredModelConfig | null {
+  const provider = process.env.W2L_EXTRACT_PROVIDER?.trim().toLowerCase() || 'openai'
   const baseUrl = process.env.W2L_EXTRACT_BASE_URL?.trim()
   const model = process.env.W2L_EXTRACT_MODEL?.trim()
-  if (!baseUrl || !model) return null
   const apiKey = process.env.W2L_EXTRACT_API_KEY?.trim()
+  if (provider === 'anthropic') {
+    const key = apiKey || process.env.ANTHROPIC_API_KEY?.trim()
+    const effort = process.env.W2L_EXTRACT_EFFORT?.trim().toLowerCase()
+    if (!model || !key || (effort && !CLAUDE_EFFORTS.has(effort))) return null
+    return { provider, model, apiKey: key, ...(baseUrl ? { baseUrl } : {}), ...(effort ? { effort: effort as ClaudeEffort } : {}) }
+  }
+  if (provider !== 'openai' || !baseUrl || !model) return null
   return { baseUrl, model, ...(apiKey ? { apiKey } : {}) }
 }
 
@@ -264,6 +301,25 @@ function addDeclaredCandidates(
   }
 }
 
+/**
+ * A title that opens with a document series' number (`PEP 8 – Style Guide
+ * for Python Code`, `RFC 9112: HTTP/1.1`), without it, for a schema that asks
+ * for that number in a field of its own: `number`, `no` or `num`, or one named
+ * after the series (`pep_number`, `rfcNumber`, `pep`). The number is the
+ * document's identifier there, not part of its title. A number field about
+ * something else (`phoneNumber`, `caseNumber`) does not ask for it.
+ */
+function withoutDocumentNumber(title: string, root: JsonSchema): string {
+  const m = /^([A-Z]{2,6})[ -]?\d+\s*[:–—-]\s+(\S.*)$/.exec(title)
+  if (m === null) return title
+  const series = m[1]!.toLowerCase()
+  const asked = Object.keys(effective(root, root).properties ?? {}).some((name) => {
+    const key = name.toLowerCase().replace(/[^a-z0-9]/g, '')
+    return ['number', 'no', 'num', series, `${series}number`, `${series}no`, `${series}num`].includes(key)
+  })
+  return asked ? m[2]! : title
+}
+
 /** A scholarly page's own title, from its citation_title tag: the first heading may name the archive's subject instead (arXiv). */
 function citationTitle(result: FetchResult): Candidate | null {
   const tag = result.document?.declaredValues?.find(item => item.name === 'citation_title')
@@ -291,9 +347,10 @@ function candidates(result: FetchResult, schema?: JsonSchema, issues: Structured
     map.set('title', citation)
     map.set('pagetitle', citation)
   } else if (result.document?.title) {
-    const fact = titleFact(result.document.title, result.metadata)
-    map.set('title', { value: result.document.title, fact })
-    map.set('pagetitle', { value: result.document.title, fact })
+    const fact = titleFact(result.document.title, result.document.titlePath, result.metadata)
+    const value = schema === undefined ? result.document.title : withoutDocumentNumber(result.document.title, schema)
+    map.set('title', { value, fact })
+    map.set('pagetitle', { value, fact })
   }
   if (result.document?.pageType) map.set('pagetype', { value: result.document.pageType, fact: { source: 'inferred', path: 'document.pageType' } })
   if (product !== null) addProductCandidates(map, product, put, language)
@@ -305,12 +362,14 @@ function candidates(result: FetchResult, schema?: JsonSchema, issues: Structured
 }
 
 /**
- * Where the content title was read. The extractor takes the first heading of
- * the main content (`h1[0]`, counted like label rows) and falls back to the
- * page's `<title>`, which the page metadata holds as written. Without the
- * metadata the place is unknown.
+ * Where the content title was read: the extractor says which heading of the
+ * main content (`h1[1]`, `h2[0]`, counted like label rows) or the page's
+ * `<title>`. A document without that record took the first heading (`h1[0]`)
+ * and fell back to the `<title>`, which the page metadata holds as written.
+ * Without either the place is unknown.
  */
-function titleFact(title: string, metadata: FetchResult['metadata']): Candidate['fact'] {
+function titleFact(title: string, path: string | undefined, metadata: FetchResult['metadata']): Candidate['fact'] {
+  if (path !== undefined) return { source: 'dom', path }
   if (metadata === undefined || metadata === null) return { source: 'dom' }
   const text = (value: string): string => value.replace(/\s+/g, ' ').trim()
   return { source: 'dom', path: metadata.title !== null && text(metadata.title) === text(title) ? 'title' : 'h1[0]' }
@@ -715,11 +774,18 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
   if (list.pages !== 1 || list.records.some(record => record.source.page !== 1 || ![result.requestedUrl, result.evidence.finalUrl].includes(record.source.url))) return incomplete('selected-list JSON covers one captured page; records from multiple or unrelated pages were not combined')
   if (list.records.length > LIST_JSON_MAX_RECORDS) return incomplete('selected-list JSON exceeded its 2000-record limit; the list output retains its records')
   const namedFields = new Map(fields.map(field => [field.name, field]))
+  // The selected rows' table columns, read with these records only (FetchOptions.listColumns).
+  const columns = result.listColumns?.length === list.records.length ? result.listColumns : undefined
   const location = (index: number, name: string): string => {
     const record = list.records[index]!
     const field = namedFields.get(name)!
     return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index} ${field.selector ?? ':scope'} ${field.attribute === undefined ? 'text' : `@${field.attribute}`}`
   }
+  const recordLocation = (index: number): string => {
+    const record = list.records[index]!
+    return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index}`
+  }
+  const columnLocation = (index: number, column: ListColumn): string => `${recordLocation(index)} column ${column.column} ${JSON.stringify(column.header)} text`
   let chars = 0
   for (const [index, record] of list.records.entries()) {
     if (Object.keys(record.values).some(name => !namedFields.has(name))) return incomplete('captured list fields differ from the selected field specification; unrelated fields were not copied')
@@ -749,17 +815,73 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
     return { status: 'invalid', data: null, schemaSha256, evidence: [], issues: [{ code: 'schema_invalid', message: error instanceof Error ? error.message : String(error) }], modelUsage: null }
   }
   const root = effective(format.schema, format.schema)
+  /**
+   * A key no list field names, from the record's table column whose header
+   * names it (compared as page labels are, an exact header before one that
+   * matches without its bracketed qualifier). Columns that state different
+   * values leave it out.
+   */
+  const columnValue = (index: number, name: string, valuePath: string): { raw: string; column: ListColumn } | 'ambiguous' | null => {
+    const key = labelKey(name)
+    const row = columns?.[index] ?? []
+    const exact = row.filter(column => labelKey(column.header) === key)
+    const matched = (exact.length > 0 ? exact : row.filter(column => baseLabelKey(column.header) === key)).filter(column => column.value !== null)
+    if (key.length === 0 || matched.length === 0) return null
+    if (matched.some(column => column.value !== matched[0]!.value)) {
+      issues.push({ code: 'field_ambiguous', path: valuePath, message: `the selected record's columns state different values for ${valuePath}: ${matched.map(column => `${JSON.stringify(column.header)} = ${JSON.stringify(column.value)} (column ${column.column})`).join(', ')}` })
+      return 'ambiguous'
+    }
+    return { raw: matched[0]!.value!, column: matched[0]! }
+  }
+  /**
+   * A number's reading (numbers.ts) and context: the currency or percent its
+   * text states, and the unit and as-of date its table states for the columns
+   * it was read under (tableContext.ts), each with where it was read. Two
+   * statements that disagree leave that entry out with field_ambiguous.
+   */
+  const numberEvidence = (raw: string, under: readonly ListColumn[], index: number, valuePath: string): Partial<StructuredFieldEvidence> => {
+    const reading = readNumber(raw)
+    if (!('value' in reading)) return { text: raw }
+    const context: NonNullable<StructuredFieldEvidence['context']> = { ...readingContext(undefined, reading.unit) }
+    const contextEvidence: NonNullable<StructuredFieldEvidence['contextEvidence']> = {}
+    const { units, dates } = tableStatements(under, result.listTables ?? [])
+    const ambiguous = (key: 'unit' | 'date', statements: readonly TableStatement[], own: boolean): void => {
+      const states = own ? 'the number\'s own text and its table state' : 'the table states'
+      issues.push({ code: 'field_ambiguous', path: valuePath, message: `${states} different ${key === 'unit' ? 'units' : 'dates'} for ${valuePath}: ${statements.map(statement => `${JSON.stringify(statement.value)} (${statement.where})`).join(', ')}; ${own ? 'only the text\'s own is given' : 'none was given'}` })
+    }
+    const given = (key: 'unit' | 'date', statement: TableStatement): void => {
+      context[key] = statement.value
+      chars += statement.text.length + statement.where.length
+      contextEvidence[key] = { text: statement.text, evidencePath: `${recordLocation(index)} ${statement.where}` }
+    }
+    if (units.length > 0) {
+      // The currency or percent the number's own text states (D3b) is weighed against the table's unit.
+      const own = context.currency ?? context.unit
+      if (units.some(unit => unit.value !== units[0]!.value)) ambiguous('unit', units, false)
+      else if (own !== undefined && !agreesWithText(context, units[0]!.value)) ambiguous('unit', [{ value: own, text: raw, where: 'the value\'s own text' }, ...units], true)
+      else if (context.unit === undefined) given('unit', units[0]!)
+    }
+    if (dates.some(date => date.value !== dates[0]!.value)) ambiguous('date', dates, false)
+    else if (dates.length > 0) given('date', dates[0]!)
+    return {
+      text: raw, normalized: reading.value, conversion: reading.conversion,
+      ...(Object.keys(context).length === 0 ? {} : { context }),
+      ...(Object.keys(contextEvidence).length === 0 ? {} : { contextEvidence }),
+    }
+  }
   const recordValue = (schema: JsonSchema, index: number, path: string): JsonValue => {
     const record = list.records[index]!
     const out: Record<string, JsonValue> = {}
     for (const [name, child] of Object.entries(effective(format.schema, schema).properties ?? {})) {
       const valuePath = `${path}/${pointerPart(name)}`
       const field = namedFields.get(name)
-      const raw = field === undefined || record.missing.includes(name) ? null : record.values[name] ?? null
+      const read = field === undefined ? columnValue(index, name, valuePath) : null
+      const fromColumn = read === 'ambiguous' ? null : read
+      const raw = fromColumn !== null ? fromColumn.raw : field === undefined || record.missing.includes(name) ? null : record.values[name] ?? null
       const target = effective(format.schema, child)
       if (raw === null) {
         if (schemaTypes(target).includes('null')) Object.defineProperty(out, name, { value: null, enumerable: true, configurable: true })
-        missing(valuePath)
+        if (read !== 'ambiguous') missing(valuePath)
         continue
       }
       const value = coerce(raw, target)
@@ -769,7 +891,11 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
         continue
       }
       Object.defineProperty(out, name, { value, enumerable: true, configurable: true })
-      evidence.push({ path: valuePath, source: 'dom', evidencePath: location(index, name), ...(typeof value === 'number' ? { text: raw } : {}) })
+      const evidencePath = fromColumn !== null ? columnLocation(index, fromColumn.column) : location(index, name)
+      // A column counts against the budget once a key is read from it; the fields were counted above.
+      if (fromColumn !== null) chars += name.length + raw.length + evidencePath.length
+      const under = fromColumn !== null ? [fromColumn.column] : columns?.[index]?.filter(column => column.fields?.includes(name)) ?? []
+      evidence.push({ path: valuePath, source: 'dom', evidencePath, ...(typeof value === 'number' ? numberEvidence(raw, under, index, valuePath) : {}) })
     }
     return out
   }
@@ -786,6 +912,7 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
     } else if (arrays.length === 0 && list.records.length === 1 && (schemaTypes(root).includes('object') || root.properties !== undefined)) data = recordValue(root, 0, '')
     else return incomplete('multiple selected records require one record-array schema; a single page-wide object or ambiguous arrays were not filled', 'field_ambiguous')
   }
+  if (chars > LIST_JSON_MAX_CHARS) return incomplete('selected-list JSON exceeded its 1000000-character source/evidence budget; the list output retains its records')
   const missingPaths = requiredMissing(format.schema, format.schema, data)
   issues.push(...missingPaths.map(path => ({ code: 'missing_required' as const, path, message: `required selected-record field unavailable: ${path}` })))
   const valid = validate(data)
@@ -944,6 +1071,33 @@ function modelSchema(root: JsonSchema): ModelSchema {
   }
 }
 
+/** What a model call answered, with the tokens and price it was billed at; null where the provider does not say. */
+interface ModelAnswer {
+  value: JsonValue
+  inputTokens: number | null
+  outputTokens: number | null
+  costUsd: number | null
+}
+
+/** A reply without an answer (a refusal, an answer cut off), with what it was billed for. */
+class ModelNoAnswer extends Error {
+  constructor(message: string, readonly usage: Omit<ModelAnswer, 'value'>) {
+    super(message)
+  }
+}
+
+const MODEL_SYSTEM = 'Return only facts supported by the supplied subject content. Do not infer from recommendations or unrelated products.'
+
+/** The user message: the task, the values already read, the page's Markdown and, on the second call, what to repair. */
+function modelInput(result: FetchResult, format: JsonFormatRequest, deterministic: JsonValue, repair: string | null): Record<string, JsonValue> {
+  return {
+    prompt: format.prompt ?? 'Complete the missing schema fields.',
+    deterministic,
+    subject: result.markdown ?? '',
+    ...(repair === null ? {} : { repair }),
+  }
+}
+
 async function callModel(
   result: FetchResult,
   format: JsonFormatRequest,
@@ -952,8 +1106,9 @@ async function callModel(
   execution: ExecutionContext,
   config: StructuredModelConfig,
   repair: string | null,
-): Promise<{ value: JsonValue; inputTokens: number | null; outputTokens: number | null }> {
+): Promise<ModelAnswer> {
   execution.signal?.throwIfAborted()
+  if (config.provider === 'anthropic') return callClaude(result, format, request, deterministic, execution, config, repair)
   const fetchImpl = config.fetch ?? fetch
   const response = await fetchImpl(`${config.baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
     method: 'POST',
@@ -965,19 +1120,8 @@ async function callModel(
     body: JSON.stringify({
       model: config.model,
       messages: [
-        {
-          role: 'system',
-          content: 'Return only facts supported by the supplied subject content. Do not infer from recommendations or unrelated products.',
-        },
-        {
-          role: 'user',
-          content: JSON.stringify({
-            prompt: format.prompt ?? 'Complete the missing schema fields.',
-            deterministic,
-            subject: result.markdown ?? '',
-            ...(repair === null ? {} : { repair }),
-          }),
-        },
+        { role: 'system', content: MODEL_SYSTEM },
+        { role: 'user', content: JSON.stringify(modelInput(result, format, deterministic, repair)) },
       ],
       response_format: {
         type: 'json_schema',
@@ -993,6 +1137,95 @@ async function callModel(
     value: JSON.parse(content) as JsonValue,
     inputTokens: payload.usage?.prompt_tokens ?? null,
     outputTokens: payload.usage?.completion_tokens ?? null,
+    costUsd: null,
+  }
+}
+
+/**
+ * Extraction is a lookup in the supplied Markdown, and every value the model
+ * writes is checked against the page afterwards: thinking at `low` keeps the
+ * output tokens it bills (thinking counts as output) and the latency down.
+ * Claude Haiku 5.5 defaults to `medium`, Claude Sonnet 5.5 to `high`.
+ */
+const CLAUDE_DEFAULT_EFFORT: ClaudeEffort = 'low'
+/** Room for adaptive thinking and the answer without streaming. */
+const CLAUDE_MAX_TOKENS = 16_000
+
+/**
+ * Published prices in USD per million tokens (platform.claude.com/docs/en/about-claude/pricing,
+ * read 2026-10-23). Claude Haiku 5.5 bills a prompt of over 100,000 tokens at its long-prompt prices.
+ */
+const CLAUDE_PRICES: Readonly<Record<string, { input: number; output: number; long?: { above: number; input: number; output: number } }>> = {
+  'claude-haiku-5-5': { input: 0.10, output: 0.50, long: { above: 100_000, input: 0.50, output: 2.50 } },
+  'claude-sonnet-5-5': { input: 2, output: 10 },
+}
+
+/**
+ * One call's price from its usage, or null when it is not known: a model not
+ * in the table, or a call billed at other rates than the table's (cached
+ * input, a region or service tier with its own multiplier).
+ */
+function claudeCostUsd(model: string, usage: Anthropic.Usage): number | null {
+  const price = CLAUDE_PRICES[model]
+  if (price === undefined || (usage.cache_creation_input_tokens ?? 0) > 0 || (usage.cache_read_input_tokens ?? 0) > 0) return null
+  if ((usage.inference_geo ?? 'global') !== 'global' || (usage.service_tier ?? 'standard') !== 'standard') return null
+  const rates = price.long !== undefined && usage.input_tokens > price.long.above ? price.long : price
+  return (usage.input_tokens * rates.input + usage.output_tokens * rates.output) / 1e6
+}
+
+/**
+ * The Messages API with structured outputs. Claude takes the same strict-safe
+ * schema as OpenAI strict mode (closed objects, every property required,
+ * optional ones nullable, only type, properties, required, items, enum,
+ * const, anyOf, $ref, $defs and description). A schema that cannot be made
+ * strict-safe, such as an open map, is sent in the message instead, with the
+ * answer asked for as JSON, because structured outputs take only closed
+ * objects. No other model answers for a refusal: modelUsage names the model
+ * that answered.
+ */
+async function callClaude(
+  result: FetchResult,
+  format: JsonFormatRequest,
+  request: ModelSchema,
+  deterministic: JsonValue,
+  execution: ExecutionContext,
+  config: ClaudeModelConfig,
+  repair: string | null,
+): Promise<ModelAnswer> {
+  const client = new Anthropic({
+    apiKey: config.apiKey,
+    authToken: null,
+    ...(config.baseUrl === undefined ? {} : { baseURL: config.baseUrl }),
+    ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
+  })
+  const input = modelInput(result, format, deterministic, repair)
+  const message = await client.messages.create({
+    model: config.model,
+    max_tokens: CLAUDE_MAX_TOKENS,
+    system: request.strict ? MODEL_SYSTEM : `${MODEL_SYSTEM} Answer with one JSON object that the JSON Schema in "schema" accepts, and nothing else.`,
+    messages: [{ role: 'user', content: JSON.stringify(request.strict ? input : { ...input, schema: request.schema }) }],
+    output_config: {
+      effort: config.effort ?? CLAUDE_DEFAULT_EFFORT,
+      ...(request.strict ? { format: { type: 'json_schema' as const, schema: request.schema as Record<string, unknown> } } : {}),
+    },
+  }, { signal: execution.signal })
+  const usage = {
+    inputTokens: message.usage.input_tokens + (message.usage.cache_creation_input_tokens ?? 0) + (message.usage.cache_read_input_tokens ?? 0),
+    outputTokens: message.usage.output_tokens,
+    costUsd: claudeCostUsd(config.model, message.usage),
+  }
+  if (message.stop_reason === 'refusal') {
+    const category = message.stop_details?.category
+    throw new ModelNoAnswer(`the model declined to answer (stop_reason refusal${category ? `, category ${category}` : ''})`, usage)
+  }
+  if (message.stop_reason === 'max_tokens' || message.stop_reason === 'model_context_window_exceeded') {
+    throw new ModelNoAnswer(`the model's answer was cut off (stop_reason ${message.stop_reason})`, usage)
+  }
+  const text = message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('').trim()
+  try {
+    return { value: JSON.parse(text.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1')) as JsonValue, ...usage }
+  } catch {
+    throw new ModelNoAnswer('the model answered with text that is not JSON', usage)
   }
 }
 
@@ -1197,13 +1430,23 @@ export async function extractStructured(
   let inputTokens = 0
   let outputTokens = 0
   let tokensKnown = true
+  // Only Claude calls are priced (claudeCostUsd): an OpenAI-compatible endpoint's price is unknown, also for a call that failed.
+  let costUsd: number | null = modelConfig.provider === 'anthropic' ? 0 : null
   let repair: string | null = null
+  const count = (usage: Omit<ModelAnswer, 'value'>): void => {
+    if (usage.inputTokens === null || usage.outputTokens === null) tokensKnown = false
+    else {
+      inputTokens += usage.inputTokens
+      outputTokens += usage.outputTokens
+    }
+    costUsd = costUsd === null || usage.costUsd === null ? null : costUsd + usage.costUsd
+  }
   const modelUsage = (): StructuredModelUsage => ({
     model: modelConfig.model,
     attempts,
     inputTokens: tokensKnown ? inputTokens : null,
     outputTokens: tokensKnown ? outputTokens : null,
-    externalCostUsd: null,
+    externalCostUsd: costUsd,
     strict: request.strict,
     ...(request.reason === undefined ? {} : { strictReason: request.reason }),
   })
@@ -1211,11 +1454,7 @@ export async function extractStructured(
     attempts++
     try {
       const model = await callModel(result, format, request, deterministic, execution, modelConfig, repair)
-      if (model.inputTokens === null || model.outputTokens === null) tokensKnown = false
-      else {
-        inputTokens += model.inputTokens
-        outputTokens += model.outputTokens
-      }
+      count(model)
       const answer = withoutDisallowedNulls(format.schema, format.schema, model.value)
       // Schema-valid and supported by the page are two states: the answer is
       // first checked against the schema as written, then each value the
@@ -1252,6 +1491,9 @@ export async function extractStructured(
         return { status: 'invalid', data, schemaSha256, evidence, issues: [...readIssues, { code: 'model_output_invalid', message: repair }, ...missingIssues], modelUsage: modelUsage() }
       }
     } catch (error) {
+      if (error instanceof ModelNoAnswer) count(error.usage)
+      // A Claude call that failed may still have been billed, for one cut off by the deadline: its tokens and price are unknown, not 0.
+      else if (modelConfig.provider === 'anthropic') count({ inputTokens: null, outputTokens: null, costUsd: null })
       const aborted = execution.signal?.aborted === true || (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'TimeoutError')
       return {
         status: 'incomplete',
@@ -1347,9 +1589,9 @@ function withoutRepeatedBodies(summary: ScrapeResponse['summary'], debug: boolea
   return {
     ...summary,
     attempts: summary.attempts.map(({ result, ...attempt }) => {
-      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, ...rest } = result
+      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, listColumns: _listColumns, listTables: _listTables, ...rest } = result
       // What the actions produced travels once too, on the response.
-      const { actions: _kept, list: _records, ...whole } = result
+      const { actions: _kept, list: _records, listColumns: _columns, listTables: _columnTables, ...whole } = result
       return {
         ...attempt,
         result: { ...(debug ? whole : { ...rest, markdown: null, links: [] }), ...(screenshot === undefined ? {} : { screenshot: null }) },
@@ -1385,8 +1627,10 @@ export async function prepareScrapeResponse(
   const serializeStart = performance.now()
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
   const warning = warningOf(result.warnings)
+  // What JSON read from the selected rows' columns is not a format of its own.
+  const { listColumns: _listColumns, listTables: _listTables, ...run } = result
   const next: ScrapeRun = {
-    ...result,
+    ...run,
     markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
     links: includeLinks ? result.links ?? [] : [],
     // The warnings as one string too, Firecrawl's `warning`, present exactly when they are.

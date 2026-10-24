@@ -850,7 +850,7 @@ function renderLinks(result: PreviewResponse): HTMLElement {
       downloadFile(`url,where\n${rows.map((row) => `${cell(row.link)},${row.own ? 'this site' : 'elsewhere'}`).join('\n')}\n`, resultFilename(result, 'links.csv'), 'text/csv;charset=utf-8')
     })
     tools.append(filter, csv)
-    box.append(tools)
+    box.append(tools, textElement('p', `Copy and downloads include all ${rows.length.toLocaleString()} links. Filters only change the list below.`, 'ledger-meter'))
   }
   box.append(frame)
   return box

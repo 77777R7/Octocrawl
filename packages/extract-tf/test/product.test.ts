@@ -121,6 +121,40 @@ describe('PDP facts: evidence is labelled, never invented', () => {
     expect(out.product?.sku?.value).toBe('CI-900')
   })
 
+  it('states availability in the words the page shows for its one product, and leaves it out when they disagree (F2 false successes)', () => {
+    // Adafruit: JSON-LD declares the offer's availability as an IRI; an itemprop outside any itemscope shows it in words.
+    const page = (shown: string, more = '') => `<!doctype html><html><head><title>CP2105 Friend</title>
+<script type="application/ld+json">{"@context":"http://schema.org","@type":"Product","name":"CP2105 Friend","sku":6065,"offers":{"@type":"Offer","availability":"http:\\/\\/schema.org\\/InStock","price":"6.9500","priceCurrency":"USD"}}</script>
+</head><body><main><h1>CP2105 Friend</h1><span itemprop="price" content="6.9500">$6.95</span>
+<div id="prod-stock"><span itemprop="availability">${shown}</span></div>${more}
+<p>Two serial ports on one USB port, without the complexity of a hub, for every-day serial data.</p></main></body></html>`
+    expect(extractTf.extract(page('In stock'), { url: 'https://www.adafruit.com/product/6065' }).product?.availability)
+      .toEqual({ value: 'In stock', source: 'microdata', path: '[itemprop~="availability"][0]' })
+    // Words that state another availability than the offer: neither is chosen.
+    const stale = extractTf.extract(page('Out of stock'), { url: 'https://www.adafruit.com/product/6065' }).product
+    expect(stale?.availability).toBeNull()
+    expect(stale?.ambiguous?.find((a) => a.field === 'availability')?.facts.map((f) => f.value)).toEqual(['InStock', 'Out of stock'])
+    // Words that name no schema.org availability state nothing to compare: the offer's stays.
+    for (const words of ['Auf Lager', 'In stock (12 available)']) {
+      expect(extractTf.extract(page(words), { url: 'https://www.adafruit.com/product/6065' }).product?.availability?.value, words).toBe('InStock')
+    }
+    // The path counts every itemprop="availability" in the document, a scoped one before it too.
+    const scoped = page('In stock').replace('<main>', '<main><div itemscope itemtype="http://schema.org/Product"><meta itemprop="sku" content="6065"><link itemprop="availability" href="http://schema.org/InStock"></div>')
+    expect(extractTf.extract(scoped, { url: 'https://www.adafruit.com/product/6065' }).product?.availability)
+      .toEqual({ value: 'In stock', source: 'microdata', path: '[itemprop~="availability"][1]' })
+    // Beside another product the page declares, even one nested in the subject as a related item, or inside another itemscope (an Offer of another seller), words are not the subject's.
+    const related = page('Out of stock').replace('"sku":6065,', '"sku":6065,"isRelatedTo":[{"@type":"Product","name":"CP2104 Friend","sku":3309,"offers":{"@type":"Offer","availability":"http://schema.org/OutOfStock"}}],')
+    expect(extractTf.extract(related, { url: 'https://www.adafruit.com/product/6065' }).product?.availability?.value).toBe('InStock')
+    const offer = page('In stock', '<div itemscope itemtype="https://schema.org/Offer"><link itemprop="availability" href="https://schema.org/OutOfStock">Other seller</div>')
+    expect(extractTf.extract(offer, { url: 'https://www.adafruit.com/product/6065' }).product?.availability?.value).toBe('In stock')
+    // A meta tag's words are not shown on the page: the offer's name stays.
+    const meta = page('Auf Lager').replace('</title>', '</title><meta property="product:availability" content="in stock">')
+    expect(extractTf.extract(meta, { url: 'https://www.adafruit.com/product/6065' }).product?.availability?.value).toBe('InStock')
+    // Beside another product the page declares, words outside any itemscope are not the subject's.
+    const other = '<script type="application/ld+json">{"@context":"http://schema.org","@type":"Product","name":"CP2104 Friend","sku":3309}</script>'
+    expect(extractTf.extract(page('Out of stock', other), { url: 'https://www.adafruit.com/product/6065' }).product?.availability?.value).toBe('InStock')
+  })
+
   it('falls back to OpenGraph product meta', () => {
     const html = `<!doctype html><html><head><title>Mug</title>
 <meta property="og:title" content="Speckled stoneware mug">

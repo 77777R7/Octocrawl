@@ -2,7 +2,9 @@
 
 To find all pages on a website, read its sitemap (robots.txt says where it is), search Google with `site:`, check Search Console if the site is yours, run a crawler, map the site with one API call, or look the domain up in the Wayback Machine. Each finds a different part of the site, so the last step is to check the list.
 
-[**Paste a URL, get every page and where it was found →**](/tools/link-extractor/?from=blog-find-all-pages)
+[**Find sitemap and start-page links →**](/tools/link-extractor/?from=blog-find-all-pages)
+
+The free tool returns up to 500 URLs from sitemaps and the start page, with a source for each. It does not open every page or guarantee a complete site inventory.
 
 On 2026-10-13 we tried five of them on modelcontextprotocol.io and on our own site, octocrawl.dev; for the crawler we read its documentation. The sitemap listed 357 pages, Google said "about 4,310 results", and two web archives held 458 addresses that a map of the site didn't. Here is what each way finds, which to use, and how we found out which of those 458 were real pages.
 

@@ -11,7 +11,7 @@
  * native XPath (bake-off confirmed for jsdom/linkedom/happy-dom).
  */
 
-import type { Extractor, ExtractorOptions, ExtractorOutput, PageType, ProductFacts } from '@w2l/contracts'
+import type { Extractor, ExtractorOptions, ExtractorOutput, PageMetadata, PageType, ProductFacts } from '@w2l/contracts'
 import { detachAll, outerHtml, parse, textOf } from './dom.js'
 import { linkTarget } from './markdown.js'
 import { cleanTree, pruneRecommendations, pruneTree, selectionBody } from './prune.js'
@@ -37,16 +37,80 @@ const DEFAULT_CLASSIFY: ClassifyOptions = {
   maxLinkDensity: 0.2,
 }
 
-function pickTitle(doc: Document, main: Element | null): string | null {
+/** The separators a page's `<title>` joins its subject and its site with: `Post | Blog`, `RFC 9112 - HTTP/1.1`, `RFC 9112: HTTP/1.1`. */
+const TITLE_SEPARATOR = /\s+[|·•»–—-]\s+|:\s+/g
+const collapsed = (s: string): string => s.replace(/\s+/g, ' ').trim()
+
+/**
+ * A declared title's runs of separated parts. `leads` marks a run that opens
+ * the title and is at least as long as every part outside it: in
+ * `Subject | Site` the subject leads, in `Acme Blog: How we scaled Postgres`
+ * the site's name does not, nor does `Site` in `Release notes for version 3 -
+ * Site`.
+ */
+function titleRuns(title: string): Array<{ text: string; leads: boolean }> {
+  const cuts = [...title.matchAll(TITLE_SEPARATOR)].map((m) => [m.index, m.index + m[0].length] as const)
+  const starts = [0, ...cuts.map(([, end]) => end)]
+  const ends = [...cuts.map(([start]) => start), title.length]
+  const lengths = starts.map((start, i) => collapsed(title.slice(start, ends[i])).length)
+  return starts.flatMap((start, i) => ends.slice(i).map((end, k) => {
+    const text = collapsed(title.slice(start, end))
+    return { text, leads: i === 0 && lengths.every((length, n) => n <= k || length <= text.length) }
+  }))
+}
+
+/** A heading's text without its `<small>` subtitle (`HTTP/1.1 <small>RFC 9112</small>`), or null when it has none. */
+function withoutSubtitle(heading: Element): string | null {
+  if (heading.querySelector('small') === null) return null
+  const copy = heading.cloneNode(true) as Element
+  for (const small of Array.from(copy.querySelectorAll('small'))) small.remove()
+  return collapsed(textOf(copy))
+}
+
+/** A heading that is one link to another page names a site or an archive (`<h1><a href="/blog/">The Go Blog</a></h1>`), not this page. */
+function linksAway(heading: Element): boolean {
+  const links = heading.querySelectorAll('a[href]')
+  return links.length === 1 && !(links[0]!.getAttribute('href') ?? '').startsWith('#') && collapsed(textOf(links[0]!)) === collapsed(textOf(heading))
+}
+
+/**
+ * The content title and where it was read: the main content's heading that
+ * names the page's subject by the page's declared title (`<title>`,
+ * `og:title`), compared as written (`og:title` "requests" does not name a
+ * README's "Requests" below PyPI's "requests 2.34.2") and never by its
+ * `og:site_name`. The first h1 stays the title when it is the declared title
+ * or any run of its separated parts, as it was before, and when it is not one
+ * link to another page. When it is such a link (a blog's or archive's own
+ * heading above the post), a later h1 is the title, and when the main content
+ * has no h1, an h2 is, if it is a run that leads the declared title
+ * (titleRuns): `Better HTTP/1 connection reuse` in `Better HTTP/1 connection
+ * reuse - The Go Programming Language`. Without such a heading the first h1
+ * is the title, else the `<title>`.
+ */
+function pickTitle(doc: Document, main: Element | null, metadata: PageMetadata): { title: string; path: string } | null {
+  const site = metadata.ogSiteName === undefined ? null : collapsed(metadata.ogSiteName).toLowerCase()
+  const runs = [metadata.title, metadata.ogTitle].flatMap((t) => (t === null || t === undefined ? [] : titleRuns(t)))
+    .filter((run) => run.text.length > 0 && run.text.toLowerCase() !== site)
+  const named = (heading: Element, leading: boolean): string | undefined => linksAway(heading) ? undefined
+    : [collapsed(textOf(heading)), withoutSubtitle(heading)].find((t) => t !== null && t.length > 0 && runs.some((run) => run.text === t && (run.leads || !leading))) ?? undefined
   if (main) {
-    const h1 = main.querySelector('h1')
+    const h1s = Array.from(main.querySelectorAll('h1'))
+    const first = h1s[0] === undefined ? undefined : named(h1s[0], false)
+    if (first !== undefined) return { title: first, path: 'h1[0]' }
+    const later = h1s.length === 0 ? Array.from(main.querySelectorAll('h2')).map((h, i) => [h, `h2[${i}]`] as const)
+      : linksAway(h1s[0]!) ? h1s.slice(1).map((h, i) => [h, `h1[${i + 1}]`] as const) : []
+    for (const [heading, path] of later) {
+      const t = named(heading, true)
+      if (t !== undefined) return { title: t, path }
+    }
+    const h1 = h1s[0]
     if (h1) {
       const t = textOf(h1).trim()
-      if (t.length > 0) return t
+      if (t.length > 0) return { title: t, path: 'h1[0]' }
     }
   }
   const docTitle = doc.querySelector('title')
-  return docTitle ? textOf(docTitle).trim() : null
+  return docTitle ? { title: textOf(docTitle).trim(), path: 'title' } : null
 }
 
 /** The confidence floor of a product region that shows its title heading and its price (confidenceOf). */
@@ -292,8 +356,10 @@ export class ExtractTf implements Extractor {
     // the cascade found of the page.
     const selection = includeSelectors !== undefined && includeSelectors.length > 0 ? selectionBody(html, includeSelectors, pruneSelectors) : null
     const selected = selection !== null && !selection.blank
+    const title = pickTitle(doc.document, main, metadata)
     const output: ExtractorOutput = {
-      title: pickTitle(doc.document, main),
+      title: title?.title ?? null,
+      ...(title === null ? {} : { titlePath: title.path }),
       mainHtml: selection !== null ? selection.html : leads !== null ? outerHtml(leads) : main ? outerHtml(main) : '',
       baseUrl,
       metadata,

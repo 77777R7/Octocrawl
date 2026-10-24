@@ -5,8 +5,8 @@ import { TOOLS, TOOLS_PATH, fromCodeCards, toolBanner, toolCards, toolPath, tool
  * tools link to their page; the next ones are listed as coming, linking nowhere. vite.config.ts prerenders this markup
  * into tools/index.html; hubMain.ts runs the header's and analytics' scripts. */
 
-export const HUB_TITLE = 'Free Web Data Tools: URL to Markdown and More | Octocrawl'
-export const HUB_DESCRIPTION = 'Free tools that read a public web page in your browser: URL to Markdown, and more coming. No sign-up, five a day, and when a page can’t be read you get the reason.'
+export const HUB_TITLE = 'Free Markdown, Text and Link Extractor Tools | Octocrawl'
+export const HUB_DESCRIPTION = 'Convert a public URL to Markdown or plain text, or find sitemap and page links. Three free tools, no sign-up. Five shared previews a day.'
 
 export const HUB_FAQ: ReadonlyArray<readonly [question: string, answer: string]> = [
   ['Are these tools free?', 'Yes. Every tool here runs in your browser without an account: five pages a day per visitor (at most 150 a day for the whole site), reset at 00:00 UTC.'],
