@@ -1487,6 +1487,14 @@ export async function extractStructured(
       const model = await callModel(result, format, request, deterministic, execution, modelConfig, repair)
       count(model)
       const { answer, written } = inDocumentNumberForm(withoutDisallowedNulls(format.schema, format.schema, model.value), result.document?.title, format.schema)
+      // A field whose own checks (a pattern, an enum) the number alone breaks keeps what the model wrote.
+      if (written.size > 0 && !validate(mergeModel(base, answer, '', kept, format.schema, format.schema, TAKE_ALL, { evidence: [], unsupported: [] }) ?? null)) {
+        for (const [path, text] of written) {
+          if (!isPlainObject(answer) || !(validate.errors ?? []).some(error => error.instancePath === path)) continue
+          answer[path.slice(1)] = text
+          written.delete(path)
+        }
+      }
       // A value put in the field's form is located as the model wrote it, and its evidence says what it became.
       const locate: Locate = (value, path) => {
         const text = written.get(path)

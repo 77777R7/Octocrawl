@@ -1084,6 +1084,10 @@ describe('structured JSON extraction', () => {
       expect(out.evidence.filter(item => item.source === 'model').every(item => item.normalized === undefined), JSON.stringify(answer)).toBe(true)
     }
     await kept(doc, { number: { type: 'string' } }, { number: '8' }, { number: '8' })
+    // A field whose own checks ask for the series form keeps it.
+    for (const field of [{ type: 'string', pattern: '^PEP \\d+$' }, { type: 'string', enum: ['PEP 8', 'PEP 20'] }, { type: 'string', minLength: 3 }] as JsonSchema[]) {
+      await kept(doc, { pep: field, title: { type: 'string' } }, { pep: 'PEP 8', title: 'x' }, { pep: 'PEP 8', title: 'Style Guide for Python Code' })
+    }
     await kept(doc, { number: { type: 'string' } }, { number: 'PEP 20' }, { number: 'PEP 20' })
     await kept(doc, { id: { type: 'string' }, title: { type: 'string' } }, { id: 'PEP 8', title: 'x' }, { id: 'PEP 8', title: 'PEP 8 – Style Guide for Python Code' })
     await kept(doc, { rfc_number: { type: 'string' } }, { rfc_number: 'PEP 8' }, { rfc_number: 'PEP 8' })
