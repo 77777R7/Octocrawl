@@ -18,13 +18,18 @@
  *   W2L_MONTHLY_CREDITS         credits every account gets a month, spent by its keys (default 1000)
  *   W2L_PUBLIC_API_ORIGIN       the public address, for hints (e.g. https://api.octocrawl.dev)
  *   W2L_SOURCE_COMMIT           recorded in the startup line
+ *   W2L_EXTRACT_PROVIDER, W2L_EXTRACT_MODEL, W2L_EXTRACT_API_KEY
+ *                               the json model fallback's model and key (structuredModelConfigFromEnv): offered to accounts
+ *                               only while `hostedConfig/model.enabled` is true, within its daily cap (hostedModel.ts)
  */
+import { structuredModelConfigFromEnv } from '@w2l/api'
 import { hostedProxyNotice } from '@w2l/contracts'
 import { createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, FirestoreHostedQuota, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, serviceAccessToken, type HostedKeys, type HostedLeases, type HostedOAuthTokens, type HostedQuota } from './hostedApi.js'
 import { FirestoreCreditsStore, MemoryCreditsStore, type CreditsStore } from './hostedCredits.js'
 import { FirestoreHostedJobStore } from './hostedJobs.js'
 import { gcsJobFiles } from './hostedJobRoutes.js'
 import { jobsCloudFromEnv } from './hostedJobsCloud.js'
+import { FirestoreModelSpend, firestoreModelSettings, HostedModel } from './hostedModel.js'
 
 function positive(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -63,12 +68,15 @@ if (store === 'memory') {
 
 // Hosted batch and crawl jobs (ROADMAP PH H1): on when the five jobs variables are set (hostedJobsCloud.ts).
 const jobsCloud = store === 'firestore' ? await jobsCloudFromEnv(process.env) : null
+// The json model fallback (hostedModel.ts): off until hostedConfig/model.enabled is true; a memory store offers none.
+const extractModel = structuredModelConfigFromEnv()
+const model = store === 'firestore' ? new HostedModel({ model: extractModel, settings: firestoreModelSettings(process.env.W2L_FIRESTORE_PROJECT_ID!, serviceAccessToken()), spend: new FirestoreModelSpend(process.env.W2L_FIRESTORE_PROJECT_ID!, serviceAccessToken()) }) : undefined
 const notice = hostedProxyNotice(process.env)
 if (notice) console.log(`octocrawl-hosted-api: ${notice}`)
 const service = createHostedApi({
   port, host: '0.0.0.0',
   taskRoot: process.env.W2L_TASK_ROOT ?? '/tmp/octocrawl-hosted',
-  hashKey, keys, oauthTokens, quota, leases, credits,
+  hashKey, keys, oauthTokens, quota, leases, credits, ...(model === undefined ? {} : { model }),
   ...(jobsCloud === null ? {} : { jobs: { store: new FirestoreHostedJobStore(jobsCloud.project, serviceAccessToken()), files: gcsJobFiles(jobsCloud.bucket), enqueueSlice: jobsCloud.enqueueSlice, enqueueFinish: jobsCloud.enqueueFinish, enabled: jobsCloud.enabled, allows: jobsCloud.allows } }),
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
   keylessDaily: positive('W2L_KEYLESS_DAILY', 20),
@@ -81,4 +89,4 @@ const service = createHostedApi({
   publicOrigin: process.env.W2L_PUBLIC_API_ORIGIN || undefined,
 })
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void service.close().then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) }) })
-console.log(JSON.stringify({ service: 'octocrawl-hosted-api', port, store, keylessDaily: positive('W2L_KEYLESS_DAILY', 20), claudeDaily: positive('W2L_CLAUDE_DAILY', 200), siteDaily: positive('W2L_SITE_DAILY', 1_500), keylessTotalDaily: positive('W2L_KEYLESS_TOTAL_DAILY', 500), accountDaily: positive('W2L_ACCOUNT_DAILY', 500), accountsDaily: positive('W2L_ACCOUNTS_DAILY', 3_000), monthlyCredits, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
+console.log(JSON.stringify({ service: 'octocrawl-hosted-api', port, store, keylessDaily: positive('W2L_KEYLESS_DAILY', 20), claudeDaily: positive('W2L_CLAUDE_DAILY', 200), siteDaily: positive('W2L_SITE_DAILY', 1_500), keylessTotalDaily: positive('W2L_KEYLESS_TOTAL_DAILY', 500), accountDaily: positive('W2L_ACCOUNT_DAILY', 500), accountsDaily: positive('W2L_ACCOUNTS_DAILY', 3_000), monthlyCredits, extractModel: model === undefined ? null : extractModel?.model ?? null, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))

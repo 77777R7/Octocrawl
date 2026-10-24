@@ -176,6 +176,13 @@ describe('hosted job routes', () => {
     expect(await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(20), maxCredits: 40 })).json()).toMatchObject({ estimatedCredits: 40 })
   })
 
+  it('counts the json model fallback\'s two credits a page in the estimate, not in what the first slice needs', async () => {
+    const { call } = await start({ credits: new MemoryCreditsStore(20) })
+    const formats = [{ type: 'json', modelFallback: true, schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } }]
+    // Twenty pages over HTTP: twenty credits, and two more a page where the model may be called; a slice short of them reads without it.
+    expect(await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(20), fastMode: true, formats })).json()).toMatchObject({ estimatedCredits: 60 })
+  })
+
   it('runs two jobs at once an account, queues ten, refuses the next with 429, and queues no slice for a waiting job', async () => {
     const { call, enqueued } = await start({ credits: new MemoryCreditsStore(100_000) })
     const statuses: string[] = []

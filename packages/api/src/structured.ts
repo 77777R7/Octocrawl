@@ -1180,6 +1180,33 @@ const CLAUDE_DEFAULT_EFFORT: ClaudeEffort = 'low'
 const CLAUDE_MAX_TOKENS = 16_000
 
 /**
+ * Bytes a page's model calls may send besides the user message and the schema: the system prompt, the format's own
+ * framing and a second attempt's repair text, which is not known before the first answer.
+ */
+const MODEL_OVERHEAD_BYTES = 8_192
+/**
+ * The repair text a gated page sends at most, in characters: as JSON at most six bytes each, within MODEL_OVERHEAD_BYTES
+ * beside the system prompt. Ajv names every error, so an answer full of invalid values could otherwise make the second
+ * call far larger than the bound its gate reserved. Without a gate the repair text is sent whole, as before.
+ */
+const GATED_REPAIR_CHARS = 1_000
+
+/**
+ * The most a page's model calls can cost in USD, for a gate that holds a budget (ExecutionContext.modelGate): both
+ * attempts, each billed at most one input token for every byte it sends (a token covers at least one byte of UTF-8)
+ * and CLAUDE_MAX_TOKENS of output, at the long-prompt prices once that bound passes their threshold. Null for a model
+ * without a published price here, and for an OpenAI-compatible endpoint, whose price is not known.
+ */
+export function modelCallsMaxCostUsd(config: StructuredModelConfig, sentBytes: number): number | null {
+  if (config.provider !== 'anthropic') return null
+  const price = CLAUDE_PRICES[config.model]
+  if (price === undefined) return null
+  const tokens = sentBytes + MODEL_OVERHEAD_BYTES
+  const rates = price.long !== undefined && tokens > price.long.above ? price.long : price
+  return 2 * (tokens * rates.input + CLAUDE_MAX_TOKENS * rates.output) / 1e6
+}
+
+/**
  * Published prices in USD per million tokens (platform.claude.com/docs/en/about-claude/pricing,
  * read 2026-10-23). Claude Haiku 5.5 bills a prompt of over 100,000 tokens at its long-prompt prices.
  */
@@ -1456,6 +1483,13 @@ export async function extractStructured(
   const baseEvidence = evidence.filter(item => !broken.has(item.path))
   const deterministic = withoutPaths(mapped, broken)
   const request = modelSchema(format.schema)
+  // A gate (hosted Octocrawl's switch, daily cap and credits) is asked once for the page, before its first call.
+  const sentBytes = Buffer.byteLength(JSON.stringify(modelInput(result, format, deterministic, null))) + Buffer.byteLength(JSON.stringify(request.schema))
+  const admission = execution.modelGate === undefined ? undefined : await execution.modelGate.admit({ model: modelConfig.model, maxCostUsd: modelCallsMaxCostUsd(modelConfig, sentBytes) })
+  if (admission?.ok === false) {
+    issues.push({ code: 'model_unavailable', message: admission.message }, ...missingIssues)
+    return { status: 'incomplete', data, schemaSha256, evidence, issues, modelUsage: null }
+  }
   const pageLocate = modelLocator(result)
   let attempts = 0
   let inputTokens = 0
@@ -1481,6 +1515,11 @@ export async function extractStructured(
     strict: request.strict,
     ...(request.reason === undefined ? {} : { strictReason: request.reason }),
   })
+  /** The page's answer, once the gate that admitted it has heard what its calls cost. */
+  const done = async (out: StructuredExtractionResult): Promise<StructuredExtractionResult> => {
+    await admission?.settle(attempts > 0 ? modelUsage() : null).catch(() => {})
+    return out
+  }
   while (attempts < 2) {
     attempts++
     try {
@@ -1523,25 +1562,26 @@ export async function extractStructured(
           ...(failedChecks.length > 0 ? [{ code: 'field_unavailable' as const, message: validationMessage(failedChecks) }] : []),
           ...unavailable(merged),
         ]
-        return {
+        return done({
           status: valid && unsupported.length === 0 ? 'complete' : 'incomplete',
           data: merged,
           schemaSha256,
           evidence: [...baseEvidence, ...check.evidence],
           issues,
           modelUsage: modelUsage(),
-        }
+        })
       }
       repair = validationMessage(validate.errors)
+      if (admission !== undefined && repair.length > GATED_REPAIR_CHARS) repair = `${repair.slice(0, GATED_REPAIR_CHARS - 1)}…`
       if (attempts === 2) {
-        return { status: 'invalid', data, schemaSha256, evidence, issues: [...readIssues, { code: 'model_output_invalid', message: repair }, ...missingIssues], modelUsage: modelUsage() }
+        return done({ status: 'invalid', data, schemaSha256, evidence, issues: [...readIssues, { code: 'model_output_invalid', message: repair }, ...missingIssues], modelUsage: modelUsage() })
       }
     } catch (error) {
       if (error instanceof ModelNoAnswer) count(error.usage)
       // A Claude call that failed may still have been billed, for one cut off by the deadline: its tokens and price are unknown, not 0.
       else if (modelConfig.provider === 'anthropic') count({ inputTokens: null, outputTokens: null, costUsd: null })
       const aborted = execution.signal?.aborted === true || (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'TimeoutError')
-      return {
+      return done({
         status: 'incomplete',
         data,
         schemaSha256,
@@ -1552,10 +1592,10 @@ export async function extractStructured(
           ...missingIssues,
         ],
         modelUsage: modelUsage(),
-      }
+      })
     }
   }
-  return { status: 'incomplete', data, schemaSha256, evidence, issues: [...readIssues, ...missingIssues], modelUsage: null }
+  return done({ status: 'incomplete', data, schemaSha256, evidence, issues: [...readIssues, ...missingIssues], modelUsage: null })
 }
 
 /** minTables counts Markdown tables too; neither it nor a Markdown field check validates an omitted format. */

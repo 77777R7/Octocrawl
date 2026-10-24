@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
@@ -14,6 +14,7 @@ import { expectUsableInstructions } from './instructionChecks.js'
 import { TOOL_NAMES } from '../src/tools.js'
 import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, noteScrape, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore, type RequestNote } from '../src/hostedCredits.js'
+import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } from '../src/hostedModel.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
 import { expectIsError } from './toolErrorChecks.js'
 
@@ -49,7 +50,7 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; siteDaily?: number; accountDaily?: number; accountsDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void } = {}) {
+async function start(options: { keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; siteDaily?: number; accountDaily?: number; accountsDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void; model?: HostedModel } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
   // `keys` are stored under their plaintext's digest; `keyRecords` under their own id, as a connection's key record has no plaintext.
@@ -59,6 +60,7 @@ async function start(options: { keylessDaily?: number; claudeDaily?: number; key
   const service = createHostedApi({
     port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: options.keyStore ?? new MemoryHostedKeys(records), oauthTokens: options.oauthTokenStore ?? oauthTokens, ...(options.now ? { now: options.now } : {}), quota, leases: options.leases,
     ...(options.credits === null ? {} : { credits: options.credits ?? new MemoryCreditsStore() }),
+    ...(options.model === undefined ? {} : { model: options.model }),
     keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: options.siteDaily ?? 100, keylessTotalDaily: options.keylessTotalDaily, accountDaily: options.accountDaily, accountsDaily: options.accountsDaily, proxySecret: options.proxySecret,
     networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: options.log ?? (() => {}),
   })
@@ -985,4 +987,124 @@ it('a request line names the scrape\'s record and the paid calls on its Evidence
   // A record with no paid calls: an empty list, not unknown.
   noteScrape(note, { status: 'success', scrapeId: 'scrape-2', evidenceRecord: { access: null } })
   expect(note).toMatchObject({ scrapeId: 'scrape-2', paidCallIds: [] })
+})
+
+describe('the json model fallback on an account\'s credits (decided 2026-10-24)', () => {
+  // A fake Anthropic Messages API on loopback stands in for Claude Haiku 5.5: no paid call is made.
+  const KEY = 'sk-ant-hosted-test-secret'
+  const ANSWER = 'The harbour office'
+  let messages: Server
+  let calls: Array<{ key: string | undefined; body: Record<string, any> }>
+  beforeAll(async () => {
+    messages = createServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk) => { raw += chunk })
+      req.on('end', () => {
+        const body = JSON.parse(raw)
+        calls.push({ key: req.headers['x-api-key'] as string | undefined, body })
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: `msg_${calls.length}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null, stop_details: null, content: [{ type: 'text', text: JSON.stringify({ title: 'Tides', office: ANSWER }), citations: null }], stop_reason: 'end_turn', usage: { input_tokens: 1_200, output_tokens: 40 } }))
+      })
+    })
+    messages.listen(0, '127.0.0.1'); await once(messages, 'listening')
+  })
+  afterAll(async () => { await new Promise<void>((resolve) => messages.close(() => resolve())) })
+  afterEach(() => { vi.unstubAllEnvs() })
+  const configure = () => {
+    calls = []
+    vi.stubEnv('W2L_EXTRACT_PROVIDER', 'anthropic')
+    vi.stubEnv('W2L_EXTRACT_MODEL', 'claude-haiku-5-5')
+    vi.stubEnv('W2L_EXTRACT_API_KEY', KEY)
+    vi.stubEnv('W2L_EXTRACT_BASE_URL', `http://127.0.0.1:${(messages.address() as AddressInfo).port}`)
+  }
+  const hostedModel = (enabled = true, spend = new MemoryModelSpend(), log?: (line: string) => void) => {
+    const settings = new MemoryModelSettings({ enabled, dailyCapUsd: 5 })
+    return { model: new HostedModel({ model: { provider: 'anthropic', model: 'claude-haiku-5-5' }, settings, spend, ...(log ? { log } : {}) }), settings, spend }
+  }
+  // The page states a title but no office field, so only the model can complete the json.
+  const incomplete = { type: 'json', modelFallback: true, schema: { type: 'object', properties: { title: { type: 'string' }, office: { type: 'string' } }, required: ['title', 'office'], additionalProperties: false } }
+  const complete = { type: 'json', modelFallback: true, schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'], additionalProperties: false } }
+  const account = { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: false, uid: 'account-1' } }
+  const auth = { authorization: 'Bearer oc_account' }
+  type Answer = { json: { status: string; issues: Array<{ code: string; message: string }>; modelUsage: { attempts: number } | null } }
+
+  it('charges two credits more for a page whose json called the model, says so, and settles the day\'s spend at the call\'s cost', async () => {
+    configure()
+    const lines: string[] = []
+    const credits = new MemoryCreditsStore(1_000)
+    const { model, spend } = hostedModel(true, new MemoryModelSpend(), (line) => lines.push(line))
+    const { url } = await start({ credits, keys: account, model, log: (line) => lines.push(line) })
+    const page = await post(url, '/v1/scrape', { url: `${origin}/page`, formats: [incomplete] }, auth)
+    const body = await page.json() as Answer
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.key).toBe(KEY)
+    expect(body.json.modelUsage).toMatchObject({ attempts: 1 })
+    expect([page.headers.get('x-credits-used'), page.headers.get('x-credits-model'), page.headers.get('x-credits-remaining')]).toEqual(['3', '2', '997'])
+    const day = new Date().toISOString().slice(0, 10)
+    expect(credits.usage.get(`account-1-${day}`)).toMatchObject({ http: 1, model: 1, credits: 3 })
+    expect(credits.requests.get('account-1')![0]).toMatchObject({ credits: 3, modelCredits: 2, kind: 'http' })
+    // Claude Haiku 5.5: 1,200 input and 40 output tokens at $0.10 and $0.50 a million.
+    expect(spend.spent.get(day)).toBe(140)
+    // Logs carry neither the key nor what the page, the prompt or the model said.
+    const logged = lines.join('\n')
+    for (const secret of [KEY, ANSWER, 'harbour office records', 'Complete the missing schema fields']) expect(logged).not.toContain(secret)
+    expect(lines.map((line) => JSON.parse(line).event)).toContain('hosted_model_call')
+    expect(JSON.stringify(body)).not.toContain(KEY)
+  })
+
+  it('charges nothing more where no call was made: the json complete without the model, or modelFallback not asked for', async () => {
+    configure()
+    const credits = new MemoryCreditsStore(1_000)
+    const { model, spend } = hostedModel()
+    const { url } = await start({ credits, keys: account, model })
+    const done = await post(url, '/v1/scrape', { url: `${origin}/page`, formats: [complete] }, auth)
+    expect(((await done.json()) as Answer).json.status).toBe('complete')
+    expect([done.headers.get('x-credits-used'), done.headers.get('x-credits-model')]).toEqual(['1', '0'])
+    const plain = await post(url, '/v1/scrape', { url: `${origin}/page`, formats: [{ ...incomplete, modelFallback: false }] }, auth)
+    expect([plain.headers.get('x-credits-used'), plain.headers.get('x-credits-model')]).toEqual(['1', null])
+    expect(calls).toHaveLength(0)
+    expect(await credits.balance('account-1')).toBe(998)
+    expect([...spend.spent.values()].every((micro) => micro === 0)).toBe(true)
+  })
+
+  it('calls no model and charges nothing more while the switch is off, past the day\'s cap, or without the two credits', async () => {
+    configure()
+    const credits = new MemoryCreditsStore(1_000)
+    const day = new Date().toISOString().slice(0, 10)
+    const { model, settings, spend } = hostedModel(false)
+    const { url } = await start({ credits, keys: account, model })
+    const issueOf = async (response: Response) => ((await response.json()) as Answer).json.issues.find((issue) => issue.code === 'model_unavailable')?.message
+    const off = await post(url, '/v1/scrape', { url: `${origin}/page`, formats: [incomplete] }, auth)
+    expect(await issueOf(off)).toBe(MODEL_REFUSALS.switchedOff)
+    expect([off.headers.get('x-credits-used'), off.headers.get('x-credits-model')]).toEqual(['1', '0'])
+    settings.settings = { enabled: true, dailyCapUsd: 5 }
+    spend.spent.set(day, 4_999_000)
+    const capped = await post(url, '/v1/scrape', { url: `${origin}/page`, formats: [incomplete] }, auth)
+    expect(await issueOf(capped)).toBe(MODEL_REFUSALS.cap(5))
+    expect([capped.headers.get('x-credits-used'), capped.headers.get('x-credits-model')]).toEqual(['1', '0'])
+    expect(spend.spent.get(day)).toBe(4_999_000)
+    expect(calls).toHaveLength(0)
+    expect(await credits.balance('account-1')).toBe(998)
+
+    // Two credits left: the page (one) and the model (two) do not fit together, so the page is read without the model.
+    await close?.(); close = undefined
+    const poor = new MemoryCreditsStore(2)
+    const second = await start({ credits: poor, keys: account, model: hostedModel().model })
+    const short = await post(second.url, '/v1/scrape', { url: `${origin}/page`, formats: [incomplete] }, auth)
+    expect(await issueOf(short)).toBe(MODEL_REFUSALS.credits)
+    expect([short.headers.get('x-credits-used'), short.headers.get('x-credits-remaining')]).toEqual(['1', '1'])
+    expect(calls).toHaveLength(0)
+  })
+
+  it('calls no model for a caller without an account, nor on a server that does not offer it', async () => {
+    configure()
+    const { url } = await start({ model: hostedModel().model })
+    const keyless = await post(url, '/v1/scrape', { url: `${origin}/page`, formats: [incomplete] })
+    expect(((await keyless.json()) as Answer).json.issues).toContainEqual({ code: 'model_unavailable', message: MODEL_REFUSALS.needsAccount })
+    await close?.(); close = undefined
+    const bare = await start({ keys: account })
+    const unoffered = await post(bare.url, '/v1/scrape', { url: `${origin}/page`, formats: [incomplete] }, auth)
+    expect(((await unoffered.json()) as Answer).json.issues).toContainEqual({ code: 'model_unavailable', message: MODEL_REFUSALS.notOffered })
+    expect(unoffered.headers.get('x-credits-used')).toBe('1')
+    expect(calls).toHaveLength(0)
+  })
 })
