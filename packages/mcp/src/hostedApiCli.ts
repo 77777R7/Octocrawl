@@ -11,9 +11,10 @@
  *   W2L_PROXY_SECRET            shared with the Cloudflare Worker; proves CF-Connecting-IP
  *   W2L_KEYLESS_DAILY           keyless pages per address per UTC day (default 20)
  *   W2L_CLAUDE_DAILY            keyless pages per UTC day shared by every call from Claude's egress range (default 200)
- *   W2L_SITE_DAILY              pages for the whole service per UTC day (default 1500)
+ *   W2L_SITE_DAILY              pages per UTC day for every caller without an account (default 1500)
  *   W2L_KEYLESS_TOTAL_DAILY     keyless pages per UTC day for every keyless caller together, within the site's (default 500)
- *   W2L_ACCOUNT_DAILY           pages per UTC day one account may start, within the site's (default 500)
+ *   W2L_ACCOUNTS_DAILY          pages per UTC day for every account together, apart from the site's (default 3000)
+ *   W2L_ACCOUNT_DAILY           pages per UTC day one account may start, within the accounts' (default 500)
  *   W2L_MONTHLY_CREDITS         credits every account gets a month, spent by its keys (default 1000)
  *   W2L_PUBLIC_API_ORIGIN       the public address, for hints (e.g. https://api.octocrawl.dev)
  *   W2L_SOURCE_COMMIT           recorded in the startup line
@@ -75,7 +76,9 @@ const service = createHostedApi({
   siteDaily: positive('W2L_SITE_DAILY', 1_500),
   keylessTotalDaily: positive('W2L_KEYLESS_TOTAL_DAILY', 500),
   accountDaily: positive('W2L_ACCOUNT_DAILY', 500),
+  accountsDaily: positive('W2L_ACCOUNTS_DAILY', 3_000),
+  monthlyCredits,
   publicOrigin: process.env.W2L_PUBLIC_API_ORIGIN || undefined,
 })
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void service.close().then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) }) })
-console.log(JSON.stringify({ service: 'octocrawl-hosted-api', port, store, keylessDaily: positive('W2L_KEYLESS_DAILY', 20), claudeDaily: positive('W2L_CLAUDE_DAILY', 200), siteDaily: positive('W2L_SITE_DAILY', 1_500), keylessTotalDaily: positive('W2L_KEYLESS_TOTAL_DAILY', 500), accountDaily: positive('W2L_ACCOUNT_DAILY', 500), monthlyCredits, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
+console.log(JSON.stringify({ service: 'octocrawl-hosted-api', port, store, keylessDaily: positive('W2L_KEYLESS_DAILY', 20), claudeDaily: positive('W2L_CLAUDE_DAILY', 200), siteDaily: positive('W2L_SITE_DAILY', 1_500), keylessTotalDaily: positive('W2L_KEYLESS_TOTAL_DAILY', 500), accountDaily: positive('W2L_ACCOUNT_DAILY', 500), accountsDaily: positive('W2L_ACCOUNTS_DAILY', 3_000), monthlyCredits, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))

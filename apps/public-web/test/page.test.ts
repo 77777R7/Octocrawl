@@ -131,7 +131,10 @@ describe('Page markup', () => {
     expect(key!.facts.map(([, v]) => v).join(' ')).toContain(`${constant('KEY_PER_MINUTE')} a minute`)
     expect(local!.perDay).toBeNull()
     const page = pageMarkup()
-    expect(page).toContain(`serves ${constant('DEFAULT_SITE_DAILY').toLocaleString('en-US')} pages a day`)
+    const site = constant('DEFAULT_SITE_DAILY').toLocaleString('en-US')
+    const accounts = constant('DEFAULT_ACCOUNTS_DAILY').toLocaleString('en-US')
+    expect(page).toContain(`Callers without an account share ${site} hosted pages a day, and accounts have ${accounts} a day of their own`)
+    expect(limits).toContain(`Callers without an account share ${site} pages a day for the whole service; accounts have ${accounts} a day of their own, at most ${constant('DEFAULT_ACCOUNT_DAILY')} an account`)
     // The big numbers the page shows come from the same allowances.
     const numbers = [...page.matchAll(/<span class="tier-amount"><b>([^<]+)<\/b>/g)].map(([, n]) => n)
     const units = [...page.matchAll(/<p class="tier-unit">([^<]+)<\/p>/g)].map(([, unit]) => unit)
