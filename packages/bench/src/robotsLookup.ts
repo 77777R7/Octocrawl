@@ -7,11 +7,15 @@
  * reason kept so it never reads as a rule the publisher wrote. Unreachable
  * entries expire after `robotsUnreachableTtlMs`, so a transient failure is
  * retried; other entries are kept for the life of the process. Only the
- * caller's own cancellation or deadline aborts a lookup.
+ * caller's own cancellation or deadline aborts a lookup. Cookies a redirect
+ * sets go back on the lookup's later hops, as a browser's would, and are
+ * dropped with it: a sign-in check that sends a browser away and back ends
+ * its loop only for a client that keeps them.
  */
 
 import { isOctocrawlRobotsGroup, robotsAgent, type NetworkPolicy, type ExecutionContext, type FetchWarning, type AppliedRobotsOverride, type RobotsOverrideApplied, type RobotsUnreachable, type TraceEvent } from '@w2l/contracts'
 import type { Dispatcher } from 'undici'
+import { CookieJar } from 'tough-cookie'
 import {
   createExecutionScope,
   isTlsError,
@@ -159,19 +163,25 @@ export class RobotsOriginCache {
       const request = (async (): Promise<CachedRobots | null> => {
       const scope = createExecutionScope({ signal: controller.signal, deadlineAt: Date.now() + (this.networkPolicy.robotsTimeoutMs ?? ROBOTS_TIMEOUT_MS) })
       let entry: CachedRobots = { robotsUrl, robots: null, sha256: null, absent: false }
+      // This lookup's own cookies, never shared or recorded. developer.android.com sends a browser user agent's
+      // robots.txt to a sign-in check and back, and answers it only when the check's cookie comes back; without it
+      // the round trip repeats until the redirect limit.
+      const jar = new CookieJar(undefined, { looseMode: true })
       try {
       await raceWithSignal(assertSafeUrl(robotsUrl, this.networkPolicy), scope.signal)
       let currentUrl = robotsUrl
       for (let hop = 0; hop <= this.networkPolicy.maxRedirects; hop++) {
         await raceWithSignal(assertSafeUrl(currentUrl, this.networkPolicy), scope.signal)
+        const cookie = await jar.getCookieString(currentUrl).catch(() => '')
         const res = await fetch(currentUrl, {
-        headers: { 'user-agent': userAgent },
+        headers: { 'user-agent': userAgent, ...(cookie === '' ? {} : { cookie }) },
         signal: scope.signal,
         redirect: 'manual',
         // Node's fetch accepts the Undici dispatcher; the socket lookup
         // validates the address again and pins the validated result.
         dispatcher: typeof route === 'function' ? route(currentUrl) : route,
       } as RequestInit & { dispatcher: Dispatcher })
+        for (const line of res.headers.getSetCookie()) await jar.setCookie(line, currentUrl, { ignoreError: true }).catch(() => undefined)
         if (res.status >= 300 && res.status < 400) {
           await res.body?.cancel()
           const location = res.headers.get('location')

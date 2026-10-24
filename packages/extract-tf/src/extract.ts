@@ -375,10 +375,11 @@ export class ExtractTf implements Extractor {
         product,
       ),
       // Escalate when a strategy produced nothing at all, a region the page
-      // hides (hiddenRegion), or the article cascade a region that only names
-      // the page (headingsOnly; a region the last resort found is a list's).
+      // hides (hiddenRegion), the article cascade a region that only names
+      // the page (headingsOnly; a region the last resort found is a list's),
+      // or a region in the page's frame while its main landmark is empty.
       // Routing to a non-article strategy is not by itself an escalation reason.
-      escalate: main === null || hiddenRegion(main) || (strategy === 'article' && headingsOnly(main)),
+      escalate: main === null || hiddenRegion(main) || (strategy === 'article' && headingsOnly(main)) || frameWhileMainEmpty(doc.document, main),
       ...(lastResort ? { lastResort: true } : {}),
       pageType: decision.type,
       strategy,
@@ -408,6 +409,21 @@ export class ExtractTf implements Extractor {
 
 /** Default instance. */
 export const extractTf = new ExtractTf()
+
+/** The landmarks a page frames its content with: its banner, navigation, search and footer. */
+const FRAME_LANDMARKS = 'header, nav, footer, [role="banner"], [role="navigation"], [role="search"], [role="contentinfo"]'
+
+/**
+ * Whether the region lies in the page's frame (FRAME_LANDMARKS) while every main landmark the page declares (`<main>`,
+ * `role="main"`) holds no text and no image: the page has said where its content goes, and nothing is there yet. Such a
+ * region is not the page's content (help.autodesk.com, 2026-10-24: read before its article loaded, the banner's home
+ * link and language menu answered `success`). A page that declares no main landmark keeps its region.
+ */
+export function frameWhileMainEmpty(doc: Document, region: Element): boolean {
+  if (region.closest(FRAME_LANDMARKS) === null) return false
+  const landmarks = Array.from(doc.querySelectorAll('main, [role="main"]'))
+  return landmarks.length > 0 && landmarks.every((landmark) => !landmark.contains(region) && textOf(landmark).trim() === '' && landmark.querySelector('img[src]') === null)
+}
 
 /** A region whose headings hold no more text than this, and that says next to nothing beside them, names a page without its content. */
 const HEADINGS_ONLY_MAX_CHARS = 100

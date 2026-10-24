@@ -27,6 +27,7 @@ import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverride
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
+import { TaskCookieSession } from '../cookieSession.js'
 import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import type { FileStore } from '../fileStore.js'
@@ -373,8 +374,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const maxFileBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
     // The coding the compatible transport decoded on the latest response; the lane never sees its header.
     const transportCoding: { decoded: string | null } = { decoded: null }
-    // The task's cookie session, counted for the trace (its values are never recorded).
-    const cookies = execution.cookieSession === undefined ? undefined : new SessionCookies(execution.cookieSession)
+    // The task's cookie session, counted for the trace (its values are never recorded). Without one, the cookies this
+    // fetch's own redirects set go back on its later hops and are dropped with it, as a browser's would: a sign-in check
+    // that sends the client away and back (developer.android.com) answers only a client that kept its cookie.
+    const cookies = new SessionCookies(execution.cookieSession ?? new TaskCookieSession())
     const out = await resilientFetch(url, this.fetcherFor(url, prepared.identityHeaders, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
       queueMs += intervalMs
       cooldownWaitMs += cooldownMs
@@ -394,6 +397,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
         onRetryAfter?.(target, retryAt)
       },
       maxRedirects: this.networkPolicy.maxRedirects,
+      requestState: target => cookies.state(target),
       // A caller's timeout is how long it will wait: headers and body may take until its deadline.
       capsFollowDeadline: options.timeout !== undefined,
       assertUrl: async (target) => {
@@ -405,7 +409,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       transportMs = Math.max(0, performance.now() - transportStart - pacingWaitMs)
       return null
     })
-    if (cookies !== undefined) trace.push({ at: Date.now() - start, lane: 'http', event: 'session_cookies', detail: cookies.detail() })
+    if (execution.cookieSession !== undefined) trace.push({ at: Date.now() - start, lane: 'http', event: 'session_cookies', detail: cookies.detail() })
+    else if (cookies.keptAny) trace.push({ at: Date.now() - start, lane: 'http', event: 'redirect_cookies', detail: cookies.counts() })
     if (out === null) return timedDenied('timeout', this.scheduler.retryAt(host))
     // resilientFetch returns once the final response's headers arrived.
     const fetchedAt = out.status === null ? null : new Date().toISOString()
@@ -983,7 +988,17 @@ class SessionCookies {
   async keep(url: string, setCookies: readonly string[]): Promise<void> {
     if (setCookies.length > 0) this.kept += await this.session.store(url, setCookies)
   }
+  /** The cookie header a request to `url` would carry now, uncounted: what tells a redirect loop from a round trip. */
+  state(url: string): Promise<string> {
+    return this.session.cookieHeader(url)
+  }
+  get keptAny(): boolean {
+    return this.kept > 0
+  }
+  counts(): Record<string, unknown> {
+    return { requestsWithCookies: this.requestsWithCookies, kept: this.kept }
+  }
   detail(): Record<string, unknown> {
-    return { session: this.session.id, requestsWithCookies: this.requestsWithCookies, kept: this.kept }
+    return { session: this.session.id, ...this.counts() }
   }
 }

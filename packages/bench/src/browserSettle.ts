@@ -25,8 +25,10 @@ export interface SettleOutcome {
 
 /**
  * Whether a page with little text shows that its data is still on the way: a visible element marked busy
- * (`aria-busy="true"`, the page's own root aside), or a visible short text, not a button's or a link's, that is or ends in
- * a loading message ("Loading…", "Fetching results...", "Please wait", "Search Results Fetching..."). A page with more
+ * (`aria-busy="true"`, the page's own root aside), a visible short text, not a button's or a link's, that is or ends in
+ * a loading message ("Loading…", "Fetching results...", "Please wait", "Search Results Fetching..."), or main landmarks
+ * (`<main>`, `role="main"`) that hold no text and no image while the rest of the page shows some: the page has said
+ * where its content goes and it is not there yet (help.autodesk.com, 2026-10-24, read with only its banner). A page with more
  * text than LOADING_PAGE_TEXT_MAX is read for that text: a loader left on it (more comments, a feed's next page) is not its
  * data. Visible means a box of some size on the page that neither it nor an ancestor hides (`checkVisibility`, with
  * opacity). Progress bars and skeleton classes are not signs: rating histograms, language bars and button styles use
@@ -52,6 +54,10 @@ export const LOADING_PROBE = `(() => {
       return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
     }
     for (const el of body.querySelectorAll('[aria-busy="true"]')) if (shown(el)) return true
+    const mains = Array.from(body.querySelectorAll('main, [role="main"]'))
+    const empty = (el) => (el.innerText ?? '').trim() === '' && el.querySelector('img, video, canvas, iframe') === null
+      && (typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkVisibilityCSS: true }))
+    if (mains.length > 0 && mains.every(empty) && (body.innerText ?? '').trim() !== '') return true
     const message = /^(?:(?:loading|fetching|please wait|one moment|searching|retrieving)(?:\\s+[\\w-]+){0,3}\\s*(?:\\.{2,3}|\\u2026)|loading|fetching|please wait)$/i
     const trailing = /\\b(?:loading|fetching)\\s*(?:\\.{2,3}|\\u2026)$/i
     // 4 is NodeFilter.SHOW_TEXT, named so that a page replacing NodeFilter cannot break the probe.
