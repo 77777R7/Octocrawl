@@ -70,6 +70,12 @@ beforeAll(async () => {
           'document.getElementById("grid").insertAdjacentHTML("beforeend", "<ul><li>Drill one $99.00</li><li>Drill two $149.00</li><li>Drill three $199.00</li><li>Drill four $249.00</li></ul>") }).observe(document.getElementById("grid"))</script>' +
           '</body></html>',
       )
+    } else if (req.url === '/main-elsewhere' || req.url === '/main-search') {
+      // Finished pages with a main landmark and no text in it: the article beside it, or a main that holds only a search form.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><header><a href="/">Site</a></header>' + (req.url === '/main-search'
+        ? '<main><form><input name="q" placeholder="Search the timetable"></form></main>'
+        : '<main></main><div><h1>Article</h1><p>The ferry leaves the harbour at nine and returns at five, every day of the week.</p></div>') + '</body></html>')
     } else if (req.url === '/help-shell' || req.url === '/help-shell-stuck') {
       // help.autodesk.com (2026-10-24): the banner (a home link, a language menu) renders, the role="main" stays empty
       // until the article arrives, 2.5 s after load here (or never).
@@ -544,9 +550,9 @@ describe('BrowserLocalSubject transport', () => {
       const shell = await subject.fetch(`${url}/help-shell-stuck`, Date.now() + 5_000)
       expect(shell).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
       // Loading words and signs on a finished page, and a loader left on a page with plenty of text, are not waited for.
-      for (const path of ['/not-loading', '/rich-loader']) {
+      for (const path of ['/not-loading', '/rich-loader', '/main-elsewhere', '/main-search']) {
         const done = await subject.fetch(`${url}${path}`)
-        expect(done.status, path).toBe('success')
+        if (path !== '/main-search') expect(done.status, path).toBe('success')
         expect(done.trace.some((event) => event.event === 'loading_wait'), path).toBe(false)
       }
       // A request that runs steps on the page keeps their time: no loading wait takes it, within a short timeout.

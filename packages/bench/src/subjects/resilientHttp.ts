@@ -190,7 +190,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     return this.route.viaOperatorProxy(url)
   }
 
-  /** `cookieSession`: the task's cookies (ADR 0005 `egress_sessions`), sent and kept on every hop; absent, none are. */
+  /** `cookieSession`: the task's cookies (ADR 0005 `egress_sessions`), sent and kept on every hop; absent, only the cookies the fetch's own redirects set, on its later hops. */
   async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession, onTrace?: ExecutionContext['onTrace']): Promise<FetchResult> {
     if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(url)) throw new Error('Local platform exception is limited to fixed platform hosts')
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter, ...(cookieSession === undefined ? {} : { cookieSession }) })
@@ -410,7 +410,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
       return null
     })
     if (execution.cookieSession !== undefined) trace.push({ at: Date.now() - start, lane: 'http', event: 'session_cookies', detail: cookies.detail() })
-    else if (cookies.keptAny) trace.push({ at: Date.now() - start, lane: 'http', event: 'redirect_cookies', detail: cookies.counts() })
+    else if (cookies.sentAny) trace.push({ at: Date.now() - start, lane: 'http', event: 'redirect_cookies', detail: cookies.counts() })
     if (out === null) return timedDenied('timeout', this.scheduler.retryAt(host))
     // resilientFetch returns once the final response's headers arrived.
     const fetchedAt = out.status === null ? null : new Date().toISOString()
@@ -992,8 +992,8 @@ class SessionCookies {
   state(url: string): Promise<string> {
     return this.session.cookieHeader(url)
   }
-  get keptAny(): boolean {
-    return this.kept > 0
+  get sentAny(): boolean {
+    return this.requestsWithCookies > 0
   }
   counts(): Record<string, unknown> {
     return { requestsWithCookies: this.requestsWithCookies, kept: this.kept }
