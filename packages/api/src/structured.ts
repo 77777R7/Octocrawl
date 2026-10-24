@@ -36,7 +36,7 @@ import { compilePathFilter, readinessOf, toEvidenceRecord, verify } from '@w2l/r
 import { statesAbsence } from '@w2l/extract-tf'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
-import { modelLocator } from './modelEvidence.js'
+import { modelLocator, type ModelLocation } from './modelEvidence.js'
 import { agreesWithText, tableStatements, type TableStatement } from './tableContext.js'
 
 export type StructuredModelConfig = OpenAiModelConfig | ClaudeModelConfig
@@ -310,14 +310,42 @@ function addDeclaredCandidates(
  * something else (`phoneNumber`, `caseNumber`) does not ask for it.
  */
 function withoutDocumentNumber(title: string, root: JsonSchema): string {
-  const m = /^([A-Z]{2,6})[ -]?\d+\s*[:–—-]\s+(\S.*)$/.exec(title)
-  if (m === null) return title
+  return documentNumber(title, root)?.rest ?? title
+}
+
+/** The series and number a title opens with, what follows them, and the top-level keys that ask for that number (withoutDocumentNumber), when one does. */
+function documentNumber(title: string, root: JsonSchema): { series: string; number: string; rest: string; keys: string[] } | null {
+  const m = /^([A-Z]{2,6})[ -]?(\d+)\s*[:–—-]\s+(\S.*)$/.exec(title)
+  if (m === null) return null
   const series = m[1]!.toLowerCase()
-  const asked = Object.keys(effective(root, root).properties ?? {}).some((name) => {
+  const keys = Object.keys(effective(root, root).properties ?? {}).filter((name) => {
     const key = name.toLowerCase().replace(/[^a-z0-9]/g, '')
     return ['number', 'no', 'num', series, `${series}number`, `${series}no`, `${series}num`].includes(key)
   })
-  return asked ? m[2]! : title
+  return keys.length > 0 ? { series: m[1]!, number: m[2]!, rest: m[3]!, keys } : null
+}
+
+/**
+ * The model's answer with each string field that asks for the title's
+ * document number (documentNumber) holding the number alone where the model
+ * wrote it with its series (`PEP 8`, `pep-8` for `8`), as the title is read
+ * without it. Each such path maps to what the model wrote, which is what the
+ * page is searched for. Any other value, and a number field, stays as written.
+ */
+function inDocumentNumberForm(answer: JsonValue, title: string | null | undefined, root: JsonSchema): { answer: JsonValue; written: Map<string, string> } {
+  const written = new Map<string, string>()
+  const asked = title === undefined || title === null ? null : documentNumber(title, root)
+  if (asked === null || !isPlainObject(answer)) return { answer, written }
+  const out = { ...answer }
+  const properties = effective(root, root).properties ?? {}
+  for (const key of asked.keys) {
+    const value = out[key]
+    if (typeof value !== 'string' || !schemaTypes(effective(root, properties[key]!)).includes('string')) continue
+    if (value.trim().toUpperCase().replace(/[ -]/, '') !== `${asked.series}${asked.number}`) continue
+    out[key] = asked.number
+    written.set(`/${key}`, value)
+  }
+  return { answer: out, written }
 }
 
 /** A scholarly page's own title, from its citation_title tag: the first heading may name the archive's subject instead (arXiv). */
@@ -1261,6 +1289,9 @@ function withoutPaths(value: JsonValue | null, paths: ReadonlySet<string>, path 
     .map(([key, child]) => [key, withoutPaths(child, paths, `${path}/${key}`)]))
 }
 
+/** Where the page states a value the model wrote at `path` (modelLocator), or null. */
+type Locate = (value: string | number | boolean, path: string) => ModelLocation | null
+
 /** What the model wrote that the page states, and what it does not. */
 interface ModelCheck {
   evidence: StructuredFieldEvidence[]
@@ -1277,7 +1308,7 @@ interface ModelCheck {
  * dropped whole is reported at the array's path. A null says unavailable and
  * is kept without evidence.
  */
-function supportedValue(value: JsonValue, path: string, root: JsonSchema, schemaInput: JsonSchema | undefined, locate: ReturnType<typeof modelLocator>, check: ModelCheck): JsonValue | undefined {
+function supportedValue(value: JsonValue, path: string, root: JsonSchema, schemaInput: JsonSchema | undefined, locate: Locate, check: ModelCheck): JsonValue | undefined {
   if (value === null) return null
   const schema = schemaInput === undefined ? undefined : effective(root, schemaInput)
   if (Array.isArray(value)) {
@@ -1296,7 +1327,7 @@ function supportedValue(value: JsonValue, path: string, root: JsonSchema, schema
     const out: Record<string, JsonValue> = {}
     for (const [key, child] of Object.entries(value)) {
       const named = schema?.properties?.[key]
-      if (named === undefined && locate(key) === null) {
+      if (named === undefined && locate(key, `${path}/${key}`) === null) {
         check.unsupported.push({ path: `${path}/${key}`, value: { [key]: child } })
         continue
       }
@@ -1307,7 +1338,7 @@ function supportedValue(value: JsonValue, path: string, root: JsonSchema, schema
     if (Object.keys(value).length === 0) check.unsupported.push({ path, value })
     return Object.keys(out).length > 0 ? out : undefined
   }
-  const location = locate(value)
+  const location = locate(value, path)
   if (location === null) {
     check.unsupported.push({ path, value })
     return undefined
@@ -1317,7 +1348,7 @@ function supportedValue(value: JsonValue, path: string, root: JsonSchema, schema
 }
 
 /** A locator that takes every value: the answer as the model wrote it, for the schema check. */
-const TAKE_ALL: ReturnType<typeof modelLocator> = value => ({ evidencePath: '', text: String(value) })
+const TAKE_ALL: Locate = value => ({ evidencePath: '', text: String(value) })
 
 /**
  * The model's answer merged into the data read from the page, key by key at
@@ -1326,7 +1357,7 @@ const TAKE_ALL: ReturnType<typeof modelLocator> = value => ({ evidencePath: '', 
  * (supportedValue), and a value the page does not state leaves the field out,
  * also a nullable one the page had no value for.
  */
-function mergeModel(base: JsonValue | undefined, patch: JsonValue | undefined, path: string, kept: ReadonlySet<string>, root: JsonSchema, schemaInput: JsonSchema | undefined, locate: ReturnType<typeof modelLocator>, check: ModelCheck): JsonValue | undefined {
+function mergeModel(base: JsonValue | undefined, patch: JsonValue | undefined, path: string, kept: ReadonlySet<string>, root: JsonSchema, schemaInput: JsonSchema | undefined, locate: Locate, check: ModelCheck): JsonValue | undefined {
   if (patch === undefined || kept.has(path)) return base
   if (isPlainObject(base) && isPlainObject(patch)) {
     const schema = schemaInput === undefined ? undefined : effective(root, schemaInput)
@@ -1425,7 +1456,7 @@ export async function extractStructured(
   const baseEvidence = evidence.filter(item => !broken.has(item.path))
   const deterministic = withoutPaths(mapped, broken)
   const request = modelSchema(format.schema)
-  const locate = modelLocator(result)
+  const pageLocate = modelLocator(result)
   let attempts = 0
   let inputTokens = 0
   let outputTokens = 0
@@ -1455,7 +1486,14 @@ export async function extractStructured(
     try {
       const model = await callModel(result, format, request, deterministic, execution, modelConfig, repair)
       count(model)
-      const answer = withoutDisallowedNulls(format.schema, format.schema, model.value)
+      const { answer, written } = inDocumentNumberForm(withoutDisallowedNulls(format.schema, format.schema, model.value), result.document?.title, format.schema)
+      // A value put in the field's form is located as the model wrote it, and its evidence says what it became.
+      const locate: Locate = (value, path) => {
+        const text = written.get(path)
+        if (text === undefined) return pageLocate(value)
+        const location = pageLocate(text)
+        return location === null ? null : { ...location, normalized: value as string }
+      }
       // Schema-valid and supported by the page are two states: the answer is
       // first checked against the schema as written, then each value the
       // model wrote is kept only where the page states it.

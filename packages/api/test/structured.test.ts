@@ -1087,7 +1087,7 @@ describe('structured JSON extraction', () => {
     await kept(doc, { number: { type: 'string' } }, { number: 'PEP 20' }, { number: 'PEP 20' })
     await kept(doc, { id: { type: 'string' }, title: { type: 'string' } }, { id: 'PEP 8', title: 'x' }, { id: 'PEP 8', title: 'PEP 8 – Style Guide for Python Code' })
     await kept(doc, { rfc_number: { type: 'string' } }, { rfc_number: 'PEP 8' }, { rfc_number: 'PEP 8' })
-    await kept(pep('Style Guide for Python Code'), { number: { type: 'string' } }, { number: 'PEP 8' }, { number: 'PEP 8' })
+    await kept({ ...pep('Style Guide for Python Code'), markdown: '# Style Guide for Python Code\n\nPEP 8 gives coding conventions.' }, { number: { type: 'string' } }, { number: 'PEP 8' }, { number: 'PEP 8' })
     const rfc = { ...page(`<html><head><title>RFC 9112: HTTP/1.1</title></head><body><main><h1>RFC 9112: HTTP/1.1</h1>${body}</main></body></html>`, 'https://www.rfc-editor.org/rfc/rfc9112'),
       markdown: '# RFC 9112: HTTP/1.1\n\nPrice: $12.99' }
     await kept(rfc, { id: { type: 'string' }, price: { type: 'string' } }, { id: 'RFC 9112', price: '$12.99' }, { id: 'RFC 9112', price: '$12.99' })
