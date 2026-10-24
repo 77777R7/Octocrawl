@@ -78,9 +78,9 @@ export interface AccountData {
   createKey(uid: string, digest: string, record: { label: string; prefix: string; createdAt: string }): Promise<void>
   /** Disables the key if it belongs to the account; false when it does not, or does not exist. */
   revokeKey(uid: string, id: string): Promise<boolean>
-  /** Deletes everything this file keeps for the account: its keys, credits, daily usage and request lines. Safe to run
-   * again after a failure part way. */
-  erase(uid: string): Promise<void>
+  /** Deletes everything this file keeps for the account: its keys, credits, daily usage and counters, and request
+   * lines. Safe to run again after a failure part way. */
+  erase(uid: string, now?: Date): Promise<void>
   /** Before an account is deleted: what is left of this month's free credits, if it spent any, kept under its email
    * address's key until the month ends (`creditCarry/{key}`: month, left, expireAt). */
   rememberCredits(uid: string, emailKey: string, monthlyGrant: number, now?: Date): Promise<void>
@@ -92,6 +92,18 @@ export interface AccountData {
 /** The first moment of the next UTC month: when a remembered month stops counting. */
 const nextMonth = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
 const EMAIL_KEY = /^[0-9a-f]{64}$/
+
+/**
+ * The account's daily counters in `hostedQuotas`: its calls (packages/mcp/src/hostedApi.ts) and its jobs' pages
+ * (hostedJobWorker.ts). They are named by the uid and carry no `uid` field to find them by. Each expires two days after
+ * its UTC day, and Firestore's TTL may take a day more to delete it, so the last three days' may still be there.
+ */
+export function accountQuotaIds(uid: string, now: Date): string[] {
+  return [0, 1, 2].flatMap(back => {
+    const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - back)).toISOString().slice(0, 10)
+    return [`${day}-account-${uid}`, `${day}-jobs-account-${uid}`]
+  })
+}
 
 export class MemoryAccountData implements AccountData {
   readonly balances = new Map<string, Balance>()
@@ -249,7 +261,7 @@ export class FirestoreAccountData implements AccountData {
     if (response.ok || response.status === 409) return
     throw new Error(`credit carry failed (${response.status})`)
   }
-  async erase(uid: string): Promise<void> {
+  async erase(uid: string, now = new Date()): Promise<void> {
     if (!/^[A-Za-z0-9_-]{8,128}$/.test(uid) || /^__.*__$/.test(uid)) throw new Error('account id is malformed')
     const remove = async (names: string[]) => {
       // A commit takes at most 500 writes.
@@ -259,8 +271,9 @@ export class FirestoreAccountData implements AccountData {
       }
     }
     // The balance first: a call already under way then cannot settle (its commit needs the balance), so it writes no
-    // usage or request line after these are gone.
-    await remove([`${this.resource}/credits/${uid}`])
+    // usage or request line after these are gone. The daily counters go with it, by name: a reservation counts in the
+    // same commit that takes from the balance, and none can make a new balance once sign-in has forgotten the account.
+    await remove([`${this.resource}/credits/${uid}`, ...accountQuotaIds(uid, now).map(id => `${this.resource}/hostedQuotas/${id}`)])
     // Keys (OAuth connections' included), daily usage and the connections' grants, codes and tokens (oauth.ts) by the
     // account's uid, a page at a time until none is left; the keys stop working within a minute, as a revoked one does
     // (the hosted API caches lookups that long).
