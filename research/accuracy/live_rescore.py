@@ -23,11 +23,22 @@ reported side by side, and every false success against the gold gets a cause lab
   the gold normalises it (EUR), or a changed value on a page whose run-day source this arm did not keep.
 A case's label is the first of access, extraction, unknown, schema_scope, drift among its failing required fields.
 
+"This arm's own source" is decided by content hash, never by arm name (page_refs): an arm is on the reference source only
+when its answer's evidenceRecord.rawSha256 equals the reference's (or a copy from the reference's run that the agreement
+check covers). A later run fetches new pages, so there the reference is a different fetch. --own-pages names folders
+shaped like the same-day set (cases/<ID>/gold.json) that annotate pages a later run read, with that page's rawSha256 and
+the reference's block (cases/<ID>/block-error.json where it did not run); an arm whose page one of them covers is labelled
+against it, so a value that moved between the two fetches is drift, not extraction. An arm whose page nothing annotates,
+or that kept no hash (Firecrawl), is labelled against a page this run read when one is annotated, under the rules for
+another arm's source; when none is, only drift and schema_scope can be shown and the rest is unknown. Scores stay
+against the reference.
+
 Usage: python3 research/accuracy/live_rescore.py <run dir with field-results-json.json and field-results-md.json>
-         [--gold <reserved-v2 dir> --sameday <same-day set dir>]
+         [--gold <reserved-v2 dir> --sameday <same-day set dir> [--own-pages <annotated pages dir>]...]
 """
 import argparse,json,math,os,sys
 CAUSES=['access','extraction','unknown','schema_scope','drift']
+OWN={'reference','agree','own_page'}  # page statuses whose annotation is of the bytes this arm's answer was read from
 FAST={'live','hourly','volatile'}  # freshness classes that can change between two arms' fetches of the same minute
 LIVE_ORIGIN='http://127.0.0.1:1'
 def up(k,n):
@@ -85,18 +96,23 @@ def field_cause(arm,row,ref_row,perfect_row,ref,seen_live,own_quote,same_record=
   the field's freshness is in FAST, so only this arm's own source can show which value the page stated when it read it
   (a requested unit or date delivered wrongly with the right value is still extraction)."""
   if ref_row is not None:
-    if ok(ref_row): return 'drift','correct against the same-day annotation'
+    status=ref['arms'].get(arm);page=ref.get('page');noun=page or 'the same-day annotation'
+    if ok(ref_row): return 'drift',f'correct against {noun}'
     dims=[k for k,c in ref_row['checks'].items() if c is False and k not in ('sameSource','relation')]
     beyond=unrequested(perfect_row,ref_row)
-    if dims and set(dims)<=beyond: return 'schema_scope',f'{",".join(dims)} not requested; '+('value correct against the same-day annotation' if ref_row['checks']['value'] else 'value as the gold')
+    if dims and set(dims)<=beyond: return 'schema_scope',f'{",".join(dims)} not requested; '+(f'value correct against {noun}' if ref_row['checks']['value'] else 'value as the gold')
     if as_page(ref_row,dims): return 'unknown','the answer gives the unit as the page writes it; the gold normalises it (for example € to EUR)'
     dims=[k for k in dims if k not in beyond]
-    own=ref['arms'].get(arm)=='reference' or ref['arms'].get(arm)=='agree'
+    own=status in OWN
     stable=ref_row['expected']==row['expected']
+    if not own and not ref.get('thisRun',True):
+      return 'unknown','the reference is a different fetch from every page this run read, and no page this run read is annotated'
     if own or (stable or same_record) and not (fast and 'value' in dims):
-      why='the same-day annotation of this arm\'s own source' if own else 'the value is unchanged since the gold' if stable else 'the same-day annotation of the record whose other fields this answer matches'
+      why=noun if status=='own_page' else 'the same-day annotation of this arm\'s own source' if own else 'the value is unchanged since the gold' if stable else f'{page} (a record whose other fields this answer matches)' if page else 'the same-day annotation of the record whose other fields this answer matches'
       return 'extraction',f'{why} states {"/".join(dims)} the answer did not deliver'
-    return 'unknown','the value can change between fetches and this arm\'s run-day source was not kept' if fast and 'value' in dims else 'the value changed since the gold, this arm\'s run-day source was not kept, and no other field of the record matches'
+    kept='this arm\'s own page is a different fetch and is not annotated' if status=='other_fetch' else 'this arm\'s run-day source was not kept'
+    if fast and 'value' in dims and row['fieldId'] in ref.get('unsettled',()):return 'unknown',f'the value differs between the pages this run read, and {kept}'
+    return 'unknown',f'the value can change between fetches and {kept}' if fast and 'value' in dims else f'the value changed since the gold, {kept}, and no other field of the record matches'
   dims=[k for k,c in row['checks'].items() if c is False and k not in ('sameSource','relation')]
   beyond=unrequested(perfect_row,row)
   if dims and set(dims)<=beyond: return 'schema_scope',f'{",".join(dims)} not requested'
@@ -106,7 +122,9 @@ def field_cause(arm,row,ref_row,perfect_row,ref,seen_live,own_quote,same_record=
   return 'unknown','no same-day annotation, and no arm returned the gold value'
 
 def label_case(arm,r_gold,r_ref,r_perfect,ref,seen,own_source,gold_fresh=None):
-  """Cause labels for one false success: per failing required field, then the case's first label in CAUSES order."""
+  """Cause labels for one false success: per failing required field, then the case's first label in CAUSES order.
+  ref is page_refs' view for this arm: the annotation r_ref and r_perfect were scored against, each arm's page status,
+  and whether that annotation is of a page this run read."""
   if ref and ref['arms'].get(arm)=='block_did_not_run':
     return {'cause':'access','fields':{},'note':'this arm\'s own kept page did not carry the task structure (same-day block did not run on it)'}
   fields={}
@@ -117,7 +135,7 @@ def label_case(arm,r_gold,r_ref,r_perfect,ref,seen,own_source,gold_fresh=None):
   for x in r_gold['rows']:
     if not x['required'] or ok(x):continue
     quote=bool(own_source) and r_gold.get('oneSubject') and all(e['quote'] in own_source for e in x['sourceEvidence'] if e.get('role','value')=='value') and bool(x['sourceEvidence'])
-    fast=fresh.get(x['fieldId']) in FAST
+    fast=fresh.get(x['fieldId']) in FAST or x['fieldId'] in (ref or {}).get('unsettled',())
     fields[x['fieldId']]=field_cause(arm,x,rr.get(x['fieldId']),pp[x['fieldId']],ref,x['fieldId'] in seen,quote,x['entityId'] in read,fast)
   labels={c for c,_ in fields.values()}
   if r_gold['totals']['duplicateSelectedRecords']:labels.add('extraction');fields['(duplicates)']=('extraction','duplicate selected records')
@@ -126,19 +144,57 @@ def label_case(arm,r_gold,r_ref,r_perfect,ref,seen,own_source,gold_fresh=None):
   cause=next((c for c in CAUSES if c in labels),'unknown')
   return {'cause':cause,'fields':{k:{'cause':c,'evidence':e} for k,(c,e) in fields.items()}}
 
-def sameday_section(R,gold_dir,sameday_dir,json_rows):
+def page_refs(gold,cap,verdicts,own,hashes):
+  """Which annotated page each arm's answer was read from, matched by content hash (the answer's evidenceRecord.rawSha256,
+  kept by --keep-html), never by arm name. gold is the reference annotation, of the source whose rawSha256 it carries;
+  cap['arms'] lists the copies the reference's run kept beside it and verdicts the agreement check on each; own lists
+  annotations of pages a later run read (--own-pages), each carrying its page's rawSha256, or a blockError where the
+  reference's block did not run on that page. Status per arm: reference, agree, disagree, not_checked or
+  block_did_not_run (the reference source or a copy from its run), own_page (an annotation from own), other_fetch (a
+  page no annotation covers) or no_source (no hash). Returns, per arm, the view label_case takes: the annotation to label
+  against (its own page's, else a page this run read, else the reference), whether that annotation is of a page this run
+  read, and the fields whose value differs between the annotated pages this run read."""
+  known={gold['rawSha256']:'reference'}
+  for arm,a in (cap.get('arms') or {}).items():
+    if a and arm in verdicts and a['rawSha256'] not in known:known[a['rawSha256']]=verdicts[arm]
+  pages={g['rawSha256']:g for g in own if g['rawSha256'] not in known}
+  def status(h):
+    if not h:return 'no_source'
+    if h in known:return known[h]
+    if h in pages:return 'block_did_not_run' if 'blockError' in pages[h] else 'own_page'
+    return 'other_fetch'
+  arms={arm:status(h) for arm,h in hashes.items()}
+  run=([gold] if any(h in known for h in hashes.values()) else [])+[pages[h] for h in dict.fromkeys(hashes.values()) if h in pages and 'blockError' not in pages[h]]
+  values={}
+  for g in run:
+    for f in g['fields']:values.setdefault(f['id'],set()).add(json.dumps(f['value']))
+  unsettled={k for k,v in values.items() if len(v)>1}
+  views={}
+  for arm,h in hashes.items():
+    if arms[arm]=='own_page':g,page,this=pages[h],'the annotation of this arm\'s own kept page',True
+    elif arms[arm] in OWN or not run:g,page,this=gold,None,bool(run)
+    else:g=run[0];page,this=None if g is gold else 'the annotation of a page this run read',True
+    views[arm]={'gold':g,'arms':arms,'page':page,'thisRun':this,'unsettled':unsettled}
+  return views
+
+def sameday_section(R,gold_dir,sameday_dir,json_rows,own_dirs=()):
   import holdout_score as hs
   cases={c:json.load(open(f'{gold_dir}/cases/{c}/gold.json')) for c in sorted({r['id'] for r in json_rows})}
   ref={};plan=json.load(open(f'{sameday_dir}/plan.json'))
   man_path=f'{sameday_dir}/agreement-model.json';agree=json.load(open(man_path)) if os.path.exists(man_path) else {}
   for c in plan['cases']:
     g=json.load(open(f'{sameday_dir}/cases/{c["id"]}/gold.json'));cap=json.load(open(f'{sameday_dir}/cases/{c["id"]}/capture.json'))
-    arms={cap['referenceArm']:'reference'}
+    verdicts={}  # the agreement check on each copy the reference's run kept beside the reference source
     for arm,a in (cap.get('arms') or {}).items():
-      if arm in arms or not a:continue
+      if arm==cap['referenceArm'] or not a:continue
       v=agree.get(c['id']) if arm=='model' else None
-      arms[arm]='block_did_not_run' if v and 'blockError' in v else 'agree' if v and all(v.get(f['id'])==f['value'] for f in g['fields']) else 'disagree' if v else 'not_checked'
-    ref[c['id']]={'gold':g,'arms':arms}
+      verdicts[arm]='block_did_not_run' if v and 'blockError' in v else 'agree' if v and all(v.get(f['id'])==f['value'] for f in g['fields']) else 'disagree' if v else 'not_checked'
+    own=[]
+    for d in own_dirs:
+      p=f'{d}/cases/{c["id"]}'
+      if os.path.exists(f'{p}/gold.json'):own.append(json.load(open(f'{p}/gold.json')));assert own[-1]['id']==c['id'],p
+      elif os.path.exists(f'{p}/block-error.json'):own.append(json.load(open(f'{p}/block-error.json')))
+    ref[c['id']]={'gold':g,'cap':cap,'verdicts':verdicts,'own':own}
   versions=sorted({r['version'] for r in json_rows})
   docs={(v,c):(json.load(open(f'{R}/{v}/{c}.json')).get('response') or {}) for v in versions for c in cases if os.path.exists(f'{R}/{v}/{c}.json')}
   schema={}
@@ -150,6 +206,8 @@ def sameday_section(R,gold_dir,sameday_dir,json_rows):
   gold_rows={(r['version'],r['id']):r for r in json_rows}
   # The gold value of a field, seen in any arm's live answer: the page still stated it on the run day.
   seen={c:{x['fieldId'] for v in versions for x in gold_rows[(v,c)]['rows'] if x['checks']['value'] and x['checks']['entity']} for c in cases}
+  # Each arm's page, matched by the content hash of the page its answer was read from.
+  views={c:page_refs(r['gold'],r['cap'],r['verdicts'],r['own'],{v:((docs.get((v,c)) or {}).get('evidenceRecord') or {}).get('rawSha256') for v in versions}) for c,r in ref.items() if c in cases}
   out={}
   for v in versions:
     rows_ref=[];labels={}
@@ -160,18 +218,22 @@ def sameday_section(R,gold_dir,sameday_dir,json_rows):
       if r_ref:r_ref['version']=v
       rows_ref.append(r_ref or rg)
       if claim(rg) and not accepted(rg):
-        r_perfect=hs.score_case(ref_case or cases[c],perfect_answer(ref_case or cases[c],schema.get(c)),LIVE_ORIGIN,'json')
+        view=views[c][v] if c in views else None;lab=view['gold'] if view else None
+        r_lab=r_ref if lab is ref_case else hs.score_case(lab,docs.get((v,c),{}),LIVE_ORIGIN,'json')
+        r_perfect=hs.score_case(lab or cases[c],perfect_answer(lab or cases[c],schema.get(c)),LIVE_ORIGIN,'json')
         src=(docs.get((v,c)) or {}).get('rawHtml')
-        labels[c]=label_case(v,rg,r_ref,r_perfect,ref.get(c),seen[c]-{x['fieldId'] for x in rg['rows'] if x['checks']['value'] and x['checks']['entity']},src,{f['id']:f.get('freshness') for f in cases[c]['fields']})
+        labels[c]=label_case(v,rg,r_lab,r_perfect,view,seen[c]-{x['fieldId'] for x in rg['rows'] if x['checks']['value'] and x['checks']['entity']},src,{f['id']:f.get('freshness') for f in cases[c]['fields']})
     covered=[r for r in rows_ref if r['id'] in ref];covered_gold=[gold_rows[(v,r['id'])] for r in covered]
     out[v]={'againstGold':tally([gold_rows[(v,c)] for c in cases]),'againstSameDay':tally(rows_ref),
       'coveredCases':sorted(ref),'coveredAgainstGold':tally(covered_gold),'coveredAgainstSameDay':tally(covered),
       'perCase':{r['id']:{'reference':'same-day' if r['id'] in ref else 'gold','requiredGold':sum(ok(x) for x in gold_rows[(v,r['id'])]['rows'] if x['required']),'requiredSameDay':sum(ok(x) for x in r['rows'] if x['required']),'required':sum(x['required'] for x in r['rows']),'acceptedGold':accepted(gold_rows[(v,r['id'])]),'acceptedSameDay':accepted(r),'claim':claim(r)} for r in rows_ref},
       'falseSuccessCauses':labels,'causeCounts':{k:sum(l['cause']==k for l in labels.values()) for k in CAUSES}}
-  return {'set':os.path.basename(os.path.normpath(sameday_dir)),'planSha256':__import__('hashlib').sha256(open(f'{sameday_dir}/plan.json','rb').read()).hexdigest(),'notAnnotated':plan.get('notAnnotated'),'versions':out}
+  res={'set':os.path.basename(os.path.normpath(sameday_dir)),'planSha256':__import__('hashlib').sha256(open(f'{sameday_dir}/plan.json','rb').read()).hexdigest(),'notAnnotated':plan.get('notAnnotated'),'versions':out}
+  if own_dirs:res['ownPages']={'sets':[os.path.normpath(d) for d in own_dirs],'pages':{c:{v:views[c][v]['arms'][v] for v in versions} for c in sorted(views)}}
+  return res
 
 def main():
-  p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter);p.add_argument('run');p.add_argument('--gold');p.add_argument('--sameday')
+  p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter);p.add_argument('run');p.add_argument('--gold');p.add_argument('--sameday');p.add_argument('--own-pages',action='append',default=[])
   a=p.parse_args();R=a.run;out={};rows_by={}
   for k in ['json','md']:
     j=json.load(open(f'{R}/field-results-{k}.json'));rows_by[k]=j['rows']
@@ -183,7 +245,7 @@ def main():
   res={f'{k}:{v}':d for (k,v),d in out.items()}
   if a.sameday:
     if not a.gold:p.error('--sameday needs --gold')
-    sd=sameday_section(R,a.gold,a.sameday,rows_by['json']);res['sameday']=sd
+    sd=sameday_section(R,a.gold,a.sameday,rows_by['json'],a.own_pages);res['sameday']=sd
     for v,d in sd['versions'].items():
       g,s=d['againstGold'],d['againstSameDay']
       print(f"json {v}: required {g['requiredLiveCorrect']} gold / {s['requiredLiveCorrect']} same-day; accepted {g['accepted']} / {s['accepted']}; false success {g['fs']} / {s['fs']} of 42; causes {d['causeCounts']}")
