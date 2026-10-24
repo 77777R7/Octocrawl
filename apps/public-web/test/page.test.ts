@@ -97,14 +97,15 @@ describe('Page markup', () => {
     expect(page).toContain('CI run 35423895294 · main@6dc2e6e')
   })
 
-  it('marks as hosted only what hosted Octocrawl serves: scrape and map, each with its Evidence Record', () => {
+  it('marks as hosted only what hosted Octocrawl serves: scrape and map, and crawl and batch jobs for an account', () => {
     const hostedApi = readFileSync(new URL('../../../packages/mcp/src/hostedApi.ts', import.meta.url), 'utf8')
-    expect(hostedApi).toContain('is not served by hosted Octocrawl: scrape and map only')
-    expect(CAPABILITIES.filter(c => c.hosted).map(c => c.key)).toEqual(['scrape', 'map'])
+    expect(hostedApi).toContain("(path === '/v1/scrape' || path === '/v1/map')")
+    expect(hostedApi).toContain("(path === '/v1/batches' || path === '/v1/crawl')")
+    expect(CAPABILITIES.filter(c => c.hosted).map(c => c.key)).toEqual(['scrape', 'map', 'crawl', 'batch'])
     const page = pageMarkup()
-    expect(page.match(/<li class="can-cell" data-hosted="true">/g)).toHaveLength(2)
-    expect(page.match(/<li class="can-cell" data-hosted="false">/g)).toHaveLength(4)
-    expect(page).toContain('Hosted <span class="can-count">2</span>')
+    expect(page.match(/<li class="can-cell" data-hosted="true">/g)).toHaveLength(4)
+    expect(page.match(/<li class="can-cell" data-hosted="false">/g)).toHaveLength(2)
+    expect(page).toContain('Hosted <span class="can-count">4</span>')
   })
 
   it('says what each capability does in a few short points', () => {

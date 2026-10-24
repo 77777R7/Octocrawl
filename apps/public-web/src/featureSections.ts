@@ -5,8 +5,9 @@ import { glyphCloud } from './glyphArt'
  * controls that need a script (the filter, the tabs and Copy) stay hidden, and every free tier shows open.
  *
  * What the sections claim was checked against the product on 2026-10-09 (origin/main c25c126):
- * - Hosted Octocrawl serves scrape and map only (packages/mcp/src/hostedApi.ts refuses every other route by name); crawl,
- *   batch, Monitor, logins and the handoff to Chrome run on the person's computer.
+ * - Hosted Octocrawl serves scrape and map, and to an account crawl jobs of up to 500 pages and batch jobs of up to 1,000
+ *   URLs (packages/mcp/src/hostedApi.ts refuses every other route by name; rechecked 2026-10-23, origin/main d1eb4647);
+ *   larger crawls, Monitor, logins and the handoff to Chrome run on the person's computer.
  * - Allowances: five previews a visitor a day (VISITOR_DAILY_PREVIEWS, packages/public-preview/src/quota.ts); 20 pages a
  *   day per address without a key and 10 starts a minute (DEFAULT_KEYLESS_DAILY, KEYLESS_PER_MINUTE); an account's
  *   1,000 credits a month and 60 a minute (DEFAULT_MONTHLY_CREDITS in packages/mcp/src/hostedCredits.ts, KEY_PER_MINUTE);
@@ -51,13 +52,13 @@ export const CAPABILITIES: readonly Capability[] = [
     ],
   },
   {
-    key: 'crawl', hosted: false, title: 'Crawl a site',
-    points: ['Follow links across a site or section', 'Set page, depth and path limits', 'Resume a crawl where it left off'],
+    key: 'crawl', hosted: true, title: 'Crawl a site',
+    points: ['Follow links across a site or section', 'Set page, depth and path limits', 'Hosted with an account, up to 500 pages'],
     art: ['site.example', ' ├─ /docs {─›} /docs/start', ' ├─ /blog {─›} /blog/post', ' └─ page limit ✓', '    depth limit ✓'],
   },
   {
-    key: 'batch', hosted: false, title: 'Scrape a batch',
-    points: ['Scrape a list of URLs', 'Keep each result, including failures', 'Export content and per-URL outcomes'],
+    key: 'batch', hosted: true, title: 'Scrape a batch',
+    points: ['Scrape a list of URLs', 'Keep each result, including failures', 'Hosted with an account, up to 1,000 URLs'],
     art: ['[URL 1, URL 2, URL 3]', '        {│}', '   ✓ Markdown', '   × blocked', '   ✓ Markdown'],
   },
   {
