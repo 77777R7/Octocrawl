@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -60,6 +60,34 @@ describe('agent hints', () => {
       ])
     }
     expect(hints(result({ status: 'blocked', blockReason: 'geo_restricted', markdown: null }))).toEqual([])
+  })
+
+  it('recommends installed_chrome after a gate the bundled browser met too, only where the server offers it (ADR 0005, 2026-10-23)', () => {
+    const gate = (blockReason: 'cloudflare_challenge' | 'captcha' | 'bot_detected_generic') => result({ status: 'blocked', blockReason, markdown: null, evidence: { finalUrl: URL_, httpStatus: 403 } })
+    const offered = { installedChrome: true }
+    for (const blockReason of ['cloudflare_challenge', 'captcha', 'bot_detected_generic'] as const) {
+      const said = agentHintsFor({}, { channelsTried: ['http', 'browser_local'], result: gate(blockReason) }, offered)
+      expect(said, blockReason).toHaveLength(2)
+      expect(said[0], blockReason).toContain('gates automated access on the lanes tried (http, browser_local)')
+      expect(said[1], blockReason).toBe(INSTALLED_CHROME_RECOMMENDED_HINT)
+    }
+    // It names the route, what it opens, and the grant the person writes and starts the server with; and what was not measured.
+    for (const part of ['installed_chrome', "this machine's Google Chrome", 'at most 2', 'tier enhanced', 'your own attestation', '--access-grant', 'W2L_ACCESS_GRANT', 'access: "enhanced"', 'unknown on yours', 'docs/access.md#the-recommended-route-on-your-own-machine']) {
+      expect(INSTALLED_CHROME_RECOMMENDED_HINT).toContain(part)
+    }
+    // A server that does not offer it (hosted, or one whose grant already names the route) says the gate alone, as before.
+    expect(agentHintsFor({}, { channelsTried: ['http', 'browser_local'], result: gate('cloudflare_challenge') })).toHaveLength(1)
+    expect(agentHintsFor({}, { channelsTried: ['http', 'browser_local'], result: gate('cloudflare_challenge') }, { installedChrome: false })).toHaveLength(1)
+    // The rung comes after the bundled browser: a run that never reached it (fastMode, an http-only server, the person's own Chrome) is not told to skip ahead.
+    expect(agentHintsFor({}, { channelsTried: ['http'], result: gate('cloudflare_challenge') }, offered)).toHaveLength(1)
+    expect(agentHintsFor({}, { channelsTried: ['my_browser'], result: { ...gate('cloudflare_challenge'), lane: 'my_browser' } }, offered)).toHaveLength(1)
+    // A stored page whose run already tried the route (read before the server's grant changed) is not told to try it.
+    expect(agentHintsFor({}, { channelsTried: ['http', 'browser_local', 'installed_chrome'], result: gate('cloudflare_challenge') }, offered)).toHaveLength(1)
+    // Not for what is not a check the route waits out: a login wall, a rate limit, a region, a page that was read.
+    expect(agentHintsFor({}, { channelsTried: ['http', 'browser_local'], result: result({ status: 'blocked', blockReason: 'login_wall', markdown: null }) }, offered)).not.toContain(INSTALLED_CHROME_RECOMMENDED_HINT)
+    expect(agentHintsFor({}, { channelsTried: ['http', 'browser_local'], result: result({ status: 'blocked', blockReason: 'rate_limit', markdown: null }) }, offered)).not.toContain(INSTALLED_CHROME_RECOMMENDED_HINT)
+    expect(agentHintsFor({}, { channelsTried: ['http', 'browser_local'], result: result({ status: 'blocked', blockReason: 'geo_restricted', markdown: null }) }, offered)).toEqual([])
+    expect(agentHintsFor({}, { channelsTried: ['http', 'browser_local'], result: result({ lane: 'browser_local' }) }, offered)).toEqual([])
   })
 
   it('gives the Retry-After time for a rate limit, the cut for a truncated page, and the error page for an HTTP error', () => {

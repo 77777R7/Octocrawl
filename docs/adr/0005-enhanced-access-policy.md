@@ -165,3 +165,47 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
   - 每周重测。
   - 浏览器通道自带的一些步骤在测量里没有，验收时一起看。其中一项是用 `Network.setBlockedURLs` 屏蔽广告域名。
 
+## 修订 2026-10-23：本机运行时默认推荐 installed_chrome（ROADMAP PA item 5）
+
+**背景。** K1 在 2026-10-21 和 2026-10-22 两个窗口里，用同样的 92 道题和同样的条件，比较了 Octocrawl 的 standard、enhanced（Steel 数据中心）、installed_chrome 三臂和 Firecrawl、ZenRows，主指标是首次调用（[两窗口记录](../../research/access/runs/2026-10-22-k1-two-windows-b233d232.md)）。两个窗口都成立的大收益只有 installed_chrome 这一条。2026-10-22，Howard 按 K4 的默认定了：installed_chrome 进本机的默认推荐（`docs/pa-enhancement-tasks.md`"待你决定"第 14 条）。上面"使用条件"里的"定期重测"写了低于验收基线时停止默认推荐，但没有说推荐本身是什么。本修订补上。
+
+**"默认推荐"是什么。** Octocrawl 在本机运行时，把 installed_chrome 说成首选的增强路线。它只是推荐，不是默认开启：
+
+- 能力仍属第 3 类，默认关。要用它，服务的 grant 要列 `installed_chrome`（档位 enhanced，带 attestation），请求要选 `access: "enhanced"`，模式是 standard。
+- Octocrawl 不替使用者写 grant，也不因为推荐而改任何默认能力。
+- 托管服务照样拒绝它。一次最多开 2 个窗口。
+- 阶梯顺序不变：它仍排在 `browser_local` 之后、provider 之前。
+
+**在哪里推荐。** 只在下面三处。停止推荐时撤的也就是这些：
+
+1. `docs/access.md`：增强访问一节里的"The recommended route on your own machine"，以及指向它的两句（页首列表里的 Enhanced access 一条，`installed_chrome` 条目里的 Status）。
+2. `docs/local-setup.md` 的"Pages that stop at a check"。
+3. 本地服务回答里的 agentHints（`packages/api/src/hints.ts` 的 `INSTALLED_CHROME_RECOMMENDED_HINT`），连同 `docs/scrape-options.md` agentHints 表里它那一行。它紧跟在挑战页那条提示后面，指向这条路线，并说怎样授权：使用者自己写 grant（档位 enhanced，列 `installed_chrome`，带自己的 attestation），用它启动服务，请求再选 `access: "enhanced"`。scrape、batch 和 crawl 的页面都带它。条件同时满足才出现：
+   - 服务在使用者自己的机器上，和提供 handoff 的服务是同一类。托管服务永远不是，所以托管回答不带这条提示。
+   - 服务的 grant 没有列 `installed_chrome`，浏览器也没有限定在一组 host 上（那时这一级根本不建）。
+   - 页面停在挑战页或机器人检查：`blocked`，blockReason 是 `cloudflare_challenge`、`captcha` 或 `bot_detected_generic`，也就是这一级会等的那三种。
+   - 自带的浏览器（`browser_local`）已经试过，同样停在检查上；这一级排在它后面。这一页的运行没有试过 installed_chrome，比如服务换掉 grant 之前存下的结果。
+   - 这一级会接这个请求：模式是 standard，服务的通道策略把这个 URL 交给阶梯，请求不带 actions、截图、`mobile`、自定义请求头或 `skipTlsVerification`。拒收的选项和这一级用的是同一个函数（`installedChromeRefusal`）。
+
+**引用的数字。** 都出自 K1 的两窗口记录：首次调用，92 道题，走 Clash 出口。
+
+- 相对 standard：两个窗口都成立的增 15、退 0，不稳 11。首次调用的账本费用两个窗口都是 $0，因为这条路线不付钱给第三方。Clash 的带宽和本机算力没有测量，记为 unknown exposure。
+- 首次调用通过 60 道和 68 道（共 92 道）。Firecrawl 是 69 和 70，差距 9 和 2。这两个数是整条阶梯的：由 installed_chrome 这一级交付的是 16 道和 20 道，其余由 http 和自带浏览器交付（[窗口 1](../../research/access/runs/2026-10-21-k1-w1-322de68e-installed_chrome.md)、[窗口 2](../../research/access/runs/2026-10-22-k1-w2-b233d232-installed_chrome.md) 的臂记录里，首次调用四块的 "Verified answers by the route that delivered them" 之和）。
+- 假成功 2 道和 1 道，两个窗口合计 3/184（95% 上限 4.2%）。Firecrawl 是 24/184（17.9%）。
+- 对照：本机另一条增强路线 enhanced（Steel）增 3、退 1，不稳 14，大收益没有在两个窗口里都成立。
+
+**推荐时要一并说明的限制。**
+
+- 只在一台 Mac、一个机房出口（Clash，103.142.140.0/24）上测过。在使用者自己的网络上效果如何，unknown。住宅出口在 K3 的 Cloudflare 组里反而更差：Webshare 5/32，Clash 24/32（[记录](../../research/access/runs/2026-10-21-k3-egress-by-detection-5beacbf3.md)）。
+- 它会在使用者的屏幕上打开 Chrome 窗口。K1 的 92 道首次调用里，走到这一级的窗口 1 有 38 道，窗口 2 有 35 道（同上两份臂记录，首次调用四块 "Rungs started" 里 installed_chrome 的数之和）。同时最多 2 个窗口。p95（全部尝试）是 26162 ms 和 25275 ms，standard 是 13887 ms 和 15918 ms，长 9–12 s。
+- 要本机装有 Google Chrome。Chrome 会自动升级，效果可能在某次升级后变差。
+- 托管服务和远程 MCP 的使用者用不上它。
+- 没测过：installed_chrome 和付费供应商写在同一份 grant 里。K1 的两臂各用各的 grant。
+
+**停止条件。** 就是"使用条件"里的"定期重测"。
+
+- 每周重跑已于 2026-10-20 建成（`research/access/weekly.mjs`），每次在 16 道题上跑 installed_chrome；Chrome 大版本变化时，这 16 道再跑一次。
+- 验收基线是 2026-10-14 验收里较低的那一次：16 道过 7 道（`research/access/weeklyPlan.mjs` 的 `IC16_BASELINE.floor`）。2026-10-20 和 2026-10-21 两次每周重跑都是 10/16。
+- 结果低于 7 时，那周的记录写 "stop the default recommendation, retest pending"。Octocrawl 随后用一个 PR 撤下上面三处的推荐，直到重新测量、结果不低于基线，再用一个 PR 恢复。CHANGELOG 里已有的条目是记录，不改；撤下和恢复各写一条新的。
+- 能力本身、grant 的规则和阶梯都不因此改变，已经授权的使用者照常能用。
+

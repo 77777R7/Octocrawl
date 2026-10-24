@@ -11,9 +11,9 @@ import { siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
 import { DASHBOARD_BODIES, dashboardPageHtml } from './dashboardPages.mjs'
 // The free tool pages, built by Vite (vite.config.ts) and listed in the sitemap here.
 // The free tools' pages (apps/public-web/src/tools/pages.ts), with the day each last changed.
-const TOOL_LOCATIONS = [['/tools/url-to-markdown/', '2026-10-16'], ['/tools/link-extractor/', '2026-10-16'], ['/tools/website-to-text/', '2026-10-16']]
+const TOOL_LOCATIONS = [['/tools/url-to-markdown/', '2026-10-21'], ['/tools/link-extractor/', '2026-10-21'], ['/tools/website-to-text/', '2026-10-21']]
 const TOOLS_HUB_PATH = '/tools/'
-const TOOLS_HUB_UPDATED = '2026-10-16'
+const TOOLS_HUB_UPDATED = '2026-10-21'
 // The product pages (src/product/), with the day each last changed.
 const SCRAPE_PATH = '/scrape/'
 const SCRAPE_UPDATED = '2026-10-13'
@@ -393,7 +393,7 @@ await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify({ ...Obj
 
 // llms.txt (https://llmstxt.org): what Octocrawl is, and a link to the Markdown copy of every page. llms-full.txt carries
 // all of them in one file.
-const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. Connect an agent to hosted Octocrawl at https://mcp.octocrawl.dev/mcp (MCP) or call https://api.octocrawl.dev (REST): scrape and map, keyless within a daily allowance; a key from an account adds 1,000 credits a month and the browser lane. The published packages run everything on your own computer (npx octocrawl serve: REST, a TypeScript SDK, a Python client or MCP, with crawl, batch and Monitor), and npx octocrawl serve --hosted --token serves other machines. It is open source (AGPL-3.0).'
+const summary = 'Octocrawl turns a public web page into readable Markdown and, on supported pages, fields you can check against the source. It reports blocks, timeouts and missing fields with a reason instead of inventing content. Connect an agent to hosted Octocrawl at https://mcp.octocrawl.dev/mcp (MCP) or call https://api.octocrawl.dev (REST): scrape and map, keyless within a daily allowance; an account adds 1,000 credits a month, crawl jobs of up to 500 pages, batch jobs of up to 1,000 URLs, and with a key the browser lane. The published packages run everything on your own computer, without credits or a daily allowance, and crawls without the 500-page cap (npx octocrawl serve: REST, a TypeScript SDK, a Python client or MCP, with crawl, batch and Monitor), and npx octocrawl serve --hosted --token serves other machines. It is open source (AGPL-3.0).'
 const groups = [...new Set(pages.map(page => page.group))]
 const llms = [
   '# Octocrawl', '', `> ${summary}`, '',

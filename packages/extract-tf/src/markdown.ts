@@ -280,6 +280,8 @@ function normalizeCell(s: string): string {
  * boundaries are spaces, so separate lines stay separate words.
  */
 function cellText(cell: Element, ctx: Context): string {
+  const signed = caretPercent(cell, ctx)
+  if (signed !== null) return signed.trim()
   const inline = new Inline({ escape: true })
   inlineChildren(cell, inline, ctx, CELL_MARKS)
   return inline.finish().text.replace(/\n/g, ' ')
@@ -373,7 +375,7 @@ const ROW_GROUPS = new Set(['thead', 'tbody', 'tfoot'])
  * a row directly in the table (a fragment's). The walk stops at the table, so
  * a deep page costs no more than the row's own depth.
  */
-function rowGroup(tr: Element, table: Element): Element | null {
+export function rowGroup(tr: Element, table: Element): Element | null {
   for (let el = tr.parentElement; el !== null && el !== table; el = el.parentElement) {
     if (ROW_GROUPS.has(el.localName)) return el
   }
@@ -424,12 +426,12 @@ function ownRowGroups(table: Element): Element[][] {
   return [...(headRun ? [headRun] : []), ...body, ...(footRun ? [footRun] : [])].map((run) => run.rows)
 }
 
-function ownRows(table: Element): Element[] {
+export function ownRows(table: Element): Element[] {
   return ownRowGroups(table).flat()
 }
 
 /** A row's own cells, not those of a table nested in one of them. */
-function ownCells(tr: Element): Element[] {
+export function ownCells(tr: Element): Element[] {
   return ownElements(tr, CELLS, 'tr')
 }
 
@@ -466,7 +468,7 @@ function ownElements(top: Element, names: Set<string>, stop: string): Element[] 
  * leading whitespace, an optional sign, then the leading digits (`1.5` is 1,
  * `2abc` is 2); null when absent, when no digit follows, or when negative.
  */
-function nonNegativeInteger(attr: string | null): number | null {
+export function nonNegativeInteger(attr: string | null): number | null {
   const m = attr === null ? null : /^[\t\n\f\r ]*([-+]?)([0-9]+)/.exec(attr)
   if (m === null) return null
   const n = Number(m[2])
@@ -565,6 +567,8 @@ function tableData(table: Element, ctx: Context, tableIndex: number): ExtractedT
 }
 
 function plainCell(cell: Element, ctx: Context): string {
+  const signed = caretPercent(cell, ctx)
+  if (signed !== null) return signed.trim()
   const inline = new Inline({ escape: false })
   inlineChildren(cell, inline, ctx, TEXT_MARKS)
   return inline.finish().text.replace(/\s+/g, ' ').trim()
@@ -1181,6 +1185,36 @@ function walkInline(first: InlineLevel, ctx: Context): void {
   }
 }
 
+/**
+ * A percentage whose minus is drawn as an empty down caret (CoinGecko's change cells, dev set D09: `<i class="fa-caret-down">`
+ * then `1.3%`), written with the minus, or null. The caret alone is not a sign: the table cell that holds it, the element
+ * itself or its parent, must state a negative sort key (`data-sort`). Only one empty caret and one unsigned, nonzero
+ * percentage may make up the element; a literal sign, a rounded zero, colour or another arrow stay as written, and the
+ * page's displayed magnitude is kept, never the sort key's.
+ */
+function caretPercent(el: Element, ctx: Context): string | null {
+  const cell = el.localName === 'td' || el.localName === 'th' ? el : el.parentElement
+  if (cell === null || (cell.localName !== 'td' && cell.localName !== 'th')) return null
+  const sort = cell.getAttribute('data-sort')?.trim() ?? ''
+  if (!/^-\d+(?:\.\d+)?$/.test(sort) || !(Number(sort) < 0)) return null
+  let icon: Element | null = null
+  let text = ''
+  for (let child = el.firstChild; child !== null; child = child.nextSibling) {
+    if (child.nodeType === TEXT_NODE) text += (child as Text).data
+    else if (child.nodeType !== ELEMENT_NODE) continue
+    else if (icon !== null || text.trim() !== '') return null
+    else {
+      icon = child as Element
+      if ((icon.localName !== 'i' && icon.localName !== 'span') || icon.firstChild !== null || skipped(icon, ctx) || cssBlock(icon, ctx)) return null
+      const classes = (icon.getAttribute('class') ?? '').split(/\s+/)
+      if (!classes.includes('fa-caret-down') || classes.includes('fa-caret-up')) return null
+    }
+  }
+  const value = text.trim()
+  if (icon === null || !/^\d+(?:\.\d+)?%$/.test(value) || Number(value.slice(0, -1)) === 0) return null
+  return text.replace(value, `-${value}`)
+}
+
 /** Starts an element written as inline content: what it writes before its children, and the level of those, or null when it has none to write. */
 function openInline(el: Element, out: Inline, ctx: Context, marks: Marks): InlineLevel | null {
   const tag = el.localName
@@ -1190,6 +1224,13 @@ function openInline(el: Element, out: Inline, ctx: Context, marks: Marks): Inlin
   // their boundaries become spaces.
   const block = BLOCK.has(tag) || cssBlock(el, ctx)
   if (block) out.space()
+  // A wrapper written otherwise than by its text (a link keeps its target) is left to its own writing.
+  const signed = SPECIAL_INLINE.has(tag) ? null : caretPercent(el, ctx)
+  if (signed !== null) {
+    out.text(signed)
+    if (block) out.space()
+    return null
+  }
   // Its children, written to `inner`, then `done` and a block's closing space. (No closure where nothing is to be done.)
   const children = (inner: Inline, innerMarks: Marks, done?: () => void): InlineLevel => ({
     next: el.firstChild,

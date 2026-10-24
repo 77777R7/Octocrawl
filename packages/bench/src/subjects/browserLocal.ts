@@ -1451,6 +1451,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         metadata: extracted.metadata,
         document: {
           title: extracted.title,
+          ...(extracted.titlePath === undefined ? {} : { titlePath: extracted.titlePath }),
           pageType: extracted.pageType,
           strategy: extracted.strategy,
           confidence: extracted.confidence,
@@ -1940,8 +1941,10 @@ function withActions(result: FetchResult, ran: ActionRun | undefined, list?: Lis
   if (pages.length > 0) {
     const merged = mergeListPages(pages, list!)!
     const rescued = merged.valued && result.status === 'failed' && result.failureReason === 'empty_unverified'
+    // The columns read with the page as it stands are not the merged pages' records.
+    const { listColumns: _listColumns, listTables: _listTables, ...unmerged } = result
     result = {
-      ...result,
+      ...unmerged,
       list: merged.list,
       ...(rescued ? { status: 'success' as const, failureReason: null } : {}),
       trace: [...result.trace, { at: result.usage.wallMs, lane: 'browser_local', event: 'list_extracted', detail: { records: merged.list.records.length, incomplete: merged.list.incomplete, pages: merged.list.pages, truncated: merged.list.truncated } }],

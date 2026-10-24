@@ -122,14 +122,14 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, BrowserIdentityChoice, ChannelsFiltered, InstalledChromeTestSeams } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
-import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, pinnedFastModeHints, type FastModePin } from './hints.js'
+import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
 import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
-import { FileSessionBrokerStore, FileSessionStore, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
+import { FileSessionBrokerStore, FileSessionStore, installedChromeRefusal, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
 import { BLOCK_REASON, VERIFY_REGEX_CHECK_TYPES, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv, verifyScrapeResponse } from './structured.js'
@@ -609,6 +609,21 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** ADR 0005 `installed_chrome`: the machine's own Google Chrome, a rung for requests that choose access enhanced. Local only. */
   const installedChrome = (accessGrant?.capabilities ?? []).includes('installed_chrome')
   if (installedChrome && options.hosted === true) throw new Error('installed_chrome is refused on a hosted engine (ADR 0005: it launches the Google Chrome of the machine Octocrawl runs on)')
+  /**
+   * ADR 0005 (revision of 2026-10-23): a server on the person's machine (one that can hand them a page; never a hosted
+   * one) whose grant does not name installed_chrome recommends the route in the hint of a page a check stopped, for a
+   * request its rung would take: mode standard, a URL the channel policy leaves to the ladder, and none of the options
+   * the rung refuses. A browser kept to a list of hosts builds no such rung, so it recommends none.
+   */
+  const hintOffers = (mode: Task['mode'], url: string, page: FetchOptions): HintOffers =>
+    userChrome !== null && !installedChrome && options.browserAllowedHosts === undefined && mode === 'standard'
+      && (options.channelPolicy?.(url) ?? 'ladder') === 'ladder' && installedChromeRefusal(page) === null
+      ? { installedChrome: true } : {}
+  /** The same for a page of a stored batch or crawl, under the options it was started with. */
+  const taskHintOffers = (task: Task, url: string): HintOffers => {
+    const stored = task.batch ?? task.crawl
+    return hintOffers(task.mode, url, fetchOptions(stored, stored?.formats))
+  }
   if (compatHosts.length > 0 && !(accessGrant?.capabilities ?? []).includes('compatible_transport')) throw new Error('the compatible transport needs an access grant that names compatible_transport (ADR 0005)')
   /** Why a request's options keep it off the compatible transport, which sends its profile's headers alone; null when they do not. */
   const compatOptionsRefusal = (page: { headers?: Readonly<Record<string, string>>; mobile?: boolean }): string | null => {
@@ -1100,7 +1115,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** At startup, a finished job with a webhook: every step and the terminal event offered again, so a crash between a write and its enqueue loses no delivery. */
   async function reconcileFinished(task: Task, store: SqliteTaskStore): Promise<void> {
     try {
-      await jobWebhooks.reconcile(task, store, (step) => compactPage(step, task))
+      await jobWebhooks.reconcile(task, store, (step) => compactPage(step, task, taskHintOffers(task, step.url)))
       if (webhookOf(task) !== undefined) {
         const report = task.batch === undefined ? (await loadCrawlWithSteps(task.id))?.report ?? null : await loadBatch(task.id)
         if (report !== null) await jobWebhooks.terminal(task, report, store)
@@ -1139,7 +1154,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(query?.includeDuplicates === undefined ? {} : { includeDuplicates: query.includeDuplicates }),
       })
       return {
-        items: page.steps.map((step) => toCrawlPage(step, task, userChrome !== null && task.batch !== undefined && offersHandoff(task))),
+        items: page.steps.map((step) => toCrawlPage(step, task, userChrome !== null && task.batch !== undefined && offersHandoff(task), taskHintOffers(task, step.url))),
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       }
@@ -1491,7 +1506,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                 if (listRun !== null) await store.clearPagesRead(taskId, step.canonicalUrl)
                 items.push({ id: step.id, url: step.url, through: true, status: stored.status })
                 // The item replaced is a job event of its own: a webhook delivery when the batch has a receiver, then the hub's.
-                const page = compactPage(replaced, task)
+                const page = compactPage(replaced, task, taskHintOffers(task, replaced.url))
                 if (webhookOf(task) !== undefined) {
                   try { await jobWebhooks.replaced(task, replaced, page, store) }
                   catch (error) { logWebhookFailure(task.id, 'handoff', error) }
@@ -1603,7 +1618,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           ...outcome.audit,
           summary: {
             ...outcome.audit.summary,
-            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, ...result }, ...attempt }) => ({
+            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, listColumns: _listColumns, listTables: _listTables, ...result }, ...attempt }) => ({
               ...attempt,
               result: { ...result, markdown: null, links: [], ...(screenshot === undefined ? {} : { screenshot: null }) },
             })),
@@ -1675,7 +1690,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const webhook = webhookOf(task)
     const kind = jobKindOf(task)
     const onStep = async (step: StepRecord): Promise<void> => {
-      const page = compactPage(step, task)
+      const page = compactPage(step, task, taskHintOffers(task, step.url))
       if (webhook !== undefined) {
         try { await jobWebhooks.page(task, step, page, store) }
         catch (error) { logWebhookFailure(task.id, 'page', error) }
@@ -1700,7 +1715,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const job = (async () => {
       // A resumed or restarted job offers its persisted steps to the webhook again before fetching more; those already enqueued are ignored.
       if (webhook !== undefined && req.resume) {
-        try { await jobWebhooks.reconcile(task, store, (step) => compactPage(step, task)) }
+        try { await jobWebhooks.reconcile(task, store, (step) => compactPage(step, task, taskHintOffers(task, step.url))) }
         catch (error) { logWebhookFailure(task.id, 'reconcile', error) }
       }
       return orchestrator.run({
@@ -1858,7 +1873,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         : 'reason' in handed ? withHandoffHint({ ...run.result, warnings: [...(run.result.warnings ?? []), { code: 'handoff_not_through', message: `Handed to you in your Chrome, the page was not read: ${handed.reason}.` }] }, req, true)
           : answer.kind === 'fetch' && answer.missed && plan?.bounds != null ? withCacheMiss(handed.result, plan.bounds) : handed.result
       // The hints of a page read in the person's Chrome speak of that read, not of the stopped run's lanes.
-      const agentHints = read !== null ? agentHintsFor(req, { channelsTried: [result.lane], result }) : agentHintsFor(req, { ...run, result })
+      const agentHints = read !== null ? agentHintsFor(req, { channelsTried: [result.lane], result }) : agentHintsFor(req, { ...run, result }, hintOffers(mode, req.url, fetchOptions(req, req.formats)))
       // The call's totals count the read in the person's Chrome as one more attempt, after the stopped run's.
       const summary = read === null ? run.summary : { ...run.summary, ...summarize(run.channelsTried, [...run.summary.attempts, { channel: read.lane, result: read, ordinal: run.summary.attempts.length + 1 }]) }
       const full: ScrapeRun = {
@@ -2367,7 +2382,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           return {
             status: ended?.status ?? 'failed', attemptId, newPages, budgetExceeded: attempt?.budgetExceeded ?? null,
             // Each page keeps its trace (the robots.txt and Crawl-delay evidence a page is judged by); the routing audit is left out.
-            items: steps.map((step) => { const { audit: _audit, ...item } = toCrawlPage(step, ended!); return item as CrawlPage }),
+            items: steps.map((step) => { const { audit: _audit, ...item } = toCrawlPage(step, ended!, false, taskHintOffers(ended!, step.url)); return item as CrawlPage }),
             charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null })),
           }
         } finally { await after.close() }
@@ -2640,6 +2655,8 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
     ...(screenshot === undefined ? {} : { screenshot }),
     ...(options?.actions === undefined ? {} : { actions: options.actions }),
     ...(list === undefined ? {} : { list }),
+    // A schema read from the selected list may name record keys its fields do not: their table columns are read too.
+    ...(list?.itemSelector !== undefined && customJsonFormat(formats) !== undefined ? { listColumns: true } : {}),
     ...(options?.verify === undefined ? {} : { verify: options.verify }),
   }
 }
@@ -3005,18 +3022,18 @@ function verifiedJobResult(task: Task, result: FetchResult): FetchResult {
 }
 
 /** A step as the items routes list it by default and as a job event carries it: no routing audit, an empty trace. */
-function compactPage(step: StepRecord, task: Task): CrawlPage {
-  const { audit: _audit, ...page } = toCrawlPage(step, task)
+function compactPage(step: StepRecord, task: Task, offers: HintOffers = {}): CrawlPage {
+  const { audit: _audit, ...page } = toCrawlPage(step, task, false, offers)
   return { ...page, trace: [] }
 }
 
-function toCrawlPage(step: StepRecord, task: Task, handoffOffered = false): CrawlPage {
+function toCrawlPage(step: StepRecord, task: Task, handoffOffered = false, offers: HintOffers = {}): CrawlPage {
   // A page whose fetch threw was stored without passing the verifier: it is judged here, against the task's contract.
   const result = step.result === null || step.result.verification !== undefined ? step.result : verifiedJobResult(task, step.result)
   const handoff = handoffOffered && handoffNeededIn(task, step) ? handoffRequestOf(step) : null
   const mode = task.mode
   // The same hints a scrape of this page would carry, from its stored result and routing audit.
-  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary, ladderTrace: step.audit.ladderTrace }) })
+  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary, ladderTrace: step.audit.ladderTrace }) }, offers)
   return {
     ...jobPageContent(task, result),
     id: step.id,

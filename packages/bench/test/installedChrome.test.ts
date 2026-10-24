@@ -4,7 +4,7 @@ import { browserNotInstalled, browserInstallCommand } from '../src/browserInstal
 import { chromeProxyError } from '../src/subjects/browserLocal.js'
 import {
   AVOID_PORTS, chromeCandidates, DETECTION_FLAGS, findInstalledChrome, freeDebuggingPort, INSTALLED_CHROME_INSTALL,
-  InstalledChromeMissingError, installedChromeArgs, WindowGate,
+  InstalledChromeMissingError, installedChromeArgs, installedChromeRefusal, WindowGate,
 } from '../src/subjects/installedChrome.js'
 
 describe('installed_chrome: where Chrome is looked for', () => {
@@ -66,6 +66,16 @@ describe('installed_chrome: the narrowed launch (ADR 0005, 2026-10-13 revision)'
     expect(port).toBeGreaterThan(0)
     expect(AVOID_PORTS.has(port)).toBe(false)
     expect(AVOID_PORTS.has(8791)).toBe(true)
+  })
+})
+
+describe('installed_chrome: the requests it takes', () => {
+  it('takes a page as Chrome opens it and names each option it does not take (ADR 0005)', () => {
+    expect(installedChromeRefusal({})).toBeNull()
+    expect(installedChromeRefusal({ actions: [], headers: {}, mobile: false, skipTlsVerification: false })).toBeNull()
+    expect(installedChromeRefusal({ mobile: true })).toBe('installed_chrome reads the page as Chrome opened it and takes no mobile (ADR 0005)')
+    expect(installedChromeRefusal({ actions: [{ type: 'wait', milliseconds: 10 }], screenshot: { fullPage: false }, headers: { 'x-a': '1' }, skipTlsVerification: true }))
+      .toBe('installed_chrome reads the page as Chrome opened it and takes no actions, screenshot, headers, skipTlsVerification (ADR 0005)')
   })
 })
 

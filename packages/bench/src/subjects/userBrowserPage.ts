@@ -167,6 +167,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     metadata: extracted.metadata,
     document: {
       title: extracted.title,
+      ...(extracted.titlePath === undefined ? {} : { titlePath: extracted.titlePath }),
       pageType: extracted.pageType,
       strategy: extracted.strategy,
       confidence: extracted.confidence,
