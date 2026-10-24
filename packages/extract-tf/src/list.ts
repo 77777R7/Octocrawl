@@ -10,7 +10,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { ListColumn, ListDetection, ListExtraction, ListFormatRequest, ListRecord, ListSpec } from '@w2l/contracts'
+import type { ListColumn, ListDetection, ListExtraction, ListFormatRequest, ListRecord, ListSpec, ListTableText } from '@w2l/contracts'
 import { detectFields, detectLists } from './detectList.js'
 import { detachAll, parse, qsa } from './dom.js'
 import { documentBaseUrl } from './links.js'
@@ -29,7 +29,7 @@ const URL_ATTRIBUTES: ReadonlySet<string> = new Set(['href', 'src', 'data-src', 
  * (1 when one page is read). At most `budget.records` records and
  * `budget.chars` characters of values; `cut` says when the page had more.
  * With `read.columns`, `columns` holds each kept record's table columns
- * (`rowColumns`), in record order.
+ * (`rowColumns`), in record order, each naming the fields read under it.
  */
 export function extractListRecords(html: string, url: string, spec: ListSpec, page = 1, budget: { records: number; chars: number } = { records: MAX_LIST_RECORDS, chars: MAX_LIST_VALUE_CHARS }, scope: { includeSelectors?: readonly string[]; excludeSelectors?: readonly string[] } = {}, read: { columns?: boolean } = {}): ListRecord[] & { cut?: boolean; itemText?: string; columns?: (ListColumn[] | null)[] } {
   const doc = parse(html)
@@ -68,9 +68,11 @@ export function extractListRecords(html: string, url: string, spec: ListSpec, pa
     const descendants = qsa(item, '*')
     const values: Record<string, string | null> = {}
     const missing: string[] = []
+    const found: { name: string; el: Element }[] = []
     spec.fields.forEach((field, i) => {
       const among = fieldMatches[i]
       const el = among === null ? item : descendants.find((candidate) => among!.has(candidate)) ?? null
+      if (el !== null) found.push({ name: field.name, el })
       const value = el === null ? null : field.attribute === undefined ? textOf(el) : attributeValue(el, field.attribute, base)
       values[field.name] = value
       if (value === null) missing.push(field.name)
@@ -78,15 +80,15 @@ export function extractListRecords(html: string, url: string, spec: ListSpec, pa
     chars += Object.values(values).reduce((sum, value) => sum + (value?.length ?? 0), 0)
     if (chars > budget.chars) { records.cut = true; break }
     records.push({ values, missing, source: { url, page, index } })
-    if (read.columns === true) columns.push(rowColumns(item, heads, columnBudget))
+    if (read.columns === true) columns.push(rowColumns(item, heads, columnBudget, found))
   }
   doc.close()
   if (read.columns === true) Object.defineProperty(records, 'columns', { value: columns, enumerable: false })
   return records
 }
 
-/** A table's one header row: each header's text and the columns it covers (1-based, inclusive). */
-type TableHead = { row: Element; headers: { header: string; start: number; end: number }[] }
+/** A table's one header row: each header's text and the columns it covers (1-based, inclusive), and what the table states around its rows. */
+type TableHead = { row: Element; headers: { header: string; start: number; end: number }[]; text: ListTableText | null }
 
 /**
  * A table row's columns: each header of its table, with the text of the row's
@@ -97,8 +99,10 @@ type TableHead = { row: Element; headers: { header: string; start: number; end: 
  * move the cells under a header. A cell counts the columns its `colspan`
  * covers. The table's header is read once (`heads`). Null too once the
  * columns' text would pass `budget.left` characters, which it then stays.
+ * A column names the fields of `read` whose element is in a cell under it,
+ * and carries the table's own text (`tableText`) when it has any.
  */
-function rowColumns(item: Element, heads: Map<Element, TableHead | null>, budget: { left: number }): ListColumn[] | null {
+function rowColumns(item: Element, heads: Map<Element, TableHead | null>, budget: { left: number }, read: readonly { name: string; el: Element }[]): ListColumn[] | null {
   if (item.localName !== 'tr') return null
   let table: Element | null = item.parentElement
   while (table !== null && table.localName !== 'table') table = table.parentElement
@@ -106,11 +110,11 @@ function rowColumns(item: Element, heads: Map<Element, TableHead | null>, budget
   if (!heads.has(table)) heads.set(table, tableHead(table))
   const head = heads.get(table)!
   if (head === null || head.row === item) return null
-  const cells: { text: string | null; start: number; end: number }[] = []
+  const cells: { text: string | null; start: number; end: number; fields: string[] }[] = []
   let next = 1
   for (const cell of ownCells(item)) {
     const span = spanOf(cell)
-    cells.push({ text: textOf(cell), start: next, end: next + span - 1 })
+    cells.push({ text: textOf(cell), start: next, end: next + span - 1, fields: read.filter(({ el }) => cell === el || cell.contains(el)).map(({ name }) => name) })
     next += span
   }
   const unders = head.headers.map(({ start, end }) => cells.filter(cell => cell.start <= end && cell.end >= start && cell.text !== null).map(cell => cell.text!))
@@ -118,7 +122,14 @@ function rowColumns(item: Element, heads: Map<Element, TableHead | null>, budget
   const chars = unders.reduce((sum, under) => sum + under.reduce((n, text) => n + text.length + 1, 0), 0)
   if (chars > budget.left) { budget.left = -1; return null }
   budget.left -= chars
-  return head.headers.map(({ header, start }, i) => ({ header, column: start, value: unders[i]!.length === 0 ? null : unders[i]!.join(' ') }))
+  return head.headers.map(({ header, start, end }, i) => {
+    const fields = cells.filter(cell => cell.start <= end && cell.end >= start).flatMap(cell => cell.fields)
+    return {
+      header, column: start, value: unders[i]!.length === 0 ? null : unders[i]!.join(' '),
+      ...(fields.length === 0 ? {} : { fields: [...new Set(fields)] }),
+      ...(head.text === null ? {} : { table: head.text }),
+    }
+  })
 }
 
 function tableHead(table: Element): TableHead | null {
@@ -139,7 +150,58 @@ function tableHead(table: Element): TableHead | null {
     if (header !== null) headers.push({ header, start: next, end: next + span - 1 })
     next += span
   }
-  return headers.length === 0 ? null : { row: rows[0]!, headers }
+  return headers.length === 0 ? null : { row: rows[0]!, headers, text: tableText(table) }
+}
+
+/** The most blocks, and the longest one, read before a table: past them the text is the page's, not the table's. */
+const BEFORE_BLOCKS = 4
+const BEFORE_CHARS = 200
+const HEADING = /^h[1-6]$/
+/** Content that stands between a table and what introduces it: text before it is about something else. */
+const OTHER_CONTENT = 'table, ul, ol, dl, form, nav'
+
+/**
+ * What a table states about itself (ListTableText): its caption, and the
+ * blocks just before it back to the heading that introduces it, each at most
+ * BEFORE_CHARS characters, at most BEFORE_BLOCKS of them. A longer block, a
+ * list, a form or another table ends them. A table that is the first element
+ * of its wrappers is introduced by what stands before them (three levels up).
+ * Null when it states neither.
+ */
+function tableText(table: Element): ListTableText | null {
+  const captionEl = Array.from(table.children).find(child => child.localName === 'caption')
+  const caption = captionEl === undefined ? null : textOf(captionEl)
+  let at = table
+  for (let up = 0; up < 3 && previousBlock(at) === null; up++) {
+    const parent = at.parentElement
+    if (parent === null || parent.localName === 'body' || parent.localName === 'html') break
+    at = parent
+  }
+  const before: { text: string; element: string; distance: number }[] = []
+  for (let el = previousBlock(at); el !== null && before.length < BEFORE_BLOCKS; el = previousBlock(el)) {
+    if (el.matches(OTHER_CONTENT) || qsa(el, OTHER_CONTENT).length > 0) break
+    const text = textOf(el)
+    if (text === null) continue
+    if (text.length > BEFORE_CHARS) break
+    before.push({ text, element: elementName(el), distance: before.length + 1 })
+    if (HEADING.test(el.localName) || qsa(el, 'h1, h2, h3, h4, h5, h6').length > 0) break
+  }
+  return caption === null && before.length === 0 ? null : { caption, before }
+}
+
+/** The element before this one that a reader can see text in: scripts and styles skipped. */
+function previousBlock(el: Element): Element | null {
+  let prev = el.previousElementSibling
+  while (prev !== null && NOT_TEXT.has(prev.localName)) prev = prev.previousElementSibling
+  return prev
+}
+
+/** An element as a locator names it: its tag with its id, or else its first class (`span.ratesTimestamp`). */
+function elementName(el: Element): string {
+  const id = el.getAttribute('id')?.trim()
+  if (id) return `${el.localName}#${id}`
+  const first = el.getAttribute('class')?.trim().split(/\s+/)[0]
+  return first ? `${el.localName}.${first}` : el.localName
 }
 
 /** The columns a cell covers, as browsers read `colspan`: an invalid value or 0 is 1, at most 1000. */

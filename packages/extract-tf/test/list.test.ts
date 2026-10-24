@@ -96,8 +96,8 @@ describe('extractListRecords, the columns of a selected table row', () => {
 
   it('reads each header of the table with the row\'s text under it, only when asked', () => {
     expect(columns(VERSIONS, 'table.t > tbody > tr')).toEqual([
-      [{ header: 'Version', column: 1, value: '18' }, { header: 'Current minor', column: 2, value: '18.6' }, { header: 'First Release', column: 3, value: 'September 25, 2025' }],
-      [{ header: 'Version', column: 1, value: '17' }, { header: 'Current minor', column: 2, value: null }, { header: 'First Release', column: 3, value: 'September 26, 2024' }],
+      [{ header: 'Version', column: 1, value: '18', fields: ['version'] }, { header: 'Current minor', column: 2, value: '18.6' }, { header: 'First Release', column: 3, value: 'September 25, 2025' }],
+      [{ header: 'Version', column: 1, value: '17', fields: ['version'] }, { header: 'Current minor', column: 2, value: null }, { header: 'First Release', column: 3, value: 'September 26, 2024' }],
     ])
     expect(extractListRecords(VERSIONS, 'https://x.test/', spec('table.t > tbody > tr')).columns).toBeUndefined()
   })
@@ -106,7 +106,7 @@ describe('extractListRecords, the columns of a selected table row', () => {
     const branches = '<table class="standard"><tr><th>Branch</th><th colspan="2">Initial Release</th><th>Notes</th></tr>' +
       '<tr class="security"><td><a href="/downloads.php?version=8.2">8.2</a></td><td>8 Dec 2022</td><td><em>3 years, 10 months ago</em></td><td colspan="2">Migration guide</td></tr></table>'
     expect(columns(branches, 'tr.security')).toEqual([[
-      { header: 'Branch', column: 1, value: '8.2' }, { header: 'Initial Release', column: 2, value: '8 Dec 2022 3 years, 10 months ago' }, { header: 'Notes', column: 4, value: 'Migration guide' },
+      { header: 'Branch', column: 1, value: '8.2', fields: ['version'] }, { header: 'Initial Release', column: 2, value: '8 Dec 2022 3 years, 10 months ago' }, { header: 'Notes', column: 4, value: 'Migration guide' },
     ]])
   })
 
@@ -148,8 +148,8 @@ describe('extractListRecords, the columns of a selected table row', () => {
   })
 
   it('reads before a table only short blocks back to its heading: a long paragraph, a list or another table ends them, and a table first in its wrapper looks before the wrapper', () => {
-    const body = '<table><thead><tr><th>Rate</th></tr></thead><tbody><tr><td>1.5</td></tr></tbody></table>'
-    const tableOf = (html: string) => extractListRecords(html, 'https://x.test/', spec('tbody tr'), 1, undefined, {}, { columns: true }).columns![0]![0]!.table
+    const body = '<table class="r"><thead><tr><th>Rate</th></tr></thead><tbody><tr><td>1.5</td></tr></tbody></table>'
+    const tableOf = (html: string) => extractListRecords(html, 'https://x.test/', spec('table.r tbody tr'), 1, undefined, {}, { columns: true }).columns![0]![0]!.table
     expect(tableOf(`<p>${'Rates are published daily. '.repeat(12)}</p><p>As at 19 Oct 2026</p>${body}`)).toEqual({ caption: null, before: [{ text: 'As at 19 Oct 2026', element: 'p', distance: 1 }] })
     expect(tableOf(`<h3>Rates</h3><ul><li>Updated 18 Oct 2026</li></ul>${body}`)).toBeUndefined()
     expect(tableOf(`<h3>Rates</h3><table><tr><td>19 Oct 2026</td></tr></table>${body}`)).toBeUndefined()

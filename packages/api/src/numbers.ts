@@ -56,6 +56,8 @@ const CODES = [
   'USD', 'EUR', 'GBP', 'JPY', 'CNY', 'RMB', 'AUD', 'CAD', 'CHF', 'HKD', 'SGD', 'INR', 'KRW', 'BRL', 'MXN', 'SEK', 'NOK', 'DKK', 'PLN', 'TRY', 'ZAR',
   'NZD', 'CZK', 'HUF', 'RON', 'BGN', 'ISK', 'ILS', 'THB', 'TWD', 'IDR', 'MYR', 'PHP', 'VND', 'CLP', 'COP', 'PEN', 'ARS', 'UAH', 'AED', 'SAR',
 ]
+/** The ISO 4217 codes read as a currency beside a number. */
+export const CURRENCY_CODES: readonly string[] = CODES
 /** Currencies whose amounts have no minor unit (ISO 4217 exponent 0) among those W2L recognises, and their own signs. */
 const NO_MINOR_UNIT = new Set(['JPY', 'KRW', 'ISK', 'VND', 'CLP', '₩', '円'])
 const CODE = `(?:${CODES.join('|')})`

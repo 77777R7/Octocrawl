@@ -37,6 +37,7 @@ import { statesAbsence } from '@w2l/extract-tf'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
 import { modelLocator } from './modelEvidence.js'
+import { tableStatements, type TableStatement } from './tableContext.js'
 
 export type StructuredModelConfig = OpenAiModelConfig | ClaudeModelConfig
 
@@ -780,10 +781,11 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
     const field = namedFields.get(name)!
     return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index} ${field.selector ?? ':scope'} ${field.attribute === undefined ? 'text' : `@${field.attribute}`}`
   }
-  const columnLocation = (index: number, column: ListColumn): string => {
+  const recordLocation = (index: number): string => {
     const record = list.records[index]!
-    return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index} column ${column.column} ${JSON.stringify(column.header)} text`
+    return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index}`
   }
+  const columnLocation = (index: number, column: ListColumn): string => `${recordLocation(index)} column ${column.column} ${JSON.stringify(column.header)} text`
   let chars = 0
   for (const [index, record] of list.records.entries()) {
     if (Object.keys(record.values).some(name => !namedFields.has(name))) return incomplete('captured list fields differ from the selected field specification; unrelated fields were not copied')
@@ -831,6 +833,40 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
     }
     return { raw: matched[0]!.value!, column: matched[0]! }
   }
+  /**
+   * A number's reading (numbers.ts) and context: the currency or percent its
+   * text states, and the unit and as-of date its table states for the columns
+   * it was read under (tableContext.ts), each with where it was read. Two
+   * statements that disagree leave that entry out with field_ambiguous.
+   */
+  const numberEvidence = (raw: string, under: readonly ListColumn[], index: number, valuePath: string): Partial<StructuredFieldEvidence> => {
+    const reading = readNumber(raw)
+    if (!('value' in reading)) return { text: raw }
+    const context: NonNullable<StructuredFieldEvidence['context']> = { ...readingContext(undefined, reading.unit) }
+    const contextEvidence: NonNullable<StructuredFieldEvidence['contextEvidence']> = {}
+    const { units, dates } = tableStatements(under)
+    const stated = (key: 'unit' | 'date', statements: TableStatement[], own?: TableStatement): void => {
+      const all = own === undefined || statements.length === 0 ? statements : [own, ...statements]
+      if (all.length === 0) return
+      if (all.some(statement => statement.value !== all[0]!.value)) {
+        const states = own === undefined ? 'the table states' : 'the number\'s own text and its table state'
+        issues.push({ code: 'field_ambiguous', path: valuePath, message: `${states} different ${key === 'unit' ? 'units' : 'dates'} for ${valuePath}: ${all.map(statement => `${JSON.stringify(statement.value)} (${statement.where})`).join(', ')}; ${own === undefined ? 'none was given' : 'only the text\'s own is given'}` })
+        return
+      }
+      if (own !== undefined) return
+      context[key] = all[0]!.value
+      chars += all[0]!.text.length + all[0]!.where.length
+      contextEvidence[key] = { text: all[0]!.text, evidencePath: `${recordLocation(index)} ${all[0]!.where}` }
+    }
+    // A percent the number's own text states is its unit; a table that states another is in doubt.
+    stated('unit', units, context.unit === undefined ? undefined : { value: context.unit, text: raw, where: 'the value\'s own text' })
+    stated('date', dates)
+    return {
+      text: raw, normalized: reading.value, conversion: reading.conversion,
+      ...(Object.keys(context).length === 0 ? {} : { context }),
+      ...(Object.keys(contextEvidence).length === 0 ? {} : { contextEvidence }),
+    }
+  }
   const recordValue = (schema: JsonSchema, index: number, path: string): JsonValue => {
     const record = list.records[index]!
     const out: Record<string, JsonValue> = {}
@@ -856,7 +892,8 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
       const evidencePath = fromColumn !== null ? columnLocation(index, fromColumn.column) : location(index, name)
       // A column counts against the budget once a key is read from it; the fields were counted above.
       if (fromColumn !== null) chars += name.length + raw.length + evidencePath.length
-      evidence.push({ path: valuePath, source: 'dom', evidencePath, ...(typeof value === 'number' ? { text: raw } : {}) })
+      const under = fromColumn !== null ? [fromColumn.column] : columns?.[index]?.filter(column => column.fields?.includes(name)) ?? []
+      evidence.push({ path: valuePath, source: 'dom', evidencePath, ...(typeof value === 'number' ? numberEvidence(raw, under, index, valuePath) : {}) })
     }
     return out
   }

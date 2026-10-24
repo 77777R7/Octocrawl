@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FetchResult, JsonFormatRequest, ListExtraction, ListFormatRequest } from '@w2l/contracts'
+import type { FetchResult, JsonFormatRequest, ListColumn, ListExtraction, ListFormatRequest } from '@w2l/contracts'
 import { extractStructured } from '../src/structured.js'
 
 const url = 'https://example.test/products'
@@ -125,12 +125,13 @@ describe('selected-list JSON from the selected table rows\' columns', () => {
 
 describe('selected-list JSON numbers with the unit and as-of date their table states', () => {
   const rows: ListFormatRequest = { type: 'list', itemSelector: 'table > tbody > tr', fields: [{ name: 'currency', selector: 'th' }, { name: 'rate', selector: 'td.highlight' }] }
-  const schema = (keys: Record<string, string>): JsonFormatRequest => ({ type: 'json', schema: { type: 'object', properties: { records: { type: 'array', items: { type: 'object', properties: Object.fromEntries(Object.entries(keys).map(([key, type]) => [key, { type }])), required: Object.keys(keys) } } }, required: ['records'] } })
+  const schema = (keys: Record<string, 'string' | 'number'>): JsonFormatRequest => ({ type: 'json', schema: { type: 'object', properties: { records: { type: 'array', items: { type: 'object', properties: Object.fromEntries(Object.entries(keys).map(([key, type]) => [key, { type }])), required: Object.keys(keys) } } }, required: ['records'] } })
   const rates = schema({ currency: 'string', rate: 'number' })
-  type Row = { values: Record<string, string | null>; columns: FetchResult['listColumns'] extends readonly (infer C)[] | undefined ? C : never }
+  type Row = { values: Record<string, string | null>; columns: ListColumn[] | null }
   function table(records: Row[], fields = ['currency', 'rate']): FetchResult {
     const list: ListExtraction = { itemSelector: rows.itemSelector!, fields, records: records.map(({ values }, index) => ({ values, missing: [], source: { url, page: 1, index } })), pages: 1, incomplete: 0, truncated: false, csv: '', csvSha256: '' }
-    return { requestedUrl: url, status: 'success', markdown: '', evidence: { finalUrl: url, httpStatus: 200 }, list, listColumns: records.map(row => row.columns) } as FetchResult
+    const listColumns: FetchResult['listColumns'] = records.map(row => row.columns)
+    return { requestedUrl: url, status: 'success', markdown: '', evidence: { finalUrl: url, httpStatus: 200 }, list, listColumns } as FetchResult
   }
   const read = (source: FetchResult, format: JsonFormatRequest, request: ListFormatRequest = rows) => extractStructured(source, format, {}, null, request)
   const at = (out: Awaited<ReturnType<typeof read>>, path: string) => out.evidence.find(item => item.path === path)
@@ -204,23 +205,40 @@ describe('selected-list JSON numbers with the unit and as-of date their table st
 
   it('leaves out a unit, or a date, that two of the table\'s statements give differently, with field_ambiguous', async () => {
     const table_ = { caption: 'Figures in USD', before: [{ text: 'As of 18 Oct 2026', element: 'p', distance: 1 }, { text: 'Prices', element: 'h2', distance: 2 }] }
-    const source = table([{ values: { currency: 'Euro', rate: '0.6210' }, columns: [{ header: 'Price', column: 2, value: '0.6210', fields: ['rate'], table: table_ }, { header: '20 Oct 2026', column: 3, value: '0.7', table: table_ }] }])
+    const columns: ListColumn[] = [{ header: 'Price', column: 2, value: '0.6210', fields: ['rate'], table: table_ }, { header: '20 Oct 2026', column: 3, value: '0.7', table: table_ }]
+    const source = table([{ values: { currency: 'Euro', rate: '0.6210' }, columns }])
     const agreed = await read(source, rates)
     expect(agreed.status).toBe('complete')
     expect(at(agreed, '/records/0/rate')).toMatchObject({ context: { unit: 'USD', date: '2026-10-18' } })
-    source.listColumns![0]![0] = { header: 'Price (EUR)', column: 2, value: '0.6210', fields: ['rate'], table: table_ }
+    columns[0] = { header: 'Price (EUR)', column: 2, value: '0.6210', fields: ['rate'], table: table_ }
     const unit = await read(source, rates)
     expect(unit.status).toBe('incomplete')
     expect(unit.data).toEqual({ records: [{ currency: 'Euro', rate: 0.621 }] })
     expect(at(unit, '/records/0/rate')!.context).toEqual({ date: '2026-10-18' })
     expect(unit.issues).toEqual([expect.objectContaining({ code: 'field_ambiguous', path: '/records/0/rate' })])
     expect(unit.issues[0]!.message).toContain('"EUR"')
-    source.listColumns![0]![0] = { header: '19 Oct 2026', column: 2, value: '0.6210', fields: ['rate'], table: table_ }
+    columns[0] = { header: '19 Oct 2026', column: 2, value: '0.6210', fields: ['rate'], table: table_ }
     const date = await read(source, rates)
     expect(date.status).toBe('incomplete')
     expect(at(date, '/records/0/rate')!.context).toEqual({ unit: 'USD' })
     expect(date.issues).toEqual([expect.objectContaining({ code: 'field_ambiguous', path: '/records/0/rate' })])
     expect(date.issues[0]!.message).toContain('2026-10-18')
+  })
+
+  it('keeps the percent a number\'s own text states, and leaves out a table unit that states another, with field_ambiguous', async () => {
+    const shares: ListFormatRequest = { type: 'list', itemSelector: rows.itemSelector, fields: [{ name: 'country', selector: 'td' }] }
+    const source = table([{ values: { country: 'India' }, columns: [
+      { header: 'Country', column: 1, value: 'India', fields: ['country'] },
+      { header: 'Yearly Change (%)', column: 2, value: '0.87 %' },
+      { header: 'World Share (Km²)', column: 3, value: '17.8%' },
+    ] }], ['country'])
+    const out = await read(source, schema({ country: 'string', yearly_change: 'number', world_share: 'number' }), shares)
+    expect(out.data).toEqual({ records: [{ country: 'India', yearly_change: 0.87, world_share: 17.8 }] })
+    expect(at(out, '/records/0/yearly_change')!.context).toEqual({ unit: '%' })
+    expect(at(out, '/records/0/world_share')!.context).toEqual({ unit: '%' })
+    expect(at(out, '/records/0/world_share')).not.toHaveProperty('contextEvidence')
+    expect(out.issues).toEqual([expect.objectContaining({ code: 'field_ambiguous', path: '/records/0/world_share' })])
+    expect(out.issues[0]!.message).toMatch(/"%" \(the value's own text\), "Km²" \(column 3 "World Share \(Km²\)" header\); only the text's own is given/)
   })
 
   it('takes no as-of date from a date column, whose dates are the rows\' data, or from the header of another column', async () => {
