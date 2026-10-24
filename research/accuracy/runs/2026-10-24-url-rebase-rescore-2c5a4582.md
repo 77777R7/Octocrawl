@@ -55,5 +55,5 @@ A wider scan, with a scratch script outside the repository, of all 171 output di
 ## What it means for the false successes
 
 - **On the frozen captures, V20 and V21 were false successes only because of this scoring defect.** With the urls rebased, both are correct successes in every arm of every list run above. Octocrawl's remaining frozen false successes on #700's candidate are 2, not 4: V25 and V34.
-- The live false successes are not affected: a live answer's urls were always scored as delivered. Their causes are in `2026-10-24-f2-live-v2-sameday-07d8fb45-2c5a4582.md`.
+- The live false successes are not affected: a live answer's urls were always scored as delivered. Their causes are in [2026-10-24-f2-live-v2-sameday-07d8fb45-56971363.md](2026-10-24-f2-live-v2-sameday-07d8fb45-56971363.md).
 - The records named above keep their numbers as written. Where a later record compares with them, it should use the counts here.
