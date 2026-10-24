@@ -28,7 +28,7 @@ import { SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
 import { scrapeSchemaWithout } from './toolsets.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
-import { CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
+import { CREDITS, DEFAULT_MONTHLY_CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
 import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, type HostedJobsConfig } from './hostedJobRoutes.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
@@ -112,9 +112,13 @@ export class MemoryHostedLeases implements HostedLeases {
   }
 }
 
-/** A daily counter and its limit; `amount` is what one use adds (default 1; a hosted job's slice adds its pages). */
-export interface QuotaEntry { id: string; limit: number; amount?: number }
-export type QuotaResult = { ok: true } | { ok: false; limited: string; limit: number }
+/**
+ * A daily counter and its limit; `amount` is what one use adds (default 1; a hosted job's slice adds its pages). `alert`
+ * marks a pool many callers share: the use that takes it to QUOTA_ALERT_SHARE of its limit logs `hosted_quota_threshold`.
+ */
+export interface QuotaEntry { id: string; limit: number; amount?: number; alert?: boolean }
+/** `counts`: each entry's count after this use, in the entries' order. */
+export type QuotaResult = { ok: true; counts?: readonly number[] } | { ok: false; limited: string; limit: number }
 
 export interface HostedQuota {
   /** Consumes one unit of every entry, or none: the first entry at its limit is named. */
@@ -131,7 +135,7 @@ export class MemoryHostedQuota implements HostedQuota {
   async consume(entries: readonly QuotaEntry[]): Promise<QuotaResult> {
     for (const entry of entries) if ((this.counts.get(entry.id) ?? 0) >= entry.limit) return { ok: false, limited: entry.id, limit: entry.limit }
     for (const entry of entries) this.counts.set(entry.id, (this.counts.get(entry.id) ?? 0) + 1)
-    return { ok: true }
+    return { ok: true, counts: entries.map((entry) => this.counts.get(entry.id)!) }
   }
 }
 
@@ -152,13 +156,38 @@ for (const range of CLAUDE_EGRESS) { const [network, bits] = range.split('/'); c
 export function fromClaude(address: string): boolean {
   return isIP(address) === 4 && claudeEgress.check(address, 'ipv4')
 }
+/** The day's pages for every caller without an account: keyless callers and keys issued without one. */
 export const DEFAULT_SITE_DAILY = 1_500
 /**
- * Shares of the site's day (ROADMAP PH stage H0), so that no one caller can use it up: every keyless caller together,
- * Claude's pool included, and each account. Starts are counted against the site's total and the share both.
+ * Shares of a day (ROADMAP PH stage H0), so that no one caller can use it up: every keyless caller together, Claude's
+ * pool included, within the site's day; each account within the accounts' day. Starts are counted against both.
  */
 export const DEFAULT_KEYLESS_TOTAL_DAILY = 500
 export const DEFAULT_ACCOUNT_DAILY = 500
+/**
+ * The day's pages for every account together, apart from the site's day, so that a rush of callers without an account
+ * cannot refuse someone who signed in, nor a rush of accounts refuse the keyless. Each account's credits bound it too.
+ */
+export const DEFAULT_ACCOUNTS_DAILY = 3_000
+/** The share of a shared pool's day at which `hosted_quota_threshold` is logged, once: by the use that reaches it. */
+export const QUOTA_ALERT_SHARE = 0.7
+
+/**
+ * Logs `hosted_quota_threshold` for each entry marked `alert` that this use took to QUOTA_ALERT_SHARE of its limit. Counts
+ * only grow during a day and each use is one commit, so exactly one use crosses the mark: one line a pool a day, with no
+ * state kept. The pool is named without its day: `site`, `keyless`, `keyless-claude`, `accounts`, `jobs`.
+ */
+export function logQuotaThresholds(entries: readonly QuotaEntry[], counts: readonly number[] | undefined, day: string, log: (line: string) => void): void {
+  if (counts === undefined) return
+  for (const [index, entry] of entries.entries()) {
+    const count = counts[index]
+    if (entry.alert !== true || count === undefined) continue
+    const mark = Math.ceil(entry.limit * QUOTA_ALERT_SHARE)
+    if (count >= mark && count - (entry.amount ?? 1) < mark) {
+      log(JSON.stringify({ severity: 'WARNING', event: 'hosted_quota_threshold', pool: entry.id.startsWith(`${day}-`) ? entry.id.slice(day.length + 1) : entry.id, day, count, limit: entry.limit }))
+    }
+  }
+}
 /** Requests per minute a caller may start, so a loop cannot spend a day's allowance in a second. */
 export const KEYLESS_PER_MINUTE = 10
 export const KEY_PER_MINUTE = 60
@@ -402,8 +431,12 @@ export interface HostedApiConfig {
   siteDaily?: number
   /** Keyless pages a UTC day for every keyless caller together, within the site's total. */
   keylessTotalDaily?: number
-  /** Pages a UTC day one account's keys may start, within the site's total. */
+  /** Pages a UTC day one account's keys may start, within the accounts' total. */
   accountDaily?: number
+  /** Pages a UTC day every account together may start, apart from the site's total (DEFAULT_ACCOUNTS_DAILY). */
+  accountsDaily?: number
+  /** The credits an account gets a month, named in the hint that says to sign in (DEFAULT_MONTHLY_CREDITS). */
+  monthlyCredits?: number
   /** The public address of this API, named in hints; e.g. https://api.octocrawl.dev */
   publicOrigin?: string
   networkPolicy?: NetworkPolicy
@@ -554,6 +587,9 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const siteDaily = config.siteDaily ?? DEFAULT_SITE_DAILY
   const keylessTotalDaily = config.keylessTotalDaily ?? DEFAULT_KEYLESS_TOTAL_DAILY
   const accountDaily = config.accountDaily ?? DEFAULT_ACCOUNT_DAILY
+  const accountsDaily = config.accountsDaily ?? DEFAULT_ACCOUNTS_DAILY
+  // Signing in is free and its credits are outside every keyless pool, so a caller without an account is told so first.
+  const signInHint = `sign in free for ${(config.monthlyCredits ?? DEFAULT_MONTHLY_CREDITS).toLocaleString('en-US')} credits a month: an MCP client connects to ${MCP_OAUTH_RESOURCE} and signs in there, and the API takes a key made at https://octocrawl.dev/signin/?utm_source=hosted&utm_medium=quota`
   const policy = hostedPolicy(config.networkPolicy ?? hostedNetworkPolicy(), env)
   const engine = createApiEngine({
     taskRoot: config.taskRoot,
@@ -642,7 +678,10 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const jobStart = jobRoute && method === 'POST' && (path === '/v1/batches' || path === '/v1/crawl')
     if (method === 'GET' && path === '/health') return next()
     if (!starts && !reads && !jobRoute) {
-      return refuse(c, 403, 'hosted_unavailable', `${method} ${path} is not served by hosted Octocrawl: scrape and map only (POST /v1/scrape, POST /v1/map)`, [LOCAL_HINT, 'batch, crawl and Monitor are hosted in a later phase of the roadmap'])
+      return refuse(c, 403, 'hosted_unavailable', jobRoutes === null
+        ? `${method} ${path} is not served by hosted Octocrawl: scrape and map only (POST /v1/scrape, POST /v1/map)`
+        : `${method} ${path} is not served by hosted Octocrawl: scrape and map, and with an account crawl and batch jobs (POST /v1/crawl, POST /v1/batches)`,
+      [LOCAL_HINT, 'Monitors, logins and /fc run on your computer'])
     }
     // The site's signed header is checked without a store, and every Playground call comes from the site's few addresses,
     // so it is not counted per address; the account's own rate below still applies.
@@ -668,7 +707,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     c.set('caller', caller)
     if (jobRoute) {
       // A job spends an account's credits over many pages: keyless callers and keys without an account have none to spend.
-      if (caller.kind !== 'key' || caller.uid === undefined) return refuse(c, 403, 'jobs_need_account', 'hosted batch and crawl jobs need an account\'s key', ['create a key at https://octocrawl.dev/dashboard/ , or run it on your computer: npx octocrawl serve'])
+      if (caller.kind !== 'key' || caller.uid === undefined) return refuse(c, 403, 'jobs_need_account', 'hosted batch and crawl jobs need an account\'s key', [signInHint, 'or run it on your computer: npx octocrawl serve'])
       if (jobStart) {
         const wait = keyLimiter.retryAfterSeconds(caller.id)
         if (wait !== null) return refuse(c, 429, 'rate_limited', `too many requests: at most ${KEY_PER_MINUTE} starts a minute`, [`retry after ${wait} s`], { 'Retry-After': String(wait) })
@@ -714,18 +753,21 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   async function keyedStart(c: Context<GateEnv>, caller: HostedCaller, path: string, day: string, now: Date, next: () => Promise<void>) {
     if (caller.uid !== undefined) return accountStart(c, caller, caller.uid, path, day, now, next)
     const keylessTotal = `${day}-keyless`
-    const quota = await config.quota.consume([
-      { id: `${day}-site`, limit: siteDaily },
-      ...(caller.kind === 'keyless' ? [{ id: keylessTotal, limit: keylessTotalDaily }] : []),
-      { id: `${day}-${caller.kind}-${caller.id}`, limit: caller.dailyLimit },
-    ], now)
+    const entries: QuotaEntry[] = [
+      { id: `${day}-site`, limit: siteDaily, alert: true },
+      ...(caller.kind === 'keyless' ? [{ id: keylessTotal, limit: keylessTotalDaily, alert: true }] : []),
+      // Claude's pool is shared by every connector's user; an address's or a key's own day is one caller's.
+      { id: `${day}-${caller.kind}-${caller.id}`, limit: caller.dailyLimit, alert: caller.pool === 'claude' },
+    ]
+    const quota = await config.quota.consume(entries, now)
     if (!quota.ok) {
       const seconds = secondsToUtcMidnight(now)
       const site = quota.limited.endsWith('-site')
       const shared = quota.limited === keylessTotal
-      return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served its ${quota.limit} pages for today` : shared ? `the ${quota.limit} pages a day that hosted Octocrawl serves without a key are used up` : caller.pool === 'claude' ? `the ${quota.limit} pages a day that every Claude connector without a key shares are used up` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
-        [caller.kind === 'keyless' && (shared || (caller.pool !== 'claude' && !site)) ? 'a key raises the allowance: https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint' : LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+      return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served the ${quota.limit} pages a day it serves without an account` : shared ? `the ${quota.limit} pages a day that hosted Octocrawl serves without a key are used up` : caller.pool === 'claude' ? `the ${quota.limit} pages a day that every Claude connector without a key shares are used up` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
+        [...(caller.kind === 'keyless' ? [signInHint] : []), LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
     }
+    logQuotaThresholds(entries, quota.counts, day, log)
     logUsage(caller, path, day)
     if (path === '/v1/scrape') {
       // The scrape route runs here with the request pinned: nothing is stored for reuse (the page cache would grow with every
@@ -749,8 +791,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   async function accountStart(c: Context<GateEnv>, caller: HostedCaller, uid: string, path: string, day: string, now: Date, next: () => Promise<void>) {
     const credits = config.credits
     if (credits === undefined) return c.json({ error: 'account credits are unavailable on this server', code: 'internal_error' }, 503)
-    const site = { id: `${day}-site`, limit: siteDaily }
-    const quotas = [site, { id: `${day}-account-${uid}`, limit: accountDaily }]
+    const accounts = { id: `${day}-accounts`, limit: accountsDaily, alert: true }
+    const quotas: QuotaEntry[] = [accounts, { id: `${day}-account-${uid}`, limit: accountDaily }]
     const isScrape = path === '/v1/scrape'
     let browser = isScrape && caller.browser
     const reserve = (amount: number) => credits.reserve(uid, amount, quotas, now).catch((error: unknown) => {
@@ -768,12 +810,13 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       if (reserved.limited === 'account') return refuse(c, 401, 'unauthorized', 'this key\'s account no longer exists', [])
       if (reserved.limited === 'quota') {
         const seconds = secondsToUtcMidnight(now)
-        return refuse(c, 429, 'quota_exhausted', reserved.id === site.id ? `hosted Octocrawl has served its ${reserved.limit} pages for today` : `this account has started its ${reserved.limit} hosted pages for today`, [LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+        return refuse(c, 429, 'quota_exhausted', reserved.id === accounts.id ? `hosted Octocrawl has served the ${reserved.limit} pages a day it serves to accounts` : `this account has started its ${reserved.limit} hosted pages for today`, [LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
       }
       const seconds = secondsToNextGrant(now)
       return refuse(c, 429, 'quota_exhausted', `this account's credits are used up (${reserved.remaining} left)`,
         [`the monthly credits come back on the 1st at 00:00 UTC, in ${seconds} s`, LOCAL_HINT], { 'Retry-After': String(seconds), 'X-Credits-Remaining': String(reserved.remaining) })
     }
+    logQuotaThresholds(quotas, reserved.counts, day, log)
     logUsage(caller, path, day)
     const reservation: Reservation = reserved.reservation
     let charge: ReturnType<typeof scrapeCharge> = { credits: 0, kind: 'unread' }
@@ -1147,7 +1190,7 @@ export class FirestoreHostedQuota implements HostedQuota {
           currentDocument: doc.updateTime === null ? { exists: false } : { updateTime: doc.updateTime },
         })) }),
       })
-      if (response.ok) return { ok: true }
+      if (response.ok) return { ok: true, counts: reads.map((doc) => doc.count + 1) }
       if (response.status === 409 || response.status === 412) continue
       if (response.status === 400) {
         const error = await response.json().catch(() => null) as { error?: { status?: string } } | null

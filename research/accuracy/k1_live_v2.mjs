@@ -14,10 +14,12 @@
 // modelFallback set to true: Octocrawl's F2. Only its API gets W2L_EXTRACT_* and ANTHROPIC_API_KEY from the shell; the
 // other local arms run with them removed. --firecrawl-cap and --model-cap-usd stop the run before a case that could pass
 // them (a Firecrawl answer counted at 9 credits when it reports none; a model answer without a known cost stops the run).
+// --keep-html adds the rawHtml format to every local arm's request, so its answer keeps the page source the engine read
+// (only a screenshot format changes the lanes a request takes) and a later engine can re-read the same bytes.
 //
 // Usage: node research/accuracy/k1_live_v2.mjs <output dir> [--control <dir>] [--plan <plan.json>] [--ports 8831,8832,8833,8834]
 //          [--timeout 120000] [--steel-grant <file>] [--ic-grant <file>] [--arms standard,model,firecrawl]
-//          [--firecrawl-cap <credits>] [--model-cap-usd <usd>]
+//          [--firecrawl-cap <credits>] [--model-cap-usd <usd>] [--keep-html]
 //   --ports are taken by the selected local arms in order; --control is needed only with the control arm.
 //   Each answer goes to <output dir>/<arm>/<case>.json ({caseId, arm, request, startedAt, finishedAt, response, error});
 //   a case already saved for an arm is not sent again. Keys and grants are found as k1-window.mjs finds them, and keys are
@@ -44,6 +46,7 @@ const plan = JSON.parse(await readFile(flag('--plan') ?? join(here, 'reserved-pl
 const ports = (flag('--ports') ?? '8831,8832,8833,8834').split(',').map(Number)
 for (const p of ports) if ([8787, 8791, 8799, 8812, 8813, 8814].includes(p)) throw new Error(`port ${p} is reserved on this machine`)
 const timeout = Number(flag('--timeout') ?? 120_000)
+const keepHtml = args.includes('--keep-html')
 const sh = (cmd, cwd = repo) => execSync(cmd, { cwd }).toString().trim()
 const mainCheckout = dirname(sh('git rev-parse --path-format=absolute --git-common-dir'))
 const checkouts = [...new Set([repo, mainCheckout])]
@@ -121,6 +124,7 @@ async function octocrawl(name, item) {
   const { url: _u, ...own } = item.request ?? {}
   const request = { ...base, ...own, url: item.url, maxAge: 0, timeout, access: LOCAL[name].access }
   if (LOCAL[name].model) request.formats = request.formats.map((f) => (typeof f === 'object' && f.type === 'json' ? { ...f, modelFallback: true } : f))
+  if (keepHtml && !request.formats.includes('rawHtml')) request.formats = [...request.formats, 'rawHtml']
   const startedAt = new Date().toISOString()
   let response = null, error = null
   try {
@@ -210,5 +214,5 @@ try {
   }
 } finally {
   killAll()
-  await writeFile(join(out, 'run.json'), JSON.stringify({ plan: flag('--plan') ?? 'research/accuracy/reserved-plan-json.v2.json', arms, timeout, ports, commits: Object.fromEntries(names.map((n) => [n, LOCAL[n].commit])), spent, startedAt: new Date(runStart).toISOString(), finishedAt: new Date().toISOString(), sleeps: sleepsSince(runStart), proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null } }, null, 2) + '\n')
+  await writeFile(join(out, 'run.json'), JSON.stringify({ plan: flag('--plan') ?? 'research/accuracy/reserved-plan-json.v2.json', arms, timeout, ports, keepHtml, commits: Object.fromEntries(names.map((n) => [n, LOCAL[n].commit])), spent, startedAt: new Date(runStart).toISOString(), finishedAt: new Date().toISOString(), sleeps: sleepsSince(runStart), proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null } }, null, 2) + '\n')
 }

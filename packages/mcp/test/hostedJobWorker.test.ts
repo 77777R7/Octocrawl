@@ -134,6 +134,18 @@ describe('hosted job worker', () => {
     expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(5)
   })
 
+  it('logs once when the day\'s job pool for every account reaches 70%, and never for one account\'s pool', async () => {
+    const { origin, deps, create, drain } = await setup({ limits: { jobsDaily: 10 } })
+    const lines: string[] = []
+    deps.log = (line) => lines.push(line)
+    const id = await create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/e', '/f', '/g', '/h'].map((path) => `${origin}${path}`), fastMode: true }))
+    await drain(id)
+    const alerts = lines.map((line) => JSON.parse(line) as { event?: string; pool?: string; limit?: number; count?: number }).filter((line) => line.event === 'hosted_quota_threshold')
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0]).toMatchObject({ pool: 'jobs', day: '2026-10-19', limit: 10 })
+    expect(alerts[0]!.count).toBeGreaterThanOrEqual(7)
+  })
+
   it('reads under hosted Octocrawl\'s 5 MiB file cap, as a scrape does', async () => {
     const { origin, store, files, deps, create, drain } = await setup()
     // The engine's own channels, as in production: the test's channels are built on a policy of their own.

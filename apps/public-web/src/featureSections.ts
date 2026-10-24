@@ -5,12 +5,14 @@ import { glyphCloud } from './glyphArt'
  * controls that need a script (the filter, the tabs and Copy) stay hidden, and every free tier shows open.
  *
  * What the sections claim was checked against the product on 2026-10-09 (origin/main c25c126):
- * - Hosted Octocrawl serves scrape and map only (packages/mcp/src/hostedApi.ts refuses every other route by name); crawl,
- *   batch, Monitor, logins and the handoff to Chrome run on the person's computer.
+ * - Hosted Octocrawl serves scrape and map, and to an account crawl jobs of up to 500 pages and batch jobs of up to 1,000
+ *   URLs (packages/mcp/src/hostedApi.ts refuses every other route by name; rechecked 2026-10-23, origin/main d1eb4647);
+ *   larger crawls, Monitor, logins and the handoff to Chrome run on the person's computer.
  * - Allowances: five previews a visitor a day (VISITOR_DAILY_PREVIEWS, packages/public-preview/src/quota.ts); 20 pages a
  *   day per address without a key and 10 starts a minute (DEFAULT_KEYLESS_DAILY, KEYLESS_PER_MINUTE); an account's
  *   1,000 credits a month and 60 a minute (DEFAULT_MONTHLY_CREDITS in packages/mcp/src/hostedCredits.ts, KEY_PER_MINUTE);
- *   1,500 pages a day for the whole hosted service; no daily limit on the person's own computer.
+ *   1,500 pages a day for every caller without an account and 3,000 for every account together (DEFAULT_SITE_DAILY,
+ *   DEFAULT_ACCOUNTS_DAILY; rechecked 2026-10-23); no daily limit on the person's own computer.
  * - `npx octocrawl serve` runs a Monitor when asked (POST /v1/monitors/:id/run) and delivers its events; timed re-runs
  *   come from the repository's managed local service (packages/mcp/src/managedRuntime.ts), as content/reference.md says.
  *   A delivery is signed when its destination names a secret (packages/runtime/src/deliveryWorker.ts).
@@ -51,13 +53,13 @@ export const CAPABILITIES: readonly Capability[] = [
     ],
   },
   {
-    key: 'crawl', hosted: false, title: 'Crawl a site',
-    points: ['Follow links across a site or section', 'Set page, depth and path limits', 'Resume a crawl where it left off'],
+    key: 'crawl', hosted: true, title: 'Crawl a site',
+    points: ['Follow links across a site or section', 'Set page, depth and path limits', 'Hosted with an account, up to 500 pages'],
     art: ['site.example', ' ├─ /docs {─›} /docs/start', ' ├─ /blog {─›} /blog/post', ' └─ page limit ✓', '    depth limit ✓'],
   },
   {
-    key: 'batch', hosted: false, title: 'Scrape a batch',
-    points: ['Scrape a list of URLs', 'Keep each result, including failures', 'Export content and per-URL outcomes'],
+    key: 'batch', hosted: true, title: 'Scrape a batch',
+    points: ['Scrape a list of URLs', 'Keep each result, including failures', 'Hosted with an account, up to 1,000 URLs'],
     art: ['[URL 1, URL 2, URL 3]', '        {│}', '   ✓ Markdown', '   × blocked', '   ✓ Markdown'],
   },
   {
@@ -318,7 +320,7 @@ export function tiersMarkup(bar: string): string {
         </div>
       </div>
       <div class="band"><div class="frame tier-foot-band">
-        <p class="tier-foot">The whole hosted service serves 1,500 pages a day; over an allowance the answer is HTTP 429 until 00:00 UTC, and for an account's credits until the 1st. Credit packs are planned but not sold yet. <a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
+        <p class="tier-foot">Callers without an account share 1,500 hosted pages a day, and accounts have 3,000 a day of their own; over an allowance the answer is HTTP 429 until 00:00 UTC, and for an account's credits until the 1st. Credit packs are planned but not sold yet. <a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
       </div></div>
     </section>`
 }

@@ -266,7 +266,7 @@
           "type": ["number", "string", "null"]
         },
         "unit": {
-          "description": "The currency or unit stated with the value, as written: a currency symbol or code next to the number or the priceCurrency the same declaration states (GBP, £), a percent sign or percentage points (%, pp). Null when none is stated.",
+          "description": "The currency or unit stated with the value, as written: a currency symbol or code next to the number or the priceCurrency the same declaration states (GBP, £), a percent sign or percentage points (%, pp), or for a number in a selected table row the unit its table states (a caption such as Units of Foreign Currencies per Australian Dollar, a header qualifier such as Km², a header such as 1.00 USD). Null when none is stated.",
           "type": ["string", "null"]
         },
         "conversion": {

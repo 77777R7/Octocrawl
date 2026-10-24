@@ -18,7 +18,7 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import { createApiEngine, type ApiEngineOptions, type SliceCharge } from '@w2l/api'
 import { hostedNetworkPolicy, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore, webhookSignature, type WebhookTransport } from '@w2l/runtime'
-import { hostedPolicy, type HostedLeases } from './hostedApi.js'
+import { hostedPolicy, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
 import { CREDITS, scrapeCharge, type CreditsStore, type Reservation, type UsageKind } from './hostedCredits.js'
 import type { UploadResult } from './hostedCloud.js'
 import type { HostedJob, HostedJobStore, HostedWebhookDelivery } from './hostedJobs.js'
@@ -191,7 +191,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     // The slice's credits and its pages on the day's job pools, taken before any page is read. A drain lets the pages in
     // flight finish, so a slice can store one page more than it asked for (two workers): that page is reserved too.
     const day = now().toISOString().slice(0, 10)
-    const pools = (n: number) => [{ id: `${day}-jobs`, limit: limits.jobsDaily, amount: n }, { id: `${day}-jobs-account-${job.uid}`, limit: limits.jobsAccountDaily, amount: n }]
+    const pools = (n: number) => [{ id: `${day}-jobs`, limit: limits.jobsDaily, amount: n, alert: true }, { id: `${day}-jobs-account-${job.uid}`, limit: limits.jobsAccountDaily, amount: n }]
     const reservationId = `${jobId}-${generation}-${holder}`
     // Under maxCredits the reservation stays within what is left of it; a page a drain stores past it is not charged.
     let reservedPages = Math.min(pages + headroom, job.credits.maxCredits === null ? Number.POSITIVE_INFINITY : allowed)
@@ -207,6 +207,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
       const reason = reserved.limited === 'account' ? 'account_deleted' : 'credits_exhausted'
       return await pass((j) => ({ ...j, status: 'failed', failureReason: reason }))
     }
+    logQuotaThresholds(pools(reservedPages), reserved.counts, day, log)
     reservation = reserved.reservation
     const held = await deps.store.updateHeld(jobId, holder, (j) => ({ ...j, reservation: { reservation, used: null } }))
     if (!held.ok) return { status: 200, outcome: held.reason }
