@@ -237,6 +237,13 @@ G01 was added on 2026-10-22 for the Skyscanner human verification rule (#515, [P
 | --- | --- | --- | --- |
 | G01 | [Skyscanner: London to Paris](https://www.skyscanner.net/routes/lond/pari/london-to-paris.html) | Either the route's content, with a final URL that is not the challenge, or `blocked`/`captcha` with no Markdown and readiness `not_served`; never `success` on the challenge page | scrape-execution.error-model |
 
+G02 and G03 were added on 2026-10-24 from the outreach pre-checks, frozen before their first run: two docs pages that hosted Octocrawl (extractor commit f7708b3c) failed for reasons of its own. Run them with `--only G02,G03`.
+
+| Case | URL | What it tests | Feature |
+| --- | --- | --- | --- |
+| G02 | [Android Developers: Introduction to activities](https://developer.android.com/guide/components/activities/intro-activities) | robots.txt and the page read over HTTP (`fastMode`) through devsite's sign-in round trip, which ends only for a client that sends back the cookie it set; robots.txt `allowed`, never unreachable | scrape-execution.error-model |
+| G03 | [Fusion Help: Assemblies overview](https://help.autodesk.com/view/fusion360/ENU/?guid=ASM-ASSEMBLIES) | Either the article, or `failed`/`empty_unverified`; never `success` with only the banner a script-rendered help page shows before its article | scrape-execution.error-model |
+
 ## Later batches
 
 About 40 sites in total, plus the seed user's URLs. These were reachable on 2026-09-29; their checks are written when the feature they test is worked on.

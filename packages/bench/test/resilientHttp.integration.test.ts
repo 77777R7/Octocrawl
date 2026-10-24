@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createServer } from 'node:http'
+import { once } from 'node:events'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
@@ -51,6 +53,45 @@ describe('resilient subject on served fixture bytes', () => {
     expect(out.usage.requestCount).toBe(2)
     // The final URL is b, whose 302 is the last response received.
     expect(out.evidence).toMatchObject({ finalUrl: `${server.url}/redirect/loop/b`, httpStatus: 302, redirectChain: [`${server.url}/redirect/loop/a`, `${server.url}/redirect/loop/b`] })
+  })
+
+  it('sign-in round trip: sends back the cookie a redirect set, and reads the page it returns to', async () => {
+    // developer.android.com (devsite, 2026-10-24): a browser user agent's page goes to a sign-in check and back, and is
+    // served only to a client that sends the check's cookie; without it the return reads as redirect_loop.
+    const sent: (string | null)[] = []
+    const site = createServer((req, res) => {
+      const checked = req.headers.cookie?.split(/;\s*/).includes('signin_details=checked') === true
+      if (req.url === '/robots.txt') { res.setHeader('content-type', 'text/plain'); res.end('User-agent: *\nAllow: /\n'); return }
+      if (req.url === '/guide') sent.push(req.headers.cookie ?? null)
+      if (req.url === '/guide' && checked) { res.setHeader('content-type', 'text/html'); res.end('<html><head><title>Activities</title></head><body><main><h1>Introduction to activities</h1><p>The Activity class is a crucial component of an Android app.</p></main></body></html>'); return }
+      if (req.url === '/guide') { res.writeHead(302, { location: '/oauth2authorize?return_url=/guide' }).end(); return }
+      if (req.url?.startsWith('/oauth2authorize')) { res.writeHead(302, { location: '/oauth2callback?error=interaction_required' }).end(); return }
+      if (req.url?.startsWith('/oauth2callback')) { res.writeHead(302, { location: '/guide', 'set-cookie': 'signin_details=checked; Path=/; Max-Age=300' }).end(); return }
+      res.writeHead(404).end()
+    })
+    site.listen(0, '127.0.0.1')
+    await once(site, 'listening')
+    const address = site.address()
+    if (address === null || typeof address === 'string') throw new Error('missing fixture port')
+    const origin = `http://127.0.0.1:${address.port}`
+    const own = new ResilientHttpSubject()
+    try {
+      const out = await own.fetch(`${origin}/guide`)
+      expect(out).toMatchObject({ status: 'success', evidence: { finalUrl: `${origin}/guide`, httpStatus: 200 } })
+      expect(out.markdown).toContain('The Activity class is a crucial component')
+      expect(out.evidence.redirectChain).toEqual([`${origin}/guide`, `${origin}/oauth2authorize?return_url=/guide`, `${origin}/oauth2callback?error=interaction_required`, `${origin}/guide`])
+      expect(sent).toEqual([null, 'signin_details=checked'])
+      // Counted, never valued; and not a task session, which the record would name.
+      expect(out.trace.find(event => event.event === 'redirect_cookies')?.detail).toEqual({ requestsWithCookies: 1, kept: 1 })
+      expect(out.trace.some(event => event.event === 'session_cookies')).toBe(false)
+      // The cookie went with that fetch: the next one starts without it.
+      await own.fetch(`${origin}/guide`)
+      expect(sent[2]).toBeNull()
+    } finally {
+      await own.teardown()
+      site.closeAllConnections()
+      await new Promise<void>(resolve => site.close(() => resolve()))
+    }
   })
 
   it('flaky-once: retries the 503 and succeeds on attempt 2', async () => {

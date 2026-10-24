@@ -25,8 +25,11 @@ export interface SettleOutcome {
 
 /**
  * Whether a page with little text shows that its data is still on the way: a visible element marked busy
- * (`aria-busy="true"`, the page's own root aside), or a visible short text, not a button's or a link's, that is or ends in
- * a loading message ("Loading…", "Fetching results...", "Please wait", "Search Results Fetching..."). A page with more
+ * (`aria-busy="true"`, the page's own root aside), a visible short text, not a button's or a link's, that is or ends in
+ * a loading message ("Loading…", "Fetching results...", "Please wait", "Search Results Fetching..."), or main landmarks
+ * (`<main>`, `role="main"`) that hold nothing while all the text one can see is in the page's frame (its banner,
+ * navigation, search or footer): the page has said where its content goes and it is not there yet (help.autodesk.com,
+ * 2026-10-24, read with only its banner). Content beside an empty main landmark is content. A page with more
  * text than LOADING_PAGE_TEXT_MAX is read for that text: a loader left on it (more comments, a feed's next page) is not its
  * data. Visible means a box of some size on the page that neither it nor an ancestor hides (`checkVisibility`, with
  * opacity). Progress bars and skeleton classes are not signs: rating histograms, language bars and button styles use
@@ -52,6 +55,25 @@ export const LOADING_PROBE = `(() => {
       return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
     }
     for (const el of body.querySelectorAll('[aria-busy="true"]')) if (shown(el)) return true
+    // Main landmarks that hold nothing (no text, media, control, embedded document or shadow root), on a page whose
+    // every text one can see is in its frame: its banner, navigation, search or footer.
+    const mains = Array.from(body.querySelectorAll('main, [role="main"]'))
+    const holds = (el) => (el.innerText ?? '').trim() !== '' || el.querySelector('img, video, canvas, iframe, object, embed, input, select, textarea, button') !== null
+      || Array.from(el.querySelectorAll('*')).some((child) => child.shadowRoot !== null)
+    if (mains.length > 0 && !mains.some(holds)) {
+      const frame = 'header, nav, footer, [role="banner"], [role="navigation"], [role="search"], [role="contentinfo"]'
+      const texts = document.createTreeWalker(body, 4)
+      let framed = false
+      let elsewhere = false
+      let read = 0
+      for (let node = texts.nextNode(); node !== null && read < 20000 && !elsewhere; node = texts.nextNode(), read++) {
+        const parent = node.parentElement
+        if (parent === null || (node.textContent ?? '').trim() === '' || parent.closest('script, style, noscript, template') !== null) continue
+        if (parent.closest(frame) !== null) framed = true
+        else if (shown(parent)) elsewhere = true
+      }
+      if (framed && !elsewhere) return true
+    }
     const message = /^(?:(?:loading|fetching|please wait|one moment|searching|retrieving)(?:\\s+[\\w-]+){0,3}\\s*(?:\\.{2,3}|\\u2026)|loading|fetching|please wait)$/i
     const trailing = /\\b(?:loading|fetching)\\s*(?:\\.{2,3}|\\u2026)$/i
     // 4 is NodeFilter.SHOW_TEXT, named so that a page replacing NodeFilter cannot break the probe.

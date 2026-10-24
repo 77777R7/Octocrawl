@@ -160,11 +160,17 @@ describe('the HTTP rungs with a task cookie session', () => {
     })
   }
 
-  it('without a session sends no cookie and keeps none, as before', async () => {
+  it('without a session keeps no cookie between pages: one a redirect set goes back only on that request\'s later hops', async () => {
     seen.length = 0
-    const { second } = await run(new ResilientHttpSubject('standard', localNetworkPolicy()))
+    const { first, second } = await run(new ResilientHttpSubject('standard', localNetworkPolicy()))
     expect(second).toMatchObject({ evidence: { httpStatus: 403 } })
-    expect(seen.every((r) => r.cookie === undefined)).toBe(true)
-    expect(second.trace.map((e) => e.event)).not.toContain('session_cookies')
+    expect(seen.filter((r) => r.url !== '/robots.txt')).toEqual([
+      { url: '/start', cookie: undefined },
+      { url: '/landing', cookie: `token=${TOKEN}` },
+      { url: '/needs', cookie: undefined },
+    ])
+    expect(first.trace.find((e) => e.event === 'redirect_cookies')?.detail).toEqual({ requestsWithCookies: 1, kept: 3 })
+    for (const out of [first, second]) expect(out.trace.map((e) => e.event)).not.toContain('session_cookies')
+    expect(JSON.stringify([first, second])).not.toContain(TOKEN)
   })
 })

@@ -70,6 +70,24 @@ beforeAll(async () => {
           'document.getElementById("grid").insertAdjacentHTML("beforeend", "<ul><li>Drill one $99.00</li><li>Drill two $149.00</li><li>Drill three $199.00</li><li>Drill four $249.00</li></ul>") }).observe(document.getElementById("grid"))</script>' +
           '</body></html>',
       )
+    } else if (req.url === '/main-elsewhere' || req.url === '/main-search') {
+      // Finished pages with a main landmark and no text in it: the article beside it, or a main that holds only a search form.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><header><a href="/">Site</a></header>' + (req.url === '/main-search'
+        ? '<main><form><input name="q" placeholder="Search the timetable"></form></main>'
+        : '<main></main><div><h1>Article</h1><p>The ferry leaves the harbour at nine and returns at five, every day of the week.</p></div>') + '</body></html>')
+    } else if (req.url === '/help-shell' || req.url === '/help-shell-stuck') {
+      // help.autodesk.com (2026-10-24): the banner (a home link, a language menu) renders, the role="main" stays empty
+      // until the article arrives, 2.5 s after load here (or never).
+      const languages = ['English (US)', 'Deutsch', 'Español', 'Français', 'Italiano', 'Polski', 'Português (Brasil)', 'Türkçe'].map((l) => `<li role="option">${l}</li>`).join('')
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Fusion Help | Assemblies overview</title></head><body><header role="banner"><ul id="ui-user-area">' +
+          `<li><a rel="home" href="/">Help Home</a></li><li><span>English (US)</span><ol role="listbox" hidden aria-hidden="true">${languages}</ol></li></ul></header>` +
+          '<div id="ui-content-area" role="main"><div id="loader"></div></div>' +
+          (req.url === '/help-shell-stuck' ? '' : '<script>setTimeout(function () { document.getElementById("loader").innerHTML = "<article><h1>Assemblies overview</h1><p>An Assembly is a collection of components that function as a single design, built from parts you model or insert.</p></article>" }, 2500)</script>') +
+          '</body></html>',
+      )
     } else if (req.url === '/fetching-below') {
       // A results list still fetching, its message one can see below a tall header, filled 2.5 s after load: still loading.
       const items = Array.from({ length: 6 }, (_, i) => `<li>Result ${i + 1}: a drill with a price of $${(i + 1) * 20}</li>`).join('')
@@ -524,10 +542,17 @@ describe('BrowserLocalSubject transport', () => {
       const below = await subject.fetch(`${url}/fetching-below`)
       expect(below.markdown).toContain('Result 6: a drill with a price of $120')
       expect(below.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
+      // An empty main landmark under a rendered banner is waited for; never filled, the banner is not answered as the page.
+      const help = await subject.fetch(`${url}/help-shell`)
+      expect(help.status).toBe('success')
+      expect(help.markdown).toContain('An Assembly is a collection of components')
+      expect(help.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
+      const shell = await subject.fetch(`${url}/help-shell-stuck`, Date.now() + 5_000)
+      expect(shell).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
       // Loading words and signs on a finished page, and a loader left on a page with plenty of text, are not waited for.
-      for (const path of ['/not-loading', '/rich-loader']) {
+      for (const path of ['/not-loading', '/rich-loader', '/main-elsewhere', '/main-search']) {
         const done = await subject.fetch(`${url}${path}`)
-        expect(done.status, path).toBe('success')
+        if (path !== '/main-search') expect(done.status, path).toBe('success')
         expect(done.trace.some((event) => event.event === 'loading_wait'), path).toBe(false)
       }
       // A request that runs steps on the page keeps their time: no loading wait takes it, within a short timeout.
