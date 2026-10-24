@@ -71,5 +71,24 @@ class JsonPlans(unittest.TestCase):
   d=doc('');d['json']={'status':'complete','data':{'updated':'2 January 2026','records':[{'title':'a','price':9.5,'currency':'USD'}]},'evidence':[]}
   r=score_case(g,d,O,'json');rows={x['fieldId']:x for x in r['rows']}
   self.assertTrue(rows['V99/page/updated']['fullyCorrect']);self.assertTrue(rows['V99/post-1/price']['fullyCorrect']);self.assertFalse(rows['V99/post-2/title']['checks']['entity'])
+ def test_json_mapping_rebases_fixture_origin_urls(self):
+  # A frozen replay serves the page from the fixture origin, so absolutised links carry it; the Markdown mappings rebase them.
+  g=case('V99','https://example.org/news/',[field('V99',f'post-{k}','url',f'https://example.org/news/{k}/','url') for k in (1,2)])
+  d=doc('');d['json']={'status':'complete','data':{'records':[{'url':O+'/news/1/'},{'url':'https://other.test/news/2/'}]},'evidence':[]}
+  rows={x['fieldId']:x for x in score_case(g,d,O,'json')['rows']}
+  self.assertEqual(rows['V99/post-1/url']['observed'],'https://example.org/news/1/');self.assertTrue(rows['V99/post-1/url']['checks']['value'])
+  self.assertEqual(rows['V99/post-2/url']['observed'],'https://other.test/news/2/')
+  live=score_case(g,d,'http://127.0.0.1:1','json')['rows'][0];self.assertEqual(live['observed'],O+'/news/1/')
+ def test_json_mapping_takes_unit_and_date_from_the_evidence_context(self):
+  # #704: a number read from a table row carries the unit and as-of date its table states in json.evidence[path].context.
+  g=case('V99','https://example.org/rates',[field('V99',f'c-{k}','rate','0.70','decimal','d','u') for k in (1,2)],{'d':{'state':'known','value':'2026-10-19'}},{'u':{'state':'known','value':'per AUD'}})
+  d=doc('');d['json']={'status':'complete','data':{'records':[{'rate':0.70},{'rate':0.70}]},'evidence':[{'path':'/records/0/rate','context':{'unit':'per AUD','date':'2026-10-19'}},{'path':'/records/1/rate'}]}
+  rows={x['fieldId']:x for x in score_case(g,d,O,'json')['rows']}
+  self.assertTrue(rows['V99/c-1/rate']['fullyCorrect']);self.assertEqual((rows['V99/c-1/rate']['unit'],rows['V99/c-1/rate']['businessDate']),('per AUD','2026-10-19'))
+  self.assertIsNone(rows['V99/c-2/rate']['unit']);self.assertIsNone(rows['V99/c-2/rate']['businessDate'])  # nothing stated, nothing inferred
+ def test_json_mapping_keeps_the_declared_currency_over_a_text_mark(self):
+  g=case('V99','https://example.org/p',[field('V99','product','price','9.5','decimal',unit='usd')],units={'usd':{'state':'known','value':'USD'}})
+  d=doc('');d['json']={'status':'complete','data':{'price':9.5,'currency':'USD'},'evidence':[{'path':'/price','context':{'currency':'$'}}]}
+  self.assertEqual(score_case(g,d,O,'json')['rows'][0]['unit'],'USD')
 
 if __name__=='__main__':unittest.main()
