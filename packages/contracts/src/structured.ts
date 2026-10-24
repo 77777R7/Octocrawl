@@ -159,7 +159,7 @@ export interface StructuredFieldEvidence {
    * For a value the model wrote: the page text it was located in, as written (`In Stock` for `in_stock`).
    */
   text?: string
-  /** For a number read from page text, or a number or an ISO date the model wrote: the value `text` was read as. */
+  /** For a number read from page text, or a number, an ISO date or a document number (`8` for `PEP 8`) the model wrote: the value `text` was read as. */
   normalized?: number | string
   /** For a number read from page text: the rule it was read by (`number/decimal`, `number/language:de`; numbers.ts). */
   conversion?: string
