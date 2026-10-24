@@ -122,3 +122,117 @@ describe('selected-list JSON from the selected table rows\' columns', () => {
   })
 })
 
+
+describe('selected-list JSON numbers with the unit and as-of date their table states', () => {
+  const rows: ListFormatRequest = { type: 'list', itemSelector: 'table > tbody > tr', fields: [{ name: 'currency', selector: 'th' }, { name: 'rate', selector: 'td.highlight' }] }
+  const schema = (keys: Record<string, string>): JsonFormatRequest => ({ type: 'json', schema: { type: 'object', properties: { records: { type: 'array', items: { type: 'object', properties: Object.fromEntries(Object.entries(keys).map(([key, type]) => [key, { type }])), required: Object.keys(keys) } } }, required: ['records'] } })
+  const rates = schema({ currency: 'string', rate: 'number' })
+  type Row = { values: Record<string, string | null>; columns: FetchResult['listColumns'] extends readonly (infer C)[] | undefined ? C : never }
+  function table(records: Row[], fields = ['currency', 'rate']): FetchResult {
+    const list: ListExtraction = { itemSelector: rows.itemSelector!, fields, records: records.map(({ values }, index) => ({ values, missing: [], source: { url, page: 1, index } })), pages: 1, incomplete: 0, truncated: false, csv: '', csvSha256: '' }
+    return { requestedUrl: url, status: 'success', markdown: '', evidence: { finalUrl: url, httpStatus: 200 }, list, listColumns: records.map(row => row.columns) } as FetchResult
+  }
+  const read = (source: FetchResult, format: JsonFormatRequest, request: ListFormatRequest = rows) => extractStructured(source, format, {}, null, request)
+  const at = (out: Awaited<ReturnType<typeof read>>, path: string) => out.evidence.find(item => item.path === path)
+  const where = (index: number) => `${JSON.stringify(url)} page 1 table > tbody > tr record ${index}`
+
+  // Minimized from reserved v2 V25 (rba.gov.au): the caption states the unit, each column's header its day.
+  const v25 = { caption: 'Units of Foreign Currencies per Australian Dollar', before: [{ text: 'Latest Exchange Rates', element: 'h2', distance: 1 }] }
+  const v25Row = (currency: string, earlier: string, latest: string): Row => ({ values: { currency, rate: latest }, columns: [
+    { header: '16 Oct 2026', column: 2, value: earlier, table: v25 },
+    { header: '19 Oct 2026', column: 3, value: latest, fields: ['rate'], table: v25 },
+  ] })
+
+  it('gives a number read from a column the unit its table\'s caption states and the day its column\'s header is, with where each was read, and leaves the data as read', async () => {
+    const out = await read(table([v25Row('United States dollar', '0.6947', '0.6975'), v25Row('Japanese yen', '109.67', '110.27')]), rates)
+    expect(out.status).toBe('complete')
+    expect(out.issues).toEqual([])
+    expect(out.data).toEqual({ records: [{ currency: 'United States dollar', rate: 0.6975 }, { currency: 'Japanese yen', rate: 110.27 }] })
+    expect(at(out, '/records/1/rate')).toEqual({
+      path: '/records/1/rate', source: 'dom', evidencePath: `${where(1)} td.highlight text`, text: '110.27', normalized: 110.27, conversion: 'number/decimal',
+      context: { unit: 'Units of Foreign Currencies per Australian Dollar', date: '2026-10-19' },
+      contextEvidence: {
+        unit: { text: 'Units of Foreign Currencies per Australian Dollar', evidencePath: `${where(1)} table caption` },
+        date: { text: '19 Oct 2026', evidencePath: `${where(1)} column 3 "19 Oct 2026" header` },
+      },
+    })
+    // A text value is not a number its table's unit or date qualifies.
+    expect(at(out, '/records/0/currency')).not.toHaveProperty('context')
+  })
+
+  it('reads a unit a header states as an amount of a currency, and a date the block just before the table is', async () => {
+    // Minimized from reserved v2 V34 (x-rates.com): the inverse column next to it states another unit.
+    const before = [{ text: 'Jan 01, 2026 03:50 UTC', element: 'span.ratesTimestamp', distance: 1 }, { text: 'Top 10', element: 'span.ratesTablePopu', distance: 2 }, { text: 'US Dollar Exchange Rates Table Converter', element: 'h1.basicH1', distance: 3 }]
+    const source = table([{ values: { currency: 'Euro', rate: '0.890579' }, columns: [
+      { header: 'US Dollar', column: 1, value: 'Euro', fields: ['currency'], table: { caption: null, before } },
+      { header: '1.00 USD', column: 2, value: '0.890579', fields: ['rate'], table: { caption: null, before } },
+      { header: 'inv. 1.00 USD', column: 3, value: '1.122865', table: { caption: null, before } },
+    ] }])
+    const out = await read(source, rates)
+    expect(out.status).toBe('complete')
+    expect(at(out, '/records/0/rate')).toMatchObject({
+      context: { unit: '1.00 USD', date: '2026-01-01' },
+      contextEvidence: {
+        unit: { text: '1.00 USD', evidencePath: `${where(0)} column 2 "1.00 USD" header` },
+        date: { text: 'Jan 01, 2026 03:50 UTC', evidencePath: `${where(0)} table, block 1 before it (span.ratesTimestamp)` },
+      },
+    })
+  })
+
+  it('reads a unit from a header\'s bracketed qualifier, for a key read from that column', async () => {
+    // Minimized from reserved v2 V24 (worldometers): the key names the header without its qualifier.
+    const source = table([{ values: { country: 'India' }, columns: [
+      { header: 'Country (or dependency)', column: 2, value: 'India', fields: ['country'] },
+      { header: 'Density (P/Km²)', column: 6, value: '518' },
+      { header: 'Land Area (Km²)', column: 7, value: '2,973,190' },
+    ] }], ['country'])
+    const out = await read(source, schema({ country: 'string', land_area: 'number', density: 'number' }), { type: 'list', itemSelector: rows.itemSelector, fields: [{ name: 'country', selector: 'td' }] })
+    expect(out.data).toEqual({ records: [{ country: 'India', land_area: 2973190, density: 518 }] })
+    expect(at(out, '/records/0/land_area')).toMatchObject({ context: { unit: 'Km²' }, contextEvidence: { unit: { text: 'Land Area (Km²)', evidencePath: `${where(0)} column 7 "Land Area (Km²)" header` } } })
+    expect(at(out, '/records/0/density')).toMatchObject({ context: { unit: 'P/Km²' } })
+  })
+
+  it('states no unit or date for a table that states none, and none from a caption or block that is prose, a range or a year', async () => {
+    for (const table_ of [undefined, { caption: 'In 2024, the largest economies by output', before: [{ text: 'Rates for 15–19 Oct 2026', element: 'p', distance: 1 }, { text: 'Population (2024)', element: 'h2', distance: 2 }] }]) {
+      const source = table([{ values: { currency: 'Euro', rate: '0.6210' }, columns: [{ header: 'Rate (est.)', column: 2, value: '0.6210', fields: ['rate'], ...(table_ === undefined ? {} : { table: table_ }) }] }])
+      const out = await read(source, rates)
+      expect(out.status).toBe('complete')
+      expect(at(out, '/records/0/rate')).not.toHaveProperty('context')
+      expect(at(out, '/records/0/rate')).not.toHaveProperty('contextEvidence')
+    }
+  })
+
+  it('leaves out a unit, or a date, that two of the table\'s statements give differently, with field_ambiguous', async () => {
+    const table_ = { caption: 'Figures in USD', before: [{ text: 'As of 18 Oct 2026', element: 'p', distance: 1 }, { text: 'Prices', element: 'h2', distance: 2 }] }
+    const source = table([{ values: { currency: 'Euro', rate: '0.6210' }, columns: [{ header: 'Price', column: 2, value: '0.6210', fields: ['rate'], table: table_ }, { header: '20 Oct 2026', column: 3, value: '0.7', table: table_ }] }])
+    const agreed = await read(source, rates)
+    expect(agreed.status).toBe('complete')
+    expect(at(agreed, '/records/0/rate')).toMatchObject({ context: { unit: 'USD', date: '2026-10-18' } })
+    source.listColumns![0]![0] = { header: 'Price (EUR)', column: 2, value: '0.6210', fields: ['rate'], table: table_ }
+    const unit = await read(source, rates)
+    expect(unit.status).toBe('incomplete')
+    expect(unit.data).toEqual({ records: [{ currency: 'Euro', rate: 0.621 }] })
+    expect(at(unit, '/records/0/rate')!.context).toEqual({ date: '2026-10-18' })
+    expect(unit.issues).toEqual([expect.objectContaining({ code: 'field_ambiguous', path: '/records/0/rate' })])
+    expect(unit.issues[0]!.message).toContain('"EUR"')
+    source.listColumns![0]![0] = { header: '19 Oct 2026', column: 2, value: '0.6210', fields: ['rate'], table: table_ }
+    const date = await read(source, rates)
+    expect(date.status).toBe('incomplete')
+    expect(at(date, '/records/0/rate')!.context).toEqual({ unit: 'USD' })
+    expect(date.issues).toEqual([expect.objectContaining({ code: 'field_ambiguous', path: '/records/0/rate' })])
+    expect(date.issues[0]!.message).toContain('2026-10-18')
+  })
+
+  it('takes no as-of date from a date column, whose dates are the rows\' data, or from the header of another column', async () => {
+    const closes: ListFormatRequest = { type: 'list', itemSelector: rows.itemSelector, fields: [{ name: 'close', selector: 'td.close' }] }
+    const source = table([{ values: { close: '231.40' }, columns: [
+      { header: 'Date', column: 1, value: '10/15/2026' },
+      { header: 'Close', column: 2, value: '231.40', fields: ['close'] },
+      { header: '19 Oct 2026', column: 3, value: 'note' },
+    ] }], ['close'])
+    const out = await read(source, schema({ close: 'number', date: 'string' }), closes)
+    expect(out.data).toEqual({ records: [{ close: 231.4, date: '10/15/2026' }] })
+    expect(at(out, '/records/0/close')).not.toHaveProperty('context')
+    expect(at(out, '/records/0/date')).not.toHaveProperty('context')
+  })
+})

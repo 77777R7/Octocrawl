@@ -613,6 +613,23 @@ export interface ListColumn {
   header: string
   column: number
   value: string | null
+  /** The list's fields whose value was read from a cell under this header; absent when none was. */
+  fields?: readonly string[]
+  /** What the row's table states around its rows (`ListTableText`), the same for each of its columns; absent when it states nothing there. */
+  table?: ListTableText
+}
+
+/**
+ * The text a table states about itself, as the page writes it, whitespace
+ * collapsed: its caption, and the short blocks just before it, nearest first,
+ * back to and including the heading that introduces it (`before`). Each block
+ * names its element (`span.ratesTimestamp`) and how many blocks before the
+ * table it stands (1 is the nearest). Read for the unit and as-of date of the
+ * numbers in its columns; nothing is classified here.
+ */
+export interface ListTableText {
+  caption: string | null
+  before: readonly { text: string; element: string; distance: number }[]
 }
 
 /** The `list` format: the records of the page, or of every page a paginate step read. */
