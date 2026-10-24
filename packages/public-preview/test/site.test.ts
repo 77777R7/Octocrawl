@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import type { FetchResult } from '@w2l/contracts'
 import { createPreviewServer, type PreviewServerOptions } from '../src/server.js'
 import type { CaptureOutcome } from '../src/preview.js'
-import { dailyVisitorId, looksAutomated, parsePublicOrigin, parseWebEvent, type LogLine } from '../src/site.js'
+import { dailyVisitorId, looksAutomated, parsePublicOrigin, parseWebEvent, readSourceCookie, type LogLine } from '../src/site.js'
 
 const servers: Server[] = []
 const tempDirs: string[] = []
@@ -247,13 +247,39 @@ describe('first-party analytics', () => {
     ])
   })
 
+  it('remembers how a browser first reached the site, once, in a cookie of its own, and nothing for one that asked not to be tracked', async () => {
+    const { url } = await site({ visitorCookieSecret: 's'.repeat(32) })
+    const source = (response: Response) => response.headers.getSetCookie().find(cookie => cookie.startsWith('w2l_src='))
+    const first = await fetch(`${url}/docs/limits/?utm_source=reddit&utm_medium=post&utm_campaign=launch-1&from=blog-x`, { headers: { referer: 'https://www.reddit.com/r/mcp/comments/abc/?share=1' } })
+    const set = source(first)!
+    expect(set).toMatch(/^w2l_src=[A-Za-z0-9_-]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=7776000$/)
+    const pair = set.split(';')[0]!
+    const today = new Date().toISOString().slice(0, 10)
+    expect(readSourceCookie({ headers: { cookie: `a=1; ${pair}` } } as never)).toEqual({ utmSource: 'reddit', utmMedium: 'post', utmCampaign: 'launch-1', from: 'blog-x', ref: 'www.reddit.com', landing: '/docs/limits/', landedOn: today })
+    // The first touch stays: a later page with other tags sets nothing.
+    expect(source(await fetch(`${url}/?utm_source=hn`, { headers: { cookie: pair } }))).toBeUndefined()
+    // This site as the referrer is no source; a tag that is not plain text is dropped.
+    const direct = source(await fetch(`${url}/?utm_source=%3Cscript%3E`, { headers: { referer: `${url}/docs/limits/` } }))!
+    expect(readSourceCookie({ headers: { cookie: direct.split(';')[0] } } as never)).toEqual({ landing: '/', landedOn: today })
+    // Files are not pages, and Do Not Track or Global Privacy Control set nothing.
+    expect(source(await fetch(`${url}/robots.txt?utm_source=x`))).toBeUndefined()
+    expect(source(await fetch(`${url}/?utm_source=x`, { headers: { dnt: '1' } }))).toBeUndefined()
+    expect(source(await fetch(`${url}/?utm_source=x`, { headers: { 'sec-gpc': '1' } }))).toBeUndefined()
+    // A signed-in browser had its cookie deleted at sign-in and gets no new one.
+    expect(source(await fetch(`${url}/?utm_source=x`, { headers: { cookie: 'w2l_account=1' } }))).toBeUndefined()
+    expect(source(await fetch(`${url}/?utm_source=x`, { headers: { cookie: 'a=1; w2l_session=abc' } }))).toBeUndefined()
+    expect(source(await fetch(`${url}/?utm_source=x`, { headers: { cookie: 'w2l_account=' } }))).toBeDefined()
+    // A cookie this site did not write reads as none.
+    expect(readSourceCookie({ headers: { cookie: 'w2l_src=bm90IGpzb24' } } as never)).toBeNull()
+  })
+
   it('flags the operator\'s own browser as internal once it opts in with ?internal=1, and clears it with ?internal=0', async () => {
     const { url, lines } = await site({ visitorCookieSecret: 's'.repeat(32) })
     const on = (await fetch(`${url}/?internal=1`)).headers.getSetCookie()
-    expect(on.map(cookie => cookie.split('=')[0])).toEqual(['w2l_visitor', 'w2l_internal'])
+    expect(on.map(cookie => cookie.split('=')[0])).toEqual(['w2l_visitor', 'w2l_internal', 'w2l_src'])
     expect(on[1]).toMatch(/^w2l_internal=1; Max-Age=31536000; Path=\/; HttpOnly; SameSite=Lax$/)
     expect((await fetch(`${url}/?internal=0`)).headers.getSetCookie()[1]).toMatch(/^w2l_internal=; Max-Age=0;/)
-    expect((await fetch(`${url}/?internal=yes`)).headers.getSetCookie().map(cookie => cookie.split('=')[0])).toEqual(['w2l_visitor'])
+    expect((await fetch(`${url}/?internal=yes`)).headers.getSetCookie().map(cookie => cookie.split('=')[0])).toEqual(['w2l_visitor', 'w2l_src'])
     const event = (cookie?: string) => fetch(`${url}/api/events`, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify({ name: 'page_view', props: { path: '/' } }) })
     await event('w2l_internal=1')
     await event('w2l_internal=0')

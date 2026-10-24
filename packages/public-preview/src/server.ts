@@ -10,7 +10,7 @@ import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './cap
 import { mapPreview, type PreviewMap, type PreviewMapper } from './map.js'
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
 import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, INTERNAL_COOKIE, internalVisit, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
-  requestOrigin, stdoutLogger, targetHost, type Logger } from './site.js'
+  landingSource, readSourceCookie, requestOrigin, sourceCookie, stdoutLogger, targetHost, type Logger } from './site.js'
 import { parseWaitlistEntry, WAITLIST_BODY_BYTES, WAITLIST_DAILY_SUBMISSIONS, type WaitlistStore } from './waitlist.js'
 import type { createAuthRoutes } from './auth.js'
 import type { createAccountRoutes } from './account.js'
@@ -167,6 +167,18 @@ function setInternalCookie(req: IncomingMessage, res: ServerResponse, search: st
   const cookie = `${INTERNAL_COOKIE}=${value === '1' ? '1; Max-Age=31536000' : '; Max-Age=0'}; Path=/; HttpOnly; SameSite=Lax${secure}`
   const existing = res.getHeader('set-cookie')
   res.setHeader('set-cookie', [...(Array.isArray(existing) ? existing : typeof existing === 'string' ? [existing] : []), cookie])
+}
+
+/** The first page a browser opens without `w2l_src` remembers how it got here (site.ts, GTM gate R5); files are not pages,
+ * and a visitor who sent Do Not Track or Global Privacy Control gets no cookie, nor does a signed-in browser, whose
+ * cookie was deleted at sign-in (auth.ts). */
+function setSourceCookie(req: IncomingMessage, res: ServerResponse, pathname: string, search: string, ownHost: string): void {
+  if (/\.[A-Za-z0-9]+$/.test(pathname) && !pathname.endsWith('.html')) return
+  if (optedOut(req) || readSourceCookie(req) !== null) return
+  if (/(?:^|;\s*)(?:w2l_session=[^;\s]|w2l_account=1)/.test(req.headers.cookie ?? '')) return
+  const secure = !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host ?? '')
+  const existing = res.getHeader('set-cookie')
+  res.setHeader('set-cookie', [...(Array.isArray(existing) ? existing : typeof existing === 'string' ? [existing] : []), sourceCookie(landingSource(req, pathname, search, ownHost), secure)])
 }
 
 function visitorKey(req: IncomingMessage, secret: string | undefined): string {
@@ -509,6 +521,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
       await serveStatic(req, res, options.staticDir, pathname, requestUrl.search, requestOrigin(req, publicOrigin), () => {
         if (req.method === 'GET' && secret) issueVisitorCookie(req, res, secret)
         if (req.method === 'GET') setInternalCookie(req, res, requestUrl.search)
+        if (req.method === 'GET') setSourceCookie(req, res, pathname, requestUrl.search, siteHost(req, publicOrigin))
       })
       return
     }
