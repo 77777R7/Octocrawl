@@ -1,7 +1,7 @@
 """Synthetic controls for live_rescore.py's same-day scoring and cause labels. No reserved label or product output is loaded."""
-import unittest
+import json,os,tempfile,unittest
 from holdout_score import score_case
-from live_rescore import LIVE_ORIGIN,label_case,perfect_answer,tally
+from live_rescore import LIVE_ORIGIN,label_case,perfect_answer,sameday_section,tally
 
 def field(eid,name,value,dtype='text',unit='na',date='na',freshness='static'):
  return {'id':f'V99/{eid}/{name}','entityId':eid,'name':name,'value':value,'dataType':dtype,'required':True,'unitRef':unit,'dateRef':date,'evidence':[{'quote':value,'role':'value'}],'freshness':freshness}
@@ -67,5 +67,51 @@ class SameDayCauses(unittest.TestCase):
  def test_perfect_answer_fills_a_price_currency_from_its_unit(self):
   g={'id':'V99','fields':[field('product','name','Kit'),field('product','price','9.50','decimal','usd')],'units':{'na':{'state':'not_applicable','value':None},'usd':{'state':'known','value':'USD'}}}
   self.assertEqual(perfect_answer(g,{'properties':{'name':{},'price':{},'currency':{}}})['json']['data'],{'name':'Kit','price':'9.50','currency':'USD'})
+
+def stated(records,unit='per AUD',day='2026-10-23',sha=None):
+ """A json answer that states each rate's unit and date (json.evidence context, #704), read from the page whose sha is given."""
+ doc=answer(records);doc['json']['evidence']=[{'path':f'/records/{k}/rate','context':{'unit':unit,'date':day}} for k in range(len(records))]
+ if sha:doc['evidenceRecord']={'rawSha256':sha}
+ return doc
+def with_sha(case,sha):return {**case,'rawSha256':sha}
+def run_labels(gold,ref,docs,own=()):
+ """sameday_section on a one-case run written to a temporary folder: gold, a same-day set whose reference arm is
+ `standard`, each arm's answer and, optionally, annotations of pages this run fetched. Returns each arm's label."""
+ with tempfile.TemporaryDirectory() as t:
+  def put(p,o):os.makedirs(os.path.dirname(f'{t}/{p}'),exist_ok=True);json.dump(o,open(f'{t}/{p}','w'))
+  put('gold/cases/V99/gold.json',gold);put('sd/plan.json',{'cases':[{'id':'V99'}]});put('sd/cases/V99/gold.json',ref)
+  put('sd/cases/V99/capture.json',{'referenceArm':'standard','rawSha256':ref['rawSha256'],'arms':{'standard':{'rawSha256':ref['rawSha256']}}})
+  for arm,doc in docs.items():put(f'run/{arm}/V99.json',{'request':{'formats':[{'type':'json','schema':SCHEMA_RATES}]},'response':doc})
+  for k,g in enumerate(own):put(f'own/{k}/cases/V99/gold.json',g)
+  rows=[{**score_case(gold,doc,LIVE_ORIGIN,'json'),'version':arm} for arm,doc in docs.items()]
+  out=sameday_section(f'{t}/run',f'{t}/gold',f'{t}/sd',rows,[f'{t}/own/{k}' for k in range(len(own))])
+ return {v:d['falseSuccessCauses'].get('V99') for v,d in out['versions'].items()}
+
+class SourceByHash(unittest.TestCase):
+ """The reference is an arm's own page only when the arm's answer was read from the same bytes (evidenceRecord.rawSha256)."""
+ GOLD=with_sha(rates('0.70','110.2','2026-10-19'),'0'*64)
+ REF=with_sha(rates('0.71','110.5','2026-10-23'),'b'*64)  # the reference fetch
+ LATER=with_sha(rates('0.72','110.5','2026-10-23'),'c'*64)  # a later fetch of the same page, where the rate moved
+ READ=[{'currency':'USD','rate':0.72},{'currency':'JPY','rate':110.5}]
+ def test_an_arm_named_like_the_reference_that_read_a_later_fetch_is_not_on_its_own_source(self):
+  l=run_labels(self.GOLD,self.REF,{'standard':stated(self.READ,sha='c'*64)})['standard']
+  self.assertEqual(l['fields']['V99/c-1/rate']['cause'],'unknown');self.assertEqual(l['cause'],'unknown')
+ def test_a_later_fetch_with_its_own_annotation_is_drift_where_the_value_moved(self):
+  l=run_labels(self.GOLD,self.REF,{'standard':stated(self.READ,sha='c'*64)},[self.LATER])['standard']
+  self.assertEqual(l['cause'],'drift');self.assertIn('own',l['fields']['V99/c-1/rate']['evidence'])
+ def test_an_arm_that_read_the_reference_bytes_is_on_its_own_source(self):
+  l=run_labels(self.GOLD,self.REF,{'standard':stated(self.READ,sha='b'*64)})['standard']
+  self.assertEqual(l['fields']['V99/c-1/rate']['cause'],'extraction')
+ def test_an_arm_without_a_hash_is_never_on_its_own_source(self):
+  l=run_labels(self.GOLD,self.REF,{'standard':stated(self.READ)})['standard']
+  self.assertEqual(l['fields']['V99/c-1/rate']['cause'],'unknown')
+ def test_an_arm_without_a_source_uses_a_page_this_run_read(self):
+  fc=stated(self.READ);fc['json'].pop('evidence')  # Firecrawl keeps no source and states no context
+  same=run_labels(self.GOLD,self.REF,{'firecrawl':fc,'standard':stated(self.READ,sha='b'*64)})['firecrawl']
+  self.assertEqual(same['fields']['V99/c-1/rate']['cause'],'extraction')  # the reference is a page of this run (as in #701)
+  later=run_labels(self.GOLD,self.REF,{'firecrawl':fc,'standard':stated(self.READ,sha='c'*64)})['firecrawl']
+  self.assertEqual(later['fields']['V99/c-1/rate']['cause'],'unknown')  # no page this run read is annotated
+  own=run_labels(self.GOLD,self.REF,{'firecrawl':fc,'standard':stated(self.READ,sha='c'*64)},[self.LATER])['firecrawl']
+  self.assertEqual(own['fields']['V99/c-1/rate']['cause'],'schema_scope')  # right value on this run's page; unit and date not requested
 
 if __name__=='__main__':unittest.main()
