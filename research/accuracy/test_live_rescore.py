@@ -36,6 +36,11 @@ class SameDayCauses(unittest.TestCase):
   gold=posts(('Old A','5'),('Old B','7'));today=posts(('New A','9'),('New B','3'))
   l=label('standard',gold,today,answer([{'title':'New A','points':9},{'title':'Wrong','points':3}]),SCHEMA_POSTS)
   self.assertEqual(l['cause'],'extraction');self.assertEqual(l['fields']['V99/p-2/title']['cause'],'extraction')
+ def test_a_wrong_unit_the_answer_states_in_its_evidence_is_not_schema_scope(self):
+  doc=answer([{'currency':'USD','rate':0.71},{'currency':'JPY','rate':110.5}])
+  doc['json']['evidence']=[{'path':f'/records/{k}/rate','context':{'unit':'per USD','date':'2026-10-23'}} for k in (0,1)]
+  l=label('standard',rates('0.70','110.2','2026-10-19'),rates('0.71','110.5','2026-10-23'),doc,SCHEMA_RATES)
+  self.assertEqual(l['cause'],'extraction')
  def test_a_live_value_from_another_fetch_is_unknown_not_extraction(self):
   gold=posts(('Old A','5'),('Old B','7'));today=posts(('New A','9'),('New B','3'));doc=answer([{'title':'New A','points':10},{'title':'New B','points':3}])
   self.assertEqual(label('firecrawl',gold,today,doc,SCHEMA_POSTS)['fields']['V99/p-1/points']['cause'],'unknown')

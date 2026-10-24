@@ -12,7 +12,8 @@ annotation, every other case against the 2026-10-20 gold again, so all 42 cases 
 reported side by side, and every false success against the gold gets a cause label (CAUSES) read from evidence:
 - drift: the answer is correct against the same-day annotation of the page;
 - schema_scope: what still fails is a unit, date or period check that an answer giving every requested property exactly
-  right would fail too (the request never asked for it);
+  right would fail too (the request never asked for it), and that the answer does not state anyway (a json.evidence
+  context, #704, that states a wrong unit or date is the answer's own);
 - extraction: a value the page stated on the run day (same-day annotation from this arm's own source, from a source that
   agrees with it, a value unchanged since the gold, or a record whose other fields the answer matches; without a same-day
   annotation, the gold value another arm returned in this run) and the answer did not deliver; also duplicate records.
@@ -66,6 +67,12 @@ def perfect_answer(case,schema):
   if 'records' in props:data['records']=[obj(fs,set(props['records'].get('items',{}).get('properties') or {})) for _,fs in recs]
   return {'status':'success','json':{'status':'complete','data':data},'verification':{'status':'passed'}}
 
+def unrequested(perfect_row,row):
+  """Checks the perfect answer to the request fails too, less those this answer states anyway: since #704 a number's
+  json.evidence context can state a unit or date the schema never asked for, and a wrong one is the answer's own."""
+  stated={k for k,o in (('unit','unit'),('date','businessDate'),('period','period')) if row.get(o) is not None}
+  return {k for k,c in perfect_row['checks'].items() if c is False and k not in ('sameSource','relation')}-stated
+
 def as_page(row,dims):
   """Only the unit fails, the value is right, and the delivered unit is the page's own text of it (a symbol the gold normalises)."""
   ctx=row['contextEvidence'].get('units') or {}
@@ -80,7 +87,7 @@ def field_cause(arm,row,ref_row,perfect_row,ref,seen_live,own_quote,same_record=
   if ref_row is not None:
     if ok(ref_row): return 'drift','correct against the same-day annotation'
     dims=[k for k,c in ref_row['checks'].items() if c is False and k not in ('sameSource','relation')]
-    beyond={k for k,c in perfect_row['checks'].items() if c is False and k not in ('sameSource','relation')}
+    beyond=unrequested(perfect_row,ref_row)
     if dims and set(dims)<=beyond: return 'schema_scope',f'{",".join(dims)} not requested; '+('value correct against the same-day annotation' if ref_row['checks']['value'] else 'value as the gold')
     if as_page(ref_row,dims): return 'unknown','the answer gives the unit as the page writes it; the gold normalises it (for example € to EUR)'
     dims=[k for k in dims if k not in beyond]
@@ -91,7 +98,7 @@ def field_cause(arm,row,ref_row,perfect_row,ref,seen_live,own_quote,same_record=
       return 'extraction',f'{why} states {"/".join(dims)} the answer did not deliver'
     return 'unknown','the value can change between fetches and this arm\'s run-day source was not kept' if fast and 'value' in dims else 'the value changed since the gold, this arm\'s run-day source was not kept, and no other field of the record matches'
   dims=[k for k,c in row['checks'].items() if c is False and k not in ('sameSource','relation')]
-  beyond={k for k,c in perfect_row['checks'].items() if c is False and k not in ('sameSource','relation')}
+  beyond=unrequested(perfect_row,row)
   if dims and set(dims)<=beyond: return 'schema_scope',f'{",".join(dims)} not requested'
   if as_page(row,dims): return 'unknown','the answer gives the unit as the page writes it; the gold normalises it (for example € to EUR)'
   if seen_live and not fast: return 'extraction','another arm returned the gold value in this run'
