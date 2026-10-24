@@ -59,3 +59,66 @@ describe('selected-list JSON scope and bounds', () => {
     expect(calls).toBe(0)
   })
 })
+
+describe('selected-list JSON from the selected table rows\' columns', () => {
+  // Minimized from reserved v2 V23 (devguide.python.org) and V22 (endoflife.date): the list names the first cell only.
+  const rows: ListFormatRequest = { type: 'list', itemSelector: 'table > tbody > tr', fields: [{ name: 'branch', selector: 'td' }] }
+  const schema = (keys: string[]): JsonFormatRequest => ({ type: 'json', schema: { type: 'object', properties: { records: { type: 'array', items: { type: 'object', properties: Object.fromEntries(keys.map(key => [key, { type: 'string' }])), required: keys } } }, required: ['records'] } })
+  function table(columns: FetchResult['listColumns']): FetchResult {
+    const branches = ['main', '3.15']
+    const list: ListExtraction = { itemSelector: rows.itemSelector!, fields: ['branch'], records: branches.map((branch, index) => ({ values: { branch }, missing: [], source: { url, page: 1, index } })), pages: 1, incomplete: 0, truncated: false, csv: '', csvSha256: '' }
+    return { requestedUrl: url, status: 'success', markdown: '', evidence: { finalUrl: url, httpStatus: 200 }, list, listColumns: columns } as FetchResult
+  }
+  const header = (values: [string, string | null][]) => values.map(([h, value], i) => ({ header: h, column: i + 1, value }))
+  const read = (source: FetchResult, format: JsonFormatRequest) => extractStructured(source, format, {}, null, rows)
+
+  it('fills a key the list fields do not name from the column whose header names it, with the column as evidence', async () => {
+    const source = table([
+      header([['Branch', 'main'], ['Status', 'feature'], ['First release', '2027-10-06'], ['End of life', '2032-10']]),
+      header([['Branch', '3.15'], ['Status', 'bugfix'], ['First release', '2026-10-09'], ['End of life', '2031-10']]),
+    ])
+    const out = await read(source, schema(['branch', 'status', 'first_release', 'end_of_life']))
+    expect(out.status).toBe('complete')
+    expect(out.data).toEqual({ records: [
+      { branch: 'main', status: 'feature', first_release: '2027-10-06', end_of_life: '2032-10' },
+      { branch: '3.15', status: 'bugfix', first_release: '2026-10-09', end_of_life: '2031-10' },
+    ] })
+    expect(out.evidence.find(item => item.path === '/records/1/first_release')).toEqual({ path: '/records/1/first_release', source: 'dom', evidencePath: `${JSON.stringify(url)} page 1 table > tbody > tr record 1 column 3 "First release" text` })
+    expect(out.evidence.find(item => item.path === '/records/0/branch')!.evidencePath).toContain('record 0 td text')
+  })
+
+  it('keeps a named field\'s own value, and leaves out a key no header names, a column under no text and two columns that state different values', async () => {
+    const source = table([
+      header([['Branch', 'other'], ['Security Support', 'Ends in 5 years (31 Oct 2031)'], ['Status', null], ['Released', '2026'], ['Released', '2027']]),
+      header([['Branch', 'other'], ['Security Support', 'Ends in 4 years (31 Oct 2030)'], ['Status', 'bugfix'], ['Released', '2025'], ['Released', '2025']]),
+    ])
+    const out = await read(source, schema(['branch', 'security_support_until', 'status', 'released']))
+    expect(out.status).toBe('incomplete')
+    expect(out.data).toEqual({ records: [{ branch: 'main' }, { branch: '3.15', status: 'bugfix', released: '2025' }] })
+    expect(out.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'field_unavailable', path: '/records/0/security_support_until' }),
+      expect.objectContaining({ code: 'field_unavailable', path: '/records/0/status' }),
+      expect.objectContaining({ code: 'field_ambiguous', path: '/records/0/released' }),
+    ]))
+    expect(out.issues.some(issue => issue.path === '/records/1/released')).toBe(false)
+  })
+
+  it('counts against the JSON budget only the columns a key is read from', async () => {
+    const many = 700
+    const wide = table(Array.from({ length: many }, () => Array.from({ length: 10 }, (_, i) => ({ header: `Column header ${i}`, column: i + 1, value: `some cell value ${i}`.repeat(4) }))))
+    wide.list!.records = Array.from({ length: many }, (_, index) => ({ values: { branch: 'main' }, missing: [], source: { url, page: 1, index } }))
+    expect((await read(wide, schema(['branch']))).status).toBe('complete')
+    const read2000 = table(Array.from({ length: 2000 }, () => [{ header: 'Status', column: 1, value: 'x'.repeat(600) }]))
+    read2000.list!.records = Array.from({ length: 2000 }, (_, index) => ({ values: { branch: 'main' }, missing: [], source: { url, page: 1, index } }))
+    const over = await read(read2000, schema(['branch', 'status']))
+    expect(over).toMatchObject({ status: 'incomplete', data: null })
+    expect(over.issues[0]!.message).toMatch(/budget/)
+  })
+
+  it('reads no column when the columns are not those of the selected records', async () => {
+    const source = table([header([['Branch', 'main'], ['Status', 'feature']])])
+    const out = await read(source, schema(['branch', 'status']))
+    expect(out.data).toEqual({ records: [{ branch: 'main' }, { branch: '3.15' }] })
+  })
+})
+

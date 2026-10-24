@@ -1618,7 +1618,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           ...outcome.audit,
           summary: {
             ...outcome.audit.summary,
-            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, ...result }, ...attempt }) => ({
+            attempts: outcome.audit.summary.attempts.map(({ result: { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, listColumns: _listColumns, ...result }, ...attempt }) => ({
               ...attempt,
               result: { ...result, markdown: null, links: [], ...(screenshot === undefined ? {} : { screenshot: null }) },
             })),
@@ -2655,6 +2655,8 @@ function fetchOptions(options: PageOptions | undefined, formats: readonly Scrape
     ...(screenshot === undefined ? {} : { screenshot }),
     ...(options?.actions === undefined ? {} : { actions: options.actions }),
     ...(list === undefined ? {} : { list }),
+    // A schema read from the selected list may name record keys its fields do not: their table columns are read too.
+    ...(list?.itemSelector !== undefined && customJsonFormat(formats) !== undefined ? { listColumns: true } : {}),
     ...(options?.verify === undefined ? {} : { verify: options.verify }),
   }
 }

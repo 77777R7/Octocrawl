@@ -87,6 +87,45 @@ describe('extractListRecords, as a reader sees the page', () => {
   })
 })
 
+describe('extractListRecords, the columns of a selected table row', () => {
+  // Minimized from reserved v2 V28 (postgresql.org), V27 (php.net) and V22 (endoflife.date).
+  const VERSIONS = '<table class="t"><thead><tr><th>Version</th><th>Current minor</th><th>First Release</th></tr></thead><tbody>' +
+    '<tr><td>18</td><td>18.6</td><td>September 25, 2025</td></tr><tr><td>17</td><td> </td><td>September 26, 2024</td></tr></tbody></table>'
+  const spec = (itemSelector: string): ListSpec => ({ type: 'list', itemSelector, fields: [{ name: 'version', selector: 'td' }] })
+  const columns = (html: string, itemSelector: string) => extractListRecords(html, 'https://x.test/', spec(itemSelector), 1, undefined, {}, { columns: true }).columns
+
+  it('reads each header of the table with the row\'s text under it, only when asked', () => {
+    expect(columns(VERSIONS, 'table.t > tbody > tr')).toEqual([
+      [{ header: 'Version', column: 1, value: '18' }, { header: 'Current minor', column: 2, value: '18.6' }, { header: 'First Release', column: 3, value: 'September 25, 2025' }],
+      [{ header: 'Version', column: 1, value: '17' }, { header: 'Current minor', column: 2, value: null }, { header: 'First Release', column: 3, value: 'September 26, 2024' }],
+    ])
+    expect(extractListRecords(VERSIONS, 'https://x.test/', spec('table.t > tbody > tr')).columns).toBeUndefined()
+  })
+
+  it('gives a header that spans columns the text of every cell under it, and finds a header row of th cells outside a thead', () => {
+    const branches = '<table class="standard"><tr><th>Branch</th><th colspan="2">Initial Release</th><th>Notes</th></tr>' +
+      '<tr class="security"><td><a href="/downloads.php?version=8.2">8.2</a></td><td>8 Dec 2022</td><td><em>3 years, 10 months ago</em></td><td colspan="2">Migration guide</td></tr></table>'
+    expect(columns(branches, 'tr.security')).toEqual([[
+      { header: 'Branch', column: 1, value: '8.2' }, { header: 'Initial Release', column: 2, value: '8 Dec 2022 3 years, 10 months ago' }, { header: 'Notes', column: 4, value: 'Migration guide' },
+    ]])
+  })
+
+  it('reads no columns for an item that is not a table row, a header row, a table with no or two header rows, or one with a cell spanning rows', () => {
+    expect(columns('<ul><li>18</li></ul>', 'li')).toEqual([null])
+    expect(columns(VERSIONS, 'thead tr')).toEqual([null])
+    expect(columns('<table><tr><td>18</td><td>18.6</td></tr></table>', 'tr')).toEqual([null])
+    expect(columns('<table><thead><tr><th colspan="2">Releases</th></tr><tr><th>Version</th><th>Minor</th></tr></thead><tbody><tr><td>18</td><td>18.6</td></tr></tbody></table>', 'tbody tr')).toEqual([null])
+    expect(columns('<table><thead><tr><th>Version</th><th>Minor</th></tr></thead><tbody><tr><td rowspan="2">18</td><td>18.6</td></tr><tr><td>18.5</td></tr></tbody></table>', 'tbody tr')).toEqual([null, null])
+  })
+
+  it('stops reading columns once their text would pass the characters budget', () => {
+    const wide = `<table><thead><tr>${'<th>h</th>'.repeat(10)}</tr></thead><tbody>${'<tr><td colspan="10">abcdefghi</td></tr>'.repeat(3)}</tbody></table>`
+    const read = extractListRecords(wide, 'https://x.test/', spec('tbody tr'), 1, { records: 10, chars: 250 }, {}, { columns: true })
+    expect(read.map(record => record.values.version)).toEqual(['abcdefghi', 'abcdefghi', 'abcdefghi'])
+    expect(read.columns!.map(row => row?.length ?? null)).toEqual([10, 10, null])
+  })
+})
+
 describe('listExtraction', () => {
   it('writes RFC 4180 CSV with the fields, then source_url, page and index, and hashes it', () => {
     const records = extractListRecords(PAGE, 'https://shop.test/list', SPEC)

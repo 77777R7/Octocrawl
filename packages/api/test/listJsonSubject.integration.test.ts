@@ -15,6 +15,13 @@ const HTML = '<html><head><title>Stationery</title><script type="application/ld+
   '<article class="item featured"><h2>Field notebook</h2><p class="price">$12.00</p><time>2026-10-14</time><a href="/notebook">Details</a></article>' +
   '<article class="item"><h2>Graph pad</h2><p class="price">$25.00</p><time>2026-10-13</time><a href="/pad">Details</a></article>' +
   '</main></body></html>'
+// Minimized from reserved v2 V28 (postgresql.org): the list names the version cell only.
+const VERSIONS = '<html><head><title>Versioning</title></head><body><main><table class="table-striped"><thead><tr><th>Version</th><th>Current minor</th><th>Supported</th><th>First Release</th><th>Final Release</th></tr></thead><tbody>' +
+  '<tr><td>18</td><td>18.6</td><td>Yes</td><td>September 25, 2025</td><td>November 14, 2030</td></tr>' +
+  '<tr><td>17</td><td>17.11</td><td>Yes</td><td>September 26, 2024</td><td>November 8, 2029</td></tr></tbody></table></main></body></html>'
+const versionRows = { type: 'list', itemSelector: 'table.table-striped > tbody > tr', fields: [{ name: 'version', selector: 'td' }] }
+const versionKeys = ['version', 'current_minor', 'first_release', 'final_release']
+const versionSchema = { type: 'json', schema: { type: 'object', properties: { records: { type: 'array', items: { type: 'object', properties: Object.fromEntries(versionKeys.map(key => [key, { type: 'string' }])), required: versionKeys } } }, required: ['records'] } }
 const list = { type: 'list', itemSelector: '#chosen .item', fields: [{ name: 'name', selector: 'h2' }, { name: 'price', selector: '.price' }, { name: 'date', selector: 'time' }, { name: 'url', selector: 'a', attribute: 'href' }] }
 const scalar = { type: 'json', schema: { type: 'object', properties: { name: { type: 'string' }, price: { type: 'string' } }, required: ['name', 'price'] } }
 let server: Server
@@ -24,7 +31,7 @@ let engine: ApiEngine
 beforeAll(async () => {
   server = createServer((req, res) => {
     if (req.url === '/robots.txt') { res.writeHead(200).end('User-agent: *\nAllow: /'); return }
-    const html = req.url === '/missing' ? HTML.replace('<p class="price">$25.00</p>', '<p class="price"></p>') : req.url === '/zero' ? HTML.replace('$12.00', '$0.00') : HTML
+    const html = req.url === '/versions' ? VERSIONS : req.url === '/missing' ? HTML.replace('<p class="price">$25.00</p>', '<p class="price"></p>') : req.url === '/zero' ? HTML.replace('$12.00', '$0.00') : HTML
     res.writeHead(200, { 'content-type': 'text/html' }).end(html)
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -112,6 +119,21 @@ describe('JSON and explicit list subject agreement', () => {
     expect(out.json.data.records).toHaveLength(1)
     expect(out.json.data.records[0]).toMatchObject({ values: { name: 'Graph pad' }, source: { index: 1 } })
     expect(out.json.evidence.every((e: any) => e.evidencePath.includes('record 1'))).toBe(true)
+  })
+
+  it('fills record keys the list fields do not name from the selected rows\' table columns, and delivers the list as asked', async () => {
+    for (const debug of [false, true]) {
+      const out = await scrape(['markdown', versionRows, versionSchema], { url: `${origin}/versions`, debug })
+      expect(out.json.status).toBe('complete')
+      expect(out.json.data.records).toEqual([
+        { version: '18', current_minor: '18.6', first_release: 'September 25, 2025', final_release: 'November 14, 2030' },
+        { version: '17', current_minor: '17.11', first_release: 'September 26, 2024', final_release: 'November 8, 2029' },
+      ])
+      expect(out.json.evidence.find((e: any) => e.path === '/records/1/final_release').evidencePath).toContain('record 1 column 5 "Final Release" text')
+      expect(out.list.fields).toEqual(['version'])
+      expect(out.list.records.map((r: any) => r.values)).toEqual([{ version: '18' }, { version: '17' }])
+      expect(JSON.stringify(out)).not.toContain('listColumns')
+    }
   })
 
   it.each(['batch', 'crawl'] as const)('keeps the selected records aligned on %s pages too', async kind => {

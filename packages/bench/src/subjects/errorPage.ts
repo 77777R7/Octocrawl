@@ -74,14 +74,17 @@ export function markdownOptions(options: FetchOptions): Pick<MarkdownOptions, 'd
  * response body on the HTTP lane, the rendered DOM on a browser lane) like
  * `links`, with their trace events (`images_collected`, `attributes_extracted`).
  */
-export function extraFormats(raw: string, url: string, options: FetchOptions, trace: TraceEvent[], lane: Lane, at: number): Pick<FetchResult, 'images' | 'attributes' | 'list'> {
-  const out: { images?: readonly string[]; attributes?: readonly AttributeExtraction[]; list?: ListExtraction } = {}
+export function extraFormats(raw: string, url: string, options: FetchOptions, trace: TraceEvent[], lane: Lane, at: number): Pick<FetchResult, 'images' | 'attributes' | 'list' | 'listColumns'> {
+  const out: { images?: readonly string[]; attributes?: readonly AttributeExtraction[]; list?: ListExtraction; listColumns?: FetchResult['listColumns'] } = {}
   if (options.list !== undefined) {
     const { spec, detected } = resolveListSpec(raw, options.list)
-    const records = spec === null ? [] : extractListRecords(raw, url, spec, 1, undefined, listScope(options))
+    const columns = options.listColumns === true && options.list.itemSelector !== undefined
+    const records = spec === null ? [] : extractListRecords(raw, url, spec, 1, undefined, listScope(options), { columns })
     const list = listExtraction(spec, records, 1, 'cut' in records && records.cut === true, detected)
     trace.push({ at, lane, event: 'list_extracted', detail: { records: list.records.length, incomplete: list.incomplete, truncated: list.truncated, ...(detected === undefined ? {} : { detected: list.itemSelector }) } })
     out.list = list
+    // For the JSON a schema reads from the selected list; not part of the list format's output.
+    if (columns && 'columns' in records && records.columns !== undefined) out.listColumns = records.columns
   }
   if (options.includeImages === true) {
     const collected = collectImages(raw, url)
