@@ -31,4 +31,4 @@ To report a problem with how the preview treated your site, email [hello@octocra
 
 ## Misuse
 
-To report misuse of the preview, see the [Acceptable use policy](/docs/acceptable-use/) and email [hello@octocrawl.dev](mailto:hello@octocrawl.dev).
+To report misuse of the preview, the hosted API or MCP, email [abuse@octocrawl.dev](mailto:abuse@octocrawl.dev). We reply within 48 hours. What counts as misuse is in the [Acceptable use policy](/docs/acceptable-use/).

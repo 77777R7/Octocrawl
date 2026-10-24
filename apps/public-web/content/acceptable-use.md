@@ -19,4 +19,4 @@ Requests may be refused, access may be limited, and the preview may be paused fo
 
 ## Report misuse
 
-Email [hello@octocrawl.dev](mailto:hello@octocrawl.dev). Other ways to reach us are on [Contact](/docs/contact/).
+Email [abuse@octocrawl.dev](mailto:abuse@octocrawl.dev). Say what was misused (a page you saw requested, an API key, an account), when, and what happened. We reply within 48 hours, and may block an address or suspend a key while we look into it. Other ways to reach us are on [Contact](/docs/contact/).
