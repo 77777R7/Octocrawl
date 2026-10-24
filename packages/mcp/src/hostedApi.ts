@@ -29,6 +29,7 @@ import { scrapeSchemaWithout } from './toolsets.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
 import { CREDITS, DEFAULT_MONTHLY_CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
+import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
 import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, type HostedJobsConfig } from './hostedJobRoutes.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
@@ -421,6 +422,8 @@ export interface HostedApiConfig {
   credits?: CreditsStore
   /** Hosted batch and crawl jobs (ROADMAP PH H1), for accounts' keys; absent, or without credits: their routes stay refused. */
   jobs?: HostedJobsConfig
+  /** The json model fallback on an account's credits (hostedModel.ts); absent: no hosted call calls the model. */
+  model?: HostedModel
   /** Shared with the Cloudflare Worker; proves CF-Connecting-IP. Absent: the socket address is the keyless identity. */
   proxySecret?: string
   keylessDaily?: number
@@ -601,6 +604,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     taskRoot: config.taskRoot,
     networkPolicy: policy,
     hosted: true,
+    // No page calls the model without the gate a start passes: its credits, the switch and the day's cap.
+    requireModelGate: true,
     defaultMaxPages: 1,
     mapMaxLimit: HOSTED_MAP_MAX_LIMIT,
     mapMaxTimeoutMs: HOSTED_MAP_MAX_TIMEOUT_MS,
@@ -792,15 +797,19 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
         ? { ...(body as Record<string, unknown>), storeInCache: false, ...(caller.browser ? {} : { fastMode: true }) }
         : body
       const req = parseScrapeRequest(pinned)
-      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
+      // The model's +2 is charged in credits, which only an account has.
+      const modelGate = { admit: async () => ({ ok: false as const, message: config.model === undefined ? MODEL_REFUSALS.notOffered : MODEL_REFUSALS.needsAccount }) }
+      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
     }
     await next()
     return c.res
   }
   /**
    * A start by an account's key: reserves what the call could cost (five credits where the browser lane may answer, one
-   * for an HTTP page or a map), runs it, then settles at what its result cost and says so in `X-Credits-Used` and
-   * `X-Credits-Remaining`. An account with at least one credit but fewer than five reads over HTTP alone this time.
+   * for an HTTP page or a map, two more where the json model fallback may be called), runs it, then settles at what its
+   * result cost and says so in `X-Credits-Used` and `X-Credits-Remaining`, and the model's part in `X-Credits-Model`.
+   * An account with too few credits for the model's two runs the page without it; with at least one credit but fewer
+   * than five, it reads over HTTP alone this time.
    */
   async function accountStart(c: Context<GateEnv>, caller: HostedCaller, uid: string, path: string, day: string, now: Date, next: () => Promise<void>) {
     const credits = config.credits
@@ -809,12 +818,23 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const quotas: QuotaEntry[] = [accounts, { id: `${day}-account-${uid}`, limit: accountDaily }]
     const isScrape = path === '/v1/scrape'
     let browser = isScrape && caller.browser
+    // The model's two credits are reserved only where it may be called: asked for, and offered (configured, switched on).
+    const wantsModel = isScrape && asksModelFallback((await c.req.json().catch(() => null) as { formats?: unknown } | null)?.formats)
+    const offered = wantsModel && config.model !== undefined && await config.model.offered()
+    let modelExtra = offered ? CREDITS.model : 0
+    let modelRefusal: string | null = modelExtra > 0 ? null : config.model === undefined ? MODEL_REFUSALS.notOffered : MODEL_REFUSALS.switchedOff
     const reserve = (amount: number) => credits.reserve(uid, amount, quotas, now).catch((error: unknown) => {
       // A commit that timed out may still have applied: the line names what may have been taken, to check against credits/{uid}.
       log(JSON.stringify({ severity: 'ERROR', event: 'hosted_credits_reserve_failed', uid, amount, message: error instanceof Error ? error.message : String(error) }))
       throw error
     })
-    let reserved = await reserve(browser ? CREDITS.browserPage : isScrape ? CREDITS.httpPage : CREDITS.map)
+    const base = () => browser ? CREDITS.browserPage : isScrape ? CREDITS.httpPage : CREDITS.map
+    let reserved = await reserve(base() + modelExtra)
+    if (!reserved.ok && reserved.limited === 'credits' && modelExtra > 0) {
+      modelExtra = 0
+      modelRefusal = MODEL_REFUSALS.credits
+      reserved = await reserve(base())
+    }
     if (!reserved.ok && reserved.limited === 'credits' && browser && reserved.remaining >= CREDITS.httpPage) {
       browser = false
       reserved = await reserve(CREDITS.httpPage)
@@ -834,16 +854,19 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     logUsage(caller, path, day)
     const reservation: Reservation = reserved.reservation
     let charge: ReturnType<typeof scrapeCharge> = { credits: 0, kind: 'unread' }
+    let modelCharged = 0
     // The call's line for the dashboard's Activity page: what was asked for, then what came back.
     const note: RequestNote = { endpoint: isScrape ? 'scrape' : 'map', keyId: caller.id, url: '', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: null, ms: null, scrapeId: null, paidCallIds: null }
     // From the call's arrival at the gate, so the reservation's round trip counts too.
     const started = now.getTime()
     const settle = async () => {
       note.ms = Date.now() - started
-      log(JSON.stringify({ severity: 'INFO', event: 'hosted_credits', uid, kind: charge.kind, used: charge.credits, reserved: reservation.fromGrant + reservation.fromPurchased }))
+      if (wantsModel) note.modelCredits = modelCharged
+      const used = charge.credits + modelCharged
+      log(JSON.stringify({ severity: 'INFO', event: 'hosted_credits', uid, kind: charge.kind, used, ...(wantsModel ? { model: modelCharged } : {}), reserved: reservation.fromGrant + reservation.fromPurchased }))
       // A settle that fails keeps what was reserved: the call is answered, and the log names the credits to give back.
-      return credits.settle(reservation, charge.credits, charge.kind, now, note).catch((error: unknown) => {
-        log(JSON.stringify({ severity: 'ERROR', event: 'hosted_credits_settle_failed', uid, reserved: reservation.fromGrant + reservation.fromPurchased, used: charge.credits, message: error instanceof Error ? error.message : String(error) }))
+      return credits.settle(reservation, used, charge.kind, now, note, modelCharged > 0 ? { [charge.kind]: 1, model: 1 } : undefined).catch((error: unknown) => {
+        log(JSON.stringify({ severity: 'ERROR', event: 'hosted_credits_settle_failed', uid, reserved: reservation.fromGrant + reservation.fromPurchased, used, message: error instanceof Error ? error.message : String(error) }))
         return null
       })
     }
@@ -859,8 +882,12 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const pinned = body !== null && typeof body === 'object' && !Array.isArray(body)
             ? { ...(body as Record<string, unknown>), storeInCache: false, ...(browser ? {} : { fastMode: true }) }
             : body
-          const result = await engine.scrape(parseScrapeRequest(pinned), { signal: c.req.raw.signal, ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
+          const model = config.model?.gate(modelRefusal) ?? null
+          const modelGate = model?.gate ?? { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) }
+          const result = await engine.scrape(parseScrapeRequest(pinned), { signal: c.req.raw.signal, modelGate, ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
+          // Two more where the model was called for the page: never more than was reserved, as only a reserved gate admits.
+          modelCharged = modelExtra > 0 && (model?.pagesCalled() ?? 0) > 0 ? CREDITS.model : 0
           noteScrape(note, result)
           response = c.json(result, 200)
         }
@@ -876,12 +903,14 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     } catch (error) {
       // A refused request, an engine error or a cancelled call cost nothing: everything reserved goes back.
       charge = { credits: 0, kind: 'unread' }
+      modelCharged = 0
       note.status = error instanceof RequestError ? 'invalid_request' : 'error'
       await settle()
       throw error
     }
     const settled = await settle()
-    response.headers.set('X-Credits-Used', String(charge.credits))
+    response.headers.set('X-Credits-Used', String(charge.credits + modelCharged))
+    if (wantsModel) response.headers.set('X-Credits-Model', String(modelCharged))
     if (settled !== null) response.headers.set('X-Credits-Remaining', String(settled.remaining))
     c.res = response
     return response

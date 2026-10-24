@@ -2,7 +2,7 @@
 
 These terms cover the public Octocrawl page at this address and its preview service (“the preview”). They do not cover the Octocrawl software: its code is licensed under the [GNU AGPL-3.0](https://github.com/77777R7/Octocrawl/blob/main/LICENSE), and nothing here limits your rights under that licence. When you run Octocrawl on your own computer, these terms do not apply.
 
-Last updated 23 October 2026.
+Last updated 24 October 2026.
 
 ## Who runs the preview
 
@@ -19,6 +19,7 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 
 - `api.octocrawl.dev` and `mcp.octocrawl.dev` are a free, limited service: a daily allowance without a key, and with a key its account's monthly credits or the allowance the key was issued with. There is no payment yet. An account makes its own keys in its dashboard, and keys can be revoked.
 - It serves scrape and map, and to an account crawl jobs of up to 500 pages and batch jobs of up to 1,000 URLs. It obeys robots.txt for every page, refuses private addresses, and does not offer proxies, CAPTCHA solving or stealth. It may be changed, slowed down, paused or stopped at any time, without notice.
+- With an account, a json format's `modelFallback: true` has Anthropic's model (Claude Haiku 5.5) fill the required fields a page's own data left empty. It sends that page's content to Anthropic, as [Privacy](/docs/privacy/#hosted-api-and-mcp) describes, and costs 2 credits more for each page on which the model is called ([Limits](/docs/limits/#hosted-api-and-mcp)). It runs within a daily budget for the whole service and may be switched off at any time, without notice; the page is then read without it.
 - The same responsibilities below apply to what you fetch through it.
 
 ## Accounts and credits
@@ -32,7 +33,7 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 ## Results
 
 - Results are provided as they are. A preview can come back blocked, incomplete or timed out, and a successful one does not guarantee that every field is correct. Amazon.sg product records are in Beta.
-- Check a result's status, final address and any field issues before you rely on it.
+- Check a result's status, final address and any field issues before you rely on it. A value the json model fallback wrote carries `model` evidence: it is kept only where the page states it, and can still be wrong.
 - A call's result is kept for ten minutes. The pages a crawl or batch job reads are kept for 7 days after the job ends, so that you can read and export them. What the service records, and when it is deleted, is described in [Privacy](/docs/privacy/).
 - If you give a job a webhook, the service sends the job's end to the address you gave. You are responsible for that address.
 

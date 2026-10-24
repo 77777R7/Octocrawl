@@ -21,6 +21,7 @@ import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTas
 import { hostedPolicy, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
 import { CREDITS, scrapeCharge, type CreditsStore, type Reservation, type UsageKind } from './hostedCredits.js'
 import type { UploadResult } from './hostedCloud.js'
+import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
 import type { HostedJob, HostedJobStore, HostedWebhookDelivery } from './hostedJobs.js'
 import { exportName, jobPrefix, jobStatus } from './hostedJobRoutes.js'
 
@@ -66,6 +67,8 @@ export interface JobWorkerDeps {
   /** Leases on hosts, so that two slices never read one site at once (`host-{host}`). */
   hostLeases: HostedLeases
   enabled?: () => Promise<boolean>
+  /** The json model fallback on the job's credits (hostedModel.ts); absent: a job's pages call no model. */
+  model?: HostedModel
   /** The engine's network and lanes; a test passes a local policy and HTTP-only channels. Default: the hosted policy. */
   engineOptions?: () => Partial<ApiEngineOptions>
   /** A directory the worker may write task directories in. */
@@ -151,8 +154,20 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
   if (deps.enabled !== undefined && !(await deps.enabled())) { line('hosted_job_switched_off'); return pass(unchanged, 300) }
 
   const request = job.request as (ParsedBatchStartRequest | ParsedCrawlStartRequest) & { fastMode?: boolean }
-  const price = request.fastMode === true ? CREDITS.httpPage : CREDITS.browserPage
-  const allowed = job.credits.maxCredits === null ? limits.slicePages : Math.floor((job.credits.maxCredits - job.credits.used) / price)
+  const basePrice = request.fastMode === true ? CREDITS.httpPage : CREDITS.browserPage
+  // A job that asks for the json model fallback reserves its two credits a page while the model is offered; a slice
+  // that cannot cover them reads its pages without the model (MODEL_REFUSALS.credits).
+  const wantsModel = asksModelFallback((request as { formats?: unknown }).formats)
+  let modelPrice = wantsModel && deps.model !== undefined && await deps.model.offered() ? CREDITS.model : 0
+  let modelRefusal: string | null = modelPrice > 0 ? null : deps.model === undefined ? MODEL_REFUSALS.notOffered : MODEL_REFUSALS.switchedOff
+  let price = basePrice + modelPrice
+  let allowed = job.credits.maxCredits === null ? limits.slicePages : Math.floor((job.credits.maxCredits - job.credits.used) / price)
+  if (allowed <= 0 && modelPrice > 0 && job.credits.maxCredits !== null && job.credits.maxCredits - job.credits.used >= basePrice) {
+    modelPrice = 0
+    modelRefusal = MODEL_REFUSALS.credits
+    price = basePrice
+    allowed = Math.floor((job.credits.maxCredits - job.credits.used) / price)
+  }
   if (allowed <= 0) return pass((j) => ({ ...j, status: 'completed', failureReason: 'max_credits' }))
   // Under maxCredits the headroom page must fit too.
   const slicePages = job.counts.slices === 0 ? Math.min(limits.firstSlicePages, limits.slicePages) : limits.slicePages
@@ -196,6 +211,14 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     // Under maxCredits the reservation stays within what is left of it; a page a drain stores past it is not charged.
     let reservedPages = Math.min(pages + headroom, job.credits.maxCredits === null ? Number.POSITIVE_INFINITY : allowed)
     let reserved = await deps.credits.reserve(job.uid, reservedPages * price, pools(reservedPages), now(), reservationId)
+    // Fewer credits than a page and the model's two: the slice reads without the model rather than not at all.
+    if (!reserved.ok && reserved.limited === 'credits' && modelPrice > 0 && reserved.remaining < price && reserved.remaining >= basePrice) {
+      modelPrice = 0
+      modelRefusal = MODEL_REFUSALS.credits
+      price = basePrice
+      reservedPages = Math.min(pages + headroom, job.credits.maxCredits === null ? Number.POSITIVE_INFINITY : Math.floor((job.credits.maxCredits - job.credits.used) / price))
+      reserved = await deps.credits.reserve(job.uid, reservedPages * price, pools(reservedPages), now(), reservationId)
+    }
     if (!reserved.ok && reserved.limited === 'credits' && reserved.remaining >= price) {
       reservedPages = Math.floor(reserved.remaining / price)
       // What is left of the job fits: no headroom needed. Otherwise a page of the reservation is the headroom.
@@ -215,10 +238,14 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     // The slice: a new engine over the restored task, stopped by the job's cancel or the switch meanwhile.
     // The policy a hosted scrape reads under (its 5 MiB file cap and the operator's contact), on whatever network a test gives.
     const extra = deps.engineOptions?.() ?? {}
+    // Each page's model call is admitted by the switch and the day's cap, and only while the slice holds its two credits;
+    // a worker without a hosted model refuses every call, whatever engine options a caller passed.
+    const model = deps.model?.gate(modelRefusal) ?? { gate: { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) } }
     const engine = createApiEngine({
       taskRoot, hosted: true, defaultMaxPages: 500, allowRobotsOverride: false, sessionsFile: null, userChrome: null,
       workerCount: SLICE_HEADROOM + 1, resumeOnStart: false, deferLaunch: true, taskIds: () => jobId, ...extra,
       networkPolicy: hostedPolicy(extra.networkPolicy ?? hostedNetworkPolicy()),
+      modelGate: model.gate,
     })
     const off = new AbortController()
     let result: Awaited<ReturnType<typeof engine.runSlice>>
@@ -255,7 +282,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     foldCheckpoint(taskDir)
     await deps.files.upload(nextCheckpoint, new Uint8Array(readFileSync(join(taskDir, CHECKPOINT_FILENAME))), { contentType: 'application/vnd.sqlite3' })
     // Charged what its pages cost, never more than it reserved (the headroom page past a maxCredits cap is free).
-    const priced = priceOf(result.charges)
+    const priced = priceOf(result.charges, modelPrice > 0)
     const used = Math.min(priced.used, reservedPages * price)
     const perKind = priced.perKind
     const errors = result.charges.filter((charge) => ERROR_STATUSES.has(charge.status)).length
@@ -400,14 +427,21 @@ export async function hostsOf(job: HostedJob, taskDir: string | null): Promise<s
   return hosts
 }
 
-/** What a slice's pages cost, as a scrape of each would (hostedCredits.ts scrapeCharge), and how many of each kind. */
-export function priceOf(charges: readonly SliceCharge[]): { used: number; perKind: Partial<Record<UsageKind, number>> } {
+/**
+ * What a slice's pages cost, as a scrape of each would (hostedCredits.ts scrapeCharge), and how many of each kind; with
+ * `model` (the slice reserved the model's credits), two more for each page whose json called the model.
+ */
+export function priceOf(charges: readonly SliceCharge[], model = false): { used: number; perKind: Partial<Record<UsageKind, number>> } {
   let used = 0
   const perKind: Partial<Record<UsageKind, number>> = {}
   for (const charge of charges) {
     const priced = scrapeCharge({ status: charge.status, lane: charge.lane, failureReason: charge.failureReason, evidenceRecord: { httpStatus: charge.httpStatus } } as Parameters<typeof scrapeCharge>[0])
     used += priced.credits
     perKind[priced.kind] = (perKind[priced.kind] ?? 0) + 1
+    if (model && charge.modelCalled === true) {
+      used += CREDITS.model
+      perKind.model = (perKind.model ?? 0) + 1
+    }
   }
   return { used, perKind }
 }

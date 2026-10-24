@@ -1,6 +1,6 @@
 import type { AppliedRobotsOverride } from './compliance.js'
 import type { FetchWarning, TraceEvent } from './result.js'
-import type { AttributeSelector, ListFormatRequest, ScreenshotOptions } from './structured.js'
+import type { AttributeSelector, ListFormatRequest, ScreenshotOptions, StructuredModelGate } from './structured.js'
 import type { PageAction } from './actions.js'
 import type { VerifyContract } from './verify.js'
 
@@ -66,6 +66,12 @@ export interface ExecutionContext {
    * asked. Set by the ladder with `paidCallId`; a listener's error is ignored.
    */
   onPaidSession?: (session: { providerSessionId: string; providerRequestId?: string }) => void
+  /**
+   * Asked before a json model fallback calls the model for a page (hosted Octocrawl's switch, daily cap and credits):
+   * a refusal leaves the json as deterministic extraction read it, with a `model_unavailable` issue that gives the
+   * reason. Absent: the model is called whenever it is configured, as before.
+   */
+  modelGate?: StructuredModelGate
 }
 
 /**

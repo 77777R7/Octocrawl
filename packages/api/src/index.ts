@@ -8,7 +8,7 @@ export type { CdpConnection, ImportChromeLoginOptions, ImportedLogin } from './c
 export { HandoffNotThrough, openUserChrome } from './chromeHandoff.js'
 export type { UserChrome, UserChromeOptions, UserChromeReadOptions } from './chromeHandoff.js'
 export type { ApiEngine, ApiEngineOptions, CrawlWithSteps, HandoffHooks, SliceCharge, SliceLimits, SliceResult } from './engine.js'
-export { compactScrapeResponse, extractStructured } from './structured.js'
+export { compactScrapeResponse, extractStructured, modelCallsMaxCostUsd, structuredModelConfigFromEnv } from './structured.js'
 export { deliveryConfig, JOB_STREAMS_OFF_NOTICE, parseListen, parsePort } from './listen.js'
 export { loadEngineConfig, preloadEngineModules, tunedPolicy } from './engineConfig.js'
 export type { EngineConfig } from './engineConfig.js'
