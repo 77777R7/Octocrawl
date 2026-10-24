@@ -14,8 +14,9 @@ reported side by side, and every false success against the gold gets a cause lab
 - schema_scope: what still fails is a unit, date or period check that an answer giving every requested property exactly
   right would fail too (the request never asked for it);
 - extraction: a value the page stated on the run day (same-day annotation from this arm's own source, from a source that
-  agrees with it, or a value unchanged since the gold; without a same-day annotation, the gold value another arm returned
-  in this run) and the answer did not deliver; also duplicate records;
+  agrees with it, a value unchanged since the gold, or a record whose other fields the answer matches; without a same-day
+  annotation, the gold value another arm returned in this run) and the answer did not deliver; also duplicate records.
+  For a value that can change within minutes (FAST), only the arm's own source shows what its page stated;
 - access: the arm's own kept page is not the page (its same-day block did not run on it);
 - unknown: none of the above can be shown, for example a changed value on a page whose run-day source this arm did not keep.
 A case's label is the first of access, extraction, unknown, schema_scope, drift among its failing required fields.
@@ -68,7 +69,8 @@ def field_cause(arm,row,ref_row,perfect_row,ref,seen_live,own_quote,same_record=
   """Cause of one failing required field against the gold. ref_row is the same field scored against the same-day
   annotation (None when the case has none), perfect_row the perfect answer's row against the same reference; same_record
   says another field of the same record is correct against the same-day annotation (the arm read that record); fast says
-  the field's freshness is in FAST, so only this arm's own source can show what the page stated when it read it."""
+  the field's freshness is in FAST, so only this arm's own source can show which value the page stated when it read it
+  (a requested unit or date delivered wrongly with the right value is still extraction)."""
   if ref_row is not None:
     if ok(ref_row): return 'drift','correct against the same-day annotation'
     dims=[k for k,c in ref_row['checks'].items() if c is False and k not in ('sameSource','relation')]
@@ -76,10 +78,10 @@ def field_cause(arm,row,ref_row,perfect_row,ref,seen_live,own_quote,same_record=
     if dims and set(dims)<=beyond: return 'schema_scope',f'{",".join(dims)} not requested; '+('value correct against the same-day annotation' if ref_row['checks']['value'] else 'value as the gold')
     own=ref['arms'].get(arm)=='reference' or ref['arms'].get(arm)=='agree'
     stable=ref_row['expected']==row['expected']
-    if own or (stable or same_record) and not fast:
+    if own or (stable or same_record) and not (fast and 'value' in dims):
       why='the same-day annotation of this arm\'s own source' if own else 'the value is unchanged since the gold' if stable else 'the same-day annotation of the record whose other fields this answer matches'
       return 'extraction',f'{why} states {"/".join(dims)} the answer did not deliver'
-    return 'unknown','the value can change between fetches and this arm\'s run-day source was not kept' if fast else 'the value changed since the gold, this arm\'s run-day source was not kept, and no other field of the record matches'
+    return 'unknown','the value can change between fetches and this arm\'s run-day source was not kept' if fast and 'value' in dims else 'the value changed since the gold, this arm\'s run-day source was not kept, and no other field of the record matches'
   dims=[k for k,c in row['checks'].items() if c is False and k not in ('sameSource','relation')]
   beyond={k for k,c in perfect_row['checks'].items() if c is False and k not in ('sameSource','relation')}
   if dims and set(dims)<=beyond: return 'schema_scope',f'{",".join(dims)} not requested'

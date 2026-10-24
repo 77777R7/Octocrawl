@@ -40,6 +40,12 @@ class SameDayCauses(unittest.TestCase):
   gold=posts(('Old A','5'),('Old B','7'));today=posts(('New A','9'),('New B','3'));doc=answer([{'title':'New A','points':10},{'title':'New B','points':3}])
   self.assertEqual(label('firecrawl',gold,today,doc,SCHEMA_POSTS)['fields']['V99/p-1/points']['cause'],'unknown')
   self.assertEqual(label('standard',gold,today,doc,SCHEMA_POSTS)['fields']['V99/p-1/points']['cause'],'extraction')
+ def test_a_volatile_price_with_the_right_value_and_a_wrong_currency_is_extraction(self):
+  g={'id':'V99','url':'https://example.org/p','rawSha256':'a'*64,'completeness':{'expectedRecords':1},'units':{'na':{'state':'not_applicable','value':None},'eur':{'state':'known','value':'EUR'}},'dates':{'na':{'state':'not_applicable','value':None}},'periods':{},
+   'fields':[field('product','name','Kit'),field('product','price','9.50','decimal','eur',freshness='volatile')]}
+  schema={'properties':{'name':{},'price':{},'currency':{}}};wrong=lambda price,cur:{'status':'success','json':{'status':'complete','data':{'name':'Kit','price':price,'currency':cur}},'verification':{'status':'passed'}}
+  self.assertEqual(label('firecrawl',g,g,wrong(9.5,'€'),schema)['cause'],'extraction')
+  self.assertEqual(label('firecrawl',g,g,wrong(9.9,'EUR'),schema)['cause'],'unknown')
  def test_a_static_field_of_a_record_read_elsewhere_is_extraction(self):
   gold=posts(('Old A','5'),('Old B','7'),'static');today=posts(('New A','9'),('New B','3'),'static')
   l=label('firecrawl',gold,today,answer([{'title':'New A','points':1},{'title':'New B','points':3}]),SCHEMA_POSTS)
