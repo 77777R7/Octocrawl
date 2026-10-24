@@ -1052,6 +1052,47 @@ describe('structured JSON extraction', () => {
     expect(out.evidence.filter(item => item.source === 'model').map(item => item.path)).toEqual(['/details/Pages', '/items/0/name', '/items/0/price'])
   })
 
+  it('keeps a model-written document number in the form the field asks for: the number alone where the title gives the series (V37)', async () => {
+    const body = '<p>This document gives coding conventions for the Python code comprising the standard library. See also PEP 20 and PEP 257.</p>'
+    const pep = (heading: string) => {
+      const html = `<html><head><title>${heading} | peps.python.org</title></head><body><main><h1>${heading}</h1>${body}</main></body></html>`
+      return { ...page(html, 'https://peps.python.org/pep-0008/'), markdown: `# ${heading}\n\nThis document gives coding conventions for the Python code comprising the standard library. See also PEP 20 and PEP 257.` }
+    }
+    const run = (input: FetchResult, properties: Record<string, JsonSchema>, answer: Record<string, unknown>) =>
+      extractStructured(input, json(properties, Object.keys(properties), true), {}, { baseUrl: 'https://model.example', model: 'extractor', fetch: openAiEndpoint(answer, []) })
+    const doc = pep('PEP 8 – Style Guide for Python Code')
+    // The title gives the series and the number; a string field that asks for the number takes it without the series.
+    for (const key of ['number', 'pep_number', 'pep']) {
+      for (const written of ['PEP 8', 'pep 8', 'PEP-8']) {
+        const out = await run(doc, { [key]: { type: 'string' }, title: { type: 'string' } }, { [key]: written, title: 'Style Guide for Python Code' })
+        expect(out.status, `${key} ${written}`).toBe('complete')
+        expect(out.data, `${key} ${written}`).toEqual({ [key]: '8', title: 'Style Guide for Python Code' })
+        expect(out.evidence.find(item => item.path === `/${key}`), `${key} ${written}`).toEqual({ path: `/${key}`, source: 'model', evidencePath: 'markdown line 1', text: 'PEP 8', normalized: '8' })
+      }
+    }
+    // A number field is never read from `PEP 8` by dropping words: the schema check refuses it, and the field stays missing.
+    for (const type of ['number', 'integer'] as const) {
+      const out = await run(doc, { number: { type }, title: { type: 'string' } }, { number: 'PEP 8', title: 'Style Guide for Python Code' })
+      expect(out.status, type).toBe('invalid')
+      expect(out.data, type).toEqual({ title: 'Style Guide for Python Code' })
+      expect(out.issues.map(issue => [issue.code, issue.path]), type).toEqual([['model_output_invalid', undefined], ['missing_required', '/number']])
+    }
+    // Kept as written: the number alone, another document's number, a field that is not the document's number, a price.
+    const kept = async (input: FetchResult, properties: Record<string, JsonSchema>, answer: Record<string, unknown>, expected: Record<string, unknown>) => {
+      const out = await run(input, properties, answer)
+      expect(out.data, JSON.stringify(answer)).toEqual(expected)
+      expect(out.evidence.filter(item => item.source === 'model').every(item => item.normalized === undefined), JSON.stringify(answer)).toBe(true)
+    }
+    await kept(doc, { number: { type: 'string' } }, { number: '8' }, { number: '8' })
+    await kept(doc, { number: { type: 'string' } }, { number: 'PEP 20' }, { number: 'PEP 20' })
+    await kept(doc, { id: { type: 'string' }, title: { type: 'string' } }, { id: 'PEP 8', title: 'x' }, { id: 'PEP 8', title: 'PEP 8 – Style Guide for Python Code' })
+    await kept(doc, { rfc_number: { type: 'string' } }, { rfc_number: 'PEP 8' }, { rfc_number: 'PEP 8' })
+    await kept(pep('Style Guide for Python Code'), { number: { type: 'string' } }, { number: 'PEP 8' }, { number: 'PEP 8' })
+    const rfc = { ...page(`<html><head><title>RFC 9112: HTTP/1.1</title></head><body><main><h1>RFC 9112: HTTP/1.1</h1>${body}</main></body></html>`, 'https://www.rfc-editor.org/rfc/rfc9112'),
+      markdown: '# RFC 9112: HTTP/1.1\n\nPrice: $12.99' }
+    await kept(rfc, { id: { type: 'string' }, price: { type: 'string' } }, { id: 'RFC 9112', price: '$12.99' }, { id: 'RFC 9112', price: '$12.99' })
+  })
+
   it('sends OpenAI strict mode a strict-safe schema derived from an ordinary one', async () => {
     const requests: Array<Record<string, any>> = []
     const schema: JsonSchema = {
