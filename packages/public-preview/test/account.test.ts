@@ -83,7 +83,7 @@ describe('the account page\'s data', () => {
     expect([body.limit, body.retentionDays]).toEqual([1_000, 30])
   })
 
-  it('erases the account\'s keys, daily usage, request lines, credits and OAuth connections from Firestore, a page at a time', async () => {
+  it('erases the account\'s keys, daily usage, request lines, credits, settled charges and OAuth connections from Firestore, a page at a time', async () => {
     const root = 'projects/octocrawl-test/databases/(default)/documents'
     const deleted: string[] = []
     const left: Record<string, string[]> = {
@@ -94,6 +94,8 @@ describe('the account page\'s data', () => {
       // Hosted jobs and their idempotency keys, each kept with the account's uid (packages/mcp/src/hostedJobs.ts).
       hostedJobs: [`${root}/hostedJobs/job-1`],
       hostedJobIdempotency: [`${root}/hostedJobIdempotency/ws_account-0001-abc`],
+      // The jobs' settled charges, each kept with the account's uid (packages/mcp/src/hostedCredits.ts).
+      creditSettles: ['job-1-0-h1', 'job-1-1-h2'].map(id => `${root}/creditSettles/${id}`),
       files: ['w/ws_account-0001/jobs/job-1/pages/00000.jsonl.gz', 'w/ws_account-0001/jobs/job-1/checkpoint.sqlite'],
       requests: Array.from({ length: 450 }, (_, i) => `${root}/requestLog/account-0001/requests/${String(i).padStart(4, '0')}`),
     }
@@ -127,9 +129,11 @@ describe('the account page\'s data', () => {
     }) as typeof fetch
     await new FirestoreAccountData('octocrawl-test', fetcher, 'octocrawl-jobs').erase('account-0001')
     expect(Object.values(left).flat()).toEqual([])
-    // Keys, usage, OAuth, jobs and idempotency keys, the workspace's slots, request lines, the balance, and two job files.
-    expect(deleted).toHaveLength(2 + 2 + 4 + 2 + 1 + 450 + 1 + 2)
+    // Keys, usage, OAuth, jobs and idempotency keys, settled charges, the workspace's slots, request lines, the balance,
+    // and two job files.
+    expect(deleted).toHaveLength(2 + 2 + 4 + 2 + 2 + 1 + 450 + 1 + 2)
     expect(deleted).toContain(`${root}/hostedJobWorkspaces/ws_account-0001`)
+    expect(deleted).toEqual(expect.arrayContaining([`${root}/creditSettles/job-1-0-h1`, `${root}/creditSettles/job-1-1-h2`]))
     // The balance first: a call under way cannot then settle and write usage back.
     expect(deleted[0]).toBe(`${root}/credits/account-0001`)
     await expect(new FirestoreAccountData('octocrawl-test', fetcher).erase('__x__')).rejects.toThrow(/malformed/)
