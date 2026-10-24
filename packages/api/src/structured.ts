@@ -37,6 +37,7 @@ import { statesAbsence } from '@w2l/extract-tf'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
 import { modelLocator } from './modelEvidence.js'
+import { agreesWithText, tableStatements, type TableStatement } from './tableContext.js'
 
 export type StructuredModelConfig = OpenAiModelConfig | ClaudeModelConfig
 
@@ -780,10 +781,11 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
     const field = namedFields.get(name)!
     return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index} ${field.selector ?? ':scope'} ${field.attribute === undefined ? 'text' : `@${field.attribute}`}`
   }
-  const columnLocation = (index: number, column: ListColumn): string => {
+  const recordLocation = (index: number): string => {
     const record = list.records[index]!
-    return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index} column ${column.column} ${JSON.stringify(column.header)} text`
+    return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index}`
   }
+  const columnLocation = (index: number, column: ListColumn): string => `${recordLocation(index)} column ${column.column} ${JSON.stringify(column.header)} text`
   let chars = 0
   for (const [index, record] of list.records.entries()) {
     if (Object.keys(record.values).some(name => !namedFields.has(name))) return incomplete('captured list fields differ from the selected field specification; unrelated fields were not copied')
@@ -831,6 +833,42 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
     }
     return { raw: matched[0]!.value!, column: matched[0]! }
   }
+  /**
+   * A number's reading (numbers.ts) and context: the currency or percent its
+   * text states, and the unit and as-of date its table states for the columns
+   * it was read under (tableContext.ts), each with where it was read. Two
+   * statements that disagree leave that entry out with field_ambiguous.
+   */
+  const numberEvidence = (raw: string, under: readonly ListColumn[], index: number, valuePath: string): Partial<StructuredFieldEvidence> => {
+    const reading = readNumber(raw)
+    if (!('value' in reading)) return { text: raw }
+    const context: NonNullable<StructuredFieldEvidence['context']> = { ...readingContext(undefined, reading.unit) }
+    const contextEvidence: NonNullable<StructuredFieldEvidence['contextEvidence']> = {}
+    const { units, dates } = tableStatements(under, result.listTables ?? [])
+    const ambiguous = (key: 'unit' | 'date', statements: readonly TableStatement[], own: boolean): void => {
+      const states = own ? 'the number\'s own text and its table state' : 'the table states'
+      issues.push({ code: 'field_ambiguous', path: valuePath, message: `${states} different ${key === 'unit' ? 'units' : 'dates'} for ${valuePath}: ${statements.map(statement => `${JSON.stringify(statement.value)} (${statement.where})`).join(', ')}; ${own ? 'only the text\'s own is given' : 'none was given'}` })
+    }
+    const given = (key: 'unit' | 'date', statement: TableStatement): void => {
+      context[key] = statement.value
+      chars += statement.text.length + statement.where.length
+      contextEvidence[key] = { text: statement.text, evidencePath: `${recordLocation(index)} ${statement.where}` }
+    }
+    if (units.length > 0) {
+      // The currency or percent the number's own text states (D3b) is weighed against the table's unit.
+      const own = context.currency ?? context.unit
+      if (units.some(unit => unit.value !== units[0]!.value)) ambiguous('unit', units, false)
+      else if (own !== undefined && !agreesWithText(context, units[0]!.value)) ambiguous('unit', [{ value: own, text: raw, where: 'the value\'s own text' }, ...units], true)
+      else if (context.unit === undefined) given('unit', units[0]!)
+    }
+    if (dates.some(date => date.value !== dates[0]!.value)) ambiguous('date', dates, false)
+    else if (dates.length > 0) given('date', dates[0]!)
+    return {
+      text: raw, normalized: reading.value, conversion: reading.conversion,
+      ...(Object.keys(context).length === 0 ? {} : { context }),
+      ...(Object.keys(contextEvidence).length === 0 ? {} : { contextEvidence }),
+    }
+  }
   const recordValue = (schema: JsonSchema, index: number, path: string): JsonValue => {
     const record = list.records[index]!
     const out: Record<string, JsonValue> = {}
@@ -856,7 +894,8 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
       const evidencePath = fromColumn !== null ? columnLocation(index, fromColumn.column) : location(index, name)
       // A column counts against the budget once a key is read from it; the fields were counted above.
       if (fromColumn !== null) chars += name.length + raw.length + evidencePath.length
-      evidence.push({ path: valuePath, source: 'dom', evidencePath, ...(typeof value === 'number' ? { text: raw } : {}) })
+      const under = fromColumn !== null ? [fromColumn.column] : columns?.[index]?.filter(column => column.fields?.includes(name)) ?? []
+      evidence.push({ path: valuePath, source: 'dom', evidencePath, ...(typeof value === 'number' ? numberEvidence(raw, under, index, valuePath) : {}) })
     }
     return out
   }
@@ -1550,9 +1589,9 @@ function withoutRepeatedBodies(summary: ScrapeResponse['summary'], debug: boolea
   return {
     ...summary,
     attempts: summary.attempts.map(({ result, ...attempt }) => {
-      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, listColumns: _listColumns, ...rest } = result
+      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, listColumns: _listColumns, listTables: _listTables, ...rest } = result
       // What the actions produced travels once too, on the response.
-      const { actions: _kept, list: _records, listColumns: _columns, ...whole } = result
+      const { actions: _kept, list: _records, listColumns: _columns, listTables: _columnTables, ...whole } = result
       return {
         ...attempt,
         result: { ...(debug ? whole : { ...rest, markdown: null, links: [] }), ...(screenshot === undefined ? {} : { screenshot: null }) },
@@ -1589,7 +1628,7 @@ export async function prepareScrapeResponse(
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
   const warning = warningOf(result.warnings)
   // What JSON read from the selected rows' columns is not a format of its own.
-  const { listColumns: _listColumns, ...run } = result
+  const { listColumns: _listColumns, listTables: _listTables, ...run } = result
   const next: ScrapeRun = {
     ...run,
     markdown: hasFormat(formats, 'markdown') ? result.markdown : null,

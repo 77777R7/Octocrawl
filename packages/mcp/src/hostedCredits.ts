@@ -131,9 +131,10 @@ export interface Reservation {
 }
 
 export type ReserveResult =
-  | { ok: true; reservation: Reservation }
+  /** `counts`: each daily counter's count after this reservation, in the order the counters were given. */
+  | { ok: true; reservation: Reservation; counts?: readonly number[] }
   | { ok: false; limited: 'credits'; remaining: number }
-  /** A daily counter is at its limit: the site's day, or one account's share of it (`id` names which). */
+  /** A daily counter is at its limit: the accounts' day, or one account's share of it (`id` names which). */
   | { ok: false; limited: 'quota'; id: string; limit: number }
   /** The account has no `users/{uid}`: it was deleted (a key the API still had cached), or never signed in. */
   | { ok: false; limited: 'account' }
@@ -141,7 +142,7 @@ export type ReserveResult =
 export interface CreditsStore {
   /**
    * Takes `amount` credits from the account (this month's grant first, then bought credits) and one start from each
-   * daily counter (the site's, the account's), in one atomic commit; refuses, taking nothing, when any would go past
+   * daily counter (the accounts', the account's), in one atomic commit; refuses, taking nothing, when any would go past
    * its limit, naming the first.
    */
   reserve(uid: string, amount: number, quotas: readonly QuotaEntry[], now?: Date, id?: string): Promise<ReserveResult>
@@ -194,7 +195,7 @@ export class MemoryCreditsStore implements CreditsStore {
     const left = { month, grant: have.grant - fromGrant, purchased: have.purchased - fromPurchased }
     this.balances.set(uid, left)
     for (const quota of quotas) this.site.set(quota.id, (this.site.get(quota.id) ?? 0) + (quota.amount ?? 1))
-    return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased, ...(id === undefined ? {} : { id }) } }
+    return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased, ...(id === undefined ? {} : { id }) }, counts: quotas.map((quota) => this.site.get(quota.id)!) }
   }
   async balance(uid: string, now = new Date()): Promise<number> {
     const have = current(this.balances.get(uid) ?? null, utcMonth(now), this.monthlyGrant)
@@ -221,7 +222,7 @@ export class MemoryCreditsStore implements CreditsStore {
   }
 }
 
-// ---- Firestore: `credits/{uid}` holds the balance, `hostedQuotas/{day}-site` the site's starts and `hostedQuotas/{day}-account-{uid}` the account's, `creditUsage/{uid}-{day}` the day's use ----
+// ---- Firestore: `credits/{uid}` holds the balance, `hostedQuotas/{day}-accounts` every account's starts and `hostedQuotas/{day}-account-{uid}` the account's (a job's slice: `{day}-jobs` and `{day}-jobs-account-{uid}`), `creditUsage/{uid}-{day}` the day's use ----
 
 interface Value { integerValue?: string; stringValue?: string; timestampValue?: string }
 interface FirestoreDoc { name: string; fields?: Record<string, Value>; updateTime?: string }
@@ -318,7 +319,7 @@ export class FirestoreCreditsStore implements CreditsStore {
         continue
       }
       if (committed === 'retry') continue
-      return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased, ...(id === undefined ? {} : { id }) } }
+      return { ok: true, reservation: { uid, month, fromGrant, fromPurchased, remaining: left.grant + left.purchased, ...(id === undefined ? {} : { id }) }, counts: quotas.map((quota, index) => counts[index]! + (quota.amount ?? 1)) }
     }
     throw new Error('credits contention exceeded retry budget')
   }

@@ -19,7 +19,7 @@ describe('the selected list\'s table columns', () => {
   it('are read only when the request asks for them, and are not part of the list', () => {
     expect(extraFormats(html, 'https://x.test/', { list }, [], 'http', 0).listColumns).toBeUndefined()
     const read = extraFormats(html, 'https://x.test/', { list, listColumns: true }, [], 'http', 0)
-    expect(read.listColumns).toEqual([[{ header: 'Version', column: 1, value: '18' }, { header: 'Current minor', column: 2, value: '18.6' }]])
+    expect(read.listColumns).toEqual([[{ header: 'Version', column: 1, value: '18', fields: ['version'] }, { header: 'Current minor', column: 2, value: '18.6' }]])
     expect(read.list!.records).toEqual([{ values: { version: '18' }, missing: [], source: { url: 'https://x.test/', page: 1, index: 0 } }])
     expect(extraFormats(html, 'https://x.test/', { list: { type: 'list', fields: list.fields }, listColumns: true }, [], 'http', 0).listColumns).toBeUndefined()
   })
