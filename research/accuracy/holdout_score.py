@@ -101,7 +101,7 @@ def mapped(case,doc,fixture_origin,mapping='markdown'):
   return v,ref
  if mapping=='json':
   from json_map import json_mapped  # json/verify plans: values from json.data only
-  json_mapped(case,doc,put,duplicates)
+  json_mapped(case,doc,put,duplicates,fixture_origin)
  elif cid=='H01':
   stop=re.search(r'^#{0,6}\s*(?:Abstract|Status of This Memo|Table of Contents)\s*$',text,re.M|re.I)
   head=text[:stop.start()] if stop else text[:8000]

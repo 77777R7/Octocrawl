@@ -6,7 +6,9 @@ Values come only from the delivered `json.data`: a top-level field from the prop
 the same rule that wrote the schema). A price-like number takes its unit from the `currency` property the schema asks
 for (never from a symbol). A date field's business date is the date its value states; any other field whose date the
 source states takes the date of its own object's first date field. Periods and non-currency units are not in this
-output and stay None. Nothing is read from Markdown, tables, links, the retained source or the labels.
+output and stay None. A url value served from the fixture origin of a frozen replay is rebased onto the case's own
+origin, as the Markdown mappings do (holdout_score.rebase_url). Nothing is read from Markdown, tables, links, the retained
+source or the labels.
 """
 import re
 import holdout_score as hs
@@ -24,7 +26,7 @@ def value_of(v):
  if isinstance(v,bool):return str(v).lower()
  return str(v)
 
-def json_mapped(case,doc,put,duplicates):
+def json_mapped(case,doc,put,duplicates,fixture_origin):
  js=doc.get('json') if isinstance(doc.get('json'),dict) else {};data=js.get('data') if isinstance(js.get('data'),dict) else None
  top,recs=grouping(case);order={e:k for k,(e,_) in enumerate(recs)}
  records=data.get('records') if data and isinstance(data.get('records'),list) else []
@@ -34,6 +36,7 @@ def json_mapped(case,doc,put,duplicates):
   else:obj=data;pointer='/'+f['name']
   if obj is None:put(f,None,None,entity=False);continue
   v=value_of(obj.get(f['name']))
+  if f['dataType']=='url' and v and v.startswith(fixture_origin.rstrip('/')+'/'):v=hs.rebase_url(v,case['url'],fixture_origin)
   unit=value_of(obj.get('currency')) if 'price' in f['name'] else None
   dt=f['dataType'];date=(vdate(v) or (v if v and re.fullmatch(r'\d{4}-\d{2}-\d{2}',v) else None)) if dt in DATES and v else hs.month_only(v) if dt=='year_month' and v else v if dt=='year' else None
   if dt=='text' and v and case['dates'].get(f.get('dateRef'),{}).get('state')=='known':date=v if hs.month_only(v) else vdate(v)

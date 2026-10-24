@@ -71,5 +71,13 @@ class JsonPlans(unittest.TestCase):
   d=doc('');d['json']={'status':'complete','data':{'updated':'2 January 2026','records':[{'title':'a','price':9.5,'currency':'USD'}]},'evidence':[]}
   r=score_case(g,d,O,'json');rows={x['fieldId']:x for x in r['rows']}
   self.assertTrue(rows['V99/page/updated']['fullyCorrect']);self.assertTrue(rows['V99/post-1/price']['fullyCorrect']);self.assertFalse(rows['V99/post-2/title']['checks']['entity'])
+ def test_json_mapping_rebases_fixture_origin_urls(self):
+  # A frozen replay serves the page from the fixture origin, so absolutised links carry it; the Markdown mappings rebase them.
+  g=case('V99','https://example.org/news/',[field('V99',f'post-{k}','url',f'https://example.org/news/{k}/','url') for k in (1,2)])
+  d=doc('');d['json']={'status':'complete','data':{'records':[{'url':O+'/news/1/'},{'url':'https://other.test/news/2/'}]},'evidence':[]}
+  rows={x['fieldId']:x for x in score_case(g,d,O,'json')['rows']}
+  self.assertEqual(rows['V99/post-1/url']['observed'],'https://example.org/news/1/');self.assertTrue(rows['V99/post-1/url']['checks']['value'])
+  self.assertEqual(rows['V99/post-2/url']['observed'],'https://other.test/news/2/')
+  live=score_case(g,d,'http://127.0.0.1:1','json')['rows'][0];self.assertEqual(live['observed'],O+'/news/1/')
 
 if __name__=='__main__':unittest.main()
