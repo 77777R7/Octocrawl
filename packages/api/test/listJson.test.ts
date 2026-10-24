@@ -256,6 +256,12 @@ describe('selected-list JSON numbers with the unit and as-of date their table st
     const dollars = await read(one('$12.50', { header: 'Price (USD)', column: 2, value: null }), rates)
     expect(dollars.status).toBe('complete')
     expect(at(dollars, '/records/0/rate')!.context).toEqual({ currency: '$', unit: 'USD' })
+    // A scale says how many of the text's currency: no disagreement.
+    for (const [raw, header, unit] of [['€12', 'Revenue (millions)', 'millions'], ['£12', 'Revenue (m)', 'm']] as const) {
+      const scaled = await read(one(raw, { header, column: 2, value: null }), rates)
+      expect(scaled.status, header).toBe('complete')
+      expect(at(scaled, '/records/0/rate')!.context, header).toEqual({ currency: raw.slice(0, 1), unit })
+    }
     for (const [raw, column] of [['$12.50', { header: 'Price (EUR)', column: 2 }], ['€5', { header: 'Price', column: 2, table: { caption: 'Figures in USD millions', before: [] } }], ['$3', { header: 'Change (%)', column: 2 }]] as const) {
       const out = await read(one(raw, { value: null, ...column }), rates)
       expect(out.status, raw).toBe('incomplete')

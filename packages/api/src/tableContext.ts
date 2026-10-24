@@ -63,12 +63,15 @@ const codesOf = (currency: string): readonly string[] => CODES.has(currency) ? [
 /**
  * Whether a unit the table states can be the one the number's own text
  * states: a percent for a percent; for a currency (`$`, `EUR`), a unit naming
- * a currency it can stand for (`$` and `USD`, `€` and `EUR millions`). A sign
+ * a currency it can stand for (`$` and `USD`, `€` and `EUR millions`) or a
+ * scale alone, which says how many of it (`€` and `millions`). A sign
  * Octocrawl cannot map stands for no code, so it agrees only with itself.
  */
 export function agreesWithText(own: { currency?: string; unit?: string }, unit: string): boolean {
   if (own.unit !== undefined) return PERCENT.test(unit.replace(/^in\s+/iu, ''))
   if (own.currency === undefined) return true
+  // Beside an amount of money, `m`, `k` and `b` are millions, thousands and billions, not metres.
+  if (unit.replace(/^in\s+/iu, '').split(/\s+/u).every(word => isScale(word) || ['m', 'k', 'b'].includes(word))) return true
   const codes = codesOf(own.currency)
   return unit.split(/[\s/()]+/u).some(word => word === own.currency || (isCurrency(word) && codesOf(word).some(code => codes.includes(code))))
 }
