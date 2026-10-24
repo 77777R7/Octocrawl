@@ -18,7 +18,8 @@ reported side by side, and every false success against the gold gets a cause lab
   annotation, the gold value another arm returned in this run) and the answer did not deliver; also duplicate records.
   For a value that can change within minutes (FAST), only the arm's own source shows what its page stated;
 - access: the arm's own kept page is not the page (its same-day block did not run on it);
-- unknown: none of the above can be shown, for example a changed value on a page whose run-day source this arm did not keep.
+- unknown: none of the above can be shown, for example a right value whose unit is given as the page writes it (€) where
+  the gold normalises it (EUR), or a changed value on a page whose run-day source this arm did not keep.
 A case's label is the first of access, extraction, unknown, schema_scope, drift among its failing required fields.
 
 Usage: python3 research/accuracy/live_rescore.py <run dir with field-results-json.json and field-results-md.json>
@@ -65,6 +66,11 @@ def perfect_answer(case,schema):
   if 'records' in props:data['records']=[obj(fs,set(props['records'].get('items',{}).get('properties') or {})) for _,fs in recs]
   return {'status':'success','json':{'status':'complete','data':data},'verification':{'status':'passed'}}
 
+def as_page(row,dims):
+  """Only the unit fails, the value is right, and the delivered unit is the page's own text of it (a symbol the gold normalises)."""
+  ctx=row['contextEvidence'].get('units') or {}
+  return dims==['unit'] and row['checks']['value'] and row.get('unit') is not None and any(e.get('quote','').strip()==str(row['unit']).strip() for e in ctx.get('evidence') or [])
+
 def field_cause(arm,row,ref_row,perfect_row,ref,seen_live,own_quote,same_record=False,fast=False):
   """Cause of one failing required field against the gold. ref_row is the same field scored against the same-day
   annotation (None when the case has none), perfect_row the perfect answer's row against the same reference; same_record
@@ -76,6 +82,8 @@ def field_cause(arm,row,ref_row,perfect_row,ref,seen_live,own_quote,same_record=
     dims=[k for k,c in ref_row['checks'].items() if c is False and k not in ('sameSource','relation')]
     beyond={k for k,c in perfect_row['checks'].items() if c is False and k not in ('sameSource','relation')}
     if dims and set(dims)<=beyond: return 'schema_scope',f'{",".join(dims)} not requested; '+('value correct against the same-day annotation' if ref_row['checks']['value'] else 'value as the gold')
+    if as_page(ref_row,dims): return 'unknown','the answer gives the unit as the page writes it; the gold normalises it (for example € to EUR)'
+    dims=[k for k in dims if k not in beyond]
     own=ref['arms'].get(arm)=='reference' or ref['arms'].get(arm)=='agree'
     stable=ref_row['expected']==row['expected']
     if own or (stable or same_record) and not (fast and 'value' in dims):
@@ -85,6 +93,7 @@ def field_cause(arm,row,ref_row,perfect_row,ref,seen_live,own_quote,same_record=
   dims=[k for k,c in row['checks'].items() if c is False and k not in ('sameSource','relation')]
   beyond={k for k,c in perfect_row['checks'].items() if c is False and k not in ('sameSource','relation')}
   if dims and set(dims)<=beyond: return 'schema_scope',f'{",".join(dims)} not requested'
+  if as_page(row,dims): return 'unknown','the answer gives the unit as the page writes it; the gold normalises it (for example € to EUR)'
   if seen_live and not fast: return 'extraction','another arm returned the gold value in this run'
   if own_quote: return 'extraction','the gold quote is in this arm\'s own run-day source (one-subject page)'
   return 'unknown','no same-day annotation, and no arm returned the gold value'

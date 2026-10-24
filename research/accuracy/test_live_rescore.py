@@ -44,7 +44,9 @@ class SameDayCauses(unittest.TestCase):
   g={'id':'V99','url':'https://example.org/p','rawSha256':'a'*64,'completeness':{'expectedRecords':1},'units':{'na':{'state':'not_applicable','value':None},'eur':{'state':'known','value':'EUR'}},'dates':{'na':{'state':'not_applicable','value':None}},'periods':{},
    'fields':[field('product','name','Kit'),field('product','price','9.50','decimal','eur',freshness='volatile')]}
   schema={'properties':{'name':{},'price':{},'currency':{}}};wrong=lambda price,cur:{'status':'success','json':{'status':'complete','data':{'name':'Kit','price':price,'currency':cur}},'verification':{'status':'passed'}}
-  self.assertEqual(label('firecrawl',g,g,wrong(9.5,'€'),schema)['cause'],'extraction')
+  self.assertEqual(label('firecrawl',g,g,wrong(9.5,'USD'),schema)['cause'],'extraction')
+  g['units']['eur']['evidence']=[{'quote':'€'}]  # the page writes the symbol; the gold normalises it to EUR
+  self.assertEqual(label('firecrawl',g,g,wrong(9.5,'€'),schema)['cause'],'unknown')
   self.assertEqual(label('firecrawl',g,g,wrong(9.9,'EUR'),schema)['cause'],'unknown')
  def test_a_static_field_of_a_record_read_elsewhere_is_extraction(self):
   gold=posts(('Old A','5'),('Old B','7'),'static');today=posts(('New A','9'),('New B','3'),'static')
