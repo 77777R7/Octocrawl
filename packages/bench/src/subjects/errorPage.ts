@@ -74,8 +74,8 @@ export function markdownOptions(options: FetchOptions): Pick<MarkdownOptions, 'd
  * response body on the HTTP lane, the rendered DOM on a browser lane) like
  * `links`, with their trace events (`images_collected`, `attributes_extracted`).
  */
-export function extraFormats(raw: string, url: string, options: FetchOptions, trace: TraceEvent[], lane: Lane, at: number): Pick<FetchResult, 'images' | 'attributes' | 'list' | 'listColumns'> {
-  const out: { images?: readonly string[]; attributes?: readonly AttributeExtraction[]; list?: ListExtraction; listColumns?: FetchResult['listColumns'] } = {}
+export function extraFormats(raw: string, url: string, options: FetchOptions, trace: TraceEvent[], lane: Lane, at: number): Pick<FetchResult, 'images' | 'attributes' | 'list' | 'listColumns' | 'listTables'> {
+  const out: { images?: readonly string[]; attributes?: readonly AttributeExtraction[]; list?: ListExtraction; listColumns?: FetchResult['listColumns']; listTables?: FetchResult['listTables'] } = {}
   if (options.list !== undefined) {
     const { spec, detected } = resolveListSpec(raw, options.list)
     const columns = options.listColumns === true && options.list.itemSelector !== undefined
@@ -84,7 +84,10 @@ export function extraFormats(raw: string, url: string, options: FetchOptions, tr
     trace.push({ at, lane, event: 'list_extracted', detail: { records: list.records.length, incomplete: list.incomplete, truncated: list.truncated, ...(detected === undefined ? {} : { detected: list.itemSelector }) } })
     out.list = list
     // For the JSON a schema reads from the selected list; not part of the list format's output.
-    if (columns && 'columns' in records && records.columns !== undefined) out.listColumns = records.columns
+    if (columns && 'columns' in records && records.columns !== undefined) {
+      out.listColumns = records.columns
+      if (records.tables !== undefined && records.tables.length > 0) out.listTables = records.tables
+    }
   }
   if (options.includeImages === true) {
     const collected = collectImages(raw, url)

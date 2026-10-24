@@ -265,7 +265,7 @@ export interface EvidenceFieldReading {
   raw: string
   /** The value `raw` was read as; null when it is the page's statement that there is none. */
   normalized: number | string | null
-  /** The currency or unit stated with it (`GBP`, `£`, `%`, `pp`); null when none is. */
+  /** The currency or unit stated with it (`GBP`, `£`, `%`, `pp`), or the unit a selected table row's table states for it (`Km²`, `1.00 USD`); null when none is. */
   unit: string | null
   /** The rule `raw` was read by (`number/decimal`, `number/language:de`); null when none was applied. */
   conversion: string | null
