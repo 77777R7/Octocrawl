@@ -375,7 +375,7 @@ const ROW_GROUPS = new Set(['thead', 'tbody', 'tfoot'])
  * a row directly in the table (a fragment's). The walk stops at the table, so
  * a deep page costs no more than the row's own depth.
  */
-function rowGroup(tr: Element, table: Element): Element | null {
+export function rowGroup(tr: Element, table: Element): Element | null {
   for (let el = tr.parentElement; el !== null && el !== table; el = el.parentElement) {
     if (ROW_GROUPS.has(el.localName)) return el
   }
@@ -426,12 +426,12 @@ function ownRowGroups(table: Element): Element[][] {
   return [...(headRun ? [headRun] : []), ...body, ...(footRun ? [footRun] : [])].map((run) => run.rows)
 }
 
-function ownRows(table: Element): Element[] {
+export function ownRows(table: Element): Element[] {
   return ownRowGroups(table).flat()
 }
 
 /** A row's own cells, not those of a table nested in one of them. */
-function ownCells(tr: Element): Element[] {
+export function ownCells(tr: Element): Element[] {
   return ownElements(tr, CELLS, 'tr')
 }
 
@@ -468,7 +468,7 @@ function ownElements(top: Element, names: Set<string>, stop: string): Element[] 
  * leading whitespace, an optional sign, then the leading digits (`1.5` is 1,
  * `2abc` is 2); null when absent, when no digit follows, or when negative.
  */
-function nonNegativeInteger(attr: string | null): number | null {
+export function nonNegativeInteger(attr: string | null): number | null {
   const m = attr === null ? null : /^[\t\n\f\r ]*([-+]?)([0-9]+)/.exec(attr)
   if (m === null) return null
   const n = Number(m[2])

@@ -3,6 +3,7 @@ import Ajv from 'ajv'
 import type { CodeOptions, ErrorObject, ValidateFunction } from 'ajv'
 import type {
   AttributesFormatRequest,
+  ListColumn,
   ListFormatRequest,
   CompactScrapeResponse,
   ExecutionContext,
@@ -772,10 +773,16 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
   if (list.pages !== 1 || list.records.some(record => record.source.page !== 1 || ![result.requestedUrl, result.evidence.finalUrl].includes(record.source.url))) return incomplete('selected-list JSON covers one captured page; records from multiple or unrelated pages were not combined')
   if (list.records.length > LIST_JSON_MAX_RECORDS) return incomplete('selected-list JSON exceeded its 2000-record limit; the list output retains its records')
   const namedFields = new Map(fields.map(field => [field.name, field]))
+  // The selected rows' table columns, read with these records only (FetchOptions.listColumns).
+  const columns = result.listColumns?.length === list.records.length ? result.listColumns : undefined
   const location = (index: number, name: string): string => {
     const record = list.records[index]!
     const field = namedFields.get(name)!
     return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index} ${field.selector ?? ':scope'} ${field.attribute === undefined ? 'text' : `@${field.attribute}`}`
+  }
+  const columnLocation = (index: number, column: ListColumn): string => {
+    const record = list.records[index]!
+    return `${JSON.stringify(record.source.url)} page ${record.source.page} ${request.itemSelector} record ${record.source.index} column ${column.column} ${JSON.stringify(column.header)} text`
   }
   let chars = 0
   for (const [index, record] of list.records.entries()) {
@@ -806,17 +813,37 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
     return { status: 'invalid', data: null, schemaSha256, evidence: [], issues: [{ code: 'schema_invalid', message: error instanceof Error ? error.message : String(error) }], modelUsage: null }
   }
   const root = effective(format.schema, format.schema)
+  /**
+   * A key no list field names, from the record's table column whose header
+   * names it (compared as page labels are, an exact header before one that
+   * matches without its bracketed qualifier). Columns that state different
+   * values leave it out.
+   */
+  const columnValue = (index: number, name: string, valuePath: string): { raw: string; column: ListColumn } | 'ambiguous' | null => {
+    const key = labelKey(name)
+    const row = columns?.[index] ?? []
+    const exact = row.filter(column => labelKey(column.header) === key)
+    const matched = (exact.length > 0 ? exact : row.filter(column => baseLabelKey(column.header) === key)).filter(column => column.value !== null)
+    if (key.length === 0 || matched.length === 0) return null
+    if (matched.some(column => column.value !== matched[0]!.value)) {
+      issues.push({ code: 'field_ambiguous', path: valuePath, message: `the selected record's columns state different values for ${valuePath}: ${matched.map(column => `${JSON.stringify(column.header)} = ${JSON.stringify(column.value)} (column ${column.column})`).join(', ')}` })
+      return 'ambiguous'
+    }
+    return { raw: matched[0]!.value!, column: matched[0]! }
+  }
   const recordValue = (schema: JsonSchema, index: number, path: string): JsonValue => {
     const record = list.records[index]!
     const out: Record<string, JsonValue> = {}
     for (const [name, child] of Object.entries(effective(format.schema, schema).properties ?? {})) {
       const valuePath = `${path}/${pointerPart(name)}`
       const field = namedFields.get(name)
-      const raw = field === undefined || record.missing.includes(name) ? null : record.values[name] ?? null
+      const read = field === undefined ? columnValue(index, name, valuePath) : null
+      const fromColumn = read === 'ambiguous' ? null : read
+      const raw = fromColumn !== null ? fromColumn.raw : field === undefined || record.missing.includes(name) ? null : record.values[name] ?? null
       const target = effective(format.schema, child)
       if (raw === null) {
         if (schemaTypes(target).includes('null')) Object.defineProperty(out, name, { value: null, enumerable: true, configurable: true })
-        missing(valuePath)
+        if (read !== 'ambiguous') missing(valuePath)
         continue
       }
       const value = coerce(raw, target)
@@ -826,7 +853,10 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
         continue
       }
       Object.defineProperty(out, name, { value, enumerable: true, configurable: true })
-      evidence.push({ path: valuePath, source: 'dom', evidencePath: location(index, name), ...(typeof value === 'number' ? { text: raw } : {}) })
+      const evidencePath = fromColumn !== null ? columnLocation(index, fromColumn.column) : location(index, name)
+      // A column counts against the budget once a key is read from it; the fields were counted above.
+      if (fromColumn !== null) chars += name.length + raw.length + evidencePath.length
+      evidence.push({ path: valuePath, source: 'dom', evidencePath, ...(typeof value === 'number' ? { text: raw } : {}) })
     }
     return out
   }
@@ -843,6 +873,7 @@ function selectedListJson(result: FetchResult, request: ListFormatRequest, forma
     } else if (arrays.length === 0 && list.records.length === 1 && (schemaTypes(root).includes('object') || root.properties !== undefined)) data = recordValue(root, 0, '')
     else return incomplete('multiple selected records require one record-array schema; a single page-wide object or ambiguous arrays were not filled', 'field_ambiguous')
   }
+  if (chars > LIST_JSON_MAX_CHARS) return incomplete('selected-list JSON exceeded its 1000000-character source/evidence budget; the list output retains its records')
   const missingPaths = requiredMissing(format.schema, format.schema, data)
   issues.push(...missingPaths.map(path => ({ code: 'missing_required' as const, path, message: `required selected-record field unavailable: ${path}` })))
   const valid = validate(data)
@@ -1519,9 +1550,9 @@ function withoutRepeatedBodies(summary: ScrapeResponse['summary'], debug: boolea
   return {
     ...summary,
     attempts: summary.attempts.map(({ result, ...attempt }) => {
-      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, ...rest } = result
+      const { html: _html, rawHtml: _rawHtml, images: _images, tables: _tables, pages: _pages, attributes: _attributes, screenshot, actions: _actions, list: _list, listColumns: _listColumns, ...rest } = result
       // What the actions produced travels once too, on the response.
-      const { actions: _kept, list: _records, ...whole } = result
+      const { actions: _kept, list: _records, listColumns: _columns, ...whole } = result
       return {
         ...attempt,
         result: { ...(debug ? whole : { ...rest, markdown: null, links: [] }), ...(screenshot === undefined ? {} : { screenshot: null }) },
@@ -1557,8 +1588,10 @@ export async function prepareScrapeResponse(
   const serializeStart = performance.now()
   const includeLinks = req.includeLinks === true || hasFormat(formats, 'links')
   const warning = warningOf(result.warnings)
+  // What JSON read from the selected rows' columns is not a format of its own.
+  const { listColumns: _listColumns, ...run } = result
   const next: ScrapeRun = {
-    ...result,
+    ...run,
     markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
     links: includeLinks ? result.links ?? [] : [],
     // The warnings as one string too, Firecrawl's `warning`, present exactly when they are.

@@ -10,10 +10,11 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { ListDetection, ListExtraction, ListFormatRequest, ListRecord, ListSpec } from '@w2l/contracts'
+import type { ListColumn, ListDetection, ListExtraction, ListFormatRequest, ListRecord, ListSpec } from '@w2l/contracts'
 import { detectFields, detectLists } from './detectList.js'
 import { detachAll, parse, qsa } from './dom.js'
 import { documentBaseUrl } from './links.js'
+import { nonNegativeInteger, ownCells, ownRows, rowGroup } from './markdown.js'
 import { namedBy } from './selectors.js'
 
 /** The most records one list carries, and the most characters of values in all: past either, the list is cut and says so. */
@@ -27,8 +28,10 @@ const URL_ATTRIBUTES: ReadonlySet<string> = new Set(['href', 'src', 'data-src', 
  * The records of one page: its URL, and its number among the pages of a list
  * (1 when one page is read). At most `budget.records` records and
  * `budget.chars` characters of values; `cut` says when the page had more.
+ * With `read.columns`, `columns` holds each kept record's table columns
+ * (`rowColumns`), in record order.
  */
-export function extractListRecords(html: string, url: string, spec: ListSpec, page = 1, budget: { records: number; chars: number } = { records: MAX_LIST_RECORDS, chars: MAX_LIST_VALUE_CHARS }, scope: { includeSelectors?: readonly string[]; excludeSelectors?: readonly string[] } = {}): ListRecord[] & { cut?: boolean; itemText?: string } {
+export function extractListRecords(html: string, url: string, spec: ListSpec, page = 1, budget: { records: number; chars: number } = { records: MAX_LIST_RECORDS, chars: MAX_LIST_VALUE_CHARS }, scope: { includeSelectors?: readonly string[]; excludeSelectors?: readonly string[] } = {}, read: { columns?: boolean } = {}): ListRecord[] & { cut?: boolean; itemText?: string; columns?: (ListColumn[] | null)[] } {
   const doc = parse(html)
   const document = doc.document
   // Links resolve as the page resolves them: against its <base href> when it has one.
@@ -49,7 +52,11 @@ export function extractListRecords(html: string, url: string, spec: ListSpec, pa
     !excluded.has(item) && !hasAncestorIn(item, excluded) &&
     (included === null || included.has(item) || hasAncestorIn(item, included))))
   detachAll(excluded)
-  const records: ListRecord[] & { cut?: boolean; itemText?: string } = []
+  const records: ListRecord[] & { cut?: boolean; itemText?: string; columns?: (ListColumn[] | null)[] } = []
+  const columns: (ListColumn[] | null)[] = []
+  const heads = new Map<Element, TableHead | null>()
+  // Column text is bounded apart from the values: a cell under many headers is repeated under each.
+  const columnBudget = { left: budget.chars }
   // The whole text of every item, not only the fields asked for: what tells this page's records from another page's.
   Object.defineProperty(records, 'itemText', { value: items.filter(item => kept.has(item)).map((item) => textOf(item) ?? '').join('\u0000'), enumerable: false })
   let chars = 0
@@ -71,9 +78,73 @@ export function extractListRecords(html: string, url: string, spec: ListSpec, pa
     chars += Object.values(values).reduce((sum, value) => sum + (value?.length ?? 0), 0)
     if (chars > budget.chars) { records.cut = true; break }
     records.push({ values, missing, source: { url, page, index } })
+    if (read.columns === true) columns.push(rowColumns(item, heads, columnBudget))
   }
   doc.close()
+  if (read.columns === true) Object.defineProperty(records, 'columns', { value: columns, enumerable: false })
   return records
+}
+
+/** A table's one header row: each header's text and the columns it covers (1-based, inclusive). */
+type TableHead = { row: Element; headers: { header: string; start: number; end: number }[] }
+
+/**
+ * A table row's columns: each header of its table, with the text of the row's
+ * cells the header covers, joined by a space. Null when the item is not a row
+ * of a table, is its header row, or the table does not have exactly one header
+ * row (the leading rows in its `<thead>` or made of `<th>` cells alone, as the
+ * `tables` format counts them), or any of its cells spans rows, which would
+ * move the cells under a header. A cell counts the columns its `colspan`
+ * covers. The table's header is read once (`heads`). Null too once the
+ * columns' text would pass `budget.left` characters, which it then stays.
+ */
+function rowColumns(item: Element, heads: Map<Element, TableHead | null>, budget: { left: number }): ListColumn[] | null {
+  if (item.localName !== 'tr') return null
+  let table: Element | null = item.parentElement
+  while (table !== null && table.localName !== 'table') table = table.parentElement
+  if (table === null) return null
+  if (!heads.has(table)) heads.set(table, tableHead(table))
+  const head = heads.get(table)!
+  if (head === null || head.row === item) return null
+  const cells: { text: string | null; start: number; end: number }[] = []
+  let next = 1
+  for (const cell of ownCells(item)) {
+    const span = spanOf(cell)
+    cells.push({ text: textOf(cell), start: next, end: next + span - 1 })
+    next += span
+  }
+  const unders = head.headers.map(({ start, end }) => cells.filter(cell => cell.start <= end && cell.end >= start && cell.text !== null).map(cell => cell.text!))
+  // Measured before any text is joined.
+  const chars = unders.reduce((sum, under) => sum + under.reduce((n, text) => n + text.length + 1, 0), 0)
+  if (chars > budget.left) { budget.left = -1; return null }
+  budget.left -= chars
+  return head.headers.map(({ header, start }, i) => ({ header, column: start, value: unders[i]!.length === 0 ? null : unders[i]!.join(' ') }))
+}
+
+function tableHead(table: Element): TableHead | null {
+  const rows = ownRows(table)
+  let headerRows = 0
+  for (const tr of rows) {
+    const cells = ownCells(tr)
+    if (cells.length === 0 || !(rowGroup(tr, table)?.localName === 'thead' || cells.every(el => el.localName === 'th'))) break
+    headerRows++
+  }
+  if (headerRows !== 1) return null
+  if (rows.some(tr => ownCells(tr).some(cell => (nonNegativeInteger(cell.getAttribute('rowspan')) ?? 1) !== 1))) return null
+  const headers: TableHead['headers'] = []
+  let next = 1
+  for (const cell of ownCells(rows[0]!)) {
+    const span = spanOf(cell)
+    const header = textOf(cell)
+    if (header !== null) headers.push({ header, start: next, end: next + span - 1 })
+    next += span
+  }
+  return headers.length === 0 ? null : { row: rows[0]!, headers }
+}
+
+/** The columns a cell covers, as browsers read `colspan`: an invalid value or 0 is 1, at most 1000. */
+function spanOf(cell: Element): number {
+  return Math.min(nonNegativeInteger(cell.getAttribute('colspan')) || 1, 1000)
 }
 
 /**

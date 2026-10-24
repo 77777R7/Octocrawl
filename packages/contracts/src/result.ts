@@ -521,6 +521,14 @@ export interface FetchResult {
    */
   list?: ListExtraction
   /**
+   * For each `list` record, in order, the columns of its table row
+   * (`ListColumn`), or null when the record is not a row of a table with one
+   * header row. Read only when a JSON schema reads an explicitly selected
+   * list (`FetchOptions.listColumns`), for the record keys the list's fields
+   * do not name; it is not part of the `list` format's output.
+   */
+  listColumns?: readonly (readonly ListColumn[] | null)[]
+  /**
    * A PDF's pages, each as the Markdown has it (without its marker), when a
    * `pdf` parser entry asked for them (`pages: true`) and the text layer was
    * read; absent otherwise.
@@ -593,6 +601,18 @@ export interface ListRecord {
   missing: string[]
   /** Where it was read: the page's URL, the page's number (1 for the page read, or each page a paginate step read, in order), and the record's place on it (0-based, document order). */
   source: { url: string; page: number; index: number }
+}
+
+/**
+ * A column of a table row a list selected: its header's text, the first
+ * column the header covers (1-based, counting each column a `colspan`
+ * covers), and the row's text under it, the cells the header covers joined
+ * by a space (null when they hold none).
+ */
+export interface ListColumn {
+  header: string
+  column: number
+  value: string | null
 }
 
 /** The `list` format: the records of the page, or of every page a paginate step read. */
