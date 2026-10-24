@@ -6,9 +6,12 @@ Values come only from the delivered `json.data`: a top-level field from the prop
 the same rule that wrote the schema). A price-like number takes its unit from the `currency` property the schema asks
 for (never from a symbol). A date field's business date is the date its value states; any other field whose date the
 source states takes the date of its own object's first date field. Periods and non-currency units are not in this
-output and stay None. A url value served from the fixture origin of a frozen replay is rebased onto the case's own
-origin, as the Markdown mappings do (holdout_score.rebase_url). Nothing is read from Markdown, tables, links, the retained
-source or the labels.
+output and stay None, unless the field's own `json.evidence` entry (the one whose path is the field's pointer) states
+them in `context.unit` and `context.date` (#704: the unit and as-of day a table states for a number read from one of its
+rows); those come first, as delivered, and nothing is inferred when they are absent. `context.currency`, the mark of the
+number's own text, is not taken: it would replace the declared currency with a symbol. A url value served from the
+fixture origin of a frozen replay is rebased onto the case's own origin, as the Markdown mappings do
+(holdout_score.rebase_url). Nothing is read from Markdown, tables, links, the retained source or the labels.
 """
 import re
 import holdout_score as hs
@@ -20,6 +23,11 @@ def evidence_ref(js,pointer):
  for i,e in enumerate(js.get('evidence') or []):
   if isinstance(e,dict) and e.get('path')==pointer:return f'json.evidence[{i}]'
  return 'json.data'+pointer.replace('/','.')
+
+def evidence_context(js,pointer):
+ for e in js.get('evidence') or []:
+  if isinstance(e,dict) and e.get('path')==pointer and isinstance(e.get('context'),dict):return e['context']
+ return {}
 
 def value_of(v):
  if v is None or isinstance(v,(dict,list)):return None
@@ -37,10 +45,12 @@ def json_mapped(case,doc,put,duplicates,fixture_origin):
   if obj is None:put(f,None,None,entity=False);continue
   v=value_of(obj.get(f['name']))
   if f['dataType']=='url' and v and v.startswith(fixture_origin.rstrip('/')+'/'):v=hs.rebase_url(v,case['url'],fixture_origin)
-  unit=value_of(obj.get('currency')) if 'price' in f['name'] else None
+  ctx=evidence_context(js,pointer);cu=ctx.get('unit') if isinstance(ctx.get('unit'),str) else None;cd=ctx.get('date') if isinstance(ctx.get('date'),str) else None
+  unit=cu or (value_of(obj.get('currency')) if 'price' in f['name'] else None)
   dt=f['dataType'];date=(vdate(v) or (v if v and re.fullmatch(r'\d{4}-\d{2}-\d{2}',v) else None)) if dt in DATES and v else hs.month_only(v) if dt=='year_month' and v else v if dt=='year' else None
   if dt=='text' and v and case['dates'].get(f.get('dateRef'),{}).get('state')=='known':date=v if hs.month_only(v) else vdate(v)
   if dt in DATES and date:v=date  # a stated day is compared as ISO, as the Markdown mappings deliver it
+  if date is None and cd:date=cd  # the as-of day the evidence states for this value
   if date is None and case['dates'].get(f.get('dateRef'),{}).get('state')=='known':
    # A value without its own date (a price, a close) takes the date its own object states, first date-typed field.
    sib=next((g for g in case['fields'] if g['entityId']==f['entityId'] and g['dataType'] in DATES and g is not f),None)
