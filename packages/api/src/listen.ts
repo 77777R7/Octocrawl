@@ -1,7 +1,7 @@
 import type { AccessGrant } from '@w2l/http-core'
 import type { BrowserIdentityChoice, BrowserEngineName } from '@w2l/bench'
 import { describeEgressProxy, hostedNetworkPolicy, hostedProxyNotice, LOCAL_PRIVATE_ALLOWLIST, localNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, withEnvironmentProxy, withOperatorContact, type NetworkPolicy, type ProxyServer } from '@w2l/contracts'
-import { loadEngineConfig, readFlag, tunedPolicy } from './engineConfig.js'
+import { loadEngineConfig, readFlag, tunedPolicy, type EngineConfig } from './engineConfig.js'
 
 export { accessGrantNotice, MAX_WORKER_COUNT } from './engineConfig.js'
 
@@ -87,6 +87,8 @@ export interface ListenConfig {
   egressProxies: ProxyServer[]
   /** `W2L_EGRESS_ECHO_URL`: the URL each egress is asked where it leaves from; only with egress proxies. Null: not asked. */
   egressEchoUrl: string | null
+  /** The access grant's CAPTCHA solver (ADR 0005 third_party_captcha_solver), started by the entry point before the engine; null: none. Local only. */
+  captchaSolver: EngineConfig['captchaSolver']
 }
 
 /** `W2L_JOB_STREAMS=off` is the one value that turns the stream routes off; anything else leaves them on. */
@@ -102,7 +104,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   const tokens = readTokens(argv, env)
   const rateLimit = parseRateLimit(argv, env)
   // The engine's options, from the loader every entry point that runs the engine shares (engineConfig.ts).
-  const { accessGrant, browserEngine, browserIdentity, compatHosts, egressProxies: egressList, egressEchoUrl, workerCount, notices: engineNotices } = loadEngineConfig(env, { hosted, argv })
+  const { accessGrant, browserEngine, browserIdentity, compatHosts, egressProxies: egressList, egressEchoUrl, workerCount, captchaSolver, notices: engineNotices } = loadEngineConfig(env, { hosted, argv })
   if (hosted) {
     if (tokens.length === 0) {
       throw new Error('hosted mode requires --token, W2L_API_TOKEN or W2L_API_TOKENS')
@@ -129,6 +131,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
       compatHosts,
       egressProxies: egressList,
       egressEchoUrl,
+      captchaSolver,
     }
   }
   const networkPolicy = withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(), env), env), env)
@@ -159,6 +162,7 @@ export function parseListen(argv: readonly string[], env: NodeJS.ProcessEnv = pr
     compatHosts,
     egressProxies: egressList,
     egressEchoUrl,
+    captchaSolver,
   }
 }
 

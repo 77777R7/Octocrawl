@@ -79,6 +79,29 @@ describe('normalizeAccessGrant', () => {
     expect(tariffCostUsd({ perCallUsd: 0.01, perHourUsd: 0, maxSessionMs: null, minBilledMs: 0, billingIncrementMs: 1 } as import('../src/accessGrant.js').VendorTariff, 5_000, { proxyBytes: 9, solves: 9 })).toBeCloseTo(0.01, 9)
   })
 
+  it('takes a third-party CAPTCHA solver only with its vendor, its exit, and a per-solve price with a bound (ADR 0005, 2026-10-25)', () => {
+    const solverGrant = (extra: Record<string, unknown>) => normalizeAccessGrant({ tier: 'enhanced', capabilities: ['installed_chrome', 'third_party_captcha_solver'], budget: { perRunUsd: 20 }, attestation: ATTESTATION, ...extra })
+    const ok = solverGrant({ solver: { vendor: 'capsolver', egress: 'proxy' }, tariffs: { capsolver: { perSolveUsd: 0.003, maxSolvesPerCall: 2 } } })
+    expect(ok.ok && ok.grant.solver).toEqual({ vendor: 'capsolver', egress: 'proxy' })
+    expect(ok.ok && ok.grant.tariffs.capsolver).toMatchObject({ perSolveUsd: 0.003, maxSolvesPerCall: 2 })
+    // Named without the solver, the run would not know its vendor or its exit.
+    expect(solverGrant({ tariffs: { capsolver: { perSolveUsd: 0.003, maxSolvesPerCall: 2 } } })).toEqual({ ok: false, problems: [expect.objectContaining({ field: 'solver' })] })
+    // An unknown vendor or exit, or a field more.
+    for (const solver of [{ vendor: 'other', egress: 'proxy' }, { vendor: 'capsolver', egress: 'rotate' }, { vendor: 'capsolver', egress: 'none', key: 'x' }]) {
+      expect(solverGrant({ solver, tariffs: { capsolver: { perSolveUsd: 0.003, maxSolvesPerCall: 2 } } })).toEqual({ ok: false, problems: [expect.objectContaining({ field: 'solver', kind: 'invalid' })] })
+    }
+    // No tariff, a zero price or no bound: the solver is never called with no price and no ceiling.
+    expect(solverGrant({ solver: { vendor: 'capsolver', egress: 'none' } })).toEqual({ ok: false, problems: [expect.objectContaining({ field: 'tariffs.capsolver' })] })
+    expect(solverGrant({ solver: { vendor: 'capsolver', egress: 'none' }, tariffs: { capsolver: { perSolveUsd: 0, maxSolvesPerCall: 2 } } })).toEqual({ ok: false, problems: [expect.objectContaining({ field: 'tariffs.capsolver' })] })
+    expect(solverGrant({ solver: { vendor: 'capsolver', egress: 'none' }, tariffs: { capsolver: { perSolveUsd: 0.003 } } }).ok).toBe(false)
+    // A solver on a grant that does not name the capability is a mistake, said so.
+    const stray = normalizeAccessGrant({ tier: 'enhanced', capabilities: ['installed_chrome'], attestation: ATTESTATION, solver: { vendor: 'capsolver', egress: 'none' } })
+    expect(stray).toEqual({ ok: false, problems: [expect.objectContaining({ field: 'solver', reason: expect.stringContaining('third_party_captcha_solver') })] })
+    // Without a run budget it is refused like every capability that spends a third party's money.
+    expect(normalizeAccessGrant({ tier: 'enhanced', capabilities: ['third_party_captcha_solver'], attestation: ATTESTATION, solver: { vendor: 'capsolver', egress: 'none' }, tariffs: { capsolver: { perSolveUsd: 0.003, maxSolvesPerCall: 1 } } }))
+      .toEqual({ ok: false, problems: [expect.objectContaining({ field: 'budget.perRunUsd', kind: 'budget_required' })] })
+  })
+
   it('lets standard name the routes with no third-party cost, without a budget', () => {
     const r = normalizeAccessGrant({ tier: 'standard', capabilities: ['compatible_transport', 'egress_sessions'] })
     expect(r.ok && r.grant.capabilities).toEqual(['compatible_transport', 'egress_sessions'])

@@ -209,3 +209,112 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - 结果低于 7 时，那周的记录写 "stop the default recommendation, retest pending"。Octocrawl 随后用一个 PR 撤下上面三处的推荐，直到重新测量、结果不低于基线，再用一个 PR 恢复。CHANGELOG 里已有的条目是记录，不改；撤下和恢复各写一条新的。
 - 能力本身、grant 的规则和阶梯都不因此改变，已经授权的使用者照常能用。
 
+
+## 修订 2026-10-25：第三方验证码求解器（ROADMAP PA item 6）
+
+**背景。** K1 之后，本机 Chrome 与 Steel 合用一份 grant 时，92 道首次调用通过 71 道，Firecrawl 是 67 道（窗口 1，2026-10-25）。剩下的访问失败主要是验证码和机器人检查页：DataDome（T034、T038、T045、T046）、PerimeterX（T018、T065）、Kasada（T042）。厂商内置的求解在 2026-10-11 的 arm B 里一道也没有解出（见上文 item 4 的记录），Steel 能识别 DataDome，但不会自动解它。
+
+**决定（Howard，2026-10-25）。**
+
+- 验证码和 DataDome 求解是 PA 当前的第一优先。item 6 的条件启动就此满足，`third_party_captcha_solver` 开始实现。
+- 求解器厂商用 CapSolver（基于 AI，2026-10-25 比较时是最便宜的一家）。
+- DataDome 的求解走 Octocrawl 的 Webshare 出口，代理凭据发给 CapSolver。DataDome 的 cookie 只在发出它的出口和 User-Agent 上有效，所以浏览器和求解器必须用同一个粘性出口、同一个 User-Agent。这一点 Howard 已接受。
+- 这一轮开发和测量的预算是 $20。
+- 先做本地。托管以后单独做，放在一个默认关闭的开关后面；本修订不建任何托管部分。
+
+**出口在请求之前选定。** 第 1 类的 `in_session_route_switch` 不变，被拦之后不换出口。所以 DataDome 的求解只能用会话已经在用的出口，这个出口必须在请求之前选定，不能在被拦之后再选。做法如下：
+
+- grant 写明求解器和它的出口：`"solver": { "vendor": "capsolver", "egress": "proxy" | "none" }`。
+- `egress: "proxy"` 的意思是：这个服务（`octocrawl serve`，或一次性的 `octocrawl` 命令）的每个 rung，在每个请求的第一个请求之前，就经本机 `127.0.0.1` 上的一个转发器走操作者的粘性出口（`W2L_SOLVER_PROXY`）。
+  - 转发器负责补上代理登录，因为 `installed_chrome` 的命令行不能带代理凭据。
+  - 记录里出口的 `source` 是 `pool`，`proxy` 是转发器的 `127.0.0.1:端口`，从不写上游的登录。
+  - 和 `W2L_EGRESS_PROXIES` 同时设置时，启动即报错：两种方式都在选这次运行的出口，只能留一种。
+- 只有页面确实经这个转发器读取时，DataDome 和 Cloudflare 挑战才会求解。页面的出口由 rung 的出口策略判断（`proxyFor`），它必须等于转发器。否则记 `egress_mismatch`，不求解、不扣费，也不发任何东西给求解器。
+- `egress: "none"`：运行的出口不变，只求解不绑定出口的类型（Turnstile、reCAPTCHA v2）。
+- 按检测类型选出口仍然不做（item 3，2026-10-22 的决定）。这里的出口是整个运行的选择，由操作者写进 grant，不按页面或站点切换。
+- K3 测过：Cloudflare 组走 Webshare 出口比走 Clash 差（5/32 对 24/32）。所以对以 Cloudflare 为主的任务集，选 `proxy` 有代价，这一点在 grant 里由操作者决定。
+
+**grant 的规则（`normalizeAccessGrant`）。**
+
+- 列了 `third_party_captcha_solver` 的 grant 必须有 `solver`。
+- `tariffs[solver.vendor]` 必须写正数的 `perSolveUsd` 和 `maxSolvesPerCall`。
+- 和其他有第三方费用的能力一样，必须有 `perRunUsd` 和 attestation。
+- 没列这个能力却写了 `solver`，判为错误。
+- 托管服务读到这个能力时，启动即拒绝。
+
+**求解在哪里发生。**
+
+- 只在本地的公共浏览器 rung 上：`browser_local` 和 `installed_chrome`，模式 standard，请求选了 `access: "enhanced"`。
+- 带登录的 rung（`browser_local_authed`）和托管预览都不接。
+- 在 `installed_chrome` 上，先按上文"等挑战页自己放行"等待。那一步仍然只读不动，不解题；求解是它之后单独的一步，只在 grant 允许时发生。
+- 只求解 rung 本来会以"被检查拦住"返回 blocked 的页面，判定和 rung 自己的捕获用同一套规则：
+  - 错误状态上的检查；
+  - 决定性的检查；
+  - 自身没有内容的页面上的小组件。
+  一个为表单加载 reCAPTCHA 的正常文章页不求解。
+- 支持的类型（CapSolver 文档，2026-10-25 读取）：
+  - DataDome：`DatadomeSliderTask`。只接受 `t=fe` 的 captcha URL；`t=bv` 表示出口已被封，不买求解。
+  - Cloudflare 挑战：`AntiCloudflareTask`。
+  - Turnstile：`AntiTurnstileTaskProxyLess`。
+  - reCAPTCHA v2：`ReCaptchaV2TaskProxyLess`。
+  - PerimeterX、Kasada、hCaptcha、GeeTest 记为 `unsupported`，不求解。
+  - 放在以 GET 提交的表单里的 Turnstile 或 reCAPTCHA 不求解（`form_sent_by_get`）：token 会进页面地址，而记录会保存这个地址。既没有回调、也不在表单里的小组件也不求解（`no_submit_target`）。
+
+**发给求解器的，只有这些：**
+
+- 页面 URL；
+- 挑战自己的 URL（DataDome 的 captcha URL）或站点密钥（Turnstile、reCAPTCHA），以及小组件的 `data-action`、`data-cdata`；
+- 浏览器的 User-Agent（`installed_chrome` 是 Chrome 自己报的那个，不另设）；
+- 只对绑定出口的类型（DataDome、Cloudflare 挑战），加上运行的出口及其登录。
+
+**从不发给求解器的：**
+
+- 页面内容；
+- 挑战之外的 cookie；
+- 登录状态；
+- Octocrawl 的记录。
+
+**答案怎样用。**
+
+- cookie 写进同一个浏览器上下文，然后重新加载页面。
+- token 写进小组件的回填字段，再调用小组件的回调或提交它所在的表单。
+- 之后页面按任何页面的规则重新判定：
+  - 仍被拦，结果就是 blocked，这次求解照样计费，trace 记 `still_gated`。
+  - 不再被拦，页面照常读取，ladder 再用任务契约验证。放行了检查但没有通过契约的页面，不算完成任务。
+
+**上限和计费。**
+
+- 每次求解在创建任务之前，先按价目表的 `perSolveUsd` 从运行（或该页）的 spend ledger 预留。
+- 放不下时，或没有 ledger 时，不求解，记 `limit_reached`。
+- 每次抓取最多 `maxSolvesPerCall` 次求解。这个次数按页面计，由 ladder 在该页的所有 rung 和重试之间共享，不是每个 rung 各算一次。
+- 任务创建了才结算。只有 CapSolver 明确拒绝（`errorId` 非 0）才算没有创建；请求已发出但回答丢失或无法解析时，按可能已创建计费。CapSolver 的回答里不报单价，所以按价目表收费，记录写 `costBasis: "tariff"`。
+- 每次结算后立刻记入运行的 paid calls（页面结果未知时 `outcome` 为 null），所以 rung 在求解之后抛错，这次求解也不会从记录里消失。
+- 页面的第三方成本 `externalCostUsd` 记为 null（未知），不写 0；账本的收费在 `externalCostChargedUsd`。
+- 任务里，每次求解有自己的 `paid_calls` 行：先写 `reserved`，结算后写 `settled`。
+- 页面记录的 `access.paidCalls[]` 里，每次求解一条：`provider: "capsolver"`，`capabilities: ["third_party_captcha_solver"]`，`solves: 1`。
+
+**到上限时。** 页面照常以 blocked 结束，ladder 继续或结束。这就是"结束"。没有 grant 时，handoff 仍是默认，由人在自己的 Chrome 里通过。
+
+**记录里有什么，没有什么。**
+
+- trace 的 `captcha_solve` 记：类型、厂商、第几次、毫秒数、预留和收费、计费依据、结果、原因、厂商的错误码（只接受纯代码），以及是否用了运行的出口。
+- 从不记：token、cookie 值、CapSolver 的 key、出口的密码。CapSolver 的 `errorDescription` 是自由文本，可能回显请求，不出适配器。
+
+**本机转发器。** 它只听 `127.0.0.1`，只转发代理形式的请求（`CONNECT host:port`，或带完整 `http://` 地址的请求）。网页脚本发到这个端口的普通路径请求返回 400，不会带着出口的登录发给上游。本机其他进程仍然可以用它，这和本机的 `HTTPS_PROXY` 转发器一样，属于操作者自己的机器。
+
+**解出的 cookie。** 它写进浏览器上下文，和站点自己设置的 cookie 一样。grant 同时列了 `egress_sessions` 时，任务的 cookie 会话也会照常保存它：放在任务目录里，只有本人可读，任务结束时删除，从不进记录。
+
+**密钥与配置。**
+
+- key 从 `CAPSOLVER_API_KEY` 读取（Howard 的 `.w2l/access/capsolver.env`），出口从 `W2L_SOLVER_PROXY` 读取（`http://user:password@host:port`，必须是粘性出口；CapSolver 要求 Cloudflare 挑战的出口至少保持 3 分钟）。
+- 启动提示只写出口的 `host:port`。错误信息不复述任何一个值。
+- CapSolver 的 API 调用走操作者的环境代理（`HTTPS_PROXY`），不走求解出口。
+- 本地 MCP host 暂不运行求解器，启动时提示这一点。
+
+**本修订合入时的边界。**
+
+- 本 PR 不发任何付费调用。测试用环回地址上的 CapSolver 替身和挑战页夹具。
+- 真实站点上的效果、CapSolver 的实际账单与价目表的差距、求解后通过的比例，都是 unknown，要等一次小规模的实测（最多 3 次求解，在 $20 预算内）和之后的冻结任务集测量。
+- 一次任务中途才出现的挑战（后续导航、弹窗、晚加载的表单）还没有监视；现在只在 rung 读页面的那一次检查。
+- 站点自己的回调拿到 token 后，若自行以 GET 方式把它放进地址，Octocrawl 无法阻止，地址会进记录。目前只排除了可见的 GET 表单。
+- 托管仍然拒绝。

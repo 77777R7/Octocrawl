@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { accessGrantFromText, type AccessGrant } from '@w2l/http-core'
-import { browserEngineChoice, browserIdentityChoice, type BrowserIdentityChoice, COMPAT_LIBRARY, compatHostsChoice, DEFAULT_COMPAT_PROFILE, loadImpit, loadPatchrightEngine, type BrowserEngineName } from '@w2l/bench'
-import { egressProxies, type NetworkPolicy, type ProxyServer } from '@w2l/contracts'
+import { browserEngineChoice, browserIdentityChoice, type BrowserIdentityChoice, CapSolver, capSolverFetch, type CaptchaSolving, COMPAT_LIBRARY, compatHostsChoice, DEFAULT_COMPAT_PROFILE, loadImpit, loadPatchrightEngine, startSolverForwarder, type BrowserEngineName } from '@w2l/bench'
+import { egressProxies, environmentProxy, type NetworkPolicy, type ProxyServer } from '@w2l/contracts'
 
 /**
  * The engine options every entry point that runs the engine on this machine reads from its environment: the API server
@@ -41,8 +41,25 @@ export interface EngineConfig {
    * (`W2L_PER_HOST_CONCURRENCY`) still holds for each host.
    */
   workerCount: number
+  /**
+   * ADR 0005 `third_party_captcha_solver` (revision of 2026-10-25): the solver the grant names, its key
+   * (`CAPSOLVER_API_KEY`) and, when the grant's solver exit is `proxy`, the operator's sticky exit (`W2L_SOLVER_PROXY`).
+   * Local only. Null when the grant does not name the capability.
+   */
+  captchaSolver: CaptchaSolverConfig | null
   /** Startup lines about the grant and what it turned on, printed once. */
   notices: string[]
+}
+
+/** The solver as the grant and the environment give it; started by startCaptchaSolving. The key and the exit's login stay in memory. */
+export interface CaptchaSolverConfig {
+  vendor: 'capsolver'
+  apiKey: string
+  /** The run's exit for every rung, chosen before any request; null when the grant's solver exit is `none`. */
+  upstream: ProxyServer | null
+  perSolveUsd: number
+  maxSolvesPerCall: number
+  grantHash: string | null
 }
 
 export const MAX_WORKER_COUNT = 64
@@ -61,14 +78,16 @@ export function loadEngineConfig(env: NodeJS.ProcessEnv, options: { hosted: bool
   const compatHosts = compatHostsChoice(env, accessGrant, hosted)
   const egressList = readEgressProxies(env, accessGrant, hosted)
   const egressEchoUrl = readEgressEchoUrl(env, egressList)
+  const captchaSolver = readCaptchaSolver(env, accessGrant, hosted, egressList)
   const notices = [
     ...(accessGrant === null ? [] : [accessGrantNotice(accessGrant)]),
     ...(browserEngine === 'playwright' ? [] : [`browser engine: ${browserEngine} on the public browser rung (ADR 0005 enhanced_browser); saved logins and managed sessions keep stock Playwright`]),
     ...(browserIdentity === 'declared' ? [] : ['browser identity: actual on the public browser rung (W2L_BROWSER_IDENTITY): the browser sends its own User-Agent and client hints, which the record declares; an experiment switch (docs/pa-challenge-botcheck-tasks.md G2)']),
     ...(compatHosts.length === 0 ? [] : [`compatible transport (ADR 0005 compatible_transport): ${COMPAT_LIBRARY.name} ${COMPAT_LIBRARY.version}, profile ${DEFAULT_COMPAT_PROFILE}, in place of the http rung for standard-mode pages on ${compatHosts.join(', ')} and their subdomains${(env.W2L_COMPAT_HOSTS ?? '').trim() === '' ? ' (the hosts its acceptance showed it helps, research/access/benefit-hosts.v1.json; W2L_COMPAT_HOSTS names others, none turns it off)' : ''}; a request with custom headers or mobile keeps the http rung`]),
     ...(egressList.length === 0 ? [] : [`egress proxies (ADR 0005 egress_sessions): ${egressList.map((proxy) => proxy.endpoint).join(', ')}; a batch or crawl keeps one for its run and moves on only when the proxy itself fails its probe (at most 2 times), never after a block, a challenge, a 429 or a site's reset; a scrape takes the next healthy one${egressEchoUrl === null ? '' : `; each is asked where it leaves from at ${new URL(egressEchoUrl).host}`}`]),
+    ...(captchaSolver === null ? [] : [`captcha solver (ADR 0005 third_party_captcha_solver): ${captchaSolver.vendor}, $${captchaSolver.perSolveUsd} a solve by the grant's tariff, at most ${captchaSolver.maxSolvesPerCall} a page, within the grant's budget; on the public browser rungs of requests that choose access enhanced${captchaSolver.upstream === null ? '; no solver exit, so DataDome and Cloudflare challenges are not solved' : `; every rung leaves through the solver exit ${captchaSolver.upstream.endpoint} from its first request, and DataDome and Cloudflare challenges are solved through it`}`]),
   ]
-  return { accessGrant, browserEngine, browserIdentity, compatHosts, egressProxies: egressList, egressEchoUrl, workerCount, notices }
+  return { accessGrant, browserEngine, browserIdentity, compatHosts, egressProxies: egressList, egressEchoUrl, workerCount, captchaSolver, notices }
 }
 
 /**
@@ -127,10 +146,59 @@ function readAccessGrant(argv: readonly string[], env: NodeJS.ProcessEnv, hosted
   if (hosted && grant.tier === 'my_browser') {
     throw new Error("access grant refused: tier my_browser reads the person's own Chrome, which a hosted server does not have")
   }
+  if (hosted && grant.capabilities.includes('third_party_captcha_solver')) {
+    throw new Error('access grant refused: third_party_captcha_solver is local only for now; a hosted server will take it behind its own switch, off by default (ADR 0005, revision of 2026-10-25)')
+  }
   if (hosted && grant.capabilities.includes('installed_chrome')) {
     throw new Error('access grant refused: installed_chrome launches the Google Chrome of the machine Octocrawl runs on, which a hosted server does not offer (ADR 0005)')
   }
   return grant
+}
+
+/**
+ * The solver of a grant that names third_party_captcha_solver, checked at startup: its key from CAPSOLVER_API_KEY, and
+ * for a solver exit `proxy` the operator's sticky exit from W2L_SOLVER_PROXY (an http:// URL with its login), which the
+ * run's every rung then leaves through. Errors never repeat either value.
+ */
+function readCaptchaSolver(env: NodeJS.ProcessEnv, grant: AccessGrant | null, hosted: boolean, egressList: readonly ProxyServer[]): CaptchaSolverConfig | null {
+  const solverExit = (env.W2L_SOLVER_PROXY ?? '').trim()
+  if (grant === null || !grant.capabilities.includes('third_party_captcha_solver') || grant.solver == null) {
+    if (solverExit !== '') throw new Error('W2L_SOLVER_PROXY needs an access grant that names third_party_captcha_solver with solver.egress "proxy" (ADR 0005)')
+    return null
+  }
+  if (hosted) throw new Error('third_party_captcha_solver is refused on a hosted server (ADR 0005)')
+  const apiKey = (env.CAPSOLVER_API_KEY ?? '').trim()
+  if (apiKey === '') throw new Error('the access grant names third_party_captcha_solver with solver capsolver: set CAPSOLVER_API_KEY (for example from .w2l/access/capsolver.env)')
+  const tariff = grant.tariffs[grant.solver.vendor]!
+  let upstream: ProxyServer | null = null
+  if (grant.solver.egress === 'proxy') {
+    if (solverExit === '') throw new Error('the access grant\'s solver exit is "proxy": set W2L_SOLVER_PROXY to the operator\'s sticky exit (http://user:password@host:port)')
+    if (egressList.length > 0) throw new Error('W2L_SOLVER_PROXY and W2L_EGRESS_PROXIES both choose the run\'s exit; set one (ADR 0005)')
+    let parsed: ReturnType<typeof environmentProxy>
+    try { parsed = environmentProxy({ HTTPS_PROXY: solverExit }) } catch { throw new Error('W2L_SOLVER_PROXY is not an http(s) proxy URL') }
+    if (parsed?.https == null || !parsed.https.url.startsWith('http://')) throw new Error('W2L_SOLVER_PROXY must be an http:// proxy URL with its login')
+    upstream = parsed.https
+  } else if (solverExit !== '') {
+    throw new Error('W2L_SOLVER_PROXY is set but the access grant\'s solver exit is "none"; set solver.egress to "proxy" in the grant, or unset it')
+  }
+  return { vendor: grant.solver.vendor, apiKey, upstream, perSolveUsd: tariff.perSolveUsd, maxSolvesPerCall: tariff.maxSolvesPerCall!, grantHash: grant.sha256 ?? null }
+}
+
+/**
+ * Start the configured solver before the engine is built: the local forwarder to the solver exit, when the grant chose
+ * one, and the vendor's client, whose API calls follow the operator's environment proxy. `exit` is the proxy every rung
+ * of the run is then given (withPoolProxy); `close` stops the forwarder.
+ */
+export async function startCaptchaSolving(config: CaptchaSolverConfig | null, env: NodeJS.ProcessEnv = process.env): Promise<{ solving: CaptchaSolving; exit: ProxyServer | null; close: () => Promise<void> } | null> {
+  if (config === null) return null
+  const forwarder = config.upstream === null ? null : await startSolverForwarder(config.upstream)
+  const api = capSolverFetch(environmentProxy(env) !== null)
+  const solver = new CapSolver({ apiKey: config.apiKey, fetchImpl: api.fetch })
+  return {
+    solving: { solver, perSolveUsd: config.perSolveUsd, maxSolvesPerCall: config.maxSolvesPerCall, egress: forwarder?.egress ?? null, grantHash: config.grantHash },
+    exit: forwarder?.server ?? null,
+    close: async () => { await forwarder?.close(); await api.close() },
+  }
 }
 
 /** W2L_EGRESS_PROXIES, checked at startup: the grant must name egress_sessions; a hosted server refuses them. */

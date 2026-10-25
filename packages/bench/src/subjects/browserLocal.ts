@@ -25,6 +25,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Down
 import { browserEngineFor, type BrowserEngineName } from './browserEngine.js'
 import { DETECTION_FLAGS_ID, launchInstalledChrome, type InstalledChromeTestSeams } from './installedChrome.js'
 import type { BrowserIdentityChoice } from './browserIdentity.js'
+import { solveChallenges, type CaptchaSolving } from '../vendors/captchaSolver.js'
 import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -353,7 +354,15 @@ export class BrowserLocalSubject implements SubjectAdapter {
     private readonly browserIdentity: BrowserIdentityChoice = 'declared',
     /** installed_chrome's test seams (installedChrome.ts): a stand-in Chromium and headless where no display exists. */
     private readonly installedChromeSeams: InstalledChromeTestSeams = {},
+    /**
+     * ADR 0005 `third_party_captcha_solver` (revision of 2026-10-25): the solver a page still stopped at a check is
+     * handed to, with the grant's per-solve price and limit and the run's solver exit; null (the default): none.
+     */
+    private readonly captchaSolving: CaptchaSolving | null = null,
   ) {
+    if (captchaSolving !== null && (mode !== 'standard' || access != null || managedProfileDir !== null || previewProductToken || browserAllowedHosts !== undefined)) {
+      throw new Error('a captcha solver runs only on the standard public browser of a local server, never with a saved login or on a hosted preview (ADR 0005)')
+    }
     if (browserEngine !== 'playwright' && (access != null || managedProfileDir !== null)) {
       throw new Error('the enhanced browser runs only in the public browser lane, never with a saved login or a managed profile')
     }
@@ -392,8 +401,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
   }
 
   /** `cookieSession`: the task's cookies (ADR 0005 `egress_sessions`): the context starts with them and leaves its own there. */
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession, listing?: Pick<ExecutionContext, 'onListPage' | 'listResume'>): Promise<FetchResult> {
-    const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter, ...(cookieSession === undefined ? {} : { cookieSession }), ...(listing?.onListPage === undefined ? {} : { onListPage: listing.onListPage }), ...(listing?.listResume === undefined ? {} : { listResume: listing.listResume }) })
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession, listing?: Pick<ExecutionContext, 'onListPage' | 'listResume' | 'spend' | 'paidCalls' | 'captchaSolves'>): Promise<FetchResult> {
+    const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter, ...(cookieSession === undefined ? {} : { cookieSession }), ...(listing?.onListPage === undefined ? {} : { onListPage: listing.onListPage }), ...(listing?.listResume === undefined ? {} : { listResume: listing.listResume }), ...(listing?.spend === undefined ? {} : { spend: listing.spend }), ...(listing?.paidCalls === undefined ? {} : { paidCalls: listing.paidCalls }), ...(listing?.captchaSolves === undefined ? {} : { captchaSolves: listing.captchaSolves }) })
     const start = Date.now()
     const monotonicStart = performance.now()
     let queueMs = 0
@@ -969,6 +978,35 @@ export class BrowserLocalSubject implements SubjectAdapter {
             trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'challenge_wait', detail: waited })
             if (waited.outcome === 'cleared') await settle(remainingTimeout(execution, 1_500))
           }
+        }
+        // ADR 0005 `third_party_captcha_solver`: a page still stopped at a check, judged as its capture below will judge
+        // it, goes to the grant's solver, on the exit the page already left through; the page it shows after the answer
+        // is read and judged as any page, so a solve that leaves it gated is still blocked. A step that fails ends here.
+        if (this.captchaSolving !== null) {
+          const shown = page
+          // The gate the capture below would return the page blocked for, and only that: a check on an error status, a
+          // decisive one, or a widget on a page with no content of its own. A page read as content is never solved.
+          const solveGate = async () => {
+            const answered = reported(documents.shown() ?? { url: shown.url(), response, kind: 'document' }).response
+            const body = await shown.content().catch(() => null)
+            if (body === null) return undefined
+            const shownStatus = answered?.status() ?? 0
+            const header = (name: string) => answered?.headers()[name.toLowerCase()] ?? null
+            const gate = classifyGate({ status: shownStatus || 200, header, body, finalUrl: shown.url() })
+            if (gate === null || (shownStatus !== 200 && shownStatus !== 0)) return gate
+            const decisive = classifyGate({ status: shownStatus || 200, header, body, finalUrl: shown.url(), contentful: true })
+            if (decisive !== null) return decisive
+            const read = extractTf.extract(body, { url: shown.url(), pruneSelectors: options.excludeTags, blockAds: options.blockAds })
+            return read.escalate || read.lastResort === true ? gate : null
+          }
+          await raceWithSignal(solveChallenges({
+            page: shown, solving: this.captchaSolving, userAgent: await page.evaluate(() => navigator.userAgent),
+            pageEgress: proxyFor(page.url(), this.networkPolicy)?.endpoint ?? null,
+            gateNow: solveGate, settle: async () => { await settle(remainingTimeout(execution, 1_500)) },
+            spend: execution.spend, paidCalls: execution.paidCalls, log: execution.captchaSolves, rung: this.browserEngine === 'installed_chrome' ? 'installed_chrome' : 'browser_local',
+            onEvent: (detail) => { trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'captcha_solve', detail: { ...detail } }) },
+            url, deadlineAt: execution.deadlineAt, signal, reserveMs: CAPTURE_RESERVE_MS,
+          }), signal)
         }
         break
       }

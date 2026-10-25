@@ -39,7 +39,8 @@ export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalC
   // The same engine options the API server and the octocrawl command read (W2L_ACCESS_GRANT, W2L_BROWSER_*, W2L_COMPAT_HOSTS, W2L_EGRESS_*, W2L_WORKER_COUNT).
   const engine=loadEngineConfig(env,{hosted:false})
   // The Amazon.sg state limits the public browser to Amazon's hosts, which leaves no installed_chrome rung (buildChannels).
-  const notices=[...engine.notices,...(amazonPublicState!==undefined && (engine.accessGrant?.capabilities ?? []).includes('installed_chrome') ? ['installed_chrome: no rung while W2L_AMAZON_PUBLIC_STATE_FILE is set: that state keeps the browser to Amazon.sg\'s hosts, and the person\'s Chrome is not limited that way (ADR 0005)'] : [])]
+  // The CAPTCHA solver (ADR 0005 third_party_captcha_solver) is started by the API server and the octocrawl command; this host does not run it yet.
+  const notices=[...engine.notices,...(engine.captchaSolver!==null ? ['captcha solver: not used by the local MCP host yet; run octocrawl serve (the API server) to solve under this grant'] : []),...(amazonPublicState!==undefined && (engine.accessGrant?.capabilities ?? []).includes('installed_chrome') ? ['installed_chrome: no rung while W2L_AMAZON_PUBLIC_STATE_FILE is set: that state keeps the browser to Amazon.sg\'s hosts, and the person\'s Chrome is not limited that way (ADR 0005)'] : [])]
   // Capture follows the operator's HTTPS_PROXY/HTTP_PROXY/NO_PROXY, the W2L_PER_HOST_* pacing and declares W2L_CONTACT; delivery keeps its own explicit proxy setting.
   const tuned=env.W2L_PER_HOST_CONCURRENCY!==undefined || env.W2L_PER_HOST_MIN_DELAY_MS!==undefined
   const networkPolicy=withOperatorContact(withEnvironmentProxy(tunedPolicy(localNetworkPolicy(),env),env),env)

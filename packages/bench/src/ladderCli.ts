@@ -221,6 +221,12 @@ export function buildChannels(
     installedChrome?: boolean
     /** Test seams of the installed_chrome rung (installedChrome.ts): a stand-in Chromium, headless where no display exists. */
     installedChromeSeams?: import('./subjects/installedChrome.js').InstalledChromeTestSeams
+    /**
+     * ADR 0005 `third_party_captcha_solver` (revision of 2026-10-25): the solver the local public browser rungs
+     * (browser_local, installed_chrome) hand a page still stopped at a check to. Taken only under a grant that names the
+     * capability, in mode standard, on a local server; never on the hosted preview.
+     */
+    captchaSolving?: import('./vendors/captchaSolver.js').CaptchaSolving
   } = {},
 ): Channel[] {
   // One subject per channel for the life of the run. A fresh Chromium per
@@ -232,13 +238,17 @@ export function buildChannels(
   if (preview && mode !== 'standard') throw new Error(`the preview product token is for standard mode, not ${mode}`)
   const http = new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, opts.localPreviewProxyUrl, opts.localPreviewRobotsException === true, fileStore, preview, opts.robotsCache)
   // The public browser alone may run another engine; the saved-login rung below is always stock Playwright.
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared')
+  if (opts.captchaSolving !== undefined && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('a captcha solver is for a local server, not the hosted preview (ADR 0005)')
+  if (opts.captchaSolving !== undefined && !(opts.vendorPolicy?.authorized ?? []).includes('third_party_captcha_solver')) throw new Error('a captcha solver needs an access grant that names third_party_captcha_solver (ADR 0005)')
+  // The public browser rungs of mode standard solve; a host-pinned browser (a local host's Amazon.sg state) does not.
+  const solving = opts.captchaSolving !== undefined && mode === 'standard' && opts.browserAllowedHosts === undefined && (opts.publicPreferenceState ?? null) === null ? opts.captchaSolving : null
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared', {}, solving)
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
   if (opts.compatTransport === true && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('the compatible transport is for a local server, not the hosted preview')
   if (opts.installedChrome === true && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('installed_chrome is for a local server, not the hosted preview (ADR 0005)')
   // A browser kept to a list of hosts (a local host's Amazon.sg state) gets no installed_chrome rung: the person's Chrome is not kept to them.
   const installedChrome = opts.installedChrome === true && opts.browserAllowedHosts === undefined && mode === 'standard' && opts.enhanced === true && (opts.vendorPolicy?.authorized ?? []).includes('installed_chrome')
-    ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', opts.installedChromeSeams ?? {})
+    ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', opts.installedChromeSeams ?? {}, solving)
     : null
   const compat = opts.compatTransport === true && mode === 'standard' ? new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, undefined, false, fileStore, false, opts.robotsCache, new CompatTransport(opts.networkPolicy ?? defaultNetworkPolicy())) : null
 
@@ -297,11 +307,13 @@ export function buildChannels(
       id: 'browser_local',
       identity: declared,
       waitsFor: true,
+      // Its CAPTCHA solves are paid calls under the grant (ADR 0005 third_party_captcha_solver), named on their record.
+      ...(solving === null || opts.vendorGrant === undefined ? {} : { grant: opts.vendorGrant }),
       // No session here, ever: the plain rung is the public browser.
       fetch: (url, _session, execution, options) =>
         opts.localSubjects?.browser_local !== undefined
           ? opts.localSubjects.browser_local.fetch(url, execution?.deadlineAt, execution?.signal, execution, options)
-          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume }),
+          : plainBrowser.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume, spend: execution.spend, paidCalls: execution.paidCalls, captchaSolves: execution.captchaSolves }),
       close: async () => {
         await plainBrowser.teardown()
         await opts.localSubjects?.browser_local?.teardown?.()
@@ -312,11 +324,12 @@ export function buildChannels(
       // The browser's own identity: the record declares the User-Agent Chrome reports (browserIdentity.ts).
       identity: declared,
       waitsFor: true,
+      ...(solving === null || opts.vendorGrant === undefined ? {} : { grant: opts.vendorGrant }),
       // The Chrome reads the page as it opened it (ADR 0005): no actions, screenshot, phone identity, added headers or
       // relaxed certificate check, each of which would drive or dress the window beyond what was measured.
       refusal: (_url: string, options: FetchOptions) => installedChromeRefusal(options),
       fetch: (url: string, _session: SessionSnapshot | null | undefined, execution?: ExecutionContext, options?: FetchOptions) =>
-        installedChrome.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume }),
+        installedChrome.fetch(url, execution?.deadlineAt, execution?.signal, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution === undefined ? undefined : { onListPage: execution.onListPage, listResume: execution.listResume, spend: execution.spend, paidCalls: execution.paidCalls, captchaSolves: execution.captchaSolves }),
       close: () => installedChrome.teardown(),
     } satisfies Channel]),
   ]
