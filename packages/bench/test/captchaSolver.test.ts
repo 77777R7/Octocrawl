@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createServer, request, type IncomingMessage, type Server } from 'node:http'
 import net from 'node:net'
-import { classifyChallenge, parseSolvedCookie, type ChallengeProbe, type DetectedChallenge } from '../src/vendors/captchaSolver.js'
-import { CapSolver, capSolverProxy } from '../src/vendors/capsolver.js'
+import { browserOf, classifyChallenge, parseSolvedCookie, TASK_CONTRACT_UNMET, type ChallengeProbe, type DetectedChallenge, type SolveVerdict } from '../src/vendors/captchaSolver.js'
+import { CapSolver, capSolverHint, capSolverProxy } from '../src/vendors/capsolver.js'
 import { startSolverForwarder } from '../src/solverEgress.js'
+import { chromeMajorOf } from '../src/subjects/installedChrome.js'
 import { startMockCapSolver, type MockBehaviour, type MockCapSolver } from './mockCapSolver.js'
 
 const KEY = 'CAP-unit-key-7f3a'
@@ -39,6 +40,26 @@ describe('classifyChallenge: the challenge a page shows, from its DOM and the ga
     expect(classifyChallenge(probe({ recaptcha: [{ sitekey: '6Lc', size: 'invisible', callback: 'go', form: null }], responseFieldInGetForm: true }), verdict)).toEqual({ type: 'unsupported', kind: 'recaptcha_v2', reason: 'form_sent_by_get' })
   })
 
+  it("takes a widget in a form the page's own script sends (no method, no action), as the 2captcha demos are", () => {
+    const verdict = { reason: 'captcha' as const, signals: ['widget_turnstile'] }
+    expect(classifyChallenge(probe({ turnstile: [{ sitekey: '0x4AAA', action: null, cdata: null, callback: null, form: 'script' }] }), verdict)).toMatchObject({ type: 'turnstile', websiteKey: '0x4AAA' })
+  })
+
+  it('on a page that fails its task contract, takes only a visible widget that gates it, never a form that asks for more (smoke test 2026-10-25, C009)', () => {
+    const unmet: SolveVerdict = { reason: TASK_CONTRACT_UNMET, signals: [] }
+    const gating = { sitekey: '0x4AAA', action: null, cdata: null, callback: null, form: 'script' as const, visible: true, inputs: 0 }
+    expect(classifyChallenge(probe({ turnstile: [gating] }), unmet)).toMatchObject({ type: 'turnstile', websiteKey: '0x4AAA' })
+    expect(classifyChallenge(probe({ recaptcha: [{ sitekey: '6Lc', size: null, callback: 'go', form: null, visible: true, inputs: 0 }] }), unmet)).toMatchObject({ type: 'recaptcha_v2', invisible: false })
+    // An invisible reCAPTCHA on a form, a contact form with fields of its own, a widget not shown: not what the task waits on.
+    expect(classifyChallenge(probe({ recaptcha: [{ sitekey: '6Lc', size: 'invisible', callback: null, form: 'post', visible: true, inputs: 0 }] }), unmet)).toBeNull()
+    expect(classifyChallenge(probe({ turnstile: [{ ...gating, form: 'post', inputs: 2 }] }), unmet)).toBeNull()
+    expect(classifyChallenge(probe({ turnstile: [{ ...gating, visible: false }] }), unmet)).toBeNull()
+    expect(classifyChallenge(probe({ turnstile: [{ ...gating, visible: undefined, inputs: undefined }] }), unmet)).toBeNull()
+    // A vendor's check is the gate's to name, never the contract's.
+    expect(classifyChallenge(probe({ iframes: ['https://geo.captcha-delivery.com/captcha/?t=fe&cid=1'] }), unmet)).toBeNull()
+    expect(classifyChallenge(probe(), unmet)).toBeNull()
+  })
+
   it('is nothing on a page the gate passed, or stopped for another reason', () => {
     expect(classifyChallenge(probe({ recaptcha: [{ sitekey: '6Lc', size: null, callback: null, form: 'post' }] }), null)).toBeNull()
     expect(classifyChallenge(probe(), { reason: 'login_wall', signals: ['status_401'] })).toBeNull()
@@ -54,6 +75,38 @@ describe('parseSolvedCookie', () => {
     expect(parseSolvedCookie('datadome=v; Domain=.shop.example')).toMatchObject({ domain: '.shop.example' })
     expect(parseSolvedCookie('')).toBeNull()
     expect(parseSolvedCookie('=v')).toBeNull()
+  })
+})
+
+describe('the browser a solve is bought for, against the vendor\'s list (smoke test 2026-10-25, C008 and T045)', () => {
+  const mac = (major: number) => `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`
+  const windows = (major: number) => `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`
+  const capsolver = new CapSolver({ apiKey: KEY })
+
+  it('reads the family, major and platform off a User-Agent', () => {
+    expect(browserOf(mac(156))).toEqual({ family: 'chrome', major: 156, platform: 'mac' })
+    expect(browserOf(windows(141))).toEqual({ family: 'chrome', major: 141, platform: 'windows' })
+    expect(browserOf(mac(151).replace('Chrome/', 'HeadlessChrome/'))).toEqual({ family: 'headless_chrome', major: 151, platform: 'mac' })
+    expect(browserOf('Mozilla/5.0 (X11; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0')).toEqual({ family: 'other', major: null, platform: 'linux' })
+  })
+
+  it("takes DataDome and Cloudflare's challenge only for a Chrome its guides list (Mac 150-155, Windows 140-155), tokens for any browser", () => {
+    for (const type of ['datadome', 'cloudflare_challenge'] as const) {
+      expect(capsolver.browserSupport(type, browserOf(mac(151)))).toBeNull()
+      expect(capsolver.browserSupport(type, browserOf(windows(141)))).toBeNull()
+      expect(capsolver.browserSupport(type, browserOf(mac(156)))).toBe('browser_version_unsupported')
+      expect(capsolver.browserSupport(type, browserOf(mac(141)))).toBe('browser_version_unsupported')
+      expect(capsolver.browserSupport(type, browserOf(mac(151).replace('Chrome/', 'HeadlessChrome/')))).toBe('browser_not_supported')
+      expect(capsolver.browserSupport(type, browserOf('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'))).toBe('browser_not_supported')
+    }
+    expect(capsolver.browserSupport('turnstile', browserOf(mac(156)))).toBeNull()
+    expect(capsolver.browserSupport('recaptcha_v2', browserOf('HeadlessChrome/151'))).toBeNull()
+  })
+
+  it("reads the installed Chrome's major from its --version line", () => {
+    expect(chromeMajorOf('Google Chrome 156.0.8078.47\n')).toBe(156)
+    expect(chromeMajorOf('Google Chrome for Testing 151.0.7922.34 ')).toBe(151)
+    expect(chromeMajorOf('')).toBeNull()
   })
 })
 
@@ -102,30 +155,46 @@ describe('CapSolver: createTask, then getTaskResult until ready (docs.capsolver.
     expect(m.requests.map((r) => r.path)).toEqual(['/createTask'])
   })
 
-  it('says why it failed by code only, and whether a task was created (so may be billed)', async () => {
+  it('says why it failed by code only, whether a task was created, and whether CapSolver bills it (no charge for a task it failed)', async () => {
     const dd = challenges[0]![0]
     let m = await start(() => ({ createError: 'ERROR_ZERO_BALANCE' }))
-    expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toEqual({ ok: false, error: 'zero_balance', code: 'ERROR_ZERO_BALANCE', taskCreated: false })
+    expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toMatchObject({ ok: false, error: 'zero_balance', code: 'ERROR_ZERO_BALANCE', taskCreated: false, billed: false })
     await m.close()
+    // A task CapSolver itself reports failed is not billed (its docs: "no charge for failed attempts"; ERROR_CAPTCHA_UNSOLVABLE
+    // "No deduction"), as the smoke test's balance showed for T045's ERROR_CAPTCHA_SOLVE_FAILED.
     m = await start(() => ({ pollError: 'ERROR_CAPTCHA_UNSOLVABLE' }))
-    expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toEqual({ ok: false, error: 'unsolvable', code: 'ERROR_CAPTCHA_UNSOLVABLE', taskCreated: true })
+    expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toMatchObject({ ok: false, error: 'unsolvable', code: 'ERROR_CAPTCHA_UNSOLVABLE', taskCreated: true, billed: false })
     await m.close()
-    m = await start(() => ({ pollError: 'ERROR_PROXY_BANNED' }))
-    expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toMatchObject({ ok: false, error: 'proxy_banned', taskCreated: true })
+    m = await start(() => ({ pollError: 'ERROR_CAPTCHA_SOLVE_FAILED', description: 'Failed to solve the captcha: 1013' }))
+    expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toEqual({ ok: false, error: 'rejected', code: 'ERROR_CAPTCHA_SOLVE_FAILED', taskCreated: true, billed: false, hint: '1013' })
     await m.close()
+    // A poll refused for another reason (a rate limit, a blocked key, the proxy) says nothing of the task's bill.
+    for (const code of ['ERROR_PROXY_BANNED', 'ERROR_RATE_LIMIT', 'ERROR_KEY_TEMP_BLOCKED']) {
+      m = await start(() => ({ pollError: code }))
+      expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toMatchObject({ ok: false, code, taskCreated: true, billed: null })
+      await m.close()
+    }
     // createTask's answer lost (garbled here): a task may have been made, and may bill.
     m = await start(() => ({ createGarbled: true }))
-    expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toMatchObject({ ok: false, error: 'transport', taskCreated: true })
+    expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toMatchObject({ ok: false, error: 'transport', taskCreated: true, billed: null })
     await m.close()
-    // A solution without its cookie is no answer; the task was still made.
+    // A solution without its cookie is no answer; the task was made and answered "ready", so billed.
     m = await start(() => ({ solution: { cookie: '' } }))
-    expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toEqual({ ok: false, error: 'rejected', code: 'NO_SOLUTION', taskCreated: true })
+    expect(await solver(m.url).solve({ challenge: dd, userAgent: UA, proxy: EXIT, deadlineAt: soon() })).toEqual({ ok: false, error: 'rejected', code: 'NO_SOLUTION', taskCreated: true, billed: true, hint: null })
+  })
+
+  it('keeps of the free-text description only a fixed vocabulary and numeric codes, never what it echoes', () => {
+    expect(capSolverHint('Failed to solve the captcha: 1013')).toBe('1013')
+    expect(capSolverHint('userAgent does not match or your proxy IP has been blocked')).toBe('user_agent+proxy+ip+blocked')
+    expect(capSolverHint(`proxy 203.0.113.9:8080:user-us-1:exit-pass-9c1 refused, key ${KEY}`)).toBe('proxy')
+    expect(capSolverHint('')).toBeNull()
+    expect(capSolverHint(undefined)).toBeNull()
   })
 
   it('gives up at its deadline, and when the caller aborts', async () => {
     const m = await start(() => ({ never: true }))
     const started = Date.now()
-    expect(await solver(m.url).solve({ challenge: challenges[3]![0], userAgent: UA, proxy: null, deadlineAt: Date.now() + 300 })).toEqual({ ok: false, error: 'timeout', code: null, taskCreated: true })
+    expect(await solver(m.url).solve({ challenge: challenges[3]![0], userAgent: UA, proxy: null, deadlineAt: Date.now() + 300 })).toEqual({ ok: false, error: 'timeout', code: null, taskCreated: true, billed: null, hint: null })
     expect(Date.now() - started).toBeLessThan(3_000)
     const controller = new AbortController()
     setTimeout(() => controller.abort(), 100)
@@ -135,14 +204,15 @@ describe('CapSolver: createTask, then getTaskResult until ready (docs.capsolver.
   it('creates no task for an exit-bound challenge without an exit, nor a type it does not solve', async () => {
     const m = await start(() => ({ solution: { cookie: 'datadome=x' } }))
     expect(await solver(m.url).solve({ challenge: challenges[0]![0], userAgent: UA, proxy: null, deadlineAt: soon() })).toMatchObject({ ok: false, taskCreated: false })
-    expect(await solver(m.url).solve({ challenge: { type: 'hcaptcha' } as unknown as DetectedChallenge, userAgent: UA, proxy: null, deadlineAt: soon() })).toEqual({ ok: false, error: 'unsupported', code: null, taskCreated: false })
+    expect(await solver(m.url).solve({ challenge: { type: 'hcaptcha' } as unknown as DetectedChallenge, userAgent: UA, proxy: null, deadlineAt: soon() })).toEqual({ ok: false, error: 'unsupported', code: null, taskCreated: false, billed: false, hint: null })
     expect(m.requests).toEqual([])
   })
 
   it('keeps no secret in what it returns: the vendor\'s free-text description, which echoes the request, never leaves', async () => {
     const m = await start(() => ({ createError: 'ERROR_INVALID_TASK_DATA' }))
     const answer = await solver(m.url).solve({ challenge: challenges[0]![0], userAgent: UA, proxy: EXIT, deadlineAt: soon() })
-    expect(answer).toEqual({ ok: false, error: 'rejected', code: 'ERROR_INVALID_TASK_DATA', taskCreated: false })
+    // The stand-in's description echoes the whole request: only the words it shares with the vocabulary are kept.
+    expect(answer).toEqual({ ok: false, error: 'rejected', code: 'ERROR_INVALID_TASK_DATA', taskCreated: false, billed: false, hint: 'user_agent+proxy' })
     expect(JSON.stringify(answer)).not.toMatch(/exit-pass-9c1|CAP-unit-key/)
     expect(capSolverProxy({ url: 'http://198.51.100.2:3128', endpoint: '198.51.100.2:3128' })).toBe('198.51.100.2:3128')
   })

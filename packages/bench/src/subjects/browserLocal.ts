@@ -25,7 +25,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Down
 import { browserEngineFor, type BrowserEngineName } from './browserEngine.js'
 import { DETECTION_FLAGS_ID, launchInstalledChrome, type InstalledChromeTestSeams } from './installedChrome.js'
 import type { BrowserIdentityChoice } from './browserIdentity.js'
-import { solveChallenges, type CaptchaSolving } from '../vendors/captchaSolver.js'
+import { solveChallenges, TASK_CONTRACT_UNMET, type CaptchaSolving, type SolveVerdict } from '../vendors/captchaSolver.js'
 import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -1005,7 +1005,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
             gateNow: solveGate, settle: async () => { await settle(remainingTimeout(execution, 1_500)) },
             spend: execution.spend, paidCalls: execution.paidCalls, log: execution.captchaSolves, rung: this.browserEngine === 'installed_chrome' ? 'installed_chrome' : 'browser_local',
             onEvent: (detail) => { trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'captcha_solve', detail: { ...detail } }) },
-            url, deadlineAt: execution.deadlineAt, signal, reserveMs: CAPTURE_RESERVE_MS,
+            url, deadlineAt: execution.deadlineAt, signal, reserveMs: CAPTURE_RESERVE_MS, options,
           }), signal)
         }
         break
@@ -1139,9 +1139,30 @@ export class BrowserLocalSubject implements SubjectAdapter {
         : true
       if (region !== undefined && !gated) {
         const maxMs = Math.min(REGION_WAIT_MAX_MS, execution.deadlineAt === undefined ? REGION_WAIT_MAX_MS : execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now())
-        const waited = regionWaitEvent(await raceWithSignal(waitForRegion(shownPage, region, { maxMs }), signal), Date.now() - start, 'browser_local')
+        const outcome = await raceWithSignal(waitForRegion(shownPage, region, { maxMs }), signal)
+        const waited = regionWaitEvent(outcome, Date.now() - start, 'browser_local')
         if (waited !== null) trace.push(waited)
         throwIfExecutionStopped(execution)
+        // ADR 0005 `third_party_captcha_solver` (revision of 2026-10-26): a page that answered as content and fails the
+        // task's checks after the wait, with a token widget that gates it (gatingWidget: shown, not reCAPTCHA's invisible
+        // kind, in a form that asks for nothing else or handing its token to a callback), is solved; the contract judged on
+        // the live page again says whether the token passed. Never a widget on a page the task does not fail.
+        const failing = outcome !== undefined && !outcome.ready && outcome.unjudged === undefined && outcome.checks.some((check) => check.passed === false)
+        if (this.captchaSolving !== null && failing) {
+          const contractNow = async (): Promise<SolveVerdict | null> => {
+            const again = await waitForRegion(shownPage, region, { maxMs: 1_500, scroll: false })
+            return again.ready ? null : { reason: TASK_CONTRACT_UNMET, signals: [] }
+          }
+          await raceWithSignal(solveChallenges({
+            page: shownPage, solving: this.captchaSolving, userAgent: await shownPage.evaluate(() => navigator.userAgent),
+            pageEgress: proxyFor(shownPage.url(), this.networkPolicy)?.endpoint ?? null, trigger: 'task_contract',
+            gateNow: contractNow, settle: async () => { await settle(remainingTimeout(execution, 1_500)) },
+            spend: execution.spend, paidCalls: execution.paidCalls, log: execution.captchaSolves, rung: this.browserEngine === 'installed_chrome' ? 'installed_chrome' : 'browser_local',
+            onEvent: (detail) => { trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'captcha_solve', detail: { ...detail } }) },
+            url, deadlineAt: execution.deadlineAt, signal, reserveMs: CAPTURE_RESERVE_MS, options,
+          }), signal)
+          throwIfExecutionStopped(execution)
+        }
       }
       // The screenshot format: the page as it stands after load, stability
       // and waitFor, before the DOM is read below, so the image and the

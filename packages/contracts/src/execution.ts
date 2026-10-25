@@ -121,8 +121,11 @@ export interface PaidCallRecord {
 export interface CaptchaSolveLog {
   /** Solves bought so far for this page. */
   used(): number
-  /** A solve the ledger settled; returns its call number in the run. */
-  charged(solve: { vendor: string; rung: string; ceilingUsd: number; chargedUsd: number; reportedCostUsd: number | null; paidCallId?: string }): number
+  /**
+   * A solve the ledger settled (at 0 for a task the vendor reported failed, which its terms do not bill); returns its call
+   * number in the run. `solved`: the vendor answered with a token or cookie.
+   */
+  charged(solve: { vendor: string; rung: string; ceilingUsd: number; chargedUsd: number; reportedCostUsd: number | null; solved: boolean; paidCallId?: string }): number
 }
 
 /** A task's paid-call journal, as a rung sees it. */
