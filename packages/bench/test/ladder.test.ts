@@ -165,6 +165,16 @@ describe('LadderRunner', () => {
     expect(vendor.calls).toEqual([])
   })
 
+  it('stops at a challenge served with 429 whose Retry-After the next rung would spend its time waiting out', async () => {
+    const url = 'https://example.com/p'
+    const challenged: FetchResult = { ...blockedResult(url, 'captcha'), evidence: { ...blockedResult(url, 'captcha').evidence, httpStatus: 429 }, retryAt: Date.now() + 60_000 }
+    const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    const run = await new LadderRunner([channel('http', [challenged]), browser], { mode: 'research' }).run(url)
+    expect(run.result.blockReason).toBe('captcha')
+    expect(run.result.retryAt).toBe(challenged.retryAt)
+    expect(browser.calls).toEqual([])
+  })
+
   it('still stops at a challenge served with 429 when only vendor rungs are left', async () => {
     const url = 'https://example.com/p'
     const challenged: FetchResult = { ...blockedResult(url, 'bot_detected_generic'), evidence: { ...blockedResult(url, 'bot_detected_generic').evidence, httpStatus: 429 }, retryAt: Date.now() + 250 }
