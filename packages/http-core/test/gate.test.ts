@@ -311,6 +311,24 @@ script.src = 'https://captcha.px-cloud.net/PX3Vk96I6i/captcha.js?a=c';</script><
     expect(classifyGate(withHeaders({ 'retry-after': '30' }, { status: 429, body }))).toEqual(want)
   })
 
+  it.each([
+    // K1's frozen tasks, 2026-10-21 to 2026-10-25: each answered every run with 429, no Retry-After, and these headers
+    // (read live on 2026-10-25). A browser can run the challenge; waiting does not clear it.
+    ['Vercel\'s checkpoint (ironmountain.com, T007)', { 'x-vercel-mitigated': 'challenge' }, { reason: 'bot_detected_generic', signals: ['header_x_vercel_mitigated', 'status_429'] }],
+    ['Kasada (realtor.com, T042)', { 'x-kpsdk-ct': '01bieInQz9wE', 'x-kpsdk-r': '1-AA' }, { reason: 'bot_detected_generic', signals: ['header_x_kpsdk_ct', 'status_429'] }],
+    ['Expedia\'s challenge handler (expedia.com, T037)', { 'x-page-id': 'wildcard-challenge-handler' }, { reason: 'captcha', signals: ['header_expedia_challenge_handler', 'status_429'] }],
+  ] as const)('names a 429 answered by %s a challenge, not a rate limit', (_site, headers, want) => {
+    expect(classifyGate(withHeaders(headers, { status: 429, body: '<title>Security Checkpoint</title>' }))).toEqual(want)
+    expect(classifyGate(withHeaders({ ...headers, 'retry-after': '30' }, { status: 429, body: '' }))).toEqual(want)
+  })
+
+  it('keeps a 429 rate_limit when those headers do not name a challenge', () => {
+    const rateLimit = { reason: 'rate_limit', signals: ['status_429'] }
+    expect(classifyGate(withHeaders({ 'x-vercel-mitigated': 'deny' }, { status: 429, body: '' }))).toEqual(rateLimit)
+    expect(classifyGate(withHeaders({ 'x-page-id': 'hotel-search' }, { status: 429, body: '' }))).toEqual(rateLimit)
+    expect(classifyGate(withHeaders({ 'x-kpsdk-ct': '' }, { status: 429, body: '' }))).toEqual(rateLimit)
+  })
+
   it('keeps a 429 rate_limit when it carries only the sensor or the copy, not the challenge', () => {
     const rateLimit = { reason: 'rate_limit', signals: ['status_429'] }
     expect(classifyGate(res({ status: 429, body: `<h1>Too Many Requests</h1>${PX_SENSOR}` }))).toEqual(rateLimit)

@@ -92,6 +92,17 @@ const VENDOR_HEADERS: readonly (readonly [name: string, reason: GateBlockReason,
   ['x-sucuri-block', 'bot_detected_generic', 'header_x_sucuri_block'],
 ]
 
+/**
+ * Headers that name a challenge a vendor serves with 429, so the 429 is no rate limit; read only on a 429 (`null`:
+ * any value). Vercel's checkpoint says `challenge` (`deny` is a refusal, no challenge); Kasada's interstitial sends its
+ * client token with the KPSDK script; Expedia's challenge handler draws its captcha.
+ */
+const CHALLENGE_429_HEADERS: readonly (readonly [name: string, value: string | null, reason: GateBlockReason, signal: string])[] = [
+  ['x-vercel-mitigated', 'challenge', 'bot_detected_generic', 'header_x_vercel_mitigated'],
+  ['x-kpsdk-ct', null, 'bot_detected_generic', 'header_x_kpsdk_ct'],
+  ['x-page-id', 'wildcard-challenge-handler', 'captcha', 'header_expedia_challenge_handler'],
+]
+
 /** Cloudflare's managed-challenge plumbing. Any one of these is decisive. */
 const CF_STRONG_MARKERS: readonly (readonly [marker: string, signal: string])[] = [
   ['/cdn-cgi/challenge-platform', 'cf_challenge_platform_script'],
@@ -297,6 +308,11 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     // cooldown and Retry-After follow the status, not this verdict.
     const px = perimeterXChallenge(head, lower)
     if (px !== null) return { reason: 'captcha', signals: [...px, 'status_429'] }
+    // Vercel, Kasada and Expedia send their challenge with 429 too, and name it in a header (K1, 2026-10-25).
+    for (const [name, value, reason, signal] of CHALLENGE_429_HEADERS) {
+      const got = res.header(name)?.trim().toLowerCase()
+      if (got !== undefined && got !== '' && (value === null || got === value)) return { reason, signals: [signal, 'status_429'] }
+    }
     return { reason: 'rate_limit', signals: ['status_429'] }
   }
   if (res.status === 451) {

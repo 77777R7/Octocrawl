@@ -152,6 +152,30 @@ describe('LadderRunner', () => {
     expect(browser.calls).toEqual([])
   })
 
+  it.each(['bot_detected_generic', 'captcha'] as const)('climbs past a %s challenge served with 429, on the same exit only (ADR 0005)', async (reason) => {
+    // K1 T007/T042/T037/T018: a vendor's challenge with 429 and no Retry-After stopped the run at http. The browser
+    // rung shares the origin's cooldown, so it still waits the site's time; a vendor rung would leave through another exit.
+    const url = 'https://example.com/p'
+    const challenged: FetchResult = { ...blockedResult(url, reason), evidence: { ...blockedResult(url, reason).evidence, httpStatus: 429 }, retryAt: Date.now() + 250 }
+    const browser = channel('browser_local', [contentfulResult(url, 'browser_local')])
+    const vendor = channel('provider', [contentfulResult(url, 'provider')], 'steel')
+    const run = await new LadderRunner([channel('http', [challenged]), vendor, browser], { mode: 'research' }).run(url)
+    expect(run.result.status).toBe('success')
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(vendor.calls).toEqual([])
+  })
+
+  it('still stops at a challenge served with 429 when only vendor rungs are left', async () => {
+    const url = 'https://example.com/p'
+    const challenged: FetchResult = { ...blockedResult(url, 'bot_detected_generic'), evidence: { ...blockedResult(url, 'bot_detected_generic').evidence, httpStatus: 429 }, retryAt: Date.now() + 250 }
+    const vendor = channel('provider', [contentfulResult(url, 'provider')], 'steel')
+    const run = await new LadderRunner([channel('http', [challenged]), vendor], { mode: 'research' }).run(url)
+    expect(run.result.blockReason).toBe('bot_detected_generic')
+    expect(run.channelsTried).toEqual(['http'])
+    expect(vendor.calls).toEqual([])
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', channel: 'provider', detail: { vendorId: 'steel', reason: expect.stringContaining('429') } }))
+  })
+
   it('governance refuses a URL outside the allowlist before any channel runs', async () => {
     const http = channel('http', [contentfulResult('https://evil.test/p', 'http')])
     const runner = new LadderRunner([http], ALLOWED_ALL)
