@@ -22,6 +22,9 @@ export function solverOf(doc, providers = SOLVER_PROVIDERS) {
   // As run-set.mjs's paidCallsOf: a record that carries the key lists every paid call (null: none could be made, no grant).
   if (access === undefined || access === null || !('paidCalls' in access)) return null
   const calls = (access.paidCalls ?? []).filter((c) => providers.includes(c?.provider))
+  // A paid call that names the solver capability under a provider not on the list: its figures are not known here, not 0.
+  const unlisted = (access.paidCalls ?? []).some((c) => !providers.includes(c?.provider) && [c?.capability, ...(Array.isArray(c?.capabilities) ? c.capabilities : [])].includes('third_party_captcha_solver'))
+  if (unlisted) return { calls: null, attempted: null, succeeded: null, reportedUsd: null, chargedUsd: null, solveMs: null }
   return {
     calls: calls.length,
     attempted: calls.reduce((a, c) => a + (firstNumber(c, ['solveAttempts']) ?? 1), 0),
@@ -51,9 +54,11 @@ export function armCells(tasks, rows, baseRows = null) {
   const cell = (ts) => {
     const made = ts.map((t) => byTask.get(t.id)).filter((r) => r !== undefined)
     const solver = made.map((r) => r.observed?.solver ?? null)
-    const tried = made.filter((r) => (r.observed?.solver?.attempted ?? 0) > 0)
-    const succeeded = sumOrNull(solver.filter((s) => s !== null && s.attempted > 0).map((s) => s.succeeded))
-    const reportedUsd = sumOrNull(solver.filter((s) => s !== null && s.calls > 0).map((s) => s.reportedUsd))
+    // An unknown solver (null, or a call it could not attribute) makes every solver figure of the cell unknown.
+    const unknownSolver = solver.some((s) => s === null || s.attempted === null)
+    const tried = unknownSolver ? [] : made.filter((r) => r.observed.solver.attempted > 0)
+    const succeeded = unknownSolver ? null : sumOrNull(solver.filter((s) => s.attempted > 0).map((s) => s.succeeded))
+    const reportedUsd = unknownSolver ? null : sumOrNull(solver.filter((s) => s.calls > 0).map((s) => s.reportedUsd))
     const paired = tried.filter((r) => base.has(r.taskId)).map((r) => r.outcome.wallMs - base.get(r.taskId).outcome.wallMs)
     return {
       planned: ts.length,
@@ -62,13 +67,13 @@ export function armCells(tasks, rows, baseRows = null) {
       verified: made.filter((r) => r.outcome.verified).length,
       falseSuccess: made.filter((r) => r.outcome.falseSuccess).length,
       // Unknown when any attempt's record says nothing of paid calls.
-      solvesAttempted: solver.some((s) => s === null) ? null : solver.reduce((a, s) => a + s.attempted, 0),
-      solvesSucceeded: solver.some((s) => s === null) ? null : succeeded,
-      reportedUsd: solver.some((s) => s === null) ? null : reportedUsd,
-      usdPerSolve: solver.some((s) => s === null) || reportedUsd === null || succeeded === null || succeeded === 0 ? null : reportedUsd / succeeded,
+      solvesAttempted: unknownSolver ? null : solver.reduce((a, s) => a + s.attempted, 0),
+      solvesSucceeded: unknownSolver ? null : succeeded,
+      reportedUsd: unknownSolver ? null : reportedUsd,
+      usdPerSolve: unknownSolver || reportedUsd === null || succeeded === null || succeeded === 0 ? null : reportedUsd / succeeded,
       chargedUsd: sumOrNull(made.map((r) => (typeof r.outcome.chargedUsd === 'number' ? r.outcome.chargedUsd : null))),
-      solveMs: solver.some((s) => s === null) ? null : sumOrNull(tried.map((r) => r.observed.solver.solveMs)),
-      pairedAddedMs: { n: paired.length, median: median(paired) },
+      solveMs: unknownSolver ? null : sumOrNull(tried.map((r) => r.observed.solver.solveMs)),
+      pairedAddedMs: unknownSolver ? { n: null, median: null } : { n: paired.length, median: median(paired) },
     }
   }
   return { all: cell(tasks), byType: Object.fromEntries(types.map((ty) => [ty, cell(tasks.filter((t) => typeOf(t) === ty))])) }
@@ -84,7 +89,7 @@ const usd = (v) => (v === null ? 'unknown' : `$${v.toFixed(4)}`)
 export function cellsTable(arms) {
   const head = ['| Arm | Challenge type | Planned | Attempted | Not run | Verified | False success | Solves attempted | Solves succeeded | Solver-reported USD | USD per solve | Charged by ledger | Solve ms (reported) | Added wall ms vs base arm (median, n) |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |']
   // A cell with no attempt has no solves or cost to report: n/a, not 0.
-  const line = (arm, type, c) => `| ${arm} | ${type} | ${c.planned} | ${c.attempted} | ${c.notRun.length} | ${c.verified} | ${c.falseSuccess} | ${c.attempted === 0 ? 'n/a | n/a | n/a | n/a | n/a | n/a' : `${fmt(c.solvesAttempted)} | ${fmt(c.solvesSucceeded)} | ${c.reportedUsd === null ? 'unknown' : usd(c.reportedUsd)} | ${c.usdPerSolve === null ? (c.solvesSucceeded === 0 ? 'n/a' : 'unknown') : usd(c.usdPerSolve)} | ${c.chargedUsd === null ? 'unknown' : usd(c.chargedUsd)} | ${fmt(c.solveMs)}`} | ${c.pairedAddedMs.n === 0 ? 'n/a' : `${c.pairedAddedMs.median} (${c.pairedAddedMs.n})`} |`
+  const line = (arm, type, c) => `| ${arm} | ${type} | ${c.planned} | ${c.attempted} | ${c.notRun.length} | ${c.verified} | ${c.falseSuccess} | ${c.attempted === 0 ? 'n/a | n/a | n/a | n/a | n/a | n/a' : `${fmt(c.solvesAttempted)} | ${fmt(c.solvesSucceeded)} | ${c.reportedUsd === null ? 'unknown' : usd(c.reportedUsd)} | ${c.usdPerSolve === null ? (c.solvesSucceeded === 0 ? 'n/a' : 'unknown') : usd(c.usdPerSolve)} | ${c.chargedUsd === null ? 'unknown' : usd(c.chargedUsd)} | ${fmt(c.solveMs)}`} | ${c.pairedAddedMs.n === null ? 'unknown' : c.pairedAddedMs.n === 0 ? 'n/a' : `${c.pairedAddedMs.median} (${c.pairedAddedMs.n})`} |`
   return [...head, ...arms.flatMap(({ arm, cells }) => [line(arm, '**all**', cells.all), ...Object.entries(cells.byType).map(([ty, c]) => line(arm, ty, c))])]
 }
 

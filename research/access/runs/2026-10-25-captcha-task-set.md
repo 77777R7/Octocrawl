@@ -170,6 +170,7 @@ Of the 56 tasks, 41 come from saved runs and 15 were added (7 real pages, 8 vend
 - `captcha-window.mjs` runs one window over these arms: standard, installed_chrome, the combined installed_chrome + Steel grant, and each of them `+solver`.
   - A solver arm needs `--solver-grants <arm>+solver=<file>` (a grant that lists `third_party_captcha_solver`) and `--solver-env`.
   - Until those exist, the arm is not started, and the manifest names why.
+  - Every solver arm sends access "enhanced", since the solver is an enhanced capability and a standard request drops every paid rung. So `standard+solver` is the standard arm's local rungs with a grant that adds the solver alone.
 - `captcha-report.mjs` reports per arm and per type, real pages and demos apart, unknown where not measured:
   - verified and false success;
   - solves attempted and succeeded;
@@ -177,6 +178,8 @@ Of the 56 tasks, 41 come from saved runs and 15 were added (7 real pages, 8 vend
   - the ledger's charge;
   - reported solve ms, plus the median added wall ms against the same arm without the solver;
   - planned, attempted and not run.
+
+  A paid call that names `third_party_captcha_solver` under a provider not on the list makes the cell's solver figures unknown, not 0.
 
   Its logic is in `captchaReport.mjs`, tested by `packages/runtime/test/captchaReport.test.ts`.
 - The field names the harness reads from a solver call (`solveAttempts`, `solves`, `reportedCostUsd`/`costUsd`, `solveMs`/`durationMs`) are a proposal to the adapter session. If the adapter names them differently, change the lists in `captchaReport.mjs`.

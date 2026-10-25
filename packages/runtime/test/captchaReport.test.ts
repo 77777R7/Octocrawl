@@ -26,6 +26,10 @@ describe('captcha report', () => {
     expect(solverOf({ evidenceRecord: { access: { paidCalls: null } } })).toMatchObject({ calls: 0, attempted: 0, succeeded: 0 })
     expect(solverOf(doc(undefined))).toBeNull()
     expect(solverOf({})).toBeNull()
+    // A solver call under a provider the harness does not list: unknown, not 0.
+    expect(solverOf(doc([{ provider: 'capsolver_v2', capabilities: ['third_party_captcha_solver'], solves: 1, chargedUsd: 0.003 }]))).toMatchObject({ calls: null, attempted: null, succeeded: null, reportedUsd: null })
+    const unattributed = armCells(tasks, [row('T045', { solver: { calls: null, attempted: null, succeeded: null, reportedUsd: null, chargedUsd: null, solveMs: null } })])
+    expect(unattributed.byType.datadome).toMatchObject({ solvesAttempted: null, solvesSucceeded: null, usdPerSolve: null, pairedAddedMs: { n: null } })
   })
 
   it('counts by type, keeps tasks not run in the denominator and pairs the time a solve added with the base arm', () => {

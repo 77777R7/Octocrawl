@@ -8,7 +8,7 @@
 //   combined          this checkout's API, the combined installed_chrome + Steel grant written for the combined-grant
 //                     measurement (--combined-grant, default .w2l/access/combined-grant.json), W2L_VENDORS=steel and
 //                     STEEL_API_KEY, access "enhanced".
-//   <arm>+solver      the same arm with the third-party solver: its grant from --solver-grants <arm>=<file>[,…], which must
+//   <arm>+solver      (always access "enhanced": standard+solver is the standard arm's rungs with a grant adding the solver)      the same arm with the third-party solver: its grant from --solver-grants <arm>=<file>[,…], which must
 //                     list third_party_captcha_solver (ADR 0005), and --solver-env NAME[,NAME…], the environment variables
 //                     the solver needs (read like the other keys, never written anywhere). An arm whose grant or key is
 //                     missing is not started: the manifest names it and why, and the report counts all its tasks not run.
@@ -104,7 +104,9 @@ for (const [i, name] of armNames.entries()) {
   }
   if (file !== null && grant !== null) env.W2L_ACCESS_GRANT = file
   if (why.length > 0) notStarted.push({ arm: name, why })
-  else arms[name] = { port: ports[i], access: base === 'standard' ? '"standard"' : '"enhanced"', env, grant, grantFile: grant === null ? null : file }
+  // A solver arm is always "enhanced": the solver is an enhanced capability, and a standard request drops every paid rung.
+  // standard+solver is the standard arm's local rungs with a grant that adds the solver alone.
+  else arms[name] = { port: ports[i], access: base === 'standard' && baseArmOf(name) === null ? '"standard"' : '"enhanced"', env, grant, grantFile: grant === null ? null : file }
 }
 const runArms = armNames.filter((a) => a in arms)
 const rotated = (b) => runArms.map((_, i) => runArms[(i + b) % runArms.length])
@@ -162,6 +164,8 @@ async function runSet(name, label, ids) {
   const argv = ['research/access/run-set.mjs', '--tasks', TASKS_FILE, '--arm', name, '--set', 'all', '--only', ids.join(','), '--save-responses', '--raw-html', '--access', a.access, '--record', record,
     ...(a.grantFile === null ? [] : ['--grant', a.grantFile]), ...(flag('--solver-providers') ? ['--solver-providers', flag('--solver-providers')] : [])]
   const env = { ...process.env, W2L_API_URL: `http://127.0.0.1:${a.port}`, W2L_EGRESS_ECHO_URL: 'https://api.ipify.org' }
+  // run-set falls back to the shell's W2L_ACCESS_GRANT: an arm without a grant must not record one its API never had.
+  if (a.grantFile === null) delete env.W2L_ACCESS_GRANT
   const startedAt = new Date().toISOString()
   const out = createWriteStream(join(work, `${label}.log`))
   await new Promise((r) => out.once('open', r))

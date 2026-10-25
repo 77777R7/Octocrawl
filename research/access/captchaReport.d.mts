@@ -1,6 +1,6 @@
 // Types for captchaReport.mjs, so its tests (packages/runtime/test/captchaReport.test.ts) type-check against it.
 
-export interface Solver { calls: number; attempted: number; succeeded: number | null; reportedUsd: number | null; chargedUsd: number | null; solveMs: number | null }
+export interface Solver { calls: number | null; attempted: number | null; succeeded: number | null; reportedUsd: number | null; chargedUsd: number | null; solveMs: number | null }
 export interface Row {
   taskId: string
   temperature: string
@@ -11,7 +11,7 @@ export interface Task { id: string; challenge?: { primaryType?: string } }
 export interface Cell {
   planned: number; attempted: number; notRun: string[]; verified: number; falseSuccess: number
   solvesAttempted: number | null; solvesSucceeded: number | null; reportedUsd: number | null; usdPerSolve: number | null
-  chargedUsd: number | null; solveMs: number | null; pairedAddedMs: { n: number; median: number | null }
+  chargedUsd: number | null; solveMs: number | null; pairedAddedMs: { n: number | null; median: number | null }
 }
 export interface Cells { all: Cell; byType: Record<string, Cell> }
 

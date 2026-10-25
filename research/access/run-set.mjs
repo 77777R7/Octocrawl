@@ -136,7 +136,7 @@ import { readFile, writeFile as writeRaw, mkdir, appendFile as appendRaw } from 
 import { existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isData, judge } from './judge.mjs'
 import { channelsCell, denominator, denominatorLines, grantLine, grantOf, plannedAttempts, stopReason } from './runSetReport.mjs'
@@ -519,7 +519,7 @@ if (rejudgeDir !== undefined) {
     if (task === undefined || (row.url !== undefined && row.url !== task.url)) {
       // The task was removed from the file (or its id now names another URL) after this run: it
       // stays in the denominator with the run's own verdict, which the current predicates cannot redo.
-      row.notRejudged = task === undefined ? 'removed from tasks.v1.json after the run' : 'its URL in tasks.v1.json changed after the run'
+      row.notRejudged = task === undefined ? `removed from ${basename(tasksFile)} after the run` : `its URL in ${basename(tasksFile)} changed after the run`
       droppedRows.push(row)
       rows.push(row)
       continue
@@ -684,7 +684,7 @@ if (recordFile !== undefined) {
     `# Access task set run: ${priorRun?.set ?? setFilter}, ${environment.startedAt.slice(0, 10)}`, '',
     `- Command: \`${command}\``,
     ...((priorRun?.arm ?? armName) === null ? [] : [`- Arm: ${priorRun?.arm ?? armName}`]),
-    ...(rejudged === null ? [] : [`- Rejudged: ${rejudged.at} against tasks.v1.json with SHA-256 \`${rejudged.tasksSha256}\` (\`${rejudged.command}\`); statuses and timings are the run's own`]),
+    ...(rejudged === null ? [] : [`- Rejudged: ${rejudged.at} against ${basename(tasksFile)} with SHA-256 \`${rejudged.tasksSha256}\` (\`${rejudged.command}\`); statuses and timings are the run's own`]),
     `- Source commit: \`${environment.commit}\`${environment.dirty ? ' (working tree had uncommitted changes)' : ''}`,
     `- Network: ${environment.proxied ? `proxied (HTTPS_PROXY=${environment.proxyEnv.HTTPS_PROXY ?? ''}, HTTP_PROXY=${environment.proxyEnv.HTTP_PROXY ?? ''}, NO_PROXY=${environment.proxyEnv.NO_PROXY ?? ''}${environment.proxyCredentialsRemoved.length === 0 ? '' : `; credentials and query of ${environment.proxyCredentialsRemoved.join(', ')} not recorded`})` : 'direct'}`,
     `- Target: ${TARGETS[environment.target ?? 'octocrawl']}${(environment.target ?? 'octocrawl') === 'octocrawl' ? '' : ' (the network line is the driver\'s way to its API; the provider fetches from its own cloud)'}`,
@@ -705,7 +705,8 @@ if (recordFile !== undefined) {
     ...(rungsRecorded ? [...Object.keys(totals).flatMap(rungLines), ''] : []),
     ...(robotsRecorded ? [...Object.keys(totals).map(robotsLine), ''] : []),
     // By challenge type (a typed task file): the tasks this run selected, cold attempts; solves as captchaReport.mjs reads them.
-    ...(typed ? ['Cold attempts by challenge type (captchaReport.mjs; unknown where the answers did not say):', '', ...cellsTable([{ arm: priorRun?.arm ?? armName ?? 'this run', cells: armCells(tasks, rows) }]), ''] : []),
+    // A rejudge's table covers the run's own tasks (those it made and those it did not run), not the whole file.
+    ...(typed ? ['Cold attempts by challenge type (captchaReport.mjs; unknown where the answers did not say):', '', ...cellsTable([{ arm: priorRun?.arm ?? armName ?? 'this run', cells: armCells(rejudgeDir === undefined ? tasks : taskFile.tasks.filter((t) => rows.some((r) => r.taskId === t.id) || (runDenominator.notRun ?? []).some((n) => n.taskId === t.id)), rows) }]), ''] : []),
     `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}${readinessColumn ? ' Readiness |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}${readinessColumn ? ' --- |' : ''}`,
     ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${channelsCell(r)} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}${readinessColumn ? ` ${readinessCell(r)} |` : ''}`),
