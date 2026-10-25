@@ -41,6 +41,7 @@ const rows = Object.fromEntries(await Promise.all(m.arms.map(async (a) => [a, aw
 const tableOf = (ts) => cellsTable(m.arms.map((arm) => ({ arm, cells: armCells(ts, rows[arm], baseArmOf(arm) === null ? null : rows[baseArmOf(arm)] ?? null) })))
 const real = tasks.filter((t) => t.origin !== 'vendor_demo')
 const demo = tasks.filter((t) => t.origin === 'vendor_demo')
+const balanceText = (b) => (b == null ? 'not read' : b.balanceUsd === null ? `unreadable (${b.errorCode ?? 'no answer'})` : `$${b.balanceUsd} at ${b.at}`)
 const notRunOf = (arm) => armCells(tasks, rows[arm]).all.notRun
 
 const md = [
@@ -50,11 +51,14 @@ const md = [
   `- Window: ${m.runs[0]?.startedAt ?? 'no run'} → ${m.finishedAt ?? 'not finished'}; network: HTTPS_PROXY ${m.proxy.HTTPS_PROXY ?? 'not set'}`,
   ...Object.entries(m.grants).map(([a, g]) => `- Grant of ${a}: ${g === null ? 'none' : `SHA-256 \`${g.sha256}\`; capabilities ${(g.capabilities ?? ['unreadable']).join(', ')}`}`),
   ...m.notStarted.map((n) => `- **Not started:** ${n.arm} (${n.why.join('; ')}); its ${tasks.length} tasks count as not run`),
+  ...(m.exits === undefined ? [] : [`- Exits: ${Object.entries(m.exits).map(([a, e]) => `${a} ${e}`).join('; ')}`]),
+  ...(m.capsolverBalance === undefined ? [] : [`- CapSolver getBalance: before ${balanceText(m.capsolverBalance.before)}, after ${balanceText(m.capsolverBalance.after)}; billed in the window ${m.capsolverBalance.before?.balanceUsd == null || m.capsolverBalance.after?.balanceUsd == null ? 'unknown' : `$${(m.capsolverBalance.before.balanceUsd - m.capsolverBalance.after.balanceUsd).toFixed(4)}`} (every solver arm together; CapSolver states no per-task price)`]),
   ...m.failures.map((f) => `- Failure: ${f}`),
   '',
   `## Real pages (${real.length})`, '',
   ...tableOf(real), '',
   ...(demo.length === 0 ? [] : [`## Vendor demo pages (${demo.length}; test pages, reported apart)`, '', ...tableOf(demo), '']),
+  'Solves not attempted, by arm (type:reason, from the captcha_solve events): ' + m.arms.filter((arm) => baseArmOf(arm) !== null).map((arm) => { const k = armCells(tasks, rows[arm]).all.skipped; return `${arm} ${Object.keys(k).length === 0 ? 'none' : Object.entries(k).sort().map(([r, n]) => `${r} ${n}`).join(', ')}` }).join('; '), '',
   'Not run, by arm: ' + m.arms.map((arm) => `${arm} ${notRunOf(arm).length === 0 ? 'none' : notRunOf(arm).join(', ')}`).join('; '), '',
   'An attempt not run counts as not verified. Unknown is not zero: a solver figure the answers did not report is unknown.', '',
 ].join('\n')

@@ -20,20 +20,39 @@ const row = (taskId: string, opts: { verified?: boolean; falseSuccess?: boolean;
 describe('captcha report', () => {
   it('reads the solver calls by provider, and keeps an unreported figure unknown', () => {
     const s = solverOf(doc([{ provider: 'steel', chargedUsd: 0.01 }, { provider: 'capsolver', solves: 1, reportedCostUsd: 0.0012, chargedUsd: 0.002, solveMs: 9000 }, { provider: 'capsolver', solves: null, chargedUsd: 0.002 }]))
-    expect(s).toEqual({ calls: 2, attempted: 2, succeeded: null, reportedUsd: null, chargedUsd: 0.004, solveMs: null })
-    expect(solverOf(doc([{ provider: 'steel' }]))).toEqual({ calls: 0, attempted: 0, succeeded: 0, reportedUsd: 0, chargedUsd: 0, solveMs: 0 })
+    // Without a trace, `solves` (1 for every charged solve, a failed one too) is never read as success: unknown.
+    expect(s).toEqual({ calls: 2, attempted: 2, succeeded: null, cleared: null, reportedUsd: null, chargedUsd: 0.004, solveMs: null, skipped: null })
+    expect(solverOf(doc([{ provider: 'steel' }]))).toEqual({ calls: 0, attempted: 0, succeeded: 0, cleared: 0, reportedUsd: 0, chargedUsd: 0, solveMs: 0, skipped: null })
     // A record whose paidCalls is null (no grant) made none; one that says nothing of paid calls is unknown, not none.
     expect(solverOf({ evidenceRecord: { access: { paidCalls: null } } })).toMatchObject({ calls: 0, attempted: 0, succeeded: 0 })
     expect(solverOf(doc(undefined))).toBeNull()
     expect(solverOf({})).toBeNull()
     // A solver call under a provider the harness does not list: unknown, not 0.
     expect(solverOf(doc([{ provider: 'capsolver_v2', capabilities: ['third_party_captcha_solver'], solves: 1, chargedUsd: 0.003 }]))).toMatchObject({ calls: null, attempted: null, succeeded: null, reportedUsd: null })
-    const unattributed = armCells(tasks, [row('T045', { solver: { calls: null, attempted: null, succeeded: null, reportedUsd: null, chargedUsd: null, solveMs: null } })])
+    const unattributedRow = { calls: null, attempted: null, succeeded: null, cleared: null, reportedUsd: null, chargedUsd: null, solveMs: null, skipped: null }
+    const unattributed = armCells(tasks, [row('T045', { solver: unattributedRow })])
     expect(unattributed.byType.datadome).toMatchObject({ solvesAttempted: null, solvesSucceeded: null, usdPerSolve: null, pairedAddedMs: { n: null } })
   })
 
+  it('reads attempts, answers and clears from every rung\'s captcha_solve events, each once', () => {
+    const ev = (detail: Record<string, unknown>) => ({ event: 'captcha_solve', detail: { vendor: 'capsolver', rung: 'installed_chrome', type: 'cloudflare_challenge', ...detail } })
+    const failed = ev({ rung: 'browser_local', solve: 1, outcome: 'solver_failed', ms: 4944, reason: 'rejected' })
+    const gated = ev({ solve: 1, outcome: 'still_gated', ms: 26516, reason: null, call: 1 })
+    const limit = ev({ solve: null, outcome: 'limit_reached', ms: 0, reason: 'max_solves_per_call' })
+    const answer = {
+      evidenceRecord: { access: { paidCalls: [{ provider: 'capsolver', solves: 1, chargedUsd: 0.003, reportedCostUsd: null }] } },
+      // The answer's own trace is its last rung's; earlier rungs' are in summary.attempts, and the last one appears in both.
+      trace: [gated, limit],
+      summary: { attempts: [{ result: { trace: [failed] } }, { result: { trace: [gated, limit, { event: 'gate_detected' }] } }] },
+    }
+    expect(solverOf(answer)).toEqual({ calls: 1, attempted: 2, succeeded: 1, cleared: 0, reportedUsd: null, chargedUsd: 0.003, solveMs: 31460, skipped: { 'cloudflare_challenge:max_solves_per_call': 1 } })
+    const clearedRow = { calls: 1, attempted: 1, succeeded: 1, cleared: 1, reportedUsd: null, chargedUsd: 0.003, solveMs: 9000, skipped: {} }
+    const cells = armCells(tasks, [row('T045', { verified: true, solver: clearedRow }), row('T046', { solver: solverOf(answer) })])
+    expect(cells.byType.datadome).toMatchObject({ solvesAttempted: 3, solvesSucceeded: 2, solvesCleared: 1, verifiedAfterClear: 1, skipped: { 'cloudflare_challenge:max_solves_per_call': 1 } })
+  })
+
   it('counts by type, keeps tasks not run in the denominator and pairs the time a solve added with the base arm', () => {
-    const solved = { calls: 1, attempted: 1, succeeded: 1, reportedUsd: 0.003, chargedUsd: 0.003, solveMs: 8000 }
+    const solved = { calls: 1, attempted: 1, succeeded: 1, cleared: 1, reportedUsd: 0.003, chargedUsd: 0.003, solveMs: 8000, skipped: {} }
     const cells = armCells(tasks, [row('T045', { verified: true, wallMs: 21000, solver: solved }), row('C001', { falseSuccess: true })], [row('T045', { wallMs: 6000 }), row('C001')])
     expect(cells.all).toMatchObject({ planned: 3, attempted: 2, notRun: ['T046'], verified: 1, falseSuccess: 1, solvesAttempted: 1, solvesSucceeded: 1, usdPerSolve: 0.003, solveMs: 8000, pairedAddedMs: { n: 1, median: 15000 } })
     expect(cells.byType.datadome).toMatchObject({ planned: 2, attempted: 1, notRun: ['T046'], verified: 1 })
@@ -47,8 +66,9 @@ describe('captcha report', () => {
     expect(never.all).toMatchObject({ planned: 3, attempted: 0, notRun: ['T045', 'T046', 'C001'], verified: 0 })
     const table = cellsTable([{ arm: 'standard+solver', cells: never }]).join('\n')
     expect(table).toContain('| standard+solver | **all** | 3 | 0 | 3 | 0 | 0 |')
-    expect(table).toContain('| 0 | 0 | n/a | n/a | n/a | n/a | n/a | n/a | n/a |')
+    expect(table).toContain('| 0 | 0 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |')
     expect(baseArmOf('combined+solver')).toBe('combined')
+    expect(baseArmOf('installed_chrome+solver-none')).toBe('installed_chrome')
     expect(baseArmOf('combined')).toBeNull()
   })
 })
