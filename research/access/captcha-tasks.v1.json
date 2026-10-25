@@ -1,0 +1,3795 @@
+{
+  "schema": "octocrawl.captcha-tasks/1",
+  "note": "The frozen task set for the CAPTCHA and DataDome work (ROADMAP PA item 6, ADR 0005 third_party_captcha_solver). FREEZE RULE: frozen 2026-10-25; from then on no task is dropped, replaced or edited, and every task stays in every denominator (run-set.mjs refuses this file when its tasks no longer hash to manifestSha256). A wrong task is not fixed here: write a new version (captcha-tasks.v2.json) and say why in a dated record. Tasks with origin saved_run come from saved runs whose answer was blocked with captcha, bot_detected_generic or cloudflare_challenge, or carried a DataDome, PerimeterX or Kasada signal (and the three vendor challenges sent with 429, #712); their url, request and predicates are copied from tasks.v1.json unchanged. Tasks with origin real were added from public pages a probe found challenged on 2026-10-25; origin vendor_demo are vendor or practice demo pages, the only pages found for Turnstile, reCAPTCHA, hCaptcha and GeeTest: they are test pages, reported apart from the real pages and never added to their numbers. Each task's predicates fail on the challenge page the probe captured; challenge.primaryType is the type most often seen in the saved runs (the probe's when no run saw one), unknown when neither names it. Method and candidates: research/access/runs/2026-10-25-captcha-task-set.md.",
+  "createdAt": "2026-10-25",
+  "frozenAt": "2026-10-25",
+  "manifestRule": "manifestSha256 is the SHA-256 of JSON.stringify(tasks) (captchaReport.mjs manifestText): the tasks array, in file order, as JavaScript serialises it",
+  "manifestSha256": "39942eebdac5ded01766a0f72f6b3f5dbbad94ff9a80934484962d74bd8d43bc",
+  "tasks": [
+    {
+      "id": "T001",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T001",
+      "audience": "researcher",
+      "kind": "document",
+      "url": "https://studylib.net/doc/28545749/google-2025-environmental-report",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Google",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "environmental report",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare, then the site's own captcha",
+        "widget": "Cloudflare challenge in most runs; the site's own captcha (/captcha/ script, \"Studylib Security Check\") in others and today",
+        "basis": "runs: header_cf_mitigated 13, site_captcha_script 9; probe: 403 \"Studylib Security Check\" with /captcha/ assets",
+        "blockReasons": {
+          "cloudflare_challenge": 13,
+          "captcha": 9
+        },
+        "gateSignals": {
+          "header_cf_mitigated": 13,
+          "site_captcha_script": 9,
+          "text_verify_you_are_human": 9,
+          "text_complete_the_security_check": 9
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 6,
+            "attempts": 10,
+            "verified": 2
+          },
+          "standard": {
+            "blocked": 8,
+            "attempts": 8,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 8,
+            "attempts": 12,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "installed_chrome": [
+            "browser_local"
+          ],
+          "steel": [
+            "browser_local",
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Studylib Security Check",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "harvest: coos-pilot URL"
+    },
+    {
+      "id": "T002",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T002",
+      "audience": "researcher",
+      "kind": "dynamic",
+      "url": "https://ember-energy.org/data/electricity-data-explorer/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "electricity",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "generation",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare",
+        "widget": "managed challenge",
+        "basis": "runs: header_cf_mitigated; probe: cType managed",
+        "blockReasons": {
+          "cloudflare_challenge": 8
+        },
+        "gateSignals": {
+          "header_cf_mitigated": 8
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 8,
+            "attempts": 8,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Just a moment...",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "managed"
+        }
+      },
+      "provenance": "harvest: real-site-test-set"
+    },
+    {
+      "id": "T003",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T003",
+      "audience": "developer",
+      "kind": "product",
+      "url": "https://demoshop.oxid-esales.com/Merchandise/Uhren/Gold-Spirit.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Gold Spirit",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 1
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare",
+        "widget": "non-interactive challenge",
+        "basis": "runs: header_cf_mitigated; probe: cType non-interactive",
+        "blockReasons": {
+          "cloudflare_challenge": 8
+        },
+        "gateSignals": {
+          "header_cf_mitigated": 8
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 8,
+            "attempts": 8,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Just a moment...",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "non-interactive"
+        }
+      },
+      "provenance": "harvest: parity J05"
+    },
+    {
+      "id": "T005",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T005",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.etsy.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Etsy",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome",
+        "widget": "captcha (rt=c)",
+        "basis": "runs: header_x_datadome, datadome_captcha; probe: rt c",
+        "blockReasons": {
+          "bot_detected_generic": 5,
+          "captcha": 4
+        },
+        "gateSignals": {
+          "header_x_datadome": 9,
+          "datadome_captcha": 4
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 1,
+            "attempts": 9,
+            "verified": 6
+          },
+          "standard": {
+            "blocked": 7,
+            "attempts": 8,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 1,
+            "attempts": 7,
+            "verified": 3
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ],
+          "installed_chrome": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "etsy.com",
+          "headers": [
+            "x-datadome: protected",
+            "server: DataDome"
+          ],
+          "datadomeRt": "c"
+        }
+      },
+      "provenance": "harvest: canary tier 2"
+    },
+    {
+      "id": "T007",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T007",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.ironmountain.com/data-centers/colocation",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "colocation",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "data cent",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "vercel_checkpoint",
+        "vendor": "Vercel",
+        "widget": "Security Checkpoint sent with 429",
+        "basis": "runs: rate_limit before #712; probe: 429 x-vercel-mitigated: challenge",
+        "blockReasons": {
+          "rate_limit (before #712, a vendor challenge sent with 429)": 13
+        },
+        "gateSignals": {},
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "standard": {
+            "blocked": 7,
+            "attempts": 8,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "http"
+          ],
+          "installed_chrome": [
+            "http"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 429,
+          "title": "Vercel Security Checkpoint",
+          "headers": [
+            "x-vercel-mitigated: challenge",
+            "server: Vercel"
+          ]
+        }
+      },
+      "provenance": "harvest: coos-pilot URL"
+    },
+    {
+      "id": "T012",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T012",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.walmart.com/browse/electronics/laptops/3944_3951_1089430_132960",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "perimeterx",
+        "vendor": "PerimeterX (HUMAN)",
+        "widget": "px captcha",
+        "basis": "runs: px_captcha_script, px_app_id, px_captcha_container; probe: 200 with the PX script, not the challenge",
+        "blockReasons": {
+          "captcha": 7
+        },
+        "gateSignals": {
+          "px_captcha_script": 7,
+          "px_app_id": 7,
+          "px_captcha_container": 7
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 2,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 5,
+            "attempts": 8,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "steel": [
+            "provider"
+          ],
+          "installed_chrome": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 200,
+          "title": null,
+          "headers": []
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T014",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T014",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.homedepot.com/b/Tools-Power-Tools-Drills/N-5yc1vZc27f",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "drill",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "akamai",
+        "vendor": "Akamai",
+        "widget": "Access Denied 403, no widget",
+        "basis": "runs: weak_access_denied + status_403; probe: AkamaiGHost Access Denied",
+        "blockReasons": {
+          "bot_detected_generic": 13
+        },
+        "gateSignals": {
+          "weak_access_denied": 13,
+          "status_403": 13
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "standard": {
+            "blocked": 7,
+            "attempts": 8,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "installed_chrome": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Access Denied",
+          "headers": [
+            "server: AkamaiGHost"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T018",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T018",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.wayfair.com/furniture/sb0/sofas-c413892.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "sofa",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "perimeterx",
+        "vendor": "PerimeterX (HUMAN)",
+        "widget": "px captcha sent with 429",
+        "basis": "runs: px_captcha_script, px_app_id, status_429; probe: 200, the listing",
+        "blockReasons": {
+          "captcha": 13
+        },
+        "gateSignals": {
+          "px_captcha_script": 13,
+          "px_app_id": 13,
+          "status_429": 13
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "standard": {
+            "blocked": 7,
+            "attempts": 8,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "http"
+          ],
+          "installed_chrome": [
+            "http"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 200,
+          "title": "Sofas &amp; Couches | Living Room Furniture &amp; Living Room Furniture Sets | Way Day™: u",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T020",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T020",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.newegg.com/p/pl?d=laptop",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare",
+        "widget": "interactive challenge",
+        "basis": "runs: header_cf_mitigated; probe: cType interactive",
+        "blockReasons": {
+          "cloudflare_challenge": 2
+        },
+        "gateSignals": {
+          "header_cf_mitigated": 2
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 2,
+            "attempts": 8,
+            "verified": 5
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Just a moment...",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "interactive"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T021",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T021",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.ebay.com/b/Laptops-Netbooks/175672/bn_1648276",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "unknown",
+        "vendor": "eBay (own page) behind Akamai",
+        "widget": "\"Pardon Our Interruption\"",
+        "basis": "runs: text_pardon_our_interruption, short_page; probe: 403 AkamaiGHost \"Error Page\"",
+        "blockReasons": {
+          "bot_detected_generic": 1
+        },
+        "gateSignals": {
+          "text_pardon_our_interruption": 1,
+          "short_page": 1
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 1,
+            "attempts": 8,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Error Page | eBay",
+          "headers": [
+            "server: AkamaiGHost"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T023",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T023",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.sephora.com/shop/moisturizing-cream-oils-mists",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "moisturi",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "akamai",
+        "vendor": "Akamai",
+        "widget": "Access Denied 403, no widget",
+        "basis": "runs: weak_access_denied + status_403; probe: AkamaiGHost Access Denied",
+        "blockReasons": {
+          "bot_detected_generic": 7
+        },
+        "gateSignals": {
+          "weak_access_denied": 7,
+          "status_403": 7
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 6,
+            "attempts": 8,
+            "verified": 1
+          },
+          "steel": {
+            "blocked": 1,
+            "attempts": 6,
+            "verified": 2
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Access Denied",
+          "headers": [
+            "server: AkamaiGHost"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T025",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T025",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.nordstrom.com/browse/women/clothing/dresses",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "dress",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "unknown",
+        "vendor": "unknown",
+        "widget": "\"unusual activity\" page",
+        "basis": "runs: heading_unusual_activity, text_automated_traffic, short_page; probe: 200, the listing",
+        "blockReasons": {
+          "bot_detected_generic": 6
+        },
+        "gateSignals": {
+          "heading_unusual_activity": 6,
+          "text_automated_traffic": 6,
+          "short_page": 6
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 200,
+          "title": "",
+          "headers": []
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T031",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T031",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.temu.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Temu",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "site_captcha",
+        "vendor": "Temu (own)",
+        "widget": "object-count image puzzle",
+        "basis": "runs: verification_url, heading_security_verification, object_count_instruction, interactive_image; probe: 200 script-only shell",
+        "blockReasons": {
+          "captcha": 6
+        },
+        "gateSignals": {
+          "verification_url": 6,
+          "heading_security_verification": 6,
+          "object_count_instruction": 6,
+          "interactive_image": 6
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 3,
+            "attempts": 5,
+            "verified": 1
+          },
+          "standard": {
+            "blocked": 3,
+            "attempts": 6,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "installed_chrome": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 200,
+          "title": null,
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T034",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T034",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.etsy.com/c/jewelry/necklaces",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "necklace",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome",
+        "widget": "captcha (rt=c)",
+        "basis": "runs: header_x_datadome, datadome_captcha; probe: rt c",
+        "blockReasons": {
+          "captcha": 3
+        },
+        "gateSignals": {
+          "header_x_datadome": 3,
+          "datadome_captcha": 3
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 1,
+            "attempts": 9,
+            "verified": 6
+          },
+          "standard": {
+            "blocked": 2,
+            "attempts": 4,
+            "verified": 2
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "installed_chrome": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "etsy.com",
+          "headers": [
+            "x-datadome: protected",
+            "server: DataDome"
+          ],
+          "datadomeRt": "c"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T037",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T037",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.expedia.com/Paris-Hotels.d179898.Travel-Guide-Hotels",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Paris",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "arkose",
+        "vendor": "Arkose Labs (FunCaptcha) on Expedia's challenge handler",
+        "widget": "\"Bot or Not?\" sent with 429",
+        "basis": "runs: rate_limit before #712; probe: 429 x-page-id wildcard-challenge-handler, arkoselabs/funcaptcha markers",
+        "blockReasons": {
+          "rate_limit (before #712, a vendor challenge sent with 429)": 20
+        },
+        "gateSignals": {},
+        "blockedArms": {
+          "combined": {
+            "blocked": 2,
+            "attempts": 2,
+            "verified": 0
+          },
+          "installed_chrome": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "standard": {
+            "blocked": 4,
+            "attempts": 5,
+            "verified": 1
+          },
+          "steel": {
+            "blocked": 8,
+            "attempts": 8,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "steel": [
+            "http"
+          ],
+          "standard": [
+            "http"
+          ],
+          "installed_chrome": [
+            "http"
+          ],
+          "combined": [
+            "http"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 429,
+          "title": "Bot or Not?",
+          "headers": [
+            "x-page-id: wildcard-challenge-handler",
+            "server: istio-envoy"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T038",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T038",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.tripadvisor.com/Hotels-g187147-Paris_Ile_de_France-Hotels.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Paris",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome",
+        "widget": "interstitial (rt=i) today; captcha in some runs",
+        "basis": "runs: header_x_datadome 19, datadome_captcha 8; probe: rt i",
+        "blockReasons": {
+          "captcha": 8,
+          "bot_detected_generic": 11
+        },
+        "gateSignals": {
+          "header_x_datadome": 19,
+          "datadome_captcha": 8
+        },
+        "blockedArms": {
+          "enhanced (grant not recorded)": {
+            "blocked": 4,
+            "attempts": 8,
+            "verified": 2
+          },
+          "installed_chrome": {
+            "blocked": 4,
+            "attempts": 9,
+            "verified": 3
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 5,
+            "attempts": 9,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "installed_chrome": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ],
+          "enhanced (grant not recorded)": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "tripadvisor.com",
+          "headers": [
+            "x-datadome: protected",
+            "server: DataDome"
+          ],
+          "datadomeRt": "i"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T039",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T039",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.skyscanner.net/routes/lond/pari/london-to-paris.html",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Paris",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "perimeterx",
+        "vendor": "PerimeterX (HUMAN)",
+        "widget": "captcha-v2 page (/sttc/px/captcha-v2/)",
+        "basis": "runs: skyscanner_challenge_url, px_captcha_container; probe: 307 to /sttc/px/captcha-v2/",
+        "blockReasons": {
+          "captcha": 3
+        },
+        "gateSignals": {
+          "skyscanner_challenge_url": 3,
+          "heading_person_or_robot": 3,
+          "px_captcha_container": 3,
+          "px_challenge_loader": 3
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 3,
+            "attempts": 6,
+            "verified": 2
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 307,
+          "title": "307 Temporary Redirect",
+          "headers": [
+            "server: istio-envoy"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T042",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T042",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.realtor.com/realestateandhomes-search/Seattle_WA",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Seattle",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "kasada",
+        "vendor": "Kasada",
+        "widget": "challenge sent with 429 (x-kpsdk-ct)",
+        "basis": "runs: rate_limit before #712; probe: 429 x-kpsdk-ct",
+        "blockReasons": {
+          "rate_limit (before #712, a vendor challenge sent with 429)": 22
+        },
+        "gateSignals": {},
+        "blockedArms": {
+          "combined": {
+            "blocked": 2,
+            "attempts": 2,
+            "verified": 0
+          },
+          "installed_chrome": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 8,
+            "attempts": 8,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "steel": [
+            "http"
+          ],
+          "standard": [
+            "http"
+          ],
+          "installed_chrome": [
+            "http"
+          ],
+          "combined": [
+            "http"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 429,
+          "title": "realtor.com",
+          "headers": [
+            "server: CloudFront"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T043",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T043",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.redfin.com/city/16163/WA/Seattle",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Seattle",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "aws_waf",
+        "vendor": "AWS WAF",
+        "widget": "captcha (405, x-amzn-waf-action: captcha)",
+        "basis": "runs: weak_enable_javascript + weak_security_check; probe: 405 \"Human Verification\", x-amzn-waf-action: captcha",
+        "blockReasons": {
+          "bot_detected_generic": 15
+        },
+        "gateSignals": {
+          "weak_enable_javascript": 15,
+          "weak_security_check": 15
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 3,
+            "attempts": 8,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "steel": [
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ],
+          "installed_chrome": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 405,
+          "title": "Human Verification",
+          "headers": [
+            "x-amzn-waf-action: captcha",
+            "server: CloudFront"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T045",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T045",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.idealista.com/venta-viviendas/madrid-madrid/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Madrid",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome",
+        "widget": "captcha (rt=c)",
+        "basis": "runs: header_x_datadome, datadome_captcha; probe: rt c",
+        "blockReasons": {
+          "captcha": 31
+        },
+        "gateSignals": {
+          "header_x_datadome": 31,
+          "datadome_captcha": 31
+        },
+        "blockedArms": {
+          "combined": {
+            "blocked": 2,
+            "attempts": 2,
+            "verified": 0
+          },
+          "enhanced (grant not recorded)": {
+            "blocked": 8,
+            "attempts": 8,
+            "verified": 0
+          },
+          "installed_chrome": {
+            "blocked": 9,
+            "attempts": 11,
+            "verified": 0
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 6,
+            "attempts": 9,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "installed_chrome": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ],
+          "enhanced (grant not recorded)": [
+            "browser_local"
+          ],
+          "combined": [
+            "provider"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "idealista.com",
+          "headers": [
+            "x-datadome: protected",
+            "server: DataDome"
+          ],
+          "datadomeRt": "c"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T046",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T046",
+      "audience": "developer",
+      "kind": "listing",
+      "url": "https://www.g2.com/categories/crm",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "reviews?",
+          "flags": "i",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "CRM",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome behind Cloudflare",
+        "widget": "interstitial (rt=i) today; captcha in most runs",
+        "basis": "runs: header_x_datadome 23, datadome_captcha 16; probe: rt i",
+        "blockReasons": {
+          "captcha": 16,
+          "bot_detected_generic": 7
+        },
+        "gateSignals": {
+          "header_x_datadome": 23,
+          "datadome_captcha": 16
+        },
+        "blockedArms": {
+          "enhanced (grant not recorded)": {
+            "blocked": 3,
+            "attempts": 8,
+            "verified": 4
+          },
+          "installed_chrome": {
+            "blocked": 7,
+            "attempts": 10,
+            "verified": 1
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 7,
+            "attempts": 9,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "installed_chrome": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ],
+          "enhanced (grant not recorded)": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "g2.com",
+          "headers": [
+            "x-datadome: protected",
+            "server: cloudflare"
+          ],
+          "datadomeRt": "i"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T047",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T047",
+      "audience": "developer",
+      "kind": "listing",
+      "url": "https://www.capterra.com/customer-relationship-management-software/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "reviews?",
+          "flags": "i",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "CRM",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare",
+        "widget": "challenge in runs; a block (\"Sorry, you have been blocked\") to the probe",
+        "basis": "runs: header_cf_mitigated 16; probe: Attention Required block",
+        "blockReasons": {
+          "cloudflare_challenge": 18
+        },
+        "gateSignals": {
+          "header_cf_mitigated": 16
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 12,
+            "attempts": 16,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "steel": [
+            "browser_local",
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Attention Required! | Cloudflare",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T048",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T048",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.crunchbase.com/organization/openai",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "OpenAI",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Founded",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_block",
+        "vendor": "Cloudflare",
+        "widget": "\"Attention Required\" block in most runs",
+        "basis": "runs: cf_attention_required 14, header_cf_mitigated 10; probe: Attention Required block",
+        "blockReasons": {
+          "cloudflare_challenge": 25
+        },
+        "gateSignals": {
+          "cf_attention_required": 14,
+          "header_cf_mitigated": 10
+        },
+        "blockedArms": {
+          "combined": {
+            "blocked": 1,
+            "attempts": 2,
+            "verified": 0
+          },
+          "installed_chrome": {
+            "blocked": 7,
+            "attempts": 10,
+            "verified": 3
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 11,
+            "attempts": 12,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "installed_chrome": [
+            "browser_local"
+          ],
+          "steel": [
+            "browser_local",
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ],
+          "combined": [
+            "provider"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Attention Required! | Cloudflare",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T049",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T049",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.yelp.com/search?find_desc=coffee&find_loc=San+Francisco%2C+CA",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "coffee",
+          "flags": "i",
+          "min": 5
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "San Francisco",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome",
+        "widget": "captcha (rt=c)",
+        "basis": "runs: header_x_datadome; probe: rt c",
+        "blockReasons": {
+          "bot_detected_generic": 16
+        },
+        "gateSignals": {
+          "header_x_datadome": 16
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 1,
+            "attempts": 8,
+            "verified": 6
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 9,
+            "attempts": 9,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "steel": [
+            "browser_local"
+          ],
+          "standard": [
+            "browser_local"
+          ],
+          "installed_chrome": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "yelp.com",
+          "headers": [
+            "x-datadome: protected",
+            "server: DataDome"
+          ],
+          "datadomeRt": "c"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T050",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T050",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.similarweb.com/website/wikipedia.org/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "wikipedia\\.org",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "visits",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "unknown",
+        "vendor": "AWS CloudFront",
+        "widget": "403 \"request could not be satisfied\" to the probe; a \"security check, enable JavaScript\" page in the browser",
+        "basis": "runs: weak_enable_javascript + weak_security_check (one attempt); probe: CloudFront 403",
+        "blockReasons": {
+          "bot_detected_generic": 1
+        },
+        "gateSignals": {
+          "weak_enable_javascript": 1,
+          "weak_security_check": 1
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 1,
+            "attempts": 6,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "installed_chrome": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "ERROR: The request could not be satisfied",
+          "headers": [
+            "server: CloudFront"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T051",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T051",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.indeed.com/jobs?q=data+analyst&l=Remote",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "data analyst",
+          "flags": "i",
+          "min": 5
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare",
+        "widget": "managed challenge (\"Security Check - Indeed.com\")",
+        "basis": "runs: header_cf_mitigated; probe: cType managed",
+        "blockReasons": {
+          "cloudflare_challenge": 3
+        },
+        "gateSignals": {
+          "header_cf_mitigated": 3
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 1,
+            "attempts": 4,
+            "verified": 3
+          },
+          "standard": {
+            "blocked": 2,
+            "attempts": 7,
+            "verified": 5
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "installed_chrome": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Security Check - Indeed.com",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "managed"
+        }
+      },
+      "provenance": "expansion; Howard to confirm against ROADMAP.md:48"
+    },
+    {
+      "id": "T052",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T052",
+      "audience": "researcher",
+      "kind": "table",
+      "url": "https://www.census.gov/quickfacts/fact/table/US/PST045224",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "minTables",
+          "min": 1
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Population",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_block",
+        "vendor": "Cloudflare",
+        "widget": "\"Attention Required\" block",
+        "basis": "runs: cf_attention_required 10, header_cf_mitigated 2; probe: Attention Required block",
+        "blockReasons": {
+          "cloudflare_challenge": 12
+        },
+        "gateSignals": {
+          "cf_attention_required": 10,
+          "header_cf_mitigated": 2
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 2,
+            "attempts": 5,
+            "verified": 3
+          },
+          "standard": {
+            "blocked": 7,
+            "attempts": 8,
+            "verified": 1
+          },
+          "steel": {
+            "blocked": 3,
+            "attempts": 9,
+            "verified": 4
+          }
+        },
+        "blockedLanes": {
+          "installed_chrome": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Attention Required! | Cloudflare",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "expansion; sites.md line 206 candidate"
+    },
+    {
+      "id": "T053",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T053",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.imf.org/en/Publications/WEO",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "World Economic Outlook",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "akamai",
+        "vendor": "Akamai",
+        "widget": "Access Denied 403, no widget",
+        "basis": "runs: weak_access_denied + status_403; probe: AkamaiGHost Access Denied",
+        "blockReasons": {
+          "bot_detected_generic": 16
+        },
+        "gateSignals": {
+          "weak_access_denied": 16,
+          "status_403": 16
+        },
+        "blockedArms": {
+          "enhanced (grant not recorded)": {
+            "blocked": 1,
+            "attempts": 8,
+            "verified": 5
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 9,
+            "attempts": 12,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "steel": [
+            "browser_local",
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ],
+          "enhanced (grant not recorded)": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Access Denied",
+          "headers": [
+            "server: AkamaiGHost"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T059",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T059",
+      "audience": "researcher",
+      "kind": "page",
+      "url": "https://www.marketwatch.com/investing/stock/aapl",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Apple",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d{1,3}(,\\d{3})*\\.\\d{2}",
+          "min": 3
+        }
+      ],
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome",
+        "widget": "captcha served with 401",
+        "basis": "runs: status_401 + datadome_captcha (one attempt); probe: 200, the quote page",
+        "blockReasons": {
+          "captcha": 1
+        },
+        "gateSignals": {
+          "status_401": 1,
+          "datadome_captcha": 1
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 1,
+            "attempts": 7,
+            "verified": 4
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 200,
+          "title": "AAPL Stock Price | Apple Inc. Stock Quote (U.S.: Nasdaq) | MarketWatch",
+          "headers": [
+            "server: Kestrel"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T065",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T065",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.bloomberg.com/markets/stocks",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Stocks",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "challenge": {
+        "primaryType": "perimeterx",
+        "vendor": "PerimeterX (HUMAN)",
+        "widget": "px captcha (\"Are you a robot?\")",
+        "basis": "runs: px_captcha_script, px_app_id, px_captcha_container; probe: 403 \"Bloomberg - Are you a robot?\" with the PX script",
+        "blockReasons": {
+          "captcha": 5
+        },
+        "gateSignals": {
+          "px_captcha_script": 5,
+          "px_app_id": 5,
+          "px_captcha_container": 5
+        },
+        "blockedArms": {
+          "installed_chrome": {
+            "blocked": 2,
+            "attempts": 4,
+            "verified": 2
+          },
+          "standard": {
+            "blocked": 2,
+            "attempts": 4,
+            "verified": 2
+          },
+          "steel": {
+            "blocked": 1,
+            "attempts": 6,
+            "verified": 3
+          }
+        },
+        "blockedLanes": {
+          "installed_chrome": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Bloomberg - Are you a robot?",
+          "headers": [
+            "server: Varnish"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T067",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T067",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.ft.com/technology",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Technology",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare",
+        "widget": "managed challenge",
+        "basis": "runs: header_cf_mitigated; probe: cType managed",
+        "blockReasons": {
+          "cloudflare_challenge": 1
+        },
+        "gateSignals": {
+          "header_cf_mitigated": 1
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 1,
+            "attempts": 5,
+            "verified": 4
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Security Verification",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "managed"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T068",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T068",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.economist.com/finance-and-economics",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Finance",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        }
+      ],
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome, also Cloudflare",
+        "widget": "DataDome bot check in most runs; a Cloudflare managed challenge in others and today",
+        "basis": "runs: header_x_datadome 21, header_cf_mitigated 6; probe: cType managed",
+        "blockReasons": {
+          "bot_detected_generic": 21,
+          "cloudflare_challenge": 6
+        },
+        "gateSignals": {
+          "header_x_datadome": 21,
+          "header_cf_mitigated": 6
+        },
+        "blockedArms": {
+          "enhanced (grant not recorded)": {
+            "blocked": 7,
+            "attempts": 8,
+            "verified": 0
+          },
+          "installed_chrome": {
+            "blocked": 9,
+            "attempts": 11,
+            "verified": 0
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 5,
+            "attempts": 9,
+            "verified": 1
+          }
+        },
+        "blockedLanes": {
+          "installed_chrome": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ],
+          "enhanced (grant not recorded)": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Just a moment...",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "managed"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T069",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T069",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.carvana.com/cars",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\bcars?\\b",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_block",
+        "vendor": "Cloudflare",
+        "widget": "\"Attention Required\" in most runs; a managed challenge in others and today",
+        "basis": "runs: cf_attention_required 10, header_cf_mitigated 9; probe: cType managed",
+        "blockReasons": {
+          "cloudflare_challenge": 20
+        },
+        "gateSignals": {
+          "cf_attention_required": 10,
+          "header_cf_mitigated": 9
+        },
+        "blockedArms": {
+          "combined": {
+            "blocked": 2,
+            "attempts": 2,
+            "verified": 0
+          },
+          "installed_chrome": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "standard+installed_chrome grant": {
+            "blocked": 1,
+            "attempts": 1,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 5,
+            "attempts": 9,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "installed_chrome": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ],
+          "standard+installed_chrome grant": [
+            "browser_local"
+          ],
+          "combined": [
+            "provider"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Just a moment...",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "managed"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T070",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T070",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.autotrader.com/cars-for-sale/all-cars/seattle-wa",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Seattle",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "akamai",
+        "vendor": "Akamai",
+        "widget": "\"page unavailable\" short page",
+        "basis": "runs: akamai_reference + short_page; probe: 200 \"Autotrader - page unavailable\" (AkamaiNetStorage)",
+        "blockReasons": {
+          "bot_detected_generic": 10
+        },
+        "gateSignals": {
+          "akamai_reference": 9,
+          "short_page": 9
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "standard+installed_chrome grant": {
+            "blocked": 1,
+            "attempts": 1,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 3,
+            "attempts": 8,
+            "verified": 1
+          }
+        },
+        "blockedLanes": {
+          "steel": [
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ],
+          "standard+installed_chrome grant": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 200,
+          "title": "Autotrader - page unavailable",
+          "headers": [
+            "server: AkamaiNetStorage"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T071",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T071",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.cars.com/shopping/results/?stock_type=used&zip=98101",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\bused\\b",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare",
+        "widget": "challenge in runs; a block to the probe",
+        "basis": "runs: header_cf_mitigated; probe: Attention Required block",
+        "blockReasons": {
+          "cloudflare_challenge": 9
+        },
+        "gateSignals": {
+          "header_cf_mitigated": 9
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 3,
+            "attempts": 9,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "steel": [
+            "provider"
+          ],
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Attention Required! | Cloudflare",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T073",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T073",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.stubhub.com/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "tickets",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\]\\(https?://",
+          "min": 10
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{1,2}\\b"
+        }
+      ],
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome",
+        "widget": "interstitial in runs; captcha (rt=c) today",
+        "basis": "runs: datadome_interstitial, header_x_datadome; probe: rt c",
+        "blockReasons": {
+          "bot_detected_generic": 8
+        },
+        "gateSignals": {
+          "datadome_interstitial": 4,
+          "header_x_datadome": 4
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 2,
+            "attempts": 6,
+            "verified": 2
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "stubhub.com",
+          "headers": [
+            "x-datadome: protected",
+            "server: CloudFront"
+          ],
+          "datadomeRt": "c"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "T076",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json T076",
+      "audience": "developer",
+      "kind": "listing",
+      "url": "https://stackoverflow.com/questions/tagged/web-scraping",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "web-scraping",
+          "flags": "i",
+          "min": 5
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare",
+        "widget": "managed challenge",
+        "basis": "runs: header_cf_mitigated; probe: cType managed",
+        "blockReasons": {
+          "cloudflare_challenge": 7
+        },
+        "gateSignals": {
+          "header_cf_mitigated": 7
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 1,
+            "attempts": 8,
+            "verified": 1
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Just a moment...",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "managed"
+        }
+      },
+      "provenance": "expansion"
+    },
+    {
+      "id": "B001",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json B001",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.bhphotovideo.com/c/buy/laptops/ci/18818",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare",
+        "widget": "managed challenge (cType managed today); a Cloudflare block page (\"you have been blocked\") on the Steel provider lane",
+        "basis": "runs: header_cf_mitigated; probe: cf-mitigated: challenge, cType managed",
+        "blockReasons": {
+          "cloudflare_challenge": 8,
+          "bot_detected_generic": 3
+        },
+        "gateSignals": {
+          "header_cf_mitigated": 8,
+          "text_you_have_been_blocked": 3
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 5,
+            "attempts": 9,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Just a moment...",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "managed"
+        }
+      },
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B003",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json B003",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.tesla.com/inventory/new/m3",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Model 3",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "akamai",
+        "vendor": "Akamai",
+        "widget": "Access Denied 403, no widget",
+        "basis": "runs: weak_access_denied + status_403; probe: server AkamaiGHost, Access Denied",
+        "blockReasons": {
+          "bot_detected_generic": 7
+        },
+        "gateSignals": {
+          "weak_access_denied": 7,
+          "status_403": 7
+        },
+        "blockedArms": {
+          "combined": {
+            "blocked": 1,
+            "attempts": 2,
+            "verified": 0
+          },
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "combined": [
+            "provider"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Access Denied",
+          "headers": [
+            "server: AkamaiGHost"
+          ]
+        }
+      },
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B004",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json B004",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.apartments.com/seattle-wa/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownCountMin",
+          "pattern": "(?:[$€£]\\s*\\d|\\b(?:USD|EUR|GBP|SGD|AUD|CAD|CHF|JPY)\\s?\\d|\\d[\\d.,]*\\s?(?:€|£|EUR\\b|USD\\b))",
+          "min": 3
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Seattle",
+          "flags": "i"
+        }
+      ],
+      "challenge": {
+        "primaryType": "akamai",
+        "vendor": "Akamai",
+        "widget": "Access Denied 403, no widget",
+        "basis": "runs: weak_access_denied, akamai_reference; probe: server AkamaiGHost, Access Denied",
+        "blockReasons": {
+          "bot_detected_generic": 7
+        },
+        "gateSignals": {
+          "weak_access_denied": 6,
+          "status_403": 6,
+          "akamai_reference": 1,
+          "short_page": 1
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 1,
+            "attempts": 7,
+            "verified": 3
+          }
+        },
+        "blockedLanes": {
+          "standard": [
+            "browser_local"
+          ],
+          "steel": [
+            "provider"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 403,
+          "title": "Access Denied",
+          "headers": [
+            "server: AkamaiGHost"
+          ]
+        }
+      },
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "B008",
+      "part": "frozen",
+      "origin": "saved_run",
+      "sourceTask": "research/access/tasks.v1.json B008",
+      "audience": "non_programmer",
+      "kind": "listing",
+      "url": "https://www.imdb.com/chart/top/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "The Shawshank Redemption",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\b\\d\\.\\d\\b",
+          "min": 25
+        }
+      ],
+      "challenge": {
+        "primaryType": "aws_waf",
+        "vendor": "AWS WAF",
+        "widget": "challenge (202, x-amzn-waf-action: challenge)",
+        "basis": "runs: weak_enable_javascript + weak_security_check; probe: x-amzn-waf-action: challenge",
+        "blockReasons": {
+          "bot_detected_generic": 15
+        },
+        "gateSignals": {
+          "weak_enable_javascript": 15,
+          "weak_security_check": 15
+        },
+        "blockedArms": {
+          "standard": {
+            "blocked": 6,
+            "attempts": 6,
+            "verified": 0
+          },
+          "steel": {
+            "blocked": 9,
+            "attempts": 9,
+            "verified": 0
+          }
+        },
+        "blockedLanes": {
+          "steel": [
+            "browser_local"
+          ],
+          "standard": [
+            "browser_local"
+          ]
+        },
+        "runSources": [
+          "combined-w1",
+          "k1-archive",
+          "pa-weekly"
+        ],
+        "probe": {
+          "at": "2026-10-25T11:11Z",
+          "httpStatus": 202,
+          "title": "",
+          "headers": [
+            "x-amzn-waf-action: challenge",
+            "server: Server"
+          ]
+        }
+      },
+      "provenance": "blind set, chosen 2026-10-05 before fetching"
+    },
+    {
+      "id": "C001",
+      "part": "frozen",
+      "origin": "real",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.alltrails.com/trail/us/california/half-dome-trail",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Half Dome",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "elevation gain",
+          "flags": "i"
+        }
+      ],
+      "contract": "the trail page names its trail and its elevation gain; the DataDome page has neither. the text shown once the challenge is passed was not seen in this check (the probe met the challenge); it is the shape such a page must have",
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome",
+        "widget": "interstitial (rt=i)",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 403,
+          "title": "alltrails.com",
+          "headers": [
+            "x-datadome: protected",
+            "server: nginx"
+          ],
+          "datadomeRt": "i"
+        }
+      },
+      "provenance": "scout: ful.io DataDome list (alltrails.com); robots allows /trail/"
+    },
+    {
+      "id": "C002",
+      "part": "frozen",
+      "origin": "real",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.seloger.com/immobilier/achat/immo-paris-75/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Paris",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d[\\d\\s  .]*\\s?€",
+          "min": 5,
+          "flags": "i"
+        }
+      ],
+      "contract": "a Paris sale listing shows five prices or more; the DataDome page shows none. the text shown once the challenge is passed was not seen in this check (the probe met the challenge); it is the shape such a page must have",
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome",
+        "widget": "interstitial (rt=i)",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 403,
+          "title": "seloger.com",
+          "headers": [
+            "x-datadome: protected",
+            "server: CloudFront"
+          ],
+          "datadomeRt": "i"
+        }
+      },
+      "provenance": "added 2026-10-25: a DataDome host (x-datadome: protected)"
+    },
+    {
+      "id": "C003",
+      "part": "frozen",
+      "origin": "real",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://allegro.pl/kategoria/laptopy-491",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "laptop",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d[\\d\\s ]*,\\d{2}\\s?zł",
+          "min": 5,
+          "flags": "i"
+        }
+      ],
+      "contract": "a laptop category shows five prices in zł or more. the text shown once the challenge is passed was not seen in this check (the probe met the challenge); it is the shape such a page must have",
+      "challenge": {
+        "primaryType": "datadome",
+        "vendor": "DataDome",
+        "widget": "interstitial (rt=i)",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 403,
+          "title": "allegro.pl",
+          "headers": [],
+          "datadomeRt": "i"
+        }
+      },
+      "provenance": "added 2026-10-25: a DataDome host (x-datadome-cid)"
+    },
+    {
+      "id": "C004",
+      "part": "frozen",
+      "origin": "real",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.fiverr.com/categories/graphics-design",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Logo Design",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "Graphics",
+          "flags": "i"
+        }
+      ],
+      "contract": "the category page lists its subcategories, Logo Design among them; the challenge page does not. the text shown once the challenge is passed was not seen in this check (the probe met the challenge); it is the shape such a page must have",
+      "challenge": {
+        "primaryType": "perimeterx",
+        "vendor": "PerimeterX (HUMAN)",
+        "widget": "press-and-hold (\"It needs a human touch\", 403)",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 403,
+          "title": "It needs a human touch",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "scout: research/access/runs/2026-10-05-perimeterx-gate-proxied-5d3335a.md:28 (fiverr.com, PX); robots allows /categories/"
+    },
+    {
+      "id": "C005",
+      "part": "frozen",
+      "origin": "real",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.sae.org/standards/",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "standards",
+          "flags": "i"
+        },
+        {
+          "type": "markdownMatches",
+          "pattern": "\\b(?:J\\d{3,4}|AS\\d{3,5}|ARP\\d{3,5}|AMS\\d{3,5})\\b",
+          "flags": ""
+        }
+      ],
+      "contract": "the standards page names SAE standards by number (J1939, AS9100 …); the WAF page is a script. the text shown once the challenge is passed was not seen in this check (the probe met the challenge); it is the shape such a page must have",
+      "challenge": {
+        "primaryType": "aws_waf",
+        "vendor": "AWS WAF",
+        "widget": "challenge (202, x-amzn-waf-action: challenge)",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 202,
+          "title": "",
+          "headers": [
+            "x-amzn-waf-action: challenge",
+            "server: CloudFront"
+          ]
+        }
+      },
+      "provenance": "scout: ful.io AWS WAF Captcha list (sae.org); robots allows /standards/"
+    },
+    {
+      "id": "C006",
+      "part": "frozen",
+      "origin": "real",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Wohnung",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\d[\\d.]*(?:,\\d{2})?\\s?€",
+          "min": 5,
+          "flags": "i"
+        }
+      ],
+      "contract": "a Berlin rental listing shows five prices or more; the captcha page shows none. the text shown once the challenge is passed was not seen in this check (the probe met the challenge); it is the shape such a page must have",
+      "challenge": {
+        "primaryType": "aws_waf",
+        "vendor": "AWS WAF",
+        "widget": "captcha (\"Ich bin kein Roboter\", 401, AwsWafIntegration)",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 401,
+          "title": "Ich bin kein Roboter - ImmobilienScout24",
+          "headers": [
+            "server: CloudFront"
+          ]
+        }
+      },
+      "provenance": "added 2026-10-25: probe met its AWS WAF captcha"
+    },
+    {
+      "id": "C007",
+      "part": "frozen",
+      "origin": "real",
+      "audience": "researcher",
+      "kind": "listing",
+      "url": "https://www.ssense.com/en-us/men/sneakers",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "sneakers",
+          "flags": "i"
+        },
+        {
+          "type": "markdownCountMin",
+          "pattern": "\\$\\s?\\d{2,5}",
+          "min": 5,
+          "flags": ""
+        }
+      ],
+      "contract": "a sneakers listing shows five prices or more; \"Just a moment…\" shows none. the text shown once the challenge is passed was not seen in this check (the probe met the challenge); it is the shape such a page must have",
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare",
+        "widget": "managed challenge (cType managed)",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 403,
+          "title": "Just a moment...",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "managed"
+        }
+      },
+      "provenance": "added 2026-10-25: probe met cf-mitigated: challenge"
+    },
+    {
+      "id": "C008",
+      "part": "frozen",
+      "origin": "vendor_demo",
+      "audience": "researcher",
+      "kind": "document",
+      "url": "https://www.scrapingcourse.com/cloudflare-challenge",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "bypassed",
+          "flags": "i"
+        }
+      ],
+      "contract": "the page says the visitor bypassed the challenge once it is passed (secondhand: ZenRows tutorials, via the scout; unconfirmed)",
+      "challenge": {
+        "primaryType": "cloudflare_challenge",
+        "vendor": "Cloudflare (a scraping-practice page)",
+        "widget": "managed challenge (cType managed)",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 403,
+          "title": "Just a moment...",
+          "headers": [
+            "cf-mitigated: challenge",
+            "server: cloudflare"
+          ],
+          "cfCType": "managed"
+        }
+      },
+      "provenance": "scout: scrapingcourse.com demo list; robots allows it"
+    },
+    {
+      "id": "C009",
+      "part": "frozen",
+      "origin": "vendor_demo",
+      "audience": "researcher",
+      "kind": "document",
+      "url": "https://2captcha.com/demo/cloudflare-turnstile",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "passed successfully",
+          "flags": "i"
+        }
+      ],
+      "contract": "the demo's own message strings (its captcha_passed_message, in a script on 2026-10-25) say \"Captcha is passed successfully!\" once a solved form is checked; the visible page before the solve does not, and its code samples say \"Captcha solved\", so that phrase cannot be the contract",
+      "challenge": {
+        "primaryType": "turnstile",
+        "vendor": "Cloudflare Turnstile (2captcha demo form)",
+        "widget": "Turnstile widget in a form",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 200,
+          "title": "Cloudflare Turnstile demo: Sample Form with Cloudflare Turnstile",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "scout: 2captcha.com/demo index; robots allows /demo/ without a query"
+    },
+    {
+      "id": "C010",
+      "part": "frozen",
+      "origin": "vendor_demo",
+      "audience": "researcher",
+      "kind": "document",
+      "url": "https://2captcha.com/demo/recaptcha-v2",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "passed successfully",
+          "flags": "i"
+        }
+      ],
+      "contract": "as C009",
+      "challenge": {
+        "primaryType": "recaptcha_v2",
+        "vendor": "Google reCAPTCHA v2 (2captcha demo form)",
+        "widget": "reCAPTCHA v2 checkbox in a form",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 200,
+          "title": "Google reCAPTCHA v2 demo: Sample Form with Google reCAPTCHA v2",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "scout: 2captcha.com/demo index"
+    },
+    {
+      "id": "C011",
+      "part": "frozen",
+      "origin": "vendor_demo",
+      "audience": "researcher",
+      "kind": "document",
+      "url": "https://www.google.com/recaptcha/api2/demo",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "Verification Success",
+          "flags": "i"
+        }
+      ],
+      "contract": "Google's demo answers a solved, submitted form with \"Verification Success... Hooray!\" (widely cited; not seen in this check)",
+      "challenge": {
+        "primaryType": "recaptcha_v2",
+        "vendor": "Google reCAPTCHA v2 (Google's demo)",
+        "widget": "reCAPTCHA v2 checkbox in a form",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 200,
+          "title": "ReCAPTCHA demo",
+          "headers": [
+            "server: ESF"
+          ]
+        }
+      },
+      "provenance": "scout: widely cited demo; robots allows /recaptcha/"
+    },
+    {
+      "id": "C012",
+      "part": "frozen",
+      "origin": "vendor_demo",
+      "audience": "researcher",
+      "kind": "document",
+      "url": "https://2captcha.com/demo/recaptcha-v3",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "passed successfully",
+          "flags": "i"
+        }
+      ],
+      "contract": "as C009",
+      "challenge": {
+        "primaryType": "recaptcha_v3",
+        "vendor": "Google reCAPTCHA v3 (2captcha demo form)",
+        "widget": "reCAPTCHA v3 score, no widget",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 200,
+          "title": "Google reCAPTCHA v3 demo: Sample Form with Google reCAPTCHA v3",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "scout: 2captcha.com/demo index"
+    },
+    {
+      "id": "C013",
+      "part": "frozen",
+      "origin": "vendor_demo",
+      "audience": "researcher",
+      "kind": "document",
+      "url": "https://accounts.hcaptcha.com/demo",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "\\bsuccess",
+          "flags": "i"
+        }
+      ],
+      "contract": "the demo shows its siteverify result once a solved form is submitted (its stylesheet has .hcaptcha-success for it; the exact text unconfirmed); the visible page before has no \"success\"",
+      "challenge": {
+        "primaryType": "hcaptcha",
+        "vendor": "hCaptcha (its own demo form)",
+        "widget": "hCaptcha checkbox in a form",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 200,
+          "title": "hCAPTCHA Demo",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "scout: cited by a third-party doc; robots.txt 404 (no rule)"
+    },
+    {
+      "id": "C014",
+      "part": "frozen",
+      "origin": "vendor_demo",
+      "audience": "researcher",
+      "kind": "document",
+      "url": "https://2captcha.com/demo/geetest",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "passed successfully",
+          "flags": "i"
+        }
+      ],
+      "contract": "as C009",
+      "challenge": {
+        "primaryType": "geetest",
+        "vendor": "GeeTest v3 (2captcha demo form)",
+        "widget": "GeeTest slide in a form",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 200,
+          "title": "GeeTest captcha demo: Sample Form with GeeTest captcha",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "scout: 2captcha.com/demo index"
+    },
+    {
+      "id": "C015",
+      "part": "frozen",
+      "origin": "vendor_demo",
+      "audience": "researcher",
+      "kind": "document",
+      "url": "https://2captcha.com/demo/geetest-v4",
+      "request": {
+        "formats": [
+          "markdown"
+        ]
+      },
+      "predicates": [
+        {
+          "type": "markdownMatches",
+          "pattern": "passed successfully",
+          "flags": "i"
+        }
+      ],
+      "contract": "as C009",
+      "challenge": {
+        "primaryType": "geetest",
+        "vendor": "GeeTest v4 (2captcha demo form)",
+        "widget": "GeeTest v4 in a form",
+        "basis": "probe 2026-10-25 (one GET through 127.0.0.1:7890)",
+        "blockReasons": null,
+        "gateSignals": null,
+        "blockedArms": null,
+        "blockedLanes": null,
+        "runSources": [],
+        "probe": {
+          "at": "2026-10-25T11:2xZ",
+          "httpStatus": 200,
+          "title": "GeeTest captcha v4 demo: Sample Form with GeeTest captcha v4",
+          "headers": [
+            "server: cloudflare"
+          ]
+        }
+      },
+      "provenance": "scout: 2captcha.com/demo index"
+    }
+  ]
+}

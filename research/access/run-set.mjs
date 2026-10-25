@@ -11,6 +11,7 @@
 // Usage: node research/access/run-set.mjs [--set frozen|healthy|blind|candidate|all] [--only T01,T02] [--warm]
 //          [--access '{"tier":"standard"}'] [--target octocrawl|firecrawl|zenrows] [--no-contract] [--raw-html] [--save-responses]
 //          [--grant <grant file>] [--stale-build] [--record research/access/runs/<date>-<label>-<commit>.md]
+//          [--tasks research/access/captcha-tasks.v1.json] [--arm <name>] [--solver-providers capsolver]
 //        node research/access/run-set.mjs --rejudge .w2l/access/runs/<timestamp> [--record research/access/runs/<new file>.md]
 //   --target     who fetches the pages (ROADMAP PA item 9, the competitor baseline). octocrawl (the default) is the local
 //                API. firecrawl is Firecrawl Cloud's POST /v2/scrape with FIRECRAWL_API_KEY: the task's own formats,
@@ -50,6 +51,15 @@
 //   beside them. A task removed from tasks.v1.json, or whose URL changed, after the run stays in
 //   the denominator with the run's own verdict, marked as not rejudged.
 //   --record never replaces a file that exists: a committed record is not rewritten.
+//   --tasks      another frozen task file of the same shape (default tasks.v1.json; for example captcha-tasks.v1.json, the
+//                CAPTCHA and DataDome set). A file that carries `manifestSha256` is refused unless its tasks still hash to
+//                it (captchaReport.mjs manifestText): a frozen set's tasks are never dropped or replaced. --rejudge reads
+//                the file the run named.
+//   --arm        the arm's name (captcha-window.mjs), written to the summary and the record; a label, nothing more.
+//   solver       (octocrawl) each attempt's third-party solver calls (captchaReport.mjs solverOf: the paid calls of the
+//                providers named by --solver-providers, default capsolver): solves attempted and succeeded, the
+//                solver's reported USD and the ledger's charge, solve time; null when the answer says nothing of paid
+//                calls. With a task file whose tasks carry `challenge.primaryType`, the record adds a table by type.
 //   Engine build (octocrawl): the local API loads the workspace packages from their compiled, git-ignored dist/, so
 //   the commit says nothing about the code that ran when dist/ predates it. The runner asks `tsc --build --dry`
 //   (runSetBuild.mjs) whether this checkout's dist/ matches its source, records the answer in the environment and
@@ -131,6 +141,7 @@ import { fileURLToPath } from 'node:url'
 import { isData, judge } from './judge.mjs'
 import { channelsCell, denominator, denominatorLines, grantLine, grantOf, plannedAttempts, stopReason } from './runSetReport.mjs'
 import { buildLine, buildState } from './runSetBuild.mjs'
+import { armCells, cellsTable, manifestText, solverOf, SOLVER_PROVIDERS } from './captchaReport.mjs'
 
 // Every file the runner writes goes through scrub() (defined below, before the first write), except a page's own Markdown.
 const writeFile = (file, text) => writeRaw(file, scrub(text))
@@ -152,6 +163,8 @@ if (extraRequest !== null && (typeof extraRequest !== 'object' || Array.isArray(
 const recordFile = flag('--record')
 const allowStaleBuild = args.includes('--stale-build')
 const rejudgeDir = flag('--rejudge')
+const armName = flag('--arm') ?? null
+const solverProviders = flag('--solver-providers')?.split(',').map((s) => s.trim()).filter(Boolean) ?? SOLVER_PROVIDERS
 const api = process.env.W2L_API_URL ?? 'http://127.0.0.1:8787'
 const target = flag('--target') ?? 'octocrawl'
 const TARGETS = { octocrawl: 'the local Octocrawl API', firecrawl: 'Firecrawl Cloud, POST /v2/scrape (proxy auto, maxAge 0, storeInCache false)', zenrows: 'ZenRows Fetch API, GET /v1/ (mode=auto, response_type=markdown)' }
@@ -163,9 +176,17 @@ const grantSource = (flag('--grant') ?? process.env.W2L_ACCESS_GRANT ?? '').trim
 const grant = rejudgeDir !== undefined ? undefined : grantOf(grantSource === '' ? null : grantSource.startsWith('{') ? grantSource : await readFile(resolve(repo, grantSource), 'utf8'))
 
 
-const taskText = await readFile(join(here, 'tasks.v1.json'), 'utf8')
+// A rejudge reads the task file its run named (the default when the run named none).
+const priorTasksFile = rejudgeDir === undefined ? undefined : JSON.parse(await readFile(join(resolve(repo, rejudgeDir), 'summary.json'), 'utf8')).environment?.tasksFile
+const tasksFile = flag('--tasks') ?? priorTasksFile ?? 'research/access/tasks.v1.json'
+const taskText = await readFile(resolve(repo, tasksFile), 'utf8')
 const tasksSha256 = createHash('sha256').update(taskText).digest('hex')
 const taskFile = JSON.parse(taskText)
+if (typeof taskFile.manifestSha256 === 'string') {
+  const got = createHash('sha256').update(manifestText(taskFile)).digest('hex')
+  if (got !== taskFile.manifestSha256) throw new Error(`${tasksFile}: its tasks hash to ${got}, not the frozen manifestSha256 ${taskFile.manifestSha256}; a frozen task is never dropped or replaced`)
+}
+const typed = taskFile.tasks.some((t) => typeof t.challenge?.primaryType === 'string')
 const inSet = (t) => setFilter === 'all' || t.part === setFilter || (setFilter === 'frozen' && t.part === 'unstable')
 const tasks = taskFile.tasks.filter((t) => inSet(t) && (only === undefined || only.includes(t.id)))
 for (const t of rejudgeDir === undefined ? tasks : taskFile.tasks) {
@@ -225,6 +246,8 @@ const environment = {
   api,
   exitIp: null,
   tasksSha256,
+  tasksFile,
+  ...(armName === null ? {} : { arm: armName }),
   grant,
   startedAt: new Date().toISOString(),
 }
@@ -446,6 +469,7 @@ async function attempt(task, temperature) {
   const events = doc === null ? [] : [...new Set([...(doc.trace ?? []).map((t) => t.event), ...(doc.ladderTrace ?? []).map((t) => t.event)])]
   return {
     taskId: task.id, url: task.url, part: task.part, temperature,
+    ...(typed ? { challengeType: task.challenge?.primaryType ?? 'unknown' } : {}),
     observed: {
       apiStatus, httpStatus: doc?.evidence?.httpStatus ?? null, status: doc?.status ?? null,
       reason: doc?.failureReason ?? doc?.blockReason ?? doc?.budgetExceeded ?? doc?.error?.code ?? (typeof doc?.code === 'string' ? doc.code : null) ?? error,
@@ -456,7 +480,7 @@ async function attempt(task, temperature) {
       gateEvents: events.filter((e) => /gate|blocked|challenge|quality|client_rendered|identity|robots/.test(e)),
       markdownChars: typeof doc?.markdown === 'string' ? doc.markdown.length : null,
       ...(doc?.requestCost === undefined ? {} : { requestCost: doc.requestCost }),
-      ...(target === 'octocrawl' ? { paidCalls: paidCallsOf(doc), ladderSkips: ladderSkipsOf(doc), robots: robotsOf(doc), ...rungsOf(doc) } : {}),
+      ...(target === 'octocrawl' ? { solver: solverOf(doc, solverProviders), paidCalls: paidCallsOf(doc), ladderSkips: ladderSkipsOf(doc), robots: robotsOf(doc), ...rungsOf(doc) } : {}),
       // The product's own verdict on the task's contract (ADR 0006); null when none was sent or the answer has none.
       productVerification: typeof doc?.verification?.status === 'string' && doc.verification.status !== 'not_requested' ? doc.verification.status : null,
       // Whether the page was ready for its task (ADR 0007), and the browser's last wait for its region; null when the answer has none.
@@ -591,7 +615,7 @@ const finishedAt = priorRun?.finishedAt ?? new Date().toISOString()
 const command = priorRun?.command ?? `node research/access/run-set.mjs ${args.join(' ')}`
 const hasWarm = rows.some((r) => r.temperature === 'warm')
 const totals = { cold: summary('cold'), ...(hasWarm ? { warm: summary('warm') } : {}) }
-await writeFile(join(runDir, rejudgeDir === undefined ? 'summary.json' : `summary.rejudged-${rejudgeStamp}.json`), JSON.stringify({ command, environment, finishedAt, set: priorRun?.set ?? setFilter, access: priorRun?.access ?? access ?? null, request: priorRun?.request ?? extraRequest, totals, denominator: runDenominator, ...(rejudged === null ? {} : { rejudged }) }, null, 2))
+await writeFile(join(runDir, rejudgeDir === undefined ? 'summary.json' : `summary.rejudged-${rejudgeStamp}.json`), JSON.stringify({ command, environment, finishedAt, arm: priorRun?.arm ?? armName, set: priorRun?.set ?? setFilter, access: priorRun?.access ?? access ?? null, request: priorRun?.request ?? extraRequest, totals, denominator: runDenominator, ...(rejudged === null ? {} : { rejudged }) }, null, 2))
 
 if (recordFile !== undefined) {
   const fmt = (v) => (v === null ? 'unknown' : String(v))
@@ -659,6 +683,7 @@ if (recordFile !== undefined) {
   const md = [
     `# Access task set run: ${priorRun?.set ?? setFilter}, ${environment.startedAt.slice(0, 10)}`, '',
     `- Command: \`${command}\``,
+    ...((priorRun?.arm ?? armName) === null ? [] : [`- Arm: ${priorRun?.arm ?? armName}`]),
     ...(rejudged === null ? [] : [`- Rejudged: ${rejudged.at} against tasks.v1.json with SHA-256 \`${rejudged.tasksSha256}\` (\`${rejudged.command}\`); statuses and timings are the run's own`]),
     `- Source commit: \`${environment.commit}\`${environment.dirty ? ' (working tree had uncommitted changes)' : ''}`,
     `- Network: ${environment.proxied ? `proxied (HTTPS_PROXY=${environment.proxyEnv.HTTPS_PROXY ?? ''}, HTTP_PROXY=${environment.proxyEnv.HTTP_PROXY ?? ''}, NO_PROXY=${environment.proxyEnv.NO_PROXY ?? ''}${environment.proxyCredentialsRemoved.length === 0 ? '' : `; credentials and query of ${environment.proxyCredentialsRemoved.join(', ')} not recorded`})` : 'direct'}`,
@@ -668,7 +693,7 @@ if (recordFile !== undefined) {
     grantLine(environment.grant),
     ...((environment.target ?? 'octocrawl') === 'octocrawl' ? [buildLine(environment.build)] : []),
     `- Run: ${environment.startedAt} → ${finishedAt}`,
-    `- Tasks: ${rows.filter((r) => r.temperature === 'cold').length} (set \`${priorRun?.set ?? setFilter}\`${only ? `, only ${only.join(', ')}` : ''}); task file SHA-256 at fetch time: ${environment.tasksSha256 === undefined ? 'not recorded (run before the hash was added)' : `\`${environment.tasksSha256}\``}; method in the header of run-set.mjs`,
+    `- Tasks: ${rows.filter((r) => r.temperature === 'cold').length} from \`${environment.tasksFile ?? 'research/access/tasks.v1.json'}\` (set \`${priorRun?.set ?? setFilter}\`${only ? `, only ${only.join(', ')}` : ''}); task file SHA-256 at fetch time: ${environment.tasksSha256 === undefined ? 'not recorded (run before the hash was added)' : `\`${environment.tasksSha256}\``}; method in the header of run-set.mjs`,
     ...denominatorLines(runDenominator, environment.stoppedEarly), '',
     `| Attempts | Verified | False success | p50 ms | p95 ms | External cost per 1,000 verified (USD) | Egress cost per 1,000 verified (USD) |${'credits' in totals.cold ? ' Credits (inferred) | Credits per 1,000 verified |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- |${'credits' in totals.cold ? ' --- | --- |' : ''}`,
@@ -679,6 +704,8 @@ if (recordFile !== undefined) {
     ...(skipsRecorded ? [...Object.keys(totals).map(skipsLine), ''] : []),
     ...(rungsRecorded ? [...Object.keys(totals).flatMap(rungLines), ''] : []),
     ...(robotsRecorded ? [...Object.keys(totals).map(robotsLine), ''] : []),
+    // By challenge type (a typed task file): the tasks this run selected, cold attempts; solves as captchaReport.mjs reads them.
+    ...(typed ? ['Cold attempts by challenge type (captchaReport.mjs; unknown where the answers did not say):', '', ...cellsTable([{ arm: priorRun?.arm ?? armName ?? 'this run', cells: armCells(tasks, rows) }]), ''] : []),
     `| Task | Attempt | Verified | Status | Reason | HTTP | Lane | Channels tried | Failed predicates | Wall ms |${paidColumn ? ' Paid calls |' : ''}${readinessColumn ? ' Readiness |' : ''}`,
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |${paidColumn ? ' --- |' : ''}${readinessColumn ? ' --- |' : ''}`,
     ...rows.map((r) => `| ${r.taskId} | ${r.temperature} | ${r.outcome.verified ? 'yes' : 'no'}${r.outcome.falseSuccess ? ' (false success)' : ''} | ${r.observed.status ?? '-'} | ${r.observed.reason ?? ''} | ${r.observed.httpStatus ?? ''} | ${r.observed.lane ?? ''} | ${channelsCell(r)} | ${r.outcome.failedPredicates.join(', ')} | ${r.outcome.wallMs} |${paidColumn ? ` ${paidCell(r.observed.paidCalls)} |` : ''}${readinessColumn ? ` ${readinessCell(r)} |` : ''}`),
