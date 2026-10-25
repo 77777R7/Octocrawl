@@ -1,7 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { buildChannels, formatScrapeReport, parseArgs, USAGE, withMeasuredSessions } from '../src/ladderCli.js'
+import { buildChannels, formatScrapeReport, installedChromeCarries, parseArgs, USAGE, withMeasuredSessions } from '../src/ladderCli.js'
+import { CapSolver } from '../src/vendors/capsolver.js'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { identityBundleFrom, modeIdentity, PREVIEW_PRODUCT_TOKEN, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { LadderRunner } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
@@ -316,6 +320,33 @@ function fakeVendorOps(
     async releaseSession() { opts.onRelease?.() },
   }
 }
+
+describe('installedChromeCarries: where a browser-bound solve goes when the ladder has installed_chrome (ADR 0005, 2026-10-26)', () => {
+  /** A stand-in Chrome that prints `--version` as `line`. */
+  const fakeChrome = (dir: string, name: string, line: string) => {
+    const path = join(dir, name)
+    writeFileSync(path, `#!/bin/sh\necho '${line}'\n`)
+    chmodSync(path, 0o755)
+    return path
+  }
+
+  it.skipIf(process.platform === 'win32')('leaves DataDome and Cloudflare to a Chrome the solver lists, keeps them for one it does not, and never for a request installed_chrome refuses', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w2l-chrome-'))
+    try {
+      const solver = new CapSolver({ apiKey: 'k' })
+      const listed = installedChromeCarries(solver, { executable: fakeChrome(dir, 'listed', 'Google Chrome 153.0.7000.10') }, 'mac')
+      const tooNew = installedChromeCarries(solver, { executable: fakeChrome(dir, 'new', 'Google Chrome 156.0.8078.47') }, 'mac')
+      const unread = installedChromeCarries(solver, { executable: fakeChrome(dir, 'unread', '') }, 'mac')
+      const missing = installedChromeCarries(solver, { executable: join(dir, 'none') }, 'mac')
+      expect(await listed('datadome', {})).toBe(true)
+      expect(await listed('cloudflare_challenge', { screenshot: { fullPage: false } } as FetchOptions)).toBe(false)
+      expect(await tooNew('datadome', {})).toBe(false)
+      expect(await tooNew('cloudflare_challenge', {})).toBe(false)
+      expect(await unread('datadome', {})).toBe(true)
+      expect(await missing('datadome', {})).toBe(false)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+})
 
 describe('lazy vendor connection', () => {
   it('does not create a vendor session while channels are built, only when the provider rung runs', async () => {

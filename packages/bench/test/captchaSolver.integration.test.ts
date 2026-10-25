@@ -16,9 +16,16 @@ const EXIT = { url: 'http://203.0.113.9:80', endpoint: '203.0.113.9:80', usernam
 const ARTICLE = `<!doctype html><title>Tide tables</title><main><h1>Tide tables</h1>${'<p>The harbour office records tide height, wind and visibility for every hour of the day, and the ledger is kept for the whole year.</p>'.repeat(6)}</main>`
 const TURNSTILE = (action: string) => `<!doctype html><title>Verify</title><p>One moment.</p><form method="post" action="${action}"><div class="cf-turnstile" data-sitekey="0x4TESTKEY" data-action="read"></div></form>`
 const RECAPTCHA = `<!doctype html><title>Verify</title><p>One moment.</p><div class="g-recaptcha" data-sitekey="6LTESTKEY" data-callback="onOk"></div><script>function onOk(t) { document.cookie = 'rc=' + (t === '${RC_GOOD}' ? 'ok' : 'bad') + '; path=/'; location.reload() }</script>`
+const MAC_151 = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
+const MAC_156 = MAC_151.replace('Chrome/151', 'Chrome/156')
+/** The 2captcha demo's shape (2026-10-25): a 200 page whose form has no method or action, sent by its own script, which says when the token passed. */
+const DEMO = (handled: boolean) => `<!doctype html><title>Turnstile demo</title><main><h1>Sample form</h1><p>${'Solve the widget and press Check to see the result of the check on this page. '.repeat(4)}</p><form id="f"><div class="cf-turnstile" data-sitekey="0x4DEMOKEY" style="width:300px;height:65px"></div><button type="submit">Check</button></form><p id="out"></p></main>${handled ? `<script>document.getElementById('f').addEventListener('submit', (e) => { e.preventDefault(); const t = new FormData(e.target).get('cf-turnstile-response'); document.getElementById('out').textContent = t === '${GOOD}' ? 'Captcha is passed successfully!' : 'Captcha failed' })</script>` : ''}</main>`
+/** A contact form with an invisible reCAPTCHA: a form that asks for more than the widget, never solved for a task. */
+const CONTACT = `<!doctype html><title>Contact</title><main><h1>Contact us</h1><p>${'Write to the harbour office and we answer within two days. '.repeat(4)}</p><form method="post" action="/contact"><input name="email" type="email"><textarea name="message"></textarea><div class="g-recaptcha" data-sitekey="6LTESTKEY" data-size="invisible" style="width:300px;height:65px"></div><button>Send</button></form></main>`
 const DATADOME = `<!doctype html><title>shop</title><p>Please enable JS and disable any ad blocker</p><iframe src="https://geo.captcha-delivery.com/captcha/?initialCid=abc&cid=def&t=fe&referer=x" width="100%" height="100%"></iframe>`
 
 let site: Server
+let contactPosts = 0
 let base = ''
 beforeAll(async () => {
   site = createServer((req, res) => {
@@ -40,6 +47,12 @@ beforeAll(async () => {
     if (path === '/recaptcha') return cookie.includes('rc=ok') ? html(200, ARTICLE) : html(200, RECAPTCHA)
     if (path.startsWith('/callback-get')) return html(200, `<!doctype html><title>Verify</title><p>One moment.</p><div class="g-recaptcha" data-sitekey="6LTESTKEY" data-callback="go"></div><form id="f" method="get" action="/callback-get"><textarea name="g-recaptcha-response"></textarea></form><script>function go() { document.getElementById('f').submit() }</script>`)
     if (path.startsWith('/get-form')) return html(200, TURNSTILE('/get-form').replace('method="post"', 'method="get"'))
+    if (path === '/demo') return html(200, DEMO(true))
+    if (path === '/demo-native?stop') return html(200, DEMO(false).replace('</main>', `<script>document.getElementById('f').addEventListener('submit', (e) => e.stopPropagation())</script></main>`))
+    if (path.startsWith('/demo-native')) return html(200, DEMO(false))
+    if (req.method === 'POST' && path === '/contact') { contactPosts++; res.writeHead(303, { location: '/contact' }).end(); return }
+    if (path === '/two-widgets') return html(200, CONTACT.replace('</main>', `<div class="g-recaptcha" data-sitekey="6LTESTKEY" data-callback="onGate" style="width:300px;height:78px"></div><p id="out"></p><script>function onGate(t) { document.getElementById('out').textContent = t === '${RC_GOOD}' ? 'Captcha is passed successfully!' : 'Captcha failed' }</script></main>`))
+    if (path === '/contact') return html(200, CONTACT)
     if (path === '/hcaptcha') return html(200, '<!doctype html><title>Verify</title><p>One moment.</p><div class="h-captcha" data-sitekey="abc"></div>')
     if (path === '/datadome') return html(403, DATADOME, { 'x-datadome-cid': 'abc' })
     if (path === '/article-with-form') return html(200, ARTICLE.replace('</main>', '<form><div class="g-recaptcha" data-sitekey="6LTESTKEY"></div></form></main>'))
@@ -55,7 +68,7 @@ let mock: MockCapSolver | null = null
 afterEach(async () => { await mock?.close(); mock = null })
 
 /** The mock's answers: the right token for each widget, unless a test says otherwise. */
-const answers = (task: Record<string, unknown>): MockBehaviour => task.type === 'AntiTurnstileTaskProxyLess' ? { solution: { token: GOOD }, polls: 1 } : task.type === 'ReCaptchaV2TaskProxyLess' ? { solution: { gRecaptchaResponse: RC_GOOD } } : { solution: { cookie: 'datadome=dd-secret-3; Path=/' } }
+const answers = (task: Record<string, unknown>): MockBehaviour => task.type === 'AntiTurnstileTaskProxyLess' ? { solution: { token: GOOD }, polls: 1 } : task.type === 'ReCaptchaV2TaskProxyLess' ? { solution: { gRecaptchaResponse: RC_GOOD } } : task.type === 'AntiCloudflareTask' ? { solution: { cookies: { cf_clearance: 'cf-secret-6' } } } : { solution: { cookie: 'datadome=dd-secret-3; Path=/' } }
 const solvingWith = (m: MockCapSolver, over: Partial<CaptchaSolving> = {}): CaptchaSolving => ({ solver: new CapSolver({ apiKey: KEY, baseUrl: m.url, pollMs: 20 }), perSolveUsd: 0.003, maxSolvesPerCall: 2, egress: null, grantHash: 'f'.repeat(64), ...over })
 /** The public browser rung, stock Playwright, with ad hosts naming DataDome's captcha host so blockAds keeps the test offline. */
 const subjectWith = (solving: CaptchaSolving) => new BrowserLocalSubject('standard', null, false, localNetworkPolicy(), null, undefined, null, undefined, undefined, null, false, ['captcha-delivery.com'], 'playwright', 'actual', {}, solving)
@@ -148,7 +161,7 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
     } finally { await subject.teardown() }
   }, 90_000)
 
-  it('ends a failed or timed-out solve blocked, charging a task that was made and nothing for one that was not', async () => {
+  it('ends a failed or timed-out solve blocked, charging a task whose bill is unknown and nothing for one the vendor did not bill', async () => {
     let behaviour: MockBehaviour = { pollError: 'ERROR_CAPTCHA_UNSOLVABLE' }
     const m = mock = await startMockCapSolver(() => behaviour)
     const subject = subjectWith(solvingWith(m))
@@ -156,7 +169,8 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
       const ledger = createSpendLedger(1)
       const failed = await subject.fetch(`${base}/turnstile`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
       expect(failed).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
-      expect(solves(failed.trace)).toEqual([expect.objectContaining({ outcome: 'solver_failed', reason: 'unsolvable', code: 'ERROR_CAPTCHA_UNSOLVABLE', chargedUsd: 0.003 })])
+      // CapSolver bills no task it reports failed: attempted, charged 0, on the record as such (smoke test 2026-10-25, T045).
+      expect(solves(failed.trace)).toEqual([expect.objectContaining({ outcome: 'solver_failed', reason: 'unsolvable', code: 'ERROR_CAPTCHA_UNSOLVABLE', chargedUsd: 0, costBasis: 'vendor_unbilled_failure', solve: 1 })])
       behaviour = { createError: 'ERROR_KEY_DENIED_ACCESS' }
       const denied = await subject.fetch(`${base}/turnstile`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
       expect(solves(denied.trace)).toEqual([expect.objectContaining({ outcome: 'solver_failed', reason: 'key_denied', chargedUsd: null })])
@@ -164,10 +178,56 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
       const slow = await subject.fetch(`${base}/turnstile`, Date.now() + 12_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
       expect(slow.status).toBe('blocked')
       expect(solves(slow.trace)).toEqual([expect.objectContaining({ outcome: 'solver_failed', reason: 'timeout', chargedUsd: 0.003 })])
-      expect(ledger.settledUsd).toBeCloseTo(0.006)
+      expect(ledger.settledUsd).toBeCloseTo(0.003)
       expect(ledger.reservedUsd).toBe(0)
       // The vendor's free-text description repeated the request (the key); it is never on the result.
       for (const result of [failed, denied, slow]) expect(JSON.stringify(result)).not.toContain(KEY)
+    } finally { await subject.teardown() }
+  }, 90_000)
+
+  it('solves a widget that gates what the task needs on a page that answered 200, and only then (smoke test 2026-10-25, C009)', async () => {
+    const m = mock = await startMockCapSolver(answers)
+    const subject = subjectWith(solvingWith(m))
+    const verify = { checks: [{ type: 'markdownMatches' as const, pattern: 'passed successfully', flags: 'i' }] }
+    try {
+      const ledger = createSpendLedger(1)
+      const paid = journal()
+      const demo = await subject.fetch(`${base}/demo`, Date.now() + 40_000, undefined, undefined, { verify }, undefined, undefined, { spend: ledger, paidCalls: paid })
+      expect(demo.status).toBe('success')
+      expect(demo.markdown).toContain('Captcha is passed successfully!')
+      expect(solves(demo.trace)).toEqual([expect.objectContaining({ type: 'turnstile', trigger: 'task_contract', outcome: 'cleared', solve: 1, chargedUsd: 0.003, blockReasonAfter: null })])
+      expect(m.tasks).toEqual([{ type: 'AntiTurnstileTaskProxyLess', websiteURL: `${base}/demo`, websiteKey: '0x4DEMOKEY' }])
+      // Without a task contract nothing says the widget gates anything: no solve.
+      const asIs = await subject.fetch(`${base}/demo`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
+      expect(asIs.status).toBe('success')
+      expect(solves(asIs.trace)).toEqual([])
+      // A contact form's invisible reCAPTCHA is not what a failing task waits on.
+      const contact = await subject.fetch(`${base}/contact`, Date.now() + 40_000, undefined, undefined, { verify }, undefined, undefined, { spend: ledger })
+      expect(solves(contact.trace)).toEqual([])
+      expect(m.tasks).toHaveLength(1)
+      expect(JSON.stringify([demo, paid.rows])).not.toContain(GOOD)
+    } finally { await subject.teardown() }
+  }, 90_000)
+
+  it("never lets a form with no script of its own send the token by GET, nor fills or sends a form other than the solved widget's", async () => {
+    const m = mock = await startMockCapSolver(answers)
+    const subject = subjectWith(solvingWith(m))
+    try {
+      const page = await subject.fetch(`${base}/demo-native`, Date.now() + 40_000, undefined, undefined, { verify: { checks: [{ type: 'markdownMatches', pattern: 'passed successfully', flags: 'i' }] } }, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(page.trace)).toEqual([expect.objectContaining({ type: 'turnstile', trigger: 'task_contract', outcome: 'not_injected', reason: 'script_did_not_take_submit' })])
+      expect(page.evidence.finalUrl).toBe(`${base}/demo-native`)
+      expect(JSON.stringify(page)).not.toContain(GOOD)
+      // A handler that stops the event without cancelling it still sends nothing by GET.
+      const stopped = await subject.fetch(`${base}/demo-native?stop`, Date.now() + 40_000, undefined, undefined, { verify: { checks: [{ type: 'markdownMatches', pattern: 'passed successfully', flags: 'i' }] } }, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(stopped.evidence.finalUrl).toBe(`${base}/demo-native?stop`)
+      expect(JSON.stringify(stopped)).not.toContain(GOOD)
+      // A contact form's invisible widget comes first on the page, with the same site key; the gating one after it, with a
+      // callback, is solved, and only its callback gets the token: the contact form is never filled or sent.
+      contactPosts = 0
+      const two = await subject.fetch(`${base}/two-widgets`, Date.now() + 40_000, undefined, undefined, { verify: { checks: [{ type: 'markdownMatches', pattern: 'passed successfully', flags: 'i' }] } }, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(two.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared' })])
+      expect(two.markdown).toContain('Captcha is passed successfully!')
+      expect(contactPosts).toBe(0)
     } finally { await subject.teardown() }
   }, 90_000)
 
@@ -217,7 +277,7 @@ describe('solveChallenges on a page read through the solver exit', () => {
     try {
       await page.goto('https://shop.example/item')
       const egress = { endpoint: '127.0.0.1:65001', upstream: EXIT }
-      const ua = await page.evaluate(() => navigator.userAgent)
+      const ua = MAC_151
       const events = await solveChallenges({
         page, solving: solvingWith(m, { egress }), userAgent: ua, pageEgress: '127.0.0.1:65001',
         gateNow: gate(page, () => cleared ? 200 : 403, (): Record<string, string> => cleared ? {} : { 'x-datadome-cid': 'abc' }), settle: () => page.waitForLoadState('domcontentloaded'),
@@ -240,12 +300,44 @@ describe('solveChallenges on a page read through the solver exit', () => {
     try {
       await page.goto('https://shop.example/item')
       const events = await solveChallenges({
-        page, solving: solvingWith(m, { egress: { endpoint: '127.0.0.1:65001', upstream: EXIT } }), userAgent: 'UA-of-browser', pageEgress: '127.0.0.1:65001',
+        page, solving: solvingWith(m, { egress: { endpoint: '127.0.0.1:65001', upstream: EXIT } }), userAgent: MAC_151, pageEgress: '127.0.0.1:65001',
         gateNow: gate(page, () => cleared ? 200 : 403, (): Record<string, string> => cleared ? {} : { 'cf-mitigated': 'challenge' }), settle: () => page.waitForLoadState('domcontentloaded'),
         spend: createSpendLedger(1), paidCalls: undefined, log: undefined, rung: 'installed_chrome', onEvent: () => {}, url: 'https://shop.example/item', deadlineAt: Date.now() + 30_000, signal: undefined, reserveMs: 1_000,
       })
-      expect(events).toEqual([expect.objectContaining({ type: 'cloudflare_challenge', outcome: 'cleared', egress: 'solver_proxy' })])
-      expect(m.tasks).toEqual([{ type: 'AntiCloudflareTask', websiteURL: 'https://shop.example/item', userAgent: 'UA-of-browser', proxy: '203.0.113.9:80:user-us-1:exit-pass-9c1' }])
+      // CapSolver says it solved with another User-Agent than the browser's: the record says so.
+      expect(events).toEqual([expect.objectContaining({ type: 'cloudflare_challenge', outcome: 'cleared', egress: 'solver_proxy', vendorUserAgent: 'other' })])
+      expect(m.tasks).toEqual([{ type: 'AntiCloudflareTask', websiteURL: 'https://shop.example/item', userAgent: MAC_151, proxy: '203.0.113.9:80:user-us-1:exit-pass-9c1' }])
     } finally { await page.close() }
+  }, 60_000)
+
+  /** A Cloudflare challenge page, read through the run's exit, the solve step's arguments but the solving and the browser's User-Agent. */
+  async function challenged(m: MockCapSolver, over: Partial<CaptchaSolving>, userAgent: string): Promise<SolveTraceDetail[]> {
+    const page = await routed(() => ({ status: 403, body: '<!doctype html><title>Just a moment...</title>', headers: { 'cf-mitigated': 'challenge' } }))
+    try {
+      await page.goto('https://shop.example/item')
+      return await solveChallenges({
+        page, solving: solvingWith(m, { egress: { endpoint: '127.0.0.1:65001', upstream: EXIT }, ...over }), userAgent, pageEgress: '127.0.0.1:65001',
+        gateNow: gate(page, () => 403, () => ({ 'cf-mitigated': 'challenge' })), settle: () => page.waitForLoadState('domcontentloaded'),
+        spend: createSpendLedger(1), paidCalls: undefined, log: undefined, rung: 'installed_chrome', onEvent: () => {}, url: 'https://shop.example/item', deadlineAt: Date.now() + 30_000, signal: undefined, reserveMs: 1_000,
+      })
+    } finally { await page.close() }
+  }
+
+  it('buys no exit-bound solve for a browser the vendor does not list: Chrome 156, a headless Chrome (smoke test 2026-10-25, C008)', async () => {
+    const m = mock = await startMockCapSolver(answers)
+    expect(await challenged(m, {}, MAC_156)).toEqual([expect.objectContaining({ type: 'cloudflare_challenge', outcome: 'unsupported', reason: 'browser_version_unsupported', browser: 'chrome/156 mac', chargedUsd: null })])
+    expect(await challenged(m, {}, MAC_151.replace('Chrome/', 'HeadlessChrome/'))).toEqual([expect.objectContaining({ outcome: 'unsupported', reason: 'browser_not_supported', browser: 'headless_chrome/151 mac' })])
+    expect(m.requests).toEqual([])
+  }, 60_000)
+
+  it("leaves an exit-bound solve to a later rung that carries it, spending none of the page's allowance (smoke test 2026-10-25, T045)", async () => {
+    const m = mock = await startMockCapSolver(answers)
+    const asked: string[] = []
+    const later = (carries: boolean): Partial<CaptchaSolving> => ({ maxSolvesPerCall: 1, defersTo: { rung: 'installed_chrome', carries: async (type) => { asked.push(type); return carries } } })
+    expect(await challenged(m, later(true), MAC_151)).toEqual([expect.objectContaining({ type: 'cloudflare_challenge', outcome: 'deferred', reason: 'later_rung_solves', deferredTo: 'installed_chrome', solve: null, chargedUsd: null })])
+    expect(m.requests).toEqual([])
+    // The later rung does not carry it (its Chrome is not on the vendor's list): this rung solves.
+    expect(await challenged(m, later(false), MAC_151)).toEqual([expect.objectContaining({ outcome: 'still_gated', solve: 1, chargedUsd: 0.003 }), expect.objectContaining({ outcome: 'limit_reached' })])
+    expect(asked).toEqual(['cloudflare_challenge', 'cloudflare_challenge'])
   }, 60_000)
 })
