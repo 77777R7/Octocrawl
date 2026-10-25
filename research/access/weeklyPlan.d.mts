@@ -45,3 +45,26 @@ export declare const IC16_BASELINE: Baseline
 export declare function baselineLine(verified: number | null, baseline?: Baseline): string
 export declare function weeklyHeaderLines(opts: { date: string; commit: string; arm: string; set: WeeklySet; chrome: string | null; previousChrome?: string | null; chromeRerun?: boolean }): string[]
 export declare function summaryRows(arms: readonly ArmResult[]): SummaryRow[]
+
+/** One vendor attempt's RouteObservation (packages/bench/src/routing/vendorRouter.ts), as the routing history stores it. */
+export interface StoredObservation {
+  observedAt: string
+  accessDelivered: boolean | null
+  regionLoaded: boolean | null
+  taskVerified: boolean | null
+  failureStage: string | null
+  chargedUsd: number | null
+  chargeBasis: string | null
+  [key: string]: unknown
+}
+export interface RouteEntry { vendor: string; entry: { observations?: readonly StoredObservation[] } & Record<string, unknown> }
+export declare function readRouteEntries(file: string): Promise<RouteEntry[]>
+export declare function observationsBetween(entries: readonly RouteEntry[], from: string, to: string): Array<StoredObservation & { vendor: string }>
+export declare function steelLayerLines(opts: {
+  observations: readonly StoredObservation[] | null
+  historyError?: string | null
+  paidCalls: number | null | undefined
+  chargedUsd: number | null | undefined
+  verified: number | null | undefined
+  verifiedFromPaidCall: number | null | undefined
+}): string[]
