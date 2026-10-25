@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -122,6 +123,46 @@ describe('reading the same capture again when its contract fails on what was ext
     expect(out.trace.at(-1)).toMatchObject({ detail: { capped: true, selected: 'main_content' } })
     expect((out.trace.at(-1)!.detail!.candidates as Array<{ id: string; skipped?: string }>)[1]).toMatchObject({ id: 'document', skipped: 'html_too_large' })
   })
+})
+
+// D6's standards fixtures (not copied): an RFC and a W3C Recommendation whose header and chapters are body siblings.
+const standardsFixture = (name: string) => readFileSync(new URL(`../../extract-tf/test/fixtures/standards/${name}`, import.meta.url), 'utf8')
+const STANDARDS = [
+  { name: 'ietf-rfc.html', firstChapter: '## [1.](#section-1)', header: ['Standards Track', 'March 2026', 'Internet Engineering Task Force (IETF)'], chapter: 'Section 1 paragraph 1' },
+  { name: 'w3c-recommendation.html', firstChapter: '## 1. Perceivable', header: ['W3C Recommendation', '05 March 2026', 'Dana Example'], chapter: 'Guideline 1.1 requirement 1' },
+]
+
+describe('D6\'s RFC and W3C fixtures through the same-capture candidates (F3a acceptance)', () => {
+  for (const { name, firstChapter, header, chapter } of STANDARDS) {
+    const html = standardsFixture(name)
+    const options = ask([...header.map(text => ({ type: 'markdownIncludes' as const, text })), { type: 'markdownIncludes', text: chapter }])
+
+    it(`${name}: the main content keeps the header since D6, so the contract passes and nothing is read again`, () => {
+      const result = delivered(html)
+      expect(verify(options.verify, result as never, { partial: true }).status).toBe('passed')
+      expect(withExtractionCandidates(result, { html, url, options, lane: 'browser_local', at: 9 })).toBe(result)
+    })
+
+    it(`${name}: a delivery that lost the header, as H01 and H07 did before D6, gets it back from the document candidate`, () => {
+      const result = delivered(html)
+      // Only the chapters, as the main content was before D6 made the header and chapters one document.
+      const chapters = result.markdown!.slice(result.markdown!.indexOf(firstChapter))
+      expect(chapters.length).toBeGreaterThan(0)
+      const lost: FetchResult = { ...result, markdown: chapters }
+      const before = verify(options.verify, lost as never, { partial: true })
+      expect(before.status).toBe('failed')
+      expect(readinessOf({ ...lost, verification: before }).state).toBe('not_extracted')
+
+      const out = withExtractionCandidates(lost, { html, url, options, lane: 'browser_local', at: 9 })
+      expect(verify(options.verify, out as never, { partial: true }).status).toBe('passed')
+      const event = out.trace.find(item => item.event === 'extraction_candidates')!
+      expect(event.detail).toMatchObject({ selected: 'document', reason: 'passes_contract', replaced: true, capped: false, trigger: 'not_extracted' })
+      expect(event.detail!.captureId).toBe((result.trace[0]!.detail as { captureId: string }).captureId)
+      const scored = event.detail!.candidates as Array<{ id: string; passed: number; failed: number }>
+      expect(scored.find(item => item.id === 'main_content')).toMatchObject({ passed: 1, failed: header.length })
+      expect(scored.find(item => item.id === 'document')).toMatchObject({ passed: header.length + 1, failed: 0 })
+    })
+  }
 })
 
 describe('the HTTP lane reads its own capture again', () => {

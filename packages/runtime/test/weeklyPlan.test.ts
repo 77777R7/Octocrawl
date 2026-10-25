@@ -1,8 +1,11 @@
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 // The weekly rerun's plan and record header (research/access/weekly.mjs), kept pure so they can be tested here.
-import { IC16_BASELINE, baselineLine, chromeMajor, chromeOfRecord, isoWeek, rotationGroupOf, rotationGroups, summaryRows, weeklyHeaderLines, weeklySet } from '../../../research/access/weeklyPlan.mjs'
-import type { ArmResult, Subsets, TaskFile } from '../../../research/access/weeklyPlan.mjs'
+import { IC16_BASELINE, baselineLine, chromeMajor, chromeOfRecord, isoWeek, observationsBetween, readRouteEntries, rotationGroupOf, rotationGroups, steelLayerLines, summaryRows, weeklyHeaderLines, weeklySet } from '../../../research/access/weeklyPlan.mjs'
+import type { ArmResult, StoredObservation, Subsets, TaskFile } from '../../../research/access/weeklyPlan.mjs'
 
 const taskFile: TaskFile = JSON.parse(readFileSync(new URL('../../../research/access/tasks.v1.json', import.meta.url), 'utf8'))
 const subsets: Subsets = JSON.parse(readFileSync(new URL('../../../research/access/subsets.v1.json', import.meta.url), 'utf8'))
@@ -129,5 +132,62 @@ describe('weekly summary', () => {
     expect(rows[1]?.status).toBe('not_run (no key)')
     expect(rows[1]?.verified).toBeNull()
     expect(rows[0]?.gap).toEqual({ all: null, healthy: null, challenge: null, rotation: null })
+  })
+})
+
+describe('the Steel arm\'s layered results and cost per verified result (PA G2a)', () => {
+  // Shaped like the RouteObservations the 2026-10-21 weekly Steel arm left in its routing history.
+  const observed = (at: string, o: Partial<StoredObservation> = {}): StoredObservation => ({
+    observedAt: at, accessDelivered: false, regionLoaded: null, taskVerified: false, failureStage: 'access', readiness: null, reason: 'captcha',
+    chargedUsd: 0.0033333333333333335, chargeBasis: 'ceiling', wallMs: 6286, costUsd: null, failureClass: 'captcha_required', ...o,
+  })
+  const passed = (at: string) => observed(at, { accessDelivered: true, regionLoaded: true, taskVerified: true, failureStage: null, readiness: 'ready', reason: null, chargedUsd: 0.0012, chargeBasis: 'measured' })
+  const from = '2026-10-20T18:02:07.703Z'
+  const to = '2026-10-20T18:09:24.709Z'
+
+  it('reads every route of the routing history and keeps the observations made during the run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'weekly-g2a-'))
+    try {
+      const file = join(dir, 'routing-history.sqlite')
+      const db = new Database(file)
+      db.exec('CREATE TABLE routes (id INTEGER PRIMARY KEY, vendor TEXT NOT NULL, host TEXT NOT NULL, entry_json TEXT NOT NULL, expired_at INTEGER)')
+      const insert = db.prepare('INSERT INTO routes (vendor, host, entry_json, expired_at) VALUES (?, ?, ?, ?)')
+      // One observation from last week, one from this run, on a live route; one from this run on a route since expired.
+      insert.run('steel', 'studylib.net', JSON.stringify({ attempts: 2, observations: [observed('2026-10-13T18:05:00.000Z'), observed('2026-10-20T18:02:28.000Z')] }), null)
+      insert.run('steel', 'example.org', JSON.stringify({ attempts: 1, observations: [passed('2026-10-20T18:09:10.000Z')] }), 1792600000000)
+      insert.run('steel', 'later.example', JSON.stringify({ attempts: 1, observations: [observed('2026-10-20T18:30:00.000Z')] }), null)
+      db.close()
+      const got = observationsBetween(await readRouteEntries(file), from, to)
+      expect(got.map((o) => [o.vendor, o.observedAt, o.taskVerified])).toEqual([['steel', '2026-10-20T18:02:28.000Z', false], ['steel', '2026-10-20T18:09:10.000Z', true]])
+      await expect(readRouteEntries(join(dir, 'missing.sqlite'))).rejects.toThrow()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('counts each layer yes / no / unknown and gives the ledger\'s cost per verified result', () => {
+    const observations = [...Array.from({ length: 14 }, (_, i) => observed(`2026-10-20T18:03:${String(i).padStart(2, '0')}.000Z`)), passed('2026-10-20T18:05:00.000Z'), passed('2026-10-20T18:06:00.000Z')]
+    const lines = steelLayerLines({ observations, paidCalls: 16, chargedUsd: 0.03564419444444445, verified: 27, verifiedFromPaidCall: 2 })
+    expect(lines[0]).toContain('16 attempts (the runner counted 16 paid calls)')
+    expect(lines).toContain('| Access delivered | 2 | 14 | 0 |')
+    // A region no live read judged is unknown, never a no.
+    expect(lines).toContain('| Region loaded | 2 | 0 | 14 |')
+    expect(lines).toContain('| Task verified | 2 | 14 | 0 |')
+    expect(lines).toContain('- Where the vendor attempts stopped (failureStage): access 14, region 0, extraction 0, task 0, none 2')
+    expect(lines.find((l) => l.startsWith('- Charged on these attempts'))).toBe('- Charged on these attempts by the spend ledger: $0.0491 on 16 (basis: ceiling 14, measured 2)')
+    expect(lines.at(-1)).toContain('Cost per verified result: $0.0013 (the ledger\'s $0.0356 over the arm\'s 27 verified answers')
+    expect(lines.at(-1)).toContain('per result verified with a paid call\'s page: $0.0178 (over the 2 tasks')
+  })
+
+  it('leaves what it cannot see unknown instead of 0', () => {
+    const unsettled = steelLayerLines({ observations: [observed('2026-10-20T18:03:00.000Z', { chargedUsd: null, chargeBasis: null, taskVerified: null })], paidCalls: 3, chargedUsd: null, verified: 5, verifiedFromPaidCall: 0 })
+    expect(unsettled[0]).toContain('the runner counted 3 paid calls; the counts differ')
+    expect(unsettled).toContain('| Task verified | 0 | 0 | 1 |')
+    expect(unsettled.find((l) => l.startsWith('- Charged'))).toBe('- Charged on these attempts by the spend ledger: unknown (no charge settled)')
+    expect(unsettled.at(-1)).toContain('Cost per verified result: unknown (the ledger\'s charge is unknown); per result verified with a paid call\'s page: unknown')
+
+    const unread = steelLayerLines({ observations: null, historyError: 'routing-history.sqlite: unable to open database file', paidCalls: 16, chargedUsd: 0.0356, verified: 0, verifiedFromPaidCall: 0 })
+    expect(unread[0]).toBe('- Vendor attempts by layer (PA G2a): unknown, the routing history was not read (routing-history.sqlite: unable to open database file)')
+    expect(unread.at(-1)).toContain('Cost per verified result: none: nothing was verified (the ledger charged $0.0356)')
+
+    expect(steelLayerLines({ observations: [], paidCalls: 4, chargedUsd: 0, verified: 9, verifiedFromPaidCall: 0 })[0]).toContain('none observed during the run, though the runner counted 4 paid calls: unknown')
   })
 })
