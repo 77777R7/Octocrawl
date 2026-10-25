@@ -8,7 +8,7 @@ const grant = (tier: string, capabilities: string[]) => JSON.stringify({ tier, c
 
 describe('loadEngineConfig: the engine options every local entry point reads (docs/pa-enhancement-tasks.md A2)', () => {
   it('has no grant and the defaults without one, and prints nothing', () => {
-    expect(loadEngineConfig({}, { hosted: false })).toEqual({ accessGrant: null, browserEngine: 'playwright', browserIdentity: 'declared', compatHosts: [], egressProxies: [], egressEchoUrl: null, workerCount: 4, notices: [] })
+    expect(loadEngineConfig({}, { hosted: false })).toEqual({ accessGrant: null, browserEngine: 'playwright', browserIdentity: 'declared', compatHosts: [], egressProxies: [], egressEchoUrl: null, workerCount: 4, captchaSolver: null, notices: [] })
   })
 
   it('reads every option from the environment of a local entry point, and --access-grant only where the entry point passes its flags', () => {
@@ -35,6 +35,30 @@ describe('loadEngineConfig: the engine options every local entry point reads (do
     const flagged = loadEngineConfig({}, { hosted: false, argv: ['--access-grant', grant('standard', [])] })
     expect(flagged.accessGrant).toMatchObject({ tier: 'standard' })
     expect(loadEngineConfig({}, { hosted: false }).accessGrant).toBeNull()
+  })
+
+  it('reads the CAPTCHA solver of a grant that names it: its key and its exit, local only (ADR 0005, 2026-10-25)', () => {
+    const solverGrant = (egress: 'proxy' | 'none') => JSON.stringify({ tier: 'enhanced', capabilities: ['installed_chrome', 'third_party_captcha_solver'], budget: { perRunUsd: 20 }, attestation: ATTESTATION, solver: { vendor: 'capsolver', egress }, tariffs: { capsolver: { perSolveUsd: 0.003, maxSolvesPerCall: 2 } } })
+    const KEY = 'CAP-test-key-0000'
+    const EXIT = 'http://user-1:exit-secret@203.0.113.9:80'
+    const config = loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('proxy'), CAPSOLVER_API_KEY: KEY, W2L_SOLVER_PROXY: EXIT }, { hosted: false })
+    expect(config.captchaSolver).toMatchObject({ vendor: 'capsolver', apiKey: KEY, perSolveUsd: 0.003, maxSolvesPerCall: 2, upstream: { endpoint: '203.0.113.9:80', username: 'user-1', password: 'exit-secret' } })
+    // The startup line names the exit by host:port, never its login or the key.
+    const line = config.notices.find((notice) => notice.startsWith('captcha solver'))!
+    expect(line).toContain('203.0.113.9:80')
+    expect(config.notices.join('\n')).not.toMatch(/exit-secret|CAP-test-key|user-1/)
+    // Exit "none": no exit is read, and one given anyway is a mistake.
+    expect(loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('none'), CAPSOLVER_API_KEY: KEY }, { hosted: false }).captchaSolver).toMatchObject({ upstream: null })
+    expect(() => loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('none'), CAPSOLVER_API_KEY: KEY, W2L_SOLVER_PROXY: EXIT }, { hosted: false })).toThrow(/solver exit is "none"/)
+    // A key, and for "proxy" an exit, are needed; the errors never repeat a value.
+    expect(() => loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('proxy'), W2L_SOLVER_PROXY: EXIT }, { hosted: false })).toThrow(/CAPSOLVER_API_KEY/)
+    expect(() => loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('proxy'), CAPSOLVER_API_KEY: KEY }, { hosted: false })).toThrow(/W2L_SOLVER_PROXY/)
+    try { loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('proxy'), CAPSOLVER_API_KEY: KEY, W2L_SOLVER_PROXY: 'socks5://user-1:exit-secret@203.0.113.9:1080' }, { hosted: false }); expect.unreachable() } catch (error) { expect(String(error)).not.toMatch(/exit-secret|CAP-test-key/) }
+    // Two ways to choose the run's exit are one too many; an exit without the capability is refused.
+    expect(() => loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('proxy'), CAPSOLVER_API_KEY: KEY, W2L_SOLVER_PROXY: EXIT, W2L_EGRESS_PROXIES: 'http://proxy-a.test:8080' }, { hosted: false })).toThrow()
+    expect(() => loadEngineConfig({ W2L_SOLVER_PROXY: EXIT }, { hosted: false })).toThrow(/third_party_captcha_solver/)
+    // A hosted server refuses the capability (hosted comes later, behind its own switch).
+    expect(() => loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('none'), CAPSOLVER_API_KEY: KEY }, { hosted: true })).toThrow(/local only/)
   })
 
   it('checks the per-host pacing variables over a policy', () => {

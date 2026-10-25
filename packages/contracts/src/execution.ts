@@ -55,6 +55,13 @@ export interface ExecutionContext {
    */
   paidCalls?: PaidCallLog
   /**
+   * The page's CAPTCHA solves (ADR 0005 `third_party_captcha_solver`), shared by every rung and retry of one page's
+   * fetch: how many it has bought, so `maxSolvesPerCall` bounds the page and not each rung, and `charged` puts a solve on
+   * the run's paid calls the moment the ledger settles it, so a rung that throws afterwards loses none. Returns the
+   * call's number in the run. Absent: the rung counts its own, and its result's trace alone carries them.
+   */
+  captchaSolves?: CaptchaSolveLog
+  /**
    * The paid call this fetch is (its `paid_calls` id), set by the ladder for a provider rung's call within a task: a
    * provider that lets the caller name its session (Steel's `sessionId`) names it from this id, so the session can be
    * found again after a crash (PA E4). Absent outside a task.
@@ -108,6 +115,14 @@ export interface PaidCallRecord {
   createdAt: string
   /** When the row reached `settled`, `unknown` or `released`; null until then. */
   settledAt: string | null
+}
+
+/** One page's CAPTCHA solves across its rungs (ExecutionContext.captchaSolves). */
+export interface CaptchaSolveLog {
+  /** Solves bought so far for this page. */
+  used(): number
+  /** A solve the ledger settled; returns its call number in the run. */
+  charged(solve: { vendor: string; rung: string; ceilingUsd: number; chargedUsd: number; reportedCostUsd: number | null; paidCallId?: string }): number
 }
 
 /** A task's paid-call journal, as a rung sees it. */

@@ -9,7 +9,8 @@ import { createApp, injectJobWebSockets, isLoopbackAuthority } from './app.js'
 import { createApiEngine, defaultSessionsFile } from './engine.js'
 import { closeIdleOnlyWhenUnread } from './keepAlive.js'
 import { parseListen, parsePort } from './listen.js'
-import { preloadEngineModules } from './engineConfig.js'
+import { preloadEngineModules, startCaptchaSolving } from './engineConfig.js'
+import { withPoolProxy } from '@w2l/contracts'
 
 export { parseListen, parsePort }
 
@@ -28,13 +29,15 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
   // Patchright (an optional install) and impit (a native module) are checked to load before the server listens, not on the first page.
   const loaded = await preloadEngineModules(listen)
   if (loaded !== null) log(`w2l-api: ${loaded}`)
+  // The grant's CAPTCHA solver, and its exit when the grant chose one: every rung of the run leaves through it from the first request (ADR 0005).
+  const solver = listen.mode === 'local' ? await startCaptchaSolving(listen.captchaSolver, env) : null
   const taskRoot = env.W2L_TASK_ROOT ?? '.w2l/api'
   // The user's saved logins are read by a local server that listens on loopback alone, and it then answers loopback requests only.
   const servesLogins = listen.mode === 'local' && isLoopbackAuthority(listen.host.includes(':') && !listen.host.startsWith('[') ? `[${listen.host}]` : listen.host, false)
   if (listen.mode === 'local' && !servesLogins) log(`saved logins (mode authed) are not read: this server listens on ${listen.host}, reachable from other machines; listen on 127.0.0.1 to use them`)
   const engine = createApiEngine({
     taskRoot,
-    networkPolicy: listen.networkPolicy,
+    networkPolicy: solver?.exit == null ? listen.networkPolicy : withPoolProxy(listen.networkPolicy, solver.exit),
     defaultMaxPages: listen.defaultMaxPages,
     mapMaxLimit: listen.mapMaxLimit,
     mapMaxTimeoutMs: listen.mapMaxTimeoutMs,
@@ -51,6 +54,7 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
     compatHosts: listen.compatHosts,
     egressProxies: listen.egressProxies,
     egressEchoUrl: listen.egressEchoUrl,
+    ...(solver === null ? {} : { captchaSolving: solver.solving }),
   })
   const app = createApp(engine, { loopbackOnly: servesLogins, tokens: listen.tokens, exposeInternalErrors: listen.mode === 'local', jobStreams: listen.jobStreams, ...(listen.rateLimit === undefined ? {} : { rateLimit: listen.rateLimit }) })
   // Job webhooks are delivered by this process: the same control database and worker the MCP runtime runs, under the delivery policy (not the crawler's).
@@ -76,6 +80,7 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
       await engine.close({cancelActive: true})
       await workerLoop
       deliveryStore.close()
+      await solver?.close()
     })()
     return stopping
   }

@@ -6,6 +6,7 @@ import {
   CONTENTFUL_STATUS,
   identityBundleFrom,
   modeIdentity,
+  paidCallsOfError,
   QUALITY_ESCALATION_MAX_CONFIDENCE,
   RENDERED_LOW_YIELD_MAX_TOKENS,
   type FetchOptions,
@@ -2059,5 +2060,68 @@ describe('LadderRunner — the shadow vendor ranking (PA G3)', () => {
     const run = await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), bb, steel], { mode: 'authed' }).run(url)
     expect(run.ladderTrace.some((t) => t.event === 'vendor_rank_shadow')).toBe(false)
     expect(bb.calls).toHaveLength(1)
+  })
+})
+
+describe('LadderRunner — a local rung\'s CAPTCHA solves (ADR 0005 third_party_captcha_solver)', () => {
+  const url = 'https://example.com/p'
+  const solve = (outcome: string, chargedUsd: number | null, extra: Record<string, unknown> = {}) => ({ at: 5, lane: 'browser_local' as const, event: 'captcha_solve', detail: { vendor: 'capsolver', type: 'turnstile', outcome, solve: 1, ms: 900, chargedUsd, ceilingUsd: chargedUsd === null ? null : 0.003, costBasis: chargedUsd === null ? null : 'tariff', reason: null, code: null, egress: 'none', blockReasonAfter: outcome === 'cleared' ? null : 'captcha', ...extra } })
+  const grant = { sha256: 'a'.repeat(64), tier: 'enhanced' as const, attestedAt: '2026-10-25T00:00:00Z' }
+
+  it('puts each solve whose task was made on the run\'s paid calls, its cost unknown from the vendor (never 0)', async () => {
+    const solved: FetchResult = { ...contentfulResult(url, 'browser_local'), usage: { ...contentfulResult(url, 'browser_local').usage, externalCostUsd: 0 }, trace: [] }
+    const browser: Channel = { id: 'browser_local', identity: COHERENT, grant, async fetch(_url, _session, execution) {
+      const call = execution!.captchaSolves!.charged({ vendor: 'capsolver', rung: 'browser_local', ceilingUsd: 0.003, chargedUsd: 0.003, reportedCostUsd: null })
+      return { ...solved, trace: [solve('cleared', 0.003, { call })] }
+    } }
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'captcha')]), browser], { mode: 'authed' }).run(url)
+    expect(run.result.lane).toBe('browser_local')
+    expect(run.result.usage.externalCostUsd).toBeNull()
+    expect(run.result.usage.externalCostChargedUsd).toBeCloseTo(0.003)
+    const paid = run.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[]; grant: unknown }
+    expect(paid.calls).toEqual([expect.objectContaining({ provider: 'capsolver', rung: 'browser_local', capabilities: ['third_party_captcha_solver'], ceilingUsd: 0.003, chargedUsd: 0.003, reportedCostUsd: null, solves: 1, outcome: 'success', answer: true })])
+    expect(paid.grant).toEqual(grant)
+    // A solve that bought nothing (no task: a limit, an unsupported check, another exit) is on the trace alone.
+    const none: FetchResult = { ...blockedResult(url, 'captcha'), lane: 'browser_local', trace: [solve('limit_reached', null)] }
+    const quiet = await new LadderRunner([channel('browser_local', [none])], { mode: 'authed' }).run(url)
+    expect(quiet.result.trace.some((event) => event.event === 'paid_calls')).toBe(false)
+  })
+
+  it('keeps a solve the ledger charged on the paid calls when the rung throws after it, and counts solves for the page across rungs', async () => {
+    const seen: number[] = []
+    const solving = (id: string, then: 'throw' | FetchResult): Channel => ({
+      id, identity: COHERENT, grant,
+      async fetch(_url, _session, execution) {
+        seen.push(execution!.captchaSolves!.used())
+        const call = execution!.captchaSolves!.charged({ vendor: 'capsolver', rung: id, ceilingUsd: 0.003, chargedUsd: 0.003, reportedCostUsd: null })
+        if (then === 'throw') throw new Error('page closed')
+        return { ...then, trace: [solve('still_gated', 0.003, { call, rung: id })] }
+      },
+    })
+    const gated = { ...blockedResult(url, 'captcha'), lane: 'browser_local' as const }
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'captcha')]), solving('browser_local', gated), solving('installed_chrome', gated)], { mode: 'standard', enhanced: true }).run(url)
+    // The second rung saw the first rung's solve: maxSolvesPerCall bounds the page, not each rung.
+    expect(seen).toEqual([0, 1])
+    const paid = run.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: Record<string, unknown>[] }
+    expect(paid.calls).toEqual([
+      expect.objectContaining({ provider: 'capsolver', rung: 'browser_local', chargedUsd: 0.003, outcome: 'blocked', reason: 'captcha' }),
+      expect.objectContaining({ provider: 'capsolver', rung: 'installed_chrome', chargedUsd: 0.003, outcome: 'blocked', reason: 'captcha' }),
+    ])
+    expect(run.result.usage.externalCostChargedUsd).toBeCloseTo(0.006)
+    // A rung that throws after a charged solve: the run's error still carries the solve, its page unknown (null).
+    const thrown = await new LadderRunner([solving('browser_local', 'throw')], { mode: 'authed' }).run(url).then(() => null, (error: unknown) => error)
+    expect((paidCallsOfError(thrown)?.detail as { calls: Record<string, unknown>[] }).calls).toEqual([expect.objectContaining({ provider: 'capsolver', chargedUsd: 0.003, outcome: null })])
+  })
+
+  it('judges the page after a solve by the task contract: a cleared check is not a verified task', async () => {
+    const cleared: FetchResult = { ...contentfulResult(url, 'browser_local'), markdown: 'Welcome back. Nothing the task needs.', trace: [] }
+    const wants = { checks: [{ type: 'markdownIncludes' as const, text: 'Price' }] }
+    const browser: Channel = { id: 'browser_local', identity: COHERENT, async fetch(_url, _session, execution) {
+      const call = execution!.captchaSolves!.charged({ vendor: 'capsolver', rung: 'browser_local', ceilingUsd: 0.003, chargedUsd: 0.003, reportedCostUsd: null })
+      return { ...cleared, trace: [solve('cleared', 0.003, { call })] }
+    } }
+    const run = await new LadderRunner([browser], { mode: 'authed' }, null, null, null, { verify: wants }).run(url)
+    expect(run.ladderTrace.filter((t) => t.event === 'verification_checked').map((t) => t.detail.status)).toEqual(['failed'])
+    expect((run.result.trace.find((event) => event.event === 'paid_calls')?.detail as { calls: unknown[] }).calls).toHaveLength(1)
   })
 })

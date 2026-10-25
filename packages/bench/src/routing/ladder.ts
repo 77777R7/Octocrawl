@@ -16,7 +16,7 @@
  * content is caught by the false-success checks upstream.
  */
 
-import type { EvidenceAccessGrant, EvidencePaidCall, ExecutionContext, PaidCallRecord, PaidCallState, SpendLedger, Escalation, FetchOptions, FetchResult, FetchWarning, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, ReadinessState, RobotsOverrideApplied, SpendReservation, TraceEvent, Verification, VerifyContract } from '@w2l/contracts'
+import type { CaptchaSolveLog, EvidenceAccessGrant, EvidencePaidCall, ExecutionContext, PaidCallRecord, PaidCallState, SpendLedger, Escalation, FetchOptions, FetchResult, FetchWarning, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, ReadinessState, RobotsOverrideApplied, SpendReservation, TraceEvent, Verification, VerifyContract } from '@w2l/contracts'
 import { carryPaidCalls, CONTENTFUL_STATUS, identityBundleIssues, QUALITY_ESCALATION_MAX_CONFIDENCE, RENDERED_LOW_YIELD_MAX_TOKENS } from '@w2l/contracts'
 import {
   createExecutionScope,
@@ -142,6 +142,8 @@ interface LadderProgress {
   grant: EvidenceAccessGrant | null
   /** The run's own ledger, with no cap, when the caller gave none: every provider call is still settled and recorded. */
   ledger: SpendLedger | null
+  /** CAPTCHA solves bought for this page, by every rung and retry (ADR 0005 third_party_captcha_solver). */
+  solves: number
   /** The last page the ladder stepped past for a stronger rung (strongerRungMayAnswer), kept over a later failure with none. */
   steppedPast: { channel: string; result: FetchResult } | null
   /**
@@ -607,7 +609,7 @@ export class LadderRunner {
    */
   async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}, options: FetchOptions = {}): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
-    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [], charged: null, paidCalls: [], grant: null, ledger: null, steppedPast: null }
+    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [], charged: null, paidCalls: [], grant: null, ledger: null, solves: 0, steppedPast: null }
     for (const filtered of this.options.channelsFiltered ?? []) {
       progress.ladderTrace.push({ at: 0, event: 'ladder_channels_filtered', channel: '—', detail: { reason: filtered.reason, dropped: [...filtered.dropped] } })
     }
@@ -616,7 +618,7 @@ export class LadderRunner {
     try { return withRunCost(carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides), progress) }
     catch (error) {
       // A run that throws keeps its paid calls on the error, for the record of whatever result the error becomes.
-      if (!deadlineReached(scope)) throw progress.paidCalls.length === 0 ? error : carryPaidCalls(error, paidCallsEvent(progress, null, Math.max(0, performance.now() - progress.startedAt), 'provider'))
+      if (!deadlineReached(scope)) throw progress.paidCalls.length === 0 ? error : carryPaidCalls(error, paidCallsEvent(progress, new Set(), Math.max(0, performance.now() - progress.startedAt), 'provider'))
       return withRunCost(carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides), progress)
     } finally { scope.dispose() }
   }
@@ -1255,7 +1257,8 @@ export class LadderRunner {
       }
     }
     onCall()
-    const named = row === null ? execution : {
+    // A local rung's CAPTCHA solves are counted for the page and put on its paid calls as the ledger settles each.
+    const named = ceiling === undefined ? { ...execution, captchaSolves: solveLog(progress, channel) } : row === null ? execution : {
       ...execution,
       paidCallId: row.paidCallId,
       onPaidSession: ({ providerSessionId, providerRequestId }: { providerSessionId: string; providerRequestId?: string }) => {
@@ -1283,7 +1286,7 @@ export class LadderRunner {
       }
       throw error
     }
-    if (reservation === null || ceiling === undefined) return result
+    if (reservation === null || ceiling === undefined) return withSolverCalls(progress, result)
     // The provider's stated price, else what its sessions' measured time costs under the tariff, else the ceiling.
     const reported = result.usage.externalCostUsd
     const measured = reported === null && typeof result.usage.measuredCostUsd === 'number' ? result.usage.measuredCostUsd : null
@@ -1597,6 +1600,52 @@ function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceil
 }
 
 /**
+ * One page's CAPTCHA solves across its rungs (ADR 0005 `third_party_captcha_solver`): the count `maxSolvesPerCall` bounds,
+ * and each solve on the run's charge and paid calls the moment the rung's ledger settles it, its outcome unknown (null)
+ * until the rung returns a page (withSolverCalls), and left null when it never does.
+ */
+function solveLog(progress: LadderProgress, channel: Channel): CaptchaSolveLog {
+  return {
+    used: () => progress.solves,
+    charged: (solve) => {
+      progress.solves++
+      progress.charged = (progress.charged ?? 0) + solve.chargedUsd
+      progress.grant ??= channel.grant ?? null
+      const call = progress.paidCalls.length + 1
+      progress.paidCalls.push({
+        provider: solve.vendor, rung: solve.rung, capabilities: ['third_party_captcha_solver'], ceilingUsd: solve.ceilingUsd, chargedUsd: solve.chargedUsd,
+        reportedCostUsd: solve.reportedCostUsd, sessionMs: null, solves: 1, outcome: null, reason: null, call,
+        ...(solve.paidCallId === undefined ? {} : { paidCallId: solve.paidCallId }),
+      })
+      return call
+    },
+  }
+}
+
+/**
+ * A local rung's page after its solves: each solve's paid call gets Octocrawl's verdict on the page, and the page what
+ * the ledger charged for them. The vendor states no price, so the page's own third-party cost is unknown (null), never 0.
+ */
+function withSolverCalls(progress: LadderProgress, result: FetchResult): FetchResult {
+  let charged = 0
+  let reportedAll = true
+  let any = false
+  for (const event of result.trace) {
+    const call = event.event === 'captcha_solve' ? event.detail?.call : undefined
+    const paid = typeof call === 'number' ? progress.paidCalls.find((entry) => entry.call === call) : undefined
+    if (paid === undefined) continue
+    any = true
+    charged += paid.chargedUsd
+    reportedAll &&= paid.reportedCostUsd !== null
+    paid.outcome = result.status
+    paid.reason = result.failureReason ?? result.blockReason ?? result.budgetExceeded ?? null
+  }
+  if (!any) return result
+  const external = result.usage.externalCostUsd
+  return { ...result, usage: { ...result.usage, externalCostUsd: reportedAll && external !== null ? external + charged : null, externalCostChargedUsd: (result.usage.externalCostChargedUsd ?? 0) + charged } }
+}
+
+/**
  * The answer's third-party spend is the whole run's, not the kept rung's: a local answer kept after a provider attempt still
  * cost what the provider charged, and an unknown charge anywhere in the run makes it unknown.
  */
@@ -1608,14 +1657,14 @@ function withRunCost(run: LadderRunResult, progress: LadderProgress): LadderRunR
   const { externalCostChargedUsd: _attempt, ...usage } = run.result.usage
   const result: FetchResult = { ...run.result, usage: { ...usage, externalCostUsd: run.summary.externalCostUsd, ...(progress.charged === null ? {} : { externalCostChargedUsd: progress.charged }) } }
   if (progress.paidCalls.length === 0) return { ...run, result }
-  // The answer is a paid call's page when its own trace holds that call's settlement.
-  const own = result.trace.find((event) => event.event === 'spend_settled')?.detail?.call
+  // The answer is a paid call's page when its own trace holds that call's settlement, or the call of a solve made on it.
+  const own = new Set(result.trace.filter((event) => event.event === 'spend_settled' || event.event === 'captcha_solve').map((event) => event.detail?.call).filter((call) => call !== undefined))
   return { ...run, result: { ...result, trace: [...result.trace, paidCallsEvent(progress, own, result.usage.wallMs, result.lane)] } }
 }
 
-/** The run's paid calls as one `paid_calls` event, the call numbered `answer` (if any) marked as the answer's. */
-function paidCallsEvent(progress: LadderProgress, answer: unknown, at: number, lane: Lane): TraceEvent {
-  const calls: EvidencePaidCall[] = progress.paidCalls.map(({ call, ...paid }) => ({ ...paid, answer: call === answer }))
+/** The run's paid calls as one `paid_calls` event, the calls numbered in `answer` marked as the answer's. */
+function paidCallsEvent(progress: LadderProgress, answer: ReadonlySet<unknown>, at: number, lane: Lane): TraceEvent {
+  const calls: EvidencePaidCall[] = progress.paidCalls.map(({ call, ...paid }) => ({ ...paid, answer: answer.has(call) }))
   return { at, lane, event: 'paid_calls', detail: { calls, grant: progress.grant } }
 }
 
