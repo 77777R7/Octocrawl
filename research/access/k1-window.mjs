@@ -8,6 +8,9 @@
 //   installed_chrome  this checkout's API, the grant that names installed_chrome alone, access "enhanced".
 //   control           the API of a checkout pinned to 2ffd7f25 (--control <dir>, built there), the Steel grant as
 //                     `enhanced`, access "enhanced": the same-window main control of the done criteria.
+//   combined          this checkout's API, one grant naming installed_chrome and the Steel grant's capabilities, budget and
+//                     tariff (--combined-grant, default .w2l/access/combined-grant.json), W2L_VENDORS=steel, STEEL_API_KEY,
+//                     access "enhanced": the combined-grant measurement after K1 (ROADMAP, PA bar, to measure next).
 //   firecrawl         run-set --target firecrawl (Firecrawl Cloud, its own strongest route).
 //   zenrows           run-set --target zenrows (ZenRows mode=auto).
 // Interleaving: the 92 tasks (tasks.v1.json order) are cut into --blocks blocks. In block b the four local arms run one
@@ -20,9 +23,12 @@
 //
 // Usage: node research/access/k1-window.mjs --window 1 --control <dir> [--date YYYY-MM-DD] [--blocks 4]
 //          [--ports 8821,8822,8823,8824] [--steel-grant <file>] [--ic-grant <file>] [--no-retry] [--dry-run]
-//   Ports are taken in the order standard, enhanced, installed_chrome, control; 8787, 8791, 8799 and 8812–8814 are refused.
+//          [--arms standard,installed_chrome,combined,firecrawl] [--combined-grant <file>] [--firecrawl-cap <credits>]
+//          [--name k1]
+//   --arms picks the arms (default the six above, without combined); --control is needed only with the control arm.
+//   Ports are taken in the order the local arms are listed; 8787, 8791, 8799 and 8812–8814 are refused.
 //   Grants and keys are found as weekly.mjs finds them (this checkout's .w2l/access, else the main checkout's); keys are
-//   never written anywhere. Work files: .w2l/access/k1/<date>-w<window>/ (git-ignored), with manifest.json.
+//   never written anywhere. Work files: .w2l/access/<name>/<date>-w<window>/ (git-ignored), with manifest.json.
 
 import { spawn, execSync } from 'node:child_process'
 import { createWriteStream, existsSync } from 'node:fs'
@@ -38,8 +44,12 @@ const args = process.argv.slice(2)
 const flag = (name) => { const i = args.indexOf(name); return i === -1 ? undefined : args[i + 1] }
 const windowNo = flag('--window')
 if (!/^\d$/.test(windowNo ?? '')) throw new Error('--window 1 or 2')
+const ALL_LOCAL = ['standard', 'enhanced', 'installed_chrome', 'control', 'combined']
+const ALL_COMPETITORS = ['firecrawl', 'zenrows']
+const chosen = (flag('--arms') ?? 'standard,enhanced,installed_chrome,control,firecrawl,zenrows').split(',')
+for (const a of chosen) if (![...ALL_LOCAL, ...ALL_COMPETITORS].includes(a)) throw new Error(`--arms: unknown arm ${a}`)
 const control = flag('--control') && resolve(flag('--control'))
-if (!control || !existsSync(join(control, 'packages/api/dist/index.js'))) throw new Error('--control <dir>: a built checkout of the control commit')
+if (chosen.includes('control') && (!control || !existsSync(join(control, 'packages/api/dist/index.js')))) throw new Error('--control <dir>: a built checkout of the control commit')
 const blocks = Number(flag('--blocks') ?? 4)
 const ports = (flag('--ports') ?? '8821,8822,8823,8824').split(',').map(Number)
 for (const p of ports) if ([8787, 8791, 8799, 8812, 8813, 8814].includes(p)) throw new Error(`port ${p} is reserved on this machine`)
@@ -48,7 +58,7 @@ const today = () => new Date().toISOString().slice(0, 10)
 const date = flag('--date') ?? today()
 const sh = (cmd, cwd = repo) => execSync(cmd, { cwd }).toString().trim()
 const commit = sh('git rev-parse --short HEAD')
-const controlCommit = sh('git rev-parse HEAD', control)
+const controlCommit = control ? sh('git rev-parse HEAD', control) : null
 const mainCheckout = dirname(sh('git rev-parse --path-format=absolute --git-common-dir'))
 const checkouts = [...new Set([repo, mainCheckout])]
 const localFile = (rel) => checkouts.map((root) => join(root, rel)).find((p) => existsSync(p)) ?? null
@@ -67,8 +77,8 @@ async function secret(name) {
 const tasks = JSON.parse(await readFile(join(here, 'tasks.v1.json'), 'utf8')).tasks.map((t) => t.id)
 const size = Math.ceil(tasks.length / blocks)
 const blockIds = Array.from({ length: blocks }, (_, b) => tasks.slice(b * size, (b + 1) * size)).filter((ids) => ids.length > 0)
-const LOCAL = ['standard', 'enhanced', 'installed_chrome', 'control']
-const COMPETITORS = ['firecrawl', 'zenrows']
+const LOCAL = chosen.filter((a) => ALL_LOCAL.includes(a))
+const COMPETITORS = chosen.filter((a) => ALL_COMPETITORS.includes(a))
 const rotated = (b) => LOCAL.map((_, i) => LOCAL[(i + b) % LOCAL.length])
 
 const steelGrant = flag('--steel-grant') ?? localFile('.w2l/access/steel-grant.json')
@@ -80,18 +90,35 @@ const steel = grantOf(await readFile(steelGrant, 'utf8'))
 const ic = grantOf(await readFile(icGrant, 'utf8'))
 if (!steel.capabilities?.includes('vendor_remote_browser') || steel.capabilities.includes('vendor_residential_proxy')) throw new Error(`${steelGrant}: the Steel datacenter grant (vendor_remote_browser, never vendor_residential_proxy)`)
 if (ic.capabilities?.join() !== 'installed_chrome') throw new Error(`${icGrant}: must name installed_chrome alone`)
-const keys = { STEEL_API_KEY: await secret('STEEL_API_KEY'), FIRECRAWL_API_KEY: await secret('FIRECRAWL_API_KEY'), ZENROWS_API_KEY: await secret('ZENROWS_API_KEY') }
-for (const [k, v] of Object.entries(keys)) if (!v) throw new Error(`${k} not found (environment or .w2l/access/competitors.env)`)
-
-const workRel = `.w2l/access/k1/${date}-w${windowNo}`
-const work = join(repo, workRel)
-const arm = {
-  standard: { port: ports[0], cwd: repo, commit: sh('git rev-parse HEAD'), access: '"standard"', env: {}, grant: null },
-  enhanced: { port: ports[1], cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: steelGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.STEEL_API_KEY }, grant: steel },
-  installed_chrome: { port: ports[2], cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: icGrant }, grant: ic },
-  control: { port: ports[3], cwd: control, commit: controlCommit, access: '"enhanced"', env: { W2L_ACCESS_GRANT: steelGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.STEEL_API_KEY }, grant: steel },
+// The combined grant holds installed_chrome and exactly the Steel grant's capabilities; its budget and tariff are checked
+// against the Steel grant's by the engine's own parser below, so a typo cannot give the arm more or less than the two.
+const combinedGrant = flag('--combined-grant') ?? localFile('.w2l/access/combined-grant.json')
+let combined = null
+if (LOCAL.includes('combined')) {
+  if (combinedGrant === null) throw new Error('no combined grant: .w2l/access/combined-grant.json (or --combined-grant)')
+  combined = grantOf(await readFile(combinedGrant, 'utf8'))
+  if ([...(combined.capabilities ?? [])].sort().join() !== ['installed_chrome', ...steel.capabilities].sort().join()) throw new Error(`${combinedGrant}: must name installed_chrome and the Steel grant's capabilities, nothing else`)
+  const { accessGrantFromText } = await import('../../packages/http-core/dist/accessGrant.js')
+  const settings = async (f) => { const { attestation, sha256, capabilities, ...rest } = accessGrantFromText(await readFile(f, 'utf8')); return JSON.stringify(rest) }
+  if (await settings(combinedGrant) !== await settings(steelGrant)) throw new Error(`${combinedGrant}: its tier, budget, scope or tariffs differ from ${steelGrant}`)
 }
-console.log(`K1 window ${windowNo}, ${date}, runner ${commit}, control ${controlCommit.slice(0, 8)}; ${tasks.length} tasks in ${blockIds.length} blocks of ${size}; ports ${ports.join(',')}`)
+const needs = { STEEL_API_KEY: LOCAL.some((a) => ['enhanced', 'control', 'combined'].includes(a)), FIRECRAWL_API_KEY: COMPETITORS.includes('firecrawl'), ZENROWS_API_KEY: COMPETITORS.includes('zenrows') }
+const keys = {}
+for (const k of Object.keys(needs)) keys[k] = await secret(k)
+for (const [k, v] of Object.entries(keys)) if (needs[k] && !v) throw new Error(`${k} not found (environment or .w2l/access/competitors.env)`)
+
+const workRel = `.w2l/access/${flag('--name') ?? 'k1'}/${date}-w${windowNo}`
+const work = join(repo, workRel)
+if (ports.length < LOCAL.length) throw new Error(`--ports: ${LOCAL.length} local arms need ${LOCAL.length} ports`)
+const portOf = (name) => ports[LOCAL.indexOf(name)]
+const arm = {
+  standard: { port: portOf('standard'), cwd: repo, commit: sh('git rev-parse HEAD'), access: '"standard"', env: {}, grant: null, grantFile: null },
+  enhanced: { port: portOf('enhanced'), cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: steelGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.STEEL_API_KEY }, grant: steel, grantFile: steelGrant },
+  installed_chrome: { port: portOf('installed_chrome'), cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: icGrant }, grant: ic, grantFile: icGrant },
+  control: { port: portOf('control'), cwd: control, commit: controlCommit, access: '"enhanced"', env: { W2L_ACCESS_GRANT: steelGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.STEEL_API_KEY }, grant: steel, grantFile: steelGrant },
+  combined: { port: portOf('combined'), cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: combinedGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.STEEL_API_KEY }, grant: combined, grantFile: combinedGrant },
+}
+console.log(`window ${windowNo}, ${date}, runner ${commit}, control ${controlCommit?.slice(0, 8) ?? 'none'}; arms ${chosen.join(',')}; ${tasks.length} tasks in ${blockIds.length} blocks of ${size}; ports ${LOCAL.map((a) => `${a}=${portOf(a)}`).join(',')}`)
 for (const [b, ids] of blockIds.entries()) console.log(`block ${b}: ${ids[0]}…${ids.at(-1)} (${ids.length}); local order ${rotated(b).join(' → ')}`)
 if (dryRun) process.exit(0)
 if (existsSync(join(work, 'manifest.json'))) throw new Error(`${workRel}/manifest.json exists: this window was run; use another --date or --window`)
@@ -112,7 +139,7 @@ async function usage(name) {
   } catch (e) { return { at: new Date().toISOString(), error: e.message } }
 }
 
-const manifest = { window: Number(windowNo), date, runner: commit, control: controlCommit, tasks: tasks.length, blocks: blockIds, ports, grants: { steel: { file: steelGrant, sha256: steel.sha256, capabilities: steel.capabilities }, installed_chrome: { file: icGrant, sha256: ic.sha256, capabilities: ic.capabilities } }, proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null, HTTP_PROXY: process.env.HTTP_PROXY ?? null, NO_PROXY: process.env.NO_PROXY ?? null }, credits: { before: {}, after: {} }, runs: [], failures: [] }
+const manifest = { window: Number(windowNo), date, runner: commit, control: controlCommit, arms: chosen, tasks: tasks.length, blocks: blockIds, ports, grants: { steel: { file: steelGrant, sha256: steel.sha256, capabilities: steel.capabilities }, installed_chrome: { file: icGrant, sha256: ic.sha256, capabilities: ic.capabilities }, ...(combined ? { combined: { file: combinedGrant, sha256: combined.sha256, capabilities: combined.capabilities } } : {}) }, proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null, HTTP_PROXY: process.env.HTTP_PROXY ?? null, NO_PROXY: process.env.NO_PROXY ?? null }, credits: { before: {}, after: {} }, runs: [], failures: [] }
 const saveManifest = () => writeFile(join(work, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 for (const c of COMPETITORS) manifest.credits.before[c] = await usage(c)
 await saveManifest()
@@ -150,7 +177,7 @@ async function runSet(name, label, ids) {
   const record = `${workRel}/${label}.md`
   const local = LOCAL.includes(name)
   const argv = ['research/access/run-set.mjs', '--set', 'all', '--only', ids.join(','), '--save-responses', '--record', record,
-    ...(local ? ['--access', arm[name].access, '--raw-html', '--grant', arm[name].grant ? (name === 'installed_chrome' ? icGrant : steelGrant) : ''] : ['--target', name])]
+    ...(local ? ['--access', arm[name].access, '--raw-html', '--grant', arm[name].grantFile ?? ''] : ['--target', name])]
   if (local && arm[name].grant === null) argv.splice(argv.indexOf('--grant'), 2)
   const env = { ...process.env, ...(local ? { W2L_API_URL: `http://127.0.0.1:${arm[name].port}` } : { [name === 'firecrawl' ? 'FIRECRAWL_API_KEY' : 'ZENROWS_API_KEY']: keys[name === 'firecrawl' ? 'FIRECRAWL_API_KEY' : 'ZENROWS_API_KEY'] }), ...(local ? { W2L_EGRESS_ECHO_URL: 'https://api.ipify.org' } : {}) }
   const startedAt = new Date().toISOString()
@@ -207,7 +234,17 @@ const checkAwake = async (since, what) => {
 // premium-proxy price) would take the account past --zenrows-cap used credits (default 4700) is not started, and the
 // manifest says so.
 const zenrowsCap = Number(flag('--zenrows-cap') ?? 4700)
+// --firecrawl-cap caps the credits this window may spend at Firecrawl: a run is not started when the credits spent since
+// the window's first reading plus 1.5 a page (K1's first calls averaged 110 and 112 credits for 92 pages) would pass it.
+const firecrawlCap = flag('--firecrawl-cap') === undefined ? null : Number(flag('--firecrawl-cap'))
 async function withinCap(c, pages, what) {
+  if (c === 'firecrawl' && firecrawlCap !== null) {
+    const u = await usage('firecrawl'), b = manifest.credits.before.firecrawl
+    const spent = typeof u.remainingCredits === 'number' && typeof b?.remainingCredits === 'number' ? b.remainingCredits - u.remainingCredits : null
+    const ok = spent !== null && spent + 1.5 * pages <= firecrawlCap
+    if (!ok) { manifest.failures.push(`firecrawl not started for ${what}: ${spent ?? 'unknown'} credits spent in this window, +${1.5 * pages} expected would pass the cap ${firecrawlCap}`); await saveManifest() }
+    return ok
+  }
   if (c !== 'zenrows') return true
   const u = await usage('zenrows')
   const ok = typeof u.usage_credits === 'number' && u.usage_credits + 25 * pages <= zenrowsCap
