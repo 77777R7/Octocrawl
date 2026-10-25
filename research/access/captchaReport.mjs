@@ -13,6 +13,8 @@
 //   reported $  each paid call's `reportedCostUsd`, else `costUsd`: the solver's own figure. null when neither: unknown. The
 //               spend ledger's `chargedUsd` (the grant's tariff, an estimate) is kept apart and never stands in for it.
 //   solve ms    the attempted events' `ms`; without a trace, each call's `solveMs`, else `durationMs`.
+//   A listed paid call with no charged event (its rung was cut by its deadline and returned no trace) counts as attempted,
+//   and makes succeeded, cleared and solve ms unknown.
 //   skipped     the events without a solve, by `<type>:<reason>` (no adapter, no solver exit, the per-page limit).
 // A sum is null when any part of it is null. An answer whose record says nothing of paid calls has solver null (unknown).
 
@@ -50,14 +52,18 @@ export function solverOf(doc, providers = SOLVER_PROVIDERS) {
   const skipped = {}
   for (const d of events ?? []) if (d.solve === null || d.solve === undefined) skipped[`${d.type}:${d.reason ?? d.outcome}`] = (skipped[`${d.type}:${d.reason ?? d.outcome}`] ?? 0) + 1
   const noTrace = calls.length === 0 ? 0 : null
+  // A charged solve whose event was lost (a rung cut by its deadline returns an empty trace, its solve still charged): it
+  // was attempted, and what it got is unknown, never 0.
+  const lost = tried === null ? 0 : Math.max(0, calls.length - tried.filter((d) => typeof d.chargedUsd === 'number').length)
+  const known = (n) => (lost > 0 ? null : n)
   return {
     calls: calls.length,
-    attempted: tried === null ? calls.reduce((a, c) => a + (firstNumber(c, ['solveAttempts']) ?? 1), 0) : tried.length,
-    succeeded: tried === null ? noTrace : tried.filter((d) => ANSWERED.includes(d.outcome)).length,
-    cleared: tried === null ? noTrace : tried.filter((d) => d.outcome === 'cleared').length,
+    attempted: tried === null ? calls.reduce((a, c) => a + (firstNumber(c, ['solveAttempts']) ?? 1), 0) : tried.length + lost,
+    succeeded: tried === null ? noTrace : known(tried.filter((d) => ANSWERED.includes(d.outcome)).length),
+    cleared: tried === null ? noTrace : known(tried.filter((d) => d.outcome === 'cleared').length),
     reportedUsd: sumOrNull(calls.map((c) => firstNumber(c, ['reportedCostUsd', 'costUsd']))),
     chargedUsd: sumOrNull(calls.map((c) => firstNumber(c, ['chargedUsd']))),
-    solveMs: tried === null ? sumOrNull(calls.map((c) => firstNumber(c, ['solveMs', 'durationMs']))) : tried.reduce((a, d) => a + (typeof d.ms === 'number' ? d.ms : 0), 0),
+    solveMs: tried === null ? sumOrNull(calls.map((c) => firstNumber(c, ['solveMs', 'durationMs']))) : known(tried.reduce((a, d) => a + (typeof d.ms === 'number' ? d.ms : 0), 0)),
     skipped: events === null ? null : skipped,
   }
 }

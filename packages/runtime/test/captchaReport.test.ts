@@ -36,8 +36,8 @@ describe('captcha report', () => {
 
   it('reads attempts, answers and clears from every rung\'s captcha_solve events, each once', () => {
     const ev = (detail: Record<string, unknown>) => ({ event: 'captcha_solve', detail: { vendor: 'capsolver', rung: 'installed_chrome', type: 'cloudflare_challenge', ...detail } })
-    const failed = ev({ rung: 'browser_local', solve: 1, outcome: 'solver_failed', ms: 4944, reason: 'rejected' })
-    const gated = ev({ solve: 1, outcome: 'still_gated', ms: 26516, reason: null, call: 1 })
+    const failed = ev({ rung: 'browser_local', solve: 1, outcome: 'solver_failed', ms: 4944, reason: 'rejected', chargedUsd: null })
+    const gated = ev({ solve: 1, outcome: 'still_gated', ms: 26516, reason: null, call: 1, chargedUsd: 0.003 })
     const limit = ev({ solve: null, outcome: 'limit_reached', ms: 0, reason: 'max_solves_per_call' })
     const answer = {
       evidenceRecord: { access: { paidCalls: [{ provider: 'capsolver', solves: 1, chargedUsd: 0.003, reportedCostUsd: null }] } },
@@ -46,6 +46,9 @@ describe('captcha report', () => {
       summary: { attempts: [{ result: { trace: [failed] } }, { result: { trace: [gated, limit, { event: 'gate_detected' }] } }] },
     }
     expect(solverOf(answer)).toEqual({ calls: 1, attempted: 2, succeeded: 1, cleared: 0, reportedUsd: null, chargedUsd: 0.003, solveMs: 31460, skipped: { 'cloudflare_challenge:max_solves_per_call': 1 } })
+    // A charged solve whose rung returned no trace (cut by its deadline): attempted, and its result unknown, not 0.
+    const lostEvent = { evidenceRecord: { access: { paidCalls: [{ provider: 'capsolver', solves: 1, chargedUsd: 0.003, reportedCostUsd: null, outcome: null }] } }, trace: [], summary: { attempts: [{ result: { trace: [] } }] } }
+    expect(solverOf(lostEvent)).toMatchObject({ calls: 1, attempted: 1, succeeded: null, cleared: null, solveMs: null, chargedUsd: 0.003 })
     const clearedRow = { calls: 1, attempted: 1, succeeded: 1, cleared: 1, reportedUsd: null, chargedUsd: 0.003, solveMs: 9000, skipped: {} }
     const cells = armCells(tasks, [row('T045', { verified: true, solver: clearedRow }), row('T046', { solver: solverOf(answer) })])
     expect(cells.byType.datadome).toMatchObject({ solvesAttempted: 3, solvesSucceeded: 2, solvesCleared: 1, verifiedAfterClear: 1, skipped: { 'cloudflare_challenge:max_solves_per_call': 1 } })
