@@ -214,6 +214,13 @@ function strongerRungMayAnswer(result: FetchResult, channelId: string, next: Cha
   return null
 }
 
+/**
+ * The longest origin cooldown the ladder waits for to climb past a challenge served with 429 or 503, and the time it
+ * leaves the next rung after it. The challenges K1 met came with none (the 250 ms default); a site's longer Retry-After
+ * is honoured by stopping.
+ */
+const CHALLENGE_COOLDOWN_MAX_MS = 5_000
+
 /** A single local fallback gets a full, bounded navigation budget; never an unbounded timeout retry. */
 const HEADERS_TIMEOUT_FALLBACK_MS = 30_000
 
@@ -733,10 +740,16 @@ export class LadderRunner {
     /** A rung's page failed the task contract with its content there but not extracted: a paid rung would read the same page. */
     let contractNotExtracted = false
     let headersTimeoutFallback: Channel | null = null
+    /** A rung's challenge came with a 429 or 503: the run stays on its own exit (ADR 0005), so no vendor rung. */
+    let challengedWithRetryAt = false
       for (const channel of ordered) {
         throwIfExecutionStopped(execution)
         // This timeout exception offers exactly one already-qualified local rung, never compat, Chrome or a vendor.
         if (headersTimeoutFallback !== null && channel !== headersTimeoutFallback) continue
+        if (channel.vendorId !== undefined && challengedWithRetryAt) {
+          ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: channel.id, detail: { vendorId: channel.vendorId, reason: 'a rung met a challenge served with 429 or 503; after a 429 the run keeps its own exit (ADR 0005), and a vendor rung leaves through another' } })
+          continue
+        }
         if (channel.vendorId !== undefined && contractNotExtracted) {
           ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: channel.id, detail: { vendorId: channel.vendorId, reason: 'the task contract failed on a page that came but was not extracted (not_extracted); a paid rung would read the same page' } })
           continue
@@ -836,7 +849,15 @@ export class LadderRunner {
         ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_step', channel: channel.id, detail: { status: result.status, escalate: null, fallback: 'http_headers_timeout', verification: checked?.verdict ?? null, localDeadlineExceeded: localDeadline === true } })
         return finish(sanitizeResult(answer), false)
       }
-      if (result.retryAt !== undefined || execution.signal?.aborted) return finish(result, false)
+      if (execution.signal?.aborted) return finish(result, false)
+      if (result.retryAt !== undefined) {
+        // A 429 or 503 the gate named a challenge (Vercel, Kasada, PerimeterX: K1, 2026-10-25) is no rate limit:
+        // the next local rung runs it, after the origin's shared cooldown. A rate limit, or a deferred retry, ends here, and
+        // so does a challenge whose cooldown the next rung would spend its time waiting out: its block is the answer.
+        if (result.status !== 'blocked' || result.blockReason === null || result.blockReason === 'rate_limit') return finish(result, false)
+        if (result.retryAt - Date.now() > CHALLENGE_COOLDOWN_MAX_MS || (execution.deadlineAt !== undefined && result.retryAt + CHALLENGE_COOLDOWN_MAX_MS > execution.deadlineAt)) return finish(result, false)
+        challengedWithRetryAt = true
+      }
       // The site refused the saved login (expired, signed out): that is the
       // answer. A public rung after it would return the logged-out page as
       // if it were the page the caller asked for.
