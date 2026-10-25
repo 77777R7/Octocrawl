@@ -126,6 +126,12 @@ for (const [i, name] of armNames.entries()) {
   // standard+solver is the standard arm's local rungs with a grant that adds the solver alone.
   else arms[name] = { port: ports[i], access: base === 'standard' && baseArmOf(name) === null ? '"standard"' : '"enhanced"', env, grant, grantFile: grant === null ? null : file }
 }
+// Two proxy-exit arms on one variable would share one sticky exit: the second is not started.
+const exitOwner = {}
+for (const name of armNames.filter((a) => a in arms && 'W2L_SOLVER_PROXY' in arms[a].env)) {
+  const v = arms[name].env.W2L_SOLVER_PROXY
+  if (exitOwner[v] !== undefined) { notStarted.push({ arm: name, why: [`its solver exit is ${exitOwner[v]}'s (--solver-exits names one variable per arm)`] }); delete arms[name] } else exitOwner[v] = name
+}
 const runArms = armNames.filter((a) => a in arms)
 const rotated = (b) => runArms.map((_, i) => runArms[(i + b) % runArms.length])
 
