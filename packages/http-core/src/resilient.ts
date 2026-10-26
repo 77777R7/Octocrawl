@@ -81,15 +81,17 @@ export interface ResilientHttpConfig extends ExecutionBudget {
   /**
    * deadlineAt is the caller's own timeout: wait for headers and body until it
    * instead of stopping at headersTimeoutMs / bodyTimeoutMs, unless
-   * capReserveMs says the cap still holds. Without a deadline the two caps apply.
+   * headersCapReserveMs keeps the header cap. Without a deadline the two caps apply.
    */
   capsFollowDeadline?: boolean
   /**
-   * With capsFollowDeadline: a cap still holds when at least this much of the
-   * deadline would remain after it, for what runs after this request (the
-   * ladder's later rungs). Unset, no remainder is enough: the waits run to the deadline.
+   * With capsFollowDeadline: the header cap still holds when at least this much
+   * of the deadline would remain after it, for a later rung that takes a header
+   * timeout over (the ladder's local fallback). Unset, no remainder is enough:
+   * the header wait runs to the deadline. The body's cap never holds then, as no
+   * rung takes a body timeout over.
    */
-  capReserveMs?: number
+  headersCapReserveMs?: number
   /** Called before the first request and before every redirect hop. */
   assertUrl?: UrlGuard
 }
@@ -290,9 +292,9 @@ export async function resilientFetch(
       requestCount++
       const at = Date.now() - start
       let response: ResilientResponseLike
-      const cap = (defaultMs: number) => cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined
-        && cfg.deadlineAt - Date.now() - defaultMs < (cfg.capReserveMs ?? Number.POSITIVE_INFINITY) ? Number.POSITIVE_INFINITY : defaultMs
-      const headersCapMs = cap(cfg.headersTimeoutMs), bodyCapMs = cap(cfg.bodyTimeoutMs)
+      const follows = cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined
+      const headersCapMs = follows && cfg.deadlineAt! - Date.now() - cfg.headersTimeoutMs < (cfg.headersCapReserveMs ?? Number.POSITIVE_INFINITY) ? Number.POSITIVE_INFINITY : cfg.headersTimeoutMs
+      const bodyCapMs = follows ? Number.POSITIVE_INFINITY : cfg.bodyTimeoutMs
       let headersTimeoutMs = headersCapMs, bodyTimeoutMs = bodyCapMs
       try {
         headersTimeoutMs = remainingTimeout(scope, headersCapMs)

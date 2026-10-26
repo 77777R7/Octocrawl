@@ -44,7 +44,7 @@
 
 - 方案引用的 `packages/bench/src/ladder.ts` 不存在；LadderRunner 在 `packages/bench/src/routing/ladder.ts`（#591 回退：常量和谓词 `:203-215`，触发 `:909-914`，单 rung 跳过 `:639-646`，30 秒子预算 `:678-694`）；`buildChannels` 在 `packages/bench/src/ladderCli.ts:141`，不在 `engine.ts`。
 - #604 已合入，#607（H1 PR ③）已合入；"最新合并为 #605"过期。
-- #591 回退只在 REST/SDK/crawl/batch 不传 `timeout` 时可达；本地 MCP 默认注入 120 s、托管 MCP 注入 100 s，都走不到它（`docs/vendor-escalation.md:7-9` 已写明）。2026-10-26 起不再如此：显式 `timeout` 在 10 秒切断后仍留得出 30 秒时，http 照样在 10 秒切断，MCP 的默认值也走得到回退，回退之后按常规规则继续升级（ADR 0007 的 2026-10-26 修订）。
+- #591 回退只在 REST/SDK/crawl/batch 不传 `timeout` 时可达；本地 MCP 默认注入 120 s、托管 MCP 注入 100 s，都走不到它（`docs/vendor-escalation.md:7-9` 已写明）。2026-10-26 起不再如此：显式 `timeout` 在 10 秒切断后仍留得出 30 秒、且有回退浏览器时，http 照样在 10 秒切断响应头，MCP 的默认值也走得到回退，回退之后按常规规则继续升级（ADR 0007 的 2026-10-26 修订）。
 - A 的范围：是仓库自跑的本地 HTTP host，不是"本地 MCP"整体；且它上面永远花不了钱（无 grant 时 `ladderCli.ts:398-400` 不建 provider rung），只是用不了 grant。
 - B 的"远程通道没复用 actions/layout/截图"：actions/截图/waitFor 由引擎过滤不进 provider rung，不是漏洞；缺的是文档身份和 layout/shadow 捕获。
 - G 的"历史主要在内存"：`FileRoutingHistory` 已存在（`vendorRouter.ts:184`），任务是让引擎用它并加维度，不是从零做；成功率已按 `verified ?? contentful` 算（PA item 10 已实现）。

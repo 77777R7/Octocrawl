@@ -240,10 +240,17 @@ export interface FetchOptions {
    * The caller's own `timeout`, when it set one. The deadline itself is the
    * ExecutionContext's; this says the caller chose it, so the browser waits
    * for navigation until that deadline instead of stopping at its default
-   * cap, and the HTTP lane does so for headers and body when stopping at its
-   * caps would leave the later rungs too little of it (ADR 0007, 2026-10-26).
+   * cap, and so does the HTTP lane for the body and, unless
+   * `headersTimeoutFallback` keeps its header cap, for the headers.
    */
   timeout?: number
+  /**
+   * Set by the ladder on its first http rung, never by a request: a header
+   * timeout there can go on to a later rung (the local browser fallback). The
+   * HTTP lane then keeps its 10 s header cap under the caller's `timeout` when
+   * enough of the deadline would remain for that rung (ADR 0007, 2026-10-26).
+   */
+  headersTimeoutFallback?: boolean
   /**
    * Bytes a file (PDF, CSV, XLSX, ZIP, JSON, text) may have, below the
    * operator's cap (`NetworkPolicy.maxFileBytes`); a larger file is failed

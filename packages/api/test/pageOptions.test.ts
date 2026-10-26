@@ -96,6 +96,15 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
       if (req.url === '/sitemap.xml') { res.writeHead(404).end(); return }
       // /slow sends its headers after 12 s, past the HTTP lane's default 10 s wait for them (undici's timers run up to 1 s late).
       if (req.url === '/slow') { setTimeout(() => { if (!res.destroyed) res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGES['/chrome']) }, 12_000); return }
+      if (req.url === '/slower') { setTimeout(() => { if (!res.destroyed) res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGES['/chrome']) }, 15_000); return }
+      // /slow-body sends its headers and the page's head at once, and its main content 40 s later: past the 30 s wait between chunks.
+      if (req.url === '/slow-body') {
+        const page = PAGES['/chrome']!
+        const cut = page.indexOf('<main>')
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).write(page.slice(0, cut))
+        setTimeout(() => { if (!res.destroyed) res.end(page.slice(cut)) }, 40_000)
+        return
+      }
       const page = PAGES[req.url ?? '']
       if (page !== undefined) res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page)
       // Any other path (/hang) never answers.
@@ -261,28 +270,52 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     expect(shim).toMatchObject({ status: 200, body: { success: false, error: 'failed: timeout' } })
   })
 
-  it('an HTTP-only request waits past the default header cap only with an explicit timeout that leaves the later rungs no time', async () => {
+  it('an HTTP-only request waits past the default header cap only with an explicit timeout', async () => {
     const withTimeout = await setup(hangingBrowser)
     const withoutTimeout = await setup(hangingBrowser)
     const withLongTimeout = await setup(hangingBrowser)
-    const [waited, capped, cut] = await Promise.all([
-      // A23's case here: with 16 s, too little would remain after the 10 s cap for another rung, so the wait runs to the deadline.
+    const [waited, capped, waitedLong] = await Promise.all([
       withTimeout.post('/v1/scrape', { url: `${withTimeout.origin}/slow`, timeout: 16_000, fastMode: true }),
       withoutTimeout.post('/v1/scrape', { url: `${withoutTimeout.origin}/slow`, fastMode: true }),
-      // MCP's default 120 s leaves time for the later rungs: the header cap holds (ADR 0007, amendment of 2026-10-26).
-      withLongTimeout.post('/v1/scrape', { url: `${withLongTimeout.origin}/slow`, timeout: 120_000, fastMode: true }),
+      // fastMode leaves no rung that could take a header timeout over: MCP's default 120 s waits for a 15 s server too.
+      withLongTimeout.post('/v1/scrape', { url: `${withLongTimeout.origin}/slower`, timeout: 120_000, fastMode: true }),
     ])
-    expect(waited).toMatchObject({ status: 200, body: { status: 'success', lane: 'http', failureReason: null } })
-    expect(waited.body.markdown).toContain('Hourly survey')
-    // Isolate the HTTP wire cap: the default route offers one bounded local browser after a headers timeout.
-    // Without an explicit timeout this HTTP-only request still keeps its 10 s header wait.
-    for (const stopped of [capped, cut]) {
-      expect(stopped).toMatchObject({ status: 200, body: { status: 'failed', failureReason: 'timeout', lane: 'http' } })
-      expect(stopped.body.usage.deadlineExceeded).not.toBe(true)
-      expect(stopped.body.channelsTried).toEqual(['http'])
+    for (const answered of [waited, waitedLong]) {
+      expect(answered).toMatchObject({ status: 200, body: { status: 'success', lane: 'http', failureReason: null } })
+      expect(answered.body.markdown).toContain('Hourly survey')
+      expect(answered.body.channelsTried).toEqual(['http'])
     }
-    expect(waited.body.channelsTried).toEqual(['http'])
+    // Without an explicit timeout this HTTP-only request still keeps its 10 s header wait.
+    expect(capped).toMatchObject({ status: 200, body: { status: 'failed', failureReason: 'timeout', lane: 'http' } })
+    expect(capped.body.usage.deadlineExceeded).not.toBe(true)
+    expect(capped.body.channelsTried).toEqual(['http'])
   }, 30_000)
+
+  it('keeps the 10 s header cap under an explicit timeout when the local browser can take over in time (ADR 0007, amendment of 2026-10-26)', async () => {
+    const long = await setup(recordingBrowser([]))
+    const short = await setup(recordingBrowser([]))
+    const [cut, waited] = await Promise.all([
+      // MCP's default 120 s leaves the browser its time: the HTTP rung gives up its headers at 10 s and the browser answers.
+      long.post('/v1/scrape', { url: `${long.origin}/slow`, timeout: 120_000, debug: true }),
+      // A23's case here: with 16 s, too little would remain after the cap for the browser, so the HTTP rung waits.
+      short.post('/v1/scrape', { url: `${short.origin}/slow`, timeout: 16_000 }),
+    ])
+    expect(cut).toMatchObject({ status: 200, body: { status: 'success', lane: 'browser_local', channelsTried: ['http', 'browser_local'] } })
+    const http = cut.body.summary.attempts[0].result
+    expect(http).toMatchObject({ lane: 'http', status: 'failed', failureReason: 'timeout' })
+    expect(http.usage.deadlineExceeded).not.toBe(true)
+    expect(http.usage.wallMs).toBeLessThan(12_000)
+    expect(cut.body.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_headers_timeout_fallback' }))
+    expect(waited).toMatchObject({ status: 200, body: { status: 'success', lane: 'http', channelsTried: ['http'] } })
+  }, 30_000)
+
+  it('waits for a slow body until an explicit timeout: no rung takes a body timeout over', async () => {
+    const { origin, post } = await setup(hangingBrowser)
+    const { status, body } = await post('/v1/scrape', { url: `${origin}/slow-body`, timeout: 120_000, fastMode: true })
+    expect(status).toBe(200)
+    expect(body).toMatchObject({ status: 'success', lane: 'http', failureReason: null })
+    expect(body.markdown).toContain('Hourly survey')
+  }, 60_000)
 
   it('waitFor starts at the browser rung with the options, and says so when there is no browser rung', async () => {
     const seen: Seen[] = []

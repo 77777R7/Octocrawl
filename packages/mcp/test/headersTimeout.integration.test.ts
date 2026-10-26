@@ -56,8 +56,9 @@ describe('bounded header-timeout fallback final API / SDK / MCP delivery', () =>
     sourceUrl = 'http://127.0.0.1:' + (source.address() as AddressInfo).port
     taskRoot = await mkdtemp(join(tmpdir(), 'octocrawl-header-fallback-'))
     const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
-    // MCP supplies its own 120 s timeout. That leaves time for the later rungs after the HTTP lane's 10 s header cap,
-    // so the cap holds there too (ADR 0007, amendment of 2026-10-26) and every surface takes the fallback. All wire
+    // MCP supplies its own 120 s timeout. That leaves the local browser its time after the HTTP lane's 10 s header cap,
+    // so the cap holds there too (ADR 0007, amendment of 2026-10-26) and every surface takes the fallback. In fast mode
+    // nothing could take the timeout over, so MCP's deadline governs the wait: that case gives MCP 15 s. All wire
     // requests, Chromium, extraction and final serialization are real, through the production subjects. A separate
     // explicit-deadline control keeps a short MCP deadline's behavior.
     engine = createApiEngine({ taskRoot, networkPolicy: policy, channelsFor: mode => {
@@ -90,7 +91,7 @@ describe('bounded header-timeout fallback final API / SDK / MCP delivery', () =>
         const checks: VerifyContract = kind === 'missing record' ? { checks: [{ type: 'recordFields', fields: ['name', 'price', 'url'], uniqueBy: ['id'], min: 4 }] }
           : kind === 'cropped field' ? { checks: [{ type: 'field', path: 'evidence.httpStatus', equals: 200 }] } : contract
         const request: ScrapeRequest = { url: sourceUrl + path, formats: ['markdown', 'json', 'rawHtml', list], includeTags: ['main'], maxAge: 0,
-          debug: surface === 'API' && kind !== 'cropped field', ...(kind === 'fast mode' ? { fastMode: true } : {}),
+          debug: surface === 'API' && kind !== 'cropped field', ...(kind === 'fast mode' ? { fastMode: true, ...(surface === 'MCP' ? { timeout: 15_000 } : {}) } : {}),
           ...(kind === 'no contract' ? {} : { verify: checks }) }
         let out: any
         if (surface === 'API') {

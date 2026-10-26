@@ -34,10 +34,10 @@ import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import { withExtractionCandidates } from './candidateExtraction.js'
 
 /**
- * How much of a caller's deadline must remain after an HTTP header or body cap for the cap to hold (ADR 0007,
- * amendment of 2026-10-26, Howard): the 30 s the ladder's local fallback after a header timeout needs
- * (HEADERS_TIMEOUT_FALLBACK_MS), and 2 s more, as undici's timers fire up to a second late. With less, nothing after
- * this request could use the time, so the wait runs to the deadline (A23: `timeout: 20000` on a 10 s server).
+ * How much of a caller's deadline must remain after the HTTP header cap for the cap to hold, when a later rung can take
+ * a header timeout over (ADR 0007, amendment of 2026-10-26, Howard): the 30 s the ladder's local fallback needs
+ * (HEADERS_TIMEOUT_FALLBACK_MS), and 2 s more, as undici's timers fire up to a second late. With less, that rung could
+ * not use the time, so the wait runs to the deadline (A23: `timeout: 20000` on a 10 s server).
  */
 export const HTTP_CAP_RESERVE_MS = 32_000
 
@@ -402,10 +402,11 @@ export class ResilientHttpSubject implements SubjectAdapter {
         onRetryAfter?.(target, retryAt)
       },
       maxRedirects: this.networkPolicy.maxRedirects,
-      // A caller's timeout is how long it will wait: headers and body may take until its deadline, unless stopping at
-      // the caps leaves the later rungs HTTP_CAP_RESERVE_MS of it (ADR 0007, 2026-10-26).
+      // A caller's timeout is how long it will wait: headers and body may take until its deadline. The header cap still
+      // holds when a later rung can take a header timeout over and HTTP_CAP_RESERVE_MS of the deadline would remain for it
+      // (ADR 0007, 2026-10-26).
       capsFollowDeadline: options.timeout !== undefined,
-      capReserveMs: HTTP_CAP_RESERVE_MS,
+      ...(options.headersTimeoutFallback === true ? { headersCapReserveMs: HTTP_CAP_RESERVE_MS } : {}),
       assertUrl: async (target) => {
         if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(target)) throw new Error('Local platform exception cannot follow an off-platform redirect')
         await this.route.assertUrl(target)

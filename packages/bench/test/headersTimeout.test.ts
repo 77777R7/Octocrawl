@@ -153,6 +153,22 @@ describe('headers-timeout fallback boundaries', () => {
     expect(run.result.markdown).toContain('In stock')
   })
 
+  it('tells the first http rung when a header timeout there can go on to the local browser, and only then', async () => {
+    const optionsSeen = async (rest: Channel[], mode: 'standard' | 'authed' = 'standard', session: Parameters<LadderRunner['run']>[1] = null) => {
+      let seen: unknown
+      const http: Channel = { id: 'http', identity, async fetch(_url, _session, _execution, options) { seen = options; return { ...product(), lane: 'http' } } }
+      await new LadderRunner([http, ...rest], { mode }).run(url, session, budget())
+      return (seen as { headersTimeoutFallback?: boolean } | undefined)?.headersTimeoutFallback
+    }
+    expect(await optionsSeen([channel('browser_local', product())])).toBe(true)
+    expect(await optionsSeen([channel('http_compat', product()), channel('browser_local', product())])).toBe(true)
+    // fastMode leaves the http rungs alone; a compat-first host's ladder ends there too: nothing takes the timeout over.
+    expect(await optionsSeen([])).toBeUndefined()
+    expect(await optionsSeen([channel('http_compat', product())])).toBeUndefined()
+    expect(await optionsSeen([Object.assign(channel('browser_local', product()), { identity: undefined })])).toBeUndefined()
+    expect(await optionsSeen([channel('browser_local', product())], 'authed', { domain: 'www.zalando.de', vendor: 'browser_local_authed', attestedBy: 'operator', attestedAt: new Date().toISOString() })).toBeUndefined()
+  })
+
   it('answers with the fallback browser\'s page when it does the task, and asks no later rung', async () => {
     const installed = channel('installed_chrome', product())
     const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', product()), installed], { mode: 'standard', enhanced: true }, null, null, null,

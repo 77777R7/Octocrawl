@@ -742,6 +742,9 @@ export class LadderRunner {
     /** A rung's page failed the task contract with its content there but not extracted: a paid rung would read the same page. */
     let contractNotExtracted = false
     let headersTimeoutFallback: Channel | null = null
+    /** The local browser after a rung that a header timeout on that rung may fall back to (ADR 0007). */
+    const fallbackBrowserAfter = (channel: Channel): Channel | null => ordered.slice(ordered.indexOf(channel) + 1).find((candidate) => candidate.id === 'browser_local'
+      && candidate.vendorId === undefined && refuseChannelIdentity(url, candidate) === null) ?? null
     /** A rung's challenge came with a 429 or 503: the run stays on its own exit (ADR 0005), so no vendor rung. */
     let challengedWithRetryAt = false
       for (const channel of ordered) {
@@ -789,12 +792,16 @@ export class LadderRunner {
         // Said as the call goes out, so a provider rung passed over for its price or budget is not counted as started.
         const fallback = headersTimeoutFallback === channel
         if (fallback) headersTimeoutFallback = null
+        // The first http rung whose header timeout could go on to the local browser says so: under a caller's timeout its
+        // header cap then holds while that browser would still have its time (ADR 0007, 2026-10-26).
+        const callOptions = channel.id === 'http' && channel.vendorId === undefined && channelsTried.length === 0 && effectiveSession === null
+          && fallbackBrowserAfter(channel) !== null ? { ...options, headersTimeoutFallback: true } : options
         const callStarted = performance.now()
         const localScope = fallback ? createExecutionScope({ ...execution, deadlineAt: Math.min(execution.deadlineAt!, Date.now() + HEADERS_TIMEOUT_FALLBACK_MS) }) : null
         const callExecution = localScope ?? execution
         let fetched: FetchResult | null
         try {
-          fetched = await this.paidFetch(channel, channel.id, url, effectiveSession, callExecution, options, progress, () => {
+          fetched = await this.paidFetch(channel, channel.id, url, effectiveSession, callExecution, callOptions, progress, () => {
             channelsTried.push(channel.id)
             writeDecision(progress, fallback ? 'keep_591_fallback' : 'next_rung')
             ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_channel_started', channel: channel.id, detail: { vendorId: channel.vendorId ?? null, remainingMs: callExecution.deadlineAt === undefined ? null : Math.max(0, callExecution.deadlineAt - Date.now()) } })
@@ -1056,8 +1063,7 @@ export class LadderRunner {
       // the rungs after it do not carry the login, and would answer with the logged-out page.
       if (cls === null && !subjectAsked && best === null && effectiveSession === null && initialHeadersTimeout(result, channel, channelsTried)
         && Number.isFinite(execution.deadlineAt) && execution.deadlineAt! - Date.now() >= HEADERS_TIMEOUT_FALLBACK_MS) {
-        headersTimeoutFallback = ordered.slice(ordered.indexOf(channel) + 1).find(candidate => candidate.id === 'browser_local'
-          && candidate.vendorId === undefined && refuseChannelIdentity(url, candidate) === null) ?? null
+        headersTimeoutFallback = fallbackBrowserAfter(channel)
         if (headersTimeoutFallback !== null) ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_headers_timeout_fallback', channel: channel.id, detail: { to: 'browser_local', remainingMs: execution.deadlineAt! - Date.now(), maxMs: HEADERS_TIMEOUT_FALLBACK_MS } })
       }
       const stronger = headersTimeoutFallback !== null ? 'http_headers_timeout'

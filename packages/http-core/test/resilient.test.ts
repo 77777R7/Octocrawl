@@ -393,26 +393,28 @@ describe('resilientFetch execution budget', () => {
     expect(seen[3]).toEqual({ headersTimeoutMs: 10_000, bodyTimeoutMs: 30_000 })
   })
 
-  it('keeps a default cap under a caller-chosen deadline when enough of it would remain after the cap, else waits until the deadline (O6)', async () => {
+  it('keeps the header cap under a caller-chosen deadline when enough of it would remain for a later rung, never the body cap (O6)', async () => {
     const seen: Array<{ headersTimeoutMs: number; bodyTimeoutMs: number }> = []
     const fetcher: ResilientFetcher = async (_url, init) => {
       seen.push({ headersTimeoutMs: init.headersTimeoutMs, bodyTimeoutMs: init.bodyTimeoutMs })
       return res(200)
     }
-    const reserve = { capsFollowDeadline: true, capReserveMs: 32_000 }
-    // MCP's 120 s: both caps hold, so a server that never answers is left after 10 s with time for the later rungs.
+    const reserve = { capsFollowDeadline: true, headersCapReserveMs: 32_000 }
+    // MCP's 120 s: the header cap holds, so a server that never answers is left after 10 s with time for the later rung;
+    // a body is still waited for until the deadline, as no rung takes a body timeout over.
     await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 120_000, ...reserve })
-    // 50 s: 40 s would remain after the header cap, 20 s after the body's.
-    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 50_000, ...reserve })
-    // A23's 20 s: nothing else could use the time, so both waits run to the deadline.
+    // 41 s: 31 s would remain after the header cap, less than the reserve.
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 41_000, ...reserve })
+    // A23's 20 s: the later rung could not use the time, so the header wait runs to the deadline.
     await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 20_000, ...reserve })
-    expect(seen[0]).toEqual({ headersTimeoutMs: 10_000, bodyTimeoutMs: 30_000 })
-    expect(seen[1]!.headersTimeoutMs).toBe(10_000)
-    expect(seen[1]!.bodyTimeoutMs).toBeGreaterThan(45_000)
-    expect(seen[1]!.bodyTimeoutMs).toBeLessThanOrEqual(50_000)
-    for (const timeout of [seen[2]!.headersTimeoutMs, seen[2]!.bodyTimeoutMs]) {
-      expect(timeout).toBeGreaterThan(15_000)
-      expect(timeout).toBeLessThanOrEqual(20_000)
+    expect(seen[0]!.headersTimeoutMs).toBe(10_000)
+    expect(seen[0]!.bodyTimeoutMs).toBeGreaterThan(115_000)
+    expect(seen[0]!.bodyTimeoutMs).toBeLessThanOrEqual(120_000)
+    for (const [timeouts, deadlineMs] of [[seen[1]!, 41_000], [seen[2]!, 20_000]] as const) {
+      for (const timeout of [timeouts.headersTimeoutMs, timeouts.bodyTimeoutMs]) {
+        expect(timeout).toBeGreaterThan(deadlineMs - 5_000)
+        expect(timeout).toBeLessThanOrEqual(deadlineMs)
+      }
     }
     // A cap that held ends the wait, not the caller's deadline.
     const headersTimeout = Object.assign(new Error('headers timeout'), { name: 'HeadersTimeoutError' })
