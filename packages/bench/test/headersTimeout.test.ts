@@ -145,6 +145,14 @@ describe('headers-timeout fallback boundaries', () => {
     expect(installed.calls + paid.calls).toBe(0)
   })
 
+  it('goes on past the fallback browser when its page fails the task contract', async () => {
+    const installed = channel('installed_chrome', { ...product(), lane: 'installed_chrome', markdown: '# Shoes\n\nTrail Runner — €79.95\n\nIn stock' })
+    const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', product()), installed], { mode: 'standard', enhanced: true }, null, null, null,
+      { verify: { checks: [{ type: 'markdownIncludes', text: 'In stock' }] } }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome'])
+    expect(run.result.markdown).toContain('In stock')
+  })
+
   it('answers with the fallback browser\'s page when it does the task, and asks no later rung', async () => {
     const installed = channel('installed_chrome', product())
     const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', product()), installed], { mode: 'standard', enhanced: true }, null, null, null,
@@ -163,7 +171,9 @@ describe('headers-timeout fallback boundaries', () => {
     const browser: Channel = { id: 'browser_local', identity, fetch: async (_url, _session, execution) => {
       seen = execution; started(); return new Promise(() => {})
     } }
-    const pending = new LadderRunner([channel('http', headersTimeout()), browser], { mode: 'standard' }).run(url, null, { deadlineAt: parentDeadline })
+    // A later rung is there, but the fallback running out its own 30 s ends the run, as a timeout ends any rung.
+    const installed = channel('installed_chrome', product())
+    const pending = new LadderRunner([channel('http', headersTimeout()), browser, installed], { mode: 'standard', enhanced: true }).run(url, null, { deadlineAt: parentDeadline })
     await didStart
     expect(seen?.deadlineAt).toBe(Date.now() + 30_000)
     await vi.advanceTimersByTimeAsync(30_000)
@@ -172,6 +182,8 @@ describe('headers-timeout fallback boundaries', () => {
     expect(run.result.failureReason).toBe('timeout')
     expect(run.result.usage.deadlineExceeded).not.toBe(true)
     expect(run.summary.attempts).toHaveLength(2)
+    expect(installed.calls).toBe(0)
+    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'local_fallback_deadline' }))
     expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_headers_timeout_fallback_expired' }))
   })
 
