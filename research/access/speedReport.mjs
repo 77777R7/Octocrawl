@@ -135,13 +135,13 @@ function steel(rows) {
 function header(W) {
   const { m } = W
   const g = m.grants
-  const newPkgs = sh(`git diff --name-only ${m.runner} ${W.newCommit ?? m.runner} -- packages`)
+  const newPkgs = sh(`git diff --name-only ${m.runner} ${W.newCommit ?? m.runner} -- packages ':!packages/*/test'`)
   const builds = W.env.filter((e) => e.build).map((e) => e.build.upToDate)
   const firstAt = m.runs.map((r) => r.startedAt).sort()[0]
   return [
     `- Measures: O1 (#722), O4 (#720), O6 (#721), O7 (#723) together, base against new; the read-only analysis \`.w2l/perf/2026-10-26-speed-root-cause.md\` (not in the repository), sections 1, 3 and U10.`,
     `- Command: \`node research/access/k1-window.mjs --window ${m.window} --name perf --arms ${m.arms.join(',')} --base <base checkout> --ic-grant <K1 installed_chrome grant> --combined-grant <combined grant> --steel-grant <Steel grant> --ports ${m.ports.join(',')} --steel-cap ${m.steelCap?.usd ?? 'none'} --no-retry\`; report \`node research/access/speedReport.mjs ${W.dir} --new ${W.newCommit ?? '<commit>'} --out ${out}\`.`,
-    `- New: the runner \`${m.runner}\`, its packages/ ${newPkgs === '' ? `equal to main \`${(W.newCommit ?? '').slice(0, 8)}\`` : `differ from \`${W.newCommit}\` in ${newPkgs ?? 'unread'}`}; run-set's build check up to date in ${builds.filter((b) => b === true).length} of ${W.env.length} runs (it reads this checkout only).`,
+    `- New: the runner \`${m.runner}\`, its packages/ (tests aside) ${newPkgs === '' ? `equal to main \`${(W.newCommit ?? '').slice(0, 8)}\`` : `differ from \`${W.newCommit}\` in ${newPkgs ?? 'unread'}`}; run-set's build check up to date in ${builds.filter((b) => b === true).length} of ${W.env.length} runs (it reads this checkout only).`,
     `- Base: \`${m.base?.commit ?? 'none'}\` in its own checkout and API process; its build \`${m.base?.build?.check}\` ${m.base?.build?.upToDate === true ? 'up to date' : `NOT up to date (${JSON.stringify(m.base?.build)})`} at the start (k1-window.mjs).`,
     `- Grants: installed_chrome arms the K1 grant \`${g.installed_chrome.sha256}\` (${g.installed_chrome.capabilities.join(', ')}); combined arms \`${g.combined?.sha256 ?? 'none'}\` (${g.combined?.capabilities?.join(', ') ?? '-'}), W2L_VENDORS=steel, $0.05 a request, Steel at the grant's tariff. No CapSolver key or solver grant.`,
     `- Interleaving: ${m.blocks.length} blocks of ${m.blocks[0].length} in task-file order; in block b the four arms one after another, the list rotated by b, so each base arm ran before its new arm in half the blocks. First calls only (--no-retry).`,
