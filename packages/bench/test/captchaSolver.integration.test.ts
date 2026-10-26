@@ -29,6 +29,7 @@ const DATADOME = `<!doctype html><title>shop</title><p>Please enable JS and disa
 let site: Server
 let contactPosts = 0
 let recaptchaFormPosts = 0
+let recaptchaChecks = 0
 let base = ''
 beforeAll(async () => {
   site = createServer((req, res) => {
@@ -59,7 +60,15 @@ beforeAll(async () => {
       return
     }
     if (path === '/recaptcha-form') return cookie.includes('rf=ok') ? html(200, ARTICLE) : html(200, RECAPTCHA_FORM)
-    if (path === '/recaptcha-in-place') return html(200, RECAPTCHA_FORM.replace(`document.getElementById('err').textContent = ''`, `document.body.innerHTML = ${JSON.stringify(ARTICLE.replace(/<\/?(?:!doctype html|title)>/gi, ''))}`))
+    // The callback clears the page in place and leaves its form and widget there: only the page's gate says not to post.
+    if (path === '/recaptcha-in-place') return html(200, RECAPTCHA_FORM.replace(`document.getElementById('err').textContent = ''`, `document.querySelector('p').remove(); document.body.insertAdjacentHTML('afterbegin', ${JSON.stringify(ARTICLE.replace(/<!doctype html><title>Tide tables<\/title>/i, ''))})`).replace('<title>Verify</title>', '<title>Tide tables</title>'))
+    // Google's documented shape: the callback posts the form itself, and the site answers after 3 s.
+    if (path === '/recaptcha-self-submit') return html(200, RECAPTCHA_FORM.replace(`document.getElementById('err').textContent = ''`, `document.getElementById('recaptcha-demo-form').submit()`).replace('action="/recaptcha-form"', 'action="/recaptcha-slow"'))
+    if (req.method === 'POST' && path === '/recaptcha-slow') { recaptchaFormPosts++; setTimeout(() => res.writeHead(303, { location: '/recaptcha-slow', 'set-cookie': 'rs=ok; path=/' }).end(), 3_000); return }
+    // A callback that checks the token by fetch (the site answers after 3 s), then clears the page in place.
+    if (path === '/recaptcha-fetch') return html(200, RECAPTCHA_FORM.replace(`document.getElementById('err').textContent = ''`, `fetch('/recaptcha-check', { method: 'POST', body: arguments[0] }).then((r) => r.text()).then((t) => { if (t === 'ok') document.body.innerHTML = ${JSON.stringify(ARTICLE.replace(/<!doctype html><title>Tide tables<\/title>/i, ''))}; document.title = 'Tide tables' })`))
+    if (req.method === 'POST' && path === '/recaptcha-check') { recaptchaChecks++; setTimeout(() => res.writeHead(200, { 'content-type': 'text/plain' }).end('ok'), 3_000); return }
+    if (path === '/recaptcha-slow') return cookie.includes('rs=ok') ? html(200, ARTICLE) : html(200, RECAPTCHA_FORM)
     if (path.startsWith('/callback-get')) return html(200, `<!doctype html><title>Verify</title><p>One moment.</p><div class="g-recaptcha" data-sitekey="6LTESTKEY" data-callback="go"></div><form id="f" method="get" action="/callback-get"><textarea name="g-recaptcha-response"></textarea></form><script>function go() { document.getElementById('f').submit() }</script>`)
     if (path.startsWith('/get-form')) return html(200, TURNSTILE('/get-form').replace('method="post"', 'method="get"'))
     if (path === '/demo') return html(200, DEMO(true))
@@ -143,6 +152,18 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
       const inPlace = await subject.fetch(`${base}/recaptcha-in-place`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: createSpendLedger(1) })
       expect(solves(inPlace.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared' })])
       expect(recaptchaFormPosts).toBe(0)
+      // A callback that posts the form itself, its answer slower than the wait: the token is posted once, never twice.
+      recaptchaFormPosts = 0
+      const self = await subject.fetch(`${base}/recaptcha-self-submit`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(self.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared' })])
+      expect(self.markdown).toContain('Tide tables')
+      expect(recaptchaFormPosts).toBe(1)
+      // A callback whose check by fetch outlasts the wait: its token, which a site takes once, is not posted again.
+      recaptchaFormPosts = 0
+      recaptchaChecks = 0
+      const checked = await subject.fetch(`${base}/recaptcha-fetch`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(checked.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared' })])
+      expect([recaptchaChecks, recaptchaFormPosts]).toEqual([1, 0])
     } finally { await subject.teardown() }
   }, 90_000)
 
