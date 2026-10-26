@@ -5,10 +5,11 @@
 // every call whose provider is one of the solver providers (SOLVER_PROVIDERS, or the window's --solver-providers;
 // `paidCalls: null`, no grant, is none); its attempts from the `captcha_solve` trace events of every rung the ladder ran
 // (the answer's trace and summary.attempts[].result.trace: the answer's own trace carries its last rung's alone). Per answer:
-//   attempted   events with a solve number: a task asked of the solver (also one it refused before creating it). Without
-//               any trace, the paid calls (each one's `solveAttempts`, else 1).
-//   succeeded   events whose solver gave an answer (outcome cleared, still_gated or not_injected); `paidCalls[].solves`
-//               is 1 for every charged solve, a failed one too, so it is never read as success. Unknown without a trace.
+//   attempted   events with a solve number: a task asked of the solver, also one it refused before creating it (no paid
+//               call is written for that one). Without any trace, the paid calls (each one's `solveAttempts`, else 1).
+//   succeeded   events whose solver gave an answer (outcome cleared, still_gated or not_injected). Without a trace, the
+//               paid calls' `solves` only when every call states `solveAttempts` too (#718: `solves` is then the answered
+//               ones; before it, `solves` was 1 for a failed solve as well): else unknown.
 //   cleared     events after which the page showed no gate (outcome cleared). Unknown without a trace.
 //   reported $  each paid call's `reportedCostUsd`, else `costUsd`: the solver's own figure. null when neither: unknown. The
 //               spend ledger's `chargedUsd` (the grant's tariff, an estimate) is kept apart and never stands in for it.
@@ -52,6 +53,7 @@ export function solverOf(doc, providers = SOLVER_PROVIDERS) {
   const skipped = {}
   for (const d of events ?? []) if (d.solve === null || d.solve === undefined) skipped[`${d.type}:${d.reason ?? d.outcome}`] = (skipped[`${d.type}:${d.reason ?? d.outcome}`] ?? 0) + 1
   const noTrace = calls.length === 0 ? 0 : null
+  const answeredNoTrace = calls.length > 0 && calls.every((c) => typeof c?.solveAttempts === 'number') ? sumOrNull(calls.map((c) => firstNumber(c, ['solves']))) : noTrace
   // A charged solve whose event was lost (a rung cut by its deadline returns an empty trace, its solve still charged): it
   // was attempted, and what it got is unknown, never 0.
   const lost = tried === null ? 0 : Math.max(0, calls.length - tried.filter((d) => typeof d.chargedUsd === 'number').length)
@@ -59,7 +61,7 @@ export function solverOf(doc, providers = SOLVER_PROVIDERS) {
   return {
     calls: calls.length,
     attempted: tried === null ? calls.reduce((a, c) => a + (firstNumber(c, ['solveAttempts']) ?? 1), 0) : tried.length + lost,
-    succeeded: tried === null ? noTrace : known(tried.filter((d) => ANSWERED.includes(d.outcome)).length),
+    succeeded: tried === null ? answeredNoTrace : known(tried.filter((d) => ANSWERED.includes(d.outcome)).length),
     cleared: tried === null ? noTrace : known(tried.filter((d) => d.outcome === 'cleared').length),
     reportedUsd: sumOrNull(calls.map((c) => firstNumber(c, ['reportedCostUsd', 'costUsd']))),
     chargedUsd: sumOrNull(calls.map((c) => firstNumber(c, ['chargedUsd']))),

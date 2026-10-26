@@ -38,7 +38,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { connect } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { grantOf } from './runSetReport.mjs'
+import { CAPTCHA_CLIENT_TIMEOUT_MS, grantOf } from './runSetReport.mjs'
 import { baseArmOf } from './captchaReport.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -190,7 +190,8 @@ async function runSet(name, label, ids) {
   await spaced()
   const a = arms[name]
   const record = `${workRel}/${label}.md`
-  const argv = ['research/access/run-set.mjs', '--tasks', TASKS_FILE, '--arm', name, '--set', 'all', '--only', ids.join(','), '--save-responses', '--raw-html', '--access', a.access, '--record', record,
+  // The client waits past the API's 300 s ladder budget: an abort would keep no response and no trace.
+  const argv = ['research/access/run-set.mjs', '--tasks', TASKS_FILE, '--arm', name, '--set', 'all', '--only', ids.join(','), '--save-responses', '--raw-html', '--access', a.access, '--record', record, '--client-timeout-ms', String(CAPTCHA_CLIENT_TIMEOUT_MS),
     ...(a.grantFile === null ? [] : ['--grant', a.grantFile]), ...(flag('--solver-providers') ? ['--solver-providers', flag('--solver-providers')] : [])]
   const env = { ...process.env, W2L_API_URL: `http://127.0.0.1:${a.port}`, W2L_EGRESS_ECHO_URL: 'https://api.ipify.org' }
   // run-set falls back to the shell's W2L_ACCESS_GRANT: an arm without a grant must not record one its API never had.
