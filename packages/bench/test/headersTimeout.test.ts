@@ -169,6 +169,25 @@ describe('headers-timeout fallback boundaries', () => {
     expect(await optionsSeen([channel('browser_local', product())], 'authed', { domain: 'www.zalando.de', vendor: 'browser_local_authed', attestedBy: 'operator', attestedAt: new Date().toISOString() })).toBeUndefined()
   })
 
+  it('takes the fallback a held header cap promised, though connect and robots time left it under 30 s (44 s timeout)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const deadlineAt = Date.now() + 44_000
+    // About 3 s of robots and connect, the held 10 s cap and its timer's lateness: 29 s of the deadline left.
+    const http: Channel = { id: 'http', identity, async fetch(_url, _session, _execution, options) {
+      expect((options as { headersTimeoutFallback?: boolean }).headersTimeoutFallback).toBe(true)
+      vi.setSystemTime(Date.now() + 15_000)
+      return headersTimeout()
+    } }
+    let seen: { deadlineAt?: number } | undefined
+    const browser: Channel = { id: 'browser_local', identity, async fetch(_url, _session, execution) { seen = execution; return product() } }
+    const run = await new LadderRunner([http, browser], { mode: 'standard' }).run(url, null, { deadlineAt }, { timeout: 44_000 })
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(run.result.markdown).toContain('€79.95')
+    // The browser has what is left of the deadline, not 30 s past it.
+    expect(seen?.deadlineAt).toBe(deadlineAt)
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_headers_timeout_fallback', detail: expect.objectContaining({ promised: true, remainingMs: 29_000 }) }))
+  })
+
   it('answers with the fallback browser\'s page when it does the task, and asks no later rung', async () => {
     const installed = channel('installed_chrome', product())
     const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', product()), installed], { mode: 'standard', enhanced: true }, null, null, null,

@@ -1061,10 +1061,15 @@ export class LadderRunner {
       const subjectAsked = resultRequestsEscalation(result)
       // Content an earlier rung found stays the answer: a later rung's failure is not stepped past. Nor is the saved login's:
       // the rungs after it do not carry the login, and would answer with the logged-out page.
+      // Under a caller's timeout, a header cap the http rung held because this fallback was there was decided by the
+      // fallback's own rule when the request went out (HTTP_CAP_RESERVE_MS): the connect time after that decision does not
+      // take the fallback away, and the browser has what is left, at most its 30 s (ADR 0007, 2026-10-26). Without one the
+      // caps hold by default, and the fallback still needs its full 30 s.
+      const promised = callOptions.headersTimeoutFallback === true && options.timeout !== undefined
       if (cls === null && !subjectAsked && best === null && effectiveSession === null && initialHeadersTimeout(result, channel, channelsTried)
-        && Number.isFinite(execution.deadlineAt) && execution.deadlineAt! - Date.now() >= HEADERS_TIMEOUT_FALLBACK_MS) {
+        && Number.isFinite(execution.deadlineAt) && (promised || execution.deadlineAt! - Date.now() >= HEADERS_TIMEOUT_FALLBACK_MS)) {
         headersTimeoutFallback = fallbackBrowserAfter(channel)
-        if (headersTimeoutFallback !== null) ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_headers_timeout_fallback', channel: channel.id, detail: { to: 'browser_local', remainingMs: execution.deadlineAt! - Date.now(), maxMs: HEADERS_TIMEOUT_FALLBACK_MS } })
+        if (headersTimeoutFallback !== null) ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_headers_timeout_fallback', channel: channel.id, detail: { to: 'browser_local', remainingMs: execution.deadlineAt! - Date.now(), maxMs: HEADERS_TIMEOUT_FALLBACK_MS, ...(promised ? { promised: true } : {}) } })
       }
       const stronger = headersTimeoutFallback !== null ? 'http_headers_timeout'
         : cls === null && !subjectAsked && best === null && channel !== sessionFirst && channel.id !== 'authed_session' ? strongerRungMayAnswer(result, channel.id, next) : null
