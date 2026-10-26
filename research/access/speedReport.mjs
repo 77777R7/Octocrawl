@@ -6,6 +6,7 @@
 // Usage: node research/access/speedReport.mjs <work dir> --new <commit> --out <record.md>   one window; --new: main's
 //          commit the runner's packages/ are checked against
 //        node research/access/speedReport.mjs <w1 dir> <w2 dir> --out <record.md>      both windows: what held in both
+//          (in every mode, a --note line goes into the header as given: what the runs' files cannot say)
 //        node research/access/speedReport.mjs --probe <name>/<side>=<run dir> … [--note <line>] … --out <record.md>
 //          the probes, each side one or more run-set runs (a side named again adds its run's tasks); a --note line
 //          goes into the header as given
@@ -129,14 +130,14 @@ function steel(rows) {
   const calls = [...rows.values()].flatMap((x) => (x.rungs ?? []).filter((r) => r.channel === 'provider'))
   const med = (k) => q(calls.filter((c) => k in c.phases).map((c) => c.phases[k]), 0.5)
   return { calls: calls.length, timed: calls.filter((c) => c.timedSteps).length, clock: q(calls.map((c) => c.clockMs), 0.5), wall: q(calls.map((c) => c.wallMs), 0.5), outside: med('outside_lane'),
-    steps: Object.fromEntries(['session_created', 'cdp_connected', 'ua_probed', 'robots_gate', 'page_opened', 'navigate', 'settled', 'gate_read', 'region_read', 'page_read', 'loading_wait', 'region_wait', 'release', 'in_page'].map((k) => [k, med(k)])) }
+    steps: Object.fromEntries(['session_created', 'cdp_connected', 'ua_probed', 'robots_gate', 'page_opened', 'navigate', 'settled', 'gate_read', 'region_read', 'page_read', 'loading_wait', 'region_wait', 'release', 'in_page', 'before_gate'].map((k) => [k, med(k)])), failedBeforeGate: calls.filter((c) => 'before_gate' in c.phases).length }
 }
 
 // ---- one window
 function header(W) {
   const { m } = W
   const g = m.grants
-  const newPkgs = sh(`git diff --name-only ${m.runner} ${W.newCommit ?? m.runner} -- packages ':!packages/*/test'`)
+  const newPkgs = sh(`git diff --name-only ${m.runner} ${W.newCommit ?? m.runner} -- packages ':!packages/*/test/*'`)?.split('\n').filter(Boolean).join(', ') ?? null
   const builds = W.env.filter((e) => e.build).map((e) => e.build.upToDate)
   const firstAt = m.runs.map((r) => r.startedAt).sort()[0]
   return [
@@ -181,8 +182,8 @@ function windowBody(W, P) {
     ...ARMS.map((a) => { const r = robots(W.arms[a]); return `| ${a} | ${r.tasks} | ${r.checks} | ${(r.checks / Math.max(1, r.tasks)).toFixed(2)} | ${r.fetched} | ${(r.fetched / Math.max(1, r.tasks)).toFixed(2)} | ${s1(r.ms)} | ${Object.entries(r.byRung).map(([k, v]) => `${k} ${v.checks}/${v.fetched}`).join(', ')} |` }))
   P('', '## challenge_wait (installed_chrome), by gate and outcome', '', '| Arm | Gate · outcome | n | p50 ms | max ms | Total s |', '| --- | --- | --- | --- | --- | --- |')
   for (const a of ARMS) { const c = challenge(W.arms[a]); const e = Object.entries(c).sort(); if (e.length === 0) P(`| ${a} | none | 0 | - | - | 0 |`); for (const [k, v] of e) P(`| ${a} | ${k} | ${v.length} | ${ms(q(v, 0.5))} | ${ms(Math.max(...v.map((x) => x ?? 0)))} | ${s1(v.reduce((s, x) => s + (x ?? 0), 0))} |`) }
-  P('', '## Steel (combined arms)', '', '| Arm | Provider rungs | With O7 steps | Ledger | p50 clock | p50 wallMs | p50 outside lane | p50 session_created / cdp_connected / ua_probed | p50 robots_gate / navigate / settled / region_read / page_read | p50 region_wait / release | p50 in page (inferred) |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...PAIRS[1].map((a) => { const s = steel(W.arms[a]), st = s.steps, f = figures(W.arms[a]); return `| ${a} | ${s.calls} | ${s.timed} | ${usdText(f)} | ${ms(s.clock)} | ${ms(s.wall)} | ${ms(s.outside)} | ${ms(st.session_created)} / ${ms(st.cdp_connected)} / ${ms(st.ua_probed)} | ${ms(st.robots_gate)} / ${ms(st.navigate)} / ${ms(st.settled)} / ${ms(st.region_read)} / ${ms(st.page_read)} | ${ms(st.region_wait)} / ${ms(st.release)} | ${ms(st.in_page)} |` }))
+  P('', '## Steel (combined arms)', '', '| Arm | Provider rungs | Failed before the gate | With O7 steps | Ledger | p50 clock | p50 wallMs | p50 outside lane | p50 session_created / cdp_connected / ua_probed | p50 robots_gate / navigate / settled / region_read / page_read | p50 region_wait / release | p50 in page (inferred) |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    ...PAIRS[1].map((a) => { const s = steel(W.arms[a]), st = s.steps, f = figures(W.arms[a]); return `| ${a} | ${s.calls} | ${s.failedBeforeGate} | ${s.timed} | ${usdText(f)} | ${ms(s.clock)} | ${ms(s.wall)} | ${ms(s.outside)} | ${ms(st.session_created)} / ${ms(st.cdp_connected)} / ${ms(st.ua_probed)} | ${ms(st.robots_gate)} / ${ms(st.navigate)} / ${ms(st.settled)} / ${ms(st.region_read)} / ${ms(st.page_read)} | ${ms(st.region_wait)} / ${ms(st.release)} | ${ms(st.in_page)} |` }))
   P('', '## Per task (first calls): verdict and wall ms, base → new', '', 'y = verified, F = false success, n = not (its reason), - = not run.', '',
     `| Task | Part | ${PAIRS.map(([, n]) => n).join(' | ')} |`, `| --- | --- | ${PAIRS.map(() => '---').join(' | ')} |`,
     ...tasks.map((t) => `| ${t.id} | ${t.part} | ${PAIRS.map(([b, n]) => [b, n].map((a) => { const x = W.arms[a].get(t.id); return !x ? '-' : `${x.outcome.verified ? 'y' : x.outcome.falseSuccess ? 'F' : `n (${reasonOf(x)})`} ${x.outcome.wallMs}` }).join(' → ')).join(' | ')} |`), '')
@@ -255,11 +256,11 @@ if (probes.length > 0) {
 } else if (dirs.length === 1) {
   const W = await load(dirs[0])
   W.newCommit = opt('--new') ?? null
-  P(`# Speed A/B, window ${W.m.window}: base \`${W.m.base?.commit?.slice(0, 8)}\` against new, installed_chrome and combined on K1's 92 tasks, ${W.m.date}`, '', ...header(W))
+  P(`# Speed A/B, window ${W.m.window}: base \`${W.m.base?.commit?.slice(0, 8)}\` against new, installed_chrome and combined on K1's 92 tasks, ${W.m.date}`, '', ...header(W), ...notes.map((n) => `- ${n}`))
   windowBody(W, P)
 } else {
   const [A, B] = [await load(dirs[0]), await load(dirs[1])]
-  P(`# Speed A/B, two windows: ${A.m.date} and ${B.m.date}`, '', `- Windows \`${A.dir}\` (runner \`${A.m.runner}\`, base \`${A.m.base?.commit?.slice(0, 8)}\`) and \`${B.dir}\` (runner \`${B.m.runner}\`, base \`${B.m.base?.commit?.slice(0, 8)}\`); each window's own record has its conditions.`, `- Command: \`node research/access/speedReport.mjs ${A.dir} ${B.dir} --out ${out}\`. First calls only.`)
+  P(`# Speed A/B, two windows: ${A.m.date} and ${B.m.date}`, '', `- Windows \`${A.dir}\` (runner \`${A.m.runner}\`, base \`${A.m.base?.commit?.slice(0, 8)}\`) and \`${B.dir}\` (runner \`${B.m.runner}\`, base \`${B.m.base?.commit?.slice(0, 8)}\`); each window's own record has its conditions.`, `- Command: \`node research/access/speedReport.mjs ${A.dir} ${B.dir} --out ${out}\`. First calls only.`, ...notes.map((n) => `- ${n}`))
   twoWindows(A, B, P)
 }
 await writeFile(out, L.join('\n'))

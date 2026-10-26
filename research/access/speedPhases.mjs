@@ -9,7 +9,8 @@
 // Inferred (from the gaps between events): a browser rung's launch (to identity_declared), robots.txt (identity_declared
 // to robots_checked), navigation (navigate to the first wait or render) and settle; the provider's robots.txt and gate
 // (provider_selected to provider_gate); before O7, the provider's session time outside the lane (the rung's clock less
-// its usage.wallMs, which holds the session's creation, connection, UA probe and release) and its time in the page.
+// its usage.wallMs, which holds the session's creation, connection, UA probe and release) and its time in the page; a
+// provider call that failed before its gate (a session never created) as before_gate.
 
 /** A robots.txt read that took this long or more went to the network; a cache hit answers at once. Inferred: no event says which. */
 export const ROBOTS_FETCH_MS = 30
@@ -63,7 +64,9 @@ export function attemptOf(a) {
     // Outside the lane's clock: before O7 the session's creation, connection, UA probe and release, untimed.
     phases.outside_lane = wallMs === null ? 0 : Math.max(0, clockMs - wallMs)
     const last = Math.max(0, ...trace.map((e) => num(e.at)))
-    if (!timedSteps) phases.in_page = Math.max(0, last - num(gate) - phases.loading_wait - phases.region_wait)
+    // A call that failed before its gate (the session was never created or connected) spent its time there, not in a page.
+    if (typeof gate !== 'number') phases.before_gate = last
+    else if (!timedSteps) phases.in_page = Math.max(0, last - gate - phases.loading_wait - phases.region_wait)
   } else if (BROWSER.has(a.channel)) {
     const declared = first('identity_declared')?.at ?? first('browser_engine')?.at ?? null
     const robots = first('robots_checked')?.at ?? null

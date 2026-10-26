@@ -42,6 +42,10 @@ describe('speed phases', () => {
     expect(after.phases).toMatchObject({ robots_gate: 450, session_created: 2_000, cdp_connected: 2_500, ua_probed: 500, page_opened: 150, navigate: 4_400, settled: 1_000, region_read: 1_000, page_read: 300, release: 1_100, outside_lane: 6_000 })
     expect(after.phases.in_page).toBeUndefined()
     expect(after.robots).toEqual({ ms: 450, fetched: true })
+    // A session that was never created: its time is before the gate, not in a page, and it read no robots.txt.
+    const failed = attemptsOf({ summary: { attempts: [attempt('provider', 0, 10_500, { status: 'failed', failureReason: 'provider_error', usage: { wallMs: 10_500 }, trace: [ev(0, 'provider_selected'), ev(10_500, 'provider_failed', { error: 'fetch failed' })] })] } })![0]!
+    expect(failed.phases).toEqual({ robots_gate: 0, loading_wait: 0, region_wait: 0, outside_lane: 0, before_gate: 10_500 })
+    expect(failed.robots).toBeNull()
   })
 
   it('reports the http request time and the header-timeout fallback, and null without a ladder summary', () => {
