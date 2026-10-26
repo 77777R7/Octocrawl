@@ -393,6 +393,34 @@ describe('resilientFetch execution budget', () => {
     expect(seen[3]).toEqual({ headersTimeoutMs: 10_000, bodyTimeoutMs: 30_000 })
   })
 
+  it('keeps a default cap under a caller-chosen deadline when enough of it would remain after the cap, else waits until the deadline (O6)', async () => {
+    const seen: Array<{ headersTimeoutMs: number; bodyTimeoutMs: number }> = []
+    const fetcher: ResilientFetcher = async (_url, init) => {
+      seen.push({ headersTimeoutMs: init.headersTimeoutMs, bodyTimeoutMs: init.bodyTimeoutMs })
+      return res(200)
+    }
+    const reserve = { capsFollowDeadline: true, capReserveMs: 32_000 }
+    // MCP's 120 s: both caps hold, so a server that never answers is left after 10 s with time for the later rungs.
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 120_000, ...reserve })
+    // 50 s: 40 s would remain after the header cap, 20 s after the body's.
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 50_000, ...reserve })
+    // A23's 20 s: nothing else could use the time, so both waits run to the deadline.
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 20_000, ...reserve })
+    expect(seen[0]).toEqual({ headersTimeoutMs: 10_000, bodyTimeoutMs: 30_000 })
+    expect(seen[1]!.headersTimeoutMs).toBe(10_000)
+    expect(seen[1]!.bodyTimeoutMs).toBeGreaterThan(45_000)
+    expect(seen[1]!.bodyTimeoutMs).toBeLessThanOrEqual(50_000)
+    for (const timeout of [seen[2]!.headersTimeoutMs, seen[2]!.bodyTimeoutMs]) {
+      expect(timeout).toBeGreaterThan(15_000)
+      expect(timeout).toBeLessThanOrEqual(20_000)
+    }
+    // A cap that held ends the wait, not the caller's deadline.
+    const headersTimeout = Object.assign(new Error('headers timeout'), { name: 'HeadersTimeoutError' })
+    const capped = await resilientFetch(U, scripted([headersTimeout]), { deadlineAt: Date.now() + 120_000, ...reserve })
+    expect(capped.failureReason).toBe('timeout')
+    expect(capped.deadlineExceeded).toBeUndefined()
+  })
+
   it('retains deadline protection while reading a deferred response body', async () => {
     const out = await resilientFetch(U, async () => ({ ...res(200), bodyText: async () => new Promise<string>(() => {}) }), { deadlineAt: Date.now() + 40 })
     await expect(out.bodyText()).rejects.toMatchObject({ name: 'TimeoutError' })

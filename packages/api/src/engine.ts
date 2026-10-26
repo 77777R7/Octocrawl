@@ -2656,7 +2656,8 @@ function deliveryQuery<T extends DeliveryQuery>(query: T): Omit<T, 'jobId'> {
 
 /**
  * What a request or stored task asks each lane to capture. Its timeout is the
- * deadline; passed on, it lets the lanes' waits run to it. `html`, `rawHtml`,
+ * deadline; passed on, it lets the lanes' waits run to it (the HTTP lane's only
+ * when its caps would leave the later rungs too little time). `html`, `rawHtml`,
  * `images`, `tables`, an `attributes` entry and a `screenshot` entry among its formats
  * ask the lanes to carry them on the result.
  */

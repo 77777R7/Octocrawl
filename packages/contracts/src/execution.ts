@@ -238,9 +238,10 @@ export interface FetchOptions {
   waitFor?: number
   /**
    * The caller's own `timeout`, when it set one. The deadline itself is the
-   * ExecutionContext's; this says the caller chose it, so a lane waits for a
-   * slow server (HTTP headers and body, browser navigation) until that
-   * deadline instead of stopping at its default caps.
+   * ExecutionContext's; this says the caller chose it, so the browser waits
+   * for navigation until that deadline instead of stopping at its default
+   * cap, and the HTTP lane does so for headers and body when stopping at its
+   * caps would leave the later rungs too little of it (ADR 0007, 2026-10-26).
    */
   timeout?: number
   /**

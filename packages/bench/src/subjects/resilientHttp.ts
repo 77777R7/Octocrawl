@@ -34,6 +34,14 @@ import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import { withExtractionCandidates } from './candidateExtraction.js'
 
 /**
+ * How much of a caller's deadline must remain after an HTTP header or body cap for the cap to hold (ADR 0007,
+ * amendment of 2026-10-26, Howard): the 30 s the ladder's local fallback after a header timeout needs
+ * (HEADERS_TIMEOUT_FALLBACK_MS), and 2 s more, as undici's timers fire up to a second late. With less, nothing after
+ * this request could use the time, so the wait runs to the deadline (A23: `timeout: 20000` on a 10 s server).
+ */
+export const HTTP_CAP_RESERVE_MS = 32_000
+
+/**
  * Resilient HTTP subject: the resilient transport engine (redirect following
  * + 503 retry, http-core) composed with the extract-tf cascade. This is the
  * production-shaped arm — BareHttpSubject stays the untouched floor.
@@ -394,8 +402,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
         onRetryAfter?.(target, retryAt)
       },
       maxRedirects: this.networkPolicy.maxRedirects,
-      // A caller's timeout is how long it will wait: headers and body may take until its deadline.
+      // A caller's timeout is how long it will wait: headers and body may take until its deadline, unless stopping at
+      // the caps leaves the later rungs HTTP_CAP_RESERVE_MS of it (ADR 0007, 2026-10-26).
       capsFollowDeadline: options.timeout !== undefined,
+      capReserveMs: HTTP_CAP_RESERVE_MS,
       assertUrl: async (target) => {
         if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(target)) throw new Error('Local platform exception cannot follow an off-platform redirect')
         await this.route.assertUrl(target)

@@ -103,23 +103,55 @@ describe('headers-timeout fallback boundaries', () => {
     expect(browser.calls).toBe(0)
   })
 
-  it.each(['captcha', 'timeout', 'contract failure', 'empty'])('stops after one local answer: %s', async kind => {
-    const answer = kind === 'captcha' ? { ...product(), status: 'blocked' as const, blockReason: 'captcha' as const, markdown: null }
-      : kind === 'timeout' ? { ...headersTimeout(), lane: 'browser_local' as const }
-      : kind === 'empty' ? { ...product(), status: 'failed' as const, failureReason: 'empty_unverified' as const, markdown: null }
-      : product()
+  // ADR 0007, amendment of 2026-10-26 (Howard, O6): after the fallback browser the ladder goes on by its ordinary rules.
+  const blockedBy = (blockReason: 'captcha' | 'bot_detected_generic' | 'geo_restricted'): FetchResult => ({ ...product(), status: 'blocked', blockReason, markdown: null, evidence: { ...product().evidence, httpStatus: 403 } })
+
+  it.each([
+    ['captcha', blockedBy('captcha')],
+    ['bot check', blockedBy('bot_detected_generic')],
+    ['geo block (T013)', blockedBy('geo_restricted')],
+    ['empty page', { ...product(), status: 'failed' as const, failureReason: 'empty_unverified' as const, markdown: null }],
+  ])('goes on past the fallback browser to the later rungs: %s', async (_kind, answer) => {
+    const compat = channel('http_compat', product())
     const browser = channel('browser_local', answer)
     const installed = channel('installed_chrome', product())
-    const paid = { ...channel('provider', product()), vendorId: 'steel', priceCeilingUsd: 1 }
-    const secondBrowser = channel('browser_local', product())
-    const run = await new LadderRunner([channel('http', headersTimeout()), installed, browser, secondBrowser, paid], { mode: 'standard', enhanced: true }, null, null, null,
-      kind === 'contract failure' ? { verify: { checks: [{ type: 'markdownIncludes', text: 'not on page' }] } } : {})
-      .run(url, null, budget())
-    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    const run = await new LadderRunner([channel('http', headersTimeout()), compat, browser, installed], { mode: 'standard', enhanced: true }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome'])
+    // The rungs between http and the fallback browser stay skipped: another HTTP client is not what a header timeout asks for.
+    expect(compat.calls).toBe(0)
     expect(browser.calls).toBe(1)
-    expect(installed.calls + secondBrowser.calls + paid.calls).toBe(0)
-    expect(run.result.markdown).toBe(answer.markdown)
+    expect(run.result.lane).toBe('browser_local')
+    expect(run.result.markdown).toContain('€79.95')
     expect(run.ladderTrace).toContainEqual(expect.objectContaining({ channel: 'http', event: 'ladder_step', detail: expect.objectContaining({ escalate: 'http_headers_timeout' }) }))
+  })
+
+  it('reaches a provider the run allows after the fallback browser and the installed Chrome are blocked', async () => {
+    const installed = channel('installed_chrome', blockedBy('bot_detected_generic'))
+    const paid = { ...channel('provider', product()), vendorId: 'steel', priceCeilingUsd: 1 }
+    const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', blockedBy('geo_restricted')), installed, paid], { mode: 'standard', enhanced: true }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome', 'provider'])
+    expect(paid.calls).toBe(1)
+    expect(run.result.markdown).toContain('€79.95')
+  })
+
+  it.each([
+    ['timeout', { ...headersTimeout(), lane: 'browser_local' as const }],
+    ['rate limit', { ...blockedBy('captcha'), blockReason: 'rate_limit' as const }],
+  ])('still ends at the fallback browser on %s, as at any rung', async (_kind, answer) => {
+    const installed = channel('installed_chrome', product())
+    const paid = { ...channel('provider', product()), vendorId: 'steel', priceCeilingUsd: 1 }
+    const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', answer), installed, paid], { mode: 'standard', enhanced: true }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(installed.calls + paid.calls).toBe(0)
+  })
+
+  it('answers with the fallback browser\'s page when it does the task, and asks no later rung', async () => {
+    const installed = channel('installed_chrome', product())
+    const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', product()), installed], { mode: 'standard', enhanced: true }, null, null, null,
+      { verify: { checks: [{ type: 'markdownIncludes', text: '€79.95' }] } }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(installed.calls).toBe(0)
+    expect(run.result.markdown).toContain('€79.95')
   })
 
   it('caps a hanging local call with its own signal while the run still has time', async () => {

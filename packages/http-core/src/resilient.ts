@@ -80,10 +80,16 @@ export interface ResilientHttpConfig extends ExecutionBudget {
   bodyTimeoutMs: number
   /**
    * deadlineAt is the caller's own timeout: wait for headers and body until it
-   * instead of stopping at headersTimeoutMs / bodyTimeoutMs. Without a
-   * deadline the two caps apply.
+   * instead of stopping at headersTimeoutMs / bodyTimeoutMs, unless
+   * capReserveMs says the cap still holds. Without a deadline the two caps apply.
    */
   capsFollowDeadline?: boolean
+  /**
+   * With capsFollowDeadline: a cap still holds when at least this much of the
+   * deadline would remain after it, for what runs after this request (the
+   * ladder's later rungs). Unset, no remainder is enough: the waits run to the deadline.
+   */
+  capReserveMs?: number
   /** Called before the first request and before every redirect hop. */
   assertUrl?: UrlGuard
 }
@@ -284,7 +290,8 @@ export async function resilientFetch(
       requestCount++
       const at = Date.now() - start
       let response: ResilientResponseLike
-      const cap = (defaultMs: number) => cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined ? Number.POSITIVE_INFINITY : defaultMs
+      const cap = (defaultMs: number) => cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined
+        && cfg.deadlineAt - Date.now() - defaultMs < (cfg.capReserveMs ?? Number.POSITIVE_INFINITY) ? Number.POSITIVE_INFINITY : defaultMs
       const headersCapMs = cap(cfg.headersTimeoutMs), bodyCapMs = cap(cfg.bodyTimeoutMs)
       let headersTimeoutMs = headersCapMs, bodyTimeoutMs = bodyCapMs
       try {
