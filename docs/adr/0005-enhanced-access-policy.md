@@ -372,5 +372,5 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - 适配器给 CapSolver 的 `proxy` 改成 `scheme://user:pass@host:port`：scheme 是出口自己的（现在只接受 http），用户名和密码做百分号编码。主机用操作者在 `W2L_SOLVER_PROXY` 里写的那个，浏览器的转发器连的也是它。出口仍在运行前选定，不在会话中途换路由或换身份。
 - Webshare 按登录里的会话 id 固定出口 IP（apidocs.webshare.io/proxy-connection："The same session ID will route to the same exit IP"）。它没有说经过不同地区的网关时是否仍是同一个出口，这一点未核实。
 - CapSolver 拒绝建任务（`errorId` 非 0，没有任务）时不收费，但这一次计入该页的 `maxSolvesPerCall`。2026-10-25 的无代理测试里，两页发了 4 次被拒的 createTask：每个 rung 各发一次。
-- 小组件有回调、又在以 POST 提交的表单里时，先调用回调；约 2 秒内页面没有导航、主框架没有发出自己的请求（尚未得到回应的导航，或用 fetch 做的校验），门判定也没有放行，就再提交这个小组件所在的那个表单元素。这样，网站只收一次的 token 不会被发两次。Google 的 reCAPTCHA 演示页（C011，2026-10-26）的回调只清掉一条错误提示，token 只有随表单提交才会到达网站。别的表单不提交。
+- 小组件有回调、又在以 POST 提交的表单里时，先调用回调；约 2 秒内页面没有导航、主框架没有发出自己的请求（尚未得到回应的导航，或用 fetch 做的校验），门判定也没有放行，就再提交这个小组件所在的那个表单元素。回调在这 2 秒内发出的 document、fetch、XHR 请求会被看到，token 不会因此再发一次；beacon、WebSocket 或晚于 2 秒的请求看不到。Google 的 reCAPTCHA 演示页（C011，2026-10-26）的回调只清掉一条错误提示，token 只有随表单提交才会到达网站。别的表单不提交。
 - `hint` 的固定词表加四个词：`connect_failed`、`website_key`、`invalid`、`not_supported`，覆盖探测和无代理测试遇到的拒绝说明。`errorDescription` 的原文仍不出适配器；要保留原文，需要 Howard 另行决定。

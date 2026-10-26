@@ -402,7 +402,11 @@ export async function injectAnswer(page: Page, challenge: DetectedChallenge, sol
   const navigation = page.waitForEvent('framenavigated', { predicate: (frame) => frame === page.mainFrame(), timeout: timeoutMs }).then(() => true, () => false)
   // What the main frame sends once the callback has the token: a navigation or a fetch means the callback acted on it.
   let sentByPage = false
-  const onRequest = (request: Request) => { if (request.frame() === page.mainFrame() && ['document', 'fetch', 'xhr'].includes(request.resourceType())) sentByPage = true }
+  const onRequest = (request: Request) => {
+    if (!['document', 'fetch', 'xhr'].includes(request.resourceType())) return
+    // A navigation request may come before its frame exists, when frame() throws: not the main frame's own request.
+    try { if (request.frame() === page.mainFrame()) sentByPage = true } catch {}
+  }
   page.on('request', onRequest)
   const submitted = await page.evaluate(({ token, selector, sitekey, index, name, tag, callback, key }) => {
     // The widget the probe chose, by its place, and only while it still carries the key that was solved.
@@ -443,11 +447,13 @@ export async function injectAnswer(page: Page, challenge: DetectedChallenge, sol
   if (submitted === 'callback_then_form') {
     const moved = await Promise.race([navigation, new Promise<false>((resolve) => setTimeout(() => resolve(false), Math.min(CALLBACK_WAIT_MS, timeoutMs)))])
     page.off('request', onRequest)
+    // The solved form's reference is dropped from the page on every way out of this step.
+    const forget = () => page.evaluate((key) => { delete (window as unknown as Record<symbol, unknown>)[Symbol.for(key)] }, SOLVED_FORM).catch(() => {})
     if (moved) return 'injected'
     // The callback sent something (its own form, not yet answered; a check by fetch): it is waited for as before, and
     // the token, which a site takes once, is never sent again.
-    if (sentByPage) { await Promise.race([navigation, new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(SCRIPT_SUBMIT_WAIT_MS - CALLBACK_WAIT_MS, timeoutMs - CALLBACK_WAIT_MS))))]); return 'injected' }
-    if (cleared !== undefined && await cleared().catch(() => false)) return 'injected'
+    if (sentByPage) { await forget(); await Promise.race([navigation, new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(SCRIPT_SUBMIT_WAIT_MS - CALLBACK_WAIT_MS, timeoutMs - CALLBACK_WAIT_MS))))]); return 'injected' }
+    if (cleared !== undefined && await cleared().catch(() => false)) { await forget(); return 'injected' }
     // Only the form element the solved widget was in, still on the page and still sent by POST: never another form.
     const sent = await page.evaluate((key) => {
       const form = (window as unknown as Record<symbol, unknown>)[Symbol.for(key)]
