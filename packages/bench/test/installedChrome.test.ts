@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { browserNotInstalled, browserInstallCommand } from '../src/browserInstall.js'
-import { chromeProxyError } from '../src/subjects/browserLocal.js'
+import { CHALLENGE_WAIT_CAP_MS, chromeProxyError, waitOutGate } from '../src/subjects/browserLocal.js'
 import {
   AVOID_PORTS, chromeCandidates, DETECTION_FLAGS, findInstalledChrome, freeDebuggingPort, INSTALLED_CHROME_INSTALL,
   InstalledChromeMissingError, installedChromeArgs, installedChromeRefusal, WindowGate,
@@ -66,6 +66,53 @@ describe('installed_chrome: the narrowed launch (ADR 0005, 2026-10-13 revision)'
     expect(port).toBeGreaterThan(0)
     expect(AVOID_PORTS.has(port)).toBe(false)
     expect(AVOID_PORTS.has(8791)).toBe(true)
+  })
+})
+
+describe('installed_chrome: the wait for a check that clears itself (ADR 0005, revision of 2026-10-26)', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  /** A page whose gate is `shown[n]` on its nth read (the last from then on), counting the reads. */
+  function page(...shown: Array<string | null>) {
+    let reads = 0
+    return { reads: () => reads, gateNow: async () => { const reason = shown[Math.min(reads++, shown.length - 1)] ?? null; return reason === null ? null : { reason } } }
+  }
+
+  it('does not wait on a captcha, which waits for someone or a solver to answer it, and says so', async () => {
+    vi.useFakeTimers()
+    expect(CHALLENGE_WAIT_CAP_MS.get('captcha')).toBe(0)
+    const captcha = page('captcha', null)
+    expect(await waitOutGate(captcha.gateNow, {}, undefined)).toEqual({ blockReason: 'captcha', outcome: 'not_waited', ms: 0, capMs: 0 })
+    expect(captcha.reads()).toBe(1)
+  })
+
+  it("waits 10 s at most for a Cloudflare challenge or a bot check that does not clear, and never into the capture's reserve", async () => {
+    vi.useFakeTimers()
+    for (const reason of ['cloudflare_challenge', 'bot_detected_generic']) {
+      const held = page(reason)
+      const waiting = waitOutGate(held.gateNow, {}, undefined)
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(await waiting).toEqual({ blockReason: reason, outcome: 'still_gated', ms: 10_000, capMs: 10_000 })
+      expect(held.reads()).toBe(11)
+    }
+    // A deadline 5 s away leaves the capture its reserve and the last read its second.
+    const near = waitOutGate(page('cloudflare_challenge').gateNow, { deadlineAt: Date.now() + 5_000 }, undefined)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(await near).toEqual({ blockReason: 'cloudflare_challenge', outcome: 'still_gated', ms: 3_000, capMs: 10_000 })
+  })
+
+  it('ends as soon as the check gives way, here 3 s in', async () => {
+    vi.useFakeTimers()
+    const clears = page('cloudflare_challenge', 'cloudflare_challenge', 'cloudflare_challenge', null)
+    const waiting = waitOutGate(clears.gateNow, {}, undefined)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(await waiting).toEqual({ blockReason: 'cloudflare_challenge', outcome: 'cleared', ms: 3_000, capMs: 10_000 })
+    expect(clears.reads()).toBe(4)
+  })
+
+  it('waits on no other gate, and on no page that shows none', async () => {
+    expect(await waitOutGate(page('login_required').gateNow, {}, undefined)).toBeNull()
+    expect(await waitOutGate(page(null).gateNow, {}, undefined)).toBeNull()
   })
 })
 

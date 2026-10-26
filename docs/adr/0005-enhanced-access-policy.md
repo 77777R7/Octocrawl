@@ -143,7 +143,7 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
   - 两次都不同的只有 T048，验收时再看。
 - **不做的事。** 不设 User-Agent、语言、时区、窗口大小，也不注入客户端提示。记录声明的是 Chrome 自己报的 User-Agent（`identity: actual`）。
 - **不接的请求。** 带 actions、截图、`mobile`、自定义请求头或 `skipTlsVerification` 的请求，这个 rung 不接，因为它们都要在测量之外驱动或改动窗口。
-- **等挑战页自己放行（2026-10-14 补）。** 测量时探针遇到挑战页会每秒重读一次，最多等 20 秒；产品 rung 起初没有这一步，看到 Cloudflare 挑战页就立刻返回 blocked（T002 冒烟测试）。现在 rung 遇到 `cloudflare_challenge`、`bot_detected_generic` 或 `captcha` 时，也每秒重读一次页面，最多 20 秒，且不占用截止时间前的抓取余量。只读不动：不点击、不输入、不解题。页面换成不是挑战的文档就照常读取；到时仍是挑战就照常报 blocked。trace 里记 `challenge_wait`，写明结果和等了多久。
+- **等挑战页自己放行（2026-10-14 补）。** 测量时探针遇到挑战页会每秒重读一次，最多等 20 秒；产品 rung 起初没有这一步，看到 Cloudflare 挑战页就立刻返回 blocked（T002 冒烟测试）。现在 rung 遇到 `cloudflare_challenge`、`bot_detected_generic` 或 `captcha` 时，也每秒重读一次页面，最多 20 秒，且不占用截止时间前的抓取余量。只读不动：不点击、不输入、不解题。页面换成不是挑战的文档就照常读取；到时仍是挑战就照常报 blocked。trace 里记 `challenge_wait`，写明结果和等了多久。（等哪些门、各等多久，已由 2026-10-26（三）的修订按门类型改动，见本文末。）
 - **每次抓取的生命周期。** 每次抓取启动一个 Chrome，抓完关掉，同时删除临时 profile。整个进程最多同时开 2 个窗口。
 - **代理。** 需要登录的代理会被拒绝，并说明原因：Chrome 的命令行不能带代理凭据，而代答代理认证的质询要拦截请求。
 - **找不到 Chrome 时。** 结果带 `browser_not_installed` 警告，提示安装 Google Chrome 或设置 `W2L_CHROME_PATH`。
@@ -375,3 +375,28 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - CapSolver 拒绝建任务（`errorId` 非 0，没有任务）时不收费，但这一次计入该页的 `maxSolvesPerCall`。2026-10-25 的无代理测试里，两页发了 4 次被拒的 createTask：每个 rung 各发一次。
 - 小组件有回调、又在以 POST 提交的表单里时，先调用回调；约 2 秒内页面没有导航、主框架没有发出自己的请求（尚未得到回应的导航，或用 fetch 做的校验），门判定也没有放行，就再提交这个小组件所在的那个表单元素。回调在这 2 秒内发出的 document、fetch、XHR 请求会被看到，token 不会因此再发一次；beacon、WebSocket 或晚于 2 秒的请求看不到。Google 的 reCAPTCHA 演示页（C011，2026-10-26）的回调只清掉一条错误提示，token 只有随表单提交才会到达网站。别的表单不提交。
 - `hint` 的固定词表加四个词：`connect_failed`、`website_key`、`invalid`、`not_supported`，覆盖探测和无代理测试遇到的拒绝说明。`errorDescription` 的原文仍不出适配器；要保留原文，需要 Howard 另行决定。
+
+## 修订 2026-10-26（三）：挑战等待按门类型设上限
+
+**背景。** 上文 2026-10-14 补的那一条让 installed_chrome 对 `cloudflare_challenge`、`bot_detected_generic` 和 `captcha` 一律每秒重读、最多等 20 秒。依据是探针的测量，测量没有按门区分。2026-10-26 的只读速度分析（原始响应在 git 忽略的 `.w2l/` 下，不在仓库里）按门数了 combined grant 两个窗口（[记录](../../research/access/runs/2026-10-26-combined-two-windows-22bf90e7.md)，runner `22bf90e7`）和 2026-10-26 每周重跑（[记录](../../research/access/runs/2026-10-26-weekly-summary-fef3d8f8.md)，`fef3d8f8`）里的全部 `challenge_wait`（两个窗口的 30 次运行含重试轮，每周重跑是 installed_chrome 的两次 challenge16 运行）：
+
+- 54 次 `still_gated`，每次都等满，用时 19.1–19.3 秒。按门：`captcha` 29 次、`cloudflare_challenge` 17 次、`bot_detected_generic` 8 次。
+- `captcha` 门靠等待放行的是 0/29。验证码挂件（DataDome 等）要人或求解器作答，只读不动的等待不会让它放行。
+- 放行的 63 次全部是 `cloudflare_challenge`（43）或 `bot_detected_generic`（20），中位 3.8 秒，最长 9.1 秒。
+- 上面的数是按这两个来源的原始响应复算的。速度分析当时报的是 57 次、`captcha` 0/30：它还数进了 2026-10-26 两次 CapSolver 冒烟运行（C008 两次 `cloudflare_challenge`、T045 一次 `captcha`，都是 `still_gated`）。它报的放行中位是 3.6 秒，这里按 63 次的 `ms` 复算是 3.8 秒，差别的原因没有查到。
+
+**决定（Howard，2026-10-26，在对话中批准）。**
+
+- 每种门有自己的等待上限：
+  - `cloudflare_challenge`：10 秒。
+  - `bot_detected_generic`：10 秒。
+  - `captcha`：0，不等。
+- 其余照旧：每秒重读一次，不占用截止时间前的抓取余量，只读不动；页面换成不是挑战的文档就照常读取，到上限仍是挑战就照常报 blocked。
+- `captcha` 门不等待，但仍是被拦的页面。grant 列了 `third_party_captcha_solver` 时，页面立即交给求解器，条件和顺序与 2026-10-25、2026-10-26 的修订相同；没有求解器时照常报 blocked。
+- 每个决定仍记在 trace 的 `challenge_wait` 里：`blockReason` 是门，`capMs` 是这个门的上限，`outcome` 是 `cleared`、`still_gated` 或 `not_waited`（`captcha`，`ms: 0`、`capMs: 0`）。截止时间比上限先到时，`ms` 小于 `capMs`。
+- 上限按第一次读到的门定。等待中门的类型变了（例如挑战页换成验证码），仍按第一次的上限等到放行或到点。
+
+**本修订的边界。**
+
+- 10 到 20 秒之间才放行的 Cloudflare 挑战，现在会报 blocked。样本里 63 次放行没有一次超过 9.1 秒，但样本只来自一台 Mac、一个出口，站点类型也有限。会不会漏掉这样的挑战，unknown。
+- 确认方法（尚未运行）：challenge16（`research/access/subsets.v1.json`）跑两次，K1 的 92 道题跑两个窗口。通过数不低于 12/16 和 61/92，并按门列出 `challenge_wait` 的 cleared / still_gated / not_waited 分布。
