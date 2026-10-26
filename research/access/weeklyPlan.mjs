@@ -1,7 +1,8 @@
 // The weekly rerun's plan and record header (research/access/weekly.mjs), pure so that
 // packages/runtime/test/weeklyPlan.test.ts can test them: the ISO week, the rotation of the frozen tasks that are not in
-// the challenge subset, the 51-task set, the Chrome major comparison, the installed_chrome acceptance baseline and the
-// summary's gap figures.
+// the challenge subset, the 51-task set, the Chrome major comparison, the installed_chrome acceptance baseline, the
+// summary's gap figures, and the Steel arm's layered results and cost per verified result (PA G2a). The one read that is
+// not pure, readRouteEntries, opens the API's routing history read-only.
 
 /** ISO-8601 week of a date: the week with that year's first Thursday is week 1, Monday first. */
 export function isoWeek(date) {
@@ -98,4 +99,87 @@ export function summaryRows(arms) {
     parts: a.parts,
     gap: a.competitor || a.totals === null ? null : Object.fromEntries(['all', 'healthy', 'challenge', 'rotation'].map((p) => { const best = competitorBest(p); return [p, best === null ? null : best - a.parts[p].verified] })),
   }))
+}
+
+/**
+ * Every route of the API's routing history (PA G2b, `<taskRoot>/routing-history.sqlite`), expired ones included, as
+ * `{ vendor, entry }` with the entry's JSON parsed; opened read-only. Throws when the file is not there.
+ */
+export async function readRouteEntries(file) {
+  const { default: Database } = await import('better-sqlite3')
+  const db = new Database(file, { readonly: true, fileMustExist: true })
+  try {
+    return db.prepare('SELECT vendor, entry_json FROM routes ORDER BY id').all().map((row) => ({ vendor: row.vendor, entry: JSON.parse(row.entry_json) }))
+  } finally { db.close() }
+}
+
+/**
+ * The vendor attempts' RouteObservations (PA G2a) the routing history holds from one run: those observed from its start
+ * to its end (ISO times), each with its vendor, oldest first. The history keeps the 50 most recent per route.
+ */
+export function observationsBetween(entries, from, to) {
+  const start = Date.parse(from)
+  const end = Date.parse(to)
+  const out = []
+  for (const { vendor, entry } of entries) {
+    for (const observation of entry?.observations ?? []) {
+      const at = Date.parse(observation?.observedAt)
+      if (Number.isFinite(at) && at >= start && at <= end) out.push({ vendor, ...observation })
+    }
+  }
+  return out.sort((a, b) => a.observedAt.localeCompare(b.observedAt))
+}
+
+const usd = (v) => `$${v.toFixed(4)}`
+
+/**
+ * The Steel arm's record lines for G2a: its vendor attempts layer by layer (access delivered, region loaded, task
+ * verified: yes / no / unknown, never a guessed no), where they stopped, what the ledger charged them, and the cost per
+ * verified result. `observations` is null when the routing history could not be read (`historyError` says why); the
+ * run's totals are the runner's (summary.json `totals.cold`). Unknown stays unknown.
+ */
+export function steelLayerLines({ observations, historyError = null, paidCalls, chargedUsd, verified, verifiedFromPaidCall }) {
+  const lines = []
+  if (observations === null) {
+    lines.push(`- Vendor attempts by layer (PA G2a): unknown, the routing history was not read (${historyError ?? 'no reason given'})`)
+  } else if (observations.length === 0) {
+    lines.push(`- Vendor attempts by layer (PA G2a): none observed during the run${typeof paidCalls === 'number' && paidCalls > 0 ? `, though the runner counted ${paidCalls} paid calls: unknown` : ''}`)
+  } else {
+    const count = (key) => {
+      const c = { yes: 0, no: 0, unknown: 0 }
+      for (const o of observations) c[o[key] === true ? 'yes' : o[key] === false ? 'no' : 'unknown']++
+      return c
+    }
+    const row = (label, key) => { const c = count(key); return `| ${label} | ${c.yes} | ${c.no} | ${c.unknown} |` }
+    const stages = { access: 0, region: 0, extraction: 0, task: 0, none: 0, unknown: 0 }
+    for (const o of observations) {
+      const stage = o.failureStage === null ? 'none' : o.failureStage in stages ? o.failureStage : 'unknown'
+      stages[stage]++
+    }
+    const settled = observations.filter((o) => typeof o.chargedUsd === 'number')
+    const bases = {}
+    for (const o of settled) bases[o.chargeBasis ?? 'unknown'] = (bases[o.chargeBasis ?? 'unknown'] ?? 0) + 1
+    const unsettled = observations.length - settled.length
+    lines.push(
+      `- Vendor attempts by layer (PA G2a RouteObservation, from the API's routing history, observed during the run): ${observations.length} attempts${typeof paidCalls === 'number' ? ` (the runner counted ${paidCalls} paid calls${paidCalls === observations.length ? '' : '; the counts differ, so some attempts are not here'})` : ''}`,
+      '',
+      '| Layer | Yes | No | Unknown |',
+      '| --- | --- | --- | --- |',
+      row('Access delivered', 'accessDelivered'),
+      row('Region loaded', 'regionLoaded'),
+      row('Task verified', 'taskVerified'),
+      '',
+      `- Where the vendor attempts stopped (failureStage): access ${stages.access}, region ${stages.region}, extraction ${stages.extraction}, task ${stages.task}, none ${stages.none}${stages.unknown ? `, unknown ${stages.unknown}` : ''}`,
+      `- Charged on these attempts by the spend ledger: ${settled.length === 0 ? 'unknown (no charge settled)' : `${usd(settled.reduce((s, o) => s + o.chargedUsd, 0))} on ${settled.length} (basis: ${Object.entries(bases).map(([b, n]) => `${b} ${n}`).join(', ')})${unsettled ? `; ${unsettled} not settled: unknown` : ''}`}`,
+    )
+  }
+  const perVerified = typeof chargedUsd !== 'number' ? 'unknown (the ledger\'s charge is unknown)'
+    : typeof verified !== 'number' ? 'unknown (the verified count is unknown)'
+      : verified === 0 ? `none: nothing was verified (the ledger charged ${usd(chargedUsd)})`
+        : `${usd(chargedUsd / verified)} (the ledger's ${usd(chargedUsd)} over the arm's ${verified} verified answers, any route; the exit's bandwidth is not metered)`
+  const perPaid = typeof chargedUsd !== 'number' || typeof verifiedFromPaidCall !== 'number' ? 'unknown'
+    : verifiedFromPaidCall === 0 ? `none: no task was verified with a paid call's page (the ledger charged ${usd(chargedUsd)} for that)`
+      : `${usd(chargedUsd / verifiedFromPaidCall)} (over the ${verifiedFromPaidCall} tasks verified with a paid call's page)`
+  lines.push(`- Cost per verified result: ${perVerified}; per result verified with a paid call's page: ${perPaid}. The ledger's figure is the grant's tariff estimate, not Steel's bill.`)
+  return lines
 }

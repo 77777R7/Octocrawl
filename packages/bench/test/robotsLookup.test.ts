@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { localNetworkPolicy } from '@w2l/contracts'
 import { createGuardedDispatcher } from '../src/egress.js'
-import { RobotsOriginCache } from '../src/robotsLookup.js'
+import { RobotsOriginCache, robotsFetcherOf } from '../src/robotsLookup.js'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -30,6 +30,45 @@ describe('RobotsOriginCache reliability boundaries', () => {
     expect(results.every((entry) => entry?.robots !== null)).toBe(true)
     await cache.teardown()
     await cache.teardown()
+  })
+
+  it('keeps one robots.txt per origin and User-Agent: the same identity reads it once, another reads its own (T005)', async () => {
+    // A site that answers each client its own file, as etsy did for the http, browser_local and installed_chrome rungs.
+    const asked: string[] = []
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      const agent = (init.headers as Record<string, string>)['user-agent']!
+      asked.push(agent)
+      return response(`User-agent: *\nDisallow: /${agent === 'Chrome/128' ? 'cart' : 'search'}\n`)
+    })
+    const cache = new RobotsOriginCache()
+    try {
+      const http = await cache.lookup(`${origin}/a`, 'Chrome/128')
+      expect(await cache.lookup(`${origin}/b`, 'Chrome/128')).toBe(http)
+      const browser = await cache.lookup(`${origin}/a`, 'Chrome/151')
+      expect(asked).toEqual(['Chrome/128', 'Chrome/151'])
+      expect(browser?.sha256).not.toBe(http?.sha256)
+      expect(cache.decision(http, `${origin}/cart`, 'Chrome/128').decision).toBe('disallowed')
+      expect(cache.decision(browser, `${origin}/cart`, 'Chrome/151').decision).toBe('allowed')
+    } finally { await cache.teardown() }
+  })
+
+  it("answers the provider rung's robots.txt fetcher from the cache, each outcome as the provider reads it", async () => {
+    let calls = 0
+    vi.stubGlobal('fetch', async () => { calls++; return response('User-agent: *\nDisallow: /x\n') })
+    const cache = new RobotsOriginCache()
+    const fetcher = robotsFetcherOf(cache)
+    const file = { text: 'User-agent: *\nDisallow: /x\n', status: 200, contentType: 'text/plain' }
+    expect(await fetcher(`${origin}/robots.txt`, 'TestUA/1.0')).toEqual(file)
+    expect(await fetcher(`${origin}/robots.txt`, 'TestUA/1.0')).toEqual(file)
+    expect(calls).toBe(1)
+    const read = async (answer: () => Promise<Response>) => {
+      vi.stubGlobal('fetch', answer)
+      return robotsFetcherOf(new RobotsOriginCache())(`${origin}/robots.txt`, 'TestUA/1.0')
+    }
+    expect(await read(async () => response('down', 503))).toEqual({ text: '', status: 503, contentType: null })
+    expect(await read(async () => response('none', 404))).toEqual({ text: '', status: 404, contentType: null })
+    expect(await read(async () => response('<html></html>', 200, { 'content-type': 'text/html' }))).toEqual({ text: '', status: 404, contentType: null })
+    expect(await read(async () => { throw new TypeError('fetch failed') })).toBeNull()
   })
 
   it('follows robots redirects manually and caps oversized bodies', async () => {
@@ -119,6 +158,8 @@ describe('RobotsOriginCache reliability boundaries', () => {
       const entry = await cache.lookup(url, 'w2l-test')
       expect(entry).toMatchObject({ robots: null, absent: false, unreachable: 'timeout' })
       expect(cache.decision(entry, url, 'w2l-test')).toMatchObject({ decision: 'disallowed', unreachable: 'timeout' })
+      // The provider rung reads the same deadline as its own fetcher's timeout.
+      expect(await robotsFetcherOf(cache)(url, 'w2l-test')).toEqual({ unreachable: 'timeout' })
       await cache.teardown()
 
       const slow = new RobotsOriginCache({ ...policy, robotsTimeoutMs: 10_000 })

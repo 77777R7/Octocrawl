@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPreviewServer } from '../src/server.js'
 import { createAuthRoutes, MemoryAccountStore, type IdentityProvider } from '../src/auth.js'
-import { createAccountRoutes, FirestoreAccountData, hostedJobPath, MAX_ACTIVE_KEYS, MemoryAccountData, playgroundRequest, type AccountRoutesOptions } from '../src/account.js'
+import { accountQuotaIds, createAccountRoutes, FirestoreAccountData, hostedJobPath, MAX_ACTIVE_KEYS, MemoryAccountData, playgroundRequest, type AccountRoutesOptions } from '../src/account.js'
 import { accountConnections, MemoryOAuthStore, type GrantRecord } from '../src/oauth.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 // The hosted API itself, so the Playground's signed header is checked by the code that serves it.
@@ -83,7 +83,7 @@ describe('the account page\'s data', () => {
     expect([body.limit, body.retentionDays]).toEqual([1_000, 30])
   })
 
-  it('erases the account\'s keys, daily usage, request lines, credits and OAuth connections from Firestore, a page at a time', async () => {
+  it('erases the account\'s keys, daily usage, request lines, credits, settled charges and OAuth connections from Firestore, a page at a time', async () => {
     const root = 'projects/octocrawl-test/databases/(default)/documents'
     const deleted: string[] = []
     const left: Record<string, string[]> = {
@@ -94,6 +94,8 @@ describe('the account page\'s data', () => {
       // Hosted jobs and their idempotency keys, each kept with the account's uid (packages/mcp/src/hostedJobs.ts).
       hostedJobs: [`${root}/hostedJobs/job-1`],
       hostedJobIdempotency: [`${root}/hostedJobIdempotency/ws_account-0001-abc`],
+      // The jobs' settled charges, each kept with the account's uid (packages/mcp/src/hostedCredits.ts).
+      creditSettles: ['job-1-0-h1', 'job-1-1-h2'].map(id => `${root}/creditSettles/${id}`),
       files: ['w/ws_account-0001/jobs/job-1/pages/00000.jsonl.gz', 'w/ws_account-0001/jobs/job-1/checkpoint.sqlite'],
       requests: Array.from({ length: 450 }, (_, i) => `${root}/requestLog/account-0001/requests/${String(i).padStart(4, '0')}`),
     }
@@ -125,13 +127,17 @@ describe('the account page\'s data', () => {
       }
       throw new Error(`unexpected ${url}`)
     }) as typeof fetch
-    await new FirestoreAccountData('octocrawl-test', fetcher, 'octocrawl-jobs').erase('account-0001')
+    await new FirestoreAccountData('octocrawl-test', fetcher, 'octocrawl-jobs').erase('account-0001', new Date('2026-11-01T05:00:00Z'))
     expect(Object.values(left).flat()).toEqual([])
-    // Keys, usage, OAuth, jobs and idempotency keys, the workspace's slots, request lines, the balance, and two job files.
-    expect(deleted).toHaveLength(2 + 2 + 4 + 2 + 1 + 450 + 1 + 2)
+    // Keys, usage, OAuth, jobs and idempotency keys, settled charges, the workspace's slots, request lines, the balance,
+    // three days' counters, and two job files.
+    expect(deleted).toHaveLength(2 + 2 + 4 + 2 + 2 + 1 + 450 + 1 + 6 + 2)
     expect(deleted).toContain(`${root}/hostedJobWorkspaces/ws_account-0001`)
+    expect(deleted).toEqual(expect.arrayContaining([`${root}/creditSettles/job-1-0-h1`, `${root}/creditSettles/job-1-1-h2`]))
     // The balance first: a call under way cannot then settle and write usage back.
     expect(deleted[0]).toBe(`${root}/credits/account-0001`)
+    // With it, the account's daily counters for calls and job pages, by name: they hold no uid to query by.
+    expect(deleted.slice(1, 7)).toEqual(['2026-11-01', '2026-10-31', '2026-10-30'].flatMap(day => [`${root}/hostedQuotas/${day}-account-account-0001`, `${root}/hostedQuotas/${day}-jobs-account-account-0001`]))
     await expect(new FirestoreAccountData('octocrawl-test', fetcher).erase('__x__')).rejects.toThrow(/malformed/)
     // In memory, as the routes' tests use it: nothing of the account is left, another account's things are.
     const memory = new MemoryAccountData()
@@ -339,6 +345,10 @@ describe('the Playground', () => {
     expect(api.credits.requests.get('account-0001')!.map(line => [line.endpoint, line.keyId, line.credits])).toEqual([
       ['scrape', 'playground:account-0001', 0], ['map', 'playground:account-0001', 1], ['scrape', 'playground:account-0001', 1], ['scrape', 'playground:account-0001', 1],
     ])
+    // Deleting the account finds, by name, the daily counter the hosted API keeps for it.
+    const counters = [...api.credits.site.keys()].filter(id => id.includes('account-0001'))
+    expect(counters).toHaveLength(1)
+    expect(accountQuotaIds('account-0001', new Date())).toContain(counters[0])
   })
 
   it('needs a session and a request from the site, refuses what the page never asks for, and passes on a spent balance', async () => {

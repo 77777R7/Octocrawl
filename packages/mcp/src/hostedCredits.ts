@@ -9,6 +9,7 @@
  *   a page read in a browser       5    (the same statuses on a browser lane)
  *   a page that does not exist     1    (failed, http_error with HTTP 404 or 410)
  *   a map call that returned URLs  1
+ *   the json model fallback        +2   (on a page whose json called the model: hostedModel.ts, decided 2026-10-24)
  *   anything else                  0    (blocked by a check, a challenge or robots.txt; DNS, timeout, no response;
  *                                        an invalid request; a server error)
  *
@@ -23,7 +24,7 @@
 import type { QuotaEntry } from './hostedApi.js'
 
 export const DEFAULT_MONTHLY_CREDITS = 1_000
-export const CREDITS = { httpPage: 1, browserPage: 5, notFound: 1, map: 1 } as const
+export const CREDITS = { httpPage: 1, browserPage: 5, notFound: 1, map: 1, model: 2 } as const
 /** Usage records are kept this long, for the account page and questions about a charge. */
 export const USAGE_RETENTION_DAYS = 90
 /** Request lines are kept this long. */
@@ -63,6 +64,8 @@ export interface RequestNote {
    * null for a map, and for a scrape that ran nothing.
    */
   paidCallIds: string[] | null
+  /** The credits of the json model fallback within the line's credits (CREDITS.model, or 0); absent when it was not asked for. */
+  modelCredits?: number
 }
 export interface RequestLine extends RequestNote { id: string; at: string; kind: UsageKind; credits: number }
 
@@ -83,8 +86,8 @@ function requestLine(note: RequestNote, id: string, now: Date, kind: UsageKind, 
   }
 }
 
-/** What a settled call is counted as on the account page. */
-export type UsageKind = 'http' | 'browser' | 'not_found' | 'map' | 'unread'
+/** What a settled call is counted as on the account page; `model` counts the pages whose json called the model, beside their own kind. */
+export type UsageKind = 'http' | 'browser' | 'not_found' | 'map' | 'unread' | 'model'
 
 const BROWSER_LANES: ReadonlySet<string> = new Set(['browser_local', 'browser_local_authed', 'browser_proxy', 'provider', 'my_browser'])
 const READ_STATUSES: ReadonlySet<string> = new Set(['success', 'partial', 'empty_verified'])
@@ -181,7 +184,7 @@ function giveBack(refund: number, reservation: Reservation): { toGrant: number; 
 export class MemoryCreditsStore implements CreditsStore {
   readonly balances = new Map<string, { month: string; grant: number; purchased: number }>()
   readonly site = new Map<string, number>()
-  readonly usage = new Map<string, Record<UsageKind | 'credits', number>>()
+  readonly usage = new Map<string, Partial<Record<UsageKind, number>> & { credits: number }>()
   readonly requests = new Map<string, RequestLine[]>()
   readonly settled = new Set<string>()
   constructor(private readonly monthlyGrant = DEFAULT_MONTHLY_CREDITS) {}
@@ -213,9 +216,10 @@ export class MemoryCreditsStore implements CreditsStore {
     balance.grant += back.toGrant
     balance.purchased += back.toPurchased
     const day = `${reservation.uid}-${now.toISOString().slice(0, 10)}`
+    // `model` is counted only once a page called the model, as Firestore's increments make the field.
     const counts = this.usage.get(day) ?? { http: 0, browser: 0, not_found: 0, map: 0, unread: 0, credits: 0 }
-    if (perKind === undefined) counts[kind] += 1
-    else for (const [name, n] of Object.entries(perKind) as Array<[UsageKind, number]>) counts[name] += n
+    if (perKind === undefined) counts[kind] = (counts[kind] ?? 0) + 1
+    else for (const [name, n] of Object.entries(perKind) as Array<[UsageKind, number]>) counts[name] = (counts[name] ?? 0) + n
     counts.credits += used
     this.usage.set(day, counts)
     return { remaining: balance.grant + balance.purchased }
@@ -242,7 +246,7 @@ function requestLineFields(line: RequestLine, uid: string, now: Date): Record<st
   }
   if (line.formats !== null) fields.formats = { arrayValue: line.formats.length ? { values: line.formats.map((stringValue) => ({ stringValue })) } : {} }
   if (line.paidCallIds !== null) fields.paidCallIds = { arrayValue: line.paidCallIds.length ? { values: line.paidCallIds.map((stringValue) => ({ stringValue })) } : {} }
-  for (const name of ['httpStatus', 'links', 'ms'] as const) {
+  for (const name of ['httpStatus', 'links', 'ms', 'modelCredits'] as const) {
     const value = line[name]
     if (typeof value === 'number' && Number.isSafeInteger(value)) fields[name] = { integerValue: String(value) }
   }

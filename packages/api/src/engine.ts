@@ -82,6 +82,7 @@ import {
   type HostPacing,
   type CrawlPageQuery,
   type ExecutionContext,
+  type StructuredModelGate,
   type AppliedRobotsOverride,
   type RobotsOverride,
   type RobotsUrlOverride,
@@ -120,7 +121,7 @@ import {
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
-import type { BrowserEngineName, BrowserIdentityChoice, ChannelsFiltered, InstalledChromeTestSeams } from '@w2l/bench'
+import type { BrowserEngineName, BrowserIdentityChoice, CaptchaSolving, ChannelsFiltered, InstalledChromeTestSeams } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
@@ -415,6 +416,13 @@ export interface ApiEngineOptions {
   channelsFor?: (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => Channel[]
   /** Test seams of the installed_chrome rung (installedChrome.ts): a stand-in Chromium, headless where no display exists. */
   installedChromeSeams?: InstalledChromeTestSeams
+  /**
+   * ADR 0005 `third_party_captcha_solver` (revision of 2026-10-25), as the entry point started it (startCaptchaSolving):
+   * the public browser rungs of a request that chose access enhanced hand a page still stopped at a check to it. Needs
+   * the grant; refused on a hosted engine. When the grant chose a solver exit, the entry point has already given the
+   * network policy that exit, so every rung of the run leaves through it from its first request.
+   */
+  captchaSolving?: CaptchaSolving
   /** Restrict a hosted public-document pilot to the HTTP rung. */
   httpOnly?: boolean
   /** Server-owned acquisition rule; callers cannot disable it per request. */
@@ -427,6 +435,17 @@ export interface ApiEngineOptions {
   batchMaxWallMs?: number | null
   /** Pages the orchestrator fetches at once per crawl, and the most a crawl's `maxConcurrency` may ask for. Default 4. */
   workerCount?: number
+  /**
+   * Asked before each page's json model fallback calls the model, where a call's context names no gate of its own: a
+   * hosted job's slice passes the hosted switch, daily cap and credits here. Absent: the model is called whenever it is
+   * configured, as before, unless `requireModelGate`.
+   */
+  modelGate?: StructuredModelGate
+  /**
+   * Hosted Octocrawl's own service (hostedApi.ts): a call whose context names no gate, with no engine gate either, calls
+   * no model. A self-hosted `serve --hosted` leaves it unset and keeps calling its own configured model.
+   */
+  requireModelGate?: boolean
   perHostConcurrency?: number
   perHostMinDelayMs?: number
   crawlDelayMsByHost?: ReadonlyMap<string, number>
@@ -579,8 +598,16 @@ type CacheAnswer =
   | { kind: 'lockdown_miss'; result: FetchResult }
   | { kind: 'fetch'; missed: boolean }
 
+/** The gate for a call that came with none on an engine that requires one: it calls no model it cannot charge or budget. */
+const HOSTED_MODEL_UNGATED: StructuredModelGate = { admit: async () => ({ ok: false, message: 'this hosted server calls the json model fallback only for a call it can charge and budget, and this one has neither' }) }
+
 export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const taskRoot = options.taskRoot ?? '.w2l/api'
+  /** `scope` with the model gate its json extraction asks: the call's own (`from`), else the engine's, else a refusal where one is required. */
+  const modelGated = <C extends ExecutionContext>(scope: C, from: ExecutionContext = scope): C => {
+    const gate = from.modelGate ?? options.modelGate ?? (options.requireModelGate === true ? HOSTED_MODEL_UNGATED : undefined)
+    return gate === undefined ? scope : { ...scope, modelGate: gate }
+  }
   prepareTaskRoot(taskRoot)
   const monitorStore = MonitorStore.open(join(taskRoot, 'section-b-control.sqlite'), {leaseMs: options.monitorLeaseMs, attemptTimeoutMs: options.monitorAttemptTimeoutMs})
   const deliveryStore = DeliveryStore.open(join(taskRoot, 'section-b-control.sqlite'))
@@ -609,6 +636,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   /** ADR 0005 `installed_chrome`: the machine's own Google Chrome, a rung for requests that choose access enhanced. Local only. */
   const installedChrome = (accessGrant?.capabilities ?? []).includes('installed_chrome')
   if (installedChrome && options.hosted === true) throw new Error('installed_chrome is refused on a hosted engine (ADR 0005: it launches the Google Chrome of the machine Octocrawl runs on)')
+  const captchaSolving = options.captchaSolving
+  if (captchaSolving !== undefined && options.hosted === true) throw new Error('third_party_captcha_solver is refused on a hosted engine (ADR 0005, revision of 2026-10-25: local only for now)')
+  if (captchaSolving !== undefined && !(accessGrant?.capabilities ?? []).includes('third_party_captcha_solver')) throw new Error('a captcha solver needs an access grant that names third_party_captcha_solver (ADR 0005)')
   /**
    * ADR 0005 (revision of 2026-10-23): a server on the person's machine (one that can hand them a page; never a hosted
    * one) whose grant does not name installed_chrome recommends the route in the hint of a page a check stopped, for a
@@ -912,7 +942,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}), ...(installedChrome ? { installedChrome, ...(options.installedChromeSeams === undefined ? {} : { installedChromeSeams: options.installedChromeSeams }) } : {}) })
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}), ...(installedChrome ? { installedChrome, ...(options.installedChromeSeams === undefined ? {} : { installedChromeSeams: options.installedChromeSeams }) } : {}), ...(captchaSolving !== undefined && enhanced === true ? { captchaSolving } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -1487,7 +1517,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
                 const read = listRun === null ? await readThrough(chrome, step.url, step.result!, fetchOpts, req.waitMs, hooks, signal) : await continueList(chrome, step, listRun, selection, fetchOpts, req.waitMs, hooks, signal)
                 if ('reason' in read) { items.push({ id: step.id, url: step.url, through: false, status: step.status, reason: read.reason }); continue }
                 const result = read.result
-                const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), createExecutionScope({}), structuredModelConfigFromEnv(), listFormat(formats)) : undefined
+                const json = hasFormat(formats, 'json') ? await extractStructured(extractionInput(result), customJsonFormat(formats), modelGated(createExecutionScope({})), structuredModelConfigFromEnv(), listFormat(formats)) : undefined
                 const stored = verifiedJobResult(task, {
                   ...result,
                   markdown: hasFormat(formats, 'markdown') ? result.markdown : null,
@@ -1610,7 +1640,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           const outcome: ScrapeOutcome = answer.kind === 'fetch'
             ? await (myBrowser !== null ? myBrowser.scrape(url, context) : lane.ladder.scrape(url, page)).then((fetched) => ({ ...fetched, result: afterFetch(plan, answer, fetched.result) }))
             : { result: answer.result, links: answer.result.links ?? [], cached: answer.kind === 'hit' }
-          const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, page, structuredModelConfigFromEnv(), listFormat(formats)) : undefined
+          const json = wants('json') ? await extractStructured(extractionInput(outcome.result), custom, modelGated(page), structuredModelConfigFromEnv(), listFormat(formats)) : undefined
           return { outcome, json }
         })().finally(() => page.dispose())
         // The stored audit repeats no page body; a screenshot's base64 is stored once, on the result, and its attempt copy says null; what actions produced is stored once, on the result.
@@ -1833,7 +1863,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // A pinned fastMode's reason replaces the engine's "retry without fastMode" in the answer and the record alike.
       const pinned = context.fastModePin === undefined ? [] : pinnedFastModeHints(run.agentHints ?? [], context.fastModePin)
       const full: ScrapeRun = pinned.length === 0 ? run : { ...run, agentHints: pinned }
-      const response = await prepareScrapeResponse(full, req, shapeScope, null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
+      const response = await prepareScrapeResponse(full, req, modelGated(shapeScope, context), null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
       if (!record) return response
       // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
       try {
@@ -2383,7 +2413,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             status: ended?.status ?? 'failed', attemptId, newPages, budgetExceeded: attempt?.budgetExceeded ?? null,
             // Each page keeps its trace (the robots.txt and Crawl-delay evidence a page is judged by); the routing audit is left out.
             items: steps.map((step) => { const { audit: _audit, ...item } = toCrawlPage(step, ended!, false, taskHintOffers(ended!, step.url)); return item as CrawlPage }),
-            charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null })),
+            charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null, modelCalled: (step.result?.json?.modelUsage?.attempts ?? 0) > 0 })),
           }
         } finally { await after.close() }
       } finally {
@@ -2790,7 +2820,8 @@ export interface SliceResult {
   charges: SliceCharge[]
 }
 
-export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null }
+/** `modelCalled`: the page's json model fallback called the model (its json's `modelUsage` names an attempt). */
+export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null; modelCalled: boolean }
 
 /** A batch never discovers: its frontier takes the whole host and exact canonical URLs. */
 const BATCH_SCOPE: CrawlScopeOptions = { regexOnFullURL: false, ignoreQueryParameters: false, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false }

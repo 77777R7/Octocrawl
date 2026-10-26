@@ -1,6 +1,6 @@
 import type { AppliedRobotsOverride } from './compliance.js'
 import type { FetchWarning, TraceEvent } from './result.js'
-import type { AttributeSelector, ListFormatRequest, ScreenshotOptions } from './structured.js'
+import type { AttributeSelector, ListFormatRequest, ScreenshotOptions, StructuredModelGate } from './structured.js'
 import type { PageAction } from './actions.js'
 import type { VerifyContract } from './verify.js'
 
@@ -55,6 +55,13 @@ export interface ExecutionContext {
    */
   paidCalls?: PaidCallLog
   /**
+   * The page's CAPTCHA solves (ADR 0005 `third_party_captcha_solver`), shared by every rung and retry of one page's
+   * fetch: how many it has bought, so `maxSolvesPerCall` bounds the page and not each rung, and `charged` puts a solve on
+   * the run's paid calls the moment the ledger settles it, so a rung that throws afterwards loses none. Returns the
+   * call's number in the run. Absent: the rung counts its own, and its result's trace alone carries them.
+   */
+  captchaSolves?: CaptchaSolveLog
+  /**
    * The paid call this fetch is (its `paid_calls` id), set by the ladder for a provider rung's call within a task: a
    * provider that lets the caller name its session (Steel's `sessionId`) names it from this id, so the session can be
    * found again after a crash (PA E4). Absent outside a task.
@@ -66,6 +73,12 @@ export interface ExecutionContext {
    * asked. Set by the ladder with `paidCallId`; a listener's error is ignored.
    */
   onPaidSession?: (session: { providerSessionId: string; providerRequestId?: string }) => void
+  /**
+   * Asked before a json model fallback calls the model for a page (hosted Octocrawl's switch, daily cap and credits):
+   * a refusal leaves the json as deterministic extraction read it, with a `model_unavailable` issue that gives the
+   * reason. Absent: the model is called whenever it is configured, as before.
+   */
+  modelGate?: StructuredModelGate
 }
 
 /**
@@ -102,6 +115,22 @@ export interface PaidCallRecord {
   createdAt: string
   /** When the row reached `settled`, `unknown` or `released`; null until then. */
   settledAt: string | null
+}
+
+/** One page's CAPTCHA solves across its rungs (ExecutionContext.captchaSolves). */
+export interface CaptchaSolveLog {
+  /** Solves attempted so far for this page: those the ledger settled, and those the vendor refused before a task. */
+  used(): number
+  /**
+   * A solve the ledger settled (at 0 for a task the vendor reported failed, which its terms do not bill); returns its call
+   * number in the run. `solved`: the vendor answered with a token or cookie.
+   */
+  charged(solve: { vendor: string; rung: string; ceilingUsd: number; chargedUsd: number; reportedCostUsd: number | null; solved: boolean; paidCallId?: string }): number
+  /**
+   * A solve the vendor refused before creating a task: nothing charged, no paid call, but it counts in `used()`, so a
+   * later rung does not send the same refused task again past `maxSolvesPerCall` (proxyless test 2026-10-25).
+   */
+  refused(): void
 }
 
 /** A task's paid-call journal, as a rung sees it. */

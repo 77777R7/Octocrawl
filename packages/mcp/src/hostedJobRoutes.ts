@@ -10,6 +10,7 @@ import { gunzipSync } from 'node:zlib'
 import { CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, parseBatchStartRequest, parseCrawlStartRequest, readWebhook, RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import type { CreditsStore } from './hostedCredits.js'
 import { CREDITS } from './hostedCredits.js'
+import { asksModelFallback } from './hostedModel.js'
 import type { GcsBucket } from './hostedCloud.js'
 import { newHostedJob, type HostedJob, type HostedJobStore, type HostedJobWebhook, type HostedWebhookEvent, type JobLimits } from './hostedJobs.js'
 
@@ -225,12 +226,15 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
 
     const pages = kind === 'batch' ? (parsed as ParsedBatchStartRequest).urls.length : (parsed as ParsedCrawlStartRequest).maxPages ?? JOB_DEFAULT_CRAWL_PAGES
     const price = body.fastMode === true ? CREDITS.httpPage : CREDITS.browserPage
-    const estimatedCredits = Math.min(pages * price, (maxCredits as number | undefined) ?? Number.POSITIVE_INFINITY)
-    const firstSlice = Math.min(pages, JOB_SLICE_PAGES) * price
+    const cap = (maxCredits as number | undefined) ?? Number.POSITIVE_INFINITY
+    // The estimate counts the json model fallback's two a page where it is asked for; the start needs only what a slice
+    // without the model needs, since a slice short of the two reads without it.
+    const estimatedCredits = Math.min(pages * (price + (asksModelFallback(body.formats) ? CREDITS.model : 0)), cap)
+    const firstSlice = Math.min(Math.min(pages, JOB_SLICE_PAGES) * price, cap)
     const at = now()
     const balance = await credits.balance(caller.uid, at)
-    if (balance < Math.min(firstSlice, estimatedCredits)) {
-      return refusal(429, 'quota_exhausted', `this account has ${balance} credits; the job's first slice needs ${Math.min(firstSlice, estimatedCredits)}`, ['send fastMode: true to read over HTTP alone at 1 credit a page, or fewer URLs'])
+    if (balance < firstSlice) {
+      return refusal(429, 'quota_exhausted', `this account has ${balance} credits; the job's first slice needs ${firstSlice}`, ['send fastMode: true to read over HTTP alone at 1 credit a page, or fewer URLs'])
     }
 
     const workspaceId = personalWorkspace(caller.uid)

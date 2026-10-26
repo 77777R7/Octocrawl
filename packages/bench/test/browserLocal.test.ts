@@ -7,6 +7,8 @@ import { DEFAULT_NETWORK_POLICY, localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { extractTf } from '@w2l/extract-tf'
 import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
+import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
+import { RobotsOriginCache } from '../src/robotsLookup.js'
 import { captureOf } from '../src/capture.js'
 
 /**
@@ -191,6 +193,10 @@ beforeAll(async () => {
           '<nav><ul><li><a href="/tides">Tide tables</a></li><li><a href="/weather">Weather</a></li></ul></nav>' +
           '<footer><p>Published by the harbour office</p></footer></body></html>',
       )
+    } else if (req.url === '/solved-short') {
+      // Google's reCAPTCHA demo once its form was posted with a good token (C011, 2026-10-26): 31 characters, no main block.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><head><title>ReCAPTCHA demo</title></head><body><div class="recaptcha-success">Verification Success... Hooray!</div></body></html>')
     } else if (req.url === '/hang') {
       // Never respond; the subject's own timeout must fire and map to `timeout`.
     } else if (req.url === '/gate') {
@@ -469,6 +475,46 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
+  it("shares the run's robots.txt cache with the other rungs by origin and User-Agent, and records its own decision", async () => {
+    // A server that answers each User-Agent its own file, as etsy did (T005).
+    const agents: string[] = []
+    const site = createServer((req, res) => {
+      if (req.url === '/robots.txt') {
+        const agent = req.headers['user-agent'] ?? ''
+        agents.push(agent)
+        res.writeHead(200, { 'content-type': 'text/plain' }).end(`User-agent: *\nDisallow: /${agent.includes('Chrome/128.') ? 'cart' : 'search'}\n`)
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><main><article><h1>Harbour notes</h1><p>The harbour office keeps a ledger of tides, winds and the ships that came in, and this page is long enough to be read as content.</p></article></main></body></html>')
+    })
+    await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${(site.address() as { port: number }).port}`
+    const robots = new RobotsOriginCache()
+    const browsers = [1, 2].map(() => new BrowserLocalSubject('standard', null, false, undefined, null, undefined, null, undefined, undefined, null, false, undefined, 'playwright', 'declared', {}, null, robots))
+    const http = new ResilientHttpSubject('standard', undefined, undefined, undefined, false, null, false, robots)
+    try {
+      const reads = [await browsers[0]!.fetch(`${base}/page`), await browsers[1]!.fetch(`${base}/page`), await http.fetch(`${base}/page`)]
+      // Both browsers declare the same User-Agent and read the file once; http declares its own and reads its own.
+      expect(agents).toHaveLength(2)
+      expect(agents[1]).toContain('Chrome/128.')
+      const checked = reads.map((out) => out.trace.find((event) => event.event === 'robots_checked')?.detail)
+      expect(checked.map((detail) => detail?.decision)).toEqual(['allowed', 'allowed', 'allowed'])
+      expect(checked[0]?.robotsSha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(checked[1]?.robotsSha256).toBe(checked[0]?.robotsSha256)
+      expect(checked[2]?.robotsSha256).not.toBe(checked[0]?.robotsSha256)
+      // Each browser's record signs the file its own decision was made on.
+      expect(reads.slice(0, 2).map((out) => out.compliance?.robots.robotsSha256)).toEqual(checked.slice(0, 2).map((detail) => detail?.robotsSha256))
+    } finally {
+      for (const browser of browsers) await browser.teardown()
+      await http.teardown()
+    }
+    // The cache is the run's, not a rung's: their teardown left it reading.
+    const after = await robots.lookup(`${base}/page`, 'Later/1.0')
+    expect(robots.decision(after, `${base}/page`, 'Later/1.0').decision).toBe('allowed')
+    await robots.teardown()
+    await new Promise<void>((resolve) => site.close(() => resolve()))
+  })
+
   it('chains every record in a run into one verifiable ledger', async () => {
     const subject = new BrowserLocalSubject()
     try {
@@ -628,6 +674,27 @@ describe('BrowserLocalSubject transport', () => {
       await subject.teardown()
     }
   })
+
+  it('delivers a page with no main block whose whole text the task contract holds on, and only then (C011, 2026-10-26)', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const verify = { checks: [{ type: 'markdownMatches' as const, pattern: 'Verification Success' }] }
+      const held = await subject.fetch(`${url}/solved-short`, Date.now() + 20_000, undefined, undefined, { verify })
+      expect(held).toMatchObject({ status: 'success', failureReason: null, markdown: 'Verification Success... Hooray!' })
+      expect(held.usage.contentTokens).toBeGreaterThan(0)
+      expect(held.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true, textChars: 31 }) }))
+      // The contract's choice, so the API's page cache never gives this page to a request without it.
+      expect(held.trace.find((event) => event.event === 'extraction_candidates')?.detail).toMatchObject({ readiness: 'not_extracted', trigger: 'not_extracted', selected: 'document', replaced: true, reason: 'passes_contract', candidates: [{ id: 'main_content', skipped: 'empty' }, { id: 'document', passed: 1, failed: 0, unjudged: 0 }] })
+      // No contract, one the page fails, or one with no Markdown check (a field the result always has): not proven content.
+      const unproven = [{}, { verify: { checks: [{ type: 'markdownIncludes' as const, text: 'Order confirmed' }] } }, { verify: { checks: [{ type: 'field' as const, path: 'status', equals: 'success' }] } }]
+      for (const options of unproven) {
+        const out = await subject.fetch(`${url}/solved-short`, Date.now() + 6_000, undefined, undefined, options)
+        expect(out).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: 'Verification Success... Hooray!' })
+      }
+    } finally {
+      await subject.teardown()
+    }
+  }, 60_000)
 
   it('reads a page of zero-width characters alone as a page with no text, not content, for onlyMainContent false too', async () => {
     const subject = new BrowserLocalSubject()

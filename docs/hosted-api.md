@@ -240,6 +240,7 @@ A key that names an account (`uid` on its `hostedApiKeys` document) spends that 
   | A page read on a browser lane | 5 |
   | A page that does not exist (HTTP 404 or 410) | 1 |
   | A `map` that returned URLs | 1 |
+  | The json model fallback, on a page whose json called the model ([below](#the-json-model-fallback)) | +2 |
   | Anything else: blocked by a check, a challenge or robots.txt, nothing read, an invalid request, a server error | 0 |
 
 - **How it is charged.** A call reserves the most it could cost before it runs: 5 when the key may use the browser lane, else 1. When it ends, it gives back what its result did not cost.
@@ -248,9 +249,9 @@ A key that names an account (`uid` on its `hostedApiKeys` document) spends that 
 - **Firestore.**
   - `credits/{uid}` holds `month`, `grant` and `purchased`. An account's first balance is written only while `users/{uid}` exists (the same commit checks it): a deleted account (public-preview auth.ts) cannot start a new one through a key the API still has cached, and such a call is `401 unauthorized`. A key issued by hand with `--uid` needs that account to have signed in once.
   - A reservation updates that document and the accounts' daily counters (`hostedQuotas/{day}-accounts` and `hostedQuotas/{day}-account-{uid}`) in one commit with update-time preconditions, so two instances cannot overspend.
-  - The refund and the day's usage (`creditUsage/{uid}-{day}`: `http`, `browser`, `not_found`, `map`, `unread`, `credits`) are server-side increments. The usage documents expire after 90 days (the TTL policy above).
-  - The same commit writes the call's request line, `requestLog/{uid}/requests/{id}`: endpoint, key HMAC, the URL asked for and the final URL, lane, status, HTTP status, reason, robots.txt decision, the Evidence Record's `rawSha256`, a map's link count, the format names a scrape asked for (`formats`, empty when it named none, absent on a map), how long the call took (`ms`), what it was counted as and its credits. Never the page's content. The id is `9999999999999 − epoch ms` and a random tail, so Firestore's default order lists the newest first without an index. Lines expire 30 days on (`expireAt`, the TTL policy above), and the dashboard reads them through `GET /api/account/activity` (packages/public-preview/src/account.ts).
-- **Logs.** Every key's start that passed its allowance or reserved its credits logs `hosted_usage` with the first 16 characters of the key's HMAC (never the key; `playground:` and the uid's first characters for the dashboard's Playground, below), its plan, the account id for an account's key, the endpoint and the UTC day: the per-key, per-day count for keys issued by hand as well (ROADMAP PH item 2). Every call that reserved credits logs `hosted_credits` with the account id, what it was counted as, and what it reserved and spent. A reservation or settle that fails logs `hosted_credits_reserve_failed` or `hosted_credits_settle_failed`. A commit that timed out may still have applied, so check `credits/{uid}` and `creditUsage` before giving anything back by hand.
+  - The refund and the day's usage (`creditUsage/{uid}-{day}`: `http`, `browser`, `not_found`, `map`, `unread`, `model`, `credits`; `model` counts the pages whose json called the model, beside their own kind) are server-side increments. The usage documents expire after 90 days (the TTL policy above).
+  - The same commit writes the call's request line, `requestLog/{uid}/requests/{id}`: endpoint, key HMAC, the URL asked for and the final URL, lane, status, HTTP status, reason, robots.txt decision, the Evidence Record's `rawSha256`, a map's link count, the format names a scrape asked for (`formats`, empty when it named none, absent on a map), how long the call took (`ms`), what it was counted as and its credits, with `modelCredits` (the model's part of them) when the scrape asked for the json model fallback. Never the page's content. The id is `9999999999999 − epoch ms` and a random tail, so Firestore's default order lists the newest first without an index. Lines expire 30 days on (`expireAt`, the TTL policy above), and the dashboard reads them through `GET /api/account/activity` (packages/public-preview/src/account.ts).
+- **Logs.** Every key's start that passed its allowance or reserved its credits logs `hosted_usage` with the first 16 characters of the key's HMAC (never the key; `playground:` and the uid's first characters for the dashboard's Playground, below), its plan, the account id for an account's key, the endpoint and the UTC day: the per-key, per-day count for keys issued by hand as well (ROADMAP PH item 2). Every call that reserved credits logs `hosted_credits` with the account id, what it was counted as, and what it reserved and spent. A reservation or settle that fails logs `hosted_credits_reserve_failed` or `hosted_credits_settle_failed`. A commit that timed out may still have applied, so check `credits/{uid}` and `creditUsage` before giving anything back by hand. Every keyless start logs `hosted_keyless_usage` with the first 16 characters of the address's HMAC (the daily counter's; `null` and `pool: "claude"` for Claude's connectors), the endpoint and the UTC day, and every MCP `initialize` logs `hosted_mcp_initialize` with the endpoint, the caller's kind (`keyless`, `key`, `oauth`) and the `clientInfo` name and version the client gave, as printable text of at most 64 characters. `scripts/hosted/funnel.mjs` counts active keyless addresses and connections by client from these lines, and sign-ups by `users/{uid}.firstSource`, which the site writes from its `w2l_src` cookie on an account's first sign-in (packages/public-preview/src/site.ts).
 - **Edge.** A call that runs across 00:00 UTC on the 1st gives its refund to the new month's grant, at most 4 credits over it.
 - **The dashboard's Playground.** `/dashboard/scrape/` and `/dashboard/map/` on octocrawl.dev run a scrape or a map for the signed-in account without a key. The site's server (`POST /api/account/run`, packages/public-preview/src/account.ts) calls `/v1/scrape` or `/v1/map` with `X-W2L-Site-Account: {uid}.{expires ms}.{HMAC}`, signed with `W2L_QUOTA_HASH_KEY` and good for two minutes. The gate checks it without a store (`verifySiteAccount`), so it is not counted per address, and treats the call as the account's: same price, same reservation, same `X-Credits-*` headers, same request line, under the key id `playground:{uid}`. A header that does not verify is `401 unauthorized`. A run does not count against the account's five keys. Its scrape takes a browser-lane lease of its own, `browser-playground:{uid}`, so a second run started before the first ends is `429 browser_busy`.
 
@@ -259,6 +260,60 @@ Keys for an account are made on octocrawl.dev's dashboard (`/dashboard/keys/`) a
 ```sh
 node scripts/hosted/issue-key.mjs issue --label 'test account' --uid test-account-1 --browser
 ```
+
+## The json model fallback
+
+`modelFallback: true` on a json format calls a model for the required fields a page's own data left empty ([JSON extraction](json-extraction.md)). On hosted Octocrawl it runs on Octocrawl's Anthropic account, for accounts only. Decided by Howard on 2026-10-24 (ROADMAP P5); `packages/mcp/src/hostedModel.ts` holds the rules.
+
+- **The model.** Claude Haiku 5.5 (`claude-haiku-5-5`) through the native provider (`W2L_EXTRACT_PROVIDER=anthropic`), at the code's default effort (`low`, `CLAUDE_DEFAULT_EFFORT` in `packages/api/src/structured.ts`; no `W2L_EXTRACT_EFFORT`).
+- **The price.** 2 credits more for each page on which the model was called, as `json.modelUsage.attempts` shows it: one call or two (a repair) cost the same. Nothing more when `modelFallback` is off, the json was complete without the model, or a refusal below kept the model from being called. A scrape reserves the 2 with the page, before it runs, and gives them back when no call was made. An account without the 2 on top of the page's own price reads the page without the model; a job's slice does the same. A keyless caller and a key issued by hand have no credits, so their pages never call the model.
+- **The daily cap.** Every hosted call together may spend `dailyCapUsd` (default $5) a UTC day on the model. Before a page's first call its gate reserves the most the page's calls can cost: both attempts, one input token per byte sent (the page's Markdown, the schema, the prompt and the values already read, plus 8 KiB for the system prompt, the format's framing and a repair, whose text a gated page cuts to 1,000 characters; this assumes a token covers at least one byte of UTF-8) and 16,000 output tokens each, at Claude Haiku 5.5's published prices. For a 30 KB page that is about $0.024 against a measured $0.0011 a call (19 calls cost $0.0208 in `research/accuracy/runs/2026-10-24-f2-live-v2-453b2105.md`): it is held only while the call runs. The reservation is a commit to `hostedModelSpend/{day}` (`microUsd`, micro-USD) with an update-time precondition, so two instances cannot pass the cap together. After the call it is replaced by what the calls cost (`modelUsage.externalCostUsd`), or given back when none was made. A cost that is not known (a call that failed after it was sent) keeps the whole reservation. The day's document expires 90 days on (`expireAt`).
+- **The switch.** The Firestore document `hostedConfig/model`: `enabled` (boolean) and `dailyCapUsd` (number, optional; 0 admits nothing). Both services read it at most every 30 s. While the document is absent, or `enabled` is anything but `true`, the fallback is off, so a deploy alone turns nothing on. A failed read keeps what was read last; with nothing read yet it is off.
+- **A refusal.** A switch that is off, a cap that is reached, a caller without credits for it, or a budget that could not be read calls no model and charges nothing more. The json stays as deterministic extraction read it, `incomplete`, with a `model_unavailable` issue that says which.
+- **What the response says.** A scrape that asked for the fallback carries `X-Credits-Model` (2 or 0), within `X-Credits-Used`. Its json's `modelUsage` gives the model, the calls, the tokens and their price in USD. A job's `credits.used` counts the 2 with each page's own price, and its start's `estimatedCredits` counts 2 more a page.
+- **Logs.** `hosted_model_call` gives the day, the calls, the tokens, the cost and the reservation; `hosted_model_cap_reached` the day's spend and the cap; `hosted_model_budget_failed` and `hosted_model_settle_failed` a store error (a failed settle keeps the reservation, so the day counts more than was spent, never less). `hosted_credits` adds `model`, the credits the model's part cost. No line carries the page, the prompt, the schema, the model's answer or the key.
+- **Local and self-hosted Octocrawl** do not change: the model is called whenever `W2L_EXTRACT_*` configure one, with no gate, no cap and no credits.
+
+### Turning it on
+
+Steps for Howard to approve; nothing here has been run. Howard makes the Anthropic API key in the Anthropic Console on Octocrawl's organization, with its payment method bound, and keeps it in a git-ignored file with owner-only permissions (for example `.w2l/hosted/anthropic-api-key`, no trailing newline).
+
+```sh
+# 1. The secret, readable by the runtime account both services run as.
+gcloud secrets create w2l-anthropic-api-key --replication-policy=automatic --data-file=.w2l/hosted/anthropic-api-key --project="$W2L_PROJECT_ID"
+gcloud secrets add-iam-policy-binding w2l-anthropic-api-key --member="serviceAccount:${W2L_RUNTIME_SA}" --role='roles/secretmanager.secretAccessor' --project="$W2L_PROJECT_ID"
+
+# 2. The day's spend expires 90 days on.
+gcloud firestore fields ttls update expireAt --collection-group=hostedModelSpend --enable-ttl --async --project="$W2L_PROJECT_ID"
+
+# 3. The switch, written off first: the deploy below then enables nothing.
+T=$(gcloud auth print-access-token); curl -s -X PATCH -H "authorization: Bearer $T" -H "x-goog-user-project: $W2L_PROJECT_ID" -H 'content-type: application/json' \
+  "https://firestore.googleapis.com/v1/projects/$W2L_PROJECT_ID/databases/(default)/documents/hostedConfig/model" \
+  -d '{"fields":{"enabled":{"booleanValue":false},"dailyCapUsd":{"doubleValue":5}}}'
+
+# 4. A release of both services from a commit that has this code, as any release (Deploy above; Batch and crawl jobs for
+#    octocrawl-jobs), with the model's variables and the key added to what each has:
+gcloud run deploy octocrawl-api --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic \
+  --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA},W2L_EXTRACT_PROVIDER=anthropic,W2L_EXTRACT_MODEL=claude-haiku-5-5" \
+  --update-secrets='W2L_EXTRACT_API_KEY=w2l-anthropic-api-key:latest'
+gcloud run deploy octocrawl-jobs --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic \
+  --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA},W2L_EXTRACT_PROVIDER=anthropic,W2L_EXTRACT_MODEL=claude-haiku-5-5" \
+  --update-secrets='W2L_EXTRACT_API_KEY=w2l-anthropic-api-key:latest'
+#    Then update-traffic for each to its new revision under a new tag, keep the previous tags as the rollback, and check
+#    that each startup line names "extractModel":"claude-haiku-5-5" and that a scrape with modelFallback answers
+#    model_unavailable "switched off" with X-Credits-Model: 0.
+
+# 5. On: one test page with an account's key, then the switch.
+curl -s -X PATCH -H "authorization: Bearer $T" -H "x-goog-user-project: $W2L_PROJECT_ID" -H 'content-type: application/json' \
+  "https://firestore.googleapis.com/v1/projects/$W2L_PROJECT_ID/databases/(default)/documents/hostedConfig/model?updateMask.fieldPaths=enabled" \
+  -d '{"fields":{"enabled":{"booleanValue":true}}}'
+```
+
+`W2L_EXTRACT_BASE_URL` stays unset, so the SDK calls `https://api.anthropic.com`. The services pass no proxy to the SDK: Cloud Run reaches Anthropic directly.
+
+To turn it off, write `enabled: false` (or delete the document): within 30 s no new call is admitted, and a call already admitted finishes. To change the cap, write `dailyCapUsd`. To take the model away altogether, a release with `--remove-env-vars=W2L_EXTRACT_PROVIDER,W2L_EXTRACT_MODEL --remove-secrets=W2L_EXTRACT_API_KEY` on both services; rolling back to the previous tags does the same, since those revisions have no key. Read a day's spend from `hostedModelSpend/{day}.microUsd`, and the bill from the Anthropic Console.
 
 ## Read the service
 

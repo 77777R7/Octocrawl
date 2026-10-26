@@ -159,7 +159,7 @@ export interface StructuredFieldEvidence {
    * For a value the model wrote: the page text it was located in, as written (`In Stock` for `in_stock`).
    */
   text?: string
-  /** For a number read from page text, or a number or an ISO date the model wrote: the value `text` was read as. */
+  /** For a number read from page text, or a number, an ISO date or a document number (`8` for `PEP 8`) the model wrote: the value `text` was read as. */
   normalized?: number | string
   /** For a number read from page text: the rule it was read by (`number/decimal`, `number/language:de`; numbers.ts). */
   conversion?: string
@@ -228,6 +228,22 @@ export interface StructuredModelUsage {
   strict?: boolean
   strictReason?: string
 }
+
+/**
+ * Whether a page's json model fallback may call the model (ExecutionContext.modelGate). `maxCostUsd` is the most the
+ * page's calls could cost (both attempts, at the model's published prices), or null when that is not known.
+ */
+export interface StructuredModelGate {
+  admit(request: { model: string; maxCostUsd: number | null }): Promise<StructuredModelAdmission>
+}
+
+/**
+ * An admitted page settles once with the usage its calls reported (null when no call was made); a refused one says
+ * why, in words for the `model_unavailable` issue.
+ */
+export type StructuredModelAdmission =
+  | { ok: true; settle(usage: StructuredModelUsage | null): Promise<void> }
+  | { ok: false; message: string }
 
 export interface CanonicalStructuredData {
   adapter: AdapterDescriptor

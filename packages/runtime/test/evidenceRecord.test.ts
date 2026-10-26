@@ -181,6 +181,10 @@ describe('toEvidenceRecord', () => {
     const counted = { ...measured, bytesCounted: 3_900_000, bytesCapped: true }
     expect(timed([counted, { ...counted, bytesCounted: -5, bytesCapped: 'yes' }])).toEqual([counted, { ...counted, bytesCounted: null, bytesCapped: null }])
     expect(timed([measured])![0]).not.toHaveProperty('bytesCounted')
+    // A third-party solver's call keeps its solves attempted beside those it answered, a failed one at 0 solved.
+    const solver = { ...measured, solveAttempts: 1, solves: 0 }
+    expect(timed([solver, { ...solver, solveAttempts: -1 }])).toEqual([solver, { ...solver, solveAttempts: null }])
+    expect(timed([measured])![0]).not.toHaveProperty('solveAttempts')
   })
 
   it('records the device the answering lane declared and the custom headers it sent, sorted by name', () => {

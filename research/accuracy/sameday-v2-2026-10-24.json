@@ -1,0 +1,507 @@
+{
+ "schema": "octocrawl.sameday-field-set/1",
+ "name": "sameday-v2-2026-10-24",
+ "createdAt": "2026-10-24T07:00:11.516313+00:00",
+ "basis": {
+  "set": "reserved-v2",
+  "reservedPlanSha256": "b424a57fdedaa646e2301c60f7b6a55b33c12199d02cbee322c4fb5dfc037bdb",
+  "reservedSealSha256": "1588c8d393e6326eae0796be9f97bcffea46ca2c31c1245ebb7c1f9e03b2f5e1",
+  "run": "2026-10-24-f2-live-v2-07d8fb45",
+  "record": "research/accuracy/runs/2026-10-24-f2-live-v2-07d8fb45.md",
+  "runCommit": "07d8fb456ff3099c5da06202c400040dc8126bb8"
+ },
+ "dataset": {
+  "path": ".w2l/field-gold/sameday-v2-2026-10-24/ (git-ignored)",
+  "planSha256": "751390e59b90478dabefcf3902f68fa26292a9a836397ca90ecae71364f7a0fe",
+  "sealSha256": "3d834cef53b19858c9558eb89baa202e424ef660eed9e9c01d07ffe8fb1319c1",
+  "sourceAudit": "audit_gold.audit_case passes on all 22 cases at sealing"
+ },
+ "scopeRule": "Same-day reference for the live run 2026-10-24-f2-live-v2-07d8fb45 (#701): reserved-v2 cases with a non-static field or a moved list, annotated on the run-day source with their own reserved-v2 rule. Not a holdout; the reserved-v2 gold and seal are unchanged.",
+ "notAnnotated": {
+  "V15": "dates source/context mismatch: advisory-1_date (the block types the 2026-10-20 advisories)",
+  "V16": "not found '<a href=\"/security/notices/USN-8911-1\">' (the block types the 2026-10-20 notices)",
+  "V17": "dates source/context mismatch: news-1_posted (the block types the 2026-10-20 news items)",
+  "V31": "its current rule is reserved-v2/annotation/fix_v31.py (the 2026-10-20 correction), which types the 2026-10-20 entries' start times; the cases_dynamic.py block takes the card time, the rule that correction replaced",
+  "V32": "not found '<div class=\"right\">11:26 am PDT Oct 19, 2026' (the block types the 2026-10-20 forecast time)",
+  "V35": "not found '<time dateTime=\"2026-10-20\">' (the block types the 2026-10-20 first day)"
+ },
+ "edits": {
+  "V19": [
+   "observedTargetRecords: 104 was the 2026-10-20 count; not counted on the run-day page"
+  ],
+  "V25": [
+   "relation names the run-day column header"
+  ],
+  "V34": [
+   "freshness note states the run-day timestamp"
+  ]
+ },
+ "annotation": {
+  "annotatedBy": "Claude Code session f2-eval-sameday (2026-10-24), from the run-day source bytes only, by each case's reserved-v2 annotation block",
+  "status": "engineering_source_checked; spot check done 2026-10-24 (Howard, 36 of 36 agreed)"
+ },
+ "spotCheck": {
+  "seed": 20261024,
+  "fields": 36,
+  "byStratum": {
+   "product": 6,
+   "list": 9,
+   "table": 13,
+   "dynamic": 5,
+   "document_metadata": 3
+  },
+  "reviewer": "Howard (decision 3)",
+  "status": "done: 36 of 36 sampled fields agreed",
+  "checkedAt": "2026-10-24",
+  "record": "research/accuracy/runs/2026-10-24-sameday-v2-spot-check.md"
+ },
+ "fieldSlots": 164,
+ "fieldsDifferingFromGold": 63,
+ "withinRunAgreement": {
+  "checked": 20,
+  "agree": 20,
+  "detail": {
+   "V08": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V09": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V10": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V11": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V12": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V13": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V14": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V18": {
+    "state": "no_model_source"
+   },
+   "V19": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V20": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V21": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V22": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V23": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V24": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V25": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V26": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V28": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V29": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V33": {
+    "state": "block_did_not_run",
+    "error": "V33: not found '<h1 class=\"project-header__name\">'"
+   },
+   "V34": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V36": {
+    "state": "agree",
+    "disagreeing": []
+   },
+   "V37": {
+    "state": "agree",
+    "disagreeing": []
+   }
+  }
+ },
+ "cases": [
+  {
+   "id": "V08",
+   "stratum": "product",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:21:19.545Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V08.json",
+   "answerSha256": "414334f4a4cdf8d296d9a29b5822a2864255106604123a0ba617f75c29e5139d",
+   "sourceSha256": "eb2e56ed5bb3ca5174260f47a9a8cb2010c386d1ef6c4764db15680ad05f0253",
+   "sourceBytes": 83850,
+   "captureSha256": "6804df12dd87f93d2e143939faa4072ab63b12ec4945fd77852c62a4ccc6f3f7",
+   "annotationSha256": "77385915500ec13554d7c425091c6f7d4332a21fdfa170f314046d2d97f288b7",
+   "goldAnnotationSha256": "d241c2422f8f980c89112032e7bdf33c45eedd37b8e73016cf7d914a16a9b9c3",
+   "fieldSlots": 4,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V09",
+   "stratum": "product",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:21:27.229Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V09.json",
+   "answerSha256": "5950e141d2a7b494940486c86a1940f0ef1c8a3e289fa9f612eb4f04624ad4cf",
+   "sourceSha256": "c1365784a9bdad6f0ef416e0866ddf80da6b2e4d7636b88c78141617a4b72a0a",
+   "sourceBytes": 185430,
+   "captureSha256": "aceddeba1c7b221c22abdd5400272f14b04cb23e9841336875d5fc02010e9ba6",
+   "annotationSha256": "be5ec29eaa39d9567f77537aa1326ae813c3834432d5bcc263185728fdba2260",
+   "goldAnnotationSha256": "242b4d34ee8921f1b23ba23145df31a53806ef0011276317777259252d574125",
+   "fieldSlots": 4,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V10",
+   "stratum": "product",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:21:40.572Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V10.json",
+   "answerSha256": "ed4720d52f0e45d37fb4a65ec24fcc59e23e0c02ab166c894157e2bbc6f2686b",
+   "sourceSha256": "900585d3a06fa899c3624387bf2dc1a0315b1247cecc5ac6e4be2e0ee59f0ed6",
+   "sourceBytes": 298903,
+   "captureSha256": "a58c08937e62d0ca7529aa076bffc78a3770f8fde5c48ac7f51486b56c377f9c",
+   "annotationSha256": "7abbe8efeedf53e388facd5ee067a409393069d5d7b18212163b4183600cb97e",
+   "goldAnnotationSha256": "cecf352bbfe3b97db51ef106b025d8f252d67886ae2d3cb9b0e7d0da99362cc8",
+   "fieldSlots": 4,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V11",
+   "stratum": "product",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:21:46.975Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V11.json",
+   "answerSha256": "1bde36f7b9fcdc06456e97178ddb8d17223413fc630c09c993dab187340d9e3b",
+   "sourceSha256": "4edbd8059134962b094376542a14684156dfc3d2769a2ea355f1094ee702da3e",
+   "sourceBytes": 178993,
+   "captureSha256": "af6b7cfac0af455524c9ef2e0bd14d5bb925201d4acf88d886d74838af71cf21",
+   "annotationSha256": "64f1066122d6ca800f423f5547b53657ba0698e8598d25b0777b2b6ab2495989",
+   "goldAnnotationSha256": "ccaaf3eaf923a0a5509c36545a05ebff35d4620e07a14b5d596b169dd8cf198e",
+   "fieldSlots": 3,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V12",
+   "stratum": "product",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:22:04.132Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V12.json",
+   "answerSha256": "7e0e44c9cfb010e1de218536a199a5aff3decafd09b13c7c65a2755ef41e6e6b",
+   "sourceSha256": "7774205a2b459160e28d75cb89c94ddb64463c586daa45e6e03c1041339614b0",
+   "sourceBytes": 1242567,
+   "captureSha256": "4d6681db1f0b370f4fd1303a156e7f2169831ec0487c22710cba32daeaf0ef27",
+   "annotationSha256": "c3c487220a487716dec8cb109e3cc90a2130b7ce2cac3689d8d7df4b10eb4d73",
+   "goldAnnotationSha256": "8aca6adc81e1a05908dad3c1dd81b250d7abcfbd5b0c1adba7b7576e840fe6e5",
+   "fieldSlots": 3,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V13",
+   "stratum": "product",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:22:16.792Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V13.json",
+   "answerSha256": "710c1f3a94fb8e164590a5da1be6938f49ea5ab95a3a9f3e1e1b8ff66e55a146",
+   "sourceSha256": "1c953123ad39a574a1bb63562e694fc46ae01188ef42ca797673ee3d7fb5c1ec",
+   "sourceBytes": 2333639,
+   "captureSha256": "b7c2df3dfb8260829c75f2e063c09e44c8cedbca6bb8793e59789801f19bdf19",
+   "annotationSha256": "a4209676e430b70664ebd225c20c03fac8b0325d35e73494b3a5e63ffd0c1766",
+   "goldAnnotationSha256": "27334d75f2c6c37c6764dbb93d6750ce000ed7ac2867a43e9dff08c92b610b1a",
+   "fieldSlots": 5,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V14",
+   "stratum": "product",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:22:36.482Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V14.json",
+   "answerSha256": "58b6740f99254a09a29a351f1abac56eb8fa70631b784c51e677d3f0bc323b13",
+   "sourceSha256": "8fa809032be4e3ab2380a66e1feab647fe71f6275763c6c697f9c3cb1cffc07e",
+   "sourceBytes": 424513,
+   "captureSha256": "f02ca872dab1b32333d4168bbe1c49b60714d3456186627554e6db8d8af02343",
+   "annotationSha256": "d14ebf25f1ef25a99685884b0bbe9799bdfde3c88a086c9145a6b42e2f752d15",
+   "goldAnnotationSha256": "f61c21501722f91044da200a7cc35613f85cb2b4765bbd599f470010258205c0",
+   "fieldSlots": 4,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V18",
+   "stratum": "list",
+   "referenceArm": "standard",
+   "lane": "browser_local",
+   "fetchedAt": "2026-10-24T05:27:21.630Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V18.json",
+   "answerSha256": "42557a6bf0d29be9ef106706e45bdd4d1ac1585a2349a526f419bb3e742fe2c4",
+   "sourceSha256": "55232957895efbaf8fa3695a74f7f75e62774897f88d11f1d60c2b4eec4c81e5",
+   "sourceBytes": 199448,
+   "captureSha256": "e5c9da99219b76a5d68a5a406e996eede7ae9af558344af3df4f7c76ccfb5793",
+   "annotationSha256": "99b8a73d3079fdf00d5650c2a0812212ef9c9b827cebff0076e6e2bb358fb04f",
+   "goldAnnotationSha256": "824ba43f971224b6f271e2407e93e31f10055ce19aa669faef5cc59b426eea71",
+   "fieldSlots": 9,
+   "fieldsDifferingFromGold": 7
+  },
+  {
+   "id": "V19",
+   "stratum": "list",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:27:27.727Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V19.json",
+   "answerSha256": "4923d002b2d8ba169142e721a0eef1a481e1eb26eff1673782b29f6a1c88d1a4",
+   "sourceSha256": "dbc6cd1f215165398c1f5878831d49bef6c5edf95e64bddd29b0610ff3634426",
+   "sourceBytes": 592578,
+   "captureSha256": "71588a1af0f55c0c2057f2e0c995925be7084df05e029ecf3dbd3c8b75760973",
+   "annotationSha256": "5b2d52898b274e7e88c5e397ff126d21dc654b510e94cf7f88d78b57945d28b9",
+   "goldAnnotationSha256": "e600b0b9a0d1e1d3f9588a1ca518968b34fe5bb8f70bc42c1b14cf1d75dd40ba",
+   "fieldSlots": 9,
+   "fieldsDifferingFromGold": 9
+  },
+  {
+   "id": "V20",
+   "stratum": "list",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:28:04.756Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V20.json",
+   "answerSha256": "9faea1a7374a052ff43acb63d1e98218d65f3519aae3630aa4b6c837a5433619",
+   "sourceSha256": "80f142e9189eefce2bfa0fae636e91fd96005fe10646c8585eacc1447aaabb3b",
+   "sourceBytes": 45520,
+   "captureSha256": "e1ec25ac97d860b4493876efc1b2b64ed73d97a86e8aca8b48d99e83f0194b02",
+   "annotationSha256": "c87ea40d61125e5197923c0e177abfa6edc112d09f6566d37a7603bdf5068e03",
+   "goldAnnotationSha256": "28785b9f41ff39b8e439574fd5316bc58477c3ae7d4e28e87d5dc16479443b86",
+   "fieldSlots": 12,
+   "fieldsDifferingFromGold": 10
+  },
+  {
+   "id": "V21",
+   "stratum": "list",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:28:16.826Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V21.json",
+   "answerSha256": "ef2e6d1eb58c9fc4ccb28db1fb696062b4ddda39a5b8406bc2515eabed09e137",
+   "sourceSha256": "67ad2b5610129aa39efb92311b82b70a4f0aff54a02470d0bf4adfcd51581b78",
+   "sourceBytes": 829173,
+   "captureSha256": "cd4885c22b7ade858336073592472edf5141c9d37d6f5cb93cc6262b4729c0d3",
+   "annotationSha256": "90fb286fc61f4d313f3666a28558133684cf939d3c0328d5b416849657272747",
+   "goldAnnotationSha256": "b83726b983b6e166576683a20f4b1dac3a88686b254682ecba6663168b071f96",
+   "fieldSlots": 12,
+   "fieldsDifferingFromGold": 12
+  },
+  {
+   "id": "V22",
+   "stratum": "table",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:28:28.927Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V22.json",
+   "answerSha256": "da1f38a8b625368a542b1ebcafbdc97dfcd09829bf0a68bf1971a333b9471313",
+   "sourceSha256": "3681b3cc63192cdb248ec4224e3b6a0b8043dc617ecd6f0b9fb05447e1c7d3d5",
+   "sourceBytes": 91148,
+   "captureSha256": "6f7fcd5c02d1a4ba6ce60a110b8b7b631ab5071cee5446e7e6423b36479bd80c",
+   "annotationSha256": "c10811bb74a07777e831dcb67534c1888897b122c45768130afab46885801eca",
+   "goldAnnotationSha256": "b039bfa995c4276f4648300ddde4e2e2e66fccc7a57f7a3adc662d2d26064dc0",
+   "fieldSlots": 12,
+   "fieldsDifferingFromGold": 3
+  },
+  {
+   "id": "V23",
+   "stratum": "table",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:28:39.289Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V23.json",
+   "answerSha256": "274834c2317b8181acb0bf1fe5019bc6b198ab90ee36d8e042017b274c7588aa",
+   "sourceSha256": "9933a4e2ddbaa2416475bf3693bfe4a5386dd0ba9f73d62536587d304de8333b",
+   "sourceBytes": 125283,
+   "captureSha256": "7ba92c8ffadd95980c30cb5b2c8080190dea143895fc41f1e7d4ad6abd0ebc73",
+   "annotationSha256": "f977b8957a8099e0b3ab2c3899e39e7fba50213e04ff013874cceae0fa649f0a",
+   "goldAnnotationSha256": "b3eb6bee1c07611733e88b391cd74af329985a11be96f3e73df6e5d5cd61971c",
+   "fieldSlots": 12,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V24",
+   "stratum": "table",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:28:54.735Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V24.json",
+   "answerSha256": "b015b29b5418b5d608470e2e55b9fb982f10e8f11cda651aa1b6e7e3ee240f32",
+   "sourceSha256": "965efd214c42f1f4572ff07de21ffe567386e21c7117d7edd6453098e1a5c7b6",
+   "sourceBytes": 422284,
+   "captureSha256": "9da62167abc31038987adc6e187f0dc0c5e7dfc2824485e24126c2847850a8a7",
+   "annotationSha256": "ee441a2a05e5f140a350354156cd77415783c39dc7aeedbd234aa21d111a9e87",
+   "goldAnnotationSha256": "52cee30650c2576d4278626f5e388e64a307c0651acf7180d60b6004af0c7b5a",
+   "fieldSlots": 12,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V25",
+   "stratum": "table",
+   "referenceArm": "standard",
+   "lane": "browser_local",
+   "fetchedAt": "2026-10-24T05:30:17.518Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V25.json",
+   "answerSha256": "2fef4a2bedad6c3c22bcd55bdff51bb1973a9335114bbe26f1c6ea979f409e39",
+   "sourceSha256": "4795a27a0a1d3fab8fc8f1eba69fdbcc1bae73a79538e6b1e188df51c68e9578",
+   "sourceBytes": 633537,
+   "captureSha256": "fbd0d214a107e2a86e56cbab4debb6d7c496cacf307e764189cd068b86389c78",
+   "annotationSha256": "8dd5854b26bedb29bc5a820d5e66685386b5992d336cd943d558968b49466966",
+   "goldAnnotationSha256": "35b7ea91b742537f958624f76b0a7b5b6129772cc7459cab93f8335218b1a174",
+   "fieldSlots": 6,
+   "fieldsDifferingFromGold": 3
+  },
+  {
+   "id": "V26",
+   "stratum": "table",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:30:27.058Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V26.json",
+   "answerSha256": "d76a10a4a70a35a78da8efc4e16c08e3cbc73189bcd2eeccc0579ebc968ff109",
+   "sourceSha256": "9cc9021eb24bc73fbc5e6d50b99e3f6b21af07813b96f178021b8b228e706939",
+   "sourceBytes": 19152,
+   "captureSha256": "854c41923b22c3461d69b7eb8ba619f9c300202844562fa07b1c2fd2be037977",
+   "annotationSha256": "91ac1aa5f1e1d687384a55aa06cd1578b9edc6c91f6bb46ff371b345359daff5",
+   "goldAnnotationSha256": "7320ffd8b956ae38e633b3a3de3ab51afdf494aceb63390ada1bbbad3e3bcdc0",
+   "fieldSlots": 9,
+   "fieldsDifferingFromGold": 4
+  },
+  {
+   "id": "V28",
+   "stratum": "table",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:30:45.834Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V28.json",
+   "answerSha256": "b4cb32bd5b73611cd2287788ec92b8d90405ef6ba9ae3a3b6977610f10fb00c5",
+   "sourceSha256": "2cad77c248e575372245d33197385a7a3727dffdcebc87a3eb5972c149d3ed8a",
+   "sourceBytes": 12669,
+   "captureSha256": "50f32429639c9148b13f0e86c7bf4347b6bbdd17ee519c7af36c1b4cf369ece7",
+   "annotationSha256": "3866dbe8d568f1c3e70362001619f34085a03cb83cdecfcf15ecaa6bb051f8b9",
+   "goldAnnotationSha256": "231f54ac3603771822365ba4c4d6721e28950161f69e0481c4a3b3e2b5446e7a",
+   "fieldSlots": 12,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V29",
+   "stratum": "dynamic",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:31:02.600Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V29.json",
+   "answerSha256": "fc9a268549b1510d45d658cb26d32523c3d1ac20276f6832c5614b30f512caef",
+   "sourceSha256": "d84eed9adb4bc941df59cf58dc2fc1359ec913ae74d123d5ebb7344af3089080",
+   "sourceBytes": 34523,
+   "captureSha256": "52578938a2c93b79ec91703be76061ad592cf9193baf989ce0836b39c110c56b",
+   "annotationSha256": "77b2d81b46da075a72b0a8bafcf6db3dbcf90ad9bb75894ed1a6d143f589ccc9",
+   "goldAnnotationSha256": "07f247fa3090f2d7bca5c4426fd11a956c8ddc227170810eb317e853e65040e4",
+   "fieldSlots": 12,
+   "fieldsDifferingFromGold": 12
+  },
+  {
+   "id": "V33",
+   "stratum": "dynamic",
+   "referenceArm": "standard",
+   "lane": "browser_local",
+   "fetchedAt": "2026-10-24T05:32:06.202Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V33.json",
+   "answerSha256": "568434cf01d360688e2a38714a606f5f2dd945cc14c1615341bbaf0122658b3e",
+   "sourceSha256": "13dad320f1d6ad0e0d709ff371dc5fe08a5525cd587c7fadab00090d85fa19d4",
+   "sourceBytes": 353565,
+   "captureSha256": "529ce14774c44dfb7f27c6dcf83bcc438f72d78ba63dad5d625bcf6a20de00e0",
+   "annotationSha256": "eddc25b7e4a990f62b7c33fc57800bea6fa5ad2bb365282d7e74bb306a6ef440",
+   "goldAnnotationSha256": "1d37516b05462bc11a3547134610467c5c7da2f168aa2b538a56bdebbdeb57d0",
+   "fieldSlots": 3,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V34",
+   "stratum": "dynamic",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:32:21.116Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V34.json",
+   "answerSha256": "83d7109735898390a4f3a849aa4de6414ba069dc5d46091d555f34df4b878d3c",
+   "sourceSha256": "80cb7f53899dbd693b0665b702294e2c9e5daf898d93d07b61988c85f2f6dec6",
+   "sourceBytes": 44930,
+   "captureSha256": "150b526c0488fbb5af78add14f890daddb4ba2fed3a7e6b15d04c03b52d5c8a7",
+   "annotationSha256": "f5678daa8a24a4ff890d7aa3e259611988d2d0ae12f1d2cd72b71fd8972d3607",
+   "goldAnnotationSha256": "203d18e7cc2648af1703c7247f49f23b44f96dd50fbd4ea5b3e6e58da383c0b7",
+   "fieldSlots": 6,
+   "fieldsDifferingFromGold": 3
+  },
+  {
+   "id": "V36",
+   "stratum": "document_metadata",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:32:51.068Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V36.json",
+   "answerSha256": "8245b87dbf45fc86b57523052ca560e262aa5b5822a02a34d1a7e545f92022f2",
+   "sourceSha256": "04b557846462efd3d7644938c52ee9dd1b9c3461191f9e3e5096b9a17edaab4f",
+   "sourceBytes": 156624,
+   "captureSha256": "0d58fef75628bc1a56128f854dfcf9943b67c7e8db3886c78a773bbd573cab93",
+   "annotationSha256": "87eacdf0e2af3ae6945a89cce1db24a56fdc0398fbbb6cf880eaac4f6b93b83b",
+   "goldAnnotationSha256": "afed2b774f0d6ed8d5e0701d69a15cd2e8287a1a9ead5557967a4d14ce264cef",
+   "fieldSlots": 5,
+   "fieldsDifferingFromGold": 0
+  },
+  {
+   "id": "V37",
+   "stratum": "document_metadata",
+   "referenceArm": "standard",
+   "lane": "http",
+   "fetchedAt": "2026-10-24T05:32:58.278Z",
+   "answerFile": ".w2l/field-gold/runs/2026-10-24-f2-live-v2-07d8fb45/standard/V37.json",
+   "answerSha256": "7131a42fff1a7d86998607c52835c0451c31ad20c4cb5cb2108b5054f1ed89ce",
+   "sourceSha256": "9f4e669bee0fab4b1b0e60321b9ca8822b2f1e61a6ebe0243760294eaba0248e",
+   "sourceBytes": 121592,
+   "captureSha256": "ca53e35bc17eaaa33a8d3c4e9daf2fcd22588a4e97efe10d6a6a1c27937808e8",
+   "annotationSha256": "fc08c5a318fcdfcefce7633fc774cae0c0df12b07e6517c00cd99fd62e49c6c6",
+   "goldAnnotationSha256": "d440841373862c0334f7c54c906345249e832450e8752277dd926270a90b6342",
+   "fieldSlots": 6,
+   "fieldsDifferingFromGold": 0
+  }
+ ]
+}

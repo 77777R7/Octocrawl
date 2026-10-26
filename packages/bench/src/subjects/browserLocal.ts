@@ -25,6 +25,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Down
 import { browserEngineFor, type BrowserEngineName } from './browserEngine.js'
 import { DETECTION_FLAGS_ID, launchInstalledChrome, type InstalledChromeTestSeams } from './installedChrome.js'
 import type { BrowserIdentityChoice } from './browserIdentity.js'
+import { solveChallenges, TASK_CONTRACT_UNMET, type CaptchaSolving, type SolveVerdict } from '../vendors/captchaSolver.js'
 import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
@@ -59,7 +60,7 @@ import {
   type HonestyVerdict,
   type IdentityDevice,
 } from '@w2l/contracts'
-import { withExtractionCandidates } from './candidateExtraction.js'
+import { wholePageChosen, withExtractionCandidates } from './candidateExtraction.js'
 
 /**
  * Headers that never go into the as-sent record or the trace: a credential
@@ -264,8 +265,8 @@ async function closeWithin(closing: Promise<unknown>, timeoutMs: number): Promis
  * runs on every fetch and is recorded into the trace — a UA that Playwright
  * mutates on the wire is surfaced as a mismatch, never papered over.
  *
- * robots.txt is fetched per origin and evaluated against the mode's declared
- * UA before navigation; a disallow ends the fetch as `policy_denied` and still
+ * robots.txt is fetched per origin and User-Agent, in the cache the ladder's rungs share
+ * when it hands one (RobotsOriginCache), and evaluated against the UA the page is read with before navigation; a disallow ends the fetch as `policy_denied` and still
  * mints a record, unless the fetch carries an override (`FetchOptions.robotsOverride`:
  * on a local server, a URL the request named), which the record then holds. Every record joins one per-run hash chain, so the ledger a
  * publisher receives is missing-record-evident, not just tamper-evident.
@@ -306,6 +307,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
    * the opposite of what the file is for.
    */
   private readonly robotsCache: RobotsOriginCache
+  /** False when the cache is the run's (the constructor's `robotsCache`): its owner, not this rung, tears it down. */
+  private readonly ownsRobotsCache: boolean
   private readonly networkPolicy: NetworkPolicy
   /** The run's hash chain. Every record this subject mints links into it. */
   private readonly chain: ComplianceChain
@@ -353,7 +356,23 @@ export class BrowserLocalSubject implements SubjectAdapter {
     private readonly browserIdentity: BrowserIdentityChoice = 'declared',
     /** installed_chrome's test seams (installedChrome.ts): a stand-in Chromium and headless where no display exists. */
     private readonly installedChromeSeams: InstalledChromeTestSeams = {},
+    /**
+     * ADR 0005 `third_party_captcha_solver` (revision of 2026-10-25): the solver a page still stopped at a check is
+     * handed to, with the grant's per-solve price and limit and the run's solver exit; null (the default): none.
+     */
+    private readonly captchaSolving: CaptchaSolving | null = null,
+    /**
+     * The run's robots.txt cache, shared with its other rungs (keyed by origin and User-Agent); without one the subject
+     * keeps its own. Only for a browser on the run's own routes: a user's proxy or a host-pinned browser reads its own.
+     */
+    robotsCache?: RobotsOriginCache,
   ) {
+    if (robotsCache !== undefined && (access?.proxy || browserAllowedHosts !== undefined)) {
+      throw new Error("a browser on a route of its own (a user's proxy, host pinning) reads robots.txt on that route, not from the run's cache")
+    }
+    if (captchaSolving !== null && (mode !== 'standard' || access != null || managedProfileDir !== null || previewProductToken || browserAllowedHosts !== undefined)) {
+      throw new Error('a captcha solver runs only on the standard public browser of a local server, never with a saved login or on a hosted preview (ADR 0005)')
+    }
     if (browserEngine !== 'playwright' && (access != null || managedProfileDir !== null)) {
       throw new Error('the enhanced browser runs only in the public browser lane, never with a saved login or a managed profile')
     }
@@ -380,7 +399,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.networkPolicy = access?.proxy || browserAllowedHosts !== undefined ? { ...policy, egressProxy: null } : policy
     this.envProxy = browserProxySettings(this.networkPolicy)
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
-    this.robotsCache = new RobotsOriginCache(this.networkPolicy)
+    this.robotsCache = robotsCache ?? new RobotsOriginCache(this.networkPolicy)
+    this.ownsRobotsCache = robotsCache === undefined
   }
 
   /** Managed profile is a distinct lifecycle path; it is never implied by an anonymous subject. */
@@ -392,8 +412,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
   }
 
   /** `cookieSession`: the task's cookies (ADR 0005 `egress_sessions`): the context starts with them and leaves its own there. */
-  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession, listing?: Pick<ExecutionContext, 'onListPage' | 'listResume'>): Promise<FetchResult> {
-    const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter, ...(cookieSession === undefined ? {} : { cookieSession }), ...(listing?.onListPage === undefined ? {} : { onListPage: listing.onListPage }), ...(listing?.listResume === undefined ? {} : { listResume: listing.listResume }) })
+  async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession, listing?: Pick<ExecutionContext, 'onListPage' | 'listResume' | 'spend' | 'paidCalls' | 'captchaSolves'>): Promise<FetchResult> {
+    const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter, ...(cookieSession === undefined ? {} : { cookieSession }), ...(listing?.onListPage === undefined ? {} : { onListPage: listing.onListPage }), ...(listing?.listResume === undefined ? {} : { listResume: listing.listResume }), ...(listing?.spend === undefined ? {} : { spend: listing.spend }), ...(listing?.paidCalls === undefined ? {} : { paidCalls: listing.paidCalls }), ...(listing?.captchaSolves === undefined ? {} : { captchaSolves: listing.captchaSolves }) })
     const start = Date.now()
     const monotonicStart = performance.now()
     let queueMs = 0
@@ -970,6 +990,35 @@ export class BrowserLocalSubject implements SubjectAdapter {
             if (waited.outcome === 'cleared') await settle(remainingTimeout(execution, 1_500))
           }
         }
+        // ADR 0005 `third_party_captcha_solver`: a page still stopped at a check, judged as its capture below will judge
+        // it, goes to the grant's solver, on the exit the page already left through; the page it shows after the answer
+        // is read and judged as any page, so a solve that leaves it gated is still blocked. A step that fails ends here.
+        if (this.captchaSolving !== null) {
+          const shown = page
+          // The gate the capture below would return the page blocked for, and only that: a check on an error status, a
+          // decisive one, or a widget on a page with no content of its own. A page read as content is never solved.
+          const solveGate = async () => {
+            const answered = reported(documents.shown() ?? { url: shown.url(), response, kind: 'document' }).response
+            const body = await shown.content().catch(() => null)
+            if (body === null) return undefined
+            const shownStatus = answered?.status() ?? 0
+            const header = (name: string) => answered?.headers()[name.toLowerCase()] ?? null
+            const gate = classifyGate({ status: shownStatus || 200, header, body, finalUrl: shown.url() })
+            if (gate === null || (shownStatus !== 200 && shownStatus !== 0)) return gate
+            const decisive = classifyGate({ status: shownStatus || 200, header, body, finalUrl: shown.url(), contentful: true })
+            if (decisive !== null) return decisive
+            const read = extractTf.extract(body, { url: shown.url(), pruneSelectors: options.excludeTags, blockAds: options.blockAds })
+            return read.escalate || read.lastResort === true ? gate : null
+          }
+          await raceWithSignal(solveChallenges({
+            page: shown, solving: this.captchaSolving, userAgent: await page.evaluate(() => navigator.userAgent),
+            pageEgress: proxyFor(page.url(), this.networkPolicy)?.endpoint ?? null,
+            gateNow: solveGate, settle: async () => { await settle(remainingTimeout(execution, 1_500)) },
+            spend: execution.spend, paidCalls: execution.paidCalls, log: execution.captchaSolves, rung: this.browserEngine === 'installed_chrome' ? 'installed_chrome' : 'browser_local',
+            onEvent: (detail) => { trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'captcha_solve', detail: { ...detail } }) },
+            url, deadlineAt: execution.deadlineAt, signal, reserveMs: CAPTURE_RESERVE_MS, options,
+          }), signal)
+        }
         break
       }
       throwIfExecutionStopped(execution)
@@ -1101,9 +1150,30 @@ export class BrowserLocalSubject implements SubjectAdapter {
         : true
       if (region !== undefined && !gated) {
         const maxMs = Math.min(REGION_WAIT_MAX_MS, execution.deadlineAt === undefined ? REGION_WAIT_MAX_MS : execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now())
-        const waited = regionWaitEvent(await raceWithSignal(waitForRegion(shownPage, region, { maxMs }), signal), Date.now() - start, 'browser_local')
+        const outcome = await raceWithSignal(waitForRegion(shownPage, region, { maxMs }), signal)
+        const waited = regionWaitEvent(outcome, Date.now() - start, 'browser_local')
         if (waited !== null) trace.push(waited)
         throwIfExecutionStopped(execution)
+        // ADR 0005 `third_party_captcha_solver` (revision of 2026-10-26): a page that answered as content and fails the
+        // task's checks after the wait, with a token widget that gates it (gatingWidget: shown, not reCAPTCHA's invisible
+        // kind, in a form that asks for nothing else or handing its token to a callback), is solved; the contract judged on
+        // the live page again says whether the token passed. Never a widget on a page the task does not fail.
+        const failing = outcome !== undefined && !outcome.ready && outcome.unjudged === undefined && outcome.checks.some((check) => check.passed === false)
+        if (this.captchaSolving !== null && failing) {
+          const contractNow = async (): Promise<SolveVerdict | null> => {
+            const again = await waitForRegion(shownPage, region, { maxMs: 1_500, scroll: false })
+            return again.ready ? null : { reason: TASK_CONTRACT_UNMET, signals: [] }
+          }
+          await raceWithSignal(solveChallenges({
+            page: shownPage, solving: this.captchaSolving, userAgent: await shownPage.evaluate(() => navigator.userAgent),
+            pageEgress: proxyFor(shownPage.url(), this.networkPolicy)?.endpoint ?? null, trigger: 'task_contract',
+            gateNow: contractNow, settle: async () => { await settle(remainingTimeout(execution, 1_500)) },
+            spend: execution.spend, paidCalls: execution.paidCalls, log: execution.captchaSolves, rung: this.browserEngine === 'installed_chrome' ? 'installed_chrome' : 'browser_local',
+            onEvent: (detail) => { trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'captcha_solve', detail: { ...detail } }) },
+            url, deadlineAt: execution.deadlineAt, signal, reserveMs: CAPTURE_RESERVE_MS, options,
+          }), signal)
+          throwIfExecutionStopped(execution)
+        }
       }
       // The screenshot format: the page as it stands after load, stability
       // and waitFor, before the DOM is read below, so the image and the
@@ -1394,6 +1464,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       let wholePage: string | null = null
       // A page of the records a list format asked for is content, though no article was found in it.
       let listPage = false
+      // So is a page whose whole text holds the request's task contract, its region there on the live page (C011).
+      let contractPage = false
       // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
       if ((extracted.escalate || extracted.lastResort === true) && gate !== null) return blocked(gate)
       if (extracted.escalate && !selectionAsked(options)) {
@@ -1401,18 +1473,24 @@ export class BrowserLocalSubject implements SubjectAdapter {
         listPage = listRecordsFound(body, pageUrl, options)
         // A page captured before its wait ended is not proven empty: the
         // deadline, not the page, is the reason there is no content.
-        if ((options.onlyMainContent !== false && !listPage) || wholePage === null) return {
-          ...base,
-          status: 'failed',
-          failureReason: waitCutShort ? 'timeout' : 'empty_unverified',
-          blockReason: null,
-          budgetExceeded: null,
-          lane: 'browser_local',
-          escalations: [],
-          markdown: wholePage,
-          ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
-          ...(wholePage === null ? {} : { links }),
-          ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
+        if ((options.onlyMainContent !== false && !listPage) || wholePage === null) {
+          const failed: FetchResult = {
+            ...base,
+            status: 'failed',
+            failureReason: waitCutShort ? 'timeout' : 'empty_unverified',
+            blockReason: null,
+            budgetExceeded: null,
+            lane: 'browser_local',
+            escalations: [],
+            markdown: wholePage,
+            ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
+            ...(wholePage === null ? {} : { links }),
+            ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
+          }
+          const chosen = wholePageChosen(failed, { html: converted, url: pageUrl, options, lane: 'browser_local', at: wallMs })
+          if (chosen === null) return failed
+          trace.push(chosen)
+          contractPage = true
         }
       }
 
@@ -1427,7 +1505,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
-      const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, converted.length))
+      const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, converted.length)) || contractPage
         ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl, exclude: options.excludeTags, ...markdownOptions(options) })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
       // The images and attributes formats read the rendered DOM as received, like links.
@@ -1902,7 +1980,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     await this.browser?.close().catch(() => {})
     this.browser = null
     this.browserPromise = null
-    await this.robotsCache.teardown()
+    if (this.ownsRobotsCache) await this.robotsCache.teardown()
   }
 }
 

@@ -41,11 +41,24 @@ export interface AccessGrant {
    */
   tariffs: Readonly<Record<string, VendorTariff>>
   /**
+   * ADR 0005 `third_party_captcha_solver` (revision of 2026-10-25): the solver's vendor, priced by `tariffs[vendor]`, and
+   * the exit the run's rungs use. `egress: "proxy"`: every rung of every request the grant serves leaves through the
+   * operator's sticky exit (W2L_SOLVER_PROXY) from its first request, and the challenges whose answer is bound to an exit
+   * (DataDome, Cloudflare's challenge) are solved through that exit, which the solver is sent. `"none"`: the run's exit
+   * stays as it is and only the challenges solved without an exit (Turnstile, reCAPTCHA v2) are. Null when the grant does
+   * not name the capability (absent).
+   */
+  solver?: AccessGrantSolver | null
+  /**
    * SHA-256 of the grant's text as it was read (accessGrantFromText), so a record names the grant its paid calls were
    * made under without copying it: `shasum -a 256 grant.json` gives the same digest. Absent on a grant built in code.
    */
   sha256?: string
 }
+
+export const SOLVER_VENDORS = ['capsolver'] as const
+export const SOLVER_EGRESS = ['proxy', 'none'] as const
+export interface AccessGrantSolver { vendor: (typeof SOLVER_VENDORS)[number]; egress: (typeof SOLVER_EGRESS)[number] }
 
 /** What a record says of the grant a paid call was made under (ROADMAP PA item 4): its digest, tier and attestation time. */
 export function accessGrantRef(grant: AccessGrant): EvidenceAccessGrant {
@@ -278,8 +291,32 @@ export function normalizeAccessGrant(input: unknown): AccessGrantResult {
     }
   }
 
+  // The solver (ADR 0005, revision of 2026-10-25): named with its capability, priced per solve with a bound on solves.
+  let solver: AccessGrantSolver | null = null
+  const solverIn = input.solver
+  const solverNamed = capabilities.includes('third_party_captcha_solver')
+  if (solverIn !== undefined && solverIn !== null) {
+    if (!isRecord(solverIn) || !(SOLVER_VENDORS as readonly unknown[]).includes(solverIn.vendor) || !(SOLVER_EGRESS as readonly unknown[]).includes(solverIn.egress) || Object.keys(solverIn).some((key) => key !== 'vendor' && key !== 'egress')) {
+      problems.push({ field: 'solver', kind: 'invalid', reason: `solver is { vendor: ${SOLVER_VENDORS.join(' | ')}, egress: ${SOLVER_EGRESS.join(' | ')} }` })
+    } else if (!solverNamed) {
+      problems.push({ field: 'solver', kind: 'invalid', reason: 'solver is only for a grant that names third_party_captcha_solver' })
+    } else {
+      solver = { vendor: solverIn.vendor as AccessGrantSolver['vendor'], egress: solverIn.egress as AccessGrantSolver['egress'] }
+    }
+  } else if (solverNamed) {
+    problems.push({ field: 'solver', kind: 'invalid', reason: 'a grant naming third_party_captcha_solver names its solver: { vendor, egress }' })
+  }
+  if (solver !== null) {
+    const tariff = tariffs[solver.vendor]
+    if (tariff === undefined && !problems.some((p) => p.field.startsWith(`tariffs.${solver!.vendor}`))) {
+      problems.push({ field: `tariffs.${solver.vendor}`, kind: 'invalid', reason: 'the solver is called only at a price: its tariff states perSolveUsd and maxSolvesPerCall' })
+    } else if (tariff !== undefined && (tariff.perSolveUsd <= 0 || tariff.maxSolvesPerCall === null)) {
+      problems.push({ field: `tariffs.${solver.vendor}`, kind: 'invalid', reason: 'the solver\'s tariff states a positive perSolveUsd and maxSolvesPerCall, the most solves one page may buy' })
+    }
+  }
+
   if (problems.length > 0) return { ok: false, problems }
-  return { ok: true, grant: { tier: tier as AccessTier, capabilities, budget: { perRequestUsd, perRunUsd }, scope: { hosts }, attestation, tariffs } }
+  return { ok: true, grant: { tier: tier as AccessTier, capabilities, budget: { perRequestUsd, perRunUsd }, scope: { hosts }, attestation, tariffs, ...(solver === null ? {} : { solver }) } }
 }
 
 /**

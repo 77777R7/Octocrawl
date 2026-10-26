@@ -35,7 +35,8 @@
 //   checkout, else of the main checkout (as run-set.mjs reads them). Never written anywhere.
 //
 // Cost: the free arm pays nothing; the Steel arm's figure is what the spend ledger charged (its tariff estimate, not Steel's
-// bill); a competitor's is the change in its account's usage between before and after its arm, as its own API reports it
+// bill), also per verified result, with its vendor attempts by layer (PA G2a: access delivered, region loaded, task
+// verified) as the API's routing history recorded them during the arm; a competitor's is the change in its account's usage between before and after its arm, as its own API reports it
 // (Firecrawl: credits; ZenRows: credits and USD), beside the runner's inferred credits. Unknown stays unknown.
 
 import { spawn, spawnSync, execSync } from 'node:child_process'
@@ -45,7 +46,7 @@ import { connect } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { grantOf } from './runSetReport.mjs'
-import { IC16_BASELINE, baselineLine, chromeMajor, chromeOfRecord, summaryRows, weeklyHeaderLines, weeklySet } from './weeklyPlan.mjs'
+import { IC16_BASELINE, baselineLine, chromeMajor, chromeOfRecord, observationsBetween, readRouteEntries, steelLayerLines, summaryRows, weeklyHeaderLines, weeklySet } from './weeklyPlan.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../..')
@@ -240,7 +241,15 @@ async function steelArm() {
   } catch (e) { return fail('steel', title, e) } finally { await stopApi() }
   const t = run.summary.totals.cold
   const cost = t.chargedUsd === null || t.chargedUsd === undefined ? 'unknown' : `$${t.chargedUsd.toFixed(4)} charged by the spend ledger (${t.paidCalls} paid calls; the grant's tariff estimate, not Steel's bill)`
-  const extra = [`- API: http://127.0.0.1:${port}, started by this script with W2L_ACCESS_GRANT=${grantFile} (SHA-256 \`${grant.sha256}\`, capabilities: ${grant.capabilities.join(', ')}), W2L_VENDORS=steel; every task with access "enhanced"; stopped after the arm`]
+  // G2a's layers come from the routing history the API wrote during the arm (W2L_TASK_ROOT, as packages/api/src/cli.ts reads it).
+  let observations = null
+  let historyError = null
+  const historyFile = join(resolve(repo, process.env.W2L_TASK_ROOT ?? '.w2l/api'), 'routing-history.sqlite')
+  try { observations = observationsBetween(await readRouteEntries(historyFile), run.summary.environment.startedAt, run.summary.finishedAt) } catch (e) { historyError = `${historyFile}: ${e.message.replace(/\n/g, ' ')}` }
+  const extra = [
+    `- API: http://127.0.0.1:${port}, started by this script with W2L_ACCESS_GRANT=${grantFile} (SHA-256 \`${grant.sha256}\`, capabilities: ${grant.capabilities.join(', ')}), W2L_VENDORS=steel; every task with access "enhanced"; stopped after the arm`,
+    ...steelLayerLines({ observations, historyError, paidCalls: t.paidCalls, chargedUsd: t.chargedUsd, verified: t.verified, verifiedFromPaidCall: t.verifiedFromPaidCall }),
+  ]
   const p = await writeArmRecord('steel', title, extra, [run], cost)
   return { arm: 'steel', competitor: false, totals: combinedTotals([run]), cost: t.chargedUsd === null || t.chargedUsd === undefined ? 'unknown' : `$${t.chargedUsd.toFixed(4)}`, parts: p }
 }

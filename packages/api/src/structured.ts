@@ -36,7 +36,7 @@ import { compilePathFilter, readinessOf, toEvidenceRecord, verify } from '@w2l/r
 import { statesAbsence } from '@w2l/extract-tf'
 import { readNumber, type NumberContext } from './numbers.js'
 import { pdfLabelledValues } from './pdfFields.js'
-import { modelLocator } from './modelEvidence.js'
+import { modelLocator, type ModelLocation } from './modelEvidence.js'
 import { agreesWithText, tableStatements, type TableStatement } from './tableContext.js'
 
 export type StructuredModelConfig = OpenAiModelConfig | ClaudeModelConfig
@@ -310,14 +310,42 @@ function addDeclaredCandidates(
  * something else (`phoneNumber`, `caseNumber`) does not ask for it.
  */
 function withoutDocumentNumber(title: string, root: JsonSchema): string {
-  const m = /^([A-Z]{2,6})[ -]?\d+\s*[:–—-]\s+(\S.*)$/.exec(title)
-  if (m === null) return title
+  return documentNumber(title, root)?.rest ?? title
+}
+
+/** The series and number a title opens with, what follows them, and the top-level keys that ask for that number (withoutDocumentNumber), when one does. */
+function documentNumber(title: string, root: JsonSchema): { series: string; number: string; rest: string; keys: string[] } | null {
+  const m = /^([A-Z]{2,6})[ -]?(\d+)\s*[:–—-]\s+(\S.*)$/.exec(title)
+  if (m === null) return null
   const series = m[1]!.toLowerCase()
-  const asked = Object.keys(effective(root, root).properties ?? {}).some((name) => {
+  const keys = Object.keys(effective(root, root).properties ?? {}).filter((name) => {
     const key = name.toLowerCase().replace(/[^a-z0-9]/g, '')
     return ['number', 'no', 'num', series, `${series}number`, `${series}no`, `${series}num`].includes(key)
   })
-  return asked ? m[2]! : title
+  return keys.length > 0 ? { series: m[1]!, number: m[2]!, rest: m[3]!, keys } : null
+}
+
+/**
+ * The model's answer with each string field that asks for the title's
+ * document number (documentNumber) holding the number alone where the model
+ * wrote it with its series (`PEP 8`, `pep-8` for `8`), as the title is read
+ * without it. Each such path maps to what the model wrote, which is what the
+ * page is searched for. Any other value, and a number field, stays as written.
+ */
+function inDocumentNumberForm(answer: JsonValue, title: string | null | undefined, root: JsonSchema): { answer: JsonValue; written: Map<string, string> } {
+  const written = new Map<string, string>()
+  const asked = title === undefined || title === null ? null : documentNumber(title, root)
+  if (asked === null || !isPlainObject(answer)) return { answer, written }
+  const out = { ...answer }
+  const properties = effective(root, root).properties ?? {}
+  for (const key of asked.keys) {
+    const value = out[key]
+    if (typeof value !== 'string' || !schemaTypes(effective(root, properties[key]!)).includes('string')) continue
+    if (value.trim().toUpperCase().replace(/[ -]/, '') !== `${asked.series}${asked.number}`) continue
+    out[key] = asked.number
+    written.set(`/${key}`, value)
+  }
+  return { answer: out, written }
 }
 
 /** A scholarly page's own title, from its citation_title tag: the first heading may name the archive's subject instead (arXiv). */
@@ -1152,6 +1180,33 @@ const CLAUDE_DEFAULT_EFFORT: ClaudeEffort = 'low'
 const CLAUDE_MAX_TOKENS = 16_000
 
 /**
+ * Bytes a page's model calls may send besides the user message and the schema: the system prompt, the format's own
+ * framing and a second attempt's repair text, which is not known before the first answer.
+ */
+const MODEL_OVERHEAD_BYTES = 8_192
+/**
+ * The repair text a gated page sends at most, in characters: as JSON at most six bytes each, within MODEL_OVERHEAD_BYTES
+ * beside the system prompt. Ajv names every error, so an answer full of invalid values could otherwise make the second
+ * call far larger than the bound its gate reserved. Without a gate the repair text is sent whole, as before.
+ */
+const GATED_REPAIR_CHARS = 1_000
+
+/**
+ * The most a page's model calls can cost in USD, for a gate that holds a budget (ExecutionContext.modelGate): both
+ * attempts, each billed at most one input token for every byte it sends (a token covers at least one byte of UTF-8)
+ * and CLAUDE_MAX_TOKENS of output, at the long-prompt prices once that bound passes their threshold. Null for a model
+ * without a published price here, and for an OpenAI-compatible endpoint, whose price is not known.
+ */
+export function modelCallsMaxCostUsd(config: StructuredModelConfig, sentBytes: number): number | null {
+  if (config.provider !== 'anthropic') return null
+  const price = CLAUDE_PRICES[config.model]
+  if (price === undefined) return null
+  const tokens = sentBytes + MODEL_OVERHEAD_BYTES
+  const rates = price.long !== undefined && tokens > price.long.above ? price.long : price
+  return 2 * (tokens * rates.input + CLAUDE_MAX_TOKENS * rates.output) / 1e6
+}
+
+/**
  * Published prices in USD per million tokens (platform.claude.com/docs/en/about-claude/pricing,
  * read 2026-10-23). Claude Haiku 5.5 bills a prompt of over 100,000 tokens at its long-prompt prices.
  */
@@ -1261,6 +1316,9 @@ function withoutPaths(value: JsonValue | null, paths: ReadonlySet<string>, path 
     .map(([key, child]) => [key, withoutPaths(child, paths, `${path}/${key}`)]))
 }
 
+/** Where the page states a value the model wrote at `path` (modelLocator), or null. */
+type Locate = (value: string | number | boolean, path: string) => ModelLocation | null
+
 /** What the model wrote that the page states, and what it does not. */
 interface ModelCheck {
   evidence: StructuredFieldEvidence[]
@@ -1277,7 +1335,7 @@ interface ModelCheck {
  * dropped whole is reported at the array's path. A null says unavailable and
  * is kept without evidence.
  */
-function supportedValue(value: JsonValue, path: string, root: JsonSchema, schemaInput: JsonSchema | undefined, locate: ReturnType<typeof modelLocator>, check: ModelCheck): JsonValue | undefined {
+function supportedValue(value: JsonValue, path: string, root: JsonSchema, schemaInput: JsonSchema | undefined, locate: Locate, check: ModelCheck): JsonValue | undefined {
   if (value === null) return null
   const schema = schemaInput === undefined ? undefined : effective(root, schemaInput)
   if (Array.isArray(value)) {
@@ -1296,7 +1354,7 @@ function supportedValue(value: JsonValue, path: string, root: JsonSchema, schema
     const out: Record<string, JsonValue> = {}
     for (const [key, child] of Object.entries(value)) {
       const named = schema?.properties?.[key]
-      if (named === undefined && locate(key) === null) {
+      if (named === undefined && locate(key, `${path}/${key}`) === null) {
         check.unsupported.push({ path: `${path}/${key}`, value: { [key]: child } })
         continue
       }
@@ -1307,7 +1365,7 @@ function supportedValue(value: JsonValue, path: string, root: JsonSchema, schema
     if (Object.keys(value).length === 0) check.unsupported.push({ path, value })
     return Object.keys(out).length > 0 ? out : undefined
   }
-  const location = locate(value)
+  const location = locate(value, path)
   if (location === null) {
     check.unsupported.push({ path, value })
     return undefined
@@ -1317,7 +1375,7 @@ function supportedValue(value: JsonValue, path: string, root: JsonSchema, schema
 }
 
 /** A locator that takes every value: the answer as the model wrote it, for the schema check. */
-const TAKE_ALL: ReturnType<typeof modelLocator> = value => ({ evidencePath: '', text: String(value) })
+const TAKE_ALL: Locate = value => ({ evidencePath: '', text: String(value) })
 
 /**
  * The model's answer merged into the data read from the page, key by key at
@@ -1326,7 +1384,7 @@ const TAKE_ALL: ReturnType<typeof modelLocator> = value => ({ evidencePath: '', 
  * (supportedValue), and a value the page does not state leaves the field out,
  * also a nullable one the page had no value for.
  */
-function mergeModel(base: JsonValue | undefined, patch: JsonValue | undefined, path: string, kept: ReadonlySet<string>, root: JsonSchema, schemaInput: JsonSchema | undefined, locate: ReturnType<typeof modelLocator>, check: ModelCheck): JsonValue | undefined {
+function mergeModel(base: JsonValue | undefined, patch: JsonValue | undefined, path: string, kept: ReadonlySet<string>, root: JsonSchema, schemaInput: JsonSchema | undefined, locate: Locate, check: ModelCheck): JsonValue | undefined {
   if (patch === undefined || kept.has(path)) return base
   if (isPlainObject(base) && isPlainObject(patch)) {
     const schema = schemaInput === undefined ? undefined : effective(root, schemaInput)
@@ -1425,7 +1483,14 @@ export async function extractStructured(
   const baseEvidence = evidence.filter(item => !broken.has(item.path))
   const deterministic = withoutPaths(mapped, broken)
   const request = modelSchema(format.schema)
-  const locate = modelLocator(result)
+  // A gate (hosted Octocrawl's switch, daily cap and credits) is asked once for the page, before its first call.
+  const sentBytes = Buffer.byteLength(JSON.stringify(modelInput(result, format, deterministic, null))) + Buffer.byteLength(JSON.stringify(request.schema))
+  const admission = execution.modelGate === undefined ? undefined : await execution.modelGate.admit({ model: modelConfig.model, maxCostUsd: modelCallsMaxCostUsd(modelConfig, sentBytes) })
+  if (admission?.ok === false) {
+    issues.push({ code: 'model_unavailable', message: admission.message }, ...missingIssues)
+    return { status: 'incomplete', data, schemaSha256, evidence, issues, modelUsage: null }
+  }
+  const pageLocate = modelLocator(result)
   let attempts = 0
   let inputTokens = 0
   let outputTokens = 0
@@ -1450,12 +1515,32 @@ export async function extractStructured(
     strict: request.strict,
     ...(request.reason === undefined ? {} : { strictReason: request.reason }),
   })
+  /** The page's answer, once the gate that admitted it has heard what its calls cost. */
+  const done = async (out: StructuredExtractionResult): Promise<StructuredExtractionResult> => {
+    await admission?.settle(attempts > 0 ? modelUsage() : null).catch(() => {})
+    return out
+  }
   while (attempts < 2) {
     attempts++
     try {
       const model = await callModel(result, format, request, deterministic, execution, modelConfig, repair)
       count(model)
-      const answer = withoutDisallowedNulls(format.schema, format.schema, model.value)
+      const { answer, written } = inDocumentNumberForm(withoutDisallowedNulls(format.schema, format.schema, model.value), result.document?.title, format.schema)
+      // A field whose own checks (a pattern, an enum) the number alone breaks keeps what the model wrote.
+      if (written.size > 0 && !validate(mergeModel(base, answer, '', kept, format.schema, format.schema, TAKE_ALL, { evidence: [], unsupported: [] }) ?? null)) {
+        for (const [path, text] of written) {
+          if (!isPlainObject(answer) || !(validate.errors ?? []).some(error => error.instancePath === path)) continue
+          answer[path.slice(1)] = text
+          written.delete(path)
+        }
+      }
+      // A value put in the field's form is located as the model wrote it, and its evidence says what it became.
+      const locate: Locate = (value, path) => {
+        const text = written.get(path)
+        if (text === undefined) return pageLocate(value)
+        const location = pageLocate(text)
+        return location === null ? null : { ...location, normalized: value as string }
+      }
       // Schema-valid and supported by the page are two states: the answer is
       // first checked against the schema as written, then each value the
       // model wrote is kept only where the page states it.
@@ -1477,25 +1562,26 @@ export async function extractStructured(
           ...(failedChecks.length > 0 ? [{ code: 'field_unavailable' as const, message: validationMessage(failedChecks) }] : []),
           ...unavailable(merged),
         ]
-        return {
+        return done({
           status: valid && unsupported.length === 0 ? 'complete' : 'incomplete',
           data: merged,
           schemaSha256,
           evidence: [...baseEvidence, ...check.evidence],
           issues,
           modelUsage: modelUsage(),
-        }
+        })
       }
       repair = validationMessage(validate.errors)
+      if (admission !== undefined && repair.length > GATED_REPAIR_CHARS) repair = `${repair.slice(0, GATED_REPAIR_CHARS - 1)}…`
       if (attempts === 2) {
-        return { status: 'invalid', data, schemaSha256, evidence, issues: [...readIssues, { code: 'model_output_invalid', message: repair }, ...missingIssues], modelUsage: modelUsage() }
+        return done({ status: 'invalid', data, schemaSha256, evidence, issues: [...readIssues, { code: 'model_output_invalid', message: repair }, ...missingIssues], modelUsage: modelUsage() })
       }
     } catch (error) {
       if (error instanceof ModelNoAnswer) count(error.usage)
       // A Claude call that failed may still have been billed, for one cut off by the deadline: its tokens and price are unknown, not 0.
       else if (modelConfig.provider === 'anthropic') count({ inputTokens: null, outputTokens: null, costUsd: null })
       const aborted = execution.signal?.aborted === true || (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'TimeoutError')
-      return {
+      return done({
         status: 'incomplete',
         data,
         schemaSha256,
@@ -1506,10 +1592,10 @@ export async function extractStructured(
           ...missingIssues,
         ],
         modelUsage: modelUsage(),
-      }
+      })
     }
   }
-  return { status: 'incomplete', data, schemaSha256, evidence, issues: [...readIssues, ...missingIssues], modelUsage: null }
+  return done({ status: 'incomplete', data, schemaSha256, evidence, issues: [...readIssues, ...missingIssues], modelUsage: null })
 }
 
 /** minTables counts Markdown tables too; neither it nor a Markdown field check validates an omitted format. */

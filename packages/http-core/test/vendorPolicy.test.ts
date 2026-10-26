@@ -26,6 +26,8 @@ function grantNaming(capabilities: readonly string[]): unknown {
     capabilities,
     budget: { perRequestUsd: 0.05, perRunUsd: 5 },
     attestation: { principal: 'tester', at: '2026-10-05T00:00:00Z', statement: 'I accept these routes.' },
+    // The solver names its vendor, its exit and a per-solve price with a bound (ADR 0005, revision of 2026-10-25).
+    ...(capabilities.includes('third_party_captcha_solver') ? { solver: { vendor: 'capsolver', egress: 'none' }, tariffs: { capsolver: { perSolveUsd: 0.003, maxSolvesPerCall: 1 } } } : {}),
   }
 }
 

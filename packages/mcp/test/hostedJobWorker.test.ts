@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -11,6 +11,7 @@ import { MemoryHostedLeases } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
 import { MemoryHostedJobStore, newHostedJob, type HostedJob, type HostedJobWebhook } from '../src/hostedJobs.js'
 import { exportName } from '../src/hostedJobRoutes.js'
+import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } from '../src/hostedModel.js'
 import { googleOidcVerifier, runJobExpiry, runJobSlice, runJobWebhook, startJobWorker, WEBHOOK_MAX_ATTEMPTS, type JobWorkerDeps, type WorkerFiles } from '../src/hostedJobWorker.js'
 import { createHmac, generateKeyPairSync, sign } from 'node:crypto'
 import type { WebhookTransportRequest } from '@w2l/runtime'
@@ -44,7 +45,7 @@ describe('hosted job worker', () => {
   const cleanup: Array<() => Promise<void>> = []
   afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
 
-  async function setup(options: { balance?: number; limits?: Partial<NonNullable<JobWorkerDeps['limits']>>; gate?: string; clock?: { t: Date } } = {}) {
+  async function setup(options: { balance?: number; limits?: Partial<NonNullable<JobWorkerDeps['limits']>>; gate?: string; clock?: { t: Date }; model?: HostedModel } = {}) {
     const seen: string[] = []
     const handler = async (req: IncomingMessage, res: ServerResponse) => {
       const path = req.url ?? '/'
@@ -79,6 +80,7 @@ describe('hosted job worker', () => {
       webhookTransport: async (request) => { posts.push(request); const answer = receiver.answer(); if (answer instanceof Error) throw answer; return { status: answer, retryAfter: null } },
       engineOptions: () => ({ networkPolicy: policy, hosted: false, channelsFor: (mode) => buildChannels(mode, { networkPolicy: policy, localSubjects: { browser_local: { fetch: async () => { throw new Error('worker tests stay on HTTP') } } } }) }),
       limits: { slicePages: 2, sliceMs: 30_000, graceMs: 2_000, ...options.limits },
+      ...(options.model === undefined ? {} : { model: options.model }),
     }
     let n = 0
     const create = async (request: unknown, kind: 'batch' | 'crawl' = 'batch', maxCredits: number | null = null, webhook: HostedJobWebhook | null = null) => {
@@ -328,6 +330,83 @@ describe('hosted job worker', () => {
     const cappedJob = (await capped.store.get(capId))!
     expect(cappedJob).toMatchObject({ status: 'completed', failureReason: 'max_credits' })
     expect(cappedJob.credits.used).toBeLessThanOrEqual(3)
+  })
+
+  describe('the json model fallback on the job\'s credits (decided 2026-10-24)', () => {
+    // A fake Anthropic Messages API on loopback stands in for Claude Haiku 5.5: no paid call is made.
+    let messages: ReturnType<typeof createServer>
+    let calls = 0
+    beforeAll(async () => {
+      messages = createServer((req, res) => {
+        let raw = ''
+        req.on('data', (chunk) => { raw += chunk })
+        req.on('end', () => {
+          calls++
+          const body = JSON.parse(raw)
+          res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: `msg_${calls}`, type: 'message', role: 'assistant', model: body.model, stop_sequence: null, stop_details: null, content: [{ type: 'text', text: JSON.stringify({ title: 'Page', office: 'the worker fixture' }), citations: null }], stop_reason: 'end_turn', usage: { input_tokens: 1_000, output_tokens: 40 } }))
+        })
+      })
+      await new Promise<void>((resolve) => messages.listen(0, '127.0.0.1', resolve))
+    })
+    afterAll(async () => { await new Promise<void>((resolve) => messages.close(() => resolve())) })
+    afterEach(() => { vi.unstubAllEnvs() })
+    const configure = (enabled: boolean) => {
+      calls = 0
+      vi.stubEnv('W2L_EXTRACT_PROVIDER', 'anthropic')
+      vi.stubEnv('W2L_EXTRACT_MODEL', 'claude-haiku-5-5')
+      vi.stubEnv('W2L_EXTRACT_API_KEY', 'sk-ant-worker-test')
+      vi.stubEnv('W2L_EXTRACT_BASE_URL', `http://127.0.0.1:${(messages.address() as AddressInfo).port}`)
+      const spend = new MemoryModelSpend()
+      return { spend, model: new HostedModel({ model: { provider: 'anthropic', model: 'claude-haiku-5-5' }, settings: new MemoryModelSettings({ enabled, dailyCapUsd: 5 }), spend, now: () => NOW, log: () => {} }) }
+    }
+    const formats = ['markdown', { type: 'json', modelFallback: true, schema: { type: 'object', properties: { title: { type: 'string' }, office: { type: 'string' } }, required: ['title', 'office'], additionalProperties: false } }]
+    type Item = { url: string; status: string; json?: { issues: Array<{ code: string; message: string }>; modelUsage: { attempts: number } | null } }
+
+    it('charges each page its read and two more where its json called the model, and settles the day\'s spend', async () => {
+      const { model, spend } = configure(true)
+      const { origin, store, credits, create, drain, exportLines } = await setup({ model })
+      const id = await create(parseBatchStartRequest({ urls: ['/a', '/b', '/c'].map((path) => `${origin}${path}`), fastMode: true, formats }))
+      expect((await drain(id)).at(-1)).toBe('completed')
+      const job = (await store.get(id))!
+      expect(calls).toBe(3)
+      expect(job).toMatchObject({ counts: { pages: 3 }, credits: { used: 9 } })
+      expect(await credits.balance('account-1', NOW)).toBe(991)
+      expect(credits.usage.get('account-1-2026-10-19')).toMatchObject({ http: 3, model: 3, credits: 9 })
+      expect((exportLines(job) as Item[]).every((item) => item.json?.modelUsage?.attempts === 1)).toBe(true)
+      // Three calls of 1,000 input and 40 output tokens at $0.10 and $0.50 a million: 120 micro-USD each.
+      expect(spend.spent.get('2026-10-19')).toBe(360)
+    })
+
+    it('reads a job\'s pages without the model, and charges nothing more, while the switch is off or the credits fall short', async () => {
+      const off = configure(false)
+      const first = await setup({ model: off.model })
+      const id = await first.create(parseBatchStartRequest({ urls: ['/a', '/b'].map((path) => `${first.origin}${path}`), fastMode: true, formats }))
+      await first.drain(id)
+      const job = (await first.store.get(id))!
+      expect(job).toMatchObject({ status: 'completed', credits: { used: 2 } })
+      expect((first.exportLines(job) as Item[]).map((item) => item.json?.issues.find((issue) => issue.code === 'model_unavailable')?.message)).toEqual([MODEL_REFUSALS.switchedOff, MODEL_REFUSALS.switchedOff])
+      // Two credits: a page (one) and the model (two) do not fit together, so the page is read without the model.
+      const on = configure(true)
+      const short = await setup({ balance: 2, model: on.model })
+      const shortId = await short.create(parseBatchStartRequest({ urls: [`${short.origin}/a`], fastMode: true, formats }))
+      await short.drain(shortId)
+      const shortJob = (await short.store.get(shortId))!
+      expect(shortJob).toMatchObject({ status: 'completed', credits: { used: 1 } })
+      expect((short.exportLines(shortJob) as Item[])[0]!.json?.issues).toContainEqual({ code: 'model_unavailable', message: MODEL_REFUSALS.credits })
+      expect(calls).toBe(0)
+      expect(on.spend.spent.size).toBe(0)
+    })
+
+    it('calls no model for a job on a worker that does not offer it', async () => {
+      configure(true)
+      const { origin, store, create, drain, exportLines } = await setup()
+      const id = await create(parseBatchStartRequest({ urls: [`${origin}/a`], fastMode: true, formats }))
+      await drain(id)
+      const job = (await store.get(id))!
+      expect(job.credits.used).toBe(1)
+      expect(calls).toBe(0)
+      expect((exportLines(job) as Item[])[0]!.json?.issues).toContainEqual(expect.objectContaining({ code: 'model_unavailable' }))
+    })
   })
 
   it('waits for the next UTC day at the day\'s job pool, and for a busy host', async () => {

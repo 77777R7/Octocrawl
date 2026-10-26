@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, defaultSessionsFile, parseListen, preloadEngineModules, runApiServer, type ApiEngine, type HandoffHooks } from '@w2l/api'
+import { createApiEngine, defaultSessionsFile, parseListen, preloadEngineModules, runApiServer, startCaptchaSolving, type ApiEngine, type HandoffHooks } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -19,6 +19,7 @@ import {
   type CrawlReport,
   type EvidenceRecord,
   type PageTable,
+  withPoolProxy,
 } from '@w2l/contracts'
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
 import { login } from './login.js'
@@ -61,9 +62,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       await preloadEngineModules(listen)
     } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)) }
     for (const notice of listen.notices) io.stderr(`octocrawl: ${notice}`)
+    // The grant's CAPTCHA solver and its exit, the run's every rung leaving through it from the first request (ADR 0005).
+    const solver = await startCaptchaSolving(listen.captchaSolver, io.env)
     const engine = createApiEngine({
       taskRoot,
-      networkPolicy: listen.networkPolicy,
+      networkPolicy: solver?.exit == null ? listen.networkPolicy : withPoolProxy(listen.networkPolicy, solver.exit),
       allowRobotsOverride: listen.allowRobotsOverride,
       sessionsFile: defaultSessionsFile(io.env),
       // The CLI runs on the person's machine and answers them alone: a page a check stopped can be handed to them in their Chrome.
@@ -77,6 +80,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       compatHosts: listen.compatHosts,
       egressProxies: listen.egressProxies,
       egressEchoUrl: listen.egressEchoUrl,
+      ...(solver === null ? {} : { captchaSolving: solver.solving }),
     })
     try {
       return await runCommand(engine, command, line.urls, line.body, line.cli, io)
@@ -89,6 +93,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
       throw error
     } finally {
       await engine.close({ cancelActive: true })
+      await solver?.close()
     }
   } catch (error) {
     if (error instanceof UsageError || error instanceof RequestError) {

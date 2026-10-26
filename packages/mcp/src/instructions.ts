@@ -48,8 +48,8 @@ export function serverInstructions(toolNames: Iterable<string>, surface: Instruc
       lines.push(`This connection has no key: pages are read over HTTP alone, ${allowance}, so a page that fills itself in with scripts comes back as a shell (client_rendered_suspected). Signing in or a key adds the browser lane and spends the account's credits.`)
     } else {
       const spends = surface.connection === 'oauth'
-        ? 'This connection spends the signed-in account\'s credits: 1 per HTTP page, 5 per browser page, 1 per map.'
-        : 'With a key, pages count against the key\'s daily allowance, or an account\'s credits: 1 per HTTP page, 5 per browser page, 1 per map.'
+        ? 'This connection spends the signed-in account\'s credits: 1 per HTTP page, 5 per browser page, 1 per map, 2 more for a page whose json modelFallback called the model.'
+        : 'With a key, pages count against the key\'s daily allowance, or an account\'s credits: 1 per HTTP page, 5 per browser page, 1 per map, 2 more for a page whose json modelFallback called the model.'
       const lane = surface.browser
         ? 'A page that needs scripts goes on to the browser lane; fastMode: true keeps a call over HTTP alone, and waitFor above 0 starts in the browser.'
         : 'This connection reads over HTTP alone: it has no browser lane.'
