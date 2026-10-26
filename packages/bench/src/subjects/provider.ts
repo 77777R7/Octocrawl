@@ -69,6 +69,18 @@ export interface ProviderTransport {
    */
   fetch(url: string, deadlineMs?: number, signal?: AbortSignal, region?: RegionSpec): Promise<ProviderResponse>
   close?(): Promise<void>
+  /**
+   * The steps the transport took since the last call (its session's creation, CDP connect and UA probe, the page's
+   * navigation, settle and reads), in order: the lane puts them on its trace (O7). Absent on a transport that does not time them.
+   */
+  takeSteps?(): readonly ProviderStep[]
+}
+
+/** A step a transport took for a call: when it ended (`endedAt`, epoch ms) and what it saw, how long it took (`ms`) among it. */
+export interface ProviderStep {
+  event: string
+  endedAt: number
+  detail: Record<string, unknown>
 }
 
 export interface ProviderResponse {
@@ -253,6 +265,16 @@ export class ProviderSubject implements SubjectAdapter {
     }
   }
 
+  /**
+   * The transport's steps since the last call, on the trace with their times (O7). The steps taken before this lane's
+   * clock started (the session opened for the gate's declaration) are put at 0 and say so (`beforeLane`).
+   */
+  private traceSteps(trace: TraceEvent[], start: number, beforeLane = false): void {
+    for (const step of this.transport.takeSteps?.() ?? []) {
+      trace.push({ at: beforeLane ? 0 : Math.max(0, step.endedAt - start), lane: 'provider', event: step.event, detail: beforeLane ? { ...step.detail, beforeLane: true } : step.detail })
+    }
+  }
+
   ledger(): ReturnType<ComplianceChain['toLedger']> {
     return this.chain.toLedger()
   }
@@ -269,6 +291,8 @@ export class ProviderSubject implements SubjectAdapter {
     const trace: TraceEvent[] = [
       { at: 0, lane: 'provider', event: 'provider_selected', detail: { provider: this.provider.id } },
     ]
+    // The session the gate's declaration was measured on was opened before this lane's clock started.
+    this.traceSteps(trace, start, true)
 
     // The capability refusal does not depend on the target, so it can be
     // decided before any network call — and must be, so a refused provider
@@ -349,6 +373,7 @@ export class ProviderSubject implements SubjectAdapter {
     try {
       res = await raceWithSignal(this.transport.fetch(url, execution.deadlineAt, execution.signal, providerRegion(options)), execution.signal)
       fetchedAt = new Date().toISOString()
+      this.traceSteps(trace, start)
       const waited = loadingWaitEvent(res.settle, Date.now() - start, 'provider')
       if (waited !== null) trace.push(waited)
       const regionWaited = regionWaitEvent(res.region, Date.now() - start, 'provider')
@@ -358,6 +383,8 @@ export class ProviderSubject implements SubjectAdapter {
         if (delay !== null) execution.onRetryAfter?.(res.finalUrl, Date.now() + delay)
       }
     } catch (err) {
+      // The steps the call got through before it failed: where its time went.
+      this.traceSteps(trace, start)
       const wallMs = Date.now() - start
       trace.push({
         at: wallMs,

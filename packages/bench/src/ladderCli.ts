@@ -690,9 +690,15 @@ export function buildChannels(
  * report is priced at the ceiling's allowance), and can pass the ceiling: the provider's proxy also carries what the
  * page's own count does not, and it solves what appears. Not when a session's release went unconfirmed (it bills until
  * its timeout) or none was closed: the ceiling stays the charge. What the transport's own meter counted the sessions'
- * pages receiving goes on the result either way (PA G1): it is a count, not a charge.
+ * pages receiving goes on the result either way (PA G1): it is a count, not a charge. So does how long each release and
+ * its usage reads took (`session_released`, O7), after the lane's own clock stopped.
  */
-export function withMeasuredSessions(result: FetchResult, sessions: readonly ClosedVendorSession[], tariff: VendorTariff, ceilingUsd: number, proxyCountry: string | null = null): FetchResult {
+export function withMeasuredSessions(answer: FetchResult, sessions: readonly ClosedVendorSession[], tariff: VendorTariff, ceilingUsd: number, proxyCountry: string | null = null): FetchResult {
+  const timed = sessions.filter((session) => session.releaseTimings !== undefined)
+  const result: FetchResult = timed.length === 0 ? answer : {
+    ...answer,
+    trace: [...answer.trace, ...timed.map((session) => ({ at: answer.usage.wallMs, lane: answer.lane, event: 'session_released', detail: { sessionMs: session.sessionMs, released: session.released, ...session.releaseTimings } }))],
+  }
   // Counted only when every session was (a session the meter did not see makes the total unknown); none counted, none on the result.
   const counted = sessions.some((session) => session.bytesCounted !== undefined) ? {
     vendorBytesCounted: sessions.every((session) => typeof session.bytesCounted === 'number') ? sessions.reduce((sum, session) => sum + session.bytesCounted!, 0) : null,

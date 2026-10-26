@@ -767,6 +767,15 @@ describe('buildChannels + LadderRunner session composition', () => {
     expect(unreleased.measuredCostUsd).toBe(base.usage.measuredCostUsd)
     // No meter (a tariff without maxBytesPerCall): no count on the result.
     expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true }], byMinute, 0.004).usage).not.toHaveProperty('vendorBytesCounted')
+    // How long each release and usage read took goes on the trace (O7), and changes nothing in the charge.
+    const releaseTimings = { liveUsageMs: 120, releaseMs: 900, usageMs: null }
+    const timedRelease = withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, releaseTimings }, { sessionMs: 1_000, released: false, releaseTimings: { ...releaseTimings, usageMs: null } }], byMinute, 0.004)
+    expect(timedRelease.usage).toEqual(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true }, { sessionMs: 1_000, released: false }], byMinute, 0.004).usage)
+    expect(timedRelease.trace.slice(0, base.trace.length)).toEqual(base.trace)
+    expect(timedRelease.trace.slice(base.trace.length)).toEqual([
+      { at: base.usage.wallMs, lane: base.lane, event: 'session_released', detail: { sessionMs: 17_000, released: true, ...releaseTimings } },
+      { at: base.usage.wallMs, lane: base.lane, event: 'session_released', detail: { sessionMs: 1_000, released: false, ...releaseTimings } },
+    ])
   })
 
   it('answers a provider error just before the request\'s deadline as the provider\'s failure, not a thrown error (ROADMAP PA item 4)', async () => {
