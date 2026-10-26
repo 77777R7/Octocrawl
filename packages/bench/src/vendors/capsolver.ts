@@ -50,6 +50,8 @@ const CHROME_LISTED: Readonly<Partial<Record<SolvableChallenge, Readonly<Partial
 const HINT_WORDS: readonly [string, RegExp][] = [
   ['user_agent', /user.?agent/i], ['proxy', /proxy/i], ['ip', /\bip\b/i], ['banned', /\bbann?ed\b/i], ['blocked', /\bblock(?:ed)?\b/i],
   ['html', /\bhtml\b/i], ['timeout', /time.?out|timed out/i], ['cookie', /cookie/i],
+  ['connect_failed', /connect(?:ion)?\s+(?:failed|refused)/i], ['website_key', /\b(?:web)?site.?key\b/i], ['invalid', /\binvalid\b/i],
+  ['not_supported', /not\s+supported|\bunsupported\b/i],
 ]
 
 /**
@@ -92,12 +94,22 @@ export interface CapSolverOptions {
   fetchImpl?: typeof fetch
 }
 
-/** `host:port:user:pass`, the proxy form CapSolver's guides show; an exit without a login is `host:port`. */
+/**
+ * `scheme://user:pass@host:port`, the exit's own scheme, its login percent-encoded. CapSolver's proxy guide also lists
+ * `host:port:user:pass`, but on 2026-10-26 it refused that form for Webshare's sticky exit (ERROR_PROXY_CONNECT_REFUSED,
+ * by the gateway's IP and by p.webshare.io) and accepted this one, with the same host, port and login. The host is the
+ * one the operator named, which the browser's forwarder dials too: Webshare pins the exit by the session id in the login
+ * ("The same session ID will route to the same exit IP", apidocs.webshare.io/proxy-connection); whether that holds
+ * across its regional gateways it does not say.
+ */
 export function capSolverProxy(proxy: ProxyServer): string {
   const { hostname, port, protocol } = new URL(proxy.url)
-  const where = `${hostname}:${port || (protocol === 'https:' ? '443' : '80')}`
-  return proxy.username === undefined ? where : `${where}:${proxy.username}:${proxy.password ?? ''}`
+  const where = `${hostname}:${port || DEFAULT_PORTS[protocol] || '80'}`
+  const login = proxy.username === undefined ? '' : `${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password ?? '')}@`
+  return `${protocol}//${login}${where}`
 }
+
+const DEFAULT_PORTS: Readonly<Record<string, string>> = { 'http:': '80', 'https:': '443', 'socks5:': '1080' }
 
 /** A plain error code, or null: anything else (free text) is not kept. */
 function plainCode(value: unknown): string | null {

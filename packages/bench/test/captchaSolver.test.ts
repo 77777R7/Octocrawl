@@ -119,10 +119,10 @@ describe('CapSolver: createTask, then getTaskResult until ready (docs.capsolver.
 
   const challenges: [DetectedChallenge, Record<string, unknown>, Record<string, unknown>, 'token' | 'cookies'][] = [
     [{ type: 'datadome', websiteUrl: 'https://shop.example/item', captchaUrl: 'https://geo.captcha-delivery.com/captcha/?t=fe&cid=1' },
-      { type: 'DatadomeSliderTask', websiteURL: 'https://shop.example/item', captchaUrl: 'https://geo.captcha-delivery.com/captcha/?t=fe&cid=1', userAgent: UA, proxy: '203.0.113.9:80:user-us-1:exit-pass-9c1' },
+      { type: 'DatadomeSliderTask', websiteURL: 'https://shop.example/item', captchaUrl: 'https://geo.captcha-delivery.com/captcha/?t=fe&cid=1', userAgent: UA, proxy: 'http://user-us-1:exit-pass-9c1@203.0.113.9:80' },
       { cookie: 'datadome=dd-secret-1; Max-Age=60; Domain=; Path=/; Secure; SameSite=Lax' }, 'cookies'],
     [{ type: 'cloudflare_challenge', websiteUrl: 'https://shop.example/item' },
-      { type: 'AntiCloudflareTask', websiteURL: 'https://shop.example/item', userAgent: UA, proxy: '203.0.113.9:80:user-us-1:exit-pass-9c1' },
+      { type: 'AntiCloudflareTask', websiteURL: 'https://shop.example/item', userAgent: UA, proxy: 'http://user-us-1:exit-pass-9c1@203.0.113.9:80' },
       { cookies: { cf_clearance: 'cf-secret-1' }, token: 'cf-secret-1', userAgent: UA }, 'cookies'],
     [{ type: 'turnstile', websiteUrl: 'https://shop.example/item', websiteKey: '0x4AAA', action: 'login', cdata: 'c1', callback: null },
       { type: 'AntiTurnstileTaskProxyLess', websiteURL: 'https://shop.example/item', websiteKey: '0x4AAA', metadata: { action: 'login', cdata: 'c1' } },
@@ -187,6 +187,10 @@ describe('CapSolver: createTask, then getTaskResult until ready (docs.capsolver.
     expect(capSolverHint('Failed to solve the captcha: 1013')).toBe('1013')
     expect(capSolverHint('userAgent does not match or your proxy IP has been blocked')).toBe('user_agent+proxy+ip+blocked')
     expect(capSolverHint(`proxy 203.0.113.9:8080:user-us-1:exit-pass-9c1 refused, key ${KEY}`)).toBe('proxy')
+    // The refusals the 2026-10-26 probe and the proxyless test met, which said nothing in the vocabulary before.
+    expect(capSolverHint('custom proxy connect failed.')).toBe('proxy+connect_failed')
+    expect(capSolverHint('invalid websiteKey (3x00000000000000000000FF)')).toBe('website_key+invalid')
+    expect(capSolverHint('the sitekey is not supported')).toBe('website_key+not_supported')
     expect(capSolverHint('')).toBeNull()
     expect(capSolverHint(undefined)).toBeNull()
   })
@@ -214,7 +218,16 @@ describe('CapSolver: createTask, then getTaskResult until ready (docs.capsolver.
     // The stand-in's description echoes the whole request: only the words it shares with the vocabulary are kept.
     expect(answer).toEqual({ ok: false, error: 'rejected', code: 'ERROR_INVALID_TASK_DATA', taskCreated: false, billed: false, hint: 'user_agent+proxy' })
     expect(JSON.stringify(answer)).not.toMatch(/exit-pass-9c1|CAP-unit-key/)
-    expect(capSolverProxy({ url: 'http://198.51.100.2:3128', endpoint: '198.51.100.2:3128' })).toBe('198.51.100.2:3128')
+  })
+
+  it('sends the exit as a URL with its scheme and login (CapSolver refused the colon form for the Webshare exit, 2026-10-26)', () => {
+    expect(capSolverProxy(EXIT)).toBe('http://user-us-1:exit-pass-9c1@203.0.113.9:80')
+    // The host as the operator named it (the browser's forwarder dials the same one), and its default port when unnamed.
+    expect(capSolverProxy({ url: 'http://p.proxy.test', endpoint: 'p.proxy.test:80', username: 'user-us-1', password: 'exit-pass-9c1' })).toBe('http://user-us-1:exit-pass-9c1@p.proxy.test:80')
+    expect(capSolverProxy({ url: 'socks5://198.51.100.2:1080', endpoint: '198.51.100.2:1080', username: 'u', password: 'p' })).toBe('socks5://u:p@198.51.100.2:1080')
+    // A login with URL delimiters is percent-encoded, so CapSolver cannot read part of it as the host.
+    expect(capSolverProxy({ ...EXIT, username: 'user:us@1', password: 'p/a#s s%' })).toBe('http://user%3Aus%401:p%2Fa%23s%20s%25@203.0.113.9:80')
+    expect(capSolverProxy({ url: 'http://198.51.100.2:3128', endpoint: '198.51.100.2:3128' })).toBe('http://198.51.100.2:3128')
   })
 
   it('refuses to start without a key', () => {

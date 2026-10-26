@@ -531,6 +531,8 @@ export async function solveChallenges(step: SolveStep): Promise<SolveTraceDetail
       const unbilled = !answer.ok && answer.billed === false
       const reportedCostUsd = answer.ok ? answer.reportedCostUsd : null
       const charged = !created ? (reservation.release(), null) : reservation.settle(unbilled ? 0 : reportedCostUsd)
+      // A task the vendor refused costs nothing, but still uses one of the page's solves for every rung.
+      if (!created) step.log?.refused()
       const costBasis = !created ? null : unbilled ? 'vendor_unbilled_failure' as const : reportedCostUsd !== null ? 'reported' as const : 'tariff' as const
       // On the run's paid calls the moment it is charged, before anything else can fail.
       const call = charged === null ? undefined : step.log?.charged({ vendor, rung, ceilingUsd: solving.perSolveUsd, chargedUsd: charged, reportedCostUsd, solved: answer.ok, ...(row === null ? {} : { paidCallId: row.paidCallId }) })

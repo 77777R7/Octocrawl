@@ -142,7 +142,7 @@ interface LadderProgress {
   grant: EvidenceAccessGrant | null
   /** The run's own ledger, with no cap, when the caller gave none: every provider call is still settled and recorded. */
   ledger: SpendLedger | null
-  /** CAPTCHA solves bought for this page, by every rung and retry (ADR 0005 third_party_captcha_solver). */
+  /** CAPTCHA solves attempted for this page, by every rung and retry: charged, or refused before a task (ADR 0005 third_party_captcha_solver). */
   solves: number
   /** The last page the ladder stepped past for a stronger rung (strongerRungMayAnswer), kept over a later failure with none. */
   steppedPast: { channel: string; result: FetchResult } | null
@@ -1621,6 +1621,7 @@ function solveLog(progress: LadderProgress, channel: Channel): CaptchaSolveLog {
       })
       return call
     },
+    refused: () => { progress.solves++ },
   }
 }
 

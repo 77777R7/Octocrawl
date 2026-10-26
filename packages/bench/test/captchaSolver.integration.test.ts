@@ -150,7 +150,7 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
       const otherForm = await subject.fetch(`${base}/callback-get`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
       expect(solves(otherForm.trace)).toEqual([expect.objectContaining({ type: 'unsupported:recaptcha_v2', reason: 'form_sent_by_get' })])
       // The page's solves are counted across its rungs: one the ladder says it already bought leaves none for this rung.
-      const counted = await subject.fetch(`${base}/turnstile`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger, captchaSolves: { used: () => 2, charged: () => 1 } })
+      const counted = await subject.fetch(`${base}/turnstile`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger, captchaSolves: { used: () => 2, charged: () => 1, refused: () => {} } })
       expect(solves(counted.trace)).toEqual([expect.objectContaining({ outcome: 'limit_reached', reason: 'max_solves_per_call' })])
       // An article that carries a reCAPTCHA for its form is content: nothing to solve, nothing bought.
       const article = await subject.fetch(`${base}/article-with-form`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
@@ -172,8 +172,11 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
       // CapSolver bills no task it reports failed: attempted, charged 0, on the record as such (smoke test 2026-10-25, T045).
       expect(solves(failed.trace)).toEqual([expect.objectContaining({ outcome: 'solver_failed', reason: 'unsolvable', code: 'ERROR_CAPTCHA_UNSOLVABLE', chargedUsd: 0, costBasis: 'vendor_unbilled_failure', solve: 1 })])
       behaviour = { createError: 'ERROR_KEY_DENIED_ACCESS' }
-      const denied = await subject.fetch(`${base}/turnstile`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
+      // A refused createTask charges nothing but counts against the page's solves, for the rungs after this one.
+      const log = { refusedCalls: 0, used: () => log.refusedCalls, charged: () => 1, refused: () => { log.refusedCalls++ } }
+      const denied = await subject.fetch(`${base}/turnstile`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger, captchaSolves: log })
       expect(solves(denied.trace)).toEqual([expect.objectContaining({ outcome: 'solver_failed', reason: 'key_denied', chargedUsd: null })])
+      expect(log.refusedCalls).toBe(1)
       behaviour = { never: true }
       const slow = await subject.fetch(`${base}/turnstile`, Date.now() + 12_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
       expect(slow.status).toBe('blocked')
@@ -284,7 +287,7 @@ describe('solveChallenges on a page read through the solver exit', () => {
         spend: createSpendLedger(1), paidCalls: undefined, log: undefined, rung: 'installed_chrome', onEvent: () => {}, url: 'https://shop.example/item', deadlineAt: Date.now() + 30_000, signal: undefined, reserveMs: 1_000,
       })
       expect(events).toEqual([expect.objectContaining({ type: 'datadome', outcome: 'cleared', egress: 'solver_proxy', chargedUsd: 0.003 })])
-      expect(m.tasks).toEqual([{ type: 'DatadomeSliderTask', websiteURL: 'https://shop.example/item', captchaUrl: 'https://geo.captcha-delivery.com/captcha/?initialCid=abc&cid=def&t=fe&referer=x', userAgent: ua, proxy: '203.0.113.9:80:user-us-1:exit-pass-9c1' }])
+      expect(m.tasks).toEqual([{ type: 'DatadomeSliderTask', websiteURL: 'https://shop.example/item', captchaUrl: 'https://geo.captcha-delivery.com/captcha/?initialCid=abc&cid=def&t=fe&referer=x', userAgent: ua, proxy: 'http://user-us-1:exit-pass-9c1@203.0.113.9:80' }])
       expect(await page.content()).toContain('Tide tables')
       expect(JSON.stringify(events)).not.toMatch(/dd-secret-4|exit-pass-9c1|CAP-int-key/)
     } finally { await page.close() }
@@ -306,7 +309,7 @@ describe('solveChallenges on a page read through the solver exit', () => {
       })
       // CapSolver says it solved with another User-Agent than the browser's: the record says so.
       expect(events).toEqual([expect.objectContaining({ type: 'cloudflare_challenge', outcome: 'cleared', egress: 'solver_proxy', vendorUserAgent: 'other' })])
-      expect(m.tasks).toEqual([{ type: 'AntiCloudflareTask', websiteURL: 'https://shop.example/item', userAgent: MAC_151, proxy: '203.0.113.9:80:user-us-1:exit-pass-9c1' }])
+      expect(m.tasks).toEqual([{ type: 'AntiCloudflareTask', websiteURL: 'https://shop.example/item', userAgent: MAC_151, proxy: 'http://user-us-1:exit-pass-9c1@203.0.113.9:80' }])
     } finally { await page.close() }
   }, 60_000)
 

@@ -364,3 +364,12 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - 演示页的脚本读 token 的方式（表单字段，还是 Turnstile 自己的 `getResponse()`）没有核实。如果只读后者，写进回填字段的 token 不会被看到，页面会是 `still_gated`。
 - 把挑战页的 HTML 发给 CapSolver（DataDome 指南对 userAgent 或代理被拦的错误建议这样做）没有采用：上文规定不把页面内容发给求解器，改动需要 Howard 决定。
 
+
+## 修订 2026-10-26（二）：发给 CapSolver 的出口格式，以及被拒的建任务
+
+**背景。** 2026-10-26 Howard 批准了一次付费探测：对 C008 的 Cloudflare 挑战页发 AntiCloudflareTask，主机、端口和登录每次都相同。`IP:端口:用户:密码` 和 `p.webshare.io:端口:用户:密码` 两种冒号格式都被拒（`ERROR_PROXY_CONNECT_REFUSED`，"custom proxy connect failed."），`http://用户:密码@p.webshare.io:端口` 被接受，8.6 秒后解出 cf_clearance。CapSolver 的代理指南把两种格式都列为可用。
+
+- 适配器给 CapSolver 的 `proxy` 改成 `scheme://user:pass@host:port`：scheme 是出口自己的（现在只接受 http），用户名和密码做百分号编码。主机用操作者在 `W2L_SOLVER_PROXY` 里写的那个，浏览器的转发器连的也是它。出口仍在运行前选定，不在会话中途换路由或换身份。
+- Webshare 按登录里的会话 id 固定出口 IP（apidocs.webshare.io/proxy-connection："The same session ID will route to the same exit IP"）。它没有说经过不同地区的网关时是否仍是同一个出口，这一点未核实。
+- CapSolver 拒绝建任务（`errorId` 非 0，没有任务）时不收费，但这一次计入该页的 `maxSolvesPerCall`。2026-10-25 的无代理测试里，两页发了 4 次被拒的 createTask：每个 rung 各发一次。
+- `hint` 的固定词表加四个词：`connect_failed`、`website_key`、`invalid`、`not_supported`，覆盖探测和无代理测试遇到的拒绝说明。`errorDescription` 的原文仍不出适配器；要保留原文，需要 Howard 另行决定。
