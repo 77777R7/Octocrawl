@@ -281,8 +281,8 @@ async function closeWithin(closing: Promise<unknown>, timeoutMs: number): Promis
  * runs on every fetch and is recorded into the trace — a UA that Playwright
  * mutates on the wire is surfaced as a mismatch, never papered over.
  *
- * robots.txt is fetched per origin and evaluated against the mode's declared
- * UA before navigation; a disallow ends the fetch as `policy_denied` and still
+ * robots.txt is fetched per origin and User-Agent, in the cache the ladder's rungs share
+ * when it hands one (RobotsOriginCache), and evaluated against the UA the page is read with before navigation; a disallow ends the fetch as `policy_denied` and still
  * mints a record, unless the fetch carries an override (`FetchOptions.robotsOverride`:
  * on a local server, a URL the request named), which the record then holds. Every record joins one per-run hash chain, so the ledger a
  * publisher receives is missing-record-evident, not just tamper-evident.
@@ -323,6 +323,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
    * the opposite of what the file is for.
    */
   private readonly robotsCache: RobotsOriginCache
+  /** False when the cache is the run's (the constructor's `robotsCache`): its owner, not this rung, tears it down. */
+  private readonly ownsRobotsCache: boolean
   private readonly networkPolicy: NetworkPolicy
   /** The run's hash chain. Every record this subject mints links into it. */
   private readonly chain: ComplianceChain
@@ -375,7 +377,15 @@ export class BrowserLocalSubject implements SubjectAdapter {
      * handed to, with the grant's per-solve price and limit and the run's solver exit; null (the default): none.
      */
     private readonly captchaSolving: CaptchaSolving | null = null,
+    /**
+     * The run's robots.txt cache, shared with its other rungs (keyed by origin and User-Agent); without one the subject
+     * keeps its own. Only for a browser on the run's own routes: a user's proxy or a host-pinned browser reads its own.
+     */
+    robotsCache?: RobotsOriginCache,
   ) {
+    if (robotsCache !== undefined && (access?.proxy || browserAllowedHosts !== undefined)) {
+      throw new Error("a browser on a route of its own (a user's proxy, host pinning) reads robots.txt on that route, not from the run's cache")
+    }
     if (captchaSolving !== null && (mode !== 'standard' || access != null || managedProfileDir !== null || previewProductToken || browserAllowedHosts !== undefined)) {
       throw new Error('a captcha solver runs only on the standard public browser of a local server, never with a saved login or on a hosted preview (ADR 0005)')
     }
@@ -405,7 +415,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
     this.networkPolicy = access?.proxy || browserAllowedHosts !== undefined ? { ...policy, egressProxy: null } : policy
     this.envProxy = browserProxySettings(this.networkPolicy)
     this.scheduler = scheduler ?? new OriginScheduler(this.networkPolicy)
-    this.robotsCache = new RobotsOriginCache(this.networkPolicy)
+    this.robotsCache = robotsCache ?? new RobotsOriginCache(this.networkPolicy)
+    this.ownsRobotsCache = robotsCache === undefined
   }
 
   /** Managed profile is a distinct lifecycle path; it is never implied by an anonymous subject. */
@@ -1986,7 +1997,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
     await this.browser?.close().catch(() => {})
     this.browser = null
     this.browserPromise = null
-    await this.robotsCache.teardown()
+    if (this.ownsRobotsCache) await this.robotsCache.teardown()
   }
 }
 
