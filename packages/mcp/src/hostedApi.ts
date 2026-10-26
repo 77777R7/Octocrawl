@@ -2,8 +2,11 @@
  * Hosted Octocrawl, phase 1 (ROADMAP PH): the API's hosted mode and a remote
  * MCP endpoint in one process, for `api.octocrawl.dev` and `mcp.octocrawl.dev`.
  *
- * Only scrape and map are served, since both are stateless; every other
- * route and tool is refused by name with a hint to run Octocrawl locally.
+ * Every caller is served scrape and map, and scrape_product with the browser
+ * lane; an account's key or sign-in is served crawl and batch jobs too
+ * (hostedJobRoutes.ts). Every other route and tool is refused by name with a
+ * hint to run Octocrawl locally; hostedParity.ts records, tool by tool and
+ * option by option, where hosted stands against a local server.
  * A caller is either a key holder (`Authorization: Bearer <key>`, looked up
  * by HMAC in the key store) or keyless (counted by the address the
  * Cloudflare Worker reports, within a daily allowance). Keyless calls use the
