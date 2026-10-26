@@ -11,8 +11,11 @@
 //   combined          this checkout's API, one grant naming installed_chrome and the Steel grant's capabilities, budget and
 //                     tariff (--combined-grant, default .w2l/access/combined-grant.json), W2L_VENDORS=steel, STEEL_API_KEY,
 //                     access "enhanced": the combined-grant measurement after K1 (ROADMAP, PA bar, to measure next).
-//   installed_chrome_base, combined_base
-//                     installed_chrome and combined run by the API of another checkout (--base <dir>, built there), for an
+//   ic_compat         this checkout's API, a grant naming installed_chrome and compatible_transport (--ic-compat-grant,
+//                     default .w2l/access/ic-compat-grant-k1.json), otherwise the K1 installed_chrome grant's settings, no
+//                     Steel, access "enhanced": the local route without a paid vendor (Howard, 2026-10-27).
+//   installed_chrome_base, combined_base, ic_compat_base
+//                     installed_chrome, combined and ic_compat run by the API of another checkout (--base <dir>, built there), for an
 //                     A/B of two engine commits on the same grants: the same window, the same blocks, an API process each.
 //   firecrawl         run-set --target firecrawl (Firecrawl Cloud, its own strongest route).
 //   zenrows           run-set --target zenrows (ZenRows mode=auto).
@@ -27,7 +30,7 @@
 // Usage: node research/access/k1-window.mjs --window 1 --control <dir> [--date YYYY-MM-DD] [--blocks 4]
 //          [--ports 8821,8822,8823,8824] [--steel-grant <file>] [--ic-grant <file>] [--no-retry] [--dry-run]
 //          [--arms standard,installed_chrome,combined,firecrawl] [--combined-grant <file>] [--firecrawl-cap <credits>]
-//          [--name k1] [--base <dir>] [--steel-cap <usd>]
+//          [--name k1] [--base <dir>] [--steel-cap <usd>] [--ic-compat-grant <file>]
 //   --arms picks the arms (default the six above, without combined or the base arms); --control is needed only with the
 //   control arm, --base only with a base arm. A base checkout's dist/ must match its source (runSetBuild.mjs), checked
 //   at the start: run-set.mjs checks only this checkout's. List four arms as installed_chrome_base, combined_base,
@@ -55,7 +58,7 @@ const args = process.argv.slice(2)
 const flag = (name) => { const i = args.indexOf(name); return i === -1 ? undefined : args[i + 1] }
 const windowNo = flag('--window')
 if (!/^\d$/.test(windowNo ?? '')) throw new Error('--window 1 or 2')
-const ALL_LOCAL = ['standard', 'enhanced', 'installed_chrome', 'control', 'combined', ...BASE_ARMS]
+const ALL_LOCAL = ['standard', 'enhanced', 'installed_chrome', 'control', 'combined', 'ic_compat', ...BASE_ARMS]
 const ALL_COMPETITORS = ['firecrawl', 'zenrows']
 const chosen = (flag('--arms') ?? 'standard,enhanced,installed_chrome,control,firecrawl,zenrows').split(',')
 for (const a of chosen) if (![...ALL_LOCAL, ...ALL_COMPETITORS].includes(a)) throw new Error(`--arms: unknown arm ${a}`)
@@ -117,6 +120,18 @@ if (LOCAL.some((a) => family(a) === 'combined')) {
   const settings = async (f) => { const { attestation, sha256, capabilities, ...rest } = accessGrantFromText(await readFile(f, 'utf8')); return JSON.stringify(rest) }
   if (await settings(combinedGrant) !== await settings(steelGrant)) throw new Error(`${combinedGrant}: its tier, budget, scope or tariffs differ from ${steelGrant}`)
 }
+// The ic_compat grant holds installed_chrome and compatible_transport; the rest of it is checked against the K1
+// installed_chrome grant's by the engine's own parser, as the combined grant is against the Steel grant's.
+const icCompatGrant = flag('--ic-compat-grant') ?? localFile('.w2l/access/ic-compat-grant-k1.json')
+let icCompat = null
+if (LOCAL.some((a) => family(a) === 'ic_compat')) {
+  if (icCompatGrant === null) throw new Error('no ic_compat grant: .w2l/access/ic-compat-grant-k1.json (or --ic-compat-grant)')
+  icCompat = grantOf(await readFile(icCompatGrant, 'utf8'))
+  if ([...(icCompat.capabilities ?? [])].sort().join() !== 'compatible_transport,installed_chrome') throw new Error(`${icCompatGrant}: must name installed_chrome and compatible_transport, nothing else`)
+  const { accessGrantFromText } = await import('../../packages/http-core/dist/accessGrant.js')
+  const settings = async (f) => { const { attestation, sha256, capabilities, ...rest } = accessGrantFromText(await readFile(f, 'utf8')); return JSON.stringify(rest) }
+  if (await settings(icCompatGrant) !== await settings(icGrant)) throw new Error(`${icCompatGrant}: its tier, budget, scope or tariffs differ from ${icGrant}`)
+}
 const needs = { STEEL_API_KEY: LOCAL.some((a) => ['enhanced', 'control', 'combined'].includes(family(a))), FIRECRAWL_API_KEY: COMPETITORS.includes('firecrawl'), ZENROWS_API_KEY: COMPETITORS.includes('zenrows') }
 const keys = {}
 for (const k of Object.keys(needs)) keys[k] = await secret(k)
@@ -132,6 +147,7 @@ const arm = withBaseArms({
   installed_chrome: { port: portOf('installed_chrome'), cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: icGrant }, grant: ic, grantFile: icGrant },
   control: { port: portOf('control'), cwd: control, commit: controlCommit, access: '"enhanced"', env: { W2L_ACCESS_GRANT: steelGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.STEEL_API_KEY }, grant: steel, grantFile: steelGrant },
   combined: { port: portOf('combined'), cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: combinedGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.STEEL_API_KEY }, grant: combined, grantFile: combinedGrant },
+  ic_compat: { port: portOf('ic_compat'), cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: icCompatGrant }, grant: icCompat, grantFile: icCompatGrant },
 }, baseDir ? { dir: baseDir, commit: baseCommit } : null, portOf)
 // The base checkout's dist/ against its source: run-set.mjs sees only this checkout's build, not the API's of another.
 const baseBuild = baseDir && LOCAL.some((a) => baseOf(a) !== null) ? buildState(baseDir) : null
@@ -169,7 +185,7 @@ async function usage(name) {
   } catch (e) { return { at: new Date().toISOString(), error: e.message } }
 }
 
-const manifest = { window: Number(windowNo), date, runner: commit, control: controlCommit, ...(baseCommit ? { base: { dir: baseDir, commit: baseCommit, build: baseBuild } } : {}), ...(steelCap === null ? {} : { steelCap: { usd: steelCap, pageCeilingUsd: steelCeiling } }), arms: chosen, tasks: tasks.length, blocks: blockIds, ports, grants: { steel: { file: steelGrant, sha256: steel.sha256, capabilities: steel.capabilities }, installed_chrome: { file: icGrant, sha256: ic.sha256, capabilities: ic.capabilities }, ...(combined ? { combined: { file: combinedGrant, sha256: combined.sha256, capabilities: combined.capabilities } } : {}) }, proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null, HTTP_PROXY: process.env.HTTP_PROXY ?? null, NO_PROXY: process.env.NO_PROXY ?? null }, credits: { before: {}, after: {} }, runs: [], failures: [] }
+const manifest = { window: Number(windowNo), date, runner: commit, control: controlCommit, ...(baseCommit ? { base: { dir: baseDir, commit: baseCommit, build: baseBuild } } : {}), ...(steelCap === null ? {} : { steelCap: { usd: steelCap, pageCeilingUsd: steelCeiling } }), arms: chosen, tasks: tasks.length, blocks: blockIds, ports, grants: { steel: { file: steelGrant, sha256: steel.sha256, capabilities: steel.capabilities }, installed_chrome: { file: icGrant, sha256: ic.sha256, capabilities: ic.capabilities }, ...(combined ? { combined: { file: combinedGrant, sha256: combined.sha256, capabilities: combined.capabilities } } : {}), ...(icCompat ? { ic_compat: { file: icCompatGrant, sha256: icCompat.sha256, capabilities: icCompat.capabilities } } : {}) }, proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null, HTTP_PROXY: process.env.HTTP_PROXY ?? null, NO_PROXY: process.env.NO_PROXY ?? null }, credits: { before: {}, after: {} }, runs: [], failures: [] }
 const saveManifest = () => writeFile(join(work, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 for (const c of COMPETITORS) manifest.credits.before[c] = await usage(c)
 await saveManifest()

@@ -47,8 +47,8 @@ if (existsSync(out)) throw new Error(`${out} exists: a record is not rewritten`)
 
 const tasks = JSON.parse(await readFile(join(here, 'tasks.v1.json'), 'utf8')).tasks
 const ids = tasks.map((t) => t.id)
-const PAIRS = [['installed_chrome_base', 'installed_chrome'], ['combined_base', 'combined']]
-const ARMS = PAIRS.flat()
+/** The window's base/new pairs, from its manifest: each `<arm>_base` with its `<arm>`, base first. */
+const pairsOf = (m) => m.arms.filter((a) => a.endsWith('_base') && m.arms.includes(a.slice(0, -'_base'.length))).map((b) => [b, b.slice(0, -'_base'.length)])
 const readJsonl = async (f) => (await readFile(f, 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l))
 const sh = (cmd) => { try { return execSync(cmd, { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() } catch { return null } }
 
@@ -67,15 +67,16 @@ async function runRows(runDir) {
 
 async function load(dir) {
   const m = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8'))
-  const arms = Object.fromEntries(ARMS.map((a) => [a, new Map()]))
+  const pairs = pairsOf(m), armList = pairs.flat()
+  const arms = Object.fromEntries(armList.map((a) => [a, new Map()]))
   const env = []
-  for (const r of m.runs.filter((x) => x.label.includes('first') && x.runDir && ARMS.includes(x.arm))) {
+  for (const r of m.runs.filter((x) => x.label.includes('first') && x.runDir && armList.includes(x.arm))) {
     for (const [id, row] of await runRows(r.runDir)) arms[r.arm].set(id, row)
     try { env.push({ label: r.label, ...JSON.parse(await readFile(join(repo, r.runDir, 'summary.json'), 'utf8')).environment }) } catch { env.push({ label: r.label }) }
   }
   let prechecks = null
   try { prechecks = (await readFile(join(dir, 'prechecks.txt'), 'utf8')).trim().split('\n').join('; ') } catch {}
-  return { dir, m, arms, env, prechecks }
+  return { dir, m, pairs, armList, arms, env, prechecks }
 }
 
 // ---- figures
@@ -156,43 +157,59 @@ function header(W) {
 function windowBody(W, P) {
   P('', '## Per arm, first calls, all 92 tasks', '',
     '| Arm | Attempted | Verified | False success | p50 all | p95 all | p50 verified | p95 verified | Wall total s | Steel, ledger | No ladder summary |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...ARMS.map((a) => { const f = figures(W.arms[a]); return `| ${a} | ${f.attempted} | ${f.verified} | ${f.fs} | ${ms(f.p50)} | ${ms(f.p95)} | ${ms(f.p50v)} | ${ms(f.p95v)} | ${s1(f.totalMs)} | ${usdText(f)} | ${f.noSummary} |` }),
+    ...W.armList.map((a) => { const f = figures(W.arms[a]); return `| ${a} | ${f.attempted} | ${f.verified} | ${f.fs} | ${ms(f.p50)} | ${ms(f.p95)} | ${ms(f.p50v)} | ${ms(f.p95v)} | ${s1(f.totalMs)} | ${usdText(f)} | ${f.noSummary} |` }),
     '', 'Not run counts as not verified (planned 92 each). Latency in wall ms.')
   P('', '## Base against new', '', '| Pair | Δ p50 all | Δ p95 all | Δ p50 verified | Δ p95 verified | Paired median Δ (n) | Faster / slower | Gains (new only) | Regressions (base only) |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
-  for (const [b, n] of PAIRS) {
+  for (const [b, n] of W.pairs) {
     const fb = figures(W.arms[b]), fn = figures(W.arms[n]), p = paired(W.arms[b], W.arms[n])
     const gain = ids.filter((id) => ver(W.arms[n], id) && !ver(W.arms[b], id)), loss = ids.filter((id) => ver(W.arms[b], id) && !ver(W.arms[n], id))
     P(`| ${n} | ${signed(fn.p50 - fb.p50)} | ${signed(fn.p95 - fb.p95)} | ${signed(fn.p50v - fb.p50v)} | ${signed(fn.p95v - fb.p95v)} | ${signed(p.median)} (${p.n}) | ${p.faster} / ${p.slower} | ${list(gain)} | ${list(loss)} |`)
   }
+  // An arm against another on the same side, when the window has both (Howard, 2026-10-27: installed_chrome alone against
+  // installed_chrome with compatible_transport): what the second arm verified that the first did not, and the reverse.
+  for (const [x, y] of [['installed_chrome', 'ic_compat'], ['installed_chrome_base', 'ic_compat_base']].filter(([x, y]) => W.arms[x] && W.arms[y])) {
+    const win = ids.filter((id) => ver(W.arms[y], id) && !ver(W.arms[x], id)), lose = ids.filter((id) => ver(W.arms[x], id) && !ver(W.arms[y], id))
+    const compat = ids.filter((id) => (W.arms[y].get(id)?.rungs ?? []).some((r) => r.channel === 'http_compat'))
+    const fx = figures(W.arms[x]), fy = figures(W.arms[y])
+    const at = (a, id) => { const r = W.arms[a].get(id); return r ? `${routeOf(r)}${r.outcome.verified ? '' : ` (${reasonOf(r)})`}` : 'not run' }
+    P('', `## ${y} against ${x}, same window`, '', `- Verified ${fx.verified} → ${fy.verified}; p50 ${ms(fx.p50)} → ${ms(fy.p50)}; p95 ${ms(fx.p95)} → ${ms(fy.p95)}.`,
+      `- ${y} verified, ${x} not: ${list(win)}${win.length ? `; ${y}'s route, ${x}'s answer: ${win.map((id) => `${id} ${at(y, id)} / ${at(x, id)}`).join('; ')}` : ''}.`,
+      `- ${x} verified, ${y} not: ${list(lose)}${lose.length ? `; ${x}'s route, ${y}'s answer: ${lose.map((id) => `${id} ${at(x, id)} / ${at(y, id)}`).join('; ')}` : ''}.`,
+      `- Tasks on which ${y} ran an http_compat rung: ${list(compat)}.`)
+  }
   P('', '## By delivering route (verified answers; the rest as not verified)', '', '| Arm | Route | n | p50 | p95 |', '| --- | --- | --- | --- | --- |')
-  for (const a of ARMS) {
+  for (const a of W.armList) {
     const by = {}
     for (const x of W.arms[a].values()) (by[routeOf(x)] ??= []).push(x.outcome.wallMs)
     for (const [r, v] of Object.entries(by).sort((x, y) => y[1].length - x[1].length)) P(`| ${a} | ${r} | ${v.length} | ${ms(q(v, 0.5))} | ${ms(q(v, 0.95))} |`)
   }
   P('', '## Wall time per rung (summed over the tasks with a ladder summary)', '', '| Arm | Rung | Attempts | Clock s | Mean ms | p50 ms |', '| --- | --- | --- | --- | --- | --- |')
-  for (const a of ARMS) for (const [r, v] of Object.entries(rungTable(W.arms[a])).sort((x, y) => y[1].reduce((s, z) => s + z, 0) - x[1].reduce((s, z) => s + z, 0))) P(`| ${a} | ${r} | ${v.length} | ${s1(v.reduce((s, z) => s + z, 0))} | ${ms(v.reduce((s, z) => s + z, 0) / v.length)} | ${ms(q(v, 0.5))} |`)
+  for (const a of W.armList) for (const [r, v] of Object.entries(rungTable(W.arms[a])).sort((x, y) => y[1].reduce((s, z) => s + z, 0) - x[1].reduce((s, z) => s + z, 0))) P(`| ${a} | ${r} | ${v.length} | ${s1(v.reduce((s, z) => s + z, 0))} | ${ms(v.reduce((s, z) => s + z, 0) / v.length)} | ${ms(q(v, 0.5))} |`)
   P('', '## Wall time per phase, seconds summed over every rung attempt', '', 'Timed or inferred as research/access/speedPhases.mjs says. The provider\'s outside_lane is its clock less its wallMs (session creation, connection, UA probe and release before O7 timed them); with O7 its session_created, cdp_connected, ua_probed and release are parts of it, not additions.', '')
-  for (const [b, n] of PAIRS) {
+  for (const [b, n] of W.pairs) {
     const pb = phaseTable(W.arms[b]), pn = phaseTable(W.arms[n])
     const keys = [...new Set([...Object.keys(pb), ...Object.keys(pn)])].filter((k) => (pb[k] ?? 0) + (pn[k] ?? 0) >= 500).sort((x, y) => (pb[y] ?? 0) + (pn[y] ?? 0) - (pb[x] ?? 0) - (pn[x] ?? 0))
     P(`| Rung · phase | ${b} | ${n} | Δ |`, '| --- | --- | --- | --- |', ...keys.map((k) => `| ${k} | ${s1(pb[k] ?? null)} | ${s1(pn[k] ?? null)} | ${pb[k] === undefined || pn[k] === undefined ? '-' : s1(pn[k] - pb[k])} |`), '')
   }
   P(`## robots.txt reads per task (a read of ${ROBOTS_FETCH_MS} ms or more counted as fetched: inferred)`, '', '| Arm | Tasks with a summary | Checks | Per task | Fetched | Per task | Robots s | By rung (checks / fetched) |', '| --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...ARMS.map((a) => { const r = robots(W.arms[a]); return `| ${a} | ${r.tasks} | ${r.checks} | ${(r.checks / Math.max(1, r.tasks)).toFixed(2)} | ${r.fetched} | ${(r.fetched / Math.max(1, r.tasks)).toFixed(2)} | ${s1(r.ms)} | ${Object.entries(r.byRung).map(([k, v]) => `${k} ${v.checks}/${v.fetched}`).join(', ')} |` }))
+    ...W.armList.map((a) => { const r = robots(W.arms[a]); return `| ${a} | ${r.tasks} | ${r.checks} | ${(r.checks / Math.max(1, r.tasks)).toFixed(2)} | ${r.fetched} | ${(r.fetched / Math.max(1, r.tasks)).toFixed(2)} | ${s1(r.ms)} | ${Object.entries(r.byRung).map(([k, v]) => `${k} ${v.checks}/${v.fetched}`).join(', ')} |` }))
   P('', '## challenge_wait (installed_chrome), by gate and outcome', '', '| Arm | Gate · outcome | n | p50 ms | max ms | Total s |', '| --- | --- | --- | --- | --- | --- |')
-  for (const a of ARMS) { const c = challenge(W.arms[a]); const e = Object.entries(c).sort(); if (e.length === 0) P(`| ${a} | none | 0 | - | - | 0 |`); for (const [k, v] of e) P(`| ${a} | ${k} | ${v.length} | ${ms(q(v, 0.5))} | ${ms(Math.max(...v.map((x) => x ?? 0)))} | ${s1(v.reduce((s, x) => s + (x ?? 0), 0))} |`) }
-  P('', '## Steel (combined arms)', '', '| Arm | Provider rungs | Failed before the gate | With O7 steps | Ledger | p50 clock | p50 wallMs | p50 outside lane | p50 session_created / cdp_connected / ua_probed | p50 robots_gate / navigate / settled / region_read / page_read | p50 region_wait / release | p50 in page (inferred) |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...PAIRS[1].map((a) => { const s = steel(W.arms[a]), st = s.steps, f = figures(W.arms[a]); return `| ${a} | ${s.calls} | ${s.failedBeforeGate} | ${s.timed} | ${usdText(f)} | ${ms(s.clock)} | ${ms(s.wall)} | ${ms(s.outside)} | ${ms(st.session_created)} / ${ms(st.cdp_connected)} / ${ms(st.ua_probed)} | ${ms(st.robots_gate)} / ${ms(st.navigate)} / ${ms(st.settled)} / ${ms(st.region_read)} / ${ms(st.page_read)} | ${ms(st.region_wait)} / ${ms(st.release)} | ${ms(st.in_page)} |` }))
+  for (const a of W.armList) { const c = challenge(W.arms[a]); const e = Object.entries(c).sort(); if (e.length === 0) P(`| ${a} | none | 0 | - | - | 0 |`); for (const [k, v] of e) P(`| ${a} | ${k} | ${v.length} | ${ms(q(v, 0.5))} | ${ms(Math.max(...v.map((x) => x ?? 0)))} | ${s1(v.reduce((s, x) => s + (x ?? 0), 0))} |`) }
+  if (!W.armList.some((a) => steel(W.arms[a]).calls > 0)) P('', '## Steel', '', 'No arm of this window ran a provider (Steel) rung.')
+  else P('', W.armList.filter((a) => steel(W.arms[a]).calls > 0).every((a) => a.startsWith('combined')) ? '## Steel (combined arms)' : '## Steel (arms with a provider rung)', '', '| Arm | Provider rungs | Failed before the gate | With O7 steps | Ledger | p50 clock | p50 wallMs | p50 outside lane | p50 session_created / cdp_connected / ua_probed | p50 robots_gate / navigate / settled / region_read / page_read | p50 region_wait / release | p50 in page (inferred) |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    ...W.armList.filter((a) => steel(W.arms[a]).calls > 0).map((a) => { const s = steel(W.arms[a]), st = s.steps, f = figures(W.arms[a]); return `| ${a} | ${s.calls} | ${s.failedBeforeGate} | ${s.timed} | ${usdText(f)} | ${ms(s.clock)} | ${ms(s.wall)} | ${ms(s.outside)} | ${ms(st.session_created)} / ${ms(st.cdp_connected)} / ${ms(st.ua_probed)} | ${ms(st.robots_gate)} / ${ms(st.navigate)} / ${ms(st.settled)} / ${ms(st.region_read)} / ${ms(st.page_read)} | ${ms(st.region_wait)} / ${ms(st.release)} | ${ms(st.in_page)} |` }))
   P('', '## Per task (first calls): verdict and wall ms, base → new', '', 'y = verified, F = false success, n = not (its reason), - = not run.', '',
-    `| Task | Part | ${PAIRS.map(([, n]) => n).join(' | ')} |`, `| --- | --- | ${PAIRS.map(() => '---').join(' | ')} |`,
-    ...tasks.map((t) => `| ${t.id} | ${t.part} | ${PAIRS.map(([b, n]) => [b, n].map((a) => { const x = W.arms[a].get(t.id); return !x ? '-' : `${x.outcome.verified ? 'y' : x.outcome.falseSuccess ? 'F' : `n (${reasonOf(x)})`} ${x.outcome.wallMs}` }).join(' → ')).join(' | ')} |`), '')
+    `| Task | Part | ${W.pairs.map(([, n]) => n).join(' | ')} |`, `| --- | --- | ${W.pairs.map(() => '---').join(' | ')} |`,
+    ...tasks.map((t) => `| ${t.id} | ${t.part} | ${W.pairs.map(([b, n]) => [b, n].map((a) => { const x = W.arms[a].get(t.id); return !x ? '-' : `${x.outcome.verified ? 'y' : x.outcome.falseSuccess ? 'F' : `n (${reasonOf(x)})`} ${x.outcome.wallMs}` }).join(' → ')).join(' | ')} |`), '')
 }
 
 // ---- two windows
 function twoWindows(A, B, P) {
   const both = (W1, W2, a, id) => ver(W1.arms[a], id) && ver(W2.arms[a], id)
   const neither = (W1, W2, a, id) => !ver(W1.arms[a], id) && !ver(W2.arms[a], id)
+  // Only a pair both windows ran is compared across them; a pair one window ran alone is that window's, said so below.
+  const PAIRS = A.pairs.filter(([, n]) => B.pairs.some(([, m]) => m === n)), ARMS = PAIRS.flat()
+  const single = [...A.pairs.map((p) => [p, A, 1]), ...B.pairs.map((p) => [p, B, 2])].filter(([[, n]]) => !PAIRS.some(([, m]) => m === n))
   P('', '## Per arm and window, first calls, all 92 tasks', '', '| Arm | Verified w1 / w2 | In both | False success w1 / w2 | p50 all w1 / w2 | p95 all w1 / w2 | p50 verified w1 / w2 | p95 verified w1 / w2 | Steel w1 / w2 |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...ARMS.map((a) => { const [x, y] = [A, B].map((w) => figures(w.arms[a])); return `| ${a} | ${x.verified} / ${y.verified} | ${ids.filter((id) => both(A, B, a, id)).length} | ${x.fs} / ${y.fs} | ${ms(x.p50)} / ${ms(y.p50)} | ${ms(x.p95)} / ${ms(y.p95)} | ${ms(x.p50v)} / ${ms(y.p50v)} | ${ms(x.p95v)} / ${ms(y.p95v)} | ${usdText(x)} / ${usdText(y)} |` }))
   P('', '## Base against new, per window', '', '| Pair | Δ p50 all w1 / w2 | Δ p95 all w1 / w2 | Paired median Δ w1 / w2 | Gains held in both | Regressions held in both | Unstable |', '| --- | --- | --- | --- | --- | --- | --- |')
@@ -202,6 +219,8 @@ function twoWindows(A, B, P) {
     const u = ids.filter((id) => !g.includes(id) && !r.includes(id) && [A, B].some((w) => ver(w.arms[n], id) !== ver(w.arms[b], id)))
     P(`| ${n} | ${signed(d(A, 'p50'))} / ${signed(d(B, 'p50'))} | ${signed(d(A, 'p95'))} / ${signed(d(B, 'p95'))} | ${signed(paired(A.arms[b], A.arms[n]).median)} / ${signed(paired(B.arms[b], B.arms[n]).median)} | ${list(g)} | ${list(r)} | ${list(u)} |`)
   }
+  if (single.length) P('', '## Pairs run in one window only (single window: not a two-window result)', '', '| Pair | Window | Verified base → new | p50 all base → new | p95 all base → new | Gains / regressions (that window) |', '| --- | --- | --- | --- | --- | --- |',
+    ...single.map(([[b, n], w, k]) => { const fb = figures(w.arms[b]), fn = figures(w.arms[n]); return `| ${n} | ${k} (${w.m.date}) | ${fb.verified} → ${fn.verified} | ${ms(fb.p50)} → ${ms(fn.p50)} | ${ms(fb.p95)} → ${ms(fn.p95)} | ${ids.filter((id) => ver(w.arms[n], id) && !ver(w.arms[b], id)).length} / ${ids.filter((id) => ver(w.arms[b], id) && !ver(w.arms[n], id)).length} |` }))
   P('', '## Key phases per window, seconds summed', '', '| Arm | challenge_wait w1 / w2 | robots w1 / w2 | region_wait w1 / w2 | provider outside lane w1 / w2 | provider rung clock w1 / w2 |', '| --- | --- | --- | --- | --- | --- |')
   for (const a of ARMS) {
     const v = [A, B].map((w) => { const p = phaseTable(w.arms[a]), t = rungTable(w.arms[a]); const by = (suffix) => Object.entries(p).filter(([k]) => k.endsWith(suffix)).reduce((s, [, x]) => s + x, 0); return { cw: by('· challenge_wait'), rb: by('· robots') + by('· robots_gate'), rw: by('· region_wait'), out: p['provider · outside_lane'] ?? 0, prov: (t.provider ?? []).reduce((s, x) => s + x, 0) } })
@@ -211,10 +230,10 @@ function twoWindows(A, B, P) {
   for (const a of ARMS) { const c = {}; for (const w of [A, B]) for (const [k, v] of Object.entries(challenge(w.arms[a]))) (c[k] ??= []).push(...v); for (const [k, v] of Object.entries(c).sort()) P(`| ${a} | ${k} | ${v.length} | ${ms(q(v, 0.5))} | ${ms(Math.max(...v.map((x) => x ?? 0)))} |`) }
   // The analysis's what-if estimates (section 3, whatif.py over the combined windows of runner 22bf90e7, linear
   // interpolation): the measured p95 here uses the records' rank, and its base is not that window's commit.
-  const p95 = (w, a) => figures(w.arms[a]).p95, p50 = (w, a) => figures(w.arms[a]).p50
+  const p95 = (w, a) => (w.arms[a] ? figures(w.arms[a]).p95 : null), p50 = (w, a) => (w.arms[a] ? figures(w.arms[a]).p50 : null)
   P('', '## Against the analysis\'s estimates (p95 all, s)', '', 'Estimates from `.w2l/perf/2026-10-26-speed-root-cause.md` section 3, simulated per task on the combined windows of 2026-10-25/26 (runner `22bf90e7`, engine main `4dc53ac0`). "O1–O4" there includes O2 (Steel prewarm) and O3 (region-wait memory), neither of which was done; O1 and O4 are the parts that shipped, and O6 and O7 were estimated at 0 and unknown for these runs (run-set sends no `timeout`).', '',
     '| Arm | Estimate O1–O4 (w2; w1) | Estimate O1 alone (w2; w1) | Estimate O4: p50 | Measured base → new w1 | Measured base → new w2 | Measured p50 base → new w1 / w2 |', '| --- | --- | --- | --- | --- | --- | --- |',
-    `| combined | 53 → 27 (42 → 29) | 53 → 43 (42 → 37) | 6.4 → 5.8 (7.0 → 6.1); p95 −1 | ${s1(p95(A, 'combined_base'))} → ${s1(p95(A, 'combined'))} | ${s1(p95(B, 'combined_base'))} → ${s1(p95(B, 'combined'))} | ${s1(p50(A, 'combined_base'))} → ${s1(p50(A, 'combined'))} / ${s1(p50(B, 'combined_base'))} → ${s1(p50(B, 'combined'))} |`,
+    `| combined${A.arms.combined && B.arms.combined ? '' : ` (window ${A.arms.combined ? 1 : 2} only)`} | 53 → 27 (42 → 29) | 53 → 43 (42 → 37) | 6.4 → 5.8 (7.0 → 6.1); p95 −1 | ${s1(p95(A, 'combined_base'))} → ${s1(p95(A, 'combined'))} | ${s1(p95(B, 'combined_base'))} → ${s1(p95(B, 'combined'))} | ${s1(p50(A, 'combined_base'))} → ${s1(p50(A, 'combined'))} / ${s1(p50(B, 'combined_base'))} → ${s1(p50(B, 'combined'))} |`,
     `| installed_chrome | 26 → 18 | 26 → 24.5 | - | ${s1(p95(A, 'installed_chrome_base'))} → ${s1(p95(A, 'installed_chrome'))} | ${s1(p95(B, 'installed_chrome_base'))} → ${s1(p95(B, 'installed_chrome'))} | ${s1(p50(A, 'installed_chrome_base'))} → ${s1(p50(A, 'installed_chrome'))} / ${s1(p50(B, 'installed_chrome_base'))} → ${s1(p50(B, 'installed_chrome'))} |`,
     '', 'Reference, not run here: Firecrawl Cloud in the same 92 tasks, p50 / p95 all 3232 / 10989 ms (2026-10-25) and 3479 / 10213 ms (2026-10-26), from `research/access/runs/2026-10-26-combined-two-windows-22bf90e7.md`.')
   P('', '## Per task, both windows (w1/w2: y = verified, F = false success, n = not, - = not run)', '', `| Task | Part | ${ARMS.join(' | ')} |`, `| --- | --- | ${ARMS.map(() => '---').join(' | ')} |`,

@@ -8,19 +8,21 @@ const arms = {
   standard: { ...local(8821, {}, null), access: '"standard"' },
   installed_chrome: local(8822, { W2L_ACCESS_GRANT: 'ic.json' }, 'ic.json'),
   combined: local(8823, { W2L_ACCESS_GRANT: 'combined.json', W2L_VENDORS: 'steel', STEEL_API_KEY: 'k' }, 'combined.json'),
+  ic_compat: local(8824, { W2L_ACCESS_GRANT: 'ic-compat.json' }, 'ic-compat.json'),
 }
 
 describe('k1-window arms', () => {
   it('names the arm each base arm copies, and no other', () => {
-    expect(BASE_ARMS.map(baseOf)).toEqual(['installed_chrome', 'combined'])
+    expect(BASE_ARMS.map(baseOf)).toEqual(['installed_chrome', 'combined', 'ic_compat'])
     for (const name of ['standard', 'installed_chrome', 'combined', 'control', 'enhanced_base', 'firecrawl']) expect(baseOf(name)).toBeNull()
   })
 
   it('runs a base arm with its arm\'s grant, environment and access, from the base checkout on its own port', () => {
-    const ports: Record<string, number> = { installed_chrome_base: 8841, combined_base: 8842 }
+    const ports: Record<string, number> = { installed_chrome_base: 8841, combined_base: 8842, ic_compat_base: 8843 }
     const table = withBaseArms(arms, { dir: '/base', commit: 'old' }, (name) => ports[name]!)
     expect(table.installed_chrome_base).toEqual({ ...arms.installed_chrome, port: 8841, cwd: '/base', commit: 'old' })
     expect(table.combined_base).toEqual({ ...arms.combined, port: 8842, cwd: '/base', commit: 'old' })
+    expect(table.ic_compat_base).toEqual({ ...arms.ic_compat, port: 8843, cwd: '/base', commit: 'old' })
     // The arms of this checkout are unchanged, and without --base the table is the same object.
     expect(table.combined).toBe(arms.combined)
     expect(withBaseArms(arms, null, () => 0)).toBe(arms)
@@ -28,6 +30,12 @@ describe('k1-window arms', () => {
 
   it('puts each base arm before its new arm in half the blocks when the four are listed base, base, new, new', () => {
     const list = ['installed_chrome_base', 'combined_base', 'installed_chrome', 'combined']
+    // Listed new, new, base, base, block b runs each pair in the other order than the base-first list does.
+    const reversed = ['installed_chrome', 'combined', 'installed_chrome_base', 'combined_base']
+    for (const b of [0, 1, 2, 3]) for (const name of ['installed_chrome', 'combined']) {
+      const ahead = (order: string[]) => order.indexOf(`${name}_base`) < order.indexOf(name)
+      expect(ahead(rotated(reversed, b))).toBe(!ahead(rotated(list, b)))
+    }
     const orders = [0, 1, 2, 3].map((b) => rotated(list, b))
     expect(orders[0]).toEqual(list)
     expect(orders[1]).toEqual(['combined_base', 'installed_chrome', 'combined', 'installed_chrome_base'])

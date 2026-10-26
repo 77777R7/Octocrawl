@@ -3,7 +3,7 @@
 // the arms in, and the window's cap on Steel spend (--steel-cap).
 
 /** An `<arm>_base` arm is `<arm>` run by the API of the --base checkout: the same grant, environment and access, its engine. */
-export const BASE_ARMS = ['installed_chrome_base', 'combined_base']
+export const BASE_ARMS = ['installed_chrome_base', 'combined_base', 'ic_compat_base']
 const SUFFIX = '_base'
 
 /** The arm an `<arm>_base` arm copies; null for any other name. */
