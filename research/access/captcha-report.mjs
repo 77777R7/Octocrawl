@@ -52,6 +52,7 @@ const md = [
   ...Object.entries(m.grants).map(([a, g]) => `- Grant of ${a}: ${g === null ? 'none' : `SHA-256 \`${g.sha256}\`; capabilities ${(g.capabilities ?? ['unreadable']).join(', ')}`}`),
   ...m.notStarted.map((n) => `- **Not started:** ${n.arm} (${n.why.join('; ')}); its ${tasks.length} tasks count as not run`),
   ...(m.exits === undefined ? [] : [`- Exits: ${Object.entries(m.exits).map(([a, e]) => `${a} ${e}`).join('; ')}`]),
+  ...(m.exitAddresses === undefined ? [] : Object.entries(m.exitAddresses).map(([a, e]) => `- Solver exit of ${a}, read through it (api.ipify.org): ${e.before?.address ?? 'not read'} before the first block, ${e.after?.address ?? 'not read'} after the last${e.before?.address && e.after?.address && e.before.address !== e.after.address ? ' (**changed during the window**)' : ''}`)),
   ...(m.capsolverBalance === undefined ? [] : [`- CapSolver getBalance: before ${balanceText(m.capsolverBalance.before)}, after ${balanceText(m.capsolverBalance.after)}; billed in the window ${m.capsolverBalance.before?.balanceUsd == null || m.capsolverBalance.after?.balanceUsd == null ? 'unknown' : `$${(m.capsolverBalance.before.balanceUsd - m.capsolverBalance.after.balanceUsd).toFixed(4)}`} (every solver arm together; CapSolver states no per-task price)`]),
   ...m.failures.map((f) => `- Failure: ${f}`),
   '',

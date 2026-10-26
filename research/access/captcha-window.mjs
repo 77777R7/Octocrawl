@@ -16,7 +16,11 @@
 //                     solver arms on one base. A grant whose solver.egress is "proxy" gets its run's exit in
 //                     W2L_SOLVER_PROXY from the environment variable --solver-exits <arm>=NAME names (default
 //                     W2L_SOLVER_PROXY; one sticky session per arm, so two arms never share an exit), never written
-//                     anywhere; every other arm's API is started without W2L_SOLVER_PROXY. With a solver arm and
+//                     anywhere, with <NAME>_ADDRESS and <NAME>_SCHEME, when set, as its W2L_SOLVER_PROXY_ADDRESS (the
+//                     gateway IP the forwarder dials) and W2L_SOLVER_PROXY_SCHEME (what CapSolver is given). Every other
+//                     arm's API is started without any W2L_SOLVER_PROXY*. The exit address of each such arm is read
+//                     once through its exit before the first block and once after the last (api.ipify.org), into the
+//                     manifest. With a solver arm and
 //                     CAPSOLVER_API_KEY, CapSolver's getBalance is read through the shell's proxy before the first block
 //                     and after the last, into the manifest (the balance only).
 // Interleaving: the tasks (file order) are cut into --blocks blocks; in block b the arms run one after another, their
@@ -116,7 +120,12 @@ for (const [i, name] of armNames.entries()) {
     try { egress = file === null ? null : JSON.parse(await readFile(file, 'utf8'))?.solver?.egress ?? null } catch {}
     if (egress === 'proxy') {
       const exitVar = solverExits[name] ?? 'W2L_SOLVER_PROXY'
-      if (process.env[exitVar]) { env.W2L_SOLVER_PROXY = process.env[exitVar]; exits[name] = `solver exit from ${exitVar}` } else why.push(`${exitVar} not set (the grant's solver exit is "proxy")`)
+      if (process.env[exitVar]) {
+        env.W2L_SOLVER_PROXY = process.env[exitVar]
+        if (process.env[`${exitVar}_ADDRESS`]) env.W2L_SOLVER_PROXY_ADDRESS = process.env[`${exitVar}_ADDRESS`]
+        if (process.env[`${exitVar}_SCHEME`]) env.W2L_SOLVER_PROXY_SCHEME = process.env[`${exitVar}_SCHEME`]
+        exits[name] = `solver exit from ${exitVar}${env.W2L_SOLVER_PROXY_ADDRESS ? `, dialled at ${env.W2L_SOLVER_PROXY_ADDRESS}` : ''}${env.W2L_SOLVER_PROXY_SCHEME ? `, given to the solver as ${env.W2L_SOLVER_PROXY_SCHEME}` : ''}`
+      } else why.push(`${exitVar} not set (the grant's solver exit is "proxy")`)
     } else if (egress === 'none') exits[name] = 'shell proxy (solver egress none)'
     else why.push(`${file} names no solver.egress`)
   }
@@ -152,6 +161,7 @@ const manifest = {
   proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ? 'set' : null, HTTP_PROXY: process.env.HTTP_PROXY ? 'set' : null, NO_PROXY: process.env.NO_PROXY ?? null },
   exits: Object.fromEntries(runArms.map((a) => [a, exits[a] ?? 'shell proxy'])),
   capsolverBalance: { before: null, after: null },
+  exitAddresses: Object.fromEntries(runArms.filter((a) => 'W2L_SOLVER_PROXY' in arms[a].env).map((a) => [a, { before: null, after: null }])),
   runs: [], failures: [],
 }
 const saveManifest = () => writeFile(join(work, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
@@ -168,7 +178,7 @@ async function startApi(name) {
   const env = { ...process.env, ...a.env, W2L_TASK_ROOT: join(work, `api-${name}`), W2L_SOURCE_COMMIT: sh('git rev-parse HEAD') }
   if (!('W2L_ACCESS_GRANT' in a.env)) delete env.W2L_ACCESS_GRANT
   // Only an arm whose grant chose the solver exit gets one: the API refuses W2L_SOLVER_PROXY under any other grant.
-  if (!('W2L_SOLVER_PROXY' in a.env)) delete env.W2L_SOLVER_PROXY
+  for (const k of ['W2L_SOLVER_PROXY', 'W2L_SOLVER_PROXY_ADDRESS', 'W2L_SOLVER_PROXY_SCHEME']) if (!(k in a.env)) delete env[k]
   procs[name] = spawn('node', ['--import', 'tsx', 'packages/api/src/cli.ts', '--port', String(a.port)], { cwd: repo, env, stdio: ['ignore', out, out] })
   for (let i = 0; i < 90; i++) {
     await new Promise((r) => setTimeout(r, 2000))
@@ -230,8 +240,21 @@ function balance() {
   } catch { return { at: new Date().toISOString(), balanceUsd: null, errorCode: 'unreadable' } }
 }
 
+// A solver exit's address, as api.ipify.org sees it through the exit (dialled where the API dials it). curl reads the
+// proxy from its config on stdin, so the login is on no command line.
+function exitAddress(env) {
+  try {
+    const u = new URL(env.W2L_SOLVER_PROXY)
+    if (env.W2L_SOLVER_PROXY_ADDRESS) u.hostname = env.W2L_SOLVER_PROXY_ADDRESS
+    const out = execSync('curl -s -m 30 -K - https://api.ipify.org', { input: `proxy = "${u.href.replace(/\/$/, '')}"\n` }).toString().trim()
+    return { at: new Date().toISOString(), address: /^\d{1,3}(\.\d{1,3}){3}$/.test(out) ? out : null }
+  } catch { return { at: new Date().toISOString(), address: null } }
+}
+const readExits = (when) => { for (const a of Object.keys(manifest.exitAddresses)) manifest.exitAddresses[a][when] = exitAddress(arms[a].env) }
+
 try {
   manifest.capsolverBalance.before = balance()
+  readExits('before')
   await saveManifest()
   for (const name of runArms) await startApi(name)
   for (const [b, ids] of blockIds.entries()) for (const name of rotated(b)) await runSet(name, `${name}-b${b}`, ids)
@@ -241,6 +264,7 @@ try {
 } finally {
   await stopAll()
   manifest.capsolverBalance.after = balance()
+  readExits('after')
   manifest.finishedAt = new Date().toISOString()
   await saveManifest()
 }
