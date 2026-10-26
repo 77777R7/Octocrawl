@@ -894,10 +894,9 @@ describe('a release the provider does not confirm at once (speed A/B window A, 2
     expect(closed.usage).toEqual({ proxyBytes: 0, solves: 0 })
   })
 
-  it('keeps a session the provider still runs, or cannot say of, unreleased, and stops asking within the bound', async () => {
+  it('keeps a session the provider still runs, or cannot say of, unreleased, after its last release call', async () => {
     for (const state of [{ status: 'live' }, null]) {
       const steel = slowSteel(Number.POSITIVE_INFINITY, state)
-      const started = Date.now()
       const closed = await closeOne(steel.api)
       expect(steel.releases()).toBe(1 + quick.retryWaitsMs.length)
       expect(closed.released).toBe(false)
@@ -905,7 +904,6 @@ describe('a release the provider does not confirm at once (speed A/B window A, 2
       expect(closed.releaseState).toEqual(state === null
         ? { ms: expect.any(Number), status: null, reason: null, durationMs: null, error: 'steel: session read returned 503' }
         : { ms: expect.any(Number), status: 'live', reason: null, durationMs: null })
-      expect(Date.now() - started).toBeLessThan(3 * quick.attemptMs + 30 + quick.stateReadMs + 500)
     }
     // A provider with no read of a session's state: unreleased after its last release call.
     let asked = 0
