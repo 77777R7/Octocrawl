@@ -7,7 +7,8 @@
 //          commit the runner's packages/ are checked against
 //        node research/access/speedReport.mjs <w1 dir> <w2 dir> --out <record.md>      both windows: what held in both
 //        node research/access/speedReport.mjs --probe <name>/<side>=<run dir> … [--note <line>] … --out <record.md>
-//          the probes, each side a run-set run; a --note line goes into the header as given
+//          the probes, each side one or more run-set runs (a side named again adds its run's tasks); a --note line
+//          goes into the header as given
 //   A file that exists is never replaced.
 //
 // Method (first calls only; no retry pass is read):
@@ -222,19 +223,20 @@ function twoWindows(A, B, P) {
 // ---- probes
 async function probeRecord(P) {
   const groups = {}
-  for (const p of probes) { const [key, runDir] = p.split('='); const [name, side] = key.split('/'); (groups[name] ??= []).push({ side, runDir }) }
+  for (const p of probes) { const [key, runDir] = p.split('='); const [name, side] = key.split('/'); ((groups[name] ??= {})[side] ??= []).push(runDir) }
   for (const [name, sides] of Object.entries(groups)) {
     P('', `## ${name}`, '')
     const loaded = []
-    for (const s of sides) {
-      const sm = JSON.parse(await readFile(join(repo, s.runDir, 'summary.json'), 'utf8'))
-      loaded.push({ ...s, sm, rows: await runRows(s.runDir) })
+    for (const [side, runDirs] of Object.entries(sides)) {
+      const rows = new Map(), sms = []
+      for (const runDir of runDirs) { sms.push({ runDir, ...JSON.parse(await readFile(join(repo, runDir, 'summary.json'), 'utf8')) }); for (const [id, x] of await runRows(runDir)) rows.set(id, x) }
+      loaded.push({ side, sms, rows, planned: sms.reduce((n, sm) => n + (sm.denominator?.planned ?? 0), 0) })
     }
-    for (const s of loaded) { const e = s.sm.environment; P(`- ${s.side}: \`${s.sm.command}\` against ${e.api}; runner \`${e.commit}\`${e.dirty ? ' (dirty)' : ''}, ${e.proxied ? 'proxied' : 'direct'} (exit ${e.exitIp ?? 'unread'}), grant \`${e.grant?.sha256 ?? 'none'}\`, started ${e.startedAt}; raw run \`${s.runDir}\`.`) }
+    for (const s of loaded) for (const sm of s.sms) { const e = sm.environment; P(`- ${s.side}: \`${sm.command}\` against ${e.api}; runner \`${e.commit}\`${e.dirty ? ' (dirty)' : ''}, ${e.proxied ? 'proxied' : 'direct'} (exit ${e.exitIp ?? 'unread'}), grant \`${e.grant?.sha256 ?? 'none'}\`, started ${e.startedAt}; raw run \`${sm.runDir}\`.`) }
     P('', '| Side | Planned | Verified | False success | p50 | p95 | challenge_wait (gate · outcome: n, p50 ms) |', '| --- | --- | --- | --- | --- | --- | --- |')
     for (const s of loaded) {
       const all = [...s.rows.values()], c = challenge(s.rows)
-      P(`| ${s.side} | ${s.sm.denominator?.planned ?? all.length} | ${all.filter((x) => x.outcome.verified).length} | ${all.filter((x) => x.outcome.falseSuccess).length} | ${ms(q(all.map((x) => x.outcome.wallMs), 0.5))} | ${ms(q(all.map((x) => x.outcome.wallMs), 0.95))} | ${Object.entries(c).sort().map(([k, v]) => `${k}: ${v.length}, ${ms(q(v, 0.5))}`).join('; ') || 'none'} |`)
+      P(`| ${s.side} | ${s.planned || all.length} | ${all.filter((x) => x.outcome.verified).length} | ${all.filter((x) => x.outcome.falseSuccess).length} | ${ms(q(all.map((x) => x.outcome.wallMs), 0.5))} | ${ms(q(all.map((x) => x.outcome.wallMs), 0.95))} | ${Object.entries(c).sort().map(([k, v]) => `${k}: ${v.length}, ${ms(q(v, 0.5))}`).join('; ') || 'none'} |`)
     }
     const taskIds = [...new Set(loaded.flatMap((s) => [...s.rows.keys()]))]
     P('', `| Task | ${loaded.map((s) => s.side).join(' | ')} |`, `| --- | ${loaded.map(() => '---').join(' | ')} |`)
