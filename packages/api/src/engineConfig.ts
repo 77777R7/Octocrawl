@@ -60,6 +60,8 @@ export interface CaptchaSolverConfig {
   upstream: ProxyServer | null
   /** The IP the forwarder dials for `upstream` (W2L_SOLVER_PROXY_ADDRESS), the solver still given its hostname; null: its own. */
   upstreamAddress: string | null
+  /** The scheme the solver is given `upstream` by (W2L_SOLVER_PROXY_SCHEME), the browser's being http; null: http too. */
+  solverScheme: 'socks5' | null
   perSolveUsd: number
   maxSolvesPerCall: number
   grantHash: string | null
@@ -88,7 +90,7 @@ export function loadEngineConfig(env: NodeJS.ProcessEnv, options: { hosted: bool
     ...(browserIdentity === 'declared' ? [] : ['browser identity: actual on the public browser rung (W2L_BROWSER_IDENTITY): the browser sends its own User-Agent and client hints, which the record declares; an experiment switch (docs/pa-challenge-botcheck-tasks.md G2)']),
     ...(compatHosts.length === 0 ? [] : [`compatible transport (ADR 0005 compatible_transport): ${COMPAT_LIBRARY.name} ${COMPAT_LIBRARY.version}, profile ${DEFAULT_COMPAT_PROFILE}, in place of the http rung for standard-mode pages on ${compatHosts.join(', ')} and their subdomains${(env.W2L_COMPAT_HOSTS ?? '').trim() === '' ? ' (the hosts its acceptance showed it helps, research/access/benefit-hosts.v1.json; W2L_COMPAT_HOSTS names others, none turns it off)' : ''}; a request with custom headers or mobile keeps the http rung`]),
     ...(egressList.length === 0 ? [] : [`egress proxies (ADR 0005 egress_sessions): ${egressList.map((proxy) => proxy.endpoint).join(', ')}; a batch or crawl keeps one for its run and moves on only when the proxy itself fails its probe (at most 2 times), never after a block, a challenge, a 429 or a site's reset; a scrape takes the next healthy one${egressEchoUrl === null ? '' : `; each is asked where it leaves from at ${new URL(egressEchoUrl).host}`}`]),
-    ...(captchaSolver === null ? [] : [`captcha solver (ADR 0005 third_party_captcha_solver): ${captchaSolver.vendor}, $${captchaSolver.perSolveUsd} a solve by the grant's tariff, at most ${captchaSolver.maxSolvesPerCall} a page, within the grant's budget; on the public browser rungs of requests that choose access enhanced${captchaSolver.upstream === null ? '; no solver exit, so DataDome and Cloudflare challenges are not solved' : `; every rung leaves through the solver exit ${captchaSolver.upstream.endpoint}${captchaSolver.upstreamAddress === null ? '' : `, dialled at ${captchaSolver.upstreamAddress}`} from its first request, and DataDome and Cloudflare challenges are solved through it`}`]),
+    ...(captchaSolver === null ? [] : [`captcha solver (ADR 0005 third_party_captcha_solver): ${captchaSolver.vendor}, $${captchaSolver.perSolveUsd} a solve by the grant's tariff, at most ${captchaSolver.maxSolvesPerCall} a page, within the grant's budget; on the public browser rungs of requests that choose access enhanced${captchaSolver.upstream === null ? '; no solver exit, so DataDome and Cloudflare challenges are not solved' : `; every rung leaves through the solver exit ${captchaSolver.upstream.endpoint}${captchaSolver.upstreamAddress === null ? '' : `, dialled at ${captchaSolver.upstreamAddress}`}${captchaSolver.solverScheme === null ? '' : ` and given to ${captchaSolver.vendor} as ${captchaSolver.solverScheme}`} from its first request, and DataDome and Cloudflare challenges are solved through it`}`]),
   ]
   return { accessGrant, browserEngine, browserIdentity, compatHosts, egressProxies: egressList, egressEchoUrl, workerCount, captchaSolver, notices }
 }
@@ -166,6 +168,9 @@ function readAccessGrant(argv: readonly string[], env: NodeJS.ProcessEnv, hosted
 function readCaptchaSolver(env: NodeJS.ProcessEnv, grant: AccessGrant | null, hosted: boolean, egressList: readonly ProxyServer[]): CaptchaSolverConfig | null {
   const solverExit = (env.W2L_SOLVER_PROXY ?? '').trim()
   const solverAddress = (env.W2L_SOLVER_PROXY_ADDRESS ?? '').trim()
+  const solverScheme = (env.W2L_SOLVER_PROXY_SCHEME ?? '').trim().toLowerCase()
+  if (solverScheme !== '' && solverScheme !== 'socks5' && solverScheme !== 'http') throw new Error('W2L_SOLVER_PROXY_SCHEME must be socks5 or http (the scheme the solver is given W2L_SOLVER_PROXY by)')
+  if (solverScheme !== '' && solverExit === '') throw new Error('W2L_SOLVER_PROXY_SCHEME is the scheme the solver is given W2L_SOLVER_PROXY by: set W2L_SOLVER_PROXY too, or unset it')
   if (solverAddress !== '' && solverExit === '') throw new Error('W2L_SOLVER_PROXY_ADDRESS is the address W2L_SOLVER_PROXY\'s host is dialled at: set W2L_SOLVER_PROXY too, or unset it')
   if (solverAddress !== '' && isIP(solverAddress) === 0) throw new Error('W2L_SOLVER_PROXY_ADDRESS must be an IP address (the gateway the exit\'s hostname is dialled at)')
   if (grant === null || !grant.capabilities.includes('third_party_captcha_solver') || grant.solver == null) {
@@ -187,7 +192,7 @@ function readCaptchaSolver(env: NodeJS.ProcessEnv, grant: AccessGrant | null, ho
   } else if (solverExit !== '') {
     throw new Error('W2L_SOLVER_PROXY is set but the access grant\'s solver exit is "none"; set solver.egress to "proxy" in the grant, or unset it')
   }
-  return { vendor: grant.solver.vendor, apiKey, upstream, upstreamAddress: upstream === null || solverAddress === '' ? null : solverAddress, perSolveUsd: tariff.perSolveUsd, maxSolvesPerCall: tariff.maxSolvesPerCall!, grantHash: grant.sha256 ?? null }
+  return { vendor: grant.solver.vendor, apiKey, upstream, upstreamAddress: upstream === null || solverAddress === '' ? null : solverAddress, solverScheme: upstream === null || solverScheme !== 'socks5' ? null : 'socks5', perSolveUsd: tariff.perSolveUsd, maxSolvesPerCall: tariff.maxSolvesPerCall!, grantHash: grant.sha256 ?? null }
 }
 
 /**
@@ -197,7 +202,7 @@ function readCaptchaSolver(env: NodeJS.ProcessEnv, grant: AccessGrant | null, ho
  */
 export async function startCaptchaSolving(config: CaptchaSolverConfig | null, env: NodeJS.ProcessEnv = process.env): Promise<{ solving: CaptchaSolving; exit: ProxyServer | null; close: () => Promise<void> } | null> {
   if (config === null) return null
-  const forwarder = config.upstream === null ? null : await startSolverForwarder(config.upstream, config.upstreamAddress ?? undefined)
+  const forwarder = config.upstream === null ? null : await startSolverForwarder(config.upstream, config.upstreamAddress ?? undefined, config.solverScheme ?? undefined)
   const api = capSolverFetch(environmentProxy(env) !== null)
   const solver = new CapSolver({ apiKey: config.apiKey, fetchImpl: api.fetch })
   return {

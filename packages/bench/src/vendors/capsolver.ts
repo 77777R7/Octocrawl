@@ -99,8 +99,9 @@ export interface CapSolverOptions {
  * `host:port:user:pass`, but on 2026-10-26 it refused that form for Webshare's sticky exit (ERROR_PROXY_CONNECT_REFUSED,
  * by the gateway's IP and by p.webshare.io) and accepted this one, with the same host, port and login. The host is the
  * one the operator named, which the browser's forwarder dials too: Webshare pins the exit by the session id in the login
- * ("The same session ID will route to the same exit IP", apidocs.webshare.io/proxy-connection); whether that holds
- * across its regional gateways it does not say.
+ * ("The same session ID will route to the same exit IP", apidocs.webshare.io/proxy-connection), but only within one
+ * region of its gateways: on 2026-10-26 one session id left from one address through us-east-1 gateways and from another
+ * through ap-northeast-1 ones, so the forwarder's address (W2L_SOLVER_PROXY_ADDRESS) is a gateway of CapSolver's region.
  */
 export function capSolverProxy(proxy: ProxyServer): string {
   const { hostname, port, protocol } = new URL(proxy.url)
