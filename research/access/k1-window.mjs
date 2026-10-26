@@ -11,6 +11,10 @@
 //   combined          this checkout's API, one grant naming installed_chrome and the Steel grant's capabilities, budget and
 //                     tariff (--combined-grant, default .w2l/access/combined-grant.json), W2L_VENDORS=steel, STEEL_API_KEY,
 //                     access "enhanced": the combined-grant measurement after K1 (ROADMAP, PA bar, to measure next).
+//   ic_compat         this checkout's API, a grant naming installed_chrome and compatible_transport (--ic-compat-grant,
+//                     default .w2l/access/ic-compat-grant-k1.json) whose other settings the engine's parser finds equal to
+//                     the K1 installed_chrome grant's, no Steel, access "enhanced": the candidate local default without a
+//                     paid vendor (ROADMAP current phase, decision 17, stage L item 1).
 //   firecrawl         run-set --target firecrawl (Firecrawl Cloud, its own strongest route).
 //   zenrows           run-set --target zenrows (ZenRows mode=auto).
 // Interleaving: the 92 tasks (tasks.v1.json order) are cut into --blocks blocks. In block b the four local arms run one
@@ -24,8 +28,13 @@
 // Usage: node research/access/k1-window.mjs --window 1 --control <dir> [--date YYYY-MM-DD] [--blocks 4]
 //          [--ports 8821,8822,8823,8824] [--steel-grant <file>] [--ic-grant <file>] [--no-retry] [--dry-run]
 //          [--arms standard,installed_chrome,combined,firecrawl] [--combined-grant <file>] [--firecrawl-cap <credits>]
-//          [--name k1]
-//   --arms picks the arms (default the six above, without combined); --control is needed only with the control arm.
+//          [--name k1] [--ic-compat-grant <file>] [--steel-cap <usd>] [--steel-probe]
+//   --arms picks the arms (default the six above, without combined or ic_compat); --control is needed only with the
+//   control arm.
+//   --steel-cap stops a run of an arm with Steel from starting when the ledger's charges in this window so far, plus each
+//   of its pages at the Steel tariff's price ceiling (one call a page), would pass the cap; the manifest names each run it
+//   held back, and its tasks stay in the denominator as not run. --steel-probe reads Steel's API once before the first
+//   block (GET /v1/sessions?limit=1, read-only, through the shell's proxy as the arms' calls go) and records its latency.
 //   Ports are taken in the order the local arms are listed; 8787, 8791, 8799 and 8812–8814 are refused.
 //   Grants and keys are found as weekly.mjs finds them (this checkout's .w2l/access, else the main checkout's); keys are
 //   never written anywhere. Work files: .w2l/access/<name>/<date>-w<window>/ (git-ignored), with manifest.json.
@@ -37,6 +46,7 @@ import { connect } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { grantOf } from './runSetReport.mjs'
+import { icCompatRefusal, steelCapAllows } from './combinedArms.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../..')
@@ -44,7 +54,7 @@ const args = process.argv.slice(2)
 const flag = (name) => { const i = args.indexOf(name); return i === -1 ? undefined : args[i + 1] }
 const windowNo = flag('--window')
 if (!/^\d$/.test(windowNo ?? '')) throw new Error('--window 1 or 2')
-const ALL_LOCAL = ['standard', 'enhanced', 'installed_chrome', 'control', 'combined']
+const ALL_LOCAL = ['standard', 'enhanced', 'installed_chrome', 'control', 'combined', 'ic_compat']
 const ALL_COMPETITORS = ['firecrawl', 'zenrows']
 const chosen = (flag('--arms') ?? 'standard,enhanced,installed_chrome,control,firecrawl,zenrows').split(',')
 for (const a of chosen) if (![...ALL_LOCAL, ...ALL_COMPETITORS].includes(a)) throw new Error(`--arms: unknown arm ${a}`)
@@ -102,10 +112,36 @@ if (LOCAL.includes('combined')) {
   const settings = async (f) => { const { attestation, sha256, capabilities, ...rest } = accessGrantFromText(await readFile(f, 'utf8')); return JSON.stringify(rest) }
   if (await settings(combinedGrant) !== await settings(steelGrant)) throw new Error(`${combinedGrant}: its tier, budget, scope or tariffs differ from ${steelGrant}`)
 }
+// The ic_compat grant holds installed_chrome and compatible_transport; the rest of it is checked against the K1
+// installed_chrome grant's by the engine's own parser, as the combined grant is against the Steel grant's.
+const icCompatGrant = flag('--ic-compat-grant') ?? localFile('.w2l/access/ic-compat-grant-k1.json')
+let icCompat = null
+if (LOCAL.includes('ic_compat')) {
+  if (icCompatGrant === null) throw new Error('no ic_compat grant: .w2l/access/ic-compat-grant-k1.json (or --ic-compat-grant)')
+  icCompat = grantOf(await readFile(icCompatGrant, 'utf8'))
+  const refusal = icCompatRefusal(icCompat.capabilities)
+  if (refusal !== null) throw new Error(`${icCompatGrant}: ${refusal}`)
+  const { accessGrantFromText } = await import('../../packages/http-core/dist/accessGrant.js')
+  const settings = async (f) => { const { attestation, sha256, capabilities, ...rest } = accessGrantFromText(await readFile(f, 'utf8')); return JSON.stringify(rest) }
+  if (await settings(icCompatGrant) !== await settings(icGrant)) throw new Error(`${icCompatGrant}: its tier, budget, scope or tariffs differ from ${icGrant}`)
+}
+const steelCap = flag('--steel-cap') === undefined ? null : Number(flag('--steel-cap'))
+if (steelCap !== null && !(steelCap >= 0)) throw new Error('--steel-cap <usd>: a number of US dollars')
+// A page makes one Steel call (the ladder's one Steel rung), and the ledger charges a call at most the tariff's price
+// ceiling (the engine's own tariffCeilingUsd, Steel's shortest session as the floor) unless it prices bytes or solves.
+let steelCeiling = null
+if (steelCap !== null) {
+  const { accessGrantFromText, tariffCeilingUsd } = await import('../../packages/http-core/dist/accessGrant.js')
+  const { STEEL_MIN_SESSION_MS } = await import('../../packages/bench/dist/vendors/steel.js')
+  const tariff = accessGrantFromText(await readFile(steelGrant, 'utf8')).tariffs?.steel
+  if (!tariff || tariff.maxSessionMs === null || tariff.perGbUsd > 0 || tariff.perSolveUsd > 0) throw new Error(`--steel-cap: the Steel grant's tariff does not bound a page's charge (${steelGrant})`)
+  steelCeiling = tariffCeilingUsd(tariff, STEEL_MIN_SESSION_MS)
+}
 const needs = { STEEL_API_KEY: LOCAL.some((a) => ['enhanced', 'control', 'combined'].includes(a)), FIRECRAWL_API_KEY: COMPETITORS.includes('firecrawl'), ZENROWS_API_KEY: COMPETITORS.includes('zenrows') }
 const keys = {}
 for (const k of Object.keys(needs)) keys[k] = await secret(k)
 for (const [k, v] of Object.entries(keys)) if (needs[k] && !v) throw new Error(`${k} not found (environment or .w2l/access/competitors.env)`)
+if (args.includes('--steel-probe') && !needs.STEEL_API_KEY) throw new Error('--steel-probe: no arm of this window calls Steel')
 
 const workRel = `.w2l/access/${flag('--name') ?? 'k1'}/${date}-w${windowNo}`
 const work = join(repo, workRel)
@@ -117,8 +153,9 @@ const arm = {
   installed_chrome: { port: portOf('installed_chrome'), cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: icGrant }, grant: ic, grantFile: icGrant },
   control: { port: portOf('control'), cwd: control, commit: controlCommit, access: '"enhanced"', env: { W2L_ACCESS_GRANT: steelGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.STEEL_API_KEY }, grant: steel, grantFile: steelGrant },
   combined: { port: portOf('combined'), cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: combinedGrant, W2L_VENDORS: 'steel', STEEL_API_KEY: keys.STEEL_API_KEY }, grant: combined, grantFile: combinedGrant },
+  ic_compat: { port: portOf('ic_compat'), cwd: repo, commit: sh('git rev-parse HEAD'), access: '"enhanced"', env: { W2L_ACCESS_GRANT: icCompatGrant }, grant: icCompat, grantFile: icCompatGrant },
 }
-console.log(`window ${windowNo}, ${date}, runner ${commit}, control ${controlCommit?.slice(0, 8) ?? 'none'}; arms ${chosen.join(',')}; ${tasks.length} tasks in ${blockIds.length} blocks of ${size}; ports ${LOCAL.map((a) => `${a}=${portOf(a)}`).join(',')}`)
+console.log(`window ${windowNo}, ${date}, runner ${commit}, control ${controlCommit?.slice(0, 8) ?? 'none'}; arms ${chosen.join(',')}; ${tasks.length} tasks in ${blockIds.length} blocks of ${size}; ports ${LOCAL.map((a) => `${a}=${portOf(a)}`).join(',')}${steelCap === null ? '' : `; Steel cap $${steelCap}, a page at most $${steelCeiling.toFixed(4)}`}`)
 for (const [b, ids] of blockIds.entries()) console.log(`block ${b}: ${ids[0]}…${ids.at(-1)} (${ids.length}); local order ${rotated(b).join(' → ')}`)
 if (dryRun) process.exit(0)
 if (existsSync(join(work, 'manifest.json'))) throw new Error(`${workRel}/manifest.json exists: this window was run; use another --date or --window`)
@@ -139,9 +176,26 @@ async function usage(name) {
   } catch (e) { return { at: new Date().toISOString(), error: e.message } }
 }
 
-const manifest = { window: Number(windowNo), date, runner: commit, control: controlCommit, arms: chosen, tasks: tasks.length, blocks: blockIds, ports, grants: { steel: { file: steelGrant, sha256: steel.sha256, capabilities: steel.capabilities }, installed_chrome: { file: icGrant, sha256: ic.sha256, capabilities: ic.capabilities }, ...(combined ? { combined: { file: combinedGrant, sha256: combined.sha256, capabilities: combined.capabilities } } : {}) }, proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null, HTTP_PROXY: process.env.HTTP_PROXY ?? null, NO_PROXY: process.env.NO_PROXY ?? null }, credits: { before: {}, after: {} }, runs: [], failures: [] }
+/** Steel's API answering one read-only list call, through the shell's proxy as the arms' calls go: its latency now. */
+async function steelProbe() {
+  const { EnvHttpProxyAgent, fetch: f } = await import('undici')
+  const request = 'GET /v1/sessions?limit=1'
+  const at = new Date().toISOString()
+  const started = performance.now()
+  try {
+    const res = await f('https://api.steel.dev/v1/sessions?limit=1', { dispatcher: new EnvHttpProxyAgent(), headers: { 'steel-api-key': keys.STEEL_API_KEY }, signal: AbortSignal.timeout(30_000) })
+    await res.arrayBuffer()
+    return { at, request, status: res.status, ms: Math.round(performance.now() - started) }
+  } catch (e) { return { at, request, status: null, ms: Math.round(performance.now() - started), error: e.message } }
+}
+
+const manifest = { window: Number(windowNo), date, runner: commit, control: controlCommit, ...(steelCap === null ? {} : { steelCap: { usd: steelCap, pageCeilingUsd: steelCeiling } }), arms: chosen, tasks: tasks.length, blocks: blockIds, ports, grants: { steel: { file: steelGrant, sha256: steel.sha256, capabilities: steel.capabilities }, installed_chrome: { file: icGrant, sha256: ic.sha256, capabilities: ic.capabilities }, ...(combined ? { combined: { file: combinedGrant, sha256: combined.sha256, capabilities: combined.capabilities } } : {}), ...(icCompat ? { ic_compat: { file: icCompatGrant, sha256: icCompat.sha256, capabilities: icCompat.capabilities } } : {}) }, proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null, HTTP_PROXY: process.env.HTTP_PROXY ?? null, NO_PROXY: process.env.NO_PROXY ?? null }, credits: { before: {}, after: {} }, runs: [], failures: [] }
 const saveManifest = () => writeFile(join(work, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 for (const c of COMPETITORS) manifest.credits.before[c] = await usage(c)
+if (args.includes('--steel-probe')) {
+  manifest.steelProbe = await steelProbe()
+  console.log(`Steel ${manifest.steelProbe.request}: ${manifest.steelProbe.status ?? manifest.steelProbe.error} in ${manifest.steelProbe.ms} ms`)
+}
 await saveManifest()
 
 // ---- the four local APIs
@@ -252,13 +306,30 @@ async function withinCap(c, pages, what) {
   return ok
 }
 
+/** Whether an arm's run may start under --steel-cap: an arm without Steel always may. */
+async function withinSteelCap(name, pages, what) {
+  if (steelCap === null || !arm[name].env.STEEL_API_KEY) return true
+  const charged = []
+  for (const r of manifest.runs.filter((x) => arm[x.arm]?.env.STEEL_API_KEY)) {
+    const f = r.runDir && join(repo, r.runDir, 'attempts.jsonl')
+    const rows = f && existsSync(f) ? (await readFile(f, 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []
+    charged.push(...rows.map((a) => a.outcome?.chargedUsd))
+    // A page the run did not report (it stopped, or left no run directory) is counted at the ceiling.
+    const reported = new Set(rows.map((a) => a.taskId))
+    charged.push(...r.ids.filter((id) => !reported.has(id)).map(() => null))
+  }
+  const check = steelCapAllows({ charged, pages, capUsd: steelCap, pageCeilingUsd: steelCeiling })
+  if (!check.ok) { manifest.failures.push(`${name} not started for ${what}: $${check.spentUsd?.toFixed(4)} charged in this window, +${pages} pages at $${steelCeiling.toFixed(4)} would pass the Steel cap $${steelCap}`); await saveManifest() }
+  return check.ok
+}
+
 try {
   for (const name of LOCAL) await startApi(name)
   for (const [b, ids] of blockIds.entries()) {
     const since = Date.now()
     const comp = []
     for (const c of COMPETITORS) if (await withinCap(c, ids.length, `block ${b}`)) comp.push(runSet(c, `${c}-first-b${b}`, ids))
-    for (const name of rotated(b)) await runSet(name, `${name}-first-b${b}`, ids)
+    for (const name of rotated(b)) if (await withinSteelCap(name, ids.length, `block ${b}`)) await runSet(name, `${name}-first-b${b}`, ids)
     await Promise.all(comp)
     await checkAwake(since, `block ${b}`)
   }
@@ -272,7 +343,7 @@ try {
     const comp = []
     for (const c of COMPETITORS) if (retry[c].length > 0 && await withinCap(c, retry[c].length, 'the retry pass')) comp.push(runSet(c, `${c}-retry`, retry[c]))
     const since = Date.now()
-    for (const name of rotated(blockIds.length)) if (retry[name].length > 0) await runSet(name, `${name}-retry`, retry[name])
+    for (const name of rotated(blockIds.length)) if (retry[name].length > 0 && await withinSteelCap(name, retry[name].length, 'the retry pass')) await runSet(name, `${name}-retry`, retry[name])
     await Promise.all(comp)
     await checkAwake(since, 'the retry pass')
   }
