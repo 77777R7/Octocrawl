@@ -349,6 +349,23 @@ export class RegionTracker {
 }
 
 /**
+ * One read of a region wait, for a lane that times its page's steps (O7): what the read took on the page and what
+ * judging it took here, and how much the view moved.
+ */
+export interface RegionRead {
+  /** 1 for the wait's first read. */
+  read: number
+  /** The read on the page: the view, and the lane's table reader when it has one. */
+  ms: number
+  /** Judging the read here (the view's Markdown included). */
+  judgeMs: number
+  /** Characters of the view the read returned, the page's whole HTML among them when a Markdown check needs it; null when a navigation cut the read off. */
+  viewChars: number | null
+  /** The part of `ms` the lane's table reader took (RegionSpec.readTables), when it has one. */
+  tablesMs?: number
+}
+
+/**
  * Wait for the region on a page a lane drives (browser_local, a provider's browser): read the view every
  * REGION_SAMPLE_MS until it is ready or `maxMs` has passed, at least once. A view that can judge none of the contract's
  * checks ends it at that read, with `unjudged`. A read that a navigation cut off starts the comparison afresh.
@@ -358,12 +375,13 @@ export class RegionTracker {
  * one screen down before each read after, until the region is ready, the page ends or MAX_REGION_SCROLLS, all within
  * `maxMs`; a wait that `maxMs` ends first says so (`scrollUnfinished`). `scroll: false` waits without scrolling.
  */
-export async function waitForRegion(page: SettlePage, spec: RegionSpec, options: { maxMs: number; sampleMs?: number; now?: () => number; scroll?: boolean }): Promise<RegionOutcome> {
+export async function waitForRegion(page: SettlePage, spec: RegionSpec, options: { maxMs: number; sampleMs?: number; now?: () => number; scroll?: boolean; onRead?: (read: RegionRead) => void }): Promise<RegionOutcome> {
   const now = options.now ?? Date.now
   const tracker = new RegionTracker(spec, now)
   const expression = tracker.expression()
   const sampleMs = options.sampleMs ?? REGION_SAMPLE_MS
   const deadline = now() + Math.max(0, options.maxMs)
+  let read = 0
   let scrolls = 0
   let scrolling = false
   let ended = false
@@ -381,14 +399,21 @@ export async function waitForRegion(page: SettlePage, spec: RegionSpec, options:
     const readStarted = now()
     let json: unknown
     let tables: RegionTables | undefined
+    let tablesMs: number | undefined
     try {
       json = await page.evaluate(expression)
-      if (spec.readTables !== undefined) tables = await spec.readTables(Math.max(0, deadline - now()))
+      if (spec.readTables !== undefined) {
+        const tablesStarted = now()
+        tables = await spec.readTables(Math.max(0, deadline - now()))
+        tablesMs = now() - tablesStarted
+      }
     } catch (error) {
       if (!isNavigationError(error)) throw error
       json = undefined
     }
+    const judgeStarted = now()
     const ready = tracker.observe(json, tables)
+    options.onRead?.({ read: ++read, ms: judgeStarted - readStarted, judgeMs: now() - judgeStarted, viewChars: typeof json === 'string' ? json.length : null, ...(tablesMs === undefined ? {} : { tablesMs }) })
     if (!tracker.judgeable || tracker.settled) return await outcome()
     // A read takes what the last one took (a large page's HTML, its Markdown): none is begun that would end past the bound.
     const readMs = now() - readStarted

@@ -18,7 +18,7 @@ import { createExecutionScope, throwIfExecutionStopped } from '@w2l/http-core'
  */
 
 import type { PolicyDecision, VendorSessionUsage } from '@w2l/http-core'
-import type { ProviderResponse, ProviderTransport } from '../subjects/provider.js'
+import type { ProviderResponse, ProviderStep, ProviderTransport } from '../subjects/provider.js'
 import type { RegionSpec } from '../regionWait.js'
 import { scrubSecret } from './api.js'
 import {
@@ -146,6 +146,8 @@ export interface ClosedVendorSession {
   bytesCounted?: number | null
   /** True when the transport ended the session at the tariff's maxBytesPerCall. */
   bytesCapped?: boolean
+  /** How long the release and the provider's usage reads took (O7); a read the provider has no call for is null. */
+  releaseTimings?: { liveUsageMs: number | null; releaseMs: number; usageMs: number | null }
 }
 
 export class CdpVendorTransport implements ProviderTransport {
@@ -153,6 +155,8 @@ export class CdpVendorTransport implements ProviderTransport {
   private readonly closed: ClosedVendorSession[] = []
   private declaredUserAgent: string | null = null
   private resume: VendorResumeContext | null = null
+  /** The steps taken since the last takeSteps, each as it ended, with how long it took (O7). */
+  private steps: ProviderStep[] = []
 
   constructor(
     private readonly ops: VendorOps,
@@ -186,7 +190,9 @@ export class CdpVendorTransport implements ProviderTransport {
     if (this.declaredUserAgent !== null) return this.declaredUserAgent
     const { browser } = await this.ensureSession(deadlineMs, signal)
     try {
+      const probeStarted = Date.now()
       const ua = await measureUserAgent(browser, deadlineMs, signal)
+      this.step('ua_probed', { ms: Date.now() - probeStarted })
       this.declaredUserAgent = ua
       return ua
     } catch (err) {
@@ -204,7 +210,7 @@ export class CdpVendorTransport implements ProviderTransport {
     const declared = await this.resolveUserAgent(deadlineMs, signal)
     const { browser, meter } = await this.ensureSession(deadlineMs, signal)
     try {
-      const res = await navigateOnce(browser, url, deadlineMs, signal, region, meter ?? undefined)
+      const res = await navigateOnce(browser, url, deadlineMs, signal, region, meter ?? undefined, (event, detail) => this.step(event, detail))
       return {
         status: res.status,
         body: res.body,
@@ -240,6 +246,15 @@ export class CdpVendorTransport implements ProviderTransport {
     await this.dropSession()
   }
 
+  /** The session's and the pages' steps since the last call, in order: the provider lane puts them on its trace. */
+  takeSteps(): ProviderStep[] {
+    return this.steps.splice(0)
+  }
+
+  private step(event: string, detail: Record<string, unknown>): void {
+    this.steps.push({ event, endedAt: Date.now(), detail })
+  }
+
   private async ensureSession(deadlineMs?: number, signal?: AbortSignal): Promise<LiveSession> {
     throwIfExecutionStopped({ signal, deadlineAt: deadlineMs })
     if (this.live !== null) return this.live
@@ -247,15 +262,19 @@ export class CdpVendorTransport implements ProviderTransport {
     // A monotonic clock: a wall clock stepped back mid-session (a time sync, a laptop waking) would shorten the time charged.
     const openedAt = performance.now()
     let session: VendorSession
+    const createStarted = Date.now()
     try {
       session = await this.ops.createSession(this.resume, deadlineMs, signal)
     } catch (err) {
       throw new Error(this.scrub(err instanceof Error ? err.message : String(err)))
     }
+    this.step('session_created', { ms: Date.now() - createStarted })
 
     let browser: CdpBrowser
+    const connectStarted = Date.now()
     try {
       browser = await this.connector(session.connectUrl, deadlineMs, signal)
+      this.step('cdp_connected', { ms: Date.now() - connectStarted })
     } catch (err) {
       await this.release(session.sessionId, openedAt)
       throw new Error(this.scrub(err instanceof Error ? err.message : String(err)))
@@ -264,8 +283,10 @@ export class CdpVendorTransport implements ProviderTransport {
     if (this.declaredUserAgent !== null) {
       // A reconnect must still be the identity the gate cleared.
       let current: string
+      const probeStarted = Date.now()
       try {
         current = await measureUserAgent(browser, deadlineMs, signal)
+        this.step('ua_probed', { ms: Date.now() - probeStarted, recheck: true })
       } catch (err) {
         await browser.close().catch(() => {})
         await this.release(session.sessionId, openedAt)
@@ -314,26 +335,35 @@ export class CdpVendorTransport implements ProviderTransport {
   private async release(sessionId: string, openedAt: number, meter: ByteMeter | null = null): Promise<void> {
     // The figures a provider only answers for while the session lives (Steel's solves), read before the release.
     let live: Partial<VendorSessionUsage> | null = null
+    let liveUsageMs: number | null = null
     if (typeof this.ops.liveUsage === 'function') {
+      const started = Date.now()
       try { live = await this.ops.liveUsage(sessionId, Date.now() + 3_000) } catch { live = null }
+      liveUsageMs = Date.now() - started
     }
     let released = true
+    const releaseStarted = Date.now()
     try {
       await this.ops.releaseSession(sessionId, Date.now() + 5_000)
     } catch {
       released = false
     }
+    const releaseMs = Date.now() - releaseStarted
     const sessionMs = Math.ceil(performance.now() - openedAt)
     let usage: VendorSessionUsage | null = null
+    let usageMs: number | null = null
     if (released && typeof this.ops.sessionUsage === 'function') {
       // Up to six seconds: a provider's figure can come some time after the release (Steel's proxyBytesUsed).
+      const started = Date.now()
       try { usage = await this.ops.sessionUsage(sessionId, Date.now() + 6_000) } catch { usage = null }
+      usageMs = Date.now() - started
     }
     if (usage !== null && live !== null) usage = { proxyBytes: live.proxyBytes ?? usage.proxyBytes, solves: live.solves ?? usage.solves }
     this.closed.push({
       sessionMs, released,
       ...(typeof this.ops.sessionUsage === 'function' ? { usage } : {}),
       ...(meter === null ? {} : { bytesCounted: meter.bytes, bytesCapped: meter.capped !== null }),
+      releaseTimings: { liveUsageMs, releaseMs, usageMs },
     })
   }
 
