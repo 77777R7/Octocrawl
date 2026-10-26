@@ -175,6 +175,44 @@ describe('RobotsOriginCache reliability boundaries', () => {
     }
   })
 
+  it('keeps the cookies its redirects set for the rest of the lookup, as a sign-in round trip needs', async () => {
+    // developer.android.com (devsite, 2026-10-24): a browser user agent's robots.txt goes to a sign-in check and back,
+    // four redirects, and the loop ends only for a client that sends the cookie the check set. Without it, every round
+    // trip starts over, the redirect limit is reached and robots.txt reads as unreachable (network_error).
+    const sent: (string | null)[] = []
+    const server = createServer((req, res) => {
+      const checked = req.headers.cookie?.split(/;\s*/).includes('signin_details=checked') === true
+      if (req.url === '/robots.txt') sent.push(req.headers.cookie ?? null)
+      if (req.url === '/robots.txt' && checked) { res.setHeader('content-type', 'text/plain'); res.end('User-agent: *\nDisallow: /private\n'); return }
+      if (req.url === '/robots.txt') { res.writeHead(302, { location: '/oauth2authorize?return_url=/robots.txt' }).end(); return }
+      if (req.url?.startsWith('/oauth2authorize')) { res.writeHead(302, { location: '/oauth2callback?error=interaction_required' }).end(); return }
+      if (req.url?.startsWith('/oauth2callback')) { res.writeHead(302, { location: '/robots.txt', 'set-cookie': 'signin_details=checked; Path=/; Max-Age=300' }).end(); return }
+      res.writeHead(404).end()
+    })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('missing fixture port')
+    const url = `http://127.0.0.1:${address.port}/page`
+    const cache = new RobotsOriginCache(localNetworkPolicy())
+    try {
+      const entry = await cache.lookup(url, 'Mozilla/5.0 Chrome/128.0.0.0')
+      expect(entry).toMatchObject({ absent: false, robotsUrl: `http://127.0.0.1:${address.port}/robots.txt` })
+      expect(entry).not.toHaveProperty('unreachable')
+      expect(cache.decision(entry, url, 'Mozilla/5.0 Chrome/128.0.0.0').decision).toBe('allowed')
+      expect(sent).toEqual([null, 'signin_details=checked'])
+      // The cookie belonged to that lookup alone: the next origin lookup starts without it.
+      const other = new RobotsOriginCache(localNetworkPolicy())
+      await other.lookup(url, 'Mozilla/5.0 Chrome/128.0.0.0')
+      await other.teardown()
+      expect(sent[2]).toBeNull()
+    } finally {
+      await cache.teardown()
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  })
+
   it('uses the guarded connector for a real robots request', async () => {
     const server = createServer((_req, res) => {
       res.setHeader('content-type', 'text/plain')

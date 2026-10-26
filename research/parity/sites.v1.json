@@ -3628,6 +3628,45 @@
           ]
         ]}
       ]
+    },
+    {
+      "id": "G02",
+      "batch": "gates",
+      "feature": "scrape-execution.error-model",
+      "url": "https://developer.android.com/guide/components/activities/intro-activities",
+      "request": {"formats": ["markdown"], "maxAge": 0, "debug": true, "fastMode": true},
+      "note": "Added 2026-10-24 from the outreach pre-checks, frozen before its first run. On hosted Octocrawl (extractor commit f7708b3c, API tag h37cursor) the page failed policy_denied on two tries: robots.txt unreadable (network_error). Google's devsite sends a browser user agent's robots.txt and pages to a sign-in check and back (oauth2authorize, accounts.google.com, oauth2callback, then the URL again) and answers only a client that sends the cookie the check set; without it the round trip repeats until the redirect limit. fastMode keeps the case on the HTTP lane, which reads robots.txt and the page itself. Passes with the article read over HTTP and robots.txt read (allowed, never unreachable).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "2", "type": "field", "path": "status", "equals": "success"},
+        {"item": "2", "type": "field", "path": "lane", "equals": "http"},
+        {"item": "2", "type": "field", "path": "evidenceRecord.robotsDecision.decision", "equals": "allowed"},
+        {"item": "2", "type": "field", "path": "evidenceRecord.robotsDecision.unreachable", "present": false},
+        {"item": "2", "type": "field", "path": "evidence.finalUrl", "equals": "https://developer.android.com/guide/components/activities/intro-activities"},
+        {"item": "FS", "type": "markdownMatches", "pattern": "^# Introduction to activities", "flags": "m"},
+        {"item": "FS", "type": "markdownMatches", "pattern": "crucial component of an Android app", "flags": "m"}
+      ]
+    },
+    {
+      "id": "G03",
+      "batch": "gates",
+      "feature": "scrape-execution.error-model",
+      "url": "https://help.autodesk.com/view/fusion360/ENU/?guid=ASM-ASSEMBLIES",
+      "request": {"formats": ["markdown"], "maxAge": 0, "debug": true},
+      "note": "Added 2026-10-24 from the outreach pre-checks, frozen before its first run. On hosted Octocrawl (extractor commit f7708b3c, API tag h37cursor) the browser lane once answered success, readiness ready, with about 230 characters: the banner's Help Home link and language menu, no article. The help viewer renders its banner first and fills its role=\"main\" with the article later. Either answer passes: the article, or an honest failed/empty_unverified. A success without the article's text fails.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "2", "type": "anyOf", "checks": [
+          [
+            {"type": "field", "path": "status", "equals": "success"},
+            {"type": "markdownMatches", "pattern": "is a collection of components that function as a single design", "flags": "m"}
+          ],
+          [
+            {"type": "field", "path": "status", "equals": "failed"},
+            {"type": "field", "path": "failureReason", "equals": "empty_unverified"}
+          ]
+        ]}
+      ]
     }
   ]
 }

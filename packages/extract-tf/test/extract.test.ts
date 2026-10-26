@@ -221,6 +221,27 @@ describe('extractTf', () => {
     expect(said.mainHtml).toContain('363 miles of range')
   })
 
+  it('escalates on a region in the page\'s banner or navigation while its declared main landmark is still empty', () => {
+    // help.autodesk.com (2026-10-24), read before its article loaded: the banner's home link and its language menu were
+    // the only text, and the page answered success with them while its role="main" held nothing.
+    const languages = ['English (US)', '简体中文', 'Deutsch', 'Español', 'Français', 'Italiano', '日本語', '한국어', 'Polski', 'Português (Brasil)', 'Türkçe']
+    const page = (main: string, region = 'role="main"') => `<!doctype html><html><head><title>Fusion Help | Assemblies overview | Autodesk</title></head><body>
+<div id="adsk-athena"><div id="ui-header-area"><header role="banner"><ul id="ui-user-area">
+<li class="ui-nav-home"><a rel="home" href="."><span class="button-text">Help Home</span></a></li>
+<li class="ui-nav-language"><div class="ui-dropdown"><div class="ui-dropdown__trigger" role="button"><span>English (US)</span></div>
+<ol role="listbox" class="ui-dropdown__list" hidden aria-hidden="true">${languages.map((l) => `<li role="option">${l}</li>`).join('')}</ol></div></li></ul>
+<div class="ui-product-title"><a rel="home" href="."><img src="images/product-title.png" alt="Fusion"></a></div></header></div>
+<section id="ui-main-area"><div id="ui-content-area" ${region}><div class="toc ui-sidebar"></div><div class="ui-content-wrap"><div data-athena-component="ContentLoader">${main}</div></div></div></section>
+<div id="ui-footer-area"><footer role="contentinfo"><p>Except where otherwise noted, this work is licensed under a Creative Commons License.</p></footer></div></div></body></html>`
+    expect(extractTf.extract(page('')).escalate).toBe(true)
+    expect(extractTf.extract(page('<!-- loading -->\n  ', '')).escalate, 'no declared main landmark').toBe(false)
+    expect(extractTf.extract(page('').replace('<div id="ui-content-area" role="main">', '<main id="ui-content-area">').replace('</div></div></div></section>', '</div></div></main></section>')).escalate).toBe(true)
+    // The article in the landmark is the content.
+    const loaded = extractTf.extract(page('<article><h1>Assemblies overview</h1><p>An Assembly is a collection of components that function as a single design in Fusion.</p></article>'))
+    expect(loaded.escalate).toBe(false)
+    expect(loaded.mainHtml).toContain('collection of components')
+  })
+
   it('keeps short or heading-led pages that are content: cards, a terse product, prose in headings, a one-line notice', () => {
     // Each of these is content under extract-tf/14 too: the rule must leave them so.
     const shell = (head: string, main: string) => `<!doctype html><html><head><title>Page</title>${head}</head><body>
