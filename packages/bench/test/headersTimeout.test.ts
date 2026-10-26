@@ -188,6 +188,17 @@ describe('headers-timeout fallback boundaries', () => {
     expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_headers_timeout_fallback', detail: expect.objectContaining({ promised: true, remainingMs: 29_000 }) }))
   })
 
+  it('says the caller\'s deadline, not the fallback\'s own 30 s, ended a promised fallback that had less left', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const deadlineAt = Date.now() + 44_000
+    const http: Channel = { id: 'http', identity, async fetch() { vi.setSystemTime(Date.now() + 15_000); return headersTimeout() } }
+    // The browser stops reading just before the deadline it was given, the caller's here, and says so.
+    const partial = { ...product(), status: 'partial' as const, usage: { ...product().usage, deadlineExceeded: true } }
+    const run = await new LadderRunner([http, channel('browser_local', partial)], { mode: 'standard' }).run(url, null, { deadlineAt }, { timeout: 44_000 })
+    expect(run.result.usage.deadlineExceeded).toBe(true)
+    expect(run.result.trace).not.toContainEqual(expect.objectContaining({ event: 'local_fallback_deadline' }))
+  })
+
   it('answers with the fallback browser\'s page when it does the task, and asks no later rung', async () => {
     const installed = channel('installed_chrome', product())
     const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', product()), installed], { mode: 'standard', enhanced: true }, null, null, null,

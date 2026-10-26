@@ -797,6 +797,8 @@ export class LadderRunner {
         const callOptions = channel.id === 'http' && channel.vendorId === undefined && channelsTried.length === 0 && effectiveSession === null
           && fallbackBrowserAfter(channel) !== null ? { ...options, headersTimeoutFallback: true } : options
         const callStarted = performance.now()
+        // The fallback's own 30 s ends before the caller's deadline, unless a promised fallback had less left (ADR 0007, 2026-10-26).
+        const ownDeadline = fallback && Date.now() + HEADERS_TIMEOUT_FALLBACK_MS < execution.deadlineAt!
         const localScope = fallback ? createExecutionScope({ ...execution, deadlineAt: Math.min(execution.deadlineAt!, Date.now() + HEADERS_TIMEOUT_FALLBACK_MS) }) : null
         const callExecution = localScope ?? execution
         let fetched: FetchResult | null
@@ -849,11 +851,11 @@ export class LadderRunner {
           }),
         }
       // A rung the deadline cut short ends the run: nothing after it has time.
-      if ((!fallback && result.usage.deadlineExceeded === true) || ((fallback || result.failureReason === 'timeout') && deadlineReached(execution))) {
+      if ((!ownDeadline && result.usage.deadlineExceeded === true) || ((fallback || result.failureReason === 'timeout') && deadlineReached(execution))) {
         return deadlineOutcome(url, progress, result)
       }
       last = result
-      if (fallback && result.usage.deadlineExceeded === true) {
+      if (ownDeadline && result.usage.deadlineExceeded === true) {
         // The fallback ran out its own 30 s: that ends the run, as a timeout ends any rung. The attempt keeps its
         // original local deadline flag; the answer must not call that the caller's deadline.
         const { deadlineExceeded: _localDeadline, ...usage } = result.usage
