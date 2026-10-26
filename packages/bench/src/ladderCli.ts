@@ -46,7 +46,7 @@ import { browserEngineChoice } from './subjects/browserEngine.js'
 import { CompatTransport, compatIdentity } from './compatTransport.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
-import type { RobotsOriginCache } from './robotsLookup.js'
+import { robotsFetcherOf, type RobotsOriginCache } from './robotsLookup.js'
 import { BrowserLocalSubject } from './subjects/browserLocal.js'
 import { installedChromeMajor, installedChromeRefusal, type InstalledChromeTestSeams } from './subjects/installedChrome.js'
 import { platformOf, type CaptchaSolver, type CaptchaSolving } from './vendors/captchaSolver.js'
@@ -218,7 +218,11 @@ export function buildChannels(
      * API leave it unset; other modes refuse it.
      */
     previewProductToken?: boolean
-    /** A robots.txt cache the http rung shares with a crawl's sitemap reader (one read of a host's robots.txt serves both); the rung keeps its own without one. */
+    /**
+     * The run's robots.txt cache, keyed by origin and User-Agent: every rung on the run's routes reads through it (http,
+     * http_compat, browser_local, installed_chrome, the provider rung's robots.txt) and so does a crawl's sitemap reader,
+     * and each records its own decision. Its owner tears it down. Without one each rung keeps its own.
+     */
     robotsCache?: RobotsOriginCache
     /**
      * Standard mode on a local server, as the entry point allowed it (ADR 0005 `compatible_transport`):
@@ -266,10 +270,11 @@ export function buildChannels(
   // 2026-10-25) the bundled Chromium solves, on the same exit.
   const seams = opts.installedChromeSeams ?? {}
   const plainSolving: CaptchaSolving | null = solving !== null && installedChromeRung ? { ...solving, defersTo: { rung: 'installed_chrome', carries: installedChromeCarries(solving.solver, seams) } } : solving
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared', {}, plainSolving)
+  // The run's robots.txt cache serves every rung on its routes, by origin and User-Agent; a host-pinned browser reads its own.
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared', {}, plainSolving, opts.browserAllowedHosts === undefined ? opts.robotsCache : undefined)
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
   const installedChrome = installedChromeRung
-    ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', seams, solving)
+    ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', seams, solving, opts.robotsCache)
     : null
   const compat = opts.compatTransport === true && mode === 'standard' ? new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, undefined, false, fileStore, false, opts.robotsCache, new CompatTransport(opts.networkPolicy ?? defaultNetworkPolicy())) : null
 
@@ -436,10 +441,11 @@ export function buildChannels(
   const bbKey = opts.keys?.browserbase ?? (named.has('browserbase') ? process.env.BROWSERBASE_API_KEY : undefined) ?? ''
   const steelKey = opts.keys?.steel ?? (named.has('steel') ? process.env.STEEL_API_KEY : undefined) ?? ''
   // The vendor's browser fetches the page; robots.txt is the one request this
-  // lane sends from this machine, so it takes the operator's proxy like the HTTP lane.
-  const routedPolicy = opts.robotsFetcher === undefined && opts.networkPolicy?.egressProxy ? opts.networkPolicy : null
+  // lane sends from this machine, so it takes the operator's proxy like the HTTP lane:
+  // through the run's robots.txt cache when there is one, read for the vendor's User-Agent.
+  const routedPolicy = opts.robotsFetcher === undefined && opts.robotsCache === undefined && opts.networkPolicy?.egressProxy ? opts.networkPolicy : null
   let providerRoutes: EgressRoutes | null = null
-  const providerRobots = opts.robotsFetcher ?? (routedPolicy === null ? undefined : robotsFetcherVia(url => (providerRoutes ??= new EgressRoutes(routedPolicy)).dispatcherFor(url)))
+  const providerRobots = opts.robotsFetcher ?? (opts.robotsCache !== undefined ? robotsFetcherOf(opts.robotsCache) : routedPolicy === null ? undefined : robotsFetcherVia(url => (providerRoutes ??= new EgressRoutes(routedPolicy)).dispatcherFor(url)))
 
   const vendorChannel = (
     vendorId: string,

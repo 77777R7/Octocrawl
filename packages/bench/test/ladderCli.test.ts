@@ -6,7 +6,8 @@ import { CapSolver } from '../src/vendors/capsolver.js'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { identityBundleFrom, modeIdentity, PREVIEW_PRODUCT_TOKEN, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { identityBundleFrom, localNetworkPolicy, modeIdentity, PREVIEW_PRODUCT_TOKEN, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { RobotsOriginCache } from '../src/robotsLookup.js'
 import { LadderRunner } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
 import { MemorySessionStore } from '../src/routing/sessionStore.js'
@@ -345,6 +346,38 @@ describe('installedChromeCarries: where a browser-bound solve goes when the ladd
       expect(await unread('datadome', {})).toBe(true)
       expect(await missing('datadome', {})).toBe(false)
     } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+})
+
+describe("the run's robots.txt cache on the provider rung", () => {
+  it("reads the file for the vendor's User-Agent once a run, not once a call, and each call still records its decision", async () => {
+    const agents: string[] = []
+    const site = createServer((req, res) => {
+      if (req.url === '/robots.txt') { agents.push(req.headers['user-agent'] ?? ''); res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /private\n'); return }
+      res.writeHead(404).end()
+    })
+    await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${(site.address() as AddressInfo).port}`
+    const robots = new RobotsOriginCache(localNetworkPolicy())
+    const channels = buildChannels('research', {
+      networkPolicy: localNetworkPolicy(),
+      robotsCache: robots,
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: { steel: fakeVendorOps('steel', () => {}) },
+      vendorConnector: async () => fakeBrowser(),
+    })
+    const provider = channels.find((c) => c.vendorId === 'steel')!
+    try {
+      const reads = [await provider.fetch(`${base}/p`), await provider.fetch(`${base}/q`)]
+      expect(agents).toEqual(['TestUA/1.0'])
+      for (const out of reads) {
+        expect(out.trace).toContainEqual(expect.objectContaining({ lane: 'provider', event: 'robots_checked', detail: expect.objectContaining({ decision: 'allowed', robotsSha256: expect.stringMatching(/^[0-9a-f]{64}$/) }) }))
+      }
+    } finally {
+      await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
+      await robots.teardown()
+      await new Promise<void>((resolve) => site.close(() => resolve()))
+    }
   })
 })
 

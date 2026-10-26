@@ -7,6 +7,8 @@ import { DEFAULT_NETWORK_POLICY, localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { extractTf } from '@w2l/extract-tf'
 import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
+import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
+import { RobotsOriginCache } from '../src/robotsLookup.js'
 import { captureOf } from '../src/capture.js'
 
 /**
@@ -453,6 +455,46 @@ describe('BrowserLocalSubject transport', () => {
     } finally {
       await subject.teardown()
     }
+  })
+
+  it("shares the run's robots.txt cache with the other rungs by origin and User-Agent, and records its own decision", async () => {
+    // A server that answers each User-Agent its own file, as etsy did (T005).
+    const agents: string[] = []
+    const site = createServer((req, res) => {
+      if (req.url === '/robots.txt') {
+        const agent = req.headers['user-agent'] ?? ''
+        agents.push(agent)
+        res.writeHead(200, { 'content-type': 'text/plain' }).end(`User-agent: *\nDisallow: /${agent.includes('Chrome/128.') ? 'cart' : 'search'}\n`)
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><main><article><h1>Harbour notes</h1><p>The harbour office keeps a ledger of tides, winds and the ships that came in, and this page is long enough to be read as content.</p></article></main></body></html>')
+    })
+    await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${(site.address() as { port: number }).port}`
+    const robots = new RobotsOriginCache()
+    const browsers = [1, 2].map(() => new BrowserLocalSubject('standard', null, false, undefined, null, undefined, null, undefined, undefined, null, false, undefined, 'playwright', 'declared', {}, null, robots))
+    const http = new ResilientHttpSubject('standard', undefined, undefined, undefined, false, null, false, robots)
+    try {
+      const reads = [await browsers[0]!.fetch(`${base}/page`), await browsers[1]!.fetch(`${base}/page`), await http.fetch(`${base}/page`)]
+      // Both browsers declare the same User-Agent and read the file once; http declares its own and reads its own.
+      expect(agents).toHaveLength(2)
+      expect(agents[1]).toContain('Chrome/128.')
+      const checked = reads.map((out) => out.trace.find((event) => event.event === 'robots_checked')?.detail)
+      expect(checked.map((detail) => detail?.decision)).toEqual(['allowed', 'allowed', 'allowed'])
+      expect(checked[0]?.robotsSha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(checked[1]?.robotsSha256).toBe(checked[0]?.robotsSha256)
+      expect(checked[2]?.robotsSha256).not.toBe(checked[0]?.robotsSha256)
+      // Each browser's record signs the file its own decision was made on.
+      expect(reads.slice(0, 2).map((out) => out.compliance?.robots.robotsSha256)).toEqual(checked.slice(0, 2).map((detail) => detail?.robotsSha256))
+    } finally {
+      for (const browser of browsers) await browser.teardown()
+      await http.teardown()
+    }
+    // The cache is the run's, not a rung's: their teardown left it reading.
+    const after = await robots.lookup(`${base}/page`, 'Later/1.0')
+    expect(robots.decision(after, `${base}/page`, 'Later/1.0').decision).toBe('allowed')
+    await robots.teardown()
+    await new Promise<void>((resolve) => site.close(() => resolve()))
   })
 
   it('chains every record in a run into one verifiable ledger', async () => {
