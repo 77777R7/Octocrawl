@@ -190,18 +190,44 @@ function contextCookie(c: { name: string; value: string; domain: string; path: s
   return { name: c.name, value: c.value, domain: c.domain, path: c.path, expires: c.expires, httpOnly: c.httpOnly, secure: c.secure, sameSite: c.sameSite }
 }
 
-/** The checks a real Chrome may get through by waiting: they run their own script and load the page (ADR 0005). */
-const WAITABLE_GATES: ReadonlySet<string> = new Set(['cloudflare_challenge', 'bot_detected_generic', 'captcha'])
-/** How long installed_chrome waits for such a check, as measured (research/access/probe-cdp.mjs read for 20 s). */
-export const CHALLENGE_WAIT_MAX_MS = 20_000
+/**
+ * How long installed_chrome waits for each check, by its gate (ADR 0005, revision of 2026-10-26). Cloudflare's managed
+ * challenge and a bot check run their own script and load the page: the longest of 63 that cleared took 9.1 s. A
+ * captcha waits for someone, or a solver, to answer it, and none of 29 cleared by waiting: it is not waited on, and
+ * goes to the grant's solver where there is one. A gate not named here is no check to wait out.
+ */
+export const CHALLENGE_WAIT_CAP_MS: ReadonlyMap<string, number> = new Map([['cloudflare_challenge', 10_000], ['bot_detected_generic', 10_000], ['captcha', 0]])
 const CHALLENGE_POLL_MS = 1_000
 
+/** What installed_chrome's wait for a check ended with, as the trace's `challenge_wait` records it, with the cap its gate had. */
+export type ChallengeWait = { blockReason: string; outcome: 'cleared' | 'still_gated' | 'not_waited'; ms: number; capMs: number }
+
 /**
- * Wait for the check the page shows to clear by itself: the page is read once a second, never clicked or typed into,
- * until the document it shows is no check, CHALLENGE_WAIT_MAX_MS at most and never into the capture's reserve. Null
- * when the page shows no check worth waiting for.
+ * Wait for the check `gateNow` reads to clear by itself: it is read once a second until it reads no check, its gate's
+ * cap at most and never into the capture's reserve. A gate whose cap is 0 is recorded as not waited. Null when the
+ * first read shows no check worth waiting for, or a page still loading.
  */
-async function waitOutChallenge(page: Page, documents: MainFrameDocuments, response: Response | null, execution: ExecutionContext, signal: AbortSignal | undefined): Promise<{ blockReason: string; outcome: 'cleared' | 'still_gated'; ms: number } | null> {
+export async function waitOutGate(gateNow: () => Promise<{ reason: string } | null | undefined>, execution: ExecutionContext, signal: AbortSignal | undefined): Promise<ChallengeWait | null> {
+  const first = await raceWithSignal(gateNow(), signal)
+  const capMs = first === undefined || first === null ? undefined : CHALLENGE_WAIT_CAP_MS.get(first.reason)
+  if (first === undefined || first === null || capMs === undefined) return null
+  if (capMs === 0) return { blockReason: first.reason, outcome: 'not_waited', ms: 0, capMs }
+  const started = Date.now()
+  const until = Math.min(started + capMs, execution.deadlineAt === undefined ? Number.POSITIVE_INFINITY : execution.deadlineAt - CAPTURE_RESERVE_MS - CHALLENGE_POLL_MS)
+  while (Date.now() + CHALLENGE_POLL_MS <= until) {
+    await abortableSleep(CHALLENGE_POLL_MS, signal)
+    throwIfExecutionStopped(execution)
+    const now = await raceWithSignal(gateNow(), signal)
+    if (now === null) return { blockReason: first.reason, outcome: 'cleared', ms: Date.now() - started, capMs }
+  }
+  return { blockReason: first.reason, outcome: 'still_gated', ms: Date.now() - started, capMs }
+}
+
+/**
+ * Wait for the check the page shows to clear by itself (waitOutGate): the page is read, never clicked or typed into.
+ * Null when the page shows no check worth waiting for.
+ */
+async function waitOutChallenge(page: Page, documents: MainFrameDocuments, response: Response | null, execution: ExecutionContext, signal: AbortSignal | undefined): Promise<ChallengeWait | null> {
   const gateNow = async () => {
     const answered = reported(documents.shown() ?? { url: page.url(), response, kind: 'document' }).response
     const body = await page.content().catch(() => null)
@@ -211,17 +237,7 @@ async function waitOutChallenge(page: Page, documents: MainFrameDocuments, respo
     // captcha script for a form, or says "please wait", is no check to wait out, and would never stop looking like one.
     return classifyGate({ status: answered?.status() || 200, header: (name) => answered?.headers()[name.toLowerCase()] ?? null, body, finalUrl: page.url(), contentful: true })
   }
-  const first = await raceWithSignal(gateNow(), signal)
-  if (first === undefined || first === null || !WAITABLE_GATES.has(first.reason)) return null
-  const started = Date.now()
-  const until = Math.min(started + CHALLENGE_WAIT_MAX_MS, execution.deadlineAt === undefined ? Number.POSITIVE_INFINITY : execution.deadlineAt - CAPTURE_RESERVE_MS - CHALLENGE_POLL_MS)
-  while (Date.now() + CHALLENGE_POLL_MS <= until) {
-    await abortableSleep(CHALLENGE_POLL_MS, signal)
-    throwIfExecutionStopped(execution)
-    const now = await raceWithSignal(gateNow(), signal)
-    if (now === null) return { blockReason: first.reason, outcome: 'cleared', ms: Date.now() - started }
-  }
-  return { blockReason: first.reason, outcome: 'still_gated', ms: Date.now() - started }
+  return waitOutGate(gateNow, execution, signal)
 }
 
 /**
@@ -970,8 +986,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
           }
         }
         // installed_chrome (ADR 0005): a check that clears itself in a real Chrome (Cloudflare's managed challenge, a bot
-        // check whose script runs and reloads the page) is waited out, as the route was measured. The page is only read
-        // again, never touched; what it shows when the wait ends is read as any page is.
+        // check whose script runs and reloads the page) is waited out, up to its gate's cap (CHALLENGE_WAIT_CAP_MS). The
+        // page is only read again, never touched; what it shows when the wait ends is read as any page is. A captcha is
+        // recorded as not waited on and goes straight to the solver below, where the grant has one.
         if (this.browserEngine === 'installed_chrome') {
           const waited = await waitOutChallenge(page, documents, response, execution, signal)
           if (waited !== null) {
