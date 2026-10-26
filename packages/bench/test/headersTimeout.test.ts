@@ -146,7 +146,7 @@ describe('headers-timeout fallback boundaries', () => {
   })
 
   it('goes on past the fallback browser when its page fails the task contract', async () => {
-    const installed = channel('installed_chrome', { ...product(), lane: 'installed_chrome', markdown: '# Shoes\n\nTrail Runner — €79.95\n\nIn stock' })
+    const installed = channel('installed_chrome', { ...product(), markdown: '# Shoes\n\nTrail Runner — €79.95\n\nIn stock' })
     const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', product()), installed], { mode: 'standard', enhanced: true }, null, null, null,
       { verify: { checks: [{ type: 'markdownIncludes', text: 'In stock' }] } }).run(url, null, budget())
     expect(run.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome'])
