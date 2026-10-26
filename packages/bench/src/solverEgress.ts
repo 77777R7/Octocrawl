@@ -19,11 +19,17 @@ export interface SolverForwarder {
   close(): Promise<void>
 }
 
-/** Start the forwarder on a free loopback port. `upstream` must be an http:// proxy (Webshare's gateway is one). */
-export async function startSolverForwarder(upstream: ProxyServer): Promise<SolverForwarder> {
+/**
+ * Start the forwarder on a free loopback port. `upstream` must be an http:// proxy (Webshare's gateway is one).
+ * `dialAt`, an IP, is dialled in place of the upstream's hostname (W2L_SOLVER_PROXY_ADDRESS), for a machine whose
+ * resolver cannot be trusted with it; the solver is still given the hostname (`egress.upstream`), which CapSolver needed
+ * on 2026-10-26 (it refused the gateway's IP and took p.webshare.io, with the same login and sticky session).
+ */
+export async function startSolverForwarder(upstream: ProxyServer, dialAt?: string): Promise<SolverForwarder> {
   const target = new URL(upstream.url)
   if (target.protocol !== 'http:') throw new Error('the solver exit must be an http:// proxy')
-  const host = target.hostname
+  if (dialAt !== undefined && net.isIP(dialAt) === 0) throw new Error('the solver exit\'s address must be an IP address')
+  const host = dialAt ?? target.hostname
   const port = Number(target.port || 80)
   const auth = upstream.username === undefined ? null : `Basic ${Buffer.from(`${upstream.username}:${upstream.password ?? ''}`).toString('base64')}`
 

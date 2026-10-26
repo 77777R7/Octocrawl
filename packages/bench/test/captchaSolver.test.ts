@@ -275,6 +275,40 @@ describe('startSolverForwarder: the run\'s solver exit, its login added on the w
     } finally { await forwarder.close() }
   })
 
+  it('dials the pinned address for an upstream named by hostname, which the solver is still given (2026-10-26, C008)', async () => {
+    const seen: { url: string; auth: string | undefined }[] = []
+    upstream = createServer((req: IncomingMessage, res) => { seen.push({ url: req.url!, auth: req.headers['proxy-authorization'] }); res.end('plain ok') })
+    upstream.on('connect', (req: IncomingMessage, socket: net.Socket) => {
+      seen.push({ url: req.url!, auth: req.headers['proxy-authorization'] })
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+      socket.end('tunnelled')
+    })
+    await new Promise<void>((resolve) => upstream!.listen(0, '127.0.0.1', resolve))
+    const port = (upstream.address() as net.AddressInfo).port
+    // A name that resolves nowhere: only the pinned address reaches the upstream.
+    const named = { url: `http://gateway.invalid:${port}`, endpoint: `gateway.invalid:${port}`, username: 'user-us-1', password: 'exit-pass-9c1' }
+    const forwarder = await startSolverForwarder(named, '127.0.0.1')
+    try {
+      expect(forwarder.egress.upstream).toBe(named)
+      expect(capSolverProxy(forwarder.egress.upstream)).toBe(`http://user-us-1:exit-pass-9c1@gateway.invalid:${port}`)
+      const [host, localPort] = forwarder.egress.endpoint.split(':')
+      const tunnelled = await new Promise<string>((resolve, reject) => {
+        const socket = net.connect(Number(localPort), host!, () => socket.write('CONNECT shop.example:443 HTTP/1.1\r\nHost: shop.example:443\r\n\r\n'))
+        let data = ''
+        socket.on('data', (chunk) => { data += chunk })
+        socket.on('end', () => resolve(data))
+        socket.on('error', reject)
+      })
+      expect(tunnelled).toContain('tunnelled')
+      const plain = await new Promise<string>((resolve, reject) => {
+        request({ host, port: Number(localPort), path: 'http://shop.example/p', method: 'GET' }, (res) => { let body = ''; res.on('data', (c) => { body += c }); res.on('end', () => resolve(body)) }).on('error', reject).end()
+      })
+      expect(plain).toBe('plain ok')
+      expect(seen.map((entry) => entry.url)).toEqual(['shop.example:443', 'http://shop.example/p'])
+    } finally { await forwarder.close() }
+    await expect(startSolverForwarder(named, 'gateway.invalid')).rejects.toThrow(/IP address/)
+  })
+
   it('takes only an http:// upstream', async () => {
     await expect(startSolverForwarder({ url: 'https://203.0.113.9:443', endpoint: '203.0.113.9:443' })).rejects.toThrow(/http:\/\//)
   })
