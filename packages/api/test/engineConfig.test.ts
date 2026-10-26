@@ -47,6 +47,17 @@ describe('loadEngineConfig: the engine options every local entry point reads (do
     const line = config.notices.find((notice) => notice.startsWith('captcha solver'))!
     expect(line).toContain('203.0.113.9:80')
     expect(config.notices.join('\n')).not.toMatch(/exit-secret|CAP-test-key|user-1/)
+    // The address the forwarder dials, for a hostname this machine cannot resolve (2026-10-26: CapSolver refused the
+    // gateway's IP and took p.webshare.io): the vendor still gets the hostname, the startup line says both.
+    const HOSTNAME_EXIT = 'http://user-1:exit-secret@p.proxy.test:80'
+    const pinned = loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('proxy'), CAPSOLVER_API_KEY: KEY, W2L_SOLVER_PROXY: HOSTNAME_EXIT, W2L_SOLVER_PROXY_ADDRESS: ' 203.0.113.9 ' }, { hosted: false })
+    expect(pinned.captchaSolver).toMatchObject({ upstream: { endpoint: 'p.proxy.test:80', url: 'http://p.proxy.test:80' }, upstreamAddress: '203.0.113.9' })
+    expect(pinned.notices.find((notice) => notice.startsWith('captcha solver'))).toContain('p.proxy.test:80, dialled at 203.0.113.9')
+    expect(config.captchaSolver).toMatchObject({ upstreamAddress: null })
+    // Only an IP address, and only with the exit it dials.
+    expect(() => loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('proxy'), CAPSOLVER_API_KEY: KEY, W2L_SOLVER_PROXY: HOSTNAME_EXIT, W2L_SOLVER_PROXY_ADDRESS: 'gw.proxy.test' }, { hosted: false })).toThrow(/W2L_SOLVER_PROXY_ADDRESS must be an IP address/)
+    expect(() => loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('proxy'), CAPSOLVER_API_KEY: KEY, W2L_SOLVER_PROXY_ADDRESS: '203.0.113.9' }, { hosted: false })).toThrow(/W2L_SOLVER_PROXY/)
+    expect(() => loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('none'), CAPSOLVER_API_KEY: KEY, W2L_SOLVER_PROXY_ADDRESS: '203.0.113.9' }, { hosted: false })).toThrow(/W2L_SOLVER_PROXY_ADDRESS/)
     // Exit "none": no exit is read, and one given anyway is a mistake.
     expect(loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('none'), CAPSOLVER_API_KEY: KEY }, { hosted: false }).captchaSolver).toMatchObject({ upstream: null })
     expect(() => loadEngineConfig({ W2L_ACCESS_GRANT: solverGrant('none'), CAPSOLVER_API_KEY: KEY, W2L_SOLVER_PROXY: EXIT }, { hosted: false })).toThrow(/solver exit is "none"/)

@@ -364,3 +364,14 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - 演示页的脚本读 token 的方式（表单字段，还是 Turnstile 自己的 `getResponse()`）没有核实。如果只读后者，写进回填字段的 token 不会被看到，页面会是 `still_gated`。
 - 把挑战页的 HTML 发给 CapSolver（DataDome 指南对 userAgent 或代理被拦的错误建议这样做）没有采用：上文规定不把页面内容发给求解器，改动需要 Howard 决定。
 
+
+## 修订 2026-10-26（二）：发给 CapSolver 的出口格式、被拒的建任务，以及回调之后的表单
+
+**背景。** 2026-10-26 Howard 批准了一次付费探测：对 C008 的 Cloudflare 挑战页发 AntiCloudflareTask，主机、端口和登录每次都相同。`IP:端口:用户:密码` 和 `p.webshare.io:端口:用户:密码` 两种冒号格式都被拒（`ERROR_PROXY_CONNECT_REFUSED`，"custom proxy connect failed."），`http://用户:密码@p.webshare.io:端口` 被接受，8.6 秒后解出 cf_clearance。CapSolver 的代理指南把两种格式都列为可用。
+
+- 适配器给 CapSolver 的 `proxy` 改成 `scheme://user:pass@host:port`：scheme 是出口自己的（现在只接受 http），用户名和密码做百分号编码。主机用操作者在 `W2L_SOLVER_PROXY` 里写的那个，浏览器的转发器连的也是它。出口仍在运行前选定，不在会话中途换路由或换身份。
+- 2026-10-26 的 re-smoke 里，URL 格式配网关 IP（`http://…@23.81.44.13:80`）同样被拒，所以 CapSolver 要拿到主机名。本机的 DNS 污染了 `p.webshare.io`，浏览器的转发器连不上这个名字。为此加一个可选的 `W2L_SOLVER_PROXY_ADDRESS`（必须是 IP）：转发器连这个地址，CapSolver 仍拿到 `W2L_SOLVER_PROXY` 里的主机名，启动提示同时写出两者。出口仍在运行前选定，由登录里的会话 id 固定。
+- Webshare 按登录里的会话 id 固定出口 IP（apidocs.webshare.io/proxy-connection："The same session ID will route to the same exit IP"）。它没有说经过不同地区的网关时是否仍是同一个出口。2026-10-26 从本机用同一个会话 id 经三个网关 IP 出去，出口 IP 相同；从 CapSolver 的服务器进来是否相同，未核实。
+- CapSolver 拒绝建任务（`errorId` 非 0，没有任务）时不收费，但这一次计入该页的 `maxSolvesPerCall`。2026-10-25 的无代理测试里，两页发了 4 次被拒的 createTask：每个 rung 各发一次。
+- 小组件有回调、又在以 POST 提交的表单里时，先调用回调；约 2 秒内页面没有导航、主框架没有发出自己的请求（尚未得到回应的导航，或用 fetch 做的校验），门判定也没有放行，就再提交这个小组件所在的那个表单元素。回调在这 2 秒内发出的 document、fetch、XHR 请求会被看到，token 不会因此再发一次；beacon、WebSocket 或晚于 2 秒的请求看不到。Google 的 reCAPTCHA 演示页（C011，2026-10-26）的回调只清掉一条错误提示，token 只有随表单提交才会到达网站。别的表单不提交。
+- `hint` 的固定词表加四个词：`connect_failed`、`website_key`、`invalid`、`not_supported`，覆盖探测和无代理测试遇到的拒绝说明。`errorDescription` 的原文仍不出适配器；要保留原文，需要 Howard 另行决定。

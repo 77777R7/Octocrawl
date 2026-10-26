@@ -2113,6 +2113,23 @@ describe('LadderRunner — a local rung\'s CAPTCHA solves (ADR 0005 third_party_
     expect((paidCallsOfError(thrown)?.detail as { calls: Record<string, unknown>[] }).calls).toEqual([expect.objectContaining({ provider: 'capsolver', chargedUsd: 0.003, outcome: null })])
   })
 
+  it('counts a task the vendor refused to create against the page\'s solves, charging nothing (proxyless test 2026-10-25: 4 calls for 2 pages)', async () => {
+    const seen: number[] = []
+    const refusing = (id: string): Channel => ({
+      id, identity: COHERENT, grant,
+      async fetch(_url, _session, execution) {
+        seen.push(execution!.captchaSolves!.used())
+        execution!.captchaSolves!.refused()
+        return { ...blockedResult(url, 'captcha'), lane: 'browser_local', trace: [solve('solver_failed', null, { rung: id, reason: 'rejected', code: 'ERROR_INVALID_TASK_DATA' })] }
+      },
+    })
+    const run = await new LadderRunner([channel('http', [blockedResult(url, 'captcha')]), refusing('browser_local'), refusing('installed_chrome')], { mode: 'standard', enhanced: true }).run(url)
+    expect(seen).toEqual([0, 1])
+    // No task, so no paid call and no charge.
+    expect(run.result.trace.some((event) => event.event === 'paid_calls')).toBe(false)
+    expect(run.result.usage.externalCostChargedUsd ?? 0).toBe(0)
+  })
+
   it('counts a solve the vendor reported failed as attempted, not solved, at the 0 its terms bill (smoke test 2026-10-25, T045)', async () => {
     const browser: Channel = { id: 'browser_local', identity: COHERENT, grant, async fetch(_url, _session, execution) {
       const call = execution!.captchaSolves!.charged({ vendor: 'capsolver', rung: 'browser_local', ceilingUsd: 0.003, chargedUsd: 0, reportedCostUsd: null, solved: false })

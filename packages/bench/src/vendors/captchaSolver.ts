@@ -14,7 +14,7 @@
  * posts it or hands it to its own callback, never into a form sent by GET, whose URL the record would keep.
  */
 
-import type { Page } from 'playwright'
+import type { Page, Request } from 'playwright'
 import type { CaptchaSolveLog, FetchOptions, PaidCallLog, PaidCallRecord, ProxyServer, SpendLedger } from '@w2l/contracts'
 import type { GateVerdict } from '@w2l/http-core'
 
@@ -363,12 +363,25 @@ export type Injection = 'injected' | 'no_submit_target' | 'script_did_not_take_s
 const SCRIPT_SUBMIT_WAIT_MS = 5_000
 
 /**
+ * How long a callback whose widget sits in a POST form may take to navigate, clear the page or send anything, before
+ * that form is sent.
+ */
+const CALLBACK_WAIT_MS = 2_000
+
+/** Where injectAnswer keeps the solved widget's form between its two steps: on the page's window, not in its DOM. */
+const SOLVED_FORM = 'octocrawl.solvedForm'
+
+/**
  * Put the answer into the page: cookies into the page's own browser context, then reload; a token into the widget's
  * response field, then the widget's callback or its form. The widget is the one solved (its site key), never another on
  * the page. A form its page's script sends (`script`) gets a dispatched `submit` event, which the page's handlers take
  * and the browser never submits itself: the token never goes into a URL the record keeps, whatever the script does.
+ * A widget with a callback inside a POST form gets both: the callback first, then, when within CALLBACK_WAIT_MS the page
+ * has not navigated, sent no request of its own (a navigation not yet answered, a fetch that may have spent the token)
+ * and does not pass (`cleared`), the same form element. Google's reCAPTCHA demo's callback only clears an error
+ * message, and its token reaches the site only with the form (C011, 2026-10-26).
  */
-export async function injectAnswer(page: Page, challenge: DetectedChallenge, solution: Extract<SolveAnswer, { ok: true }>['solution'], timeoutMs: number): Promise<Injection> {
+export async function injectAnswer(page: Page, challenge: DetectedChallenge, solution: Extract<SolveAnswer, { ok: true }>['solution'], timeoutMs: number, cleared?: () => Promise<boolean>): Promise<Injection> {
   if (solution.kind === 'cookies') {
     const pageUrl = new URL(page.url())
     await page.context().addCookies(solution.cookies.map((c) => ({
@@ -387,7 +400,15 @@ export async function injectAnswer(page: Page, challenge: DetectedChallenge, sol
   // The probe's selectors, so `widget` indexes the same list.
   const field = challenge.type === 'turnstile' ? { selector: '.cf-turnstile[data-sitekey]', name: 'cf-turnstile-response', tag: 'input' } : { selector: '.g-recaptcha[data-sitekey]', name: 'g-recaptcha-response', tag: 'textarea' }
   const navigation = page.waitForEvent('framenavigated', { predicate: (frame) => frame === page.mainFrame(), timeout: timeoutMs }).then(() => true, () => false)
-  const submitted = await page.evaluate(({ token, selector, sitekey, index, name, tag, callback }) => {
+  // What the main frame sends once the callback has the token: a navigation or a fetch means the callback acted on it.
+  let sentByPage = false
+  const onRequest = (request: Request) => {
+    if (!['document', 'fetch', 'xhr'].includes(request.resourceType())) return
+    // A navigation request may come before its frame exists, when frame() throws: not the main frame's own request.
+    try { if (request.frame() === page.mainFrame()) sentByPage = true } catch {}
+  }
+  page.on('request', onRequest)
+  const submitted = await page.evaluate(({ token, selector, sitekey, index, name, tag, callback, key }) => {
     // The widget the probe chose, by its place, and only while it still carries the key that was solved.
     const all = Array.from(document.querySelectorAll(selector))
     const widget = (index === null ? all.find((el) => el.getAttribute('data-sitekey')?.trim() === sitekey) : all[index]) ?? null
@@ -409,7 +430,12 @@ export async function injectAnswer(page: Page, challenge: DetectedChallenge, sol
     const scripted = form !== null && form.method.toLowerCase() !== 'post' && !form.hasAttribute('method') && !form.hasAttribute('action')
     if (form !== null && form.method.toLowerCase() !== 'post' && !scripted) return 'no_submit_target'
     const fn = callback === null ? undefined : (window as unknown as Record<string, unknown>)[callback]
-    if (typeof fn === 'function') { (fn as (t: string) => void)(token); return 'by_script' }
+    if (typeof fn === 'function') {
+      const then = form !== null && !scripted
+      if (then) (window as unknown as Record<symbol, unknown>)[Symbol.for(key)] = form
+      ;(fn as (t: string) => void)(token)
+      return then ? 'callback_then_form' : 'by_script'
+    }
     if (form === null) return 'no_submit_target'
     if (!scripted) { if (typeof form.requestSubmit === 'function') form.requestSubmit(); else form.submit(); return 'navigates' }
     // A dispatched submit event reaches the page's handlers (React's too) but never makes the browser submit the form, so
@@ -417,7 +443,29 @@ export async function injectAnswer(page: Page, challenge: DetectedChallenge, sol
     const event = typeof SubmitEvent === 'function' ? new SubmitEvent('submit', { bubbles: true, cancelable: true }) : new Event('submit', { bubbles: true, cancelable: true })
     form.dispatchEvent(event)
     return event.defaultPrevented ? 'by_script' : 'script_did_not_take_submit'
-  }, { token: solution.secret, selector: field.selector, sitekey: challenge.websiteKey, index: challenge.widget ?? null, name: field.name, tag: field.tag, callback: challenge.callback })
+  }, { token: solution.secret, selector: field.selector, sitekey: challenge.websiteKey, index: challenge.widget ?? null, name: field.name, tag: field.tag, callback: challenge.callback, key: SOLVED_FORM }).catch((error: unknown) => { page.off('request', onRequest); throw error })
+  if (submitted === 'callback_then_form') {
+    const moved = await Promise.race([navigation, new Promise<false>((resolve) => setTimeout(() => resolve(false), Math.min(CALLBACK_WAIT_MS, timeoutMs)))])
+    page.off('request', onRequest)
+    // The solved form's reference is dropped from the page on every way out of this step.
+    const forget = () => page.evaluate((key) => { delete (window as unknown as Record<symbol, unknown>)[Symbol.for(key)] }, SOLVED_FORM).catch(() => {})
+    if (moved) return 'injected'
+    // The callback sent something (its own form, not yet answered; a check by fetch): it is waited for as before, and
+    // the token, which a site takes once, is never sent again.
+    if (sentByPage) { await forget(); await Promise.race([navigation, new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(SCRIPT_SUBMIT_WAIT_MS - CALLBACK_WAIT_MS, timeoutMs - CALLBACK_WAIT_MS))))]); return 'injected' }
+    if (cleared !== undefined && await cleared().catch(() => false)) { await forget(); return 'injected' }
+    // Only the form element the solved widget was in, still on the page and still sent by POST: never another form.
+    const sent = await page.evaluate((key) => {
+      const form = (window as unknown as Record<symbol, unknown>)[Symbol.for(key)]
+      delete (window as unknown as Record<symbol, unknown>)[Symbol.for(key)]
+      if (!(form instanceof HTMLFormElement) || !form.isConnected || form.method.toLowerCase() !== 'post') return false
+      if (typeof form.requestSubmit === 'function') form.requestSubmit(); else form.submit()
+      return true
+    }, SOLVED_FORM).catch(() => false)
+    if (sent) await navigation
+    return 'injected'
+  }
+  page.off('request', onRequest)
   if (submitted === 'navigates') await navigation
   // A callback or a script may navigate, or only change the page in place: what it does is waited for a few seconds.
   else if (submitted === 'by_script') await Promise.race([navigation, new Promise((resolve) => setTimeout(resolve, Math.min(SCRIPT_SUBMIT_WAIT_MS, timeoutMs)))])
@@ -531,6 +579,8 @@ export async function solveChallenges(step: SolveStep): Promise<SolveTraceDetail
       const unbilled = !answer.ok && answer.billed === false
       const reportedCostUsd = answer.ok ? answer.reportedCostUsd : null
       const charged = !created ? (reservation.release(), null) : reservation.settle(unbilled ? 0 : reportedCostUsd)
+      // A task the vendor refused costs nothing, but still uses one of the page's solves for every rung.
+      if (!created) step.log?.refused()
       const costBasis = !created ? null : unbilled ? 'vendor_unbilled_failure' as const : reportedCostUsd !== null ? 'reported' as const : 'tariff' as const
       // On the run's paid calls the moment it is charged, before anything else can fail.
       const call = charged === null ? undefined : step.log?.charged({ vendor, rung, ceilingUsd: solving.perSolveUsd, chargedUsd: charged, reportedCostUsd, solved: answer.ok, ...(row === null ? {} : { paidCallId: row.paidCallId }) })
@@ -546,7 +596,7 @@ export async function solveChallenges(step: SolveStep): Promise<SolveTraceDetail
       const vendorUserAgent = answer.userAgent === null ? {} : { vendorUserAgent: answer.userAgent === step.userAgent ? 'same' as const : 'other' as const }
       let injection: Injection = 'no_submit_target'
       try {
-        injection = await injectAnswer(step.page, found, answer.solution, Math.max(1_000, Math.min(15_000, until - Date.now())))
+        injection = await injectAnswer(step.page, found, answer.solution, Math.max(1_000, Math.min(15_000, until - Date.now())), async () => (await step.gateNow()) === null)
         if (injection === 'injected') await step.settle()
       } catch {
         injection = 'no_submit_target'

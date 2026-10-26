@@ -16,6 +16,8 @@ const EXIT = { url: 'http://203.0.113.9:80', endpoint: '203.0.113.9:80', usernam
 const ARTICLE = `<!doctype html><title>Tide tables</title><main><h1>Tide tables</h1>${'<p>The harbour office records tide height, wind and visibility for every hour of the day, and the ledger is kept for the whole year.</p>'.repeat(6)}</main>`
 const TURNSTILE = (action: string) => `<!doctype html><title>Verify</title><p>One moment.</p><form method="post" action="${action}"><div class="cf-turnstile" data-sitekey="0x4TESTKEY" data-action="read"></div></form>`
 const RECAPTCHA = `<!doctype html><title>Verify</title><p>One moment.</p><div class="g-recaptcha" data-sitekey="6LTESTKEY" data-callback="onOk"></div><script>function onOk(t) { document.cookie = 'rc=' + (t === '${RC_GOOD}' ? 'ok' : 'bad') + '; path=/'; location.reload() }</script>`
+/** Google's reCAPTCHA demo's shape (C011, 2026-10-26): the widget in a POST form, its callback only clearing an error message. */
+const RECAPTCHA_FORM = `<!doctype html><title>Verify</title><p>One moment.</p><form id="recaptcha-demo-form" method="POST" action="/recaptcha-form"><div class="g-recaptcha" data-sitekey="6LTESTKEY" data-callback="onSuccess"></div><p id="err">Please verify that you are not a robot.</p><button type="submit">Submit</button></form><script>function onSuccess() { document.getElementById('err').textContent = '' }</script>`
 const MAC_151 = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
 const MAC_156 = MAC_151.replace('Chrome/151', 'Chrome/156')
 /** The 2captcha demo's shape (2026-10-25): a 200 page whose form has no method or action, sent by its own script, which says when the token passed. */
@@ -26,6 +28,8 @@ const DATADOME = `<!doctype html><title>shop</title><p>Please enable JS and disa
 
 let site: Server
 let contactPosts = 0
+let recaptchaFormPosts = 0
+let recaptchaChecks = 0
 let base = ''
 beforeAll(async () => {
   site = createServer((req, res) => {
@@ -45,6 +49,26 @@ beforeAll(async () => {
     }
     if (path === '/turnstile' || path === '/holds') return cookie.includes('ts=ok') ? html(200, ARTICLE) : html(200, TURNSTILE(path))
     if (path === '/recaptcha') return cookie.includes('rc=ok') ? html(200, ARTICLE) : html(200, RECAPTCHA)
+    if (req.method === 'POST' && path === '/recaptcha-form') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        recaptchaFormPosts++
+        const ok = new URLSearchParams(body).get('g-recaptcha-response') === RC_GOOD
+        res.writeHead(303, { location: path, ...(ok ? { 'set-cookie': 'rf=ok; path=/' } : {}) }).end()
+      })
+      return
+    }
+    if (path === '/recaptcha-form') return cookie.includes('rf=ok') ? html(200, ARTICLE) : html(200, RECAPTCHA_FORM)
+    // The callback clears the page in place and leaves its form and widget there: only the page's gate says not to post.
+    if (path === '/recaptcha-in-place') return html(200, RECAPTCHA_FORM.replace(`document.getElementById('err').textContent = ''`, `document.querySelector('p').remove(); document.body.insertAdjacentHTML('afterbegin', ${JSON.stringify(ARTICLE.replace(/<!doctype html><title>Tide tables<\/title>/i, ''))})`).replace('<title>Verify</title>', '<title>Tide tables</title>'))
+    // Google's documented shape: the callback posts the form itself, and the site answers after 3 s.
+    if (path === '/recaptcha-self-submit') return html(200, RECAPTCHA_FORM.replace(`document.getElementById('err').textContent = ''`, `document.getElementById('recaptcha-demo-form').submit()`).replace('action="/recaptcha-form"', 'action="/recaptcha-slow"'))
+    if (req.method === 'POST' && path === '/recaptcha-slow') { recaptchaFormPosts++; setTimeout(() => res.writeHead(303, { location: '/recaptcha-slow', 'set-cookie': 'rs=ok; path=/' }).end(), 3_000); return }
+    // A callback that checks the token by fetch (the site answers after 3 s), then clears the page in place.
+    if (path === '/recaptcha-fetch') return html(200, RECAPTCHA_FORM.replace(`document.getElementById('err').textContent = ''`, `fetch('/recaptcha-check', { method: 'POST', body: arguments[0] }).then((r) => r.text()).then((t) => { if (t === 'ok') document.body.innerHTML = ${JSON.stringify(ARTICLE.replace(/<!doctype html><title>Tide tables<\/title>/i, ''))}; document.title = 'Tide tables' })`))
+    if (req.method === 'POST' && path === '/recaptcha-check') { recaptchaChecks++; setTimeout(() => res.writeHead(200, { 'content-type': 'text/plain' }).end('ok'), 3_000); return }
+    if (path === '/recaptcha-slow') return cookie.includes('rs=ok') ? html(200, ARTICLE) : html(200, RECAPTCHA_FORM)
     if (path.startsWith('/callback-get')) return html(200, `<!doctype html><title>Verify</title><p>One moment.</p><div class="g-recaptcha" data-sitekey="6LTESTKEY" data-callback="go"></div><form id="f" method="get" action="/callback-get"><textarea name="g-recaptcha-response"></textarea></form><script>function go() { document.getElementById('f').submit() }</script>`)
     if (path.startsWith('/get-form')) return html(200, TURNSTILE('/get-form').replace('method="post"', 'method="get"'))
     if (path === '/demo') return html(200, DEMO(true))
@@ -112,6 +136,37 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
     } finally { await subject.teardown() }
   }, 90_000)
 
+  it('posts the widget\'s own form when its callback leaves the page gated, and not when the callback cleared it (C011, 2026-10-26)', async () => {
+    const m = mock = await startMockCapSolver(answers)
+    const subject = subjectWith(solvingWith(m))
+    try {
+      recaptchaFormPosts = 0
+      const posted = await subject.fetch(`${base}/recaptcha-form`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(posted.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared', blockReasonAfter: null })])
+      expect(posted.status).toBe('success')
+      expect(posted.markdown).toContain('Tide tables')
+      expect(recaptchaFormPosts).toBe(1)
+      expect(JSON.stringify(posted)).not.toContain(RC_GOOD)
+      // A callback that clears the page in place: the form is never sent.
+      recaptchaFormPosts = 0
+      const inPlace = await subject.fetch(`${base}/recaptcha-in-place`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(inPlace.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared' })])
+      expect(recaptchaFormPosts).toBe(0)
+      // A callback that posts the form itself, its answer slower than the wait: the token is posted once, never twice.
+      recaptchaFormPosts = 0
+      const self = await subject.fetch(`${base}/recaptcha-self-submit`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(self.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared' })])
+      expect(self.markdown).toContain('Tide tables')
+      expect(recaptchaFormPosts).toBe(1)
+      // A callback whose check by fetch outlasts the wait: its token, which a site takes once, is not posted again.
+      recaptchaFormPosts = 0
+      recaptchaChecks = 0
+      const checked = await subject.fetch(`${base}/recaptcha-fetch`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(checked.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared' })])
+      expect([recaptchaChecks, recaptchaFormPosts]).toEqual([1, 0])
+    } finally { await subject.teardown() }
+  }, 90_000)
+
   it('keeps a page still gated after a "successful" solve blocked, the solve paid; and stops at maxSolvesPerCall', async () => {
     const m = mock = await startMockCapSolver(answers)
     const subject = subjectWith(solvingWith(m, { maxSolvesPerCall: 1 }))
@@ -150,7 +205,7 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
       const otherForm = await subject.fetch(`${base}/callback-get`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
       expect(solves(otherForm.trace)).toEqual([expect.objectContaining({ type: 'unsupported:recaptcha_v2', reason: 'form_sent_by_get' })])
       // The page's solves are counted across its rungs: one the ladder says it already bought leaves none for this rung.
-      const counted = await subject.fetch(`${base}/turnstile`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger, captchaSolves: { used: () => 2, charged: () => 1 } })
+      const counted = await subject.fetch(`${base}/turnstile`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger, captchaSolves: { used: () => 2, charged: () => 1, refused: () => {} } })
       expect(solves(counted.trace)).toEqual([expect.objectContaining({ outcome: 'limit_reached', reason: 'max_solves_per_call' })])
       // An article that carries a reCAPTCHA for its form is content: nothing to solve, nothing bought.
       const article = await subject.fetch(`${base}/article-with-form`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
@@ -172,8 +227,11 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
       // CapSolver bills no task it reports failed: attempted, charged 0, on the record as such (smoke test 2026-10-25, T045).
       expect(solves(failed.trace)).toEqual([expect.objectContaining({ outcome: 'solver_failed', reason: 'unsolvable', code: 'ERROR_CAPTCHA_UNSOLVABLE', chargedUsd: 0, costBasis: 'vendor_unbilled_failure', solve: 1 })])
       behaviour = { createError: 'ERROR_KEY_DENIED_ACCESS' }
-      const denied = await subject.fetch(`${base}/turnstile`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
+      // A refused createTask charges nothing but counts against the page's solves, for the rungs after this one.
+      const log = { refusedCalls: 0, used: () => log.refusedCalls, charged: () => 1, refused: () => { log.refusedCalls++ } }
+      const denied = await subject.fetch(`${base}/turnstile`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: ledger, captchaSolves: log })
       expect(solves(denied.trace)).toEqual([expect.objectContaining({ outcome: 'solver_failed', reason: 'key_denied', chargedUsd: null })])
+      expect(log.refusedCalls).toBe(1)
       behaviour = { never: true }
       const slow = await subject.fetch(`${base}/turnstile`, Date.now() + 12_000, undefined, undefined, {}, undefined, undefined, { spend: ledger })
       expect(slow.status).toBe('blocked')
@@ -284,7 +342,7 @@ describe('solveChallenges on a page read through the solver exit', () => {
         spend: createSpendLedger(1), paidCalls: undefined, log: undefined, rung: 'installed_chrome', onEvent: () => {}, url: 'https://shop.example/item', deadlineAt: Date.now() + 30_000, signal: undefined, reserveMs: 1_000,
       })
       expect(events).toEqual([expect.objectContaining({ type: 'datadome', outcome: 'cleared', egress: 'solver_proxy', chargedUsd: 0.003 })])
-      expect(m.tasks).toEqual([{ type: 'DatadomeSliderTask', websiteURL: 'https://shop.example/item', captchaUrl: 'https://geo.captcha-delivery.com/captcha/?initialCid=abc&cid=def&t=fe&referer=x', userAgent: ua, proxy: '203.0.113.9:80:user-us-1:exit-pass-9c1' }])
+      expect(m.tasks).toEqual([{ type: 'DatadomeSliderTask', websiteURL: 'https://shop.example/item', captchaUrl: 'https://geo.captcha-delivery.com/captcha/?initialCid=abc&cid=def&t=fe&referer=x', userAgent: ua, proxy: 'http://user-us-1:exit-pass-9c1@203.0.113.9:80' }])
       expect(await page.content()).toContain('Tide tables')
       expect(JSON.stringify(events)).not.toMatch(/dd-secret-4|exit-pass-9c1|CAP-int-key/)
     } finally { await page.close() }
@@ -306,7 +364,7 @@ describe('solveChallenges on a page read through the solver exit', () => {
       })
       // CapSolver says it solved with another User-Agent than the browser's: the record says so.
       expect(events).toEqual([expect.objectContaining({ type: 'cloudflare_challenge', outcome: 'cleared', egress: 'solver_proxy', vendorUserAgent: 'other' })])
-      expect(m.tasks).toEqual([{ type: 'AntiCloudflareTask', websiteURL: 'https://shop.example/item', userAgent: MAC_151, proxy: '203.0.113.9:80:user-us-1:exit-pass-9c1' }])
+      expect(m.tasks).toEqual([{ type: 'AntiCloudflareTask', websiteURL: 'https://shop.example/item', userAgent: MAC_151, proxy: 'http://user-us-1:exit-pass-9c1@203.0.113.9:80' }])
     } finally { await page.close() }
   }, 60_000)
 
