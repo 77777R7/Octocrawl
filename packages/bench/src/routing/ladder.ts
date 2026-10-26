@@ -742,11 +742,15 @@ export class LadderRunner {
     /** A rung's page failed the task contract with its content there but not extracted: a paid rung would read the same page. */
     let contractNotExtracted = false
     let headersTimeoutFallback: Channel | null = null
+    /** The local browser after a rung that a header timeout on that rung may fall back to (ADR 0007). */
+    const fallbackBrowserAfter = (channel: Channel): Channel | null => ordered.slice(ordered.indexOf(channel) + 1).find((candidate) => candidate.id === 'browser_local'
+      && candidate.vendorId === undefined && refuseChannelIdentity(url, candidate) === null) ?? null
     /** A rung's challenge came with a 429 or 503: the run stays on its own exit (ADR 0005), so no vendor rung. */
     let challengedWithRetryAt = false
       for (const channel of ordered) {
         throwIfExecutionStopped(execution)
-        // This timeout exception offers exactly one already-qualified local rung, never compat, Chrome or a vendor.
+        // A header timeout asks for a browser, not another HTTP client: the rungs before the qualified local browser
+        // (compat) are skipped. From that browser on, the ladder goes on by its ordinary rules (ADR 0007, 2026-10-26).
         if (headersTimeoutFallback !== null && channel !== headersTimeoutFallback) continue
         if (channel.vendorId !== undefined && challengedWithRetryAt) {
           ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: channel.id, detail: { vendorId: channel.vendorId, reason: 'a rung met a challenge served with 429 or 503; after a 429 the run keeps its own exit (ADR 0005), and a vendor rung leaves through another' } })
@@ -787,12 +791,19 @@ export class LadderRunner {
         // When each rung was called and how much of the run's time it had left: a rung reached late fails for want of time.
         // Said as the call goes out, so a provider rung passed over for its price or budget is not counted as started.
         const fallback = headersTimeoutFallback === channel
+        if (fallback) headersTimeoutFallback = null
+        // The first http rung whose header timeout could go on to the local browser says so: under a caller's timeout its
+        // header cap then holds while that browser would still have its time (ADR 0007, 2026-10-26).
+        const callOptions = channel.id === 'http' && channel.vendorId === undefined && channelsTried.length === 0 && effectiveSession === null
+          && fallbackBrowserAfter(channel) !== null ? { ...options, headersTimeoutFallback: true } : options
         const callStarted = performance.now()
+        // The fallback's own 30 s ends before the caller's deadline, unless a promised fallback had less left (ADR 0007, 2026-10-26).
+        const ownDeadline = fallback && Date.now() + HEADERS_TIMEOUT_FALLBACK_MS < execution.deadlineAt!
         const localScope = fallback ? createExecutionScope({ ...execution, deadlineAt: Math.min(execution.deadlineAt!, Date.now() + HEADERS_TIMEOUT_FALLBACK_MS) }) : null
         const callExecution = localScope ?? execution
         let fetched: FetchResult | null
         try {
-          fetched = await this.paidFetch(channel, channel.id, url, effectiveSession, callExecution, options, progress, () => {
+          fetched = await this.paidFetch(channel, channel.id, url, effectiveSession, callExecution, callOptions, progress, () => {
             channelsTried.push(channel.id)
             writeDecision(progress, fallback ? 'keep_591_fallback' : 'next_rung')
             ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_channel_started', channel: channel.id, detail: { vendorId: channel.vendorId ?? null, remainingMs: callExecution.deadlineAt === undefined ? null : Math.max(0, callExecution.deadlineAt - Date.now()) } })
@@ -840,15 +851,16 @@ export class LadderRunner {
           }),
         }
       // A rung the deadline cut short ends the run: nothing after it has time.
-      if ((!fallback && result.usage.deadlineExceeded === true) || ((fallback || result.failureReason === 'timeout') && deadlineReached(execution))) {
+      if ((!ownDeadline && result.usage.deadlineExceeded === true) || ((fallback || result.failureReason === 'timeout') && deadlineReached(execution))) {
         return deadlineOutcome(url, progress, result)
       }
       last = result
-      if (fallback) {
-        // The attempt keeps its original local deadline flag; the answer must not call that the caller's deadline.
-        const { deadlineExceeded: localDeadline, ...usage } = result.usage
-        const answer: FetchResult = localDeadline === true ? { ...result, usage, trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'local_fallback_deadline', detail: { trigger: 'http_headers_timeout', maxMs: HEADERS_TIMEOUT_FALLBACK_MS } }] } : result
-        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_step', channel: channel.id, detail: { status: result.status, escalate: null, fallback: 'http_headers_timeout', verification: checked?.verdict ?? null, localDeadlineExceeded: localDeadline === true } })
+      if (ownDeadline && result.usage.deadlineExceeded === true) {
+        // The fallback ran out its own 30 s: that ends the run, as a timeout ends any rung. The attempt keeps its
+        // original local deadline flag; the answer must not call that the caller's deadline.
+        const { deadlineExceeded: _localDeadline, ...usage } = result.usage
+        const answer: FetchResult = { ...result, usage, trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'local_fallback_deadline', detail: { trigger: 'http_headers_timeout', maxMs: HEADERS_TIMEOUT_FALLBACK_MS } }] }
+        ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_step', channel: channel.id, detail: { status: result.status, escalate: null, fallback: 'http_headers_timeout', verification: checked?.verdict ?? null, localDeadlineExceeded: true } })
         return finish(sanitizeResult(answer), false)
       }
       if (execution.signal?.aborted) return finish(result, false)
@@ -1051,11 +1063,15 @@ export class LadderRunner {
       const subjectAsked = resultRequestsEscalation(result)
       // Content an earlier rung found stays the answer: a later rung's failure is not stepped past. Nor is the saved login's:
       // the rungs after it do not carry the login, and would answer with the logged-out page.
+      // Under a caller's timeout, a header cap the http rung held because this fallback was there was decided by the
+      // fallback's own rule when the request went out (HTTP_CAP_RESERVE_MS): the connect time after that decision does not
+      // take the fallback away, and the browser has what is left, at most its 30 s (ADR 0007, 2026-10-26). Without one the
+      // caps hold by default, and the fallback still needs its full 30 s.
+      const promised = callOptions.headersTimeoutFallback === true && options.timeout !== undefined
       if (cls === null && !subjectAsked && best === null && effectiveSession === null && initialHeadersTimeout(result, channel, channelsTried)
-        && Number.isFinite(execution.deadlineAt) && execution.deadlineAt! - Date.now() >= HEADERS_TIMEOUT_FALLBACK_MS) {
-        headersTimeoutFallback = ordered.slice(ordered.indexOf(channel) + 1).find(candidate => candidate.id === 'browser_local'
-          && candidate.vendorId === undefined && refuseChannelIdentity(url, candidate) === null) ?? null
-        if (headersTimeoutFallback !== null) ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_headers_timeout_fallback', channel: channel.id, detail: { to: 'browser_local', remainingMs: execution.deadlineAt! - Date.now(), maxMs: HEADERS_TIMEOUT_FALLBACK_MS } })
+        && Number.isFinite(execution.deadlineAt) && (promised || execution.deadlineAt! - Date.now() >= HEADERS_TIMEOUT_FALLBACK_MS)) {
+        headersTimeoutFallback = fallbackBrowserAfter(channel)
+        if (headersTimeoutFallback !== null) ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_headers_timeout_fallback', channel: channel.id, detail: { to: 'browser_local', remainingMs: execution.deadlineAt! - Date.now(), maxMs: HEADERS_TIMEOUT_FALLBACK_MS, ...(promised ? { promised: true } : {}) } })
       }
       const stronger = headersTimeoutFallback !== null ? 'http_headers_timeout'
         : cls === null && !subjectAsked && best === null && channel !== sessionFirst && channel.id !== 'authed_session' ? strongerRungMayAnswer(result, channel.id, next) : null

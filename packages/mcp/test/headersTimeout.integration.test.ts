@@ -56,18 +56,16 @@ describe('bounded header-timeout fallback final API / SDK / MCP delivery', () =>
     sourceUrl = 'http://127.0.0.1:' + (source.address() as AddressInfo).port
     taskRoot = await mkdtemp(join(tmpdir(), 'octocrawl-header-fallback-'))
     const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
-    // MCP explicitly supplies a 120s timeout, which normally extends the wire cap to the caller's deadline.
-    // Keep a 10s per-attempt cap in this fixture's MCP subject to exercise an earlier transport timeout. All wire
-    // requests, Chromium, extraction and final serialization are real. A separate explicit-deadline control keeps
-    // the normal MCP behavior. API/SDK calls use the unmodified production subjects.
+    // MCP supplies its own 120 s timeout. That leaves the local browser its time after the HTTP lane's 10 s header cap,
+    // so the cap holds there too (ADR 0007, amendment of 2026-10-26) and every surface takes the fallback. In fast mode
+    // nothing could take the timeout over, so MCP's deadline governs the wait: that case gives MCP 15 s. All wire
+    // requests, Chromium, extraction and final serialization are real, through the production subjects. A separate
+    // explicit-deadline control keeps a short MCP deadline's behavior.
     engine = createApiEngine({ taskRoot, networkPolicy: policy, channelsFor: mode => {
       const http = new ResilientHttpSubject(mode, policy)
       return buildChannels(mode, { networkPolicy: policy, localSubjects: { http: {
-        fetch: (url, deadline, signal, execution, options = {}) => {
-          const { timeout: _timeout, ...capped } = options
-          const useCap = new URL(url).searchParams.get('surface') === 'MCP'
-          return http.fetch(url, deadline, signal, {}, execution?.onRetryAfter, useCap ? capped : options, execution?.onRobotsOverride, execution?.cookieSession, execution?.onTrace)
-        }, teardown: () => http.teardown(),
+        fetch: (url, deadline, signal, execution, options = {}) => http.fetch(url, deadline, signal, {}, execution?.onRetryAfter, options, execution?.onRobotsOverride, execution?.cookieSession, execution?.onTrace),
+        teardown: () => http.teardown(),
       } } })
     } })
     api = serve({ fetch: createApp(engine).fetch, hostname: '127.0.0.1', port: 0 }); await once(api, 'listening')
@@ -93,7 +91,7 @@ describe('bounded header-timeout fallback final API / SDK / MCP delivery', () =>
         const checks: VerifyContract = kind === 'missing record' ? { checks: [{ type: 'recordFields', fields: ['name', 'price', 'url'], uniqueBy: ['id'], min: 4 }] }
           : kind === 'cropped field' ? { checks: [{ type: 'field', path: 'evidence.httpStatus', equals: 200 }] } : contract
         const request: ScrapeRequest = { url: sourceUrl + path, formats: ['markdown', 'json', 'rawHtml', list], includeTags: ['main'], maxAge: 0,
-          debug: surface === 'API' && kind !== 'cropped field', ...(kind === 'fast mode' ? { fastMode: true } : {}),
+          debug: surface === 'API' && kind !== 'cropped field', ...(kind === 'fast mode' ? { fastMode: true, ...(surface === 'MCP' ? { timeout: 15_000 } : {}) } : {}),
           ...(kind === 'no contract' ? {} : { verify: checks }) }
         let out: any
         if (surface === 'API') {
