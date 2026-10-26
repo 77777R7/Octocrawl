@@ -412,6 +412,49 @@ describe('resilientFetch execution budget', () => {
     expect(seen[3]).toEqual({ headersTimeoutMs: 10_000, bodyTimeoutMs: 30_000 })
   })
 
+  it('keeps the header cap under a caller-chosen deadline when enough of it would remain for a later rung, never the body cap (O6)', async () => {
+    const seen: Array<{ headersTimeoutMs: number; bodyTimeoutMs: number }> = []
+    const fetcher: ResilientFetcher = async (_url, init) => {
+      seen.push({ headersTimeoutMs: init.headersTimeoutMs, bodyTimeoutMs: init.bodyTimeoutMs })
+      return res(200)
+    }
+    const reserve = { capsFollowDeadline: true, headersCapReserveMs: 32_000 }
+    // MCP's 120 s: the header cap holds, so a server that never answers is left after 10 s with time for the later rung;
+    // a body is still waited for until the deadline, as no rung takes a body timeout over.
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 120_000, ...reserve })
+    // 41 s: 31 s would remain after the header cap, less than the reserve.
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 41_000, ...reserve })
+    // A23's 20 s: the later rung could not use the time, so the header wait runs to the deadline.
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 20_000, ...reserve })
+    expect(seen[0]!.headersTimeoutMs).toBe(10_000)
+    expect(seen[0]!.bodyTimeoutMs).toBeGreaterThan(115_000)
+    expect(seen[0]!.bodyTimeoutMs).toBeLessThanOrEqual(120_000)
+    for (const [timeouts, deadlineMs] of [[seen[1]!, 41_000], [seen[2]!, 20_000]] as const) {
+      for (const timeout of [timeouts.headersTimeoutMs, timeouts.bodyTimeoutMs]) {
+        expect(timeout).toBeGreaterThan(deadlineMs - 5_000)
+        expect(timeout).toBeLessThanOrEqual(deadlineMs)
+      }
+    }
+    // A cap that held ends the wait, not the caller's deadline.
+    const headersTimeout = Object.assign(new Error('headers timeout'), { name: 'HeadersTimeoutError' })
+    const capped = await resilientFetch(U, scripted([headersTimeout]), { deadlineAt: Date.now() + 120_000, ...reserve })
+    expect(capped.failureReason).toBe('timeout')
+    expect(capped.deadlineExceeded).toBeUndefined()
+  })
+
+  it('holds the header cap for the first attempt only: no later rung takes a retry\'s header timeout over (O6)', async () => {
+    const waits: number[] = []
+    let calls = 0
+    const fetcher: ResilientFetcher = async (_url, init) => {
+      waits.push(init.headersTimeoutMs)
+      return calls++ === 0 ? res(503) : res(200)
+    }
+    await resilientFetch(U, fetcher, { deadlineAt: Date.now() + 120_000, capsFollowDeadline: true, headersCapReserveMs: 32_000 }, { sleep: async () => {} })
+    expect(waits[0]).toBe(10_000)
+    expect(waits[1]).toBeGreaterThan(115_000)
+    expect(waits[1]).toBeLessThanOrEqual(120_000)
+  })
+
   it('retains deadline protection while reading a deferred response body', async () => {
     const out = await resilientFetch(U, async () => ({ ...res(200), bodyText: async () => new Promise<string>(() => {}) }), { deadlineAt: Date.now() + 40 })
     await expect(out.bodyText()).rejects.toMatchObject({ name: 'TimeoutError' })

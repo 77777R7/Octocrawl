@@ -103,23 +103,109 @@ describe('headers-timeout fallback boundaries', () => {
     expect(browser.calls).toBe(0)
   })
 
-  it.each(['captcha', 'timeout', 'contract failure', 'empty'])('stops after one local answer: %s', async kind => {
-    const answer = kind === 'captcha' ? { ...product(), status: 'blocked' as const, blockReason: 'captcha' as const, markdown: null }
-      : kind === 'timeout' ? { ...headersTimeout(), lane: 'browser_local' as const }
-      : kind === 'empty' ? { ...product(), status: 'failed' as const, failureReason: 'empty_unverified' as const, markdown: null }
-      : product()
+  // ADR 0007, amendment of 2026-10-26 (Howard, O6): after the fallback browser the ladder goes on by its ordinary rules.
+  const blockedBy = (blockReason: 'captcha' | 'bot_detected_generic' | 'geo_restricted'): FetchResult => ({ ...product(), status: 'blocked', blockReason, markdown: null, evidence: { ...product().evidence, httpStatus: 403 } })
+
+  it.each([
+    ['captcha', blockedBy('captcha')],
+    ['bot check', blockedBy('bot_detected_generic')],
+    ['geo block (T013)', blockedBy('geo_restricted')],
+    ['empty page', { ...product(), status: 'failed' as const, failureReason: 'empty_unverified' as const, markdown: null }],
+  ])('goes on past the fallback browser to the later rungs: %s', async (_kind, answer) => {
+    const compat = channel('http_compat', product())
     const browser = channel('browser_local', answer)
     const installed = channel('installed_chrome', product())
-    const paid = { ...channel('provider', product()), vendorId: 'steel', priceCeilingUsd: 1 }
-    const secondBrowser = channel('browser_local', product())
-    const run = await new LadderRunner([channel('http', headersTimeout()), installed, browser, secondBrowser, paid], { mode: 'standard', enhanced: true }, null, null, null,
-      kind === 'contract failure' ? { verify: { checks: [{ type: 'markdownIncludes', text: 'not on page' }] } } : {})
-      .run(url, null, budget())
-    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    const run = await new LadderRunner([channel('http', headersTimeout()), compat, browser, installed], { mode: 'standard', enhanced: true }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome'])
+    // The rungs between http and the fallback browser stay skipped: another HTTP client is not what a header timeout asks for.
+    expect(compat.calls).toBe(0)
     expect(browser.calls).toBe(1)
-    expect(installed.calls + secondBrowser.calls + paid.calls).toBe(0)
-    expect(run.result.markdown).toBe(answer.markdown)
+    expect(run.result.lane).toBe('browser_local')
+    expect(run.result.markdown).toContain('€79.95')
     expect(run.ladderTrace).toContainEqual(expect.objectContaining({ channel: 'http', event: 'ladder_step', detail: expect.objectContaining({ escalate: 'http_headers_timeout' }) }))
+  })
+
+  it('reaches a provider the run allows after the fallback browser and the installed Chrome are blocked', async () => {
+    const installed = channel('installed_chrome', blockedBy('bot_detected_generic'))
+    const paid = { ...channel('provider', product()), vendorId: 'steel', priceCeilingUsd: 1 }
+    const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', blockedBy('geo_restricted')), installed, paid], { mode: 'standard', enhanced: true }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome', 'provider'])
+    expect(paid.calls).toBe(1)
+    expect(run.result.markdown).toContain('€79.95')
+  })
+
+  it.each([
+    ['timeout', { ...headersTimeout(), lane: 'browser_local' as const }],
+    ['rate limit', { ...blockedBy('captcha'), blockReason: 'rate_limit' as const }],
+  ])('still ends at the fallback browser on %s, as at any rung', async (_kind, answer) => {
+    const installed = channel('installed_chrome', product())
+    const paid = { ...channel('provider', product()), vendorId: 'steel', priceCeilingUsd: 1 }
+    const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', answer), installed, paid], { mode: 'standard', enhanced: true }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(installed.calls + paid.calls).toBe(0)
+  })
+
+  it('goes on past the fallback browser when its page fails the task contract', async () => {
+    const installed = channel('installed_chrome', { ...product(), markdown: '# Shoes\n\nTrail Runner — €79.95\n\nIn stock' })
+    const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', product()), installed], { mode: 'standard', enhanced: true }, null, null, null,
+      { verify: { checks: [{ type: 'markdownIncludes', text: 'In stock' }] } }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome'])
+    expect(run.result.markdown).toContain('In stock')
+  })
+
+  it('tells the first http rung when a header timeout there can go on to the local browser, and only then', async () => {
+    const optionsSeen = async (rest: Channel[], mode: 'standard' | 'authed' = 'standard', session: Parameters<LadderRunner['run']>[1] = null) => {
+      let seen: unknown
+      const http: Channel = { id: 'http', identity, async fetch(_url, _session, _execution, options) { seen = options; return { ...product(), lane: 'http' } } }
+      await new LadderRunner([http, ...rest], { mode }).run(url, session, budget())
+      return (seen as { headersTimeoutFallback?: boolean } | undefined)?.headersTimeoutFallback
+    }
+    expect(await optionsSeen([channel('browser_local', product())])).toBe(true)
+    expect(await optionsSeen([channel('http_compat', product()), channel('browser_local', product())])).toBe(true)
+    // fastMode leaves the http rungs alone; a compat-first host's ladder ends there too: nothing takes the timeout over.
+    expect(await optionsSeen([])).toBeUndefined()
+    expect(await optionsSeen([channel('http_compat', product())])).toBeUndefined()
+    expect(await optionsSeen([Object.assign(channel('browser_local', product()), { identity: undefined })])).toBeUndefined()
+    expect(await optionsSeen([channel('browser_local', product())], 'authed', { domain: 'www.zalando.de', vendor: 'browser_local_authed', attestedBy: 'operator', attestedAt: new Date().toISOString() })).toBeUndefined()
+  })
+
+  it('takes the fallback a held header cap promised, though connect and robots time left it under 30 s (44 s timeout)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const deadlineAt = Date.now() + 44_000
+    // About 3 s of robots and connect, the held 10 s cap and its timer's lateness: 29 s of the deadline left.
+    const http: Channel = { id: 'http', identity, async fetch(_url, _session, _execution, options) {
+      expect((options as { headersTimeoutFallback?: boolean }).headersTimeoutFallback).toBe(true)
+      vi.setSystemTime(Date.now() + 15_000)
+      return headersTimeout()
+    } }
+    let seen: { deadlineAt?: number } | undefined
+    const browser: Channel = { id: 'browser_local', identity, async fetch(_url, _session, execution) { seen = execution; return product() } }
+    const run = await new LadderRunner([http, browser], { mode: 'standard' }).run(url, null, { deadlineAt }, { timeout: 44_000 })
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(run.result.markdown).toContain('€79.95')
+    // The browser has what is left of the deadline, not 30 s past it.
+    expect(seen?.deadlineAt).toBe(deadlineAt)
+    expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_headers_timeout_fallback', detail: expect.objectContaining({ promised: true, remainingMs: 29_000 }) }))
+  })
+
+  it('says the caller\'s deadline, not the fallback\'s own 30 s, ended a promised fallback that had less left', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const deadlineAt = Date.now() + 44_000
+    const http: Channel = { id: 'http', identity, async fetch() { vi.setSystemTime(Date.now() + 15_000); return headersTimeout() } }
+    // The browser stops reading just before the deadline it was given, the caller's here, and says so.
+    const partial = { ...product(), status: 'partial' as const, usage: { ...product().usage, deadlineExceeded: true } }
+    const run = await new LadderRunner([http, channel('browser_local', partial)], { mode: 'standard' }).run(url, null, { deadlineAt }, { timeout: 44_000 })
+    expect(run.result.usage.deadlineExceeded).toBe(true)
+    expect(run.result.trace).not.toContainEqual(expect.objectContaining({ event: 'local_fallback_deadline' }))
+  })
+
+  it('answers with the fallback browser\'s page when it does the task, and asks no later rung', async () => {
+    const installed = channel('installed_chrome', product())
+    const run = await new LadderRunner([channel('http', headersTimeout()), channel('browser_local', product()), installed], { mode: 'standard', enhanced: true }, null, null, null,
+      { verify: { checks: [{ type: 'markdownIncludes', text: '€79.95' }] } }).run(url, null, budget())
+    expect(run.channelsTried).toEqual(['http', 'browser_local'])
+    expect(installed.calls).toBe(0)
+    expect(run.result.markdown).toContain('€79.95')
   })
 
   it('caps a hanging local call with its own signal while the run still has time', async () => {
@@ -131,7 +217,9 @@ describe('headers-timeout fallback boundaries', () => {
     const browser: Channel = { id: 'browser_local', identity, fetch: async (_url, _session, execution) => {
       seen = execution; started(); return new Promise(() => {})
     } }
-    const pending = new LadderRunner([channel('http', headersTimeout()), browser], { mode: 'standard' }).run(url, null, { deadlineAt: parentDeadline })
+    // A later rung is there, but the fallback running out its own 30 s ends the run, as a timeout ends any rung.
+    const installed = channel('installed_chrome', product())
+    const pending = new LadderRunner([channel('http', headersTimeout()), browser, installed], { mode: 'standard', enhanced: true }).run(url, null, { deadlineAt: parentDeadline })
     await didStart
     expect(seen?.deadlineAt).toBe(Date.now() + 30_000)
     await vi.advanceTimersByTimeAsync(30_000)
@@ -140,6 +228,8 @@ describe('headers-timeout fallback boundaries', () => {
     expect(run.result.failureReason).toBe('timeout')
     expect(run.result.usage.deadlineExceeded).not.toBe(true)
     expect(run.summary.attempts).toHaveLength(2)
+    expect(installed.calls).toBe(0)
+    expect(run.result.trace).toContainEqual(expect.objectContaining({ event: 'local_fallback_deadline' }))
     expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_headers_timeout_fallback_expired' }))
   })
 
