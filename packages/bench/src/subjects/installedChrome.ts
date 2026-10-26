@@ -17,7 +17,7 @@
  * DETECTION_FLAGS and change only after two runs on the 16 tasks (ADR 0005).
  */
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { access, mkdtemp, rm } from 'node:fs/promises'
 import { constants, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -85,6 +85,38 @@ export async function findInstalledChrome(env: NodeJS.ProcessEnv = process.env, 
     try { await access(path, platform === 'win32' ? constants.F_OK : constants.X_OK); return path } catch {}
   }
   throw new InstalledChromeMissingError(candidates.length === 0 ? 'no place to look' : `looked at ${candidates.slice(0, 4).join(', ')}`)
+}
+
+/** The major of a `--version` line (`Google Chrome 156.0.8078.47`); null when it names none. */
+export function chromeMajorOf(text: string): number | null {
+  const match = /(\d+)\.\d+\.\d+\.\d+/.exec(text)
+  return match === null ? null : Number(match[1])
+}
+
+const MAJORS = new Map<string, Promise<{ found: boolean; major: number | null }>>()
+
+/**
+ * The installed Chrome's major before it is launched, from its `--version` (once per executable): what the solver's
+ * browser list is checked against when browser_local decides whether to leave a solve to installed_chrome (ADR 0005,
+ * revision of 2026-10-26). `found: false` when no Chrome is installed; `major: null` when its version could not be read
+ * (Chrome on Windows prints none).
+ */
+export function installedChromeMajor(seams: InstalledChromeTestSeams = {}, env: NodeJS.ProcessEnv = process.env): Promise<{ found: boolean; major: number | null }> {
+  const key = seams.executable ?? env.W2L_CHROME_PATH ?? ''
+  let known = MAJORS.get(key)
+  if (known === undefined) {
+    known = (async () => {
+      let executable: string
+      try {
+        executable = seams.executable ?? await findInstalledChrome(env)
+        if (seams.executable !== undefined) await access(executable, constants.X_OK)
+      } catch { return { found: false, major: null } }
+      const text = await new Promise<string>((resolve) => execFile(executable, ['--version'], { timeout: 5_000 }, (error, stdout) => resolve(error === null ? String(stdout) : '')))
+      return { found: true, major: chromeMajorOf(text) }
+    })()
+    MAJORS.set(key, known)
+  }
+  return known
 }
 
 /** A free port on 127.0.0.1 from the operating system, never one of `avoid`. */

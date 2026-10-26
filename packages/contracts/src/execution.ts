@@ -119,10 +119,18 @@ export interface PaidCallRecord {
 
 /** One page's CAPTCHA solves across its rungs (ExecutionContext.captchaSolves). */
 export interface CaptchaSolveLog {
-  /** Solves bought so far for this page. */
+  /** Solves attempted so far for this page: those the ledger settled, and those the vendor refused before a task. */
   used(): number
-  /** A solve the ledger settled; returns its call number in the run. */
-  charged(solve: { vendor: string; rung: string; ceilingUsd: number; chargedUsd: number; reportedCostUsd: number | null; paidCallId?: string }): number
+  /**
+   * A solve the ledger settled (at 0 for a task the vendor reported failed, which its terms do not bill); returns its call
+   * number in the run. `solved`: the vendor answered with a token or cookie.
+   */
+  charged(solve: { vendor: string; rung: string; ceilingUsd: number; chargedUsd: number; reportedCostUsd: number | null; solved: boolean; paidCallId?: string }): number
+  /**
+   * A solve the vendor refused before creating a task: nothing charged, no paid call, but it counts in `used()`, so a
+   * later rung does not send the same refused task again past `maxSolvesPerCall` (proxyless test 2026-10-25).
+   */
+  refused(): void
 }
 
 /** A task's paid-call journal, as a rung sees it. */

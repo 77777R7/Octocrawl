@@ -247,7 +247,7 @@ function paidCalls(trace: readonly TraceEvent[]): { calls: EvidencePaidCall[] | 
   for (const event of trace) {
     if (event.event !== 'paid_calls') continue
     for (const call of Array.isArray(event.detail?.calls) ? (event.detail.calls as Record<string, unknown>[]) : []) {
-      const { provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, sessionMs, proxyBytes, solves, proxyCountry, outcome, reason, answer, paidCallId, bytesCounted, bytesCapped } = call
+      const { provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, sessionMs, proxyBytes, solves, proxyCountry, outcome, reason, answer, paidCallId, bytesCounted, bytesCapped, solveAttempts } = call
       if (!text(provider) || !text(rung) || !Array.isArray(capabilities) || !capabilities.every(text) || !usd(ceilingUsd) || !usd(chargedUsd)) continue
       if (!(reportedCostUsd === null || usd(reportedCostUsd)) || !(outcome === null || (RESULT_STATUS as readonly unknown[]).includes(outcome)) || !(reason === null || text(reason)) || typeof answer !== 'boolean') continue
       // A measured session time is a whole number of milliseconds; anything else (a trace from before it was kept) is null.
@@ -257,6 +257,7 @@ function paidCalls(trace: readonly TraceEvent[]): { calls: EvidencePaidCall[] | 
       const used = {
         ...(proxyBytes === undefined ? {} : { proxyBytes: count(proxyBytes) }),
         ...(solves === undefined ? {} : { solves: count(solves) }),
+        ...(solveAttempts === undefined ? {} : { solveAttempts: count(solveAttempts) }),
         ...(proxyCountry === undefined ? {} : { proxyCountry: typeof proxyCountry === 'string' && /^[A-Z]{2}$/.test(proxyCountry) ? proxyCountry : null }),
       }
       // What the transport's own meter counted (PA G1): on the record only when the call carried it, a figure in another shape unknown.

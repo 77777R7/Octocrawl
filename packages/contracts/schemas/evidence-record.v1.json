@@ -585,6 +585,11 @@
         "bytesCapped": {
           "description": "True when the transport ended a session at the tariff's maxBytesPerCall; null when not known. Added with bytesCounted.",
           "type": ["boolean", "null"]
+        },
+        "solveAttempts": {
+          "description": "For a third-party CAPTCHA solver's call (third_party_captcha_solver): the solves it was asked for, failed ones included; solves is those it answered. Absent on other calls. Added after bytesCapped.",
+          "type": ["integer", "null"],
+          "minimum": 0
         }
       }
     },

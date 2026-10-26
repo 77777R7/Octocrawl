@@ -19,12 +19,24 @@ export interface SolverForwarder {
   close(): Promise<void>
 }
 
-/** Start the forwarder on a free loopback port. `upstream` must be an http:// proxy (Webshare's gateway is one). */
-export async function startSolverForwarder(upstream: ProxyServer): Promise<SolverForwarder> {
+/**
+ * Start the forwarder on a free loopback port. `upstream` must be an http:// proxy (Webshare's gateway is one).
+ * `dialAt`, an IP, is dialled in place of the upstream's hostname (W2L_SOLVER_PROXY_ADDRESS), for a machine whose
+ * resolver cannot be trusted with it; the solver is still given the hostname (`egress.upstream`), which CapSolver needed
+ * on 2026-10-26 (it refused the gateway's IP and took p.webshare.io, with the same login and sticky session).
+ * `solverScheme` (W2L_SOLVER_PROXY_SCHEME) gives the solver the same host, port and login by SOCKS5, for a gateway that
+ * serves HTTP and SOCKS5 on one port ("All connection types support HTTP and SOCKS5 Proxy Protocols on the same port",
+ * help.webshare.io): CapSolver's DataDome task refused Webshare's exit over http and took it over socks5 (T045,
+ * 2026-10-26). The browser still reaches it over HTTP, through this forwarder.
+ */
+export async function startSolverForwarder(upstream: ProxyServer, dialAt?: string, solverScheme?: 'socks5'): Promise<SolverForwarder> {
   const target = new URL(upstream.url)
   if (target.protocol !== 'http:') throw new Error('the solver exit must be an http:// proxy')
-  const host = target.hostname
+  if (dialAt !== undefined && net.isIP(dialAt) === 0) throw new Error('the solver exit\'s address must be an IP address')
+  const host = dialAt ?? target.hostname
   const port = Number(target.port || 80)
+  // The port written out: a URL drops http's default 80, which SOCKS5's would read as 1080.
+  const solverUpstream = solverScheme === undefined ? upstream : { ...upstream, url: `${solverScheme}://${target.hostname}:${port}` }
   const auth = upstream.username === undefined ? null : `Basic ${Buffer.from(`${upstream.username}:${upstream.password ?? ''}`).toString('base64')}`
 
   const server = http.createServer((req, res) => {
@@ -74,7 +86,7 @@ export async function startSolverForwarder(upstream: ProxyServer): Promise<Solve
   const localPort = typeof address === 'object' && address !== null ? address.port : 0
   const endpoint = `127.0.0.1:${localPort}`
   return {
-    egress: { endpoint, upstream },
+    egress: { endpoint, upstream: solverUpstream },
     server: { url: `http://${endpoint}`, endpoint },
     close: () => new Promise<void>((resolve) => { for (const s of sockets) s.destroy(); server.close(() => resolve()) }),
   }

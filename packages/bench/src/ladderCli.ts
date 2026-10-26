@@ -48,7 +48,8 @@ import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import type { RobotsOriginCache } from './robotsLookup.js'
 import { BrowserLocalSubject } from './subjects/browserLocal.js'
-import { installedChromeRefusal } from './subjects/installedChrome.js'
+import { installedChromeMajor, installedChromeRefusal, type InstalledChromeTestSeams } from './subjects/installedChrome.js'
+import { platformOf, type CaptchaSolver, type CaptchaSolving } from './vendors/captchaSolver.js'
 import { OriginScheduler } from './subjects/originScheduler.js'
 import { FileStore } from './fileStore.js'
 import { defaultNetworkPolicy, EgressRoutes } from './egress.js'
@@ -141,6 +142,19 @@ const SESSION_END_SLACK_MS = 25
  * `keys` overrides the environment (tests); when omitted the process env is
  * consulted.
  */
+/**
+ * Whether the installed_chrome rung carries a browser-bound solve in browser_local's place (ADR 0005, revision of
+ * 2026-10-26): it takes the request, Chrome is installed, and the solver lists its version, read before launch. A Chrome
+ * whose version cannot be read is left the solve: the grant prefers its rung.
+ */
+export function installedChromeCarries(solver: CaptchaSolver, seams: InstalledChromeTestSeams = {}, platform = platformOf()): NonNullable<CaptchaSolving['defersTo']>['carries'] {
+  return async (type, options) => {
+    if (installedChromeRefusal(options) !== null) return false
+    const chrome = await installedChromeMajor(seams)
+    return chrome.found && (chrome.major === null || solver.browserSupport(type, { family: 'chrome', major: chrome.major, platform }) === null)
+  }
+}
+
 export function buildChannels(
   mode: Args['mode'],
   opts: {
@@ -242,13 +256,20 @@ export function buildChannels(
   if (opts.captchaSolving !== undefined && !(opts.vendorPolicy?.authorized ?? []).includes('third_party_captcha_solver')) throw new Error('a captcha solver needs an access grant that names third_party_captcha_solver (ADR 0005)')
   // The public browser rungs of mode standard solve; a host-pinned browser (a local host's Amazon.sg state) does not.
   const solving = opts.captchaSolving !== undefined && mode === 'standard' && opts.browserAllowedHosts === undefined && (opts.publicPreferenceState ?? null) === null ? opts.captchaSolving : null
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared', {}, solving)
-  const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
   if (opts.compatTransport === true && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('the compatible transport is for a local server, not the hosted preview')
   if (opts.installedChrome === true && (preview || opts.localPreviewProxyUrl !== undefined)) throw new Error('installed_chrome is for a local server, not the hosted preview (ADR 0005)')
   // A browser kept to a list of hosts (a local host's Amazon.sg state) gets no installed_chrome rung: the person's Chrome is not kept to them.
-  const installedChrome = opts.installedChrome === true && opts.browserAllowedHosts === undefined && mode === 'standard' && opts.enhanced === true && (opts.vendorPolicy?.authorized ?? []).includes('installed_chrome')
-    ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', opts.installedChromeSeams ?? {}, solving)
+  const installedChromeRung = opts.installedChrome === true && opts.browserAllowedHosts === undefined && mode === 'standard' && opts.enhanced === true && (opts.vendorPolicy?.authorized ?? []).includes('installed_chrome')
+  // ADR 0005 (revision of 2026-10-26): a browser-bound solve (DataDome, Cloudflare's challenge) belongs to the ladder's
+  // last local rung that carries it. With installed_chrome on the ladder, the bundled Chromium leaves it there when that
+  // rung takes the request and the solver lists its Chrome; else (its Chrome too new for the vendor's list, smoke test
+  // 2026-10-25) the bundled Chromium solves, on the same exit.
+  const seams = opts.installedChromeSeams ?? {}
+  const plainSolving: CaptchaSolving | null = solving !== null && installedChromeRung ? { ...solving, defersTo: { rung: 'installed_chrome', carries: installedChromeCarries(solving.solver, seams) } } : solving
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared', {}, plainSolving)
+  const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
+  const installedChrome = installedChromeRung
+    ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', seams, solving)
     : null
   const compat = opts.compatTransport === true && mode === 'standard' ? new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, undefined, false, fileStore, false, opts.robotsCache, new CompatTransport(opts.networkPolicy ?? defaultNetworkPolicy())) : null
 

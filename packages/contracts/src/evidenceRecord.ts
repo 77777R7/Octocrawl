@@ -125,8 +125,17 @@ export interface EvidencePaidCall {
    * provider proxy. Added after `sessionMs`.
    */
   proxyBytes?: number | null
-  /** CAPTCHA solves the provider reported for the call's sessions; null when it reported none, or solving was not granted. */
+  /**
+   * CAPTCHA solves the provider reported for the call's sessions; null when it reported none, or solving was not granted.
+   * For a third-party solver's call (`third_party_captcha_solver`), the solves it answered with a token or cookie: 0 for
+   * a task it reported failed, whatever the page did after.
+   */
   solves?: number | null
+  /**
+   * For a third-party solver's call (`third_party_captcha_solver`): the solves it was asked for, failed ones included, so
+   * `solves` out of `solveAttempts` is its success rate. Absent on other calls. Added after `bytesCapped`.
+   */
+  solveAttempts?: number | null
   /** The country the provider's residential proxy was asked for (ISO 3166-1 alpha-2), when the grant named it; null otherwise. */
   proxyCountry?: string | null
   /**
@@ -421,7 +430,7 @@ export const EVIDENCE_RECORD_KEYS = {
   accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit']),
   accessEgressExit: keysOf<EvidenceAccessEgressExit>()(['ip', 'country', 'observedAt']),
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
-  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer', 'paidCallId', 'bytesCounted', 'bytesCapped']),
+  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts']),
   accessGrant: keysOf<EvidenceAccessGrant>()(['sha256', 'tier', 'attestedAt']),
   verification: keysOf<EvidenceVerification>()(['status', 'verifier', 'contractSha256', 'reason', 'failed']),
   readiness: keysOf<EvidenceReadiness>()(['state', 'basis']),
@@ -440,5 +449,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   fieldEvidence: ['reading'],
   access: ['completion', 'egress', 'session', 'paidCalls', 'grant'],
   accessEgress: ['exit'],
-  accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped'],
+  accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts'],
 }

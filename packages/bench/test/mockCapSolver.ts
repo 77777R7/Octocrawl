@@ -4,7 +4,7 @@ import { createServer, type Server } from 'node:http'
 export type MockBehaviour =
   | { solution: Record<string, unknown>; polls?: number; readyAtCreate?: boolean }
   | { createError: string }
-  | { pollError: string }
+  | { pollError: string; description?: string }
   | { never: true }
   | { createGarbled: true }
 
@@ -46,7 +46,7 @@ export async function startMockCapSolver(behave: (task: Record<string, unknown>)
         const task = pending.get(String(body.taskId))
         if (task === undefined) return send({ errorId: 1, errorCode: 'ERROR_TASKID_INVALID', errorDescription: 'no such task' })
         task.polled++
-        if ('pollError' in task.behaviour) return send({ errorId: 1, errorCode: task.behaviour.pollError, errorDescription: `failed for ${JSON.stringify(body)}` })
+        if ('pollError' in task.behaviour) return send({ errorId: 1, errorCode: task.behaviour.pollError, errorDescription: task.behaviour.description ?? `failed for ${JSON.stringify(body)}` })
         if ('never' in task.behaviour) return send({ errorId: 0, taskId: body.taskId, status: 'processing' })
         if ('solution' in task.behaviour && task.polled > (task.behaviour.polls ?? 0)) return send({ errorId: 0, taskId: body.taskId, status: 'ready', solution: task.behaviour.solution })
         return send({ errorId: 0, taskId: body.taskId, status: 'processing' })

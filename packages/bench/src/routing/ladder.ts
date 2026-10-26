@@ -142,7 +142,7 @@ interface LadderProgress {
   grant: EvidenceAccessGrant | null
   /** The run's own ledger, with no cap, when the caller gave none: every provider call is still settled and recorded. */
   ledger: SpendLedger | null
-  /** CAPTCHA solves bought for this page, by every rung and retry (ADR 0005 third_party_captcha_solver). */
+  /** CAPTCHA solves attempted for this page, by every rung and retry: charged, or refused before a task (ADR 0005 third_party_captcha_solver). */
   solves: number
   /** The last page the ladder stepped past for a stronger rung (strongerRungMayAnswer), kept over a later failure with none. */
   steppedPast: { channel: string; result: FetchResult } | null
@@ -1601,8 +1601,9 @@ function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceil
 
 /**
  * One page's CAPTCHA solves across its rungs (ADR 0005 `third_party_captcha_solver`): the count `maxSolvesPerCall` bounds,
- * and each solve on the run's charge and paid calls the moment the rung's ledger settles it, its outcome unknown (null)
- * until the rung returns a page (withSolverCalls), and left null when it never does.
+ * and each solve on the run's charge and paid calls the moment the rung's ledger settles it (at 0 for a task the vendor
+ * failed and does not bill), its outcome unknown (null) until the rung returns a page (withSolverCalls), and left null
+ * when it never does.
  */
 function solveLog(progress: LadderProgress, channel: Channel): CaptchaSolveLog {
   return {
@@ -1614,11 +1615,13 @@ function solveLog(progress: LadderProgress, channel: Channel): CaptchaSolveLog {
       const call = progress.paidCalls.length + 1
       progress.paidCalls.push({
         provider: solve.vendor, rung: solve.rung, capabilities: ['third_party_captcha_solver'], ceilingUsd: solve.ceilingUsd, chargedUsd: solve.chargedUsd,
-        reportedCostUsd: solve.reportedCostUsd, sessionMs: null, solves: 1, outcome: null, reason: null, call,
+        // Attempted and answered apart: a task the vendor failed is an attempt with no solve (smoke test 2026-10-25, T045).
+        reportedCostUsd: solve.reportedCostUsd, sessionMs: null, solves: solve.solved ? 1 : 0, solveAttempts: 1, outcome: null, reason: null, call,
         ...(solve.paidCallId === undefined ? {} : { paidCallId: solve.paidCallId }),
       })
       return call
     },
+    refused: () => { progress.solves++ },
   }
 }
 
