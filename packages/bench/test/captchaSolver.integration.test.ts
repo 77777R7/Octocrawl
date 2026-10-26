@@ -16,6 +16,8 @@ const EXIT = { url: 'http://203.0.113.9:80', endpoint: '203.0.113.9:80', usernam
 const ARTICLE = `<!doctype html><title>Tide tables</title><main><h1>Tide tables</h1>${'<p>The harbour office records tide height, wind and visibility for every hour of the day, and the ledger is kept for the whole year.</p>'.repeat(6)}</main>`
 const TURNSTILE = (action: string) => `<!doctype html><title>Verify</title><p>One moment.</p><form method="post" action="${action}"><div class="cf-turnstile" data-sitekey="0x4TESTKEY" data-action="read"></div></form>`
 const RECAPTCHA = `<!doctype html><title>Verify</title><p>One moment.</p><div class="g-recaptcha" data-sitekey="6LTESTKEY" data-callback="onOk"></div><script>function onOk(t) { document.cookie = 'rc=' + (t === '${RC_GOOD}' ? 'ok' : 'bad') + '; path=/'; location.reload() }</script>`
+/** Google's reCAPTCHA demo's shape (C011, 2026-10-26): the widget in a POST form, its callback only clearing an error message. */
+const RECAPTCHA_FORM = `<!doctype html><title>Verify</title><p>One moment.</p><form id="recaptcha-demo-form" method="POST" action="/recaptcha-form"><div class="g-recaptcha" data-sitekey="6LTESTKEY" data-callback="onSuccess"></div><p id="err">Please verify that you are not a robot.</p><button type="submit">Submit</button></form><script>function onSuccess() { document.getElementById('err').textContent = '' }</script>`
 const MAC_151 = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
 const MAC_156 = MAC_151.replace('Chrome/151', 'Chrome/156')
 /** The 2captcha demo's shape (2026-10-25): a 200 page whose form has no method or action, sent by its own script, which says when the token passed. */
@@ -26,6 +28,7 @@ const DATADOME = `<!doctype html><title>shop</title><p>Please enable JS and disa
 
 let site: Server
 let contactPosts = 0
+let recaptchaFormPosts = 0
 let base = ''
 beforeAll(async () => {
   site = createServer((req, res) => {
@@ -45,6 +48,18 @@ beforeAll(async () => {
     }
     if (path === '/turnstile' || path === '/holds') return cookie.includes('ts=ok') ? html(200, ARTICLE) : html(200, TURNSTILE(path))
     if (path === '/recaptcha') return cookie.includes('rc=ok') ? html(200, ARTICLE) : html(200, RECAPTCHA)
+    if (req.method === 'POST' && path === '/recaptcha-form') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        recaptchaFormPosts++
+        const ok = new URLSearchParams(body).get('g-recaptcha-response') === RC_GOOD
+        res.writeHead(303, { location: path, ...(ok ? { 'set-cookie': 'rf=ok; path=/' } : {}) }).end()
+      })
+      return
+    }
+    if (path === '/recaptcha-form') return cookie.includes('rf=ok') ? html(200, ARTICLE) : html(200, RECAPTCHA_FORM)
+    if (path === '/recaptcha-in-place') return html(200, RECAPTCHA_FORM.replace(`document.getElementById('err').textContent = ''`, `document.body.innerHTML = ${JSON.stringify(ARTICLE.replace(/<\/?(?:!doctype html|title)>/gi, ''))}`))
     if (path.startsWith('/callback-get')) return html(200, `<!doctype html><title>Verify</title><p>One moment.</p><div class="g-recaptcha" data-sitekey="6LTESTKEY" data-callback="go"></div><form id="f" method="get" action="/callback-get"><textarea name="g-recaptcha-response"></textarea></form><script>function go() { document.getElementById('f').submit() }</script>`)
     if (path.startsWith('/get-form')) return html(200, TURNSTILE('/get-form').replace('method="post"', 'method="get"'))
     if (path === '/demo') return html(200, DEMO(true))
@@ -109,6 +124,25 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
       // No token, cookie, key or exit login in the result, its trace or anything it records.
       for (const result of [turnstile, recaptcha]) expect(JSON.stringify(result)).not.toMatch(new RegExp([GOOD, RC_GOOD, KEY, EXIT.password].join('|')))
       expect(JSON.stringify(paid.rows)).not.toMatch(new RegExp([GOOD, KEY].join('|')))
+    } finally { await subject.teardown() }
+  }, 90_000)
+
+  it('posts the widget\'s own form when its callback leaves the page gated, and not when the callback cleared it (C011, 2026-10-26)', async () => {
+    const m = mock = await startMockCapSolver(answers)
+    const subject = subjectWith(solvingWith(m))
+    try {
+      recaptchaFormPosts = 0
+      const posted = await subject.fetch(`${base}/recaptcha-form`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(posted.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared', blockReasonAfter: null })])
+      expect(posted.status).toBe('success')
+      expect(posted.markdown).toContain('Tide tables')
+      expect(recaptchaFormPosts).toBe(1)
+      expect(JSON.stringify(posted)).not.toContain(RC_GOOD)
+      // A callback that clears the page in place: the form is never sent.
+      recaptchaFormPosts = 0
+      const inPlace = await subject.fetch(`${base}/recaptcha-in-place`, Date.now() + 40_000, undefined, undefined, {}, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(inPlace.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared' })])
+      expect(recaptchaFormPosts).toBe(0)
     } finally { await subject.teardown() }
   }, 90_000)
 
