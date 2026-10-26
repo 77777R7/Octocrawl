@@ -755,8 +755,9 @@ describe('vendor step timings', () => {
     expect(positions.every((position) => position >= 0), names.join(' ')).toBe(true)
     expect([...positions].sort((a, b) => a - b)).toEqual(positions)
     const step = (name: string) => out.trace.find((event) => event.event === name)!
-    expect(step('session_created').detail!.ms).toBeGreaterThanOrEqual(40)
-    expect(step('cdp_connected').detail!.ms).toBeGreaterThanOrEqual(30)
+    // A timer can end a millisecond or so before Date.now() says it should: each step covers its delay, within 5 ms.
+    expect(step('session_created').detail!.ms).toBeGreaterThanOrEqual(35)
+    expect(step('cdp_connected').detail!.ms).toBeGreaterThanOrEqual(25)
     // The session was opened before the lane's clock started (connectVendor): said so, at the lane's start.
     for (const name of ['session_created', 'cdp_connected', 'ua_probed']) expect(step(name)).toMatchObject({ at: 0, lane: 'provider', detail: { beforeLane: true } })
     for (const name of ['ua_probed', 'page_opened', 'navigate', 'settled', 'page_read']) expect(Number.isInteger(step(name).detail!.ms) && (step(name).detail!.ms as number) >= 0, name).toBe(true)
@@ -813,7 +814,7 @@ describe('vendor step timings', () => {
     await transport.close()
     const [closed] = transport.closedSessions()
     expect(closed!.released).toBe(true)
-    expect(closed!.releaseTimings!.releaseMs).toBeGreaterThanOrEqual(30)
+    expect(closed!.releaseTimings!.releaseMs).toBeGreaterThanOrEqual(25)
     // Steel answers both of its usage reads: each is timed, a read the provider has not is null.
     expect(typeof closed!.releaseTimings!.liveUsageMs).toBe('number')
     expect(typeof closed!.releaseTimings!.usageMs).toBe('number')
