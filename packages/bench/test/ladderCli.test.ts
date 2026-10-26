@@ -776,6 +776,46 @@ describe('buildChannels + LadderRunner session composition', () => {
       { at: base.usage.wallMs, lane: base.lane, event: 'session_released', detail: { sessionMs: 17_000, released: true, ...releaseTimings } },
       { at: base.usage.wallMs, lane: base.lane, event: 'session_released', detail: { sessionMs: 1_000, released: false, ...releaseTimings } },
     ])
+    // Each call made to release a session goes with it, and what the provider said of the session when none was confirmed.
+    const releaseAttempts = [{ ms: 5_001, confirmed: false, error: 'The operation was aborted due to timeout' }, { ms: 300, confirmed: true }]
+    const releaseState = { ms: 200, status: 'released', reason: 'user_requested', durationMs: 4_200 }
+    const told = withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, releaseTimings, releaseAttempts, releaseState }], byMinute, 0.004)
+    expect(told.trace.at(-1)!.detail).toEqual({ sessionMs: 17_000, released: true, ...releaseTimings, releaseAttempts, releaseState })
+  })
+
+  it('charges a call by its measured time when a second release call, or the provider\'s word, confirmed the release (speed A/B window A, 2026-10-26)', async () => {
+    // That window every release ran out its one 5 s call while Steel's API was slow, and each call was charged its ceiling.
+    const tariff = { perCallUsd: 0.001, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null }
+    const settle = async (ops: VendorOps) => {
+      const channels = buildChannels('authed', {
+        localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+        vendorPolicy: { authorized: ['vendor_remote_browser'] },
+        vendorOps: { steel: ops },
+        vendorTariffs: { steel: tariff },
+        ...vendorEnv(),
+      })
+      const run = await new LadderRunner(channels, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p')
+      await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
+      expect(run.result.lane).toBe('provider')
+      return { settled: run.result.trace.find((e) => e.event === 'spend_settled')?.detail, released: run.result.trace.find((e) => e.event === 'session_released')?.detail }
+    }
+    // The first release call runs out its time; the second is confirmed.
+    let calls = 0
+    const retried = await settle({ ...fakeVendorOps('steel', () => {}), async releaseSession() { if (++calls === 1) throw new Error('The operation was aborted due to timeout') } })
+    expect(calls).toBe(2)
+    expect(retried.settled).toMatchObject({ basis: 'measured' })
+    expect(retried.released).toMatchObject({ released: true, releaseAttempts: [{ confirmed: false, error: 'The operation was aborted due to timeout' }, { confirmed: true }] })
+    expect(retried.released).not.toHaveProperty('releaseState')
+    // No release call is confirmed, and Steel says it released the session at the caller's request: measured, not the ceiling.
+    const fails = { async releaseSession() { throw new Error('fetch failed') } }
+    const ended = await settle({ ...fakeVendorOps('steel', () => {}), ...fails, async sessionState() { return { released: true, status: 'released', reason: 'user_requested', durationMs: 4_200 } } })
+    expect(ended.settled).toMatchObject({ basis: 'measured' })
+    expect(ended.released).toMatchObject({ released: true, releaseState: { status: 'released', reason: 'user_requested', durationMs: 4_200 } })
+    expect(ended.released!.releaseAttempts).toHaveLength(3)
+    // Steel says it still runs: the session bills until its timeout, and the ceiling stays the charge.
+    const live = await settle({ ...fakeVendorOps('steel', () => {}), ...fails, async sessionState() { return { released: false, status: 'live', reason: null, durationMs: 9_000 } } })
+    expect(live.settled).toMatchObject({ basis: 'ceiling' })
+    expect(live.released).toMatchObject({ released: false, releaseState: { status: 'live', reason: null } })
   })
 
   it('answers a provider error just before the request\'s deadline as the provider\'s failure, not a thrown error (ROADMAP PA item 4)', async () => {
