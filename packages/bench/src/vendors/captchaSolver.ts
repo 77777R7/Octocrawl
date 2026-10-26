@@ -384,15 +384,23 @@ const SOLVED_FORM = 'octocrawl.solvedForm'
 export async function injectAnswer(page: Page, challenge: DetectedChallenge, solution: Extract<SolveAnswer, { ok: true }>['solution'], timeoutMs: number, cleared?: () => Promise<boolean>): Promise<Injection> {
   if (solution.kind === 'cookies') {
     const pageUrl = new URL(page.url())
-    await page.context().addCookies(solution.cookies.map((c) => ({
-      name: c.name, value: c.secret,
-      // A cookie with no Domain is the page's host's own, as a browser takes a Set-Cookie without one.
-      ...(c.domain === null ? { url: pageUrl.origin } : { domain: c.domain, path: c.path ?? '/' }),
-      secure: c.secure || pageUrl.protocol === 'https:',
-      httpOnly: c.httpOnly,
-      ...(c.sameSite === null ? {} : { sameSite: c.sameSite }),
-      ...(c.expires === null ? {} : { expires: c.expires }),
-    })))
+    // The site's own cookies of those names on a parent domain, which the solved ones replace: two of one name would
+    // both be sent, the older first (T045, 2026-10-26: idealista's DataDome set `datadome` on `.idealista.com`, and the
+    // solved one, which names no Domain, went beside it on www.idealista.com; the page stayed gated).
+    const held = (await page.context().cookies(pageUrl.href)).filter((cookie) => cookie.domain.startsWith('.'))
+    await page.context().addCookies(solution.cookies.map((c) => {
+      const own = c.domain === null ? held.find((cookie) => cookie.name === c.name) : undefined
+      return {
+        name: c.name, value: c.secret,
+        // A cookie with no Domain is the page's host's own, as a browser takes a Set-Cookie without one, unless the site
+        // keeps one of that name on a parent domain: it then takes that cookie's place.
+        ...(own !== undefined ? { domain: own.domain, path: own.path } : c.domain === null ? { url: pageUrl.origin } : { domain: c.domain, path: c.path ?? '/' }),
+        secure: c.secure || pageUrl.protocol === 'https:',
+        httpOnly: c.httpOnly,
+        ...(c.sameSite === null ? {} : { sameSite: c.sameSite }),
+        ...(c.expires === null ? {} : { expires: c.expires }),
+      }
+    }))
     await page.reload({ waitUntil: 'domcontentloaded', timeout: timeoutMs })
     return 'injected'
   }

@@ -157,9 +157,38 @@ export function withExtractionCandidates(result: FetchResult, source: CandidateS
   // Most checks passed wins; fewer failed breaks a tie; the earlier candidate (the main content first) keeps it.
   const best = all.filter(item => item.markdown !== null).reduce((a, b) => (b.passed > a.passed || (b.passed === a.passed && b.failed < a.failed) ? b : a))
   const reason = best === main ? 'delivered_kept' : best.failed === 0 && best.unjudged === 0 ? 'passes_contract' : 'more_checks_passed'
-  const capture = captureOf(result.trace)
-  const view = [...result.trace].reverse().find(event => event.event === 'view')
-  const event: TraceEvent = {
+  // Appended to the lane's own trace array: a lane adds events after its result is built (browserLocal's session_cookies).
+  ;(result.trace as TraceEvent[]).push(candidatesEvent(result.trace, source, readiness, trigger, all, best, main, reason))
+  if (best === main || best.markdown === null) return result
+  return { ...result, markdown: best.markdown, usage: { ...result.usage, contentTokens: estimateTokens(best.markdown) } }
+}
+
+/**
+ * The `extraction_candidates` event that makes a page with no main content its whole page (C011, 2026-10-26: Google's
+ * reCAPTCHA demo, its form posted with a solved token, shows "Verification Success... Hooray!" alone, 31 characters).
+ * The lane's failed result (`empty_unverified`, the whole page kept as evidence) is read as content only when readiness
+ * says its region was there and not extracted (the live page held the contract: `region_ready`), and the contract, a
+ * Markdown check among its checks, holds on that whole page with every check judged and passed. The requests
+ * withExtractionCandidates leaves out are left out. Null for any other page, which stays failed. The event says the
+ * content was the contract's choice (`replaced`), so the API's page cache never gives it to another request.
+ */
+export function wholePageChosen(failed: FetchResult, source: CandidateSource): TraceEvent | null {
+  const { options } = source
+  if (options.verify === undefined || failed.status !== 'failed' || failed.failureReason !== 'empty_unverified' || typeof failed.markdown !== 'string') return null
+  if (selectionAsked(options) || wholePageAsked(options) || (options.actions ?? []).some(action => action.type === 'paginate')) return null
+  if (!options.verify.checks.some(check => MARKDOWN_CHECKS.has(check.type))) return null
+  const readiness = readinessOf({ ...failed, verification: verify(options.verify, failed as unknown as Record<string, unknown>, { partial: true }) })
+  if (readiness.state !== 'not_extracted' || !readiness.basis.includes('region_ready')) return null
+  const document = candidate('document', failed.markdown, { ...failed, status: 'success' }, options)
+  if (document.markdown === null || document.passed === 0 || document.failed > 0 || document.unjudged > 0) return null
+  const main = candidate('main_content', null, failed, options, 'empty')
+  return candidatesEvent(failed.trace, source, readiness, 'not_extracted', [main, document], document, main, 'passes_contract')
+}
+
+function candidatesEvent(trace: readonly TraceEvent[], source: CandidateSource, readiness: Readiness, trigger: string, all: readonly Scored[], best: Scored, main: Scored, reason: string): TraceEvent {
+  const capture = captureOf(trace)
+  const view = [...trace].reverse().find(event => event.event === 'view')
+  return {
     at: source.at,
     lane: source.lane,
     event: 'extraction_candidates',
@@ -177,8 +206,4 @@ export function withExtractionCandidates(result: FetchResult, source: CandidateS
       limits: { html: MAX_TASK_SELECTION_HTML, markdown: MAX_CANDIDATE_CHARS, candidates: all.length },
     },
   }
-  // Appended to the lane's own trace array: a lane adds events after its result is built (browserLocal's session_cookies).
-  ;(result.trace as TraceEvent[]).push(event)
-  if (best === main || best.markdown === null) return result
-  return { ...result, markdown: best.markdown, usage: { ...result.usage, contentTokens: estimateTokens(best.markdown) } }
 }

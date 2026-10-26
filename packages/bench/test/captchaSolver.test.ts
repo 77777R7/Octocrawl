@@ -309,6 +309,33 @@ describe('startSolverForwarder: the run\'s solver exit, its login added on the w
     await expect(startSolverForwarder(named, 'gateway.invalid')).rejects.toThrow(/IP address/)
   })
 
+  it('gives the solver the same exit by SOCKS5, on its own port, while the browser still reaches it over HTTP (2026-10-26, T045)', async () => {
+    const seen: string[] = []
+    upstream = createServer((_req, res) => { res.end('plain ok') })
+    upstream.on('connect', (req: IncomingMessage, socket: net.Socket) => { seen.push(req.url!); socket.write('HTTP/1.1 200 Connection Established\r\n\r\n'); socket.end('tunnelled') })
+    await new Promise<void>((resolve) => upstream!.listen(0, '127.0.0.1', resolve))
+    const port = (upstream.address() as net.AddressInfo).port
+    const named = { url: `http://gateway.invalid:${port}`, endpoint: `gateway.invalid:${port}`, username: 'user-us-1', password: 'exit-pass-9c1' }
+    const forwarder = await startSolverForwarder(named, '127.0.0.1', 'socks5')
+    try {
+      expect(forwarder.egress.upstream).toEqual({ ...named, url: `socks5://gateway.invalid:${port}` })
+      expect(capSolverProxy(forwarder.egress.upstream)).toBe(`socks5://user-us-1:exit-pass-9c1@gateway.invalid:${port}`)
+      const [host, localPort] = forwarder.egress.endpoint.split(':')
+      const tunnelled = await new Promise<string>((resolve, reject) => {
+        const socket = net.connect(Number(localPort), host!, () => socket.write('CONNECT shop.example:443 HTTP/1.1\r\nHost: shop.example:443\r\n\r\n'))
+        let data = ''
+        socket.on('data', (chunk) => { data += chunk })
+        socket.on('end', () => resolve(data))
+        socket.on('error', reject)
+      })
+      expect(tunnelled).toContain('tunnelled')
+      expect(seen).toEqual(['shop.example:443'])
+    } finally { await forwarder.close() }
+    // An http:// exit on its default port keeps that port for the solver, never SOCKS5's 1080.
+    const onDefault = await startSolverForwarder({ url: 'http://gateway.invalid:80', endpoint: 'gateway.invalid:80', username: 'u', password: 'p' }, '127.0.0.1', 'socks5')
+    try { expect(capSolverProxy(onDefault.egress.upstream)).toBe('socks5://u:p@gateway.invalid:80') } finally { await onDefault.close() }
+  })
+
   it('takes only an http:// upstream', async () => {
     await expect(startSolverForwarder({ url: 'https://203.0.113.9:443', endpoint: '203.0.113.9:443' })).rejects.toThrow(/http:\/\//)
   })

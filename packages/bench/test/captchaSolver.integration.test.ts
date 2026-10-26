@@ -60,6 +60,18 @@ beforeAll(async () => {
       return
     }
     if (path === '/recaptcha-form') return cookie.includes('rf=ok') ? html(200, ARTICLE) : html(200, RECAPTCHA_FORM)
+    // Google's demo itself (C011, 2026-10-26): the form's POST is answered with a page of 31 characters and no main block.
+    if (req.method === 'POST' && path === '/recaptcha-demo') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        recaptchaFormPosts++
+        if (new URLSearchParams(body).get('g-recaptcha-response') === RC_GOOD) html(200, '<!doctype html><title>ReCAPTCHA demo</title><div class="recaptcha-success">Verification Success... Hooray!</div>')
+        else html(200, RECAPTCHA_FORM.replace('action="/recaptcha-form"', 'action="/recaptcha-demo"'))
+      })
+      return
+    }
+    if (path === '/recaptcha-demo') return html(200, RECAPTCHA_FORM.replace('action="/recaptcha-form"', 'action="/recaptcha-demo"'))
     // The callback clears the page in place and leaves its form and widget there: only the page's gate says not to post.
     if (path === '/recaptcha-in-place') return html(200, RECAPTCHA_FORM.replace(`document.getElementById('err').textContent = ''`, `document.querySelector('p').remove(); document.body.insertAdjacentHTML('afterbegin', ${JSON.stringify(ARTICLE.replace(/<!doctype html><title>Tide tables<\/title>/i, ''))})`).replace('<title>Verify</title>', '<title>Tide tables</title>'))
     // Google's documented shape: the callback posts the form itself, and the site answers after 3 s.
@@ -166,6 +178,20 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
       expect([recaptchaChecks, recaptchaFormPosts]).toEqual([1, 0])
     } finally { await subject.teardown() }
   }, 90_000)
+
+  it("delivers the short page a solve cleared when the task's contract holds on it, not escalated as empty (C011, 2026-10-26)", async () => {
+    const m = mock = await startMockCapSolver(answers)
+    const subject = subjectWith(solvingWith(m))
+    try {
+      recaptchaFormPosts = 0
+      const verify = { checks: [{ type: 'markdownMatches' as const, pattern: 'Verification Success' }] }
+      const page = await subject.fetch(`${base}/recaptcha-demo`, Date.now() + 40_000, undefined, undefined, { verify }, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(page.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared', blockReasonAfter: null })])
+      expect(page).toMatchObject({ status: 'success', failureReason: null, markdown: 'Verification Success... Hooray!' })
+      expect(recaptchaFormPosts).toBe(1)
+      expect(JSON.stringify(page)).not.toContain(RC_GOOD)
+    } finally { await subject.teardown() }
+  }, 60_000)
 
   it('keeps a page still gated after a "successful" solve blocked, the solve paid; and stops at maxSolvesPerCall', async () => {
     const m = mock = await startMockCapSolver(answers)
@@ -345,6 +371,30 @@ describe('solveChallenges on a page read through the solver exit', () => {
       expect(m.tasks).toEqual([{ type: 'DatadomeSliderTask', websiteURL: 'https://shop.example/item', captchaUrl: 'https://geo.captcha-delivery.com/captcha/?initialCid=abc&cid=def&t=fe&referer=x', userAgent: ua, proxy: 'http://user-us-1:exit-pass-9c1@203.0.113.9:80' }])
       expect(await page.content()).toContain('Tide tables')
       expect(JSON.stringify(events)).not.toMatch(/dd-secret-4|exit-pass-9c1|CAP-int-key/)
+    } finally { await page.close() }
+  }, 60_000)
+
+  it("replaces the site's own DataDome cookie, set on its parent domain, so the browser sends the solved one alone (T045, 2026-10-26)", async () => {
+    // CapSolver's cookie names no Domain; idealista's DataDome sets its own on `.idealista.com` (2026-10-26).
+    const m = mock = await startMockCapSolver(() => ({ solution: { cookie: 'datadome=dd-secret-4; Max-Age=3600; Domain=; Path=/; Secure; SameSite=Lax' } }))
+    let sent: string[] = []
+    const page = await routed((url, cookie) => {
+      if (url.hostname.endsWith('captcha-delivery.com')) return { status: 200, body: '<p>slider</p>' }
+      sent = cookie.split(/;\s*/).filter((pair) => pair.startsWith('datadome='))
+      // A server reads the first of two cookies of one name, the older one when their paths are the same.
+      return sent[0] === 'datadome=dd-secret-4' ? { status: 200, body: ARTICLE } : { status: 403, body: DATADOME, headers: { 'x-datadome-cid': 'abc', 'set-cookie': 'datadome=dd-flagged-1; Max-Age=3600; Domain=.shop.example; Path=/; Secure; SameSite=Lax' } }
+    })
+    try {
+      await page.goto('https://www.shop.example/item')
+      const cleared = () => sent[0] === 'datadome=dd-secret-4'
+      const events = await solveChallenges({
+        page, solving: solvingWith(m, { egress: { endpoint: '127.0.0.1:65001', upstream: EXIT } }), userAgent: MAC_151, pageEgress: '127.0.0.1:65001',
+        gateNow: gate(page, () => cleared() ? 200 : 403, (): Record<string, string> => cleared() ? {} : { 'x-datadome-cid': 'abc' }), settle: () => page.waitForLoadState('domcontentloaded'),
+        spend: createSpendLedger(1), paidCalls: undefined, log: undefined, rung: 'browser_local', onEvent: () => {}, url: 'https://www.shop.example/item', deadlineAt: Date.now() + 30_000, signal: undefined, reserveMs: 1_000,
+      })
+      expect(events).toEqual([expect.objectContaining({ type: 'datadome', outcome: 'cleared' })])
+      expect(sent).toEqual(['datadome=dd-secret-4'])
+      expect((await page.context().cookies('https://www.shop.example/item')).filter((c) => c.name === 'datadome')).toEqual([expect.objectContaining({ domain: '.shop.example', path: '/', value: 'dd-secret-4' })])
     } finally { await page.close() }
   }, 60_000)
 
