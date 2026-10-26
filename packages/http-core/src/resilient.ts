@@ -80,10 +80,19 @@ export interface ResilientHttpConfig extends ExecutionBudget {
   bodyTimeoutMs: number
   /**
    * deadlineAt is the caller's own timeout: wait for headers and body until it
-   * instead of stopping at headersTimeoutMs / bodyTimeoutMs. Without a
-   * deadline the two caps apply.
+   * instead of stopping at headersTimeoutMs / bodyTimeoutMs, unless
+   * headersCapReserveMs keeps the header cap. Without a deadline the two caps apply.
    */
   capsFollowDeadline?: boolean
+  /**
+   * With capsFollowDeadline: the header cap of the first attempt (its redirect
+   * hops included) still holds when at least this much of the deadline would
+   * remain after it, for a later rung that takes a header timeout over (the
+   * ladder's local fallback, which takes no retry's). Unset, no remainder is
+   * enough: the header wait runs to the deadline. The body's cap never holds
+   * then, as no rung takes a body timeout over.
+   */
+  headersCapReserveMs?: number
   /** Called before the first request and before every redirect hop. */
   assertUrl?: UrlGuard
 }
@@ -284,8 +293,10 @@ export async function resilientFetch(
       requestCount++
       const at = Date.now() - start
       let response: ResilientResponseLike
-      const cap = (defaultMs: number) => cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined ? Number.POSITIVE_INFINITY : defaultMs
-      const headersCapMs = cap(cfg.headersTimeoutMs), bodyCapMs = cap(cfg.bodyTimeoutMs)
+      const follows = cfg.capsFollowDeadline === true && cfg.deadlineAt !== undefined
+      const reserveMs = attemptCount === 1 ? cfg.headersCapReserveMs ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY
+      const headersCapMs = follows && cfg.deadlineAt! - Date.now() - cfg.headersTimeoutMs < reserveMs ? Number.POSITIVE_INFINITY : cfg.headersTimeoutMs
+      const bodyCapMs = follows ? Number.POSITIVE_INFINITY : cfg.bodyTimeoutMs
       let headersTimeoutMs = headersCapMs, bodyTimeoutMs = bodyCapMs
       try {
         headersTimeoutMs = remainingTimeout(scope, headersCapMs)
