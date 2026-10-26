@@ -5,9 +5,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { localNetworkPolicy } from '@w2l/contracts'
 import type { FetchOptions, FetchResult, TraceEvent } from '@w2l/contracts'
 import { extractTf, htmlToMarkdown } from '@w2l/extract-tf'
-import { readinessOf, verify } from '@w2l/runtime'
+import { contractSha256, readinessOf, verify } from '@w2l/runtime'
 import { captureEvent, newCapture } from '../src/capture.js'
-import { withExtractionCandidates } from '../src/subjects/candidateExtraction.js'
+import { wholePageChosen, withExtractionCandidates } from '../src/subjects/candidateExtraction.js'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
 
 /** A standard's page: its number, status and date sit in a header block the main content leaves out. */
@@ -208,5 +208,37 @@ describe('the HTTP lane reads its own capture again', () => {
     const plain = await http.fetch(`${origin}/wxf42`)
     expect(plain.markdown).not.toContain('Proposed Standard')
     expect(plain.trace.some(event => event.event === 'extraction_candidates')).toBe(false)
+  })
+})
+
+describe('a page with no main content whose whole page holds the task contract (C011, 2026-10-26)', () => {
+  const whole = 'Verification Success... Hooray!'
+  /** The lane's failed result for Google's solved reCAPTCHA demo: the whole page kept as evidence, the live page's wait in the trace. */
+  const empty = (options: FetchOptions, wait: Record<string, unknown> | null): FetchResult => {
+    const result = delivered(`<div class="recaptcha-success">${whole}</div>`)
+    const region: TraceEvent[] = wait === null ? [] : [{ at: 2, lane: 'browser_local', event: 'region_wait', detail: { empty: false, waitedMs: 515, reads: 2, judged: 2, loading: false, steady: true, contractSha256: contractSha256(options.verify!), ...wait } }]
+    return { ...result, status: 'failed', failureReason: 'empty_unverified', markdown: whole, metadata: undefined, document: undefined, trace: [...region, ...result.trace, { at: 3, lane: 'browser_local', event: 'extract', detail: { escalate: true, confidence: 0, textChars: 31 } }] }
+  }
+  const held = ask([{ type: 'markdownMatches', pattern: 'Verification Success' }])
+
+  it('chooses the whole page when the live page held the contract and the whole page holds it, every check judged', () => {
+    const event = wholePageChosen(empty(held, { ready: true }), source(held))
+    expect(event).toMatchObject({ lane: 'browser_local', event: 'extraction_candidates', detail: { readiness: 'not_extracted', trigger: 'not_extracted', selected: 'document', replaced: true, reason: 'passes_contract' } })
+  })
+
+  it('leaves the page failed when its region did not hold, nothing judged it, or the contract fails or is not all judged there', () => {
+    expect(wholePageChosen(empty(held, { ready: false }), source(held))).toBeNull()
+    expect(wholePageChosen(empty(held, null), source(held))).toBeNull()
+    for (const options of [
+      ask([{ type: 'markdownMatches', pattern: 'Verification Success' }, { type: 'markdownIncludes', text: 'Order confirmed' }]),
+      // A check the whole page's Markdown cannot judge (the JSON a format extracts) leaves it not proven.
+      ask([{ type: 'markdownMatches', pattern: 'Verification Success' }, { type: 'field', path: 'json.order', present: true }]),
+      // No Markdown check: a field every success has proves nothing about the page.
+      ask([{ type: 'field', path: 'status', equals: 'success' }]),
+    ]) expect(wholePageChosen(empty(options, { ready: true }), source(options))).toBeNull()
+    // A request that named its content, or a page cut short by its deadline, is not re-read.
+    const tags = ask([{ type: 'markdownMatches', pattern: 'Verification Success' }], { includeTags: ['div'] })
+    expect(wholePageChosen(empty(tags, { ready: true }), source(tags))).toBeNull()
+    expect(wholePageChosen({ ...empty(held, { ready: true }), failureReason: 'timeout' }, source(held))).toBeNull()
   })
 })

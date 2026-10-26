@@ -173,6 +173,10 @@ beforeAll(async () => {
           '<nav><ul><li><a href="/tides">Tide tables</a></li><li><a href="/weather">Weather</a></li></ul></nav>' +
           '<footer><p>Published by the harbour office</p></footer></body></html>',
       )
+    } else if (req.url === '/solved-short') {
+      // Google's reCAPTCHA demo once its form was posted with a good token (C011, 2026-10-26): 31 characters, no main block.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><head><title>ReCAPTCHA demo</title></head><body><div class="recaptcha-success">Verification Success... Hooray!</div></body></html>')
     } else if (req.url === '/hang') {
       // Never respond; the subject's own timeout must fire and map to `timeout`.
     } else if (req.url === '/gate') {
@@ -603,6 +607,27 @@ describe('BrowserLocalSubject transport', () => {
       await subject.teardown()
     }
   })
+
+  it('delivers a page with no main block whose whole text the task contract holds on, and only then (C011, 2026-10-26)', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const verify = { checks: [{ type: 'markdownMatches' as const, pattern: 'Verification Success' }] }
+      const held = await subject.fetch(`${url}/solved-short`, Date.now() + 20_000, undefined, undefined, { verify })
+      expect(held).toMatchObject({ status: 'success', failureReason: null, markdown: 'Verification Success... Hooray!' })
+      expect(held.usage.contentTokens).toBeGreaterThan(0)
+      expect(held.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true, textChars: 31 }) }))
+      // The contract's choice, so the API's page cache never gives this page to a request without it.
+      expect(held.trace.find((event) => event.event === 'extraction_candidates')?.detail).toMatchObject({ readiness: 'not_extracted', trigger: 'not_extracted', selected: 'document', replaced: true, reason: 'passes_contract', candidates: [{ id: 'main_content', skipped: 'empty' }, { id: 'document', passed: 1, failed: 0, unjudged: 0 }] })
+      // No contract, one the page fails, or one with no Markdown check (a field the result always has): not proven content.
+      const unproven = [{}, { verify: { checks: [{ type: 'markdownIncludes' as const, text: 'Order confirmed' }] } }, { verify: { checks: [{ type: 'field' as const, path: 'status', equals: 'success' }] } }]
+      for (const options of unproven) {
+        const out = await subject.fetch(`${url}/solved-short`, Date.now() + 6_000, undefined, undefined, options)
+        expect(out).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', markdown: 'Verification Success... Hooray!' })
+      }
+    } finally {
+      await subject.teardown()
+    }
+  }, 60_000)
 
   it('reads a page of zero-width characters alone as a page with no text, not content, for onlyMainContent false too', async () => {
     const subject = new BrowserLocalSubject()

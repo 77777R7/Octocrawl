@@ -60,7 +60,7 @@ import {
   type HonestyVerdict,
   type IdentityDevice,
 } from '@w2l/contracts'
-import { withExtractionCandidates } from './candidateExtraction.js'
+import { wholePageChosen, withExtractionCandidates } from './candidateExtraction.js'
 
 /**
  * Headers that never go into the as-sent record or the trace: a credential
@@ -1453,6 +1453,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       let wholePage: string | null = null
       // A page of the records a list format asked for is content, though no article was found in it.
       let listPage = false
+      // So is a page whose whole text holds the request's task contract, its region there on the live page (C011).
+      let contractPage = false
       // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
       if ((extracted.escalate || extracted.lastResort === true) && gate !== null) return blocked(gate)
       if (extracted.escalate && !selectionAsked(options)) {
@@ -1460,18 +1462,24 @@ export class BrowserLocalSubject implements SubjectAdapter {
         listPage = listRecordsFound(body, pageUrl, options)
         // A page captured before its wait ended is not proven empty: the
         // deadline, not the page, is the reason there is no content.
-        if ((options.onlyMainContent !== false && !listPage) || wholePage === null) return {
-          ...base,
-          status: 'failed',
-          failureReason: waitCutShort ? 'timeout' : 'empty_unverified',
-          blockReason: null,
-          budgetExceeded: null,
-          lane: 'browser_local',
-          escalations: [],
-          markdown: wholePage,
-          ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
-          ...(wholePage === null ? {} : { links }),
-          ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
+        if ((options.onlyMainContent !== false && !listPage) || wholePage === null) {
+          const failed: FetchResult = {
+            ...base,
+            status: 'failed',
+            failureReason: waitCutShort ? 'timeout' : 'empty_unverified',
+            blockReason: null,
+            budgetExceeded: null,
+            lane: 'browser_local',
+            escalations: [],
+            markdown: wholePage,
+            ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}),
+            ...(wholePage === null ? {} : { links }),
+            ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
+          }
+          const chosen = wholePageChosen(failed, { html: converted, url: pageUrl, options, lane: 'browser_local', at: wallMs })
+          if (chosen === null) return failed
+          trace.push(chosen)
+          contractPage = true
         }
       }
 
@@ -1486,7 +1494,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
-      const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, converted.length))
+      const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, converted.length)) || contractPage
         ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl, exclude: options.excludeTags, ...markdownOptions(options) })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
       // The images and attributes formats read the rendered DOM as received, like links.

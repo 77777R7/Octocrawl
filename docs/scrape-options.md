@@ -6,7 +6,7 @@ This page lists the options a scrape takes and what its result carries. A batch 
 
 Octocrawl reports a failure as a failure, never as an empty success:
 
-`empty_verified`, `blocked`, `failed` with reasons, not silent empties; a page answered with an error status keeps its `httpStatus` and Markdown as evidence, never as success, and so does a page on which Octocrawl finds no main content (`failed`/`empty_unverified` with the whole page's Markdown), a main region the page hides with `hidden` and an article region that only names the page included (headings of fewer than 100 characters and almost nothing beside them, no image the Markdown carries, in-page jump links such as "Skip to Filters" set aside)
+`empty_verified`, `blocked`, `failed` with reasons, not silent empties; a page answered with an error status keeps its `httpStatus` and Markdown as evidence, never as success, and so does a page on which Octocrawl finds no main content (`failed`/`empty_unverified` with the whole page's Markdown; unless a task contract holds on it, see readiness below), a main region the page hides with `hidden` and an article region that only names the page included (headings of fewer than 100 characters and almost nothing beside them, no image the Markdown carries, in-page jump links such as "Skip to Filters" set aside)
 
 ## Compact MCP responses
 
@@ -195,7 +195,7 @@ With a task contract (`verify`, see [JSON extraction](json-extraction.md)), the 
 
 The local browser and a provider's browser scroll to a region that loads as it comes into view, as a product grid far down a category page does. Once a check fails on a page that has settled (its text steady, no loading indicator), the wait scrolls one screen down before each read after that. It stops when the checks hold, the page ends, or after 20 screens, all within the wait's 10 s. The `region_wait` event says how many screens it scrolled (`scrolls`), and `scrollUnfinished: true` when the 10 s ran out before the page's end. The my-browser lane does not scroll: it reads the person's own tab.
 
-A page the contract could not judge because it was not read (`page_not_read`) goes by its own signals, as above, except one with no main content (`empty_unverified`) whose region held on the live page for this contract: `not_extracted` with `empty_unverified` and `region_ready`. `waitedMs` is the lane's last settle wait and its region wait together. For now `readiness` changes nothing the ladder does (ROADMAP PA items 10 and 11).
+A page the contract could not judge because it was not read (`page_not_read`) goes by its own signals, as above, except one with no main content (`empty_unverified`) whose region held on the live page for this contract: `not_extracted` with `empty_unverified` and `region_ready`. On a local browser rung, such a page whose whole-page Markdown then holds the contract, with a Markdown check among its checks and every check judged there, is not failed: it answers `success` with that Markdown (`extraction_candidates` with `selected: "document"` in the trace), as a short page a solved CAPTCHA leads to does (Google's reCAPTCHA demo: `Verification Success... Hooray!`). A request that names its content (`includeTags`, `onlyMainContent: false`) or pages through a list is not re-read so, and the page cache does not keep such a page, whose content the contract chose. `waitedMs` is the lane's last settle wait and its region wait together. For now `readiness` changes nothing the ladder does (ROADMAP PA items 10 and 11).
 
 ## agentHints
 

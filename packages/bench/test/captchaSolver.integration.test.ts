@@ -60,6 +60,18 @@ beforeAll(async () => {
       return
     }
     if (path === '/recaptcha-form') return cookie.includes('rf=ok') ? html(200, ARTICLE) : html(200, RECAPTCHA_FORM)
+    // Google's demo itself (C011, 2026-10-26): the form's POST is answered with a page of 31 characters and no main block.
+    if (req.method === 'POST' && path === '/recaptcha-demo') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        recaptchaFormPosts++
+        if (new URLSearchParams(body).get('g-recaptcha-response') === RC_GOOD) html(200, '<!doctype html><title>ReCAPTCHA demo</title><div class="recaptcha-success">Verification Success... Hooray!</div>')
+        else html(200, RECAPTCHA_FORM.replace('action="/recaptcha-form"', 'action="/recaptcha-demo"'))
+      })
+      return
+    }
+    if (path === '/recaptcha-demo') return html(200, RECAPTCHA_FORM.replace('action="/recaptcha-form"', 'action="/recaptcha-demo"'))
     // The callback clears the page in place and leaves its form and widget there: only the page's gate says not to post.
     if (path === '/recaptcha-in-place') return html(200, RECAPTCHA_FORM.replace(`document.getElementById('err').textContent = ''`, `document.querySelector('p').remove(); document.body.insertAdjacentHTML('afterbegin', ${JSON.stringify(ARTICLE.replace(/<!doctype html><title>Tide tables<\/title>/i, ''))})`).replace('<title>Verify</title>', '<title>Tide tables</title>'))
     // Google's documented shape: the callback posts the form itself, and the site answers after 3 s.
@@ -166,6 +178,20 @@ describe('the public browser rung with a CAPTCHA solver (ADR 0005 third_party_ca
       expect([recaptchaChecks, recaptchaFormPosts]).toEqual([1, 0])
     } finally { await subject.teardown() }
   }, 90_000)
+
+  it("delivers the short page a solve cleared when the task's contract holds on it, not escalated as empty (C011, 2026-10-26)", async () => {
+    const m = mock = await startMockCapSolver(answers)
+    const subject = subjectWith(solvingWith(m))
+    try {
+      recaptchaFormPosts = 0
+      const verify = { checks: [{ type: 'markdownMatches' as const, pattern: 'Verification Success' }] }
+      const page = await subject.fetch(`${base}/recaptcha-demo`, Date.now() + 40_000, undefined, undefined, { verify }, undefined, undefined, { spend: createSpendLedger(1) })
+      expect(solves(page.trace)).toEqual([expect.objectContaining({ type: 'recaptcha_v2', outcome: 'cleared', blockReasonAfter: null })])
+      expect(page).toMatchObject({ status: 'success', failureReason: null, markdown: 'Verification Success... Hooray!' })
+      expect(recaptchaFormPosts).toBe(1)
+      expect(JSON.stringify(page)).not.toContain(RC_GOOD)
+    } finally { await subject.teardown() }
+  }, 60_000)
 
   it('keeps a page still gated after a "successful" solve blocked, the solve paid; and stops at maxSolvesPerCall', async () => {
     const m = mock = await startMockCapSolver(answers)
