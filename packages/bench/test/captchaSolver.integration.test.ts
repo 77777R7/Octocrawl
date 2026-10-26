@@ -374,6 +374,30 @@ describe('solveChallenges on a page read through the solver exit', () => {
     } finally { await page.close() }
   }, 60_000)
 
+  it("replaces the site's own DataDome cookie, set on its parent domain, so the browser sends the solved one alone (T045, 2026-10-26)", async () => {
+    // CapSolver's cookie names no Domain; idealista's DataDome sets its own on `.idealista.com` (2026-10-26).
+    const m = mock = await startMockCapSolver(() => ({ solution: { cookie: 'datadome=dd-secret-4; Max-Age=3600; Domain=; Path=/; Secure; SameSite=Lax' } }))
+    let sent: string[] = []
+    const page = await routed((url, cookie) => {
+      if (url.hostname.endsWith('captcha-delivery.com')) return { status: 200, body: '<p>slider</p>' }
+      sent = cookie.split(/;\s*/).filter((pair) => pair.startsWith('datadome='))
+      // A server reads the first of two cookies of one name, the older one when their paths are the same.
+      return sent[0] === 'datadome=dd-secret-4' ? { status: 200, body: ARTICLE } : { status: 403, body: DATADOME, headers: { 'x-datadome-cid': 'abc', 'set-cookie': 'datadome=dd-flagged-1; Max-Age=3600; Domain=.shop.example; Path=/; Secure; SameSite=Lax' } }
+    })
+    try {
+      await page.goto('https://www.shop.example/item')
+      const cleared = () => sent[0] === 'datadome=dd-secret-4'
+      const events = await solveChallenges({
+        page, solving: solvingWith(m, { egress: { endpoint: '127.0.0.1:65001', upstream: EXIT } }), userAgent: MAC_151, pageEgress: '127.0.0.1:65001',
+        gateNow: gate(page, () => cleared() ? 200 : 403, (): Record<string, string> => cleared() ? {} : { 'x-datadome-cid': 'abc' }), settle: () => page.waitForLoadState('domcontentloaded'),
+        spend: createSpendLedger(1), paidCalls: undefined, log: undefined, rung: 'browser_local', onEvent: () => {}, url: 'https://www.shop.example/item', deadlineAt: Date.now() + 30_000, signal: undefined, reserveMs: 1_000,
+      })
+      expect(events).toEqual([expect.objectContaining({ type: 'datadome', outcome: 'cleared' })])
+      expect(sent).toEqual(['datadome=dd-secret-4'])
+      expect((await page.context().cookies('https://www.shop.example/item')).filter((c) => c.name === 'datadome')).toEqual([expect.objectContaining({ domain: '.shop.example', path: '/', value: 'dd-secret-4' })])
+    } finally { await page.close() }
+  }, 60_000)
+
   it("sends Cloudflare's challenge the exit and the User-Agent, and sets cf_clearance", async () => {
     const m = mock = await startMockCapSolver(() => ({ solution: { cookies: { cf_clearance: 'cf-secret-5' }, token: 'cf-secret-5', userAgent: 'UA' } }))
     let cleared = false
