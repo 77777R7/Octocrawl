@@ -4,7 +4,7 @@
  *
  * Every caller is served scrape and map, and scrape_product with the browser
  * lane; an account's key or sign-in is served crawl and batch jobs too
- * (hostedJobRoutes.ts). Every other route and tool is refused by name with a
+ * (hostedJobRoutes.ts), and get_scrape. Every other route and tool is refused by name with a
  * hint to run Octocrawl locally; hostedParity.ts records, tool by tool and
  * option by option, where hosted stands against a local server.
  * A caller is either a key holder (`Authorization: Bearer <key>`, looked up
@@ -27,7 +27,7 @@ import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
 import { serverInstructions } from './instructions.js'
-import { SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
+import { MAX_WAIT_MS, MCP_SCRAPE_TIMEOUT_MS, SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
 import { scrapeSchemaWithout } from './toolsets.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
@@ -196,8 +196,13 @@ export function logQuotaThresholds(entries: readonly QuotaEntry[], counts: reado
 /** Requests per minute a caller may start, so a loop cannot spend a day's allowance in a second. */
 export const KEYLESS_PER_MINUTE = 10
 export const KEY_PER_MINUTE = 60
-/** How long a browser-lane lease is held at most: the request timeout (120 s) and a margin, so a lease left by a crash frees itself. */
-export const BROWSER_LEASE_MS = 130_000
+/**
+ * Cloud Run's request timeout for this service, the deploy's --timeout (docs/hosted-api.md; hostedApi.test.ts holds the two
+ * together): no call here runs longer, a REST scrape's 300 s included.
+ */
+export const HOSTED_REQUEST_TIMEOUT_MS = 300_000
+/** How long a browser-lane lease is held at most: the request timeout and a margin, so a lease left by a crash frees itself. */
+export const BROWSER_LEASE_MS = HOSTED_REQUEST_TIMEOUT_MS + 10_000
 /** Requests of any kind per minute from one address, counted before the key lookup, so unknown keys cannot drive the key store. */
 export const ADDRESS_PER_MINUTE = 120
 /** A file (PDF, CSV, ...) a hosted call may read: the preview's cap. Files land under the task root, which Cloud Run keeps in memory. */
@@ -216,12 +221,12 @@ export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', '
 
 /** The tools hosted Octocrawl lists to a caller: scrape_product only to a key with the browser lane, since it needs one,
  * so every tool a client sees can answer. All are read-only here: hosted Octocrawl refuses page actions and logins.
- * scrape's description does not name get_scrape, which is not served here. */
+ * scrape's description names get_scrape only to a connection that lists it (`jobs`). */
 export function hostedTools(browser: boolean, jobs = false) {
   return TOOLS.filter((tool) => (HOSTED_API_TOOLS.has(tool.name) && (browser || tool.name !== 'scrape_product')) || (jobs && HOSTED_JOB_TOOLS.has(tool.name)))
     .map((tool) => HOSTED_JOB_TOOLS.has(tool.name) ? hostedJobTool(tool, browser) : ({
       ...tool,
-      description: tool.description.replace(SCRAPE_RECORD_HINT, ''),
+      description: jobs ? tool.description : tool.description.replace(SCRAPE_RECORD_HINT, ''),
       inputSchema: hostedInputSchema(tool.name, tool.inputSchema, browser),
       annotations: { ...tool.annotations, readOnlyHint: true },
       _meta: { ...('_meta' in tool ? tool._meta : {}), ...HOSTED_INVOCATION[tool.name as keyof typeof HOSTED_INVOCATION] },
@@ -231,11 +236,12 @@ export function hostedTools(browser: boolean, jobs = false) {
 /**
  * The job tools an account's connection lists (ROADMAP PH H2, docs/h2-hosted-jobs-tasks.md M1): crawl and batch jobs run
  * a slice at a time on hosted Octocrawl and are read back through these. Keyless callers and keys without an account
- * have no credits to spend, so they are not offered.
+ * have no credits to spend, so they are not offered. list_active_crawls (the account's crawls not yet ended) and
+ * get_scrape (a scrape's record, while it is kept) are listed by the same rule (stage H W0).
  */
-export const HOSTED_JOB_TOOLS: ReadonlySet<string> = new Set(['crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'wait_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'get_batch_errors', 'cancel_batch', 'wait_batch'])
-/** A hosted wait ends within the MCP request's deadline (HOSTED_MCP_SCRAPE_TIMEOUT_MS) and answers the status so far. */
-export const HOSTED_MCP_WAIT_MS = 90_000
+export const HOSTED_JOB_TOOLS: ReadonlySet<string> = new Set(['crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'wait_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'get_batch_errors', 'cancel_batch', 'wait_batch', 'get_scrape'])
+/** A hosted wait ends as a local one does (MAX_WAIT_MS), well inside the request timeout, and answers the status so far. */
+export const HOSTED_MCP_WAIT_MS = MAX_WAIT_MS
 /** The most items a hosted job list answers at once (hostedJobRoutes.ts PAGE_LIST_MAX). */
 const HOSTED_MCP_LIST_MAX = 100
 /** A hosted job's statuses: queued while the account's running slots are taken, expired once its results are deleted. */
@@ -244,6 +250,11 @@ const HOSTED_JOB_NOTE = ' On hosted Octocrawl a job runs in slices: a crawl read
 
 /** get_batch_errors as hosted answers it (H2 M7): the job's failed items in a page list, not the local { errors, robotsBlocked }. */
 const HOSTED_BATCH_ERRORS_DESCRIPTION = `List a batch's items that did not succeed (status failed, blocked, cancelled or budget_exceeded), each as get_batch_items lists it: { items, nextCursor, hasMore }, in pages of up to ${HOSTED_MCP_LIST_MAX} (cursor, limit). A URL robots.txt refused is among them, blocked with its blockReason.`
+
+/** list_active_crawls as hosted answers it (GET /v1/crawl/active): the account's crawl jobs, in its jobs' own statuses, without their options. */
+const HOSTED_ACTIVE_CRAWLS_DESCRIPTION = 'List this account\'s crawls that are queued or running, oldest first: each with its id, start URL, status and pages so far. Empty when none is.'
+/** get_scrape as hosted serves it: a record is swept HOSTED_RECORD_TTL_MS after its scrape, and answered without its telemetry (withoutTelemetry). */
+const HOSTED_GET_SCRAPE_DESCRIPTION = `Read one scrape call's record by its scrapeId (metadata.scrapeId on the response): the request, the verdict, metadata, warnings and hints; no page body. Kept ${HOSTED_RECORD_TTL_MS / 60_000} minutes.`
 
 /** A start tool's local description less what hosted does not serve: appendToId, actions, and an unstated retention (HOSTED_JOB_NOTE states it). */
 function hostedStartDescription(description: string): string {
@@ -255,6 +266,8 @@ function hostedStartDescription(description: string): string {
 
 /** A job tool as hosted serves it: its start options cut to what hosted takes, waits within the request's deadline, its status values. */
 function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
+  // get_scrape reads a scrape's record, not a job: only how long a record is kept differs.
+  if (tool.name === 'get_scrape') return { ...tool, description: HOSTED_GET_SCRAPE_DESCRIPTION }
   const schema = structuredClone(tool.inputSchema) as { properties: Record<string, Record<string, unknown>>; required?: string[] }
   const starts = tool.name === 'crawl' || tool.name === 'batch_scrape'
   if (starts) {
@@ -282,7 +295,7 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
   if (output?.properties?.status !== undefined) output.properties.status = { enum: [...HOSTED_JOB_STATUSES] }
   return {
     ...tool,
-    description: starts ? `${hostedStartDescription(tool.description)}${HOSTED_JOB_NOTE}` : tool.name === 'get_batch_errors' ? HOSTED_BATCH_ERRORS_DESCRIPTION : tool.description.replace(/at most 120000/g, `at most ${HOSTED_MCP_WAIT_MS}`),
+    description: starts ? `${hostedStartDescription(tool.description)}${HOSTED_JOB_NOTE}` : tool.name === 'get_batch_errors' ? HOSTED_BATCH_ERRORS_DESCRIPTION : tool.name === 'list_active_crawls' ? HOSTED_ACTIVE_CRAWLS_DESCRIPTION : tool.description.replace(/at most 120000/g, `at most ${HOSTED_MCP_WAIT_MS}`),
     inputSchema: schema,
     ...(output === undefined ? {} : { outputSchema: output }),
   }
@@ -296,8 +309,14 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
  * hostedSchema.integration.test.ts calls every listed option, so a new local option reaches hosted only when added here.
  */
 export const HOSTED_SCRAPE_KEYS: ReadonlySet<string> = new Set(['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'fastMode', 'blockAds', 'removeBase64Images', 'verify', 'integration'])
-/** A hosted MCP scrape's deadline: under claude.ai's 240 s tool limit and Cloud Run's 120 s request timeout. */
-export const HOSTED_MCP_SCRAPE_TIMEOUT_MS = 100_000
+/** A hosted MCP scrape's deadline when it names none: a local MCP scrape's. */
+export const HOSTED_MCP_SCRAPE_TIMEOUT_MS = MCP_SCRAPE_TIMEOUT_MS
+/**
+ * The longest deadline a hosted MCP scrape may ask for: 60 s inside the 240 s claude.ai and Claude Desktop give a tool call
+ * (https://claude.com/docs/connectors/building.md, read 2026-10-27), for a cold start and the answer's assembly. Clients
+ * that give a call less (Cursor, Codex CLI and ChatGPT report about 60 s) end it sooner whatever this allows.
+ */
+export const HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS = 180_000
 
 /** A hosted copy of a tool's input schema, with only what this connection can use. */
 function hostedInputSchema(name: string, schema: unknown, browser: boolean): unknown {
@@ -314,7 +333,7 @@ function hostedInputSchema(name: string, schema: unknown, browser: boolean): unk
   }
   const copy = scrapeSchemaWithout(schema, (key) => HOSTED_SCRAPE_KEYS.has(key), 'The declared identity the page is read under: standard (default) or research. A hosted server holds no saved logins, so it has no authed mode.')
   const properties = copy.properties
-  properties.timeout = { ...properties.timeout, maximum: HOSTED_MCP_SCRAPE_TIMEOUT_MS, description: `Deadline in milliseconds for the whole scrape. When it fires the result is partial with the content so far, or failed/timeout. Here at most and by default ${HOSTED_MCP_SCRAPE_TIMEOUT_MS}; a longer one is lowered to it.` }
+  properties.timeout = { ...properties.timeout, maximum: HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, description: `Deadline in milliseconds for the whole scrape. When it fires the result is partial with the content so far, or failed/timeout. Here by default ${HOSTED_MCP_SCRAPE_TIMEOUT_MS}, max ${HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS}; a longer one is lowered to it.` }
   properties.maxFileBytes = { ...properties.maxFileBytes, maximum: HOSTED_MAX_FILE_BYTES }
   const verify = properties.verify as { description: string; properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }
   const checkType = verify.properties.checks.items.properties.type
@@ -337,11 +356,21 @@ function hostedInputSchema(name: string, schema: unknown, browser: boolean): unk
   return copy
 }
 
-/** A hosted MCP scrape's arguments with its deadline held to HOSTED_MCP_SCRAPE_TIMEOUT_MS (REST keeps the engine's own). */
+/** A hosted MCP scrape's arguments with its deadline: HOSTED_MCP_SCRAPE_TIMEOUT_MS when it names none, at most HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS (REST keeps the engine's own). */
 export function hostedScrapeArguments(args: unknown): unknown {
   if (args === null || typeof args !== 'object' || Array.isArray(args)) return args
   const timeout = (args as { timeout?: unknown }).timeout
-  return { ...args, timeout: typeof timeout === 'number' && timeout < HOSTED_MCP_SCRAPE_TIMEOUT_MS ? timeout : HOSTED_MCP_SCRAPE_TIMEOUT_MS }
+  return { ...args, timeout: typeof timeout === 'number' ? Math.min(timeout, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS) : HOSTED_MCP_SCRAPE_TIMEOUT_MS }
+}
+/**
+ * A request the hosted MCP handler sends the gate in-process: every scrape a tool starts gets the MCP deadline
+ * (hostedScrapeArguments), scrape_product's too, which names none and would otherwise run the engine's 300 s.
+ */
+export async function withMcpScrapeDeadline(request: Request): Promise<Request> {
+  if (request.method !== 'POST' || new URL(request.url).pathname !== '/v1/scrape') return request
+  const body = await request.clone().json().catch(() => null) as unknown
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return request
+  return new Request(request, { body: JSON.stringify(hostedScrapeArguments(body)) })
 }
 /** What ChatGPT shows while a hosted tool runs and once it has (Apps SDK openai/toolInvocation/*, 64 characters at most). */
 const HOSTED_INVOCATION = {
@@ -1057,7 +1086,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       baseUrl: 'http://hosted.internal',
       ...(typeof authorization === 'string' ? { token: authorization.replace(/^Bearer\s+/i, '') } : {}),
       fetch: async (input, init) => {
-        const request = new Request(input, init)
+        const request = await withMcpScrapeDeadline(new Request(input, init))
         // Every call from here is this handler's own: the MCP POST that carries it was counted against the address already.
         request.headers.set(INTERNAL_SECRET_HEADER, internalSecret)
         if (caller.kind === 'keyless') request.headers.set(INTERNAL_CLIENT_HEADER, address)

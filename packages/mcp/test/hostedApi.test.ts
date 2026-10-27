@@ -17,7 +17,8 @@ import { MemoryCreditsStore, type CreditsStore, type RequestNote } from '../src/
 import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } from '../src/hostedModel.js'
 import { MemoryHostedAccess, type HostedAccessSource } from '../src/hostedAccess.js'
 import { CompatAddressGuard } from '@w2l/bench'
-import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
+import { BROWSER_LEASE_MS, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS } from '../src/hostedApi.js'
 import { expectIsError } from './toolErrorChecks.js'
 
 const HASH_KEY = 'h'.repeat(40)
@@ -304,7 +305,7 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
 
 it('hosted tool results carry the page and its Evidence Record, without telemetry or internal ids, unless debug asks', async () => {
   // OpenAI's plugin review asks that tool results leave out session, trace and request ids and logging metadata
-  // (developers.openai.com/plugins/plugin-guidelines, "Response minimization"); hosted Octocrawl offers no get_scrape to use them.
+  // (developers.openai.com/plugins/plugin-guidelines, "Response minimization"); a keyless connection lists no get_scrape to use them.
   const { url } = await start({ keylessDaily: 10 })
   const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
   const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
@@ -562,6 +563,18 @@ function fakeFirestore() {
   }) as typeof fetch
   return { docs, fetcher }
 }
+
+it('holds a browser-lane lease past the longest call Cloud Run lets run, and deploys with that request timeout (stage H W0)', async () => {
+  // A lease that expired under a call still running would let the key start a second browser-lane scrape.
+  expect(BROWSER_LEASE_MS).toBeGreaterThan(HOSTED_REQUEST_TIMEOUT_MS)
+  // The longest MCP calls end inside the request timeout, and 60 s inside the 240 s claude.ai gives a tool call.
+  for (const ms of [HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS]) expect(ms).toBeLessThanOrEqual(Math.min(HOSTED_REQUEST_TIMEOUT_MS, 240_000 - 60_000))
+  // Every deploy command of the API in the runbook sets Cloud Run's request timeout to the one the code assumes.
+  const docs = await readFile(new URL('../../../docs/hosted-api.md', import.meta.url), 'utf8')
+  const deploys = docs.match(/gcloud run deploy octocrawl-api (?:[^\n]*\\\n)*[^\n]*/g) ?? []
+  expect(deploys.length).toBeGreaterThanOrEqual(2)
+  for (const command of deploys) expect(command).toContain(`--timeout=${HOSTED_REQUEST_TIMEOUT_MS / 1000}s`)
+})
 
 it('Firestore leases: one holder at a time, an expired lease is taken over, and release deletes only the holder\'s own write', async () => {
   const { docs, fetcher } = fakeFirestore()
