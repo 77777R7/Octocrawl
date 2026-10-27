@@ -299,6 +299,24 @@ describe('withoutTelemetry: hosted results without telemetry, internal ids or ca
     })
     // debug is the caller asking for the full audit.
     expect(withoutTelemetry('scrape', result, { debug: true })).toBe(result)
+    // Where get_scrape is listed to read it back (an account's hosted connection), the record id stays (stage H W0).
+    expect(withoutTelemetry('scrape', result, {}, undefined, { keepScrapeId: true })).toMatchObject({ metadata: { title: 'Tides', statusCode: 200, scrapeId: 'id-1' } })
+    expect(withoutTelemetry('scrape', result, {}, undefined, { keepScrapeId: true })).not.toHaveProperty('usage')
+  })
+
+  it('drops a scrape record\'s telemetry and the client that made it, keeping the request, the verdict and its id (stage H W0)', () => {
+    const record = {
+      scrapeId: 'id-1', requestedAt: '2026-10-27T00:00:00.000Z', origin: 'mcp-claude-ai@1.0', request: { url: 'https://example.com/' },
+      status: 'success', failureReason: null, blockReason: null, lane: 'http', channelsTried: ['http'], usage: { wallMs: 12 },
+      metadata: { title: 'Tides', scrapeId: 'id-1', concurrencyLimited: false, concurrencyQueueDurationMs: 0 },
+      agentHints: ['run Octocrawl on your computer (https://octocrawl.dev/docs/connect-mcp/?utm_source=hosted&utm_medium=hint)'],
+    }
+    expect(withoutTelemetry('get_scrape', record, { id: 'id-1' }, undefined, { keepScrapeId: true })).toEqual({
+      scrapeId: 'id-1', requestedAt: '2026-10-27T00:00:00.000Z', request: { url: 'https://example.com/' },
+      status: 'success', failureReason: null, blockReason: null, lane: 'http',
+      metadata: { title: 'Tides', scrapeId: 'id-1' },
+      agentHints: ['run Octocrawl on your computer (https://octocrawl.dev/docs/connect-mcp/)'],
+    })
   })
 
   it('keeps a map\'s id, which its outputSchema requires, and leaves other tools alone', () => {
