@@ -202,6 +202,8 @@ function summary(call) {
     connectMsMax: sorted.length === 0 ? null : sorted.at(-1),
     exitMoved: call.exitStart !== null && call.exitEnd !== null && call.exitStart !== call.exitEnd,
     topHosts: [...hosts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([host, bytes]) => ({ host, bytes })),
+    // Every host's bytes, so the page's traffic and Chrome's own service traffic can be told apart.
+    hostBytes: Object.fromEntries([...hosts.entries()].sort((a, b) => b[1] - a[1])),
   }
 }
 

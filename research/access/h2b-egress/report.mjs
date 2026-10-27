@@ -81,21 +81,22 @@ function summarise(run) {
     moved: ran.filter((t) => t.exit?.moved === true).map((t) => t.id),
     exits: new Set(ran.map((t) => t.exit?.ipStart).filter(Boolean)).size,
     cpuAvg: pct(chrome.map((t) => t.cpu?.avgUtil), 50), cpuPeak: Math.max(...chrome.map((t) => t.cpu?.peakUtil ?? 0)),
-    saturated: pct(chrome.map((t) => t.cpu?.saturatedShare), 50),
+    saturated: pct(chrome.map((t) => t.cpu?.saturatedShare), 50), throttled: pct(chrome.map((t) => t.cpu?.throttledShare), 50),
+    serviceMean: (() => { const v = chrome.map((t) => t.bytes?.chromeService).filter((x) => typeof x === 'number'); return v.length === 0 ? null : sum(v) / v.length })(),
   }
 }
 
 const rows = runs.map(summarise)
 const out = []
-out.push('| Window | Arm | vCPU | Verified (21) | False successes | Verified, robots-allowed | Reached Chrome | Verified by Chrome | Client p50 / p95 s | Chrome rung p50 / p95 s | MB per call: verified / not / p95 | Exits | Exit moved | $ per Chrome-verified page | GB per Chrome-verified page |')
+out.push('| Window | Arm | vCPU | Verified (21) | False successes | Verified, robots-allowed | Reached Chrome | Verified by Chrome | Client p50 / p95 s | Chrome rung p50 / p95 s | MB per call: verified / not / p95 / Chrome\'s own (mean) | Exits | Exit moved | $ per Chrome-verified page | GB per Chrome-verified page |')
 out.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
 for (const r of rows) {
-  out.push(`| ${r.run.window} | ${r.run.arm} | ${r.run.cpus} | ${r.verified} / ${r.run.tasks.length}${r.skipped ? ` (${r.skipped} skipped, robots)` : ''} | ${r.falseSuccess} | ${r.subsetSize === null ? 'unknown' : `${r.subsetVerified} / ${r.subsetSize} (false ${r.subsetFalse})`} | ${r.reachedChrome} | ${r.verifiedByChrome} | ${fmt(r.clientP50 / 1000, 1)} / ${fmt(r.clientP95 / 1000, 1)} | ${fmt(r.chromeP50 / 1000, 1)} / ${fmt(r.chromeP95 / 1000, 1)} | ${mb(r.bytesVerifiedMean)} / ${mb(r.bytesFailedMean)} / ${mb(r.bytesP95)} | ${r.exits} | ${r.moved.length === 0 ? 'none' : r.moved.join(', ')} | ${r.costPerVerified === null ? (r.verifiedByChrome === 0 ? 'n/a (none verified)' : 'unknown') : `$${fmt(r.costPerVerified, 4)}`} | ${fmt(r.gbPerVerified, 4)} |`)
+  out.push(`| ${r.run.window} | ${r.run.arm} | ${r.run.cpus} | ${r.verified} / ${r.run.tasks.length}${r.skipped ? ` (${r.skipped} skipped, robots)` : ''} | ${r.falseSuccess} | ${r.subsetSize === null ? 'unknown' : `${r.subsetVerified} / ${r.subsetSize} (false ${r.subsetFalse})`} | ${r.reachedChrome} | ${r.verifiedByChrome} | ${fmt(r.clientP50 / 1000, 1)} / ${fmt(r.clientP95 / 1000, 1)} | ${fmt(r.chromeP50 / 1000, 1)} / ${fmt(r.chromeP95 / 1000, 1)} | ${mb(r.bytesVerifiedMean)} / ${mb(r.bytesFailedMean)} / ${mb(r.bytesP95)} / ${mb(r.serviceMean)} | ${r.exits} | ${r.moved.length === 0 ? 'none' : r.moved.join(', ')} | ${r.costPerVerified === null ? (r.verifiedByChrome === 0 ? 'n/a (none verified)' : 'unknown') : `$${fmt(r.costPerVerified, 4)}`} | ${fmt(r.gbPerVerified, 4)} |`)
 }
 out.push('')
-out.push('| Window | Arm | vCPU | Challenge clears (cap 10 s) | Still gated after the cap | Refused by the exit | CPU: median avg / max peak / median share ≥ 90 % |')
+out.push('| Window | Arm | vCPU | Challenge clears (cap 10 s) | Still gated after the cap | Refused by the exit | CPU of the job\'s vCPU: median avg / max peak / median share ≥ 90 % / median throttled share |')
 out.push('| --- | --- | --- | --- | --- | --- | --- |')
-for (const r of rows) out.push(`| ${r.run.window} | ${r.run.arm} | ${r.run.cpus} | ${r.clears.length === 0 ? 'none' : r.clears.join(', ')} | ${r.gated} | ${r.refused.length === 0 ? 'none' : r.refused.join('; ')} | ${fmt(r.cpuAvg, 2)} / ${fmt(r.cpuPeak, 2)} / ${fmt(r.saturated, 2)} |`)
+for (const r of rows) out.push(`| ${r.run.window} | ${r.run.arm} | ${r.run.cpus} | ${r.clears.length === 0 ? 'none' : r.clears.join(', ')} | ${r.gated} | ${r.refused.length === 0 ? 'none' : r.refused.join('; ')} | ${fmt(r.cpuAvg, 2)} / ${fmt(r.cpuPeak, 2)} / ${fmt(r.saturated, 2)} / ${fmt(r.throttled, 2)} |`)
 out.push('')
 // Per task: ✓ with the rung that answered, ✗ with the reason, "robots" for a task the arm did not send.
 const ids = [...new Set(runs.flatMap((r) => r.tasks.map((t) => t.id)))]

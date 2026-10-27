@@ -14,6 +14,10 @@ const DETECTION = {
   // The five tasks hosted lost to local on 2026-10-27, robots.txt apart (research/hosted/2026-10-27-parity-window-21edea41.md).
   T051: 'hosted_lost', T072: 'hosted_lost', T006: 'hosted_lost', T007: 'hosted_lost', T011: 'hosted_lost',
 }
+// Chrome's own service traffic, not the page's: component updates and downloads (gvt1.com, clientsN.googleusercontent
+// .com), its client services, the optimization guide, Safe Browsing and autofill, and clientsN.google.com. Hosts a page
+// may also load (accounts.google.com, www.googleapis.com, gstatic, reCAPTCHA) stay with the page.
+const CHROME_SERVICE = /(^|\.)gvt1\.com$|^clients\d*\.(googleusercontent|google)\.com$|^(clientservices|update|optimizationguide-pa|safebrowsing|safebrowsingohttpgateway|content-autofill)\.googleapis\.com$/
 const [dir, id, cpuFile] = process.argv.slice(2)
 const round = (n) => (n === null || n === undefined || Number.isNaN(n) ? null : Math.round(n))
 const readJson = async (path) => { try { return JSON.parse(await readFile(path, 'utf8')) } catch { return null } }
@@ -104,6 +108,8 @@ line.bytes = forwarder === null ? null : {
   up: forwarder.up, down: forwarder.down, total: forwarder.up + forwarder.down, tunnels: forwarder.tunnels, http: forwarder.http,
   statuses: forwarder.statuses, errors: forwarder.errors, refusals: forwarder.refusals, connectMsP50: forwarder.connectMsP50, connectMsMax: forwarder.connectMsMax,
   echoBytes: (forwarder.echo ?? []).reduce((n, e) => n + (e.bytes ?? 0), 0), topHosts: forwarder.topHosts,
+  chromeService: forwarder.hostBytes === undefined ? null : Object.entries(forwarder.hostBytes).reduce((n, [host, bytes]) => n + (CHROME_SERVICE.test(host) ? bytes : 0), 0),
+  hosts: forwarder.hostBytes ?? null,
 }
 line.cpu = cpu
 console.log(JSON.stringify({ task: line }))

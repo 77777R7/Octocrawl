@@ -30,6 +30,10 @@ Howard's decisions on this design, 2026-10-27, through the coordinating session:
 
 This design was first committed with two arms (`5d28562c`). The datacenter arm's code was added the same day, before any run, and is left off by Howard's decision.
 
+Two measures changed after the smoke execution on image `228e01f0` and before window 1, from what the smoke showed:
+- **Bytes by host.** Most of the smoke's bytes per call were Chrome's own service traffic: component downloads from `gvt1.com` and `clients2.googleusercontent.com`, and `clientservices.googleapis.com`. The forwarder now keeps every host's bytes, so the record gives that traffic apart from the page's.
+- **CPU against the job's vCPU.** A 2 vCPU gen2 job shows 5 CPUs in `/proc/stat`, so utilisation over the CPUs shown understated saturation. The sampler now divides by the job's vCPU, keeps steal time apart, and reads the cgroup's limit and throttling where the instance has them.
+
 ### What is fixed
 
 **Code.** Branch `claude/hosted-h2b-egress-17e305`, cut from main `8ece08ab`, with this design and `research/access/h2b-egress/`.
@@ -157,9 +161,9 @@ A round whose self-check or control fails still runs its tasks. It is marked in 
 | Challenge wait: ms, outcome and the cap used | the last `challenge_wait` event (`ms`, `outcome`, `capMs`) |
 | Phases of the final rung | G4's `phasesOf`, unchanged |
 | Chrome rung time | `chromeRungMs`: client time after the rung started. This is the upper bound, and the cost basis. `chromeTraceMs`, the rung's last trace event, is the lower bound |
-| Bytes through the exit | the forwarder: up and down per call, CONNECT exchange included, the echo's apart; tunnels, statuses, the proxy's refusals with its reason header, connect time, the top hosts by bytes |
+| Bytes through the exit | the forwarder: up and down per call, CONNECT exchange included, the echo's apart; tunnels, statuses, the proxy's refusals with its reason header, connect time, and every host's bytes. Chrome's own service traffic is the bytes of `*.gvt1.com`, `clientsN.googleusercontent.com`, `clientsN.google.com` and Chrome's service hosts on `googleapis.com` (client services, update, optimization guide, Safe Browsing, autofill); hosts a page may load too, such as `accounts.google.com`, `www.googleapis.com`, gstatic and reCAPTCHA, stay with the page |
 | The call's exit | the forwarder's echo at the first tunnel and at the end, and whether it moved |
-| CPU | `cpu.mjs`, every 500 ms from `/proc`: the instance's busy CPU-seconds, average and peak utilisation, the share of samples at ≥ 90 %, and lower-bound seconds for the installed Chrome, the bundled Chromium and node |
+| CPU | `cpu.mjs`, every 500 ms from `/proc`: the instance's busy CPU-seconds and steal seconds; average and peak utilisation and the share of samples at ≥ 90 %, all against the job's vCPU; the cgroup's CPU limit and the share of its periods throttled, where the instance has them; and lower-bound seconds for the installed Chrome, the bundled Chromium and node |
 
 Bytes are counted on the forwarder's connection to the exit, the traffic Webshare bills, without TCP/IP headers. If Howard reads a plan's used bandwidth before and after a window, that figure is set beside the forwarder's. Otherwise Webshare's own count stays unknown.
 
@@ -169,7 +173,7 @@ For each round, and for each arm over both windows:
 - verified and false successes, on all 21 tasks and on the robots-allowed subset;
 - how many were verified by the Chrome rung itself, and how many calls reached it;
 - p50 and p95 of client time, and of the Chrome rung's time, by nearest rank;
-- bytes per call through the exit, split into calls that ended verified and calls that did not;
+- bytes per call through the exit, split into calls that ended verified and calls that did not, and how much of it was Chrome's own service traffic;
 - the challenge clears, with their times and the cap they ran under;
 - CPU at 2 vCPU, and at 4 vCPU for the extra round;
 - $ per verified page.

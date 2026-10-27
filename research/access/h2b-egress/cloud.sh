@@ -66,7 +66,7 @@ case ${1:-} in
     while IFS=: read -r job arm style secret cpu mem _; do
       args=(--project="$P" --region="$R" --image="$image" --execution-environment=gen2 --cpu="$cpu" --memory="$mem" --tasks=1 --max-retries=0
         --task-timeout=3600s --service-account="$SA" --labels=purpose=h2b-temp --command=/usr/bin/tini --args=-g,--,bash,research/access/h2b-egress/round.sh
-        --set-env-vars="H2B_ARM=$arm,H2B_SESSION_STYLE=$style,G4_GRANT_B64=$grant")
+        --set-env-vars="H2B_ARM=$arm,H2B_SESSION_STYLE=$style,H2B_CPUS=$cpu,G4_GRANT_B64=$grant")
       [ "$secret" != - ] && args+=(--set-secrets="H2B_UPSTREAMS=octocrawl-h2b-$secret:1")
       gcloud run jobs create "octocrawl-h2b-$job" "${args[@]}" --format='value(metadata.name)'
     done <<<"$JOBS" ;;
