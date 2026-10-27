@@ -202,6 +202,8 @@ a:hover{color:#fff}
 .chart .tile-name{fill:#fff;font:600 12.5px "Helvetica Neue",Helvetica,Arial,sans-serif;pointer-events:none}
 .chart .tile-value{fill:rgba(255,255,255,.78);font:11px var(--mono);pointer-events:none}
 .chart .t4 .tile-name,.chart .t3 .tile-name{fill:#081b42}.chart .t4 .tile-value,.chart .t3 .tile-value{fill:rgba(8,27,66,.75)}
+.chart .tile.other rect{fill:var(--muted);fill-opacity:.16}.chart .tile.other.hover rect{fill-opacity:.26}
+.tm-host svg{overflow:hidden}
 .chart-wrap{position:relative;overflow:hidden}
 .chart-ascii{position:absolute;inset:0;margin:0;color:var(--orange);opacity:.07;font:10px/11px var(--mono);pointer-events:none;overflow:hidden}
 .chart-legend .sw,.glass-tip .sw{display:inline-block;width:9px;height:9px;margin-right:7px;border-radius:2px;background:currentColor;vertical-align:-1px}
