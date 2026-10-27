@@ -31,7 +31,7 @@ export interface McpServerOptions {
    * the intervals.
    */
   progress?: boolean | { everyMs?: number; heartbeatMs?: number }
-  /** Answer results without telemetry and internal ids (withoutTelemetry): hosted Octocrawl, whose tools cannot look them up. */
+  /** Answer results without telemetry and internal ids (withoutTelemetry): hosted Octocrawl, whose tools look up none but a scrape's record. */
   minimalResults?: boolean
 }
 
@@ -59,6 +59,8 @@ export function mcpOrigin(client: { name: string; version: string } | undefined)
 export function createMcpServer(client: W2L, options: McpServerOptions = {}): Server {
   const listed = options.tools ?? TOOLS.filter(tool => options.allowedTools === undefined || options.allowedTools.has(tool.name))
   const instructions = options.instructions ?? serverInstructions(listed.map(tool => (tool as { name: string }).name), { kind: 'local' })
+  // A minimal result keeps a scrape's record id where get_scrape is listed to read it back.
+  const keepScrapeId = listed.some(tool => (tool as { name: string }).name === 'get_scrape')
   const server = new Server(
     { ...SERVER_IDENTITY, version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server&utm_medium=listing' },
     { capabilities: { tools: {} }, instructions },
@@ -107,7 +109,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       const declared = TOOLS.find(tool => tool.name === request.params.name)
       const structured = declared !== undefined && 'outputSchema' in declared
       // The verdict first, cut to the budget, and a screenshot as an image block too (docs/mcp-client-ux-tasks.md W8).
-      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments, contract) : result, contract)
+      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments, contract, { keepScrapeId }) : result, contract)
       return { content: [{ type: 'text', text: JSON.stringify(value) }, ...images], ...(structured ? { structuredContent: value as Record<string, unknown> } : {}) }
     } finally { call?.end() }
   })

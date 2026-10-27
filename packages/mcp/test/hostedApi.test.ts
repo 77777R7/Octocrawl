@@ -301,7 +301,7 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
 
 it('hosted tool results carry the page and its Evidence Record, without telemetry or internal ids, unless debug asks', async () => {
   // OpenAI's plugin review asks that tool results leave out session, trace and request ids and logging metadata
-  // (developers.openai.com/plugins/plugin-guidelines, "Response minimization"); hosted Octocrawl offers no get_scrape to use them.
+  // (developers.openai.com/plugins/plugin-guidelines, "Response minimization"); a keyless connection lists no get_scrape to use them.
   const { url } = await start({ keylessDaily: 10 })
   const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
   const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })

@@ -9,7 +9,7 @@ import type { CrawlReport } from '@w2l/contracts'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
 import { AMAZON_PRODUCT_SCHEMA } from './productSchema.js'
 
-/** The scrape description's last sentence, which hosted Octocrawl drops since it does not serve get_scrape (hostedApi.ts). */
+/** The scrape description's last sentence, which hosted Octocrawl drops where it does not list get_scrape (hostedApi.ts). */
 export const SCRAPE_RECORD_HINT = " metadata.scrapeId names the call's record for get_scrape."
 /** Every tool, in the order tools/list gives them: the general ones first (docs/mcp-client-ux-tasks.md W4). */
 export const TOOL_NAMES = ['scrape', 'map', 'get_scrape', 'crawl', 'get_crawl', 'wait_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'resume_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'hand_off_batch', 'scrape_product', 'batch_products', 'import_login', 'list_logins', 'remove_login',

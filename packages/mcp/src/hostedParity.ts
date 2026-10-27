@@ -92,9 +92,9 @@ const loginTool: ToolEntry = { status: 'planned', item: 'identity', note: LOGINS
 const jobTool = (how = ''): ToolEntry => ({ status: 'limited', note: `${JOB}${how}.` })
 
 export const TOOL_PARITY: Record<ToolName, ToolEntry> = {
-  scrape: { status: 'supported', note: 'Every connection. Results leave out usage, channelsTried and metadata.scrapeId unless debug is set; the Evidence Record stays whole.' },
+  scrape: { status: 'supported', note: 'Every connection. Results leave out usage and channelsTried unless debug is set, and metadata.scrapeId unless debug is set or the connection lists get_scrape (an account\'s); the Evidence Record stays whole.' },
   map: { status: 'supported', note: 'Every connection.' },
-  get_scrape: { status: 'planned', item: null, note: `Hosted keeps a scrape's record ${HOSTED_RECORD_TTL_MS / 60_000} minutes (REST GET /v1/scrapes/:id) and lists no get_scrape; locally records are kept without a time limit.` },
+  get_scrape: jobTool(`; hosted keeps a scrape's record ${HOSTED_RECORD_TTL_MS / 60_000} minutes, on the server instance that ran the scrape, so a read that reaches another instance answers not_found, and answers it without the call's telemetry, as a scrape's result (locally records are kept without a time limit and answered whole)`),
   crawl: jobTool(`: a job run a slice at a time, at most ${n(JOB_MAX_CRAWL_PAGES)} pages, each page priced as a scrape, results kept ${JOB_RETENTION_DAYS} days`),
   get_crawl: jobTool(', for its own jobs'),
   wait_crawl: jobTool(),
@@ -102,7 +102,7 @@ export const TOOL_PARITY: Record<ToolName, ToolEntry> = {
   get_crawl_errors: jobTool(`; ${listCaps('get_crawl_errors', ['limit'])}`),
   cancel_crawl: jobTool(),
   resume_crawl: { status: 'planned', item: null, note: 'A hosted job goes on slice by slice by itself; a failed or cancelled one is started again, not resumed.' },
-  list_active_crawls: { status: 'planned', item: null, note: 'REST GET /v1/jobs lists an account\'s jobs (the dashboard\'s Jobs page); no MCP tool does.' },
+  list_active_crawls: jobTool(': its crawl jobs queued or running, in their job statuses and without the options each was started with (REST GET /v1/crawl/active)'),
   batch_scrape: jobTool(`: a job run a slice at a time, up to ${n(schemaOf(TOOLS, 'batch_scrape')?.properties.urls?.maxItems)} URLs, each page priced as a scrape, results kept ${JOB_RETENTION_DAYS} days`),
   get_batch: jobTool(', for its own jobs'),
   get_batch_items: jobTool(`; ${listCaps('get_batch_items', ['limit', 'maxResults'])}`),

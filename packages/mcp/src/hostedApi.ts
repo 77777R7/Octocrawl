@@ -4,7 +4,7 @@
  *
  * Every caller is served scrape and map, and scrape_product with the browser
  * lane; an account's key or sign-in is served crawl and batch jobs too
- * (hostedJobRoutes.ts). Every other route and tool is refused by name with a
+ * (hostedJobRoutes.ts), and get_scrape. Every other route and tool is refused by name with a
  * hint to run Octocrawl locally; hostedParity.ts records, tool by tool and
  * option by option, where hosted stands against a local server.
  * A caller is either a key holder (`Authorization: Bearer <key>`, looked up
@@ -220,12 +220,12 @@ export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', '
 
 /** The tools hosted Octocrawl lists to a caller: scrape_product only to a key with the browser lane, since it needs one,
  * so every tool a client sees can answer. All are read-only here: hosted Octocrawl refuses page actions and logins.
- * scrape's description does not name get_scrape, which is not served here. */
+ * scrape's description names get_scrape only to a connection that lists it (`jobs`). */
 export function hostedTools(browser: boolean, jobs = false) {
   return TOOLS.filter((tool) => (HOSTED_API_TOOLS.has(tool.name) && (browser || tool.name !== 'scrape_product')) || (jobs && HOSTED_JOB_TOOLS.has(tool.name)))
     .map((tool) => HOSTED_JOB_TOOLS.has(tool.name) ? hostedJobTool(tool, browser) : ({
       ...tool,
-      description: tool.description.replace(SCRAPE_RECORD_HINT, ''),
+      description: jobs ? tool.description : tool.description.replace(SCRAPE_RECORD_HINT, ''),
       inputSchema: hostedInputSchema(tool.name, tool.inputSchema, browser),
       annotations: { ...tool.annotations, readOnlyHint: true },
       _meta: { ...('_meta' in tool ? tool._meta : {}), ...HOSTED_INVOCATION[tool.name as keyof typeof HOSTED_INVOCATION] },
@@ -235,9 +235,10 @@ export function hostedTools(browser: boolean, jobs = false) {
 /**
  * The job tools an account's connection lists (ROADMAP PH H2, docs/h2-hosted-jobs-tasks.md M1): crawl and batch jobs run
  * a slice at a time on hosted Octocrawl and are read back through these. Keyless callers and keys without an account
- * have no credits to spend, so they are not offered.
+ * have no credits to spend, so they are not offered. list_active_crawls (the account's crawls not yet ended) and
+ * get_scrape (a scrape's record, while it is kept) are listed by the same rule (stage H W0).
  */
-export const HOSTED_JOB_TOOLS: ReadonlySet<string> = new Set(['crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'wait_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'get_batch_errors', 'cancel_batch', 'wait_batch'])
+export const HOSTED_JOB_TOOLS: ReadonlySet<string> = new Set(['crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'wait_crawl', 'list_active_crawls', 'batch_scrape', 'get_batch', 'get_batch_items', 'get_batch_errors', 'cancel_batch', 'wait_batch', 'get_scrape'])
 /** A hosted wait ends as a local one does (MAX_WAIT_MS), well inside the request timeout, and answers the status so far. */
 export const HOSTED_MCP_WAIT_MS = MAX_WAIT_MS
 /** The most items a hosted job list answers at once (hostedJobRoutes.ts PAGE_LIST_MAX). */
@@ -249,6 +250,11 @@ const HOSTED_JOB_NOTE = ' On hosted Octocrawl a job runs in slices: a crawl read
 /** get_batch_errors as hosted answers it (H2 M7): the job's failed items in a page list, not the local { errors, robotsBlocked }. */
 const HOSTED_BATCH_ERRORS_DESCRIPTION = `List a batch's items that did not succeed (status failed, blocked, cancelled or budget_exceeded), each as get_batch_items lists it: { items, nextCursor, hasMore }, in pages of up to ${HOSTED_MCP_LIST_MAX} (cursor, limit). A URL robots.txt refused is among them, blocked with its blockReason.`
 
+/** list_active_crawls as hosted answers it (GET /v1/crawl/active): the account's crawl jobs, in its jobs' own statuses, without their options. */
+const HOSTED_ACTIVE_CRAWLS_DESCRIPTION = 'List this account\'s crawls that are queued or running, oldest first: each with its id, start URL, status and pages so far. Empty when none is.'
+/** get_scrape as hosted serves it: a record is swept HOSTED_RECORD_TTL_MS after its scrape, and answered without its telemetry (withoutTelemetry). */
+const HOSTED_GET_SCRAPE_DESCRIPTION = `Read one scrape call's record by its scrapeId (metadata.scrapeId on the response): the request, the verdict, metadata, warnings and hints; no page body. Kept ${HOSTED_RECORD_TTL_MS / 60_000} minutes.`
+
 /** A start tool's local description less what hosted does not serve: appendToId, actions, and an unstated retention (HOSTED_JOB_NOTE states it). */
 function hostedStartDescription(description: string): string {
   return description
@@ -259,6 +265,8 @@ function hostedStartDescription(description: string): string {
 
 /** A job tool as hosted serves it: its start options cut to what hosted takes, waits within the request's deadline, its status values. */
 function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
+  // get_scrape reads a scrape's record, not a job: only how long a record is kept differs.
+  if (tool.name === 'get_scrape') return { ...tool, description: HOSTED_GET_SCRAPE_DESCRIPTION }
   const schema = structuredClone(tool.inputSchema) as { properties: Record<string, Record<string, unknown>>; required?: string[] }
   const starts = tool.name === 'crawl' || tool.name === 'batch_scrape'
   if (starts) {
@@ -286,7 +294,7 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
   if (output?.properties?.status !== undefined) output.properties.status = { enum: [...HOSTED_JOB_STATUSES] }
   return {
     ...tool,
-    description: starts ? `${hostedStartDescription(tool.description)}${HOSTED_JOB_NOTE}` : tool.name === 'get_batch_errors' ? HOSTED_BATCH_ERRORS_DESCRIPTION : tool.description.replace(/at most 120000/g, `at most ${HOSTED_MCP_WAIT_MS}`),
+    description: starts ? `${hostedStartDescription(tool.description)}${HOSTED_JOB_NOTE}` : tool.name === 'get_batch_errors' ? HOSTED_BATCH_ERRORS_DESCRIPTION : tool.name === 'list_active_crawls' ? HOSTED_ACTIVE_CRAWLS_DESCRIPTION : tool.description.replace(/at most 120000/g, `at most ${HOSTED_MCP_WAIT_MS}`),
     inputSchema: schema,
     ...(output === undefined ? {} : { outputSchema: output }),
   }
