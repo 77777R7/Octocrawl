@@ -144,7 +144,7 @@ function header(W) {
   const has = (family) => W.pairs.some(([, n]) => n === family)
   return [
     `- Measures: O1 (#722), O4 (#720), O6 (#721), O7 (#723) together, base against new; the read-only analysis \`.w2l/perf/2026-10-26-speed-root-cause.md\` (not in the repository), sections 1, 3 and U10.`,
-    `- Command: \`node research/access/k1-window.mjs --window ${m.window} --name perf --arms ${m.arms.join(',')} --base <base checkout> --ic-grant <K1 installed_chrome grant>${has('combined') ? ' --combined-grant <combined grant>' : ''}${has('ic_compat') ? ' --ic-compat-grant <ic_compat grant>' : ''} --steel-grant <Steel grant> --ports ${m.ports.join(',')}${m.steelCap ? ` --steel-cap ${m.steelCap.usd}` : ''} --no-retry\`; report \`node research/access/speedReport.mjs ${W.dir} --new ${W.newCommit ?? '<commit>'} --out ${out}\`.`,
+    `- Command: \`node research/access/k1-window.mjs --window ${m.window} --name perf --arms ${m.arms.join(',')} --base <base checkout> --ic-grant <K1 installed_chrome grant>${has('combined') ? ' --combined-grant <combined grant>' : ''}${has('ic_compat') ? ' --ic-compat-grant <ic_compat grant>' : ''} --steel-grant <Steel grant> --ports ${m.ports.join(',')}${m.steelCap ? ` --steel-cap ${m.steelCap.usd}` : ''} --no-retry\`; report \`node research/access/speedReport.mjs ${W.dir} --new ${W.newCommit ?? '<commit>'} --out ${out}\`${notes.length ? ', each note below passed as a `--note`' : ''}.`,
     `- New: the runner \`${m.runner}\`, its packages/ (tests aside) ${newPkgs === '' ? `equal to main \`${(W.newCommit ?? '').slice(0, 8)}\`` : `differ from \`${W.newCommit}\` in ${newPkgs ?? 'unread'}`}; run-set's build check up to date in ${builds.filter((b) => b === true).length} of ${W.env.length} runs (it reads this checkout only).`,
     `- Base: \`${m.base?.commit ?? 'none'}\` in its own checkout and API process; its build \`${m.base?.build?.check}\` ${m.base?.build?.upToDate === true ? 'up to date' : `NOT up to date (${JSON.stringify(m.base?.build)})`} at the start (k1-window.mjs).`,
     `- Grants: installed_chrome arms the K1 grant \`${g.installed_chrome.sha256}\` (${g.installed_chrome.capabilities.join(', ')}); ${has('combined') ? `combined arms \`${g.combined?.sha256 ?? 'none'}\` (${g.combined?.capabilities?.join(', ') ?? '-'}), W2L_VENDORS=steel, $0.05 a request, Steel at the grant's tariff` : 'no arm with Steel (no W2L_VENDORS, no Steel key)'}${has('ic_compat') ? `; ic_compat arms \`${g.ic_compat?.sha256 ?? 'none'}\` (${g.ic_compat?.capabilities?.join(', ') ?? '-'}), the K1 grant plus compatible_transport` : ''}. No CapSolver key or solver grant.`,
@@ -271,7 +271,7 @@ async function probeRecord(P) {
 const L = []
 const P = (...l) => L.push(...l)
 if (probes.length > 0) {
-  P(`# Speed A/B probes: ${opt('--title') ?? 'O1, O4, O6, O7'}`, '', `- Command: \`node research/access/speedReport.mjs ${probes.map((p) => `--probe ${p}`).join(' ')} --out ${out}\`.`, '- Each probe\'s run-set command, API, commit, network and grant are on its lines below.', ...notes.map((n) => `- ${n}`))
+  P(`# Speed A/B probes: ${opt('--title') ?? 'O1, O4, O6, O7'}`, '', `- Command: \`node research/access/speedReport.mjs ${probes.map((p) => `--probe ${p}`).join(' ')}${opt('--title') ? ` --title '${opt('--title')}'` : ''} --out ${out}\`${notes.length ? ', each note below passed as a `--note`' : ''}.`, '- Each probe\'s run-set command, API, commit, network and grant are on its lines below.', ...notes.map((n) => `- ${n}`))
   await probeRecord(P)
 } else if (dirs.length === 1) {
   const W = await load(dirs[0])
@@ -280,7 +280,7 @@ if (probes.length > 0) {
   windowBody(W, P)
 } else {
   const [A, B] = [await load(dirs[0]), await load(dirs[1])]
-  P(`# Speed A/B, two windows: ${A.m.date} and ${B.m.date}`, '', `- Windows \`${A.dir}\` (runner \`${A.m.runner}\`, base \`${A.m.base?.commit?.slice(0, 8)}\`) and \`${B.dir}\` (runner \`${B.m.runner}\`, base \`${B.m.base?.commit?.slice(0, 8)}\`); each window's own record has its conditions.`, `- Command: \`node research/access/speedReport.mjs ${A.dir} ${B.dir} --out ${out}\`. First calls only.`, ...notes.map((n) => `- ${n}`))
+  P(`# Speed A/B, two windows: ${A.m.date} and ${B.m.date}`, '', `- Windows \`${A.dir}\` (runner \`${A.m.runner}\`, base \`${A.m.base?.commit?.slice(0, 8)}\`) and \`${B.dir}\` (runner \`${B.m.runner}\`, base \`${B.m.base?.commit?.slice(0, 8)}\`); each window's own record has its conditions.`, `- Command: \`node research/access/speedReport.mjs ${A.dir} ${B.dir} --out ${out}\`${notes.length ? ', each note below passed as a `--note`' : ''}. First calls only.`, ...notes.map((n) => `- ${n}`))
   twoWindows(A, B, P)
 }
 await writeFile(out, L.join('\n'))
