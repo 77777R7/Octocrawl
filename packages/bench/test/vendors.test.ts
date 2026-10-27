@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { evaluateProviderGate, evaluateVendorPolicy, verifyLedger } from '@w2l/http-core'
 import { ProviderSubject, type RobotsFetcher } from '../src/subjects/provider.js'
 import { scrubSecret, type VendorApi, type VendorApiRequest, type VendorApiResponse } from '../src/vendors/api.js'
-import type { CdpBrowser, CdpConnector, CdpContext, CdpPage, CdpResponse } from '../src/vendors/cdp.js'
+import { cdpConnectTimeout, navigateOnce, type CdpBrowser, type CdpConnector, type CdpContext, type CdpPage, type CdpResponse } from '../src/vendors/cdp.js'
 import { browserbaseOps, browserbaseSessionBody } from '../src/vendors/browserbase.js'
 import { countSolved, steelOps, steelSessionBody } from '../src/vendors/steel.js'
-import { CdpVendorTransport } from '../src/vendors/transport.js'
+import { CdpVendorTransport, SESSION_RELEASE } from '../src/vendors/transport.js'
 import { connectVendor } from '../src/vendors/connect.js'
 import { captureOf } from '../src/capture.js'
 
@@ -735,6 +735,195 @@ describe('vendor transport behind the provider gate', () => {
   })
 })
 
+// --- where a provider call's time goes -----------------------------------------
+
+describe('vendor step timings', () => {
+  const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+  it('times the session, the CDP connect, the UA probe and the page, in order, before the capture', async () => {
+    const api = sessionServing('st_1')
+    const base = steelOps({ apiKey: 'steel_key' }, api.handler)
+    const ops = { ...base, async createSession(...args: Parameters<typeof base.createSession>) { await pause(40); return base.createSession(...args) } }
+    const bb = fakeBrowser()
+    const connector: CdpConnector = async () => { await pause(30); return bb.browser }
+    const { declaration, transport } = await connectVendor(ops, connector)
+    const out = await new ProviderSubject(declaration, transport, 'standard', null, robotsServing(AMAZON_SHAPED).fetcher).fetch('https://shop.example/dp/B0TEST')
+    expect(out.status).toBe('success')
+    const names = out.trace.map((event) => event.event)
+    const order = ['provider_selected', 'session_created', 'cdp_connected', 'ua_probed', 'provider_gate', 'page_opened', 'navigate', 'settled', 'page_read', 'capture']
+    const positions = order.map((name) => names.indexOf(name))
+    expect(positions.every((position) => position >= 0), names.join(' ')).toBe(true)
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions)
+    const step = (name: string) => out.trace.find((event) => event.event === name)!
+    // A timer can end a millisecond or so before Date.now() says it should: each step covers its delay, within 5 ms.
+    expect(step('session_created').detail!.ms).toBeGreaterThanOrEqual(35)
+    expect(step('cdp_connected').detail!.ms).toBeGreaterThanOrEqual(25)
+    // The session was opened before the lane's clock started (connectVendor): said so, at the lane's start.
+    for (const name of ['session_created', 'cdp_connected', 'ua_probed']) expect(step(name)).toMatchObject({ at: 0, lane: 'provider', detail: { beforeLane: true } })
+    for (const name of ['ua_probed', 'page_opened', 'navigate', 'settled', 'page_read']) expect(Number.isInteger(step(name).detail!.ms) && (step(name).detail!.ms as number) >= 0, name).toBe(true)
+    expect(step('navigate').detail).toMatchObject({ status: 200, timeoutMs: 20_000 })
+    expect(step('page_read').detail).toMatchObject({ htmlChars: PAGE.length, attempts: 1 })
+    // A second call on the same session opens nothing: no session steps again.
+    const again = await new ProviderSubject(declaration, transport, 'standard', null, robotsServing(AMAZON_SHAPED).fetcher).fetch('https://shop.example/dp/B0TEST')
+    expect(again.trace.map((event) => event.event)).not.toContain('session_created')
+    expect(again.trace.map((event) => event.event)).toContain('navigate')
+  })
+
+  it('keeps the page steps a failed navigation got through, before provider_failed', async () => {
+    const api = sessionServing('st_1')
+    const { declaration, transport } = await connectVendor(steelOps({ apiKey: 'steel_key' }, api.handler), connectorFor(fakeBrowser({ gotoError: new Error('net::ERR_TIMED_OUT') })).connector)
+    const out = await new ProviderSubject(declaration, transport, 'standard', null, robotsServing(AMAZON_SHAPED).fetcher).fetch('https://shop.example/dp/B0TEST')
+    const names = out.trace.map((event) => event.event)
+    expect(names.indexOf('page_opened')).toBeGreaterThan(names.indexOf('provider_gate'))
+    expect(names.indexOf('provider_failed')).toBeGreaterThan(names.indexOf('page_opened'))
+    expect(names).not.toContain('navigate')
+  })
+
+  it('records each region read on the remote page with its time and size, and the size of the HTML its table reader read (U7)', async () => {
+    const shows = (text: string) => JSON.stringify({ loading: false, text: text.length, href: 'https://site.test/a', html: `<html><body><p>${text}</p></body></html>`, tableCount: 0 })
+    const views = [shows('Results'), shows('$1 $2 $3')]
+    const steps: { event: string; detail: Record<string, unknown> }[] = []
+    const region = { contract: { checks: [{ type: 'markdownCountMin' as const, pattern: '\\$\\d', min: 3 }] } }
+    const res = await navigateOnce(fakeBrowser({ regionViews: views }).browser, 'https://shop.example/dp/A', Date.now() + 20_000, undefined, region, undefined, (event, detail) => steps.push({ event, detail }))
+    expect(steps.map((step) => step.event)).toEqual(['page_opened', 'navigate', 'settled', 'gate_read', 'region_read', 'region_read', 'region_read', 'page_read'])
+    const reads = steps.filter((step) => step.event === 'region_read')
+    expect(reads).toHaveLength(res.region!.reads)
+    expect(reads.map((step) => step.detail.read)).toEqual([1, 2, 3])
+    expect(reads.map((step) => step.detail.viewChars)).toEqual([views[0]!.length, views[1]!.length, views[1]!.length])
+    for (const step of [...reads, steps.find((s) => s.event === 'gate_read')!]) expect(Number.isInteger(step.detail.ms) && (step.detail.ms as number) >= 0).toBe(true)
+    expect(steps.find((step) => step.event === 'gate_read')!.detail.htmlChars).toBe(PAGE.length)
+
+    // A lane that reads its tables from the page's HTML: each read says how large that HTML was, null past the read's bounds.
+    const titled = JSON.stringify({ loading: false, text: 4, href: 'https://site.test/a', html: '<html><body><p>AAPL</p></body></html>', tableCount: 0 })
+    const rows = (n: number) => `<html><body><p>AAPL</p><table><tr><th>Date</th><th>Price</th></tr>${'<tr><td>2026-01-01</td><td>$1</td></tr>'.repeat(n)}</table></body></html>`
+    const contract = { checks: [{ type: 'markdownIncludes' as const, text: 'AAPL' }, { type: 'tableRowsMin' as const, tableIndex: 0, columns: [0, 1], min: 2 }] }
+    const tablesOf = (html: string) => html.includes('<table>') ? [{ tableIndex: 0, headerRows: 1, rows: [['Date', 'Price'], ...Array.from(html.matchAll(/<td>2026/g), () => ['2026-01-01', '$1'])] }] : []
+    const tableSteps: { event: string; detail: Record<string, unknown> }[] = []
+    await navigateOnce(fakeBrowser({ regionViews: [titled], pageHtml: [rows(0), null, rows(2)] }).browser, 'https://shop.example/dp/A', Date.now() + 20_000, undefined, { contract, tablesOf }, undefined, (event, detail) => tableSteps.push({ event, detail }))
+    const tableReads = tableSteps.filter((step) => step.event === 'region_read')
+    expect(tableReads.slice(0, 3).map((step) => step.detail.tablesHtmlChars)).toEqual([rows(0).length, null, rows(2).length])
+    for (const step of tableReads) expect(typeof step.detail.tablesMs).toBe('number')
+  })
+
+  it('times the release and the usage reads of a session it closes', async () => {
+    const api = sessionServing('st_1')
+    const base = steelOps({ apiKey: 'steel_key' }, api.handler)
+    const ops = { ...base, async releaseSession(...args: Parameters<typeof base.releaseSession>) { await pause(30); return base.releaseSession(...args) } }
+    const transport = new CdpVendorTransport(ops, connectorFor(fakeBrowser()).connector)
+    await transport.resolveUserAgent()
+    await transport.close()
+    const [closed] = transport.closedSessions()
+    expect(closed!.released).toBe(true)
+    expect(closed!.releaseTimings!.releaseMs).toBeGreaterThanOrEqual(25)
+    // Steel answers both of its usage reads: each is timed, a read the provider has not is null.
+    expect(typeof closed!.releaseTimings!.liveUsageMs).toBe('number')
+    expect(typeof closed!.releaseTimings!.usageMs).toBe('number')
+    const plain = new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, sessionServing('bb_1').handler), connectorFor(fakeBrowser()).connector)
+    await plain.resolveUserAgent()
+    await plain.close()
+    expect(plain.closedSessions()[0]!.releaseTimings).toMatchObject({ liveUsageMs: null, usageMs: null })
+  })
+
+  it('caps the CDP connect at 30 s however long the session may last, and never past the deadline', () => {
+    expect(cdpConnectTimeout(undefined, 1_000)).toBe(30_000)
+    expect(cdpConnectTimeout(121_000, 1_000)).toBe(30_000)
+    expect(cdpConnectTimeout(6_000, 1_000)).toBe(5_000)
+    expect(cdpConnectTimeout(1_000, 1_000)).toBe(1)
+  })
+})
+
+describe('a release the provider does not confirm at once (speed A/B window A, 2026-10-26)', () => {
+  // That window every Steel release ran out its 5 s and was never asked again: 15 of 20 sessions billed to their 120 s
+  // timeout, and 4 that Steel had ended (`user_requested`) were recorded unreleased. Short timings here.
+  const quick = { attemptMs: 40, retryWaitsMs: [10, 20], stateReadMs: 40 }
+
+  /** Steel's API, whose release answers only after its caller has given up, the first `hangs` times; its session read says `state` (null: 503). */
+  function slowSteel(hangs: number, state: Record<string, unknown> | null = { status: 'live' }) {
+    const requests: VendorApiRequest[] = []
+    let releases = 0
+    const api: VendorApi = async (req) => {
+      requests.push(req)
+      const path = new URL(req.url).pathname
+      if (req.method === 'POST' && path === '/v1/sessions') return { status: 201, json: { id: 'st_1' } }
+      if (path === '/v1/sessions/st_1/release') {
+        if (++releases <= hangs) {
+          await new Promise((resolve) => setTimeout(resolve, Math.max(0, (req.deadlineMs ?? Date.now()) - Date.now())))
+          throw new Error('The operation was aborted due to timeout')
+        }
+        return { status: 200, json: { success: true } }
+      }
+      if (req.method === 'GET' && path === '/v1/sessions/st_1') return state === null ? { status: 503, json: null } : { status: 200, json: { id: 'st_1', proxyBytesUsed: 0, ...state } }
+      return { status: 200, json: {} }
+    }
+    return { api, requests, releases: () => releases }
+  }
+
+  const closeOne = async (api: VendorApi) => {
+    const transport = new CdpVendorTransport(steelOps({ apiKey: 'steel_key' }, api), connectorFor(fakeBrowser()).connector, quick)
+    await transport.resolveUserAgent()
+    await transport.close()
+    const [closed, ...more] = transport.closedSessions()
+    expect(more).toEqual([])
+    return closed!
+  }
+
+  it('asks again after a release that timed out, and records each call', async () => {
+    const steel = slowSteel(1)
+    const closed = await closeOne(steel.api)
+    expect(steel.releases()).toBe(2)
+    expect(closed).toMatchObject({ released: true, usage: { proxyBytes: 0, solves: 0 } })
+    expect(closed.releaseAttempts).toEqual([
+      { ms: expect.any(Number), confirmed: false, error: 'The operation was aborted due to timeout' },
+      { ms: expect.any(Number), confirmed: true },
+    ])
+    expect(closed.releaseAttempts![0]!.ms).toBeGreaterThanOrEqual(35)
+    // Confirmed by the release itself: the session is not read for its state.
+    expect(closed.releaseState).toBeUndefined()
+    expect(closed.releaseTimings!.releaseMs).toBeGreaterThanOrEqual(closed.releaseAttempts![0]!.ms)
+  })
+
+  it('records a session the provider ended, though no release call was answered, as released, with its time measured here', async () => {
+    const steel = slowSteel(3, { status: 'released', releaseReason: 'user_requested', duration: 4_200 })
+    const closed = await closeOne(steel.api)
+    expect(steel.releases()).toBe(3)
+    expect(closed.releaseAttempts!.map((attempt) => attempt.confirmed)).toEqual([false, false, false])
+    expect(closed.releaseState).toEqual({ ms: expect.any(Number), status: 'released', reason: 'user_requested', durationMs: 4_200 })
+    expect(closed.released).toBe(true)
+    // Its time runs to the read that confirmed it, and what it used is read as after any confirmed release.
+    expect(closed.sessionMs).toBeGreaterThanOrEqual(3 * 35 + 30)
+    expect(closed.usage).toEqual({ proxyBytes: 0, solves: 0 })
+  })
+
+  it('keeps a session the provider still runs, or cannot say of, unreleased, after its last release call', async () => {
+    for (const state of [{ status: 'live' }, null]) {
+      const steel = slowSteel(Number.POSITIVE_INFINITY, state)
+      const closed = await closeOne(steel.api)
+      expect(steel.releases()).toBe(1 + quick.retryWaitsMs.length)
+      expect(closed.released).toBe(false)
+      expect(closed.usage).toBeNull()
+      expect(closed.releaseState).toEqual(state === null
+        ? { ms: expect.any(Number), status: null, reason: null, durationMs: null, error: 'steel: session read returned 503' }
+        : { ms: expect.any(Number), status: 'live', reason: null, durationMs: null })
+    }
+    // A provider with no read of a session's state: unreleased after its last release call.
+    let asked = 0
+    const bb = new FakeApi((req) => req.method === 'POST' && req.url.endsWith('/v1/sessions') ? { status: 201, json: { id: 'bb_1', connectUrl: 'wss://cdp.example/bb_1' } } : (asked++, { status: 503, json: {} }))
+    const plain = new CdpVendorTransport(browserbaseOps({ apiKey: 'k' }, bb.handler), connectorFor(fakeBrowser()).connector, quick)
+    await plain.resolveUserAgent()
+    await plain.close()
+    expect(asked).toBe(3)
+    expect(plain.closedSessions()[0]).toMatchObject({ released: false, releaseAttempts: [{ confirmed: false, error: 'browserbase: session release returned 503' }, { confirmed: false }, { confirmed: false }] })
+    expect(plain.closedSessions()[0]!.releaseState).toBeUndefined()
+  })
+
+  it('gives a release at most 20 s by default, its state read included', () => {
+    expect(SESSION_RELEASE.attemptMs).toBe(5_000)
+    expect(SESSION_RELEASE.retryWaitsMs.length).toBeGreaterThanOrEqual(2)
+    const total = SESSION_RELEASE.attemptMs * (1 + SESSION_RELEASE.retryWaitsMs.length) + SESSION_RELEASE.retryWaitsMs.reduce((sum, ms) => sum + ms, 0) + SESSION_RELEASE.stateReadMs
+    expect(total).toBeLessThanOrEqual(20_000)
+  })
+})
+
 describe('scrubSecret', () => {
   it('removes every occurrence and tolerates empty secrets', () => {
     expect(scrubSecret('key=abc url=wss://x?apiKey=abc', 'abc')).toBe(
@@ -996,7 +1185,7 @@ describe('a provider\'s residential proxy and what a session used (ROADMAP PA it
     const transport = new CdpVendorTransport(ops, connectorFor(fakeBrowser()).connector)
     await transport.resolveUserAgent()
     await transport.close()
-    expect(transport.closedSessions()).toEqual([{ sessionMs: expect.any(Number), released: true, usage: { proxyBytes: 0, solves: 1 } }])
+    expect(transport.closedSessions()).toEqual([{ sessionMs: expect.any(Number), released: true, usage: { proxyBytes: 0, solves: 1 }, releaseTimings: expect.any(Object), releaseAttempts: [{ ms: expect.any(Number), confirmed: true }] }])
     // The status was asked before the release, and again after it as the fallback (404 then): the live figure stands.
     expect(api.requests.map((r) => r.url.split('/').slice(-1)[0])).toEqual(['sessions', 'status', 'release', 'st_1', 'status'])
   })
@@ -1007,7 +1196,7 @@ describe('a provider\'s residential proxy and what a session used (ROADMAP PA it
     const small = new CdpVendorTransport(ops, connectorFor(fakeBrowser({ bytesPerNavigation: 400 })).connector)
     expect((await small.fetch('https://shop.example/dp/A')).status).toBe(200)
     await small.close()
-    expect(small.closedSessions()).toEqual([{ sessionMs: expect.any(Number), released: true, usage: { proxyBytes: 4_200_000, solves: 0 }, bytesCounted: 400, bytesCapped: false }])
+    expect(small.closedSessions()).toEqual([{ sessionMs: expect.any(Number), released: true, usage: { proxyBytes: 4_200_000, solves: 0 }, bytesCounted: 400, bytesCapped: false, releaseTimings: expect.any(Object), releaseAttempts: [{ ms: expect.any(Number), confirmed: true }] }])
     // Past the cap the page is closed and the fetch fails saying so; the session is released and its count recorded.
     const big = new CdpVendorTransport(ops, connectorFor(fakeBrowser({ bytesPerNavigation: 5_000 })).connector)
     await expect(big.fetch('https://shop.example/dp/A')).rejects.toThrow('maxBytesPerCall: 5000 bytes received on the page against 1000 allowed')

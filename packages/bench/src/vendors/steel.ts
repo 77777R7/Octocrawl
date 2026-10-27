@@ -30,7 +30,7 @@
 import type { CapabilityOffer, PolicyDecision, VendorPolicy, VendorSessionUsage } from '@w2l/http-core'
 import { evaluateVendorPolicy } from '@w2l/http-core'
 import { fetchVendorApi, type VendorApi } from './api.js'
-import type { VendorOps, VendorResumeContext, VendorSession } from './transport.js'
+import type { VendorOps, VendorResumeContext, VendorSession, VendorSessionState } from './transport.js'
 
 export interface SteelConfig {
   apiKey: string
@@ -209,6 +209,23 @@ export function steelOps(
       })
       // A release the vendor did not confirm leaves the session billing until its own timeout.
       if (res.status < 200 || res.status >= 300) throw new Error(`steel: session release returned ${res.status}`)
+    },
+
+    /**
+     * The session as Steel holds it (GET /v1/sessions/{id}): `status` (`live` while it runs and bills), `releaseReason`
+     * and `duration`. Only `released` ends the billing; any other status, or none, is not a release.
+     */
+    async sessionState(sessionId: string, deadlineMs?: number, signal?: AbortSignal): Promise<VendorSessionState> {
+      const res = await api({ method: 'GET', url: `${base}/v1/sessions/${sessionId}`, headers, deadlineMs, signal })
+      if (res.status !== 200) throw new Error(`steel: session read returned ${res.status}`)
+      const json = res.json as { status?: unknown; releaseReason?: unknown; duration?: unknown } | null
+      if (typeof json?.status !== 'string') throw new Error('steel: session read has no status')
+      return {
+        released: json.status === 'released',
+        status: json.status,
+        reason: typeof json.releaseReason === 'string' ? json.releaseReason : null,
+        durationMs: typeof json.duration === 'number' && Number.isFinite(json.duration) && json.duration >= 0 ? Math.round(json.duration) : null,
+      }
     },
 
     /**

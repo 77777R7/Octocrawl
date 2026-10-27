@@ -1,5 +1,8 @@
 /**
- * Origin-cached robots.txt lookup shared by the HTTP and browser arms.
+ * robots.txt lookup shared by every rung of a run (the HTTP and browser arms, and the provider rung through
+ * robotsFetcherOf), cached per origin and User-Agent: a site may answer each client its own file (etsy served three
+ * to the http, browser_local and installed_chrome rungs, T005), so a file read for one User-Agent never answers
+ * another. Each rung still makes and records its own decision on the file read for its User-Agent.
  *
  * A 4xx or a non-text/plain body is "no robots.txt" (RFC 9309 §2.3.1.3). A
  * 5xx, a network failure or the lookup's own deadline is unreachable
@@ -7,11 +10,16 @@
  * reason kept so it never reads as a rule the publisher wrote. Unreachable
  * entries expire after `robotsUnreachableTtlMs`, so a transient failure is
  * retried; other entries are kept for the life of the process. Only the
- * caller's own cancellation or deadline aborts a lookup.
+ * caller's own cancellation or deadline aborts a lookup. Cookies a redirect
+ * sets go back on the lookup's later hops, as a browser's would, and are
+ * dropped with it: a sign-in check that sends a browser away and back ends
+ * its loop only for a client that keeps them.
  */
 
 import { isOctocrawlRobotsGroup, robotsAgent, type NetworkPolicy, type ExecutionContext, type FetchWarning, type AppliedRobotsOverride, type RobotsOverrideApplied, type RobotsUnreachable, type TraceEvent } from '@w2l/contracts'
 import type { Dispatcher } from 'undici'
+import { CookieJar } from 'tough-cookie'
+import type { RobotsFetcher } from './subjects/provider.js'
 import {
   createExecutionScope,
   isTlsError,
@@ -35,6 +43,8 @@ export interface CachedRobots {
   robots: ReturnType<typeof parseRobotsTxt> | null
   sha256: string | null
   absent: boolean
+  /** The file as read, when there is one: the provider rung parses it itself (robotsFetcherOf). */
+  text?: string
   /** Why robots.txt was unreachable; set only when it was. */
   unreachable?: RobotsUnreachable
   /**
@@ -130,8 +140,8 @@ export class RobotsOriginCache {
   }
 
   /**
-   * The cached robots.txt of `url`'s origin, fetched with `userAgent` when it
-   * is not cached yet. `dispatcher` routes that one fetch instead of the
+   * The cached robots.txt of `url`'s origin as read with `userAgent`, fetched
+   * with it when it is not cached yet. `dispatcher` routes that one fetch instead of the
    * cache's own routes (a request's relaxed-TLS routes, `skipTlsVerification`):
    * what it reads is cached apart from what the default routes read, so a
    * verdict read without certificate verification never answers a verified
@@ -149,7 +159,8 @@ export class RobotsOriginCache {
       return null
     }
     const route = dispatcher ?? this.dispatcher
-    const key = dispatcher === undefined ? origin : `${origin} tls-unverified`
+    // A header value holds no line break, so the User-Agent cannot run into the rest of the key.
+    const key = `${origin}\n${userAgent}${dispatcher === undefined ? '' : '\ntls-unverified'}`
 
     const cached = this.byOrigin.get(key)
     if (cached !== undefined && Date.now() < cached.expiresAt) return cached.entry
@@ -159,19 +170,25 @@ export class RobotsOriginCache {
       const request = (async (): Promise<CachedRobots | null> => {
       const scope = createExecutionScope({ signal: controller.signal, deadlineAt: Date.now() + (this.networkPolicy.robotsTimeoutMs ?? ROBOTS_TIMEOUT_MS) })
       let entry: CachedRobots = { robotsUrl, robots: null, sha256: null, absent: false }
+      // This lookup's own cookies, never shared or recorded. developer.android.com sends a browser user agent's
+      // robots.txt to a sign-in check and back, and answers it only when the check's cookie comes back; without it
+      // the round trip repeats until the redirect limit.
+      const jar = new CookieJar(undefined, { looseMode: true })
       try {
       await raceWithSignal(assertSafeUrl(robotsUrl, this.networkPolicy), scope.signal)
       let currentUrl = robotsUrl
       for (let hop = 0; hop <= this.networkPolicy.maxRedirects; hop++) {
         await raceWithSignal(assertSafeUrl(currentUrl, this.networkPolicy), scope.signal)
+        const cookie = await jar.getCookieString(currentUrl).catch(() => '')
         const res = await fetch(currentUrl, {
-        headers: { 'user-agent': userAgent },
+        headers: { 'user-agent': userAgent, ...(cookie === '' ? {} : { cookie }) },
         signal: scope.signal,
         redirect: 'manual',
         // Node's fetch accepts the Undici dispatcher; the socket lookup
         // validates the address again and pins the validated result.
         dispatcher: typeof route === 'function' ? route(currentUrl) : route,
       } as RequestInit & { dispatcher: Dispatcher })
+        for (const line of res.headers.getSetCookie()) await jar.setCookie(line, currentUrl, { ignoreError: true }).catch(() => undefined)
         if (res.status >= 300 && res.status < 400) {
           await res.body?.cancel()
           const location = res.headers.get('location')
@@ -210,6 +227,7 @@ export class RobotsOriginCache {
           robots: parseRobotsTxt(text),
           sha256: sha256Hex(new TextEncoder().encode(text)),
           absent: false,
+          text,
         }
       }
       break
@@ -294,5 +312,26 @@ export class RobotsOriginCache {
     if (cached?.robots === null || cached?.robots === undefined) return null
     const group = cached.robots.groups.find((candidate) => candidate.agents.some((agent) => agent === '*' || userAgent.toLowerCase().includes(agent)))
     return group?.crawlDelayMs ?? null
+  }
+}
+
+/**
+ * The cache as the provider rung's robots.txt fetcher (provider.ts `RobotsFetcher`): the vendor rung reads the file
+ * the run read for its User-Agent, and fetches it only when the run has not, through the cache's routes. Each outcome
+ * reaches it as it reads one: no file as a 404, a 5xx as a 5xx, the cache's own deadline as a timeout, a network
+ * failure (or a file the cache kept no text of) as a failed request, which the provider holds a complete disallow.
+ */
+export function robotsFetcherOf(cache: RobotsOriginCache): RobotsFetcher {
+  return async (robotsUrl, userAgent, execution) => {
+    const cached = await cache.lookup(robotsUrl, userAgent, execution)
+    if (cached === null) return null
+    switch (cached.unreachable) {
+      case 'timeout': return { unreachable: 'timeout' }
+      case 'server_error': return { text: '', status: 503, contentType: null }
+      case 'network_error': return null
+      case undefined: break
+    }
+    if (cached.absent) return { text: '', status: 404, contentType: null }
+    return cached.text === undefined ? null : { text: cached.text, status: 200, contentType: 'text/plain' }
   }
 }

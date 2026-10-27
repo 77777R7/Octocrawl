@@ -350,3 +350,193 @@ gcloud billing budgets create --billing-account=<billing account id> --display-n
 ```
 
 A pool's limit is its environment variable on the service (`W2L_SITE_DAILY`, `W2L_KEYLESS_TOTAL_DAILY`, `W2L_CLAUDE_DAILY`, `W2L_ACCOUNTS_DAILY` on `octocrawl-api`; `W2L_JOBS_DAILY` on `octocrawl-jobs`); raising one is a new revision with `--update-env-vars`, moved to as any deploy is.
+
+## Hosted and local, side by side
+
+Where the hosted MCP endpoint stands against a server on your computer (`npx octocrawl serve` with `@octocrawl/mcp`): every local MCP tool, every option of `scrape`, `map`, `crawl` and `batch_scrape`, and the option values hosted leaves out. This is the parity board of the roadmap's current phase (stage H item 1). Supported is as locally; limited is listed with a lower cap, or to some connections only; planned names the stage H item that brings it, or says no item does yet; different on purpose gives the reason. "Sent anyway" says what hosted does with an option or value it does not list.
+
+The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `packages/mcp/test/hostedParity.test.ts` fails when an entry claims more or less than the hosted tool lists, key sets and engine serve, or when this table differs from the manifest; `node --import tsx scripts/hosted/parity-table.ts --write` rewrites it.
+
+<!-- hosted-parity:start -->
+**Tools.** Of the local server's 39 MCP tools, hosted serves 15: 2 as locally and 13 limited. 23 are planned and 1 is different on purpose.
+
+**Options.** Of the 118 local options of scrape, map, crawl and batch_scrape, hosted lists 85: 73 as locally and 12 limited. 23 are planned and 10 different on purpose. Below the options, 13 option values that hosted leaves out or limits.
+
+**Planned, by stage H item** (tools, options and values): item 2, hosted access: 3; item 3, actions and waitFor: 2; item 4, monitors and delivery: 18; item 5, identity-bound features: 5; item 7, the json model fallback: 1; item 8, beyond local: 13; no item yet: 13.
+
+| Tool | Hosted | How |
+| --- | --- | --- |
+| `scrape` | Supported | Every connection. Results leave out usage, channelsTried and metadata.scrapeId unless debug is set; the Evidence Record stays whole. |
+| `map` | Supported | Every connection. |
+| `get_scrape` | Planned: no stage H item yet | Hosted keeps a scrape's record 10 minutes (REST GET /v1/scrapes/:id) and lists no get_scrape; locally records are kept without a time limit. |
+| `crawl` | Limited | An account's connection only (its key, or signing in at /mcp-oauth): a job run a slice at a time, at most 500 pages, each page priced as a scrape, results kept 7 days. |
+| `get_crawl` | Limited | An account's connection only (its key, or signing in at /mcp-oauth), for its own jobs. |
+| `wait_crawl` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); a wait ends within 90 s (local 120 s) with the status so far. |
+| `get_crawl_pages` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); limit at most 100 (local 1,000), maxResults at most 100 (local 200). |
+| `get_crawl_errors` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); limit at most 100 (local 1,000). |
+| `cancel_crawl` | Limited | An account's connection only (its key, or signing in at /mcp-oauth). |
+| `resume_crawl` | Planned: no stage H item yet | A hosted job goes on slice by slice by itself; a failed or cancelled one is started again, not resumed. |
+| `list_active_crawls` | Planned: no stage H item yet | REST GET /v1/jobs lists an account's jobs (the dashboard's Jobs page); no MCP tool does. |
+| `batch_scrape` | Limited | An account's connection only (its key, or signing in at /mcp-oauth): a job run a slice at a time, up to 1,000 URLs, each page priced as a scrape, results kept 7 days. |
+| `get_batch` | Limited | An account's connection only (its key, or signing in at /mcp-oauth), for its own jobs. |
+| `get_batch_items` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); limit at most 50 (local 50), maxResults at most 100 (local 200). |
+| `wait_batch` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); a wait ends within 90 s (local 120 s) with the status so far. |
+| `cancel_batch` | Limited | An account's connection only (its key, or signing in at /mcp-oauth). |
+| `get_batch_errors` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); answers the failed items as { items, nextCursor, hasMore } (local { errors, robotsBlocked }), limit at most 100 (local 1,000). |
+| `hand_off_batch` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. |
+| `scrape_product` | Limited | A key or a signed-in connection with the browser lane only. |
+| `batch_products` | Planned: no stage H item yet | Not listed; more Amazon.sg work is paused (ROADMAP Paused). |
+| `import_login` | Planned: stage H item 5, identity-bound features | Hosted keeps no saved logins. Stage H item 5: Howard chooses between a hosted, encrypted session store and forwarding these calls to the person's own local server. |
+| `list_logins` | Planned: stage H item 5, identity-bound features | Hosted keeps no saved logins. Stage H item 5: Howard chooses between a hosted, encrypted session store and forwarding these calls to the person's own local server. |
+| `remove_login` | Planned: stage H item 5, identity-bound features | Hosted keeps no saved logins. Stage H item 5: Howard chooses between a hosted, encrypted session store and forwarding these calls to the person's own local server. |
+| `preview_monitor` | Planned: stage H item 4, monitors and delivery | Monitors run on a server on the person's computer; stage H item 4 brings them to hosted. |
+| `create_monitor` | Planned: stage H item 4, monitors and delivery | Monitors run on a server on the person's computer; stage H item 4 brings them to hosted. |
+| `list_monitors` | Planned: stage H item 4, monitors and delivery | Monitors run on a server on the person's computer; stage H item 4 brings them to hosted. |
+| `get_monitor` | Planned: stage H item 4, monitors and delivery | Monitors run on a server on the person's computer; stage H item 4 brings them to hosted. |
+| `run_monitor` | Planned: stage H item 4, monitors and delivery | Monitors run on a server on the person's computer; stage H item 4 brings them to hosted. |
+| `get_monitor_run` | Planned: stage H item 4, monitors and delivery | Monitors run on a server on the person's computer; stage H item 4 brings them to hosted. |
+| `pause_monitor` | Planned: stage H item 4, monitors and delivery | Monitors run on a server on the person's computer; stage H item 4 brings them to hosted. |
+| `resume_monitor` | Planned: stage H item 4, monitors and delivery | Monitors run on a server on the person's computer; stage H item 4 brings them to hosted. |
+| `cancel_monitor_run` | Planned: stage H item 4, monitors and delivery | Monitors run on a server on the person's computer; stage H item 4 brings them to hosted. |
+| `create_delivery_destination` | Planned: stage H item 4, monitors and delivery | Webhook destinations for Monitors and jobs are a local server's; stage H item 4 brings them to hosted. A hosted job's end can already be posted over REST (POST /v1/crawl, POST /v1/batches). |
+| `list_delivery_destinations` | Planned: stage H item 4, monitors and delivery | Webhook destinations for Monitors and jobs are a local server's; stage H item 4 brings them to hosted. A hosted job's end can already be posted over REST (POST /v1/crawl, POST /v1/batches). |
+| `pause_delivery_destination` | Planned: stage H item 4, monitors and delivery | Webhook destinations for Monitors and jobs are a local server's; stage H item 4 brings them to hosted. A hosted job's end can already be posted over REST (POST /v1/crawl, POST /v1/batches). |
+| `resume_delivery_destination` | Planned: stage H item 4, monitors and delivery | Webhook destinations for Monitors and jobs are a local server's; stage H item 4 brings them to hosted. A hosted job's end can already be posted over REST (POST /v1/crawl, POST /v1/batches). |
+| `list_deliveries` | Planned: stage H item 4, monitors and delivery | Webhook destinations for Monitors and jobs are a local server's; stage H item 4 brings them to hosted. A hosted job's end can already be posted over REST (POST /v1/crawl, POST /v1/batches). |
+| `get_delivery` | Planned: stage H item 4, monitors and delivery | Webhook destinations for Monitors and jobs are a local server's; stage H item 4 brings them to hosted. A hosted job's end can already be posted over REST (POST /v1/crawl, POST /v1/batches). |
+| `retry_dead_letter` | Planned: stage H item 4, monitors and delivery | Webhook destinations for Monitors and jobs are a local server's; stage H item 4 brings them to hosted. A hosted job's end can already be posted over REST (POST /v1/crawl, POST /v1/batches). |
+
+| Option | Hosted | How |
+| --- | --- | --- |
+| `scrape` `url` | Supported |  |
+| `scrape` `mode` | Supported |  |
+| `scrape` `handoff` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
+| `scrape` `lane` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
+| `scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. Stage H item 2 adds compatible_transport, a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. access standard, the default, is taken; enhanced and my-browser are refused by name. Sent anyway: refused by name. |
+| `scrape` `allowlistedDomains` | Supported |  |
+| `scrape` `formats` | Supported |  |
+| `scrape` `includeLinks` | Supported |  |
+| `scrape` `debug` | Supported |  |
+| `scrape` `onlyMainContent` | Supported |  |
+| `scrape` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
+| `scrape` `timeout` | Limited | At most 100 s, and 100 s when left out (local 300 s, and 120 s when left out), under claude.ai's 240 s tool limit and Cloud Run's 120 s request timeout. |
+| `scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). |
+| `scrape` `includeTags` | Supported |  |
+| `scrape` `excludeTags` | Supported |  |
+| `scrape` `headers` | Supported |  |
+| `scrape` `mobile` | Supported |  |
+| `scrape` `skipTlsVerification` | Different on purpose | A hosted engine never loosens certificate checks for a caller (engine.ts checkHostedOptions). Sent anyway: refused by name. |
+| `scrape` `fastMode` | Supported |  |
+| `scrape` `blockAds` | Supported |  |
+| `scrape` `removeBase64Images` | Supported |  |
+| `scrape` `verify` | Supported |  |
+| `scrape` `maxAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Taken, and always read live. Sent anyway: taken, not honoured. |
+| `scrape` `minAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Taken, and always read live. Sent anyway: taken, not honoured. |
+| `scrape` `storeInCache` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Taken, and nothing is stored. Sent anyway: taken, not honoured. |
+| `scrape` `lockdown` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Taken, and always failed/cache_miss. Sent anyway: taken, not honoured. |
+| `scrape` `actions` | Planned: stage H item 3, actions and waitFor | A step runs the caller's clicks and scripts in the operator's browser; hosted takes none until that isolation is reviewed, and stage H item 3 brings actions to keyed callers. Sent anyway: refused by name. |
+| `scrape` `robotsOverride` | Different on purpose | Hosted fetches from the operator's addresses and obeys robots.txt for every URL (ROADMAP Direction). Sent anyway: refused by name. |
+| `scrape` `integration` | Supported |  |
+| `map` `url` | Supported |  |
+| `map` `search` | Supported |  |
+| `map` `sitemap` | Supported |  |
+| `map` `includeSubdomains` | Supported |  |
+| `map` `ignoreQueryParameters` | Supported |  |
+| `map` `limit` | Limited | At most 5,000 links (local 100,000). Stage H item 6, limits and capacity raises it. |
+| `map` `timeout` | Limited | At most 60 s (local 300 s). Stage H item 6, limits and capacity raises it. |
+| `map` `includePaths` | Supported |  |
+| `map` `excludePaths` | Supported |  |
+| `map` `regexOnFullURL` | Supported |  |
+| `map` `crawlEntireDomain` | Supported |  |
+| `map` `deduplicateSimilarURLs` | Supported |  |
+| `map` `ignoreRobotsTxt` | Different on purpose | Hosted fetches from the operator's addresses and obeys robots.txt for every URL (ROADMAP Direction). Sent anyway: refused by name. |
+| `map` `mode` | Supported |  |
+| `map` `debug` | Supported |  |
+| `map` `integration` | Supported |  |
+| `crawl` `url` | Supported |  |
+| `crawl` `mode` | Supported |  |
+| `crawl` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. Stage H item 2 adds compatible_transport, a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
+| `crawl` `maxPages` | Limited | At most 500, and 100 when left out or null (locally null is no cap). Stage H item 6, limits and capacity raises it. |
+| `crawl` `maxDepth` | Supported |  |
+| `crawl` `useCached` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
+| `crawl` `allowlistedDomains` | Supported |  |
+| `crawl` `formats` | Supported |  |
+| `crawl` `includeLinks` | Supported |  |
+| `crawl` `includePaths` | Supported |  |
+| `crawl` `excludePaths` | Supported |  |
+| `crawl` `regexOnFullURL` | Supported |  |
+| `crawl` `ignoreQueryParameters` | Supported |  |
+| `crawl` `deduplicateSimilarURLs` | Supported |  |
+| `crawl` `crawlEntireDomain` | Supported |  |
+| `crawl` `allowSubdomains` | Supported |  |
+| `crawl` `allowExternalLinks` | Supported |  |
+| `crawl` `sitemap` | Supported |  |
+| `crawl` `ignoreRobotsTxt` | Different on purpose | Hosted fetches from the operator's addresses and obeys robots.txt for every URL (ROADMAP Direction). Sent anyway: refused by name. |
+| `crawl` `maxConcurrency` | Limited | At most 2, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT). The schema shows no cap: the start takes more, and the job's first slice refuses it, so the job ends failed (delivery_failed). Stage H item 6, limits and capacity raises it. |
+| `crawl` `idempotencyKey` | Supported |  |
+| `crawl` `webhook` | Planned: stage H item 4, monitors and delivery | REST takes it for the job's end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript. Sent anyway: served over REST only. |
+| `crawl` `onlyMainContent` | Supported |  |
+| `crawl` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
+| `crawl` `timeout` | Supported |  |
+| `crawl` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). |
+| `crawl` `includeTags` | Supported |  |
+| `crawl` `excludeTags` | Supported |  |
+| `crawl` `headers` | Supported |  |
+| `crawl` `mobile` | Supported |  |
+| `crawl` `skipTlsVerification` | Different on purpose | A hosted engine never loosens certificate checks for a caller (engine.ts checkHostedOptions). Sent anyway: refused by name. |
+| `crawl` `fastMode` | Supported |  |
+| `crawl` `blockAds` | Supported |  |
+| `crawl` `removeBase64Images` | Supported |  |
+| `crawl` `verify` | Supported |  |
+| `crawl` `maxAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
+| `crawl` `minAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
+| `crawl` `storeInCache` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
+| `crawl` `lockdown` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
+| `crawl` `integration` | Supported |  |
+| `batch_scrape` `urls` | Supported |  |
+| `batch_scrape` `mode` | Supported |  |
+| `batch_scrape` `lane` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
+| `batch_scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. Stage H item 2 adds compatible_transport, a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
+| `batch_scrape` `formats` | Supported |  |
+| `batch_scrape` `includeLinks` | Supported |  |
+| `batch_scrape` `onlyMainContent` | Supported |  |
+| `batch_scrape` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
+| `batch_scrape` `timeout` | Supported |  |
+| `batch_scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). |
+| `batch_scrape` `includeTags` | Supported |  |
+| `batch_scrape` `excludeTags` | Supported |  |
+| `batch_scrape` `headers` | Supported |  |
+| `batch_scrape` `mobile` | Supported |  |
+| `batch_scrape` `skipTlsVerification` | Different on purpose | A hosted engine never loosens certificate checks for a caller (engine.ts checkHostedOptions). Sent anyway: refused by name. |
+| `batch_scrape` `fastMode` | Supported |  |
+| `batch_scrape` `blockAds` | Supported |  |
+| `batch_scrape` `removeBase64Images` | Supported |  |
+| `batch_scrape` `verify` | Supported |  |
+| `batch_scrape` `maxAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
+| `batch_scrape` `minAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
+| `batch_scrape` `storeInCache` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
+| `batch_scrape` `lockdown` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
+| `batch_scrape` `actions` | Planned: stage H item 3, actions and waitFor | Hosted takes no page actions yet; stage H item 3 brings them to keyed callers. Sent anyway: refused by name. |
+| `batch_scrape` `robotsOverrides` | Different on purpose | Hosted fetches from the operator's addresses and obeys robots.txt for every URL (ROADMAP Direction). Sent anyway: refused by name. |
+| `batch_scrape` `maxConcurrency` | Limited | Lowered to 2, the pages a job's slice reads at once, though the schema offers 4 as locally. Stage H item 6, limits and capacity raises it. |
+| `batch_scrape` `ignoreInvalidURLs` | Supported |  |
+| `batch_scrape` `allowExternalLinks` | Planned: no stage H item yet | Locally only false is taken, since a batch follows no link; hosted refuses the field by name. Sent anyway: refused by name. |
+| `batch_scrape` `includeSubdomains` | Planned: no stage H item yet | Locally only false is taken, since a batch follows no link; hosted refuses the field by name. Sent anyway: refused by name. |
+| `batch_scrape` `idempotencyKey` | Supported |  |
+| `batch_scrape` `appendToId` | Planned: no stage H item yet | A hosted batch's URLs are fixed when it starts. Sent anyway: refused by name. |
+| `batch_scrape` `webhook` | Planned: stage H item 4, monitors and delivery | REST takes it for the job's end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript. Sent anyway: served over REST only. |
+| `batch_scrape` `integration` | Supported |  |
+| `scrape` `mode: authed` | Planned: stage H item 5, identity-bound features | Hosted holds no saved logins: the schema leaves the value out, and REST reads such a page anonymously. Sent anyway: taken, not honoured. |
+| `scrape` `access: my-browser` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
+| `scrape` `formats: screenshot` | Limited | A connection with the browser lane only, at 5 credits a page; an account with fewer credits reads over HTTP alone, where a screenshot is refused. The same on crawl and batch_scrape. |
+| `scrape` `formats: screenshot@fullPage` | Limited | A connection with the browser lane only, at 5 credits a page; an account with fewer credits reads over HTTP alone, where a screenshot is refused. The same on crawl and batch_scrape. |
+| `scrape` `formats: json.modelFallback` | Planned: stage H item 7, the json model fallback | Listed, and answered as switched off until the model fallback is deployed with a model and switched on (hostedConfig/model); the live service's state is not checked here. Sent anyway: taken, not honoured. The same on crawl and batch_scrape. |
+| `scrape` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
+| `scrape` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
+| `crawl` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. A job's start takes it, and its first slice refuses it; the slice is retried and the job ends failed (delivery_failed) without naming the check. Sent anyway: the job starts and fails. |
+| `crawl` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. A job's start takes it, and its first slice refuses it; the slice is retried and the job ends failed (delivery_failed) without naming the check. Sent anyway: the job starts and fails. |
+| `batch_scrape` `mode: authed` | Planned: stage H item 5, identity-bound features | Hosted holds no saved logins; the start refuses the value by name. Sent anyway: refused by name. |
+| `batch_scrape` `access: my-browser` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
+| `batch_scrape` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. A job's start takes it, and its first slice refuses it; the slice is retried and the job ends failed (delivery_failed) without naming the check. Sent anyway: the job starts and fails. |
+| `batch_scrape` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. A job's start takes it, and its first slice refuses it; the slice is retried and the job ends failed (delivery_failed) without naming the check. Sent anyway: the job starts and fails. |
+<!-- hosted-parity:end -->

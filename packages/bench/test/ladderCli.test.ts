@@ -6,7 +6,8 @@ import { CapSolver } from '../src/vendors/capsolver.js'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { identityBundleFrom, modeIdentity, PREVIEW_PRODUCT_TOKEN, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { identityBundleFrom, localNetworkPolicy, modeIdentity, PREVIEW_PRODUCT_TOKEN, type ExecutionContext, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
+import { RobotsOriginCache } from '../src/robotsLookup.js'
 import { LadderRunner } from '../src/routing/ladder.js'
 import { MemoryRoutingHistory } from '../src/routing/vendorRouter.js'
 import { MemorySessionStore } from '../src/routing/sessionStore.js'
@@ -345,6 +346,38 @@ describe('installedChromeCarries: where a browser-bound solve goes when the ladd
       expect(await unread('datadome', {})).toBe(true)
       expect(await missing('datadome', {})).toBe(false)
     } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+})
+
+describe("the run's robots.txt cache on the provider rung", () => {
+  it("reads the file for the vendor's User-Agent once a run, not once a call, and each call still records its decision", async () => {
+    const agents: string[] = []
+    const site = createServer((req, res) => {
+      if (req.url === '/robots.txt') { agents.push(req.headers['user-agent'] ?? ''); res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /private\n'); return }
+      res.writeHead(404).end()
+    })
+    await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${(site.address() as AddressInfo).port}`
+    const robots = new RobotsOriginCache(localNetworkPolicy())
+    const channels = buildChannels('research', {
+      networkPolicy: localNetworkPolicy(),
+      robotsCache: robots,
+      vendorPolicy: { authorized: ['vendor_remote_browser'] },
+      vendorOps: { steel: fakeVendorOps('steel', () => {}) },
+      vendorConnector: async () => fakeBrowser(),
+    })
+    const provider = channels.find((c) => c.vendorId === 'steel')!
+    try {
+      const reads = [await provider.fetch(`${base}/p`), await provider.fetch(`${base}/q`)]
+      expect(agents).toEqual(['TestUA/1.0'])
+      for (const out of reads) {
+        expect(out.trace).toContainEqual(expect.objectContaining({ lane: 'provider', event: 'robots_checked', detail: expect.objectContaining({ decision: 'allowed', robotsSha256: expect.stringMatching(/^[0-9a-f]{64}$/) }) }))
+      }
+    } finally {
+      await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
+      await robots.teardown()
+      await new Promise<void>((resolve) => site.close(() => resolve()))
+    }
   })
 })
 
@@ -734,6 +767,55 @@ describe('buildChannels + LadderRunner session composition', () => {
     expect(unreleased.measuredCostUsd).toBe(base.usage.measuredCostUsd)
     // No meter (a tariff without maxBytesPerCall): no count on the result.
     expect(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true }], byMinute, 0.004).usage).not.toHaveProperty('vendorBytesCounted')
+    // How long each release and usage read took goes on the trace (O7), and changes nothing in the charge.
+    const releaseTimings = { liveUsageMs: 120, releaseMs: 900, usageMs: null }
+    const timedRelease = withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, releaseTimings }, { sessionMs: 1_000, released: false, releaseTimings: { ...releaseTimings, usageMs: null } }], byMinute, 0.004)
+    expect(timedRelease.usage).toEqual(withMeasuredSessions(base, [{ sessionMs: 17_000, released: true }, { sessionMs: 1_000, released: false }], byMinute, 0.004).usage)
+    expect(timedRelease.trace.slice(0, base.trace.length)).toEqual(base.trace)
+    expect(timedRelease.trace.slice(base.trace.length)).toEqual([
+      { at: base.usage.wallMs, lane: base.lane, event: 'session_released', detail: { sessionMs: 17_000, released: true, ...releaseTimings } },
+      { at: base.usage.wallMs, lane: base.lane, event: 'session_released', detail: { sessionMs: 1_000, released: false, ...releaseTimings } },
+    ])
+    // Each call made to release a session goes with it, and what the provider said of the session when none was confirmed.
+    const releaseAttempts = [{ ms: 5_001, confirmed: false, error: 'The operation was aborted due to timeout' }, { ms: 300, confirmed: true }]
+    const releaseState = { ms: 200, status: 'released', reason: 'user_requested', durationMs: 4_200 }
+    const told = withMeasuredSessions(base, [{ sessionMs: 17_000, released: true, releaseTimings, releaseAttempts, releaseState }], byMinute, 0.004)
+    expect(told.trace.at(-1)!.detail).toEqual({ sessionMs: 17_000, released: true, ...releaseTimings, releaseAttempts, releaseState })
+  })
+
+  it('charges a call by its measured time when a second release call, or the provider\'s word, confirmed the release (speed A/B window A, 2026-10-26)', async () => {
+    // That window every release ran out its one 5 s call while Steel's API was slow, and each call was charged its ceiling.
+    const tariff = { perCallUsd: 0.001, perHourUsd: 0.12, maxSessionMs: 60_000, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null }
+    const settle = async (ops: VendorOps) => {
+      const channels = buildChannels('authed', {
+        localSubjects: { http: failingSubject('empty_unverified'), browser_local: failingSubject('empty_unverified') },
+        vendorPolicy: { authorized: ['vendor_remote_browser'] },
+        vendorOps: { steel: ops },
+        vendorTariffs: { steel: tariff },
+        ...vendorEnv(),
+      })
+      const run = await new LadderRunner(channels, { mode: 'authed' }, new MemoryRoutingHistory(), null, new MemorySessionStore()).run('https://example.com/p')
+      await Promise.all(channels.map((c) => c.close?.().catch(() => {})))
+      expect(run.result.lane).toBe('provider')
+      return { settled: run.result.trace.find((e) => e.event === 'spend_settled')?.detail, released: run.result.trace.find((e) => e.event === 'session_released')?.detail }
+    }
+    // The first release call runs out its time; the second is confirmed.
+    let calls = 0
+    const retried = await settle({ ...fakeVendorOps('steel', () => {}), async releaseSession() { if (++calls === 1) throw new Error('The operation was aborted due to timeout') } })
+    expect(calls).toBe(2)
+    expect(retried.settled).toMatchObject({ basis: 'measured' })
+    expect(retried.released).toMatchObject({ released: true, releaseAttempts: [{ confirmed: false, error: 'The operation was aborted due to timeout' }, { confirmed: true }] })
+    expect(retried.released).not.toHaveProperty('releaseState')
+    // No release call is confirmed, and Steel says it released the session at the caller's request: measured, not the ceiling.
+    const fails = { async releaseSession() { throw new Error('fetch failed') } }
+    const ended = await settle({ ...fakeVendorOps('steel', () => {}), ...fails, async sessionState() { return { released: true, status: 'released', reason: 'user_requested', durationMs: 4_200 } } })
+    expect(ended.settled).toMatchObject({ basis: 'measured' })
+    expect(ended.released).toMatchObject({ released: true, releaseState: { status: 'released', reason: 'user_requested', durationMs: 4_200 } })
+    expect(ended.released!.releaseAttempts).toHaveLength(3)
+    // Steel says it still runs: the session bills until its timeout, and the ceiling stays the charge.
+    const live = await settle({ ...fakeVendorOps('steel', () => {}), ...fails, async sessionState() { return { released: false, status: 'live', reason: null, durationMs: 9_000 } } })
+    expect(live.settled).toMatchObject({ basis: 'ceiling' })
+    expect(live.released).toMatchObject({ released: false, releaseState: { status: 'live', reason: null } })
   })
 
   it('answers a provider error just before the request\'s deadline as the provider\'s failure, not a thrown error (ROADMAP PA item 4)', async () => {

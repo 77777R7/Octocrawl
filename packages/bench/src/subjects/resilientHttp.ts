@@ -27,11 +27,20 @@ import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverride
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
+import { TaskCookieSession } from '../cookieSession.js'
 import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import { withExtractionCandidates } from './candidateExtraction.js'
+
+/**
+ * How much of a caller's deadline must remain after the HTTP header cap for the cap to hold, when a later rung can take
+ * a header timeout over (ADR 0007, amendment of 2026-10-26, Howard): the 30 s the ladder's local fallback needs
+ * (HEADERS_TIMEOUT_FALLBACK_MS), and 2 s more, as undici's timers fire up to a second late. With less, that rung could
+ * not use the time, so the wait runs to the deadline (A23: `timeout: 20000` on a 10 s server).
+ */
+export const HTTP_CAP_RESERVE_MS = 32_000
 
 /**
  * Resilient HTTP subject: the resilient transport engine (redirect following
@@ -189,7 +198,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
     return this.route.viaOperatorProxy(url)
   }
 
-  /** `cookieSession`: the task's cookies (ADR 0005 `egress_sessions`), sent and kept on every hop; absent, none are. */
+  /** `cookieSession`: the task's cookies (ADR 0005 `egress_sessions`), sent and kept on every hop; absent, only the cookies the fetch's own redirects set, on its later hops. */
   async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, validators: { etag?: string; lastModified?: string } = {}, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}, onRobotsOverride?: ExecutionContext['onRobotsOverride'], cookieSession?: CookieSession, onTrace?: ExecutionContext['onTrace']): Promise<FetchResult> {
     if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(url)) throw new Error('Local platform exception is limited to fixed platform hosts')
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter, ...(cookieSession === undefined ? {} : { cookieSession }) })
@@ -373,8 +382,10 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const maxFileBytes = fileByteCap(this.networkPolicy, options.maxFileBytes)
     // The coding the compatible transport decoded on the latest response; the lane never sees its header.
     const transportCoding: { decoded: string | null } = { decoded: null }
-    // The task's cookie session, counted for the trace (its values are never recorded).
-    const cookies = execution.cookieSession === undefined ? undefined : new SessionCookies(execution.cookieSession)
+    // The task's cookie session, counted for the trace (its values are never recorded). Without one, the cookies this
+    // fetch's own redirects set go back on its later hops and are dropped with it, as a browser's would: a sign-in check
+    // that sends the client away and back (developer.android.com) answers only a client that kept its cookie.
+    const cookies = new SessionCookies(execution.cookieSession ?? new TaskCookieSession())
     const out = await resilientFetch(url, this.fetcherFor(url, prepared.identityHeaders, validators, signal, ms => { bodyReadMs += ms }, (intervalMs, cooldownMs) => {
       queueMs += intervalMs
       cooldownWaitMs += cooldownMs
@@ -394,8 +405,12 @@ export class ResilientHttpSubject implements SubjectAdapter {
         onRetryAfter?.(target, retryAt)
       },
       maxRedirects: this.networkPolicy.maxRedirects,
-      // A caller's timeout is how long it will wait: headers and body may take until its deadline.
+      requestState: target => cookies.state(target),
+      // A caller's timeout is how long it will wait: headers and body may take until its deadline. The header cap still
+      // holds when a later rung can take a header timeout over and HTTP_CAP_RESERVE_MS of the deadline would remain for it
+      // (ADR 0007, 2026-10-26).
       capsFollowDeadline: options.timeout !== undefined,
+      ...(options.headersTimeoutFallback === true ? { headersCapReserveMs: HTTP_CAP_RESERVE_MS } : {}),
       assertUrl: async (target) => {
         if (this.localPreviewRobotsException && !isLocalPreviewProxyTarget(target)) throw new Error('Local platform exception cannot follow an off-platform redirect')
         await this.route.assertUrl(target)
@@ -405,7 +420,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
       transportMs = Math.max(0, performance.now() - transportStart - pacingWaitMs)
       return null
     })
-    if (cookies !== undefined) trace.push({ at: Date.now() - start, lane: 'http', event: 'session_cookies', detail: cookies.detail() })
+    if (execution.cookieSession !== undefined) trace.push({ at: Date.now() - start, lane: 'http', event: 'session_cookies', detail: cookies.detail() })
+    else if (cookies.sentAny) trace.push({ at: Date.now() - start, lane: 'http', event: 'redirect_cookies', detail: cookies.counts() })
     if (out === null) return timedDenied('timeout', this.scheduler.retryAt(host))
     // resilientFetch returns once the final response's headers arrived.
     const fetchedAt = out.status === null ? null : new Date().toISOString()
@@ -983,7 +999,17 @@ class SessionCookies {
   async keep(url: string, setCookies: readonly string[]): Promise<void> {
     if (setCookies.length > 0) this.kept += await this.session.store(url, setCookies)
   }
+  /** The cookie header a request to `url` would carry now, uncounted: what tells a redirect loop from a round trip. */
+  state(url: string): Promise<string> {
+    return this.session.cookieHeader(url)
+  }
+  get sentAny(): boolean {
+    return this.requestsWithCookies > 0
+  }
+  counts(): Record<string, unknown> {
+    return { requestsWithCookies: this.requestsWithCookies, kept: this.kept }
+  }
   detail(): Record<string, unknown> {
-    return { session: this.session.id, requestsWithCookies: this.requestsWithCookies, kept: this.kept }
+    return { session: this.session.id, ...this.counts() }
   }
 }

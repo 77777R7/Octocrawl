@@ -216,16 +216,31 @@ export interface CdpBrowser {
 export type CdpConnector = (wsUrl: string, deadlineMs?: number, signal?: AbortSignal) => Promise<CdpBrowser>
 
 /**
+ * Told each step of a vendor page as it ends: how long it took (`ms`) and what it saw by counts and sizes, never the
+ * page's text. The provider lane puts the steps on its trace (O7).
+ */
+export type VendorStepListener = (event: string, detail: Record<string, unknown>) => void
+
+/** The longest a CDP connect is waited for: the session's whole time (a tariff's maxSessionMs, up to 120 s) is not the connect's. */
+export const CDP_CONNECT_MAX_MS = 30_000
+
+/** The connect timeout for a caller deadline: the time left, at most CDP_CONNECT_MAX_MS. A pure function, as navigationTimeout is. */
+export function cdpConnectTimeout(deadlineMs: number | undefined, nowMs: number): number {
+  if (deadlineMs === undefined) return CDP_CONNECT_MAX_MS
+  return Math.min(CDP_CONNECT_MAX_MS, Math.max(1, deadlineMs - nowMs))
+}
+
+/**
  * Real connector: Playwright over CDP. Imported lazily so a test run that
- * fakes the seam never loads a browser engine. The caller's deadline becomes
- * the connect timeout — an explicit remaining-ms computation, never a read
- * of a non-standard signal property.
+ * fakes the seam never loads a browser engine. The connect timeout is the
+ * time left before the caller's deadline, at most CDP_CONNECT_MAX_MS — an
+ * explicit remaining-ms computation, never a read of a non-standard signal
+ * property.
  */
 export const playwrightConnector: CdpConnector = async (wsUrl, deadlineMs, signal) => {
   throwIfExecutionStopped({ signal, deadlineAt: deadlineMs })
   const { chromium } = await import('playwright')
-  const remaining = deadlineMs === undefined ? 30_000 : Math.max(1, deadlineMs - Date.now())
-  const pending = chromium.connectOverCDP(wsUrl, { timeout: remaining })
+  const pending = chromium.connectOverCDP(wsUrl, { timeout: cdpConnectTimeout(deadlineMs, Date.now()) })
   void pending.then(browser => { if (signal?.aborted) void browser.close().catch(() => {}) }, () => {})
   return raceWithSignal(pending, signal)
 }
@@ -346,7 +361,7 @@ const PAGE_HTML = `(() => {
  * (RegionSpec.tablesOf) has its row checks judged on this page, within the region's remaining time. A read past the
  * bounds or the time is unknown, so the row checks stay unjudged (tablesUnjudged), never zero rows.
  */
-function withPageTables(page: CdpPage, region: RegionSpec): RegionSpec {
+function withPageTables(page: CdpPage, region: RegionSpec, onHtml?: (chars: number | null) => void): RegionSpec {
   const tablesOf = region.tablesOf
   if (tablesOf === undefined || region.readTables !== undefined) return region
   return {
@@ -355,6 +370,7 @@ function withPageTables(page: CdpPage, region: RegionSpec): RegionSpec {
       if (remainingMs <= 0) return undefined
       const deadlineAt = Date.now() + remainingMs
       const html = await page.evaluate(PAGE_HTML)
+      onHtml?.(typeof html === 'string' ? html.length : null)
       if (typeof html !== 'string' || Date.now() >= deadlineAt) return undefined
       const tables = tablesOf(html, page.url())
       return Date.now() >= deadlineAt ? undefined : tables
@@ -370,6 +386,8 @@ export async function navigateOnce(
   region?: RegionSpec,
   /** Counts what the page receives and ends the navigation past the tariff's maxBytesPerCall (ROADMAP PA item 4). */
   meter?: ByteMeter,
+  /** Told each step as it ends, with its time (O7): the page opened, its navigation, settle, reads and region reads. */
+  onStep?: VendorStepListener,
 ): Promise<NavigationOutcome> {
   // The caller's absolute deadline maps onto the page's own navigation
   // timeout. Remaining budget is computed explicitly from the deadline —
@@ -381,22 +399,28 @@ export async function navigateOnce(
   scope.signal.addEventListener('abort', abort, { once: true })
   try {
     throwIfExecutionStopped(scope)
+    let started = Date.now()
     page = await createExecutionPage(browser, scope.signal)
     throwIfExecutionStopped(scope)
     // Opened before goto, so the page's documents are heard from its first one.
     const observed = await observePage(defaultContext(browser), page, meter, scope.signal)
     observing = observed.session
     const documents = observed.documents
+    onStep?.('page_opened', { ms: Date.now() - started, observed: documents !== null })
     // Past the cap the page is closed: the navigation then fails, and the error below says why.
     meter?.onCap(abort)
     const timeout = navigationTimeout(deadlineMs, Date.now())
+    started = Date.now()
     const response = await raceWithSignal(page.goto(url, { waitUntil: 'domcontentloaded', timeout }), scope.signal)
+    onStep?.('navigate', { ms: Date.now() - started, timeoutMs: timeout, status: response?.status() ?? null })
     if (meter?.capped != null) throw meter.error()
     // A page still showing a loading indicator is waited for longer, leaving a second to read it before the deadline.
+    started = Date.now()
     const settle = await raceWithSignal(waitForRenderedStability(page, {
       maxMs: deadlineMs === undefined ? 1_500 : Math.min(1_500, Math.max(1, deadlineMs - Date.now())),
       loadingMaxMs: deadlineMs === undefined ? LOADING_WAIT_MAX_MS : Math.min(LOADING_WAIT_MAX_MS, Math.max(1, deadlineMs - 1_000 - Date.now())),
     }), scope.signal)
+    onStep?.('settled', { ms: Date.now() - started, loadingSeen: settle.loadingSeen, stillLoading: settle.stillLoading })
     throwIfExecutionStopped(scope)
     // The region the task needs (ADR 0007): waited for on the same page, leaving a second to read it before the deadline,
     // only on a page that answered 2xx and shows no decisive check: a block page is not waited on, nor paid for.
@@ -405,10 +429,22 @@ export async function navigateOnce(
       ?? { status: response?.status() ?? 0, headers: Object.fromEntries(Object.entries(response?.headers() ?? {}).map(([name, value]) => [name.toLowerCase(), value])) }
     const before = onScreen()
     const answered = before.status
-    const gated = region === undefined || answered < 200 || answered >= 300
-      || classifyGate({ status: answered, header: (name) => before.headers[name.toLowerCase()] ?? null, body: await raceWithSignal(page.content(), scope.signal), contentful: true }) !== null
-    const regionOutcome = gated ? undefined : await raceWithSignal(waitForRegion(page, withPageTables(page, region!), {
+    let gated = region === undefined || answered < 200 || answered >= 300
+    if (!gated) {
+      started = Date.now()
+      const html = await raceWithSignal(page.content(), scope.signal)
+      onStep?.('gate_read', { ms: Date.now() - started, htmlChars: html.length })
+      gated = classifyGate({ status: answered, header: (name) => before.headers[name.toLowerCase()] ?? null, body: html, contentful: true }) !== null
+    }
+    // Each read of the wait with its time and size (U7), and the size of the HTML its table reader read, when it read one.
+    let tablesHtmlChars: number | null | undefined
+    const onRead = onStep === undefined ? undefined : (read: RegionRead) => {
+      onStep('region_read', { ...read, ...(tablesHtmlChars === undefined ? {} : { tablesHtmlChars }) })
+      tablesHtmlChars = undefined
+    }
+    const regionOutcome = gated ? undefined : await raceWithSignal(waitForRegion(page, withPageTables(page, region!, (chars) => { tablesHtmlChars = chars }), {
       maxMs: deadlineMs === undefined ? REGION_WAIT_MAX_MS : Math.min(REGION_WAIT_MAX_MS, deadlineMs - 1_000 - Date.now()),
+      ...(onRead === undefined ? {} : { onRead }),
     }), scope.signal)
     throwIfExecutionStopped(scope)
     // The settle and the region wait also fetched: past the cap here, the page is not read.
@@ -417,12 +453,16 @@ export async function navigateOnce(
     // The page as it is now, read while no new document loads, so that what is read and the response reported belong together.
     let body = ''
     let steady = false
+    let attempts = 0
+    started = Date.now()
     for (let attempt = 1; attempt <= READ_ATTEMPTS && !steady; attempt++) {
       if (attempt > 1) await raceWithSignal(page.waitForTimeout(250), scope.signal)
       const loads = documents?.loads
       body = await raceWithSignal(page.content(), scope.signal)
       steady = documents === null || documents.loads === loads
+      attempts = attempt
     }
+    onStep?.('page_read', { ms: Date.now() - started, htmlChars: body.length, attempts })
     throwIfExecutionStopped(scope)
     const { status, headers } = onScreen()
     // Heard nothing: unobserved, never matched. A commit with no response, or a document that kept loading under the
@@ -468,7 +508,7 @@ export async function navigateOnce(
   }
 }
 import { LOADING_WAIT_MAX_MS, waitForRenderedStability, type SettleOutcome } from '../browserSettle.js'
-import { REGION_WAIT_MAX_MS, waitForRegion, type RegionOutcome, type RegionSpec } from '../regionWait.js'
+import { REGION_WAIT_MAX_MS, waitForRegion, type RegionOutcome, type RegionRead, type RegionSpec } from '../regionWait.js'
 import { LAYOUT_MAX_ELEMENTS, SHADOW_TABLE_LIMITS } from '../browserLayout.js'
 import { sameDocument } from '../subjects/browserDocuments.js'
 import type { ResponseMatch } from '../capture.js'

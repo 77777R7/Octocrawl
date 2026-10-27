@@ -1104,12 +1104,23 @@
       "feature": "scrape-execution.timeout",
       "url": "https://httpbin.org/delay/10",
       "request": { "formats": ["markdown"], "timeout": 45000 },
-      "note": "Added 2026-09-29 for the lane waits a timeout sets. httpbin.org/delay/10 answers after 10 s, about 11.5 s through the scoring machine's proxy: past the HTTP lane's default 10 s wait for headers. With a 45 s timeout the HTTP rung must receive that 200 (summary.attempts.0 is the http rung, its wall time over 10 s). Its body is JSON, not HTML: on 2026-09-29 the HTTP rung reports it empty_unverified and the browser rung fetches the URL again, so the answer takes two 10 s waits (about 28 s in a trial run). That is why A23's 20 s is too short and this case gives 45 s. httpbin.org has occasional 5xx outages (row 38).",
+      "note": "Added 2026-09-29 for the lane waits a timeout sets. httpbin.org/delay/10 answers after 10 s, about 11.5 s through the scoring machine's proxy: past the HTTP lane's default 10 s wait for headers. Its body is JSON, not HTML: on 2026-09-29 the HTTP rung reported it empty_unverified and the browser rung fetched the URL again, so the answer took two 10 s waits (about 28 s in a trial run); that is why A23's 20 s is too short and this case gives 45 s. 2026-10-26, checks changed with the ADR 0007 amendment (Howard), timeout and URL unchanged: 45 s leaves more than 30 s after the 10 s header cap and the local browser can take a header timeout over, so the HTTP rung (summary.attempts.0) holds its 10 s header cap. That cut races httpbin's own 10 s plus the round trip (undici's timer can fire up to about 0.5 s late), so both outcomes are valid: (a) the headers arrive first and the HTTP rung receives the 200 after more than 10 s, or (b) the HTTP rung gives up its headers at about 10 s (UND_ERR_HEADERS_TIMEOUT), the ladder goes on (ladder_headers_timeout_fallback), and the browser rung answers. Either way the answer must be success: a failure, or an end at about 10 s with the deadline unused, fails the case. A23 keeps the branch where too little would remain and the HTTP rung waits. Say in the record whether the run was proxied. httpbin.org has occasional 5xx outages (row 38).",
       "checks": [
         { "item": "6", "type": "apiStatus", "equals": 200 },
         { "item": "6", "type": "field", "path": "summary.attempts.0.channel", "equals": "http" },
-        { "item": "6", "type": "field", "path": "summary.attempts.0.result.evidence.httpStatus", "equals": 200 },
-        { "item": "6", "type": "field", "path": "summary.attempts.0.result.usage.wallMs", "min": 10000, "record": true },
+        { "item": "6", "type": "anyOf", "checks": [
+          [
+            { "item": "6", "type": "field", "path": "summary.attempts.0.result.evidence.httpStatus", "equals": 200 },
+            { "item": "6", "type": "field", "path": "summary.attempts.0.result.usage.wallMs", "min": 10000 }
+          ],
+          [
+            { "item": "6", "type": "field", "path": "summary.attempts.0.result.failureReason", "equals": "timeout" },
+            { "item": "6", "type": "traceEvent", "path": "summary.attempts.0.result.trace", "match": { "event": "request_failed", "detail.code": "UND_ERR_HEADERS_TIMEOUT" } },
+            { "item": "6", "type": "field", "path": "summary.attempts.0.result.usage.wallMs", "min": 9500, "max": 14000 },
+            { "item": "6", "type": "traceEvent", "path": "ladderTrace", "match": { "event": "ladder_headers_timeout_fallback" } }
+          ]
+        ] },
+        { "item": "6", "type": "field", "path": "summary.attempts.0.result.usage.wallMs", "min": 0, "record": true },
         { "item": "6", "type": "field", "path": "status", "equals": "success" },
         { "item": "6", "type": "markdownIncludes", "text": "https://httpbin.org/delay/10" },
         { "item": "6", "type": "field", "path": "elapsedMs", "max": 45000, "record": true }
@@ -3614,6 +3625,45 @@
             {"type": "markdownMatches", "pattern": "London", "flags": "m"},
             {"type": "markdownMatches", "pattern": "Paris", "flags": "m"},
             {"type": "markdownExcludes", "text": "Are you a person or a robot?"}
+          ]
+        ]}
+      ]
+    },
+    {
+      "id": "G02",
+      "batch": "gates",
+      "feature": "scrape-execution.error-model",
+      "url": "https://developer.android.com/guide/components/activities/intro-activities",
+      "request": {"formats": ["markdown"], "maxAge": 0, "debug": true, "fastMode": true},
+      "note": "Added 2026-10-24 from the outreach pre-checks, frozen before its first run. On hosted Octocrawl (extractor commit f7708b3c, API tag h37cursor) the page failed policy_denied on two tries: robots.txt unreadable (network_error). Google's devsite sends a browser user agent's robots.txt and pages to a sign-in check and back (oauth2authorize, accounts.google.com, oauth2callback, then the URL again) and answers only a client that sends the cookie the check set; without it the round trip repeats until the redirect limit. fastMode keeps the case on the HTTP lane, which reads robots.txt and the page itself. Passes with the article read over HTTP and robots.txt read (allowed, never unreachable).",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "2", "type": "field", "path": "status", "equals": "success"},
+        {"item": "2", "type": "field", "path": "lane", "equals": "http"},
+        {"item": "2", "type": "field", "path": "evidenceRecord.robotsDecision.decision", "equals": "allowed"},
+        {"item": "2", "type": "field", "path": "evidenceRecord.robotsDecision.unreachable", "present": false},
+        {"item": "2", "type": "field", "path": "evidence.finalUrl", "equals": "https://developer.android.com/guide/components/activities/intro-activities"},
+        {"item": "FS", "type": "markdownMatches", "pattern": "^# Introduction to activities", "flags": "m"},
+        {"item": "FS", "type": "markdownMatches", "pattern": "crucial component of an Android app", "flags": "m"}
+      ]
+    },
+    {
+      "id": "G03",
+      "batch": "gates",
+      "feature": "scrape-execution.error-model",
+      "url": "https://help.autodesk.com/view/fusion360/ENU/?guid=ASM-ASSEMBLIES",
+      "request": {"formats": ["markdown"], "maxAge": 0, "debug": true},
+      "note": "Added 2026-10-24 from the outreach pre-checks, frozen before its first run. On hosted Octocrawl (extractor commit f7708b3c, API tag h37cursor) the browser lane once answered success, readiness ready, with about 230 characters: the banner's Help Home link and language menu, no article. The help viewer renders its banner first and fills its role=\"main\" with the article later. Either answer passes: the article, or an honest failed/empty_unverified. A success without the article's text fails.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "2", "type": "anyOf", "checks": [
+          [
+            {"type": "field", "path": "status", "equals": "success"},
+            {"type": "markdownMatches", "pattern": "is a collection of components that function as a single design", "flags": "m"}
+          ],
+          [
+            {"type": "field", "path": "status", "equals": "failed"},
+            {"type": "field", "path": "failureReason", "equals": "empty_unverified"}
           ]
         ]}
       ]

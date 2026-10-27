@@ -7,6 +7,8 @@ import { DEFAULT_NETWORK_POLICY, localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { extractTf } from '@w2l/extract-tf'
 import { BrowserLocalSubject, closePage } from '../src/subjects/browserLocal.js'
+import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
+import { RobotsOriginCache } from '../src/robotsLookup.js'
 import { captureOf } from '../src/capture.js'
 
 /**
@@ -68,6 +70,24 @@ beforeAll(async () => {
           '<div style="height: 6000px"></div><section id="grid"><h2>Products</h2></section></main>' +
           '<script>new IntersectionObserver(function (entries, observer) { if (!entries[0].isIntersecting) return; observer.disconnect(); ' +
           'document.getElementById("grid").insertAdjacentHTML("beforeend", "<ul><li>Drill one $99.00</li><li>Drill two $149.00</li><li>Drill three $199.00</li><li>Drill four $249.00</li></ul>") }).observe(document.getElementById("grid"))</script>' +
+          '</body></html>',
+      )
+    } else if (req.url === '/main-elsewhere' || req.url === '/main-search') {
+      // Finished pages with a main landmark and no text in it: the article beside it, or a main that holds only a search form.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><header><a href="/">Site</a></header>' + (req.url === '/main-search'
+        ? '<main><form><input name="q" placeholder="Search the timetable"></form></main>'
+        : '<main></main><div><h1>Article</h1><p>The ferry leaves the harbour at nine and returns at five, every day of the week.</p></div>') + '</body></html>')
+    } else if (req.url === '/help-shell' || req.url === '/help-shell-stuck') {
+      // help.autodesk.com (2026-10-24): the banner (a home link, a language menu) renders, the role="main" stays empty
+      // until the article arrives, 2.5 s after load here (or never).
+      const languages = ['English (US)', 'Deutsch', 'Español', 'Français', 'Italiano', 'Polski', 'Português (Brasil)', 'Türkçe'].map((l) => `<li role="option">${l}</li>`).join('')
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Fusion Help | Assemblies overview</title></head><body><header role="banner"><ul id="ui-user-area">' +
+          `<li><a rel="home" href="/">Help Home</a></li><li><span>English (US)</span><ol role="listbox" hidden aria-hidden="true">${languages}</ol></li></ul></header>` +
+          '<div id="ui-content-area" role="main"><div id="loader"></div></div>' +
+          (req.url === '/help-shell-stuck' ? '' : '<script>setTimeout(function () { document.getElementById("loader").innerHTML = "<article><h1>Assemblies overview</h1><p>An Assembly is a collection of components that function as a single design, built from parts you model or insert.</p></article>" }, 2500)</script>') +
           '</body></html>',
       )
     } else if (req.url === '/fetching-below') {
@@ -455,6 +475,46 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
+  it("shares the run's robots.txt cache with the other rungs by origin and User-Agent, and records its own decision", async () => {
+    // A server that answers each User-Agent its own file, as etsy did (T005).
+    const agents: string[] = []
+    const site = createServer((req, res) => {
+      if (req.url === '/robots.txt') {
+        const agent = req.headers['user-agent'] ?? ''
+        agents.push(agent)
+        res.writeHead(200, { 'content-type': 'text/plain' }).end(`User-agent: *\nDisallow: /${agent.includes('Chrome/128.') ? 'cart' : 'search'}\n`)
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><body><main><article><h1>Harbour notes</h1><p>The harbour office keeps a ledger of tides, winds and the ships that came in, and this page is long enough to be read as content.</p></article></main></body></html>')
+    })
+    await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${(site.address() as { port: number }).port}`
+    const robots = new RobotsOriginCache()
+    const browsers = [1, 2].map(() => new BrowserLocalSubject('standard', null, false, undefined, null, undefined, null, undefined, undefined, null, false, undefined, 'playwright', 'declared', {}, null, robots))
+    const http = new ResilientHttpSubject('standard', undefined, undefined, undefined, false, null, false, robots)
+    try {
+      const reads = [await browsers[0]!.fetch(`${base}/page`), await browsers[1]!.fetch(`${base}/page`), await http.fetch(`${base}/page`)]
+      // Both browsers declare the same User-Agent and read the file once; http declares its own and reads its own.
+      expect(agents).toHaveLength(2)
+      expect(agents[1]).toContain('Chrome/128.')
+      const checked = reads.map((out) => out.trace.find((event) => event.event === 'robots_checked')?.detail)
+      expect(checked.map((detail) => detail?.decision)).toEqual(['allowed', 'allowed', 'allowed'])
+      expect(checked[0]?.robotsSha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(checked[1]?.robotsSha256).toBe(checked[0]?.robotsSha256)
+      expect(checked[2]?.robotsSha256).not.toBe(checked[0]?.robotsSha256)
+      // Each browser's record signs the file its own decision was made on.
+      expect(reads.slice(0, 2).map((out) => out.compliance?.robots.robotsSha256)).toEqual(checked.slice(0, 2).map((detail) => detail?.robotsSha256))
+    } finally {
+      for (const browser of browsers) await browser.teardown()
+      await http.teardown()
+    }
+    // The cache is the run's, not a rung's: their teardown left it reading.
+    const after = await robots.lookup(`${base}/page`, 'Later/1.0')
+    expect(robots.decision(after, `${base}/page`, 'Later/1.0').decision).toBe('allowed')
+    await robots.teardown()
+    await new Promise<void>((resolve) => site.close(() => resolve()))
+  })
+
   it('chains every record in a run into one verifiable ledger', async () => {
     const subject = new BrowserLocalSubject()
     try {
@@ -528,10 +588,17 @@ describe('BrowserLocalSubject transport', () => {
       const below = await subject.fetch(`${url}/fetching-below`)
       expect(below.markdown).toContain('Result 6: a drill with a price of $120')
       expect(below.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
+      // An empty main landmark under a rendered banner is waited for; never filled, the banner is not answered as the page.
+      const help = await subject.fetch(`${url}/help-shell`)
+      expect(help.status).toBe('success')
+      expect(help.markdown).toContain('An Assembly is a collection of components')
+      expect(help.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
+      const shell = await subject.fetch(`${url}/help-shell-stuck`, Date.now() + 5_000)
+      expect(shell).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
       // Loading words and signs on a finished page, and a loader left on a page with plenty of text, are not waited for.
-      for (const path of ['/not-loading', '/rich-loader']) {
+      for (const path of ['/not-loading', '/rich-loader', '/main-elsewhere', '/main-search']) {
         const done = await subject.fetch(`${url}${path}`)
-        expect(done.status, path).toBe('success')
+        if (path !== '/main-search') expect(done.status, path).toBe('success')
         expect(done.trace.some((event) => event.event === 'loading_wait'), path).toBe(false)
       }
       // A request that runs steps on the page keeps their time: no loading wait takes it, within a short timeout.

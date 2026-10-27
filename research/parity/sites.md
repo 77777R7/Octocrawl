@@ -103,7 +103,7 @@ W2L_HOSTED_API_URL=http://127.0.0.1:8817 W2L_API_TOKEN=<token> node research/par
 | A33 | Crawl of books.toscrape.com with `maxPages` 5, product-page `includePaths`, `markdown`, `links` and a `json` schema | Every page has Markdown and absolute links; every product page JSON with its title and a numeric price | crawl-batch.crawl-scrape-options |
 | A34 | Batch of 30 books.toscrape.com listing pages, status polled every second | `completed` never goes back, mid-run items are in the final list, ends at 30 completed and 0 remaining | crawl-batch.batch-status |
 | A35 | Batch of 50 URLs on books.toscrape.com, quotes.toscrape.com and Wikipedia | The start answers at once; 50 items; per host, fetch starts at least the required delay apart (W2L's `crawl_delay` record) | crawl-batch.batch-start-async |
-| T01 | Scrape of httpbin.org/delay/10 with `timeout: 45000` | The HTTP rung waits past its default 10 s and receives the 200; `success` with the endpoint's JSON (through the browser rung, which fetches JSON again) | scrape-execution.timeout |
+| T01 | Scrape of httpbin.org/delay/10 with `timeout: 45000` | `success` with the endpoint's JSON, by either path: the HTTP rung receives the 200 after more than 10 s, or it gives up its headers at about 10 s (`UND_ERR_HEADERS_TIMEOUT`), the ladder goes on (`ladder_headers_timeout_fallback`) and the browser rung answers. 2026-10-26, checks changed with the ADR 0007 amendment (Howard), timeout and URL unchanged: the held 10 s cut races httpbin's 10 s plus the round trip, so both paths are valid; before, only the first was | scrape-execution.timeout |
 | T02 | SDK: `crawlAndWait` on books.toscrape.com (20 pages), its first three status requests answered by the runner with a 503, a network error and a 429 | The wait retries through all three; completed with all 20 steps | platform.sdk.waiters |
 | T03 | SDK: `batchAndWait` on 5 Wikipedia articles, its first two status requests answered with a 502 and a network error | The wait retries through both; 5 successful items with Markdown | crawl-batch.batch-wait |
 | T04 | `/fc` crawl of docs.python.org/3/ (`limit` 30), status polled every 2 s, data read 10 at a time | While scraping, `total` known, never below `completed`, above it at some poll, `next` present; at the end `completed`, `total` data entries with unique URLs, `completed` of them without an error, no `next` on the last page | crawl-batch.crawl-status |
@@ -236,6 +236,13 @@ G01 was added on 2026-10-22 for the Skyscanner human verification rule (#515, [P
 | Case | URL | What it tests | Feature |
 | --- | --- | --- | --- |
 | G01 | [Skyscanner: London to Paris](https://www.skyscanner.net/routes/lond/pari/london-to-paris.html) | Either the route's content, with a final URL that is not the challenge, or `blocked`/`captcha` with no Markdown and readiness `not_served`; never `success` on the challenge page | scrape-execution.error-model |
+
+G02 and G03 were added on 2026-10-24 from the outreach pre-checks, frozen before their first run: two docs pages that hosted Octocrawl (extractor commit f7708b3c) failed for reasons of its own. Run them with `--only G02,G03`.
+
+| Case | URL | What it tests | Feature |
+| --- | --- | --- | --- |
+| G02 | [Android Developers: Introduction to activities](https://developer.android.com/guide/components/activities/intro-activities) | robots.txt and the page read over HTTP (`fastMode`) through devsite's sign-in round trip, which ends only for a client that sends back the cookie it set; robots.txt `allowed`, never unreachable | scrape-execution.error-model |
+| G03 | [Fusion Help: Assemblies overview](https://help.autodesk.com/view/fusion360/ENU/?guid=ASM-ASSEMBLIES) | Either the article, or `failed`/`empty_unverified`; never `success` with only the banner a script-rendered help page shows before its article | scrape-execution.error-model |
 
 ## Later batches
 

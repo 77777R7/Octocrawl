@@ -5,6 +5,8 @@ import { chromium } from 'playwright'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { BrowserLocalSubject } from '../src/subjects/browserLocal.js'
 import { DETECTION_FLAGS_ID, INSTALLED_CHROME_WINDOWS, installedChromeLaunchOf, launchInstalledChrome } from '../src/subjects/installedChrome.js'
+import { CapSolver } from '../src/vendors/capsolver.js'
+import { startMockCapSolver } from './mockCapSolver.js'
 
 // Playwright's own Chromium stands in for the installed Google Chrome, headless because CI has no display: the test
 // proves the launch, the closed DevTools port, the profile's removal and the lane's wiring, not Chrome's detection.
@@ -18,11 +20,20 @@ let attackerUrl = ''
 const ARTICLE = `<!doctype html><title>Tide tables</title><main><h1>Tide tables</h1>${'<p>The harbour office records tide height, wind and visibility for every hour of the day, and the ledger is kept for the whole year.</p>'.repeat(6)}</main>`
 /** A Cloudflare-style managed challenge: 403 with cf-mitigated until its script sets a cookie and reloads (/clears), or for ever (/holds). */
 const CHALLENGE = `<!doctype html><title>Just a moment...</title><p>Checking your browser before accessing the site.</p>`
+/** DataDome's captcha, which waits for a person or a solver: its iframe from captcha-delivery.com, which blockAds keeps offline here. */
+const DATADOME = `<!doctype html><title>shop</title><p>Please enable JS and disable any ad blocker</p><iframe src="https://geo.captcha-delivery.com/captcha/?initialCid=abc&cid=def&t=fe&referer=x" width="100%" height="100%"></iframe>`
+/**
+ * An ordinary page that loads reCAPTCHA's script for a form and says "please wait": the script from google.com, which
+ * blockAds keeps offline here. Where google.com does not answer, its parser-blocking script would hold the page's
+ * DOMContentLoaded past the navigation's 20 s.
+ */
+const WIDGET = ARTICLE.replace('</main>', '</main><script src="https://www.google.com/recaptcha/api.js?render=abc"></script><noscript>Please enable JavaScript</noscript><p>Please wait</p>')
 beforeAll(async () => {
   server = await startFixtureServer()
   attacker = createServer((req, res) => {
     if (req.url?.startsWith('/clears') && (req.headers.cookie ?? '').includes('cleared=1')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ARTICLE); return }
-    if (req.url?.startsWith('/widget')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ARTICLE.replace('</main>', '</main><script src="https://www.google.com/recaptcha/api.js?render=abc"></script><noscript>Please enable JavaScript</noscript><p>Please wait</p>')); return }
+    if (req.url?.startsWith('/datadome')) { res.writeHead(403, { 'content-type': 'text/html', 'x-datadome-cid': 'abc' }); res.end(DATADOME); return }
+    if (req.url?.startsWith('/widget')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(WIDGET); return }
     if (req.url?.startsWith('/clears') || req.url?.startsWith('/holds')) {
       const script = req.url.startsWith('/clears') ? `<script>setTimeout(() => { document.cookie = 'cleared=1; path=/'; location.reload() }, 1500)</script>` : ''
       res.writeHead(403, { 'content-type': 'text/html', 'cf-mitigated': 'challenge' }); res.end(CHALLENGE + script); return
@@ -111,7 +122,7 @@ describe('installed_chrome: the browser lane on it', () => {
   }, 90_000)
 
   it('waits out a check that clears itself, reading the page it then shows, and stops waiting at the deadline for one that does not', async () => {
-    const subject = new BrowserLocalSubject('standard', null, true, undefined, null, undefined, null, undefined, undefined, null, false, undefined, 'installed_chrome', 'actual', seams)
+    const subject = new BrowserLocalSubject('standard', null, true, undefined, null, undefined, null, undefined, undefined, null, false, ['google.com'], 'installed_chrome', 'actual', seams)
     try {
       const cleared = await subject.fetch(`${attackerUrl}clears`)
       expect(cleared).toMatchObject({ status: 'success', evidence: { httpStatus: 200 } })
@@ -126,12 +137,32 @@ describe('installed_chrome: the browser lane on it', () => {
       const widgetStarted = Date.now()
       const widget = await subject.fetch(`${attackerUrl}widget`)
       expect(widget.status).toBe('success')
+      expect(widget.trace).toContainEqual(expect.objectContaining({ event: 'ads_blocked', detail: expect.objectContaining({ hosts: ['www.google.com'] }) }))
       expect(widget.trace.some((event) => event.event === 'challenge_wait')).toBe(false)
       expect(Date.now() - widgetStarted).toBeLessThan(15_000)
     } finally {
       await subject.teardown()
     }
   }, 90_000)
+
+  it("does not wait on a captcha, and hands it straight to the grant's solver (ADR 0005, revision of 2026-10-26)", async () => {
+    const mock = await startMockCapSolver(() => ({ solution: { cookie: 'datadome=dd-secret-3; Path=/' } }))
+    const solving = { solver: new CapSolver({ apiKey: 'CAP-int-key-51ee', baseUrl: mock.url, pollMs: 20 }), perSolveUsd: 0.003, maxSolvesPerCall: 1, egress: null, grantHash: 'f'.repeat(64) }
+    const subject = new BrowserLocalSubject('standard', null, true, undefined, null, undefined, null, undefined, undefined, null, false, ['captcha-delivery.com'], 'installed_chrome', 'actual', seams, solving)
+    try {
+      const started = Date.now()
+      const out = await subject.fetch(`${attackerUrl}datadome`)
+      expect(out).toMatchObject({ status: 'blocked', blockReason: 'captcha' })
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'challenge_wait', detail: { blockReason: 'captcha', outcome: 'not_waited', ms: 0, capMs: 0 } }))
+      // The solver saw the page at once; a DataDome answer is bought only on the grant's solver exit, which this grant chose none of.
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'captcha_solve', detail: expect.objectContaining({ type: 'datadome', rung: 'installed_chrome', outcome: 'egress_mismatch', reason: 'grant_chose_no_solver_exit' }) }))
+      expect(mock.tasks).toEqual([])
+      expect(Date.now() - started).toBeLessThan(10_000)
+    } finally {
+      await subject.teardown()
+      await mock.close()
+    }
+  }, 60_000)
 
   it('says Google Chrome is missing, with where to get it, when there is none', async () => {
     const subject = new BrowserLocalSubject('standard', null, true, undefined, null, undefined, null, undefined, undefined, null, false, undefined, 'installed_chrome', 'actual', { executable: '/nonexistent/octocrawl-test/chrome' })
