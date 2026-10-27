@@ -1,8 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   DATA_LINE_PREFIX, canonicalPath, describeInspection, gscWindow, indexChanges, indexCell, launchCell, mergeDataLine, pagesByPath,
-  parseSitemap, previousFor, readSeries, renderSummary, seriesEntry, snapshotId, sourceOfPath, summarizeGsc,
+  parseSitemap, previousFor, readSeries, renderSummary, seriesAppend, seriesEntry, snapshotId, sourceOfPath, summarizeGsc,
   summarizeInspections, updateTracker,
 } from './snapshot-lib.mjs'
 import { parseArgs } from './snapshot.mjs'
@@ -50,7 +55,7 @@ test('a Search Console pull is summed into the numbers the series keeps, with fu
   const pulls = {
     total: [{ clicks: 6, impressions: 100, ctr: 0.06, position: 72.2 }],
     query: [row('octocrawl mcp', 2, 10, 3), row('find all pages', 0, 80, 70), row('Octocrawl pricing', 1, 5, 2)],
-    page: [row('https://octocrawl.dev/', 3, 30, 4.2), row('https://octocrawl.dev/blog/x/', 0, 70, 72.7), row('http://localhost/', 0, 1, 90)],
+    page: [row('https://octocrawl.dev/', 3, 30, 4.2), row('https://octocrawl.dev/#free-tiers', 0, 1, 3), row('https://octocrawl.dev/blog/x/', 0, 70, 72.7), row('http://octocrawl.dev/', 0, 1, 1)],
     date: [row('2026-10-24', 3, 60, 70), row('2026-10-25', 3, 40, 74), row('2026-10-26', 0, 0, 0)],
     country: [], device: [],
   }
@@ -58,9 +63,10 @@ test('a Search Console pull is summed into the numbers the series keeps, with fu
   assert.equal(summary.clicks, 6)
   assert.equal(summary.ctr, 0.06)
   assert.equal(summary.lastDateWithData, '2026-10-25')
-  assert.deepEqual(summary.pagesLe20, { pages: 1, impressions: 30 })
-  assert.equal(summary.pageImpressions, 101)
-  assert.equal(summary.canonicalPageImpressions, 100)
+  assert.deepEqual(summary.pagesLe20, { pages: 1, impressions: 31 })
+  assert.equal(summary.pageRows, 4)
+  assert.equal(summary.pageImpressions, 102)
+  assert.equal(summary.canonicalPageImpressions, 101)
   assert.deepEqual(summary.visibleBrand, { rows: 2, impressions: 15, clicks: 3 })
   assert.equal(summary.queryRowsFull, true)
   assert.equal(summary.pageRowsFull, true)
@@ -76,14 +82,16 @@ test('an inspection becomes a tracker cell with its verdict, its coverage state 
   assert.equal(indexCell(read('PASS'), '2026-10-28'), '通过（2026-10-28）')
   assert.equal(indexCell(read('NEUTRAL'), '2026-10-28'), '中性：URL is unknown to Google（2026-10-28）')
   assert.equal(indexCell(read('FAIL'), '2026-10-28'), '未通过：URL is unknown to Google（2026-10-28）')
-  assert.equal(indexCell(describeInspection({ inspectionResult: { indexStatusResult: {} } }), '2026-10-28'), '未知（2026-10-28）')
+  assert.equal(indexCell({ verdict: 'VERDICT_UNSPECIFIED', coverageState: null }, '2026-10-28'), '未知（2026-10-28）')
   assert.equal(read('PASS').lastCrawlTime, '2026-10-20T01:00:00Z')
 })
 
-test('an answer with no index status is not a reading: it throws, so the URL counts as not read and no cell changes', () => {
+test('an answer with no index status or no verdict is not a reading: it throws, so the URL counts as not read and no cell changes', () => {
   assert.throws(() => describeInspection({}), /indexStatusResult/)
   assert.throws(() => describeInspection({ inspectionResult: {} }), /indexStatusResult/)
   assert.throws(() => describeInspection(null), /indexStatusResult/)
+  assert.throws(() => describeInspection({ inspectionResult: { indexStatusResult: {} } }), /no verdict/)
+  assert.throws(() => describeInspection({ inspectionResult: { indexStatusResult: { verdict: 'VERDICT_UNSPECIFIED', coverageState: 'x' } } }), /no verdict/)
 })
 
 test('inspections are counted by verdict and the URLs that could not be read stay in the denominator', () => {
@@ -110,7 +118,7 @@ test('a page finds its source file and its date: a blog article has a publicatio
   assert.deepEqual(find('/docs/guides/amazon-product/'), { files: ['apps/public-web/content/amazon-product.md'] })
   assert.deepEqual(find('/blog/post/'), { files: ['apps/public-web/content/blog/post.md'], pubDate: '2026-10-13' })
   assert.deepEqual(find('/blog/draft/'), { files: ['apps/public-web/content/blog/draft.md'] })
-  assert.equal(find('/changelog/').files[0], 'CHANGELOG.md')
+  assert.equal(find('/changelog/'), null)
   assert.equal(find('/blog/nope/'), null)
   assert.equal(find('/docs/nope/'), null)
   assert.equal(find('/tools/missing/'), null)
@@ -210,8 +218,9 @@ test('each source is compared with its own latest earlier reading: a snapshot th
     { id: 'a', window: { days: 28 }, gsc: { impressions: 1 }, index: { read: 29 } },
     { id: 'b', window: { days: 14 }, gsc: { impressions: 2 }, index: null },
     { id: 'c', window: { days: 28 }, gsc: { impressions: 3 }, index: null },
+    { id: 'd', window: { days: 28 }, gsc: { impressions: 4 }, index: { read: 0, urls: 29 } },
   ]
-  assert.deepEqual(previousFor(entries, 28), { gsc: { impressions: 3 }, index: { read: 29 }, indexId: 'a' })
+  assert.deepEqual(previousFor(entries, 28), { gsc: { impressions: 4 }, index: { read: 29 }, indexId: 'a' })
   assert.deepEqual(previousFor(entries, 14), { gsc: { impressions: 2 }, index: { read: 29 }, indexId: 'a' })
   assert.deepEqual(previousFor(entries, 7), { gsc: null, index: { read: 29 }, indexId: 'a' })
   assert.deepEqual(previousFor([], 28), { gsc: null, index: null, indexId: null })
@@ -228,4 +237,36 @@ test('index changes compare verdicts only, skip URLs that were not read last tim
   const before = new Map([['/same/', 'PASS'], ['/moved/', 'PASS'], ['/unread-before/', null], ['/unread-now/', 'PASS'], ['/gone/', 'PASS']])
   assert.deepEqual(indexChanges(now, before), ['/moved/: PASS to FAIL (Crawled - currently not indexed)', '/new/: new in the sitemap', '/gone/: no longer in the sitemap'])
   assert.deepEqual(indexChanges(now, null), [])
+})
+
+test('the summary says whether the index status was compared, and with what', () => {
+  const gsc = summarizeGsc({ total: [{ clicks: 1, impressions: 2, position: 3 }], query: [], page: [], date: [], country: [], device: [] }, 5000)
+  const index = { urls: 29, read: 29, notRead: 0, pass: 27, neutral: 2, fail: 0, other: 0 }
+  const entry = seriesEntry({ id: 'x', takenAt: 't', sourceCommit: 'abc', dirty: false, scriptSha256: 'f00', route: 'direct', window: { start: 'a', end: 'b', days: 28 }, gsc, index, firstParty: null, notRead: {} })
+  assert.match(renderSummary(entry, null, { indexCompare: { since: 'earlier', changes: [] } }), /No verdict changed since earlier\./)
+  assert.match(renderSummary(entry, null, { indexCompare: { since: 'earlier', changes: ['/a/: PASS to FAIL'] } }), /Changed since earlier:\n- \/a\/: PASS to FAIL/)
+  assert.match(renderSummary(entry, null, { indexCompare: { note: 'earlier has no inspection.json' } }), /Not compared with an earlier pass: earlier has no inspection\.json\./)
+  assert.doesNotMatch(renderSummary(entry, null, {}), /verdict changed|Not compared/)
+})
+
+test('a new series line goes on its own line even when the file ends in a truncated one', () => {
+  const entry = { id: 'new' }
+  assert.equal(seriesAppend('', entry), '{"id":"new"}\n')
+  assert.equal(seriesAppend('{"id":"a"}\n', entry), '{"id":"new"}\n')
+  const glued = '{"id":"a"}\n{"id":"b","tak' + seriesAppend('{"id":"a"}\n{"id":"b","tak', entry)
+  const { entries, bad } = readSeries(glued)
+  assert.deepEqual(entries.map(e => e.id), ['a', 'new'])
+  assert.equal(bad, 1)
+})
+
+test('the command line refuses a tracker rewrite on another window before it touches the network or creates a snapshot', () => {
+  const out = mkdtempSync(join(tmpdir(), 'seo-snapshot-test-'))
+  try {
+    const script = fileURLToPath(new URL('./snapshot.mjs', import.meta.url))
+    const run = spawnSync(process.execPath, [script, '--update-tracker', '--days', '14', '--out', out], { encoding: 'utf8', timeout: 20_000 })
+    assert.equal(run.status, 1)
+    assert.match(run.stderr, /needs the default --days 28/)
+    assert.equal(existsSync(join(out, 'snapshots')), false)
+    assert.equal(existsSync(join(out, 'series.jsonl')), false)
+  } finally { rmSync(out, { recursive: true, force: true }) }
 })

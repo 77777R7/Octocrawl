@@ -65,14 +65,16 @@ const BRAND = /octocrawl/i
 /** What one Search Console pull says, as the numbers the series keeps. `pulls` holds the six answers' `rows` arrays
  * (`total` has one row or none) and `rowLimit` is what the page and query pulls asked for: a pull that came back full
  * is flagged, because rows past the limit are missing, not zero. Page position is each page's average over its
- * queries, so `pagesLe20` says where the exposure sits, not where Octocrawl ranks. Queries Google hides are not in the
- * query rows, so `visibleBrand` is a floor, and no brand rows does not mean no brand searches. */
+ * queries, so `pagesLe20` says where the exposure sits, not where Octocrawl ranks; it counts pages on the canonical
+ * origin, with `#` and query-string spellings merged (the page table has one row per spelling, so it has more rows than
+ * pages). Queries Google hides are not in the query rows, so `visibleBrand` is a floor, and no brand rows does not mean
+ * no brand searches. */
 export function summarizeGsc(pulls, rowLimit) {
   const total = pulls.total[0] ?? null
   const dated = pulls.date.filter(row => row.impressions > 0 || row.clicks > 0)
   const pageImpressions = pulls.page.reduce((n, row) => n + row.impressions, 0)
   const canonical = pagesByPath(pulls.page)
-  const le20 = pulls.page.filter(row => row.position <= 20)
+  const le20 = [...canonical.values()].filter(entry => entry.position !== null && entry.position <= 20)
   const brand = pulls.query.filter(row => BRAND.test(row.keys[0]))
   return {
     clicks: total?.clicks ?? null,
@@ -91,13 +93,14 @@ export function summarizeGsc(pulls, rowLimit) {
   }
 }
 
-/** The fields of a URL Inspection answer that the series and the tracker use. An answer with no index status is not a
- * reading, so it throws and the URL counts as not read. */
+/** The fields of a URL Inspection answer that the series and the tracker use. An answer with no index status, or with no
+ * verdict, is not a reading, so it throws and the URL counts as not read. */
 export function describeInspection(answer) {
   const status = answer?.inspectionResult?.indexStatusResult
   if (!status) throw new Error('the answer had no indexStatusResult')
+  if (!status.verdict || status.verdict === 'VERDICT_UNSPECIFIED') throw new Error('the answer had no verdict')
   return {
-    verdict: status.verdict ?? 'VERDICT_UNSPECIFIED',
+    verdict: status.verdict,
     coverageState: status.coverageState ?? null,
     indexingState: status.indexingState ?? null,
     robotsTxtState: status.robotsTxtState ?? null,
@@ -138,7 +141,6 @@ export function sourceOfPath(path, { docsPages, blogPosts }, exists) {
   if (path === '/') return withFiles(['apps/public-web/index.html'])
   if (path === '/scrape/') return withFiles(['apps/public-web/scrape/index.html'])
   if (path === '/tools/') return withFiles(['apps/public-web/tools/index.html'])
-  if (path === '/changelog/') return withFiles(['CHANGELOG.md'])
   if (path === '/blog/') return withFiles(['apps/public-web/scripts/blogPosts.mjs'])
   const tool = /^\/tools\/([^/]+)\/$/.exec(path)
   if (tool) return withFiles([`apps/public-web/tools/${tool[1]}/index.html`])
@@ -243,6 +245,10 @@ export function updateTracker(markdown, pages, clauses) {
   return { markdown: lines.join('\n'), added, changed, missing }
 }
 
+/** What to append to the series file for `entry`: a newline first when the file is not empty and does not end with one,
+ * so a truncated last line cannot swallow the new entry. */
+export const seriesAppend = (existing, entry) => `${existing && !existing.endsWith('\n') ? '\n' : ''}${JSON.stringify(entry)}\n`
+
 /** The series file's lines as entries; a line that is not JSON is counted, not guessed at. */
 export function readSeries(text) {
   const entries = []
@@ -257,10 +263,11 @@ export function readSeries(text) {
  * the latest earlier index counts, each from its own entry, because a snapshot that skipped one source has null there. */
 export function previousFor(entries, days) {
   const last = test => entries.findLast(test) ?? null
+  const hasIndex = entry => entry.index && entry.index.read > 0
   return {
     gsc: last(entry => entry.gsc && entry.window?.days === days)?.gsc ?? null,
-    index: last(entry => entry.index)?.index ?? null,
-    indexId: last(entry => entry.index)?.id ?? null,
+    index: last(hasIndex)?.index ?? null,
+    indexId: last(hasIndex)?.id ?? null,
   }
 }
 
@@ -301,7 +308,7 @@ export function renderSummary(entry, previous, extras = {}) {
       `| Clicks | ${num(g.clicks)} | ${num(p?.clicks)} | ${delta(g.clicks, p?.clicks)} |`,
       `| CTR | ${pct(g.ctr)} | ${pct(p?.ctr)} | |`,
       `| Average position | ${g.position === null ? 'unknown' : g.position.toFixed(1)} | ${p?.position == null ? 'unknown' : p.position.toFixed(1)} | ${delta(g.position, p?.position)} |`,
-      `| Impressions on pages averaging position 20 or better | ${num(g.pagesLe20.impressions)} of ${num(g.pageImpressions)} (${g.pagesLe20.pages} pages) | ${p ? `${num(p.pagesLe20.impressions)} of ${num(p.pageImpressions)}` : 'unknown'} | |`,
+      `| Impressions on pages averaging position 20 or better | ${num(g.pagesLe20.impressions)} of ${num(g.canonicalPageImpressions)} (${g.pagesLe20.pages} pages) | ${p ? `${num(p.pagesLe20.impressions)} of ${num(p.canonicalPageImpressions)}` : 'unknown'} | |`,
       `| Visible queries naming octocrawl | ${g.visibleBrand.rows} rows, ${num(g.visibleBrand.impressions)} impressions, ${num(g.visibleBrand.clicks)} clicks | ${p ? `${num(p.visibleBrand.impressions)} impressions` : 'unknown'} | |`, '',
       `The page table sums to ${num(g.pageImpressions)} impressions, of which ${num(g.canonicalPageImpressions)} are on https://octocrawl.dev addresses; the property total (${num(g.impressions)}) is counted differently and is not meant to match. Queries Google hides are not in the query rows, so the brand row is a floor.`)
     if (g.pageRowsFull || g.queryRowsFull) out.push('', `**Row limit reached** (${[g.pageRowsFull && 'pages', g.queryRowsFull && 'queries'].filter(Boolean).join(' and ')}): rows past the limit are missing.`)
@@ -311,7 +318,10 @@ export function renderSummary(entry, previous, extras = {}) {
     const i = entry.index, p = previous?.index ?? null
     out.push('## URL Inspection', '',
       `${i.read} of ${i.urls} sitemap URLs were read: ${i.pass} PASS, ${i.neutral} NEUTRAL, ${i.fail} FAIL, ${i.other} other; ${i.notRead} not read.${p ? ` Before: ${p.read} of ${p.urls} read, ${p.pass} PASS.` : ''}`, '')
-    if (extras.indexChanges?.length) out.push('Changed since the last snapshot:', ...extras.indexChanges.map(change => `- ${change}`), '')
+    const compare = extras.indexCompare
+    if (compare?.note) out.push(`Not compared with an earlier pass: ${compare.note}.`, '')
+    else if (compare?.changes.length) out.push(`Changed since ${compare.since}:`, ...compare.changes.map(change => `- ${change}`), '')
+    else if (compare) out.push(`No verdict changed since ${compare.since}.`, '')
   }
   if (entry.firstParty) out.push('## First-party site analytics', '', `${entry.firstParty.days} days: ${num(entry.firstParty.pageViews)} page views, ${num(entry.firstParty.visitorDays)} visitor-days (automated and internal lines left out).`, '')
   if (extras.topQueries?.length) out.push('## Top queries', '', '| Query | Clicks | Impressions | Position |', '|---|---:|---:|---:|', ...extras.topQueries.map(row => `| ${row.keys[0].replace(/\|/g, '\\|')} | ${row.clicks} | ${row.impressions} | ${row.position.toFixed(1)} |`), '')

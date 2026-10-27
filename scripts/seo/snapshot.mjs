@@ -26,7 +26,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   GSC_SITE, SITE_ORIGIN, canonicalPath, describeInspection, gscWindow, indexChanges, indexCell, launchCell, pagesByPath,
-  parseSitemap, previousFor, readSeries, renderSummary, seriesEntry, snapshotId, sourceOfPath, summarizeGsc,
+  parseSitemap, previousFor, readSeries, renderSummary, seriesAppend, seriesEntry, snapshotId, sourceOfPath, summarizeGsc,
   summarizeInspections, updateTracker,
 } from './snapshot-lib.mjs'
 
@@ -203,8 +203,10 @@ async function main(argv) {
     else { firstPartyRaw = attempt.value; firstParty = { days: FIRST_PARTY_DAYS, pageViews: attempt.value.site.value.pageViews, visitorDays: attempt.value.site.value.visitorDays } }
   }
 
-  const index = inspections ? summarizeInspections(inspections) : null
-  if (index && index.notRead) notRead['URL Inspection'] = `${index.notRead} of ${index.urls} URLs were not read: ${[...inspections].filter(([, r]) => r.error).slice(0, 3).map(([p, r]) => `${p} (${r.error.slice(0, 80)})`).join('; ')}`
+  const passCounts = inspections ? summarizeInspections(inspections) : null
+  if (passCounts && passCounts.notRead) notRead['URL Inspection'] = `${passCounts.notRead} of ${passCounts.urls} URLs were not read: ${[...inspections].filter(([, r]) => r.error).slice(0, 3).map(([p, r]) => `${p} (${r.error.slice(0, 80)})`).join('; ')}`
+  // A pass that read no URL at all is not an index reading: it stays out of the series, so it cannot become the next baseline.
+  const index = passCounts && passCounts.read > 0 ? passCounts : null
 
   // What this snapshot is compared with. A series file or earlier snapshot that cannot be read costs the comparison, not the snapshot.
   let series = { entries: [], bad: 0 }
@@ -212,11 +214,13 @@ async function main(argv) {
   if (series.bad) notRead['Series file'] = `${series.bad} line(s) of ${seriesFile} are not JSON and were skipped`
   const previous = previousFor(series.entries, window.days)
   let before = null
+  let compareNote = previous.indexId ? null : 'there is no earlier URL Inspection pass in the series'
   if (previous.indexId) {
     try {
       const file = join(root, 'snapshots', previous.indexId, 'inspection.json')
-      if (existsSync(file)) before = new Map(Object.entries(JSON.parse(readFileSync(file, 'utf8'))).map(([path, r]) => [path, r.inspection?.verdict ?? null]))
-    } catch (error) { notRead['Earlier index status'] = reason(error) }
+      if (!existsSync(file)) throw new Error(`${previous.indexId} has no inspection.json`)
+      before = new Map(Object.entries(JSON.parse(readFileSync(file, 'utf8'))).map(([path, r]) => [path, r.inspection?.verdict ?? null]))
+    } catch (error) { compareNote = reason(error); notRead['Earlier index status'] = compareNote }
   }
 
   const entry = seriesEntry({ id, takenAt: now.toISOString(), sourceCommit, dirty, scriptSha256, route, window, gsc, index, firstParty, notRead })
@@ -231,13 +235,13 @@ async function main(argv) {
 
   // The summary and the series line are written before the tracker, so a tracker that has changed shape cannot lose them.
   const summary = renderSummary(entry, previous, {
-    indexChanges: inspections ? indexChanges(inspections, before) : [],
+    indexCompare: inspections ? (before ? { since: previous.indexId, changes: indexChanges(inspections, before) } : { note: compareNote }) : undefined,
     topQueries: gscRaw ? byImpressions(gscRaw.query).slice(0, 10) : [],
     topPages: gscRaw ? byImpressions(gscRaw.page).slice(0, 10) : [],
   })
   writeFileSync(join(dir, 'summary.md'), summary)
-  const gotNumbers = Boolean(gsc || index)
-  if (gotNumbers) appendFileSync(seriesFile, `${JSON.stringify(entry)}\n`)
+  const gotNumbers = Boolean(gsc || index || firstParty)
+  if (gotNumbers) appendFileSync(seriesFile, seriesAppend(existsSync(seriesFile) ? readFileSync(seriesFile, 'utf8') : '', entry))
 
   let trackerNote = ''
   if (options.updateTracker) {
