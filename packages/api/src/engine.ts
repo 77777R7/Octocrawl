@@ -167,6 +167,8 @@ export class SessionsUnavailableError extends Error {
 /** A scrape's context, and a fastMode its caller pinned: the answer and the scrape record then say the pin's reason. */
 export interface ScrapeContext extends ExecutionContext {
   fastModePin?: FastModePin
+  /** Told the call's whole run, its trace and ladder trace whatever `debug` asks, before the answer is shaped; never part of it (hosted's phase line). */
+  observe?: (run: ScrapeRun, scrapeId: string) => void
 }
 
 /** What a handoff tells its caller while it waits, and what ends it. */
@@ -1863,6 +1865,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // A pinned fastMode's reason replaces the engine's "retry without fastMode" in the answer and the record alike.
       const pinned = context.fastModePin === undefined ? [] : pinnedFastModeHints(run.agentHints ?? [], context.fastModePin)
       const full: ScrapeRun = pinned.length === 0 ? run : { ...run, agentHints: pinned }
+      // An observer that throws does not cost the caller the page.
+      try { context.observe?.(full, scrapeId) } catch { /* the observer's own fault */ }
       const response = await prepareScrapeResponse(full, req, modelGated(shapeScope, context), null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
       if (!record) return response
       // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
