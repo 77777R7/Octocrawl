@@ -166,6 +166,38 @@ describe('hosted job routes', () => {
     expect((await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', verify: { checks: [{ type: 'markdownIncludes', text: 'Example' }] } })).status).toBe(202)
   })
 
+  describe('refuses at the start, by name, what the worker\'s engine would refuse at the first slice (stage H W0)', () => {
+    const refusedAtStart = async (cases: ReadonlyArray<readonly [string, Record<string, unknown>]>, code: string, error: RegExp) => {
+      const { call, store, enqueued } = await start()
+      for (const [path, body] of cases) {
+        const response = await call('POST', path, 'oc_one', body)
+        expect(response.status, path).toBe(400)
+        const refused = await response.json() as { code: string; error: string }
+        expect(refused.code, path).toBe(code)
+        expect(refused.error, path).toMatch(error)
+      }
+      expect(store.jobs.size).toBe(0)
+      expect(enqueued).toEqual([])
+    }
+    const both = (body: Record<string, unknown>) => [['/v1/crawl', { url: 'https://example.com/', ...body }], ['/v1/batches', { urls: urls(1), ...body }]] as const
+
+    it('a maxFileBytes above the hosted file cap', async () => {
+      await refusedAtStart(both({ maxFileBytes: 5 * 1024 * 1024 + 1 }), 'invalid_request', /^maxFileBytes must be at most 5242880/)
+    })
+    it('an includeTags selector Octocrawl does not match', async () => {
+      await refusedAtStart(both({ includeTags: ['div:has(p)'] }), 'unsupported_parameter', /^includeTags entry uses .*: div:has\(p\)/)
+    })
+    it('a tableRowsMin check without the tables format', async () => {
+      await refusedAtStart(both({ verify: { checks: [{ type: 'tableRowsMin', tableIndex: 0, min: 1, columns: [0] }] } }), 'invalid_request', /^formats must include tables when verify uses tableRowsMin/)
+    })
+    it('a list format whose itemSelector Octocrawl does not match', async () => {
+      await refusedAtStart(both({ formats: ['markdown', { type: 'list', itemSelector: 'li:has(a)' }] }), 'unsupported_parameter', /^list itemSelector uses .*: li:has\(a\)/)
+    })
+    it('a Markdown check without the markdown format', async () => {
+      await refusedAtStart(both({ formats: ['html'], verify: { checks: [{ type: 'markdownIncludes', text: 'Example' }] } }), 'invalid_request', /^formats must include markdown when verify checks Markdown/)
+    })
+  })
+
   it('lowers a crawl\'s maxConcurrency to the pages a slice reads at once, as a batch\'s is, rather than fail its first slice (stage H W0)', async () => {
     const { call, store } = await start()
     const over = await (await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', maxConcurrency: JOB_WORKER_COUNT + 6 })).json() as { taskId: string }

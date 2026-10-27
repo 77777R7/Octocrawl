@@ -338,6 +338,24 @@ describe('hosted job worker', () => {
     expect(expiries).toEqual([id])
   })
 
+  it('fails a job whose stored request the engine refuses at its first slice at once, by its reason, with nothing read or charged (stage H W0)', async () => {
+    const { origin, seen, store, credits, expiries, deps, create, queue } = await setup()
+    const lines: string[] = []
+    deps.log = (line) => lines.push(line)
+    for (const [kind, request] of [['batch', parseBatchStartRequest({ urls: [`${origin}/a`], fastMode: true, includeTags: ['div:has(p)'] })], ['crawl', parseCrawlStartRequest({ url: `${origin}/`, fastMode: true, includeTags: ['div:has(p)'] })]] as const) {
+      const id = await create(request, kind)
+      queue.splice(queue.findIndex((task) => task.jobId === id), 1)
+      expect(await runJobSlice(deps, id, 0), kind).toEqual({ status: 200, outcome: 'failed' })
+      expect(await store.get(id), kind).toMatchObject({ status: 'failed', failureReason: 'request_refused', failedAttempts: 0, lease: null, counts: { pages: 0, errors: 0 } })
+      expect(expiries.at(-1), kind).toBe(id)
+    }
+    expect(queue).toEqual([])
+    expect(seen).toEqual([])
+    expect(await credits.balance('account-1', NOW)).toBe(1_000)
+    const refusals = lines.map((line) => JSON.parse(line) as { event?: string; message?: string }).filter((line) => line.event === 'hosted_job_request_refused')
+    expect(refusals.map((line) => line.message)).toEqual([expect.stringMatching(/^includeTags entry uses .*: div:has\(p\)/), expect.stringMatching(/^includeTags entry uses .*: div:has\(p\)/)])
+  })
+
   it('reads what the credits allow, then fails the job for credits; and stops at the job\'s maxCredits', async () => {
     const short = await setup({ balance: 3, limits: { slicePages: 5 } })
     const id = await short.create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/'].map((path) => `${short.origin}${path}`), fastMode: true }))

@@ -168,6 +168,8 @@ The API takes the same variables with `--update-env-vars` on its next release. V
 
 `GET /v1/crawl/active` lists the account's crawl jobs that are `queued` or `running`, oldest first, as `{ crawls: [{ id, url, status, startedAt, pagesFetched }] }`: a local server's list of the crawls it runs, in a job's statuses and without the options each was started with (stage H W0; the MCP tool `list_active_crawls`). It reads the same list, and a call without an account's key is 403.
 
+A start checks its request on an engine set up like the worker's (`jobEngineOptions` in `hostedApi.ts`; the engine's `checkCrawlStart` and `checkBatchStart`). It refuses with 400 whatever the job's first slice would refuse, and names the problem: a `maxFileBytes` above 5 MiB, or a selector Octocrawl does not match in `includeTags`, `excludeTags`, an attributes format or a list format. It also refuses a check whose format is missing (`tableRowsMin` without `tables`, a Markdown check without `markdown`) and a regular-expression check. Such a start used to answer 202, and the job then failed at its first slice. If the worker's engine still refuses a stored request at the first slice, the job fails at once with `failureReason: request_refused`, and the worker logs the message as `hosted_job_request_refused`. Before, the slice was retried until the job ended `delivery_failed`.
+
 ### Job webhooks
 
 A start may name a webhook for the job's end (H2 W1–W4): `"webhook": "https://…"` or `"webhook": { "url": "https://…", "events": ["completed", "failed", "cancelled"], "metadata": { … } }`.
@@ -517,7 +519,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `crawl` `onlyMainContent` | Supported |  |
 | `crawl` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
 | `crawl` `timeout` | Supported |  |
-| `crawl` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). |
+| `crawl` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). REST takes a larger value and the start refuses it by name. |
 | `crawl` `includeTags` | Supported |  |
 | `crawl` `excludeTags` | Supported |  |
 | `crawl` `headers` | Supported |  |
@@ -541,7 +543,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `batch_scrape` `onlyMainContent` | Supported |  |
 | `batch_scrape` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
 | `batch_scrape` `timeout` | Supported |  |
-| `batch_scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). |
+| `batch_scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). REST takes a larger value and the start refuses it by name. |
 | `batch_scrape` `includeTags` | Supported |  |
 | `batch_scrape` `excludeTags` | Supported |  |
 | `batch_scrape` `headers` | Supported |  |

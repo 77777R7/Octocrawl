@@ -275,6 +275,18 @@ describe('hosted job tools over MCP', () => {
     expect(enqueued.map((job) => job.request)).toMatchObject([{ maxConcurrency: 2 }])
   })
 
+  it('refuses at a job tool\'s start, by name, a selector the worker\'s engine would refuse at the first slice (stage H W0)', async () => {
+    const { connect, store, enqueued } = await start()
+    const client = await connect('oc_account')
+    for (const [name, args] of [['crawl', { url: 'https://example.com/' }], ['batch_scrape', { urls: ['https://example.com/'] }]] as const) {
+      const result = await client.callTool({ name, arguments: { ...args, includeTags: ['div:has(p)'] } })
+      expect(result.isError, name).toBe(true)
+      expect(text(result), name).toMatch(/^unsupported_parameter: includeTags entry uses .*: div:has\(p\)/)
+    }
+    expect(store.jobs.size).toBe(0)
+    expect(enqueued).toEqual([])
+  })
+
   it('refuses a webhook passed to a job tool anyway, so its secret never reaches the transcript', async () => {
     const { connect, enqueued } = await start()
     const client = await connect('oc_account')

@@ -247,6 +247,13 @@ export interface ApiEngine {
    * one's answer with `replayed: true` and starts nothing.
    */
   startBatch(req: ParsedBatchStartRequest): Promise<BatchAccepted>
+  /**
+   * Throws the RequestError startCrawl would answer the request with before it creates anything, and creates nothing: a
+   * hosted job's start checks its request on an engine configured as the worker's, which starts it at the job's first slice.
+   */
+  checkCrawlStart(req: ParsedCrawlStartRequest): void
+  /** The same for startBatch. A refusal that depends on the server's state (a batch limit, a submission in progress) is not made. */
+  checkBatchStart(req: ParsedBatchStartRequest): void
   getBatch(taskId: string): Promise<BatchStatusResponse | null>
   getBatchItems(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
   /**
@@ -2060,6 +2067,43 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     try { return await operation } finally { activeScrapes.delete(operation) }
   }
 
+  /** What startCrawl refuses before anything is created or fetched; the job's webhook, checked, when it has one. */
+  const crawlStartChecks = (req: ParsedCrawlStartRequest): ReturnType<typeof jobWebhooks.check> => {
+    checkRobotsOverride('ignoreRobotsTxt', req.ignoreRobotsTxt)
+    checkFileCap(req)
+    checkSelectors(req)
+    checkAttributeSelectors(req.formats)
+    checkListSelectors(req.formats)
+    checkVerificationFormats(req)
+    checkHostedOptions(req)
+    checkAccessChoice(req)
+    const webhookConfig = jobWebhooks.check(req.webhook)
+    if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
+      throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
+    }
+    // A crawl may lower its parallelism below the service's workers, never raise it.
+    if (req.maxConcurrency != null && req.maxConcurrency > workerCount) {
+      throw new RequestError(`maxConcurrency must be at most ${workerCount} on this service`)
+    }
+    return webhookConfig
+  }
+  /** What startBatch refuses before anything is counted, created or fetched; the webhook and the canonical URLs, checked. */
+  const batchStartChecks = (req: ParsedBatchStartRequest): { webhookConfig: ReturnType<typeof jobWebhooks.check>; canonical: string[] } => {
+    checkFileCap(req)
+    checkSelectors(req)
+    checkAttributeSelectors(req.formats)
+    checkListSelectors(req.formats)
+    checkVerificationFormats(req)
+    checkRobotsOverride('robotsOverrides', req.robotsOverrides)
+    checkHostedOptions(req)
+    checkAccessChoice(req)
+    checkMyBrowser(req)
+    const webhookConfig = jobWebhooks.check(req.webhook)
+    const canonical = req.urls.map(url => canonicalizeUrl(url))
+    if (canonical.some(url => url === null) || new Set(canonical).size !== canonical.length) throw new RequestError('urls must be unique after canonicalization')
+    return { webhookConfig, canonical: canonical as string[] }
+  }
+
   return {
     scrape: (req, context = {}, hooks = {}) => runScrape(req, context, true, hooks),
 
@@ -2085,23 +2129,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
     },
 
+    checkCrawlStart(req) { crawlStartChecks(req) },
+
+    checkBatchStart(req) { batchStartChecks(req) },
+
     async startCrawl(req) {
-      checkRobotsOverride('ignoreRobotsTxt', req.ignoreRobotsTxt)
-      checkFileCap(req)
-      checkSelectors(req)
-      checkAttributeSelectors(req.formats)
-      checkListSelectors(req.formats)
-      checkVerificationFormats(req)
-      checkHostedOptions(req)
-      checkAccessChoice(req)
-      const webhookConfig = jobWebhooks.check(req.webhook)
-      if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
-        throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
-      }
-      // A crawl may lower its parallelism below the service's workers, never raise it.
-      if (req.maxConcurrency != null && req.maxConcurrency > workerCount) {
-        throw new RequestError(`maxConcurrency must be at most ${workerCount} on this service`)
-      }
+      const webhookConfig = crawlStartChecks(req)
       // A retried start is answered from the record before anything is created or fetched.
       const submission = claimSubmission<CrawlAccepted>(req)
       if (submission.replay !== undefined) return submission.replay
@@ -2181,24 +2214,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
     async startBatch(req) {
       if (batchStartInProgress) throw new RequestError('another batch submission is in progress')
-      checkFileCap(req)
-      checkSelectors(req)
-      checkAttributeSelectors(req.formats)
-      checkListSelectors(req.formats)
-      checkVerificationFormats(req)
-      checkRobotsOverride('robotsOverrides', req.robotsOverrides)
-      checkHostedOptions(req)
-      checkAccessChoice(req)
-      checkMyBrowser(req)
-      const webhookConfig = jobWebhooks.check(req.webhook)
+      const { webhookConfig, canonical } = batchStartChecks(req)
       batchStartInProgress = true
       try {
-      const canonical = req.urls.map(url => canonicalizeUrl(url))
-      if (canonical.some(url => url === null) || new Set(canonical).size !== canonical.length) throw new RequestError('urls must be unique after canonicalization')
       // A retried submission is answered from the record before anything is counted, created or fetched; an append creates no task, and appendToBatch counts it against the batch limit only when it runs a completed batch again.
       const submission = claimSubmission<BatchAccepted>(req)
       if (submission.replay !== undefined) return submission.replay
-      if (req.appendToId !== undefined) return await appendToBatch(req, canonical as string[], submission)
+      if (req.appendToId !== undefined) return await appendToBatch(req, canonical, submission)
       if (options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
         throw new RequestError('active batch limit reached')
       }

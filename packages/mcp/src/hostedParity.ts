@@ -155,9 +155,13 @@ const SCRAPE_PAGE_OPTIONS = {
   storeInCache: cacheOption('not_honoured', ' Taken, and nothing is stored.'),
   lockdown: cacheOption('not_honoured', ' Taken, and always failed/cache_miss.'),
 } as const satisfies Record<string, OptionEntry>
-/** A job's page options: its timeout is the local one, and a field the start refuses is refused by name (hostedJobRoutes.ts). */
+/**
+ * A job's page options: its timeout is the local one, and a field the start refuses is refused by name (hostedJobRoutes.ts),
+ * as is a value the worker's engine would refuse at the job's first slice (its file cap, its selectors, the formats a check needs).
+ */
 const JOB_PAGE_OPTIONS = {
   ...SCRAPE_PAGE_OPTIONS,
+  maxFileBytes: { status: 'limited', note: `${FILE_CAP} REST takes a larger value and the start refuses it by name.`, over: { value: HOSTED_MAX_FILE_BYTES + 1, sent: 'refused' } },
   timeout: supported,
   maxAge: cacheOption('refused'),
   minAge: cacheOption('refused'),
