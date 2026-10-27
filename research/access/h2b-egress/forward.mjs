@@ -4,6 +4,10 @@
 //   direct     no upstream: the forwarder connects to the site itself (Cloud Run's own Google egress).
 //   webshare   H2B_UPSTREAMS is the rotating residential gateway URL (`http://<user>-us-rotate:<password>@host:port`);
 //              each call gets a fresh numeric session id in place of `rotate` (Webshare's sticky session).
+//   list       H2B_UPSTREAMS is a proxy list, one `ip:port:user:password` per line with no IP twice (Webshare's
+//              Direct connection list for its datacenter proxies), shuffled once with LIST_SEED; each call takes the
+//              next proxy from position H2B_LIST_START on (required: each window has its own positions), and the time
+//              between calls keeps the last call's proxy. The list never wraps: a call past its end is refused.
 // The call's exit is read through the call's own route at its first tunnel and again when it ends (api.ipify.org),
 // so an exit that moved inside a call shows. Control is a Unix socket only this user can open (curl --unix-socket):
 //   POST /call?task=<id>&n=<k>   start a call; POST /end   end it (echo, counters); GET /calls   every call's counters.
@@ -20,6 +24,7 @@ const control = process.env.H2B_CONTROL ?? '/tmp/h2b-forward.sock'
 const ECHO_HOST = 'api.ipify.org'
 const CONNECT_TIMEOUT_MS = 30_000
 const ECHO_TIMEOUT_MS = 20_000
+const LIST_SEED = 20261027
 
 /** The gateway from H2B_UPSTREAMS. A value that does not parse is refused without being repeated: it holds a login. */
 function gateway() {
@@ -31,27 +36,78 @@ function gateway() {
   if (!/-rotate$/.test(username)) throw new Error('the Webshare gateway username must end in -rotate (its value is not shown)')
   return { host: url.hostname, port: Number(url.port || 80), username, password: decodeURIComponent(url.password) }
 }
-if (style !== 'direct' && style !== 'webshare') throw new Error(`H2B_SESSION_STYLE must be direct or webshare, not ${style}`)
-const base = style === 'webshare' ? gateway() : null
+/** The same order on every run: a seeded Fisher–Yates shuffle (mulberry32). */
+function shuffled(items, seed) {
+  let state = seed >>> 0
+  const next = () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let t = Math.imul(state ^ (state >>> 15), state | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  const out = [...items]
+  for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(next() * (i + 1)); [out[i], out[j]] = [out[j], out[i]] }
+  return out
+}
 
-/** The route of a new call: null for direct, else the gateway with this call's session; `label` is what may be printed. */
-function newRoute() {
+/** The proxy list from H2B_UPSTREAMS. A line that does not parse is named by its number alone: it holds a login. */
+function proxyList() {
+  const lines = (process.env.H2B_UPSTREAMS ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const entries = lines.map((line, i) => {
+    const match = /^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5}):([^:\s]+):(\S+)$/.exec(line)
+    if (match === null) throw new Error(`H2B_UPSTREAMS line ${i + 1} is not ip:port:user:password (its value is not shown)`)
+    return { host: match[1], port: Number(match[2]), username: match[3], password: match[4] }
+  })
+  if (entries.length === 0) throw new Error('H2B_UPSTREAMS holds no proxy line')
+  const hosts = new Set(entries.map((entry) => entry.host)).size
+  if (hosts !== entries.length) throw new Error(`H2B_UPSTREAMS has ${entries.length} lines but ${hosts} distinct IPs: one IP would serve two calls`)
+  return shuffled(entries, LIST_SEED)
+}
+if (style !== 'direct' && style !== 'webshare' && style !== 'list') throw new Error(`H2B_SESSION_STYLE must be direct, webshare or list, not ${style}`)
+const base = style === 'webshare' ? gateway() : null
+const list = style === 'list' ? proxyList() : null
+const listStart = list === null ? null : Number(process.env.H2B_LIST_START ?? Number.NaN)
+if (list !== null && !(Number.isInteger(listStart) && listStart >= 0 && listStart < list.length)) {
+  throw new Error(`H2B_LIST_START must be set to a position in the list (0 to ${list.length - 1}), not ${process.env.H2B_LIST_START ?? 'unset'}`)
+}
+let listTaken = 0
+let listLast = null
+
+/**
+ * The route of a new call: null for direct, the gateway with this call's session, or the list's next proxy; `label` is
+ * what may be printed. Idle time between calls takes no proxy from the list: it keeps the last call's. A call past the
+ * list's end gets a route that refuses every connection, so no proxy ever serves two calls.
+ */
+function newRoute(task) {
+  if (list !== null) {
+    if (task === 'idle' && listLast !== null) return listLast
+    const index = listStart + listTaken
+    if (index >= list.length) return { upstream: null, refuse: 'list_exhausted', label: { exit: 'list', index: null, proxy: null } }
+    const entry = list[index]
+    const route = { upstream: entry, label: { exit: 'list', index, proxy: `${entry.host}:${entry.port}` } }
+    if (task !== 'idle') { listTaken++; listLast = route }
+    return route
+  }
   if (base === null) return { upstream: null, label: { exit: 'direct' } }
   const session = String(randomInt(100_000_000, 1_000_000_000))
   return { upstream: { ...base, username: base.username.replace(/-rotate$/, `-${session}`) }, label: { exit: 'webshare', session, gateway: `${base.host}:${base.port}` } }
 }
 const authOf = (upstream) => `Basic ${Buffer.from(`${upstream.username}:${upstream.password}`).toString('base64')}`
-/** A proxy's reason header, with the account's user name taken out in case the proxy echoes it. */
+// What a proxy might echo back in a refusal: the residential account's name, or the list's user names and passwords.
+// The longest first, so a login that contains another is never left half shown.
+const logins = (base !== null
+  ? [[base.username.replace(/-[^-]+-rotate$/, ''), '<user>'], [base.password, '<password>']]
+  : (list ?? []).flatMap((entry) => [[entry.username, '<user>'], [entry.password, '<password>']])
+).sort((a, b) => b[0].length - a[0].length)
+/** A proxy's reason header, with any login taken out in case the proxy echoes it. */
 function scrub(text) {
-  if (base === null) return text
-  const user = base.username.replace(/-[^-]+-rotate$/, '')
-  return user.length < 3 ? text : text.split(user).join('<user>')
+  return logins.reduce((out, [secret, mask]) => (secret.length < 3 ? out : out.split(secret).join(mask)), text)
 }
 
 const calls = []
 let current = null
 function newCall(task, n) {
-  const route = newRoute()
+  const route = newRoute(task)
   const call = {
     task, n, startedAt: new Date().toISOString(), endedAt: null, route, ...route.label,
     tunnels: 0, http: 0, up: 0, down: 0, statuses: {}, errors: {}, refusals: [], connectMs: [], hosts: new Map(),
@@ -79,6 +135,7 @@ function splitTarget(target) {
  */
 function openTunnel(call, target) {
   return new Promise((resolve) => {
+    if (call.route.refuse !== undefined) { resolve({ socket: null, status: call.route.refuse, ms: 0 }); return }
     const started = Date.now()
     const [host, portText] = splitTarget(target)
     const upstream = call.route.upstream
@@ -154,6 +211,7 @@ const server = http.createServer((req, res) => {
   call.http++
   let target
   try { target = new URL(req.url) } catch { res.writeHead(400); res.end(); return }
+  if (call.route.refuse !== undefined) { call.errors[call.route.refuse] = (call.errors[call.route.refuse] ?? 0) + 1; res.writeHead(502); res.end(); return }
   const upstream = call.route.upstream
   const options = upstream === null
     ? { host: target.hostname, port: Number(target.port || 80), method: req.method, path: `${target.pathname}${target.search}`, headers: req.headers }
@@ -187,7 +245,7 @@ server.on('connect', async (req, client, head) => {
   count(call, host, opened.overheadUp ?? 0, opened.overheadDown ?? 0)
   if (opened.socket === null) {
     if (call.refusals.length < 5) call.refusals.push({ host, status: opened.status, ...(opened.reason ? { reason: opened.reason } : {}) })
-    if (opened.status.startsWith('error:') || opened.status === 'connect_timeout') call.errors[opened.status] = (call.errors[opened.status] ?? 0) + 1
+    if (!/^\d{3}$/.test(opened.status)) call.errors[opened.status] = (call.errors[opened.status] ?? 0) + 1
     client.end(`HTTP/1.1 ${/^\d{3}$/.test(opened.status) ? opened.status : '502'} Upstream refused\r\n\r\n`)
     return
   }
@@ -226,5 +284,6 @@ const controlServer = http.createServer(async (req, res) => {
 rmSync(control, { force: true })
 controlServer.listen(control, () => chmodSync(control, 0o600))
 server.listen(port, '127.0.0.1', () => {
-  console.log(JSON.stringify({ forwarder: { port, style, hosts: base === null ? [] : [`${base.host}:${base.port}`] } }))
+  const listed = list === null ? {} : { proxies: list.length, start: listStart, seed: LIST_SEED }
+  console.log(JSON.stringify({ forwarder: { port, style, hosts: base === null ? [] : [`${base.host}:${base.port}`], ...listed } }))
 })

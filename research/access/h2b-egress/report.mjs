@@ -1,8 +1,9 @@
 // H2b report: the record's tables from the executions' log lines (cloud.sh logs), one file per execution named
 // w<window>-<job>.jsonl, the windows' robots verdicts (robots-w<window>.jsonl) and prices.json, all in one directory:
-//   prices.json  { "res_a": { "perGbUsd": n, "basis": "…" } }: the residential plan's price per GB and where it came from
-//                (without it the residential byte cost, and so its $ per page, stays unknown; google has no byte price)
+//   prices.json  { "res_a": { "perGbUsd": n, "basis": "…" }, "dc": { … } }: each paid plan's price per GB and where it
+//                came from (without it that arm's byte cost, and so its $ per page, stays unknown; google has no byte price)
 // Percentiles are nearest rank. Unknown stays unknown: a missing price, answer or counter is printed as "unknown".
+// A residential exit is someone's own connection, so its address is printed to its /24 alone (a.b.c.x).
 // Usage: node research/access/h2b-egress/report.mjs <directory>
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -106,14 +107,15 @@ for (const id of ids) {
     if (t === undefined) return 'not run'
     if (t.skipped) return 'robots'
     if (t.verified) return `✓ ${t.finalRung ?? t.route ?? ''}${t.challengeWait?.outcome === 'cleared' ? ` (cleared ${fmt(t.challengeWait.ms / 1000, 1)} s)` : ''}`
-    const refusal = (t.bytes?.refusals ?? []).find((x) => /^\d{3}$/.test(x.status))
+    const refusal = (t.bytes?.refusals ?? []).find((x) => /^\d{3}$/.test(x.status) || x.status === 'list_exhausted')
     return `✗ ${refusal ? `exit refused ${refusal.status}` : (t.challengeWait?.outcome === 'still_gated' ? `gated ${fmt(t.challengeWait.ms / 1000, 0)} s` : (t.reason ?? t.status ?? 'no answer'))}`
   })
   out.push(`| ${id} | ${cells.join(' | ')} |`)
 }
 out.push('')
+const shown = (arm, ip) => (typeof ip !== 'string' ? 'unknown' : arm === 'res_a' ? ip.replace(/\.\d+$/, '.x') : ip)
 for (const r of rows) {
   const sc = r.run.selfcheck
-  out.push(`- w${r.run.window} ${r.run.arm} ${r.run.cpus} vCPU: self-check ${sc === null ? 'missing' : sc.ok ? 'passed' : `failed (${sc.failed.join(', ')})`}; Chrome control exit ${sc?.egressControl?.ip ?? 'unknown'}; API control exit ${r.run.apiControl?.ip ?? 'unknown'}; bytes through the exit ${mb(r.bytesTotal)} MB; Chrome-rung cost ${r.costTotal === null ? 'unknown' : `$${fmt(r.costTotal, 4)}`}.`)
+  out.push(`- w${r.run.window} ${r.run.arm} ${r.run.cpus} vCPU: self-check ${sc === null ? 'missing' : sc.ok ? 'passed' : `failed (${sc.failed.join(', ')})`}; Chrome control exit ${shown(r.run.arm, sc?.egressControl?.ip)}; API control exit ${r.run.apiControl?.ip ?? 'unknown'}; bytes through the exit ${mb(r.bytesTotal)} MB; Chrome-rung cost ${r.costTotal === null ? 'unknown' : `$${fmt(r.costTotal, 4)}`}.`)
 }
 console.log(out.join('\n'))

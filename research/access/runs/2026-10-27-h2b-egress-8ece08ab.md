@@ -1,4 +1,4 @@
-# H2b: a residential exit for a hosted real-Chrome rung on Cloud Run, 2026-10-27
+# H2b: residential and datacenter exits for a hosted real-Chrome rung on Cloud Run, 2026-10-27
 
 Label: `research`. Stage H, step H2b of the [current phase](../../../ROADMAP.md#current-phase-local-first-then-hosted-parity-from-2026-10-27) (decision 17, 2026-10-27): hosted access gets "a real Chrome rung on Octocrawl's servers (headed Chrome under Xvfb on Cloud Run, from G4), with an egress chosen by a comparison of residential or ISP proxy providers".
 
@@ -12,7 +12,7 @@ Howard approved this comparison on 2026-10-27 (D2) with these terms:
 - Google's own egress verified 3/16 and 1/16;
 - Webshare's rotating residential pool verified 9/16 and 8/16, of which about 5 per round came from the `installed_chrome` rung itself.
 
-This comparison measures what G4 left unknown for that residential exit, in the layout the hosted plan proposes:
+This comparison measures what G4 left unknown for that residential exit, and the same for a datacenter exit, in the layout the hosted plan proposes:
 - how many tasks the real-Chrome rung verifies when only it uses the exit;
 - how many bytes a page costs on the exit;
 - how long challenges take to clear under the 10 s cap O1 set (#722; G4 saw clears at 14–20 s under the old 19 s wait);
@@ -21,9 +21,14 @@ This comparison measures what G4 left unknown for that residential exit, in the 
 ## Design (written and committed before any run)
 
 Howard's decisions on this design, 2026-10-27, through the coordinating session:
-- **Nothing is bought.** The comparison runs two arms: Google's own egress as the control, and Howard's existing Webshare residential plan. The datacenter, static ISP and second residential (Decodo) arms planned earlier are not measured, by Howard's choice.
-- **Only the real-Chrome rung uses the residential exit,** through the `W2L_CHROME_PATH` wrapper, with no product-code change.
-- **The residential arm sends only the tasks robots.txt allows.** The google control arm sends all 21.
+- **Two arms run first:** Google's own egress as the control, and Howard's existing Webshare residential plan (Rotating Residential, $9.00 a month for 3 GB, renewing 2026-11-13; 1.28 GB of it used on 2026-10-27, so about 1.72 GB left).
+- **A datacenter arm is ready but off.** Its code is in the harness: the forwarder's `list` style, `save-list.mjs`, and `cloud.sh` with `H2B_DC=1`. After window 1, Howard decides from the residential arm's results whether to buy Webshare's Shared Datacenter plan (100 US IPs, $2.99 a month) and add it. Until then nothing is bought and the arm does not run.
+- **The static ISP and second residential (Decodo) arms** planned earlier are not measured, by Howard's choice.
+- **Only the real-Chrome rung uses a paid exit,** through the `W2L_CHROME_PATH` wrapper, with no product-code change.
+- **The paid arms send only the tasks robots.txt allows.** The google control arm sends all 21.
+- **Residential bandwidth cap.** The CAPTCHA and local experiments share the residential plan, so the residential rounds of both windows should take no more than about 1.2 GB. The run stops and reports if the bytes per page measured would take the two windows past that.
+
+This design was first committed with two arms (`5d28562c`). The datacenter arm's code was added the same day, before any run, and is left off by Howard's decision.
 
 ### What is fixed
 
@@ -61,7 +66,7 @@ The hosted plan keeps the http, compatible-transport and bundled-browser rungs i
   - The wrapper replaces the rung's `--proxy-server=direct://` with the local metering forwarder.
   - It passes every other flag, `--version` and the profile unchanged, and execs Chrome so the launcher's kill and profile cleanup still apply.
   - It refuses a launch that carries any other `--proxy-server`, so an environment proxy leaking into the run fails loudly instead of being measured.
-- **The forwarder.** `research/access/h2b-egress/forward.mjs` is the only process that sees the residential login, and the installed Chrome is its only client. So every byte it counts is the `installed_chrome` rung's.
+- **The forwarder.** `research/access/h2b-egress/forward.mjs` is the only process that sees the exit's login (the residential gateway's, or the datacenter list's), and the installed Chrome is its only client. So every byte it counts is the `installed_chrome` rung's.
 - **The google arm.** It routes the Chrome through the same forwarder in `direct` mode, which connects to the site itself.
   - So in both arms, Chrome is behind the same local proxy, and only the exit differs.
   - This differs from G4's direct arm, where Chrome ran on `direct://` and could use QUIC. Behind a proxy, Chrome uses no QUIC.
@@ -75,11 +80,13 @@ One exit per task call (ADR 0005: no switching exits inside a session, and no ne
 | --- | --- | --- |
 | `google` (control) | Cloud Run's own egress, through the forwarder in `direct` mode | Google's egress address for the execution |
 | `res_a` | Webshare rotating residential, US, Howard's existing plan: the gateway login in `RESIDENTIAL_PROXY` (`.w2l/access/competitors.env`) that G4 and the CAPTCHA windows use | A fresh numeric session id per call in place of `-rotate` (`<user>-us-<id>`, Webshare's documented sticky session) |
+| `dc` (off unless Howard adds it after window 1) | Webshare Shared Datacenter, 100 US IPs: the Direct connection list, one `ip:port:user:password` line per IP | One IP per call. The list is shuffled once with a fixed seed (20261027), and each call takes the next IP; the time between calls keeps the last call's. Window *n* starts at position (*n* − 1) × 50, and a round makes at most 22 calls (the self-check and 21 tasks). The list must hold at least 72 distinct IPs, the start is always given, and the list never wraps: a call past its end is refused. So no IP serves two calls |
 
-What Webshare documents, read 2026-10-27 from its help centre and terms:
+What Webshare documents, read 2026-10-27 from its help centre, pricing page and terms:
 - **Sticky sessions.** "Append a numeric session ID to maintain a sticky session". How long a bare id keeps its exit is not documented. Its endpoint generator sets 1 minute to 24 hours.
-- **Restricted targets.** Ticketing is a restricted category on the rotating residential network, so T072 may be refused by the provider. A refusal comes back as `forbidden_host`.
+- **Restricted targets.** Ticketing is a restricted category on the rotating residential network, so T072 may be refused by the provider. A refusal comes back as `forbidden_host`. What the datacenter plan restricts was not checked; a refusal is recorded either way.
 - **Sourcing.** Residential IPs come from "physical user devices" of consenting people, through "our suppliers' pools". The suppliers are not named.
+- **The datacenter plan.** Its IPs are shared with other Webshare customers, and it includes 250 GB a month. Each line of the Direct connection list is one IP. Whether Webshare's backbone gateway with a session id pins a datacenter IP is not documented, so it is not used. The datacenter ASNs are not published.
 - **Private and reserved ranges.** Whether Webshare blocks them is not documented. This comparison does not probe that, because on a residential exit a probe would reach into someone's own network.
 
 **The exit of each call is checked twice.** The forwarder reads `api.ipify.org` through the call's own route when Chrome opens its first tunnel, and again when the call ends.
@@ -94,21 +101,24 @@ What Webshare documents, read 2026-10-27 from its help centre and terms:
 
 Each round runs them through run-set, one call per task (`run-set.mjs --set all --only <task> --access '"enhanced"' --save-responses`), so each call gets its own exit.
 
-**robots.txt.** A hosted server obeys robots.txt for every URL; on 2026-10-27 it refused T049 and B008 for that reason. The residential arm stands in for that server, so it obeys robots.txt too.
+**robots.txt.** A hosted server obeys robots.txt for every URL; on 2026-10-27 it refused T049 and B008 for that reason. The paid arms stand in for that server, so they obey robots.txt too.
 - Before each window, one execution on Cloud Run's own egress (`round.sh` arm `robots`) reads every task's robots.txt with the product's own `RobotsOriginCache` and decision, as the standard identity.
   - A robots.txt that cannot be fetched counts as disallowed (RFC 9309 §2.3.1.4, as the product holds). It is asked once more after 10 s.
-  - A trial from this Mac through Clash on 2026-10-27 timed out on Etsy's and The Economist's robots.txt and got a network error on TikTok's. That is why the verdict is read once per window, from Cloud Run, and shared by both residential rounds.
-- The residential rounds do not send the tasks that verdict disallows. Each such task stays in the denominator as `skipped: robots`, not verified.
+  - A trial from this Mac through Clash on 2026-10-27 timed out on Etsy's and The Economist's robots.txt and got a network error on TikTok's. That is why the verdict is read once per window, from Cloud Run, and shared by the paid rounds.
+- The paid rounds do not send the tasks that verdict disallows. Each such task stays in the denominator as `skipped: robots`, not verified.
 - The google arm sends every task, as G4 did.
 - The record reports each round on all 21 tasks and on the robots-allowed subset, the tasks the window's verdict allows.
 
 **Order.** Each round starts at its own place in the list, so rounds running at the same time are on different sites:
 - the offsets are google 0, residential 7, and the residential round at 4 vCPU 14;
+- the datacenter round, if Howard adds it, takes 14 in a window without the 4 vCPU round;
 - window 2 runs the list backwards with the same offsets.
 
 ### Windows
 
-- **Two windows, on different UTC days.** Each starts with the robots verdict, then starts its rounds at once as parallel executions: google and residential, and in window 1 also residential at 4 vCPU / 8 GiB. Each execution takes one task call at a time.
+- **A smoke execution first.** One google execution of T001 and T046 (window `smoke`) checks the image, the forwarder, the self-check, run-set, the digest and the CPU sampler on Cloud Run, and gives a first count of bytes per call. It uses no paid exit and no list position, and it is reported but not counted in either window.
+- **Two windows, on different UTC days.** Each starts with the robots verdict, then starts its rounds at once as parallel executions: google and residential, and in window 1 also residential at 4 vCPU / 8 GiB. The datacenter round joins only if Howard adds it. Each execution takes one task call at a time.
+- **Watching the residential bytes.** While window 1 runs, the residential rounds' bytes per call are read from their log lines. If their mean would take the residential rounds of both windows past about 1.2 GB, those rounds are stopped and the coordinating session is told. A stopped round is recorded as stopped, with every call it made.
 - **No Mac arm.** The Mac only starts the jobs and reads their logs, so it disturbs none of the Mac measurements queued for the day.
 - **Timing.** The windows keep at least an hour away from the hosted parity window at 2026-10-28 00:02 UTC. That window reads several of the same sites from Google's egress in the same region.
 
@@ -119,7 +129,7 @@ Each round runs them through run-set, one call per task (`run-set.mjs --set all 
 3. The self-check (`selfcheck.mjs`, G4's items) as its own forwarder call:
    - display;
    - the grant's SHA;
-   - DNS for the 21 tasks' hosts and the arm's gateway;
+   - DNS for the 21 tasks' hosts and the residential gateway's name;
    - fonts;
    - Chrome and its version through the wrapper;
    - CDP;
@@ -151,7 +161,7 @@ A round whose self-check or control fails still runs its tasks. It is marked in 
 | The call's exit | the forwarder's echo at the first tunnel and at the end, and whether it moved |
 | CPU | `cpu.mjs`, every 500 ms from `/proc`: the instance's busy CPU-seconds, average and peak utilisation, the share of samples at ≥ 90 %, and lower-bound seconds for the installed Chrome, the bundled Chromium and node |
 
-Bytes are counted on the forwarder's connection to the exit, the traffic Webshare bills, without TCP/IP headers. If Howard reads the plan's used bandwidth before and after a window, that figure is set beside the forwarder's. Otherwise Webshare's own count stays unknown.
+Bytes are counted on the forwarder's connection to the exit, the traffic Webshare bills, without TCP/IP headers. If Howard reads a plan's used bandwidth before and after a window, that figure is set beside the forwarder's. Otherwise Webshare's own count stays unknown.
 
 ### What each round reports
 
@@ -164,57 +174,68 @@ For each round, and for each arm over both windows:
 - CPU at 2 vCPU, and at 4 vCPU for the extra round;
 - $ per verified page.
 
+A residential exit is someone's own connection, so this record gives its address to the /24 alone (`a.b.c.x`). Google's and the datacenter's addresses appear in full.
+
 **$ per verified page.** Over all calls that reached the Chrome rung, verified or not:
 
-> Σ (`chromeRungMs` × the Cloud Run job rate + bytes through the exit × the residential price per GB) ÷ the pages the Chrome rung verified
+> Σ (`chromeRungMs` × the Cloud Run job rate + bytes through the exit × the exit's price per GB) ÷ the pages the Chrome rung verified
 
 - **Cloud Run rates** are G4's, read 2026-10-21 for `asia-southeast1` (Tier 2): $0.0000216 per vCPU-second and $0.0000024 per GiB-second. That is $0.0000528/s at 2 vCPU / 4 GiB and $0.0001056/s at 4 vCPU / 8 GiB.
-- **The residential price per GB** is the monthly price of Howard's Webshare plan divided by its GB. If the plan is not known, the record uses Webshare's 1 GB list price ($3.50/month, read 2026-10-27) and says so.
+- **The residential price per GB** is $3.00: Howard's plan is $9.00 a month for 3 GB (his dashboard, 2026-10-27).
+- **The datacenter price per GB**, if the arm runs, is the plan's monthly price divided by the 250 GB it includes: $2.99 ÷ 250 ≈ $0.012 at the list price, or the price Howard reports. That is the price per GB with the bandwidth all used. The plan is mostly a price per IP, so the record gives its monthly price beside the figure.
 - **The google arm** has no byte price. Its figure is the Cloud Run part alone.
 - **The earlier rungs' cost is left out.** They run in the API service either way.
 
 ### Budget and ledger
 
-Nothing is bought. The ledger holds Cloud Build minutes, Cloud Run seconds, Artifact Registry storage, Secret Manager and Logging, at list prices. The residential bandwidth comes out of Howard's existing Webshare plan; the record gives the bytes the forwarder counted.
+Nothing is bought for the two arms. The residential bandwidth comes out of Howard's existing plan: the record gives the bytes the forwarder counted and their cost at $3.00 per GB. The cloud part is at list prices: Cloud Build minutes, Cloud Run seconds, Artifact Registry storage, Secret Manager and Logging. If Howard adds the datacenter arm, its plan goes in the ledger at the amount he reports.
 
 | Item | Estimate |
 | --- | --- |
 | Cloud Build | one or two builds on e2-highcpu-8, about $0.07 each (G4: two builds, $0.13) |
-| Cloud Run | one robots execution per window, five round executions of 10–25 min, and one short smoke execution: about $0.30–0.60 |
+| Cloud Run | one robots execution per window, five round executions of 10–25 min (three in window 1, two in window 2), and one short smoke execution: about $0.25–0.60 |
 | Artifact Registry, Secret Manager, Logging | under $0.05 |
-| **Total** | **about $0.50–1.50**, against the $40 cap |
+| Residential bandwidth, from Howard's plan | at most about 1.2 GB, so at most about $3.60 of the plan's $9.00 |
+| **Total new spend** | **about $0.40–0.90**, against the $40 cap |
 
 The run stops and asks before any step that would take the total past $40.
 
 ### Credentials
 
-- **The login.** The Webshare gateway login is already on this Mac: `RESIDENTIAL_PROXY` in `~/Code/w2l/.w2l/access/competitors.env`, mode 600. G4 and the CAPTCHA windows use the same entry. Nothing new is pasted.
-- **How it reaches Cloud Run.** Only through one temporary Secret Manager secret, `octocrawl-h2b-res-a`.
-  - It is readable through an IAM binding on the secret itself by the jobs' service account, the default compute account, as in G4.
-  - It becomes `H2B_UPSTREAMS` in the residential jobs.
-  - `cloud.sh secrets` pipes the value from the file to gcloud's stdin, so it never passes through an argument, a printed variable, a log or a record.
-- **What gets printed.** The forwarder prints the gateway host name and each call's session id, never the login.
-  - A value it cannot parse is refused without being repeated.
-  - A proxy's refusal reason is recorded with the account name taken out.
+- **The residential login.** It is already on this Mac: `RESIDENTIAL_PROXY` in `~/Code/w2l/.w2l/access/competitors.env`, mode 600. G4 and the CAPTCHA windows use the same entry. Nothing new is pasted for it.
+- **The datacenter list, if the arm is added.** Howard pastes Webshare's Direct connection list into `node research/access/h2b-egress/save-list.mjs`, run in the Terminal panel, and presses Ctrl-D.
+  - The terminal is in raw mode from before the prompt until the list is saved, so the paste is never shown or left for the shell.
+  - A list that fails its check (a bad line, an IP twice, fewer than 72 IPs) is asked for again. The script prints counts and line numbers only.
+  - It saves the list to `~/Code/w2l/.w2l/access/h2b-dc-proxies.txt`, mode 600.
+- **How they reach Cloud Run.** Only through temporary Secret Manager secrets: `octocrawl-h2b-res-a`, and `octocrawl-h2b-dc` if the datacenter arm is added.
+  - Each is readable through an IAM binding on the secret itself by the jobs' service account, the default compute account, as in G4.
+  - Each becomes `H2B_UPSTREAMS` in its arm's jobs.
+  - `cloud.sh secrets` pipes the residential login from its file to gcloud's stdin, and gcloud reads the list's file itself. Neither passes through an argument, a printed variable, a log or a record.
+- **What gets printed.** The forwarder prints the residential gateway's host name and each call's session id, or the datacenter proxy's address and its place in the list. It never prints a login.
+  - A value it cannot parse is refused without being repeated; a bad list line is named by its number alone.
+  - A proxy's refusal reason is recorded with any user name or password taken out.
 
 ### Commands
 
 `research/access/h2b-egress/cloud.sh` holds every gcloud step. Every step runs on this Mac with `HTTPS_PROXY`, and every call names the project.
 - `build <branch>`: the image.
-- `secrets`: the temporary secret.
-- `jobs <image@digest>`: the three jobs.
+- `secrets`: the temporary secret, and the datacenter's with `H2B_DC=1`.
+- `jobs <image@digest>`: the three jobs, and the datacenter's with `H2B_DC=1`.
+- `smoke <tasks>`: the smoke execution.
 - `robots <window>`: the window's robots.txt verdict.
 - `window <n> <skip>`: every round of a window, at once.
 - `logs <execution> <file>`: an execution's log lines.
-- `cleanup <image>`: deletes the jobs, the secret, the images and the Cloud Build source archives the builds noted.
+- `cleanup <image>`: deletes the jobs, the secrets, the images and the Cloud Build source archives the builds noted.
+
+`node research/access/h2b-egress/save-list.mjs` saves the datacenter list Howard pastes (see Credentials).
 
 `node research/access/h2b-egress/report.mjs <directory>` turns the collected log lines into the record's tables. The run section will quote each command as it was run.
 
 ### Not measured
 
-- **Other exits, by Howard's choice (2026-10-27).** The datacenter, static ISP and second residential (Decodo) arms in the plan were not measured. Nothing was bought for them.
+- **Other exits, by Howard's choice (2026-10-27).** The static ISP and second residential (Decodo) arms in the plan were not measured. Nothing was bought for them. The datacenter arm is measured only if Howard adds it after window 1.
 - More than one call at a time per instance, load curves, other regions.
-- Webshare's own billing, unless Howard reads the plan's usage.
+- Webshare's own billing, unless Howard reads the plans' usage.
 - Whether Webshare blocks private or reserved addresses.
 - Cleanup time per call: G4's gap, still without an event.
 - A Mac arm. The Mac's own exits are measured elsewhere.

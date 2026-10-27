@@ -11,11 +11,12 @@
 # One run-set call per task, so each call gets its own exit. The API runs with no environment proxy: its http,
 # compatible-transport and bundled-browser rungs leave from this instance's egress; only the installed Chrome goes
 # through the forwarder (W2L_CHROME_PATH=chrome.sh), as the hosted plan's Chrome service would.
-# Environment: H2B_ARM (google|res_a|robots), H2B_WINDOW, H2B_SESSION_STYLE (direct|webshare, forward.mjs),
-# H2B_UPSTREAMS (the Webshare gateway URL with its login, from Secret Manager; absent for google), H2B_OFFSET (where
-# in the task list this round starts), H2B_REVERSE (1: the list backwards), H2B_SKIP (tasks not sent: the residential
-# rounds' robots.txt refusals for the window, joined by "+"), H2B_TASKS (default below), G4_GRANT_B64 (the
-# installed_chrome grant's bytes, base64).
+# Environment: H2B_ARM (google|res_a|dc|robots), H2B_WINDOW, H2B_SESSION_STYLE (direct|webshare|list, forward.mjs),
+# H2B_UPSTREAMS (the Webshare gateway URL with its login, or the datacenter proxy list, from Secret Manager; absent for
+# google), H2B_LIST_START (dc: the shuffled list's position of the round's first call), H2B_OFFSET (where in the task
+# list this round starts), H2B_REVERSE (1: the list backwards), H2B_SKIP (tasks not sent: the paid rounds' robots.txt
+# refusals for the window, joined by "+"), H2B_TASKS (default below), G4_GRANT_B64 (the installed_chrome grant's
+# bytes, base64).
 # H2B_UPSTREAMS moves into an unexported shell variable at once, so no process but the forwarder gets it; never printed.
 set -u
 upstreams=${H2B_UPSTREAMS:-}
@@ -63,6 +64,8 @@ pids+=($!)
 unset upstreams
 for _ in $(seq 1 60); do [ -S "$control" ] && grep -q '"forwarder"' /tmp/h2b-forward.log 2>/dev/null && break; sleep 0.25; done
 cat /tmp/h2b-forward.log
+# Without the forwarder every Chrome call would fail on its proxy: the round stops here, marked, instead.
+if ! grep -q '"forwarder"' /tmp/h2b-forward.log 2>/dev/null; then mark forwarder_failed; finish; exit 1; fi
 H2B_GATEWAY_HOSTS=$(node -e 'try{const l=require("fs").readFileSync("/tmp/h2b-forward.log","utf8").split("\n").find((x)=>x.includes("\"forwarder\""));process.stdout.write(JSON.parse(l).forwarder.hosts.map((h)=>h.replace(/:\d+$/,"")).join(","))}catch{}')
 export H2B_GATEWAY_HOSTS
 export W2L_CHROME_PATH=$PWD/research/access/h2b-egress/chrome.sh H2B_CHROME_PROXY=http://127.0.0.1:$forward_port H2B_CHROME_LOG=/tmp/h2b-chrome.log

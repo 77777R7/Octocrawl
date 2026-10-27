@@ -2,26 +2,37 @@
 # H2b on Cloud Run, from Howard's Mac (gcloud needs HTTPS_PROXY here; every call names the project). Steps:
 #   build <branch>           the G4 image (research/access/g4-cloudrun/Dockerfile and build.sh) from that branch's commit;
 #                            the build's source archive is noted in .w2l/access/h2b/build-sources.txt for cleanup
-#   secrets                  one temporary secret, octocrawl-h2b-res-a: RESIDENTIAL_PROXY from competitors.env, piped to
-#                            gcloud's stdin and never printed, readable by the jobs' service account alone
-#   jobs <image@digest>      the three jobs: google and res-a at 2 vCPU / 4 GiB gen2, and res-a at 4 vCPU / 8 GiB
+#   secrets                  the temporary secrets, readable by the jobs' service account alone, their values never
+#                            printed: octocrawl-h2b-res-a (RESIDENTIAL_PROXY from competitors.env, piped to gcloud's
+#                            stdin), and with H2B_DC=1 octocrawl-h2b-dc (the datacenter list save-list.mjs saved, read
+#                            by gcloud itself)
+#   jobs <image@digest>      the jobs: google and res-a at 2 vCPU / 4 GiB gen2, res-a at 4 vCPU / 8 GiB, and with
+#                            H2B_DC=1 dc at 2 vCPU / 4 GiB
+#   smoke <tasks>            one google execution of a few tasks (joined by ","), window "smoke": no paid exit used
 #   robots <window>          the window's robots.txt verdict, from Cloud Run's own egress (round.sh arm "robots")
 #   window <n> [<skip>]      every round of window n at once (res-a-4cpu in window 1 only); <skip> is the verdict's
-#                            disallowed tasks joined by "+", left out of the residential rounds
+#                            disallowed tasks joined by "+", left out of the paid rounds; dc (H2B_DC=1) starts window n
+#                            at list position (n - 1) × 50, so no datacenter IP serves two calls
 #   logs <execution> <file>  an execution's log lines, as JSON lines, into a file
-#   cleanup <image>          delete the jobs, the secret, every image of this run and the noted build sources
+#   cleanup <image>          delete every job and secret this script makes, every image of this run and the noted
+#                            build sources
+# The datacenter arm is off unless H2B_DC=1: Howard adds it, if at all, after window 1 (2026-10-27).
 set -euo pipefail
 export HTTPS_PROXY=${HTTPS_PROXY:-http://127.0.0.1:7890}
 P=octopus-w2l-20260924-7r7
 R=asia-southeast1
 SA=307354954747-compute@developer.gserviceaccount.com
 COMPETITORS=$HOME/Code/w2l/.w2l/access/competitors.env
+DC_LIST=$HOME/Code/w2l/.w2l/access/h2b-dc-proxies.txt
 GRANT=$HOME/Code/w2l/.w2l/access/installed-chrome-grant.json
 NOTES=$HOME/Code/w2l/.w2l/access/h2b
 # job  arm  session style  secret  cpu  memory  offset (where its task list starts)
 JOBS="google:google:direct:-:2:4Gi:0
 res-a:res_a:webshare:res-a:2:4Gi:7
 res-a-4cpu:res_a:webshare:res-a:4:8Gi:14"
+# dc takes offset 14 too: it would run in a window without the 4 vCPU round.
+[ "${H2B_DC:-0}" = 1 ] && JOBS="$JOBS
+dc:dc:list:dc:2:4Gi:14"
 
 case ${1:-} in
   build)
@@ -36,9 +47,19 @@ case ${1:-} in
     # The value goes from the file to gcloud's stdin: never an argument, a printed variable or a log line.
     read_login() { node -e 'const line = require("fs").readFileSync(process.argv[1], "utf8").split("\n").find((l) => l.startsWith("RESIDENTIAL_PROXY=")); if (line === undefined) process.exit(3); process.stdout.write(line.slice(18).trim().replace(/^["\x27]|["\x27]$/g, ""))' "$COMPETITORS"; }
     read_login >/dev/null || { echo "RESIDENTIAL_PROXY is missing from $COMPETITORS" >&2; exit 3; }
+    secrets=res-a
+    if [ "${H2B_DC:-0}" = 1 ]; then
+      # The list is checked as the forwarder reads it, by line numbers and counts alone: at least 72 lines, each a
+      # distinct IPv4 address, since window 1 takes positions 0–21 and window 2 50–71.
+      node -e 'const lines = require("fs").readFileSync(process.argv[1], "utf8").split(/\r?\n/).map((l) => l.trim()).filter(Boolean); const bad = lines.flatMap((l, i) => (/^\d{1,3}(\.\d{1,3}){3}:\d{1,5}:[^:\s]+:\S+$/.test(l) ? [] : [i + 1])); const hosts = new Set(lines.map((l) => l.split(":")[0])).size; if (bad.length > 0 || hosts !== lines.length || hosts < 72) { console.error(`the datacenter list has ${lines.length} lines and ${hosts} distinct IPs (72 needed, none twice); not ip:port:user:password: ${bad.join(", ") || "none"}`); process.exit(3) } console.log(`datacenter list: ${lines.length} lines, each a distinct IP`)' "$DC_LIST" || exit 3
+      secrets="res-a dc"
+    fi
     read_login | gcloud secrets create octocrawl-h2b-res-a --project="$P" --replication-policy=automatic --labels=purpose=h2b-temp --data-file=-
-    gcloud secrets add-iam-policy-binding octocrawl-h2b-res-a --project="$P" --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor --format='value(etag)' >/dev/null
-    echo "secret octocrawl-h2b-res-a: created, readable by $SA" ;;
+    [ "${H2B_DC:-0}" = 1 ] && gcloud secrets create octocrawl-h2b-dc --project="$P" --replication-policy=automatic --labels=purpose=h2b-temp --data-file="$DC_LIST"
+    for secret in $secrets; do
+      gcloud secrets add-iam-policy-binding "octocrawl-h2b-$secret" --project="$P" --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor --format='value(etag)' >/dev/null
+      echo "secret octocrawl-h2b-$secret: created, readable by $SA"
+    done ;;
   jobs)
     image=${2:?image@sha256:digest}
     grant=$(base64 <"$GRANT" | tr -d '\n')
@@ -49,6 +70,9 @@ case ${1:-} in
       [ "$secret" != - ] && args+=(--set-secrets="H2B_UPSTREAMS=octocrawl-h2b-$secret:1")
       gcloud run jobs create "octocrawl-h2b-$job" "${args[@]}" --format='value(metadata.name)'
     done <<<"$JOBS" ;;
+  smoke)
+    # "^@^" makes "@" gcloud's separator, so the task list keeps its commas.
+    gcloud run jobs execute octocrawl-h2b-google --project="$P" --region="$R" --wait --update-env-vars="^@^H2B_WINDOW=smoke@H2B_TASKS=${2:?tasks joined by ,}" --format='value(metadata.name)' ;;
   robots)
     gcloud run jobs execute octocrawl-h2b-google --project="$P" --region="$R" --wait --update-env-vars="H2B_ARM=robots,H2B_WINDOW=${2:?window}" --format='value(metadata.name)' ;;
   window)
@@ -56,8 +80,9 @@ case ${1:-} in
     while IFS=: read -r job arm style secret cpu mem offset; do
       [ "$job" = res-a-4cpu ] && [ "$w" != 1 ] && continue
       vars="H2B_WINDOW=$w,H2B_OFFSET=$offset,H2B_REVERSE=$reverse"
-      # The google round sends every task; the residential rounds leave out the window's robots.txt refusals.
+      # The google round sends every task; the paid rounds leave out the window's robots.txt refusals.
       [ "$arm" != google ] && [ -n "$skip" ] && vars="$vars,H2B_SKIP=$skip"
+      [ "$style" = list ] && vars="$vars,H2B_LIST_START=$(( (w - 1) * 50 ))"
       gcloud run jobs execute "octocrawl-h2b-$job" --project="$P" --region="$R" --async --update-env-vars="$vars" --format='value(metadata.name)'
     done <<<"$JOBS" ;;
   logs)
@@ -67,8 +92,8 @@ case ${1:-} in
     wc -l <"$3" ;;
   cleanup)
     image=${2:?image without digest}
-    while IFS=: read -r job _; do gcloud run jobs delete "octocrawl-h2b-$job" --project="$P" --region="$R" --quiet || true; done <<<"$JOBS"
-    gcloud secrets delete octocrawl-h2b-res-a --project="$P" --quiet || true
+    for job in google res-a res-a-4cpu dc; do gcloud run jobs delete "octocrawl-h2b-$job" --project="$P" --region="$R" --quiet || true; done
+    for secret in res-a dc; do gcloud secrets delete "octocrawl-h2b-$secret" --project="$P" --quiet || true; done
     for digest in $(gcloud artifacts docker images list "$image" --project="$P" --format='value(version)'); do
       gcloud artifacts docker images delete "$image@$digest" --project="$P" --delete-tags --quiet || true
     done
