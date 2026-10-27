@@ -2,12 +2,12 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { createSecureServer, type Http2SecureServer } from 'node:http2'
-import { connect, type AddressInfo } from 'node:net'
+import { connect, type AddressInfo, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { hostedNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
-import { CompatAddressGuard, type GuardResolver } from '../src/compatGuard.js'
+import { CompatAddressGuard, type GuardDial, type GuardResolver } from '../src/compatGuard.js'
 import { CompatTransport, DEFAULT_COMPAT_PROFILE } from '../src/compatTransport.js'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
 
@@ -218,6 +218,84 @@ describe('the address guard of the hosted compatible transport', () => {
       client.destroy()
       await guard.close()
     }
+  })
+})
+
+describe('the address guard without a login, as hosted Chrome is given it (ADR 0005 hosted_chrome)', () => {
+  /** A dial that keeps every address and port it was handed, then connects directly as the default does. */
+  function recordingDial(): GuardDial & { calls: string[] } {
+    const calls: string[] = []
+    const dial: GuardDial = (address, to) => { calls.push(`${address}:${to}`); return connect({ host: address, port: to }) }
+    return Object.assign(dial, { calls })
+  }
+  /** Greets with no login, CONNECTs to `name`, then sends a GET once connected; answers everything the guard sent back. */
+  const getThrough = (proxy: URL, name: string, path: string) => new Promise<string>((resolve, reject) => {
+    const socket: Socket = connect(Number(proxy.port), '127.0.0.1')
+    let got = Buffer.alloc(0)
+    socket.on('data', (chunk) => {
+      const before = got.length
+      got = Buffer.concat([got, chunk])
+      if (before < 12 && got.length >= 12 && got[2] === 5 && got[3] === 0) socket.write(`GET ${path} HTTP/1.1\r\nHost: ${name}:${port}\r\nConnection: close\r\n\r\n`)
+    })
+    socket.on('error', reject)
+    socket.on('close', () => resolve(got.toString('latin1')))
+    socket.write(Buffer.from([5, 1, 0]))
+    socket.write(Buffer.from(connectTo(name, port)))
+  })
+
+  it('names a socks5:// proxy with no login, takes no login and offers nothing to a client that wants one', async () => {
+    const guard = new CompatAddressGuard(hosted('pinned.test'), resolver({ 'pinned.test': ['127.0.0.1'] }), { login: false })
+    try {
+      const proxy = new URL(await guard.proxyUrl())
+      expect(proxy.protocol).toBe('socks5:')
+      expect(proxy.username).toBe('')
+      expect(proxy.hostname).toBe('127.0.0.1')
+      expect(await exchange(proxy, [[5, 1, 2]], 2)).toEqual([5, 0xff])
+      expect(await exchange(proxy, [[5, 1, 0], [5, 2, 0, 1, 127, 0, 0, 1, port >> 8, port & 0xff]], 4)).toEqual([5, 0, 5, 7])
+      const answer = await getThrough(proxy, 'pinned.test', '/article')
+      expect(answer).toContain('Tide ledger')
+      expect(seen.at(-1)).toEqual({ url: '/article', host: `pinned.test:${port}` })
+    } finally { await guard.close() }
+  })
+
+  it('hands its dial only an address it checked, never a name, and nothing it refused', async () => {
+    const dial = recordingDial()
+    const names = { 'pinned.test': ['127.0.0.1'], localhost: ['127.0.0.1'], 'a.test': ['10.0.0.7'], 'c.test': ['169.254.169.254'], 'g.test': ['93.184.216.34', '192.168.1.1'] }
+    const guard = new CompatAddressGuard(hosted('pinned.test'), resolver(names), { login: false, dial })
+    try {
+      const proxy = new URL(await guard.proxyUrl())
+      for (const name of ['a.test', 'c.test', 'g.test', 'localhost', 'metadata.google.internal']) {
+        expect(await exchange(proxy, [[5, 1, 0], connectTo(name, port)], 4), name).toEqual([5, 0, 5, 2])
+      }
+      expect(await exchange(proxy, [[5, 1, 0], connectTo('012.0.0.1', port)], 4)).toEqual([5, 0, 5, 2])
+      expect(dial.calls).toEqual([])
+      expect(await getThrough(proxy, 'pinned.test', '/article')).toContain('Tide ledger')
+      expect(dial.calls).toEqual([`127.0.0.1:${port}`])
+    } finally { await guard.close() }
+  })
+
+  it('checks every new connection: a name that rebinds to the metadata address is refused, and the dial never sees it', async () => {
+    const answers = ['127.0.0.1', '169.254.169.254']
+    let asked = 0
+    const rebinding: GuardResolver = async () => { asked += 1; return [{ address: answers[Math.min(asked, answers.length) - 1]!, family: 4 }] }
+    const dial = recordingDial()
+    const guard = new CompatAddressGuard(hosted('site.test'), rebinding, { login: false, dial })
+    try {
+      const proxy = new URL(await guard.proxyUrl())
+      expect(await getThrough(proxy, 'site.test', '/close')).toContain('Tide ledger')
+      expect(await exchange(proxy, [[5, 1, 0], connectTo('site.test', port)], 4)).toEqual([5, 0, 5, 2])
+      expect(asked).toBe(2)
+      expect(dial.calls).toEqual([`127.0.0.1:${port}`])
+    } finally { await guard.close() }
+  })
+
+  it('answers a dial that fails at once as a general failure, and keeps serving', async () => {
+    const guard = new CompatAddressGuard(hosted('pinned.test'), resolver({ 'pinned.test': ['127.0.0.1'] }), { login: false, dial: () => { throw new Error('no exit') } })
+    try {
+      const proxy = new URL(await guard.proxyUrl())
+      expect(await exchange(proxy, [[5, 1, 0], connectTo('pinned.test', port)], 4)).toEqual([5, 0, 5, 1])
+      expect(await exchange(proxy, [[5, 1, 0], connectTo('a.test', port)], 4)).toEqual([5, 0, 5, 4])
+    } finally { await guard.close() }
   })
 })
 

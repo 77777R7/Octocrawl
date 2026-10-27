@@ -14,6 +14,14 @@
  *
  * The port takes a login (RFC 1929) the guard makes up when it starts and gives impit alone, so no other client on the
  * machine can use it; it takes CONNECT alone, and the policy's checks hold for whoever connects.
+ *
+ * The same guard stands before ADR 0005 `hosted_chrome` (revision of 2026-10-27): Chrome is given it as its only proxy
+ * (hostedChromeProxy), sends it every name, and reaches nothing the guard did not check. Chrome takes no SOCKS login, so
+ * that guard listens without one (`login: false`); its checks hold for whoever connects, which on the Chrome service is
+ * that Chrome alone. What carries a checked connection on is the guard's `dial`: by default a direct connection, and an
+ * egress proxy's tunnel to the checked address once hosted_chrome has one. Either way a name reaches no proxy before it
+ * has been resolved and checked, and the proxy is handed the checked address, never the name, so it cannot resolve the
+ * name again to an address the guard never saw.
  */
 
 import { randomBytes, timingSafeEqual } from 'node:crypto'
@@ -23,6 +31,19 @@ import { evaluateHostname, evaluateResolved, type NetworkPolicy } from '@w2l/con
 
 /** How the guard resolves a name; dns.lookup's shape, so a test can name the addresses. */
 export type GuardResolver = (hostname: string, options: { all: true }) => Promise<{ address: string; family: number }[]>
+
+/**
+ * How the guard reaches an address it checked: a socket that emits `connect` once bytes can pass, or `error`. The address
+ * is always one the guard checked, never a name.
+ */
+export type GuardDial = (address: string, port: number) => Socket
+
+export interface AddressGuardOptions {
+  /** Whether a client must log in (RFC 1929). Default true; false for a client that takes no SOCKS login (Chrome). */
+  login?: boolean
+  /** How a checked connection is carried on. Default a direct connection to the checked address. */
+  dial?: GuardDial
+}
 
 /** The SOCKS5 replies the guard gives (RFC 1928 §6); the transport reads the first two by impit's names for them. */
 const REPLY = { succeeded: 0, failure: 1, notAllowed: 2, networkUnreachable: 3, hostUnreachable: 4, refused: 5, timedOut: 6, commandNotSupported: 7, addressNotSupported: 8 } as const
@@ -74,12 +95,19 @@ export class CompatAddressGuard {
   private readonly sockets = new Set<Socket>()
   private listening: Promise<{ server: Server; port: number }> | null = null
   private closed = false
+  private readonly login: boolean
+  private readonly dial: GuardDial
 
-  constructor(private readonly policy: NetworkPolicy, private readonly resolve: GuardResolver = lookup) {
+  constructor(private readonly policy: NetworkPolicy, private readonly resolve: GuardResolver = lookup, options: AddressGuardOptions = {}) {
     if (policy.egressProxy != null) throw new Error('the address guard connects to the site itself: not with an egress proxy')
+    this.login = options.login !== false
+    this.dial = options.dial ?? ((host, port) => connect({ host, port }))
   }
 
-  /** The proxy impit is given: `socks5h://<login>@127.0.0.1:<port>`, the server started on first use. */
+  /**
+   * The proxy a client is given, the server started on first use: `socks5h://<login>@127.0.0.1:<port>` for impit, or
+   * `socks5://127.0.0.1:<port>` without a login, the form Chrome reads (Chrome sends names to a SOCKS5 proxy).
+   */
   async proxyUrl(): Promise<string> {
     if (this.closed) throw new Error('the address guard is closed')
     this.listening ??= new Promise((resolve, reject) => {
@@ -89,7 +117,7 @@ export class CompatAddressGuard {
       server.listen(0, '127.0.0.1', () => { server.unref(); resolve({ server, port: (server.address() as { port: number }).port }) })
     })
     const { port } = await this.listening
-    return `socks5h://${this.user}:${this.password}@127.0.0.1:${port}`
+    return this.login ? `socks5h://${this.user}:${this.password}@127.0.0.1:${port}` : `socks5://127.0.0.1:${port}`
   }
 
   /** Stops listening and ends every connection it passes. */
@@ -112,19 +140,22 @@ export class CompatAddressGuard {
 
   private async negotiate(client: Socket): Promise<void> {
     const input = messages(client)
-    // The greeting: the methods offered. Only a login is taken.
+    // The greeting: the methods offered. A guard with a login takes only a login; one without, only no login.
     const [version, count] = await input.read(2)
     if (version !== 5) return void client.destroy()
     const methods = await input.read(count!)
-    if (!methods.includes(2)) return void client.end(Buffer.from([5, 0xff]))
-    client.write(Buffer.from([5, 2]))
-    // The login (RFC 1929).
-    const [, userLength] = await input.read(2)
-    const user = await input.read(userLength!)
-    const [passwordLength] = await input.read(1)
-    const password = await input.read(passwordLength!)
-    if (!same(user, this.user) || !same(password, this.password)) return void client.end(Buffer.from([1, 1]))
-    client.write(Buffer.from([1, 0]))
+    const method = this.login ? 2 : 0
+    if (!methods.includes(method)) return void client.end(Buffer.from([5, 0xff]))
+    client.write(Buffer.from([5, method]))
+    if (this.login) {
+      // The login (RFC 1929).
+      const [, userLength] = await input.read(2)
+      const user = await input.read(userLength!)
+      const [passwordLength] = await input.read(1)
+      const password = await input.read(passwordLength!)
+      if (!same(user, this.user) || !same(password, this.password)) return void client.end(Buffer.from([1, 1]))
+      client.write(Buffer.from([1, 0]))
+    }
     // The request: CONNECT alone, to an IPv4 address, a name or an IPv6 address.
     const [, command, , type] = await input.read(4)
     let host: string
@@ -160,11 +191,12 @@ export class CompatAddressGuard {
   }
 
   /**
-   * Connects to the checked address and passes bytes both ways. A side that ends sends its end on (pipe), so a response
+   * Connects to the checked address (through `dial`) and passes bytes both ways. A side that ends sends its end on (pipe), so a response
    * the site ends with its connection reaches impit whole; a side that fails or leaves ends the other.
    */
   private open(client: Socket, address: string, port: number, early: Buffer): void {
-    const site = connect({ host: address, port })
+    let site: Socket
+    try { site = this.dial(address, port) } catch { return void client.end(reply(REPLY.failure)) }
     this.sockets.add(site)
     const timer = setTimeout(() => site.destroy(Object.assign(new Error('connect timed out'), { code: 'ETIMEDOUT' })), CONNECT_MS)
     let connected = false
