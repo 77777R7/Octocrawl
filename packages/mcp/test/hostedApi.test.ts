@@ -15,7 +15,8 @@ import { TOOL_NAMES } from '../src/tools.js'
 import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, noteScrape, scrapePhaseLine, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore, type RequestNote } from '../src/hostedCredits.js'
 import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } from '../src/hostedModel.js'
-import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
+import { BROWSER_LEASE_MS, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS } from '../src/hostedApi.js'
 import { expectIsError } from './toolErrorChecks.js'
 
 const HASH_KEY = 'h'.repeat(40)
@@ -558,6 +559,18 @@ function fakeFirestore() {
   }) as typeof fetch
   return { docs, fetcher }
 }
+
+it('holds a browser-lane lease past the longest call Cloud Run lets run, and deploys with that request timeout (stage H W0)', async () => {
+  // A lease that expired under a call still running would let the key start a second browser-lane scrape.
+  expect(BROWSER_LEASE_MS).toBeGreaterThan(HOSTED_REQUEST_TIMEOUT_MS)
+  // The longest MCP calls end inside the request timeout, and 60 s inside the 240 s claude.ai gives a tool call.
+  for (const ms of [HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS]) expect(ms).toBeLessThanOrEqual(Math.min(HOSTED_REQUEST_TIMEOUT_MS, 240_000 - 60_000))
+  // Every deploy command of the API in the runbook sets Cloud Run's request timeout to the one the code assumes.
+  const docs = await readFile(new URL('../../../docs/hosted-api.md', import.meta.url), 'utf8')
+  const deploys = docs.match(/gcloud run deploy octocrawl-api (?:[^\n]*\\\n)*[^\n]*/g) ?? []
+  expect(deploys.length).toBeGreaterThanOrEqual(2)
+  for (const command of deploys) expect(command).toContain(`--timeout=${HOSTED_REQUEST_TIMEOUT_MS / 1000}s`)
+})
 
 it('Firestore leases: one holder at a time, an expired lease is taken over, and release deletes only the holder\'s own write', async () => {
   const { docs, fetcher } = fakeFirestore()

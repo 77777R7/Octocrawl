@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { hostedNetworkPolicy, VERIFY_REGEX_CHECK_TYPES } from '@w2l/contracts'
-import { createHostedApi, hostedScrapeArguments, hostedTools, keyDigest, MemoryHostedKeys, MemoryHostedQuota, oauthTools } from '../src/hostedApi.js'
+import { createHostedApi, hostedScrapeArguments, hostedTools, keyDigest, MemoryHostedKeys, MemoryHostedQuota, oauthTools, withMcpScrapeDeadline } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
 
 /**
@@ -32,7 +32,7 @@ beforeAll(async () => {
 })
 afterAll(async () => { await new Promise<void>((resolve) => site.close(() => resolve())) })
 
-type Schema = { properties: Record<string, { enum?: unknown[]; maximum?: number; items?: { anyOf?: { enum?: unknown[]; properties?: { type?: { const?: string } } }[] }; properties?: { checks?: { items?: { properties?: { type?: { enum?: string[] } } } } } }> }
+type Schema = { properties: Record<string, { description?: string; enum?: unknown[]; maximum?: number; items?: { anyOf?: { enum?: unknown[]; properties?: { type?: { const?: string } } }[] }; properties?: { checks?: { items?: { properties?: { type?: { enum?: string[] } } } } } }> }
 const schemaOf = (tools: readonly { name: string; inputSchema: unknown }[], name: string) => tools.find((tool) => tool.name === name)!.inputSchema as Schema
 
 /** Options a hosted server refuses, or takes and cannot honour (2026-10-17, measured against createHostedApi). */
@@ -47,7 +47,8 @@ describe('hosted tool schemas', () => {
       expect([surface, scrape.properties.mode?.enum]).toEqual([surface, ['standard', 'research']])
       const checks = scrape.properties.verify?.properties?.checks?.items?.properties?.type?.enum ?? []
       expect([surface, checks.filter((type) => (VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(type))]).toEqual([surface, []])
-      expect([surface, scrape.properties.timeout?.maximum, scrape.properties.maxFileBytes?.maximum]).toEqual([surface, 100_000, 5 * 1024 * 1024])
+      expect([surface, scrape.properties.timeout?.maximum, scrape.properties.maxFileBytes?.maximum]).toEqual([surface, 180_000, 5 * 1024 * 1024])
+      expect([surface, scrape.properties.timeout?.description]).toEqual([surface, expect.stringContaining('Here by default 120000, max 180000;')])
       const map = schemaOf(tools, 'map')
       expect([surface, 'ignoreRobotsTxt' in map.properties, map.properties.limit?.maximum, map.properties.timeout?.maximum]).toEqual([surface, false, 5_000, 60_000])
     }
@@ -62,10 +63,21 @@ describe('hosted tool schemas', () => {
     expect((keyed.properties.formats?.items?.anyOf ?? []).some((variant) => (variant.enum ?? []).includes('screenshot'))).toBe(true)
   })
 
-  it('stops a hosted MCP scrape at 100 s, whatever it asked for, and leaves other arguments alone', () => {
-    expect(hostedScrapeArguments({ url: 'https://example.com/' })).toEqual({ url: 'https://example.com/', timeout: 100_000 })
-    expect(hostedScrapeArguments({ url: 'https://example.com/', timeout: 300_000 })).toEqual({ url: 'https://example.com/', timeout: 100_000 })
+  it('gives a hosted MCP scrape a local one\'s 120 s when it names no deadline, 180 s at most, and leaves other arguments alone (stage H W0)', () => {
+    expect(hostedScrapeArguments({ url: 'https://example.com/' })).toEqual({ url: 'https://example.com/', timeout: 120_000 })
+    expect(hostedScrapeArguments({ url: 'https://example.com/', timeout: 300_000 })).toEqual({ url: 'https://example.com/', timeout: 180_000 })
+    expect(hostedScrapeArguments({ url: 'https://example.com/', timeout: 150_000 })).toEqual({ url: 'https://example.com/', timeout: 150_000 })
     expect(hostedScrapeArguments({ url: 'https://example.com/', timeout: 5_000, onlyMainContent: false })).toEqual({ url: 'https://example.com/', timeout: 5_000, onlyMainContent: false })
+  })
+
+  it('gives every scrape the hosted MCP handler sends that deadline, scrape_product\'s too, which names none (stage H W0)', async () => {
+    const sent = async (body: unknown) => await (await withMcpScrapeDeadline(new Request('http://hosted.internal/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))).json() as Record<string, unknown>
+    // scrape_product's body as tools.ts sends it: no timeout, so the engine's 300 s would run past the 240 s claude.ai gives a call.
+    expect(await sent({ url: 'https://www.amazon.sg/dp/B000VW9PIK', mode: 'standard', formats: [{ type: 'json', schema: {}, modelFallback: false }] })).toMatchObject({ url: 'https://www.amazon.sg/dp/B000VW9PIK', timeout: 120_000 })
+    expect(await sent({ url: 'https://example.com/', timeout: 250_000 })).toMatchObject({ timeout: 180_000 })
+    // Every other request goes to the gate as it came.
+    const map = new Request('http://hosted.internal/v1/map', { method: 'POST', body: JSON.stringify({ url: 'https://example.com/' }) })
+    expect(await withMcpScrapeDeadline(map)).toBe(map)
   })
 
   it('accepts every option it lists, on a keyless connection and on a key with the browser lane', async () => {

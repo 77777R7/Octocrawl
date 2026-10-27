@@ -83,7 +83,7 @@ describe('hosted job tools over MCP', () => {
     expect(properties.maxCredits).toMatchObject({ type: 'integer', minimum: 1 })
     expect(properties.maxPages?.maximum).toBe(500)
     const wait = tools.find((tool) => tool.name === 'wait_crawl')!
-    expect((wait.inputSchema as unknown as { properties: { timeoutMs: { maximum: number } } }).properties.timeoutMs.maximum).toBe(90_000)
+    expect((wait.inputSchema as unknown as { properties: { timeoutMs: { maximum: number } } }).properties.timeoutMs.maximum).toBe(120_000)
     // Its instructions say jobs run here, not only on the person's computer.
     const instructions = (await connect('oc_account')).getInstructions() ?? ''
     expect(instructions).toMatch(/Crawls and batches run here as jobs/)

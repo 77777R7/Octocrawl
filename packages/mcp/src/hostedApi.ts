@@ -27,7 +27,7 @@ import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
 import { serverInstructions } from './instructions.js'
-import { SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
+import { MAX_WAIT_MS, MCP_SCRAPE_TIMEOUT_MS, SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
 import { scrapeSchemaWithout } from './toolsets.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
@@ -195,8 +195,13 @@ export function logQuotaThresholds(entries: readonly QuotaEntry[], counts: reado
 /** Requests per minute a caller may start, so a loop cannot spend a day's allowance in a second. */
 export const KEYLESS_PER_MINUTE = 10
 export const KEY_PER_MINUTE = 60
-/** How long a browser-lane lease is held at most: the request timeout (120 s) and a margin, so a lease left by a crash frees itself. */
-export const BROWSER_LEASE_MS = 130_000
+/**
+ * Cloud Run's request timeout for this service, the deploy's --timeout (docs/hosted-api.md; hostedApi.test.ts holds the two
+ * together): no call here runs longer, a REST scrape's 300 s included.
+ */
+export const HOSTED_REQUEST_TIMEOUT_MS = 300_000
+/** How long a browser-lane lease is held at most: the request timeout and a margin, so a lease left by a crash frees itself. */
+export const BROWSER_LEASE_MS = HOSTED_REQUEST_TIMEOUT_MS + 10_000
 /** Requests of any kind per minute from one address, counted before the key lookup, so unknown keys cannot drive the key store. */
 export const ADDRESS_PER_MINUTE = 120
 /** A file (PDF, CSV, ...) a hosted call may read: the preview's cap. Files land under the task root, which Cloud Run keeps in memory. */
@@ -233,8 +238,8 @@ export function hostedTools(browser: boolean, jobs = false) {
  * have no credits to spend, so they are not offered.
  */
 export const HOSTED_JOB_TOOLS: ReadonlySet<string> = new Set(['crawl', 'get_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl', 'wait_crawl', 'batch_scrape', 'get_batch', 'get_batch_items', 'get_batch_errors', 'cancel_batch', 'wait_batch'])
-/** A hosted wait ends within the MCP request's deadline (HOSTED_MCP_SCRAPE_TIMEOUT_MS) and answers the status so far. */
-export const HOSTED_MCP_WAIT_MS = 90_000
+/** A hosted wait ends as a local one does (MAX_WAIT_MS), well inside the request timeout, and answers the status so far. */
+export const HOSTED_MCP_WAIT_MS = MAX_WAIT_MS
 /** The most items a hosted job list answers at once (hostedJobRoutes.ts PAGE_LIST_MAX). */
 const HOSTED_MCP_LIST_MAX = 100
 /** A hosted job's statuses: queued while the account's running slots are taken, expired once its results are deleted. */
@@ -293,8 +298,14 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
  * hostedSchema.integration.test.ts calls every listed option, so a new local option reaches hosted only when added here.
  */
 export const HOSTED_SCRAPE_KEYS: ReadonlySet<string> = new Set(['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'fastMode', 'blockAds', 'removeBase64Images', 'verify', 'integration'])
-/** A hosted MCP scrape's deadline: under claude.ai's 240 s tool limit and Cloud Run's 120 s request timeout. */
-export const HOSTED_MCP_SCRAPE_TIMEOUT_MS = 100_000
+/** A hosted MCP scrape's deadline when it names none: a local MCP scrape's. */
+export const HOSTED_MCP_SCRAPE_TIMEOUT_MS = MCP_SCRAPE_TIMEOUT_MS
+/**
+ * The longest deadline a hosted MCP scrape may ask for: 60 s inside the 240 s claude.ai and Claude Desktop give a tool call
+ * (https://claude.com/docs/connectors/building.md, read 2026-10-27), for a cold start and the answer's assembly. Clients
+ * that give a call less (Cursor, Codex CLI and ChatGPT report about 60 s) end it sooner whatever this allows.
+ */
+export const HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS = 180_000
 
 /** A hosted copy of a tool's input schema, with only what this connection can use. */
 function hostedInputSchema(name: string, schema: unknown, browser: boolean): unknown {
@@ -311,7 +322,7 @@ function hostedInputSchema(name: string, schema: unknown, browser: boolean): unk
   }
   const copy = scrapeSchemaWithout(schema, (key) => HOSTED_SCRAPE_KEYS.has(key), 'The declared identity the page is read under: standard (default) or research. A hosted server holds no saved logins, so it has no authed mode.')
   const properties = copy.properties
-  properties.timeout = { ...properties.timeout, maximum: HOSTED_MCP_SCRAPE_TIMEOUT_MS, description: `Deadline in milliseconds for the whole scrape. When it fires the result is partial with the content so far, or failed/timeout. Here at most and by default ${HOSTED_MCP_SCRAPE_TIMEOUT_MS}; a longer one is lowered to it.` }
+  properties.timeout = { ...properties.timeout, maximum: HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, description: `Deadline in milliseconds for the whole scrape. When it fires the result is partial with the content so far, or failed/timeout. Here by default ${HOSTED_MCP_SCRAPE_TIMEOUT_MS}, max ${HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS}; a longer one is lowered to it.` }
   properties.maxFileBytes = { ...properties.maxFileBytes, maximum: HOSTED_MAX_FILE_BYTES }
   const verify = properties.verify as { properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }
   const checkType = verify.properties.checks.items.properties.type
@@ -332,11 +343,21 @@ function hostedInputSchema(name: string, schema: unknown, browser: boolean): unk
   return copy
 }
 
-/** A hosted MCP scrape's arguments with its deadline held to HOSTED_MCP_SCRAPE_TIMEOUT_MS (REST keeps the engine's own). */
+/** A hosted MCP scrape's arguments with its deadline: HOSTED_MCP_SCRAPE_TIMEOUT_MS when it names none, at most HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS (REST keeps the engine's own). */
 export function hostedScrapeArguments(args: unknown): unknown {
   if (args === null || typeof args !== 'object' || Array.isArray(args)) return args
   const timeout = (args as { timeout?: unknown }).timeout
-  return { ...args, timeout: typeof timeout === 'number' && timeout < HOSTED_MCP_SCRAPE_TIMEOUT_MS ? timeout : HOSTED_MCP_SCRAPE_TIMEOUT_MS }
+  return { ...args, timeout: typeof timeout === 'number' ? Math.min(timeout, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS) : HOSTED_MCP_SCRAPE_TIMEOUT_MS }
+}
+/**
+ * A request the hosted MCP handler sends the gate in-process: every scrape a tool starts gets the MCP deadline
+ * (hostedScrapeArguments), scrape_product's too, which names none and would otherwise run the engine's 300 s.
+ */
+export async function withMcpScrapeDeadline(request: Request): Promise<Request> {
+  if (request.method !== 'POST' || new URL(request.url).pathname !== '/v1/scrape') return request
+  const body = await request.clone().json().catch(() => null) as unknown
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return request
+  return new Request(request, { body: JSON.stringify(hostedScrapeArguments(body)) })
 }
 /** What ChatGPT shows while a hosted tool runs and once it has (Apps SDK openai/toolInvocation/*, 64 characters at most). */
 const HOSTED_INVOCATION = {
@@ -1043,7 +1064,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       baseUrl: 'http://hosted.internal',
       ...(typeof authorization === 'string' ? { token: authorization.replace(/^Bearer\s+/i, '') } : {}),
       fetch: async (input, init) => {
-        const request = new Request(input, init)
+        const request = await withMcpScrapeDeadline(new Request(input, init))
         // Every call from here is this handler's own: the MCP POST that carries it was counted against the address already.
         request.headers.set(INTERNAL_SECRET_HEADER, internalSecret)
         if (caller.kind === 'keyless') request.headers.set(INTERNAL_CLIENT_HEADER, address)
