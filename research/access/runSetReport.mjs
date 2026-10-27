@@ -8,6 +8,13 @@ import { createHash } from 'node:crypto'
 // otherwise write every later task down as the site's failure (2026-10-14, Webshare's 402 bandwidthlimit).
 export const PROXY_REFUSED_STOP = 3
 
+/** The API's own budget for one scrape (DEFAULT_SCRAPE_TIMEOUT_MS, packages/contracts/src/api.ts; remainingMs at its first rung). */
+export const LADDER_BUDGET_MS = 300_000
+/** The CAPTCHA window's client wait (captcha-window.mjs): past the ladder budget, so an answer is never cut off unsaved. */
+export const CAPTCHA_CLIENT_TIMEOUT_MS = LADDER_BUDGET_MS + 30_000
+/** How long the runner waits for one octocrawl answer: --client-timeout-ms, else the task's timeoutMs, else 180 s. */
+export const clientTimeoutOf = (task, override = null) => override ?? task?.timeoutMs ?? 180_000
+
 /** Every attempt the run means to make, in order: each task at each temperature. */
 export const plannedAttempts = (tasks, temperatures) => tasks.flatMap((t) => temperatures.map((temperature) => ({ taskId: t.id, temperature })))
 
