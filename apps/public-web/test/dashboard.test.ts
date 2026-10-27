@@ -446,6 +446,30 @@ describe('Usage', () => {
     expect([...$('key-map').querySelectorAll('.tile-name')].map(name => name.textContent)).toEqual(['laptop agent (oc_7fQ2…)', 'Playground', 'ci (oc_Kd91…)'])
   })
 
+  it('keeps every treemap label inside its tile, and draws Other last, in grey, in the bottom-right corner', async () => {
+    // Fifteen sites: twelve get a tile, three go into Other. Each site's credits are its number of 1-credit lines.
+    const hosts = ['www.a-very-long-hostname-for-one-site.example', ...Array.from({ length: 14 }, (_, i) => `site-${i}.example`)]
+    const shown = hosts.flatMap((name, i) => Array.from({ length: i ? 16 - i : 30 }, () => ({ ...line('2026-10-20T11:00:00.000Z', KEY_A, 1), url: `https://${name}/a` })))
+    const { window, $ } = await page('/dashboard/usage/', '', OCTOBER.now, octoberAnswers(shown), { width: 640 })
+    const tiles = [...$('site-map').querySelectorAll('.tile')]
+    expect(tiles).toHaveLength(13)
+    for (const tile of tiles) {
+      const room = Number(tile.querySelector('rect')!.getAttribute('width')) - 18
+      // A window without layout measures nothing, so the chart counts 7 px a character, as here.
+      for (const text of tile.querySelectorAll('text')) expect([text.textContent, text.textContent!.length * 7 <= room]).toEqual([text.textContent, true])
+      if (tile.querySelector('.tile-value')) expect(tile.querySelector('.tile-name')).not.toBeNull()
+    }
+    expect(tiles[0]!.querySelector('.tile-name')!.textContent).toMatch(/^a-very-long-hostname[^…]*…$/)
+    const other = tiles[tiles.length - 1]!
+    expect(other.getAttribute('class')).toBe('tile other')
+    const rect = other.querySelector('rect')!
+    expect([Number(rect.getAttribute('x')) + Number(rect.getAttribute('width')), Number(rect.getAttribute('y')) + Number(rect.getAttribute('height'))].map(Math.round)).toEqual([639, 299])
+    other.dispatchEvent(new window.PointerEvent('pointermove', { bubbles: true }) as unknown as Event)
+    const tip = window.document.querySelector('.glass-tip')!
+    expect(tip.querySelector('.glass-tip-title')!.textContent).toBe('Other (3 sites)')
+    expect([...tip.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['Credits', 'Share', 'Calls', 'Not charged'])
+  })
+
   it('counts results, HTTP status, lanes and hours from the request lines', async () => {
     const { $ } = await page('/dashboard/usage/', '', OCTOBER.now, octoberAnswers(lines()), { width: 640 })
     const list = (id: string) => [...$(id).querySelectorAll('li p')].map(row => row.textContent)

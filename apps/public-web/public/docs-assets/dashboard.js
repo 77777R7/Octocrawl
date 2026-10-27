@@ -431,7 +431,8 @@
       const top = sites.slice(0, 12)
       const rest = sites.slice(12)
       const items = top.map(([name, calls, free, credits]) => ({ name, value: credits, rows: [['Calls', number(calls)], ['Not charged', number(free)]] }))
-      if (rest.length) items.push({ name: `Other (${rest.length} sites)`, value: rest.reduce((sum, r) => sum + r[3], 0), rows: [['Calls', number(rest.reduce((sum, r) => sum + r[1], 0))]] })
+      const sum = (i) => rest.reduce((total, r) => total + r[i], 0)
+      if (rest.length) items.push({ name: `Other (${rest.length} sites)`, value: sum(3), rows: [['Calls', number(sum(1))], ['Not charged', number(sum(2))]], other: true })
       const charged = items.some((item) => item.value > 0)
       if (charged) charts.treemap(siteHost, items, { unit: 'credits', label: 'Credits by site, last 30 days', height: TREEMAP_HEIGHT }); else siteHost.replaceChildren()
       $('by-site-empty').hidden = charged
