@@ -230,7 +230,7 @@
 
 - **新页面类型要先有生成器。**每个工具页要手工加 `tools/<slug>/index.html`、`TOOL_PAGES`、`build-docs.mjs` 里的 `TOOL_LOCATIONS`；导航与页脚是固定数组；博客「相关阅读」必须正好 3 篇；每篇博客要 4 张图。Phase 1 的页数少，手工可以；同一类型超过约 20 页之前要有生成器（【议】阈值）。
 - **CSP** `style-src 'self'`：模板里不能有 `style=""`；测试用 `public:preview:local`（端口 8798）。
-- **IndexNow** 现在每次提交全部 URL；Bing 的指南建议只提交新增、变更、删除的 URL，且尽量逐条提交。29 个 URL 影响小，页面变多后要改。IndexNow 救不了薄页面。
+- **IndexNow** 2026-10-28 起只提交新增、变更和已返回 404 或 410 的 URL（`scripts/public-preview/indexnow.mjs`，按批 POST；第一次运行没有状态，会发一次整站）；Bing 的指南还建议尽量逐条提交，现在没做。IndexNow 救不了薄页面。
 - **FAQPage 标记**：Google 的 FAQ 富结果已于 2026-05-07 停止显示。首页和 `/scrape/` 现有的 FAQPage 标记没有害处，也没有收益；不要为富结果新增。
 - **SoftwareApplication 标记**：Google 的软件应用富结果要求 `aggregateRating` 或 `review`；仓库里没有评分标记（grep 未发现）。不要伪造。
 - **Googlebot、Bingbot 不能被 CDN 或 Worker 拦**：Cloudflare 的机器人规则只给「已验证的 AI 助手」开过一条例外，对 Google 与 Bing 的影响**没有确认**（`docs/seo/cloudflare-access-2026-10-16.md`）；建议每周用 URL Inspection 抽样。 Cloudflare 自 2026-09-15 起，对「训练」选 Block 会连 Googlebot、Bingbot 一起封；只想拒绝训练要用 Disallow AI Training（G§2）。现在的设置**未知**（资料库决定 G-16，只读核对）。
@@ -315,6 +315,8 @@
 | 包下载（含自己的 CI 与镜像，30 天） | `octocrawl` 944、`@octocrawl/mcp` 1,676、`@octocrawl/sdk` 1,332、`@octocrawl/cli` 1,431；PyPI `octocrawl-client` 124；GitHub 2 星 | npm / PyPI / GitHub API；GTM 记录说这些不算增长信号，仅作背景 |
 
 ### 6.2 指标与节奏
+
+每周怎么取数、对判据、记决定，见 [weekly-review.md](library/weekly-review.md)。
 
 | 指标 | 来源 | 周期 | 说明 |
 |---|---|---|---|

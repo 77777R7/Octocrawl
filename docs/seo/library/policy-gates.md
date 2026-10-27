@@ -27,3 +27,12 @@
 | G18 Crawlable and indexable | all pages | Robots.txt, CDN and Worker rules allow Googlebot and Bingbot; the page returns 200 with text in the initial HTML or in rendered HTML visible via the URL Inspection tool; not noindex; snippet allowed. Pages that return soft-404 'no data' content must return a real 404 or be removed. |
 | G19 No third-party hosted SEO content | blog, tools, any future guest or partner section | Content on octocrawl.dev is written or editorially owned by the Octocrawl team; any sponsored or partner piece is clearly marked, integrated, and has rel=sponsored links; user-generated areas have spam controls and ugc links. Do not move failing pages to a new subdomain or domain to keep publishing them. |
 | G20 No automated queries to search engines | research scripts, scenario pages about scraping search results, rank-check features | No script or demo sends automated queries to Google Search without express permission. Search demand data comes from Search Console. A tutorial about scraping SERPs is reviewed against the machine-generated-traffic policy and the engine's Terms before publication. |
+
+## 已有的自动检查（2026-10-28）
+
+闸门本身仍是提议；下面两项是 Howard 要求补上的检查，已经在跑，范围写在这里，没覆盖的不要当作已检查。
+
+| 闸门 | 检查 | 覆盖 | 没覆盖 |
+|---|---|---|---|
+| G12 | `scripts/seo/check-sitemap.mjs`，CI 在构建站点之后运行 | 地址绝对、同一来源、带斜杠、不重复、无查询串；lastmod 是合法日期且不晚于明天的 UTC 日期（和 `docsPages.test.ts` 一致；没有 lastmod 的页面计数、不判错）；每个地址有构建出来的页面，页面有且仅有一个等于自身的 canonical、没有 noindex 或 none（robots、googlebot、bingbot 的 meta 标签）、有标题与描述；可索引的已构建页面必须在 sitemap 里；robots.txt 必须存在、指向 sitemap，并且对 `*`、Googlebot、Bingbot 都不禁止其中的路径（Allow 与 Disallow，支持 `*` 与 `$`，最长匹配优先）；单文件不超过 50,000 条、50 MB | 线上经 CDN 的真实状态码与响应头（包括 `X-Robots-Tag`）；其他爬虫的 robots.txt 规则；已删除的页面是否返回 404 或 410；「lastmod 只在主要内容变化时变」（docs 页由 `docsPages.test.ts` 保证；其他页面我没有找到对应的测试） |
+| G13 | `scripts/public-preview/indexnow.mjs` | 只发新增或有变化的地址（比较 sitemap 的 lastmod，没有 lastmod 的页面比较其 Markdown 副本的哈希），被 sitemap 去掉且返回 404 或 410 的地址按删除发；每次 POST 不超过 10,000 条；同一地址 5 分钟内不重发（`--all` 与删除通知不受此限）；429 之后 10 分钟内什么都不发；202（密钥验证待定）记为未确认、下次再发；Markdown 副本暂时读不到时保留上次记录的哈希，不因此重发；每次响应写进日志 | 「只发通过 G1 到 G12 的地址」（部署后手工运行，没有检查）；「不按计划重发整站」（现在没有任何定时运行，所以没有可检的；第一次运行没有状态，会发一次整站；`--all` 会重发整站） |
