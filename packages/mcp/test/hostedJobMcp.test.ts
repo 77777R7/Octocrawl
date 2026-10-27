@@ -89,7 +89,7 @@ describe('hosted job tools over MCP', () => {
     // A slice reads two pages at once, and a crawl is offered no more (stage H W0).
     expect(properties.maxConcurrency?.maximum).toBe(2)
     const wait = tools.find((tool) => tool.name === 'wait_crawl')!
-    expect((wait.inputSchema as unknown as { properties: { timeoutMs: { maximum: number } } }).properties.timeoutMs.maximum).toBe(90_000)
+    expect((wait.inputSchema as unknown as { properties: { timeoutMs: { maximum: number } } }).properties.timeoutMs.maximum).toBe(120_000)
     // Its instructions say jobs run here, not only on the person's computer.
     const instructions = (await connect('oc_account')).getInstructions() ?? ''
     expect(instructions).toMatch(/Crawls and batches run here as jobs/)

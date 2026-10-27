@@ -81,7 +81,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
    * `fileStore`: where files (PDF, CSV, ...) are saved as received; without one a file is read but not saved.
    * `previewProductToken`: the hosted public preview's standard User-Agent carries PREVIEW_PRODUCT_TOKEN (previewIdentity).
    * `robotsCache`: a robots.txt cache shared with the crawl's sitemap reader, so one robots.txt read serves both; without one the subject keeps its own.
-   * `compat`: the browser-compatible transport (compatTransport.ts) in place of undici, with its profile's identity; standard mode on a local server only.
+   * `compat`: the browser-compatible transport (compatTransport.ts) in place of undici, with its profile's identity; standard mode only, and on a hosted engine through its address guard.
    */
   constructor(mode: CrawlMode = 'standard', networkPolicy?: NetworkPolicy, scheduler?: OriginScheduler, localPreviewProxyUrl?: string, localPreviewRobotsException = false, private readonly fileStore: FileStore | null = null, private readonly previewProductToken = false, robotsCache?: RobotsOriginCache, private readonly compat: CompatTransport | null = null) {
     this.networkPolicy = networkPolicy ?? defaultNetworkPolicy()
@@ -916,7 +916,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
   }
 
   async teardown(): Promise<void> {
-    this.teardownPromise ??= Promise.all([this.egress.close(), this.localPreviewProxy?.close()]).then(() => {})
+    this.teardownPromise ??= Promise.all([this.egress.close(), this.localPreviewProxy?.close(), this.compat?.close()]).then(() => {})
     await this.teardownPromise
   }
 }

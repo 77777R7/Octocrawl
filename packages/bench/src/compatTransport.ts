@@ -37,11 +37,15 @@
  * binary loses this transport alone, and a server that is asked for it checks at startup.
  *
  * Limits. impit resolves host names itself, outside the lane's address check that pins each connection
- * to a validated address; a local server only, never a hosted one. Standard mode only: research mode
- * declares a contact in its User-Agent, which this transport cannot send unchanged.
+ * to a validated address. So a hosted engine's transport takes an address guard (compatGuard.ts), which
+ * impit reaches as its proxy: the guard resolves each name, checks every address and connects to a
+ * checked one, as the lane's guarded lookup does. A local server's transport has none and connects as
+ * before. Standard mode only: research mode declares a contact in its User-Agent, which this transport
+ * cannot send unchanged.
  */
 
 import { COMPAT_BENEFIT_HOSTS } from './compatBenefitHosts.js'
+import type { CompatAddressGuard } from './compatGuard.js'
 import type { Impit } from 'impit'
 import { proxyFor, type ModeIdentity, type NetworkPolicy, type SentHeadersFact } from '@w2l/contracts'
 import type { ResilientResponseLike } from '@w2l/http-core'
@@ -149,11 +153,17 @@ function decodingFault(message: string): boolean {
 /** The codings impit 0.14.5 decodes itself: one of these, exactly as written; any other header it leaves alone. */
 const IMPIT_DECODES: ReadonlySet<string> = new Set(['gzip', 'deflate', 'br', 'zstd'])
 
-/** Error names the resilient loop maps: a timeout, a DNS failure, a certificate failure, else a connection failure. */
+/**
+ * Error names the resilient loop maps: the address guard's refusal, a timeout, a DNS failure, a certificate failure,
+ * else a connection failure. The guard's answers come back as the SOCKS replies impit names: "not allowed by ruleset"
+ * is an address the policy refuses, "host unreachable" a name that did not resolve (compatGuard.ts).
+ */
 function normalized(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error)
   const name = error instanceof Error ? error.name : ''
   const as = (n: string, code?: string) => Object.assign(new Error(message.split('\n')[0] ?? message), { name: n, ...(code === undefined ? {} : { code }), cause: error })
+  if (/\bSocksConnect\b[\s\S]*\bConnectionNotAllowed\b/.test(message)) return Object.assign(new Error('the address guard refused the connection: the host is not at an address this server connects to'), { name: 'SsrfDeniedError', cause: error })
+  if (/\bSocksConnect\b[\s\S]*\bHostUnreachable\b/.test(message)) return Object.assign(new Error('the address guard could not resolve the host'), { name: 'DnsLookupError', cause: error })
   if (name === 'TimeoutError' || name === 'AbortError') return error instanceof Error ? error : as('TimeoutError')
   if (/InvalidCertificate|certificate|handshake|tls|ssl/i.test(message)) {
     // Codes the resilient loop's isTlsError knows, by what the certificate failure says.
@@ -183,15 +193,23 @@ export interface CompatFetchOptions {
   onBodyRead?: (ms: number) => void
 }
 
-/** One impit client per egress route and certificate mode, reused across requests. */
+/**
+ * One impit client per egress route and certificate mode, reused across requests. `guard`: a hosted engine's address
+ * guard, through which every request goes (compatGuard.ts); null on a local server.
+ */
 export class CompatTransport {
   private readonly clients = new Map<string, Impit>()
-  constructor(private readonly networkPolicy: NetworkPolicy, readonly profile: CompatProfileName = DEFAULT_COMPAT_PROFILE) {}
+  constructor(private readonly networkPolicy: NetworkPolicy, readonly profile: CompatProfileName = DEFAULT_COMPAT_PROFILE, private readonly guard: CompatAddressGuard | null = null) {}
+
+  /** Ends the address guard, when there is one; impit's clients go with the transport. */
+  async close(): Promise<void> {
+    await this.guard?.close()
+  }
 
   private async clientFor(url: string, ignoreTlsErrors: boolean): Promise<Impit> {
-    const proxy = proxyFor(url, this.networkPolicy)
+    const proxy = this.guard === null ? proxyFor(url, this.networkPolicy) : null
     const auth = proxy?.username === undefined ? '' : `${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password ?? '')}@`
-    const proxyUrl = proxy === null ? undefined : proxy.url.replace('://', `://${auth}`)
+    const proxyUrl = this.guard !== null ? await this.guard.proxyUrl() : proxy === null ? undefined : proxy.url.replace('://', `://${auth}`)
     const key = `${proxyUrl ?? 'direct'}|${ignoreTlsErrors}`
     let client = this.clients.get(key)
     if (client === undefined) {
@@ -296,9 +314,10 @@ export class CompatTransport {
 /**
  * The hosts a server sends over the compatible transport (`W2L_COMPAT_HOSTS`, comma-separated host
  * names), checked at startup: they need an access grant that names `compatible_transport`, and a
- * hosted server refuses them, since impit resolves names outside the address check a hosted server
- * relies on. Unset, a local server whose grant names `compatible_transport` takes the hosts its
- * acceptance showed it helps (COMPAT_BENEFIT_HOSTS); `none` turns the transport off. Empty otherwise.
+ * hosted server refuses them: a hosted engine gives the transport to a call only when the call is
+ * granted it (its `callCapabilities`, hosted Octocrawl's switch), never to every call by the process.
+ * Unset, a local server whose grant names `compatible_transport` takes the hosts its acceptance
+ * showed it helps (COMPAT_BENEFIT_HOSTS); `none` turns the transport off. Empty otherwise.
  */
 export function compatHostsChoice(env: NodeJS.ProcessEnv, grant: { capabilities: readonly string[] } | null, hosted: boolean): string[] {
   const granted = (grant?.capabilities ?? []).includes('compatible_transport')
@@ -310,7 +329,7 @@ export function compatHostsChoice(env: NodeJS.ProcessEnv, grant: { capabilities:
     try { return new URL(`http://${host}/`).hostname !== host || host.includes('*') } catch { return true }
   })
   if (invalid.length > 0) throw new Error(`W2L_COMPAT_HOSTS takes host names, such as example.com: not ${invalid.join(', ')}`)
-  if (hosted) throw new Error('W2L_COMPAT_HOSTS is refused on a hosted server (ADR 0005: the compatible transport resolves host names outside the hosted address check)')
+  if (hosted) throw new Error('W2L_COMPAT_HOSTS is refused on a hosted server (ADR 0005: a hosted engine gives the compatible transport to a call that is granted it, never to every call)')
   if (!granted) {
     throw new Error('W2L_COMPAT_HOSTS needs an access grant that names compatible_transport (ADR 0005; --access-grant or W2L_ACCESS_GRANT)')
   }

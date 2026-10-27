@@ -22,6 +22,7 @@ import { jobEngineOptions, logQuotaThresholds, type HostedLeases } from './hoste
 import { CREDITS, scrapeCharge, type CreditsStore, type Reservation, type UsageKind } from './hostedCredits.js'
 import type { UploadResult } from './hostedCloud.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
+import { grantedCapabilities, type HostedAccessSource } from './hostedAccess.js'
 import type { HostedJob, HostedJobStore, HostedWebhookDelivery } from './hostedJobs.js'
 import { exportName, JOB_WORKER_COUNT, jobPrefix, jobStatus } from './hostedJobRoutes.js'
 
@@ -69,6 +70,8 @@ export interface JobWorkerDeps {
   enabled?: () => Promise<boolean>
   /** The json model fallback on the job's credits (hostedModel.ts); absent: a job's pages call no model. */
   model?: HostedModel
+  /** The operator's per-request access switches (hostedAccess.ts), read for the job's account as each slice starts; absent: none. */
+  access?: HostedAccessSource
   /** The engine's network and lanes; a test passes a local policy and HTTP-only channels. Default: the hosted policy. */
   engineOptions?: () => Partial<ApiEngineOptions>
   /** A directory the worker may write task directories in. */
@@ -241,6 +244,8 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     // Each page's model call is admitted by the switch and the day's cap, and only while the slice holds its two credits;
     // a worker without a hosted model refuses every call, whatever engine options a caller passed.
     const model = deps.model?.gate(modelRefusal) ?? { gate: { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) } }
+    // What the slice's pages hold (ADR 0005 compatible_transport), as the operator's switch grants it to the job's account now.
+    const capabilities = await grantedCapabilities(deps.access, { uid: job.uid })
     const engine = createApiEngine({ ...jobEngineOptions(taskRoot, { taskIds: () => jobId, ...extra }), modelGate: model.gate })
     const off = new AbortController()
     let result: Awaited<ReturnType<typeof engine.runSlice>> = null
@@ -263,7 +268,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
           refused = error
         }
       }
-      if (refused === null) result = await engine.runSlice(jobId, { maxNewPages: pages, maxMs: limits.sliceMs, graceMs: limits.graceMs, signal: off.signal, ...(job.kind === 'batch' ? { batchHosts: hosts } : {}) })
+      if (refused === null) result = await engine.runSlice(jobId, { maxNewPages: pages, maxMs: limits.sliceMs, graceMs: limits.graceMs, signal: off.signal, capabilities, ...(job.kind === 'batch' ? { batchHosts: hosts } : {}) })
     } finally {
       clearInterval(poller)
       await engine.close({ cancelActive: true })
