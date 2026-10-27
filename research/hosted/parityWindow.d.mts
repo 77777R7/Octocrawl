@@ -28,6 +28,7 @@ export interface ArmSummary {
   notRun: number
   verified: number
   falseSuccess: number
+  robotsAllowed: { planned: number; verified: number; falseSuccess: number } | null
   p50Ms: number | null
   p95Ms: number | null
   verifiedP50Ms: number | null
@@ -51,6 +52,9 @@ export declare function robotsOf(doc: Record<string, unknown> | null): 'refused'
 export declare function verdictOf(task: Task, doc: Record<string, unknown> | null): { verified: boolean; falseSuccess: boolean; failedPredicates: string[] }
 export declare const pct: (xs: readonly number[], q: number) => number | null
 export declare function armSummary(rows: readonly Row[], arm: string): ArmSummary
+export declare function robotsRefusedTasks(rows: readonly Row[]): string[] | null
+export declare function robotsUnknownTasks(rows: readonly Row[]): string[] | null
+export declare function robotsLine(rows: readonly Row[], arms: readonly string[]): string
 export declare function summaryTable(summaries: readonly ArmSummary[]): string[]
 export declare function powerState(pmsetText: string, ioregText: string | undefined): { ac: boolean; lidOpen: boolean | null }
 export declare function runWindow(options: {

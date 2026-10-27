@@ -13,7 +13,9 @@
 // and request, and its predicates of a type the endpoint's scrape lists in tools/list as `verify`: hosted lists no
 // regular-expression check (ADR 0006), so it gets fewer checks, as an agent there would send. No timeout is sent: hosted
 // stops a scrape at 100 s, a local host at 120 s. Every answer is judged by all of its task's predicates on the result the
-// agent receives (a result over 50,000 characters is cut, the same on every arm).
+// agent receives (a result over 50,000 characters is cut, the same on every arm). A task hosted refuses for robots.txt
+// stays in every arm's denominator; the record also counts each arm over the tasks robots.txt allows, and lists the
+// refused ones, as stage H's exit compares hosted with local on those only (decided by Howard, 2026-10-27).
 //
 // Usage: node research/hosted/parity-window.mjs --key-file <file> [--arms hosted,local,local_grant] [--date YYYY-MM-DD]
 //          [--ports 8871,8872] [--grant <file>] [--credit-cap 150] [--hosted-url <url>] [--only T001,T002]
@@ -37,7 +39,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { buildLine, buildState } from '../access/runSetBuild.mjs'
 import { grantLine, grantOf } from '../access/runSetReport.mjs'
 import { weeklySet } from '../access/weeklyPlan.mjs'
-import { armSummary, contractFor, listedCheckTypes, powerState, RESERVED_PORTS, runWindow, summaryTable } from './parityWindow.mjs'
+import { armSummary, contractFor, listedCheckTypes, powerState, RESERVED_PORTS, robotsLine, robotsRefusedTasks, robotsUnknownTasks, runWindow, summaryTable } from './parityWindow.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../..')
@@ -184,7 +186,7 @@ try {
     tasksSha256: createHash('sha256').update(await readFile(join(repo, 'research/access/tasks.v1.json'))).digest('hex'),
     creditCap,
   }
-  await writeFile(join(runDir, 'summary.json'), scrub(JSON.stringify({ environment, summaries, byPart }, null, 2)) + '\n')
+  await writeFile(join(runDir, 'summary.json'), scrub(JSON.stringify({ environment, summaries, robotsRefusedByHosted: robotsRefusedTasks(rows), robotsUnknownForHosted: robotsUnknownTasks(rows), byPart }, null, 2)) + '\n')
   const record = [
     `# Hosted parity window, ${date}`,
     '',
@@ -198,6 +200,8 @@ try {
     '- No timeout is sent: hosted stops a scrape at 100 s, a local host at 120 s. Each task\'s predicates judge every arm\'s result as the agent received it. The exits differ: hosted fetches from Cloud Run (asia-southeast1), the local hosts from this Mac.',
     '',
     ...summaryTable(summaries),
+    '',
+    robotsLine(rows, arms),
     '',
     '| Part | ' + arms.join(' | ') + ' |',
     '| --- | ' + arms.map(() => '---').join(' | ') + ' |',
