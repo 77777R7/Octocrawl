@@ -209,6 +209,7 @@ The run stops and asks before any step that would take the total past $40.
 
 - **The residential login.** It is already on this Mac: `RESIDENTIAL_PROXY` in `~/Code/w2l/.w2l/access/competitors.env`, mode 600. G4 and the CAPTCHA windows use the same entry. Nothing new is pasted for it.
 - **The datacenter list.** Howard pastes Webshare's Direct connection list into `node research/access/h2b-egress/save-list.mjs`, run in the Terminal panel, and presses Ctrl-D.
+  - The list carries a user name and password on every line, in either of the download's two formats (`ip:port:user:password`, or `[http://]user:password@ip:port`, saved in the first form). IP authorization would not do, because Cloud Run's egress addresses are not fixed.
   - The terminal is in raw mode from before the prompt until the list is saved, so the paste is never shown or left for the shell.
   - A list that fails its check (a bad line, an IP twice, fewer than 72 IPs) is asked for again. The script prints counts and line numbers only.
   - It saves the list to `~/Code/w2l/.w2l/access/h2b-dc-proxies.txt`, mode 600.
