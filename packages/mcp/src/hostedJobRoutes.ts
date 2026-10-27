@@ -7,7 +7,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
-import { CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, parseBatchStartRequest, parseCrawlStartRequest, readWebhook, RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
+import { CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlStartRequest, readWebhook, RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import type { CreditsStore } from './hostedCredits.js'
 import { CREDITS } from './hostedCredits.js'
 import { asksModelFallback } from './hostedModel.js'
@@ -59,6 +59,8 @@ export const JOB_DEFAULT_CRAWL_PAGES = 100
 export const JOB_MAX_CRAWL_PAGES = 500
 /** New pages a slice stores at most (docs/launch/2026-10-19-h1-hosted-jobs-plan.md §5): a start needs the credits for one. */
 export const JOB_SLICE_PAGES = 100
+/** Pages a job's slice reads at once, its engine's workers (hostedJobWorker.ts): the most a crawl's or a batch's maxConcurrency gets. */
+export const JOB_WORKER_COUNT = 2
 export const JOB_LIMITS: JobLimits = { maxRunning: 2, maxQueued: 10 }
 const IDEMPOTENCY_TTL_MS = 24 * 3_600_000
 const PAGE_LIST_DEFAULT = 50
@@ -223,6 +225,15 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     try { parsed = kind === 'batch' ? parseBatchStartRequest(body) : parseCrawlStartRequest(body) }
     catch (error) { return refusal(400, 'invalid_request', error instanceof RequestError || error instanceof Error ? error.message : String(error)) }
     if (kind === 'crawl' && !((parsed as ParsedCrawlStartRequest).maxPages! >= 1 && (parsed as ParsedCrawlStartRequest).maxPages! <= JOB_MAX_CRAWL_PAGES)) return refusal(400, 'invalid_request', `maxPages must be 1 to ${JOB_MAX_CRAWL_PAGES} on hosted Octocrawl`)
+    // The worker's hosted engine refuses these at the job's first slice, which fails and is retried until the job ends
+    // failed (delivery_failed) without naming why: the start refuses them by name instead. The engine's other start checks
+    // (its file cap, selectors, the formats a contract needs) are not made here yet.
+    const regexRefusal = hostedVerifyRefusal(parsed.verify)
+    if (regexRefusal !== null) return refusal(400, 'unsupported_parameter', regexRefusal)
+    // A batch's maxConcurrency is lowered to the slice's workers when it runs (engine.ts); a crawl's engine refuses one above
+    // them, so a crawl's is lowered here.
+    const crawl = kind === 'crawl' ? parsed as ParsedCrawlStartRequest : null
+    if (crawl !== null && crawl.maxConcurrency != null && crawl.maxConcurrency > JOB_WORKER_COUNT) parsed = { ...crawl, maxConcurrency: JOB_WORKER_COUNT }
 
     const pages = kind === 'batch' ? (parsed as ParsedBatchStartRequest).urls.length : (parsed as ParsedCrawlStartRequest).maxPages ?? JOB_DEFAULT_CRAWL_PAGES
     const price = body.fastMode === true ? CREDITS.httpPage : CREDITS.browserPage

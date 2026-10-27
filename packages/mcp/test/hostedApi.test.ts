@@ -8,11 +8,11 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from '@modelcontextprotocol/client'
-import { hostedNetworkPolicy, parseScrapeRequest, type CompactScrapeResponse } from '@w2l/contracts'
+import { hostedNetworkPolicy, parseScrapeRequest, type CompactScrapeResponse, type ScrapeRun } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
 import { expectUsableInstructions } from './instructionChecks.js'
 import { TOOL_NAMES } from '../src/tools.js'
-import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, noteScrape, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
+import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, noteScrape, scrapePhaseLine, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore, type RequestNote } from '../src/hostedCredits.js'
 import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } from '../src/hostedModel.js'
 import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
@@ -987,6 +987,77 @@ it('a request line names the scrape\'s record and the paid calls on its Evidence
   // A record with no paid calls: an empty list, not unknown.
   noteScrape(note, { status: 'success', scrapeId: 'scrape-2', evidenceRecord: { access: null } })
   expect(note).toMatchObject({ scrapeId: 'scrape-2', paidCallIds: [] })
+})
+
+it('a scrape\'s phase line says how long each rung took and what the page waited for, by the URL\'s host alone', () => {
+  // T009 on hosted after O6 (2026-10-27): the http rung's header cap, then browser_local.
+  const run = {
+    status: 'success', lane: 'browser_local', failureReason: null, blockReason: null, channelsTried: ['http', 'browser_local'],
+    usage: { wallMs: 21551.3, browserMs: 8916 },
+    ladderTrace: [
+      { at: 3, event: 'ladder_channel_started', channel: 'http', detail: { vendorId: null, remainingMs: 99994 } },
+      { at: 10528.28, event: 'ladder_headers_timeout_fallback', channel: 'http', detail: { to: 'browser_local', remainingMs: 89464, maxMs: 30000 } },
+      { at: 10528.28, event: 'ladder_step', channel: 'http', detail: { vendorId: null, status: 'failed', escalate: 'http_headers_timeout' } },
+      { at: 10533, event: 'ladder_channel_started', channel: 'browser_local', detail: { vendorId: null, remainingMs: 30000 } },
+      { at: 11010.04, event: 'ladder_step', channel: 'browser_local', detail: { vendorId: null, status: 'success', escalate: null } },
+    ],
+    trace: [
+      { at: 3680, lane: 'browser_local', event: 'navigate', detail: { url: 'https://fred.stlouisfed.org/series/UNRATE?secret=1', attempt: 1, timeoutMs: 26317 } },
+      { at: 8100, lane: 'browser_local', event: 'loading_wait', detail: { waitedMs: 1500.4, cleared: true } },
+      { at: 8800, lane: 'browser_local', event: 'region_wait', detail: { ready: true, waitedMs: 640, reads: 3, contractSha256: 'abc' } },
+      { at: 8810, lane: 'browser_local', event: 'steady_wait', detail: { waitedMs: 300, steady: false } },
+      { at: 8820, lane: 'browser_local', event: 'wait_for', detail: { requestedMs: 500, waitedMs: 500 } },
+      // installed_chrome's wait for a check keeps its length under `ms`.
+      { at: 8830, lane: 'browser_local', event: 'challenge_wait', detail: { blockReason: 'cloudflare_challenge', outcome: 'cleared', ms: 9100, capMs: 10000 } },
+    ],
+    markdown: '# Unemployment Rate',
+  }
+  const line = scrapePhaseLine('https://fred.stlouisfed.org/series/UNRATE?secret=1', run as unknown as ScrapeRun, 'scrape-9')
+  expect(line).toEqual({
+    severity: 'INFO', event: 'hosted_scrape_phases', host: 'fred.stlouisfed.org', scrapeId: 'scrape-9', status: 'success', lane: 'browser_local', reason: null,
+    channelsTried: ['http', 'browser_local'], totalMs: 21551, browserMs: 8916, headersTimeoutFallback: true,
+    rungs: [{ channel: 'http', startMs: 3, ms: 10528, status: 'failed' }, { channel: 'browser_local', startMs: 10533, ms: 11010, status: 'success' }],
+    waits: [
+      { event: 'loading_wait', waitedMs: 1500, cleared: true }, { event: 'region_wait', waitedMs: 640, ready: true }, { event: 'steady_wait', waitedMs: 300, steady: false },
+      { event: 'wait_for', waitedMs: 500 }, { event: 'challenge_wait', waitedMs: 9100, outcome: 'cleared' },
+    ],
+  })
+  // Never the path, the query or the page.
+  expect(JSON.stringify(line)).not.toMatch(/series|secret|Unemployment/)
+  // A rung that never stepped (its call threw) has no duration; a URL that does not parse has no host.
+  expect(scrapePhaseLine('not a url', { status: 'failed', lane: 'http', failureReason: 'timeout', channelsTried: ['http'], usage: { wallMs: 5 }, ladderTrace: [{ at: 0, event: 'ladder_channel_started', channel: 'http' }], trace: [] } as unknown as ScrapeRun))
+    .toMatchObject({ host: null, reason: 'timeout', browserMs: null, headersTimeoutFallback: false, rungs: [{ channel: 'http', startMs: 0, ms: null, status: null }], waits: [] })
+})
+
+it('logs one phase line for every hosted scrape, with or without debug, and never puts it in the answer', async () => {
+  const lines: string[] = []
+  const { url } = await start({ credits: new MemoryCreditsStore(1_000), log: (line) => lines.push(line), keys: {
+    oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' },
+    oc_plain: { enabled: true, plan: 'free', dailyLimit: 5, browser: false },
+  } })
+  const page = `${origin}/page?token=private`
+  const answers = [
+    await post(url, '/v1/scrape', { url: page }),
+    await post(url, '/v1/scrape', { url: page }, { authorization: 'Bearer oc_plain' }),
+    await post(url, '/v1/scrape', { url: page }, { authorization: 'Bearer oc_account' }),
+    await post(url, '/v1/scrape', { url: page, debug: true }, { authorization: 'Bearer oc_account' }),
+  ]
+  const bodies = await Promise.all(answers.map(async (answer) => { expect(answer.status).toBe(200); return answer.text() }))
+  const phases = lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.event === 'hosted_scrape_phases')
+  expect(phases).toHaveLength(4)
+  for (const line of phases) {
+    expect(line).toMatchObject({ host: '127.0.0.1', scrapeId: expect.any(String), status: 'success', lane: 'http', channelsTried: ['http'], headersTimeoutFallback: false, rungs: [{ channel: 'http', startMs: expect.any(Number), ms: expect.any(Number), status: 'success' }] })
+    expect(JSON.stringify(line)).not.toMatch(/\/page|token|private|Tides|oc_/)
+  }
+  for (const body of bodies) expect(body).not.toContain('hosted_scrape_phases')
+  // A scrape through the MCP endpoint is logged once too, and its answer carries neither the line nor the trace.
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: { authorization: 'Bearer oc_account' } } }))
+    const text = (((await client.callTool({ name: 'scrape', arguments: { url: page } })).content) as { type: string; text: string }[])[0]!.text
+    expect(text).not.toMatch(/hosted_scrape_phases|ladderTrace/)
+  } finally { await client.close() }
+  expect(lines.filter((line) => line.includes('"hosted_scrape_phases"'))).toHaveLength(5)
 })
 
 describe('the json model fallback on an account\'s credits (decided 2026-10-24)', () => {

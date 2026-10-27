@@ -233,22 +233,74 @@
     return out
   }
 
-  /** A treemap of items [{ name, value, rows }], largest first; deeper orange for a larger share. */
+  /**
+   * Lays out items, largest first, with `other` (the rest, summed) after them: as a strip along the long side while every
+   * tile stays within 3:1, else as the last tile when that leaves squarer tiles. Either way it ends in the bottom-right
+   * corner, behind the named ones.
+   */
+  const arrange = (items, other, w, h) => {
+    if (!other) return squarify(items, 0, 0, w, h)
+    const share = other.value / (other.value + items.reduce((sum, item) => sum + item.value, 0))
+    const strip = w >= h
+      ? [...squarify(items, 0, 0, w * (1 - share), h), { ...other, x: w * (1 - share), y: 0, w: w * share, h }]
+      : [...squarify(items, 0, 0, w, h * (1 - share)), { ...other, x: 0, y: h * (1 - share), w, h: h * share }]
+    const tail = squarify([...items, other], 0, 0, w, h)
+    const worst = (cells) => Math.max(...cells.map((c) => Math.max(c.w / c.h, c.h / c.w)))
+    return worst(strip) <= Math.max(3, worst(tail)) ? strip : tail
+  }
+
+  /** A label's width: measured where the browser lays text out, else about 7 px a character in either tile font. */
+  const textWidth = (node) => node.getComputedTextLength?.() || node.textContent.length * 7
+  /**
+   * Writes into `node` the first of `texts` that fits in `room` px. With `least`, the last one may instead be cut to fit,
+   * ending in an ellipsis, when at least that many of its characters stay. Returns whether anything was written.
+   */
+  const fit = (node, texts, room, least = Infinity) => {
+    for (const text of texts) { node.textContent = text; if (textWidth(node) <= room) return true }
+    const last = texts[texts.length - 1]
+    const cut = (n) => `${last.slice(0, n).replace(/[\s.·(_-]+$/, '')}…`
+    let keep = 0
+    for (let lo = least, hi = last.length - 1; lo <= hi;) {
+      const mid = (lo + hi) >> 1
+      node.textContent = cut(mid)
+      if (textWidth(node) <= room) { keep = mid; lo = mid + 1 } else hi = mid - 1
+    }
+    node.textContent = keep ? cut(keep) : ''
+    return keep > 0
+  }
+  /** A tile's name, then shorter ways to write it: without "www.", then without a closing part in brackets. */
+  const nameForms = (name) => {
+    const bare = name.replace(/^www\./, '')
+    return [...new Set([name, bare, bare.replace(/\s+\([^()]*\)$/, '')])]
+  }
+
+  /**
+   * A treemap of items [{ name, value, rows, other? }], largest first; deeper orange for a larger share. The item marked
+   * other (the rest, summed) goes last, in grey. Labels never leave their tile: a name drops "www." or its part in
+   * brackets, then is cut; the value drops its unit, then its count; a tile too small for a name shows none.
+   */
   const treemap = (host, items, opts = {}) => {
     responsive(host, (width) => {
       const height = opts.height ?? (width < 480 ? 300 : 260)
       const svg = frame(host, width, height, opts.label ?? 'Treemap')
-      const total = items.reduce((sum, item) => sum + item.value, 0)
-      const cells = squarify(items.filter((item) => item.value > 0).sort((a, b) => b.value - a.value), 0, 0, width, height)
+      const shown = items.filter((item) => item.value > 0)
+      const total = shown.reduce((sum, item) => sum + item.value, 0)
+      const cells = arrange(shown.filter((item) => !item.other).sort((a, b) => b.value - a.value), shown.find((item) => item.other), width, height)
       for (const cell of cells) {
         const share = cell.value / total
-        const group = svgEl('g', { class: `tile t${share > 0.3 ? 4 : share > 0.15 ? 3 : share > 0.07 ? 2 : share > 0.03 ? 1 : 0}` }, svg)
+        const tone = cell.other ? 'other' : `t${share > 0.3 ? 4 : share > 0.15 ? 3 : share > 0.07 ? 2 : share > 0.03 ? 1 : 0}`
+        const group = svgEl('g', { class: `tile ${tone}` }, svg)
         svgEl('rect', { x: cell.x + 1, y: cell.y + 1, width: Math.max(0, cell.w - 2), height: Math.max(0, cell.h - 2), rx: 4 }, group)
-        if (cell.w > 70 && cell.h > 34) {
+        const room = cell.w - 20
+        if (room >= 20 && cell.h > 34) {
           const name = svgEl('text', { x: cell.x + 10, y: cell.y + 20, class: 'tile-name' }, group)
-          const room = Math.floor((cell.w - 20) / 7)
-          name.textContent = cell.name.length > room ? `${cell.name.slice(0, Math.max(1, room - 1))}…` : cell.name
-          if (cell.h > 52) { const value = svgEl('text', { x: cell.x + 10, y: cell.y + 38, class: 'tile-value' }, group); value.textContent = `${number(cell.value)} ${opts.unit ?? ''} · ${Math.round(share * 100)}%`.trim() }
+          if (!fit(name, nameForms(cell.name), room, 4)) name.remove()
+          else if (cell.h > 52) {
+            const value = svgEl('text', { x: cell.x + 10, y: cell.y + 38, class: 'tile-value' }, group)
+            const count = number(cell.value)
+            const percent = share < 0.005 ? '<1%' : `${Math.round(share * 100)}%`
+            if (!fit(value, [...new Set([`${count}${opts.unit ? ` ${opts.unit}` : ''} · ${percent}`, `${count} · ${percent}`, percent])], room)) value.remove()
+          }
         }
         group.addEventListener('pointermove', (event) => { group.classList.add('hover'); show(event, cell.name, [[opts.unit ? `${opts.unit[0].toUpperCase()}${opts.unit.slice(1)}` : 'Value', number(cell.value)], ['Share', `${(share * 100).toFixed(1)}%`], ...(cell.rows ?? [])]) })
         group.addEventListener('pointerleave', () => { group.classList.remove('hover'); hide() })

@@ -131,7 +131,7 @@ import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, FileSessionStore, installedChromeRefusal, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
-import { BLOCK_REASON, VERIFY_REGEX_CHECK_TYPES, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
+import { BLOCK_REASON, hostedVerifyRefusal, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv, verifyScrapeResponse } from './structured.js'
 
@@ -167,6 +167,8 @@ export class SessionsUnavailableError extends Error {
 /** A scrape's context, and a fastMode its caller pinned: the answer and the scrape record then say the pin's reason. */
 export interface ScrapeContext extends ExecutionContext {
   fastModePin?: FastModePin
+  /** Told the call's whole run, its trace and ladder trace whatever `debug` asks, before the answer is shaped; never part of it (hosted's phase line). */
+  observe?: (run: ScrapeRun, scrapeId: string) => void
 }
 
 /** What a handoff tells its caller while it waits, and what ends it. */
@@ -863,8 +865,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A step runs the caller's clicks and scripts in the operator's browser; a hosted engine takes none until that isolation is reviewed.
     if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run Octocrawl locally to use them')
     // A JavaScript regular expression cannot be bounded in time, and a page's Markdown is far longer than a safe pattern's text (ADR 0006).
-    const regexChecks = req.verify?.checks.filter((check) => (VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(check.type)).map((check) => check.type) ?? []
-    if (hosted && regexChecks.length > 0) throw new RequestError(`verify: ${[...new Set(regexChecks)].join(' and ')} checks are not available in hosted mode (a regular expression cannot be bounded in time); use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally`, 'unsupported_parameter', { parameters: ['verify'] })
+    const regexRefusal = hosted ? hostedVerifyRefusal(req.verify) : null
+    if (regexRefusal !== null) throw new RequestError(regexRefusal, 'unsupported_parameter', { parameters: ['verify'] })
   }
   /**
    * `access: "enhanced"` asks for what the server's access grant of tier enhanced approves (ADR 0005), within its
@@ -1863,6 +1865,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // A pinned fastMode's reason replaces the engine's "retry without fastMode" in the answer and the record alike.
       const pinned = context.fastModePin === undefined ? [] : pinnedFastModeHints(run.agentHints ?? [], context.fastModePin)
       const full: ScrapeRun = pinned.length === 0 ? run : { ...run, agentHints: pinned }
+      // An observer that throws does not cost the caller the page.
+      try { context.observe?.(full, scrapeId) } catch { /* the observer's own fault */ }
       const response = await prepareScrapeResponse(full, req, modelGated(shapeScope, context), null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
       if (!record) return response
       // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.

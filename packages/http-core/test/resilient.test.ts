@@ -137,6 +137,25 @@ describe('resilientFetch: redirects', () => {
     expect(out.headers?.get('location')).toBe('/loop/a')
   })
 
+  it('follows a redirect back to a URL already requested when its request would now differ (requestState)', async () => {
+    // A sign-in check sets a cookie and sends the client back: the second request carries it and is answered.
+    let cookie = ''
+    const f = scripted([
+      res(302, { location: '/signin' }),
+      res(302, { location: '/page' }),
+      res(200, {}, 'served'),
+    ])
+    const out = await resilientFetch('http://x.test/page', async (url, init) => {
+      const answer = await f(url, init)
+      if (url === 'http://x.test/signin') cookie = 'checked=1'
+      return answer
+    }, { requestState: async () => cookie })
+    expect(out).toMatchObject({ kind: 'ok', status: 200, finalUrl: 'http://x.test/page', redirectChain: ['http://x.test/page', 'http://x.test/signin', 'http://x.test/page'], requestCount: 3 })
+    // Unchanged state is still a loop.
+    const loop = await resilientFetch('http://x.test/loop/a', scripted([res(302, { location: '/loop/b' }), res(302, { location: '/loop/a' })]), { requestState: async () => 'same' })
+    expect(loop).toMatchObject({ kind: 'failure', failureReason: 'redirect_loop', requestCount: 2 })
+  })
+
   it('names the URL that redirects to itself as the final URL of its loop', async () => {
     const out = await resilientFetch('http://x.test/self', scripted([res(302, { location: '/self' })]))
     expect(out).toMatchObject({ kind: 'failure', failureReason: 'redirect_loop', status: 302, finalUrl: 'http://x.test/self', redirectChain: ['http://x.test/self'], requestCount: 1 })

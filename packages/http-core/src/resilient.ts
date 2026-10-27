@@ -7,7 +7,9 @@ import { abortableSleep, createExecutionScope, raceWithSignal, remainingTimeout,
  *
  * Scope (v1, fixture-driven):
  *  - follow 3xx chains within maxRedirects, record every visited URL
- *  - detect redirect loops via a per-attempt seen set
+ *  - detect redirect loops via a per-attempt seen set: a redirect back to a
+ *    URL already requested is a loop unless the request would now differ
+ *    (`requestState`, the cookies a hop set)
  *  - allow http/https targets only; anything else is policy_denied
  *  - retry ONLY a 503 response (the flaky fixture shape), at most
  *    maxRetries times; 429 and every other status never retry
@@ -95,6 +97,14 @@ export interface ResilientHttpConfig extends ExecutionBudget {
   headersCapReserveMs?: number
   /** Called before the first request and before every redirect hop. */
   assertUrl?: UrlGuard
+  /**
+   * What a request to `url` would carry besides the URL (the cookies it would
+   * send). A redirect back to a URL this attempt requested is a loop only when
+   * this is unchanged since then: a sign-in check that sets a cookie and sends
+   * the client back is answered differently the second time. Absent: every
+   * revisit is a loop.
+   */
+  requestState?: (url: string) => Promise<string>
 }
 
 export const DEFAULT_RESILIENT_CONFIG: ResilientHttpConfig = {
@@ -284,7 +294,9 @@ export async function resilientFetch(
   for (;;) {
     throwIfExecutionStopped(scope)
     attemptCount++
-    const seen = new Set<string>([current])
+    // Each URL this attempt requested, with what its request carried (requestState).
+    const seen = new Map<string, string>()
+    const stateOf = (url: string) => cfg.requestState === undefined ? Promise.resolve('') : raceWithSignal(cfg.requestState(url), scope.signal)
     let hops = 0
 
     // Inner loop: one attempt's redirect chain.
@@ -298,6 +310,7 @@ export async function resilientFetch(
       const headersCapMs = follows && cfg.deadlineAt! - Date.now() - cfg.headersTimeoutMs < reserveMs ? Number.POSITIVE_INFINITY : cfg.headersTimeoutMs
       const bodyCapMs = follows ? Number.POSITIVE_INFINITY : cfg.bodyTimeoutMs
       let headersTimeoutMs = headersCapMs, bodyTimeoutMs = bodyCapMs
+      seen.set(current, await stateOf(current))
       try {
         headersTimeoutMs = remainingTimeout(scope, headersCapMs)
         bodyTimeoutMs = remainingTimeout(scope, bodyCapMs)
@@ -393,7 +406,7 @@ export async function resilientFetch(
             headers: response.headers,
           }
         }
-        if (seen.has(next)) {
+        if (seen.has(next) && seen.get(next) === await stateOf(next)) {
           // The loop's target was requested already and is not requested
           // again: the final URL is the one whose redirect closes the loop.
           trace.push({ at, event: 'redirect_loop', detail: { from: current, to: next } })
@@ -418,7 +431,6 @@ export async function resilientFetch(
           }
         }
         hops++
-        seen.add(next)
         const hopDenied = await guardUrl(next, assertUrl, at, current, chain, requestCount, attemptCount, trace)
         throwIfExecutionStopped(scope)
         if (hopDenied !== null) return { ...hopDenied, status: response.status, headers: response.headers }

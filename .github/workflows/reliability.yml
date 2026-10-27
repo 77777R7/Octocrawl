@@ -26,7 +26,31 @@ jobs:
       # The packages come from the npm cache. The audit is a registry request whose
       # result CI never reads, and it never finished in the 6-7 minute installs.
       - run: npm ci --no-audit
-      - run: npx playwright install --with-deps chromium
+      # The browsers are cached by Playwright's version. --with-deps is left out: the runner image already has the
+      # libraries Chromium links against, so its apt step only added fonts, and on 2026-10-26 the Ubuntu mirror served
+      # them at 30 kB/s, which took the install to 11-15 minutes and cancelled jobs before any test ran.
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright-core'].version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - name: Install Chromium for Playwright
+        timeout-minutes: 5
+        run: |
+          npx playwright install chromium
+          if ldd "$(node -p "require('playwright').chromium.executablePath()")" | grep 'not found'; then
+            echo "::warning::Chromium misses libraries on this runner image; installing them from apt"
+            npx playwright install-deps chromium
+          fi
+      # Saved before the tests, so a job whose tests fail or are cancelled still leaves the browsers for its re-run.
+      - uses: actions/cache/save@v4
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-cache.outputs.cache-primary-key }}
       - run: npm run typecheck
       - run: npm test -- --project=${{ matrix.project }} --reporter=default --reporter=json --outputFile=test-results/${{ matrix.project }}.json
         timeout-minutes: ${{ matrix.project == 'timed' && 17 || 15 }}

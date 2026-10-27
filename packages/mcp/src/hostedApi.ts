@@ -2,8 +2,11 @@
  * Hosted Octocrawl, phase 1 (ROADMAP PH): the API's hosted mode and a remote
  * MCP endpoint in one process, for `api.octocrawl.dev` and `mcp.octocrawl.dev`.
  *
- * Only scrape and map are served, since both are stateless; every other
- * route and tool is refused by name with a hint to run Octocrawl locally.
+ * Every caller is served scrape and map, and scrape_product with the browser
+ * lane; an account's key or sign-in is served crawl and batch jobs too
+ * (hostedJobRoutes.ts). Every other route and tool is refused by name with a
+ * hint to run Octocrawl locally; hostedParity.ts records, tool by tool and
+ * option by option, where hosted stands against a local server.
  * A caller is either a key holder (`Authorization: Bearer <key>`, looked up
  * by HMAC in the key store) or keyless (counted by the address the
  * Cloudflare Worker reports, within a daily allowance). Keyless calls use the
@@ -20,7 +23,7 @@ import { join } from 'node:path'
 import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
 import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine } from '@w2l/api'
-import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
+import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy, type ScrapeRun } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
 import { serverInstructions } from './instructions.js'
@@ -30,7 +33,7 @@ import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
 import { CREDITS, DEFAULT_MONTHLY_CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
-import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, type HostedJobsConfig } from './hostedJobRoutes.js'
+import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, JOB_WORKER_COUNT, type HostedJobsConfig } from './hostedJobRoutes.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
 export interface HostedKeyRecord {
@@ -258,6 +261,8 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
     // REST takes a webhook (H2 W1); a tool does not offer one yet, since its secret would land in the agent's transcript.
     for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || key === 'webhook' || (!browser && key === 'waitFor')) delete schema.properties[key]
     if (tool.name === 'crawl' && schema.properties.maxPages) schema.properties.maxPages = { ...schema.properties.maxPages, maximum: JOB_MAX_CRAWL_PAGES }
+    // A slice reads JOB_WORKER_COUNT pages at once; the start lowers a crawl's larger maxConcurrency to it (hostedJobRoutes.ts).
+    if (tool.name === 'crawl' && schema.properties.maxConcurrency) schema.properties.maxConcurrency = { ...schema.properties.maxConcurrency, maximum: JOB_WORKER_COUNT }
     // The job's credit cap, offered where credits are spent: the local tools leave it out, a server on the computer spends none (H2 M6).
     schema.properties.maxCredits = { type: 'integer', minimum: 1, description: 'The most credits this job may spend; it stops when the next page would pass it.' }
     // A page in a job is read as a hosted scrape is (H2 M7, M9): its formats (no screenshot without the browser lane),
@@ -310,9 +315,11 @@ function hostedInputSchema(name: string, schema: unknown, browser: boolean): unk
   const properties = copy.properties
   properties.timeout = { ...properties.timeout, maximum: HOSTED_MCP_SCRAPE_TIMEOUT_MS, description: `Deadline in milliseconds for the whole scrape. When it fires the result is partial with the content so far, or failed/timeout. Here at most and by default ${HOSTED_MCP_SCRAPE_TIMEOUT_MS}; a longer one is lowered to it.` }
   properties.maxFileBytes = { ...properties.maxFileBytes, maximum: HOSTED_MAX_FILE_BYTES }
-  const verify = properties.verify as { properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }
+  const verify = properties.verify as { description: string; properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }
   const checkType = verify.properties.checks.items.properties.type
   checkType.enum = checkType.enum.filter((type) => !(VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(type))
+  // Its description names the types too, and the job tools' verify is "Same as scrape.": neither offers what hosted refuses.
+  for (const type of VERIFY_REGEX_CHECK_TYPES) verify.description = verify.description.replace(` ${type},`, '')
   if (!browser) {
     // Without the browser lane there is no screenshot and nothing to wait for.
     delete properties.waitFor
@@ -485,6 +492,49 @@ export function noteScrape(note: RequestNote, result: unknown): void {
     const id = call !== null && typeof call === 'object' ? (call as { paidCallId?: unknown }).paidCallId : undefined
     return typeof id === 'string' && id !== '' ? [id] : []
   }) : []
+}
+
+/** The trace events that are waits on the page: the detail field that holds each one's length, and the outcomes it names besides. */
+const PHASE_WAITS: Readonly<Record<string, { length: string; outcomes: readonly string[] }>> = {
+  loading_wait: { length: 'waitedMs', outcomes: ['cleared'] },
+  steady_wait: { length: 'waitedMs', outcomes: ['steady'] },
+  region_wait: { length: 'waitedMs', outcomes: ['ready'] },
+  wait_for: { length: 'waitedMs', outcomes: [] },
+  // installed_chrome's ChallengeWait (browserLocal.ts) keeps its length under `ms`.
+  challenge_wait: { length: 'ms', outcomes: ['outcome'] },
+}
+
+/**
+ * One line per hosted scrape on where its time went (stage H speed root cause, 2026-10-27): each rung's start and length
+ * from the ladder trace, the browser's time, the page's waits, and whether the http rung's header cap handed over to the
+ * browser. Logged whatever `debug` asks and never sent to the caller. Of the URL, its host alone: never its path, its
+ * query or the page.
+ */
+export function scrapePhaseLine(url: string, run: ScrapeRun, scrapeId: string | null = null): Record<string, unknown> {
+  let host: string | null = null
+  try { host = new URL(url).hostname } catch { host = null }
+  const ms = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : null)
+  const ladder = run.ladderTrace ?? []
+  const rungs = ladder.flatMap((event, index) => {
+    if (event.event !== 'ladder_channel_started') return []
+    const step = ladder.slice(index + 1).find((later) => later.event === 'ladder_step' && later.channel === event.channel)
+    const status = step?.detail?.status
+    return [{ channel: event.channel ?? null, startMs: ms(event.at), ms: step === undefined ? null : ms(step.at), status: typeof status === 'string' ? status : null }]
+  })
+  const waits = (run.trace ?? []).flatMap((event) => {
+    const wait = PHASE_WAITS[event.event]
+    if (wait === undefined) return []
+    const detail = event.detail ?? {}
+    const named = Object.fromEntries(wait.outcomes.flatMap((key) => typeof detail[key] === 'boolean' || typeof detail[key] === 'string' ? [[key, detail[key]]] : []))
+    return [{ event: event.event, waitedMs: ms(detail[wait.length]), ...named }]
+  })
+  return {
+    severity: 'INFO', event: 'hosted_scrape_phases', host, scrapeId,
+    status: run.status, lane: run.lane, reason: run.blockReason ?? run.failureReason ?? null,
+    channelsTried: run.channelsTried, totalMs: ms(run.usage?.wallMs), browserMs: ms(run.usage?.browserMs),
+    headersTimeoutFallback: ladder.some((event) => event.event === 'ladder_headers_timeout_fallback'),
+    rungs, waits,
+  }
 }
 
 export interface HostedCaller {
@@ -799,7 +849,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const req = parseScrapeRequest(pinned)
       // The model's +2 is charged in credits, which only an account has.
       const modelGate = { admit: async () => ({ ok: false as const, message: config.model === undefined ? MODEL_REFUSALS.notOffered : MODEL_REFUSALS.needsAccount }) }
-      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
+      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
     }
     await next()
     return c.res
@@ -884,7 +934,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
             : body
           const model = config.model?.gate(modelRefusal) ?? null
           const modelGate = model?.gate ?? { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) }
-          const result = await engine.scrape(parseScrapeRequest(pinned), { signal: c.req.raw.signal, modelGate, ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
+          const req = parseScrapeRequest(pinned)
+          const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
           // Two more where the model was called for the page: never more than was reserved, as only a reserved gate admits.
           modelCharged = modelExtra > 0 && (model?.pagesCalled() ?? 0) > 0 ? CREDITS.model : 0
