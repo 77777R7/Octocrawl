@@ -9,8 +9,10 @@
  *   W2L_JOBS_WORK_ROOT          where slices keep task directories (default /tmp/octocrawl-jobs)
  *   W2L_EXTRACT_PROVIDER, W2L_EXTRACT_MODEL, W2L_EXTRACT_API_KEY
  *                               as the hosted API's: the json model fallback for a job's pages (hostedModel.ts)
+ * A slice's pages hold the compatible transport while `hostedConfig/compatibleTransport` grants it to the job's account
+ * (hostedAccess.ts), read when the slice starts.
  */
-import { structuredModelConfigFromEnv } from '@w2l/api'
+import { loadImpit, structuredModelConfigFromEnv } from '@w2l/api'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { createHttpsWebhookTransport } from '@w2l/runtime'
 import { FirestoreHostedLeases, serviceAccessToken } from './hostedApi.js'
@@ -19,6 +21,7 @@ import { FirestoreHostedJobStore } from './hostedJobs.js'
 import { jobsCloudFromEnv } from './hostedJobsCloud.js'
 import { googleOidcVerifier, startJobWorker } from './hostedJobWorker.js'
 import { FirestoreModelSpend, firestoreModelSettings, HostedModel } from './hostedModel.js'
+import { firestoreHostedAccess } from './hostedAccess.js'
 
 function positive(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -30,6 +33,8 @@ function positive(name: string, fallback: number): number {
 
 const cloud = await jobsCloudFromEnv(process.env)
 if (cloud === null) throw new Error('the job worker needs W2L_FIRESTORE_PROJECT_ID, W2L_JOBS_BUCKET, W2L_JOBS_QUEUE, W2L_JOBS_WORKER_URL and W2L_JOBS_TASKS_ACCOUNT')
+// impit, the compatible transport's native module, loaded now: a platform without it stops the start, not a slice.
+await loadImpit()
 const worker = await startJobWorker({
   port: positive('PORT', 8080),
   verify: googleOidcVerifier({ audience: cloud.workerUrl, email: cloud.tasksAccount }),
@@ -44,6 +49,7 @@ const worker = await startJobWorker({
     hostLeases: new FirestoreHostedLeases(cloud.project),
     enabled: cloud.enabled,
     model: new HostedModel({ model: structuredModelConfigFromEnv(), settings: firestoreModelSettings(cloud.project, serviceAccessToken()), spend: new FirestoreModelSpend(cloud.project, serviceAccessToken()) }),
+    access: firestoreHostedAccess(cloud.project, serviceAccessToken()),
     workRoot: process.env.W2L_JOBS_WORK_ROOT ?? '/tmp/octocrawl-jobs',
     limits: { jobsDaily: positive('W2L_JOBS_DAILY', 10_000), jobsAccountDaily: positive('W2L_JOBS_ACCOUNT_DAILY', 2_000) },
   },
