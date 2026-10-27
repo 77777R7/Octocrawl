@@ -10,6 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { hostedNetworkPolicy, VERIFY_REGEX_CHECK_TYPES } from '@w2l/contracts'
 import { createHostedApi, hostedScrapeArguments, hostedTools, keyDigest, MemoryHostedKeys, MemoryHostedQuota, oauthTools, withMcpScrapeDeadline } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
+import { collectGarbage } from './collectGarbage.js'
 
 /**
  * Hosted Octocrawl lists only the options it serves (docs/mcp-client-ux-tasks.md W6): an agent that reads the
@@ -80,6 +81,16 @@ describe('hosted tool schemas', () => {
     // Every other request goes to the gate as it came.
     const map = new Request('http://hosted.internal/v1/map', { method: 'POST', body: JSON.stringify({ url: 'https://example.com/' }) })
     expect(await withMcpScrapeDeadline(map)).toBe(map)
+  })
+
+  it('keeps the caller\'s cancel on a scrape it gives the deadline, after the request it replaced is collected', async () => {
+    const cancel = new AbortController()
+    // Made in a call of its own, as the MCP handler's fetch makes it, so nothing here still reaches the request it replaced.
+    const send = (signal: AbortSignal) => withMcpScrapeDeadline(new Request('http://hosted.internal/v1/scrape', { method: 'POST', body: JSON.stringify({ url: 'https://example.com/' }), signal }), signal)
+    const sent = await send(cancel.signal)
+    await collectGarbage()
+    cancel.abort()
+    expect(sent.signal.aborted).toBe(true)
   })
 
   it('accepts every option it lists, on a keyless connection and on a key with the browser lane', async () => {
