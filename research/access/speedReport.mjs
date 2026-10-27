@@ -275,7 +275,7 @@ if (probes.length > 0) {
 } else if (dirs.length === 1) {
   const W = await load(dirs[0])
   W.newCommit = opt('--new') ?? null
-  P(`# Speed A/B, window ${W.m.window}: base \`${W.m.base?.commit?.slice(0, 8)}\` against new, installed_chrome and combined on K1's 92 tasks, ${W.m.date}`, '', ...header(W), ...notes.map((n) => `- ${n}`))
+  P(`# Speed A/B, window ${W.m.window}: base \`${W.m.base?.commit?.slice(0, 8)}\` against new, ${W.pairs.map(([, n]) => n).join(' and ')} on K1's 92 tasks, ${W.m.date}`, '', ...header(W), ...notes.map((n) => `- ${n}`))
   windowBody(W, P)
 } else {
   const [A, B] = [await load(dirs[0]), await load(dirs[1])]
