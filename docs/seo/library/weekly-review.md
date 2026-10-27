@@ -17,7 +17,7 @@
 
 ## 一次复盘的步骤
 
-1. **取数。**运行快照脚本 `NODE_USE_ENV_PROXY=1 W2L_PROJECT_ID=<项目> node scripts/seo/snapshot.mjs --update-tracker`（脚本随 PR #744 合入；在这之前手工取数，方法见 [data-sources.md](data-sources.md)）。看摘要开头的「Not read」：没读到的来源在记录里写「未读」和原因，**不用上周的数填，不写 0**。记下快照编号、源提交、走代理还是直连。
+1. **取数。**运行快照脚本 `NODE_USE_ENV_PROXY=1 W2L_PROJECT_ID=<项目> node scripts/seo/snapshot.mjs --update-tracker`（取数方法和限制见 [data-sources.md](data-sources.md)）。看摘要开头的「Not read」：没读到的来源在记录里写「未读」和原因，**不用上周的数填，不写 0**。记下快照编号、源提交、走代理还是直连。
 2. **查数据卫生（框架 §6.5）。**窗口和上周一样长吗（不一样就不比较）；位置 64 到 99 的展示不当作增长；Firecrawl 对比数字注意任务集（50 个与 92 个不混用）；不用脚本抓 Google 搜索结果。
 3. **填「数字」表。**数字从快照摘要抄，不重算；和上次复盘并排放。
 4. **查新页面。**上线后第 2、4、8 周的页面，逐个看收录结论、第一次展示、第一个查询（追踪表 [page-tracker.md](page-tracker.md)）。追踪表里没有的写「未知」。
