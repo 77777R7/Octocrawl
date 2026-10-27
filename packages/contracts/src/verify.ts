@@ -32,6 +32,16 @@ const MAX_VERIFY_COUNT = 1_000_000
 const MAX_RECORD_FIELDS = 50
 
 /**
+ * Why a hosted server refuses a contract, naming its regular-expression checks, or null when it holds none: a hosted
+ * engine's scrape, crawl and batch and a hosted job's start refuse it in these words, before anything is fetched or stored.
+ */
+export function hostedVerifyRefusal(contract: VerifyContract | undefined): string | null {
+  const types = [...new Set(contract?.checks.filter((check) => VERIFY_REGEX_CHECK_TYPES.includes(check.type)).map((check) => check.type) ?? [])]
+  if (types.length === 0) return null
+  return `verify: ${types.join(' and ')} checks are not available in hosted mode (a regular expression cannot be bounded in time); use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally`
+}
+
+/**
  * Whether a check is about the page's data, not its status or lane: run-set.mjs's `isData`, with `recordFields`. A
  * `field` check is data when its path is under `json`, `list` or `tables`.
  */
