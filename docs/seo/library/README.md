@@ -21,6 +21,7 @@
 | [competitors.md](competitors.md) | 11 个竞品的站点结构、采用度、第三方流量估算 | 活表 v0.1，2026-10-27 取数 | 每月或有重大变化 |
 | [internal-links.md](internal-links.md) | 29 个页面当前的内链关系，新页面登记模板 | 活表 v0.1，2026-10-27 抓取 | **每个新页面上线前**登记 |
 | [page-tracker.md](page-tracker.md) | 每个页面的主承接词、收录、28 天展示点击位置 | 活表 v0.1 | 每周 |
+| [weekly-review.md](weekly-review.md) | 每周复盘：步骤、判据表、记录模板 | **提议，未批准**，没跑过 | 批准后每次复盘后修订 |
 | [policy-gates.md](policy-gates.md) | 20 条发布闸门，来自 Google、Bing、IndexNow 官方规则 | **提议，未批准** | 官方政策变化时 |
 | [data-sources.md](data-sources.md) | 每个数据从哪来、怎么重新取、有什么限制 | v0.1 | 取数方法变化时 |
 | [geo-protocol.md](geo-protocol.md) | AI 助手可见度的观测协议：指标、采集、复查循环、规则、站点前置条件 | **提议，未批准**，没跑过 | 批准后每次试点后修订 |

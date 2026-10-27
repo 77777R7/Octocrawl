@@ -18,7 +18,7 @@
 | 社区信号：Reddit | 用户在哪里讨论、抱怨什么 | **目前读不到**：直连无法连通，经代理 `curl` 返回 403，`agent-reach` 的 Reddit 后端 forbidden，`WebFetch` 与 `WebSearch` 拒绝 reddit.com，内置浏览器拒绝 reddit.com | 需要换网络环境，或由 Howard 提供导出；在那之前，库里没有 Reddit 来源的条目 | 2026-10-27（失败） |
 | 站内链接 | 29 个页面当前的入链与出链 | 对 `sitemap.xml` 里每个 URL 做 `curl`，解析 `<a href>`，按所在标签区分页头、页脚、正文 | 区域按标签判断；不含 sitemap 之外的页面 | 2026-10-27 |
 | 第一方分析 | 访客、来源、预览结果、注册来源 | `node scripts/public-preview/weekly-report.mjs`（合并 Cloud Logging、Firestore、GitHub、npm、PyPI、GSC；设了 `BING_WEBMASTER_API_KEY` 才读 Bing） | 日志保留 30 天；没读到的来源报告「未读」，不报 0 | 随周报 |
-| IndexNow | 通知 Bing 等有新页面 | `node scripts/public-preview/indexnow.mjs`（部署后手工跑） | 现在每次提交全部 URL，Bing 建议只提交变更；200 不代表收录 | 部署后 |
+| IndexNow | 通知 Bing 等有新页面 | `node scripts/public-preview/indexnow.mjs`（部署后手工跑）：只发新增或有变化的地址和已返回 404 或 410 的地址；`--dry-run` 先看会发什么，`--all` 只用于迁移 | 状态与每次响应的日志在主检出 `.w2l/seo/` 的 `indexnow-state.json`、`indexnow-log.jsonl`；第一次运行没有状态，会发一次整站；200 不代表收录；IndexNow 只到 Bing 及其合作方，不到 Google | 部署后 |
 | GEO 研究的原始 JSON | 研究记录里被截断的单元格与文中引用的数字的完整原文 | `.w2l/seo/2026-10-27/geo/`（`geo_official`、`geo_studies`、`geo_tools`、`geo_coding`、各 `geoVerify_*`、`prompts`、`promptVerify`，git 忽略）；文中引用的数字原文见 [GEO 研究记录](../../../research/seo/2026-10-27-geo-research.md) §10 | git 忽略，删除 worktree 前要归档 | 2026-10-27 |
 | AI 回答样本 | 助手是否提到、引用 Octocrawl | 见 [geo-protocol.md](geo-protocol.md) | 单次样本不能下结论；需要已登录的网页版会话：内置浏览器 2026-10-28 能打开 ChatGPT、Claude、Perplexity，但都没有登录 | 2026-10-16（Google AI Mode，12 题） |
 

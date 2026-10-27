@@ -23,6 +23,7 @@
 | S-15 | Cursor 市场的发布条款禁止 AGPL 组件，是否书面询问；Anthropic connector 目录（商业计划记录 2026-10-18 已提交）现状 | 框架 §4.6 |
 | S-16 | 付费登记（mcpservers.org Premium、claudemarket.ai）：默认不做 | 框架 §4.6 |
 | S-17 | 本库里「发布闸门」20 条（[policy-gates.md](policy-gates.md)）是否采纳为写页面的检查清单 | 页面发布 |
+| S-18 | 谁来跑[每周复盘](weekly-review.md)、什么时候（建议周一）；是否建每周定时任务（仓库之外的常驻配置，批准前不建） | 框架 §6.2 的每周周期是否真的执行 |
 
 ## 待决：GEO（[geo-protocol.md](geo-protocol.md) §8，状态都是「开」）
 
