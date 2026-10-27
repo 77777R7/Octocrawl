@@ -33,6 +33,7 @@ import { InFlightCalls, trackPost } from './inFlight.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
 import { CREDITS, DEFAULT_MONTHLY_CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
+import { grantedCapabilities, HOSTED_ACCESS_ENGINE, type HostedAccessSource } from './hostedAccess.js'
 import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, JOB_WORKER_COUNT, type HostedJobsConfig } from './hostedJobRoutes.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
@@ -460,6 +461,10 @@ export interface HostedApiConfig {
   jobs?: HostedJobsConfig
   /** The json model fallback on an account's credits (hostedModel.ts); absent: no hosted call calls the model. */
   model?: HostedModel
+  /** The operator's per-request access switches (hostedAccess.ts); absent: no call holds a capability. */
+  access?: HostedAccessSource
+  /** The hosts a call that holds compatible_transport reads over it; default the local default (COMPAT_BENEFIT_HOSTS). A test names its own. */
+  compatHosts?: readonly string[]
   /** Shared with the Cloudflare Worker; proves CF-Connecting-IP. Absent: the socket address is the keyless identity. */
   proxySecret?: string
   keylessDaily?: number
@@ -692,6 +697,9 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     sessionsFile: null,
     userChrome: null,
     workerCount: config.workerCount ?? 2,
+    // ADR 0005 compatible_transport, held by a call only when the operator's switch grants it to its caller (hostedAccess.ts).
+    callCapabilities: HOSTED_ACCESS_ENGINE.callCapabilities,
+    compatHosts: config.compatHosts ?? HOSTED_ACCESS_ENGINE.compatHosts,
   })
   const inner = createApp(engine, { exposeInternalErrors: false, jobStreams: false })
   // A process-local secret lets the MCP handler hand the gate a keyless caller's identity; no outside request can present it.
@@ -878,7 +886,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const req = parseScrapeRequest(pinned)
       // The model's +2 is charged in credits, which only an account has.
       const modelGate = { admit: async () => ({ ok: false as const, message: config.model === undefined ? MODEL_REFUSALS.notOffered : MODEL_REFUSALS.needsAccount }) }
-      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
+      const capabilities = await grantedCapabilities(config.access, caller)
+      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
     }
     await next()
     return c.res
@@ -964,7 +973,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const model = config.model?.gate(modelRefusal) ?? null
           const modelGate = model?.gate ?? { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) }
           const req = parseScrapeRequest(pinned)
-          const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
+          const capabilities = await grantedCapabilities(config.access, caller)
+          const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
           // Two more where the model was called for the page: never more than was reserved, as only a reserved gate admits.
           modelCharged = modelExtra > 0 && (model?.pagesCalled() ?? 0) > 0 ? CREDITS.model : 0

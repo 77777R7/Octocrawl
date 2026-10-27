@@ -317,6 +317,43 @@ curl -s -X PATCH -H "authorization: Bearer $T" -H "x-goog-user-project: $W2L_PRO
 
 To turn it off, write `enabled: false` (or delete the document): within 30 s no new call is admitted, and a call already admitted finishes. To change the cap, write `dailyCapUsd`. To take the model away altogether, a release with `--remove-env-vars=W2L_EXTRACT_PROVIDER,W2L_EXTRACT_MODEL --remove-secrets=W2L_EXTRACT_API_KEY` on both services; rolling back to the previous tags does the same, since those revisions have no key. Read a day's spend from `hostedModelSpend/{day}.microUsd`, and the bill from the Anthropic Console.
 
+## The compatible transport
+
+ADR 0005's `compatible_transport` sends a page's requests with [impit](https://github.com/apify/impit) (0.14.5, profile `chrome142`), whose TLS and HTTP/2 handshakes and headers are a real Chrome's, instead of undici's ([access](access.md), `W2L_COMPAT_HOSTS`). It is the first step of ROADMAP stage H item 2. Hosted Octocrawl reads no access grant, so the transport is granted per request, by an operator switch that is off by default. `packages/mcp/src/hostedAccess.ts` holds the rules.
+
+- **The switch.** The Firestore document `hostedConfig/compatibleTransport`:
+  - `enabled` (boolean). While the document is absent, or `enabled` is anything but `true`, no call holds the transport, so a deploy alone turns nothing on.
+  - `allowedUids` (an array of account uids, optional). When it exists, only those accounts' calls hold the transport: a keyless caller, a key issued without an account and every other account do not. An empty array grants it to no one. When it is absent, every caller holds it.
+  - Both services read the document at most every 30 s. A failed read keeps what was read last; with nothing read yet the switch is off.
+- **Who asks.** The gate asks for each scrape, REST and MCP alike. The job worker asks as each slice starts, for the job's account, so a change reaches a running job at its next slice. The answer goes to the engine with the call (`ScrapeContext.capabilities`, `SliceLimits.capabilities`); the engine grants a call nothing beyond `compatible_transport` (`HOSTED_CALL_CAPABILITIES`), and the other capabilities stay refused here: `installed_chrome`, the CAPTCHA solver, vendors, egress proxies, Patchright.
+- **Which pages.** As on a server on your computer whose grant names the transport and sets no `W2L_COMPAT_HOSTS`:
+  - only the five hosts its acceptance showed it helps (`research/access/benefit-hosts.v1.json`), with their subdomains;
+  - their `http` rung becomes `http_compat`;
+  - a request with custom `headers` or `mobile` keeps `http`, and a map's start page never uses the transport;
+  - every other page is read as before.
+- **The address guard.** impit resolves names itself and takes no resolver, so a hosted engine's transport sends every request through `CompatAddressGuard` (`packages/bench/src/compatGuard.ts`):
+  - a SOCKS5 server on `127.0.0.1` in the same process, with a login it makes up when it starts and gives impit alone;
+  - it resolves each name, refuses it when any address it resolves to is one hosted Octocrawl does not connect to (private, shared, loopback, link-local, multicast, unspecified, the metadata service's), and connects only to an address it checked;
+  - impit's TLS handshake and HTTP/2 pass through it unchanged;
+  - impit follows no redirect itself: the lane checks each hop, and the hop's connection goes through the guard again;
+  - a refused address is `failed` / `policy_denied`, a name that does not resolve `failed` / `dns_error`, as on the undici lane.
+- **The price and the record.** A page read over the transport is an HTTP page: 1 credit, as `lane: "http"` shows. Its Evidence Record says how it was read, as a local server's does: `access.route: "http_compat"`, `executor: "impit"`, `executorVersion`, `profile`, and `egress.source: "direct"` (the guard is not a proxy). The trace has the lane's `transport` event, and a scrape's ladder audit says `http` was set aside (`ladder_channels_filtered`, reason `compatible_transport`).
+
+### Turning it on
+
+Steps for Howard to approve; nothing here has been run.
+
+1. A release of both services from a commit that has this code (Deploy above; Batch and crawl jobs for `octocrawl-jobs`). It needs no new variable or secret. Both services load impit as they start, so a revision whose image lacks it does not start.
+2. Write the switch for one account first, so the parity board can measure the transport before every caller has it.
+3. Measure it on the parity board (`research/hosted/parity-window.mjs`), switch on and switch off, in two windows. Turn it on for every caller only after that, by removing `allowedUids`.
+
+```sh
+# The switch for one account (users/{uid}); write enabled false to turn it off, within 30 s.
+T=$(gcloud auth print-access-token); curl -s -X PATCH -H "authorization: Bearer $T" -H "x-goog-user-project: $W2L_PROJECT_ID" -H 'content-type: application/json' \
+  "https://firestore.googleapis.com/v1/projects/$W2L_PROJECT_ID/databases/(default)/documents/hostedConfig/compatibleTransport" \
+  -d '{"fields":{"enabled":{"booleanValue":true},"allowedUids":{"arrayValue":{"values":[{"stringValue":"<uid>"}]}}}}'
+```
+
 ## Read the service
 
 Every request is in Cloud Run's request log. The two-week cost record the roadmap asks for is read from Cloud Billing (the service's own SKU lines) against the request counts:
@@ -414,7 +451,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `scrape` `mode` | Supported |  |
 | `scrape` `handoff` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
 | `scrape` `lane` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
-| `scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. Stage H item 2 adds compatible_transport, a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. access standard, the default, is taken; enhanced and my-browser are refused by name. Sent anyway: refused by name. |
+| `scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 goes on with a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. access standard, the default, is taken; enhanced and my-browser are refused by name. Sent anyway: refused by name. |
 | `scrape` `allowlistedDomains` | Supported |  |
 | `scrape` `formats` | Supported |  |
 | `scrape` `includeLinks` | Supported |  |
@@ -457,7 +494,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `map` `integration` | Supported |  |
 | `crawl` `url` | Supported |  |
 | `crawl` `mode` | Supported |  |
-| `crawl` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. Stage H item 2 adds compatible_transport, a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
+| `crawl` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 goes on with a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
 | `crawl` `maxPages` | Limited | At most 500, and 100 when left out or null (locally null is no cap). Stage H item 6, limits and capacity raises it. |
 | `crawl` `maxDepth` | Supported |  |
 | `crawl` `useCached` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
@@ -498,7 +535,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `batch_scrape` `urls` | Supported |  |
 | `batch_scrape` `mode` | Supported |  |
 | `batch_scrape` `lane` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
-| `batch_scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. Stage H item 2 adds compatible_transport, a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
+| `batch_scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 goes on with a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
 | `batch_scrape` `formats` | Supported |  |
 | `batch_scrape` `includeLinks` | Supported |  |
 | `batch_scrape` `onlyMainContent` | Supported |  |

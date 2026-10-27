@@ -15,6 +15,8 @@ import { TOOL_NAMES } from '../src/tools.js'
 import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, noteScrape, scrapePhaseLine, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore, type RequestNote } from '../src/hostedCredits.js'
 import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } from '../src/hostedModel.js'
+import { MemoryHostedAccess, type HostedAccessSource } from '../src/hostedAccess.js'
+import { CompatAddressGuard } from '@w2l/bench'
 import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
 import { BROWSER_LEASE_MS, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS } from '../src/hostedApi.js'
 import { expectIsError } from './toolErrorChecks.js'
@@ -51,7 +53,7 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; siteDaily?: number; accountDaily?: number; accountsDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void; model?: HostedModel } = {}) {
+async function start(options: { keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; siteDaily?: number; accountDaily?: number; accountsDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void; model?: HostedModel; access?: HostedAccessSource; compatHosts?: string[] } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
   // `keys` are stored under their plaintext's digest; `keyRecords` under their own id, as a connection's key record has no plaintext.
@@ -62,6 +64,8 @@ async function start(options: { keylessDaily?: number; claudeDaily?: number; key
     port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: options.keyStore ?? new MemoryHostedKeys(records), oauthTokens: options.oauthTokenStore ?? oauthTokens, ...(options.now ? { now: options.now } : {}), quota, leases: options.leases,
     ...(options.credits === null ? {} : { credits: options.credits ?? new MemoryCreditsStore() }),
     ...(options.model === undefined ? {} : { model: options.model }),
+    ...(options.access === undefined ? {} : { access: options.access }),
+    ...(options.compatHosts === undefined ? {} : { compatHosts: options.compatHosts }),
     keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: options.siteDaily ?? 100, keylessTotalDaily: options.keylessTotalDaily, accountDaily: options.accountDaily, accountsDaily: options.accountsDaily, proxySecret: options.proxySecret,
     networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: options.log ?? (() => {}),
   })
@@ -1190,5 +1194,48 @@ describe('the json model fallback on an account\'s credits (decided 2026-10-24)'
     expect(((await unoffered.json()) as Answer).json.issues).toContainEqual({ code: 'model_unavailable', message: MODEL_REFUSALS.notOffered })
     expect(unoffered.headers.get('x-credits-used')).toBe('1')
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('the compatible transport, granted per request (ADR 0005 compatible_transport, hostedConfig/compatibleTransport)', () => {
+  type Read = { status: string; lane: string; channelsTried: string[]; evidenceRecord: { access: { route: string; executor: string; executorVersion: string | null; profile: string | null; egress?: { source: string } | null } } }
+  const ON = { compatibleTransport: { enabled: true, allowedUids: null } }
+
+  // The test site is on the policy's list, so impit would reach it without the guard too: whether impit is handed the guard is checked apart.
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('is off until the switch is on: a listed host is read over undici, and no guard starts', async () => {
+    const guarded = vi.spyOn(CompatAddressGuard.prototype, 'proxyUrl')
+    const { url } = await start({ compatHosts: ['127.0.0.1'], access: new MemoryHostedAccess() })
+    const page = await (await post(url, '/v1/scrape', { url: `${origin}/page` })).json() as Read
+    expect(page).toMatchObject({ status: 'success', lane: 'http', channelsTried: ['http'], evidenceRecord: { access: { route: 'http', executor: 'undici' } } })
+    expect(guarded).not.toHaveBeenCalled()
+  })
+
+  it('switched on, reads a listed host over impit through the address guard, recorded as a local server records it, at an HTTP page\'s price', async () => {
+    const guarded = vi.spyOn(CompatAddressGuard.prototype, 'proxyUrl')
+    const credits = new MemoryCreditsStore(1_000)
+    const { url } = await start({ compatHosts: ['127.0.0.1'], access: new MemoryHostedAccess(ON), credits, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+    const keyless = await (await post(url, '/v1/scrape', { url: `${origin}/page` })).json() as Read
+    expect(keyless).toMatchObject({ status: 'success', lane: 'http', channelsTried: ['http_compat'], evidenceRecord: { access: { route: 'http_compat', executor: 'impit', executorVersion: '0.14.5', profile: 'chrome142', egress: { source: 'direct' } } } })
+    // impit was given the guard as its proxy: the hosted engine sends the transport through it.
+    expect(guarded).toHaveBeenCalled()
+    const account = await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_account' })
+    expect(await account.json()).toMatchObject({ status: 'success', channelsTried: ['http_compat'] })
+    expect([account.headers.get('x-credits-used'), account.headers.get('x-credits-remaining')]).toEqual(['1', '999'])
+    // A call whose options the transport cannot send stays on undici.
+    const mobile = await (await post(url, '/v1/scrape', { url: `${origin}/page`, mobile: true })).json() as Read
+    expect(mobile.channelsTried).toEqual(['http'])
+  })
+
+  it('with allowedUids, only those accounts\' calls hold it', async () => {
+    const { url } = await start({ compatHosts: ['127.0.0.1'], keylessDaily: 5, access: new MemoryHostedAccess({ compatibleTransport: { enabled: true, allowedUids: ['account-1'] } }), credits: new MemoryCreditsStore(1_000), keys: {
+      oc_one: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' },
+      oc_two: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-2' },
+    } })
+    const tried = async (headers: Record<string, string> = {}) => ((await (await post(url, '/v1/scrape', { url: `${origin}/page` }, headers)).json()) as Read).channelsTried
+    expect(await tried({ authorization: 'Bearer oc_one' })).toEqual(['http_compat'])
+    expect(await tried({ authorization: 'Bearer oc_two' })).toEqual(['http'])
+    expect(await tried()).toEqual(['http'])
   })
 })
