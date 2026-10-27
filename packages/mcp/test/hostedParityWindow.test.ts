@@ -12,7 +12,7 @@ import { createHostedApi, hostedTools, keyDigest, MemoryHostedKeys, MemoryHosted
 import { MemoryCreditsStore, scrapeCharge } from '../src/hostedCredits.js'
 import { TOOLS } from '../src/tools.js'
 // The hosted parity window's pure parts (research/hosted/parity-window.mjs), kept apart so they can be tested here.
-import { armOrder, armSummary, contractFor, documentOf, listedCheckTypes, powerState, robotsOf, runWindow, summaryTable, verdictOf, type CallAnswer, type Task } from '../../../research/hosted/parityWindow.mjs'
+import { armOrder, armSummary, contractFor, documentOf, listedCheckTypes, powerState, robotsLine, robotsOf, robotsRefusedTasks, robotsUnknownTasks, runWindow, summaryTable, verdictOf, type CallAnswer, type Task } from '../../../research/hosted/parityWindow.mjs'
 
 const taskFile = JSON.parse(await readFile(new URL('../../../research/access/tasks.v1.json', import.meta.url), 'utf8')) as { tasks: Task[] }
 const PAGE = `<!doctype html><html lang="en"><head><title>Tides</title></head><body><main><article><h1>Tides</h1><p>${'The harbour office records tide height every hour of the day. '.repeat(8)}</p></article></main></body></html>`
@@ -99,7 +99,62 @@ describe('a window', () => {
     const hosted = armSummary(rows, 'hosted')
     expect(hosted).toMatchObject({ planned: 2, attempted: 1, notRun: 1, verified: 1, falseSuccess: 0, credits: 5, overCap: 1, p50Ms: 101_000 })
     expect(armSummary(rows, 'local')).toMatchObject({ planned: 2, attempted: 2, verified: 0, reasons: { captcha: 2 }, credits: null })
-    expect(summaryTable([hosted]).at(-1)).toContain('| hosted | 1 / 2 | 0 | 1 |')
+    expect(summaryTable([hosted]).at(-1)).toContain('| hosted | 1 / 2 | 1 / 2 | 0 | 0 | 1 |')
+  })
+
+  it('counts every arm over all tasks and over the tasks robots.txt allows, keeping the ones hosted refused in the denominator and listing them', async () => {
+    const three: Task[] = [...tasks, { id: 'C', url: 'https://example.com/c', predicates: [{ type: 'markdownMatches', pattern: 'Tides' }] as VerifyCheck[] }]
+    const disallowed = { decision: 'disallowed' }
+    const rows = await runWindow({
+      tasks: three, arms: ['hosted', 'local'],
+      call: async (arm, task) => {
+        if (task.id === 'B') return arm === 'hosted'
+          ? answer({ status: 'failed', failureReason: 'policy_denied', markdown: null, evidenceRecord: { robotsDecision: disallowed } }, 300)
+          : answer({ status: 'success', markdown: 'Tides', evidenceRecord: { robotsDecision: { ...disallowed, userOverride: true, overrideBasis: 'user_named_url' } } }, 900)
+        if (task.id === 'C' && arm === 'hosted') return answer({ status: 'success', markdown: 'nothing here' }, 800)
+        return answer({ status: 'success', markdown: 'Tides' }, 500)
+      },
+    })
+    expect(robotsRefusedTasks(rows)).toEqual(['B'])
+    const hosted = armSummary(rows, 'hosted')
+    const local = armSummary(rows, 'local')
+    // B stays in the denominator of the whole set, and is left out of the count over what robots.txt allows, on every arm.
+    expect(hosted).toMatchObject({ planned: 3, verified: 1, falseSuccess: 1, robotsAllowed: { planned: 2, verified: 1, falseSuccess: 1 } })
+    expect(local).toMatchObject({ planned: 3, verified: 3, robotsAllowed: { planned: 2, verified: 2, falseSuccess: 0 } })
+    const table = summaryTable([hosted, local])
+    expect(table[0]).toContain('| Arm | Verified | Verified, robots.txt allows | False successes | False successes, robots.txt allows |')
+    expect(table.slice(2)).toEqual([expect.stringContaining('| hosted | 1 / 3 | 1 / 2 | 1 | 1 |'), expect.stringContaining('| local | 3 / 3 | 2 / 2 | 0 | 0 |')])
+    expect(robotsLine(rows, ['hosted', 'local'])).toContain('hosted refused 1 task for robots.txt: B.')
+    expect(robotsLine(rows.filter((r) => r.taskId !== 'B'), ['hosted', 'local'])).toContain('hosted refused no task it answered for robots.txt')
+
+    // Without a hosted arm nobody knows which tasks hosted would refuse: the robots.txt view is unknown, not the whole set.
+    const localOnly = rows.filter((r) => r.arm === 'local')
+    expect(robotsRefusedTasks(localOnly)).toBeNull()
+    expect(armSummary(localOnly, 'local').robotsAllowed).toBeNull()
+    expect(summaryTable([armSummary(localOnly, 'local')]).at(-1)).toContain('| local | 3 / 3 | unknown | 0 | unknown |')
+    expect(robotsLine(localOnly, ['local'])).toContain('unknown')
+  })
+
+  it('calls whether robots.txt allows a task unknown where hosted gave no answer: held back by the cap, or a call that failed', async () => {
+    const robotsDenied = answer({ status: 'failed', failureReason: 'policy_denied', markdown: null, evidenceRecord: { robotsDecision: { decision: 'disallowed' } } }, 300)
+    const ok = answer({ status: 'success', markdown: 'Tides' }, 500)
+    const run = (canRun: (arm: string, sofar: readonly { arm: string }[]) => string | null, failB = false) => runWindow({
+      tasks, arms: ['hosted', 'local'], canRun,
+      call: async (arm, task) => (arm === 'hosted' && task.id === 'B' ? (failB ? { error: new Error('socket hang up'), wallMs: 160_000 } : robotsDenied) : ok),
+    })
+    // A cap that holds every hosted call back: hosted answered nothing, so the view is unknown, not "refused none".
+    const none = await run((arm) => (arm === 'hosted' ? 'credit cap 0' : null))
+    expect(robotsRefusedTasks(none)).toBeNull()
+    expect(armSummary(none, 'local').robotsAllowed).toBeNull()
+    expect(robotsLine(none, ['hosted', 'local'])).not.toContain('refused no task')
+    // A held back after A: A is known, B is unknown and named; it stays in the denominator, not verified on hosted.
+    const some = await run((arm, sofar) => (arm === 'hosted' && sofar.some((r) => r.arm === 'hosted') ? 'credit cap 5' : null))
+    expect([robotsRefusedTasks(some), robotsUnknownTasks(some)]).toEqual([[], ['B']])
+    expect(armSummary(some, 'hosted').robotsAllowed).toEqual({ planned: 2, verified: 1, falseSuccess: 0 })
+    expect(robotsLine(some, ['hosted', 'local'])).toContain('unknown for 1 task: B')
+    const failed = await run(() => null, true)
+    expect(robotsUnknownTasks(failed)).toEqual(['B'])
+    expect(robotsUnknownTasks(none.filter((r) => r.arm === 'local'))).toBeNull()
   })
 
   it('counts the credits of an answer it could not read, or a call that failed on the way, as unknown', async () => {
