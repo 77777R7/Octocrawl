@@ -305,11 +305,11 @@
 | 最近 14 天 | 17,086 展示、6 点击、位置 72.3 | 同上（6 次点击全落在这 14 天） |
 | 每周展示 | 5、374、7,594、9,492（点击 0、0、3、3） | 日表求和；第一周只有 09-30 至 10-04 |
 | 展示集中度 | `find-all-pages` 博客 17,176（98.3%），位置 72.7，0 点击；工具页 562，位置 80 | 页面表 |
-| 页面平均位置 ≤20 的展示 | **193 / 18,035（1.1%）**，21 个页面：首页 33（4.2；含 `#` 片段的写法并入后是 34）、changelog 35（5.3）、`/docs/` 19（4.1）、`connect-mcp` 19（7.2）、`reference` 22（15.8）等 | GSC 页面表；页面平均位置是各查询的混合值；页面表合计 18,035，与属性级 17,465 口径不同 |
+| 页面平均位置 ≤20 的展示 | **190 / 18,032（1.1%）**，19 个页面（按 `https://octocrawl.dev` 规范地址合并 `#` 与查询串写法；页面表原始行口径是 193 / 18,035、21 行，多出的是 `http://octocrawl.dev/` 与 `#free-tiers` 两个写法）：首页 34（4.2）、changelog 35（5.3）、`/docs/` 19（4.1）、`connect-mcp` 19（7.2）、`reference` 22（15.8）等 | GSC 页面表；页面平均位置是各查询的混合值；页面表合计 18,035，与属性级 17,465 口径不同 |
 | 位置 ≤20 的展示（查询 × 页面表） | 2 行、各 1 展示（`http://127.0.0.1:8791`、`octoscrape`） | 排名靠前页面的查询被 Google 匿名化，这张表看不到它们，所以不能度量可见度 |
 | 品牌词 | 可见查询中**没有**含 octocrawl 的 | 可能被匿名化隐藏，**未知** |
 | 收录（2026-10-12，旧） | 24 已收录、9 未收录；URL Inspection（10-13）21 通过、3 中性 | 已被下一行取代 |
-| 收录（2026-10-27） | 29 个 sitemap URL 全部读到：27 通过、2 中性（`/tools/` 与 `/tools/website-to-text/`：Discovered - currently not indexed；后者在脚本开发期间的第一次试跑读到的是 URL is unknown to Google，单次读数的文字不稳） | `scripts/seo/snapshot.mjs` 的 URL Inspection，快照 `2026-10-27T172629Z`；`/scrape/` 在 10-13 是中性，现在通过 |
+| 收录（2026-10-27） | 29 个 sitemap URL 全部读到：27 通过、2 中性（`/tools/`、`/tools/website-to-text/`；4 次读数里 verdict 一直是 NEUTRAL，coverageState 文字在 URL is unknown to Google 与 Discovered - currently not indexed 之间来回变，本次基线读到 `/tools/` 是前者、`/tools/website-to-text/` 是后者） | `scripts/seo/snapshot.mjs` 的 URL Inspection，快照 `2026-10-27T174019Z`（另外 3 次是同一天脚本开发期间的试跑，在 `.w2l/seo/dev-runs-2026-10-27/`，没有进序列）；`/scrape/` 在 10-13 是中性，现在通过 |
 | 第一方分析（9-16 至 10-13） | 453 次页面浏览；来源 Bing 5、无来源 444 | `measurement.md` |
 | AI Mode 样本（10-16） | 6/12 提名字，0/12 引用官方页面 | `ai-visibility.md` |
 | 包下载（含自己的 CI 与镜像，30 天） | `octocrawl` 944、`@octocrawl/mcp` 1,676、`@octocrawl/sdk` 1,332、`@octocrawl/cli` 1,431；PyPI `octocrawl-client` 124；GitHub 2 星 | npm / PyPI / GitHub API；GTM 记录说这些不算增长信号，仅作背景 |

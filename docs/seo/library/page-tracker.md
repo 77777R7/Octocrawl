@@ -10,13 +10,13 @@
 - 「28 天」：GSC 页面表的展示 / 点击 / 平均位置，只算 `https://octocrawl.dev` 规范地址，地址里的 `#` 片段和查询串并入同一页（首页因此是 34，不是只数裸地址的 33）；页面表里没有这一行写「页面表无此行（未知，不是 0）」。页面表合计与属性级总数口径不同，不要强行对齐。
 - 更新：`NODE_USE_ENV_PROXY=1 W2L_PROJECT_ID=<项目> node scripts/seo/snapshot.mjs --update-tracker`（见 [data-sources.md](data-sources.md)；只在默认的 28 天窗口、完整克隆、sitemap 全在 `https://octocrawl.dev` 下才会改表）。脚本只改「发布日 / 首次入库日」「收录」「28 天」三列、sitemap 里新出现的页面（追加一行，主承接词写「未知（待填）」）和下面的数据行；类型、主承接词、备注和「新页面」表由人写。数据行按列写明各自的来源和日期，本次没读到的列保持上一次的说明。每次快照留在 `.w2l/seo/snapshots/`，指标序列在 `.w2l/seo/series.jsonl`。
 
-数据（脚本写入）：日期列：快照 2026-10-27T172629Z 写入，博客取 blogPosts.mjs 的发布日，其余取 git 首次提交日（git log --follow，含合并前分支上的提交），源提交 851b39b3；收录列：2026-10-27 读，URL Inspection 29/29 个读到，读不到的行保持上次的值（快照 2026-10-27T172629Z）；28 天列：GSC 2026-09-28 至 2026-10-25（28 天，页面表，只算 https://octocrawl.dev 规范地址，# 片段和查询串并入同一页，没有这一行不等于 0，快照 2026-10-27T172629Z）；未随本次更新的行：无
+数据（脚本写入）：日期列：快照 2026-10-27T174019Z 写入，博客取 blogPosts.mjs 的发布日，其余取 git 首次提交日（git log --follow，含合并前分支上的提交），源提交 5f6f6563；收录列：2026-10-27 读，URL Inspection 29/29 个读到，读不到的行保持上次的值（快照 2026-10-27T174019Z）；28 天列：GSC 2026-09-28 至 2026-10-25（28 天，页面表，只算 https://octocrawl.dev 规范地址，# 片段和查询串并入同一页，没有这一行不等于 0，快照 2026-10-27T174019Z）；未随本次更新的行：无
 
 | URL | 类型 | 主承接词 | 发布日 / 首次入库日 | 收录 | 28 天 展示 / 点击 / 位置 | 备注 |
 |---|---|---|---|---|---|---|
 | / | 首页 | 品牌词；品类定义 | 2026-09-24（首次入库） | 通过（2026-10-27） | 34 / 5 / 4.2 |  |
 | /scrape/ | 产品页 | A 组：web scraping api、website to markdown api | 2026-10-13（首次入库） | 通过（2026-10-27） | 30 / 1 / 27.9 |  |
-| /tools/ | 工具总览 | 工具总览 | 2026-10-13（首次入库） | 中性：Discovered - currently not indexed（2026-10-27） | 页面表无此行（未知，不是 0） |  |
+| /tools/ | 工具总览 | 工具总览 | 2026-10-13（首次入库） | 中性：URL is unknown to Google（2026-10-27） | 页面表无此行（未知，不是 0） |  |
 | /tools/link-extractor/ | 工具 | C 组：extract all links、url extractor | 2026-10-13（首次入库） | 通过（2026-10-27） | 562 / 0 / 80.0 |  |
 | /tools/url-to-markdown/ | 工具 | C 组：url to markdown | 2026-10-13（首次入库） | 通过（2026-10-27） | 2 / 0 / 92.0 |  |
 | /tools/website-to-text/ | 工具 | C 组：webpage to text | 2026-10-13（首次入库） | 中性：Discovered - currently not indexed（2026-10-27） | 页面表无此行（未知，不是 0） |  |
@@ -42,7 +42,7 @@
 | /blog/scrape-list-of-urls/ | 博客 | D 组：scrape list of urls | 2026-10-10（发布日） | 通过（2026-10-27） | 9 / 1 / 21.4 |  |
 | /blog/scrape-website-with-login/ | 博客 | D 组：scrape website with login | 2026-10-10（发布日） | 通过（2026-10-27） | 17 / 0 / 28.4 |  |
 | /blog/web-scraping-for-rag/ | 博客 | D 组：web scraping for rag | 2026-10-10（发布日） | 通过（2026-10-27） | 2 / 0 / 14.5 |  |
-| /changelog/ | changelog | — | 2026-09-18（首次入库） | 通过（2026-10-27） | 35 / 0 / 5.3 |  |
+| /changelog/ | changelog | — | 未知 | 通过（2026-10-27） | 35 / 0 / 5.3 | 页面由 `build-docs.mjs` 生成；加入 Changelog 页的提交是 6e2d95e7（2026-10-09），`CHANGELOG.md` 文件本身 2026-09-18 就有，所以不用它的日期 |
 
 
 ## 新页面（上线后逐行追加）
