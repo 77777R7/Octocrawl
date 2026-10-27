@@ -11,6 +11,9 @@ export interface Denominator { planned: number | null; attempted: number; notRun
 export interface Grant { sha256: string; capabilities: string[] | null }
 
 export declare const PROXY_REFUSED_STOP: number
+export declare const LADDER_BUDGET_MS: number
+export declare const CAPTCHA_CLIENT_TIMEOUT_MS: number
+export declare function clientTimeoutOf(task: { timeoutMs?: number } | null | undefined, override?: number | null): number
 export declare function plannedAttempts(tasks: readonly { id: string }[], temperatures: readonly string[]): PlannedAttempt[]
 export declare function proxyRefusedInARow(rows: readonly ReportRow[]): number
 export declare function stopReason(rows: readonly ReportRow[], plannedCount: number, limit?: number): string | null

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 // The access task runner's denominator and record header (research/access/run-set.mjs), kept pure so they can be tested here.
-import { PROXY_REFUSED_STOP, channelsCell, denominator, denominatorLines, grantLine, grantOf, plannedAttempts, stopReason } from '../../../research/access/runSetReport.mjs'
+import { CAPTCHA_CLIENT_TIMEOUT_MS, LADDER_BUDGET_MS, PROXY_REFUSED_STOP, channelsCell, clientTimeoutOf, denominator, denominatorLines, grantLine, grantOf, plannedAttempts, stopReason } from '../../../research/access/runSetReport.mjs'
 
 const row = (taskId: string, opts: { refused?: boolean; verified?: boolean; temperature?: 'cold' | 'warm' } = {}) => ({
   taskId,
@@ -52,6 +52,16 @@ describe('run-set denominator', () => {
   it('says the tasks not run are unknown when the run did not record them', () => {
     expect(denominatorLines({ planned: null, attempted: 40, notRun: null }, 'stopped').join('\n')).toContain('planned unknown, attempted 40, not run unknown')
     expect(denominatorLines({ planned: null, attempted: 40, notRun: null }, 'stopped').join('\n')).toContain('did not record which they were')
+  })
+})
+
+describe('run-set client timeout', () => {
+  it("waits the task's own time by default, and past the API's ladder budget in a CAPTCHA window", () => {
+    expect(clientTimeoutOf({})).toBe(180_000)
+    expect(clientTimeoutOf({ timeoutMs: 60_000 })).toBe(60_000)
+    // A CAPTCHA page can use the API's whole 300 s ladder (C011 was cut at 180 s with no response saved).
+    expect(clientTimeoutOf({ timeoutMs: 60_000 }, CAPTCHA_CLIENT_TIMEOUT_MS)).toBe(CAPTCHA_CLIENT_TIMEOUT_MS)
+    expect(CAPTCHA_CLIENT_TIMEOUT_MS).toBeGreaterThanOrEqual(LADDER_BUDGET_MS + 30_000)
   })
 })
 

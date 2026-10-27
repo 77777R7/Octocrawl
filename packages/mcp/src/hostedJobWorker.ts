@@ -23,7 +23,7 @@ import { CREDITS, scrapeCharge, type CreditsStore, type Reservation, type UsageK
 import type { UploadResult } from './hostedCloud.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
 import type { HostedJob, HostedJobStore, HostedWebhookDelivery } from './hostedJobs.js'
-import { exportName, jobPrefix, jobStatus } from './hostedJobRoutes.js'
+import { exportName, JOB_WORKER_COUNT, jobPrefix, jobStatus } from './hostedJobRoutes.js'
 
 /** The bucket operations a slice needs; GcsBucket has them. */
 export interface WorkerFiles {
@@ -87,10 +87,8 @@ export const WEBHOOK_MAX_ATTEMPTS = 8
 const WEBHOOK_TIMEOUT_MS = 30_000
 const WEBHOOK_RETRYABLE = (status: number) => status === 408 || status === 425 || status === 429 || status >= 500
 
-/** Pages a slice may store past its limit: the engine's workers less one (JOB_WORKER_COUNT). */
-const SLICE_HEADROOM = 1
-/** Pages a job's slice reads at once: its engine's workers, the most a hosted crawl's maxConcurrency may ask for. */
-export const JOB_WORKER_COUNT = SLICE_HEADROOM + 1
+/** Pages a slice may store past its limit: the engine's workers (JOB_WORKER_COUNT) less one. */
+const SLICE_HEADROOM = JOB_WORKER_COUNT - 1
 /** A crawl's page limit on hosted Octocrawl (hostedJobRoutes.ts JOB_MAX_CRAWL_PAGES), for a request stored without one. */
 const JOB_MAX_PAGES = 500
 /** A slice's lease outlasts a delivery's dispatch deadline (900 s). */

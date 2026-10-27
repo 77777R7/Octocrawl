@@ -13,9 +13,8 @@
 import { HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS } from '@w2l/contracts'
 import { HOSTED_MAX_FILE_BYTES, HOSTED_MCP_SCRAPE_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_RECORD_TTL_MS, hostedTools } from './hostedApi.js'
 import { CREDITS } from './hostedCredits.js'
-import { JOB_DEFAULT_CRAWL_PAGES, JOB_MAX_CRAWL_PAGES } from './hostedJobRoutes.js'
+import { JOB_DEFAULT_CRAWL_PAGES, JOB_MAX_CRAWL_PAGES, JOB_WORKER_COUNT } from './hostedJobRoutes.js'
 import { JOB_RETENTION_DAYS } from './hostedJobs.js'
-import { JOB_WORKER_COUNT } from './hostedJobWorker.js'
 import { MAX_WAIT_MS, MCP_SCRAPE_TIMEOUT_MS, TOOLS, type ToolName } from './tools.js'
 
 /**
@@ -83,7 +82,6 @@ const MONITORS = 'Monitors run on a server on the person\'s computer; stage H it
 const DELIVERY = 'Webhook destinations for Monitors and jobs are a local server\'s; stage H item 4 brings them to hosted. A hosted job\'s end can already be posted over REST (POST /v1/crawl, POST /v1/batches).'
 const SCREENSHOT = `A connection with the browser lane only, at ${CREDITS.browserPage} credits a page; an account with fewer credits reads over HTTP alone, where a screenshot is refused.`
 const REGEX = 'ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served.'
-const REGEX_JOB = `${REGEX} A job's start takes it, and its first slice refuses it; the slice is retried and the job ends failed (delivery_failed) without naming the check.`
 const FILE_CAP = `At most ${mib(HOSTED_MAX_FILE_BYTES)} (local ${mib(MAX_FILE_BYTES_CEILING)}).`
 const BROWSER_LANE = 'A connection with the browser lane only; one without reads over HTTP alone.'
 const WEBHOOK = 'REST takes it for the job\'s end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript.'
@@ -222,7 +220,7 @@ export const OPTION_PARITY: { [N in OptionTool]: Record<OptionOf<N>, OptionEntry
     allowExternalLinks: supported,
     sitemap: supported,
     ignoreRobotsTxt: { status: 'different_on_purpose', note: ROBOTS, sent: 'refused' },
-    maxConcurrency: { status: 'limited', item: 'limits_capacity', note: `At most ${JOB_WORKER_COUNT}, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT). The schema shows no cap: the start takes more, and the job's first slice refuses it, so the job ends failed (delivery_failed).`, over: { value: JOB_WORKER_COUNT + 1, sent: 'fails_job' } },
+    maxConcurrency: { status: 'limited', item: 'limits_capacity', note: `At most ${JOB_WORKER_COUNT}, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT); the start lowers a larger value to ${JOB_WORKER_COUNT}.`, over: { value: JOB_WORKER_COUNT + 1, sent: 'not_honoured' } },
     idempotencyKey: supported,
     webhook: { status: 'planned', item: 'monitors_delivery', note: WEBHOOK, sent: 'rest_only' },
     ...JOB_PAGE_OPTIONS,
@@ -269,14 +267,14 @@ export const VALUE_PARITY: Record<OptionTool, Record<string, ValueEntry>> = {
   },
   map: {},
   crawl: {
-    'verify=markdownMatches': { status: 'planned', item: null, note: REGEX_JOB, sent: 'fails_job' },
-    'verify=markdownCountMin': { status: 'planned', item: null, note: REGEX_JOB, sent: 'fails_job' },
+    'verify=markdownMatches': { status: 'planned', item: null, note: REGEX, sent: 'refused' },
+    'verify=markdownCountMin': { status: 'planned', item: null, note: REGEX, sent: 'refused' },
   },
   batch_scrape: {
     'mode=authed': { status: 'planned', item: 'identity', note: 'Hosted holds no saved logins; the start refuses the value by name.', sent: 'refused' },
     'access=my-browser': { status: 'different_on_purpose', note: PERSON_CHROME, sent: 'refused' },
-    'verify=markdownMatches': { status: 'planned', item: null, note: REGEX_JOB, sent: 'fails_job' },
-    'verify=markdownCountMin': { status: 'planned', item: null, note: REGEX_JOB, sent: 'fails_job' },
+    'verify=markdownMatches': { status: 'planned', item: null, note: REGEX, sent: 'refused' },
+    'verify=markdownCountMin': { status: 'planned', item: null, note: REGEX, sent: 'refused' },
   },
 }
 
