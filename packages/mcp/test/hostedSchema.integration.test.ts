@@ -47,6 +47,8 @@ describe('hosted tool schemas', () => {
       expect([surface, scrape.properties.mode?.enum]).toEqual([surface, ['standard', 'research']])
       const checks = scrape.properties.verify?.properties?.checks?.items?.properties?.type?.enum ?? []
       expect([surface, checks.filter((type) => (VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(type))]).toEqual([surface, []])
+      // Nor does its description name them: crawl's and batch_scrape's verify is "Same as scrape." (stage H W0).
+      expect([surface, VERIFY_REGEX_CHECK_TYPES.filter((type) => String(scrape.properties.verify?.description).includes(type))]).toEqual([surface, []])
       expect([surface, scrape.properties.timeout?.maximum, scrape.properties.maxFileBytes?.maximum]).toEqual([surface, 180_000, 5 * 1024 * 1024])
       expect([surface, scrape.properties.timeout?.description]).toEqual([surface, expect.stringContaining('Here by default 120000, max 180000;')])
       const map = schemaOf(tools, 'map')

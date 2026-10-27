@@ -159,7 +159,7 @@
   },
   "hosted-keyless": {
     "scrape": {
-      "inputBytes": 5881,
+      "inputBytes": 5846,
       "descriptionChars": 392
     },
     "map": {
@@ -169,7 +169,7 @@
   },
   "hosted-key": {
     "scrape": {
-      "inputBytes": 6509,
+      "inputBytes": 6474,
       "descriptionChars": 392
     },
     "map": {
@@ -183,7 +183,7 @@
   },
   "oauth-http": {
     "scrape": {
-      "inputBytes": 5881,
+      "inputBytes": 5846,
       "descriptionChars": 392
     },
     "map": {
@@ -193,7 +193,7 @@
   },
   "oauth-browser": {
     "scrape": {
-      "inputBytes": 6509,
+      "inputBytes": 6474,
       "descriptionChars": 392
     },
     "map": {

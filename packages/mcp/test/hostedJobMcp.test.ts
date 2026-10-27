@@ -82,6 +82,8 @@ describe('hosted job tools over MCP', () => {
     // A job's credit cap is offered over MCP too (H2 M6).
     expect(properties.maxCredits).toMatchObject({ type: 'integer', minimum: 1 })
     expect(properties.maxPages?.maximum).toBe(500)
+    // A slice reads two pages at once, and a crawl is offered no more (stage H W0).
+    expect(properties.maxConcurrency?.maximum).toBe(2)
     const wait = tools.find((tool) => tool.name === 'wait_crawl')!
     expect((wait.inputSchema as unknown as { properties: { timeoutMs: { maximum: number } } }).properties.timeoutMs.maximum).toBe(120_000)
     // Its instructions say jobs run here, not only on the person's computer.
@@ -110,6 +112,9 @@ describe('hosted job tools over MCP', () => {
         expect(String(properties.mode?.description)).not.toMatch(/saved logins;/)
         expect(properties.maxFileBytes?.maximum, `${key} ${name}`).toBe(5 * 1024 * 1024)
         expect(tool.description).not.toMatch(/appendToId|actions|not stated/)
+        // verify is scrape's, whose hosted copy names no regular-expression check (stage H W0).
+        expect(properties.verify, `${key} ${name}`).toEqual({ type: 'object', description: 'Same as scrape.' })
+        expect(String(props(tools.find((candidate) => candidate.name === 'scrape')!).verify?.description), key).not.toMatch(/markdownMatches|markdownCountMin/)
       }
       const errors = tools.find((tool) => tool.name === 'get_batch_errors')!
       expect(errors.description).not.toMatch(/robotsBlocked|\berrors \[/)
@@ -224,6 +229,20 @@ describe('hosted job tools over MCP', () => {
     const after = await client.callTool({ name: 'get_batch', arguments: { id: taskId } })
     expect(after.isError ?? false, text(after)).toBe(false)
   }, 30_000)
+
+  it('refuses the regular-expression checks at a job tool\'s start by name, and runs a crawl\'s larger maxConcurrency at two (stage H W0)', async () => {
+    const { connect, enqueued } = await start()
+    const client = await connect('oc_account')
+    for (const [name, args] of [['crawl', { url: 'https://example.com/' }], ['batch_scrape', { urls: ['https://example.com/'] }]] as const) {
+      const result = await client.callTool({ name, arguments: { ...args, verify: { checks: [{ type: 'markdownCountMin', pattern: 'Example', min: 1 }] } } })
+      expect(result.isError, name).toBe(true)
+      expect(text(result), name).toMatch(/^unsupported_parameter: verify: markdownCountMin checks are not available in hosted mode/)
+    }
+    expect(enqueued).toEqual([])
+    const crawl = await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/', maxConcurrency: 8 } })
+    expect(crawl.isError ?? false, text(crawl)).toBe(false)
+    expect(enqueued.map((job) => job.request)).toMatchObject([{ maxConcurrency: 2 }])
+  })
 
   it('refuses a webhook passed to a job tool anyway, so its secret never reaches the transcript', async () => {
     const { connect, enqueued } = await start()
