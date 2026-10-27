@@ -308,7 +308,8 @@
 | 页面平均位置 ≤20 的展示 | **193 / 18,035（1.1%）**，21 个页面：首页 33（4.2）、changelog 35（5.3）、`/docs/` 19（4.1）、`connect-mcp` 19（7.2）、`reference` 22（15.8）等 | GSC 页面表；页面平均位置是各查询的混合值；页面表合计 18,035，与属性级 17,465 口径不同 |
 | 位置 ≤20 的展示（查询 × 页面表） | 2 行、各 1 展示（`http://127.0.0.1:8791`、`octoscrape`） | 排名靠前页面的查询被 Google 匿名化，这张表看不到它们，所以不能度量可见度 |
 | 品牌词 | 可见查询中**没有**含 octocrawl 的 | 可能被匿名化隐藏，**未知** |
-| 收录（2026-10-12） | 24 已收录、9 未收录；URL Inspection（10-13）21 通过、3 中性 | 较新的数据**未找到** |
+| 收录（2026-10-12，旧） | 24 已收录、9 未收录；URL Inspection（10-13）21 通过、3 中性 | 已被下一行取代 |
+| 收录（2026-10-27） | 29 个 sitemap URL 全部读到：27 通过、2 中性（`/tools/` 与 `/tools/website-to-text/`：Discovered - currently not indexed；后者三分钟前的第一次读数是 URL is unknown to Google，单次读数的文字不稳） | `scripts/seo/snapshot.mjs` 的 URL Inspection，快照 `2026-10-27T1709Z`；`/scrape/` 在 10-13 是中性，现在通过 |
 | 第一方分析（9-16 至 10-13） | 453 次页面浏览；来源 Bing 5、无来源 444 | `measurement.md` |
 | AI Mode 样本（10-16） | 6/12 提名字，0/12 引用官方页面 | `ai-visibility.md` |
 | 包下载（含自己的 CI 与镜像，30 天） | `octocrawl` 944、`@octocrawl/mcp` 1,676、`@octocrawl/sdk` 1,332、`@octocrawl/cli` 1,431；PyPI `octocrawl-client` 124；GitHub 2 星 | npm / PyPI / GitHub API；GTM 记录说这些不算增长信号，仅作背景 |
