@@ -213,6 +213,7 @@ The run stops and asks before any step that would take the total past $40.
   - The terminal is in raw mode from before the prompt until the list is saved, so the paste is never shown or left for the shell.
   - A list that fails its check (a bad line, an IP twice, fewer than 72 IPs) is asked for again. The script prints counts and line numbers only.
   - It saves the list to `~/Code/w2l/.w2l/access/h2b-dc-proxies.txt`, mode 600.
+  - In this run the list came another way. The coordinating session saved it from Webshare's download link to `~/Code/w2l/.w2l/access/webshare-dc-proxies.txt`, mode 600, and `cloud.sh` reads that file through `H2B_DC_LIST`. The run section says how the credentials were handled.
 - **How they reach Cloud Run.** Only through temporary Secret Manager secrets: `octocrawl-h2b-res-a`, and `octocrawl-h2b-dc` in window 2.
   - Each is readable through an IAM binding on the secret itself by the jobs' service account, the default compute account, as in G4.
   - Each becomes `H2B_UPSTREAMS` in its arm's jobs.

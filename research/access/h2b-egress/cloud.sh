@@ -4,8 +4,8 @@
 #                            the build's source archive is noted in .w2l/access/h2b/build-sources.txt for cleanup
 #   secrets                  the temporary secrets, readable by the jobs' service account alone, their values never
 #                            printed: octocrawl-h2b-res-a (RESIDENTIAL_PROXY from competitors.env, piped to gcloud's
-#                            stdin), and with H2B_DC=1 octocrawl-h2b-dc (the datacenter list save-list.mjs saved, read
-#                            by gcloud itself)
+#                            stdin), and with H2B_DC=1 octocrawl-h2b-dc (the datacenter list save-list.mjs saved, or the
+#                            file H2B_DC_LIST names in the same format, read by gcloud itself)
 #   jobs <image@digest>      the jobs: google and res-a at 2 vCPU / 4 GiB gen2, res-a at 4 vCPU / 8 GiB, and with
 #                            H2B_DC=1 dc at 2 vCPU / 4 GiB
 #   smoke <tasks>            one google execution of a few tasks (joined by ","), window "smoke": no paid exit used
@@ -23,7 +23,7 @@ P=octopus-w2l-20260924-7r7
 R=asia-southeast1
 SA=307354954747-compute@developer.gserviceaccount.com
 COMPETITORS=$HOME/Code/w2l/.w2l/access/competitors.env
-DC_LIST=$HOME/Code/w2l/.w2l/access/h2b-dc-proxies.txt
+DC_LIST=${H2B_DC_LIST:-$HOME/Code/w2l/.w2l/access/h2b-dc-proxies.txt}
 GRANT=$HOME/Code/w2l/.w2l/access/installed-chrome-grant.json
 NOTES=$HOME/Code/w2l/.w2l/access/h2b
 # job  arm  session style  secret  cpu  memory  offset (where its task list starts)
