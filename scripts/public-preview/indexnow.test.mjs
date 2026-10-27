@@ -60,11 +60,28 @@ test('the state records what a 200 or 202 accepted, drops deleted URLs, and lear
   const fingerprints = new Map([['https://x.example/a/', 'lastmod:2']])
   for (const status of [200, 202]) {
     const after = afterResponse(before, { status, sent: ['https://x.example/a/'], deleted: ['https://x.example/old/'], fingerprints, now: NOW })
-    assert.deepEqual(after.urls, { 'https://x.example/a/': { fingerprint: 'lastmod:2', submittedAt: NOW.toISOString() } })
+    assert.deepEqual(after.urls, { 'https://x.example/a/': { fingerprint: 'lastmod:2', submittedAt: NOW.toISOString(), confirmed: status === 200 } })
   }
   assert.deepEqual(afterResponse(before, { status: 500, sent: ['https://x.example/a/'], deleted: [], fingerprints, now: NOW }).urls, before.urls)
   assert.equal(afterResponse(before, { status: 429, sent: [], deleted: [], fingerprints, now: NOW }).retryNotBefore, new Date(NOW.getTime() + 10 * 60_000).toISOString())
   assert.equal(before.retryNotBefore, null)
+})
+
+test('a fingerprint that could not be read keeps the recorded one and is not sent, unless the page is new or unconfirmed or everything is sent', () => {
+  const state = stateOf({
+    'https://x.example/known/': { fingerprint: 'sha256:aa', submittedAt: minutesAgo(60), confirmed: true },
+    'https://x.example/unconfirmed/': { fingerprint: 'sha256:bb', submittedAt: minutesAgo(60), confirmed: false },
+    'https://x.example/blind/': { fingerprint: null, submittedAt: minutesAgo(60), confirmed: true },
+  })
+  const entries = [{ loc: 'https://x.example/known/', fingerprint: null, unreadable: true }, { loc: 'https://x.example/unconfirmed/', fingerprint: null, unreadable: true }, { loc: 'https://x.example/blind/', fingerprint: null, unreadable: true }, { loc: 'https://x.example/new/', fingerprint: null, unreadable: true }]
+  const result = plan({ entries, state, now: NOW })
+  assert.deepEqual(result.unreadable, ['https://x.example/known/'])
+  assert.deepEqual(result.send, ['https://x.example/new/', 'https://x.example/unconfirmed/', 'https://x.example/blind/'])
+  assert.deepEqual(plan({ entries, state, now: NOW, all: true }).send.length, 4)
+  const recorded = afterResponse(state, { status: 200, sent: ['https://x.example/known/'], deleted: [], fingerprints: new Map([['https://x.example/known/', null]]), now: NOW })
+  assert.equal(recorded.urls['https://x.example/known/'].fingerprint, 'sha256:aa')
+  assert.equal(afterResponse(state, { status: 202, sent: ['https://x.example/known/'], deleted: [], fingerprints: new Map(), now: NOW }).urls['https://x.example/known/'].confirmed, false)
+  assert.equal(afterResponse(state, { status: 200, sent: ['https://x.example/known/'], deleted: [], fingerprints: new Map(), now: NOW }).urls['https://x.example/known/'].confirmed, true)
 })
 
 test('fingerprints, batches and the state file are strict', () => {
@@ -84,15 +101,15 @@ test('fingerprints, batches and the state file are strict', () => {
 // The command itself, against a local site and a local IndexNow endpoint: nothing leaves this machine.
 async function withSite(body) {
   const dir = mkdtempSync(join(tmpdir(), 'indexnow-test-'))
-  const site = { sitemap: [], changelog: 'v1', answers: { '/old/': 404 }, endpointStatus: 200, posts: [] }
+  const site = { sitemap: [], changelog: 'v1', mdStatus: 200, answers: { '/old/': 404 }, endpointStatus: 200, endpointQueue: [], posts: [] }
   const server = createServer((request, response) => {
     const send = (status, text, type = 'text/plain') => { response.writeHead(status, { 'content-type': type }); response.end(text) }
     if (request.method === 'POST' && request.url === '/indexnow') {
       const chunks = []
-      request.on('data', chunk => chunks.push(chunk)).on('end', () => { site.posts.push(JSON.parse(Buffer.concat(chunks).toString('utf8'))); send(site.endpointStatus, site.endpointStatus === 200 ? '' : 'slow down') })
+      request.on('data', chunk => chunks.push(chunk)).on('end', () => { site.posts.push(JSON.parse(Buffer.concat(chunks).toString('utf8'))); const status = site.endpointQueue.shift() ?? site.endpointStatus; send(status, status === 200 || status === 202 ? '' : 'slow down') })
     } else if (request.url === '/indexnow-key.txt') send(200, 'testkey12345678\n')
     else if (request.url === '/sitemap.xml') send(200, `<urlset>${site.sitemap.map(([path, lastmod]) => `<url><loc>${origin}${path}</loc>${lastmod ? `<lastmod>${lastmod}</lastmod>` : ''}</url>`).join('')}</urlset>`, 'application/xml')
-    else if (request.url === '/changelog/index.md') send(200, site.changelog)
+    else if (request.url === '/changelog/index.md') send(site.mdStatus, site.changelog)
     else send(site.answers[request.url] ?? 404, 'x')
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -108,7 +125,9 @@ async function withSite(body) {
   })
   const stateFile = join(dir, 'indexnow-state.json')
   const state = () => JSON.parse(readFileSync(stateFile, 'utf8'))
-  try { await body({ site, origin, run, dir, stateFile, state }) } finally { await new Promise(resolve => server.close(resolve)); rmSync(dir, { recursive: true, force: true }) }
+  // Pretends ten minutes passed since the last submission, so the five-minute hold-back does not apply.
+  const age = () => { const aged = state(); for (const url of Object.values(aged.urls)) url.submittedAt = new Date(Date.now() - 10 * 60_000).toISOString(); writeFileSync(stateFile, JSON.stringify(aged)) }
+  try { await body({ site, origin, run, dir, stateFile, state, age }) } finally { await new Promise(resolve => server.close(resolve)); rmSync(dir, { recursive: true, force: true }) }
 }
 
 test('the command sends only what changed since the last submission, and says so', async () => {
@@ -214,5 +233,83 @@ test('a state file from another origin, or one that is not a state, stops the ru
     writeFileSync(stateFile, '{"oops":')
     assert.equal((await run()).status, 1)
     assert.equal(site.posts.length, 0)
+  })
+})
+
+test('a Markdown copy that does not answer leaves the page as last sent, and does not make it sent twice', async () => {
+  await withSite(async ({ site, origin, run, state, age }) => {
+    site.sitemap = [['/', '2026-10-01'], ['/changelog/', null]]
+    await run()
+    const recorded = state().urls[`${origin}/changelog/`].fingerprint
+    assert.match(recorded, /^sha256:/)
+    age()
+    site.mdStatus = 500
+    const down = await run()
+    assert.match(down.out, /Could not read the Markdown copy of .*\/changelog\/, so it is left as last sent/)
+    assert.match(down.out, /Nothing to send/)
+    assert.equal(state().urls[`${origin}/changelog/`].fingerprint, recorded)
+    site.mdStatus = 200
+    const back = await run()
+    assert.match(back.out, /Nothing to send/)
+    assert.equal(site.posts.length, 1)
+    // a real change after the outage is still sent
+    site.changelog = 'v2'
+    age()
+    await run()
+    assert.deepEqual(site.posts[1].urlList, [`${origin}/changelog/`])
+    // a page that never had a copy (404) is sent every time and says so
+    site.mdStatus = 404
+    age()
+    const blind = await run()
+    assert.match(blind.out, /No lastmod and no Markdown copy to compare/)
+  })
+})
+
+test('a 202 is recorded as not confirmed and sent again; a 200 then confirms it', async () => {
+  await withSite(async ({ site, origin, run, state, age }) => {
+    site.sitemap = [['/', '2026-10-01'], ['/docs/', '2026-10-01']]
+    site.endpointStatus = 202
+    const first = await run()
+    assert.equal(first.status, 0)
+    assert.equal(state().urls[`${origin}/`].confirmed, false)
+    age()
+    site.endpointStatus = 200
+    const second = await run()
+    assert.match(second.out, /0 new, 2 changed/)
+    assert.deepEqual(site.posts[1].urlList, [`${origin}/`, `${origin}/docs/`])
+    assert.equal(state().urls[`${origin}/`].confirmed, true)
+    age()
+    assert.match((await run()).out, /Nothing to send/)
+  })
+})
+
+test('a failure part-way through several posts keeps what was accepted and sends only the rest next time', async () => {
+  await withSite(async ({ site, origin, run, state, age }) => {
+    site.sitemap = Array.from({ length: MAX_PER_POST + 5 }, (_, i) => [`/p${i}/`, '2026-10-01'])
+    site.endpointQueue = [200, 500]
+    const failed = await run()
+    assert.equal(failed.status, 1)
+    assert.equal(site.posts.length, 2)
+    assert.equal(site.posts[0].urlList.length, MAX_PER_POST)
+    assert.equal(Object.keys(state().urls).length, MAX_PER_POST)
+    age()
+    const retry = await run()
+    assert.equal(retry.status, 0)
+    assert.deepEqual(site.posts[2].urlList, Array.from({ length: 5 }, (_, i) => `${origin}/p${MAX_PER_POST + i}/`))
+    assert.equal(Object.keys(state().urls).length, MAX_PER_POST + 5)
+  })
+})
+
+test('a URL dropped from the sitemap is sent as deleted only when it answers 404 or 410', async () => {
+  await withSite(async ({ site, origin, run, state, age }) => {
+    site.sitemap = [['/', '2026-10-01'], ['/a/', '2026-10-01'], ['/b/', '2026-10-01'], ['/c/', '2026-10-01'], ['/d/', '2026-10-01'], ['/e/', '2026-10-01']]
+    await run()
+    age()
+    site.sitemap = [['/', '2026-10-01']]
+    Object.assign(site.answers, { '/a/': 410, '/b/': 404, '/c/': 301, '/d/': 500, '/e/': 200 })
+    const result = await run()
+    assert.deepEqual(site.posts[1].urlList, [`${origin}/a/`, `${origin}/b/`])
+    for (const path of ['/c/', '/d/', '/e/']) assert.equal(`${origin}${path}` in state().urls, true)
+    assert.match(result.out, /2 deleted/)
   })
 })

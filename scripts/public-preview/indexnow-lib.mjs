@@ -19,19 +19,23 @@ export function readState(text, origin) {
 /** What says a page changed: its sitemap lastmod, else a hash of its Markdown copy, else nothing (null). */
 export const fingerprintOf = (entry, markdownHash) => (entry.lastmod ? `lastmod:${entry.lastmod}` : markdownHash ? `sha256:${markdownHash}` : null)
 
-/** Which sitemap entries to send. `entries` is [{ loc, fingerprint }], `state` the last submissions, `all` sends every
- * entry. A URL with no fingerprint cannot be compared, so it counts as changed and is listed in `uncomparable`. A URL
- * sent less than five minutes ago is held back (`recent`) unless `all`. `gone` are the state's URLs that the sitemap no
- * longer lists; the caller checks that they answer 404 or 410 before sending them as deleted. */
+/** Which sitemap entries to send. `entries` is [{ loc, fingerprint, unreadable }], `state` the last submissions, `all`
+ * sends every entry. A URL with no fingerprint cannot be compared, so it counts as changed and is listed in
+ * `uncomparable`. A URL whose fingerprint could not be read this time (`unreadable`: its Markdown copy did not answer)
+ * but was recorded last time is left alone and listed in `unreadable`, so a page is not sent twice because a request
+ * failed. A URL the engine only accepted with a 202 (`confirmed: false`) is sent again. A URL sent less than five
+ * minutes ago is held back (`recent`) unless `all`. `gone` are the state's URLs that the sitemap no longer lists; the
+ * caller checks that they answer 404 or 410 before sending them as deleted. */
 export function plan({ entries, state, now, all = false }) {
   if (state.retryNotBefore && Date.parse(state.retryNotBefore) > now.getTime()) {
-    return { blockedUntil: state.retryNotBefore, send: [], fresh: [], changed: [], unchanged: [], recent: [], uncomparable: [], gone: [] }
+    return { blockedUntil: state.retryNotBefore, send: [], fresh: [], changed: [], unchanged: [], unreadable: [], recent: [], uncomparable: [], gone: [] }
   }
-  const fresh = [], changed = [], unchanged = [], recent = [], uncomparable = []
+  const fresh = [], changed = [], unchanged = [], unreadable = [], recent = [], uncomparable = []
   for (const entry of entries) {
     const before = state.urls[entry.loc]
     if (!before) fresh.push(entry.loc)
-    else if (entry.fingerprint === null || entry.fingerprint !== before.fingerprint) changed.push(entry.loc)
+    else if (entry.unreadable && before.fingerprint !== null && before.confirmed !== false) { unreadable.push(entry.loc); continue }
+    else if (entry.fingerprint === null || entry.fingerprint !== before.fingerprint || before.confirmed === false) changed.push(entry.loc)
     else if (!all) { unchanged.push(entry.loc); continue }
     if (entry.fingerprint === null) uncomparable.push(entry.loc)
   }
@@ -43,7 +47,7 @@ export function plan({ entries, state, now, all = false }) {
     else send.push(loc)
   }
   const listed = new Set(entries.map(entry => entry.loc))
-  return { blockedUntil: null, send, fresh, changed, unchanged, recent, uncomparable, gone: Object.keys(state.urls).filter(loc => !listed.has(loc)) }
+  return { blockedUntil: null, send, fresh, changed, unchanged, unreadable, recent, uncomparable, gone: Object.keys(state.urls).filter(loc => !listed.has(loc)) }
 }
 
 /** The posts to make: at most 10,000 URLs each. */
@@ -53,12 +57,14 @@ export function batches(urls) {
   return out
 }
 
-/** The state after a response. 200 and 202 record the URLs sent (and drop deleted ones); 429 blocks the next run for
- * ten minutes; anything else changes nothing, so the same URLs are sent again next time. */
+/** The state after a response. 200 and 202 record the URLs sent and drop deleted ones, a 202 (received, key validation
+ * pending) as not confirmed so the next run sends them again; a fingerprint that could not be read keeps the one
+ * recorded before. 429 blocks the next run for ten minutes; anything else changes nothing, so the same URLs are sent
+ * again next time. */
 export function afterResponse(state, { status, sent, deleted, fingerprints, now }) {
   const next = { ...state, urls: { ...state.urls } }
   if (status === 200 || status === 202) {
-    for (const loc of sent) next.urls[loc] = { fingerprint: fingerprints.get(loc) ?? null, submittedAt: now.toISOString() }
+    for (const loc of sent) next.urls[loc] = { fingerprint: fingerprints.get(loc) ?? state.urls[loc]?.fingerprint ?? null, submittedAt: now.toISOString(), confirmed: status === 200 }
     for (const loc of deleted) delete next.urls[loc]
     next.retryNotBefore = null
   } else if (status === 429) next.retryNotBefore = new Date(now.getTime() + RETRY_AFTER_429_MS).toISOString()

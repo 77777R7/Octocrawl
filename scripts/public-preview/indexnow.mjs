@@ -9,7 +9,9 @@
 // It reads the live sitemap and the live key file, so it submits only what the site really serves, and IndexNow checks
 // the key against https://<host>/indexnow-key.txt (apps/public-web/public/indexnow-key.txt). A page changed when its
 // sitemap lastmod differs from the one sent last time; a page with no lastmod (the changelog) when the hash of its
-// Markdown copy (<url>index.md) does, and one with neither is sent every time and listed. A URL the sitemap dropped is
+// Markdown copy (<url>index.md) does, and one with neither is sent every time and listed; a copy that cannot be read this
+// time (anything but a 404) leaves the page as last sent. A 202 (key validation pending) is recorded as not confirmed, and
+// the next run sends those URLs again. A URL the sitemap dropped is
 // sent as deleted only if it answers 404 or 410. A URL sent less than five minutes ago is held back, and after a 429
 // nothing is sent for ten minutes (publishing gate G13, docs/seo/library/policy-gates.md). The first run, with no state,
 // sends every URL once. The state (indexnow-state.json) and a log of every response (indexnow-log.jsonl) are kept in
@@ -23,6 +25,17 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseSitemap } from '../seo/sitemap.mjs'
 import { afterResponse, batches, emptyState, fingerprintOf, plan, readState } from './indexnow-lib.mjs'
+
+/** A page's Markdown copy as a hash: { hash }, { missing } when the site has no copy (404), { unreadable } when the
+ * request failed or answered anything else, which says nothing about whether the page changed. */
+async function markdownHash(loc) {
+  try {
+    const response = await fetch(`${loc}index.md`, { signal: AbortSignal.timeout(30_000) })
+    if (response.status === 404) return { missing: true }
+    if (!response.ok) return { unreadable: true }
+    return { hash: createHash('sha256').update(await response.text()).digest('hex').slice(0, 16) }
+  } catch { return { unreadable: true } }
+}
 
 async function fetchText(url) {
   const response = await fetch(url, { signal: AbortSignal.timeout(30_000) })
@@ -64,9 +77,8 @@ async function main(argv) {
 
   const entries = []
   for (const entry of sitemap) {
-    let hash = null
-    if (!entry.lastmod) hash = await fetchText(`${entry.loc}index.md`).then(text => createHash('sha256').update(text).digest('hex').slice(0, 16), () => null)
-    entries.push({ loc: entry.loc, fingerprint: fingerprintOf(entry, hash) })
+    const copy = entry.lastmod ? {} : await markdownHash(entry.loc)
+    entries.push({ loc: entry.loc, fingerprint: fingerprintOf(entry, copy.hash ?? null), unreadable: Boolean(copy.unreadable) })
   }
   const fingerprints = new Map(entries.map(entry => [entry.loc, entry.fingerprint]))
 
@@ -86,10 +98,11 @@ async function main(argv) {
     else console.log(`${loc} is no longer in the sitemap but answers ${status ?? 'nothing'}, so it is not sent as deleted`)
   }
 
-  console.log(`${origin}: ${entries.length} URLs in the sitemap; ${p.fresh.length} new, ${p.changed.length} changed, ${p.unchanged.length} unchanged, ${p.recent.length} held back (sent less than 5 minutes ago), ${deleted.length} deleted`)
+  console.log(`${origin}: ${entries.length} URLs in the sitemap; ${p.fresh.length} new, ${p.changed.length} changed, ${p.unchanged.length + p.unreadable.length} unchanged, ${p.recent.length} held back (sent less than 5 minutes ago), ${deleted.length} deleted`)
   if (first) console.log('No earlier submission is recorded, so this first run sends every URL once.')
   if (options.all) console.log('--all: every URL is sent, whatever the state says.')
   if (p.uncomparable.length) console.log(`No lastmod and no Markdown copy to compare, so sent every time: ${p.uncomparable.join(', ')}`)
+  if (p.unreadable.length) console.log(`Could not read the Markdown copy of ${p.unreadable.join(', ')}, so it is left as last sent and compared again next time.`)
   const urlList = [...p.send, ...deleted]
   if (options.dryRun) {
     for (const loc of urlList) console.log(`  would send ${loc}${deleted.includes(loc) ? ' (deleted)' : ''}`)

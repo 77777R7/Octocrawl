@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { MAX_URLS, builtPages, checkSitemap, headFacts, pagePathOf, readRobots } from './check-sitemap.mjs'
+import { MAX_URLS, builtPages, checkSitemap, headFacts, pagePathOf, readRobots, robotsAllows } from './check-sitemap.mjs'
 import { parseSitemap } from './sitemap.mjs'
 
 const O = '__W2L_ORIGIN__'
@@ -71,7 +71,7 @@ test('duplicates, other origins, queries, missing slashes and bad or future last
     `${O}/changelog has no trailing slash, which every canonical here has`,
     `${O}/changelog has no built page`,
     `${O}/a/ has lastmod "2026-13-40", which is not a YYYY-MM-DD day`,
-    `${O}/b/ has lastmod 2026-11-01, which is after ${TODAY}`,
+    `${O}/b/ has lastmod 2026-11-01, which is after tomorrow (2026-10-29, UTC)`,
     `${O}/c/ has lastmod "Oct 1", which is not a YYYY-MM-DD day`,
     `${O}/docs/ is a built page that can be indexed but is not in the sitemap`,
     `${O}/changelog/ is a built page that can be indexed but is not in the sitemap`,
@@ -86,12 +86,41 @@ test('an empty sitemap, an index, another document and an oversize list are refu
   assert.match(problemsOf(run({ xml: many, pages: new Map() })).join('\n'), /lists 50001 URLs/)
 })
 
-test('robots.txt must name the sitemap and must not disallow a listed path', () => {
+test('robots.txt must exist, name the sitemap, and allow every listed path to every crawler, by the longest matching rule', () => {
+  assert.deepEqual(problemsOf(run({ robotsTxt: null })), ['robots.txt is missing'])
   assert.match(problemsOf(run({ robotsTxt: 'User-agent: *\nAllow: /\n' })).join('\n'), /robots\.txt does not name __W2L_ORIGIN__\/sitemap\.xml/)
-  assert.match(problemsOf(run({ robotsTxt: `User-agent: *\nDisallow: /docs/\nSitemap: ${O}/sitemap.xml\n` })).join('\n'), /\/docs\/ is disallowed by robots\.txt \(\/docs\/\)/)
+  assert.match(problemsOf(run({ robotsTxt: `User-agent: *\nDisallow: /docs/\nSitemap: ${O}/sitemap.xml\n` })).join('\n'), /\/docs\/ is disallowed for \* by robots\.txt \(Disallow: \/docs\/\)/)
+  const wild = problemsOf(run({ robotsTxt: `User-agent: *\nDisallow: /*/\nSitemap: ${O}/sitemap.xml\n` }))
+  assert.equal(wild.some(line => line.includes('/docs/ is disallowed for *')), true)
+  const google = problemsOf(run({ robotsTxt: `User-agent: *\nDisallow: /api/\n\nUser-agent: Googlebot\nDisallow: /\nSitemap: ${O}/sitemap.xml\n` }))
+  assert.equal(google.some(line => line.includes('/docs/ is disallowed for googlebot')), true)
+  assert.equal(google.some(line => line.includes('for *')), false)
   assert.deepEqual(run({ robotsTxt: `User-agent: Other\nDisallow: /\n\nUser-agent: *\nDisallow: /api/\nSitemap: ${O}/sitemap.xml\n` }).problems, [])
-  assert.deepEqual(readRobots('User-agent: *\nDisallow: /api/ # x\nSitemap: https://a.example/sitemap.xml'), { disallow: ['/api/'], sitemaps: ['https://a.example/sitemap.xml'] })
-  assert.deepEqual(run({ robotsTxt: null }).problems, [])
+  assert.deepEqual(run({ robotsTxt: `User-agent: *\nDisallow: /docs/\nAllow: /docs/\nSitemap: ${O}/sitemap.xml\n` }).problems, [])
+  assert.equal(robotsAllows(readRobots('User-agent: *\nDisallow: /a/\nAllow: /a/b/'), '*', '/a/b/c/').allowed, true)
+  assert.equal(robotsAllows(readRobots('User-agent: *\nDisallow: /a/\nAllow: /a/b/'), '*', '/a/x/').allowed, false)
+  assert.equal(robotsAllows(readRobots('User-agent: *\nDisallow: /*.pdf$'), '*', '/x.pdf').allowed, false)
+  assert.equal(robotsAllows(readRobots('User-agent: *\nDisallow: /*.pdf$'), '*', '/x.pdf/').allowed, true)
+  assert.equal(robotsAllows(readRobots('User-agent: *\nDisallow:'), '*', '/anything/').allowed, true)
+  assert.equal(robotsAllows(readRobots('User-agent: a\nUser-agent: b\nDisallow: /x/'), 'b', '/x/').allowed, false)
+  const parsed = readRobots('User-agent: *\nDisallow: /api/ # x\nSitemap: https://a.example/sitemap.xml')
+  assert.deepEqual(parsed.groups.get('*'), [{ allow: false, pattern: '/api/' }])
+  assert.deepEqual(parsed.sitemaps, ['https://a.example/sitemap.xml'])
+})
+
+test('noindex is found in single-quoted, unquoted, none, googlebot and bingbot meta tags, and not in an unrelated tag', () => {
+  const noindex = extra => problemsOf(run({ pages: new Map([...site().pages, ['/docs/', html('/docs/', { extra })]]) })).filter(line => line.includes('is noindex'))
+  for (const extra of ["<meta name='robots' content='noindex'>", '<meta name=robots content=noindex>', '<meta name="robots" content="none">', '<meta name="googlebot" content="noindex, nofollow">', '<meta name="BingBot" content="NOINDEX">']) assert.equal(noindex(extra).length, 1, extra)
+  for (const extra of ['<meta name="robots" content="index, follow">', '<meta name="author" content="noindex">', '<meta name="robots" content="nofollow">']) assert.equal(noindex(extra).length, 0, extra)
+})
+
+test('a lastmod of tomorrow (UTC) is allowed, the day after is not, and a day that does not exist is not', () => {
+  const base = site()
+  const withDay = day => problemsOf(run({ xml: urlset([['/', day], ['/docs/', '2026-10-21'], ['/changelog/', null]]), pages: base.pages })).filter(line => line.includes('lastmod'))
+  assert.deepEqual(withDay('2026-10-29'), [])
+  assert.equal(withDay('2026-10-30').length, 1)
+  assert.equal(withDay('2026-02-30').length, 1)
+  assert.equal(withDay('2026-02-28').length, 0)
 })
 
 test('built files map to page paths, and the sitemap reader refuses what it cannot read', () => {

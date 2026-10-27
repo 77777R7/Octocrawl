@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Checks the built public site against its own sitemap (publishing gate G12, docs/seo/library/policy-gates.md): every
 // sitemap URL is an absolute trailing-slash address on one origin, listed once, with a valid lastmod that is not in the
-// future, and has a built page that carries exactly one canonical link equal to that URL, no noindex, a title and a
-// description. The other way round, every built page that is indexable must be in the sitemap. robots.txt must name the
-// sitemap and not disallow a path in it. Offline: it reads files, so CI runs it right after the build.
+// future (as in docsPages.test.ts, up to tomorrow's UTC day), and has a built page that carries exactly one canonical
+// link equal to that URL, no noindex or none (in a robots, googlebot or bingbot meta tag), a title and a description.
+// The other way round, every built page that is indexable must be in the sitemap. robots.txt must exist, name the
+// sitemap, and allow the listed paths to every crawler (`*`, Googlebot, Bingbot; Allow and Disallow with * and $, the
+// longest matching rule wins). Offline: it reads files, so CI runs it right after the build.
 //
 //   npm run build:public && node scripts/seo/check-sitemap.mjs     the default dist is apps/public-web/dist
 //   node scripts/seo/check-sitemap.mjs --dist DIR                  another built site
@@ -21,7 +23,9 @@ import { parseSitemap } from './sitemap.mjs'
 export const MAX_URLS = 50_000
 export const MAX_BYTES = 50 * 1024 * 1024
 
-const attributes = tag => Object.fromEntries([...tag.matchAll(/([a-zA-Z:-]+)\s*=\s*"([^"]*)"/g)].map(match => [match[1].toLowerCase(), match[2]]))
+const attributes = tag => Object.fromEntries([...tag.matchAll(/([a-zA-Z:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g)].map(match => [match[1].toLowerCase(), match[2] ?? match[3] ?? match[4].replace(/\/$/, '')]))
+const ROBOTS_META = new Set(['robots', 'googlebot', 'bingbot'])
+const keepsOut = content => /\b(noindex|none)\b/i.test(content)
 
 /** What a page's head says that the check needs: canonical links, robots directives, title, description. */
 export function headFacts(html) {
@@ -30,7 +34,7 @@ export function headFacts(html) {
   const metas = [...head.matchAll(/<meta\b[^>]*>/gi)].map(match => attributes(match[0]))
   return {
     canonicals: links.filter(link => (link.rel ?? '').toLowerCase().split(/\s+/).includes('canonical')).map(link => link.href ?? ''),
-    robots: metas.filter(meta => (meta.name ?? '').toLowerCase() === 'robots').map(meta => meta.content ?? ''),
+    robots: metas.filter(meta => ROBOTS_META.has((meta.name ?? '').toLowerCase())).map(meta => meta.content ?? ''),
     title: /<title>([\s\S]*?)<\/title>/i.exec(head)?.[1].trim() ?? '',
     descriptions: metas.filter(meta => (meta.name ?? '').toLowerCase() === 'description').map(meta => (meta.content ?? '').trim()),
   }
@@ -65,24 +69,51 @@ const validDay = value => {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
-/** The `Disallow` prefixes that apply to every crawler, and the `Sitemap` addresses, of a robots.txt. */
+/** A robots.txt as { groups, sitemaps }: `groups` maps a lowercase user agent to its rules ({ allow, pattern }); a rule
+ * with an empty pattern allows everything and is left out. */
 export function readRobots(text) {
-  const disallow = []
+  const groups = new Map()
   const sitemaps = []
-  let all = false
-  let group = false
-  for (const raw of text.split('\n')) {
+  let agents = []
+  let inRules = false
+  for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/#.*/, '').trim()
-    const [field, ...rest] = line.split(':')
-    const value = rest.join(':').trim()
-    const name = field.toLowerCase()
-    if (name === 'user-agent') { if (!group) all = false; group = true; if (value === '*') all = true; continue }
-    group = false
-    if (name === 'disallow' && all && value) disallow.push(value)
-    if (name === 'sitemap' && value) sitemaps.push(value)
+    const colon = line.indexOf(':')
+    if (!line || colon < 0) continue
+    const name = line.slice(0, colon).trim().toLowerCase()
+    const value = line.slice(colon + 1).trim()
+    if (name === 'user-agent') {
+      if (inRules) { agents = []; inRules = false }
+      agents.push(value.toLowerCase())
+      for (const agent of agents) if (!groups.has(agent)) groups.set(agent, [])
+    } else if (name === 'sitemap') { if (value) sitemaps.push(value) }
+    else if (name === 'allow' || name === 'disallow') {
+      inRules = true
+      if (value) for (const agent of agents) groups.get(agent).push({ allow: name === 'allow', pattern: value })
+    }
   }
-  return { disallow, sitemaps }
+  return { groups, sitemaps }
 }
+
+const matcher = pattern => {
+  const end = pattern.endsWith('$')
+  const body = (end ? pattern.slice(0, -1) : pattern).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+  return new RegExp(`^${body}${end ? '$' : ''}`)
+}
+
+/** Whether `crawler` may fetch `path`: its own group if robots.txt has one, else the `*` group; the longest matching
+ * pattern wins and Allow wins a tie. Returns { allowed, rule } with the rule that decided. */
+export function robotsAllows(robots, crawler, path) {
+  const rules = robots.groups.get(crawler) ?? robots.groups.get('*') ?? []
+  let best = null
+  for (const rule of rules) {
+    if (!matcher(rule.pattern).test(path)) continue
+    if (!best || rule.pattern.length > best.pattern.length || (rule.pattern.length === best.pattern.length && rule.allow)) best = rule
+  }
+  return { allowed: best ? best.allow : true, rule: best }
+}
+
+export const CRAWLERS = ['*', 'googlebot', 'bingbot']
 
 /** The sitemap's problems, as { where, problem } lines, plus counts. `xml` is the sitemap, `pages` the built pages by
  * path (HTML), `robotsTxt` the built robots.txt or null, `today` a YYYY-MM-DD day. */
@@ -91,6 +122,7 @@ export function checkSitemap({ xml, pages, robotsTxt, today }) {
   const add = (where, problem) => problems.push({ where, problem })
   let entries
   try { entries = parseSitemap(xml) } catch (error) { return { problems: [{ where: 'sitemap.xml', problem: error.message }], urls: 0, undated: 0 } }
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
   if (entries.length === 0) add('sitemap.xml', 'lists no URLs')
   if (entries.length > MAX_URLS) add('sitemap.xml', `lists ${entries.length} URLs; one file may list at most ${MAX_URLS}`)
   if (Buffer.byteLength(xml) > MAX_BYTES) add('sitemap.xml', `is larger than ${MAX_BYTES} bytes`)
@@ -110,24 +142,28 @@ export function checkSitemap({ xml, pages, robotsTxt, today }) {
     listed.add(path)
     if (lastmod === null) undated += 1
     else if (!validDay(lastmod)) add(loc, `has lastmod "${lastmod}", which is not a YYYY-MM-DD day`)
-    else if (lastmod > today) add(loc, `has lastmod ${lastmod}, which is after ${today}`)
+    else if (lastmod > tomorrow) add(loc, `has lastmod ${lastmod}, which is after tomorrow (${tomorrow}, UTC)`)
     const html = pages.get(path)
     if (html === undefined) { add(loc, 'has no built page'); continue }
     const facts = headFacts(html)
     if (facts.canonicals.length !== 1) add(loc, `has ${facts.canonicals.length} canonical links, not one`)
     else if (facts.canonicals[0] !== loc) add(loc, `has canonical ${facts.canonicals[0]}, not itself`)
-    if (facts.robots.some(content => /noindex/i.test(content))) add(loc, 'is noindex')
+    if (facts.robots.some(keepsOut)) add(loc, 'is noindex')
     if (!facts.title) add(loc, 'has no <title>')
     if (facts.descriptions.length === 0 || facts.descriptions.some(description => !description)) add(loc, 'has no meta description')
   }
   for (const [path, html] of pages) {
     if (listed.has(path)) continue
-    if (!headFacts(html).robots.some(content => /noindex/i.test(content))) add(origin ? origin + path : path, 'is a built page that can be indexed but is not in the sitemap')
+    if (!headFacts(html).robots.some(keepsOut)) add(origin ? origin + path : path, 'is a built page that can be indexed but is not in the sitemap')
   }
-  if (robotsTxt !== null) {
+  if (robotsTxt === null) add('robots.txt', 'is missing')
+  else {
     const robots = readRobots(robotsTxt)
     if (origin && !robots.sitemaps.includes(`${origin}/sitemap.xml`)) add('robots.txt', `does not name ${origin}/sitemap.xml`)
-    for (const prefix of robots.disallow) for (const path of listed) if (path.startsWith(prefix)) add(origin + path, `is disallowed by robots.txt (${prefix})`)
+    for (const crawler of CRAWLERS) for (const path of listed) {
+      const { allowed, rule } = robotsAllows(robots, crawler, path)
+      if (!allowed) add(origin + path, `is disallowed for ${crawler} by robots.txt (Disallow: ${rule.pattern})`)
+    }
   }
   return { problems, urls: entries.length, undated }
 }
