@@ -7,12 +7,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { createApiEngine } from '@w2l/api'
-import { hostedNetworkPolicy, parseBatchStartRequest, parseCrawlStartRequest } from '@w2l/contracts'
+import { hostedNetworkPolicy, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import { createHostedApi, HOSTED_API_TOOLS, HOSTED_JOB_TOOLS, HOSTED_SCRAPE_KEYS, hostedPolicy, hostedTools, keyDigest, MemoryHostedKeys, MemoryHostedQuota, oauthTools } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
-import { HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, JOB_MAX_CRAWL_PAGES } from '../src/hostedJobRoutes.js'
+import { HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, JOB_MAX_CRAWL_PAGES, JOB_WORKER_COUNT } from '../src/hostedJobRoutes.js'
 import { MemoryHostedJobStore } from '../src/hostedJobs.js'
-import { JOB_WORKER_COUNT } from '../src/hostedJobWorker.js'
 import { HOSTED_ONLY_OPTIONS, OPTION_PARITY, OPTION_TOOLS, parityTable, SHARED_WITH_SCRAPE, TOOL_PARITY, VALUE_PARITY, valueEntry, type OptionEntry, type OptionTool, type ValueEntry, type WhenSent } from '../src/hostedParity.js'
 import { TOOL_NAMES, TOOLS } from '../src/tools.js'
 
@@ -196,6 +195,7 @@ describe('what hosted does with what it does not list', () => {
   let api: string
   let root: string
   let close: () => Promise<void>
+  const jobs = new MemoryHostedJobStore()
   // Each call is a new account's key, so no per-key rate, lease or job limit answers instead.
   let calls = 0
   const post = (path: string, body: unknown) => fetch(`${api}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer oc_parity_${calls++}` }, body: JSON.stringify(body) })
@@ -214,7 +214,7 @@ describe('what hosted does with what it does not list', () => {
     const service = createHostedApi({
       port, host: '127.0.0.1', taskRoot: join(root, 'api'), hashKey: HASH_KEY, keys, quota: new MemoryHostedQuota(), credits: new MemoryCreditsStore(), addressPerMinute: 10_000,
       networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: () => {},
-      jobs: { store: new MemoryHostedJobStore(), files: { segment: async () => null, exportUrl: async (job) => `https://storage.example/${job.id}` }, enqueueSlice: async () => {} },
+      jobs: { store: jobs, files: { segment: async () => null, exportUrl: async (job) => `https://storage.example/${job.id}` }, enqueueSlice: async () => {} },
     })
     close = service.close
     if (!service.server.listening) await once(service.server, 'listening')
@@ -256,10 +256,12 @@ describe('what hosted does with what it does not list', () => {
     // The job worker's engine (hostedJobWorker.ts runJobSlice), which a job's first slice starts the stored request on.
     const worker = createApiEngine({ taskRoot: join(root, 'worker'), hosted: true, defaultMaxPages: JOB_MAX_CRAWL_PAGES, allowRobotsOverride: false, sessionsFile: null, userChrome: null, workerCount: JOB_WORKER_COUNT, resumeOnStart: false, deferLaunch: true, networkPolicy: hostedPolicy(hostedNetworkPolicy()) })
     try {
-      const firstSlice = async (tool: 'crawl' | 'batch_scrape', body: Record<string, unknown>) => {
+      // It starts the request the start stored, as runJobSlice does.
+      const firstSlice = async (tool: 'crawl' | 'batch_scrape', started: Response) => {
+        const stored = jobs.jobs.get((await started.json() as { taskId: string }).taskId)!.request
         try {
-          if (tool === 'crawl') await worker.startCrawl(parseCrawlStartRequest({ maxPages: 100, ...body }))
-          else await worker.startBatch(parseBatchStartRequest(body))
+          if (tool === 'crawl') await worker.startCrawl(stored as ParsedCrawlStartRequest)
+          else await worker.startBatch(stored as ParsedBatchStartRequest)
           return 'taken'
         } catch { return 'refused' }
       }
@@ -276,9 +278,9 @@ describe('what hosted does with what it does not list', () => {
         for (const { what, body, how } of cases) {
           const request = { ...base, ...body }
           const response = await post(path, request)
-          // refused: at the start, by name. fails_job: started, then refused at the first slice. Listed or not honoured:
-          // started and taken by the first slice too. REST only: started (the start keeps a webhook from the stored request).
-          const answer = response.status === 400 ? 'refused' : response.status === 202 ? (how === 'rest_only' ? 'taken' : await firstSlice(tool, request) === 'refused' ? 'fails_job' : 'taken') : `HTTP ${response.status}`
+          // refused: at the start, by name. fails_job: started, then refused at the first slice. Listed, not honoured or REST
+          // only: started and taken by the first slice too (the start keeps a webhook out of the stored request).
+          const answer = response.status === 400 ? 'refused' : response.status === 202 ? (await firstSlice(tool, response) === 'refused' ? 'fails_job' : 'taken') : `HTTP ${response.status}`
           expect([tool, what, answer]).toEqual([tool, what, how === 'refused' || how === 'fails_job' ? how : 'taken'])
         }
       }

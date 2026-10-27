@@ -32,7 +32,7 @@ beforeAll(async () => {
 })
 afterAll(async () => { await new Promise<void>((resolve) => site.close(() => resolve())) })
 
-type Schema = { properties: Record<string, { enum?: unknown[]; maximum?: number; items?: { anyOf?: { enum?: unknown[]; properties?: { type?: { const?: string } } }[] }; properties?: { checks?: { items?: { properties?: { type?: { enum?: string[] } } } } } }> }
+type Schema = { properties: Record<string, { description?: string; enum?: unknown[]; maximum?: number; items?: { anyOf?: { enum?: unknown[]; properties?: { type?: { const?: string } } }[] }; properties?: { checks?: { items?: { properties?: { type?: { enum?: string[] } } } } } }> }
 const schemaOf = (tools: readonly { name: string; inputSchema: unknown }[], name: string) => tools.find((tool) => tool.name === name)!.inputSchema as Schema
 
 /** Options a hosted server refuses, or takes and cannot honour (2026-10-17, measured against createHostedApi). */
@@ -47,6 +47,8 @@ describe('hosted tool schemas', () => {
       expect([surface, scrape.properties.mode?.enum]).toEqual([surface, ['standard', 'research']])
       const checks = scrape.properties.verify?.properties?.checks?.items?.properties?.type?.enum ?? []
       expect([surface, checks.filter((type) => (VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(type))]).toEqual([surface, []])
+      // Nor does its description name them: crawl's and batch_scrape's verify is "Same as scrape." (stage H W0).
+      expect([surface, VERIFY_REGEX_CHECK_TYPES.filter((type) => String(scrape.properties.verify?.description).includes(type))]).toEqual([surface, []])
       expect([surface, scrape.properties.timeout?.maximum, scrape.properties.maxFileBytes?.maximum]).toEqual([surface, 100_000, 5 * 1024 * 1024])
       const map = schemaOf(tools, 'map')
       expect([surface, 'ignoreRobotsTxt' in map.properties, map.properties.limit?.maximum, map.properties.timeout?.maximum]).toEqual([surface, false, 5_000, 60_000])

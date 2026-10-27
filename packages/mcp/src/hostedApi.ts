@@ -34,7 +34,7 @@ import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from 
 import { CREDITS, DEFAULT_MONTHLY_CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
 import { grantedCapabilities, HOSTED_ACCESS_ENGINE, type HostedAccessSource } from './hostedAccess.js'
-import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, type HostedJobsConfig } from './hostedJobRoutes.js'
+import { createJobRoutes, HOSTED_BATCH_KEYS, HOSTED_CRAWL_KEYS, isJobRoute, JOB_MAX_CRAWL_PAGES, JOB_WORKER_COUNT, type HostedJobsConfig } from './hostedJobRoutes.js'
 
 /** What a key holder may do. `dailyLimit` counts scrape and map starts per UTC day. */
 export interface HostedKeyRecord {
@@ -262,6 +262,8 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
     // REST takes a webhook (H2 W1); a tool does not offer one yet, since its secret would land in the agent's transcript.
     for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || key === 'webhook' || (!browser && key === 'waitFor')) delete schema.properties[key]
     if (tool.name === 'crawl' && schema.properties.maxPages) schema.properties.maxPages = { ...schema.properties.maxPages, maximum: JOB_MAX_CRAWL_PAGES }
+    // A slice reads JOB_WORKER_COUNT pages at once; the start lowers a crawl's larger maxConcurrency to it (hostedJobRoutes.ts).
+    if (tool.name === 'crawl' && schema.properties.maxConcurrency) schema.properties.maxConcurrency = { ...schema.properties.maxConcurrency, maximum: JOB_WORKER_COUNT }
     // The job's credit cap, offered where credits are spent: the local tools leave it out, a server on the computer spends none (H2 M6).
     schema.properties.maxCredits = { type: 'integer', minimum: 1, description: 'The most credits this job may spend; it stops when the next page would pass it.' }
     // A page in a job is read as a hosted scrape is (H2 M7, M9): its formats (no screenshot without the browser lane),
@@ -314,9 +316,11 @@ function hostedInputSchema(name: string, schema: unknown, browser: boolean): unk
   const properties = copy.properties
   properties.timeout = { ...properties.timeout, maximum: HOSTED_MCP_SCRAPE_TIMEOUT_MS, description: `Deadline in milliseconds for the whole scrape. When it fires the result is partial with the content so far, or failed/timeout. Here at most and by default ${HOSTED_MCP_SCRAPE_TIMEOUT_MS}; a longer one is lowered to it.` }
   properties.maxFileBytes = { ...properties.maxFileBytes, maximum: HOSTED_MAX_FILE_BYTES }
-  const verify = properties.verify as { properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }
+  const verify = properties.verify as { description: string; properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }
   const checkType = verify.properties.checks.items.properties.type
   checkType.enum = checkType.enum.filter((type) => !(VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(type))
+  // Its description names the types too, and the job tools' verify is "Same as scrape.": neither offers what hosted refuses.
+  for (const type of VERIFY_REGEX_CHECK_TYPES) verify.description = verify.description.replace(` ${type},`, '')
   if (!browser) {
     // Without the browser lane there is no screenshot and nothing to wait for.
     delete properties.waitFor

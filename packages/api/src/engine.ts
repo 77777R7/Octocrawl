@@ -131,7 +131,7 @@ import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, FileSessionStore, installedChromeRefusal, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
-import { BLOCK_REASON, VERIFY_REGEX_CHECK_TYPES, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
+import { BLOCK_REASON, hostedVerifyRefusal, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv, verifyScrapeResponse } from './structured.js'
 
@@ -900,8 +900,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A step runs the caller's clicks and scripts in the operator's browser; a hosted engine takes none until that isolation is reviewed.
     if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run Octocrawl locally to use them')
     // A JavaScript regular expression cannot be bounded in time, and a page's Markdown is far longer than a safe pattern's text (ADR 0006).
-    const regexChecks = req.verify?.checks.filter((check) => (VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(check.type)).map((check) => check.type) ?? []
-    if (hosted && regexChecks.length > 0) throw new RequestError(`verify: ${[...new Set(regexChecks)].join(' and ')} checks are not available in hosted mode (a regular expression cannot be bounded in time); use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally`, 'unsupported_parameter', { parameters: ['verify'] })
+    const regexRefusal = hosted ? hostedVerifyRefusal(req.verify) : null
+    if (regexRefusal !== null) throw new RequestError(regexRefusal, 'unsupported_parameter', { parameters: ['verify'] })
   }
   /**
    * `access: "enhanced"` asks for what the server's access grant of tier enhanced approves (ADR 0005), within its

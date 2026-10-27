@@ -56,6 +56,10 @@
 //                it (captchaReport.mjs manifestText): a frozen set's tasks are never dropped or replaced. --rejudge reads
 //                the file the run named.
 //   --arm        the arm's name (captcha-window.mjs), written to the summary and the record; a label, nothing more.
+//   --client-timeout-ms
+//                (octocrawl) how long the runner waits for one answer before it aborts the request, in place of the
+//                task's timeoutMs (default 180 s). An abort keeps no response and no trace, so a window whose API may use
+//                its whole 300 s ladder budget sets it above that (captcha-window.mjs: 330 s).
 //   solver       (octocrawl) each attempt's third-party solver calls (captchaReport.mjs solverOf: the paid calls of the
 //                providers named by --solver-providers, default capsolver): solves attempted and succeeded, the
 //                solver's reported USD and the ledger's charge, solve time; null when the answer says nothing of paid
@@ -139,7 +143,7 @@ import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isData, judge } from './judge.mjs'
-import { channelsCell, denominator, denominatorLines, grantLine, grantOf, plannedAttempts, stopReason } from './runSetReport.mjs'
+import { channelsCell, clientTimeoutOf, denominator, denominatorLines, grantLine, grantOf, plannedAttempts, stopReason } from './runSetReport.mjs'
 import { buildLine, buildState } from './runSetBuild.mjs'
 import { armCells, cellsTable, manifestText, solverOf, SOLVER_PROVIDERS } from './captchaReport.mjs'
 
@@ -164,6 +168,8 @@ const recordFile = flag('--record')
 const allowStaleBuild = args.includes('--stale-build')
 const rejudgeDir = flag('--rejudge')
 const armName = flag('--arm') ?? null
+const clientTimeoutMs = flag('--client-timeout-ms') === undefined ? null : Number(flag('--client-timeout-ms'))
+if (clientTimeoutMs !== null && !(Number.isInteger(clientTimeoutMs) && clientTimeoutMs > 0)) throw new Error('--client-timeout-ms takes a positive whole number of milliseconds')
 const solverProviders = flag('--solver-providers')?.split(',').map((s) => s.trim()).filter(Boolean) ?? SOLVER_PROVIDERS
 const api = process.env.W2L_API_URL ?? 'http://127.0.0.1:8787'
 const target = flag('--target') ?? 'octocrawl'
@@ -447,7 +453,7 @@ async function attempt(task, temperature) {
     if (target === 'firecrawl' || target === 'zenrows') {
       ({ apiStatus, doc, waitedMs } = await (target === 'firecrawl' ? firecrawlScrape(task) : zenrowsScrape(task)))
     } else {
-      const res = await fetch(`${api}/v1/scrape`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(task.timeoutMs ?? 180_000) })
+      const res = await fetch(`${api}/v1/scrape`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(clientTimeoutOf(task, clientTimeoutMs)) })
       apiStatus = res.status
       doc = await res.json()
     }
