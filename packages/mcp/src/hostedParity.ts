@@ -11,11 +11,11 @@
  * parityTable()'s output, checked by the same test: `node --import tsx scripts/hosted/parity-table.ts --write` rewrites it.
  */
 import { HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS } from '@w2l/contracts'
-import { HOSTED_MAX_FILE_BYTES, HOSTED_MCP_SCRAPE_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_RECORD_TTL_MS, hostedTools } from './hostedApi.js'
+import { HOSTED_MAX_FILE_BYTES, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_SCRAPE_TIMEOUT_MS, HOSTED_RECORD_TTL_MS, HOSTED_REQUEST_TIMEOUT_MS, hostedTools } from './hostedApi.js'
 import { CREDITS } from './hostedCredits.js'
 import { JOB_DEFAULT_CRAWL_PAGES, JOB_MAX_CRAWL_PAGES, JOB_WORKER_COUNT } from './hostedJobRoutes.js'
 import { JOB_RETENTION_DAYS } from './hostedJobs.js'
-import { MAX_WAIT_MS, MCP_SCRAPE_TIMEOUT_MS, TOOLS, type ToolName } from './tools.js'
+import { MCP_SCRAPE_TIMEOUT_MS, TOOLS, type ToolName } from './tools.js'
 
 /**
  * supported: as on the local server. limited: listed with a lower cap, or to some connections only (a key, the browser
@@ -85,7 +85,6 @@ const REGEX = 'ADR 0006: a JavaScript regular expression cannot be bounded in ti
 const FILE_CAP = `At most ${mib(HOSTED_MAX_FILE_BYTES)} (local ${mib(MAX_FILE_BYTES_CEILING)}).`
 const BROWSER_LANE = 'A connection with the browser lane only; one without reads over HTTP alone.'
 const WEBHOOK = 'REST takes it for the job\'s end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript.'
-const WAIT = `a wait ends within ${s(HOSTED_MCP_WAIT_MS)} (local ${s(MAX_WAIT_MS)}) with the status so far`
 
 const monitorTool: ToolEntry = { status: 'planned', item: 'monitors_delivery', note: MONITORS }
 const deliveryTool: ToolEntry = { status: 'planned', item: 'monitors_delivery', note: DELIVERY }
@@ -98,7 +97,7 @@ export const TOOL_PARITY: Record<ToolName, ToolEntry> = {
   get_scrape: jobTool(`; hosted keeps a scrape's record ${HOSTED_RECORD_TTL_MS / 60_000} minutes, on the server instance that ran the scrape, so a read that reaches another instance answers not_found, and answers it without the call's telemetry, as a scrape's result (locally records are kept without a time limit and answered whole)`),
   crawl: jobTool(`: a job run a slice at a time, at most ${n(JOB_MAX_CRAWL_PAGES)} pages, each page priced as a scrape, results kept ${JOB_RETENTION_DAYS} days`),
   get_crawl: jobTool(', for its own jobs'),
-  wait_crawl: jobTool(`; ${WAIT}`),
+  wait_crawl: jobTool(),
   get_crawl_pages: jobTool(`; ${listCaps('get_crawl_pages', ['limit', 'maxResults'])}`),
   get_crawl_errors: jobTool(`; ${listCaps('get_crawl_errors', ['limit'])}`),
   cancel_crawl: jobTool(),
@@ -107,7 +106,7 @@ export const TOOL_PARITY: Record<ToolName, ToolEntry> = {
   batch_scrape: jobTool(`: a job run a slice at a time, up to ${n(schemaOf(TOOLS, 'batch_scrape')?.properties.urls?.maxItems)} URLs, each page priced as a scrape, results kept ${JOB_RETENTION_DAYS} days`),
   get_batch: jobTool(', for its own jobs'),
   get_batch_items: jobTool(`; ${listCaps('get_batch_items', ['limit', 'maxResults'])}`),
-  wait_batch: jobTool(`; ${WAIT}`),
+  wait_batch: jobTool(),
   cancel_batch: jobTool(),
   get_batch_errors: jobTool(`; answers the failed items as { items, nextCursor, hasMore } (local { errors, robotsBlocked }), ${listCaps('get_batch_errors', ['limit'])}`),
   hand_off_batch: { status: 'different_on_purpose', note: PERSON_CHROME },
@@ -140,7 +139,7 @@ const cacheOption = (sent: WhenSent, how = ''): OptionEntry => ({ status: 'plann
 const SCRAPE_PAGE_OPTIONS = {
   onlyMainContent: supported,
   waitFor: { status: 'limited', note: BROWSER_LANE },
-  timeout: { status: 'limited', note: `At most ${s(HOSTED_MCP_SCRAPE_TIMEOUT_MS)}, and ${s(HOSTED_MCP_SCRAPE_TIMEOUT_MS)} when left out (local ${s(caps('scrape', 'timeout').local ?? 0)}, and ${s(MCP_SCRAPE_TIMEOUT_MS)} when left out), under claude.ai's 240 s tool limit and Cloud Run's 120 s request timeout.` },
+  timeout: { status: 'limited', note: `At most ${s(HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS)}, and ${s(HOSTED_MCP_SCRAPE_TIMEOUT_MS)} when left out (local ${s(caps('scrape', 'timeout').local ?? 0)}, and ${s(MCP_SCRAPE_TIMEOUT_MS)} when left out): 60 s inside the 240 s claude.ai gives a tool call, under Cloud Run's ${s(HOSTED_REQUEST_TIMEOUT_MS)} request timeout.` },
   maxFileBytes: { status: 'limited', note: FILE_CAP },
   includeTags: supported,
   excludeTags: supported,
