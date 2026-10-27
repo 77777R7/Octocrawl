@@ -22,13 +22,13 @@ This comparison measures what G4 left unknown for that residential exit, and the
 
 Howard's decisions on this design, 2026-10-27, through the coordinating session:
 - **Two arms run first:** Google's own egress as the control, and Howard's existing Webshare residential plan (Rotating Residential, $9.00 a month for 3 GB, renewing 2026-11-13; 1.28 GB of it used on 2026-10-27, so about 1.72 GB left).
-- **A datacenter arm is ready but off.** Its code is in the harness: the forwarder's `list` style, `save-list.mjs`, and `cloud.sh` with `H2B_DC=1`. After window 1, Howard decides from the residential arm's results whether to buy Webshare's Shared Datacenter plan (100 US IPs, $2.99 a month) and add it. Until then nothing is bought and the arm does not run.
+- **A datacenter arm joins window 2 only.** Its code is in the harness: the forwarder's `list` style, `save-list.mjs`, and `cloud.sh` with `H2B_DC=1`. After window 1, Howard decided from the residential arm's results to add it (2026-10-27), on Webshare's Shared Datacenter plan (100 US IPs, $2.99 a month), which he buys himself. It runs in window 2 alone, so its figures come from one window and one UTC day, not two. If the proxy list is not saved by window 2's start, window 2 runs without the arm, and this record says so.
 - **The static ISP and second residential (Decodo) arms** planned earlier are not measured, by Howard's choice.
 - **Only the real-Chrome rung uses a paid exit,** through the `W2L_CHROME_PATH` wrapper, with no product-code change.
 - **The paid arms send only the tasks robots.txt allows.** The google control arm sends all 21.
 - **Residential bandwidth cap.** The CAPTCHA and local experiments share the residential plan, so the residential rounds of both windows should take no more than about 1.2 GB. The run stops and reports if the bytes per page measured would take the two windows past that.
 
-This design was first committed with two arms (`5d28562c`). The datacenter arm's code was added the same day, before any run, and is left off by Howard's decision.
+This design was first committed with two arms (`5d28562c`). The datacenter arm's code was added the same day, before any run, and was left off by Howard's decision. After window 1 and before window 2, Howard added that arm to window 2. That revision changes this record alone, no code, and window 2 runs window 1's image.
 
 Two measures changed after the smoke execution on image `228e01f0` and before window 1, from what the smoke showed:
 - **Bytes by host.** Most of the smoke's bytes per call were Chrome's own service traffic: component downloads from `gvt1.com` and `clients2.googleusercontent.com`, and `clientservices.googleapis.com`. The forwarder now keeps every host's bytes, so the record gives that traffic apart from the page's.
@@ -84,7 +84,7 @@ One exit per task call (ADR 0005: no switching exits inside a session, and no ne
 | --- | --- | --- |
 | `google` (control) | Cloud Run's own egress, through the forwarder in `direct` mode | Google's egress address for the execution |
 | `res_a` | Webshare rotating residential, US, Howard's existing plan: the gateway login in `RESIDENTIAL_PROXY` (`.w2l/access/competitors.env`) that G4 and the CAPTCHA windows use | A fresh numeric session id per call in place of `-rotate` (`<user>-us-<id>`, Webshare's documented sticky session) |
-| `dc` (off unless Howard adds it after window 1) | Webshare Shared Datacenter, 100 US IPs: the Direct connection list, one `ip:port:user:password` line per IP | One IP per call. The list is shuffled once with a fixed seed (20261027), and each call takes the next IP; the time between calls keeps the last call's. Window *n* starts at position (*n* − 1) × 50, and a round makes at most 22 calls (the self-check and 21 tasks). The list must hold at least 72 distinct IPs, the start is always given, and the list never wraps: a call past its end is refused. So no IP serves two calls |
+| `dc` (window 2 only, added by Howard after window 1) | Webshare Shared Datacenter, 100 US IPs: the Direct connection list, one `ip:port:user:password` line per IP | One IP per call. The list is shuffled once with a fixed seed (20261027), and each call takes the next IP; the time between calls keeps the last call's. Window *n* starts at position (*n* − 1) × 50, and a round makes at most 22 calls (the self-check and 21 tasks). The list must hold at least 72 distinct IPs, the start is always given, and the list never wraps: a call past its end is refused. So no IP serves two calls |
 
 What Webshare documents, read 2026-10-27 from its help centre, pricing page and terms:
 - **Sticky sessions.** "Append a numeric session ID to maintain a sticky session". How long a bare id keeps its exit is not documented. Its endpoint generator sets 1 minute to 24 hours.
@@ -115,14 +115,14 @@ Each round runs them through run-set, one call per task (`run-set.mjs --set all 
 
 **Order.** Each round starts at its own place in the list, so rounds running at the same time are on different sites:
 - the offsets are google 0, residential 7, and the residential round at 4 vCPU 14;
-- the datacenter round, if Howard adds it, takes 14 in a window without the 4 vCPU round;
+- the datacenter round takes 14 in window 2, which has no 4 vCPU round;
 - window 2 runs the list backwards with the same offsets.
 
 ### Windows
 
 - **A smoke execution first.** One google execution of T001 and T046 (window `smoke`) checks the image, the forwarder, the self-check, run-set, the digest and the CPU sampler on Cloud Run, and gives a first count of bytes per call. It uses no paid exit and no list position, and it is reported but not counted in either window.
-- **Two windows, on different UTC days.** Each starts with the robots verdict, then starts its rounds at once as parallel executions: google and residential, and in window 1 also residential at 4 vCPU / 8 GiB. The datacenter round joins only if Howard adds it. Each execution takes one task call at a time.
-- **Watching the residential bytes.** While window 1 runs, the residential rounds' bytes per call are read from their log lines. If their mean would take the residential rounds of both windows past about 1.2 GB, those rounds are stopped and the coordinating session is told. A stopped round is recorded as stopped, with every call it made.
+- **Two windows, on different UTC days.** Each starts with the robots verdict, then starts its rounds at once as parallel executions: google and residential, and in window 1 also residential at 4 vCPU / 8 GiB. The datacenter round joins window 2 only. Each execution takes one task call at a time.
+- **Watching the residential bytes.** While a window runs, the residential rounds' bytes per call are read from their log lines. If their mean would take the residential rounds of both windows past about 1.2 GB, those rounds are stopped and the coordinating session is told. A stopped round is recorded as stopped, with every call it made.
 - **No Mac arm.** The Mac only starts the jobs and reads their logs, so it disturbs none of the Mac measurements queued for the day.
 - **Timing.** The windows keep at least an hour away from the hosted parity window at 2026-10-28 00:02 UTC. That window reads several of the same sites from Google's egress in the same region.
 
@@ -186,32 +186,33 @@ A residential exit is someone's own connection, so this record gives its address
 
 - **Cloud Run rates** are G4's, read 2026-10-21 for `asia-southeast1` (Tier 2): $0.0000216 per vCPU-second and $0.0000024 per GiB-second. That is $0.0000528/s at 2 vCPU / 4 GiB and $0.0001056/s at 4 vCPU / 8 GiB.
 - **The residential price per GB** is $3.00: Howard's plan is $9.00 a month for 3 GB (his dashboard, 2026-10-27).
-- **The datacenter price per GB**, if the arm runs, is the plan's monthly price divided by the 250 GB it includes: $2.99 ÷ 250 ≈ $0.012 at the list price, or the price Howard reports. That is the price per GB with the bandwidth all used. The plan is mostly a price per IP, so the record gives its monthly price beside the figure.
+- **The datacenter price per GB** is the plan's monthly price divided by the 250 GB it includes: $2.99 ÷ 250 ≈ $0.012 at the list price, or the price Howard reports. That is the price per GB with the bandwidth all used. The plan is mostly a price per IP, so the record gives its monthly price beside the figure.
 - **The google arm** has no byte price. Its figure is the Cloud Run part alone.
 - **The earlier rungs' cost is left out.** They run in the API service either way.
 
 ### Budget and ledger
 
-Nothing is bought for the two arms. The residential bandwidth comes out of Howard's existing plan: the record gives the bytes the forwarder counted and their cost at $3.00 per GB. The cloud part is at list prices: Cloud Build minutes, Cloud Run seconds, Artifact Registry storage, Secret Manager and Logging. If Howard adds the datacenter arm, its plan goes in the ledger at the amount he reports.
+Nothing is bought for the google and residential arms. The residential bandwidth comes out of Howard's existing plan: the record gives the bytes the forwarder counted and their cost at $3.00 per GB. The cloud part is at list prices: Cloud Build minutes, Cloud Run seconds, Artifact Registry storage, Secret Manager and Logging. The datacenter plan, which Howard buys himself for window 2, goes in the ledger at the amount he reports.
 
 | Item | Estimate |
 | --- | --- |
 | Cloud Build | one or two builds on e2-highcpu-8, about $0.07 each (G4: two builds, $0.13) |
-| Cloud Run | one robots execution per window, five round executions of 10–25 min (three in window 1, two in window 2), and one short smoke execution: about $0.25–0.60 |
+| Cloud Run | one robots execution per window, six round executions of 10–25 min (three in each window), and one short smoke execution: about $0.25–0.60 |
 | Artifact Registry, Secret Manager, Logging | under $0.05 |
 | Residential bandwidth, from Howard's plan | at most about 1.2 GB, so at most about $3.60 of the plan's $9.00 |
-| **Total new spend** | **about $0.40–0.90**, against the $40 cap |
+| Datacenter plan, bought by Howard | $2.99 for a month at the list price, or the amount he reports |
+| **Total new spend** | **about $3.40–3.90** with the datacenter plan, against the $40 cap |
 
 The run stops and asks before any step that would take the total past $40.
 
 ### Credentials
 
 - **The residential login.** It is already on this Mac: `RESIDENTIAL_PROXY` in `~/Code/w2l/.w2l/access/competitors.env`, mode 600. G4 and the CAPTCHA windows use the same entry. Nothing new is pasted for it.
-- **The datacenter list, if the arm is added.** Howard pastes Webshare's Direct connection list into `node research/access/h2b-egress/save-list.mjs`, run in the Terminal panel, and presses Ctrl-D.
+- **The datacenter list.** Howard pastes Webshare's Direct connection list into `node research/access/h2b-egress/save-list.mjs`, run in the Terminal panel, and presses Ctrl-D.
   - The terminal is in raw mode from before the prompt until the list is saved, so the paste is never shown or left for the shell.
   - A list that fails its check (a bad line, an IP twice, fewer than 72 IPs) is asked for again. The script prints counts and line numbers only.
   - It saves the list to `~/Code/w2l/.w2l/access/h2b-dc-proxies.txt`, mode 600.
-- **How they reach Cloud Run.** Only through temporary Secret Manager secrets: `octocrawl-h2b-res-a`, and `octocrawl-h2b-dc` if the datacenter arm is added.
+- **How they reach Cloud Run.** Only through temporary Secret Manager secrets: `octocrawl-h2b-res-a`, and `octocrawl-h2b-dc` in window 2.
   - Each is readable through an IAM binding on the secret itself by the jobs' service account, the default compute account, as in G4.
   - Each becomes `H2B_UPSTREAMS` in its arm's jobs.
   - `cloud.sh secrets` pipes the residential login from its file to gcloud's stdin, and gcloud reads the list's file itself. Neither passes through an argument, a printed variable, a log or a record.
@@ -237,7 +238,7 @@ The run stops and asks before any step that would take the total past $40.
 
 ### Not measured
 
-- **Other exits, by Howard's choice (2026-10-27).** The static ISP and second residential (Decodo) arms in the plan were not measured. Nothing was bought for them. The datacenter arm is measured only if Howard adds it after window 1.
+- **Other exits, by Howard's choice (2026-10-27).** The static ISP and second residential (Decodo) arms in the plan were not measured. Nothing was bought for them. The datacenter arm has window 2 alone: Howard added it after window 1.
 - More than one call at a time per instance, load curves, other regions.
 - Webshare's own billing, unless Howard reads the plans' usage.
 - Whether Webshare blocks private or reserved addresses.
