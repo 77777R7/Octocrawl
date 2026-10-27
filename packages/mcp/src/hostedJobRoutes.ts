@@ -110,6 +110,12 @@ export interface HostedJobsConfig {
   enabled?: () => Promise<boolean>
   /** Whether an account may start jobs (`hostedConfig/jobs.allowedUids`); absent: every account. Reads and cancels are not gated. */
   allows?: (uid: string) => Promise<boolean>
+  /**
+   * Throws the RequestError the worker's engine would refuse the stored request with when the job's first slice starts it
+   * (ApiEngine checkCrawlStart, checkBatchStart): the start answers it 400 instead of a job that fails later. createHostedApi
+   * fills it with an engine configured as the worker's; absent: no such check.
+   */
+  checkStart?: { batch: (request: ParsedBatchStartRequest) => void; crawl: (request: ParsedCrawlStartRequest) => void }
   limits?: JobLimits
 }
 
@@ -226,14 +232,22 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     catch (error) { return refusal(400, 'invalid_request', error instanceof RequestError || error instanceof Error ? error.message : String(error)) }
     if (kind === 'crawl' && !((parsed as ParsedCrawlStartRequest).maxPages! >= 1 && (parsed as ParsedCrawlStartRequest).maxPages! <= JOB_MAX_CRAWL_PAGES)) return refusal(400, 'invalid_request', `maxPages must be 1 to ${JOB_MAX_CRAWL_PAGES} on hosted Octocrawl`)
     // The worker's hosted engine refuses these at the job's first slice, which fails and is retried until the job ends
-    // failed (delivery_failed) without naming why: the start refuses them by name instead. The engine's other start checks
-    // (its file cap, selectors, the formats a contract needs) are not made here yet.
+    // failed (delivery_failed) without naming why: the start refuses them by name instead.
     const regexRefusal = hostedVerifyRefusal(parsed.verify)
     if (regexRefusal !== null) return refusal(400, 'unsupported_parameter', regexRefusal)
     // A batch's maxConcurrency is lowered to the slice's workers when it runs (engine.ts); a crawl's engine refuses one above
     // them, so a crawl's is lowered here.
     const crawl = kind === 'crawl' ? parsed as ParsedCrawlStartRequest : null
     if (crawl !== null && crawl.maxConcurrency != null && crawl.maxConcurrency > JOB_WORKER_COUNT) parsed = { ...crawl, maxConcurrency: JOB_WORKER_COUNT }
+    // And every other check the engine makes when it starts the request the job stores: its file cap, its selectors, the
+    // formats a check needs.
+    try {
+      if (kind === 'batch') config.checkStart?.batch(parsed as ParsedBatchStartRequest)
+      else config.checkStart?.crawl(parsed as ParsedCrawlStartRequest)
+    } catch (error) {
+      if (!(error instanceof RequestError)) throw error
+      return refusal(400, error.code, error.message, error.agentHints ?? [])
+    }
 
     const pages = kind === 'batch' ? (parsed as ParsedBatchStartRequest).urls.length : (parsed as ParsedCrawlStartRequest).maxPages ?? JOB_DEFAULT_CRAWL_PAGES
     const price = body.fastMode === true ? CREDITS.httpPage : CREDITS.browserPage

@@ -22,7 +22,7 @@ import { readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
-import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine } from '@w2l/api'
+import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine, type ApiEngineOptions } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy, type ScrapeRun } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
@@ -204,6 +204,17 @@ export const HOSTED_MAX_FILE_BYTES = 5 * 1024 * 1024
 /** The network policy hosted Octocrawl reads under, the gate's and the job worker's: the file cap and the operator's contact. */
 export function hostedPolicy(base: NetworkPolicy, env: NodeJS.ProcessEnv = process.env): NetworkPolicy {
   return withOperatorContact({ ...base, maxFileBytes: Math.min(base.maxFileBytes ?? HOSTED_MAX_FILE_BYTES, HOSTED_MAX_FILE_BYTES) }, env)
+}
+/**
+ * A hosted job's engine, as the worker builds it for each slice (hostedJobWorker.ts runJobSlice) and the gate builds it to
+ * check a job's request at its start: what this engine refuses at the first slice, the start refuses by name.
+ */
+export function jobEngineOptions(taskRoot: string, extra: Partial<ApiEngineOptions> = {}): ApiEngineOptions {
+  return {
+    taskRoot, hosted: true, defaultMaxPages: JOB_MAX_CRAWL_PAGES, allowRobotsOverride: false, sessionsFile: null, userChrome: null,
+    workerCount: JOB_WORKER_COUNT, resumeOnStart: false, deferLaunch: true, ...extra,
+    networkPolicy: hostedPolicy(extra.networkPolicy ?? hostedNetworkPolicy()),
+  }
 }
 /** Scrape and map records and saved files are swept from the task root after this long: hosted phase 1 keeps nothing. */
 export const HOSTED_RECORD_TTL_MS = 10 * 60_000
@@ -640,7 +651,9 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   if (config.hashKey.length < 32) throw new Error('hashKey must contain at least 32 characters')
   const env = config.env ?? process.env
   const log = config.log ?? ((line: string) => console.log(line))
-  const jobRoutes = config.jobs === undefined || config.credits === undefined ? null : createJobRoutes(config.jobs, config.credits, log)
+  // A job's request is checked at its start on an engine configured as the worker's, which creates no task here.
+  const jobChecks = config.jobs === undefined || config.credits === undefined ? null : createApiEngine(jobEngineOptions(join(config.taskRoot, 'job-checks'), config.networkPolicy === undefined ? {} : { networkPolicy: config.networkPolicy }))
+  const jobRoutes = jobChecks === null ? null : createJobRoutes({ checkStart: { batch: (request) => jobChecks.checkBatchStart(request), crawl: (request) => jobChecks.checkCrawlStart(request) }, ...config.jobs! }, config.credits!, log)
   const keylessDaily = config.keylessDaily ?? DEFAULT_KEYLESS_DAILY
   const claudeDaily = config.claudeDaily ?? DEFAULT_CLAUDE_DAILY
   const siteDaily = config.siteDaily ?? DEFAULT_SITE_DAILY
@@ -1120,6 +1133,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
         clearInterval(sweeper)
         await new Promise<void>((resolve) => server.close(() => resolve()))
         await engine.close({ cancelActive: true })
+        await jobChecks?.close()
       })()
       return closing
     },

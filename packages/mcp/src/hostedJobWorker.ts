@@ -16,9 +16,9 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { createApiEngine, type ApiEngineOptions, type SliceCharge } from '@w2l/api'
-import { hostedNetworkPolicy, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
+import { RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore, webhookSignature, type WebhookTransport } from '@w2l/runtime'
-import { hostedPolicy, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
+import { jobEngineOptions, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
 import { CREDITS, scrapeCharge, type CreditsStore, type Reservation, type UsageKind } from './hostedCredits.js'
 import type { UploadResult } from './hostedCloud.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
@@ -241,14 +241,11 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     // Each page's model call is admitted by the switch and the day's cap, and only while the slice holds its two credits;
     // a worker without a hosted model refuses every call, whatever engine options a caller passed.
     const model = deps.model?.gate(modelRefusal) ?? { gate: { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) } }
-    const engine = createApiEngine({
-      taskRoot, hosted: true, defaultMaxPages: 500, allowRobotsOverride: false, sessionsFile: null, userChrome: null,
-      workerCount: JOB_WORKER_COUNT, resumeOnStart: false, deferLaunch: true, taskIds: () => jobId, ...extra,
-      networkPolicy: hostedPolicy(extra.networkPolicy ?? hostedNetworkPolicy()),
-      modelGate: model.gate,
-    })
+    const engine = createApiEngine({ ...jobEngineOptions(taskRoot, { taskIds: () => jobId, ...extra }), modelGate: model.gate })
     const off = new AbortController()
-    let result: Awaited<ReturnType<typeof engine.runSlice>>
+    let result: Awaited<ReturnType<typeof engine.runSlice>> = null
+    /** The engine's refusal of the stored request: retrying would be refused the same way. */
+    let refused: RequestError | null = null
     const poller = setInterval(() => {
       void (async () => {
         const current = await deps.store.get(jobId)
@@ -258,13 +255,24 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     }, deps.pollMs ?? 5_000)
     try {
       if (checkpoint === null) {
-        if (job.kind === 'batch') await engine.startBatch(job.request as ParsedBatchStartRequest)
-        else await engine.startCrawl(job.request as ParsedCrawlStartRequest)
+        try {
+          if (job.kind === 'batch') await engine.startBatch(job.request as ParsedBatchStartRequest)
+          else await engine.startCrawl(job.request as ParsedCrawlStartRequest)
+        } catch (error) {
+          if (!(error instanceof RequestError)) throw error
+          refused = error
+        }
       }
-      result = await engine.runSlice(jobId, { maxNewPages: pages, maxMs: limits.sliceMs, graceMs: limits.graceMs, signal: off.signal, ...(job.kind === 'batch' ? { batchHosts: hosts } : {}) })
+      if (refused === null) result = await engine.runSlice(jobId, { maxNewPages: pages, maxMs: limits.sliceMs, graceMs: limits.graceMs, signal: off.signal, ...(job.kind === 'batch' ? { batchHosts: hosts } : {}) })
     } finally {
       clearInterval(poller)
       await engine.close({ cancelActive: true })
+    }
+    // The start checks the request on an engine configured as this one (hostedJobRoutes.ts checkStart); a request it let
+    // through and this engine refuses fails at once, by its reason, rather than retried until delivery_failed.
+    if (refused !== null) {
+      log(JSON.stringify({ severity: 'ERROR', event: 'hosted_job_request_refused', workspaceId: job.workspaceId, jobId, generation, code: refused.code, message: refused.message }))
+      return await pass((j) => ({ ...j, status: 'failed', failureReason: 'request_refused' }))
     }
     if (result === null) throw new Error('the job\'s task is missing from its checkpoint')
 
