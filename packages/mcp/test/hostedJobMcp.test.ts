@@ -17,6 +17,7 @@ import type { JobFiles } from '../src/hostedJobRoutes.js'
 // crawl and batch tools, which call the job routes through the gate; no worker runs here, a test writes a slice's pages.
 
 const HASH_KEY = 'h'.repeat(40)
+const PAGE = `<!doctype html><html lang="en"><head><title>Tides</title></head><body><main><article><h1>Tides</h1><p>${'The harbour office records tide height every hour of the day. '.repeat(8)}</p></article></main></body></html>`
 const KEYS: Record<string, HostedKeyRecord> = {
   oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' },
   oc_http: { enabled: true, plan: 'account', dailyLimit: 0, browser: false, uid: 'account-2' },
@@ -32,7 +33,7 @@ afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true }); root = undefined
 })
 
-async function start(options: { addressPerMinute?: number; allowed?: readonly string[] } = {}) {
+async function start(options: { addressPerMinute?: number; allowed?: readonly string[]; privateSites?: boolean } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-job-mcp-'))
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening')
   const port = (probe.address() as AddressInfo).port
@@ -44,7 +45,7 @@ async function start(options: { addressPerMinute?: number; allowed?: readonly st
   const keys = new MemoryHostedKeys(new Map(Object.entries(KEYS).map(([key, record]) => [keyDigest(HASH_KEY, key), record])))
   const service = createHostedApi({
     port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys, oauthTokens: new MemoryHostedOAuthTokens(new Map()), quota: new MemoryHostedQuota(),
-    credits: new MemoryCreditsStore(1_000), networkPolicy: hostedNetworkPolicy(), log: () => {}, ...(options.addressPerMinute === undefined ? {} : { addressPerMinute: options.addressPerMinute }),
+    credits: new MemoryCreditsStore(1_000), networkPolicy: options.privateSites === true ? { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] } : hostedNetworkPolicy(), log: () => {}, ...(options.addressPerMinute === undefined ? {} : { addressPerMinute: options.addressPerMinute }),
     jobs: { store, files, enqueueSlice: async (job) => { enqueued.push(job) }, ...(options.allowed === undefined ? {} : { allows: async (uid: string) => options.allowed!.includes(uid) }) },
   })
   close = service.close
@@ -76,6 +77,9 @@ describe('hosted job tools over MCP', () => {
     const tools = (await (await connect('oc_account')).listTools()).tools
     const names = tools.map((tool) => tool.name)
     for (const name of HOSTED_JOB_TOOLS) expect(names, name).toContain(name)
+    // An account's connection also lists its active crawls and a scrape's record, and scrape names get_scrape to it (stage H W0).
+    for (const name of ['list_active_crawls', 'get_scrape']) { expect(names, name).toContain(name); expect(keyless, name).not.toContain(name); expect(plain, name).not.toContain(name) }
+    expect(tools.find((tool) => tool.name === 'scrape')!.description).toContain('get_scrape')
     const crawl = tools.find((tool) => tool.name === 'crawl')!
     const properties = (crawl.inputSchema as { properties: Record<string, { maximum?: number }> }).properties
     for (const refused of ['webhook', 'ignoreRobotsTxt', 'access', 'useCached']) expect(properties, refused).not.toHaveProperty(refused)
@@ -224,6 +228,33 @@ describe('hosted job tools over MCP', () => {
     const after = await client.callTool({ name: 'get_batch', arguments: { id: taskId } })
     expect(after.isError ?? false, text(after)).toBe(false)
   }, 30_000)
+
+  it('lists the account\'s active crawls, and reads a scrape\'s record back by the id its answer keeps (stage H W0)', async () => {
+    const site = createServer((req, res) => {
+      if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n')
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE)
+    })
+    site.listen(0, '127.0.0.1'); await once(site, 'listening')
+    try {
+      const origin = `http://127.0.0.1:${(site.address() as AddressInfo).port}`
+      const { connect } = await start({ privateSites: true })
+      const client = await connect('oc_account')
+      // Listing first makes the client check each result against its tool's outputSchema.
+      await client.listTools()
+      const taskId = structured(await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/' } })).taskId as string
+      const active = await client.callTool({ name: 'list_active_crawls', arguments: {} })
+      expect(active.isError ?? false, text(active)).toBe(false)
+      expect(JSON.parse(text(active))).toMatchObject({ crawls: [{ id: taskId, url: 'https://example.com/', status: 'running', pagesFetched: 0 }] })
+      const scraped = JSON.parse(text(await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, fastMode: true } }))) as { status: string; metadata: { scrapeId?: string } }
+      expect(scraped.status).toBe('success')
+      expect(scraped.metadata.scrapeId).toMatch(/^[0-9a-f-]{36}$/)
+      const record = await client.callTool({ name: 'get_scrape', arguments: { id: scraped.metadata.scrapeId } })
+      expect(record.isError ?? false, text(record)).toBe(false)
+      expect(structured(record)).toMatchObject({ scrapeId: scraped.metadata.scrapeId, status: 'success', request: { url: `${origin}/page` } })
+      // It is answered as a scrape's result is: without the call's telemetry or the client that made it.
+      for (const key of ['usage', 'channelsTried', 'origin']) expect(structured(record), key).not.toHaveProperty(key)
+    } finally { await new Promise<void>((resolve) => site.close(() => resolve())) }
+  })
 
   it('refuses a webhook passed to a job tool anyway, so its secret never reaches the transcript', async () => {
     const { connect, enqueued } = await start()

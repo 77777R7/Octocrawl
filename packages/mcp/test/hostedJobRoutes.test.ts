@@ -89,7 +89,7 @@ describe('job files in GCS', () => {
 
 describe('hosted job routes', () => {
   it('names the job routes, and only them', () => {
-    for (const [method, path] of [['POST', '/v1/batches'], ['POST', '/v1/crawl'], ['GET', '/v1/batches/x'], ['GET', '/v1/batches/x/items'], ['GET', '/v1/crawl/x/pages'], ['GET', '/v1/crawl/x/errors'], ['POST', '/v1/crawl/x/cancel'], ['GET', '/v1/jobs/x/export']]) expect(isJobRoute(method!, path!), `${method} ${path}`).toBe(true)
+    for (const [method, path] of [['POST', '/v1/batches'], ['POST', '/v1/crawl'], ['GET', '/v1/crawl/active'], ['GET', '/v1/batches/x'], ['GET', '/v1/batches/x/items'], ['GET', '/v1/crawl/x/pages'], ['GET', '/v1/crawl/x/errors'], ['POST', '/v1/crawl/x/cancel'], ['GET', '/v1/jobs/x/export']]) expect(isJobRoute(method!, path!), `${method} ${path}`).toBe(true)
     for (const [method, path] of [['POST', '/v1/crawl/x/resume'], ['DELETE', '/v1/batches/x'], ['POST', '/v1/batches/x/handoff'], ['GET', '/v1/crawl/x/events']]) expect(isJobRoute(method!, path!), `${method} ${path}`).toBe(false)
   })
 
@@ -269,6 +269,31 @@ describe('hosted job routes', () => {
     expect(second.hasMore).toBe(false)
     expect((await call('GET', '/v1/jobs', null)).status).toBe(403)
     expect((await call('GET', '/v1/jobs?limit=0', 'oc_one')).status).toBe(400)
+  })
+
+  it('lists the account\'s crawl jobs still queued or running at GET /v1/crawl/active, oldest first, as a local server lists its crawls (stage H W0)', async () => {
+    const { call, store } = await start({ credits: new MemoryCreditsStore(100_000) })
+    const started = async (path: string, key: string, body: unknown) => {
+      const taskId = ((await (await call('POST', path, key, body)).json()) as { taskId: string }).taskId
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      return taskId
+    }
+    const ended = await started('/v1/crawl', 'oc_one', { url: 'https://example.com/ended' })
+    const running = await started('/v1/crawl', 'oc_one', { url: 'https://example.com/running' })
+    await started('/v1/batches', 'oc_one', { urls: urls(1) })
+    const queued = await started('/v1/crawl', 'oc_one', { url: 'https://example.com/queued' })
+    await started('/v1/crawl', 'oc_two', { url: 'https://example.com/other' })
+    store.jobs.set(ended, { ...store.jobs.get(ended)!, status: 'completed', finishedAt: '2026-10-27T00:00:00.000Z' })
+    const response = await call('GET', '/v1/crawl/active', 'oc_one')
+    expect(response.status).toBe(200)
+    const { crawls } = await response.json() as { crawls: Array<Record<string, unknown>> }
+    // Another account's crawl, a batch and a crawl that ended are not listed; a queued one is, in hosted's own status.
+    expect(crawls.map((crawl) => [crawl.id, crawl.url, crawl.status, crawl.pagesFetched])).toEqual([
+      [running, 'https://example.com/running', 'running', 0],
+      [queued, 'https://example.com/queued', 'queued', 0],
+    ])
+    expect(Object.keys(crawls[0]!).sort()).toEqual(['id', 'pagesFetched', 'startedAt', 'status', 'url'])
+    expect((await call('GET', '/v1/crawl/active', null)).status).toBe(403)
   })
 
   it('starts jobs only for the accounts on the list while it exists, and still lets an account read and cancel its jobs (H2 R2)', async () => {
