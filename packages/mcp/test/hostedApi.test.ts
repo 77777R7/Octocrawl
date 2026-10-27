@@ -20,6 +20,7 @@ import { CompatAddressGuard } from '@w2l/bench'
 import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
 import { BROWSER_LEASE_MS, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS } from '../src/hostedApi.js'
 import { expectIsError } from './toolErrorChecks.js'
+import { collectGarbage } from './collectGarbage.js'
 
 const HASH_KEY = 'h'.repeat(40)
 const PROSE = 'The harbour office records tide height, wind and visibility for every hour of the day and publishes them each morning. '.repeat(4)
@@ -690,6 +691,8 @@ it('a hosted MCP scrape the client cancels frees its browser lease and costs not
     const cancel = new AbortController()
     const call = holder.callTool({ name: 'scrape', arguments: { url: `${origin}/slow` } }, undefined, { signal: cancel.signal })
     await vi.waitFor(() => expect(leases.held.size).toBe(1))
+    // A collection while the scrape runs, as CI's busy workers sometimes ran one, must not cut the cancel off from it.
+    await collectGarbage()
     cancel.abort()
     await expect(call).rejects.toThrow()
     await vi.waitFor(() => expect(leases.held.size).toBe(0), { timeout: 5_000 })

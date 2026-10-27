@@ -376,12 +376,15 @@ export function hostedScrapeArguments(args: unknown): unknown {
 /**
  * A request the hosted MCP handler sends the gate in-process: every scrape a tool starts gets the MCP deadline
  * (hostedScrapeArguments), scrape_product's too, which names none and would otherwise run the engine's 300 s.
+ * `signal` is the caller's own, which the new request follows: a request made from another follows that one's signal
+ * only while the first is reachable (undici holds its controller weakly), so once it was collected a cancelled call
+ * ran on, held its browser lease and was charged.
  */
-export async function withMcpScrapeDeadline(request: Request): Promise<Request> {
+export async function withMcpScrapeDeadline(request: Request, signal?: AbortSignal | null): Promise<Request> {
   if (request.method !== 'POST' || new URL(request.url).pathname !== '/v1/scrape') return request
   const body = await request.clone().json().catch(() => null) as unknown
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return request
-  return new Request(request, { body: JSON.stringify(hostedScrapeArguments(body)) })
+  return new Request(request, { body: JSON.stringify(hostedScrapeArguments(body)), ...(signal == null ? {} : { signal }) })
 }
 /** What ChatGPT shows while a hosted tool runs and once it has (Apps SDK openai/toolInvocation/*, 64 characters at most). */
 const HOSTED_INVOCATION = {
@@ -1099,7 +1102,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       baseUrl: 'http://hosted.internal',
       ...(typeof authorization === 'string' ? { token: authorization.replace(/^Bearer\s+/i, '') } : {}),
       fetch: async (input, init) => {
-        const request = await withMcpScrapeDeadline(new Request(input, init))
+        const request = await withMcpScrapeDeadline(new Request(input, init), init?.signal)
         // Every call from here is this handler's own: the MCP POST that carries it was counted against the address already.
         request.headers.set(INTERNAL_SECRET_HEADER, internalSecret)
         if (caller.kind === 'keyless') request.headers.set(INTERNAL_CLIENT_HEADER, address)
