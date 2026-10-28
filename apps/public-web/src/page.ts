@@ -1,16 +1,13 @@
-import { capabilitiesMarkup, startMarkup, tiersMarkup } from './featureSections'
+import { capabilitiesMarkup, startMarkup } from './featureSections'
 import { glyphBand, glyphCloud } from './glyphArt'
-import { sessionMarkup } from './sessionScript'
 import { waitlistMarkup } from './waitlistMarkup'
 import { siteActionsMarkup, siteNavMarkup } from '../scripts/siteNav.mjs'
 
 /** Light sections in page order. Each gets a `[ 0N / 0M ]` bar numbered from this list, so adding or moving a
  * section renumbers the rest. The bar repeats the section's kicker, so screen readers skip it. */
 const SECTION_BARS = [
-  ['how-it-works', 'HOW IT WORKS'],
   ['what-it-does', 'WHAT IT DOES'],
   ['get-started', 'GET STARTED'],
-  ['free-tiers', 'FREE TIERS'],
   ['faq', 'FAQ'],
 ] as const
 
@@ -56,32 +53,8 @@ export function faqJsonLd(): string {
 export function pageMarkup(): string {
   return `
   <div class="page-shell">
-${heroMarkup(HOME_HERO)}    <section class="how-section" id="how-it-works" aria-labelledby="how-title">
-      ${sectionBar('how-it-works')}
-      <div class="band">
-        <div class="frame how-grid">
-          <div class="how-intro">
-            <p class="section-kicker"><span class="kicker-square"></span> HOW IT WORKS</p>
-            <h2 id="how-title">From web page<br />to usable content.</h2>
-            <ol class="how-list" role="list">
-              <li class="how-step"><span class="step-number" aria-hidden="true">01</span><div><h3>Paste a public URL</h3><p>No install or sign-up. Paste any public http(s) address; you get five&nbsp;previews a&nbsp;day.</p></div></li>
-              <li class="how-step"><span class="step-number" aria-hidden="true">02</span><div><h3>Octocrawl checks, then reads</h3><p>It respects robots.txt and reads only what anyone can open, then reports the status, final URL and time.</p></div></li>
-              <li class="how-step"><span class="step-number" aria-hidden="true">03</span><div><h3>Use the content</h3><p>Copy or download readable Markdown or the result JSON. Amazon.sg product pages add checked fields.</p></div></li>
-            </ol>
-            <p class="how-links"><a href="/blog/extract-structured-data-from-web-page/">Extract structured data from a page <span aria-hidden="true">↗</span></a><a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
-          </div>
-          <figure class="how-specimen">
-            <div class="how-replay" id="how-replay">
-              <div class="how-replay-window" aria-hidden="true" inert>${sessionMarkup()}</div>
-            </div>
-            <figcaption>A replay of two recorded runs: the example page on this site's preview (8 Oct 2026) and an Amazon.sg product on a local Octocrawl (23 Sep 2026). Pages change, so your results may differ.<span class="visually-hidden"> Example results: https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview returned success in 0.87 seconds of server time, with Markdown that starts "# Overview of HTTP" and then describes HTTP as a protocol for fetching resources such as HTML documents. The Amazon.sg product B000NI69YA, a Fluke 116 HVAC Multimeter, was matched for Singapore 238823 at SGD 290.67, sold by Amazon US, in 4.00 seconds measured by the client.</span></figcaption>
-          </figure>
-        </div>
-      </div>
-    </section>
-    ${capabilitiesMarkup(sectionBar('what-it-does'))}
+${heroMarkup(HOME_HERO)}    ${capabilitiesMarkup(sectionBar('what-it-does'))}
     ${startMarkup(sectionBar('get-started'))}
-    ${tiersMarkup(sectionBar('free-tiers'))}
     <section class="faq-section" id="faq" aria-labelledby="faq-title">
       ${sectionBar('faq')}
       <div class="band">
@@ -120,7 +93,7 @@ ${waitlist ? `      ${waitlistMarkup()}\n` : ''}      <div class="band band-dark
       </div>
       <div class="band band-dark">
         <nav class="frame footer-columns" aria-label="Footer">
-          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try Octocrawl</a></li><li><a href="${home}#how-it-works">How it works</a></li><li><a href="${home}#what-it-does">What it does</a></li><li><a href="${home}#get-started">Get started</a></li><li><a href="${home}#free-tiers">Free tiers</a></li><li><a href="/tools/">Free tools</a></li><li><a href="${home}#faq">FAQ</a></li><li><a href="/blog/">Blog</a></li><li><a href="/changelog/">Changelog</a></li></ul></div>
+          <div class="footer-col"><p class="footer-heading">Product</p><ul><li><a href="#top">Try Octocrawl</a></li><li><a href="${home}#what-it-does">What it does</a></li><li><a href="${home}#get-started">Get started</a></li><li><a href="/tools/">Free tools</a></li><li><a href="${home}#faq">FAQ</a></li><li><a href="/blog/">Blog</a></li><li><a href="/changelog/">Changelog</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Docs</p><ul><li><a href="/docs/guides/amazon-product/">Amazon.sg product JSON</a></li><li><a href="/docs/guides/monitor-webhook/">Monitor to HTTPS Webhook</a></li><li><a href="/docs/connect-mcp/">Connect MCP</a></li><li><a href="/docs/limits/">Limits and result states</a></li><li><a href="/docs/reference/">Advanced reference</a></li><li><a href="/llms.txt">llms.txt</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Legal</p><ul><li><a href="/docs/terms/">Terms of use</a></li><li><a href="/docs/acceptable-use/">Acceptable use</a></li><li><a href="/docs/privacy/">Privacy</a></li><li><a href="https://github.com/77777R7/Octocrawl/blob/main/LICENSE">AGPL-3.0 license ↗</a></li></ul></div>
           <div class="footer-col"><p class="footer-heading">Contact</p><ul><li><a href="mailto:hello@octocrawl.dev">hello@octocrawl.dev</a></li><li><a href="https://github.com/77777R7/Octocrawl/issues">GitHub issues ↗</a></li><li><a href="https://github.com/77777R7/Octocrawl">GitHub repository ↗</a></li><li><a href="/docs/contact/">Contact page</a></li><li><a href="#top">Back to top ↑</a></li></ul></div>
@@ -173,8 +146,8 @@ const AGENT_NAMES = ['Claude Code', 'Codex', 'Cursor', 'OpenCode']
 const HOME_HERO: HeroCopy = {
   title: 'Turn web pages into <br /><em>data your agents can use.</em>',
   description: 'Clean Markdown and structured data from public pages, each with a receipt.',
-  next: '#how-it-works',
-  nextLabel: 'See how it works',
+  next: '#what-it-does',
+  nextLabel: 'See what it does',
 }
 
 /** The hero (the URL card, its panels, the crawl window) and the results under it: the home page's, and each free

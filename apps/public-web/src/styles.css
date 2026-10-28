@@ -41,7 +41,7 @@ a { color: inherit; }
 ::selection { background: #fd966c; color: #071b4f; }
 :focus-visible { outline: 3px solid #fa935f; outline-offset: 3px; }
 /* The light sections need a darker ring: #fa935f is 2.1:1 on #f7f8fb, #b8461d is 5:1. */
-.runs-section :focus-visible, .how-section :focus-visible, .can-section :focus-visible, .start-section :focus-visible, .tier-section :focus-visible, .examples-section :focus-visible, .why-section :focus-visible, .selfhost-intro :focus-visible, .status-section :focus-visible, .faq-section :focus-visible { outline-color: #b8461d; }
+.runs-section :focus-visible, .can-section :focus-visible, .start-section :focus-visible, .examples-section :focus-visible, .why-section :focus-visible, .selfhost-intro :focus-visible, .status-section :focus-visible, .faq-section :focus-visible { outline-color: #b8461d; }
 
 .page-shell { overflow: clip; }
 
@@ -194,58 +194,6 @@ a { color: inherit; }
    150 ms), and the ground its arms reach into darkens with it. At any other time that second veil is away. */
 .hero.is-taking .hero-ascii-layer .w2l-ascii-motif, .hero.is-taking .hero-ascii-layer .w2l-ascii-veil { transition-duration: .25s; }
 .hero:not(.is-taking) .hero-ascii-layer .w2l-ascii-reach { opacity: 0; }
-/* How it works: a replay of recorded runs, drawn in the artwork's glyph language, shows the steps beside it
-   happening. Never put opacity, filter or mask on .session or its ancestors: the veil's backdrop-filter would stop
-   blurring the artwork under it. */
-.session { --row: 1.66em; position: relative; width: min(100%, 34em); color: #b7c8e6; font: 500 clamp(12.5px, 1.05vw, 14.5px)/1.66 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; user-select: none; }
-/* A feathered veil, not a card: it softens the artwork's glyphs under the text only. Its feather scales with the
-   type (30 by 34 px at 14 px), so a small window never sits in a large dark halo. */
-.session-veil { position: absolute; inset: -2.15em -2.45em; background: rgba(4, 16, 50, .36); -webkit-backdrop-filter: blur(3px) brightness(.72); backdrop-filter: blur(3px) brightness(.72); -webkit-mask-image: linear-gradient(90deg, transparent, #000 2.45em, #000 calc(100% - 2.45em), transparent), linear-gradient(transparent, #000 2.15em, #000 calc(100% - 2.15em), transparent); -webkit-mask-composite: source-in; mask-image: linear-gradient(90deg, transparent, #000 2.45em, #000 calc(100% - 2.45em), transparent), linear-gradient(transparent, #000 2.15em, #000 calc(100% - 2.15em), transparent); mask-composite: intersect; }
-.session-window { position: relative; padding: 10px 12px 12px; }
-.session-window::before, .session-window::after { content: ''; position: absolute; left: 8px; right: 8px; height: 3px; background: radial-gradient(circle, rgba(176, 200, 240, .55) 1px, transparent 1.45px) 0 50% / 8px 3px repeat-x; }
-.session-window::before { top: -1px; }
-.session-window::after { bottom: -1px; }
-.s-corner { position: absolute; width: 9px; height: 9px; color: rgba(214, 228, 255, .78); background: linear-gradient(45deg, transparent 42%, currentColor 42% 58%, transparent 58%), linear-gradient(-45deg, transparent 42%, currentColor 42% 58%, transparent 58%); }
-.s-corner.is-tl { top: -5px; left: -5px; }
-.s-corner.is-tr { top: -5px; right: -5px; }
-.s-corner.is-bl { bottom: -5px; left: -5px; }
-.s-corner.is-br { bottom: -5px; right: -5px; }
-.session-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 2px 0 9px; color: #a9bfe6; font-size: 11px; font-weight: 650; letter-spacing: .14em; text-transform: uppercase; background: radial-gradient(circle, rgba(176, 200, 240, .38) 1px, transparent 1.45px) 0 100% / 8px 3px repeat-x; }
-.session-head .kicker-square { width: 6px; height: 6px; }
-.session-tag { margin-left: auto; color: #9aafd4; }
-/* Text changes never resize the rows, so layout and paint stay inside the body. */
-.session-body { contain: layout paint; }
-.s-row { display: grid; grid-template-columns: 2ch 17ch minmax(0, 1fr); height: var(--row); margin: 0; line-height: var(--row); white-space: pre; }
-.session-body > .s-row:nth-child(2), .session-body > .s-row:nth-child(7) { height: calc(3 * var(--row) - 3.32em); }
-.s-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.s-mark { color: #7fdcad; }
-.s-detail { color: #9db2d6; }
-.s-glitch { color: #94b1e4; }
-.s-row.is-prompt .s-mark { color: #fb7b4c; }
-.s-row.is-prompt .s-label, .s-row.is-out .s-label, .s-row.is-active .s-label { grid-column: 2 / 4; }
-.s-row.is-prompt .s-detail, .s-row.is-out .s-detail, .s-row.is-active .s-detail { display: none; }
-.s-row.is-prompt .s-label { color: #f4f8ff; }
-.s-row.is-sent .s-label { color: #d3e0f6; }
-/* A solid caret while the address is typed: editors stop blinking while keys arrive. */
-.s-row.is-typing .s-label::after { content: ''; display: inline-block; width: .6em; height: 1.15em; margin-left: 1px; vertical-align: -.24em; background: #fb7b4c; }
-.s-row.is-out .s-label { color: #e6eefc; }
-.s-row.is-field { grid-template-columns: 2ch 9ch minmax(0, 1fr); }
-.s-row.is-field .s-label { color: #9db2d6; }
-.s-row.is-field .s-detail { color: #e6eefc; }
-.s-row:last-child { height: calc(var(--row) + 3px); margin-top: 4px; padding-top: 3px; background: radial-gradient(circle, rgba(176, 200, 240, .38) 1px, transparent 1.45px) 0 0 / 8px 3px repeat-x; }
-.s-row.is-result { grid-template-columns: 2ch minmax(0, 1fr) auto; column-gap: 1.5ch; }
-.s-row.is-result .s-label, .s-row.is-result .s-detail { color: #eef4ff; }
-.s-row.is-result .s-detail { text-align: right; }
-.s-row.is-new { animation: s-arrive .32s ease-out both; }
-/* Cursor-style shimmer on the step in progress; stepped so it repaints about 24 times a second. */
-.s-row.is-active .s-label { color: transparent; background: linear-gradient(90deg, #8ea5cc 40%, #f4f8ff 50%, #8ea5cc 60%) 0 0 / 250% 100%; -webkit-background-clip: text; background-clip: text; animation: s-shimmer 1.25s steps(30) infinite; }
-/* Pending mark: the artwork's light marks (dot, colon, four dots), drawn so it never depends on fonts. */
-.s-mark[data-g]::before { content: ''; display: inline-block; width: 8px; height: 8px; vertical-align: -.5px; color: #a8bfe8; }
-.s-mark[data-g="1"]::before { background: radial-gradient(circle, currentColor 1.1px, transparent 1.6px); }
-.s-mark[data-g="2"]::before { background: radial-gradient(circle at 50% 20%, currentColor 1.1px, transparent 1.6px), radial-gradient(circle at 50% 80%, currentColor 1.1px, transparent 1.6px); }
-.s-mark[data-g="3"]::before { background: radial-gradient(circle at 20% 20%, currentColor 1.1px, transparent 1.6px), radial-gradient(circle at 80% 20%, currentColor 1.1px, transparent 1.6px), radial-gradient(circle at 20% 80%, currentColor 1.1px, transparent 1.6px), radial-gradient(circle at 80% 80%, currentColor 1.1px, transparent 1.6px); }
-@keyframes s-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-@keyframes s-arrive { from { opacity: 0; } }
 /* A quiet cue to the next section, only where the screen has room for it. */
 .hero-scroll { position: relative; z-index: 2; display: none; align-self: center; align-items: center; gap: 10px; min-height: 44px; margin-top: auto; padding: 0 14px; color: #c3d3ec; font: 650 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; text-transform: uppercase; text-decoration: none; }
 .hero-scroll:hover { color: #ffae86; }
@@ -654,33 +602,15 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .guidance-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-top: 24px; }
 .guidance-link { color: #1d64ac; font-size: 13px; font-weight: 700; text-underline-offset: 3px; }
 
-/* How it works: three ruled steps beside a replay of recorded runs that shows them happening. */
-.how-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: end; gap: clamp(40px, 5vw, 72px); padding: 96px 32px 104px; }
-.how-intro h2 { margin: 16px 0 0; color: #142a57; font-size: clamp(32px, 3.4vw, 46px); line-height: 1.12; letter-spacing: -.055em; }
-.how-list { margin: 34px 0 0; padding: 0; list-style: none; }
-.how-step { display: grid; grid-template-columns: 44px minmax(0, 1fr); padding: 17px 0 18px; border-top: 1px solid #e0e8f2; }
-.how-step:last-child { border-bottom: 1px solid #e0e8f2; }
-.step-number { padding-top: 4px; color: #b8461d; font: 680 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.how-step h3 { margin: 0; color: #14254a; font-size: 17px; line-height: 1.35; letter-spacing: -.02em; }
-.how-step p { margin: 5px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; text-wrap: pretty; }
-/* A free tool page's rows can hold a whole command: it wraps rather than running past a phone's edge. */
-.tool-section .how-step code { overflow-wrap: anywhere; }
-.how-links { display: flex; flex-wrap: wrap; gap: 0 24px; margin: 18px 0 0; }
-.how-links a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #1d64ac; font-size: 14px; font-weight: 650; text-underline-offset: 3px; }
-.how-links a:hover { color: #b8461d; }
-.how-specimen { min-width: 0; margin: 0; }
-/* The replay sits on a crop of the hero artwork, like a product shot on its backdrop. */
-.how-replay { position: relative; display: grid; place-items: center; min-height: clamp(400px, 34vw, 480px); padding: 44px clamp(20px, 3.4vw, 48px); border-radius: 20px; background: linear-gradient(180deg, rgba(7, 27, 79, .3), rgba(7, 27, 79, .56)), url('/assets/mountain-hero.webp') 76% 64% / cover no-repeat; box-shadow: 0 24px 60px rgba(17, 46, 96, .12); }
-.how-specimen figcaption { margin: 14px 4px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 
-/* The sections after How it works share one rhythm: a kicker, a heading, a lead, then the specimen. White and pale
+/* The light sections share one rhythm: a kicker, a heading, a lead, then the specimen. White and pale
    bands alternate so each section reads as its own sheet. */
 .examples-section, .why-section, .status-section { border-top: 1px solid var(--line); background: #fff; }
 .selfhost-section, .faq-section { border-top: 1px solid var(--line); }
 /* Every light section is a block formatting context, so a last child's bottom margin stays inside its sheet instead
    of leaking out as an empty strip of page grey; and each draws the frame's two hairlines down its full height. */
-.examples-section, .how-section, .why-section, .count-section, .selfhost-section, .status-section, .faq-section { position: relative; display: flow-root; }
-.examples-section::before, .how-section::before, .why-section::before, .count-section::before, .count-band::before, .selfhost-section::before, .status-section::before, .faq-section::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: min(1200px, calc(100% - 32px)); transform: translateX(-50%); border-inline: 1px solid var(--line); pointer-events: none; }
+.examples-section, .why-section, .count-section, .selfhost-section, .status-section, .faq-section { position: relative; display: flow-root; }
+.examples-section::before, .why-section::before, .count-section::before, .count-band::before, .selfhost-section::before, .status-section::before, .faq-section::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: min(1200px, calc(100% - 32px)); transform: translateX(-50%); border-inline: 1px solid var(--line); pointer-events: none; }
 .section-bar { display: flex; align-items: center; gap: 10px; padding: 18px 32px; border-bottom: 1px solid var(--line); color: #566b8c; font: 500 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; }
 .section-bar b { color: #b8461d; font-weight: 650; }
 .section-bar-label { color: #2f6ba8; }
@@ -820,7 +750,6 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 
 /* Below 1000 px the two-column specimen would squeeze the JSON pane under its 26-character lines. */
 @media (max-width: 999px) {
-  .how-grid { grid-template-columns: minmax(0, 1fr); gap: 48px; padding: 72px 32px 80px; }
   .selfhost-grid, .faq-grid { grid-template-columns: minmax(0, 1fr); gap: 36px; padding: 72px 32px 80px; }
 }
 
@@ -916,8 +845,6 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .product-field, .product-field:nth-child(2n) { min-height: 75px; padding: 15px 0; border-left: 0; }
   .copy-button { font-size: 11px; padding: 9px 11px; }
   .readable-content { font-size: 14px; }
-  .how-grid { gap: 40px; padding: 56px 18px 64px; }
-  .how-replay { min-height: 0; padding: 32px 14px; border-radius: 16px; }
   .selfhost-grid, .faq-grid { gap: 28px; padding: 56px 18px 64px; }
   /* One row of tabs on a phone: they share the width, and scroll sideways rather than wrap if they cannot. */
   .tabs { display: flex; flex-wrap: nowrap; width: 100%; overflow-x: auto; scrollbar-width: none; }
@@ -1255,10 +1182,9 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .waitlist-done { margin: 0; padding: 18px 20px; border: 1px solid rgba(251, 123, 76, .5); border-radius: 12px; color: #fff; font-size: 16px; font-weight: 650; }
 @media (max-width: 860px) { .waitlist { grid-template-columns: 1fr; padding: 48px 0; } }
 
-/* ---------- 02 What it does and 03 Free tiers (featureSections.ts; motion in featureMotion.ts). Hairline cells, glyph
+/* ---------- What it does and Get started (featureSections.ts; motion in featureMotion.ts). Hairline cells, glyph
    art that decodes in place, and the page's navy code window. ---------- */
-.can-wrap, .tier-wrap { padding: 96px 32px 104px; }
-.tier-wrap { padding-top: 88px; }
+.can-wrap { padding: 96px 32px 104px; }
 .can-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 28px 48px; }
 .can-intro { max-width: 560px; }
 .can-intro h2 { margin: 16px 0 0; color: #142a57; font-size: clamp(32px, 3.4vw, 46px); line-height: 1.12; letter-spacing: -.055em; }
@@ -1386,133 +1312,14 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
 .use-note a { color: var(--link-on-navy); font-weight: 650; text-underline-offset: 3px; }
 .use-note a:hover { color: var(--orange-100); }
 
-/* Free tiers: the light section's heading, then one contained dark window: the tiers on the left over calm navy, the
-   Earth artwork on the right, dimmed so it stays quieter than the hero. Colours are the palette's roles (:root). */
-/* The whole section is the Earth artwork, dimmed and veiled so the page keeps one sun (the hero's): calm navy behind
-   the words on the left (stops follow the content column, not the screen), the planet opening up to the right, and
-   navy fading in at the top and bottom so the light sections above and below meet it gently. */
-.tier-section.is-earth { position: relative; isolation: isolate; overflow: clip; color: var(--on-navy); background: var(--navy-deep); --copy-end: calc(max(16px, 50% - 600px) + 560px); }
-.is-earth .earth-art { position: absolute; inset: 0; z-index: -1; }
-.is-earth .earth-art img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 70% 42%; filter: brightness(.8) saturate(.8); }
-.earth-canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
-.is-earth .earth-art::after { content: ""; position: absolute; inset: 0; pointer-events: none; background:
-  linear-gradient(180deg, var(--navy-deep) 0, rgba(6, 22, 52, 0) 150px, rgba(6, 22, 52, 0) calc(100% - 150px), var(--navy-deep) 100%),
-  radial-gradient(ellipse 26% 30% at 75% 33%, rgba(6, 22, 52, .46), rgba(6, 22, 52, 0) 72%),
-  linear-gradient(90deg, var(--navy-deep) 0, rgba(6, 22, 52, .94) var(--copy-end), rgba(6, 22, 52, .6) calc(var(--copy-end) + 100px), rgba(6, 22, 52, 0) calc(var(--copy-end) + 280px)); }
-.is-earth :focus-visible { outline-color: #fa935f; }
-.is-earth .section-bar { border-bottom-color: rgba(176, 200, 240, .14); color: var(--on-navy-3); }
-.is-earth .section-bar b { color: var(--orange-200); }
-.is-earth .section-bar-label, .is-earth .section-kicker { color: var(--link-on-navy); }
-.is-earth .can-intro h2 { color: #fff; }
-.is-earth .can-intro h2 em { color: var(--orange-100); }
-.is-earth .can-lead { color: var(--on-navy); font-size: 16px; }
-.is-earth .tier-wrap { min-height: 860px; }
-.tier-copy { max-width: 520px; }
-.tier-hint { display: inline-flex; gap: 8px; margin: 22px 0 0; color: var(--orange-100); font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; transition: opacity .4s ease; }
-.tier-foot-band { padding: 0 32px 80px; }
-/* With a script the planet stays in view behind the section while the words scroll past it at the browser's own
-   pace, as in a scrollytelling piece: nothing is pinned but the planet, nothing folds, nothing snaps. The tier crossing
-   the middle of the screen is lit (featureMotion.ts); the others keep their place and only dim, so nothing shifts
-   under the reader. */
-.is-story .earth-art { position: sticky; inset: auto; top: 0; height: 100vh; height: 100svh; margin-bottom: -100vh; margin-bottom: -100svh; }
-.is-story .tier-wrap { min-height: 0; }
-.is-story.is-begun .tier-hint { opacity: 0; }
-.is-story .tier-head { cursor: pointer; }
-.is-story .tier-row:not(.is-active) .tier-name, .is-story .tier-row:not(.is-active) .tier-amount b { color: var(--on-navy-2); }
-.is-story .tier-row.is-active .tier-head::before { background: var(--orange); }
-.is-story .tier-row.is-active .tier-n { color: var(--orange-100); }
-.is-story .tier-panel { transition: opacity .4s ease; }
-/* Dimmed only as far as its words, labels and links still meet WCAG AA contrast on the navy. */
-.is-story .tier-row:not(.is-active) .tier-panel { opacity: .7; }
-/* Wide screens: the tiers stand a little apart, about two in view at once, and the last can still reach the middle of
-   the screen. The planet is placed so its lit continents (about 72% across the painting) sit in the middle of the
-   water right of the words at any shape of window: the painting covers the screen (as wide as 177.68vh, its own
-   shape, or the screen, whichever is wider) and slides left only as far as it can without leaving a gap. */
-@media (min-width: 861px) {
-  .is-story .tier-rail { padding-bottom: 34vh; padding-bottom: 34svh; }
-  .is-story .tier-row { padding-block: 5vh; padding-block: 5svh; }
-  .is-story .earth-art img {
-    object-position: clamp(calc(100vw - max(100vw, 177.68vh)), calc((max(16px, 50vw - 600px) + 560px + 100vw) / 2 - .72 * max(100vw, 177.68vh)), 0px) 58%;
-    object-position: clamp(calc(100vw - max(100vw, 177.68svh)), calc((max(16px, 50vw - 600px) + 560px + 100vw) / 2 - .72 * max(100vw, 177.68svh)), 0px) 58%;
-  }
-}
-/* The readout on the planet: which of the four is lit, what it allows, and how far along the four the reader is. It
-   sits on the planet's dark side, just right of the words, so it never covers the marks it counts, and above the
-   artwork's veil (::after), which is darkest there. */
-.earth-readout { position: absolute; z-index: 1; left: calc(var(--copy-end) + 48px); bottom: 40px; min-width: 248px; padding: 14px 18px 16px; border: 1px solid rgba(176, 200, 240, .16); border-radius: 8px; color: var(--on-navy); background: rgba(6, 22, 52, .8); }
-.earth-readout p { margin: 0; }
-.earth-step { color: var(--on-navy-2); font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; }
-.earth-step-n { color: var(--orange-100); font-weight: 600; }
-.earth-readout .earth-amount { margin-top: 8px; display: flex; align-items: baseline; gap: 10px; }
-.earth-amount-n { color: #fff; font-size: 40px; font-weight: 650; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
-.earth-amount-unit { color: var(--on-navy); font-size: 15px; }
-.earth-readout .earth-lit { margin-top: 6px; color: var(--on-navy-2); font: 500 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
-.earth-readout .earth-ticks { display: flex; gap: 6px; margin-top: 12px; }
-.earth-ticks i { width: 22px; height: 3px; border-radius: 2px; background: rgba(176, 200, 240, .22); transition: background-color .3s ease; }
-.earth-ticks i.is-on { background: var(--orange); }
-.is-earth .tier-rail { margin-top: 36px; }
-.tier-rail { padding: 0; }
-.tier-row { position: relative; border-top: 1px solid rgba(176, 200, 240, .16); }
-.tier-row:last-child { border-bottom: 1px solid rgba(176, 200, 240, .16); }
-.tier-head { position: relative; display: flex; align-items: baseline; gap: 12px; margin: 0; padding: 18px 16px 12px 20px; font-size: inherit; font-weight: inherit; }
-.tier-head::before { content: ""; position: absolute; top: 25px; left: 0; width: 7px; height: 7px; background: transparent; transition: background-color .3s ease; }
-.tier-n { flex: none; width: 2.6ch; color: var(--on-navy-2); font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; transition: color .3s ease; }
-.tier-name { flex: none; color: var(--on-navy); font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
-.tier-leader { flex: 1 1 auto; min-width: 16px; overflow: hidden; color: rgba(183, 200, 230, .5); font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
-.tier-leader::before { content: "· · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · ·"; }
-.tier-amount { flex: none; color: var(--on-navy-2); font-size: 14px; white-space: nowrap; }
-.tier-amount b { margin-right: .25em; color: var(--on-navy); font-size: 20px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.tier-panel { padding: 0 16px 22px calc(20px + 2.6ch + 12px); }
-.tier-unit { margin: 0 0 14px; color: var(--on-navy); font-size: 15px; }
-.tier-facts { display: grid; gap: 9px; margin: 0; }
-.tier-facts div { display: grid; grid-template-columns: 6.5ch minmax(0, 1fr); gap: 12px; }
-.tier-facts dt { color: var(--on-navy-2); font: 500 12px/1.8 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; }
-.tier-facts dd { margin: 0; color: var(--on-navy); font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; }
-.tier-facts code { color: #fff; font: 13.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.tier-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-top: 6px; color: var(--link-on-navy); font-size: 15px; font-weight: 650; text-underline-offset: 3px; }
-.tier-link:hover { color: var(--orange-100); }
-.tier-foot { max-width: 520px; margin: 0; color: var(--on-navy-2); font-size: 14px; line-height: 1.65; }
-.tier-foot a { color: var(--link-on-navy); font-weight: 650; text-underline-offset: 3px; white-space: nowrap; }
-.tier-foot a:hover { color: var(--orange-100); }
-
-@media (max-width: 1049px) { .can-wrap, .tier-wrap { padding: 72px 32px 80px; } .tier-foot-band { padding-bottom: 64px; } }
-/* The readout needs about 260px of water right of the words; narrower than this it would be cut off at the edge or
-   cover the marks it counts, so it leaves the lit tier to say which it is. */
-@media (max-width: 959px) { .is-story .earth-readout { display: none; } }
-@media (max-width: 860px) {
-  /* Narrow screens: the words on navy first, the planet rising under them at the foot of the section. */
-  .is-earth:not(.is-story) .tier-wrap { min-height: 0; padding-bottom: calc(60vw + 40px); }
-  /* With a script the tiers pass over the planet (the flow above) as cards, the planet rising under them. */
-  .is-story .earth-art img { object-position: 76% 100%; }
-  .is-story .earth-art::after { background: linear-gradient(180deg, var(--navy-deep) 0, rgba(6, 22, 52, .9) 34%, rgba(6, 22, 52, .2) 70%, rgba(6, 22, 52, .1) 100%); }
-  .is-story .tier-row { border: 0; }
-  .is-story .tier-row > * { background: rgba(6, 22, 52, .88); }
-  .is-story .tier-head { border-radius: 10px 10px 0 0; }
-  .is-story .tier-panel { border-radius: 0 0 10px 10px; }
-  /* The tiers pass over the planet one at a time as cards. */
-  .is-story .tier-wrap { padding-bottom: 16vh; }
-  .is-story .tier-rail { margin-top: 10vh; }
-  .is-story .tier-row { display: flex; flex-direction: column; justify-content: center; min-height: 56vh; min-height: 56svh; }
-  .tier-copy { max-width: none; }
-  .is-earth:not(.is-story) .earth-art { top: auto; height: calc(60vw + 120px); }
-  .is-earth .earth-art::after { background: linear-gradient(180deg, var(--navy-deep) 0, rgba(6, 22, 52, 0) 140px), radial-gradient(ellipse 30% 34% at 75% 40%, rgba(6, 22, 52, .46), rgba(6, 22, 52, 0) 72%); }
-}
-/* Phones: the dotted leader gives way, and a long tier name wraps before its number does. */
-@media (max-width: 480px) {
-  .tier-head { gap: 10px; padding-right: 8px; }
-  .tier-leader { display: none; }
-  .tier-name { flex: 1 1 auto; min-width: 0; }
-  .tier-amount { margin-left: auto; }
-  .tier-panel { padding-left: calc(20px + 2.6ch + 10px); padding-right: 8px; }
-}
+@media (max-width: 1049px) { .can-wrap { padding: 72px 32px 80px; } }
 @media (max-width: 999px) {
   .can-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .can-cell { padding: 22px 20px 18px; }
   .can-art { min-height: 70px; font-size: 10px; line-height: 14px; }
 }
 @media (max-width: 600px) {
-  .can-wrap, .tier-wrap { padding: 60px 16px 68px; }
-  .tier-foot-band { padding: 0 16px 56px; }
+  .can-wrap { padding: 60px 16px 68px; }
   .can-grid { grid-template-columns: minmax(0, 1fr); margin-top: 32px; }
   .can-cell { padding: 22px 20px 18px; }
   .can-art { min-height: 75px; font-size: 11px; line-height: 15px; }
@@ -1527,13 +1334,10 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   p.use-note { padding: 12px 18px 18px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .is-story .tier-panel, .tier-hint { transition: none; }
-  .can-cell, .can-cell::after, .can-art b, .can-cell h3, .can-points li, .can-points li::before, .can-where > span, .can-art, .can-filter label, .can-bracket, .tier-head::before, .tier-n, .tier-row { transition: none; }
+  .can-cell, .can-cell::after, .can-art b, .can-cell h3, .can-points li, .can-points li::before, .can-where > span, .can-art, .can-filter label, .can-bracket { transition: none; }
 }
 
-/* Product identity copy shares the existing section rhythm. */
-.start-scope, .start-identity { max-width: 76ch; margin: 20px auto; color: var(--ink-soft); font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
-.start-scope a, .start-identity a, .start-lead a, .can-evidence a { color: inherit; text-underline-offset: 3px; }
+.start-lead a, .can-evidence a { color: inherit; text-underline-offset: 3px; }
 .can-evidence { max-width: 76ch; margin-top: 32px; }
 .can-evidence h3 { margin: 0 0 12px; font-size: 22px; }
 .can-evidence p { margin: 0; color: var(--ink-soft); font-size: 15px; line-height: 1.65; }
@@ -1549,13 +1353,11 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .run-card { border-radius: 25px; corner-shape: squircle; }
   .loading-panel { border-radius: 25px; corner-shape: squircle; }
   .product-panel, .output-panel, .guidance-panel { border-radius: 25px; corner-shape: squircle; }
-  .how-replay { border-radius: 36px; corner-shape: squircle; }
   .cta-primary { border-radius: 18px; corner-shape: squircle; }
   .selfhost-sheet { border-radius: 36px; corner-shape: squircle; }
   .footer-card { border-radius: 22px; corner-shape: squircle; }
   @media (max-width: 600px) {
     .sheet { border-radius: 22px 22px 0 0; corner-shape: squircle; }
-    .how-replay { border-radius: 29px; corner-shape: squircle; }
     .selfhost-sheet { border-radius: 29px; corner-shape: squircle; }
   }
   .demo-card { border-radius: 32px; corner-shape: squircle; }
@@ -1568,8 +1370,4 @@ a.link-target:hover .link-path { text-decoration: underline; text-underline-offs
   .waitlist-field input:not([type="checkbox"]), .waitlist-field select, .waitlist-field textarea { border-radius: 18px; corner-shape: squircle; }
   .waitlist-done { border-radius: 22px; corner-shape: squircle; }
   .use-window { border-radius: 29px; corner-shape: squircle; }
-  @media (max-width: 860px) {
-    .is-story .tier-head { border-radius: 18px 18px 0 0; corner-shape: squircle; }
-    .is-story .tier-panel { border-radius: 0 0 18px 18px; corner-shape: squircle; }
-  }
 }

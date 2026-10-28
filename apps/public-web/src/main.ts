@@ -5,7 +5,6 @@ import { drawHeroAgents } from './heroAgents'
 import { mountHeroChip } from './heroChip'
 import { mountHeroClick } from './heroClick'
 import { mountGlyphRipple } from './glyphRipple'
-import { mountHowReplay } from './howReplay'
 import { mountFeatureSections } from './featureMotion'
 import { mountGlyphBand } from './glyphBandMotion'
 import { mountOctopusSwim } from './octopusSwim'
@@ -102,14 +101,14 @@ for (const set of document.querySelectorAll<HTMLElement>('[data-tabs]')) {
 const hero = document.querySelector<HTMLElement>('.hero')!
 trackPageView()
 trackLinkClicks(document.body)
-// The browser's own scroll to a linked section (/#how-it-works) can come after this module has run, animated (the
+// The browser's own scroll to a linked section (/#what-it-does) can come after this module has run, animated (the
 // page scrolls smoothly), and after the hero had reported itself on screen and loaded its decoration: land there
 // directly, unless the browser or a reload has already moved the page.
 try {
   const landing = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null
   if (landing && !hero.contains(landing) && !window.scrollY) landing.scrollIntoView({ behavior: 'instant' })
 } catch { /* A malformed fragment keeps the browser's own handling. */ }
-// A section link (Free tiers, Back to top, /#get-started from a docs page) only moves the page: the address goes back
+// A section link (Back to top, /#get-started from a docs page) only moves the page: the address goes back
 // to the home page's own, so it never names a section the visitor has scrolled away from, and a reload or a copied
 // address starts from the page. A link that arrives with a fragment keeps it until the page has loaded and landed.
 const dropFragment = () => { if (location.hash) history.replaceState(history.state, '', `${location.pathname}${location.search}`) }
@@ -125,9 +124,6 @@ const heroChip = document.querySelector<HTMLElement>('#hero-chip')
 if (heroChip) mountHeroChip(heroChip)
 const heroSpark = document.querySelector<HTMLElement>('#hero-click-spark')
 if (heroSpark) mountHeroClick(heroSpark, hero)
-// The replay of recorded runs is the home page's own; a free tool page has none.
-const howReplay = document.querySelector<HTMLElement>('#how-replay')
-if (howReplay) mountHowReplay(howReplay)
 mountFeatureSections()
 for (const band of document.querySelectorAll<HTMLElement>('.glyph-band')) mountGlyphBand(band)
 const startHead = document.querySelector<HTMLElement>('.start-head')

@@ -1,18 +1,13 @@
 import { glyphCloud } from './glyphArt'
 
-/** The home page's "What it does", "Get started" and "Free tiers" sections. Build-time markup like page.ts: no DOM access, no styles.
+/** The home page's "What it does" and "Get started" sections. Build-time markup like page.ts: no DOM access, no styles.
  * featureMotion.ts brings them to life; without it every claim, mark and code line is already in the HTML, and the
- * controls that need a script (the filter, the tabs and Copy) stay hidden, and every free tier shows open.
+ * controls that need a script (the filter, the tabs and Copy) stay hidden.
  *
  * What the sections claim was checked against the product on 2026-10-09 (origin/main c25c126):
  * - Hosted Octocrawl serves scrape and map, and to an account crawl jobs of up to 500 pages and batch jobs of up to 1,000
  *   URLs (packages/mcp/src/hostedApi.ts refuses every other route by name; rechecked 2026-10-23, origin/main d1eb4647);
  *   larger crawls, Monitor, logins and the handoff to Chrome run on the person's computer.
- * - Allowances: five previews a visitor a day (VISITOR_DAILY_PREVIEWS, packages/public-preview/src/quota.ts); 20 pages a
- *   day per address without a key and 10 starts a minute (DEFAULT_KEYLESS_DAILY, KEYLESS_PER_MINUTE); an account's
- *   1,000 credits a month and 60 a minute (DEFAULT_MONTHLY_CREDITS in packages/mcp/src/hostedCredits.ts, KEY_PER_MINUTE);
- *   1,500 pages a day for every caller without an account and 3,000 for every account together (DEFAULT_SITE_DAILY,
- *   DEFAULT_ACCOUNTS_DAILY; rechecked 2026-10-23); no daily limit on the person's own computer.
  * - `npx octocrawl serve` runs a Monitor when asked (POST /v1/monitors/:id/run) and delivers its events; timed re-runs
  *   come from the repository's managed local service (packages/mcp/src/managedRuntime.ts), as content/reference.md says.
  *   A delivery is signed when its destination names a secret (packages/runtime/src/deliveryWorker.ts).
@@ -148,47 +143,6 @@ export const CLIENTS: readonly Client[] = [
 /** What Copy puts on the clipboard: the commands and code, without comments, output or prompts. */
 export const clientCopy = (c: Client) => c.lines.filter(([kind]) => kind === 'cmd' || kind === 'more' || kind === 'code' || (kind === 'gap' && c.lines.some(([k]) => k === 'code'))).map(([, text]) => text).join('\n').trim()
 
-type Tier = {
-  /** `perDay` is the allowance's number; `per` its period, a day unless it says month (an account's credits). */
-  n: string, name: string, perDay: number | null, per?: 'month', unit: string,
-  facts: ReadonlyArray<readonly [string, string]>, link: readonly [href: string, label: string, arrow: string]
-}
-
-export const TIERS: readonly Tier[] = [
-  {
-    n: '01', name: 'Browser preview', perDay: 5, unit: 'previews a day, per visitor',
-    facts: [['Where', 'This page'], ['Needs', 'Nothing: no account, no install'], ['Reads', 'One public page at a time']],
-    link: ['#top', 'Try a page', '↑'],
-  },
-  {
-    n: '02', name: 'Hosted, no key', perDay: 20, unit: 'pages a day, per address',
-    facts: [['Where', '<code>api.octocrawl.dev</code>, <code>mcp.octocrawl.dev</code>'], ['Needs', 'Nothing'], ['Reads', 'Scrape and map over HTTP, 10 a minute']],
-    link: ['/docs/connect-mcp/', 'Connect MCP', '↗'],
-  },
-  {
-    n: '03', name: 'Hosted, with an account', perDay: 1000, per: 'month', unit: 'credits a month, free',
-    facts: [['Where', 'The same two addresses'], ['Needs', 'An account: sign in with GitHub, Google or email, then make a key'], ['Reads', 'HTTP at 1 credit a page, then a browser at 5, 60 a minute']],
-    link: ['/signin/', 'Sign in', '→'],
-  },
-  {
-    n: '04', name: 'Your computer', perDay: null, unit: 'no daily limit',
-    facts: [['Where', '<code>npx octocrawl serve</code>'], ['Needs', 'Node.js 22.13 or later; for a browser, <code>npx playwright install chromium</code>'], ['Reads', 'Everything above; timed Monitors from a repository checkout']],
-    link: ['/docs/connect-mcp/#run-it-on-your-computer', 'Run it yourself', '↗'],
-  },
-]
-
-/** The number a tier shows, from its allowance, so the two cannot drift apart. */
-export const tierAmount = (perDay: number | null) => perDay === null ? '∞' : perDay.toLocaleString('en-US')
-
-/** What the planet shows for a tier: one lit mark for each page a day, or every mark on the planet for no daily
- * limit. It shows only once the lights are drawn (featureMotion.ts), so it never claims marks that are not lit. */
-export const tierLit = (t: Tier) => t.perDay === null
-  ? 'Every mark on the planet lit'
-  : `${tierAmount(t.perDay)} lit mark${t.perDay === 1 ? '' : 's'} on the planet`
-
-/** A tier's unit without its qualifier ("previews a day, per visitor" is "previews a day"), for the planet's readout. */
-export const tierUnit = (t: Tier) => t.unit.split(',')[0]!
-
 function capabilityCell(item: Capability): string {
   const hosted = item.hosted ? 'is-yes' : 'is-no'
   return `<li class="can-cell" data-hosted="${item.hosted}">
@@ -238,8 +192,6 @@ export function startMarkup(bar: string): string {
             <p class="start-lead">Try a single page at <a href="https://octocrawl.dev/">octocrawl.dev</a>. Connect through MCP, use the REST API, or work with the TypeScript and Python clients.</p>
             <button class="sea-play" type="button" hidden><span aria-hidden="true">( </span>play with the octopus<span aria-hidden="true"> )</span></button>
           </div>
-          <p class="start-scope">Hosted Octocrawl supports scrape and map, and with an account crawl and batch jobs. Run locally for larger jobs, browser actions and scheduled monitoring with local workers. <a href="/docs/limits/#hosted-api-and-mcp">See hosted limits</a>.</p>
-          <p class="start-identity">Octocrawl is an open-source web scraping tool for AI agents and developers. Its official website is <a href="https://octocrawl.dev/">octocrawl.dev</a>, and its source code is maintained at <a href="https://github.com/77777R7/Octocrawl">github.com/77777R7/Octocrawl</a>. The local MCP package is <code>@octocrawl/mcp</code>; the API, SDK and hosted MCP examples are below.</p>
           ${clientPanels()}
         </div>
       </div>
@@ -276,51 +228,5 @@ export function capabilitiesMarkup(bar: string): string {
           <p class="visually-hidden" id="can-status" role="status"></p>
         </div>
       </div>
-    </section>`
-}
-
-/** Section 04: the four free ways to use Octocrawl, every one written out in full, over the Earth artwork. With a
- * script the planet stays in view behind the section while the words scroll past it as usual: the tier crossing the
- * middle of the screen is the one lit, it lights as many of the planet's painted marks (featureMotion.ts,
- * earthLights.ts), and a readout on the planet says which of the four it is and what it allows. Nothing folds and
- * nothing is pinned but the planet. Without a script the tiers simply follow one another over the artwork as
- * painted. */
-export function tiersMarkup(bar: string): string {
-  const rows = TIERS.map(t => `<div class="tier-row" id="tier-${t.n}" data-lights="${t.perDay ?? 'all'}" data-unit="${esc(tierUnit(t))}" data-lit="${esc(tierLit(t))}">
-              <h3 class="tier-head"><span class="tier-n" aria-hidden="true">${t.n}</span><span class="tier-name">${t.name}</span><span class="tier-leader" aria-hidden="true"></span><span class="tier-amount"><b>${tierAmount(t.perDay)}</b>${t.perDay === null ? '<span class="visually-hidden"> no daily limit</span>' : ` a ${t.per ?? 'day'}`}</span></h3>
-              <div class="tier-panel">
-                <p class="tier-unit">${t.unit}</p>
-                <dl class="tier-facts">${t.facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
-                <a class="tier-link" href="${t.link[0]}">${t.link[1]} <span aria-hidden="true">${t.link[2]}</span></a>
-              </div>
-            </div>`).join('\n            ')
-  const first = TIERS[0]!
-  return `<section class="tier-section is-earth" id="free-tiers" aria-labelledby="tier-title">
-      <div class="earth-art" aria-hidden="true"><img src="/assets/scene-earth.webp" alt="" width="1672" height="941" loading="lazy" decoding="async" /></div>
-      ${bar}
-      <div class="band">
-        <div class="frame tier-wrap" id="earth-window">
-          <div class="tier-copy" id="tier-copy">
-            <div class="can-intro">
-              <p class="section-kicker"><span class="kicker-square"></span> FREE TIERS</p>
-              <h2 id="tier-title">Free to start,<br />four <em>ways.</em></h2>
-              <p class="can-lead">None of them needs a card. Each mark that lights up on the planet stands for a page a day, or, for an account, a credit a month.</p>
-              <p class="tier-hint" aria-hidden="true" hidden>Scroll to light the planet <span>↓</span></p>
-            </div>
-            <div class="tier-rail" id="tier-rail">
-            ${rows}
-            </div>
-          </div>
-          <div class="earth-readout" id="earth-readout" aria-hidden="true" hidden>
-            <p class="earth-step"><b class="earth-step-n">${first.n}</b> / ${String(TIERS.length).padStart(2, '0')} · <span class="earth-step-name">${first.name}</span></p>
-            <p class="earth-amount"><b class="earth-amount-n">${tierAmount(first.perDay)}</b> <span class="earth-amount-unit">${esc(tierUnit(first))}</span></p>
-            <p class="earth-lit">${esc(tierLit(first))}</p>
-            <p class="earth-ticks">${TIERS.map((_, i) => `<i${i === 0 ? ' class="is-on"' : ''}></i>`).join('')}</p>
-          </div>
-        </div>
-      </div>
-      <div class="band"><div class="frame tier-foot-band">
-        <p class="tier-foot">Callers without an account share 1,500 hosted pages a day, and accounts have 3,000 a day of their own; over an allowance the answer is HTTP 429 until 00:00 UTC, and for an account's credits until the 1st. Credit packs are planned but not sold yet. <a href="/docs/limits/">Limits and result states <span aria-hidden="true">↗</span></a></p>
-      </div></div>
     </section>`
 }

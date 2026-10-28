@@ -20,4 +20,4 @@ export const pages = [
 ]
 
 // The home page's last content change (src/page.ts, src/featureSections.ts, src/waitlistMarkup.ts), its lastmod.
-export const HOME_UPDATED = '2026-10-23'
+export const HOME_UPDATED = '2026-10-28'

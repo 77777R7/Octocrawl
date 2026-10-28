@@ -1,6 +1,6 @@
 // The site's top navigation, shared by the home page (src/page.ts, through vite.config.ts) and every docs page
 // (scripts/build-docs.mjs), so the two headers cannot drift apart. Every address is absolute: the same markup works
-// on the home page, where `/#free-tiers` stays on the page, and on a docs page, where it goes home.
+// on the home page, where `/#get-started` stays on the page, and on a docs page, where it goes home.
 // Plain markup: the menus are <details>, so they open with a click, a tap or the keyboard without a script.
 // docs-assets/nav.js adds hover, one menu at a time, Escape and the phone menu; docs-assets/nav.css styles them.
 import { pages } from './docsPages.mjs'
@@ -57,7 +57,7 @@ export function siteNavMarkup(current = '') {
               </div></details></li>
               <li class="nav-item"><details class="nav-drop"><summary${current === 'docs' ? ' aria-current="page"' : ''}>Docs<span class="nav-caret" aria-hidden="true">▾</span></summary><div class="nav-panel nav-docs">${docs}</div></details></li>
               <li class="nav-item"><a class="nav-link" href="/blog/"${current === 'blog' ? ' aria-current="page"' : ''}>Blog</a></li>
-              <li class="nav-item"><a class="nav-link" href="/#free-tiers">Free tiers</a></li>
+              <li class="nav-item"><a class="nav-link" href="/docs/limits/">Free tiers</a></li>
               <li class="nav-item"><a class="nav-link" href="/changelog/"${current === 'changelog' ? ' aria-current="page"' : ''}>Changelog</a></li>
             </ul>
           </nav>`
