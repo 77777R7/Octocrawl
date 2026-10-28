@@ -153,6 +153,9 @@ export const AUTHORIZABLE = [
   { capability: 'enhanced_browser', tier: 'enhanced', thirdPartyCost: false },
   // The installed Chrome, launched as nodriver launches it and driven over raw CDP, headed, local only (ADR 0005, 2026-10-13).
   { capability: 'installed_chrome', tier: 'enhanced', thirdPartyCost: false },
+  // Google Chrome on Octocrawl's own server (the octocrawl-chrome service), granted per call by hosted Octocrawl's operator
+  // config, account switch and the call's access "enhanced", never by a grant file (ADR 0005, revision of 2026-10-27).
+  { capability: 'hosted_chrome', tier: 'enhanced', thirdPartyCost: false },
   { capability: 'vendor_remote_browser', tier: 'enhanced', thirdPartyCost: true },
   { capability: 'vendor_residential_proxy', tier: 'enhanced', thirdPartyCost: true },
   { capability: 'vendor_unlock_html', tier: 'enhanced', thirdPartyCost: true },

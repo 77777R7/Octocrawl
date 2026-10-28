@@ -57,6 +57,7 @@ Patchright 与 `own_fingerprint_patches` 的区别：Patchright 是维护中的�
 | `egress_sessions` | standard | 否 | 用户自己的代理组成的会话：出口、cookie、profile 绑定，有界切换 |
 | `enhanced_browser` | enhanced | 否 | Patchright，只用于 Octocrawl 自有的浏览器实例和 profile |
 | `installed_chrome` | enhanced | 否 | 本机已安装的 Google Chrome，按测量过的方式启动（调试端口不对网页开放），每个任务一个新的临时 profile；只在本地运行、有窗口（见修订 2026-10-13）。测量时用原生 CDP 驱动；实现用 Playwright 通过 CDP 接管同样启动的 Chrome（见实现 2026-10-14） |
+| `hosted_chrome` | enhanced | 否 | Octocrawl 自己服务器上的 Google Chrome（独立的 Cloud Run 服务 `octocrawl-chrome`），钉住版本，有窗口（Xvfb），每次调用一个新的临时 profile，走代理前先做地址检查；只在托管上运行，按调用授予：运营配置、账户开关和这次调用的 `access: "enhanced"` 三项同时成立才用，从不由 grant 文件授予（见修订 2026-10-27）。付费出口按价目表另行记账 |
 | `vendor_remote_browser` | enhanced | 是 | 远程浏览器厂商（Browserbase、Steel） |
 | `vendor_unlock_html` | enhanced | 是 | 只返回 HTML 的解锁类厂商 |
 | `vendor_captcha_solving` | enhanced | 是 | 厂商内置的验证码求解 |

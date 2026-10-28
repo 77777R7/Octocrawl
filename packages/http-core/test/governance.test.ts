@@ -68,10 +68,11 @@ describe('evaluateGovernance', () => {
 })
 
 describe('enhanced access', () => {
-  it('permits the provider lane and, where the browser lane is, the installed_chrome rung (ADR 0005); never without enhanced', () => {
-    expect(evaluateGovernance('https://example.com/', { ...PUBLIC_POLICY, enhanced: true }).permittedChannels).toEqual([...MODE_CHANNELS.standard, 'provider', 'installed_chrome'])
+  it('permits the provider lane and, where the browser lane is, the installed_chrome and hosted_chrome rungs (ADR 0005); never without enhanced', () => {
+    expect(evaluateGovernance('https://example.com/', { ...PUBLIC_POLICY, enhanced: true }).permittedChannels).toEqual([...MODE_CHANNELS.standard, 'provider', 'installed_chrome', 'hosted_chrome'])
     expect(evaluateGovernance('https://example.com/', PUBLIC_POLICY).permittedChannels).not.toContain('installed_chrome')
-    expect(evaluateGovernance('https://example.com/', { ...PUBLIC_POLICY, mode: 'research', enhanced: true }).permittedChannels).toEqual([...MODE_CHANNELS.research, 'installed_chrome'])
+    expect(evaluateGovernance('https://example.com/', PUBLIC_POLICY).permittedChannels).not.toContain('hosted_chrome')
+    expect(evaluateGovernance('https://example.com/', { ...PUBLIC_POLICY, mode: 'research', enhanced: true }).permittedChannels).toEqual([...MODE_CHANNELS.research, 'installed_chrome', 'hosted_chrome'])
   })
 })
 

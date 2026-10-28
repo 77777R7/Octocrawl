@@ -261,6 +261,9 @@ export function normalizeAccessGrant(input: unknown): AccessGrantResult {
         problems.push({ field, kind: 'deferred', reason: verdict.reason, source: verdict.source, restartWhen: verdict.restartWhen })
       } else if (verdict.decision === 'unknown') {
         problems.push({ field, kind: 'unknown_capability', reason: verdict.reason })
+      } else if (name === 'hosted_chrome') {
+        // Hosted Octocrawl reads no grant: its operator's config, the account's switch and the call's access enhanced grant it per call.
+        problems.push({ field, kind: 'invalid', reason: 'hosted_chrome is granted per call by hosted Octocrawl\'s operator configuration and account switch, never by an access grant; on your own machine, installed_chrome is the real-Chrome rung (ADR 0005, revision of 2026-10-27)' })
       } else {
         const entry = AUTHORIZABLE.find((e) => e.capability === name)!
         if (entry.tier === 'enhanced' && tier !== 'enhanced') {

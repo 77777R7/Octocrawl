@@ -27,7 +27,7 @@
 
 import type { Browser, LaunchOptions } from 'playwright'
 import type { CompatAddressGuard } from '../compatGuard.js'
-import { DETECTION_FLAGS_ID, launchInstalledChrome, type InstalledChromeTestSeams } from './installedChrome.js'
+import { chromeRefusedOptions, DETECTION_FLAGS_ID, launchInstalledChrome, type ChromeRefusedOptions, type InstalledChromeTestSeams } from './installedChrome.js'
 
 /** The bypass list hosted Chrome is launched with: nothing skips the guard, loopback included. */
 export const HOSTED_CHROME_PROXY_BYPASS = '<-loopback>'
@@ -50,4 +50,13 @@ export const HOSTED_CHROME_PROFILE_ID = `${DETECTION_FLAGS_ID}+webrtc-proxied-ud
 /** Launch hosted Chrome behind its address guard: installed_chrome's launch, the guard as its only proxy, the hosted preferences. */
 export async function launchHostedChrome(guard: CompatAddressGuard, options: Pick<LaunchOptions, 'timeout'> = {}, seams: InstalledChromeTestSeams = {}, signal?: AbortSignal): Promise<Browser> {
   return launchInstalledChrome({ ...options, proxy: hostedChromeProxy(await guard.proxyUrl()) }, seams, signal, { preferences: HOSTED_CHROME_PREFERENCES })
+}
+
+/**
+ * Why the rung does not take a request, or null when it does: the options installed_chrome refuses, for the same reason
+ * (ADR 0005, revision of 2026-10-27): each would drive or dress the window beyond what was measured.
+ */
+export function hostedChromeRefusal(options: ChromeRefusedOptions): string | null {
+  const asked = chromeRefusedOptions(options)
+  return asked.length === 0 ? null : `hosted_chrome reads the page as Chrome opened it and takes no ${asked.join(', ')} (ADR 0005)`
 }

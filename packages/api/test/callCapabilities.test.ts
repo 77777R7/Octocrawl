@@ -131,4 +131,86 @@ describe('capabilities granted per call', () => {
     // The compatible transport on a hosted engine comes per call or not at all, whatever a grant says.
     expect(() => createApiEngine({ taskRoot: join(root, 'grant'), hosted: true, accessGrant: GRANT, compatHosts: ['shop.test'] })).toThrow(/refused on a hosted engine unless it is granted per call/)
   })
+
+  describe('hosted_chrome (ADR 0005, revision of 2026-10-27): operator config, the call\'s capability and access enhanced, together', () => {
+    const HELD: readonly CallCapability[] = ['compatible_transport', 'hosted_chrome']
+    const ATTESTATION = { principal: 'operator', at: '2026-10-28T00:00:00Z', statement: 'Octocrawl runs Google Chrome on its own server for accounts it lets in.' }
+    /** A page a check stopped, on the rung that read it. */
+    const stopped = (url: string, lane: FetchResult['lane']): FetchResult => ({ ...page(url), lane, status: 'blocked', blockReason: 'cloudflare_challenge', markdown: null, evidence: { ...page(url).evidence, httpStatus: 403 } })
+    const asked: string[] = []
+    const client = { fetch: async (url: string) => { asked.push(url); return { ...page(url), lane: 'browser_local' as const } }, close: vi.fn(async () => {}) }
+
+    async function hostedSetup(options: Partial<ApiEngineOptions> = {}) {
+      asked.length = 0
+      root = await mkdtemp(join(tmpdir(), 'w2l-call-capabilities-'))
+      const channelsFor = (mode: 'standard' | 'research' | 'authed'): Channel[] => [
+        { id: 'http', identity: identityBundleFrom(modeIdentity(mode)), fetch: async (url) => { seen.push([url, 'http']); return stopped(url, 'http') } },
+        { id: 'browser_local', identity: identityBundleFrom(modeIdentity(mode)), fetch: async (url) => { seen.push([url, 'browser_local']); return stopped(url, 'browser_local') } },
+      ]
+      engine = createApiEngine({ taskRoot: join(root, 'tasks'), channelsFor, networkPolicy: { ...hostedNetworkPolicy(), perHostMinDelayMs: 0 }, hosted: true, callCapabilities: HELD, hostedChrome: { attestation: ATTESTATION, client }, ...options })
+    }
+    const scrape = async (request: Record<string, unknown>, capabilities?: readonly CallCapability[]) =>
+      await engine!.scrape(parseScrapeRequest({ url: 'https://shop.test/item', debug: true, ...request }), capabilities === undefined ? {} : { capabilities }) as unknown as Audit & { status: string }
+
+    it('reads a page the rungs before it could not, after browser_local, only for a call that holds it and chose access enhanced', async () => {
+      await hostedSetup()
+      const read = await scrape({ access: 'enhanced' }, HELD)
+      expect(read.channelsTried).toEqual(['http', 'browser_local', 'hosted_chrome'])
+      expect(read.status).toBe('success')
+      expect(asked).toEqual(['https://shop.test/item'])
+      // Holding it without access enhanced, or access enhanced without holding it (a keyless call holds nothing): no such
+      // rung, in the audit either, and the page is what the rungs before it read.
+      for (const [request, capabilities] of [[{}, HELD], [{ access: 'standard' }, HELD], [{ access: 'enhanced' }, undefined], [{ access: 'enhanced' }, ['compatible_transport']]] as const) {
+        const plain = await scrape(request, capabilities)
+        expect(plain.channelsTried, JSON.stringify([request, capabilities])).toEqual(['http', 'browser_local'])
+        expect(plain.status).toBe('blocked')
+        expect(JSON.stringify(plain.ladderTrace)).not.toContain('hosted_chrome')
+      }
+      expect(asked).toHaveLength(1)
+    })
+
+    it('builds no rung without the operator\'s config, whatever the call holds: access enhanced is refused as before', async () => {
+      await hostedSetup({ hostedChrome: undefined })
+      await expect(scrape({ access: 'enhanced' }, HELD)).rejects.toThrow(/no approved budget for enhanced access/)
+      expect((await scrape({}, HELD)).channelsTried).toEqual(['http', 'browser_local'])
+      expect(asked).toEqual([])
+    })
+
+    it('refuses the options installed_chrome refuses, by name, and closes the service client once with the engine', async () => {
+      await hostedSetup()
+      client.close.mockClear()
+      const mobile = await scrape({ access: 'enhanced', mobile: true }, HELD)
+      expect(mobile.channelsTried).not.toContain('hosted_chrome')
+      expect(JSON.stringify(mobile.ladderTrace)).toContain('hosted_chrome reads the page as Chrome opened it and takes no mobile')
+      expect(asked).toEqual([])
+      await engine!.close()
+      engine = null
+      expect(client.close).toHaveBeenCalledTimes(1)
+      client.close.mockClear()
+    })
+
+    it('gives a job slice the rung only when its worker passed hosted_chrome and the job chose access enhanced', async () => {
+      await hostedSetup({ deferLaunch: true })
+      const run = async (access: 'enhanced' | undefined, capabilities?: readonly CallCapability[]) => {
+        asked.length = 0
+        const { taskId } = await engine!.startBatch({ urls: ['https://news.test/a'], maxConcurrency: 1, ...(access === undefined ? {} : { access }) } as Parameters<ApiEngine['startBatch']>[0])
+        await engine!.runSlice(taskId, { maxNewPages: 10, maxMs: 20_000, ...(capabilities === undefined ? {} : { capabilities }) })
+        return [...asked]
+      }
+      expect(await run('enhanced', HELD)).toEqual(['https://news.test/a'])
+      expect(await run('enhanced')).toEqual([])
+      expect(await run(undefined, HELD)).toEqual([])
+    })
+
+    it('runs only on a hosted engine that grants it per call, with the operator\'s attestation, and never by a grant', async () => {
+      root = await mkdtemp(join(tmpdir(), 'w2l-call-capabilities-'))
+      const operator = { attestation: ATTESTATION, client }
+      expect(() => createApiEngine({ taskRoot: join(root, 'local'), hostedChrome: operator })).toThrow(/only on hosted Octocrawl/)
+      expect(() => createApiEngine({ taskRoot: join(root, 'unnamed'), hosted: true, callCapabilities: COMPAT, hostedChrome: operator, compatHosts: ['shop.test'] })).toThrow(/callCapabilities must name it/)
+      expect(() => createApiEngine({ taskRoot: join(root, 'unattested'), hosted: true, callCapabilities: HELD, hostedChrome: { ...operator, attestation: { ...ATTESTATION, statement: ' ' } } })).toThrow(/attestation/)
+      // A local engine whose real-Chrome rung is installed_chrome, and a hosted one that refuses it, the solver and egress proxies as before.
+      expect(() => createApiEngine({ taskRoot: join(root, 'grant'), hosted: true, accessGrant: accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['installed_chrome'], attestation: ATTESTATION })) })).toThrow(/installed_chrome is refused on a hosted engine/)
+      expect(() => accessGrantFromText(JSON.stringify({ tier: 'enhanced', capabilities: ['hosted_chrome'], attestation: ATTESTATION }))).toThrow(/granted per call/)
+    })
+  })
 })

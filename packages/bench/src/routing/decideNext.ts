@@ -88,7 +88,7 @@ export interface ActionDecision {
   assisted?: true
 }
 
-const BROWSER_RUNGS: ReadonlySet<string> = new Set(['browser_local', 'installed_chrome', 'authed_session'])
+const BROWSER_RUNGS: ReadonlySet<string> = new Set(['browser_local', 'installed_chrome', 'hosted_chrome', 'authed_session'])
 const isPaid = (rung: RungRef | null | undefined): boolean => rung?.vendorId !== undefined
 
 /** The readiness the ladder acts on: a `not_extracted` page whose region no live read judged is `not_served` (contractReadiness). */
