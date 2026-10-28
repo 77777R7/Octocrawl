@@ -21,6 +21,8 @@ export default {
     headers.set('x-forwarded-host', incoming.host)
     headers.set('x-forwarded-proto', 'https')
     if (env.PROXY_SECRET) headers.set('x-w2l-proxy-secret', env.PROXY_SECRET)
-    return fetch(target, { method: request.method, headers, body: request.body, redirect: 'manual' })
+    // request.signal stops when the client disconnects (the enable_request_signal flag, wrangler.toml): the request to
+    // the service stops with it, so a scrape the client gave up on stops and is not charged.
+    return fetch(target, { method: request.method, headers, body: request.body, redirect: 'manual', signal: request.signal })
   },
 }

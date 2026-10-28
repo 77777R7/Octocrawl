@@ -4,6 +4,8 @@
 name = "octocrawl-hosted-api-proxy"
 main = "worker.js"
 compatibility_date = "2026-09-30"
+# request.signal stops when the client disconnects (worker.js passes it on to the service).
+compatibility_flags = ["enable_request_signal"]
 workers_dev = false
 routes = [
   { pattern = "api.octocrawl.dev", custom_domain = true },

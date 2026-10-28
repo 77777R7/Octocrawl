@@ -99,7 +99,8 @@ export function trackPost(calls: InFlightCalls, req: IncomingMessage, res: Serve
   const session = typeof header === 'string' && header.length > 0 ? header : null
   const post = calls.open(clientScope(identity, session))
   if ((Array.isArray(body) ? body : [body]).some(message => isInitializeRequest(message))) res.setHeader('mcp-session-id', randomUUID())
-  res.once('close', () => { if (!res.writableFinished) post.abortAll(new DOMException('the MCP client disconnected before the result', 'AbortError')) })
+  // writableEnded, not writableFinished: a response whose HTTP/2 stream was reset counts as finished (Node 22 and 26).
+  res.once('close', () => { if (!res.writableEnded) post.abortAll(new DOMException('the MCP client disconnected before the result', 'AbortError')) })
   return post
 }
 

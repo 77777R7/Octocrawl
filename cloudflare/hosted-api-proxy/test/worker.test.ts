@@ -21,6 +21,17 @@ describe('hosted api proxy worker', () => {
     expect(init.redirect).toBe('manual')
   })
 
+  it('stops the request to the service when its client disconnects', async () => {
+    const fetchStub = vi.fn(async () => new Response('ok'))
+    vi.stubGlobal('fetch', fetchStub)
+    const client = new AbortController()
+    await worker.fetch(new Request('https://mcp.octocrawl.dev/mcp', { method: 'POST', body: '{}', signal: client.signal }), env)
+    const { signal } = (fetchStub.mock.calls[0] as [URL, RequestInit])[1]
+    expect(signal?.aborted).toBe(false)
+    client.abort()
+    expect(signal?.aborted).toBe(true)
+  })
+
   it('serves mcp.octocrawl.dev from the same origin and never redirects between hosts', async () => {
     const fetchStub = vi.fn(async () => new Response('ok'))
     vi.stubGlobal('fetch', fetchStub)
