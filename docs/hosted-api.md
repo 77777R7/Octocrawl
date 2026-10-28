@@ -13,7 +13,7 @@ Phase 1 of the roadmap's [PH · Hosted Octocrawl](../ROADMAP.md#ph--hosted-octoc
 
 Keyless calls from Claude's published egress range (`160.79.104.0/21`, https://platform.claude.com/docs/en/api/ip-addresses; claude.ai, the desktop and mobile apps, the API's MCP connector) share one pool, `W2L_CLAUDE_DAILY` (200) pages a day at 60 starts a minute, under the quota id `<day>-keyless-claude`, since they come from Anthropic's servers and would otherwise split one address's allowance among every Claude user. Claude Code connects from the user's own machine and keeps the per-address allowance. The range is `CLAUDE_EGRESS` in `packages/mcp/src/hostedApi.ts`; check the published list when Anthropic announces a change. The pool is first come, first served: one caller of the API's MCP connector can spend it for everyone until 00:00 UTC, and the per-address limit (120 requests a minute, counted before the caller is known, and twice for an MCP tool call) still applies to each Anthropic address. A key, which the API's MCP connector can send, keeps its own allowance.
 
-MCP directories read `GET /.well-known/mcp/server-card.json` ([Smithery's server card](https://smithery.ai/docs/build/publish)): the server's name and version, `authentication.required: false`, and the tools `/mcp` lists to a caller without a key, built from the same definitions. `tools/list` names only what the caller can use (`scrape_product` only for a key with the browser lane), and every hosted tool carries a `title` and `readOnlyHint: true`, since hosted Octocrawl refuses page actions and logins. Their input schemas list only what hosted serves (`HOSTED_SCRAPE_KEYS` in `packages/mcp/src/hostedApi.ts`): no `actions`, `robotsOverride`, `lane`, `handoff`, `skipTlsVerification`, `access`, `mode: authed`, cache options or regular-expression checks, and without the browser lane no `screenshot` or `waitFor`. A hosted MCP scrape stops at 100 s (REST keeps 300 s), and hosted MCP results leave out the call's telemetry and internal ids (`usage`, `channelsTried`, `metadata.scrapeId` and the concurrency fields) and the campaign tags in `agentHints` links, unless `debug` is set; REST keeps them, and the Evidence Record stays whole; the same `scrape` on a server on your computer is not marked read-only, as its actions can click and type; `/.well-known/oauth-protected-resource/mcp-oauth` is the Protected Resource Metadata (RFC 9728) for `/mcp-oauth`, which names `https://octocrawl.dev` as its authorization server; any other `/.well-known` file is 404 `not_found`, so a client on `/mcp` finds no OAuth metadata and connects without signing in. `crawl` and `batch` without an account's key answer 403 `jobs_need_account`; an account's connection lists the twelve job tools (`HOSTED_JOB_TOOLS`, H2 M1–M5), with their start options cut to `HOSTED_BATCH_KEYS` and `HOSTED_CRAWL_KEYS` (no `webhook`, which is REST only; `maxCredits` is listed on the hosted start tools only, H2 M6) and waits of at most 90 s. Everything else (Monitors, logins, `/fc`) answers 403 `hosted_unavailable` with an `agentHints` entry that says to run Octocrawl on your computer. Callers without an account (keyless, and keys issued without one) share `W2L_SITE_DAILY` (1500) pages a day, under the quota id `<day>-site`, and keyless callers together get `W2L_KEYLESS_TOTAL_DAILY` (500) of it, under `<day>-keyless`. Accounts have a day apart from it, so a rush of keyless calls refuses no one who signed in: `W2L_ACCOUNTS_DAILY` (3000) pages for every account together, under `<day>-accounts`, and `W2L_ACCOUNT_DAILY` (500) for each, under `<day>-account-<uid>`. Over an allowance: 429 `quota_exhausted` with `Retry-After` until 00:00 UTC; a caller without an account is told first that signing in is free and gives the month's credits (`/mcp-oauth` for an MCP client, a key from `/signin/` for the API). The use that takes a shared pool (`site`, `keyless`, `keyless-claude`, `accounts`, and the worker's `jobs`) to 70% of its day logs one `hosted_quota_threshold` line; [Alerts](#alerts) mails it. Every request, of any kind, is limited to 120 a minute per address before any key lookup. Nothing is retained: `storeInCache` is pinned off, files are capped at 5 MiB, and scrape and map records and saved files are swept from the task root (Cloud Run's in-memory `/tmp`) after 10 minutes.
+MCP directories read `GET /.well-known/mcp/server-card.json` ([Smithery's server card](https://smithery.ai/docs/build/publish)): the server's name and version, `authentication.required: false`, and the tools `/mcp` lists to a caller without a key, built from the same definitions. `tools/list` names only what the caller can use (`scrape_product` only for a key with the browser lane), and every hosted tool carries a `title` and `readOnlyHint: true`, since hosted Octocrawl refuses page actions and logins. Their input schemas list only what hosted serves (`HOSTED_SCRAPE_KEYS` in `packages/mcp/src/hostedApi.ts`): no `actions`, `robotsOverride`, `lane`, `handoff`, `skipTlsVerification`, `access`, `mode: authed`, cache options or regular-expression checks, and without the browser lane no `screenshot` or `waitFor`. A hosted MCP scrape stops at 120 s when it names no `timeout`, as a local one does, and at 180 s at most (REST keeps 300 s; Cloud Run's request timeout is 300 s), and hosted MCP results leave out the call's telemetry and internal ids (`usage`, `channelsTried`, `metadata.scrapeId` and the concurrency fields) and the campaign tags in `agentHints` links, unless `debug` is set, though a connection that lists `get_scrape` keeps `metadata.scrapeId` to read the record back by, and `get_scrape` answers the record without the same telemetry and the client that made it (`origin`); REST keeps them, and the Evidence Record stays whole; the same `scrape` on a server on your computer is not marked read-only, as its actions can click and type; `/.well-known/oauth-protected-resource/mcp-oauth` is the Protected Resource Metadata (RFC 9728) for `/mcp-oauth`, which names `https://octocrawl.dev` as its authorization server; any other `/.well-known` file is 404 `not_found`, so a client on `/mcp` finds no OAuth metadata and connects without signing in. `crawl` and `batch` without an account's key answer 403 `jobs_need_account`; an account's connection lists the twelve job tools, `list_active_crawls` and `get_scrape` (`HOSTED_JOB_TOOLS`, H2 M1–M5 and stage H W0; a scrape's record is kept 10 minutes, on the instance that ran the scrape, so a read that reaches another instance answers `not_found`), with their start options cut to `HOSTED_BATCH_KEYS` and `HOSTED_CRAWL_KEYS` (no `webhook`, which is REST only; `maxCredits` is listed on the hosted start tools only, H2 M6) and waits of at most 120 s, as locally. Everything else (Monitors, logins, `/fc`) answers 403 `hosted_unavailable` with an `agentHints` entry that says to run Octocrawl on your computer. Callers without an account (keyless, and keys issued without one) share `W2L_SITE_DAILY` (1500) pages a day, under the quota id `<day>-site`, and keyless callers together get `W2L_KEYLESS_TOTAL_DAILY` (500) of it, under `<day>-keyless`. Accounts have a day apart from it, so a rush of keyless calls refuses no one who signed in: `W2L_ACCOUNTS_DAILY` (3000) pages for every account together, under `<day>-accounts`, and `W2L_ACCOUNT_DAILY` (500) for each, under `<day>-account-<uid>`. Over an allowance: 429 `quota_exhausted` with `Retry-After` until 00:00 UTC; a caller without an account is told first that signing in is free and gives the month's credits (`/mcp-oauth` for an MCP client, a key from `/signin/` for the API). The use that takes a shared pool (`site`, `keyless`, `keyless-claude`, `accounts`, and the worker's `jobs`) to 70% of its day logs one `hosted_quota_threshold` line; [Alerts](#alerts) mails it. Every request, of any kind, is limited to 120 a minute per address before any key lookup. Nothing is retained: `storeInCache` is pinned off, files are capped at 5 MiB, and scrape and map records and saved files are swept from the task root (Cloud Run's in-memory `/tmp`) after 10 minutes.
 
 ## Connect
 
@@ -61,7 +61,7 @@ export W2L_REVISION_SUFFIX=phase1     # names the revision octocrawl-api-phase1
 export W2L_TAG=h1phase1               # one tag per release; the previous tag stays as the rollback
 gcloud run deploy octocrawl-api --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
   --service-account="$W2L_RUNTIME_SA" --allow-unauthenticated \
-  --cpu=1 --memory=2Gi --concurrency=2 --min-instances=0 --max-instances=3 --timeout=120s \
+  --cpu=1 --memory=2Gi --concurrency=2 --min-instances=0 --max-instances=3 --timeout=300s \
   --revision-suffix="$W2L_REVISION_SUFFIX" \
   --set-env-vars="W2L_FIRESTORE_PROJECT_ID=${W2L_PROJECT_ID},W2L_PUBLIC_API_ORIGIN=https://api.octocrawl.dev,W2L_KEYLESS_DAILY=20,W2L_SITE_DAILY=1500,W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}" \
   --update-secrets='W2L_QUOTA_HASH_KEY=w2l-quota-hash-key:latest,W2L_PROXY_SECRET=w2l-proxy-secret:latest'
@@ -70,16 +70,16 @@ gcloud run services update-traffic octocrawl-api --region="$W2L_REGION" --projec
 gcloud run services describe octocrawl-api --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --format='value(status.url)'
 ```
 
-A later release deploys the new image without traffic, with `--update-env-vars=W2L_SOURCE_COMMIT=…` alone (`--set-env-vars` replaces them all), then moves all traffic to it under a new tag:
+A later release deploys the new image without traffic, with `--update-env-vars=W2L_SOURCE_COMMIT=…` alone (`--set-env-vars` replaces them all) and the request timeout the code assumes (`HOSTED_REQUEST_TIMEOUT_MS`, 300 s since stage H W0; a revision keeps the last one set), then moves all traffic to it under a new tag:
 
 ```sh
 gcloud run deploy octocrawl-api --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
-  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}"
+  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --timeout=300s --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}"
 gcloud run services update-traffic octocrawl-api --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
   --to-revisions="octocrawl-api-${W2L_REVISION_SUFFIX}=100" --update-tags="${W2L_TAG}=octocrawl-api-${W2L_REVISION_SUFFIX}"
 ```
 
-`--concurrency=2` and `--max-instances=3` bound the spend: at most six pages are read at once, and a browser-lane page holds one slot for its whole run. Raise them only from the recorded cost per page (below). A key also runs one scrape at a time that may use the browser lane (ROADMAP PH item 1): the gate takes a lease, `hostedLeases/browser-{key HMAC}`, in one commit with an update-time precondition, holds it for the call and deletes it after, so the bound holds across instances. A second such scrape with the same key is `429 browser_busy` with `Retry-After` (at most 10 s); one that sends `fastMode: true`, and every map, takes no lease. A lease an instance never released (a crash) is taken over once its `expireAt` passes, 130 s after it was taken.
+`--concurrency=2` and `--max-instances=3` bound the spend: at most six pages are read at once, and a browser-lane page holds one slot for its whole run. Raise them only from the recorded cost per page (below). A key also runs one scrape at a time that may use the browser lane (ROADMAP PH item 1): the gate takes a lease, `hostedLeases/browser-{key HMAC}`, in one commit with an update-time precondition, holds it for the call and deletes it after, so the bound holds across instances. A second such scrape with the same key is `429 browser_busy` with `Retry-After` (at most 10 s); one that sends `fastMode: true`, and every map, takes no lease. A lease an instance never released (a crash) is taken over once its `expireAt` passes, 310 s after it was taken (the request timeout and 10 s).
 
 The Worker in `cloudflare/hosted-api-proxy/` answers on `api.octocrawl.dev` and `mcp.octocrawl.dev` (Workers custom domains, no DNS record for Cloud Run) and forwards to the run.app address with the shared secret, so the service can believe `CF-Connecting-IP`. Set `ORIGIN_URL` in its `wrangler.toml` to the URL the describe command printed, then:
 
@@ -165,6 +165,10 @@ gcloud run services add-iam-policy-binding octocrawl-jobs --region="$W2L_REGION"
 The API takes the same variables with `--update-env-vars` on its next release. Verified on 2026-10-20 (worker `octocrawl-jobs-w1-5141c6d`, API `octocrawl-api-jobs-5141c6d`, tag `h28jobs`, rollback `h27shares`), with a key issued for the purpose and revoked after: a 6-URL batch and a 5-page crawl through the real queue, worker and bucket each completed in one slice in about 11 s, paged back, exported by a signed link, were charged 6 and 4 credits once each (`creditSettles`), and had their expiry queued 7 days on. A request to the worker without a token is 403 from Cloud Run, and with another account's token 401 from the worker. The switch was left off.
 
 `GET /v1/jobs?limit=&before=` lists an account's jobs, newest first, with the fields of a job's status (H2 P1, for the dashboard and MCP). `limit` is 1–50 (default 20); `before` is the `nextBefore` of the previous page, a job id, and `hasMore` says whether another page follows. A call without an account's key is 403. The list is the last 200 jobs the account started, kept in its slots document (`hostedJobWorkspaces/{workspaceId}.slots.recent`), so it needs no Firestore index; a job leaves it when its record is deleted (7 days of results and 30 more of record after it finishes). Jobs started before the list existed are not in it.
+
+`GET /v1/crawl/active` lists the account's crawl jobs that are `queued` or `running`, oldest first, as `{ crawls: [{ id, url, status, startedAt, pagesFetched }] }`: a local server's list of the crawls it runs, in a job's statuses and without the options each was started with (stage H W0; the MCP tool `list_active_crawls`). It reads the same list, and a call without an account's key is 403.
+
+A start checks its request on an engine set up like the worker's (`jobEngineOptions` in `hostedApi.ts`; the engine's `checkCrawlStart` and `checkBatchStart`). It refuses with 400 whatever the job's first slice would refuse, and names the problem: a `maxFileBytes` above 5 MiB, or a selector Octocrawl does not match in `includeTags`, `excludeTags`, an attributes format or a list format. It also refuses a check whose format is missing (`tableRowsMin` without `tables`, a Markdown check without `markdown`) and a regular-expression check. Such a start used to answer 202, and the job then failed at its first slice. If the worker's engine still refuses a stored request at the first slice, the job fails at once with `failureReason: request_refused`, and the worker logs the message as `hosted_job_request_refused`. Before, the slice was retried until the job ended `delivery_failed`.
 
 ### Job webhooks
 
@@ -294,7 +298,7 @@ T=$(gcloud auth print-access-token); curl -s -X PATCH -H "authorization: Bearer 
 # 4. A release of both services from a commit that has this code, as any release (Deploy above; Batch and crawl jobs for
 #    octocrawl-jobs), with the model's variables and the key added to what each has:
 gcloud run deploy octocrawl-api --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
-  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic \
+  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --timeout=300s \
   --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA},W2L_EXTRACT_PROVIDER=anthropic,W2L_EXTRACT_MODEL=claude-haiku-5-5" \
   --update-secrets='W2L_EXTRACT_API_KEY=w2l-anthropic-api-key:latest'
 gcloud run deploy octocrawl-jobs --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
@@ -314,6 +318,43 @@ curl -s -X PATCH -H "authorization: Bearer $T" -H "x-goog-user-project: $W2L_PRO
 `W2L_EXTRACT_BASE_URL` stays unset, so the SDK calls `https://api.anthropic.com`. The services pass no proxy to the SDK: Cloud Run reaches Anthropic directly.
 
 To turn it off, write `enabled: false` (or delete the document): within 30 s no new call is admitted, and a call already admitted finishes. To change the cap, write `dailyCapUsd`. To take the model away altogether, a release with `--remove-env-vars=W2L_EXTRACT_PROVIDER,W2L_EXTRACT_MODEL --remove-secrets=W2L_EXTRACT_API_KEY` on both services; rolling back to the previous tags does the same, since those revisions have no key. Read a day's spend from `hostedModelSpend/{day}.microUsd`, and the bill from the Anthropic Console.
+
+## The compatible transport
+
+ADR 0005's `compatible_transport` sends a page's requests with [impit](https://github.com/apify/impit) (0.14.5, profile `chrome142`), whose TLS and HTTP/2 handshakes and headers are a real Chrome's, instead of undici's ([access](access.md), `W2L_COMPAT_HOSTS`). It is the first step of ROADMAP stage H item 2. Hosted Octocrawl reads no access grant, so the transport is granted per request, by an operator switch that is off by default. `packages/mcp/src/hostedAccess.ts` holds the rules.
+
+- **The switch.** The Firestore document `hostedConfig/compatibleTransport`:
+  - `enabled` (boolean). While the document is absent, or `enabled` is anything but `true`, no call holds the transport, so a deploy alone turns nothing on.
+  - `allowedUids` (an array of account uids, optional). When it exists, only those accounts' calls hold the transport: a keyless caller, a key issued without an account and every other account do not. An empty array grants it to no one. When it is absent, every caller holds it.
+  - Both services read the document at most every 30 s. A failed read keeps what was read last; with nothing read yet the switch is off.
+- **Who asks.** The gate asks for each scrape, REST and MCP alike. The job worker asks as each slice starts, for the job's account, so a change reaches a running job at its next slice. The answer goes to the engine with the call (`ScrapeContext.capabilities`, `SliceLimits.capabilities`); the engine grants a call nothing beyond `compatible_transport` (`HOSTED_CALL_CAPABILITIES`), and the other capabilities stay refused here: `installed_chrome`, the CAPTCHA solver, vendors, egress proxies, Patchright.
+- **Which pages.** As on a server on your computer whose grant names the transport and sets no `W2L_COMPAT_HOSTS`:
+  - only the five hosts its acceptance showed it helps (`research/access/benefit-hosts.v1.json`), with their subdomains;
+  - their `http` rung becomes `http_compat`;
+  - a request with custom `headers` or `mobile` keeps `http`, and a map's start page never uses the transport;
+  - every other page is read as before.
+- **The address guard.** impit resolves names itself and takes no resolver, so a hosted engine's transport sends every request through `CompatAddressGuard` (`packages/bench/src/compatGuard.ts`):
+  - a SOCKS5 server on `127.0.0.1` in the same process, with a login it makes up when it starts and gives impit alone;
+  - it resolves each name, refuses it when any address it resolves to is one hosted Octocrawl does not connect to (private, shared, loopback, link-local, multicast, unspecified, the metadata service's), and connects only to an address it checked;
+  - impit's TLS handshake and HTTP/2 pass through it unchanged;
+  - impit follows no redirect itself: the lane checks each hop, and the hop's connection goes through the guard again;
+  - a refused address is `failed` / `policy_denied`, a name that does not resolve `failed` / `dns_error`, as on the undici lane.
+- **The price and the record.** A page read over the transport is an HTTP page: 1 credit, as `lane: "http"` shows. Its Evidence Record says how it was read, as a local server's does: `access.route: "http_compat"`, `executor: "impit"`, `executorVersion`, `profile`, and `egress.source: "direct"` (the guard is not a proxy). The trace has the lane's `transport` event, and a scrape's ladder audit says `http` was set aside (`ladder_channels_filtered`, reason `compatible_transport`).
+
+### Turning it on
+
+Steps for Howard to approve; nothing here has been run.
+
+1. A release of both services from a commit that has this code (Deploy above; Batch and crawl jobs for `octocrawl-jobs`). It needs no new variable or secret. Both services load impit as they start, so a revision whose image lacks it does not start.
+2. Write the switch for one account first, so the parity board can measure the transport before every caller has it.
+3. Measure it on the parity board (`research/hosted/parity-window.mjs`), switch on and switch off, in two windows. Turn it on for every caller only after that, by removing `allowedUids`.
+
+```sh
+# The switch for one account (users/{uid}); write enabled false to turn it off, within 30 s.
+T=$(gcloud auth print-access-token); curl -s -X PATCH -H "authorization: Bearer $T" -H "x-goog-user-project: $W2L_PROJECT_ID" -H 'content-type: application/json' \
+  "https://firestore.googleapis.com/v1/projects/$W2L_PROJECT_ID/databases/(default)/documents/hostedConfig/compatibleTransport" \
+  -d '{"fields":{"enabled":{"booleanValue":true},"allowedUids":{"arrayValue":{"values":[{"stringValue":"<uid>"}]}}}}'
+```
 
 ## Read the service
 
@@ -358,29 +399,29 @@ Where the hosted MCP endpoint stands against a server on your computer (`npx oct
 The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `packages/mcp/test/hostedParity.test.ts` fails when an entry claims more or less than the hosted tool lists, key sets and engine serve, or when this table differs from the manifest; `node --import tsx scripts/hosted/parity-table.ts --write` rewrites it.
 
 <!-- hosted-parity:start -->
-**Tools.** Of the local server's 39 MCP tools, hosted serves 15: 2 as locally and 13 limited. 23 are planned and 1 is different on purpose.
+**Tools.** Of the local server's 39 MCP tools, hosted serves 17: 2 as locally and 15 limited. 21 are planned and 1 is different on purpose.
 
 **Options.** Of the 118 local options of scrape, map, crawl and batch_scrape, hosted lists 85: 73 as locally and 12 limited. 23 are planned and 10 different on purpose. Below the options, 13 option values that hosted leaves out or limits.
 
-**Planned, by stage H item** (tools, options and values): item 2, hosted access: 3; item 3, actions and waitFor: 2; item 4, monitors and delivery: 18; item 5, identity-bound features: 5; item 7, the json model fallback: 1; item 8, beyond local: 13; no item yet: 13.
+**Planned, by stage H item** (tools, options and values): item 2, hosted access: 3; item 3, actions and waitFor: 2; item 4, monitors and delivery: 18; item 5, identity-bound features: 5; item 7, the json model fallback: 1; item 8, beyond local: 13; no item yet: 11.
 
 | Tool | Hosted | How |
 | --- | --- | --- |
-| `scrape` | Supported | Every connection. Results leave out usage, channelsTried and metadata.scrapeId unless debug is set; the Evidence Record stays whole. |
+| `scrape` | Supported | Every connection. Results leave out usage and channelsTried unless debug is set, and metadata.scrapeId unless debug is set or the connection lists get_scrape (an account's); the Evidence Record stays whole. |
 | `map` | Supported | Every connection. |
-| `get_scrape` | Planned: no stage H item yet | Hosted keeps a scrape's record 10 minutes (REST GET /v1/scrapes/:id) and lists no get_scrape; locally records are kept without a time limit. |
+| `get_scrape` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); hosted keeps a scrape's record 10 minutes, on the server instance that ran the scrape, so a read that reaches another instance answers not_found, and answers it without the call's telemetry, as a scrape's result (locally records are kept without a time limit and answered whole). |
 | `crawl` | Limited | An account's connection only (its key, or signing in at /mcp-oauth): a job run a slice at a time, at most 500 pages, each page priced as a scrape, results kept 7 days. |
 | `get_crawl` | Limited | An account's connection only (its key, or signing in at /mcp-oauth), for its own jobs. |
-| `wait_crawl` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); a wait ends within 90 s (local 120 s) with the status so far. |
+| `wait_crawl` | Limited | An account's connection only (its key, or signing in at /mcp-oauth). |
 | `get_crawl_pages` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); limit at most 100 (local 1,000), maxResults at most 100 (local 200). |
 | `get_crawl_errors` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); limit at most 100 (local 1,000). |
 | `cancel_crawl` | Limited | An account's connection only (its key, or signing in at /mcp-oauth). |
 | `resume_crawl` | Planned: no stage H item yet | A hosted job goes on slice by slice by itself; a failed or cancelled one is started again, not resumed. |
-| `list_active_crawls` | Planned: no stage H item yet | REST GET /v1/jobs lists an account's jobs (the dashboard's Jobs page); no MCP tool does. |
+| `list_active_crawls` | Limited | An account's connection only (its key, or signing in at /mcp-oauth): its crawl jobs queued or running, in their job statuses and without the options each was started with (REST GET /v1/crawl/active). |
 | `batch_scrape` | Limited | An account's connection only (its key, or signing in at /mcp-oauth): a job run a slice at a time, up to 1,000 URLs, each page priced as a scrape, results kept 7 days. |
 | `get_batch` | Limited | An account's connection only (its key, or signing in at /mcp-oauth), for its own jobs. |
 | `get_batch_items` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); limit at most 50 (local 50), maxResults at most 100 (local 200). |
-| `wait_batch` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); a wait ends within 90 s (local 120 s) with the status so far. |
+| `wait_batch` | Limited | An account's connection only (its key, or signing in at /mcp-oauth). |
 | `cancel_batch` | Limited | An account's connection only (its key, or signing in at /mcp-oauth). |
 | `get_batch_errors` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); answers the failed items as { items, nextCursor, hasMore } (local { errors, robotsBlocked }), limit at most 100 (local 1,000). |
 | `hand_off_batch` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. |
@@ -412,14 +453,14 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `scrape` `mode` | Supported |  |
 | `scrape` `handoff` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
 | `scrape` `lane` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
-| `scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. Stage H item 2 adds compatible_transport, a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. access standard, the default, is taken; enhanced and my-browser are refused by name. Sent anyway: refused by name. |
+| `scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 goes on with a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. access standard, the default, is taken; enhanced and my-browser are refused by name. Sent anyway: refused by name. |
 | `scrape` `allowlistedDomains` | Supported |  |
 | `scrape` `formats` | Supported |  |
 | `scrape` `includeLinks` | Supported |  |
 | `scrape` `debug` | Supported |  |
 | `scrape` `onlyMainContent` | Supported |  |
 | `scrape` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
-| `scrape` `timeout` | Limited | At most 100 s, and 100 s when left out (local 300 s, and 120 s when left out), under claude.ai's 240 s tool limit and Cloud Run's 120 s request timeout. |
+| `scrape` `timeout` | Limited | At most 180 s, and 120 s when left out (local 300 s, and 120 s when left out): 60 s inside the 240 s claude.ai gives a tool call, under Cloud Run's 300 s request timeout. |
 | `scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). |
 | `scrape` `includeTags` | Supported |  |
 | `scrape` `excludeTags` | Supported |  |
@@ -455,7 +496,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `map` `integration` | Supported |  |
 | `crawl` `url` | Supported |  |
 | `crawl` `mode` | Supported |  |
-| `crawl` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. Stage H item 2 adds compatible_transport, a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
+| `crawl` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 goes on with a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
 | `crawl` `maxPages` | Limited | At most 500, and 100 when left out or null (locally null is no cap). Stage H item 6, limits and capacity raises it. |
 | `crawl` `maxDepth` | Supported |  |
 | `crawl` `useCached` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
@@ -472,13 +513,13 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `crawl` `allowExternalLinks` | Supported |  |
 | `crawl` `sitemap` | Supported |  |
 | `crawl` `ignoreRobotsTxt` | Different on purpose | Hosted fetches from the operator's addresses and obeys robots.txt for every URL (ROADMAP Direction). Sent anyway: refused by name. |
-| `crawl` `maxConcurrency` | Limited | At most 2, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT). The schema shows no cap: the start takes more, and the job's first slice refuses it, so the job ends failed (delivery_failed). Stage H item 6, limits and capacity raises it. |
+| `crawl` `maxConcurrency` | Limited | At most 2, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT); the start lowers a larger value to 2. Stage H item 6, limits and capacity raises it. |
 | `crawl` `idempotencyKey` | Supported |  |
 | `crawl` `webhook` | Planned: stage H item 4, monitors and delivery | REST takes it for the job's end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript. Sent anyway: served over REST only. |
 | `crawl` `onlyMainContent` | Supported |  |
 | `crawl` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
 | `crawl` `timeout` | Supported |  |
-| `crawl` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). |
+| `crawl` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). REST takes a larger value and the start refuses it by name. |
 | `crawl` `includeTags` | Supported |  |
 | `crawl` `excludeTags` | Supported |  |
 | `crawl` `headers` | Supported |  |
@@ -496,13 +537,13 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `batch_scrape` `urls` | Supported |  |
 | `batch_scrape` `mode` | Supported |  |
 | `batch_scrape` `lane` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
-| `batch_scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. Stage H item 2 adds compatible_transport, a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
+| `batch_scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 goes on with a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
 | `batch_scrape` `formats` | Supported |  |
 | `batch_scrape` `includeLinks` | Supported |  |
 | `batch_scrape` `onlyMainContent` | Supported |  |
 | `batch_scrape` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
 | `batch_scrape` `timeout` | Supported |  |
-| `batch_scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). |
+| `batch_scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). REST takes a larger value and the start refuses it by name. |
 | `batch_scrape` `includeTags` | Supported |  |
 | `batch_scrape` `excludeTags` | Supported |  |
 | `batch_scrape` `headers` | Supported |  |
@@ -533,10 +574,10 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `scrape` `formats: json.modelFallback` | Planned: stage H item 7, the json model fallback | Listed, and answered as switched off until the model fallback is deployed with a model and switched on (hostedConfig/model); the live service's state is not checked here. Sent anyway: taken, not honoured. The same on crawl and batch_scrape. |
 | `scrape` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
 | `scrape` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
-| `crawl` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. A job's start takes it, and its first slice refuses it; the slice is retried and the job ends failed (delivery_failed) without naming the check. Sent anyway: the job starts and fails. |
-| `crawl` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. A job's start takes it, and its first slice refuses it; the slice is retried and the job ends failed (delivery_failed) without naming the check. Sent anyway: the job starts and fails. |
+| `crawl` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
+| `crawl` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
 | `batch_scrape` `mode: authed` | Planned: stage H item 5, identity-bound features | Hosted holds no saved logins; the start refuses the value by name. Sent anyway: refused by name. |
 | `batch_scrape` `access: my-browser` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
-| `batch_scrape` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. A job's start takes it, and its first slice refuses it; the slice is retried and the job ends failed (delivery_failed) without naming the check. Sent anyway: the job starts and fails. |
-| `batch_scrape` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. A job's start takes it, and its first slice refuses it; the slice is retried and the job ends failed (delivery_failed) without naming the check. Sent anyway: the job starts and fails. |
+| `batch_scrape` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
+| `batch_scrape` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006: a JavaScript regular expression cannot be bounded in time, so hosted refuses it until a time-bounded regular-expression engine exists; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
 <!-- hosted-parity:end -->

@@ -57,6 +57,14 @@ jobs:
       - name: A batch of 1,000 URLs over 20 hosts survives kill -9 (0 lost, 0 duplicated)
         if: matrix.project == 'unit'
         run: npm run verify:batch-crash-1000
+      # The built site's sitemap against its pages (gate G12), then the tests of the SEO and IndexNow scripts. Both are
+      # offline: the build takes seconds and the script tests use local servers and temporary folders.
+      - name: Built sitemap and its pages agree
+        if: matrix.project == 'unit'
+        run: npm run build:public && node scripts/seo/check-sitemap.mjs
+      - name: SEO and IndexNow script tests
+        if: matrix.project == 'unit'
+        run: node --test scripts/seo/*.test.mjs scripts/public-preview/indexnow.test.mjs scripts/public-preview/weekly-report.test.mjs
       - name: Check for orphaned Chromium processes
         if: always()
         run: |

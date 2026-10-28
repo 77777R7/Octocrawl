@@ -9,7 +9,7 @@ import { hostedNetworkPolicy } from '@w2l/contracts'
 import { createHostedApi, keyDigest, MemoryHostedKeys, MemoryHostedOAuthTokens, MemoryHostedQuota, type HostedKeyRecord } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
 import { MemoryHostedJobStore, type HostedJob } from '../src/hostedJobs.js'
-import { gcsJobFiles, isJobRoute, type JobFiles } from '../src/hostedJobRoutes.js'
+import { gcsJobFiles, isJobRoute, JOB_WORKER_COUNT, type JobFiles } from '../src/hostedJobRoutes.js'
 import type { GcsBucket } from '../src/hostedCloud.js'
 import { gzipSync } from 'node:zlib'
 
@@ -89,7 +89,7 @@ describe('job files in GCS', () => {
 
 describe('hosted job routes', () => {
   it('names the job routes, and only them', () => {
-    for (const [method, path] of [['POST', '/v1/batches'], ['POST', '/v1/crawl'], ['GET', '/v1/batches/x'], ['GET', '/v1/batches/x/items'], ['GET', '/v1/crawl/x/pages'], ['GET', '/v1/crawl/x/errors'], ['POST', '/v1/crawl/x/cancel'], ['GET', '/v1/jobs/x/export']]) expect(isJobRoute(method!, path!), `${method} ${path}`).toBe(true)
+    for (const [method, path] of [['POST', '/v1/batches'], ['POST', '/v1/crawl'], ['GET', '/v1/crawl/active'], ['GET', '/v1/batches/x'], ['GET', '/v1/batches/x/items'], ['GET', '/v1/crawl/x/pages'], ['GET', '/v1/crawl/x/errors'], ['POST', '/v1/crawl/x/cancel'], ['GET', '/v1/jobs/x/export']]) expect(isJobRoute(method!, path!), `${method} ${path}`).toBe(true)
     for (const [method, path] of [['POST', '/v1/crawl/x/resume'], ['DELETE', '/v1/batches/x'], ['POST', '/v1/batches/x/handoff'], ['GET', '/v1/crawl/x/events']]) expect(isJobRoute(method!, path!), `${method} ${path}`).toBe(false)
   })
 
@@ -143,6 +143,67 @@ describe('hosted job routes', () => {
     const { call, store } = await start()
     const body = await (await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', maxPages: null })).json() as { taskId: string }
     expect(store.jobs.get(body.taskId)?.request).toMatchObject({ maxPages: 100 })
+  })
+
+  it('refuses the regular-expression checks at the start by name, which the worker\'s engine would refuse at the first slice (stage H W0)', async () => {
+    const { call, enqueued } = await start()
+    const matches = { type: 'markdownMatches', pattern: 'Example' }
+    const counts = { type: 'markdownCountMin', pattern: 'Example', min: 1 }
+    const cases = [
+      ['/v1/crawl', { url: 'https://example.com/', verify: { checks: [matches] } }, 'markdownMatches'],
+      ['/v1/batches', { urls: urls(1), verify: { checks: [{ type: 'markdownIncludes', text: 'Example' }, counts] } }, 'markdownCountMin'],
+      ['/v1/batches', { urls: urls(1), verify: { checks: [matches, counts, matches] } }, 'markdownMatches and markdownCountMin'],
+    ] as const
+    for (const [path, body, named] of cases) {
+      const response = await call('POST', path, 'oc_one', body)
+      expect(response.status, named).toBe(400)
+      const refused = await response.json() as { code: string; error: string }
+      expect(refused.code, named).toBe('unsupported_parameter')
+      expect(refused.error, named).toMatch(new RegExp(`^verify: ${named} checks are not available in hosted mode`))
+    }
+    expect(enqueued).toEqual([])
+    // markdownIncludes and the structured checks start a job as before.
+    expect((await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', verify: { checks: [{ type: 'markdownIncludes', text: 'Example' }] } })).status).toBe(202)
+  })
+
+  describe('refuses at the start, by name, what the worker\'s engine would refuse at the first slice (stage H W0)', () => {
+    const refusedAtStart = async (cases: ReadonlyArray<readonly [string, Record<string, unknown>]>, code: string, error: RegExp) => {
+      const { call, store, enqueued } = await start()
+      for (const [path, body] of cases) {
+        const response = await call('POST', path, 'oc_one', body)
+        expect(response.status, path).toBe(400)
+        const refused = await response.json() as { code: string; error: string }
+        expect(refused.code, path).toBe(code)
+        expect(refused.error, path).toMatch(error)
+      }
+      expect(store.jobs.size).toBe(0)
+      expect(enqueued).toEqual([])
+    }
+    const both = (body: Record<string, unknown>) => [['/v1/crawl', { url: 'https://example.com/', ...body }], ['/v1/batches', { urls: urls(1), ...body }]] as const
+
+    it('a maxFileBytes above the hosted file cap', async () => {
+      await refusedAtStart(both({ maxFileBytes: 5 * 1024 * 1024 + 1 }), 'invalid_request', /^maxFileBytes must be at most 5242880/)
+    })
+    it('an includeTags selector Octocrawl does not match', async () => {
+      await refusedAtStart(both({ includeTags: ['div:has(p)'] }), 'unsupported_parameter', /^includeTags entry uses .*: div:has\(p\)/)
+    })
+    it('a tableRowsMin check without the tables format', async () => {
+      await refusedAtStart(both({ verify: { checks: [{ type: 'tableRowsMin', tableIndex: 0, min: 1, columns: [0] }] } }), 'invalid_request', /^formats must include tables when verify uses tableRowsMin/)
+    })
+    it('a list format whose itemSelector Octocrawl does not match', async () => {
+      await refusedAtStart(both({ formats: ['markdown', { type: 'list', itemSelector: 'li:has(a)' }] }), 'unsupported_parameter', /^list itemSelector uses .*: li:has\(a\)/)
+    })
+    it('a Markdown check without the markdown format', async () => {
+      await refusedAtStart(both({ formats: ['html'], verify: { checks: [{ type: 'markdownIncludes', text: 'Example' }] } }), 'invalid_request', /^formats must include markdown when verify checks Markdown/)
+    })
+  })
+
+  it('lowers a crawl\'s maxConcurrency to the pages a slice reads at once, as a batch\'s is, rather than fail its first slice (stage H W0)', async () => {
+    const { call, store } = await start()
+    const over = await (await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', maxConcurrency: JOB_WORKER_COUNT + 6 })).json() as { taskId: string }
+    expect(store.jobs.get(over.taskId)?.request).toMatchObject({ maxConcurrency: JOB_WORKER_COUNT })
+    const under = await (await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', maxConcurrency: 1 })).json() as { taskId: string }
+    expect(store.jobs.get(under.taskId)?.request).toMatchObject({ maxConcurrency: 1 })
   })
 
   it('fails a promoted job whose first slice could not be queued, freeing its slot for the next', async () => {
@@ -269,6 +330,31 @@ describe('hosted job routes', () => {
     expect(second.hasMore).toBe(false)
     expect((await call('GET', '/v1/jobs', null)).status).toBe(403)
     expect((await call('GET', '/v1/jobs?limit=0', 'oc_one')).status).toBe(400)
+  })
+
+  it('lists the account\'s crawl jobs still queued or running at GET /v1/crawl/active, oldest first, as a local server lists its crawls (stage H W0)', async () => {
+    const { call, store } = await start({ credits: new MemoryCreditsStore(100_000) })
+    const started = async (path: string, key: string, body: unknown) => {
+      const taskId = ((await (await call('POST', path, key, body)).json()) as { taskId: string }).taskId
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      return taskId
+    }
+    const ended = await started('/v1/crawl', 'oc_one', { url: 'https://example.com/ended' })
+    const running = await started('/v1/crawl', 'oc_one', { url: 'https://example.com/running' })
+    await started('/v1/batches', 'oc_one', { urls: urls(1) })
+    const queued = await started('/v1/crawl', 'oc_one', { url: 'https://example.com/queued' })
+    await started('/v1/crawl', 'oc_two', { url: 'https://example.com/other' })
+    store.jobs.set(ended, { ...store.jobs.get(ended)!, status: 'completed', finishedAt: '2026-10-27T00:00:00.000Z' })
+    const response = await call('GET', '/v1/crawl/active', 'oc_one')
+    expect(response.status).toBe(200)
+    const { crawls } = await response.json() as { crawls: Array<Record<string, unknown>> }
+    // Another account's crawl, a batch and a crawl that ended are not listed; a queued one is, in hosted's own status.
+    expect(crawls.map((crawl) => [crawl.id, crawl.url, crawl.status, crawl.pagesFetched])).toEqual([
+      [running, 'https://example.com/running', 'running', 0],
+      [queued, 'https://example.com/queued', 'queued', 0],
+    ])
+    expect(Object.keys(crawls[0]!).sort()).toEqual(['id', 'pagesFetched', 'startedAt', 'status', 'url'])
+    expect((await call('GET', '/v1/crawl/active', null)).status).toBe(403)
   })
 
   it('starts jobs only for the accounts on the list while it exists, and still lets an account read and cancel its jobs (H2 R2)', async () => {
