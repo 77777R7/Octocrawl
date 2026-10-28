@@ -74,7 +74,8 @@ const jobsCloud = store === 'firestore' ? await jobsCloudFromEnv(process.env) : 
 // The json model fallback (hostedModel.ts): off until hostedConfig/model.enabled is true; a memory store offers none.
 const extractModel = structuredModelConfigFromEnv()
 const model = store === 'firestore' ? new HostedModel({ model: extractModel, settings: firestoreModelSettings(process.env.W2L_FIRESTORE_PROJECT_ID!, serviceAccessToken()), spend: new FirestoreModelSpend(process.env.W2L_FIRESTORE_PROJECT_ID!, serviceAccessToken()) }) : undefined
-// The compatible transport, per request (hostedAccess.ts): off until hostedConfig/compatibleTransport.enabled is true.
+// The per-request switches (hostedAccess.ts): the compatible transport, off until hostedConfig/compatibleTransport.enabled is
+// true, and hosted_chrome, off until hostedConfig/hostedChrome lists an account and sets both D5 numbers.
 const access = store === 'firestore' ? firestoreHostedAccess(process.env.W2L_FIRESTORE_PROJECT_ID!, serviceAccessToken()) : undefined
 // impit, the compatible transport's native module, loaded now: a platform without it stops the start, not a page.
 await loadImpit()

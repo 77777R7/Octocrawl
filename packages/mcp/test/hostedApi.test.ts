@@ -1287,6 +1287,17 @@ describe('the compatible transport, granted per request (ADR 0005 compatible_tra
     expect(mobile.channelsTried).toEqual(['http'])
   })
 
+  it('opens nothing with the hosted_chrome switch alone: hosted Octocrawl builds no such rung yet, and access enhanced stays refused', async () => {
+    const hostedChrome = { enabled: true, allowedUids: ['account-1'], monthlyCapUsd: 30, dailyAttemptsPerAccount: 50 }
+    const { url } = await start({ compatHosts: ['127.0.0.1'], access: new MemoryHostedAccess({ compatibleTransport: { enabled: false, allowedUids: null }, hostedChrome }), credits: new MemoryCreditsStore(1_000), keys: {
+      oc_one: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' },
+    } })
+    const enhanced = await post(url, '/v1/scrape', { url: `${origin}/page`, access: 'enhanced' }, { authorization: 'Bearer oc_one' })
+    expect(enhanced.status).toBe(400)
+    expect(JSON.stringify(await enhanced.json())).toContain('no approved budget for enhanced access')
+    expect(((await (await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_one' })).json()) as Read).channelsTried).toEqual(['http'])
+  })
+
   it('with allowedUids, only those accounts\' calls hold it', async () => {
     const { url } = await start({ compatHosts: ['127.0.0.1'], keylessDaily: 5, access: new MemoryHostedAccess({ compatibleTransport: { enabled: true, allowedUids: ['account-1'] } }), credits: new MemoryCreditsStore(1_000), keys: {
       oc_one: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' },

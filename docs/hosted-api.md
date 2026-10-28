@@ -329,7 +329,7 @@ ADR 0005's `compatible_transport` sends a page's requests with [impit](https://g
   - `enabled` (boolean). While the document is absent, or `enabled` is anything but `true`, no call holds the transport, so a deploy alone turns nothing on.
   - `allowedUids` (an array of account uids, optional). When it exists, only those accounts' calls hold the transport: a keyless caller, a key issued without an account and every other account do not. An empty array grants it to no one. When it is absent, every caller holds it.
   - Both services read the document at most every 30 s. A failed read keeps what was read last; with nothing read yet the switch is off.
-- **Who asks.** The gate asks for each scrape, REST and MCP alike. The job worker asks as each slice starts, for the job's account, so a change reaches a running job at its next slice. The answer goes to the engine with the call (`ScrapeContext.capabilities`, `SliceLimits.capabilities`); the engine grants a call nothing beyond `compatible_transport` (`HOSTED_CALL_CAPABILITIES`), and the other capabilities stay refused here: `installed_chrome`, the CAPTCHA solver, vendors, egress proxies, Patchright.
+- **Who asks.** The gate asks for each scrape, REST and MCP alike. The job worker asks as each slice starts, for the job's account, so a change reaches a running job at its next slice. The answer goes to the engine with the call (`ScrapeContext.capabilities`, `SliceLimits.capabilities`); the engine grants a call nothing beyond `compatible_transport` and `hosted_chrome` (`HOSTED_CALL_CAPABILITIES`; the second has its own switch, below), and the other capabilities stay refused here: `installed_chrome`, the CAPTCHA solver, vendors, egress proxies, Patchright.
 - **Which pages.** As on a server on your computer whose grant names the transport and sets no `W2L_COMPAT_HOSTS`:
   - only the five hosts its acceptance showed it helps (`research/access/benefit-hosts.v1.json`), with their subdomains;
   - their `http` rung becomes `http_compat`;
@@ -357,6 +357,14 @@ T=$(gcloud auth print-access-token); curl -s -X PATCH -H "authorization: Bearer 
   "https://firestore.googleapis.com/v1/projects/$W2L_PROJECT_ID/databases/(default)/documents/hostedConfig/compatibleTransport" \
   -d '{"fields":{"enabled":{"booleanValue":true},"allowedUids":{"arrayValue":{"values":[{"stringValue":"<uid>"}]}}}}'
 ```
+
+## The hosted_chrome switch
+
+ADR 0005's `hosted_chrome` (revision of 2026-10-27) is Google Chrome on Octocrawl's own server, in the `octocrawl-chrome` service. Hosted Octocrawl uses it only when three things hold together: the operator's config, the account's switch, and the call's `access: "enhanced"`. The account's switch is the Firestore document `hostedConfig/hostedChrome`, read the way `hostedConfig/compatibleTransport` is (at most every 30 s, a failed read keeping the last one) and granted by the same gate and job worker (`packages/mcp/src/hostedAccess.ts`):
+
+- `enabled` (boolean): anything but `true` is off, and so is a missing document.
+- `allowedUids` (an array of account uids): an allowlist and nothing else. Absent or empty grants it to no one. A keyless caller and a key issued without an account never hold it.
+- `monthlyCapUsd` (number) and `dailyAttemptsPerAccount` (whole number): the operator's dollar cap a month for the rung, and the enhanced attempts one account may start a UTC day. Their values wait for decision D5 and have no default: while either is absent or not positive, the switch grants it to no one. They are read and required today, not yet counted. The counting comes with the service, before any hosted engine is built with the rung's operator config (`hostedChrome` in `engine.ts`); until then a hosted call that asks for `access: "enhanced"` is refused as before, whatever the switch says.
 
 ## Read the service
 

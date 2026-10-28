@@ -150,6 +150,32 @@ describe('hosted job worker', () => {
     expect(compat).toEqual([])
   })
 
+  it('gives a slice\'s pages hosted_chrome only while its switch lists the job\'s account (ADR 0005, revision of 2026-10-27)', async () => {
+    const { origin, deps, create, drain } = await setup()
+    const asked: string[] = []
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    // The operator's config with a stand-in for the octocrawl-chrome service; the rungs before it find every page blocked.
+    const client = { fetch: async (url: string) => { asked.push(new URL(url).pathname); throw new Error('the stand-in service reads nothing') } }
+    deps.engineOptions = () => ({ networkPolicy: policy, hostedChrome: { attestation: { principal: 'operator', at: '2026-10-28T00:00:00Z', statement: 'test' }, client }, channelsFor: (mode) => {
+      const channels = buildChannels(mode, { networkPolicy: policy, localSubjects: { browser_local: { fetch: async () => { throw new Error('worker tests stay on HTTP') } } } })
+      const http = channels.find((channel) => channel.id === 'http')!
+      const blocked = async (url: string) => ({ ...(await http.fetch(url)), status: 'blocked' as const, blockReason: 'cloudflare_challenge' as const })
+      return [{ ...http, fetch: blocked }, { ...http, id: 'browser_local', fetch: blocked }]
+    } })
+    const on = { enabled: true, allowedUids: ['account-1'], monthlyCapUsd: 30, dailyAttemptsPerAccount: 50 }
+    deps.access = new MemoryHostedAccess({ compatibleTransport: { enabled: false, allowedUids: null }, hostedChrome: on })
+    const granted = await create(parseBatchStartRequest({ urls: [`${origin}/a`], access: 'enhanced' }))
+    await drain(granted)
+    expect(asked).toEqual(['/a'])
+    // Listing another account, or leaving a D5 number unset: the next job's slices hold nothing.
+    for (const hostedChrome of [{ ...on, allowedUids: ['account-2'] }, { ...on, dailyAttemptsPerAccount: null }]) {
+      asked.length = 0
+      deps.access = new MemoryHostedAccess({ compatibleTransport: { enabled: false, allowedUids: null }, hostedChrome })
+      await drain(await create(parseBatchStartRequest({ urls: [`${origin}/b`], access: 'enhanced' })))
+      expect(asked, JSON.stringify(hostedChrome)).toEqual([])
+    }
+  })
+
   it('takes the day\'s job pool and credits for the pages a job has left, not a whole slice (no headroom on its last slice)', async () => {
     const { origin, credits, create, drain } = await setup({ limits: { slicePages: 100 } })
     const id = await create(parseBatchStartRequest({ urls: ['/a', '/b', '/c'].map((path) => `${origin}${path}`), fastMode: true }))
