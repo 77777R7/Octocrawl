@@ -532,6 +532,13 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     const throwing = { ...admitted, fetch: async () => { throw new Error('the service went away') } }
     await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [gated]), throwing], { mode: 'standard', enhanced: true }).run(url).catch(() => null)
     expect(settled).toEqual([[null, true]])
+    // A run cut while the admission is still answering: the late admission is settled as a call that never went out.
+    settled.length = 0
+    const controller = new AbortController()
+    const slow = { ...admitted, admit: async () => { controller.abort(new Error('the caller left')); await new Promise((resolve) => setTimeout(resolve, 5)); return { ok: true as const, settle: async (result: FetchResult | null, called: boolean) => { settled.push([result?.status ?? null, called]) } } } }
+    await expect(new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [gated]), slow], { mode: 'standard', enhanced: true }).run(url, null, { signal: controller.signal })).rejects.toThrow()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(settled).toEqual([[null, false]])
   })
 
   it('leaves out a provider rung that refuses the request, and says why (PA B4)', async () => {

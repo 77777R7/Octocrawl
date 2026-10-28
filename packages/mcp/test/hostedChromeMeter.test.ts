@@ -91,6 +91,23 @@ describe('hosted_chrome D5 counting', () => {
     expect(await under.admit({ account: 'account-1' })).toMatchObject({ ok: false, reason: 'monthly_cap' })
   })
 
+  it('holds a read\'s ceiling until its spend is written, so a read admitted meanwhile on the same instance cannot pass the cap', async () => {
+    let written: () => void = () => {}
+    const spend = new MemoryHostedChromeSpend()
+    const settle = spend.settle.bind(spend)
+    spend.settle = async (month, micro) => { await new Promise<void>((resolve) => { written = resolve }); await settle(month, micro) }
+    const { meter } = counter({ ...ON, monthlyCapUsd: 20.01, dailyAttemptsPerAccount: 5 }, { spend })
+    const first = await meter.admit({ account: 'account-1' })
+    expect(first.ok).toBe(true)
+    const settling = first.ok ? first.settle(read('success', 20_000_000), true) : Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(await meter.admit({ account: 'account-1' })).toMatchObject({ ok: false, reason: 'monthly_cap' })
+    written()
+    await settling
+    expect(spend.months.get('2026-10')).toEqual({ settledMicroUsd: 10_000, calls: 1 })
+    expect(await meter.admit({ account: 'account-1' })).toMatchObject({ ok: false, reason: 'monthly_cap' })
+  })
+
   it('a new month starts from its rents again', async () => {
     const spend = new MemoryHostedChromeSpend()
     spend.months.set('2026-10', { settledMicroUsd: 20_000, calls: 2 })

@@ -1252,7 +1252,13 @@ export class LadderRunner {
    */
   private async paidFetch(channel: Channel, label: string, url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, progress: LadderProgress, onCall: () => void): Promise<FetchResult | null> {
     if (channel.admit === undefined) return await this.meteredFetch(channel, label, url, session, execution, options, progress, onCall)
-    const admission = await raceWithSignal(channel.admit(url, execution), execution.signal)
+    const asked = channel.admit(url, execution)
+    let admission: ChannelAdmission
+    try { admission = await raceWithSignal(asked, execution.signal) } catch (error) {
+      // Cut while the admission was answering: one that admits the call late is settled as a call that never went out.
+      void asked.then((late) => late.ok ? late.settle(null, false) : undefined).catch(() => {})
+      throw error
+    }
     if (!admission.ok) {
       progress.ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_channel_skipped', channel: label, detail: { reason: admission.reason, ...admission.detail } })
       if (!progress.notAdmitted.some((held) => held.code === admission.warning.code && held.message === admission.warning.message)) progress.notAdmitted.push(admission.warning)

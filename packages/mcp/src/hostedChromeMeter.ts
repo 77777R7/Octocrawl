@@ -148,16 +148,16 @@ export class HostedChromeCounter implements HostedChromeMeter {
       settle: async (result: FetchResult | null, called: boolean) => {
         if (!open) return
         open = false
-        this.hold(month, -this.ceilingUsd)
         // A read that never went out costs nothing; its attempt stays taken.
-        if (!called) { reservation.release(); return }
+        if (!called) { this.hold(month, -this.ceilingUsd); reservation.release(); return }
         const charged = reservation.settle(this.costUsd(result))
         const micro = Math.ceil(charged * MICRO - 1e-6)
+        // The ceiling is held until the month's total has the read, so no read admitted meanwhile here misses it.
         try { await this.options.spend.settle(month, micro) } catch (error) {
           // Not counted: the month's total is short by this read, which the line names.
           this.log(JSON.stringify({ severity: 'ERROR', event: 'hosted_chrome_settle_failed', month, chargedUsd: micro / MICRO, message: error instanceof Error ? error.message : String(error) }))
           return
-        }
+        } finally { this.hold(month, -this.ceilingUsd) }
         this.log(JSON.stringify({ severity: 'INFO', event: 'hosted_chrome_read', month, day, chargedUsd: micro / MICRO, ceilingUsd: this.ceilingUsd, answered: result !== null }))
       },
     }
