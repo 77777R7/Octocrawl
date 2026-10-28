@@ -26,6 +26,7 @@
  */
 
 import type { Browser, LaunchOptions } from 'playwright'
+import type { AccessEgressKind } from '@w2l/contracts'
 import type { CompatAddressGuard } from '../compatGuard.js'
 import { chromeRefusedOptions, DETECTION_FLAGS_ID, launchInstalledChrome, type ChromeRefusedOptions, type InstalledChromeTestSeams } from './installedChrome.js'
 
@@ -44,12 +45,27 @@ export function hostedChromeProxy(guardUrl: string): NonNullable<LaunchOptions['
 /** The preferences every fresh hosted profile starts with: no WebRTC UDP that does not go through the proxy. */
 export const HOSTED_CHROME_PREFERENCES: Readonly<Record<string, unknown>> = { webrtc: { ip_handling_policy: 'disable_non_proxied_udp' } }
 
+/**
+ * Flags that turn off Chrome's own background downloads (Optimization Guide models, the component updater and the like),
+ * which ADR 0005's revision of 2026-10-27 (decision eight) allows for hosted_chrome, and empty: such flags take effect
+ * only after two challenge16 runs no worse than the launch in use, on the same kind of exit. A change here is a change
+ * to the launch, so it comes with a new HOSTED_CHROME_PROFILE_ID.
+ */
+export const HOSTED_CHROME_BACKGROUND_DOWNLOAD_FLAGS: readonly string[] = []
+
+/** How hosted_chrome is launched on the octocrawl-chrome service: behind this guard, through this kind of exit. */
+export interface HostedChromeLaunch {
+  guard: CompatAddressGuard
+  /** The kind of address its connections leave from (`google` while the guard dials directly on Cloud Run). */
+  egressKind: AccessEgressKind
+}
+
 /** The name a record gives hosted_chrome's launch: installed_chrome's flag set, with the WebRTC preference. */
 export const HOSTED_CHROME_PROFILE_ID = `${DETECTION_FLAGS_ID}+webrtc-proxied-udp-only`
 
 /** Launch hosted Chrome behind its address guard: installed_chrome's launch, the guard as its only proxy, the hosted preferences. */
 export async function launchHostedChrome(guard: CompatAddressGuard, options: Pick<LaunchOptions, 'timeout'> = {}, seams: InstalledChromeTestSeams = {}, signal?: AbortSignal): Promise<Browser> {
-  return launchInstalledChrome({ ...options, proxy: hostedChromeProxy(await guard.proxyUrl()) }, seams, signal, { preferences: HOSTED_CHROME_PREFERENCES })
+  return launchInstalledChrome({ ...options, proxy: hostedChromeProxy(await guard.proxyUrl()) }, seams, signal, { preferences: HOSTED_CHROME_PREFERENCES, flags: HOSTED_CHROME_BACKGROUND_DOWNLOAD_FLAGS })
 }
 
 /**

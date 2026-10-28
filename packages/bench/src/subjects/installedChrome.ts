@@ -148,7 +148,7 @@ export async function freeDebuggingPort(avoid: ReadonlySet<number> = AVOID_PORTS
  * with a login cannot be given to Chrome on its command line, and intercepting requests to answer the challenge is what
  * the route must not do (ADR 0005), so such a proxy is refused by name.
  */
-export function installedChromeArgs(profile: string, port: number, launch: Pick<LaunchOptions, 'proxy' | 'args'>): string[] {
+export function installedChromeArgs(profile: string, port: number, launch: Pick<LaunchOptions, 'proxy' | 'args'>, flags: readonly string[] = []): string[] {
   if (launch.proxy?.username !== undefined && launch.proxy.username !== '') {
     throw new Error('installed_chrome cannot use a proxy that needs a login: Chrome takes no proxy credentials on its command line; use a proxy without one (a local forwarder) for this route')
   }
@@ -157,7 +157,7 @@ export function installedChromeArgs(profile: string, port: number, launch: Pick<
     : (launch.args ?? []).filter((arg) => arg.startsWith('--proxy-server=') || arg.startsWith('--proxy-bypass-list=') || arg.startsWith('--host-resolver-rules='))
   // Never the operating system's proxy (a proxy app may have set one): with no egress given, Chrome connects directly.
   if (!egress.some((arg) => arg.startsWith('--proxy-server='))) egress.unshift('--proxy-server=direct://')
-  return [...DETECTION_FLAGS, `--user-data-dir=${profile}`, '--remote-debugging-host=127.0.0.1', `--remote-debugging-port=${port}`, ...egress, 'about:blank']
+  return [...DETECTION_FLAGS, ...flags, `--user-data-dir=${profile}`, '--remote-debugging-host=127.0.0.1', `--remote-debugging-port=${port}`, ...egress, 'about:blank']
 }
 
 /** A counting gate: at most `max` holders at once, the rest wait in order; a freed slot passes straight to the next waiter. */
@@ -236,7 +236,11 @@ async function waitForDebugging(port: number, child: ChildProcess, timeoutMs: nu
  * What a route other than installed_chrome adds to the same launch: preferences written into the fresh profile before
  * Chrome starts (`Default/Preferences`), for hosted_chrome (hostedChrome.ts). installed_chrome passes none.
  */
-export interface ChromeProfileSeed { preferences?: Readonly<Record<string, unknown>> }
+export interface ChromeProfileSeed {
+  preferences?: Readonly<Record<string, unknown>>
+  /** Flags after DETECTION_FLAGS, before the profile and the debugging port (hosted_chrome's background-download hook). */
+  flags?: readonly string[]
+}
 
 /**
  * Launch the installed Chrome as measured and connect Playwright to it. The returned Browser's close() also ends the
@@ -271,7 +275,7 @@ export async function launchInstalledChrome(options: LaunchOptions, seams: Insta
     }
     if (signal?.aborted) throw aborted()
     const port = await freeDebuggingPort()
-    const args = installedChromeArgs(profile, port, options)
+    const args = installedChromeArgs(profile, port, options, seed.flags)
     const seamArgs = [...(seams.headless === true ? ['--headless=new'] : []), ...(seams.extraArgs ?? [])]
     child = spawn(executable, seamArgs.length === 0 ? args : [...args.slice(0, -1), ...seamArgs, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] })
     live.child = child

@@ -366,6 +366,31 @@ ADR 0005's `hosted_chrome` (revision of 2026-10-27) is Google Chrome on Octocraw
 - `allowedUids` (an array of account uids): an allowlist and nothing else. Absent or empty grants it to no one. A keyless caller and a key issued without an account never hold it.
 - `monthlyCapUsd` (number) and `dailyAttemptsPerAccount` (whole number): the operator's dollar cap a month for the rung, and the enhanced attempts one account may start a UTC day. Their values wait for decision D5 and have no default: while either is absent or not positive, the switch grants it to no one. They are read and required today, not yet counted. The counting comes with the service, before any hosted engine is built with the rung's operator config (`hostedChrome` in `engine.ts`); until then a hosted call that asks for `access: "enhanced"` is refused as before, whatever the switch says.
 
+## The octocrawl-chrome service
+
+`hosted_chrome`'s Chrome runs in a Cloud Run service of its own, `octocrawl-chrome` (ROADMAP stage H, decision D1: minimum instances 0). Its image is `Dockerfile.hosted-chrome`:
+- Google Chrome 155.0.8059.79, pinned by version and SHA-256, the build G4 measured on Cloud Run gen2;
+- Xvfb as its display, and tini as PID 1;
+- a non-root user, so Chrome's sandbox stays on.
+
+`deploy/hosted-chrome/start.sh` opens the display and starts `packages/mcp/src/hostedChromeCli.ts`. `cloudbuild.hosted-chrome.yaml` builds and pushes the image, with no deploy step; its `_IMAGE`, and so the region, is given at submit time. The service's size and region are Howard's decision. The image has not been built or deployed yet. Nothing routes the hosted API to it, and no hosted engine is built with its client.
+
+- **Its HTTP surface** (`packages/mcp/src/hostedChrome.ts`):
+  - `POST /v1/read` with `{ url, options?, deadlineAt? }` answers the browser lane's result for that page.
+  - 400 is a request the rung does not take: not http(s), an option `installed_chrome` also refuses, or a body over 256 KiB.
+  - 503 means a page is being read: one window per instance.
+  - `GET /health` answers 200.
+- **How each page is read.** The service reads each page with the hosted browser lane on the `hosted_chrome` engine:
+  - robots.txt is read and obeyed, as on every hosted rung;
+  - every connection goes through its address guard;
+  - each call gets a fresh profile, deleted after;
+  - its trace names the pinned version, the launch (`nodriver-0.50.6-no-allow-origins+webrtc-proxied-udp-only`) and the exit's kind (`google` while it leaves from Cloud Run's own egress), which the Evidence Record carries.
+- **Authentication** is Cloud Run's: the service takes internal ingress only and no unauthenticated call, and only the hosted API's service account holds `roles/run.invoker` on it. The hosted API's client (`httpHostedChromeClient`) sends a Google ID token for the service's URL from the metadata server (`metadataIdToken`).
+- **Before it serves a call**, three things must happen:
+  - the D5 counting (`hostedConfig/hostedChrome`) lands;
+  - a hosted engine is built with the rung's operator config;
+  - the launch passes ADR 0005's gate: two challenge16 runs no worse than the baseline, which covers the WebRTC preference that sets this launch apart from `installed_chrome`'s.
+
 ## Read the service
 
 Every request is in Cloud Run's request log. The two-week cost record the roadmap asks for is read from Cloud Billing (the service's own SKU lines) against the request counts:

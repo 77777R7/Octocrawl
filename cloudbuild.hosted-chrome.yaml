@@ -1,0 +1,13 @@
+# The octocrawl-chrome image (Dockerfile.hosted-chrome; ADR 0005 hosted_chrome): build and push only, no deploy step.
+# _IMAGE has no default: the Artifact Registry path (and so the region) is given at submit time (docs/hosted-api.md).
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile.hosted-chrome
+      - -t
+      - ${_IMAGE}
+      - .
+images:
+  - ${_IMAGE}

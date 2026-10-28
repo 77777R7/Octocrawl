@@ -6,6 +6,7 @@ import {
   AVOID_PORTS, chromeCandidates, DETECTION_FLAGS, findInstalledChrome, freeDebuggingPort, INSTALLED_CHROME_INSTALL,
   InstalledChromeMissingError, installedChromeArgs, installedChromeRefusal, WindowGate,
 } from '../src/subjects/installedChrome.js'
+import { HOSTED_CHROME_BACKGROUND_DOWNLOAD_FLAGS, HOSTED_CHROME_PREFERENCES, HOSTED_CHROME_PROFILE_ID, hostedChromeProxy } from '../src/subjects/hostedChrome.js'
 
 describe('installed_chrome: where Chrome is looked for', () => {
   it('takes W2L_CHROME_PATH alone when set', () => {
@@ -33,6 +34,26 @@ describe('installed_chrome: where Chrome is looked for', () => {
     expect((error as Error).message).toContain(INSTALLED_CHROME_INSTALL)
     expect(browserNotInstalled(error)).toBe(true)
     expect(browserInstallCommand('installed_chrome')).toBe(INSTALLED_CHROME_INSTALL)
+  })
+})
+
+describe('hosted_chrome: its launch (ADR 0005, revision of 2026-10-27)', () => {
+  it('is installed_chrome\'s flag set, the WebRTC preference and the guard as its only proxy, under an identifier of its own', () => {
+    expect(HOSTED_CHROME_PROFILE_ID).toBe('nodriver-0.50.6-no-allow-origins+webrtc-proxied-udp-only')
+    expect(HOSTED_CHROME_PREFERENCES).toEqual({ webrtc: { ip_handling_policy: 'disable_non_proxied_udp' } })
+    const args = installedChromeArgs('/tmp/profile-h', 41235, { proxy: hostedChromeProxy('socks5://127.0.0.1:4321') }, HOSTED_CHROME_BACKGROUND_DOWNLOAD_FLAGS)
+    expect(args.slice(0, DETECTION_FLAGS.length)).toEqual([...DETECTION_FLAGS])
+    expect(args).toEqual(expect.arrayContaining(['--proxy-server=socks5://127.0.0.1:4321', '--proxy-bypass-list=<-loopback>']))
+    expect(args.some((arg) => arg.startsWith('--remote-allow-origins') || arg === '--no-sandbox')).toBe(false)
+  })
+
+  it('turns off none of Chrome\'s own background downloads: that hook stays empty until two challenge16 runs pass (ADR 0005 item 8)', () => {
+    // A flag added here changes the launch, so it comes with a new HOSTED_CHROME_PROFILE_ID and the runs that admit it.
+    expect(HOSTED_CHROME_BACKGROUND_DOWNLOAD_FLAGS).toEqual([])
+    // Where such a flag would go: after the measured set, before the profile and the port.
+    const args = installedChromeArgs('/p', 1, {}, ['--disable-component-update'])
+    expect(args[DETECTION_FLAGS.length]).toBe('--disable-component-update')
+    expect(installedChromeArgs('/p', 1, {})).not.toContain('--disable-component-update')
   })
 })
 

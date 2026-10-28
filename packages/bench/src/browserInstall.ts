@@ -7,8 +7,9 @@ export const BROWSER_INSTALL_COMMAND = 'npx playwright install chromium'
  * The install command for the engine whose browser is missing. Patchright pins its own Chromium build, so Playwright's
  * would leave it missing (browserEngine.ts, PATCHRIGHT_INSTALL).
  */
-export function browserInstallCommand(engine: 'playwright' | 'patchright' | 'installed_chrome'): string {
-  return engine === 'patchright' ? 'npx patchright install chromium' : engine === 'installed_chrome' ? INSTALLED_CHROME_INSTALL : BROWSER_INSTALL_COMMAND
+export function browserInstallCommand(engine: 'playwright' | 'patchright' | 'installed_chrome' | 'hosted_chrome'): string {
+  // hosted_chrome's Chrome is the octocrawl-chrome image's (Dockerfile.hosted-chrome): installed where the installed one is.
+  return engine === 'patchright' ? 'npx patchright install chromium' : engine === 'installed_chrome' || engine === 'hosted_chrome' ? INSTALLED_CHROME_INSTALL : BROWSER_INSTALL_COMMAND
 }
 
 /**
