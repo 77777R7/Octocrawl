@@ -92,10 +92,23 @@ export interface Channel {
   readonly grantCapabilities?: readonly string[]
   /** Which tariff priced `priceCeilingUsd` (a hash of it), for the paid call's row; absent when not known. */
   readonly tariffVersion?: string
+  /**
+   * Asked each time the rung is about to run, before anything is reserved for it: an operator's own limits on the rung
+   * (ADR 0005 hosted_chrome's D5 counter). A refusal leaves the rung out of this run as if it had not been reached: the
+   * trace says why (`ladder_channel_skipped`), the result carries the refusal's warning, and the earlier rung's answer
+   * stands. An admitted call is settled once, with what the rung read (null when it threw), and whether its call went
+   * out. Absent: the rung runs whenever it is reached.
+   */
+  admit?(url: string, execution: ExecutionContext): Promise<ChannelAdmission>
   /** Release the channel's resources (browser processes, vendor sessions).
    *  The owner of the channel list calls this when the run is over. */
   close?(): Promise<void>
 }
+
+/** A rung's answer to `Channel.admit`. */
+export type ChannelAdmission =
+  | { ok: true; settle(result: FetchResult | null, called: boolean): Promise<void> }
+  | { ok: false; reason: string; warning: FetchWarning; detail?: Readonly<Record<string, unknown>> }
 
 /** The human in the loop. Called exactly when a result asks for takeover. */
 export interface HumanHandoff {
@@ -152,6 +165,8 @@ interface LadderProgress {
    * the run ending (`stop`) or a handoff (`handoff`). It drives nothing.
    */
   pendingDecision?: { channel: string; at: number; decision: ActionDecision } | null
+  /** The warnings of the rungs whose own admission refused them (Channel.admit), for the answer. */
+  notAdmitted: FetchWarning[]
 }
 
 /** A run's totals over its attempts: what every lane tried cost, each attempt kept as it was. */
@@ -609,17 +624,17 @@ export class LadderRunner {
    */
   async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}, options: FetchOptions = {}): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
-    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [], charged: null, paidCalls: [], grant: null, ledger: null, solves: 0, steppedPast: null }
+    const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [], charged: null, paidCalls: [], grant: null, ledger: null, solves: 0, steppedPast: null, notAdmitted: [] }
     for (const filtered of this.options.channelsFiltered ?? []) {
       progress.ladderTrace.push({ at: 0, event: 'ladder_channels_filtered', channel: '—', detail: { reason: filtered.reason, dropped: [...filtered.dropped] } })
     }
     // A rung says so the moment it sets a rule aside, so the run knows even when that rung never returns.
     const rungs: ExecutionContext = { ...scope, onRobotsOverride: (applied) => { progress.robotsOverrides.push(applied); execution.onRobotsOverride?.(applied) } }
-    try { return withRunCost(carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides), progress) }
+    try { return withNotAdmitted(withRunCost(carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides), progress), progress) }
     catch (error) {
       // A run that throws keeps its paid calls on the error, for the record of whatever result the error becomes.
       if (!deadlineReached(scope)) throw progress.paidCalls.length === 0 ? error : carryPaidCalls(error, paidCallsEvent(progress, new Set(), Math.max(0, performance.now() - progress.startedAt), 'provider'))
-      return withRunCost(carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides), progress)
+      return withNotAdmitted(withRunCost(carryRobotsOverride(deadlineOutcome(url, progress, null), progress.robotsOverrides), progress), progress)
     } finally { scope.dispose() }
   }
 
@@ -1231,7 +1246,30 @@ export class LadderRunner {
    * after it, at the price it reported or at the ceiling, a call that threw or was cut included (ROADMAP PA item 4). Null
    * when it was not called, with the reason in the trace; `onCall` hears of the call just before it goes out.
    */
+  /**
+   * One call of a rung, asked of its own admission first (Channel.admit): refused, it is skipped (null) and says why;
+   * admitted, it is settled once with what the call read, also when the call threw.
+   */
   private async paidFetch(channel: Channel, label: string, url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, progress: LadderProgress, onCall: () => void): Promise<FetchResult | null> {
+    if (channel.admit === undefined) return await this.meteredFetch(channel, label, url, session, execution, options, progress, onCall)
+    const admission = await raceWithSignal(channel.admit(url, execution), execution.signal)
+    if (!admission.ok) {
+      progress.ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_channel_skipped', channel: label, detail: { reason: admission.reason, ...admission.detail } })
+      if (!progress.notAdmitted.some((held) => held.code === admission.warning.code && held.message === admission.warning.message)) progress.notAdmitted.push(admission.warning)
+      return null
+    }
+    let called = false
+    let result: FetchResult | null = null
+    try {
+      result = await this.meteredFetch(channel, label, url, session, execution, options, progress, () => { called = true; onCall() })
+      return result
+    } finally {
+      // The admission's own failure to settle is its to report: the page it paid for is still the answer.
+      await admission.settle(result, called).catch(() => {})
+    }
+  }
+
+  private async meteredFetch(channel: Channel, label: string, url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, progress: LadderProgress, onCall: () => void): Promise<FetchResult | null> {
     const { ladderTrace } = progress
     let reservation: SpendReservation | null = null
     const ceiling = channel.vendorId === undefined ? undefined : channel.priceCeilingUsd ?? null
@@ -1672,6 +1710,12 @@ function withSolverCalls(progress: LadderProgress, result: FetchResult): FetchRe
  * The run's cost on its answer: the exact total over its attempts (null when one is unknown), and what the ledger charged
  * them all; with every paid call of the run (`paid_calls`), the one whose page is the answer marked, for its record.
  */
+/** The run's answer with the warnings of the rungs their own admission refused (Channel.admit), after its own. */
+function withNotAdmitted(run: LadderRunResult, progress: LadderProgress): LadderRunResult {
+  const added = progress.notAdmitted.filter((warning) => run.result.warnings?.some((held) => held.code === warning.code && held.message === warning.message) !== true)
+  return added.length === 0 ? run : { ...run, result: { ...run.result, warnings: [...(run.result.warnings ?? []), ...added] } }
+}
+
 function withRunCost(run: LadderRunResult, progress: LadderProgress): LadderRunResult {
   const { externalCostChargedUsd: _attempt, ...usage } = run.result.usage
   const result: FetchResult = { ...run.result, usage: { ...usage, externalCostUsd: run.summary.externalCostUsd, ...(progress.charged === null ? {} : { externalCostChargedUsd: progress.charged }) } }

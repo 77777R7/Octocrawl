@@ -510,6 +510,30 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     expect(mobile.ladderTrace.find((event) => event.event === 'ladder_channel_started')?.detail?.remainingMs).toBeNull()
   })
 
+  it('asks a rung with its own admission before it runs: a refusal skips it, the earlier answer stands, and the result and trace say why', async () => {
+    const url = 'https://example.com/p'
+    const gated = { ...blockedResult(url, 'cloudflare_challenge'), lane: 'browser_local' as const }
+    const settled: [string | null, boolean][] = []
+    const warning = { code: 'hosted_chrome_not_admitted', message: 'not today' }
+    const refusing = { ...channel('hosted_chrome', [contentfulResult(url, 'browser_local')]), admit: async () => ({ ok: false as const, reason: 'daily_attempts', warning, detail: { limit: 2 } }) }
+    const refused = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [gated]), refusing], { mode: 'standard', enhanced: true }).run(url)
+    expect(refusing.calls).toEqual([])
+    expect(refused.channelsTried).toEqual(['http', 'browser_local'])
+    expect(refused.result).toMatchObject({ status: 'blocked', lane: 'browser_local' })
+    expect(refused.result.warnings).toContainEqual(warning)
+    expect(refused.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', channel: 'hosted_chrome', detail: { reason: 'daily_attempts', limit: 2 } }))
+    // Admitted: the rung runs, and its admission is settled once with what it read; a read that threw is settled with none.
+    const admitted = { ...channel('hosted_chrome', [contentfulResult(url, 'browser_local')]), admit: async () => ({ ok: true as const, settle: async (result: FetchResult | null, called: boolean) => { settled.push([result?.status ?? null, called]) } }) }
+    const read = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [gated]), admitted], { mode: 'standard', enhanced: true }).run(url)
+    expect(read.channelsTried).toEqual(['http', 'browser_local', 'hosted_chrome'])
+    expect(read.result.warnings?.some((held) => held.code === 'hosted_chrome_not_admitted') ?? false).toBe(false)
+    expect(settled).toEqual([['success', true]])
+    settled.length = 0
+    const throwing = { ...admitted, fetch: async () => { throw new Error('the service went away') } }
+    await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [gated]), throwing], { mode: 'standard', enhanced: true }).run(url).catch(() => null)
+    expect(settled).toEqual([[null, true]])
+  })
+
   it('leaves out a provider rung that refuses the request, and says why (PA B4)', async () => {
     const url = 'https://example.com/p'
     const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'acme'), refusal: (_url: string, options: FetchOptions) => options.screenshot !== undefined ? 'provider takes no screenshot' : null }
