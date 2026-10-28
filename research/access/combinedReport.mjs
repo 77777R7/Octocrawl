@@ -78,7 +78,10 @@ async function load(dir) {
   }
   let prechecks = null
   try { prechecks = (await readFile(join(dir, 'prechecks.txt'), 'utf8')).trim().split('\n').join('; ') } catch {}
-  return { dir, m, first: rows.first, retry: rows.retry, shas, prechecks, dirty, build }
+  // A note on the window that its manifest cannot hold (a start stopped and set aside), written into its record as is.
+  let note = null
+  try { note = (await readFile(join(dir, 'note.md'), 'utf8')).trim() || null } catch {}
+  return { dir, m, first: rows.first, retry: rows.retry, shas, prechecks, note, dirty, build }
 }
 
 // ---- statistics and helpers
@@ -171,6 +174,7 @@ function windowRecord(W, label) {
     network, machine,
     `${span}${m.steelCap ? ` Steel cap: $${m.steelCap.usd} by the ledger over the window, a page at most $${m.steelCap.pageCeilingUsd.toFixed(4)} (the tariff's ceiling).` : ''}`,
     `- Steel's API at the window's start: ${m.steelProbe ? `\`${m.steelProbe.request}\` (read-only, through the shell's proxy) answered ${m.steelProbe.status ?? `nothing (${m.steelProbe.error})`} in ${m.steelProbe.ms} ms at ${m.steelProbe.at}` : 'not read'}.`)
+  if (W.note) P('', W.note)
   for (const [name, set] of [['all 92 tasks', ALL], [`the ${frozen.size} frozen tasks`, frozen]]) {
     P('', `## First calls, ${name} (main metric)`, '',
       '| Arm | Planned | Attempted | Not run | Verified | False success | FS / delivered (N, 95% upper) | FS / all requests (N, 95% upper) | p50 verified | p95 verified | p50 all | p95 all |',
@@ -259,6 +263,7 @@ function twoWindowRecord(W) {
   else P(`# installed_chrome with compatible_transport and no Steel, two windows: ${A.m.date} and ${B.m.date}`, '',
     `- Item: ROADMAP.md, current phase (decision 17), stage L item 1. Windows \`${A.dir}\` (runner \`${A.m.runner}\`) and \`${B.dir}\` (runner \`${B.m.runner}\`); ic_compat grant \`${A.m.grants.ic_compat?.sha256}\` / \`${B.m.grants.ic_compat?.sha256}\`, combined grant \`${A.m.grants.combined?.sha256}\` / \`${B.m.grants.combined?.sha256}\`; arms listed ${A.m.arms.join(', ')} in window 1 and ${B.m.arms.join(', ')} in window 2. Each window's own record has its conditions.`)
   P(`- Command: \`node research/access/combinedReport.mjs ${A.dir} ${B.dir} --out ${opt('--out')}\`. First calls only.`)
+  for (const [n, X] of [[1, A], [2, B]]) if (X.note) P(`- Window ${n}'s record carries a note on the window (${X.note.split('\n')[0].replace(/^#+\s*/, '')}); nothing it describes is counted here.`)
   for (const [name, set] of [['all 92 tasks', ids], [`the ${frozen.size} frozen tasks`, ids.filter((id) => frozen.has(id))]]) {
     const S = new Set(set)
     P('', `## Verified per window and across both, ${name}`, '',
