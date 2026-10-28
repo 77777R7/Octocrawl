@@ -1,7 +1,7 @@
-// The parts of the combined-grant windows (k1-window.mjs, combinedReport.mjs) that need no machine to decide, kept apart
-// so they can be tested (packages/runtime/test/combinedArms.test.ts): which arms a report lists and which pairs it
-// compares, the ic_compat grant's capabilities, the window's cap on Steel spend (--steel-cap), what a saved response says
-// of its Steel calls, and the exit of the ic_compat measurement (ROADMAP current phase, decision 17, stage L item 1).
+// The parts of combinedReport.mjs that need no machine to decide, kept apart so they can be tested
+// (packages/runtime/test/combinedArms.test.ts): which arms a report lists and which pairs it compares, what a saved
+// response says of its Steel calls, and the exit of the ic_compat measurement (ROADMAP current phase, decision 17, stage
+// L item 1). k1-window.mjs's own parts (its arms, block order and Steel cap) are in k1Arms.mjs.
 
 /** The arms a combined-grant report knows, in the order its tables list them. */
 export const REPORT_ARMS = ['standard', 'installed_chrome', 'ic_compat', 'combined', 'firecrawl']
@@ -20,27 +20,6 @@ export const PAIRS = [['installed_chrome', 'standard'], ['combined', 'standard']
 
 export function pairsFor(arms) {
   return PAIRS.filter(([a, base]) => arms.includes(a) && arms.includes(base))
-}
-
-/** The ic_compat arm's capabilities: installed_chrome and compatible_transport, and no route that spends money. */
-export const IC_COMPAT_CAPABILITIES = ['compatible_transport', 'installed_chrome']
-
-/** Why a grant's capabilities are not the ic_compat arm's; null when they are exactly its two. */
-export function icCompatRefusal(capabilities) {
-  const named = [...(capabilities ?? [])].sort()
-  return named.join() === IC_COMPAT_CAPABILITIES.join() ? null : `must name installed_chrome and compatible_transport, nothing else (it names ${named.join(', ') || 'none'})`
-}
-
-/**
- * Whether a run of `pages` may start under the window's Steel cap: what the ledger charged the window's earlier pages,
- * each page it did not report counted at the ceiling, plus `pages` at the ceiling, stays within `capUsd`. The ceiling
- * is the most one page can be charged (one Steel call a page at the tariff's price ceiling); null refuses.
- */
-export function steelCapAllows({ charged, pages, capUsd, pageCeilingUsd }) {
-  if (pageCeilingUsd === null) return { ok: false, spentUsd: null, worstUsd: null }
-  const spentUsd = charged.reduce((sum, usd) => sum + (typeof usd === 'number' ? usd : pageCeilingUsd), 0)
-  const worstUsd = spentUsd + pages * pageCeilingUsd
-  return { ok: worstUsd <= capUsd, spentUsd, worstUsd }
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-// The combined-grant windows' arms, Steel cap, Steel calls and the ic_compat exit (research/access/combinedArms.mjs).
-import { exitOf, icCompatRefusal, pairsFor, reportArms, steelCalls, steelCapAllows, steelTally } from '../../../research/access/combinedArms.mjs'
+// The combined-grant reports' arms, Steel calls and the ic_compat exit (research/access/combinedArms.mjs).
+import { exitOf, pairsFor, reportArms, steelCalls, steelTally } from '../../../research/access/combinedArms.mjs'
 
 const provider = (events: { event: string; detail?: Record<string, unknown> }[]) => ({ channel: 'provider', result: { trace: events.map((e) => ({ at: 0, lane: 'provider', ...e })) } })
 const answer = (...attempts: unknown[]) => ({ summary: { attempts } })
@@ -18,24 +18,6 @@ describe('combined-grant arms', () => {
     expect(pairsFor(arms)).toEqual([['combined', 'installed_chrome'], ['ic_compat', 'installed_chrome'], ['ic_compat', 'combined']])
     // An arm the report does not know is not listed.
     expect(reportArms(['installed_chrome_base', 'zenrows', 'installed_chrome'])).toEqual(['installed_chrome'])
-  })
-
-  it('takes a grant for the ic_compat arm only when it names installed_chrome and compatible_transport, nothing else', () => {
-    expect(icCompatRefusal(['installed_chrome', 'compatible_transport'])).toBeNull()
-    expect(icCompatRefusal(['compatible_transport', 'installed_chrome'])).toBeNull()
-    expect(icCompatRefusal(['installed_chrome', 'compatible_transport', 'vendor_remote_browser', 'vendor_stealth'])).toMatch(/nothing else.*vendor_remote_browser/)
-    expect(icCompatRefusal(['installed_chrome'])).toMatch(/it names installed_chrome\)/)
-    expect(icCompatRefusal(['installed_chrome', 'installed_chrome', 'compatible_transport'])).not.toBeNull()
-    expect(icCompatRefusal(null)).toMatch(/it names none/)
-  })
-
-  it('starts a Steel arm\'s run only when the window\'s charges, an unreported page at the ceiling, plus its pages at the ceiling stay within the cap', () => {
-    const ok = steelCapAllows({ charged: [0.0033, 0.001, null], pages: 23, capUsd: 1, pageCeilingUsd: 0.0033 })
-    expect(ok.ok).toBe(true)
-    expect(ok.spentUsd).toBeCloseTo(0.0076, 10)
-    expect(ok.worstUsd).toBeCloseTo(0.0076 + 23 * 0.0033, 10)
-    expect(steelCapAllows({ charged: Array(290).fill(0.0033), pages: 23, capUsd: 1, pageCeilingUsd: 0.0033 }).ok).toBe(false)
-    expect(steelCapAllows({ charged: [], pages: 1, capUsd: 1, pageCeilingUsd: null })).toEqual({ ok: false, spentUsd: null, worstUsd: null })
   })
 })
 

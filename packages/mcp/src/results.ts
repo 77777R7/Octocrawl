@@ -26,26 +26,28 @@ export function shapeResult(tool: string, result: unknown, contract?: VerifyCont
 }
 
 /**
- * A result without the call's telemetry and internal ids, for a deployment whose tools offer no record to look them up
- * by (hosted Octocrawl has no get_scrape): OpenAI's plugin review asks that a tool result leave out session, trace and
- * request ids and logging metadata (developers.openai.com/plugins/plugin-guidelines, "Response minimization"). The page,
- * the verdict and the Evidence Record stay: its fetch time and hashes are what a citation needs. A map keeps its id, which
- * its outputSchema requires. Its hints lose their
+ * A result without the call's telemetry and internal ids, for hosted Octocrawl: OpenAI's plugin review asks that a tool
+ * result leave out session, trace and request ids and logging metadata (developers.openai.com/plugins/plugin-guidelines,
+ * "Response minimization"). The page, the verdict and the Evidence Record stay: its fetch time and hashes are what a
+ * citation needs. A map keeps its id, which its outputSchema requires, and a scrape its record's id where get_scrape is
+ * listed to read it back (`keepScrapeId`: an account's connection); that record is answered as a scrape's result is. Its hints lose their
  * campaign tags, as error texts do. debug asks for the whole.
  */
-export function withoutTelemetry(tool: string, result: unknown, args: unknown, contract?: VerifyContract): unknown {
+export function withoutTelemetry(tool: string, result: unknown, args: unknown, contract?: VerifyContract, options: { keepScrapeId?: boolean } = {}): unknown {
   if (!isObject(result) || (isObject(args) && args.debug === true)) return result
   // A job's items (H2 M8) lose their usage and trace, as get_crawl_pages says pages do without debug; the Evidence Record stays whole.
   if (JOB_ITEM_TOOLS.has(tool) && Array.isArray(result.items)) {
     return { ...result, items: result.items.map((item) => isObject(item) ? (({ usage: _usage, trace: _trace, ...rest }) => rest)(item) : item) }
   }
-  if (tool !== 'scrape' && tool !== 'scrape_product') return result
-  const { usage: _usage, channelsTried: _channels, ...rest } = result
+  if (tool !== 'scrape' && tool !== 'scrape_product' && tool !== 'get_scrape') return result
+  // A scrape's record (get_scrape) loses the same telemetry, and the client that made it.
+  const { usage: _usage, channelsTried: _channels, ...kept } = result
+  const rest = tool === 'get_scrape' ? (({ origin: _origin, ...record }) => record)(kept) : kept
   const untagged = Array.isArray(rest.agentHints) ? { ...rest, agentHints: rest.agentHints.map((hint) => (typeof hint === 'string' ? withoutCampaign(hint) : hint)) } : rest
   let minimized = untagged
   if (isObject(untagged.metadata)) {
-    const { scrapeId: _scrapeId, concurrencyLimited: _limited, concurrencyQueueDurationMs: _queued, ...metadata } = untagged.metadata
-    minimized = { ...untagged, metadata }
+    const { scrapeId, concurrencyLimited: _limited, concurrencyQueueDurationMs: _queued, ...metadata } = untagged.metadata
+    minimized = { ...untagged, metadata: options.keepScrapeId === true && scrapeId !== undefined ? { ...metadata, scrapeId } : metadata }
   }
   return tool === 'scrape' && contract !== undefined ? resultProjection(result, contract, 'mcp_result_minimized')(minimized) : minimized
 }

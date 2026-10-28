@@ -400,3 +400,88 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 
 - 10 到 20 秒之间才放行的 Cloudflare 挑战，现在会报 blocked。样本里 63 次放行没有一次超过 9.1 秒，但样本只来自一台 Mac、一个出口，站点类型也有限。会不会漏掉这样的挑战，unknown。
 - 确认方法（尚未运行）：challenge16（`research/access/subsets.v1.json`）跑两次，K1 的 92 道题跑两个窗口。通过数不低于 12/16 和 61/92，并按门列出 `challenge_wait` 的 cleared / still_gated / not_waited 分布。
+
+## 修订 2026-10-27：托管的真 Chrome 进入授权（ROADMAP 阶段 H，决定 D3）
+
+**背景。** ROADMAP 阶段 H 第 (2) 项要在 Octocrawl 自己的服务器上建一级真 Chrome（Cloud Run 上用 Xvfb 跑有窗口的 Chrome，来自 G4）。上文"使用条件"里，托管的 `installed_chrome` 要等住宅出口的费用、条款和耗时另行决定；那一条现在由本修订回答，答案是另开一个能力，不是把 `installed_chrome` 搬上托管。依据：
+
+- 2026-10-14 在 Cloud Run 上用 Xvfb：Google 自己的出口 2/16，Webshare 住宅出口 7/16（见上文"只在本地运行"一条）。
+- G4（2026-10-21，[记录](../../research/access/runs/2026-10-21-g4-cloudrun-fixed-runtime-22c9e1ca.md)）：固定镜像，Cloud Run 上 Google 出口 3/16 和 1/16，Webshare 9/16 和 8/16。
+- H2b 窗口 1（2026-10-27，记录待合入）：Cloud Run 上，robots.txt 允许的 19 道题里，住宅出口验证通过 8 道（2 vCPU）和 7 道（4 vCPU），Google 出口 4 道，三个臂都没有假成功。
+
+2026-10-27，Howard 在对话中批准了阶段 H 方案（2026-10-27 的草案，不在仓库里）的 D1（真 Chrome 跑在独立的 Cloud Run 服务 `octocrawl-chrome`，最小实例 0）和 D3（本修订）。下文的 D 编号都指这份方案，不是云功能方案（`docs/launch/2026-10-18-cloud-feature-plan.md`）里同名的 D1–D6。
+
+**决定一：新能力 `hosted_chrome`。**
+
+- 属于第 3 类，最低档位 enhanced，默认关。能力本身不付钱给第三方；付费出口按决定三记账。
+- 内容：Octocrawl 自己服务器上的 Linux 版 Google Chrome，钉住版本，有窗口，显示用 Xvfb，跑在独立的 Cloud Run 服务 `octocrawl-chrome` 里（D1，最小实例 0）。
+  - 以非 root 用户运行，沙箱保持开启。
+  - 每次调用一个新的临时 profile，用完删除。
+  - 启动方式沿用上文收窄后的那一组（`nodriver-0.50.6-no-allow-origins`），调试端口的规则也相同：只对驱动开放，不带 `--remote-allow-origins`，端口由驱动选好后显式传入。
+  - 规格和每个实例同时开几个窗口，实现时按测量定。
+- 什么时候用：前面几级都被拦住，并且决定二的三项授权同时成立。阶梯顺序是自带浏览器（`browser_local`）之后。
+- 拒收的选项先和 `installed_chrome` 相同（actions、截图、`mobile`、自定义请求头、`skipTlsVerification`），原因也相同：它们要在测量之外驱动或改动窗口。
+- 走代理前先解析域名，拒绝内网和保留地址，和 HTTP 级、`compatible_transport` 的地址检查（`CompatAddressGuard`）一样严。
+- `installed_chrome` 不变，仍只在本地运行，托管引擎列了它照样启动即报错。托管从不碰使用者的 Chrome、profile 或 cookie；第 1 类的 `patch_user_chrome` 不变。
+
+**决定二：托管怎样授权。**
+
+- 托管从不读使用者的 grant 文件，今天也不读任何 grant。`hosted_chrome` 只有在下面三项同时成立时才用：
+  1. Octocrawl 自己的运营配置：运营者的声明（相当于本地 grant 的 attestation）、价目表和预算，放在 Secret Manager。
+  2. 账户开关：这个账户打开了这一级。没有账户的调用（keyless）没有这个开关，所以永远用不到它。
+  3. 这次调用选了 `access: "enhanced"`。
+- 缺任何一项，这一级不建，页面按前面几级的结果返回。crawl 和 batch 的 `maxCredits` 照常生效；单次 scrape 没有这个参数。
+- 引擎因此要从进程级的能力集合改为按请求的能力集合（云功能方案 I1 一节记为 B8）。2026-10-27 合入的 #736 只做了 `compatible_transport` 这一项：
+  - 引擎的 `callCapabilities` 列出一次调用可以持有的能力，`HOSTED_CALL_CAPABILITIES` 今天只有 `compatible_transport`。
+  - scrape 的上下文和 job 每一片的限制带着这次调用持有的能力。调用不能自己给自己任何能力。本地引擎的 grant 照旧对每次调用生效。
+  - 托管的开关是 Firestore 的 `hostedConfig/compatibleTransport`（`enabled`，可选 `allowedUids`），默认关，最多每 30 秒读一次。
+  - `installed_chrome`、`enhanced_browser`、厂商能力和求解器仍按进程级的 grant 读取；托管引擎遇到 `installed_chrome`、求解器或出口代理，启动即报错。
+- `hosted_chrome` 要加进按请求授予的能力，属于实现（H2c），不在本修订里。
+
+**决定三：出口。**
+
+- 出口有四类：Cloud Run 自己的出口（Google）、数据中心代理、静态 ISP 代理、住宅代理。走代理的三类都按价目表记账。供应商在 H2b 对比之后另行决定。
+- 价目表（`VendorTariff`）今天能写按次（`perCallUsd`）、按小时（`perHourUsd`）、按 GB（`perGbUsd`）和按次求解（`perSolveUsd`）的价格，没有固定成本。本修订加一种固定成本的写法：按 IP 的月租（ISP 和数据中心的套餐）。
+  - 固定成本按月计入运营预算，不在单次调用里按 GB 预留。
+  - 单次调用的记录不能把它写成 0。摊到单次调用的写法实现时定：要么写摊销值并在 `costBasis` 里标明是摊销，要么写 null（未知）。
+- 每次调用只用一个粘性出口，在这次调用的第一个请求之前选定。遇到 429、403 或挑战页，都不换 IP、不换出口。
+- 第 1 类的 `identity_rotation` 和 `in_session_route_switch` 不变。
+- "先走数据中心，被拦了再走住宅"这样的两级不在本修订里。要做，必须是新会话里新的一级，不能是被拦后换 IP，并且要再修订本 ADR。
+
+**决定四：记录。**
+
+- 每次走 `hosted_chrome` 的页面，Evidence Record 写明：出口类型、供应商、出口 IP、经出口的字节数和成本。
+  - 已有的字段照用：`access.egress.exit.ip`、`access.paidCalls[]` 的 `provider`、`proxyBytes`、`bytesCounted`、`chargedUsd`、`reportedCostUsd`，以及 `access.externalCostUsd`。
+  - 出口类型今天没有字段：`access.egress.source` 只分 `pool`、`environment`、`direct`。实现时加一个可选键，作为 Evidence Record v1 的新增可选键。
+  - `access.route` 是 `hosted_chrome`，`executor` 是 `chrome`，`executorVersion` 是钉住的版本，`profile` 是启动参数那一组的标识。
+- 从不写代理的登录。第 1 类的 `secrets_in_records` 不变。
+
+**决定五：挑战等待上限。** 和本地相同，即 2026-10-26（三）按门类型设的上限：`cloudflare_challenge` 10 秒，`bot_detected_generic` 10 秒，`captcha` 0。H2b 记录每个挑战放行要等多久。窗口 1 里放行的 4 次都在 8.6 秒以内，但上限是 10 秒，超过 10 秒才放行的挑战观察不到。只有对比的实测数据显示托管出口上有这类挑战时，才另行修订。
+
+**决定六：验证码求解在托管上仍然关闭。**
+
+- 上文 2026-10-25 的修订写明："先做本地。托管以后单独做，放在一个默认关闭的开关后面；本修订不建任何托管部分。"同一修订的 grant 规则写明："托管服务读到这个能力时，启动即拒绝。"代码里对应的是托管引擎拿到求解器就报错（`engine.ts` 的 `third_party_captcha_solver is refused on a hosted engine`）。
+- 这个默认关闭的开关今天还不存在：托管只是拒绝。本修订不建它，`hosted_chrome` 上不求解。
+- 上线前要做法律审查，这一条写在 ROADMAP 阶段 H 第 (2) 项（"after a legal review"），不是本 ADR 的规则。
+- 56 道验证码题的两个窗口已经跑完（[记录](../../research/access/runs/2026-10-27-captcha-two-windows-df68fb25.md)）。托管求解要不要开、怎样开，据这份记录另行决定。
+
+**决定七：robots.txt。** 托管对每个 URL 都遵守 robots.txt（ROADMAP 的 Direction），`hosted_chrome` 不改这一点。本地服务对使用者给出的 URL 不按 robots.txt 拦（只记录），这个例外不适用于托管。
+
+**决定八：可以关掉 Chrome 自己的后台下载。**
+
+- 背景：H2b 窗口 1（2026-10-27，记录待合入）里，经出口的字节有 59–71% 是 Chrome 自己的服务流量，主要是 Optimization Guide 的模型下载；冒烟测试里还看到 component 下载（gvt1.com、clients2.googleusercontent.com）和 clientservices.googleapis.com。住宅出口按 GB 收费，这部分流量直接是费用。
+- 允许：`hosted_chrome` 可以加启动参数，关掉 Chrome 自己的后台下载，包括 Optimization Guide 的模型下载、component updater 和同类服务。这是启动参数，不是请求拦截；上文"不做请求拦截"一条不变。
+- 这类参数多半是 `--disable-features=…` 或 `--disable-component-update`，按上文"启动参数分两类"属于会影响指纹或检测的那一类。那一条的门槛是"要先在 16 道题上至少跑两次，并且结果不低于当前基线"。对这一级写明如下：
+  - 在 challenge16（`research/access/subsets.v1.json`）上跑两次；
+  - 每次的验证通过数不低于基线，假成功不多于基线；
+  - 基线是这一级当时在用的启动方式，在同一类出口上的结果。
+  两次都满足，这样的参数才生效；生效后 `profile` 换成新的标识。
+- 这道门槛对 `hosted_chrome` 启动方式的每一项改动都适用。升级钉住的 Chrome 版本怎样过门槛，包括安全更新能不能先上、再补跑，另行决定。
+- 本地 `installed_chrome` 的启动参数和门槛不因本修订改变。
+
+**本修订合入时的边界。**
+
+- 只改 ADR。代码里还没有 `hosted_chrome`：`AUTHORIZABLE` 不列它，`HOSTED_CALL_CAPABILITIES` 也不列它；托管照样拒绝 `installed_chrome`、求解器和出口代理。第 3 类的表格等代码加入时再加这一行。实现和验收属于 H2c。
+- 阶段 H 方案的定价（D4）、开放范围和成本上限（D5）、法律咨询（D6）、身份类功能（D8）另行决定。
+- ROADMAP 里推翻决定 15 的那一段（"Changed 2026-10-27 by Howard"）写的是 ADR 0005 随每项能力在托管上开放而修订，不提前。本修订按 Howard 批准的 D3 先写规则；`hosted_chrome` 要等 H2c 实现并验收后才开放。
+- 没测过：服务形态下的冷启动时间和并发；Cloud Run 上走非 Google 的数据中心出口（H2b 窗口 2 才有这一臂）；关掉后台下载以后挑战页的通过率。

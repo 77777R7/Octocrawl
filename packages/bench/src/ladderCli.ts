@@ -43,7 +43,8 @@ import { LadderRunner, type Channel, type HumanHandoff } from './routing/ladder.
 import { readFileSync } from 'node:fs'
 import { accessGrantFromText, accessGrantRef, createSpendLedger, tariffCeilingUsd, tariffCostUsd, VENDOR_CAPABILITY_ACCESS, type VendorSessionUsage, type VendorTariff } from '@w2l/http-core'
 import { browserEngineChoice } from './subjects/browserEngine.js'
-import { CompatTransport, compatIdentity } from './compatTransport.js'
+import { CompatTransport, compatIdentity, DEFAULT_COMPAT_PROFILE } from './compatTransport.js'
+import { CompatAddressGuard } from './compatGuard.js'
 import type { AccessConfigInput, CrawlPolicy } from '@w2l/http-core'
 import { ResilientHttpSubject } from './subjects/resilientHttp.js'
 import { robotsFetcherOf, type RobotsOriginCache } from './robotsLookup.js'
@@ -232,6 +233,11 @@ export function buildChannels(
      */
     compatTransport?: boolean
     /**
+     * A hosted engine's compatible transport: every request goes through an address guard (compatGuard.ts), which
+     * resolves each name and connects only to an address the network policy allows, as the http rung's lookup does.
+     */
+    compatAddressGuard?: boolean
+    /**
      * A local server that may launch the person's installed Google Chrome (ADR 0005 `installed_chrome`): an
      * `installed_chrome` rung after `browser_local`, built only in standard mode, for a request that chose access
      * enhanced, under a grant that names the capability. Never on the hosted preview.
@@ -276,7 +282,8 @@ export function buildChannels(
   const installedChrome = installedChromeRung
     ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', seams, solving, opts.robotsCache)
     : null
-  const compat = opts.compatTransport === true && mode === 'standard' ? new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, undefined, false, fileStore, false, opts.robotsCache, new CompatTransport(opts.networkPolicy ?? defaultNetworkPolicy())) : null
+  const compatPolicy = opts.networkPolicy ?? defaultNetworkPolicy()
+  const compat = opts.compatTransport === true && mode === 'standard' ? new ResilientHttpSubject(mode, opts.networkPolicy, originScheduler, undefined, false, fileStore, false, opts.robotsCache, new CompatTransport(compatPolicy, DEFAULT_COMPAT_PROFILE, opts.compatAddressGuard === true ? new CompatAddressGuard(compatPolicy) : null)) : null
 
   // ----------------------------------------------------------------------
   // authed_session: the ONLY rung that uses login state. It exists solely in

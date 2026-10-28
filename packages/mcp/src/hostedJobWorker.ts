@@ -16,14 +16,15 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import { createApiEngine, type ApiEngineOptions, type SliceCharge } from '@w2l/api'
-import { hostedNetworkPolicy, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
+import { RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore, webhookSignature, type WebhookTransport } from '@w2l/runtime'
-import { hostedPolicy, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
+import { jobEngineOptions, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
 import { CREDITS, scrapeCharge, type CreditsStore, type Reservation, type UsageKind } from './hostedCredits.js'
 import type { UploadResult } from './hostedCloud.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
+import { grantedCapabilities, type HostedAccessSource } from './hostedAccess.js'
 import type { HostedJob, HostedJobStore, HostedWebhookDelivery } from './hostedJobs.js'
-import { exportName, jobPrefix, jobStatus } from './hostedJobRoutes.js'
+import { exportName, JOB_WORKER_COUNT, jobPrefix, jobStatus } from './hostedJobRoutes.js'
 
 /** The bucket operations a slice needs; GcsBucket has them. */
 export interface WorkerFiles {
@@ -69,6 +70,8 @@ export interface JobWorkerDeps {
   enabled?: () => Promise<boolean>
   /** The json model fallback on the job's credits (hostedModel.ts); absent: a job's pages call no model. */
   model?: HostedModel
+  /** The operator's per-request access switches (hostedAccess.ts), read for the job's account as each slice starts; absent: none. */
+  access?: HostedAccessSource
   /** The engine's network and lanes; a test passes a local policy and HTTP-only channels. Default: the hosted policy. */
   engineOptions?: () => Partial<ApiEngineOptions>
   /** A directory the worker may write task directories in. */
@@ -87,8 +90,8 @@ export const WEBHOOK_MAX_ATTEMPTS = 8
 const WEBHOOK_TIMEOUT_MS = 30_000
 const WEBHOOK_RETRYABLE = (status: number) => status === 408 || status === 425 || status === 429 || status >= 500
 
-/** Pages a slice may store past its limit: the engine's workers less one (workerCount 2 below). */
-const SLICE_HEADROOM = 1
+/** Pages a slice may store past its limit: the engine's workers (JOB_WORKER_COUNT) less one. */
+const SLICE_HEADROOM = JOB_WORKER_COUNT - 1
 /** A crawl's page limit on hosted Octocrawl (hostedJobRoutes.ts JOB_MAX_CRAWL_PAGES), for a request stored without one. */
 const JOB_MAX_PAGES = 500
 /** A slice's lease outlasts a delivery's dispatch deadline (900 s). */
@@ -241,14 +244,13 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     // Each page's model call is admitted by the switch and the day's cap, and only while the slice holds its two credits;
     // a worker without a hosted model refuses every call, whatever engine options a caller passed.
     const model = deps.model?.gate(modelRefusal) ?? { gate: { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) } }
-    const engine = createApiEngine({
-      taskRoot, hosted: true, defaultMaxPages: 500, allowRobotsOverride: false, sessionsFile: null, userChrome: null,
-      workerCount: SLICE_HEADROOM + 1, resumeOnStart: false, deferLaunch: true, taskIds: () => jobId, ...extra,
-      networkPolicy: hostedPolicy(extra.networkPolicy ?? hostedNetworkPolicy()),
-      modelGate: model.gate,
-    })
+    // What the slice's pages hold (ADR 0005 compatible_transport), as the operator's switch grants it to the job's account now.
+    const capabilities = await grantedCapabilities(deps.access, { uid: job.uid })
+    const engine = createApiEngine({ ...jobEngineOptions(taskRoot, { taskIds: () => jobId, ...extra }), modelGate: model.gate })
     const off = new AbortController()
-    let result: Awaited<ReturnType<typeof engine.runSlice>>
+    let result: Awaited<ReturnType<typeof engine.runSlice>> = null
+    /** The engine's refusal of the stored request: retrying would be refused the same way. */
+    let refused: RequestError | null = null
     const poller = setInterval(() => {
       void (async () => {
         const current = await deps.store.get(jobId)
@@ -258,13 +260,24 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     }, deps.pollMs ?? 5_000)
     try {
       if (checkpoint === null) {
-        if (job.kind === 'batch') await engine.startBatch(job.request as ParsedBatchStartRequest)
-        else await engine.startCrawl(job.request as ParsedCrawlStartRequest)
+        try {
+          if (job.kind === 'batch') await engine.startBatch(job.request as ParsedBatchStartRequest)
+          else await engine.startCrawl(job.request as ParsedCrawlStartRequest)
+        } catch (error) {
+          if (!(error instanceof RequestError)) throw error
+          refused = error
+        }
       }
-      result = await engine.runSlice(jobId, { maxNewPages: pages, maxMs: limits.sliceMs, graceMs: limits.graceMs, signal: off.signal, ...(job.kind === 'batch' ? { batchHosts: hosts } : {}) })
+      if (refused === null) result = await engine.runSlice(jobId, { maxNewPages: pages, maxMs: limits.sliceMs, graceMs: limits.graceMs, signal: off.signal, capabilities, ...(job.kind === 'batch' ? { batchHosts: hosts } : {}) })
     } finally {
       clearInterval(poller)
       await engine.close({ cancelActive: true })
+    }
+    // The start checks the request on an engine configured as this one (hostedJobRoutes.ts checkStart); a request it let
+    // through and this engine refuses fails at once, by its reason, rather than retried until delivery_failed.
+    if (refused !== null) {
+      log(JSON.stringify({ severity: 'ERROR', event: 'hosted_job_request_refused', workspaceId: job.workspaceId, jobId, generation, code: refused.code, message: refused.message }))
+      return await pass((j) => ({ ...j, status: 'failed', failureReason: 'request_refused' }))
     }
     if (result === null) throw new Error('the job\'s task is missing from its checkpoint')
 

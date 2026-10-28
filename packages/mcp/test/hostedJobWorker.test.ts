@@ -12,6 +12,7 @@ import { MemoryCreditsStore } from '../src/hostedCredits.js'
 import { MemoryHostedJobStore, newHostedJob, type HostedJob, type HostedJobWebhook } from '../src/hostedJobs.js'
 import { exportName } from '../src/hostedJobRoutes.js'
 import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } from '../src/hostedModel.js'
+import { MemoryHostedAccess } from '../src/hostedAccess.js'
 import { googleOidcVerifier, runJobExpiry, runJobSlice, runJobWebhook, startJobWorker, WEBHOOK_MAX_ATTEMPTS, type JobWorkerDeps, type WorkerFiles } from '../src/hostedJobWorker.js'
 import { createHmac, generateKeyPairSync, sign } from 'node:crypto'
 import type { WebhookTransportRequest } from '@w2l/runtime'
@@ -124,6 +125,29 @@ describe('hosted job worker', () => {
     expect(expiries).toEqual([id])
     // The day's job pools counted the pages each slice reserved.
     expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBeGreaterThanOrEqual(5)
+  })
+
+  it('gives a slice\'s pages the compatible transport while the switch grants it to the job\'s account, at an HTTP page\'s price', async () => {
+    const { origin, deps, credits, create, drain } = await setup()
+    const compat: string[] = []
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    deps.engineOptions = () => ({ networkPolicy: policy, hosted: false, compatHosts: ['127.0.0.1'], channelsFor: (mode) => {
+      const channels = buildChannels(mode, { networkPolicy: policy, localSubjects: { browser_local: { fetch: async () => { throw new Error('worker tests stay on HTTP') } } } })
+      const http = channels.find((channel) => channel.id === 'http')!
+      // The http rung's own fetch, counted, stands in for the transport: the worker's part is which pages hold it.
+      return [...channels, { ...http, id: 'http_compat', fetch: (url, session, execution, options) => { compat.push(new URL(url).pathname); return http.fetch(url, session, execution, options) } }]
+    } })
+    deps.access = new MemoryHostedAccess({ compatibleTransport: { enabled: true, allowedUids: ['account-1'] } })
+    const granted = await create(parseBatchStartRequest({ urls: ['/a', '/b'].map((path) => `${origin}${path}`), fastMode: true }))
+    expect((await drain(granted)).at(-1)).toBe('completed')
+    expect(compat.sort()).toEqual(['/a', '/b'])
+    expect(await credits.balance('account-1', NOW)).toBe(998)
+    // Granted to another account now: the next job's slices hold nothing.
+    compat.length = 0
+    deps.access = new MemoryHostedAccess({ compatibleTransport: { enabled: true, allowedUids: ['account-2'] } })
+    const other = await create(parseBatchStartRequest({ urls: ['/c', '/d'].map((path) => `${origin}${path}`), fastMode: true }))
+    expect((await drain(other)).at(-1)).toBe('completed')
+    expect(compat).toEqual([])
   })
 
   it('takes the day\'s job pool and credits for the pages a job has left, not a whole slice (no headroom on its last slice)', async () => {
@@ -312,6 +336,24 @@ describe('hosted job worker', () => {
     expect(await runJobSlice(deps, id, 0)).toEqual({ status: 200, outcome: 'failed' })
     expect(await store.get(id)).toMatchObject({ status: 'failed', failureReason: 'delivery_failed' })
     expect(expiries).toEqual([id])
+  })
+
+  it('fails a job whose stored request the engine refuses at its first slice at once, by its reason, with nothing read or charged (stage H W0)', async () => {
+    const { origin, seen, store, credits, expiries, deps, create, queue } = await setup()
+    const lines: string[] = []
+    deps.log = (line) => lines.push(line)
+    for (const [kind, request] of [['batch', parseBatchStartRequest({ urls: [`${origin}/a`], fastMode: true, includeTags: ['div:has(p)'] })], ['crawl', parseCrawlStartRequest({ url: `${origin}/`, fastMode: true, includeTags: ['div:has(p)'] })]] as const) {
+      const id = await create(request, kind)
+      queue.splice(queue.findIndex((task) => task.jobId === id), 1)
+      expect(await runJobSlice(deps, id, 0), kind).toEqual({ status: 200, outcome: 'failed' })
+      expect(await store.get(id), kind).toMatchObject({ status: 'failed', failureReason: 'request_refused', failedAttempts: 0, lease: null, counts: { pages: 0, errors: 0 } })
+      expect(expiries.at(-1), kind).toBe(id)
+    }
+    expect(queue).toEqual([])
+    expect(seen).toEqual([])
+    expect(await credits.balance('account-1', NOW)).toBe(1_000)
+    const refusals = lines.map((line) => JSON.parse(line) as { event?: string; message?: string }).filter((line) => line.event === 'hosted_job_request_refused')
+    expect(refusals.map((line) => line.message)).toEqual([expect.stringMatching(/^includeTags entry uses .*: div:has\(p\)/), expect.stringMatching(/^includeTags entry uses .*: div:has\(p\)/)])
   })
 
   it('reads what the credits allow, then fails the job for credits; and stops at the job\'s maxCredits', async () => {

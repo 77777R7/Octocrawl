@@ -131,7 +131,7 @@ import { JobWebhooks, webhookOf } from './jobWebhooks.js'
 import { initializeFirecrawlMonitor, runFirecrawlMonitor as executeMonitor, runConfiguredMonitor } from '@w2l/runtime'
 import { MonitorStore, DeliveryStore, assessConfiguredDocument, assessFirecrawlIntroduction } from '@w2l/runtime'
 import { FileSessionBrokerStore, FileSessionStore, installedChromeRefusal, mergeListPages, publicSession, regionSpecOf, SessionBroker, type SessionStore } from '@w2l/bench'
-import { BLOCK_REASON, VERIFY_REGEX_CHECK_TYPES, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
+import { BLOCK_REASON, hostedVerifyRefusal, FIRECRAWL_INTRO_URL, FIRECRAWL_MONITOR_ID, LIST_DEFAULTS, type AccessChoice, type BlockReason, type ListRun, type PageAction, type MonitorView, type MonitorRevision } from '@w2l/contracts'
 import type { ManagedSessionRef, PublicManagedSessionRef, SessionAccessResult } from '@w2l/contracts'
 import { attributesFormat, checkVerificationFormats, customJsonFormat, listFormat, extractionInput, extractStructured, hasFormat, prepareScrapeResponse, scrapeSnapshot, screenshotFormat, structuredModelConfigFromEnv, verifyScrapeResponse } from './structured.js'
 
@@ -164,9 +164,21 @@ export class SessionsUnavailableError extends Error {
   override readonly name = 'SessionsUnavailableError'
 }
 
+/**
+ * The ADR 0005 capabilities a call's own context may hold on an engine that grants them per call (`callCapabilities`):
+ * hosted Octocrawl reads no grant and gives each request these from its operator's switches (ROADMAP stage H item 2).
+ * The other capabilities stay with a server's own grant, and a hosted engine refuses them.
+ */
+export const HOSTED_CALL_CAPABILITIES = ['compatible_transport'] as const
+export type CallCapability = (typeof HOSTED_CALL_CAPABILITIES)[number]
+
 /** A scrape's context, and a fastMode its caller pinned: the answer and the scrape record then say the pin's reason. */
 export interface ScrapeContext extends ExecutionContext {
+  /** The capabilities this call alone holds, within the engine's `callCapabilities`: hosted Octocrawl's switches, per request. */
+  capabilities?: readonly CallCapability[]
   fastModePin?: FastModePin
+  /** Told the call's whole run, its trace and ladder trace whatever `debug` asks, before the answer is shaped; never part of it (hosted's phase line). */
+  observe?: (run: ScrapeRun, scrapeId: string) => void
 }
 
 /** What a handoff tells its caller while it waits, and what ends it. */
@@ -235,6 +247,13 @@ export interface ApiEngine {
    * one's answer with `replayed: true` and starts nothing.
    */
   startBatch(req: ParsedBatchStartRequest): Promise<BatchAccepted>
+  /**
+   * Throws the RequestError startCrawl would answer the request with before it creates anything, and creates nothing: a
+   * hosted job's start checks its request on an engine configured as the worker's, which starts it at the job's first slice.
+   */
+  checkCrawlStart(req: ParsedCrawlStartRequest): void
+  /** The same for startBatch. A refusal that depends on the server's state (a batch limit, a submission in progress) is not made. */
+  checkBatchStart(req: ParsedBatchStartRequest): void
   getBatch(taskId: string): Promise<BatchStatusResponse | null>
   getBatchItems(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
   /**
@@ -409,9 +428,18 @@ export interface ApiEngineOptions {
   /**
    * The hosts (and their subdomains) whose standard-mode pages go over the browser-compatible
    * transport, as the server chose them (compatHostsChoice; ADR 0005 `compatible_transport`): their
-   * `http` rung is `http_compat`. Absent or empty: none. Needs the grant; refused on a hosted engine.
+   * `http` rung is `http_compat`. Absent or empty: none. Needs the grant, or `callCapabilities` naming
+   * it, and then only a call that holds it uses the rung; on a hosted engine, `callCapabilities` alone.
    */
   compatHosts?: readonly string[]
+  /**
+   * What a call's own context may hold here beyond the server's grant (ScrapeContext.capabilities, SliceLimits.capabilities):
+   * hosted Octocrawl, which reads no grant, gives each request these from its operator's switches. Their rungs are built
+   * once, and a call uses one only when it holds it; on a hosted engine the compatible transport then goes through its
+   * address guard. Absent: a call's context grants nothing, and the grant alone decides, as on a server on the person's
+   * computer. Only HOSTED_CALL_CAPABILITIES may be named.
+   */
+  callCapabilities?: readonly CallCapability[]
   /** Test seam: override local ladder channels without changing fetch. */
   channelsFor?: (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => Channel[]
   /** Test seams of the installed_chrome rung (installedChrome.ts): a stand-in Chromium, headless where no display exists. */
@@ -632,7 +660,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const egressProxyList = options.egressProxies ?? []
   if (egressProxyList.length > 0 && options.hosted === true) throw new Error('egress proxies are refused on a hosted engine (ADR 0005)')
   if (egressProxyList.length > 0 && !egressSessions) throw new Error('egress proxies need an access grant that names egress_sessions (ADR 0005)')
-  if (compatHosts.length > 0 && options.hosted === true) throw new Error('the compatible transport is refused on a hosted engine (ADR 0005)')
+  const callCapabilities = options.callCapabilities ?? []
+  for (const name of callCapabilities) {
+    if (!(HOSTED_CALL_CAPABILITIES as readonly string[]).includes(name)) throw new Error(`${name} cannot be granted per call (ADR 0005): only ${HOSTED_CALL_CAPABILITIES.join(', ')} can`)
+  }
+  /** ADR 0005 `compatible_transport` granted per call (hosted Octocrawl's switch): the rung is built, and only a call that holds it uses it. */
+  const compatPerCall = callCapabilities.includes('compatible_transport')
+  /** The same by the server's grant, for every call; never on a hosted engine, whose calls hold only what they are given. */
+  const compatByGrant = options.hosted !== true && (accessGrant?.capabilities ?? []).includes('compatible_transport')
+  if (compatHosts.length > 0 && options.hosted === true && !compatPerCall) throw new Error('the compatible transport is refused on a hosted engine unless it is granted per call (callCapabilities; ADR 0005)')
   /** ADR 0005 `installed_chrome`: the machine's own Google Chrome, a rung for requests that choose access enhanced. Local only. */
   const installedChrome = (accessGrant?.capabilities ?? []).includes('installed_chrome')
   if (installedChrome && options.hosted === true) throw new Error('installed_chrome is refused on a hosted engine (ADR 0005: it launches the Google Chrome of the machine Octocrawl runs on)')
@@ -654,7 +690,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const stored = task.batch ?? task.crawl
     return hintOffers(task.mode, url, fetchOptions(stored, stored?.formats))
   }
-  if (compatHosts.length > 0 && !(accessGrant?.capabilities ?? []).includes('compatible_transport')) throw new Error('the compatible transport needs an access grant that names compatible_transport (ADR 0005)')
+  if (compatHosts.length > 0 && !(accessGrant?.capabilities ?? []).includes('compatible_transport') && !compatPerCall) throw new Error('the compatible transport needs an access grant that names compatible_transport (ADR 0005)')
+  /**
+   * Whether a call holds the compatible transport: by the server's grant, or by its own context where this engine grants
+   * it per call. A context may hold only what `callCapabilities` names: it never grants itself more.
+   */
+  const compatHeld = (capabilities: readonly CallCapability[] = []): boolean => {
+    for (const name of capabilities) if (!callCapabilities.includes(name)) throw new Error(`this engine grants ${name} to no call (callCapabilities)`)
+    return compatByGrant || capabilities.includes('compatible_transport')
+  }
   /** Why a request's options keep it off the compatible transport, which sends its profile's headers alone; null when they do not. */
   const compatOptionsRefusal = (page: { headers?: Readonly<Record<string, string>>; mobile?: boolean }): string | null => {
     const wire = [...(page.headers !== undefined && Object.keys(page.headers).length > 0 ? ['headers'] : []), ...(page.mobile === true ? ['mobile'] : [])]
@@ -863,8 +907,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // A step runs the caller's clicks and scripts in the operator's browser; a hosted engine takes none until that isolation is reviewed.
     if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run Octocrawl locally to use them')
     // A JavaScript regular expression cannot be bounded in time, and a page's Markdown is far longer than a safe pattern's text (ADR 0006).
-    const regexChecks = req.verify?.checks.filter((check) => (VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(check.type)).map((check) => check.type) ?? []
-    if (hosted && regexChecks.length > 0) throw new RequestError(`verify: ${[...new Set(regexChecks)].join(' and ')} checks are not available in hosted mode (a regular expression cannot be bounded in time); use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally`, 'unsupported_parameter', { parameters: ['verify'] })
+    const regexRefusal = hosted ? hostedVerifyRefusal(req.verify) : null
+    if (regexRefusal !== null) throw new RequestError(regexRefusal, 'unsupported_parameter', { parameters: ['verify'] })
   }
   /**
    * `access: "enhanced"` asks for what the server's access grant of tier enhanced approves (ADR 0005), within its
@@ -942,7 +986,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     options.channelsFor ??
     ((mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced?: boolean) => {
       // One set of rungs per egress: each leaves through its proxy; pacing per origin stays shared (originScheduler).
-      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, ...(enhanced === true ? { enhanced } : {}), ...(installedChrome ? { installedChrome, ...(options.installedChromeSeams === undefined ? {} : { installedChromeSeams: options.installedChromeSeams }) } : {}), ...(captchaSolving !== undefined && enhanced === true ? { captchaSolving } : {}) })
+      const channels = buildChannels(mode, { headed, networkPolicy: egress?.policy ?? networkPolicy, originScheduler, publicPreferenceState:options.publicPreferenceState, browserAllowedHosts:options.browserAllowedHosts, fileStore, robotsCache: robotsCacheFor(mode, egress), vendorPolicy: { authorized: accessGrant?.capabilities ?? [] }, vendorTariffs: accessGrant?.tariffs ?? {}, ...(accessGrant === null ? {} : { vendorGrant: accessGrantRef(accessGrant) }), browserEngine: options.browserEngine ?? 'playwright', browserIdentity: options.browserIdentity ?? 'declared', compatTransport: compatHosts.length > 0, compatAddressGuard: options.hosted === true, ...(enhanced === true ? { enhanced } : {}), ...(installedChrome ? { installedChrome, ...(options.installedChromeSeams === undefined ? {} : { installedChromeSeams: options.installedChromeSeams }) } : {}), ...(captchaSolving !== undefined && enhanced === true ? { captchaSolving } : {}) })
       return options.httpOnly ? channels.filter(channel => HTTP_CHANNELS.has(channel.id)) : channels
     })
   const channelsByMode = new Map<string, Channel[]>()
@@ -975,14 +1019,15 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * and says so, else `http`. A batch's or crawl's rungs serve many URLs and
    * keep both; each page takes one (Channel.serves). Options the transport
    * cannot send (`headers`, `mobile`) drop `http_compat` either way.
-   * `compat` false leaves it out altogether: a map reads its start page with
-   * the identity its response names, the one it reads robots.txt with.
+   * `compat` false leaves it out altogether: for a call that does not hold
+   * the transport (compatHeld), and for a map, which reads its start page
+   * with the identity its response names, the one it reads robots.txt with.
    */
   const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions & { access?: AccessChoice } = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true, egress?: Egress): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
     const channels = channelsFor(mode, egress, page.access === 'enhanced')
     const policy = options.channelPolicy?.(url) ?? 'ladder'
     let selected = policy === 'ladder' ? channels : channels.filter(channel => policy === 'http_only' ? HTTP_CHANNELS.has(channel.id) : channel.id === 'browser_local')
-    // A host the server did not list never sees the compatible rung, in the audit either.
+    // A call that does not hold the transport, or a host the server did not list, never sees the compatible rung, in the audit either.
     if (!compat || (oneUrl && !compatHostListed(compatHosts, url))) selected = selected.filter(channel => channel.id !== 'http_compat')
     if (selected.length === 0) throw new RequestError(`capture channel unavailable for ${policy}`)
     const filtered: ChannelsFiltered[] = []
@@ -1566,6 +1611,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // relaxation it refuses at submission.
     const stored = task.batch ?? task.crawl
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
+    // A hosted job's slice holds what its worker gave it (SliceLimits.capabilities); any other run, the server's grant.
+    const compat = compatHeld(req.slice?.capabilities)
     // The task's egress (W2L_EGRESS_PROXIES), kept in its directory so a resumed task goes on through it while it is in the
     // pool and not cooling down. Mode authed's saved login keeps its own route: it never takes one.
     const egressFile = join(task.taskDir, EGRESS_FILE)
@@ -1612,7 +1659,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
      * session are never cached.
      */
     const laneFor = (egress: Egress | undefined): Lane => {
-      const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, true, egress)
+      const rungs = channelsForUrl(mode, task.seedUrl, selection ?? {}, selection?.formats ?? [], false, compat, egress)
       const sessionFile = cookieSessionFileFor(task.taskDir, routeOf(egress))
       return { egress, rungs, ladder: ladderFor(rungs, egress), cookieSession: egressSessions && mode !== 'authed' ? new TaskCookieSession(sessionFile) : undefined }
     }
@@ -1844,7 +1891,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const mode = defaultApiMode(req.mode)
     // A scrape takes the next healthy egress, when the operator set some; it does not switch.
     const scrapeEgress = mode === 'authed' ? undefined : egressPool?.pick()
-    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, true, scrapeEgress)
+    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, compatHeld(context.capabilities), scrapeEgress)
     const policy: CrawlPolicy = {
       mode,
       // access enhanced permits the provider lane in mode standard too (the grant still decides whether one exists).
@@ -1863,6 +1910,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       // A pinned fastMode's reason replaces the engine's "retry without fastMode" in the answer and the record alike.
       const pinned = context.fastModePin === undefined ? [] : pinnedFastModeHints(run.agentHints ?? [], context.fastModePin)
       const full: ScrapeRun = pinned.length === 0 ? run : { ...run, agentHints: pinned }
+      // An observer that throws does not cost the caller the page.
+      try { context.observe?.(full, scrapeId) } catch { /* the observer's own fault */ }
       const response = await prepareScrapeResponse(full, req, modelGated(shapeScope, context), null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
       if (!record) return response
       // Written before the response is sent; a write failure is logged, the response keeps its id, and the full response's trace says so.
@@ -2018,6 +2067,43 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     try { return await operation } finally { activeScrapes.delete(operation) }
   }
 
+  /** What startCrawl refuses before anything is created or fetched; the job's webhook, checked, when it has one. */
+  const crawlStartChecks = (req: ParsedCrawlStartRequest): ReturnType<typeof jobWebhooks.check> => {
+    checkRobotsOverride('ignoreRobotsTxt', req.ignoreRobotsTxt)
+    checkFileCap(req)
+    checkSelectors(req)
+    checkAttributeSelectors(req.formats)
+    checkListSelectors(req.formats)
+    checkVerificationFormats(req)
+    checkHostedOptions(req)
+    checkAccessChoice(req)
+    const webhookConfig = jobWebhooks.check(req.webhook)
+    if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
+      throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
+    }
+    // A crawl may lower its parallelism below the service's workers, never raise it.
+    if (req.maxConcurrency != null && req.maxConcurrency > workerCount) {
+      throw new RequestError(`maxConcurrency must be at most ${workerCount} on this service`)
+    }
+    return webhookConfig
+  }
+  /** What startBatch refuses before anything is counted, created or fetched; the webhook and the canonical URLs, checked. */
+  const batchStartChecks = (req: ParsedBatchStartRequest): { webhookConfig: ReturnType<typeof jobWebhooks.check>; canonical: string[] } => {
+    checkFileCap(req)
+    checkSelectors(req)
+    checkAttributeSelectors(req.formats)
+    checkListSelectors(req.formats)
+    checkVerificationFormats(req)
+    checkRobotsOverride('robotsOverrides', req.robotsOverrides)
+    checkHostedOptions(req)
+    checkAccessChoice(req)
+    checkMyBrowser(req)
+    const webhookConfig = jobWebhooks.check(req.webhook)
+    const canonical = req.urls.map(url => canonicalizeUrl(url))
+    if (canonical.some(url => url === null) || new Set(canonical).size !== canonical.length) throw new RequestError('urls must be unique after canonicalization')
+    return { webhookConfig, canonical: canonical as string[] }
+  }
+
   return {
     scrape: (req, context = {}, hooks = {}) => runScrape(req, context, true, hooks),
 
@@ -2043,23 +2129,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
     },
 
+    checkCrawlStart(req) { crawlStartChecks(req) },
+
+    checkBatchStart(req) { batchStartChecks(req) },
+
     async startCrawl(req) {
-      checkRobotsOverride('ignoreRobotsTxt', req.ignoreRobotsTxt)
-      checkFileCap(req)
-      checkSelectors(req)
-      checkAttributeSelectors(req.formats)
-      checkListSelectors(req.formats)
-      checkVerificationFormats(req)
-      checkHostedOptions(req)
-      checkAccessChoice(req)
-      const webhookConfig = jobWebhooks.check(req.webhook)
-      if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
-        throw new RequestError(`maxPages must be at most ${defaultMaxPages} on this server`)
-      }
-      // A crawl may lower its parallelism below the service's workers, never raise it.
-      if (req.maxConcurrency != null && req.maxConcurrency > workerCount) {
-        throw new RequestError(`maxConcurrency must be at most ${workerCount} on this service`)
-      }
+      const webhookConfig = crawlStartChecks(req)
       // A retried start is answered from the record before anything is created or fetched.
       const submission = claimSubmission<CrawlAccepted>(req)
       if (submission.replay !== undefined) return submission.replay
@@ -2139,24 +2214,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
 
     async startBatch(req) {
       if (batchStartInProgress) throw new RequestError('another batch submission is in progress')
-      checkFileCap(req)
-      checkSelectors(req)
-      checkAttributeSelectors(req.formats)
-      checkListSelectors(req.formats)
-      checkVerificationFormats(req)
-      checkRobotsOverride('robotsOverrides', req.robotsOverrides)
-      checkHostedOptions(req)
-      checkAccessChoice(req)
-      checkMyBrowser(req)
-      const webhookConfig = jobWebhooks.check(req.webhook)
+      const { webhookConfig, canonical } = batchStartChecks(req)
       batchStartInProgress = true
       try {
-      const canonical = req.urls.map(url => canonicalizeUrl(url))
-      if (canonical.some(url => url === null) || new Set(canonical).size !== canonical.length) throw new RequestError('urls must be unique after canonicalization')
       // A retried submission is answered from the record before anything is counted, created or fetched; an append creates no task, and appendToBatch counts it against the batch limit only when it runs a completed batch again.
       const submission = claimSubmission<BatchAccepted>(req)
       if (submission.replay !== undefined) return submission.replay
-      if (req.appendToId !== undefined) return await appendToBatch(req, canonical as string[], submission)
+      if (req.appendToId !== undefined) return await appendToBatch(req, canonical, submission)
       if (options.maxActiveBatches !== undefined && await activeBatchCount() >= options.maxActiveBatches) {
         throw new RequestError('active batch limit reached')
       }
@@ -2377,7 +2441,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           const pending: Task = { ...task, status: 'pending', updatedAt: new Date().toISOString() }
           await store.putTask(pending)
           const run = task.batch === undefined ? crawlRunOptions(pending, true) : batchRunOptions(task.batch, true)
-          try { launchTask(pending, store, { ...run, slice: { drain: drain.signal, stop: stop.signal, ...(limits.batchHosts === undefined ? {} : { batchHosts: limits.batchHosts }) } }) }
+          try { launchTask(pending, store, { ...run, slice: { drain: drain.signal, stop: stop.signal, ...(limits.batchHosts === undefined ? {} : { batchHosts: limits.batchHosts }), ...(limits.capabilities === undefined ? {} : { capabilities: limits.capabilities }) } }) }
           catch (error) { await store.putTask(task); throw error }
           launched = true
           await inflight.get(taskId)
@@ -2788,8 +2852,8 @@ interface TaskRunOptions {
   sitemap: SitemapMode
   maxConcurrency: number | null
   policyAllowlist: readonly string[]
-  /** A slice of a hosted job (runSlice): its drain and its stop, either of which pauses the task, and the batch hosts it reads. */
-  slice?: { drain: AbortSignal; stop: AbortSignal; batchHosts?: readonly string[] }
+  /** A slice of a hosted job (runSlice): its drain and its stop, either of which pauses the task, the batch hosts it reads and the capabilities it holds. */
+  slice?: { drain: AbortSignal; stop: AbortSignal; batchHosts?: readonly string[]; capabilities?: readonly CallCapability[] }
 }
 
 export interface SliceLimits {
@@ -2805,6 +2869,8 @@ export interface SliceLimits {
   graceMs?: number
   /** Drains the slice as a limit does when it aborts (a hosted job switched off meanwhile). */
   signal?: AbortSignal
+  /** The capabilities the slice's pages hold, within the engine's `callCapabilities`: the hosted worker's switches, for the job's account. */
+  capabilities?: readonly CallCapability[]
 }
 
 export interface SliceResult {

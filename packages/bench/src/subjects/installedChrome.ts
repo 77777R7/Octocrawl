@@ -18,7 +18,7 @@
  */
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { access, mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { constants, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -225,11 +225,17 @@ async function waitForDebugging(port: number, child: ChildProcess, timeoutMs: nu
 }
 
 /**
+ * What a route other than installed_chrome adds to the same launch: preferences written into the fresh profile before
+ * Chrome starts (`Default/Preferences`), for hosted_chrome (hostedChrome.ts). installed_chrome passes none.
+ */
+export interface ChromeProfileSeed { preferences?: Readonly<Record<string, unknown>> }
+
+/**
  * Launch the installed Chrome as measured and connect Playwright to it. The returned Browser's close() also ends the
  * Chrome process, frees its window and deletes its profile. `options.headless` is ignored: the route is headed. A
  * `signal` that aborts while the launch waits for a window or for Chrome stops it there: no Chrome outlives its caller.
  */
-export async function launchInstalledChrome(options: LaunchOptions, seams: InstalledChromeTestSeams = {}, signal?: AbortSignal): Promise<Browser> {
+export async function launchInstalledChrome(options: LaunchOptions, seams: InstalledChromeTestSeams = {}, signal?: AbortSignal, seed: ChromeProfileSeed = {}): Promise<Browser> {
   const executable = seams.executable ?? await findInstalledChrome()
   const release = await INSTALLED_CHROME_WINDOWS.acquire(signal)
   let profile: string | null = null
@@ -251,6 +257,10 @@ export async function launchInstalledChrome(options: LaunchOptions, seams: Insta
   try {
     profile = await mkdtemp(join(tmpdir(), 'octocrawl-installed-chrome-'))
     live.profile = profile
+    if (seed.preferences !== undefined) {
+      await mkdir(join(profile, 'Default'))
+      await writeFile(join(profile, 'Default', 'Preferences'), JSON.stringify(seed.preferences))
+    }
     if (signal?.aborted) throw aborted()
     const port = await freeDebuggingPort()
     const args = installedChromeArgs(profile, port, options)

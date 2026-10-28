@@ -14,9 +14,6 @@ export declare const REPORT_ARMS: string[]
 export declare function reportArms(...armLists: readonly (readonly string[])[]): string[]
 export declare const PAIRS: [string, string][]
 export declare function pairsFor(arms: readonly string[]): [string, string][]
-export declare const IC_COMPAT_CAPABILITIES: string[]
-export declare function icCompatRefusal(capabilities: readonly string[] | null | undefined): string | null
-export declare function steelCapAllows(input: { charged: readonly unknown[]; pages: number; capUsd: number; pageCeilingUsd: number | null }): { ok: boolean; spentUsd: number | null; worstUsd: number | null }
 export declare function steelCalls(response: unknown): SteelCall[] | null
 export declare function steelTally(perResponse: readonly (SteelCall[] | null)[]): SteelTally
-export declare function exitOf(icCompat: ArmFigures, combined: ArmFigures, margin?: number): { needed: number; verified: boolean; falseSuccess: boolean | null; met: boolean | null }
+export declare function exitOf(icCompat: ArmFigures, combined: ArmFigures, margin?: number): { needed: number; verified: boolean | null; falseSuccess: boolean | null; met: boolean | null }

@@ -7,7 +7,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
-import { CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, parseBatchStartRequest, parseCrawlStartRequest, readWebhook, RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
+import { CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlStartRequest, readWebhook, RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import type { CreditsStore } from './hostedCredits.js'
 import { CREDITS } from './hostedCredits.js'
 import { asksModelFallback } from './hostedModel.js'
@@ -59,6 +59,8 @@ export const JOB_DEFAULT_CRAWL_PAGES = 100
 export const JOB_MAX_CRAWL_PAGES = 500
 /** New pages a slice stores at most (docs/launch/2026-10-19-h1-hosted-jobs-plan.md §5): a start needs the credits for one. */
 export const JOB_SLICE_PAGES = 100
+/** Pages a job's slice reads at once, its engine's workers (hostedJobWorker.ts): the most a crawl's or a batch's maxConcurrency gets. */
+export const JOB_WORKER_COUNT = 2
 export const JOB_LIMITS: JobLimits = { maxRunning: 2, maxQueued: 10 }
 const IDEMPOTENCY_TTL_MS = 24 * 3_600_000
 const PAGE_LIST_DEFAULT = 50
@@ -108,6 +110,12 @@ export interface HostedJobsConfig {
   enabled?: () => Promise<boolean>
   /** Whether an account may start jobs (`hostedConfig/jobs.allowedUids`); absent: every account. Reads and cancels are not gated. */
   allows?: (uid: string) => Promise<boolean>
+  /**
+   * Throws the RequestError the worker's engine would refuse the stored request with when the job's first slice starts it
+   * (ApiEngine checkCrawlStart, checkBatchStart): the start answers it 400 instead of a job that fails later. createHostedApi
+   * fills it with an engine configured as the worker's; absent: no such check.
+   */
+  checkStart?: { batch: (request: ParsedBatchStartRequest) => void; crawl: (request: ParsedCrawlStartRequest) => void }
   limits?: JobLimits
 }
 
@@ -120,7 +128,7 @@ const refusal = (status: number, code: string, error: string, agentHints: readon
 /** Whether a method and path are a job route; the gate hands those to handleJob. */
 export function isJobRoute(method: string, path: string): boolean {
   if (method === 'POST' && (path === '/v1/batches' || path === '/v1/crawl')) return true
-  if (method === 'GET' && path === '/v1/jobs') return true
+  if (method === 'GET' && (path === '/v1/jobs' || path === '/v1/crawl/active')) return true
   return /^\/v1\/(batches|crawl|jobs)\/[^/]+(\/(items|pages|errors|cancel|export))?$/.test(path) && (method === 'GET' || method === 'POST')
 }
 
@@ -223,6 +231,23 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     try { parsed = kind === 'batch' ? parseBatchStartRequest(body) : parseCrawlStartRequest(body) }
     catch (error) { return refusal(400, 'invalid_request', error instanceof RequestError || error instanceof Error ? error.message : String(error)) }
     if (kind === 'crawl' && !((parsed as ParsedCrawlStartRequest).maxPages! >= 1 && (parsed as ParsedCrawlStartRequest).maxPages! <= JOB_MAX_CRAWL_PAGES)) return refusal(400, 'invalid_request', `maxPages must be 1 to ${JOB_MAX_CRAWL_PAGES} on hosted Octocrawl`)
+    // The worker's hosted engine refuses these at the job's first slice, which fails and is retried until the job ends
+    // failed (delivery_failed) without naming why: the start refuses them by name instead.
+    const regexRefusal = hostedVerifyRefusal(parsed.verify)
+    if (regexRefusal !== null) return refusal(400, 'unsupported_parameter', regexRefusal)
+    // A batch's maxConcurrency is lowered to the slice's workers when it runs (engine.ts); a crawl's engine refuses one above
+    // them, so a crawl's is lowered here.
+    const crawl = kind === 'crawl' ? parsed as ParsedCrawlStartRequest : null
+    if (crawl !== null && crawl.maxConcurrency != null && crawl.maxConcurrency > JOB_WORKER_COUNT) parsed = { ...crawl, maxConcurrency: JOB_WORKER_COUNT }
+    // And every other check the engine makes when it starts the request the job stores: its file cap, its selectors, the
+    // formats a check needs.
+    try {
+      if (kind === 'batch') config.checkStart?.batch(parsed as ParsedBatchStartRequest)
+      else config.checkStart?.crawl(parsed as ParsedCrawlStartRequest)
+    } catch (error) {
+      if (!(error instanceof RequestError)) throw error
+      return refusal(400, error.code, error.message, error.agentHints ?? [])
+    }
 
     const pages = kind === 'batch' ? (parsed as ParsedBatchStartRequest).urls.length : (parsed as ParsedCrawlStartRequest).maxPages ?? JOB_DEFAULT_CRAWL_PAGES
     const price = body.fastMode === true ? CREDITS.httpPage : CREDITS.browserPage
@@ -320,6 +345,18 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     return json({ items: page.map(status), nextBefore: jobs.length > limit ? page.at(-1)!.id : null, hasMore: jobs.length > limit })
   }
 
+  /**
+   * The account's crawl jobs not yet ended, oldest first, as a local server's GET /v1/crawl/active lists the crawls it runs:
+   * in a job's own statuses (queued, running), and without the options each was started with.
+   */
+  async function activeCrawls(caller: JobCaller): Promise<Response> {
+    const crawls = (await config.store.list(personalWorkspace(caller.uid)))
+      .filter((job) => job.kind === 'crawl' && (job.status === 'queued' || job.status === 'running'))
+      .map((job) => ({ id: job.id, url: (job.request as { url: string }).url, status: job.status, startedAt: job.startedAt ?? job.createdAt, pagesFetched: job.counts.pages + job.counts.errors }))
+      .sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id))
+    return json({ crawls })
+  }
+
   return {
     /** Whether the account may start jobs, so that an MCP connection lists the job tools only to an account that may. */
     allows: async (uid: string) => config.allows === undefined || await config.allows(uid),
@@ -329,6 +366,7 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
       if (method === 'POST' && url.pathname === '/v1/batches') return start('batch', request, caller)
       if (method === 'POST' && url.pathname === '/v1/crawl') return start('crawl', request, caller)
       if (method === 'GET' && url.pathname === '/v1/jobs') return listJobs(caller, url)
+      if (method === 'GET' && url.pathname === '/v1/crawl/active') return activeCrawls(caller)
       const [, , collection, id, action] = url.pathname.split('/') as [string, string, 'batches' | 'crawl' | 'jobs', string, string | undefined]
       const kind = collection === 'batches' ? 'batch' : collection === 'crawl' ? 'crawl' : null
       if (method === 'POST' && action === 'cancel' && kind !== null) {

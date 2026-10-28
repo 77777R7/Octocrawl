@@ -21,8 +21,10 @@
  *   W2L_EXTRACT_PROVIDER, W2L_EXTRACT_MODEL, W2L_EXTRACT_API_KEY
  *                               the json model fallback's model and key (structuredModelConfigFromEnv): offered to accounts
  *                               only while `hostedConfig/model.enabled` is true, within its daily cap (hostedModel.ts)
+ * The compatible transport (ADR 0005 compatible_transport) is granted per request while `hostedConfig/compatibleTransport`
+ * says so (hostedAccess.ts); a memory store grants it to no call.
  */
-import { structuredModelConfigFromEnv } from '@w2l/api'
+import { loadImpit, structuredModelConfigFromEnv } from '@w2l/api'
 import { hostedProxyNotice } from '@w2l/contracts'
 import { createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, FirestoreHostedQuota, MemoryHostedKeys, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, serviceAccessToken, type HostedKeys, type HostedLeases, type HostedOAuthTokens, type HostedQuota } from './hostedApi.js'
 import { FirestoreCreditsStore, MemoryCreditsStore, type CreditsStore } from './hostedCredits.js'
@@ -30,6 +32,7 @@ import { FirestoreHostedJobStore } from './hostedJobs.js'
 import { gcsJobFiles } from './hostedJobRoutes.js'
 import { jobsCloudFromEnv } from './hostedJobsCloud.js'
 import { FirestoreModelSpend, firestoreModelSettings, HostedModel } from './hostedModel.js'
+import { firestoreHostedAccess } from './hostedAccess.js'
 
 function positive(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -71,12 +74,16 @@ const jobsCloud = store === 'firestore' ? await jobsCloudFromEnv(process.env) : 
 // The json model fallback (hostedModel.ts): off until hostedConfig/model.enabled is true; a memory store offers none.
 const extractModel = structuredModelConfigFromEnv()
 const model = store === 'firestore' ? new HostedModel({ model: extractModel, settings: firestoreModelSettings(process.env.W2L_FIRESTORE_PROJECT_ID!, serviceAccessToken()), spend: new FirestoreModelSpend(process.env.W2L_FIRESTORE_PROJECT_ID!, serviceAccessToken()) }) : undefined
+// The compatible transport, per request (hostedAccess.ts): off until hostedConfig/compatibleTransport.enabled is true.
+const access = store === 'firestore' ? firestoreHostedAccess(process.env.W2L_FIRESTORE_PROJECT_ID!, serviceAccessToken()) : undefined
+// impit, the compatible transport's native module, loaded now: a platform without it stops the start, not a page.
+await loadImpit()
 const notice = hostedProxyNotice(process.env)
 if (notice) console.log(`octocrawl-hosted-api: ${notice}`)
 const service = createHostedApi({
   port, host: '0.0.0.0',
   taskRoot: process.env.W2L_TASK_ROOT ?? '/tmp/octocrawl-hosted',
-  hashKey, keys, oauthTokens, quota, leases, credits, ...(model === undefined ? {} : { model }),
+  hashKey, keys, oauthTokens, quota, leases, credits, ...(model === undefined ? {} : { model }), ...(access === undefined ? {} : { access }),
   ...(jobsCloud === null ? {} : { jobs: { store: new FirestoreHostedJobStore(jobsCloud.project, serviceAccessToken()), files: gcsJobFiles(jobsCloud.bucket), enqueueSlice: jobsCloud.enqueueSlice, enqueueFinish: jobsCloud.enqueueFinish, enabled: jobsCloud.enabled, allows: jobsCloud.allows } }),
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
   keylessDaily: positive('W2L_KEYLESS_DAILY', 20),

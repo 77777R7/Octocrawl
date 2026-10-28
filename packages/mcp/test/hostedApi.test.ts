@@ -8,15 +8,19 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from '@modelcontextprotocol/client'
-import { hostedNetworkPolicy, parseScrapeRequest, type CompactScrapeResponse } from '@w2l/contracts'
+import { hostedNetworkPolicy, parseScrapeRequest, type CompactScrapeResponse, type ScrapeRun } from '@w2l/contracts'
 import { MCP_VERSION } from '../src/server.js'
 import { expectUsableInstructions } from './instructionChecks.js'
 import { TOOL_NAMES } from '../src/tools.js'
-import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, noteScrape, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
+import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, noteScrape, scrapePhaseLine, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore, type RequestNote } from '../src/hostedCredits.js'
 import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } from '../src/hostedModel.js'
-import { mkdir, readdir, utimes, writeFile } from 'node:fs/promises'
+import { MemoryHostedAccess, type HostedAccessSource } from '../src/hostedAccess.js'
+import { CompatAddressGuard } from '@w2l/bench'
+import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
+import { BROWSER_LEASE_MS, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS } from '../src/hostedApi.js'
 import { expectIsError } from './toolErrorChecks.js'
+import { collectGarbage } from './collectGarbage.js'
 
 const HASH_KEY = 'h'.repeat(40)
 const PROSE = 'The harbour office records tide height, wind and visibility for every hour of the day and publishes them each morning. '.repeat(4)
@@ -50,7 +54,7 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; siteDaily?: number; accountDaily?: number; accountsDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void; model?: HostedModel } = {}) {
+async function start(options: { keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; siteDaily?: number; accountDaily?: number; accountsDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void; model?: HostedModel; access?: HostedAccessSource; compatHosts?: string[] } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
   // `keys` are stored under their plaintext's digest; `keyRecords` under their own id, as a connection's key record has no plaintext.
@@ -61,6 +65,8 @@ async function start(options: { keylessDaily?: number; claudeDaily?: number; key
     port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys: options.keyStore ?? new MemoryHostedKeys(records), oauthTokens: options.oauthTokenStore ?? oauthTokens, ...(options.now ? { now: options.now } : {}), quota, leases: options.leases,
     ...(options.credits === null ? {} : { credits: options.credits ?? new MemoryCreditsStore() }),
     ...(options.model === undefined ? {} : { model: options.model }),
+    ...(options.access === undefined ? {} : { access: options.access }),
+    ...(options.compatHosts === undefined ? {} : { compatHosts: options.compatHosts }),
     keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: options.siteDaily ?? 100, keylessTotalDaily: options.keylessTotalDaily, accountDaily: options.accountDaily, accountsDaily: options.accountsDaily, proxySecret: options.proxySecret,
     networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: options.log ?? (() => {}),
   })
@@ -300,7 +306,7 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
 
 it('hosted tool results carry the page and its Evidence Record, without telemetry or internal ids, unless debug asks', async () => {
   // OpenAI's plugin review asks that tool results leave out session, trace and request ids and logging metadata
-  // (developers.openai.com/plugins/plugin-guidelines, "Response minimization"); hosted Octocrawl offers no get_scrape to use them.
+  // (developers.openai.com/plugins/plugin-guidelines, "Response minimization"); a keyless connection lists no get_scrape to use them.
   const { url } = await start({ keylessDaily: 10 })
   const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
   const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
@@ -559,6 +565,18 @@ function fakeFirestore() {
   return { docs, fetcher }
 }
 
+it('holds a browser-lane lease past the longest call Cloud Run lets run, and deploys with that request timeout (stage H W0)', async () => {
+  // A lease that expired under a call still running would let the key start a second browser-lane scrape.
+  expect(BROWSER_LEASE_MS).toBeGreaterThan(HOSTED_REQUEST_TIMEOUT_MS)
+  // The longest MCP calls end inside the request timeout, and 60 s inside the 240 s claude.ai gives a tool call.
+  for (const ms of [HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS]) expect(ms).toBeLessThanOrEqual(Math.min(HOSTED_REQUEST_TIMEOUT_MS, 240_000 - 60_000))
+  // Every deploy command of the API in the runbook sets Cloud Run's request timeout to the one the code assumes.
+  const docs = await readFile(new URL('../../../docs/hosted-api.md', import.meta.url), 'utf8')
+  const deploys = docs.match(/gcloud run deploy octocrawl-api (?:[^\n]*\\\n)*[^\n]*/g) ?? []
+  expect(deploys.length).toBeGreaterThanOrEqual(2)
+  for (const command of deploys) expect(command).toContain(`--timeout=${HOSTED_REQUEST_TIMEOUT_MS / 1000}s`)
+})
+
 it('Firestore leases: one holder at a time, an expired lease is taken over, and release deletes only the holder\'s own write', async () => {
   const { docs, fetcher } = fakeFirestore()
   const leases = new FirestoreHostedLeases('project-1', fetcher)
@@ -673,6 +691,8 @@ it('a hosted MCP scrape the client cancels frees its browser lease and costs not
     const cancel = new AbortController()
     const call = holder.callTool({ name: 'scrape', arguments: { url: `${origin}/slow` } }, undefined, { signal: cancel.signal })
     await vi.waitFor(() => expect(leases.held.size).toBe(1))
+    // A collection while the scrape runs, as CI's busy workers sometimes ran one, must not cut the cancel off from it.
+    await collectGarbage()
     cancel.abort()
     await expect(call).rejects.toThrow()
     await vi.waitFor(() => expect(leases.held.size).toBe(0), { timeout: 5_000 })
@@ -989,6 +1009,77 @@ it('a request line names the scrape\'s record and the paid calls on its Evidence
   expect(note).toMatchObject({ scrapeId: 'scrape-2', paidCallIds: [] })
 })
 
+it('a scrape\'s phase line says how long each rung took and what the page waited for, by the URL\'s host alone', () => {
+  // T009 on hosted after O6 (2026-10-27): the http rung's header cap, then browser_local.
+  const run = {
+    status: 'success', lane: 'browser_local', failureReason: null, blockReason: null, channelsTried: ['http', 'browser_local'],
+    usage: { wallMs: 21551.3, browserMs: 8916 },
+    ladderTrace: [
+      { at: 3, event: 'ladder_channel_started', channel: 'http', detail: { vendorId: null, remainingMs: 99994 } },
+      { at: 10528.28, event: 'ladder_headers_timeout_fallback', channel: 'http', detail: { to: 'browser_local', remainingMs: 89464, maxMs: 30000 } },
+      { at: 10528.28, event: 'ladder_step', channel: 'http', detail: { vendorId: null, status: 'failed', escalate: 'http_headers_timeout' } },
+      { at: 10533, event: 'ladder_channel_started', channel: 'browser_local', detail: { vendorId: null, remainingMs: 30000 } },
+      { at: 11010.04, event: 'ladder_step', channel: 'browser_local', detail: { vendorId: null, status: 'success', escalate: null } },
+    ],
+    trace: [
+      { at: 3680, lane: 'browser_local', event: 'navigate', detail: { url: 'https://fred.stlouisfed.org/series/UNRATE?secret=1', attempt: 1, timeoutMs: 26317 } },
+      { at: 8100, lane: 'browser_local', event: 'loading_wait', detail: { waitedMs: 1500.4, cleared: true } },
+      { at: 8800, lane: 'browser_local', event: 'region_wait', detail: { ready: true, waitedMs: 640, reads: 3, contractSha256: 'abc' } },
+      { at: 8810, lane: 'browser_local', event: 'steady_wait', detail: { waitedMs: 300, steady: false } },
+      { at: 8820, lane: 'browser_local', event: 'wait_for', detail: { requestedMs: 500, waitedMs: 500 } },
+      // installed_chrome's wait for a check keeps its length under `ms`.
+      { at: 8830, lane: 'browser_local', event: 'challenge_wait', detail: { blockReason: 'cloudflare_challenge', outcome: 'cleared', ms: 9100, capMs: 10000 } },
+    ],
+    markdown: '# Unemployment Rate',
+  }
+  const line = scrapePhaseLine('https://fred.stlouisfed.org/series/UNRATE?secret=1', run as unknown as ScrapeRun, 'scrape-9')
+  expect(line).toEqual({
+    severity: 'INFO', event: 'hosted_scrape_phases', host: 'fred.stlouisfed.org', scrapeId: 'scrape-9', status: 'success', lane: 'browser_local', reason: null,
+    channelsTried: ['http', 'browser_local'], totalMs: 21551, browserMs: 8916, headersTimeoutFallback: true,
+    rungs: [{ channel: 'http', startMs: 3, ms: 10528, status: 'failed' }, { channel: 'browser_local', startMs: 10533, ms: 11010, status: 'success' }],
+    waits: [
+      { event: 'loading_wait', waitedMs: 1500, cleared: true }, { event: 'region_wait', waitedMs: 640, ready: true }, { event: 'steady_wait', waitedMs: 300, steady: false },
+      { event: 'wait_for', waitedMs: 500 }, { event: 'challenge_wait', waitedMs: 9100, outcome: 'cleared' },
+    ],
+  })
+  // Never the path, the query or the page.
+  expect(JSON.stringify(line)).not.toMatch(/series|secret|Unemployment/)
+  // A rung that never stepped (its call threw) has no duration; a URL that does not parse has no host.
+  expect(scrapePhaseLine('not a url', { status: 'failed', lane: 'http', failureReason: 'timeout', channelsTried: ['http'], usage: { wallMs: 5 }, ladderTrace: [{ at: 0, event: 'ladder_channel_started', channel: 'http' }], trace: [] } as unknown as ScrapeRun))
+    .toMatchObject({ host: null, reason: 'timeout', browserMs: null, headersTimeoutFallback: false, rungs: [{ channel: 'http', startMs: 0, ms: null, status: null }], waits: [] })
+})
+
+it('logs one phase line for every hosted scrape, with or without debug, and never puts it in the answer', async () => {
+  const lines: string[] = []
+  const { url } = await start({ credits: new MemoryCreditsStore(1_000), log: (line) => lines.push(line), keys: {
+    oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' },
+    oc_plain: { enabled: true, plan: 'free', dailyLimit: 5, browser: false },
+  } })
+  const page = `${origin}/page?token=private`
+  const answers = [
+    await post(url, '/v1/scrape', { url: page }),
+    await post(url, '/v1/scrape', { url: page }, { authorization: 'Bearer oc_plain' }),
+    await post(url, '/v1/scrape', { url: page }, { authorization: 'Bearer oc_account' }),
+    await post(url, '/v1/scrape', { url: page, debug: true }, { authorization: 'Bearer oc_account' }),
+  ]
+  const bodies = await Promise.all(answers.map(async (answer) => { expect(answer.status).toBe(200); return answer.text() }))
+  const phases = lines.map((line) => JSON.parse(line) as Record<string, unknown>).filter((line) => line.event === 'hosted_scrape_phases')
+  expect(phases).toHaveLength(4)
+  for (const line of phases) {
+    expect(line).toMatchObject({ host: '127.0.0.1', scrapeId: expect.any(String), status: 'success', lane: 'http', channelsTried: ['http'], headersTimeoutFallback: false, rungs: [{ channel: 'http', startMs: expect.any(Number), ms: expect.any(Number), status: 'success' }] })
+    expect(JSON.stringify(line)).not.toMatch(/\/page|token|private|Tides|oc_/)
+  }
+  for (const body of bodies) expect(body).not.toContain('hosted_scrape_phases')
+  // A scrape through the MCP endpoint is logged once too, and its answer carries neither the line nor the trace.
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: { authorization: 'Bearer oc_account' } } }))
+    const text = (((await client.callTool({ name: 'scrape', arguments: { url: page } })).content) as { type: string; text: string }[])[0]!.text
+    expect(text).not.toMatch(/hosted_scrape_phases|ladderTrace/)
+  } finally { await client.close() }
+  expect(lines.filter((line) => line.includes('"hosted_scrape_phases"'))).toHaveLength(5)
+})
+
 describe('the json model fallback on an account\'s credits (decided 2026-10-24)', () => {
   // A fake Anthropic Messages API on loopback stands in for Claude Haiku 5.5: no paid call is made.
   const KEY = 'sk-ant-hosted-test-secret'
@@ -1106,5 +1197,48 @@ describe('the json model fallback on an account\'s credits (decided 2026-10-24)'
     expect(((await unoffered.json()) as Answer).json.issues).toContainEqual({ code: 'model_unavailable', message: MODEL_REFUSALS.notOffered })
     expect(unoffered.headers.get('x-credits-used')).toBe('1')
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('the compatible transport, granted per request (ADR 0005 compatible_transport, hostedConfig/compatibleTransport)', () => {
+  type Read = { status: string; lane: string; channelsTried: string[]; evidenceRecord: { access: { route: string; executor: string; executorVersion: string | null; profile: string | null; egress?: { source: string } | null } } }
+  const ON = { compatibleTransport: { enabled: true, allowedUids: null } }
+
+  // The test site is on the policy's list, so impit would reach it without the guard too: whether impit is handed the guard is checked apart.
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('is off until the switch is on: a listed host is read over undici, and no guard starts', async () => {
+    const guarded = vi.spyOn(CompatAddressGuard.prototype, 'proxyUrl')
+    const { url } = await start({ compatHosts: ['127.0.0.1'], access: new MemoryHostedAccess() })
+    const page = await (await post(url, '/v1/scrape', { url: `${origin}/page` })).json() as Read
+    expect(page).toMatchObject({ status: 'success', lane: 'http', channelsTried: ['http'], evidenceRecord: { access: { route: 'http', executor: 'undici' } } })
+    expect(guarded).not.toHaveBeenCalled()
+  })
+
+  it('switched on, reads a listed host over impit through the address guard, recorded as a local server records it, at an HTTP page\'s price', async () => {
+    const guarded = vi.spyOn(CompatAddressGuard.prototype, 'proxyUrl')
+    const credits = new MemoryCreditsStore(1_000)
+    const { url } = await start({ compatHosts: ['127.0.0.1'], access: new MemoryHostedAccess(ON), credits, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+    const keyless = await (await post(url, '/v1/scrape', { url: `${origin}/page` })).json() as Read
+    expect(keyless).toMatchObject({ status: 'success', lane: 'http', channelsTried: ['http_compat'], evidenceRecord: { access: { route: 'http_compat', executor: 'impit', executorVersion: '0.14.5', profile: 'chrome142', egress: { source: 'direct' } } } })
+    // impit was given the guard as its proxy: the hosted engine sends the transport through it.
+    expect(guarded).toHaveBeenCalled()
+    const account = await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_account' })
+    expect(await account.json()).toMatchObject({ status: 'success', channelsTried: ['http_compat'] })
+    expect([account.headers.get('x-credits-used'), account.headers.get('x-credits-remaining')]).toEqual(['1', '999'])
+    // A call whose options the transport cannot send stays on undici.
+    const mobile = await (await post(url, '/v1/scrape', { url: `${origin}/page`, mobile: true })).json() as Read
+    expect(mobile.channelsTried).toEqual(['http'])
+  })
+
+  it('with allowedUids, only those accounts\' calls hold it', async () => {
+    const { url } = await start({ compatHosts: ['127.0.0.1'], keylessDaily: 5, access: new MemoryHostedAccess({ compatibleTransport: { enabled: true, allowedUids: ['account-1'] } }), credits: new MemoryCreditsStore(1_000), keys: {
+      oc_one: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' },
+      oc_two: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-2' },
+    } })
+    const tried = async (headers: Record<string, string> = {}) => ((await (await post(url, '/v1/scrape', { url: `${origin}/page` }, headers)).json()) as Read).channelsTried
+    expect(await tried({ authorization: 'Bearer oc_one' })).toEqual(['http_compat'])
+    expect(await tried({ authorization: 'Bearer oc_two' })).toEqual(['http'])
+    expect(await tried()).toEqual(['http'])
   })
 })
