@@ -297,6 +297,25 @@ describe('the address guard without a login, as hosted Chrome is given it (ADR 0
       expect(await exchange(proxy, [[5, 1, 0], connectTo('a.test', port)], 4)).toEqual([5, 0, 5, 4])
     } finally { await guard.close() }
   })
+
+  it('takes a dial that answers once its tunnel is up (an egress proxy\'s CONNECT), and answers one that fails as its error', async () => {
+    const handed: string[] = []
+    // As a proxy's tunnel: the socket is handed over connected, after the proxy said yes.
+    const tunnel: GuardDial = (address, to) => new Promise((resolve, reject) => {
+      handed.push(`${address}:${to}`)
+      const socket = connect({ host: address, port: to }, () => resolve(socket))
+      socket.once('error', reject)
+    })
+    const guard = new CompatAddressGuard(hosted('pinned.test'), resolver({ 'pinned.test': ['127.0.0.1'], 'a.test': ['10.0.0.7'] }), { login: false, dial: tunnel })
+    const refused = new CompatAddressGuard(hosted('pinned.test'), resolver({ 'pinned.test': ['127.0.0.1'] }), { login: false, dial: async () => { throw Object.assign(new Error('the exit refused'), { code: 'ECONNREFUSED' }) } })
+    try {
+      const proxy = new URL(await guard.proxyUrl())
+      expect(await getThrough(proxy, 'pinned.test', '/article')).toContain('Tide ledger')
+      expect(await exchange(proxy, [[5, 1, 0], connectTo('a.test', port)], 4)).toEqual([5, 0, 5, 2])
+      expect(handed).toEqual([`127.0.0.1:${port}`])
+      expect(await exchange(new URL(await refused.proxyUrl()), [[5, 1, 0], connectTo('pinned.test', port)], 4)).toEqual([5, 0, 5, 5])
+    } finally { await guard.close(); await refused.close() }
+  })
 })
 
 describe('a hosted http lane over the guarded transport', () => {

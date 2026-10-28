@@ -33,10 +33,11 @@ import { evaluateHostname, evaluateResolved, type NetworkPolicy } from '@w2l/con
 export type GuardResolver = (hostname: string, options: { all: true }) => Promise<{ address: string; family: number }[]>
 
 /**
- * How the guard reaches an address it checked: a socket that emits `connect` once bytes can pass, or `error`. The address
- * is always one the guard checked, never a name.
+ * How the guard reaches an address it checked: a socket that emits `connect` once bytes can pass, or `error`; or a promise
+ * of a socket bytes can already pass on (an egress proxy's tunnel, handed over once the proxy agreed), rejected with the
+ * connection's error. The address is always one the guard checked, never a name.
  */
-export type GuardDial = (address: string, port: number) => Socket
+export type GuardDial = (address: string, port: number) => Socket | Promise<Socket>
 
 export interface AddressGuardOptions {
   /** Whether a client must log in (RFC 1929). Default true; false for a client that takes no SOCKS login (Chrome). */
@@ -195,19 +196,33 @@ export class CompatAddressGuard {
    * the site ends with its connection reaches impit whole; a side that fails or leaves ends the other.
    */
   private open(client: Socket, address: string, port: number, early: Buffer): void {
-    let site: Socket
-    try { site = this.dial(address, port) } catch { return void client.end(reply(REPLY.failure)) }
+    let dialled: Socket | Promise<Socket>
+    try { dialled = this.dial(address, port) } catch { return void client.end(reply(REPLY.failure)) }
+    if (dialled instanceof Promise) {
+      // A tunnel the dial opens itself, within its own deadline: handed over connected, or its error answered.
+      dialled.then((site) => {
+        if (client.destroyed || this.closed) return void site.destroy()
+        this.pass(client, site, early, true)
+      }, (error: NodeJS.ErrnoException) => { if (!client.destroyed) client.end(reply(connectReply(error))) })
+      return
+    }
+    this.pass(client, dialled, early, false)
+  }
+
+  /** Passes bytes between the client and the site's socket, once it is connected (`connected`: it is already). */
+  private pass(client: Socket, site: Socket, early: Buffer, connected: boolean): void {
     this.sockets.add(site)
-    const timer = setTimeout(() => site.destroy(Object.assign(new Error('connect timed out'), { code: 'ETIMEDOUT' })), CONNECT_MS)
-    let connected = false
-    site.once('connect', () => {
+    const timer = connected ? undefined : setTimeout(() => site.destroy(Object.assign(new Error('connect timed out'), { code: 'ETIMEDOUT' })), CONNECT_MS)
+    const start = () => {
       connected = true
       clearTimeout(timer)
       client.write(reply(REPLY.succeeded))
       if (early.length > 0) site.write(early)
       client.pipe(site)
       site.pipe(client)
-    })
+    }
+    if (connected) start()
+    else site.once('connect', start)
     site.on('error', (error: NodeJS.ErrnoException) => {
       if (!connected && !client.destroyed) client.end(reply(connectReply(error)))
       else client.destroy()

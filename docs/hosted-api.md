@@ -366,7 +366,14 @@ ADR 0005's `hosted_chrome` (revision of 2026-10-27) is Google Chrome on Octocraw
 - `allowedUids` (an array of account uids): an allowlist and nothing else. Absent or empty grants it to no one. A keyless caller and a key issued without an account never hold it.
 - `monthlyCapUsd` (number) and `dailyAttemptsPerAccount` (whole number): the operator's dollar cap a month for the rung, and the reads of the rung one account may start a UTC day. Their values wait for decision D5 and have no default: while either is absent or not positive, the switch grants it to no one.
 
-No hosted engine is built with the rung's operator config yet (`hostedChrome` in `engine.ts`), so a hosted call that asks for `access: "enhanced"` is refused as before, whatever the switch says.
+**The operator's config** (`packages/mcp/src/hostedChromeOperator.ts`) is three variables, read at start by the hosted API and the job worker. Set all three or none:
+- `W2L_HOSTED_CHROME_URL`: the `octocrawl-chrome` service's https URL, also the audience of the ID token the client sends;
+- `W2L_HOSTED_CHROME_ATTESTATION`: the operator's statement, JSON `{ "principal", "at", "statement" }` (`at` in ISO 8601);
+- `W2L_HOSTED_CHROME_EGRESS`: the service's exit and its price. It is `google` for Cloud Run's own egress, or JSON `{ "vendor", "tariff" }` with a `VendorTariff`. It must describe the exit the service is deployed with, since the counter prices each read by it: the datacenter tariff when the service mounts the proxy list, `google` when it does not.
+
+With none set, nothing changes: no engine builds the rung, and `access: "enhanced"` is refused as before, whatever the switch says. With some set and not all, or a value it cannot use, the process does not start, and the message names the variable, never its value. With all three, the API needs the Firestore store, where the switch and the counters are. The startup line says `hostedChrome: null`, or names the exit's vendor.
+
+**Who may ask.** With the config, the gate takes `access: "enhanced"` on a scrape, and on a batch or crawl start, only from a caller the switch grants `hosted_chrome` at that moment. Every other caller still gets a 400 `unsupported_parameter`, and a job start gets the key sets' refusal (`hosted batch jobs do not take access`), as a deploy without the rung answers them. A refused call reads nothing and is charged nothing. An admitted call reaches the rung only after the rungs before it were blocked, and only on a key with the browser lane (an HTTP-only call drops the browser rungs). A job's slices hold the rung while the switch still lists the job's account; a slice that starts after the account was taken off the list reads its pages with the earlier rungs (ADR decision two).
 
 **The counting** (`packages/mcp/src/hostedChromeMeter.ts`). The operator config must carry the counter (`meter`): an engine given the rung without one refuses to start, so the rung can never run unmetered. The counter is asked before each read of the rung, for the call's account (a scrape's caller, a job's account):
 - **The monthly cap.** The month (UTC) is a monthly ledger (`openMonthlySpendLedger`): it opens with the egress tariff's fixed rents (`perIpMonthUsd` for each of `rentedIps`) settled first, then what the month's reads settled, then this instance's reads still in flight. A read whose price ceiling does not fit what `monthlyCapUsd` leaves is not made. Settled reads only are counted, in `hostedChromeSpend/{YYYY-MM}` (`settledMicroUsd`, `calls`, and `expireAt` for TTL, 90 days after the month ends). So instances reserving at once can pass the cap by the ceilings of the reads in flight on the others.
@@ -374,7 +381,22 @@ No hosted engine is built with the rung's operator config yet (`hostedChrome` in
 - **What a read is charged.** The egress tariff's price, its rent left out (`tariffCostUsd`). Bytes the exit did not report are charged at the ceiling's allowance, and a read that threw is charged its ceiling. With Cloud Run's own egress (no tariff) a read pays no third party: it is settled at $0 and still counted. Cloud Run's compute is the project's billing budget's, not this cap's.
 - **A read over either limit** does not use the rung, and the scrape does not fail: the page is what the rungs before it read. The result carries a `hosted_chrome_not_admitted` warning saying which limit, and the ladder trace a `ladder_channel_skipped` event for `hosted_chrome` with its reason (`monthly_cap`, `daily_attempts`, `switched_off`, `budget_unread`). So does a counter that could not read the month's spend or take an attempt: unread is not zero.
 
-**The egress (D2).** Howard chose datacenter proxies on 2026-10-29. The basis is the H2b comparison (PR #748): over the 19 robots-allowed tasks, datacenter verified 9, at $0.0013 per verified page; residential verified 8 and 5 (2 vCPU, in the two windows) and Google's own egress 4. Datacenter could not resolve `challenges.cloudflare.com`, so T047 and T048 did not pass. The proxy is not wired yet: the service still leaves from Cloud Run's own egress.
+**The egress (D2).** Howard chose datacenter proxies on 2026-10-29. The basis is the H2b comparison (PR #748): over the 19 robots-allowed tasks, datacenter verified 9, at $0.0013 per verified page; residential verified 8 and 5 (2 vCPU, in the two windows) and Google's own egress 4. Datacenter could not resolve `challenges.cloudflare.com`, so T047 and T048 did not pass.
+
+The service leaves through the datacenter proxies when the proxy list is mounted (The octocrawl-chrome service, below), and from Cloud Run's own egress without it. The API's `W2L_HOSTED_CHROME_EGRESS` is then the plan's rent, which the monthly ledger counts first: the Webshare plan H2b bought is 100 IPs for $2.99 a month (`{"vendor":"webshare","tariff":{"perIpMonthUsd":0.0299,"rentedIps":100}}`), and a read past the rent is $0. Check the plan's price before deploying; the tariff is the operator's, not this page's.
+
+**The values set on 2026-10-29** (Howard, D5). They are recorded here only: this change writes nothing to Firestore. Howard sets them when the rung may serve:
+- `hostedConfig/hostedChrome.enabled`: `true`;
+- `allowedUids`: Howard's account only;
+- `monthlyCapUsd`: `20`;
+- `dailyAttemptsPerAccount`: `20`.
+
+```sh
+T=$(gcloud auth print-access-token); curl -s -X PATCH -H "authorization: Bearer $T" -H "x-goog-user-project: $W2L_PROJECT_ID" -H 'content-type: application/json' \
+  "https://firestore.googleapis.com/v1/projects/$W2L_PROJECT_ID/databases/(default)/documents/hostedConfig/hostedChrome" \
+  -d '{"fields":{"enabled":{"booleanValue":true},"allowedUids":{"arrayValue":{"values":[{"stringValue":"<Howard'"'"'s uid>"}]}},"monthlyCapUsd":{"integerValue":"20"},"dailyAttemptsPerAccount":{"integerValue":"20"}}}'
+gcloud firestore fields ttls update expireAt --collection-group=hostedChromeSpend --enable-ttl --project="$W2L_PROJECT_ID"
+```
 
 ## The octocrawl-chrome service
 
@@ -383,7 +405,7 @@ No hosted engine is built with the rung's operator config yet (`hostedChrome` in
 - Xvfb as its display, and tini as PID 1;
 - a non-root user, so Chrome's sandbox stays on.
 
-`deploy/hosted-chrome/start.sh` opens the display and starts `packages/mcp/src/hostedChromeCli.ts`. `cloudbuild.hosted-chrome.yaml` builds and pushes the image, with no deploy step; its `_IMAGE`, and so the region, is given at submit time. The service's size and region are Howard's decision. The image has not been built or deployed yet. Nothing routes the hosted API to it, and no hosted engine is built with its client.
+`deploy/hosted-chrome/start.sh` opens the display and starts `packages/mcp/src/hostedChromeCli.ts`. `cloudbuild.hosted-chrome.yaml` builds and pushes the image, with no deploy step; its `_IMAGE`, and so the region, is given at submit time. The size Howard set on 2026-10-29: 2 vCPU and 4 GiB in asia-southeast1, minimum instances 0, one request an instance (below). A hosted engine reaches it once the API or the worker is deployed with the operator's config (The hosted_chrome switch, above).
 
 - **Its HTTP surface** (`packages/mcp/src/hostedChrome.ts`):
   - `POST /v1/read` with `{ url, options?, deadlineAt? }` answers the browser lane's result for that page.
@@ -394,12 +416,79 @@ No hosted engine is built with the rung's operator config yet (`hostedChrome` in
   - robots.txt is read and obeyed, as on every hosted rung;
   - every connection goes through its address guard;
   - each call gets a fresh profile, deleted after;
-  - its trace names the pinned version, the launch (`nodriver-0.50.6-no-allow-origins+webrtc-proxied-udp-only`) and the exit's kind (`google` while it leaves from Cloud Run's own egress), which the Evidence Record carries.
-- **Authentication** is Cloud Run's: the service takes internal ingress only and no unauthenticated call, and only the hosted API's service account holds `roles/run.invoker` on it. The hosted API's client (`httpHostedChromeClient`) sends a Google ID token for the service's URL from the metadata server (`metadataIdToken`).
+  - its trace names the pinned version, the launch (`nodriver-0.50.6-no-allow-origins+webrtc-proxied-udp-only`) and the exit's kind, which the Evidence Record carries: `google` from Cloud Run's own egress, or `datacenter` with the proxy as `host:port` (`access.egress.proxy`, source `pool`).
+- **Its exit** (`packages/mcp/src/hostedChromeEgress.ts`; D2) is the proxy list, a Secret Manager secret mounted as a file. Its path is `W2L_HOSTED_CHROME_PROXIES_FILE`, and the file holds one `host:port:user:pass` line per proxy.
+  - Each read chooses one proxy before its first request and keeps it for every connection, whatever the site answers.
+  - The proxy is the address guard's dial: Chrome's connections reach the guard, which resolves and checks the name, and the proxy is asked for a CONNECT tunnel to the checked address alone.
+  - The login goes to the proxy and nowhere else. The startup line names the kind and the count of proxies, and a malformed line is named by its number.
+  - Without the variable the service leaves from Cloud Run's own egress; a file named and not readable, or a list that does not parse, stops the start.
+- **Authentication** is Cloud Run's IAM: the service takes no unauthenticated call, and only the runtime account of the hosted API and the job worker (`w2l-preview`) holds `roles/run.invoker` on it. The client (`httpHostedChromeClient`) sends a Google ID token for the service's URL from the metadata server (`metadataIdToken`). Cloud Run checks the token before a request reaches the container.
+- **Its ingress is `all`, not internal.** Cloud Run counts a call from another Cloud Run service as internal only when it comes through a VPC network. The caller must use Direct VPC egress or a connector and route all its traffic through the VPC network, with Private Google Access on the subnet, or put Private Service Connect or an internal load balancer in front of the service ([private networking](https://docs.cloud.google.com/run/docs/securing/private-networking), [ingress](https://docs.cloud.google.com/run/docs/securing/ingress), read 2026-10-29). The hosted API and the worker have no VPC egress. Routing all their traffic through one would send their public page reads through a Cloud NAT, which is a new cost, a new exit address and a new part to run. So the service takes `ingress=all`, and IAM is the bound: a request without an ID token of the invoker account is refused 403 by Cloud Run. The limit: the public preview runs as `w2l-preview` too, so its identity could also invoke the service, though its code never calls it. A runtime account for the API and the worker alone would close that.
 - **Before it serves a call**, three things must happen:
-  - the D5 numbers are set (the counting is in place: The hosted_chrome switch above);
-  - a hosted engine is built with the rung's operator config, its counter included;
-  - the launch passes ADR 0005's gate: two challenge16 runs no worse than the baseline, which covers the WebRTC preference that sets this launch apart from `installed_chrome`'s.
+  - the launch passes ADR 0005's gate: two challenge16 runs no worse than the baseline, which covers the WebRTC preference that sets this launch apart from `installed_chrome`'s;
+  - Howard decides to move traffic: until then only a tagged API revision carries the operator's config;
+  - the switch carries the values above.
+
+### Deploying hosted_chrome
+
+Nothing below has been run. Pass `--project` on every call. Build from a clean commit.
+
+The service's own runtime account, with no role but reading its proxy list. Then the list: the provider's Direct connection list, one `host:port:user:pass` a line, from a file that is never printed or pasted into a shell:
+
+```sh
+export W2L_CHROME_SA="octocrawl-chrome@${W2L_PROJECT_ID}.iam.gserviceaccount.com"
+gcloud iam service-accounts create octocrawl-chrome --display-name='octocrawl-chrome runtime' --project="$W2L_PROJECT_ID"
+gcloud secrets create w2l-hosted-chrome-proxies --replication-policy=automatic --data-file=<the proxy list file> --project="$W2L_PROJECT_ID"
+gcloud secrets add-iam-policy-binding w2l-hosted-chrome-proxies --member="serviceAccount:${W2L_CHROME_SA}" --role='roles/secretmanager.secretAccessor' --project="$W2L_PROJECT_ID"
+```
+
+Build the image and deploy the service: 2 vCPU, 4 GiB, minimum 0 instances, one request an instance (a second answers 503 and the rung fails over to the earlier page), gen2 as G4 measured, and the request timeout over the longest read (180 s). The maximum instances bound its compute and were not decided on 2026-10-29: set `W2L_CHROME_MAX_INSTANCES` to Howard's number.
+
+```sh
+export W2L_CHROME_IMAGE="${W2L_REGION}-docker.pkg.dev/${W2L_PROJECT_ID}/${W2L_REPOSITORY}/hosted-chrome:${W2L_SOURCE_SHA}"
+gcloud builds submit . --config=cloudbuild.hosted-chrome.yaml --region="$W2L_REGION" --timeout=30m --substitutions="_IMAGE=${W2L_CHROME_IMAGE}" --project="$W2L_PROJECT_ID"
+gcloud run deploy octocrawl-chrome --image="$W2L_CHROME_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --service-account="$W2L_CHROME_SA" --no-allow-unauthenticated --ingress=all --execution-environment=gen2 \
+  --cpu=2 --memory=4Gi --concurrency=1 --min-instances=0 --max-instances="$W2L_CHROME_MAX_INSTANCES" --timeout=300s \
+  --revision-suffix="$W2L_REVISION_SUFFIX" \
+  --set-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA},W2L_HOSTED_CHROME_PROXIES_FILE=/secrets/hosted-chrome/proxies" \
+  --update-secrets='/secrets/hosted-chrome/proxies=w2l-hosted-chrome-proxies:latest'
+gcloud run services add-iam-policy-binding octocrawl-chrome --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --member="serviceAccount:${W2L_RUNTIME_SA}" --role=roles/run.invoker
+export W2L_CHROME_URL="$(gcloud run services describe octocrawl-chrome --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --format='value(status.url)')"
+curl -s -o /dev/null -w '%{http_code}\n' "$W2L_CHROME_URL/health"   # 403: no unauthenticated call reaches it
+```
+
+The first revision, `octocrawl-chrome-c1-95be03e` (2026-10-28, image of `95be03ee`), differs from these commands in four ways, and the API cannot reach it until the first two change:
+- it was deployed with `--ingress=internal`, which a caller without VPC egress cannot reach. From outside, `/health` answered 404 with and without an ID token. Change it with `gcloud run services update octocrawl-chrome --ingress=all`;
+- it has no invoker binding: add the `add-iam-policy-binding` above for `w2l-preview`;
+- it runs as `w2l-preview`, which also holds the project's Firestore role. The commands above give it `octocrawl-chrome`, which holds no role but reading its proxy list, so a page that got past Chrome reaches no account worth having. That needs a redeploy with `--service-account`;
+- it has neither the proxy secret nor `W2L_HOSTED_CHROME_PROXIES_FILE`, so it leaves from Cloud Run's own egress (`google`), with `--max-instances=1`.
+
+Its log's `hosted_chrome_started` line says `egressKind: "datacenter"` and the count of proxies. Without the `W2L_HOSTED_CHROME_PROXIES_FILE` variable and the secret, it says `google`.
+
+The operator's statement and tariff, as secrets the runtime account reads:
+
+```sh
+printf '%s' '{"principal":"<who accepted it>","at":"2026-10-29T00:00:00Z","statement":"hosted_chrome on octocrawl-chrome, datacenter egress (D2), D5 caps"}' | gcloud secrets create w2l-hosted-chrome-attestation --replication-policy=automatic --data-file=- --project="$W2L_PROJECT_ID"
+printf '%s' '{"vendor":"webshare","tariff":{"perIpMonthUsd":0.0299,"rentedIps":100}}' | gcloud secrets create w2l-hosted-chrome-egress --replication-policy=automatic --data-file=- --project="$W2L_PROJECT_ID"
+for secret in w2l-hosted-chrome-attestation w2l-hosted-chrome-egress; do
+  gcloud secrets add-iam-policy-binding "$secret" --member="serviceAccount:${W2L_RUNTIME_SA}" --role='roles/secretmanager.secretAccessor' --project="$W2L_PROJECT_ID"
+done
+```
+
+An API revision with the config, without traffic, under a tag of its own. Traffic stays on the current tag until the gate has passed and Howard moves it, and the revision keeps `--timeout=300s` and `--use-http2`:
+
+```sh
+gcloud run deploy octocrawl-api --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --timeout=300s --use-http2 \
+  --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA},W2L_HOSTED_CHROME_URL=${W2L_CHROME_URL}" \
+  --update-secrets='W2L_HOSTED_CHROME_ATTESTATION=w2l-hosted-chrome-attestation:latest,W2L_HOSTED_CHROME_EGRESS=w2l-hosted-chrome-egress:latest'
+gcloud run services update-traffic octocrawl-api --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
+  --update-tags="${W2L_TAG}=octocrawl-api-${W2L_REVISION_SUFFIX}"
+```
+
+The tag's own URL reaches that revision alone, without the Worker, with an account's key. The job worker takes the same variables on its next release, with the same `--update-env-vars` and `--update-secrets`. To turn the rung off again, deploy without the three variables (`--remove-env-vars=W2L_HOSTED_CHROME_URL --remove-secrets=W2L_HOSTED_CHROME_ATTESTATION,W2L_HOSTED_CHROME_EGRESS`), or set `hostedConfig/hostedChrome.enabled` to false, which takes effect within 30 s.
 
 ## Read the service
 
@@ -498,7 +587,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `scrape` `mode` | Supported |  |
 | `scrape` `handoff` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
 | `scrape` `lane` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
-| `scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 goes on with a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. access standard, the default, is taken; enhanced and my-browser are refused by name. Sent anyway: refused by name. |
+| `scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 adds hosted_chrome, a real Chrome on Octocrawl's servers: a deploy that carries its operator config (W2L_HOSTED_CHROME_*) takes access enhanced from an account its switch lists (hostedConfig/hostedChrome) and refuses it from any other caller; a deploy without it refuses it from everyone. CAPTCHA solving behind a switch comes after. access standard, the default, is taken; my-browser is refused by name, and so is enhanced from a caller the hosted_chrome switch does not list. Sent anyway: refused by name. |
 | `scrape` `allowlistedDomains` | Supported |  |
 | `scrape` `formats` | Supported |  |
 | `scrape` `includeLinks` | Supported |  |
@@ -541,7 +630,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `map` `integration` | Supported |  |
 | `crawl` `url` | Supported |  |
 | `crawl` `mode` | Supported |  |
-| `crawl` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 goes on with a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
+| `crawl` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 adds hosted_chrome, a real Chrome on Octocrawl's servers: a deploy that carries its operator config (W2L_HOSTED_CHROME_*) takes access enhanced from an account its switch lists (hostedConfig/hostedChrome) and refuses it from any other caller; a deploy without it refuses it from everyone. CAPTCHA solving behind a switch comes after. Sent anyway: refused by name. |
 | `crawl` `maxPages` | Limited | At most 500, and 100 when left out or null (locally null is no cap). Stage H item 6, limits and capacity raises it. |
 | `crawl` `maxDepth` | Supported |  |
 | `crawl` `useCached` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
@@ -582,7 +671,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `batch_scrape` `urls` | Supported |  |
 | `batch_scrape` `mode` | Supported |  |
 | `batch_scrape` `lane` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
-| `batch_scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 goes on with a real Chrome rung on Octocrawl's servers, then CAPTCHA solving behind a switch. Sent anyway: refused by name. |
+| `batch_scrape` `access` | Planned: stage H item 2, hosted access | Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service's state is not checked here. Stage H item 2 adds hosted_chrome, a real Chrome on Octocrawl's servers: a deploy that carries its operator config (W2L_HOSTED_CHROME_*) takes access enhanced from an account its switch lists (hostedConfig/hostedChrome) and refuses it from any other caller; a deploy without it refuses it from everyone. CAPTCHA solving behind a switch comes after. Sent anyway: refused by name. |
 | `batch_scrape` `formats` | Supported |  |
 | `batch_scrape` `includeLinks` | Supported |  |
 | `batch_scrape` `onlyMainContent` | Supported |  |

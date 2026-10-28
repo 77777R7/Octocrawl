@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
-import { createApiEngine, type ApiEngineOptions, type SliceCharge } from '@w2l/api'
+import { createApiEngine, type ApiEngineOptions, type HostedChromeOperator, type SliceCharge } from '@w2l/api'
 import { RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore, webhookSignature, type WebhookTransport } from '@w2l/runtime'
 import { jobEngineOptions, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
@@ -72,6 +72,8 @@ export interface JobWorkerDeps {
   model?: HostedModel
   /** The operator's per-request access switches (hostedAccess.ts), read for the job's account as each slice starts; absent: none. */
   access?: HostedAccessSource
+  /** hosted_chrome's operator config (hostedChromeOperator.ts), for a slice whose job chose access enhanced; absent: no rung. */
+  hostedChrome?: HostedChromeOperator
   /** The engine's network and lanes; a test passes a local policy and HTTP-only channels. Default: the hosted policy. */
   engineOptions?: () => Partial<ApiEngineOptions>
   /** A directory the worker may write task directories in. */
@@ -240,7 +242,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
 
     // The slice: a new engine over the restored task, stopped by the job's cancel or the switch meanwhile.
     // The policy a hosted scrape reads under (its 5 MiB file cap and the operator's contact), on whatever network a test gives.
-    const extra = deps.engineOptions?.() ?? {}
+    const extra = { ...(deps.hostedChrome === undefined ? {} : { hostedChrome: deps.hostedChrome }), ...deps.engineOptions?.() }
     // Each page's model call is admitted by the switch and the day's cap, and only while the slice holds its two credits;
     // a worker without a hosted model refuses every call, whatever engine options a caller passed.
     const model = deps.model?.gate(modelRefusal) ?? { gate: { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) } }

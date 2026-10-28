@@ -58,6 +58,11 @@ export interface HostedChromeLaunch {
   guard: CompatAddressGuard
   /** The kind of address its connections leave from (`google` while the guard dials directly on Cloud Run). */
   egressKind: AccessEgressKind
+  /**
+   * The egress proxy this read leaves through, as `host:port` alone (never its login), or null when the guard dials
+   * directly; asked once a read, after its exit was chosen. Absent: direct.
+   */
+  proxy?: () => string | null
 }
 
 /** The name a record gives hosted_chrome's launch: installed_chrome's flag set, with the WebRTC preference. */

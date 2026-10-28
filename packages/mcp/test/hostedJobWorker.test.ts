@@ -159,7 +159,9 @@ describe('hosted job worker', () => {
     // The operator's D5 counter, asked for the job's account before each read.
     const counted: (string | undefined)[] = []
     const meter = { admit: async ({ account }: { account: string | undefined }) => { counted.push(account); return { ok: true as const, settle: async () => {} } } }
-    deps.engineOptions = () => ({ networkPolicy: policy, hostedChrome: { attestation: { principal: 'operator', at: '2026-10-28T00:00:00Z', statement: 'test' }, client, meter }, channelsFor: (mode) => {
+    // The operator's config as hostedJobsCli.ts passes it (hostedChromeOperator.ts), apart from the test's lanes.
+    deps.hostedChrome = { attestation: { principal: 'operator', at: '2026-10-28T00:00:00Z', statement: 'test' }, client, meter }
+    deps.engineOptions = () => ({ networkPolicy: policy, channelsFor: (mode) => {
       const channels = buildChannels(mode, { networkPolicy: policy, localSubjects: { browser_local: { fetch: async () => { throw new Error('worker tests stay on HTTP') } } } })
       const http = channels.find((channel) => channel.id === 'http')!
       const blocked = async (url: string) => ({ ...(await http.fetch(url)), status: 'blocked' as const, blockReason: 'cloudflare_challenge' as const })

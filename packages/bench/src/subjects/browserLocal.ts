@@ -557,6 +557,9 @@ export class BrowserLocalSubject implements SubjectAdapter {
         // The record's route, pinned version and launch (hosted_chrome's own identifier), and the kind of exit (ADR 0005 decision four).
         trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_engine', detail: { engine: this.browserEngine, version: browser.version(), flags: HOSTED_CHROME_PROFILE_ID } })
         trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_kind', detail: { kind: this.hostedChrome.egressKind } })
+        // The proxy the read left through, host and port alone: the record's egress.proxy (ADR 0005 decision four).
+        const proxy = this.hostedChrome.proxy?.() ?? null
+        if (proxy !== null) trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_proxy', detail: { proxy, source: 'pool' } })
       }
       else if (this.browserEngine !== 'playwright') trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_engine', detail: { engine: this.browserEngine, version: this.engineVersion } })
       throwIfExecutionStopped(execution)
