@@ -485,3 +485,39 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - 阶段 H 方案的定价（D4）、开放范围和成本上限（D5）、法律咨询（D6）、身份类功能（D8）另行决定。
 - ROADMAP 里推翻决定 15 的那一段（"Changed 2026-10-27 by Howard"）写的是 ADR 0005 随每项能力在托管上开放而修订，不提前。本修订按 Howard 批准的 D3 先写规则；`hosted_chrome` 要等 H2c 实现并验收后才开放。
 - 没测过：服务形态下的冷启动时间和并发；Cloud Run 上走非 Google 的数据中心出口（H2b 窗口 2 才有这一臂）；关掉后台下载以后挑战页的通过率。
+
+## 修订 2026-10-28：本机默认推荐改为 installed_chrome 加 compatible_transport，不再推荐 Steel（ROADMAP 当前阶段，决定 17，阶段 L 第 1 项与阶段 S）
+
+**背景。** 2026-10-27，Howard 定了决定 17：先把本地做好，再摆脱 Steel，托管追平本地作为主线（`docs/pa-enhancement-tasks.md`"待你决定"第 17 条）。Steel 慢而且不稳：2026-10-26 速度 A/B 的窗口 A 里，32 次调用有 12 次在会话建立前失败，按 Steel 自己的列表 20 个会话有 15 个跑满 120 s（同一文件"进度"里 2026-10-27 速度 A/B 那一行）。#716 的合并 grant（installed_chrome、compatible_transport 和 Steel 在一份 grant 里）两个窗口都成立的 5 道收益里，T007 和 T018 由 http_compat 交付，T014 和 T050 由 Steel 交付。不带 Steel 的 installed_chrome 加 compatible_transport 此前没有跑过。
+
+**测量。** K1 的 92 道题，两个窗口：2026-10-27 和 2026-10-28（UTC），runner 都是 `e1a7acc4`，都走 Clash 出口。三臂交错成 4 块、每块 23 道，块间轮换先后：installed_chrome（K1 grant）、ic_compat（K1 grant 加 `compatible_transport`，SHA `bf5f2882…`）、combined（#716 的合并 grant，`0671de73…`，参照臂）。Steel 每个窗口的上限是账本 $1。Firecrawl 没在这两个窗口里跑，参照 #716 的两个窗口。记录在 #747：[窗口 1](../../research/access/runs/2026-10-27-ic-compat-w1-e1a7acc4-summary.md)、[窗口 2](../../research/access/runs/2026-10-28-ic-compat-w2-e1a7acc4-summary.md)、[两窗口](../../research/access/runs/2026-10-28-ic-compat-two-windows-e1a7acc4.md)。主指标是首次调用：
+
+- 92 道通过：ic_compat 69 和 69，installed_chrome 67 和 69，combined 72 和 69。冻结的 50 道：ic_compat 33 和 32，combined 34 和 32，installed_chrome 31 和 31。
+- 假成功每臂都是窗口 1 一道、窗口 2 两道，两个窗口合计 3/184（95% 上限 4.2%）。
+- 两个窗口都成立的：ic_compat 相对 installed_chrome 增 1（T011）、退 0；ic_compat 和 combined 之间两个方向都是 0。
+- T007 和 T018 两个窗口都由 ic_compat 经 http_compat（impit）通过。
+- 去掉 Steel 丢的题，没有一道在两个窗口里都成立。窗口 1 里 combined 多出的 T052、T053、T059 不是 Steel 交付的（installed_chrome/chrome、installed_chrome/chrome、browser/playwright），三道都在 combined 先跑的第 2 块，ic_compat 在窗口 2 的首次调用里三道都通过了。窗口 2 里 Steel 交付了 ic_compat 没过的 T014、T030、T031、T050，这四道 combined 在窗口 1 都没过。
+- 费用：ic_compat 两个窗口的账本都是 $0；combined 是 $0.0250 加一次账本没报的调用，和 $0.0168。Clash 带宽和本机算力没有测量，记为 unknown exposure。
+- p95（全部尝试）：ic_compat 26239 和 25980 ms，combined 166619 和 46418 ms，installed_chrome 28307 和 18850 ms。
+
+**出口与例外。** 出口是：两个窗口里 ic_compat 的通过数都不少于 combined 减 2，假成功不多于它。冻结的 50 道两个窗口都满足。全部 92 道没有满足：窗口 1 ic_compat 69，需要 70。2026-10-28，Howard 把这一处按例外接受。依据都出自两窗口记录：去掉 Steel 丢的题没有一道在两个窗口里都成立；窗口 1 多出的三道不是 Steel 交付的，ic_compat 在窗口 2 都通过了；冻结的 50 道两个窗口都满足。记录里的出口照测量写"not met"，例外写在它下面一行，计数不改。
+
+**决定。**
+
+1. 本机的默认推荐从 `installed_chrome` 改为 `installed_chrome` 加 `compatible_transport`。它仍然只是推荐，2026-10-23 修订的规则照旧：两项能力默认都关，grant 由使用者自己写（档位 enhanced，带自己的 attestation），请求选 `access: "enhanced"`，模式是 standard；阶梯顺序不变；`compatible_transport` 不设 `W2L_COMPAT_HOSTS` 时只用于默认的五个 host（`research/access/benefit-hosts.v1.json`），测量用的就是这个默认。
+2. Steel 不再推荐，但仍是可选路线：自带 key 的使用者照常可以在 grant 里列 `vendor_remote_browser`（配 `W2L_VENDORS=steel` 和 `STEEL_API_KEY`），价目表、上限和结算的规则都不变。文档不再把它写成推荐路线的一部分。
+3. 推荐出现的三处和 2026-10-23 修订列的相同，本修订把它们改成新的组合：`docs/access.md` 的"The recommended route on your own machine"（连同页首列表和 `installed_chrome` 条目的 Status），`docs/local-setup.md` 的"Pages that stop at a check"，以及 `packages/api/src/hints.ts` 的 `INSTALLED_CHROME_RECOMMENDED_HINT` 和 `docs/scrape-options.md` 里它那一行。提示出现的条件不变：服务的 grant 没有列 `installed_chrome` 时才出现。grant 列了 `installed_chrome` 却没有列 `compatible_transport` 时，不出提示。
+4. 每周重跑（`research/access/weekly.mjs`）：默认不再跑 Steel 臂，`--arms steel` 仍可以跑。free 臂的 16 道挑战页题改用列 `installed_chrome` 和 `compatible_transport` 的 grant（`--ic-compat-grant`）；健康组和轮换组仍用只列 `installed_chrome` 的 grant、access standard。两份 grant 之间重启 API。臂名和记录格式不变。
+
+**停止条件。** 不变，还是 2026-10-23 修订写的：16 道挑战页题低于 7 道时，那周的记录写 "stop the default recommendation, retest pending"，随后用一个 PR 撤下上面三处的推荐。基线 7/16 是 2026-10-14 只列 `installed_chrome` 时测的。新 grant 在这 16 道题上没有单独测过基线，第一次每周重跑就是它的第一个数。
+
+**推荐时要一并说明的限制。** 2026-10-23 修订列的照旧适用：一台 Mac、一个机房出口；会开 Chrome 窗口（这两个窗口 92 道首次调用里走到 installed_chrome 的有 38 道和 39 道，同时最多 2 个）；要本机装 Chrome；托管和远程 MCP 用不上 `installed_chrome`。另加两条：
+
+- `compatible_transport` 不是对所有 host 都好：在整个任务集上它也把拒绝变成过数据错的回答（2026-10-07 的 G1 验收），所以默认只用于五个 host。
+- 这两个窗口没有跑 Firecrawl。#716 两个窗口里 Firecrawl 是 67 和 69 道，假成功 15 和 12；那是 2026-10-25 和 2026-10-26，不是同窗对比。
+
+**本修订合入时的边界。**
+
+- 引擎代码不变：阶梯、能力、grant 的规则和 Steel 的适配器都没改。改的只有推荐的措辞、本地 agentHint 的文字和每周重跑的臂。
+- 每周定时任务的调用参数不在本修订里，由协调会话另行调整。如果那个任务显式写了 `--arms` 并且含 `steel`，Steel 臂照样会跑。
+- 本修订引用的测量记录在 #747，要在 #747 合入之后才在 `main` 上。

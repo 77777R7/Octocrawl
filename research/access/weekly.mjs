@@ -3,11 +3,15 @@
 // The set, for the week of the run date: the 25 healthy tasks, the 16 challenge tasks (research/access/subsets.v1.json,
 // `challenge16`) and one rotation group of the other frozen tasks (36 in tasks.v1.json order, cut 10/10/10/6; the group is
 // the ISO week number modulo 4, so nothing is stored between weeks). The arms:
-//   free       Octocrawl's local API under a grant that names installed_chrome alone: the healthy and rotation tasks with
-//              access "standard", the 16 challenge tasks with "enhanced" (the rung ADR 0005 accepted). No paid route.
-//              When Chrome's major version differs from the previous weekly record's, the 16 tasks run a second time.
+//   free       Octocrawl's local API, no paid route: the healthy and rotation tasks with access "standard", under a grant
+//              that names installed_chrome alone; the 16 challenge tasks with "enhanced", under a grant that names
+//              installed_chrome and compatible_transport (the local route ADR 0005 recommends since its revision of
+//              2026-10-28; compatible_transport on its default hosts, research/access/benefit-hosts.v1.json). The API is
+//              restarted between the two. When Chrome's major version differs from the previous weekly record's, the 16
+//              tasks run a second time.
 //   steel      the same API under the Steel datacenter grant (vendor_remote_browser, never vendor_residential_proxy),
-//              W2L_VENDORS=steel and STEEL_API_KEY, every task with "enhanced".
+//              W2L_VENDORS=steel and STEEL_API_KEY, every task with "enhanced". Not in the default arms since ADR 0005's
+//              revision of 2026-10-28, which stopped recommending Steel; it runs only when --arms names it.
 //   firecrawl  Firecrawl Cloud through run-set.mjs --target firecrawl (its credits are checked first).
 //   zenrows    ZenRows the same way (--target zenrows).
 // Each arm is one or more run-set.mjs invocations (each sends the tasks' contracts; a competitor is never sent one); the
@@ -19,15 +23,19 @@
 // written down as not_run with its reason, and the other arms still run; the summary keeps it.
 //
 // The API is started by this script on one fixed port (--port, default 8799; never 8787, 8791 or 8812–8814, which other
-// things on this machine use), once for the free arm and once for the Steel arm, and stopped when the arm ends, also on a
+// things on this machine use), once for each grant of the free arm and once for the Steel arm, and stopped when the arm ends, also on a
 // failure. Network: the shell's HTTPS_PROXY/HTTP_PROXY/NO_PROXY, which run-set.mjs records.
 //
-// Usage: node research/access/weekly.mjs [--arms free,steel,firecrawl,zenrows] [--date YYYY-MM-DD] [--port 8799]
-//          [--ic-grant <file>] [--steel-grant <file>] [--min-credits <n>] [--dry-run]
+// Usage: node research/access/weekly.mjs [--arms free,firecrawl,zenrows] [--date YYYY-MM-DD] [--port 8799]
+//          [--ic-grant <file>] [--ic-compat-grant <file>] [--steel-grant <file>] [--min-credits <n>] [--dry-run]
+//   --arms       any of free, steel, firecrawl, zenrows (default free,firecrawl,zenrows).
 //   --date       the run date the record names (default: today, local time); the ISO week of it picks the rotation group.
 //   --ic-grant   the grant for the free arm (default .w2l/access/installed-chrome-grant.json of this checkout, else of the
 //                main checkout). It must name installed_chrome alone. Never written by this script: the attestation is
 //                Howard's.
+//   --ic-compat-grant the grant for the free arm's 16 challenge tasks (default .w2l/access/ic-compat-grant.json, else
+//                .w2l/access/ic-compat-grant-k1.json, the one the 2026-10-27/28 measurement used, found the same way). It
+//                must name installed_chrome and compatible_transport, nothing else; never written by this script either.
 //   --steel-grant the Steel grant (default .w2l/access/steel-grant.json, found the same way); vendor_residential_proxy
 //                must not be in it.
 //   --min-credits the fewest credits a competitor must have left before its arm runs (default: the number of tasks).
@@ -46,14 +54,14 @@ import { connect } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { grantOf } from './runSetReport.mjs'
-import { IC16_BASELINE, baselineLine, chromeMajor, chromeOfRecord, observationsBetween, readRouteEntries, steelLayerLines, summaryRows, weeklyHeaderLines, weeklySet } from './weeklyPlan.mjs'
+import { DEFAULT_ARMS, IC16_BASELINE, baselineLine, chromeMajor, chromeOfRecord, freeGrantRefusal, observationsBetween, readRouteEntries, steelLayerLines, summaryRows, weeklyHeaderLines, weeklySet } from './weeklyPlan.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../..')
 const args = process.argv.slice(2)
 const flag = (name) => { const i = args.indexOf(name); return i === -1 ? undefined : args[i + 1] }
 const ARMS = ['free', 'steel', 'firecrawl', 'zenrows']
-const arms = (flag('--arms') ?? ARMS.join(',')).split(',').map((s) => s.trim()).filter(Boolean)
+const arms = (flag('--arms') ?? DEFAULT_ARMS.join(',')).split(',').map((s) => s.trim()).filter(Boolean)
 for (const a of arms) if (!ARMS.includes(a)) throw new Error(`--arms: unknown arm ${a}; the arms are ${ARMS.join(', ')}`)
 const port = Number(flag('--port') ?? 8799)
 if ([8787, 8791, 8812, 8813, 8814].includes(port)) throw new Error(`--port ${port} is reserved on this machine`)
@@ -198,15 +206,24 @@ async function freeArm() {
   const grantFile = flag('--ic-grant') ?? localFile('.w2l/access/installed-chrome-grant.json')
   if (grantFile === null || !existsSync(grantFile)) return writeNotRun('free', title, 'no installed_chrome grant found (--ic-grant, or .w2l/access/installed-chrome-grant.json of this or the main checkout); the attestation is not written by this script')
   const grant = grantOf(await readFile(grantFile, 'utf8'))
-  if (grant.capabilities === null || grant.capabilities.join() !== 'installed_chrome') return writeNotRun('free', title, `the grant ${grantFile} must name installed_chrome alone; it names ${grant.capabilities?.join(', ') ?? 'nothing readable'}`)
+  const refusal = freeGrantRefusal('standard', grant.capabilities)
+  if (refusal !== null) return writeNotRun('free', title, `the grant ${grantFile}: ${refusal}`)
+  const compatFile = flag('--ic-compat-grant') ?? localFile('.w2l/access/ic-compat-grant.json') ?? localFile('.w2l/access/ic-compat-grant-k1.json')
+  if (compatFile === null || !existsSync(compatFile)) return writeNotRun('free', title, 'no installed_chrome + compatible_transport grant found for the 16 challenge tasks (--ic-compat-grant, or .w2l/access/ic-compat-grant.json or ic-compat-grant-k1.json of this or the main checkout); the attestation is not written by this script')
+  const compat = grantOf(await readFile(compatFile, 'utf8'))
+  const compatRefusal = freeGrantRefusal('challenge', compat.capabilities)
+  if (compatRefusal !== null) return writeNotRun('free', title, `the grant ${compatFile}: ${compatRefusal}`)
   const env = { W2L_ACCESS_GRANT: grantFile, W2L_API_URL: `http://127.0.0.1:${port}` }
+  const challengeEnv = { W2L_ACCESS_GRANT: compatFile, W2L_API_URL: `http://127.0.0.1:${port}` }
   const runs = []
   const failures = []
   try {
     await startApi('free', env)
     runs.push(await runSet('free-standard', ['--set', 'all', '--only', idsArg([...set.healthy, ...set.rotation]), '--access', '"standard"'], env))
-    runs.push(await runSet('free-ic16', ['--set', 'all', '--only', idsArg(set.challenge), '--access', '"enhanced"', '--save-responses'], env))
-    if (chromeRerun) runs.push(await runSet('free-ic16-rerun', ['--set', 'all', '--only', idsArg(set.challenge), '--access', '"enhanced"', '--save-responses'], env))
+    await stopApi()
+    await startApi('free-challenge', challengeEnv)
+    runs.push(await runSet('free-ic16', ['--set', 'all', '--only', idsArg(set.challenge), '--access', '"enhanced"', '--save-responses'], challengeEnv))
+    if (chromeRerun) runs.push(await runSet('free-ic16-rerun', ['--set', 'all', '--only', idsArg(set.challenge), '--access', '"enhanced"', '--save-responses'], challengeEnv))
   } catch (e) {
     await stopApi()
     if (runs.length === 0) return fail('free', title, e)
@@ -215,7 +232,7 @@ async function freeArm() {
   } finally { await stopApi() }
   const ic = runs.filter((r) => r.label.startsWith('free-ic16'))
   const extra = [
-    `- API: http://127.0.0.1:${port}, started by this script with W2L_ACCESS_GRANT=${grantFile} (SHA-256 \`${grant.sha256}\`, capabilities: ${grant.capabilities.join(', ')}); the healthy and rotation tasks with access "standard", the 16 challenge tasks with "enhanced"; stopped after the arm`,
+    `- API: http://127.0.0.1:${port}, started by this script twice: with W2L_ACCESS_GRANT=${grantFile} (SHA-256 \`${grant.sha256}\`, capabilities: ${grant.capabilities.join(', ')}) for the healthy and rotation tasks with access "standard", then with W2L_ACCESS_GRANT=${compatFile} (SHA-256 \`${compat.sha256}\`, capabilities: ${compat.capabilities.join(', ')}; compatible_transport on its default hosts) for the 16 challenge tasks with "enhanced"; stopped after each`,
     ...ic.map((r) => `${baselineLine(r.summary.totals.cold?.verified ?? null)}${ic.length > 1 ? ` (run ${r.label})` : ''}`),
     ...(ic.length === 0 ? [baselineLine(null)] : []),
     ...failures,

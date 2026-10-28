@@ -42,6 +42,9 @@ export declare function weeklySet(taskFile: TaskFile, subsets: Subsets, date: Da
 export declare function chromeMajor(version: string | null | undefined): number | null
 export declare function chromeOfRecord(text: string | null | undefined): string | null
 export declare const IC16_BASELINE: Baseline
+export declare const DEFAULT_ARMS: readonly string[]
+export declare const FREE_GRANTS: { readonly standard: readonly string[]; readonly challenge: readonly string[] }
+export declare function freeGrantRefusal(part: 'standard' | 'challenge', capabilities: readonly string[] | null | undefined): string | null
 export declare function baselineLine(verified: number | null, baseline?: Baseline): string
 export declare function weeklyHeaderLines(opts: { date: string; commit: string; arm: string; set: WeeklySet; chrome: string | null; previousChrome?: string | null; chromeRerun?: boolean }): string[]
 export declare function summaryRows(arms: readonly ArmResult[]): SummaryRow[]

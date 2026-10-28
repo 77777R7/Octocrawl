@@ -77,12 +77,15 @@ service says so at startup.
 ## Pages that stop at a check
 
 A server on your computer can read a page that stopped at a bot check in the
-Google Chrome installed there. This is the `installed_chrome` route, the
-enhanced route Octocrawl recommends on your own machine. It stays off until
-you turn it on:
+Google Chrome installed there. This is the `installed_chrome` route. With
+`compatible_transport`, which reads a few hosts' pages over a
+browser-compatible HTTP transport first, it is the enhanced route Octocrawl
+recommends on your own machine. Neither pays a third party, and Octocrawl no
+longer recommends Steel. The route stays off until you turn it on:
 
-- Write an access grant that names `installed_chrome`, with your own
-  attestation. Octocrawl never writes it for you.
+- Write an access grant that names `installed_chrome` and
+  `compatible_transport`, with your own attestation. Octocrawl never writes it
+  for you.
 - Start the server with it: `octocrawl serve --access-grant grant.json`, or
   `W2L_ACCESS_GRANT` for the `octocrawl` commands and the managed local
   service above.
@@ -95,7 +98,9 @@ Know its limits before you turn it on:
 - It opens Chrome windows on your screen, at most 2 at once, and it is slower
   than a plain read.
 - It needs Google Chrome, which updates itself.
-- The hosted service and the remote MCP cannot use it.
+- `compatible_transport` covers five hosts unless `W2L_COMPAT_HOSTS` names
+  others; it is not for every host.
+- The hosted service and the remote MCP cannot use `installed_chrome`.
 
 Until a server's grant names the route, its answers point to it: a page that
 stopped at a check Octocrawl's own browser met too carries an `agentHints`
