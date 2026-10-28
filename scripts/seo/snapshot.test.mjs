@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import {
   DATA_LINE_PREFIX, canonicalPath, describeInspection, gscWindow, indexChanges, indexCell, launchCell, mergeDataLine, pagesByPath,
   parseSitemap, previousFor, readSeries, renderSummary, seriesAppend, seriesEntry, snapshotId, sourceOfPath, summarizeGsc,
-  summarizeInspections, updateTracker,
+  summarizeInspections, summarizeAiReferrals, assistantOf, updateTracker,
 } from './snapshot-lib.mjs'
 import { parseArgs } from './snapshot.mjs'
 
@@ -269,4 +269,41 @@ test('the command line refuses a tracker rewrite on another window before it tou
     assert.equal(existsSync(join(out, 'snapshots')), false)
     assert.equal(existsSync(join(out, 'series.jsonl')), false)
   } finally { rmSync(out, { recursive: true, force: true }) }
+})
+
+test('a source label is an AI assistant when its utm_source or its referrer host is on the documented lists', () => {
+  for (const [label, name] of [['utm_source=chatgpt.com', 'ChatGPT'], ['UTM_SOURCE=ChatGPT', 'ChatGPT'], ['chatgpt.com', 'ChatGPT'], ['chat.openai.com', 'ChatGPT'], ['claude.ai', 'Claude'], ['utm_source=claude', 'Claude'], ['perplexity.ai', 'Perplexity'], ['www.perplexity.ai', 'Perplexity'], ['gemini.google.com', 'Gemini'], ['utm_source=copilot', 'Copilot'], ['copilot.microsoft.com', 'Copilot'], ['chat.deepseek.com', 'DeepSeek'], ['grok.com', 'Grok'], ['you.com', 'Other assistants'], ['phind.com', 'Other assistants']]) assert.equal(assistantOf(label), name, label)
+  for (const label of ['google.com', 'news.ycombinator.com', 'github.com', 'utm_source=devto', 'utm_source=google.com', '(none: direct, or the referrer was withheld)', 'chatgpt.com.evil.example', 'notclaude.ai']) assert.equal(assistantOf(label), null, label)
+})
+
+test('AI-assistant page views are summed per assistant and in total as a floor, with the share of all page views', () => {
+  const sources = [
+    { source: '(none: direct, or the referrer was withheld)', views: 62, visitorDays: 29 },
+    { source: 'utm_source=chatgpt.com', views: 27, visitorDays: 23 },
+    { source: 'chatgpt.com', views: 3, visitorDays: 2 },
+    { source: 'claude.ai', views: 2, visitorDays: 2 },
+    { source: 'google.com', views: 1, visitorDays: 1 },
+  ]
+  const result = summarizeAiReferrals(sources, 95)
+  assert.equal(result.views, 32)
+  assert.equal(result.visitorDays, 27)
+  assert.equal(result.viewShare, 32 / 95)
+  assert.deepEqual(result.assistants, [
+    { name: 'ChatGPT', views: 30, visitorDays: 25, sources: ['utm_source=chatgpt.com', 'chatgpt.com'] },
+    { name: 'Claude', views: 2, visitorDays: 2, sources: ['claude.ai'] },
+  ])
+  assert.deepEqual(summarizeAiReferrals([], 0), { views: 0, visitorDays: 0, viewShare: null, assistants: [] })
+})
+
+test('the summary shows the AI-assistant views as at least, and the ChatGPT tag share by day, or says it is unknown', () => {
+  const base = { id: 'x', takenAt: 't', sourceCommit: 'abc', dirty: false, scriptSha256: 'f00', route: 'direct', window: { start: 'a', end: 'b', days: 28 }, gsc: null, index: null, notRead: {} }
+  const ai = summarizeAiReferrals([{ source: 'utm_source=chatgpt.com', views: 27, visitorDays: 23 }], 90)
+  const withTag = renderSummary(seriesEntry({ ...base, firstParty: { days: 7, pageViews: 90, visitorDays: 49, ai, chatgptTag: { views: 30, tagged: 27, taggedShare: 0.9, byDay: [['2026-10-20', 10, 9], ['2026-10-21', 20, 18]] } } }), null)
+  assert.match(withTag, /From AI assistants \(at least; a visit with no referrer and no tag counts as direct\): 27 page views \(30\.00% of all\): ChatGPT 27 views, 23 visitor-days\./)
+  assert.match(withTag, /ChatGPT utm tag: 27 of 30 ChatGPT page views carry utm_source=chatgpt\.com \(90\.00%\); by day \(views, tagged\): 2026-10-20 10, 9; 2026-10-21 20, 18\./)
+  const none = renderSummary(seriesEntry({ ...base, firstParty: { days: 7, pageViews: 90, visitorDays: 49, ai: summarizeAiReferrals([], 90), chatgptTag: { views: 0, tagged: 0, taggedShare: null, byDay: [] } } }), null)
+  assert.match(none, /From AI assistants \(at least; .*\): 0 page views \(0\.00% of all\)\./)
+  assert.match(none, /no ChatGPT page views in the window, so the tagged share is unknown/)
+  const older = renderSummary(seriesEntry({ ...base, firstParty: { days: 7, pageViews: 90, visitorDays: 49 } }), null)
+  assert.doesNotMatch(older, /AI assistants|utm tag/)
 })

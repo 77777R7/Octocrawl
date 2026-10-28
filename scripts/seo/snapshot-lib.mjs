@@ -289,6 +289,52 @@ const pct = value => (value === null || value === undefined ? 'unknown' : `${(va
 const num = value => (value === null || value === undefined ? 'unknown' : value.toLocaleString('en-US'))
 const delta = (now, before) => (now === null || now === undefined || before === null || before === undefined ? 'unknown' : `${now - before >= 0 ? '+' : ''}${Number((now - before).toFixed(2))}`)
 
+// The AI assistants whose visits can be told from the site's own analytics, with the utm_source values and referrer hosts
+// that mark them. The lists are those of research/seo/2026-10-27-geo-research.md section 5 (PostHog's channel
+// definitions, Google's GA4 channel rules and vendor measurements); a platform can change what it sends, so this is a
+// floor, and an assistant app that sends neither lands in "direct".
+export const AI_ASSISTANTS = [
+  { name: 'ChatGPT', utm: ['chatgpt', 'chatgpt.com'], hosts: ['chatgpt.com', 'chat.openai.com'] },
+  { name: 'Claude', utm: ['claude', 'claude.ai'], hosts: ['claude.ai'] },
+  { name: 'Perplexity', utm: ['perplexity'], hosts: ['perplexity.ai', 'ai.perplexity.app'] },
+  { name: 'Gemini', utm: ['gemini'], hosts: ['gemini.google.com'] },
+  { name: 'Copilot', utm: ['copilot', 'copilot.com'], hosts: ['copilot.microsoft.com', 'copilot.cloud.microsoft', 'copilot.com'] },
+  { name: 'DeepSeek', utm: ['deepseek'], hosts: ['chat.deepseek.com', 'deepseek.com'] },
+  { name: 'Grok', utm: ['grok'], hosts: ['grok.com'] },
+  { name: 'Other assistants', utm: [], hosts: ['meta.ai', 'you.com', 'phind.com', 'chat.mistral.ai', 'kimi.com'] },
+]
+
+/** The assistant a source label of the weekly report names, or null. A label is `utm_source=<value>` or a referrer host
+ * (the report shows the referrer when there is one and the tag only when there is not). */
+export function assistantOf(label) {
+  const text = String(label).toLowerCase().replace(/^www\./, '')
+  const value = text.startsWith('utm_source=') ? text.slice('utm_source='.length) : null
+  for (const assistant of AI_ASSISTANTS) {
+    if (value !== null ? assistant.utm.includes(value) : assistant.hosts.includes(text)) return assistant.name
+  }
+  return null
+}
+
+/** The page views the site's analytics attribute to AI assistants, from the weekly report's `sources`
+ * ([{ source, views, visitorDays }]): per assistant, and in total with the share of all page views. The count is a
+ * floor: a visit with no referrer and no tag is counted as direct. `visitorDays` of a total adds the assistants'
+ * counts, so a visitor-day that came through two of them counts twice. */
+export function summarizeAiReferrals(sources, pageViews) {
+  const by = new Map()
+  for (const { source, views, visitorDays } of sources) {
+    const name = assistantOf(source)
+    if (name === null) continue
+    const entry = by.get(name) ?? { name, views: 0, visitorDays: 0, sources: [] }
+    entry.views += views
+    entry.visitorDays += visitorDays
+    entry.sources.push(source)
+    by.set(name, entry)
+  }
+  const assistants = [...by.values()].sort((a, b) => b.views - a.views || a.name.localeCompare(b.name))
+  const views = assistants.reduce((n, entry) => n + entry.views, 0)
+  return { views, visitorDays: assistants.reduce((n, entry) => n + entry.visitorDays, 0), viewShare: pageViews > 0 ? views / pageViews : null, assistants }
+}
+
 /** The series line for one snapshot: only numbers that were read; a source that was not read is null with its reason in
  * `notRead`. */
 export function seriesEntry({ id, takenAt, sourceCommit, dirty, scriptSha256, route, window, gsc, index, firstParty, notRead }) {
@@ -323,7 +369,14 @@ export function renderSummary(entry, previous, extras = {}) {
     else if (compare?.changes.length) out.push(`Changed since ${compare.since}:`, ...compare.changes.map(change => `- ${change}`), '')
     else if (compare) out.push(`No verdict changed since ${compare.since}.`, '')
   }
-  if (entry.firstParty) out.push('## First-party site analytics', '', `${entry.firstParty.days} days: ${num(entry.firstParty.pageViews)} page views, ${num(entry.firstParty.visitorDays)} visitor-days (automated and internal lines left out).`, '')
+  if (entry.firstParty) {
+    const f = entry.firstParty
+    out.push('## First-party site analytics', '', `${f.days} days: ${num(f.pageViews)} page views, ${num(f.visitorDays)} visitor-days (automated and internal lines left out).`, '')
+    if (f.ai) {
+      out.push(`From AI assistants (at least; a visit with no referrer and no tag counts as direct): ${num(f.ai.views)} page views${f.ai.viewShare === null ? '' : ` (${pct(f.ai.viewShare)} of all)`}${f.ai.assistants.length ? `: ${f.ai.assistants.map(a => `${a.name} ${num(a.views)} views, ${num(a.visitorDays)} visitor-days`).join('; ')}` : ''}.`, '')
+    }
+    if (f.chatgptTag) out.push(f.chatgptTag.views > 0 ? `ChatGPT utm tag: ${num(f.chatgptTag.tagged)} of ${num(f.chatgptTag.views)} ChatGPT page views carry utm_source=chatgpt.com (${pct(f.chatgptTag.taggedShare)}); by day (views, tagged): ${f.chatgptTag.byDay.map(([date, views, tagged]) => `${date} ${views}, ${tagged}`).join('; ')}.` : 'ChatGPT utm tag: no ChatGPT page views in the window, so the tagged share is unknown.', '')
+  }
   if (extras.topQueries?.length) out.push('## Top queries', '', '| Query | Clicks | Impressions | Position |', '|---|---:|---:|---:|', ...extras.topQueries.map(row => `| ${row.keys[0].replace(/\|/g, '\\|')} | ${row.clicks} | ${row.impressions} | ${row.position.toFixed(1)} |`), '')
   if (extras.topPages?.length) out.push('## Top pages', '', '| Page | Clicks | Impressions | Position |', '|---|---:|---:|---:|', ...extras.topPages.map(row => `| ${row.keys[0].replace(/\|/g, '\\|')} | ${row.clicks} | ${row.impressions} | ${row.position.toFixed(1)} |`), '')
   if (extras.tracker) out.push('## Page tracker', '', extras.tracker, '')

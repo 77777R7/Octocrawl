@@ -30,9 +30,10 @@
 
 ## 已有的自动检查（2026-10-28）
 
-闸门本身仍是提议；下面两项是 Howard 要求补上的检查，已经在跑，范围写在这里，没覆盖的不要当作已检查。
+闸门本身仍是提议；下面三项是 Howard 要求补上的检查，已经在跑，范围写在这里，没覆盖的不要当作已检查。
 
 | 闸门 | 检查 | 覆盖 | 没覆盖 |
 |---|---|---|---|
 | G12 | `scripts/seo/check-sitemap.mjs`，CI 在构建站点之后运行 | 地址绝对、同一来源、带斜杠、不重复、无查询串；lastmod 是合法日期且不晚于明天的 UTC 日期（和 `docsPages.test.ts` 一致；没有 lastmod 的页面计数、不判错）；每个地址有构建出来的页面，页面有且仅有一个等于自身的 canonical、没有 noindex 或 none（robots、googlebot、bingbot 的 meta 标签）、有标题与描述；可索引的已构建页面必须在 sitemap 里；robots.txt 必须存在、指向 sitemap，并且对 `*`、Googlebot、Bingbot 都不禁止其中的路径（Allow 与 Disallow，支持 `*` 与 `$`，最长匹配优先）；单文件不超过 50,000 条、50 MB | 线上经 CDN 的真实状态码与响应头（包括 `X-Robots-Tag`）；其他爬虫的 robots.txt 规则；已删除的页面是否返回 404 或 410；「lastmod 只在主要内容变化时变」（docs 页由 `docsPages.test.ts` 保证；其他页面我没有找到对应的测试） |
 | G13 | `scripts/public-preview/indexnow.mjs` | 只发新增或有变化的地址（比较 sitemap 的 lastmod，没有 lastmod 的页面比较其 Markdown 副本的哈希），被 sitemap 去掉且返回 404 或 410 的地址按删除发；每次 POST 不超过 10,000 条；同一地址 5 分钟内不重发（`--all` 与删除通知不受此限）；429 之后 10 分钟内什么都不发；202（密钥验证待定）记为未确认、下次再发；Markdown 副本暂时读不到时保留上次记录的哈希，不因此重发；每次响应写进日志 | 「只发通过 G1 到 G12 的地址」（部署后手工运行，没有检查）；「不按计划重发整站」（现在没有任何定时运行，所以没有可检的；第一次运行没有状态，会发一次整站；`--all` 会重发整站） |
+| G11 | `scripts/seo/check-jsonld.mjs`，CI 在构建站点之后运行 | 每个 JSON-LD 块能解析；顶层对象是本站在用的 schema.org 类型（新类型要显式加进允许表）；没有 aggregateRating、review 之类的评分与评论；数据里的地址都在本站同一来源（它点名的文件在构建里存在）或在允许的外部主机（github.com、schema.org）；`url` 与 `mainEntityOfPage` 等于页面的 canonical；TechArticle 与 BlogPosting 的 headline 出现在页面上、description 等于 meta description，BlogPosting 的日期合法、先后正确、与文章 meta 标签一致；FAQPage 只允许出现在现在已有的两页（`/`、`/scrape/`），且每个问题与答案开头都在页面上；BreadcrumbList 的序号是 1 到 n、从首页开始、到本页结束、各项是已构建的页面 | 数据里的说法是否属实（只查它重复的页面信息与页面一致）；Rich Results Test（要线上站点）；「每个属性在页面上可见」只检查了 headline、description、FAQ 的问答；现有的两个 FAQPage 在 2026-05-07 之后不再有富结果（G11 原文），保留与否待 Howard 决定 |

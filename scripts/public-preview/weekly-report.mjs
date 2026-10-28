@@ -26,6 +26,7 @@ export const NPM_PACKAGES = ['octocrawl', '@octocrawl/cli', '@octocrawl/mcp', '@
 export const PYPI_PACKAGE = 'octocrawl-client'
 export const SITE = 'https://octocrawl.dev/'
 export const DIRECT = '(none: direct, or the referrer was withheld)'
+const CHATGPT_HOSTS = new Set(['chatgpt.com', 'chat.openai.com'])
 
 const day = timestamp => String(timestamp).slice(0, 10)
 const sortedCounts = (counts, limit = 15) => [...counts].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]))).slice(0, limit)
@@ -56,6 +57,21 @@ export function summarizeSiteEvents(lines) {
   for (const line of kept) if (line.event === 'w2l_web_event' && line.name !== 'page_view') actions.set(line.name, (actions.get(line.name) ?? 0) + 1)
   const previews = new Map()
   for (const line of kept) if (line.event === 'w2l_preview') previews.set(line.status ?? '(unknown)', (previews.get(line.status ?? '(unknown)') ?? 0) + 1)
+  // ChatGPT adds utm_source=chatgpt.com to the links it shows, and the tag was missing for about a week in October 2026.
+  // Of the page views that come from ChatGPT (the tag or a ChatGPT referrer), how many carry the tag. A view with neither
+  // is counted as direct, so this is a floor, and a drop in the tagged share is the sign that the tag has gone again.
+  const chatgptDays = new Map()
+  for (const line of views) {
+    const props = line.props ?? {}
+    const tagged = String(props.utm_source ?? '').toLowerCase() === 'chatgpt.com'
+    if (!tagged && !CHATGPT_HOSTS.has(String(props.ref ?? '').toLowerCase())) continue
+    const entry = chatgptDays.get(day(line.timestamp)) ?? { views: 0, tagged: 0 }
+    entry.views += 1
+    if (tagged) entry.tagged += 1
+    chatgptDays.set(day(line.timestamp), entry)
+  }
+  const chatgptViews = [...chatgptDays.values()].reduce((n, entry) => n + entry.views, 0)
+  const chatgptTagged = [...chatgptDays.values()].reduce((n, entry) => n + entry.tagged, 0)
   return {
     pageViews: views.length,
     visitorDays: visitorDays.size,
@@ -66,6 +82,7 @@ export function summarizeSiteEvents(lines) {
     fromTags: sortedCounts(fromTags),
     actions: sortedCounts(actions),
     previews: sortedCounts(previews),
+    chatgptTag: { views: chatgptViews, tagged: chatgptTagged, taggedShare: chatgptViews ? chatgptTagged / chatgptViews : null, byDay: [...chatgptDays].sort(([a], [b]) => a.localeCompare(b)).map(([date, entry]) => [date, entry.views, entry.tagged]) },
   }
 }
 
@@ -163,6 +180,7 @@ export function renderReport(report) {
     out.push(`${s.pageViews} page views from ${s.visitorDays} visitor-days.`, '')
     out.push(markdownTable(['Day', 'Visitors'], s.perDay), '')
     out.push('### Where they came from', '', markdownTable(['Source', 'Visitor-days', 'Page views'], s.sources.map(r => [r.source, r.visitorDays, r.views])), '')
+    if (s.chatgptTag?.views > 0) out.push(`From ChatGPT: ${s.chatgptTag.views} page views, ${s.chatgptTag.tagged} of them with utm_source=chatgpt.com (${(s.chatgptTag.taggedShare * 100).toFixed(0)}%). A view with neither the tag nor a ChatGPT referrer is counted as direct, so this is a floor; a fall in the tagged share means the tag has gone again.`, '')
     out.push('### Pages', '', markdownTable(['Path', 'Page views'], s.paths), '')
     out.push('### The site\'s own links (`from`)', '', s.fromTags.length ? markdownTable(['from', 'Page views'], s.fromTags) : 'None.', '')
     out.push('### What they did', '', s.actions.length ? markdownTable(['Event', 'Count'], s.actions) : 'No events besides page views.', '')

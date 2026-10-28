@@ -95,3 +95,18 @@ test('arguments are read strictly: a missing value or an unknown flag is refused
   assert.throws(() => parseArgs(['--days', '30']), /1 to 29/)
   assert.throws(() => parseArgs(['--weeks', '2']), /Unknown argument/)
 })
+
+test('ChatGPT page views are counted with and without the utm tag, by day, and automated or internal lines are left out', () => {
+  const summary = summarizeSiteEvents([
+    view('2026-10-09T10:00:00Z', 'a', { path: '/', utm_source: 'chatgpt.com' }),
+    view('2026-10-09T10:05:00Z', 'b', { path: '/', ref: 'chatgpt.com' }),
+    view('2026-10-09T10:06:00Z', 'c', { path: '/', ref: 'chat.openai.com', utm_source: 'chatgpt.com' }),
+    view('2026-10-10T09:00:00Z', 'd', { path: '/', utm_source: 'ChatGPT.com' }),
+    view('2026-10-10T09:10:00Z', 'e', { path: '/', ref: 'perplexity.ai' }),
+    view('2026-10-10T09:20:00Z', 'f', { path: '/', utm_source: 'chatgpt.com' }, { automated: true }),
+    view('2026-10-10T09:30:00Z', 'g', { path: '/' }),
+  ])
+  assert.deepEqual(summary.chatgptTag, { views: 4, tagged: 3, taggedShare: 0.75, byDay: [['2026-10-09', 3, 2], ['2026-10-10', 1, 1]] })
+  const none = summarizeSiteEvents([view('2026-10-09T10:00:00Z', 'a', { path: '/' })])
+  assert.deepEqual(none.chatgptTag, { views: 0, tagged: 0, taggedShare: null, byDay: [] })
+})

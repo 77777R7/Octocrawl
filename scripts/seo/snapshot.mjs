@@ -26,8 +26,8 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   GSC_SITE, SITE_ORIGIN, canonicalPath, describeInspection, gscWindow, indexChanges, indexCell, launchCell, pagesByPath,
-  parseSitemap, previousFor, readSeries, renderSummary, seriesAppend, seriesEntry, snapshotId, sourceOfPath, summarizeGsc,
-  summarizeInspections, updateTracker,
+  parseSitemap, previousFor, readSeries, renderSummary, seriesAppend, seriesEntry, snapshotId, sourceOfPath, summarizeAiReferrals,
+  summarizeGsc, summarizeInspections, updateTracker,
 } from './snapshot-lib.mjs'
 
 const ROW_LIMIT = 5000
@@ -200,7 +200,11 @@ async function main(argv) {
   else {
     const attempt = await settle(() => readFirstParty(repoRoot))
     if (attempt.error) notRead['Site analytics'] = attempt.error
-    else { firstPartyRaw = attempt.value; firstParty = { days: FIRST_PARTY_DAYS, pageViews: attempt.value.site.value.pageViews, visitorDays: attempt.value.site.value.visitorDays } }
+    else {
+      const site = attempt.value.site.value
+      firstPartyRaw = attempt.value
+      firstParty = { days: FIRST_PARTY_DAYS, pageViews: site.pageViews, visitorDays: site.visitorDays, ai: summarizeAiReferrals(site.sources, site.pageViews), chatgptTag: site.chatgptTag ?? null }
+    }
   }
 
   const passCounts = inspections ? summarizeInspections(inspections) : null
