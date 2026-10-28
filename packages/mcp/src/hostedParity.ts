@@ -74,7 +74,7 @@ const listCaps = (tool: ToolName, options: readonly string[]) => options.map((op
 const PERSON_CHROME = 'Reads or hands over the page in the person\'s own Chrome. Hosted never drives the person\'s Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server.'
 const ROBOTS = 'Hosted fetches from the operator\'s addresses and obeys robots.txt for every URL (ROADMAP Direction).'
 const TLS = 'A hosted engine never loosens certificate checks for a caller (engine.ts checkHostedOptions).'
-const ACCESS = 'Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service\'s state is not checked here. Stage H item 2 goes on with a real Chrome rung on Octocrawl\'s servers, then CAPTCHA solving behind a switch.'
+const ACCESS = 'Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service\'s state is not checked here. Stage H item 2 adds hosted_chrome, a real Chrome on Octocrawl\'s servers: a deploy that carries its operator config (W2L_HOSTED_CHROME_*) takes access enhanced from an account its switch lists (hostedConfig/hostedChrome) and refuses it from any other caller; a deploy without it refuses it from everyone. CAPTCHA solving behind a switch comes after.'
 const NO_CACHE = 'Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users.'
 const JOB = 'An account\'s connection only (its key, or signing in at /mcp-oauth)'
 const LOGINS = 'Hosted keeps no saved logins. Stage H item 5: Howard chooses between a hosted, encrypted session store and forwarding these calls to the person\'s own local server.'
@@ -175,7 +175,7 @@ export const OPTION_PARITY: { [N in OptionTool]: Record<OptionOf<N>, OptionEntry
     mode: supported,
     handoff: { status: 'different_on_purpose', note: PERSON_CHROME, sent: 'refused' },
     lane: { status: 'different_on_purpose', note: PERSON_CHROME, sent: 'refused' },
-    access: { status: 'planned', item: 'hosted_access', note: `${ACCESS} access standard, the default, is taken; enhanced and my-browser are refused by name.`, sent: 'refused' },
+    access: { status: 'planned', item: 'hosted_access', note: `${ACCESS} access standard, the default, is taken; my-browser is refused by name, and so is enhanced from a caller the hosted_chrome switch does not list.`, sent: 'refused' },
     allowlistedDomains: supported,
     formats: supported,
     includeLinks: supported,

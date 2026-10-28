@@ -116,6 +116,12 @@ export interface HostedJobsConfig {
    * fills it with an engine configured as the worker's; absent: no such check.
    */
   checkStart?: { batch: (request: ParsedBatchStartRequest) => void; crawl: (request: ParsedCrawlStartRequest) => void }
+  /**
+   * Whether the account's start may name `access: "enhanced"` (ADR 0005 hosted_chrome, revision of 2026-10-27): the switch
+   * grants it hosted_chrome now, on a deploy with the rung's operator config. Absent, or false: `access` is refused, as the
+   * key sets refuse it. createHostedApi fills it.
+   */
+  admitsEnhanced?: (uid: string) => Promise<boolean>
   limits?: JobLimits
 }
 
@@ -203,7 +209,9 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
       body = { ...(parsed as Record<string, unknown>) }
     } catch { return refusal(400, 'invalid_json', 'the request body must be a JSON object') }
     const allowed = kind === 'batch' ? HOSTED_BATCH_KEYS : HOSTED_CRAWL_KEYS
-    const unsupported = Object.keys(body).filter((key) => !allowed.has(key))
+    // access enhanced, from an account hosted_chrome's switch admits; anyone else's `access` is refused as before.
+    const enhanced = body.access === 'enhanced' && config.admitsEnhanced !== undefined && await config.admitsEnhanced(caller.uid)
+    const unsupported = Object.keys(body).filter((key) => !allowed.has(key) && !(key === 'access' && enhanced))
     if (unsupported.length > 0) return refusal(400, 'invalid_request', `hosted ${kind} jobs do not take ${unsupported.join(', ')}`, ['run it on your computer for every option: npx octocrawl serve'])
     const headerKey = request.headers.get('idempotency-key') ?? request.headers.get('x-idempotency-key')
     if (headerKey !== null && body.idempotencyKey === undefined) body.idempotencyKey = headerKey

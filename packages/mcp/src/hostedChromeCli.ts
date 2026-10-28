@@ -9,18 +9,24 @@
  *   W2L_CHROME_PATH     the pinned Google Chrome (the image's /usr/bin/google-chrome-stable is found without it)
  *   W2L_OPERATOR_CONTACT, W2L_OPERATOR_URL
  *                       the operator's contact, as on the hosted API (hostedChromePolicy)
+ *   W2L_HOSTED_CHROME_PROXIES_FILE
+ *                       the datacenter proxy list (D2, 2026-10-29), a Secret Manager secret mounted as a file of
+ *                       `host:port:user:pass` lines; unset, the service leaves from Cloud Run's own egress
  *
- * Its connections leave through the address guard straight to the site, from Cloud Run's own egress: the record's exit
- * kind is `google`. An egress proxy, once one is chosen (ROADMAP stage H, D2), is the guard's dial, and the kind with it.
+ * Its connections leave through the address guard: straight to the site from Cloud Run's own egress (the record's exit
+ * kind `google`), or through one of the operator's datacenter proxies, chosen for each read (`datacenter`;
+ * hostedChromeEgress.ts). The startup line names the kind and how many proxies, never one of them.
  */
 import { createHostedChromeService, hostedChromePolicy, hostedChromeReader, serveHostedChrome } from './hostedChrome.js'
+import { hostedChromeExitFromEnv } from './hostedChromeEgress.js'
 
 const port = Number(process.env.PORT ?? 8080)
 if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error('PORT is a port number')
 if ((process.env.DISPLAY ?? '') === '') throw new Error('DISPLAY is unset: hosted_chrome is headed, on the Xvfb display start.sh opens')
-const reader = hostedChromeReader(hostedChromePolicy(process.env), 'google')
+const exit = await hostedChromeExitFromEnv(process.env)
+const reader = hostedChromeReader(hostedChromePolicy(process.env), exit)
 const { server } = await serveHostedChrome(createHostedChromeService(reader.read), port)
-console.log(JSON.stringify({ severity: 'INFO', event: 'hosted_chrome_started', port, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
+console.log(JSON.stringify({ severity: 'INFO', event: 'hosted_chrome_started', port, egressKind: exit.kind, proxies: exit.count, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
 process.once('SIGTERM', () => {
   server.close()
   void reader.close().finally(() => process.exit(0))

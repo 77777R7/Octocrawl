@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { connect as connectNet, createServer as createNetServer, isIP, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -11,6 +11,7 @@ import { HOSTED_CHROME_PROFILE_ID, type Channel } from '@w2l/bench'
 import { toEvidenceRecord } from '@w2l/runtime'
 import { createHostedChromeService, hostedChromeReader, httpHostedChromeClient, serveHostedChrome } from '../src/hostedChrome.js'
 import { MemoryHostedAccess } from '../src/hostedAccess.js'
+import { datacenterExit, GOOGLE_EXIT } from '../src/hostedChromeEgress.js'
 import { MemoryHostedQuota } from '../src/hostedApi.js'
 import { HostedChromeCounter, MemoryHostedChromeSpend } from '../src/hostedChromeMeter.js'
 
@@ -44,7 +45,7 @@ const policy: NetworkPolicy = { ...hostedNetworkPolicy(), origin: 'operator', pr
 
 describe('hosted_chrome: the octocrawl-chrome service end to end', () => {
   it('reads a page the rungs before it could not, and its record says hosted_chrome, the launch and a google exit', async () => {
-    const reader = hostedChromeReader(policy, 'google', seams)
+    const reader = hostedChromeReader(policy, GOOGLE_EXIT, seams)
     const served = await serveHostedChrome(createHostedChromeService(reader.read), 0)
     const root = await mkdtemp(join(tmpdir(), 'w2l-hosted-chrome-'))
     const blocked = (url: string, lane: FetchResult['lane']): FetchResult => ({
@@ -83,6 +84,42 @@ describe('hosted_chrome: the octocrawl-chrome service end to end', () => {
       await new Promise<void>((resolve) => served.server.close(() => resolve()))
       await reader.close()
       await rm(root, { recursive: true, force: true })
+    }
+  }, 90_000)
+
+  it('leaves through the chosen datacenter proxy: the record says datacenter and names it by host:port, never its login', async () => {
+    // A stand-in CONNECT proxy (D2's datacenter exit), with a made-up login; it keeps each tunnel's target.
+    const targets: string[] = []
+    const proxy = createNetServer((client) => {
+      client.once('data', (head: Buffer) => {
+        const target = head.toString('latin1').split(' ')[1]!
+        targets.push(target)
+        const upstream = connectNet(Number(target.split(':')[1]), target.split(':')[0]!, () => {
+          client.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+          client.pipe(upstream)
+          upstream.pipe(client)
+        })
+        upstream.on('error', () => client.destroy())
+        client.on('error', () => upstream.destroy())
+      })
+    })
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve))
+    const proxyPort = (proxy.address() as AddressInfo).port
+    const login = { username: 'made-up-user', password: 'made-up-pass-91c2' }
+    const reader = hostedChromeReader(policy, datacenterExit([{ host: '127.0.0.1', port: proxyPort, ...login }]), seams)
+    try {
+      const read = await reader.read({ url: `${origin}/article`, options: {}, deadlineAt: Date.now() + 60_000 }, new AbortController().signal)
+      expect(read.status).toBe('success')
+      expect(targets.length).toBeGreaterThan(0)
+      // Only checked addresses reach the proxy, never a name: the site's, and any Chrome's own traffic was given.
+      expect(targets).toContain(`127.0.0.1:${new URL(origin).port}`)
+      expect(targets.filter((target) => isIP(target.slice(0, target.lastIndexOf(':'))) === 0)).toEqual([])
+      const record = toEvidenceRecord(read, { mode: 'standard' }, { markdown: read.markdown })
+      expect(record.access).toMatchObject({ route: 'hosted_chrome', egress: { proxy: `127.0.0.1:${proxyPort}`, source: 'pool', kind: 'datacenter' } })
+      for (const secret of [login.username, login.password]) expect(JSON.stringify(read)).not.toContain(secret)
+    } finally {
+      await reader.close()
+      await new Promise<void>((resolve) => proxy.close(() => resolve()))
     }
   }, 90_000)
 })

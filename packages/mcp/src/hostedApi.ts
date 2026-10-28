@@ -22,7 +22,7 @@ import { readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
-import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine, type ApiEngineOptions } from '@w2l/api'
+import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine, type ApiEngineOptions, type HostedChromeOperator } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy, type ScrapeRun } from '@w2l/contracts'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
@@ -478,6 +478,12 @@ export interface HostedApiConfig {
   model?: HostedModel
   /** The operator's per-request access switches (hostedAccess.ts); absent: no call holds a capability. */
   access?: HostedAccessSource
+  /**
+   * hosted_chrome's operator config (hostedChromeOperator.ts): with it, a call the account switch grants the rung and that
+   * chose `access: "enhanced"` may use it, and any other such call gets the page the rungs before it read (ADR 0005,
+   * revision of 2026-10-27, decision two). Absent: no rung, and `access: "enhanced"` is refused.
+   */
+  hostedChrome?: HostedChromeOperator
   /** The hosts a call that holds compatible_transport reads over it; default the local default (COMPAT_BENEFIT_HOSTS). A test names its own. */
   compatHosts?: readonly string[]
   /** Shared with the Cloudflare Worker; proves CF-Connecting-IP. Absent: the socket address is the keyless identity. */
@@ -690,8 +696,17 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const env = config.env ?? process.env
   const log = config.log ?? ((line: string) => console.log(line))
   // A job's request is checked at its start on an engine configured as the worker's, which creates no task here.
-  const jobChecks = config.jobs === undefined || config.credits === undefined ? null : createApiEngine(jobEngineOptions(join(config.taskRoot, 'job-checks'), config.networkPolicy === undefined ? {} : { networkPolicy: config.networkPolicy }))
-  const jobRoutes = jobChecks === null ? null : createJobRoutes({ checkStart: { batch: (request) => jobChecks.checkBatchStart(request), crawl: (request) => jobChecks.checkCrawlStart(request) }, ...config.jobs! }, config.credits!, log)
+  const jobChecks = config.jobs === undefined || config.credits === undefined ? null : createApiEngine(jobEngineOptions(join(config.taskRoot, 'job-checks'), { ...(config.networkPolicy === undefined ? {} : { networkPolicy: config.networkPolicy }), ...(config.hostedChrome === undefined ? {} : { hostedChrome: config.hostedChrome }) }))
+  /**
+   * ADR 0005 hosted_chrome (revision of 2026-10-27): `access: "enhanced"` is taken only from a call the account switch grants
+   * the rung, on a deploy with its operator config. Every other call is refused as a deploy without the rung refuses it;
+   * an admitted call the counter then turns away (the month's cap, the day's attempts) gets the earlier rungs' page.
+   */
+  const admitsEnhanced = async (caller: { uid?: string | undefined }): Promise<boolean> => config.hostedChrome !== undefined && (await grantedCapabilities(config.access, caller)).includes('hosted_chrome')
+  const enhancedRefusal = (req: { access?: string }, capabilities: readonly string[]): RequestError | null =>
+    req.access !== 'enhanced' || config.hostedChrome === undefined || capabilities.includes('hosted_chrome') ? null
+      : new RequestError('access enhanced: hosted_chrome is not switched on for this caller on hosted Octocrawl; ask with access standard, or run it on your computer with an access grant (npx octocrawl serve)', 'unsupported_parameter', { parameters: ['access'] })
+  const jobRoutes = jobChecks === null ? null : createJobRoutes({ checkStart: { batch: (request) => jobChecks.checkBatchStart(request), crawl: (request) => jobChecks.checkCrawlStart(request) }, admitsEnhanced: (uid) => admitsEnhanced({ uid }), ...config.jobs! }, config.credits!, log)
   const keylessDaily = config.keylessDaily ?? DEFAULT_KEYLESS_DAILY
   const claudeDaily = config.claudeDaily ?? DEFAULT_CLAUDE_DAILY
   const siteDaily = config.siteDaily ?? DEFAULT_SITE_DAILY
@@ -717,6 +732,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     // ADR 0005 compatible_transport, held by a call only when the operator's switch grants it to its caller (hostedAccess.ts).
     callCapabilities: HOSTED_ACCESS_ENGINE.callCapabilities,
     compatHosts: config.compatHosts ?? HOSTED_ACCESS_ENGINE.compatHosts,
+    // ADR 0005 hosted_chrome, for a call that holds it and chose access enhanced, counted by the operator's meter.
+    ...(config.hostedChrome === undefined ? {} : { hostedChrome: config.hostedChrome }),
   })
   const inner = createApp(engine, { exposeInternalErrors: false, jobStreams: false })
   // A process-local secret lets the MCP handler hand the gate a keyless caller's identity; no outside request can present it.
@@ -904,6 +921,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       // The model's +2 is charged in credits, which only an account has.
       const modelGate = { admit: async () => ({ ok: false as const, message: config.model === undefined ? MODEL_REFUSALS.notOffered : MODEL_REFUSALS.needsAccount }) }
       const capabilities = await grantedCapabilities(config.access, caller)
+      const refusedEnhanced = enhancedRefusal(req, capabilities)
+      if (refusedEnhanced !== null) throw refusedEnhanced
       return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
     }
     await next()
@@ -991,6 +1010,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const modelGate = model?.gate ?? { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) }
           const req = parseScrapeRequest(pinned)
           const capabilities = await grantedCapabilities(config.access, caller)
+          const refusedEnhanced = enhancedRefusal(req, capabilities)
+          if (refusedEnhanced !== null) throw refusedEnhanced
           const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
           // Two more where the model was called for the page: never more than was reserved, as only a reserved gate admits.

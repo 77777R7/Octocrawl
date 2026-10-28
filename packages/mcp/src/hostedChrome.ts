@@ -15,18 +15,20 @@
  *                   being read (one window per instance: Cloud Run's concurrency 1 keeps a second request off it).
  *   GET  /health    200 once the process serves.
  *
- * Authentication is Cloud Run's own: the service takes no unauthenticated call and only internal ingress, and only the
- * hosted API's service account holds `roles/run.invoker` on it. The client sends a Google ID token for the service's URL
- * from the metadata server. The service checks no token itself: Cloud Run has refused a request without one before it
- * reaches the container.
+ * Authentication is Cloud Run's own IAM: the service takes no unauthenticated call, and only the runtime account of the
+ * hosted API and the job worker holds `roles/run.invoker` on it. Its ingress is `all`, since neither caller has the VPC
+ * egress an internal one would need (docs/hosted-api.md, The octocrawl-chrome service). The client sends a Google ID token
+ * for the service's URL from the metadata server. The service checks no token itself: Cloud Run has refused a request
+ * without one before it reaches the container.
  */
 
 import { getRequestListener } from '@hono/node-server'
 import { Hono } from 'hono'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { hostedNetworkPolicy, hostedVerifyRefusal, withOperatorContact, type AccessEgressKind, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
+import { hostedNetworkPolicy, hostedVerifyRefusal, withOperatorContact, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
 import { BrowserLocalSubject, CompatAddressGuard, hostedChromeRefusal, type GuardResolver, type HostedChromeClient, type InstalledChromeTestSeams } from '@w2l/api'
+import type { HostedChromeExit } from './hostedChromeEgress.js'
 
 /**
  * What each page option is to the service, for every key of FetchOptions (a key added there fails to compile until it is
@@ -118,14 +120,16 @@ function readOf(body: unknown, now: number): HostedChromeRead | string {
 
 /**
  * The production reader: the hosted browser lane on the `hosted_chrome` engine, behind an address guard of its own on
- * `networkPolicy` (without a login, as Chrome takes none), reading through the kind of exit `egressKind` names. One
+ * `networkPolicy` (without a login, as Chrome takes none), leaving through `exit` (hostedChromeEgress.ts): Cloud Run's
+ * own egress, or the operator's datacenter proxies as the guard's dial, one chosen for each read before it starts. One
  * subject and one guard for the process; each read launches its own Chrome and profile, and deletes them after.
  */
-export function hostedChromeReader(networkPolicy: NetworkPolicy, egressKind: AccessEgressKind, seams: InstalledChromeTestSeams = {}, resolve?: GuardResolver): { read: HostedChromeReader; close: () => Promise<void> } {
-  const guard = new CompatAddressGuard(networkPolicy, resolve, { login: false })
-  const subject = new BrowserLocalSubject('standard', null, true, networkPolicy, null, undefined, null, undefined, undefined, null, false, undefined, 'hosted_chrome', 'actual', seams, null, undefined, { guard, egressKind })
+export function hostedChromeReader(networkPolicy: NetworkPolicy, exit: HostedChromeExit, seams: InstalledChromeTestSeams = {}, resolve?: GuardResolver): { read: HostedChromeReader; close: () => Promise<void> } {
+  const guard = new CompatAddressGuard(networkPolicy, resolve, { login: false, ...(exit.dial === undefined ? {} : { dial: exit.dial }) })
+  const subject = new BrowserLocalSubject('standard', null, true, networkPolicy, null, undefined, null, undefined, undefined, null, false, undefined, 'hosted_chrome', 'actual', seams, null, undefined, { guard, egressKind: exit.kind, proxy: () => exit.proxy() })
   return {
-    read: (request, signal) => subject.fetch(request.url, request.deadlineAt, signal, undefined, request.options),
+    // The service reads one page at a time (createHostedChromeService), so the read's exit is chosen here and held by all its connections.
+    read: (request, signal) => { exit.choose(); return subject.fetch(request.url, request.deadlineAt, signal, undefined, request.options) },
     close: async () => { await subject.teardown(); await guard.close() },
   }
 }
