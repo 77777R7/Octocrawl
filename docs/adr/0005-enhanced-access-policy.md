@@ -442,6 +442,7 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 **决定三：出口。**
 
 - 出口有四类：Cloud Run 自己的出口（Google）、数据中心代理、静态 ISP 代理、住宅代理。走代理的三类都按价目表记账。供应商在 H2b 对比之后另行决定。
+- **D2（2026-10-29，Howard 定）：出口用数据中心代理。** 依据是 H2b 的对比（PR #748）：robots.txt 允许的 19 道题里，数据中心验证通过 9 道（只在窗口 2 跑），每个验证通过的页面 $0.0013；住宅出口两个窗口是 8 道和 5 道（2 vCPU），Google 出口 4 道。数据中心出口解析不了 `challenges.cloudflare.com`，T047 和 T048 因此没过。供应商、IP 数量和月租写在运营配置的价目表里（`perIpMonthUsd`、`rentedIps`），不在本 ADR。
 - 价目表（`VendorTariff`）今天能写按次（`perCallUsd`）、按小时（`perHourUsd`）、按 GB（`perGbUsd`）和按次求解（`perSolveUsd`）的价格，没有固定成本。本修订加一种固定成本的写法：按 IP 的月租（ISP 和数据中心的套餐）。
   - 固定成本按月计入运营预算，不在单次调用里按 GB 预留。
   - 单次调用的记录不能把它写成 0。摊到单次调用的写法实现时定：要么写摊销值并在 `costBasis` 里标明是摊销，要么写 null（未知）。
@@ -483,7 +484,7 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 **本修订合入时的边界。**
 
 - 只改 ADR。代码里还没有 `hosted_chrome`：`AUTHORIZABLE` 不列它，`HOSTED_CALL_CAPABILITIES` 也不列它；托管照样拒绝 `installed_chrome`、求解器和出口代理。第 3 类的表格等代码加入时再加这一行。实现和验收属于 H2c。
-- 阶段 H 方案的定价（D4）、开放范围和成本上限（D5）、法律咨询（D6）、身份类功能（D8）另行决定。
+- 阶段 H 方案的定价（D4）、开放范围和成本上限（D5）、法律咨询（D6）、身份类功能（D8）另行决定。D2 已在 2026-10-29 定下（见决定三）。D5 的计数机制随后合入：账户开关的 `monthlyCapUsd` 按运营者这一级每月的支出计（月度账本先记月租，只计已结算的调用），`dailyAttemptsPerAccount` 按账户和 UTC 日计；运营配置没有计数器时，托管引擎拒绝接上这一级（`docs/hosted-api.md` 的 "The hosted_chrome switch"）。两个数值仍等 D5。
 - ROADMAP 里推翻决定 15 的那一段（"Changed 2026-10-27 by Howard"）写的是 ADR 0005 随每项能力在托管上开放而修订，不提前。本修订按 Howard 批准的 D3 先写规则；`hosted_chrome` 要等 H2c 实现并验收后才开放。
 - 没测过：服务形态下的冷启动时间和并发；Cloud Run 上走非 Google 的数据中心出口（H2b 窗口 2 才有这一臂）；关掉后台下载以后挑战页的通过率。
 

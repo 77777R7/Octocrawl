@@ -904,7 +904,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       // The model's +2 is charged in credits, which only an account has.
       const modelGate = { admit: async () => ({ ok: false as const, message: config.model === undefined ? MODEL_REFUSALS.notOffered : MODEL_REFUSALS.needsAccount }) }
       const capabilities = await grantedCapabilities(config.access, caller)
-      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
+      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
     }
     await next()
     return c.res
@@ -991,7 +991,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const modelGate = model?.gate ?? { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) }
           const req = parseScrapeRequest(pinned)
           const capabilities = await grantedCapabilities(config.access, caller)
-          const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
+          const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
           // Two more where the model was called for the page: never more than was reserved, as only a reserved gate admits.
           modelCharged = modelExtra > 0 && (model?.pagesCalled() ?? 0) > 0 ? CREDITS.model : 0

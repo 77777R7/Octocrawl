@@ -47,9 +47,9 @@ describe('PageCache', () => {
     cache.close()
   })
 
-  it('leaves a browser_not_installed warning out of what it stores: it was about the machine, not the page', () => {
+  it('leaves browser_not_installed and hosted_chrome_not_admitted warnings out of what it stores: they were about the machine and the account, not the page', () => {
     const cache = cacheAt({ now: T0 + 1_000 })
-    const warnings = [{ code: 'client_rendered_suspected', message: 'shell' }, { code: 'browser_not_installed', message: 'no browser' }]
+    const warnings = [{ code: 'client_rendered_suspected', message: 'shell' }, { code: 'browser_not_installed', message: 'no browser' }, { code: 'hosted_chrome_not_admitted', message: 'not today' }]
     expect(cache.store('k', result({ warnings }))).toBe(true)
     expect(cache.lookup('k', { minAgeMs: 0, maxAgeMs: null })?.result.warnings).toEqual([{ code: 'client_rendered_suspected', message: 'shell' }])
     cache.close()

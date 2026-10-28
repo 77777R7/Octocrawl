@@ -13,7 +13,8 @@
  *                          hand) never holds it. Two numbers D5 decides, with no default: `monthlyCapUsd` (the
  *                          operator's dollar cap a month for the rung) and `dailyAttemptsPerAccount` (the enhanced
  *                          attempts one account may start a UTC day). While either is absent, or not a positive number
- *                          (a whole one for attempts), the switch grants it to no one. Read as the other switch is.
+ *                          (a whole one for attempts), the switch grants it to no one. Read as the other switch is;
+ *                          hostedChromeMeter.ts counts both before each read of the rung.
  *                          The rung is used only by an engine built with its operator's config (engine.ts
  *                          `hostedChrome`) and by a call that also chose access enhanced.
  *

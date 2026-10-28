@@ -156,7 +156,10 @@ describe('hosted job worker', () => {
     const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
     // The operator's config with a stand-in for the octocrawl-chrome service; the rungs before it find every page blocked.
     const client = { fetch: async (url: string) => { asked.push(new URL(url).pathname); throw new Error('the stand-in service reads nothing') } }
-    deps.engineOptions = () => ({ networkPolicy: policy, hostedChrome: { attestation: { principal: 'operator', at: '2026-10-28T00:00:00Z', statement: 'test' }, client }, channelsFor: (mode) => {
+    // The operator's D5 counter, asked for the job's account before each read.
+    const counted: (string | undefined)[] = []
+    const meter = { admit: async ({ account }: { account: string | undefined }) => { counted.push(account); return { ok: true as const, settle: async () => {} } } }
+    deps.engineOptions = () => ({ networkPolicy: policy, hostedChrome: { attestation: { principal: 'operator', at: '2026-10-28T00:00:00Z', statement: 'test' }, client, meter }, channelsFor: (mode) => {
       const channels = buildChannels(mode, { networkPolicy: policy, localSubjects: { browser_local: { fetch: async () => { throw new Error('worker tests stay on HTTP') } } } })
       const http = channels.find((channel) => channel.id === 'http')!
       const blocked = async (url: string) => ({ ...(await http.fetch(url)), status: 'blocked' as const, blockReason: 'cloudflare_challenge' as const })
@@ -167,6 +170,7 @@ describe('hosted job worker', () => {
     const granted = await create(parseBatchStartRequest({ urls: [`${origin}/a`], access: 'enhanced' }))
     await drain(granted)
     expect(asked).toEqual(['/a'])
+    expect(counted).toEqual(['account-1'])
     // Listing another account, or leaving a D5 number unset: the next job's slices hold nothing.
     for (const hostedChrome of [{ ...on, allowedUids: ['account-2'] }, { ...on, dailyAttemptsPerAccount: null }]) {
       asked.length = 0

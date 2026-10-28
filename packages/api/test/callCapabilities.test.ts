@@ -139,18 +139,31 @@ describe('capabilities granted per call', () => {
     const stopped = (url: string, lane: FetchResult['lane']): FetchResult => ({ ...page(url), lane, status: 'blocked', blockReason: 'cloudflare_challenge', markdown: null, evidence: { ...page(url).evidence, httpStatus: 403 } })
     const asked: string[] = []
     const client = { fetch: async (url: string) => { asked.push(url); return { ...page(url), lane: 'browser_local' as const } }, close: vi.fn(async () => {}) }
+    /** A stand-in for the operator's D5 counter: the accounts it was asked for, what it settled, and a refusal to give. */
+    const admitted: (string | undefined)[] = []
+    const settled: [string | null, boolean][] = []
+    let refusal: { reason: string; message: string; detail?: Record<string, unknown> } | null = null
+    const meter = {
+      admit: async ({ account }: { account: string | undefined }) => {
+        admitted.push(account)
+        return refusal === null ? { ok: true as const, settle: async (result: FetchResult | null, called: boolean) => { settled.push([result?.status ?? null, called]) } } : { ok: false as const, ...refusal }
+      },
+    }
 
     async function hostedSetup(options: Partial<ApiEngineOptions> = {}) {
       asked.length = 0
+      admitted.length = 0
+      settled.length = 0
+      refusal = null
       root = await mkdtemp(join(tmpdir(), 'w2l-call-capabilities-'))
       const channelsFor = (mode: 'standard' | 'research' | 'authed'): Channel[] => [
         { id: 'http', identity: identityBundleFrom(modeIdentity(mode)), fetch: async (url) => { seen.push([url, 'http']); return stopped(url, 'http') } },
         { id: 'browser_local', identity: identityBundleFrom(modeIdentity(mode)), fetch: async (url) => { seen.push([url, 'browser_local']); return stopped(url, 'browser_local') } },
       ]
-      engine = createApiEngine({ taskRoot: join(root, 'tasks'), channelsFor, networkPolicy: { ...hostedNetworkPolicy(), perHostMinDelayMs: 0 }, hosted: true, callCapabilities: HELD, hostedChrome: { attestation: ATTESTATION, client }, ...options })
+      engine = createApiEngine({ taskRoot: join(root, 'tasks'), channelsFor, networkPolicy: { ...hostedNetworkPolicy(), perHostMinDelayMs: 0 }, hosted: true, callCapabilities: HELD, hostedChrome: { attestation: ATTESTATION, client, meter }, ...options })
     }
-    const scrape = async (request: Record<string, unknown>, capabilities?: readonly CallCapability[]) =>
-      await engine!.scrape(parseScrapeRequest({ url: 'https://shop.test/item', debug: true, ...request }), capabilities === undefined ? {} : { capabilities }) as unknown as Audit & { status: string }
+    const scrape = async (request: Record<string, unknown>, capabilities?: readonly CallCapability[], account?: string) =>
+      await engine!.scrape(parseScrapeRequest({ url: 'https://shop.test/item', debug: true, ...request }), { ...(capabilities === undefined ? {} : { capabilities }), ...(account === undefined ? {} : { account }) }) as unknown as Audit & { status: string; warnings?: { code: string; message: string }[] }
 
     it('reads a page the rungs before it could not, after browser_local, only for a call that holds it and chose access enhanced', async () => {
       await hostedSetup()
@@ -167,6 +180,29 @@ describe('capabilities granted per call', () => {
         expect(JSON.stringify(plain.ladderTrace)).not.toContain('hosted_chrome')
       }
       expect(asked).toHaveLength(1)
+    })
+
+    it('asks the operator\'s counter for the call\'s account before each read, and settles it with what the rung read', async () => {
+      await hostedSetup()
+      const read = await scrape({ access: 'enhanced' }, HELD, 'account-1')
+      expect(read.channelsTried).toEqual(['http', 'browser_local', 'hosted_chrome'])
+      expect(admitted).toEqual(['account-1'])
+      expect(settled).toEqual([['success', true]])
+      // A call the rung is not built for asks nothing.
+      await scrape({}, HELD, 'account-1')
+      expect(admitted).toEqual(['account-1'])
+    })
+
+    it('over a D5 limit, does not use the rung: the page is what the rungs before it read, and the result and the trace say why', async () => {
+      await hostedSetup()
+      refusal = { reason: 'daily_attempts', message: 'hosted_chrome was not used: this account\'s 2 attempts for today (UTC) are used up', detail: { limit: 2 } }
+      const read = await scrape({ access: 'enhanced' }, HELD, 'account-1')
+      expect(read.status).toBe('blocked')
+      expect(read.channelsTried).toEqual(['http', 'browser_local'])
+      expect(asked).toEqual([])
+      expect(settled).toEqual([])
+      expect(read.warnings).toContainEqual({ code: 'hosted_chrome_not_admitted', message: refusal.message })
+      expect(read.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_skipped', channel: 'hosted_chrome', detail: { reason: 'daily_attempts', limit: 2 } }))
     })
 
     it('builds no rung without the operator\'s config, whatever the call holds: access enhanced is refused as before', async () => {
@@ -194,17 +230,21 @@ describe('capabilities granted per call', () => {
       const run = async (access: 'enhanced' | undefined, capabilities?: readonly CallCapability[]) => {
         asked.length = 0
         const { taskId } = await engine!.startBatch({ urls: ['https://news.test/a'], maxConcurrency: 1, ...(access === undefined ? {} : { access }) } as Parameters<ApiEngine['startBatch']>[0])
-        await engine!.runSlice(taskId, { maxNewPages: 10, maxMs: 20_000, ...(capabilities === undefined ? {} : { capabilities }) })
+        await engine!.runSlice(taskId, { maxNewPages: 10, maxMs: 20_000, account: 'account-1', ...(capabilities === undefined ? {} : { capabilities }) })
         return [...asked]
       }
       expect(await run('enhanced', HELD)).toEqual(['https://news.test/a'])
+      // The counter is asked for the job's account, as the worker named it.
+      expect(admitted).toEqual(['account-1'])
       expect(await run('enhanced')).toEqual([])
       expect(await run(undefined, HELD)).toEqual([])
     })
 
     it('runs only on a hosted engine that grants it per call, with the operator\'s attestation, and never by a grant', async () => {
       root = await mkdtemp(join(tmpdir(), 'w2l-call-capabilities-'))
-      const operator = { attestation: ATTESTATION, client }
+      const operator = { attestation: ATTESTATION, client, meter }
+      // The rung is never wired without its spend counter (D5): the operator's config is refused at once.
+      expect(() => createApiEngine({ taskRoot: join(root, 'unmetered'), hosted: true, callCapabilities: HELD, hostedChrome: { attestation: ATTESTATION, client } as unknown as NonNullable<ApiEngineOptions['hostedChrome']> })).toThrow(/spend counter/)
       expect(() => createApiEngine({ taskRoot: join(root, 'local'), hostedChrome: operator })).toThrow(/only on hosted Octocrawl/)
       expect(() => createApiEngine({ taskRoot: join(root, 'unnamed'), hosted: true, callCapabilities: COMPAT, hostedChrome: operator, compatHosts: ['shop.test'] })).toThrow(/callCapabilities must name it/)
       expect(() => createApiEngine({ taskRoot: join(root, 'unattested'), hosted: true, callCapabilities: HELD, hostedChrome: { ...operator, attestation: { ...ATTESTATION, statement: ' ' } } })).toThrow(/attestation/)

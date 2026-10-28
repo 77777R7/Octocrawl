@@ -121,7 +121,7 @@ import {
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessAttestationInput, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
-import type { BrowserEngineName, BrowserIdentityChoice, CaptchaSolving, ChannelsFiltered, InstalledChromeTestSeams } from '@w2l/bench'
+import type { BrowserEngineName, BrowserIdentityChoice, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
@@ -184,7 +184,27 @@ export interface HostedChromeOperator {
   attestation: AccessAttestationInput
   /** Reads one page in the octocrawl-chrome service: the service's own browser lane, as it answered. */
   client: HostedChromeClient
+  /**
+   * The rung's spend counter (D5 of the stage H plan): asked before each read, for the call's account, and settled
+   * after it. Required, so the rung is never built unmetered: an operator config without it is refused at once.
+   */
+  meter: HostedChromeMeter
 }
+
+/**
+ * The operator's limits on hosted_chrome, asked before each read (`account`: the call's account, ScrapeContext.account
+ * or SliceLimits.account; undefined for a call without one). A refusal leaves the rung out of the call, which keeps the
+ * page the rungs before it read and says why: a `hosted_chrome_not_admitted` warning with the refusal's message, and a
+ * `ladder_channel_skipped` event with its reason and detail. An admitted read is settled once with what it read (null
+ * when it threw) and whether it went out.
+ */
+export interface HostedChromeMeter {
+  admit(call: { account: string | undefined }): Promise<HostedChromeAdmission>
+}
+
+export type HostedChromeAdmission =
+  | { ok: true; settle(result: FetchResult | null, called: boolean): Promise<void> }
+  | { ok: false; reason: string; message: string; detail?: Readonly<Record<string, unknown>> }
 
 /** How the engine reaches the octocrawl-chrome service. The service obeys robots.txt and its address guard itself. */
 export interface HostedChromeClient {
@@ -196,6 +216,8 @@ export interface HostedChromeClient {
 export interface ScrapeContext extends ExecutionContext {
   /** The capabilities this call alone holds, within the engine's `callCapabilities`: hosted Octocrawl's switches, per request. */
   capabilities?: readonly CallCapability[]
+  /** The account the call is made for (hosted Octocrawl's caller), which hosted_chrome's counter counts it under. */
+  account?: string
   fastModePin?: FastModePin
   /** Told the call's whole run, its trace and ladder trace whatever `debug` asks, before the answer is shaped; never part of it (hosted's phase line). */
   observe?: (run: ScrapeRun, scrapeId: string) => void
@@ -705,6 +727,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   if (hostedChrome !== null && [hostedChrome.attestation?.principal, hostedChrome.attestation?.at, hostedChrome.attestation?.statement].some((value) => typeof value !== 'string' || value.trim() === '')) {
     throw new Error('hosted_chrome needs the operator\'s attestation: principal, at and statement (ADR 0005, revision of 2026-10-27)')
   }
+  // D5 lands before the rung is wired: no hosted engine builds it without the counter that limits what it spends.
+  if (hostedChrome !== null && typeof hostedChrome.meter?.admit !== 'function') throw new Error('hosted_chrome needs its spend counter (meter): the operator\'s monthly cap and each account\'s daily attempts are counted before the rung is built (ADR 0005, revision of 2026-10-27)')
   if ((accessGrant?.capabilities ?? []).includes('hosted_chrome' as never)) throw new Error('hosted_chrome is granted per call, never by an access grant (ADR 0005, revision of 2026-10-27)')
   const captchaSolving = options.captchaSolving
   if (captchaSolving !== undefined && options.hosted === true) throw new Error('third_party_captcha_solver is refused on a hosted engine (ADR 0005, revision of 2026-10-25: local only for now)')
@@ -733,8 +757,12 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     for (const name of capabilities) if (!callCapabilities.includes(name)) throw new Error(`this engine grants ${name} to no call (callCapabilities)`)
     return compatByGrant || capabilities.includes('compatible_transport')
   }
-  /** Whether a call holds hosted_chrome: by its own context alone (no grant names it), and only on an engine with the rung. */
-  const chromeHeld = (capabilities: readonly CallCapability[] = []): boolean => hostedChrome !== null && capabilities.includes('hosted_chrome')
+  /**
+   * The account a call that holds hosted_chrome is counted under, or null when it does not hold it: by its own context
+   * alone (no grant names it), and only on an engine with the rung.
+   */
+  const chromeHeld = (capabilities: readonly CallCapability[] = [], account?: string): HostedChromeCall | null =>
+    hostedChrome !== null && capabilities.includes('hosted_chrome') ? { account } : null
   /** Why a request's options keep it off the compatible transport, which sends its profile's headers alone; null when they do not. */
   const compatOptionsRefusal = (page: { headers?: Readonly<Record<string, string>>; mobile?: boolean }): string | null => {
     const wire = [...(page.headers !== undefined && Object.keys(page.headers).length > 0 ? ['headers'] : []), ...(page.mobile === true ? ['mobile'] : [])]
@@ -1062,15 +1090,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * `compat` false leaves it out altogether: for a call that does not hold
    * the transport (compatHeld), and for a map, which reads its start page
    * with the identity its response names, the one it reads robots.txt with.
-   * `chrome` false (the default) leaves out the hosted_chrome rung: only a
-   * call that holds the capability (chromeHeld) gets it.
+   * `chrome` null (the default) leaves out the hosted_chrome rung: only a
+   * call that holds the capability (chromeHeld) gets it, asking the
+   * operator's counter for the call's account before each read.
    */
-  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions & { access?: AccessChoice } = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true, egress?: Egress, chrome = false): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
+  const channelsForUrl = (mode: 'standard' | 'research' | 'authed', url: string, page: PageOptions & { access?: AccessChoice } = {}, formats: readonly ScrapeFormat[] = [], oneUrl = true, compat = true, egress?: Egress, chrome: HostedChromeCall | null = null): { channels: Channel[]; filtered: ChannelsFiltered[] } => {
     const channels = channelsFor(mode, egress, page.access === 'enhanced')
     const policy = options.channelPolicy?.(url) ?? 'ladder'
     let selected = policy === 'ladder' ? channels : channels.filter(channel => policy === 'http_only' ? HTTP_CHANNELS.has(channel.id) : channel.id === 'browser_local')
-    // A call that does not hold hosted_chrome never sees its rung, in the audit either.
-    if (!chrome) selected = selected.filter(channel => channel.id !== 'hosted_chrome')
+    // A call that does not hold hosted_chrome never sees its rung, in the audit either; one that does is counted for its account.
+    selected = chrome === null || hostedChrome === null ? selected.filter(channel => channel.id !== 'hosted_chrome')
+      : selected.map(channel => channel.id === 'hosted_chrome' ? { ...channel, admit: () => hostedChromeAdmission(hostedChrome.meter, chrome) } : channel)
     // A call that does not hold the transport, or a host the server did not list, never sees the compatible rung, in the audit either.
     if (!compat || (oneUrl && !compatHostListed(compatHosts, url))) selected = selected.filter(channel => channel.id !== 'http_compat')
     if (selected.length === 0) throw new RequestError(`capture channel unavailable for ${policy}`)
@@ -1657,7 +1687,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const selection = stored === undefined || !hosted ? stored : { ...stored, skipTlsVerification: false }
     // A hosted job's slice holds what its worker gave it (SliceLimits.capabilities); any other run, the server's grant.
     const compat = compatHeld(req.slice?.capabilities)
-    const chrome = chromeHeld(req.slice?.capabilities)
+    const chrome = chromeHeld(req.slice?.capabilities, req.slice?.account)
     // The task's egress (W2L_EGRESS_PROXIES), kept in its directory so a resumed task goes on through it while it is in the
     // pool and not cooling down. Mode authed's saved login keeps its own route: it never takes one.
     const egressFile = join(task.taskDir, EGRESS_FILE)
@@ -1936,7 +1966,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const mode = defaultApiMode(req.mode)
     // A scrape takes the next healthy egress, when the operator set some; it does not switch.
     const scrapeEgress = mode === 'authed' ? undefined : egressPool?.pick()
-    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, compatHeld(context.capabilities), scrapeEgress, chromeHeld(context.capabilities))
+    const rungs = channelsForUrl(mode, req.url, req, req.formats ?? [], true, compatHeld(context.capabilities), scrapeEgress, chromeHeld(context.capabilities, context.account))
     const policy: CrawlPolicy = {
       mode,
       // access enhanced permits the provider lane in mode standard too (the grant still decides whether one exists).
@@ -2486,7 +2516,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           const pending: Task = { ...task, status: 'pending', updatedAt: new Date().toISOString() }
           await store.putTask(pending)
           const run = task.batch === undefined ? crawlRunOptions(pending, true) : batchRunOptions(task.batch, true)
-          try { launchTask(pending, store, { ...run, slice: { drain: drain.signal, stop: stop.signal, ...(limits.batchHosts === undefined ? {} : { batchHosts: limits.batchHosts }), ...(limits.capabilities === undefined ? {} : { capabilities: limits.capabilities }) } }) }
+          try { launchTask(pending, store, { ...run, slice: { drain: drain.signal, stop: stop.signal, ...(limits.batchHosts === undefined ? {} : { batchHosts: limits.batchHosts }), ...(limits.capabilities === undefined ? {} : { capabilities: limits.capabilities }), ...(limits.account === undefined ? {} : { account: limits.account }) } }) }
           catch (error) { await store.putTask(task); throw error }
           launched = true
           await inflight.get(taskId)
@@ -2763,6 +2793,16 @@ function withHostedChrome(channels: Channel[], operator: HostedChromeOperator): 
   return [...channels.slice(0, at + 1), rung, ...channels.slice(at + 1)]
 }
 
+/** A call that holds hosted_chrome, and the account its counter counts it under. */
+interface HostedChromeCall { account: string | undefined }
+
+/** The operator counter's answer for one read of the rung, as the ladder asks a rung's own admission (Channel.admit). */
+async function hostedChromeAdmission(meter: HostedChromeMeter, call: HostedChromeCall): Promise<ChannelAdmission> {
+  const admission = await meter.admit({ account: call.account })
+  if (admission.ok) return admission
+  return { ok: false, reason: admission.reason, warning: { code: 'hosted_chrome_not_admitted', message: admission.message }, ...(admission.detail === undefined ? {} : { detail: admission.detail }) }
+}
+
 /** The local rungs that render a page and so can capture the `screenshot` format. */
 const BROWSER_RUNGS: ReadonlySet<string> = new Set(['browser_local', 'authed_session'])
 
@@ -2918,7 +2958,7 @@ interface TaskRunOptions {
   maxConcurrency: number | null
   policyAllowlist: readonly string[]
   /** A slice of a hosted job (runSlice): its drain and its stop, either of which pauses the task, the batch hosts it reads and the capabilities it holds. */
-  slice?: { drain: AbortSignal; stop: AbortSignal; batchHosts?: readonly string[]; capabilities?: readonly CallCapability[] }
+  slice?: { drain: AbortSignal; stop: AbortSignal; batchHosts?: readonly string[]; capabilities?: readonly CallCapability[]; account?: string }
 }
 
 export interface SliceLimits {
@@ -2936,6 +2976,8 @@ export interface SliceLimits {
   signal?: AbortSignal
   /** The capabilities the slice's pages hold, within the engine's `callCapabilities`: the hosted worker's switches, for the job's account. */
   capabilities?: readonly CallCapability[]
+  /** The job's account, which hosted_chrome's counter counts the slice's reads under. */
+  account?: string
 }
 
 export interface SliceResult {

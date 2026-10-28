@@ -364,7 +364,17 @@ ADR 0005's `hosted_chrome` (revision of 2026-10-27) is Google Chrome on Octocraw
 
 - `enabled` (boolean): anything but `true` is off, and so is a missing document.
 - `allowedUids` (an array of account uids): an allowlist and nothing else. Absent or empty grants it to no one. A keyless caller and a key issued without an account never hold it.
-- `monthlyCapUsd` (number) and `dailyAttemptsPerAccount` (whole number): the operator's dollar cap a month for the rung, and the enhanced attempts one account may start a UTC day. Their values wait for decision D5 and have no default: while either is absent or not positive, the switch grants it to no one. They are read and required today, not yet counted. The counting comes with the service, before any hosted engine is built with the rung's operator config (`hostedChrome` in `engine.ts`); until then a hosted call that asks for `access: "enhanced"` is refused as before, whatever the switch says.
+- `monthlyCapUsd` (number) and `dailyAttemptsPerAccount` (whole number): the operator's dollar cap a month for the rung, and the reads of the rung one account may start a UTC day. Their values wait for decision D5 and have no default: while either is absent or not positive, the switch grants it to no one.
+
+No hosted engine is built with the rung's operator config yet (`hostedChrome` in `engine.ts`), so a hosted call that asks for `access: "enhanced"` is refused as before, whatever the switch says.
+
+**The counting** (`packages/mcp/src/hostedChromeMeter.ts`). The operator config must carry the counter (`meter`): an engine given the rung without one refuses to start, so the rung can never run unmetered. The counter is asked before each read of the rung, for the call's account (a scrape's caller, a job's account):
+- **The monthly cap.** The month (UTC) is a monthly ledger (`openMonthlySpendLedger`): it opens with the egress tariff's fixed rents (`perIpMonthUsd` for each of `rentedIps`) settled first, then what the month's reads settled, then this instance's reads still in flight. A read whose price ceiling does not fit what `monthlyCapUsd` leaves is not made. Settled reads only are counted, in `hostedChromeSpend/{YYYY-MM}` (`settledMicroUsd`, `calls`, and `expireAt` for TTL, 90 days after the month ends). So instances reserving at once can pass the cap by the ceilings of the reads in flight on the others.
+- **The daily attempts.** Each read takes one from `hostedQuotas/{day}-hostedChrome-{uid}`, in a commit with an update-time precondition, as the hosted API's other daily counters are (TTL two days on). An attempt is taken once the cap admits the read, and is not given back when the read fails.
+- **What a read is charged.** The egress tariff's price, its rent left out (`tariffCostUsd`). Bytes the exit did not report are charged at the ceiling's allowance, and a read that threw is charged its ceiling. With Cloud Run's own egress (no tariff) a read pays no third party: it is settled at $0 and still counted. Cloud Run's compute is the project's billing budget's, not this cap's.
+- **A read over either limit** does not use the rung, and the scrape does not fail: the page is what the rungs before it read. The result carries a `hosted_chrome_not_admitted` warning saying which limit, and the ladder trace a `ladder_channel_skipped` event for `hosted_chrome` with its reason (`monthly_cap`, `daily_attempts`, `switched_off`, `budget_unread`). So does a counter that could not read the month's spend or take an attempt: unread is not zero.
+
+**The egress (D2).** Howard chose datacenter proxies on 2026-10-29. The basis is the H2b comparison (PR #748): over the 19 robots-allowed tasks, datacenter verified 9, at $0.0013 per verified page; residential verified 8 and 5 (2 vCPU, in the two windows) and Google's own egress 4. Datacenter could not resolve `challenges.cloudflare.com`, so T047 and T048 did not pass. The proxy is not wired yet: the service still leaves from Cloud Run's own egress.
 
 ## The octocrawl-chrome service
 
@@ -387,8 +397,8 @@ ADR 0005's `hosted_chrome` (revision of 2026-10-27) is Google Chrome on Octocraw
   - its trace names the pinned version, the launch (`nodriver-0.50.6-no-allow-origins+webrtc-proxied-udp-only`) and the exit's kind (`google` while it leaves from Cloud Run's own egress), which the Evidence Record carries.
 - **Authentication** is Cloud Run's: the service takes internal ingress only and no unauthenticated call, and only the hosted API's service account holds `roles/run.invoker` on it. The hosted API's client (`httpHostedChromeClient`) sends a Google ID token for the service's URL from the metadata server (`metadataIdToken`).
 - **Before it serves a call**, three things must happen:
-  - the D5 counting (`hostedConfig/hostedChrome`) lands;
-  - a hosted engine is built with the rung's operator config;
+  - the D5 numbers are set (the counting is in place: The hosted_chrome switch above);
+  - a hosted engine is built with the rung's operator config, its counter included;
   - the launch passes ADR 0005's gate: two challenge16 runs no worse than the baseline, which covers the WebRTC preference that sets this launch apart from `installed_chrome`'s.
 
 ## Read the service

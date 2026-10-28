@@ -268,7 +268,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
           refused = error
         }
       }
-      if (refused === null) result = await engine.runSlice(jobId, { maxNewPages: pages, maxMs: limits.sliceMs, graceMs: limits.graceMs, signal: off.signal, capabilities, ...(job.kind === 'batch' ? { batchHosts: hosts } : {}) })
+      if (refused === null) result = await engine.runSlice(jobId, { maxNewPages: pages, maxMs: limits.sliceMs, graceMs: limits.graceMs, signal: off.signal, capabilities, account: job.uid, ...(job.kind === 'batch' ? { batchHosts: hosts } : {}) })
     } finally {
       clearInterval(poller)
       await engine.close({ cancelActive: true })
