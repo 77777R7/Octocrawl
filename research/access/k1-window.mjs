@@ -30,14 +30,16 @@
 // Usage: node research/access/k1-window.mjs --window 1 --control <dir> [--date YYYY-MM-DD] [--blocks 4]
 //          [--ports 8821,8822,8823,8824] [--steel-grant <file>] [--ic-grant <file>] [--no-retry] [--dry-run]
 //          [--arms standard,installed_chrome,combined,firecrawl] [--combined-grant <file>] [--firecrawl-cap <credits>]
-//          [--name k1] [--base <dir>] [--steel-cap <usd>] [--ic-compat-grant <file>]
+//          [--name k1] [--base <dir>] [--steel-cap <usd>] [--ic-compat-grant <file>] [--steel-probe]
 //   --arms picks the arms (default the six above, without combined or the base arms); --control is needed only with the
 //   control arm, --base only with a base arm. A base checkout's dist/ must match its source (runSetBuild.mjs), checked
 //   at the start: run-set.mjs checks only this checkout's. List four arms as installed_chrome_base, combined_base,
 //   installed_chrome, combined so each base arm runs before its new arm in half the blocks (k1Arms.mjs rotated).
 //   --steel-cap stops a run of an arm with Steel from starting when the ledger's charges in this window so far, plus each
 //   of its pages at the Steel tariff's price ceiling (one call a page, held to maxSessionMs), would pass the cap; the
-//   manifest names each run it held back, and its tasks stay in the denominator as not run.
+//   manifest names each run it held back, and its tasks stay in the denominator as not run. --steel-probe reads Steel's
+//   API once before the first block (GET /v1/sessions?limit=1, read-only, through the shell's proxy as the arms' calls go)
+//   and records its latency.
 //   Ports are taken in the order the local arms are listed; 8787, 8791, 8799 and 8812–8814 are refused.
 //   Grants and keys are found as weekly.mjs finds them (this checkout's .w2l/access, else the main checkout's); keys are
 //   never written anywhere. Work files: .w2l/access/<name>/<date>-w<window>/ (git-ignored), with manifest.json.
@@ -136,6 +138,7 @@ const needs = { STEEL_API_KEY: LOCAL.some((a) => ['enhanced', 'control', 'combin
 const keys = {}
 for (const k of Object.keys(needs)) keys[k] = await secret(k)
 for (const [k, v] of Object.entries(keys)) if (needs[k] && !v) throw new Error(`${k} not found (environment or .w2l/access/competitors.env)`)
+if (args.includes('--steel-probe') && !needs.STEEL_API_KEY) throw new Error('--steel-probe: no arm of this window calls Steel')
 
 const workRel = `.w2l/access/${flag('--name') ?? 'k1'}/${date}-w${windowNo}`
 const work = join(repo, workRel)
@@ -185,9 +188,26 @@ async function usage(name) {
   } catch (e) { return { at: new Date().toISOString(), error: e.message } }
 }
 
+/** Steel's API answering one read-only list call, through the shell's proxy as the arms' calls go: its latency now. */
+async function steelProbe() {
+  const { EnvHttpProxyAgent, fetch: f } = await import('undici')
+  const request = 'GET /v1/sessions?limit=1'
+  const at = new Date().toISOString()
+  const started = performance.now()
+  try {
+    const res = await f('https://api.steel.dev/v1/sessions?limit=1', { dispatcher: new EnvHttpProxyAgent(), headers: { 'steel-api-key': keys.STEEL_API_KEY }, signal: AbortSignal.timeout(30_000) })
+    await res.arrayBuffer()
+    return { at, request, status: res.status, ms: Math.round(performance.now() - started) }
+  } catch (e) { return { at, request, status: null, ms: Math.round(performance.now() - started), error: e.message } }
+}
+
 const manifest = { window: Number(windowNo), date, runner: commit, control: controlCommit, ...(baseCommit ? { base: { dir: baseDir, commit: baseCommit, build: baseBuild } } : {}), ...(steelCap === null ? {} : { steelCap: { usd: steelCap, pageCeilingUsd: steelCeiling } }), arms: chosen, tasks: tasks.length, blocks: blockIds, ports, grants: { steel: { file: steelGrant, sha256: steel.sha256, capabilities: steel.capabilities }, installed_chrome: { file: icGrant, sha256: ic.sha256, capabilities: ic.capabilities }, ...(combined ? { combined: { file: combinedGrant, sha256: combined.sha256, capabilities: combined.capabilities } } : {}), ...(icCompat ? { ic_compat: { file: icCompatGrant, sha256: icCompat.sha256, capabilities: icCompat.capabilities } } : {}) }, proxy: { HTTPS_PROXY: process.env.HTTPS_PROXY ?? null, HTTP_PROXY: process.env.HTTP_PROXY ?? null, NO_PROXY: process.env.NO_PROXY ?? null }, credits: { before: {}, after: {} }, runs: [], failures: [] }
 const saveManifest = () => writeFile(join(work, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 for (const c of COMPETITORS) manifest.credits.before[c] = await usage(c)
+if (args.includes('--steel-probe')) {
+  manifest.steelProbe = await steelProbe()
+  console.log(`Steel ${manifest.steelProbe.request}: ${manifest.steelProbe.status ?? manifest.steelProbe.error} in ${manifest.steelProbe.ms} ms`)
+}
 await saveManifest()
 
 // ---- the four local APIs
