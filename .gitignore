@@ -39,3 +39,5 @@ python/**/__pycache__/
 python/**/*.egg-info/
 python/.pytest_cache/
 python/dist/
+# wrangler dev state (cf.json holds the request location)
+.wrangler/

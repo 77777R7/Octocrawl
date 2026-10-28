@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
+import { connect as connectH2, constants as h2, type ClientHttp2Session } from 'node:http2'
 import type { AddressInfo } from 'node:net'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -699,6 +700,61 @@ it('a hosted MCP scrape the client cancels frees its browser lease and costs not
     // The page answers after 1.5 s; by then the call is settled.
     await new Promise((resolve) => setTimeout(resolve, 2_000))
   } finally { await holder.close() }
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 1_000 })
+})
+
+/** A POST over HTTP/2 cleartext, as Cloud Run sends every request to a service deployed with --use-http2. */
+function h2Post(session: ClientHttp2Session, path: string, body: unknown, headers: Record<string, string>) {
+  const stream = session.request({ ':method': 'POST', ':path': path, 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers })
+  stream.end(JSON.stringify(body))
+  let status = 0
+  let text = ''
+  stream.setEncoding('utf8')
+  stream.on('response', (head) => { status = Number(head[':status']) })
+  stream.on('data', (chunk: string) => { text += chunk })
+  const answer = new Promise<{ status: number; body: string }>((resolve) => stream.on('close', () => resolve({ status, body: text })))
+  return { stream, answer }
+}
+
+// Cloud Run passes a client's disconnect on only over HTTP/2: it resets the request's stream (docs.cloud.google.com/run/docs/troubleshooting).
+it('a hosted scrape whose HTTP/2 stream the client resets stops, frees its browser lease and costs nothing, over MCP and REST', async () => {
+  const credits = new MemoryCreditsStore(1_000)
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ credits, leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const auth = { authorization: 'Bearer oc_account' }
+  const session = connectH2(url)
+  try {
+    const call = (id: number, page: string) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'scrape', arguments: { url: `${origin}${page}` } } })
+    for (const [path, body] of [['/mcp', call(1, '/slow')], ['/v1/scrape', { url: `${origin}/slow` }]] as const) {
+      const { stream } = h2Post(session, path, body, auth)
+      await vi.waitFor(() => expect(leases.held.size).toBe(1))
+      stream.close(h2.NGHTTP2_CANCEL)
+      await vi.waitFor(() => expect(leases.held.size).toBe(0), { timeout: 1_000 })
+    }
+    // The page answers after 1.5 s; by then both calls are settled.
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+    expect(credits.balances.get('account-1')).toMatchObject({ grant: 1_000 })
+    // The same connection answers a call that runs to its end, and charges it.
+    const done = await h2Post(session, '/mcp', call(2, '/page'), auth).answer
+    expect(done.status).toBe(200)
+    expect(JSON.parse(JSON.parse(done.body).result.content[0].text)).toMatchObject({ status: 'success' })
+    expect(credits.balances.get('account-1')).toMatchObject({ grant: 999 })
+  } finally { session.close() }
+})
+
+// A client's notifications/cancelled, sent in a POST of its own, stops its call while the call's own POST stays open.
+it('a hosted MCP scrape stops on its client\'s notifications/cancelled alone, frees its browser lease and costs nothing', async () => {
+  const credits = new MemoryCreditsStore(1_000)
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ credits, leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const headers = { authorization: 'Bearer oc_account', accept: 'application/json, text/event-stream' }
+  const call = post(url, '/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scrape', arguments: { url: `${origin}/slow` } } }, headers)
+  await vi.waitFor(() => expect(leases.held.size).toBe(1))
+  const note = await post(url, '/mcp', { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 1 } }, headers)
+  expect(note.status).toBe(202)
+  await vi.waitFor(() => expect(leases.held.size).toBe(0), { timeout: 1_000 })
+  await call
+  await new Promise((resolve) => setTimeout(resolve, 2_000))
   expect(credits.balances.get('account-1')).toMatchObject({ grant: 1_000 })
 })
 

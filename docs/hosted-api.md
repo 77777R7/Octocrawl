@@ -61,7 +61,7 @@ export W2L_REVISION_SUFFIX=phase1     # names the revision octocrawl-api-phase1
 export W2L_TAG=h1phase1               # one tag per release; the previous tag stays as the rollback
 gcloud run deploy octocrawl-api --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
   --service-account="$W2L_RUNTIME_SA" --allow-unauthenticated \
-  --cpu=1 --memory=2Gi --concurrency=2 --min-instances=0 --max-instances=3 --timeout=300s \
+  --cpu=1 --memory=2Gi --concurrency=2 --min-instances=0 --max-instances=3 --timeout=300s --use-http2 \
   --revision-suffix="$W2L_REVISION_SUFFIX" \
   --set-env-vars="W2L_FIRESTORE_PROJECT_ID=${W2L_PROJECT_ID},W2L_PUBLIC_API_ORIGIN=https://api.octocrawl.dev,W2L_KEYLESS_DAILY=20,W2L_SITE_DAILY=1500,W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}" \
   --update-secrets='W2L_QUOTA_HASH_KEY=w2l-quota-hash-key:latest,W2L_PROXY_SECRET=w2l-proxy-secret:latest'
@@ -74,10 +74,12 @@ A later release deploys the new image without traffic, with `--update-env-vars=W
 
 ```sh
 gcloud run deploy octocrawl-api --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
-  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --timeout=300s --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}"
+  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --timeout=300s --use-http2 --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA}"
 gcloud run services update-traffic octocrawl-api --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
   --to-revisions="octocrawl-api-${W2L_REVISION_SUFFIX}=100" --update-tags="${W2L_TAG}=octocrawl-api-${W2L_REVISION_SUFFIX}"
 ```
+
+`--use-http2` has Cloud Run speak HTTP/2 cleartext to the container, the only way it passes a client's disconnect on ("When you use HTTP/1.1 on Cloud Run, client disconnect events are not propagated to the Cloud Run container", [troubleshooting](https://docs.cloud.google.com/run/docs/troubleshooting)): a scrape whose client went away then stops, frees its browser lease and is not charged. Without it a cancelled scrape ran to its end and was charged (2026-10-28, revision `octocrawl-api-w0-4414d88`). The service answers HTTP/1 and h2c on the same port (`packages/mcp/src/h2c.ts`), so a revision with or without the flag serves; the Worker passes its client's disconnect on as well (`request.signal`, the `enable_request_signal` flag in its `wrangler.toml`).
 
 `--concurrency=2` and `--max-instances=3` bound the spend: at most six pages are read at once, and a browser-lane page holds one slot for its whole run. Raise them only from the recorded cost per page (below). A key also runs one scrape at a time that may use the browser lane (ROADMAP PH item 1): the gate takes a lease, `hostedLeases/browser-{key HMAC}`, in one commit with an update-time precondition, holds it for the call and deletes it after, so the bound holds across instances. A second such scrape with the same key is `429 browser_busy` with `Retry-After` (at most 10 s); one that sends `fastMode: true`, and every map, takes no lease. A lease an instance never released (a crash) is taken over once its `expireAt` passes, 310 s after it was taken (the request timeout and 10 s).
 
@@ -298,7 +300,7 @@ T=$(gcloud auth print-access-token); curl -s -X PATCH -H "authorization: Bearer 
 # 4. A release of both services from a commit that has this code, as any release (Deploy above; Batch and crawl jobs for
 #    octocrawl-jobs), with the model's variables and the key added to what each has:
 gcloud run deploy octocrawl-api --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
-  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --timeout=300s \
+  --revision-suffix="$W2L_REVISION_SUFFIX" --no-traffic --timeout=300s --use-http2 \
   --update-env-vars="W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA},W2L_EXTRACT_PROVIDER=anthropic,W2L_EXTRACT_MODEL=claude-haiku-5-5" \
   --update-secrets='W2L_EXTRACT_API_KEY=w2l-anthropic-api-key:latest'
 gcloud run deploy octocrawl-jobs --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \

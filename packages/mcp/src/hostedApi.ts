@@ -30,6 +30,7 @@ import { serverInstructions } from './instructions.js'
 import { MAX_WAIT_MS, MCP_SCRAPE_TIMEOUT_MS, SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
 import { scrapeSchemaWithout } from './toolsets.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
+import { serveH2cToo } from './h2c.js'
 import { serveMcpPost, servesProtocolVersion, unsupportedProtocolVersion } from './serveHttp.js'
 import { CREDITS, DEFAULT_MONTHLY_CREDITS, mapCharge, scrapeCharge, secondsToNextGrant, type CreditsStore, type RequestNote, type Reservation } from './hostedCredits.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
@@ -1152,7 +1153,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     }))
   }
 
-  const server = createServer((req, res) => {
+  const handle = (req: IncomingMessage, res: ServerResponse) => {
     const pathname = new URL(req.url ?? '/', 'http://hosted.internal').pathname
     if (pathname === '/mcp' || pathname === '/mcp-oauth') {
       mcp(req, res, pathname === '/mcp-oauth').catch((error) => {
@@ -1162,7 +1163,10 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       return
     }
     apiListener(req, res)
-  })
+  }
+  const server = createServer(handle)
+  // Cloud Run passes a client's disconnect on only over HTTP/2 (deployed with --use-http2), so a cancelled scrape stops.
+  const h2c = serveH2cToo(server, handle)
   server.requestTimeout = 120_000
   // A crawl's extraction runs in this process and can stall it past the keep-alive timeout: a request sent meanwhile is answered, not reset.
   closeIdleOnlyWhenUnread(server)
@@ -1173,6 +1177,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     close: () => {
       closing ??= (async () => {
         clearInterval(sweeper)
+        h2c.close()
         await new Promise<void>((resolve) => server.close(() => resolve()))
         await engine.close({ cancelActive: true })
         await jobChecks?.close()
