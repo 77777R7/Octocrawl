@@ -18,9 +18,12 @@ const fmt = (n, digits = 0) => (n === null || n === undefined || Number.isNaN(n)
 const mb = (bytes) => (bytes === null || bytes === undefined ? 'unknown' : (bytes / 1e6).toFixed(2))
 
 const verdicts = {}
+// Each task's site host, from the robots lines (task lines do not carry the URL).
+const siteHost = new Map()
 for (const file of readdirSync(dir).filter((f) => /^robots-w\d+\.jsonl$/.test(f))) {
   const window = file.match(/w(\d+)/)[1]
   verdicts[window] = lines(file).find((l) => l.robotsVerdict)?.robotsVerdict ?? null
+  for (const l of lines(file)) if (l.robots?.id && l.robots.host) siteHost.set(l.robots.id, l.robots.host)
 }
 
 const runs = []
@@ -99,6 +102,16 @@ out.push('| --- | --- | --- | --- | --- | --- | --- |')
 for (const r of rows) out.push(`| ${r.run.window} | ${r.run.arm} | ${r.run.cpus} | ${r.clears.length === 0 ? 'none' : r.clears.join(', ')} | ${r.gated} | ${r.refused.length === 0 ? 'none' : r.refused.join('; ')} | ${fmt(r.cpuAvg, 2)} / ${fmt(r.cpuPeak, 2)} / ${fmt(r.saturated, 2)} / ${fmt(r.throttled, 2)} |`)
 out.push('')
 // Per task: ✓ with the rung that answered, ✗ with the reason, "robots" for a task the arm did not send.
+// A refused tunnel is noted after the reason, as the site's own host or other hosts (Chrome's services, challenge or
+// asset hosts). The forwarder keeps a call's first 5 refusals, so with 5 kept and no site among them the site is unknown.
+const refusedNote = (t) => {
+  const kept = (t.bytes?.refusals ?? []).filter((x) => /^\d{3}$/.test(x.status) || x.status === 'list_exhausted')
+  if (kept.length === 0) return ''
+  const site = siteHost.get(t.id)
+  const own = kept.find((x) => x.host === site)
+  if (own) return `; exit refused the site ${own.status}`
+  return `; exit refused other hosts${kept.length >= 5 ? ', site unknown' : ''}`
+}
 const ids = [...new Set(runs.flatMap((r) => r.tasks.map((t) => t.id)))]
 out.push(`| Task | ${runs.map((r) => `w${r.window} ${r.arm}${r.cpus === 4 ? ' 4 vCPU' : ''}`).join(' | ')} |`)
 out.push(`| --- | ${runs.map(() => '---').join(' | ')} |`)
@@ -108,8 +121,8 @@ for (const id of ids) {
     if (t === undefined) return 'not run'
     if (t.skipped) return 'robots'
     if (t.verified) return `✓ ${t.finalRung ?? t.route ?? ''}${t.challengeWait?.outcome === 'cleared' ? ` (cleared ${fmt(t.challengeWait.ms / 1000, 1)} s)` : ''}`
-    const refusal = (t.bytes?.refusals ?? []).find((x) => /^\d{3}$/.test(x.status) || x.status === 'list_exhausted')
-    return `✗ ${refusal ? `exit refused ${refusal.status}` : (t.challengeWait?.outcome === 'still_gated' ? `gated ${fmt(t.challengeWait.ms / 1000, 0)} s` : (t.reason ?? t.status ?? 'no answer'))}`
+    const failed = t.challengeWait?.outcome === 'still_gated' ? `gated ${fmt(t.challengeWait.ms / 1000, 0)} s` : (t.reason ?? t.status ?? 'no answer')
+    return `✗ ${failed}${refusedNote(t)}`
   })
   out.push(`| ${id} | ${cells.join(' | ')} |`)
 }

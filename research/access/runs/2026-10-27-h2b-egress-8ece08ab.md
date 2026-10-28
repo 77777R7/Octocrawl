@@ -255,10 +255,11 @@ Both windows ran. Every round's self-check passed, no round was stopped, and no 
 
 - **Image.** Built from `1abc0758` on this branch (base main `8ece08ab`) by Cloud Build `e10b77b0` (4 min 49 s): `asia-southeast1-docker.pkg.dev/octopus-w2l-20260924-7r7/w2l-public-preview/octocrawl-h2b-20261027@sha256:ea4a1f05cec2a8db27519444c7cc705ad87bc513362e6a417a7959cc973dcb8f`. Both windows ran this digest. Every call records commit `1abc075`, and each round's image line reads Chrome 155.0.8059.79, Node v26.8.1 and Playwright 1.62.1.
 - **An earlier image.** `228e01f0` (Cloud Build `a961e270`, `sha256:974208bb…`) ran only the first smoke execution. The two measures that changed after it (bytes by host, CPU against the job's vCPU) are in the design section.
-- **Commits after the image.** None is in the image, and none changes the code a round runs (`forward.mjs`, `round.sh`, `digest.mjs`, `cpu.mjs`, `chrome.sh`, `selfcheck.mjs`, `robots.mjs`) or `report.mjs`:
+- **Commits after the image.** None is in the image, and none changes the code a round runs (`forward.mjs`, `round.sh`, `digest.mjs`, `cpu.mjs`, `chrome.sh`, `selfcheck.mjs`, `robots.mjs`):
   - `f30a6c41`: this record, the datacenter arm added to window 2;
   - `191a8b6f`: `save-list.mjs` also takes the `user:password@ip:port` format;
-  - `3d6ff07c`: `cloud.sh` reads the datacenter list from `H2B_DC_LIST`.
+  - `3d6ff07c`: `cloud.sh` reads the datacenter list from `H2B_DC_LIST`;
+  - after window 2, in this record's commit: `report.mjs` labels a failed task by its own reason and notes a refused tunnel as the site's or another host's. Before, any refused tunnel replaced the task's reason with "exit refused", although most refusals were for Chrome's service hosts or a challenge host, not the site. It runs on the Mac over the collected lines, so no round changed.
 - **Main moved.** When the image was built, main was at `6a57fc3b`. Main's #734–#739 (hosted job and MCP refusals, hosted MCP timeouts and tools, and a per-request `compatible_transport` grant on hosted, behind an off switch) are not in the image, as the design fixed. Going by their titles they touch hosted jobs and MCP, which the rounds do not call. That they would not change these results was not tested.
 
 ### Network
@@ -334,38 +335,38 @@ From `report.mjs`, nearest-rank percentiles; "robots-allowed" is the 19 tasks of
 
 "Exits" counts distinct exit addresses among the calls that read one. A call reads none when Chrome opened no tunnel, as for T011, which `browser_local` verified before the Chrome rung; so the datacenter round shows 18 exits for 19 calls.
 
-Challenges, refusals and CPU. A refusal is a non-200 answer from the exit itself, with Webshare's reason header; the report lists each one, and this table gives their reasons and the tasks they hit.
+Challenges, refusals and CPU. A refusal is a non-200 answer from the exit itself to one CONNECT, with Webshare's reason header. The report lists each one; this table gives, for each task with a refusal, the hosts refused. The forwarder keeps a call's first 5 refusals, so a call with 5 kept may have had more.
 
 | Window | Arm | vCPU | Challenge clears (cap 10 s) | Still gated after the cap | Tasks with a refusal by the exit | CPU of the job's vCPU: median avg / max peak / median share ≥ 90 % / median throttled share |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | google | 2 | T049 6.2 s, T076 1.0 s | 7 | none | 0.42 / 1.11 / 0.19 / 0.27 |
-| 1 | res_a | 4 | none | 6 | T072 (403 `client_connect_forbidden_host`); T001, T034, T038, T047, T048, T076 (502 `target_connect_unknown_error`) | 0.14 / 0.76 / 0.00 / 0.01 |
-| 1 | res_a | 2 | T076 5.3 s, T046 8.6 s | 7 | T072 (403 `client_connect_forbidden_host`); T034 (502 `target_connect_unknown_error`) | 0.30 / 1.14 / 0.05 / 0.10 |
-| 2 | dc | 2 | T046 6.6 s, T076 5.3 s | 6 | T047, T048 (502 `target_connect_resolve_failed`) | 0.35 / 1.09 / 0.07 / 0.15 |
+| 1 | res_a | 4 | none | 6 | 403 `client_connect_forbidden_host`: T072 (the site). 502 `target_connect_unknown_error`: T038 and T076 (the site among Google and Chrome hosts), T034 (Google and Chrome hosts, 5 kept), T001 and T048 (`brunhild.challenges.cloudflare.com`), T047 (`optimizationguide-pa.googleapis.com`) | 0.14 / 0.76 / 0.00 / 0.01 |
+| 1 | res_a | 2 | T076 5.3 s, T046 8.6 s | 7 | 403 `client_connect_forbidden_host`: T072 (the site). 502 `target_connect_unknown_error`: T034 (Google and Chrome hosts, 5 kept) | 0.30 / 1.14 / 0.05 / 0.10 |
+| 2 | dc | 2 | T046 6.6 s, T076 5.3 s | 6 | 502 `target_connect_resolve_failed`: T047 and T048 (`brunhild.challenges.cloudflare.com`) | 0.35 / 1.09 / 0.07 / 0.15 |
 | 2 | google | 2 | T076 1.0 s, T049 5.8 s | 7 | none | 0.45 / 1.25 / 0.24 / 0.28 |
-| 2 | res_a | 2 | T076 4.4 s | 8 | T072 (403 `client_connect_forbidden_host`); T002, T005, T006, T034, T047, T051, T068 (502 `target_connect_unknown_error`) | 0.22 / 1.04 / 0.03 / 0.10 |
+| 2 | res_a | 2 | T076 4.4 s | 8 | 403 `client_connect_forbidden_host`: T072 (the site). 502 `target_connect_unknown_error`: T005 (the site and a Google host), T034 (`i.etsystatic.com`), T068 (`static.captcha-delivery.com`), T002, T006, T047 and T051 (Google, Chrome or asset hosts, 5 kept) | 0.22 / 1.04 / 0.03 / 0.10 |
 
 | Task | w1 google | w1 res_a 4 vCPU | w1 res_a | w2 dc | w2 google | w2 res_a |
 | --- | --- | --- | --- | --- | --- | --- |
-| T001 | ✗ captcha | ✗ exit refused 502 | ✗ gated 9 s | ✗ captcha | ✗ captcha | ✗ gated 9 s |
+| T001 | ✗ captcha | ✗ gated 9 s; exit refused other hosts | ✗ gated 9 s | ✗ captcha | ✗ captcha | ✗ gated 9 s |
 | T002 | ✗ gated 9 s | ✓ installed_chrome | ✓ installed_chrome | ✓ installed_chrome | ✗ gated 9 s | ✓ installed_chrome |
-| T005 | ✗ captcha | ✓ installed_chrome | ✓ installed_chrome | ✓ installed_chrome | ✗ captcha | ✗ exit refused 502 |
-| T034 | ✗ captcha | ✗ exit refused 502 | ✗ exit refused 502 | ✓ installed_chrome | ✗ captcha | ✓ installed_chrome |
-| T038 | ✗ captcha | ✗ exit refused 502 | ✗ gated 9 s | ✗ gated 9 s | ✗ captcha | ✗ gated 9 s |
+| T005 | ✗ captcha | ✓ installed_chrome | ✓ installed_chrome | ✓ installed_chrome | ✗ captcha | ✗ connection_error; exit refused the site 502 |
+| T034 | ✗ captcha | ✗ timeout; exit refused other hosts, site unknown | ✗ timeout; exit refused other hosts, site unknown | ✓ installed_chrome | ✗ captcha | ✓ installed_chrome |
+| T038 | ✗ captcha | ✗ connection_error; exit refused the site 502 | ✗ gated 9 s | ✗ gated 9 s | ✗ captcha | ✗ gated 9 s |
 | T045 | ✗ captcha | ✗ captcha | ✗ captcha | ✗ captcha | ✗ captcha | ✗ captcha |
 | T046 | ✗ captcha | ✗ gated 9 s | ✓ installed_chrome (cleared 8.6 s) | ✓ installed_chrome (cleared 6.6 s) | ✗ captcha | ✗ gated 9 s |
-| T047 | ✗ gated 9 s | ✗ exit refused 502 | ✗ gated 9 s | ✗ exit refused 502 | ✗ gated 9 s | ✗ exit refused 502 |
-| T048 | ✗ gated 9 s | ✗ exit refused 502 | ✗ gated 9 s | ✗ exit refused 502 | ✗ gated 9 s | ✗ gated 9 s |
+| T047 | ✗ gated 9 s | ✗ gated 9 s; exit refused other hosts | ✗ gated 9 s | ✗ gated 9 s; exit refused other hosts | ✗ gated 9 s | ✗ gated 9 s; exit refused other hosts, site unknown |
+| T048 | ✗ gated 9 s | ✗ gated 9 s; exit refused other hosts | ✗ gated 9 s | ✗ gated 9 s; exit refused other hosts | ✗ gated 9 s | ✗ gated 9 s |
 | T049 | ✓ installed_chrome (cleared 6.2 s) | robots | robots | robots | ✓ installed_chrome (cleared 5.8 s) | robots |
 | T053 | ✓ installed_chrome | ✗ bot_detected_generic | ✗ bot_detected_generic | ✗ bot_detected_generic | ✓ installed_chrome | ✗ bot_detected_generic |
-| T068 | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s | ✗ exit refused 502 |
+| T068 | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s; exit refused other hosts |
 | T071 | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s |
-| T076 | ✓ installed_chrome (cleared 1.0 s) | ✗ exit refused 502 | ✓ installed_chrome (cleared 5.3 s) | ✓ installed_chrome (cleared 5.3 s) | ✓ installed_chrome (cleared 1.0 s) | ✓ installed_chrome (cleared 4.4 s) |
+| T076 | ✓ installed_chrome (cleared 1.0 s) | ✗ connection_error; exit refused the site 502 | ✓ installed_chrome (cleared 5.3 s) | ✓ installed_chrome (cleared 5.3 s) | ✓ installed_chrome (cleared 1.0 s) | ✓ installed_chrome (cleared 4.4 s) |
 | B001 | ✓ installed_chrome | ✓ installed_chrome | ✓ installed_chrome | ✓ installed_chrome | ✓ installed_chrome | ✓ installed_chrome |
 | B008 | ✓ installed_chrome | robots | robots | robots | ✓ installed_chrome | robots |
-| T051 | ✗ gated 9 s | ✓ installed_chrome | ✓ installed_chrome | ✓ installed_chrome | ✗ gated 9 s | ✗ exit refused 502 |
-| T072 | ✗ http_error | ✗ exit refused 403 | ✗ exit refused 403 | ✗ http_error | ✗ http_error | ✗ exit refused 403 |
-| T006 | ✗ captcha | ✓ browser_local | ✓ installed_chrome | ✓ installed_chrome | ✗ captcha | ✗ exit refused 502 |
+| T051 | ✗ gated 9 s | ✓ installed_chrome | ✓ installed_chrome | ✓ installed_chrome | ✗ gated 9 s | ✗ timeout; exit refused other hosts, site unknown |
+| T072 | ✗ http_error | ✗ http_error; exit refused the site 403 | ✗ http_error; exit refused the site 403 | ✗ http_error | ✗ http_error | ✗ http_error; exit refused the site 403 |
+| T006 | ✗ captcha | ✓ browser_local | ✓ installed_chrome | ✓ installed_chrome | ✗ captcha | ✗ connection_error; exit refused other hosts, site unknown |
 | T007 | ✗ gated 9 s | ✓ installed_chrome | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s | ✗ gated 9 s |
 | T011 | ✓ browser_local | ✓ browser_local | ✓ browser_local | ✓ browser_local | ✓ browser_local | ✓ browser_local |
 
@@ -409,13 +410,14 @@ Without that traffic, window 2's residential round would come to about $0.0116 p
 One round per arm per window is a small sample: the residential arm at 2 vCPU verified 8 in one window and 5 in the other. Differences of a few tasks between arms are within that spread, so this section does not rank the arms by verified count alone.
 
 - **The datacenter arm** verified 9 of 19 in its one round. That is the most of any round, against 8, 7 and 5 for residential and 4 for google.
-  - Its Chrome rung p50 / p95 was 10.9 / 16.0 s, against 14.0–14.1 / 22.0–49.3 s for residential.
+  - Its Chrome rung p50 / p95 was 10.9 / 16.0 s, against 13.4–14.1 / 22.0–49.3 s for residential.
   - Before the run, ip-api.com flagged the preflight exit as hosting and proxy, and these sites still passed. This is one round on one day.
-- **The residential exit refused often.** Webshare itself refused 7 tasks with 502 `target_connect_unknown_error` in window 2's round, 6 in window 1's 4 vCPU round, and 1 in window 1's 2 vCPU round. In window 2:
-  - T034 and T002 verified despite a refused tunnel;
-  - T005, T051 and T006 ended as exit refused. Each of those verified in window 1's residential round and in the datacenter round.
+- **The residential exit refused tunnels in every round.** Webshare answered 502 `target_connect_unknown_error` to at least one CONNECT in 7 tasks of window 2's round, 6 of window 1's 4 vCPU round and 1 of window 1's 2 vCPU round.
+  - Most refused hosts were Chrome's service hosts, Google hosts, asset hosts or challenge hosts, not the site. The site itself was refused in T005 (window 2), and in T038 and T076 (window 1, 4 vCPU), and each of those failed with `connection_error`.
+  - T005, T051 and T006 failed in window 2's round (`connection_error`, `timeout`, `connection_error`) and verified in window 1's residential round and in the datacenter round. For T051 and T006 the forwarder kept 5 refusals, all of other hosts, so whether the site was refused too is unknown. These rounds do not show which refusal, if any, caused the failure.
+  - Where a challenge host was refused, the task stayed gated: `brunhild.challenges.cloudflare.com` in T001 and T048 (window 1, 4 vCPU), and `static.captcha-delivery.com` in T068 (window 2).
 
-  The datacenter round had two refusals, T047 and T048, with 502 `target_connect_resolve_failed`. Why its proxies could not resolve those two hosts is unknown.
+  The datacenter round had refusals in two tasks, T047 and T048. Both were 502 `target_connect_resolve_failed` for the same host, `brunhild.challenges.cloudflare.com`, Cloudflare's challenge host, and both tasks stayed gated. Why the datacenter proxies could not resolve that host is unknown.
 - **T072 (Ticketmaster).** The residential network refused it in all three rounds (403 `client_connect_forbidden_host`), as Webshare documents for ticketing. Through the datacenter exit it reached the site and failed with the site's own `http_error`, as on google.
 - **T053 (IMF).** It verified on google in both windows and got `bot_detected_generic` on all four paid-exit rounds. So a paid exit can lose a page that Google's egress wins.
 - **Challenges under the 10 s cap.** Every clear took 1.0–8.6 s:
