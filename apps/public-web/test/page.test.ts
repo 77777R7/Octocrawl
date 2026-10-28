@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { archivedSectionsMarkup } from '../src/archive/landingSections.js'
-import { VISITOR_DAILY_PREVIEWS } from '../../../packages/public-preview/src/quota.js'
-import { CAPABILITIES, clientCopy, CLIENTS, tierAmount, tierLit, TIERS, tierUnit } from '../src/featureSections.js'
+import { CAPABILITIES, clientCopy, CLIENTS } from '../src/featureSections.js'
 import { glyphBand } from '../src/glyphArt.js'
 import { FAQ, faqJsonLd, pageMarkup, sectionBar } from '../src/page.js'
 import { REAL_SITE_MISSES, REAL_SITE_RUN } from '../src/realSiteRun.js'
@@ -10,14 +9,14 @@ import { REAL_SITE_MISSES, REAL_SITE_RUN } from '../src/realSiteRun.js'
 describe('Page markup', () => {
   it('numbers the section bars in page order', () => {
     const bars = [...pageMarkup().matchAll(/<b>(\d\d)<\/b> \/ (\d\d) \]<\/span><span>·<\/span><span class="section-bar-label">([^<]+)</g)]
-    expect(bars.map(([, n, total, label]) => `${n}/${total} ${label}`)).toEqual(['01/05 HOW IT WORKS', '02/05 WHAT IT DOES', '03/05 GET STARTED', '04/05 FREE TIERS', '05/05 FAQ'])
+    expect(bars.map(([, n, total, label]) => `${n}/${total} ${label}`)).toEqual(['01/03 WHAT IT DOES', '02/03 GET STARTED', '03/03 FAQ'])
     expect(sectionBar('faq')).toContain('aria-hidden="true"')
   })
 
-  it('is a tool page: the hero, how it works, what it does, the free tiers, then the FAQ last', () => {
+  it('is a tool page: the hero, what it does, get started, then the FAQ last', () => {
     const page = pageMarkup()
     const sections = [...page.matchAll(/<section class="[^"]*" id="([^"]+)"/g)].map(([, id]) => id)
-    expect(sections).toEqual(['result-section', 'how-it-works', 'what-it-does', 'get-started', 'free-tiers', 'faq'])
+    expect(sections).toEqual(['result-section', 'what-it-does', 'get-started', 'faq'])
     for (const [, target] of page.matchAll(/href="#([^"]+)"/g)) expect(page).toContain(`id="${target}"`)
   })
 
@@ -118,67 +117,15 @@ describe('Page markup', () => {
     }
   })
 
-  it('states the free allowances the services enforce', () => {
+  it('states in the limits doc the free allowances the services enforce', () => {
     const hostedApi = readFileSync(new URL('../../../packages/mcp/src/hostedApi.ts', import.meta.url), 'utf8')
     const constant = (name: string) => Number(new RegExp(`export const ${name} = ([\\d_]+)`).exec(hostedApi)?.[1]?.replace(/_/g, ''))
     const limits = readFileSync(new URL('../content/limits.md', import.meta.url), 'utf8')
-    const [preview, keyless, key, local] = TIERS
-    expect(preview!.perDay).toBe(VISITOR_DAILY_PREVIEWS)
-    expect(keyless!.perDay).toBe(constant('DEFAULT_KEYLESS_DAILY'))
-    expect(keyless!.facts.map(([, v]) => v).join(' ')).toContain(`${constant('KEYLESS_PER_MINUTE')} a minute`)
+    expect(limits).toContain(`${constant('DEFAULT_KEYLESS_DAILY')} pages a day per address`)
     expect(limits).toContain('The account\'s credits: 1,000 a month')
-    expect(key!.perDay).toBe(1000)
-    expect(key!.facts.map(([, v]) => v).join(' ')).toContain(`${constant('KEY_PER_MINUTE')} a minute`)
-    expect(local!.perDay).toBeNull()
-    const page = pageMarkup()
     const site = constant('DEFAULT_SITE_DAILY').toLocaleString('en-US')
     const accounts = constant('DEFAULT_ACCOUNTS_DAILY').toLocaleString('en-US')
-    expect(page).toContain(`Callers without an account share ${site} hosted pages a day, and accounts have ${accounts} a day of their own`)
     expect(limits).toContain(`Callers without an account share ${site} pages a day for the whole service; accounts have ${accounts} a day of their own, at most ${constant('DEFAULT_ACCOUNT_DAILY')} an account`)
-    // The big numbers the page shows come from the same allowances.
-    const numbers = [...page.matchAll(/<span class="tier-amount"><b>([^<]+)<\/b>/g)].map(([, n]) => n)
-    const units = [...page.matchAll(/<p class="tier-unit">([^<]+)<\/p>/g)].map(([, unit]) => unit)
-    expect(numbers.map((n, i) => `${n} ${units[i]}`)).toEqual([
-      `${VISITOR_DAILY_PREVIEWS} previews a day, per visitor`,
-      `${constant('DEFAULT_KEYLESS_DAILY')} pages a day, per address`,
-      '1,000 credits a month, free',
-      '∞ no daily limit',
-    ])
-    expect(TIERS.map(t => tierAmount(t.perDay))).toEqual(numbers)
-    // The account's credits are a month's, and the heading says so.
-    expect(page).toMatch(/id="tier-03"[\s\S]*?<b>1,000<\/b> a month<\/span><\/h3>/)
-  })
-
-  it('lights one painted mark per page a day, every mark for no daily limit, and says so on the planet', () => {
-    const page = pageMarkup()
-    const rows = [...page.matchAll(/<div class="tier-row" id="tier-\d\d" data-lights="([^"]+)" data-unit="([^"]+)" data-lit="([^"]+)">/g)]
-    expect(rows.map(([, lights]) => lights)).toEqual(TIERS.map(t => String(t.perDay ?? 'all')))
-    expect(rows.map(([, , unit]) => unit)).toEqual(['previews a day', 'pages a day', 'credits a month', 'no daily limit'])
-    expect(rows.map(([, , , lit]) => lit)).toEqual(TIERS.map(tierLit))
-    expect(tierLit(TIERS[2]!)).toBe('1,000 lit marks on the planet')
-    expect(tierLit(TIERS[3]!)).toBe('Every mark on the planet lit')
-    expect(TIERS.map(tierUnit)).toEqual(rows.map(([, , unit]) => unit))
-    // The readout on the planet: which of the four, what it allows, how far along. Hidden until the lights are
-    // drawn, so it never claims marks that are not lit.
-    const readout = /<div class="earth-readout" id="earth-readout" aria-hidden="true" hidden>([\s\S]*?)<\/div>/.exec(page)?.[1] ?? ''
-    expect(readout).toContain('<b class="earth-step-n">01</b> / 04 · <span class="earth-step-name">Browser preview</span>')
-    expect(readout).toContain('<b class="earth-amount-n">5</b> <span class="earth-amount-unit">previews a day</span>')
-    expect(readout).toContain(`<p class="earth-lit">${tierLit(TIERS[0]!)}</p>`)
-    expect(readout.match(/<i( class="is-on")?><\/i>/g)).toHaveLength(TIERS.length)
-    // The artwork is the page's own asset, sized, lazy and decorative.
-    expect(page).toContain('<div class="earth-art" aria-hidden="true"><img src="/assets/scene-earth.webp" alt="" width="1672" height="941" loading="lazy" decoding="async" /></div>')
-    expect(readFileSync(new URL('../public/assets/scene-earth.webp', import.meta.url)).length).toBeGreaterThan(0)
-    // Nothing is pinned but the planet: no stage or pinned window around the words.
-    expect(page).not.toMatch(/tier-stage|tier-pin/)
-  })
-
-  it('shows every tier with its details, so nothing needs a click', () => {
-    const page = pageMarkup()
-    for (const t of TIERS) expect(page).toContain(`<div class="tier-row" id="tier-${t.n}"`)
-    expect(page.match(/<div class="tier-panel">/g)).toHaveLength(TIERS.length)
-    const start = page.indexOf('id="free-tiers"')
-    expect(page.slice(start, page.indexOf('</section>', start))).not.toMatch(/aria-expanded|class="tier-panel"[^>]* hidden/)
-    expect(page).toContain('<p class="tier-hint" aria-hidden="true" hidden>Scroll to light the planet <span>↓</span></p>')
   })
 
   it('shows every way in without a script, and keeps the controls that need one hidden until it runs', () => {

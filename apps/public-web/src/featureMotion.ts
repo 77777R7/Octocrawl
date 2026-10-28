@@ -1,4 +1,4 @@
-/* What it does and Free tiers, brought to life. Motion stays in the page's glyph language: every mark keeps its cell,
+/* What it does and Get started, brought to life. Motion stays in the page's glyph language: every mark keeps its cell,
  * and what moves is a mark being re-typed through · : + × # until it lands. Without motion the prerendered marks stay
  * as they are, and every control still works. */
 
@@ -184,89 +184,7 @@ function mountClients(): void {
   })
 }
 
-/** Free tiers. The planet stays in view behind the section (styles.css .is-story) while the words scroll past it as
- * the browser scrolls them: nothing is pinned but the planet, nothing snaps or folds. The tier whose top has crossed
- * the middle line of the screen is the one lit (the first until then), as a scrollytelling step is; it lights as
- * many of the planet's marks, and the readout on the planet says which of the four it is, what it allows and how
- * far along the four the reader is. A tier's name scrolls it into place. The lights load (in their own chunk, with a
- * worker) only as the section comes near. */
-function mountTierRail(): void {
-  const rail = document.querySelector<HTMLElement>('#tier-rail')
-  const section = rail?.closest<HTMLElement>('section')
-  const art = section?.querySelector<HTMLElement>('.earth-art')
-  if (!rail || !section || !art) return
-  const rows = [...rail.querySelectorAll<HTMLElement>('.tier-row')]
-  const readout = document.querySelector<HTMLElement>('#earth-readout')
-  const part = (sel: string) => readout?.querySelector<HTMLElement>(sel) ?? null
-  const stepN = part('.earth-step-n'), stepName = part('.earth-step-name'), amountN = part('.earth-amount-n')
-  const amountUnit = part('.earth-amount-unit'), lit = part('.earth-lit')
-  const ticks = readout ? [...readout.querySelectorAll<HTMLElement>('.earth-ticks i')] : []
-  const hint = section.querySelector<HTMLElement>('.tier-hint')
-  const lightsFor = (row: HTMLElement) => row.dataset.lights === 'all' ? Number.POSITIVE_INFINITY : Number(row.dataset.lights)
-  /** Where a step is triggered: the middle of the screen, a little low, so a tier's name is well in view first. */
-  const LINE = 0.55
-  let active = -1
-  let lights: import('./earthLights').EarthLights | null = null
-
-  section.classList.add('is-story')
-  if (hint) hint.hidden = false
-  if (readout) art.append(readout)
-
-  const select = (index: number) => {
-    if (index === active) return
-    active = index
-    const row = rows[index]!
-    rows.forEach((other, i) => {
-      other.classList.toggle('is-active', i === index)
-      if (i === index) other.setAttribute('aria-current', 'step')
-      else other.removeAttribute('aria-current')
-    })
-    section.classList.toggle('is-begun', index > 0)
-    lights?.show(lightsFor(row))
-    if (stepN) stepN.textContent = row.querySelector('.tier-n')?.textContent ?? ''
-    if (stepName) stepName.textContent = row.querySelector('.tier-name')?.textContent ?? ''
-    if (amountN) amountN.textContent = row.querySelector('.tier-amount b')?.textContent ?? ''
-    if (amountUnit) amountUnit.textContent = row.dataset.unit ?? ''
-    if (lit) lit.textContent = row.dataset.lit ?? ''
-    ticks.forEach((tick, i) => tick.classList.toggle('is-on', i <= index))
-    if (readout && !readout.hidden && !reduced()) { if (amountN) retyper(amountN).decode(); if (lit) retyper(lit).decode() }
-  }
-  /** The tier whose top has crossed the trigger line, in px from the window's height (not vh, which moves with a
-   * phone's address bar). */
-  const current = () => {
-    const line = window.innerHeight * LINE
-    let index = 0
-    rows.forEach((row, i) => { if (row.getBoundingClientRect().top <= line) index = i })
-    return index
-  }
-  let queued = 0
-  const update = () => { queued = 0; select(current()) }
-  const refresh = () => { if (!queued) queued = requestAnimationFrame(update) }
-  update()
-  window.addEventListener('scroll', refresh, { passive: true })
-  window.addEventListener('resize', refresh)
-
-  rows.forEach(row => {
-    row.querySelector('.tier-head')?.addEventListener('click', () => {
-      const top = row.getBoundingClientRect().top + window.scrollY - window.innerHeight * (LINE - 0.12)
-      window.scrollTo({ top, behavior: reduced() ? 'auto' : 'smooth' })
-    })
-  })
-
-  const near = new IntersectionObserver(entries => {
-    if (!entries.some(entry => entry.isIntersecting)) return
-    near.disconnect()
-    void import('./earthLights').then(({ mountEarthLights }) => {
-      lights = mountEarthLights(art, section, rail)
-      lights.show(lightsFor(rows[active]!))
-      return lights.ready.then(() => { if (readout) readout.hidden = false })
-    }).catch(() => { /* The artwork stays as painted, and the readout hidden. */ })
-  }, { rootMargin: '400px 0px' })
-  near.observe(section)
-}
-
 export function mountFeatureSections(): void {
   mountCapabilities()
   mountClients()
-  mountTierRail()
 }
