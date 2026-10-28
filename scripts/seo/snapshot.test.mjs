@@ -299,11 +299,20 @@ test('the summary shows the AI-assistant views as at least, and the ChatGPT tag 
   const base = { id: 'x', takenAt: 't', sourceCommit: 'abc', dirty: false, scriptSha256: 'f00', route: 'direct', window: { start: 'a', end: 'b', days: 28 }, gsc: null, index: null, notRead: {} }
   const ai = summarizeAiReferrals([{ source: 'utm_source=chatgpt.com', views: 27, visitorDays: 23 }], 90)
   const withTag = renderSummary(seriesEntry({ ...base, firstParty: { days: 7, pageViews: 90, visitorDays: 49, ai, chatgptTag: { views: 30, tagged: 27, taggedShare: 0.9, byDay: [['2026-10-20', 10, 9], ['2026-10-21', 20, 18]] } } }), null)
-  assert.match(withTag, /From AI assistants \(at least; a visit with no referrer and no tag counts as direct\): 27 page views \(30\.00% of all\): ChatGPT 27 views, 23 visitor-days\./)
-  assert.match(withTag, /ChatGPT utm tag: 27 of 30 ChatGPT page views carry utm_source=chatgpt\.com \(90\.00%\); by day \(views, tagged\): 2026-10-20 10, 9; 2026-10-21 20, 18\./)
+  assert.match(withTag, /From AI assistants \(at least; counted by the weekly report's source label, which is the referrer when there is one and the utm tag otherwise; a visit with neither counts as direct\): 27 page views \(30\.00% of all\): ChatGPT 27 views, 23 visitor-days\./)
+  assert.match(withTag, /ChatGPT page views by tag or by referrer: 30, of which 27 carry utm_source=chatgpt\.com \(90\.00%; this can exceed the ChatGPT line above by views that have a tag and another site's referrer\); by day \(views, tagged\): 2026-10-20 10, 9; 2026-10-21 20, 18\./)
   const none = renderSummary(seriesEntry({ ...base, firstParty: { days: 7, pageViews: 90, visitorDays: 49, ai: summarizeAiReferrals([], 90), chatgptTag: { views: 0, tagged: 0, taggedShare: null, byDay: [] } } }), null)
   assert.match(none, /From AI assistants \(at least; .*\): 0 page views \(0\.00% of all\)\./)
-  assert.match(none, /no ChatGPT page views in the window, so the tagged share is unknown/)
+  assert.match(none, /ChatGPT page views by tag or by referrer: none in the window, so the tagged share is unknown/)
   const older = renderSummary(seriesEntry({ ...base, firstParty: { days: 7, pageViews: 90, visitorDays: 49 } }), null)
   assert.doesNotMatch(older, /AI assistants|utm tag/)
+})
+
+test('the summary warns that +0 can mean no newer Search Console day when both snapshots end on the same day', () => {
+  const gsc = lastDay => summarizeGsc({ total: [{ clicks: 6, impressions: 100, position: 72 }], query: [], page: [], date: [row(lastDay, 6, 100, 72)], country: [], device: [] }, 5000)
+  const base = { id: 'x', takenAt: 't', sourceCommit: 'abc', dirty: false, scriptSha256: 'f00', route: 'direct', window: { start: 'a', end: 'b', days: 28 }, index: null, firstParty: null, notRead: {} }
+  const now = seriesEntry({ ...base, gsc: gsc('2026-10-25') })
+  assert.match(renderSummary(now, { gsc: gsc('2026-10-25'), index: null }), /newest day with data is 2026-10-25 in both snapshots, so a change of \+0 can mean that Search Console has no newer day yet/)
+  assert.doesNotMatch(renderSummary(now, { gsc: gsc('2026-10-24'), index: null }), /in both snapshots/)
+  assert.doesNotMatch(renderSummary(now, { gsc: null, index: null }), /in both snapshots/)
 })
