@@ -1,0 +1,149 @@
+/* The banner and scroll stage shared by the home page's What it does (src/featureSections.ts) and /scrape/'s What you get
+   (src/product/scrapePage.ts): a banner of light drawn in characters (product/glyphLight.ts) over a dark curve, then
+   the list on the left and a stack of cards on the right that the next one slides over as the reader scrolls
+   (product/scrapeFormats.ts). Each page paints its own cards. Moved here from product.css unchanged. */
+.fx-section { --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* What you get: a banner of light drawn in characters (glyphLight.ts) over a dark curve, the headline under it; then
+   the formats, the words on the left and a card on the right that the next one slides over as the reader scrolls
+   (scrapeFormats.ts). Each card is artwork with the recorded results laid on it as panes; the artwork loads once the
+   section is near. Narrow screens stack each format's words over its card. */
+.fx-section { --fx-stage: min(660px, calc(100vh - 64px)); position: relative; padding: 96px 0 24px; color: var(--text); background: var(--page); }
+.fx-banner { position: relative; isolation: isolate; display: flex; align-items: flex-end; justify-content: center; height: clamp(540px, 56vw, 680px); overflow: hidden; border-radius: 28px; color: #fff; text-align: center; background: #050b1f; box-shadow: 0 40px 80px -48px rgba(7, 27, 79, .7); }
+.fx-light { position: absolute; inset: 0; z-index: -1; background: radial-gradient(ellipse 60% 70% at 50% 18%, rgba(255, 243, 232, .85), rgba(141, 185, 232, .45) 38%, rgba(31, 74, 168, .3) 62%, transparent 82%); }
+.fx-light.is-live { background: none; }
+.fx-light > canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+.fx-copy { position: relative; max-width: 780px; padding: 0 24px 60px; }
+.fx-kicker { margin: 0; color: var(--orange-100); font: 600 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+.fx-banner h2 { margin: 16px 0 0; font-size: clamp(36px, 4.4vw, 62px); font-weight: 400; line-height: 1.05; letter-spacing: -.05em; text-wrap: balance; }
+.fx-banner h2 span { color: var(--orange-200); }
+.fx-lead { max-width: 560px; margin: 18px auto 0; color: var(--on-navy-2); font-size: 17px; line-height: 1.6; }
+.fx-formats { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 28px 0 0; padding: 0; list-style: none; }
+.fx-formats li { display: inline-flex; align-items: center; gap: 9px; padding: 6px 14px 6px 6px; border: 1px solid rgba(230, 238, 252, .16); border-radius: 999px; color: var(--on-navy); background: rgba(6, 22, 52, .6); font-size: 14px; backdrop-filter: blur(8px); }
+.fx-glyph { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; color: var(--orange-200); background: rgba(243, 104, 61, .16); font: 600 13px/1 var(--mono); }
+
+.fx-scroll { position: relative; height: calc(var(--fx-stage) + 6 * 55vh); margin-top: 72px; }
+.fx-stage { position: sticky; top: calc((100vh - var(--fx-stage)) / 2); display: grid; grid-template-columns: minmax(0, .78fr) minmax(0, 1.42fr); gap: 40px; align-items: center; height: var(--fx-stage); }
+.fx-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.fx-item { border-radius: 20px; transition: background .4s ease; }
+.fx-head { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+.fx-head button { display: block; width: 100%; padding: 16px 24px; border: 0; color: #4a5d80; background: none; font: inherit; text-align: left; cursor: pointer; transition: color .3s ease; }
+.fx-head button:hover { color: #142a57; }
+.fx-head button:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; border-radius: 20px; }
+.fx-body { max-height: 0; padding: 0 24px; overflow: hidden; opacity: 0; transition: max-height .45s ease, opacity .3s ease, padding .45s ease; }
+.fx-eyebrow { margin: 0; color: var(--orange-100); font: 600 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.fx-body p + p { margin: 10px 0 0; color: var(--ink-soft); font-size: 16px; line-height: 1.6; }
+.fx-item.is-active { background: var(--navy-deep); }
+.fx-item.is-active .fx-head button { padding-bottom: 6px; color: #fff; }
+.fx-item.is-active .fx-body p + p { color: var(--on-navy-2); }
+.fx-item.is-active .fx-body { max-height: 240px; padding-bottom: 22px; opacity: 1; }
+
+.fx-stack { position: relative; height: 100%; overflow: clip; }
+.fx-card { position: absolute; inset: 7% 0 0; margin: 0; overflow: hidden; border-radius: 24px; background: radial-gradient(ellipse 80% 60% at 70% 10%, rgba(243, 104, 61, .22), transparent 70%), linear-gradient(160deg, #123478, #061634) center / cover; transform: translateY(104%); transition: transform .75s cubic-bezier(.2, .8, .2, 1), filter .75s ease; }
+.fx-card.is-active { transform: none; }
+.fx-card.is-past { filter: brightness(.55); transform: translateY(-7.5%) scale(.93); }
+/* Once scrapeFormats.ts drives the cards, each card carries two numbers: --fx-rise, how far below its place it still
+   is, and --fx-under, how far the next card has come over it. A card being covered steps back 26px, narrows by 6% about
+   its top edge so that edge still shows, and dims by half; it all follows the scroll, so nothing transitions. A card
+   that has not started rising stays transparent, so a scroll the script has not caught up with cannot show it. */
+.fx-section.is-linked .fx-stack { overflow: visible; }
+.fx-section.is-linked .fx-card { transition: none; transform-origin: top; transform: translateY(var(--fx-rise, 0px)) translateY(calc(var(--fx-under, 0) * -26px)) scale(calc(1 - var(--fx-under, 0) * .06)); filter: brightness(calc(1 - var(--fx-under, 0) * .5)); }
+.fx-section.is-linked .fx-card.is-waiting { opacity: 0; }
+/* Light over the paintings (cardGlow.ts): the painting drawn again where the light falls, screened onto the card, so
+   the marks there brighten in place. */
+.fx-glow { position: absolute; top: 0; left: 0; width: 100%; height: 100%; mix-blend-mode: screen; pointer-events: none; }
+.fx-solid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+
+/* A card's window: one real result in a small dark browser window centred on the painting, above its light. The
+   bar names the page and the one number that matters; the body is the result, decoding in (scrapeWindows.ts). */
+.fx-win { position: absolute; top: 50%; left: 50%; z-index: 4; display: flex; flex-direction: column; width: min(74%, 560px); max-height: 74%; transform: translate(-50%, -50%); overflow: hidden; border: 1px solid rgba(150, 186, 236, .18); border-radius: 16px; background: rgba(5, 18, 48, .86); box-shadow: 0 30px 60px -24px rgba(0, 6, 24, .75); }
+.fx-win-bar { display: flex; align-items: center; gap: 9px; margin: 0; padding: 10px 14px; border-bottom: 1px solid rgba(150, 186, 236, .12); color: var(--on-navy-3); font: 500 11.5px/1.2 var(--mono); }
+.fx-win-bar img { flex: none; width: 16px; height: 16px; border-radius: 4px; }
+.fx-win-dot { flex: none; width: 10px; height: 10px; margin: 3px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 0 3px rgba(243, 104, 61, .2); }
+.fx-win-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-win-tag { flex: none; margin-left: auto; color: var(--orange-200); font-weight: 600; }
+.fx-win-body { margin: 0; padding: 14px 16px 16px; overflow: hidden; color: #c9d8f2; font: 12px/1.65 var(--mono); white-space: pre; }
+.fx-win.is-wrap .fx-win-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.fx-win-body .h { color: #fff; font-weight: 700; }
+.fx-win-body .p { color: rgba(141, 185, 232, .55); }
+.fx-win-body .u { color: rgba(141, 185, 232, .75); }
+.fx-win-body .k { color: var(--orange-100); }
+.fx-win-body .v { color: #eef4ff; }
+.fx-win-body .c { color: rgba(141, 185, 232, .5); }
+.fx-win-body .a { color: rgba(141, 185, 232, .62); }
+.fx-win-body .w { color: var(--orange-200); }
+/* While a window decodes: what it decodes from is dim, the front glows. */
+.fx-win-body .is-ahead { color: rgba(141, 185, 232, .3); font-weight: 400; }
+.fx-win-body .is-front { color: var(--orange-200); }
+/* The glass rules come after the plain window's, so their colours win where the browser draws glass. */
+/* Frosted glass where the browser can blur what is behind: the painting and its light show through, softened and a
+   little darkened so the text holds on the brightest skies; a faint sheen across the top and a lit upper edge. */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .fx-win { border-color: transparent; background: linear-gradient(160deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .03) 38%, rgba(255, 255, 255, 0) 60%), rgba(6, 20, 52, .7); box-shadow: 0 30px 60px -24px rgba(0, 6, 24, .7); -webkit-backdrop-filter: blur(18px) saturate(140%) brightness(.62); backdrop-filter: blur(18px) saturate(140%) brightness(.62); }
+  .fx-win-bar { border-bottom-color: rgba(255, 255, 255, .12); background: rgba(255, 255, 255, .05); color: rgba(230, 238, 252, .78); }
+  .fx-win-body .p, .fx-win-body .c { color: rgba(200, 222, 248, .62); }
+  .fx-win-body .is-ahead { color: rgba(200, 222, 248, .38); }
+  .fx-win-body, .fx-win-bar { text-shadow: 0 1px 2px rgba(0, 8, 30, .4); }
+}
+/* Glass where the browser can bend the backdrop (glassLens.ts): the rounded rim draws the painting in a little, as
+   real glass does, the whole pane gets the same light frost with its colour kept, and a thin rim catches the light.
+   The blur comes before the bend: after a url() filter Chromium lets the raw backdrop show through the blur's edges. */
+.fx-win.is-lens { background: linear-gradient(160deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, 0) 45%), rgba(5, 18, 50, .52); -webkit-backdrop-filter: blur(7px) var(--fx-lens) saturate(170%) brightness(.64); backdrop-filter: blur(7px) var(--fx-lens) saturate(170%) brightness(.64); box-shadow: 0 24px 50px -22px rgba(0, 6, 24, .65); }
+/* The secondary text (punctuation, link targets, notes, authors, the bar) a little brighter on this clearer glass. */
+.fx-win.is-lens .fx-win-body .p, .fx-win.is-lens .fx-win-body .c { color: rgba(214, 228, 248, .74); }
+.fx-win.is-lens .fx-win-body .u { color: rgba(176, 208, 246, .9); }
+.fx-win.is-lens .fx-win-body .a { color: rgba(206, 224, 248, .8); }
+.fx-win.is-lens .fx-win-bar { color: rgba(236, 242, 252, .88); }
+/* The one lit edge: a faint 1px line where light from the upper left catches the rim, gone by the far sides. */
+.fx-win.is-lens::before { content: ""; position: absolute; inset: 0; z-index: 1; padding: 1px; border-radius: inherit; background: linear-gradient(135deg, rgba(255, 255, 255, .3), rgba(255, 255, 255, .06) 30%, rgba(255, 255, 255, 0) 55%); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); pointer-events: none; }
+.fx-lens-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+@media (max-width: 1000px) {
+  .fx-section { padding-top: 72px; }
+  .fx-scroll { height: auto; margin-top: 48px; }
+  .fx-stage { position: static; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; height: auto; }
+  .fx-list, .fx-stack { display: contents; }
+  .fx-item, .fx-item.is-active { background: none; }
+  .fx-head button, .fx-item.is-active .fx-head button { padding: 0 4px; color: #142a57; cursor: default; }
+  .fx-body, .fx-item.is-active .fx-body { max-height: none; padding: 10px 4px 0; opacity: 1; }
+  .fx-eyebrow { color: var(--orange-ink); }
+  .fx-body p + p, .fx-item.is-active .fx-body p + p { color: var(--ink-soft); }
+  .fx-card, .fx-card.is-past { position: relative; inset: auto; height: clamp(380px, 78vw, 520px); margin-bottom: 40px; filter: none; transform: none; }
+  .fx-item[data-step="0"] { order: 0; } .fx-card[data-step="0"] { order: 1; }
+  .fx-item[data-step="1"] { order: 2; } .fx-card[data-step="1"] { order: 3; }
+  .fx-item[data-step="2"] { order: 4; } .fx-card[data-step="2"] { order: 5; }
+  .fx-item[data-step="3"] { order: 6; } .fx-card[data-step="3"] { order: 7; }
+  .fx-item[data-step="4"] { order: 8; } .fx-card[data-step="4"] { order: 9; }
+  .fx-item[data-step="5"] { order: 10; } .fx-card[data-step="5"] { order: 11; }
+}
+
+/* Below this the rows of a window that does not wrap can be wider than it: it fades out at its right edge, so a cut row
+   reads as one that goes on. */
+@media (max-width: 1100px) {
+  .fx-win:not(.is-wrap) .fx-win-body { -webkit-mask-image: linear-gradient(90deg, #000 84%, transparent); mask-image: linear-gradient(90deg, #000 84%, transparent); }
+}
+
+@media (max-width: 680px) {
+  .fx-win { width: 92%; max-height: 86%; }
+  .fx-win-body { padding: 12px; font-size: 11px; }
+  /* Too narrow for the column of where each value was read: the values stay, and the missing field still says so. */
+  .fx-win-body .c { display: none; }
+  .fx-win-body .w { margin-left: 2ch; }
+  .fx-banner { height: auto; min-height: 560px; border-radius: 20px; }
+  .fx-copy { padding: 220px 16px 40px; }
+  .fx-lead { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-card, .fx-body, .fx-item, .fx-head button { transition: none; }
+}
+
+@supports (corner-shape: squircle) {
+  .fx-banner { border-radius: 52px; corner-shape: squircle; }
+  .fx-item, .fx-head button:focus-visible { border-radius: 36px; corner-shape: squircle; }
+  .fx-card { border-radius: 44px; corner-shape: squircle; }
+  .fx-win, .fx-win.is-lens::before { border-radius: 28px; corner-shape: squircle; }
+  @media (max-width: 680px) {
+    .fx-banner { border-radius: 36px; }
+  }
+}

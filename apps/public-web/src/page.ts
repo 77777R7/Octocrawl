@@ -1,26 +1,16 @@
 import { capabilitiesMarkup, startMarkup } from './featureSections'
-import { glyphBand, glyphCloud } from './glyphArt'
+import { glyphCloud } from './glyphArt'
 import { waitlistMarkup } from './waitlistMarkup'
 import { siteActionsMarkup, siteNavMarkup } from '../scripts/siteNav.mjs'
 
-/** Light sections in page order. Each gets a `[ 0N / 0M ]` bar numbered from this list, so adding or moving a
- * section renumbers the rest. The bar repeats the section's kicker, so screen readers skip it. */
-const SECTION_BARS = [
-  ['what-it-does', 'WHAT IT DOES'],
-  ['get-started', 'GET STARTED'],
-  ['faq', 'FAQ'],
-] as const
-
+/** A `[ 0N / 0M ]` bar over a light section. The home page no longer draws them; the archived landing sections
+ * (src/archive/landingSections.ts) still do. */
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
 export function renderSectionBar(index: number, total: number, label: string): string {
   return `<div class="band"><div class="frame section-bar" aria-hidden="true"><span>[ <b>${pad2(index + 1)}</b> / ${pad2(total)} ]</span><span>·</span><span class="section-bar-label">${label}</span></div></div>`
 }
 
-export function sectionBar(id: (typeof SECTION_BARS)[number][0]): string {
-  const index = SECTION_BARS.findIndex(([key]) => key === id)
-  return renderSectionBar(index, SECTION_BARS.length, SECTION_BARS[index][1])
-}
 
 
 
@@ -53,10 +43,9 @@ export function faqJsonLd(): string {
 export function pageMarkup(): string {
   return `
   <div class="page-shell">
-${heroMarkup(HOME_HERO)}    ${capabilitiesMarkup(sectionBar('what-it-does'))}
-    ${startMarkup(sectionBar('get-started'))}
+${heroMarkup(HOME_HERO)}    ${capabilitiesMarkup()}
+    ${startMarkup()}
     <section class="faq-section" id="faq" aria-labelledby="faq-title">
-      ${sectionBar('faq')}
       <div class="band">
         <div class="frame faq-grid">
           <div class="faq-intro">
@@ -298,8 +287,7 @@ ${siteHeaderMarkup()}
       </main>
     </div>
 
-${copy.tool ? '' : `    <div class="glyph-band" aria-hidden="true"><pre>${glyphBand()}</pre></div>
-`}
+
     <section class="runs-section" id="result-section" aria-labelledby="runs-title" hidden>
       <div class="band">
         <div class="frame runs-head">

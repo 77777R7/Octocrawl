@@ -1,4 +1,7 @@
 import { glyphCloud } from './glyphArt'
+import { cardWindow, markdownSegments, type Segment } from './product/fxWindow'
+import { foldedText } from './product/scrapeMarkdown'
+import { DOCS } from './product/scrapeRun'
 
 /** The home page's "What it does" and "Get started" sections. Build-time markup like page.ts: no DOM access, no styles.
  * featureMotion.ts brings them to life; without it every claim, mark and code line is already in the HTML, and the
@@ -18,54 +21,110 @@ import { glyphCloud } from './glyphArt'
 
 const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-/** A line of glyph art: `{…}` marks the accent, written as <b>. */
-const art = (lines: readonly string[]) => lines.map(line => esc(line).replace(/\{([^}]*)\}/g, '<b>$1</b>')).join('\n')
+/** One capability on the home page: where it runs (`hosted`: hosted Octocrawl serves it too; every one runs on the
+ * person's computer), its words on the left, its glyph in the banner, and its card on the right: a painting (its
+ * scene in product/cardGlow.ts, so the light suits it) with a window of what it returns. The first window is a
+ * recorded read; the others show the shape of each result on example addresses, and the section says so. */
+type Capability = { key: string, hosted: boolean, title: string, where: string, text: string, glyph: string, chip: string, painting: string, scene: number, window: () => string }
 
-// `points`: what it does, a short line each, read at a glance.
-type Capability = { key: string, hosted: boolean, title: string, points: readonly string[], art: readonly string[] }
+const kb = (bytes: number) => `${Math.round(bytes / 1000)} KB`
+
+/** The Python docs' datetime page, read with its content selected on 17 Oct 2026 (product/scrapeRun.ts, recorded in
+ * research/hosted/2026-10-17-scrape-page-demos-e1e128d4.md): its title, the source line and the lead paragraph. */
+function scrapeWindow(): string {
+  const kept = DOCS.markdownHead.split('\n').filter(line => line.trim())
+  const lead = foldedText(kept[2]!)
+  return cardWindow({
+    icon: 'docs', url: 'docs.python.org/3/library/datetime.html', tag: `${kb(DOCS.bytes)} → ${DOCS.markdownLines} lines`, wrap: true,
+    label: 'The start of the Markdown Octocrawl returned for the Python docs datetime page, its content selected',
+    source: DOCS.rawHead.replace(/\s+/g, ' ').slice(0, 900),
+    lines: [[['p', '# '], ['h', foldedText(kept[0]!.slice(2))]], [['p', '']], markdownSegments(foldedText(kept[1]!)), [['p', '']], markdownSegments(lead)],
+  })
+}
+
+const line = (...segments: Segment[]): Segment[] => segments
 
 export const CAPABILITIES: readonly Capability[] = [
   {
-    key: 'scrape', hosted: true, title: 'Scrape a page',
-    points: ['Markdown, links, metadata and structured fields', 'From one public URL', 'Hosted browser lane requires an account key'],
-    art: [
-      '┌──────────┐',
-      '│ ░▒░░▒▒░░ │    # Overview',
-      '│ ▒░░▒░ ░▒ │ {─›} the text…',
-      '│ ░▒▒░░▒   │    - [links]',
-      '└──────────┘    | tables |',
-    ],
+    key: 'scrape', hosted: true, title: 'Scrape a page.', where: 'Hosted · Your computer', glyph: '#', chip: 'Scrape',
+    text: 'One public URL in; Markdown, links, metadata and the fields you ask for out. A page that needs scripts opens in a browser, which on hosted Octocrawl takes an account key.',
+    painting: 'nature-1', scene: 3, window: scrapeWindow,
   },
   {
-    key: 'map', hosted: true, title: 'Map a site',
-    points: ['The URLs a site lists in its sitemap and links', 'Before you read a single page'],
-    art: [
-      '{×} site.example',
-      ' ├─ /docs',
-      ' │   ├─ /docs/start',
-      ' │   └─ /docs/api',
-      ' └─ /blog',
-    ],
+    key: 'map', hosted: true, title: 'Map a site.', where: 'Hosted · Your computer', glyph: '├', chip: 'Map',
+    text: 'The URLs a site lists in its sitemaps and links to from its start page, without reading each page. Near-duplicates fold into one, and what was left out is counted.',
+    painting: 'sky-3', scene: 2,
+    window: () => cardWindow({
+      url: 'docs.example.com', tag: '6 URLs', label: 'An example of what a map returns: the URLs of a docs site',
+      lines: [
+        line(['v', 'docs.example.com/']),
+        line(['p', '├─ '], ['v', '/guide/']),
+        line(['p', '│  ├─ '], ['v', '/guide/install/']),
+        line(['p', '│  └─ '], ['v', '/guide/config/']),
+        line(['p', '├─ '], ['v', '/api/']),
+        line(['p', '└─ '], ['v', '/changelog/']),
+        line(['p', '']),
+        line(['k', 'from '], ['a', 'links, sitemap.xml'], ['p', ' · '], ['k', 'left out '], ['a', '2 on other hosts']),
+      ],
+    }),
   },
   {
-    key: 'crawl', hosted: true, title: 'Crawl a site',
-    points: ['Follow links across a site or section', 'Set page, depth and path limits', 'Hosted with an account, up to 500 pages'],
-    art: ['site.example', ' ├─ /docs {─›} /docs/start', ' ├─ /blog {─›} /blog/post', ' └─ page limit ✓', '    depth limit ✓'],
+    key: 'crawl', hosted: true, title: 'Crawl a site.', where: 'Hosted with an account · Your computer', glyph: '»', chip: 'Crawl',
+    text: 'Follow links across a site or one section, within the page, depth and path limits you set, and read each page on the way. Hosted crawls go up to 500 pages; larger ones run on your computer.',
+    painting: 'nature-2', scene: 4,
+    window: () => cardWindow({
+      url: 'docs.example.com/guide/', tag: 'limit 50 · depth 2', label: 'An example of a crawl: each page it read and how',
+      lines: [
+        line(['k', '✓ '], ['v', '/guide/          '], ['a', '200  Markdown']),
+        line(['k', '✓ '], ['v', '/guide/install/  '], ['a', '200  Markdown']),
+        line(['k', '✓ '], ['v', '/guide/config/   '], ['a', '200  Markdown']),
+        line(['w', '× '], ['v', '/guide/old/      '], ['w', '404  not found']),
+        line(['k', '✓ '], ['v', '/guide/faq/      '], ['a', '200  Markdown']),
+        line(['p', '']),
+        line(['k', 'completed '], ['a', '· 4 read · 1 failed']),
+      ],
+    }),
   },
   {
-    key: 'batch', hosted: true, title: 'Scrape a batch',
-    points: ['Scrape a list of URLs', 'Keep each result, including failures', 'Hosted with an account, up to 1,000 URLs'],
-    art: ['[URL 1, URL 2, URL 3]', '        {│}', '   ✓ Markdown', '   × blocked', '   ✓ Markdown'],
+    key: 'batch', hosted: true, title: 'Scrape a batch.', where: 'Hosted with an account · Your computer', glyph: '≡', chip: 'Batch',
+    text: 'Hand over a list of URLs and get one result for each, failures included, so no page goes missing quietly. Hosted batches take up to 1,000 URLs.',
+    painting: 'sky-1', scene: 0,
+    window: () => cardWindow({
+      url: 'results/', tag: '3 URLs', label: 'An example of a batch: one result per URL, and the reports',
+      lines: [
+        line(['k', '✓ '], ['v', '0001-example.com.md']),
+        line(['k', '✓ '], ['v', '0002-example.org.md']),
+        line(['w', '× '], ['v', '0003-shop.example  '], ['w', 'blocked by robots.txt']),
+        line(['p', '']),
+        line(['a', 'report.json  results.csv  results.jsonl']),
+      ],
+    }),
   },
   {
-    key: 'actions', hosted: false, title: 'Browser actions',
-    points: ['Click, scroll and load content before extracting it', 'Run browser actions on your computer', 'Install Chromium for the browser lane'],
-    art: ['┌ browser ───────────┐', '│ click {›} scroll     │', '│ load more content │', '│ {↓} extract         │', '└───────────────────┘'],
+    key: 'actions', hosted: false, title: 'Act in a browser.', where: 'Your computer', glyph: '›', chip: 'Browser actions',
+    text: 'Click and scroll before reading, so what sits behind a button or further down a long list comes back too. It runs in Chromium on your computer.',
+    painting: 'nature-3', scene: 5,
+    window: () => cardWindow({
+      url: 'shop.example/catalog', tag: '3 actions', label: 'An example of browser actions run before a read',
+      lines: [
+        line(['k', '→ click   '], ['v', 'button "Load more"']),
+        line(['k', '→ scroll  '], ['v', 'to the end, 3 times']),
+        line(['k', '✓ read    '], ['v', '48 items'], ['a', ' · Markdown and a list']),
+      ],
+    }),
   },
   {
-    key: 'monitor', hosted: false, title: 'Monitor a page',
-    points: ['Revisit sources on a schedule with local workers', 'Deliver events to your HTTPS webhook', 'Timed re-runs need a repository checkout'],
-    art: [' run ·──·──·──{×}──·', '              │', '           changed', '              └─{›} POST /webhook', '                 signed ✓'],
+    key: 'monitor', hosted: false, title: 'Monitor a page.', where: 'Your computer', glyph: '◷', chip: 'Monitor',
+    text: 'Read a page again on a schedule and send each change to your HTTPS webhook, signed when you give it a secret. Timed runs come from the repository’s local service.',
+    painting: 'sky-2', scene: 1,
+    window: () => cardWindow({
+      url: 'pricing.example/plans', tag: 'every 6 h', label: 'An example of a monitor: two runs, and the change sent to a webhook',
+      lines: [
+        line(['a', '09:00  '], ['v', 'unchanged']),
+        line(['a', '15:00  '], ['k', 'changed']),
+        line(['p', '       '], ['k', '→ POST '], ['v', 'https://you.example/hook'], ['a', '  signed']),
+      ],
+    }),
   },
 ]
 
@@ -143,16 +202,6 @@ export const CLIENTS: readonly Client[] = [
 /** What Copy puts on the clipboard: the commands and code, without comments, output or prompts. */
 export const clientCopy = (c: Client) => c.lines.filter(([kind]) => kind === 'cmd' || kind === 'more' || kind === 'code' || (kind === 'gap' && c.lines.some(([k]) => k === 'code'))).map(([, text]) => text).join('\n').trim()
 
-function capabilityCell(item: Capability): string {
-  const hosted = item.hosted ? 'is-yes' : 'is-no'
-  return `<li class="can-cell" data-hosted="${item.hosted}">
-                <pre class="can-art" aria-hidden="true">${art(item.art)}</pre>
-                <h3>${item.title}</h3>
-                <ul class="can-points" role="list">${item.points.map(point => `<li>${point}</li>`).join('')}</ul>
-                <p class="can-where"><span class="${hosted}">Hosted<span class="visually-hidden">${item.hosted ? ': yes' : ': no'}</span></span><span class="is-yes">Your computer<span class="visually-hidden">: yes</span></span></p>
-              </li>`
-}
-
 function clientLine([kind, text]: Line): string {
   if (kind === 'gap') return ''
   if (kind === 'cmd') return `<span class="use-prompt" aria-hidden="true">›</span>${esc(text)}`
@@ -180,9 +229,8 @@ function clientPanels(): string {
 }
 
 /** Section 03: getting started, a few lines in each of the ways in. */
-export function startMarkup(bar: string): string {
+export function startMarkup(): string {
   return `<section class="start-section" id="get-started" aria-labelledby="start-title">
-      ${bar}
       <div class="band">
         <div class="frame start-wrap">
           <div class="start-head">
@@ -199,33 +247,37 @@ export function startMarkup(bar: string): string {
 }
 
 /** Section 02: what the engine does beyond the preview, and where each part runs. */
-export function capabilitiesMarkup(bar: string): string {
-  const hostedCount = CAPABILITIES.filter(c => c.hosted).length
-  return `<section class="can-section" id="what-it-does" aria-labelledby="can-title">
-      ${bar}
+/** What it does: a banner of light drawn in characters over a dark curve, naming the six, then the six themselves, the
+ * words on the left and a card on the right that the next one slides over as the reader scrolls. The banner and the
+ * stage are /scrape/'s (formatsStage.css, product/scrapeFormats.ts); the words and the cards are the home page's. */
+export function capabilitiesMarkup(): string {
+  const items = CAPABILITIES.map((c, i) => `
+              <li class="fx-item${i ? '' : ' is-active'}" data-step="${i}" data-hosted="${c.hosted}"><h3 class="fx-head"><button type="button" data-step="${i}" aria-controls="fx-card-${c.key}">${c.title}</button></h3><div class="fx-body"><p class="fx-eyebrow">${c.where}</p><p>${c.text}</p></div></li>`).join('')
+  const cards = CAPABILITIES.map((c, i) => `
+              <div class="fx-card is-${c.painting}${i ? '' : ' is-active'}" id="fx-card-${c.key}" data-step="${i}" data-scene="${c.scene}">
+              ${c.window()}
+              </div>`).join('')
+  return `<section class="fx-section is-home" id="what-it-does" aria-labelledby="can-title">
       <div class="band">
-        <div class="frame can-wrap">
-          <div class="can-head">
-            <div class="can-intro">
-              <p class="section-kicker"><span class="kicker-square"></span> WHAT IT DOES</p>
-              <h2 id="can-title">From one page to<br />a repeatable <em>workflow.</em></h2>
-              <p class="can-lead">Read a page, discover URLs, collect content across a site, or revisit sources on a schedule. Each capability below shows where it runs.</p>
+        <div class="frame">
+          <div class="fx-banner">
+            <div class="fx-light" aria-hidden="true"></div>
+            <div class="fx-copy">
+              <p class="fx-kicker">What it does</p>
+              <h2 id="can-title">From one page to a whole site. <span>One tool.</span></h2>
+              <p class="fx-lead">Scrape a page, map a site, crawl a section or watch it for changes, all through one API. No crawler to build, no HTML to clean.</p>
+              <ul class="fx-formats" aria-label="What Octocrawl does">${CAPABILITIES.map(c => `<li><span class="fx-glyph" aria-hidden="true">${esc(c.glyph)}</span>${c.chip}</li>`).join('')}</ul>
             </div>
-            <fieldset class="can-filter" hidden>
-              <legend class="visually-hidden">Show what runs where</legend>
-              <label><input type="radio" name="can-where" value="all" checked /><span class="can-bracket" aria-hidden="true">[</span>All <span class="can-count">${CAPABILITIES.length}</span><span class="can-bracket" aria-hidden="true">]</span></label>
-              <label><input type="radio" name="can-where" value="hosted" /><span class="can-bracket" aria-hidden="true">[</span>Hosted <span class="can-count">${hostedCount}</span><span class="can-bracket" aria-hidden="true">]</span></label>
-              <label><input type="radio" name="can-where" value="local" /><span class="can-bracket" aria-hidden="true">[</span>Your computer <span class="can-count">${CAPABILITIES.length}</span><span class="can-bracket" aria-hidden="true">]</span></label>
-            </fieldset>
           </div>
-          <ul class="can-grid" id="can-grid" role="list">
-              ${CAPABILITIES.map(capabilityCell).join('\n              ')}
-          </ul>
-          <div class="can-evidence">
-            <h3>Keep the source with the result.</h3>
-            <p>Scrape results include an Evidence Record describing the capture: the final URL, fetch time, HTTP status and access decision. Inspect separate <a href="/docs/limits/#interpret-the-status">verification results</a> when your task needs checked fields.</p>
+          <div class="fx-scroll">
+            <div class="fx-stage">
+              <ol class="fx-list">${items}
+              </ol>
+              <div class="fx-stack">${cards}
+              </div>
+            </div>
           </div>
-          <p class="visually-hidden" id="can-status" role="status"></p>
+          <p class="fx-note">The first window is a recorded read of the Python docs (17 Oct 2026). The others show what each one returns, on example addresses.</p>
         </div>
       </div>
     </section>`

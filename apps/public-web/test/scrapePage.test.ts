@@ -62,8 +62,9 @@ describe('the /scrape/ product page', () => {
       expect(markup).toContain(`aria-controls="fx-card-${c.id}">${c.title}</button>`)
       expect(markup).toContain(`id="fx-card-${c.id}" data-step="${i}"`)
     })
-    // Narrow screens put each card after its words by these orders (product.css), one pair per format.
-    const css = readFileSync(app('src/product/product.css'), 'utf8')
+    // Narrow screens put each card after its words by these orders (formatsStage.css, shared with the home page), one
+    // pair per format.
+    const css = readFileSync(app('src/formatsStage.css'), 'utf8')
     FORMAT_CARDS.forEach((_, i) => expect(css).toContain(`.fx-item[data-step="${i}"] { order: ${2 * i}; } .fx-card[data-step="${i}"] { order: ${2 * i + 1}; }`))
   })
 

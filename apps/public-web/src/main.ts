@@ -1,12 +1,14 @@
 import './styles.css'
 import './tools/tools.css'
+import './formatsStage.css'
 import { mountHeroAscii } from './ascii'
 import { drawHeroAgents } from './heroAgents'
 import { mountHeroChip } from './heroChip'
 import { mountHeroClick } from './heroClick'
 import { mountGlyphRipple } from './glyphRipple'
 import { mountFeatureSections } from './featureMotion'
-import { mountGlyphBand } from './glyphBandMotion'
+import { mountFormats } from './product/scrapeFormats'
+import { mountSmoothScroll, scrollPageTo } from './smoothScroll'
 import { mountOctopusSwim } from './octopusSwim'
 import { track, trackLinkClicks, trackPageView } from './analytics'
 import { mountWaitlist } from './waitlist'
@@ -125,7 +127,13 @@ if (heroChip) mountHeroChip(heroChip)
 const heroSpark = document.querySelector<HTMLElement>('#hero-click-spark')
 if (heroSpark) mountHeroClick(heroSpark, hero)
 mountFeatureSections()
-for (const band of document.querySelectorAll<HTMLElement>('.glyph-band')) mountGlyphBand(band)
+// What it does: /scrape/'s banner and scroll stage with the home page's own words and cards, and the page scrolls with
+// /scrape/'s damping. A section link still leaves the address as the home page's own.
+const whatItDoes = document.querySelector<HTMLElement>('#what-it-does')
+if (whatItDoes) {
+  mountSmoothScroll({ address: false })
+  mountFormats(whatItDoes)
+}
 const startHead = document.querySelector<HTMLElement>('.start-head')
 if (startHead) mountOctopusSwim(startHead)
 // The octopus game: its own chunk, loaded when a visitor asks to play, from the button by the kelp or the ▶ the
@@ -1176,7 +1184,7 @@ function selectRun(id: number): void {
   renderRuns()
   renderDetail(run)
   resultHeading.focus({ preventScroll: true })
-  runDetail.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+  scrollPageTo(window.scrollY + runDetail.getBoundingClientRect().top)
 }
 
 function renderDetailUrl(result: PreviewResponse | null): void {
@@ -1249,7 +1257,7 @@ function setResultMessage(result: PreviewResponse): void {
 
 /** Brings the selected run's result into view, below the hero; the run cards sit just above it. */
 function revealResults(): void {
-  runDetail.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
+  scrollPageTo(window.scrollY + runDetail.getBoundingClientRect().top)
 }
 
 /** Shows the run's result; the page moves to it unless the crawl window is still playing (it moves there after). */

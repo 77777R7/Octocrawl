@@ -1,4 +1,4 @@
-/* What it does and Get started, brought to life. Motion stays in the page's glyph language: every mark keeps its cell,
+/* Get started, brought to life. Motion stays in the page's glyph language: every mark keeps its cell,
  * and what moves is a mark being re-typed through · : + × # until it lands. Without motion the prerendered marks stay
  * as they are, and every control still works. */
 
@@ -9,21 +9,6 @@ const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matc
 
 /** A glyph that changes every ~45 ms, picked by the cell's position so neighbours differ. */
 const flicker = (i: number, t: number) => MARKS[(i * 7 + Math.floor(t / 45)) % MARKS.length]!
-
-/** Calls `enter(el, order)` once for each element as it first comes on screen; `order` counts the ones that arrived in
- * the same batch, for a stagger. Each element is watched on its own, so a short screen or a single column still
- * reaches every one. */
-function onEachEnter(elements: readonly Element[], enter: (el: Element, order: number) => void): void {
-  const watch = new IntersectionObserver(entries => {
-    let order = 0
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue
-      watch.unobserve(entry.target)
-      enter(entry.target, order++)
-    }
-  }, { rootMargin: '0px 0px -8% 0px' })
-  elements.forEach(el => watch.observe(el))
-}
 
 type Retype = { hide(): void, show(delay?: number): void, decode(delay?: number): void, dots(): void, shimmer(): void }
 
@@ -79,48 +64,6 @@ function retyper(root: HTMLElement): Retype {
     dots: () => run(nodes.map(node => node.data), dotted, 0, 4),
     /** A quick flicker that lands back on the same marks: the hover. */
     shimmer: () => { if (!busy) run(shown, shown, 0, 5) },
-  }
-}
-
-/** The capabilities grid: the art decodes as the grid comes into view, re-types on hover, and the filter dims what
- * does not run where the visitor asked, turning its art to dots. */
-function mountCapabilities(): void {
-  const grid = document.querySelector<HTMLElement>('#can-grid')
-  if (!grid) return
-  const status = document.querySelector<HTMLElement>('#can-status')
-  const cells = [...grid.querySelectorAll<HTMLElement>('.can-cell')].map(cell => ({
-    cell, hosted: cell.dataset.hosted === 'true', art: retyper(cell.querySelector<HTMLElement>('.can-art')!),
-  }))
-
-  const filter = document.querySelector<HTMLElement>('.can-filter')
-  if (filter) filter.hidden = false
-  if (!reduced()) {
-    cells.forEach(({ art }) => art.hide())
-    onEachEnter(cells.map(({ cell }) => cell), (el, order) => {
-      const item = cells.find(({ cell }) => cell === el)!
-      if (!item.cell.classList.contains('is-out')) item.art.show(order * 110)
-    })
-  }
-  for (const { cell, art } of cells) {
-    const shimmer = () => { if (!cell.classList.contains('is-out')) art.shimmer() }
-    cell.addEventListener('pointerenter', shimmer)
-    cell.addEventListener('focusin', shimmer)
-  }
-
-  for (const input of document.querySelectorAll<HTMLInputElement>('input[name="can-where"]')) {
-    input.addEventListener('change', () => {
-      const where = input.value
-      let shown = 0
-      cells.forEach(({ cell, hosted, art }, i) => {
-        const keep = where !== 'hosted' || hosted
-        if (keep) shown++
-        if (keep === !cell.classList.contains('is-out')) return
-        cell.classList.toggle('is-out', !keep)
-        if (keep) art.show(i * 40)
-        else art.dots()
-      })
-      if (status) status.textContent = where === 'hosted' ? `${shown} of ${cells.length} run on hosted Octocrawl.` : `All ${cells.length} run on your computer.`
-    })
   }
 }
 
@@ -185,6 +128,5 @@ function mountClients(): void {
 }
 
 export function mountFeatureSections(): void {
-  mountCapabilities()
   mountClients()
 }

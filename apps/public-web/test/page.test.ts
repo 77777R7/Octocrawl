@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs'
 import { archivedSectionsMarkup } from '../src/archive/landingSections.js'
 import { CAPABILITIES, clientCopy, CLIENTS } from '../src/featureSections.js'
 import { glyphBand } from '../src/glyphArt.js'
-import { FAQ, faqJsonLd, pageMarkup, sectionBar } from '../src/page.js'
+import { FAQ, faqJsonLd, pageMarkup } from '../src/page.js'
 import { REAL_SITE_MISSES, REAL_SITE_RUN } from '../src/realSiteRun.js'
 
 describe('Page markup', () => {
-  it('numbers the section bars in page order', () => {
-    const bars = [...pageMarkup().matchAll(/<b>(\d\d)<\/b> \/ (\d\d) \]<\/span><span>·<\/span><span class="section-bar-label">([^<]+)</g)]
-    expect(bars.map(([, n, total, label]) => `${n}/${total} ${label}`)).toEqual(['01/03 WHAT IT DOES', '02/03 GET STARTED', '03/03 FAQ'])
-    expect(sectionBar('faq')).toContain('aria-hidden="true"')
+  it('goes from the hero straight into What it does, with no glyph band and no section bars', () => {
+    const page = pageMarkup()
+    expect(page).not.toContain('class="glyph-band"')
+    expect(page).not.toContain('section-bar')
   })
 
   it('is a tool page: the hero, what it does, get started, then the FAQ last', () => {
@@ -102,19 +102,24 @@ describe('Page markup', () => {
     expect(hostedApi).toContain("(path === '/v1/batches' || path === '/v1/crawl')")
     expect(CAPABILITIES.filter(c => c.hosted).map(c => c.key)).toEqual(['scrape', 'map', 'crawl', 'batch'])
     const page = pageMarkup()
-    expect(page.match(/<li class="can-cell" data-hosted="true">/g)).toHaveLength(4)
-    expect(page.match(/<li class="can-cell" data-hosted="false">/g)).toHaveLength(2)
-    expect(page).toContain('Hosted <span class="can-count">4</span>')
+    expect(page.match(/<li class="fx-item[^"]*" data-step="\d" data-hosted="true">/g)).toHaveLength(4)
+    expect(page.match(/<li class="fx-item[^"]*" data-step="\d" data-hosted="false">/g)).toHaveLength(2)
+    // Each says where it runs, and only the hosted ones say hosted.
+    for (const c of CAPABILITIES) expect([c.key, c.where.includes('Hosted')]).toEqual([c.key, c.hosted])
   })
 
-  it('says what each capability does in a few short points', () => {
+  it('shows each capability with its words and its card, the first card a recorded read and the rest marked as examples', () => {
     const page = pageMarkup()
-    for (const c of CAPABILITIES) {
-      expect(c.points.length).toBeGreaterThanOrEqual(2)
-      expect(c.points.length).toBeLessThanOrEqual(3)
-      for (const point of c.points) expect(point.length).toBeLessThanOrEqual(70)
-      expect(page).toContain(`<ul class="can-points" role="list">${c.points.map(p => `<li>${p}</li>`).join('')}</ul>`)
+    for (const [i, c] of CAPABILITIES.entries()) {
+      expect(page).toContain(`aria-controls="fx-card-${c.key}">${c.title}</button>`)
+      expect(page).toMatch(new RegExp(`<div class="fx-card is-${c.painting}[^"]*" id="fx-card-${c.key}" data-step="${i}" data-scene="${c.scene}">`))
+      expect(c.text.length).toBeLessThanOrEqual(200)
     }
+    // Every painting once, so each card has its own light.
+    expect(new Set(CAPABILITIES.map(c => c.scene)).size).toBe(CAPABILITIES.length)
+    expect(page.match(/<div class="fx-win[^"]*" data-source="/g)).toHaveLength(1)
+    expect(page).toContain('The first window is a recorded read of the Python docs (17 Oct 2026). The others show what each one returns, on example addresses.')
+    expect(page).toContain('docs.python.org/3/library/datetime.html')
   })
 
   it('states in the limits doc the free allowances the services enforce', () => {
@@ -132,7 +137,6 @@ describe('Page markup', () => {
     const page = pageMarkup()
     expect(page).toContain('<div class="use-tabs" role="tablist" aria-label="Use Octocrawl from" hidden>')
     expect(page).toContain('<button class="use-copy" type="button" id="use-copy" hidden>')
-    expect(page).toContain('<fieldset class="can-filter" hidden>')
     expect(page).not.toMatch(/class="use-panel"[^>]* hidden/)
     expect(page.match(/<p class="use-panel-label" aria-hidden="true">/g)).toHaveLength(CLIENTS.length)
   })

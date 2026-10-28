@@ -448,7 +448,7 @@ export function mountCardGlow(section: HTMLElement): void {
     const maskPaint = mask.getContext('2d')
     if (!paint || !maskPaint) return
     el.append(canvas)
-    const scene = SCENES[index % SCENES.length]!
+    const scene = SCENES[Number(el.dataset.scene ?? index) % SCENES.length]!
     const solidCanvas = document.createElement('canvas')
     solidCanvas.className = 'fx-solid'
     solidCanvas.setAttribute('aria-hidden', 'true')

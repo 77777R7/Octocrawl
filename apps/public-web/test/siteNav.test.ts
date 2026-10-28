@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest'
 import { blogPath, posts } from '../scripts/blogPosts.mjs'
 import { pages } from '../scripts/docsPages.mjs'
 import { NAV_CAPABILITIES, siteActionsMarkup, siteNavMarkup } from '../scripts/siteNav.mjs'
-import { CAPABILITIES } from '../src/featureSections.js'
 import { pageMarkup } from '../src/page.js'
 import { TOOL_PAGES } from '../src/tools/pages'
 
@@ -17,7 +16,7 @@ describe('Top navigation', () => {
   it('leads only to places that exist: docs pages and their sections, blog articles, home page sections, the free tool and product pages, the changelog', () => {
     const home = pageMarkup()
     const hrefs = [...`${siteNavMarkup()}${siteActionsMarkup()}`.matchAll(/href="([^"]+)"/g)].map(([, href]) => href!)
-    expect(hrefs.length).toBeGreaterThan(20)
+    expect(hrefs.length).toBeGreaterThan(10)
     for (const href of hrefs) {
       if (href.startsWith('https://')) { expect(href).toBe('https://github.com/77777R7/Octocrawl'); continue }
       const [path, hash] = href.split('#') as [string, string | undefined]
@@ -40,17 +39,18 @@ describe('Top navigation', () => {
     }
   })
 
-  it('lists what the home page says Octocrawl does, and every guide and reference page', () => {
-    expect(NAV_CAPABILITIES).toHaveLength(CAPABILITIES.length)
-    // Mapping a site leads where it can be tried at once: the Link Extractor, which lists a site's pages.
-    expect(NAV_CAPABILITIES.find(item => item.title === 'Map a site')?.href).toBe('/tools/link-extractor/')
+  it('lists every guide and reference page, with the Product menu and Free tiers off for now', () => {
     const nav = siteNavMarkup()
+    expect(nav).not.toContain('>Product<')
+    expect(nav).not.toContain('>Free tiers<')
+    // The menu's entries are kept for when it comes back: mapping a site leads to the Link Extractor.
+    expect(NAV_CAPABILITIES.find(item => item.title === 'Map a site')?.href).toBe('/tools/link-extractor/')
     for (const page of pages.filter(p => p.group !== 'Project')) expect(nav).toContain(`>${page.title}<`)
   })
 
   it('works without a script: menus are <details>, and the phone menu button stays hidden; where scripts run, the phone layout holds from the first paint', () => {
     const nav = siteNavMarkup()
-    expect(nav.match(/<details class="nav-drop">/g)).toHaveLength(2)
+    expect(nav.match(/<details class="nav-drop">/g)).toHaveLength(1)
     expect(nav).toMatch(/<button class="nav-toggle"[^>]* hidden>/)
     // The folded phone header is laid out by CSS wherever scripts run, not once nav.js has run (a 64 px layout shift).
     expect(readFileSync(app('public/docs-assets/nav.css'), 'utf8')).toContain('@media (max-width: 900px) and (scripting: enabled) {')

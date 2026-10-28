@@ -10,7 +10,9 @@ import './smoothScroll.css'
 let lenis: Lenis | null = null
 const reduce = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-export function mountSmoothScroll(): void {
+/** `address: false` leaves the address as it is when a link to a part of the page is followed (the home page keeps its
+ * own address); otherwise the link's fragment is pushed, as the browser would. */
+export function mountSmoothScroll({ address = true }: { address?: boolean } = {}): void {
   if (lenis || reduce()) return
   const page = new Lenis({ lerp: 0.085, autoRaf: true, allowNestedScroll: true, stopInertiaOnNavigate: true })
   lenis = page
@@ -37,7 +39,7 @@ export function mountSmoothScroll(): void {
     if (!target.hasAttribute('tabindex') && !target.matches('a[href], button, input, select, textarea')) target.setAttribute('tabindex', '-1')
     target.focus({ preventScroll: true })
     scrollPageTo(target === document.getElementById('top') ? 0 : window.scrollY + target.getBoundingClientRect().top)
-    history.pushState(null, '', `#${id}`)
+    if (address) history.pushState(null, '', `#${id}`)
   })
 }
 
