@@ -63,6 +63,23 @@ export function chromeOfRecord(text) {
  */
 export const IC16_BASELINE = Object.freeze({ final: [11, 7], probe: [12, 12], total: 16, floor: 7 })
 
+/** The arms the weekly rerun runs when --arms is not given. Steel is not among them since ADR 0005's revision of 2026-10-28; --arms steel still runs it. */
+export const DEFAULT_ARMS = Object.freeze(['free', 'firecrawl', 'zenrows'])
+
+/**
+ * The capabilities each grant of the free arm names, exactly: installed_chrome alone for the healthy and rotation tasks
+ * (access "standard"), and with compatible_transport for the 16 challenge tasks (access "enhanced"), the local route
+ * ADR 0005 recommends since its revision of 2026-10-28.
+ */
+export const FREE_GRANTS = Object.freeze({ standard: Object.freeze(['installed_chrome']), challenge: Object.freeze(['compatible_transport', 'installed_chrome']) })
+
+/** Why a grant cannot serve one part of the free arm (FREE_GRANTS), or null when it names exactly those capabilities. */
+export function freeGrantRefusal(part, capabilities) {
+  const want = FREE_GRANTS[part]
+  if (capabilities === null || capabilities === undefined) return `it must name ${want.join(' and ')}; it names nothing readable`
+  return [...capabilities].sort().join() === want.join() ? null : `it must name ${want.length === 1 ? `${want[0]} alone` : `${want.join(' and ')}, nothing else`}; it names ${capabilities.join(', ') || 'nothing'}`
+}
+
 /** The baseline line of the free arm's record for the 16 tasks: the comparison, and the mark when the week is below it. */
 export function baselineLine(verified, baseline = IC16_BASELINE) {
   const against = `against the acceptance baseline (ADR 0005, 7b56397b: final runs ${baseline.final.join(' and ')} of ${baseline.total}, probe runs ${baseline.probe.join(' and ')})`

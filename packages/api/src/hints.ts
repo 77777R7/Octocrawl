@@ -32,11 +32,12 @@ export const BROWSER_NOT_INSTALLED_HINT = browserNotInstalledHint()
 export const INSTALLED_CHROME_MISSING_HINT = `Google Chrome is not installed where Octocrawl runs, so the installed_chrome rung could not start; ${INSTALLED_CHROME_INSTALL}, then scrape again`
 
 /**
- * The route Octocrawl recommends on the person's own machine for a check the bundled browser met too (ADR 0005, revision
- * of 2026-10-23), said by a server there whose grant does not name it. The person writes the grant, with their own
+ * The route Octocrawl recommends on the person's own machine for a check the bundled browser met too (ADR 0005, revisions
+ * of 2026-10-23 and 2026-10-28: installed_chrome, with compatible_transport since the second), said by a server there
+ * whose grant does not name installed_chrome. The person writes the grant, with their own
  * attestation; Octocrawl never does, and the route stays off until they do.
  */
-export const INSTALLED_CHROME_RECOMMENDED_HINT = 'installed_chrome is the enhanced route Octocrawl recommends on your own machine for a check like this, and this server\'s access grant does not name it: it reads the page in this machine\'s Google Chrome, in a window it opens (at most 2 at once); to use it, write an access grant of tier enhanced that names installed_chrome, with your own attestation, start the server with it (octocrawl serve --access-grant <file>, or W2L_ACCESS_GRANT) and send the request again with access: "enhanced"; it was measured on one machine behind one exit, so what it gets past is unknown on yours (https://github.com/77777R7/Octocrawl/blob/main/docs/access.md#the-recommended-route-on-your-own-machine)'
+export const INSTALLED_CHROME_RECOMMENDED_HINT = 'installed_chrome with compatible_transport is the enhanced route Octocrawl recommends on your own machine for a check like this, and this server\'s access grant does not name installed_chrome: it reads the page in this machine\'s Google Chrome, in a window it opens (at most 2 at once), and compatible_transport first reads some hosts\' pages over a browser-compatible HTTP transport; to use it, write an access grant of tier enhanced that names installed_chrome and compatible_transport, with your own attestation, start the server with it (octocrawl serve --access-grant <file>, or W2L_ACCESS_GRANT) and send the request again with access: "enhanced"; it was measured on one machine behind one exit, so what it gets past is unknown on yours (https://github.com/77777R7/Octocrawl/blob/main/docs/access.md#the-recommended-route-on-your-own-machine)'
 
 /** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */
 export const SCREENSHOT_UNAVAILABLE_HINT = "the screenshot could not be captured, so screenshot is null while the page result stands; the trace's screenshot_failed event names the error; a viewport capture (fullPage false) is the lighter request, and a longer timeout gives a slow page more time"

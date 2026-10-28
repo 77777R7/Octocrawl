@@ -72,7 +72,7 @@ describe('agent hints', () => {
       expect(said[1], blockReason).toBe(INSTALLED_CHROME_RECOMMENDED_HINT)
     }
     // It names the route, what it opens, and the grant the person writes and starts the server with; and what was not measured.
-    for (const part of ['installed_chrome', "this machine's Google Chrome", 'at most 2', 'tier enhanced', 'your own attestation', '--access-grant', 'W2L_ACCESS_GRANT', 'access: "enhanced"', 'unknown on yours', 'docs/access.md#the-recommended-route-on-your-own-machine']) {
+    for (const part of ['installed_chrome', 'compatible_transport', 'names installed_chrome and compatible_transport', "this machine's Google Chrome", 'at most 2', 'tier enhanced', 'your own attestation', '--access-grant', 'W2L_ACCESS_GRANT', 'access: "enhanced"', 'unknown on yours', 'docs/access.md#the-recommended-route-on-your-own-machine']) {
       expect(INSTALLED_CHROME_RECOMMENDED_HINT).toContain(part)
     }
     // A server that does not offer it (hosted, or one whose grant already names the route) says the gate alone, as before.

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 // The weekly rerun's plan and record header (research/access/weekly.mjs), kept pure so they can be tested here.
-import { IC16_BASELINE, baselineLine, chromeMajor, chromeOfRecord, isoWeek, observationsBetween, readRouteEntries, rotationGroupOf, rotationGroups, steelLayerLines, summaryRows, weeklyHeaderLines, weeklySet } from '../../../research/access/weeklyPlan.mjs'
+import { DEFAULT_ARMS, IC16_BASELINE, baselineLine, chromeMajor, chromeOfRecord, freeGrantRefusal, isoWeek, observationsBetween, readRouteEntries, rotationGroupOf, rotationGroups, steelLayerLines, summaryRows, weeklyHeaderLines, weeklySet } from '../../../research/access/weeklyPlan.mjs'
 import type { ArmResult, StoredObservation, Subsets, TaskFile } from '../../../research/access/weeklyPlan.mjs'
 
 const taskFile: TaskFile = JSON.parse(readFileSync(new URL('../../../research/access/tasks.v1.json', import.meta.url), 'utf8'))
@@ -132,6 +132,22 @@ describe('weekly summary', () => {
     expect(rows[1]?.status).toBe('not_run (no key)')
     expect(rows[1]?.verified).toBeNull()
     expect(rows[0]?.gap).toEqual({ all: null, healthy: null, challenge: null, rotation: null })
+  })
+})
+
+describe('the free arm\'s grants and the default arms (ADR 0005, revision of 2026-10-28)', () => {
+  it('runs no Steel arm unless asked', () => {
+    expect(DEFAULT_ARMS).toEqual(['free', 'firecrawl', 'zenrows'])
+  })
+
+  it('takes installed_chrome alone for the standard tasks and with compatible_transport, in any order, for the 16 challenge tasks', () => {
+    expect(freeGrantRefusal('standard', ['installed_chrome'])).toBeNull()
+    expect(freeGrantRefusal('challenge', ['installed_chrome', 'compatible_transport'])).toBeNull()
+    expect(freeGrantRefusal('challenge', ['compatible_transport', 'installed_chrome'])).toBeNull()
+    expect(freeGrantRefusal('standard', ['installed_chrome', 'compatible_transport'])).toBe('it must name installed_chrome alone; it names installed_chrome, compatible_transport')
+    expect(freeGrantRefusal('challenge', ['installed_chrome'])).toBe('it must name compatible_transport and installed_chrome, nothing else; it names installed_chrome')
+    expect(freeGrantRefusal('challenge', ['installed_chrome', 'compatible_transport', 'vendor_remote_browser'])).not.toBeNull()
+    expect(freeGrantRefusal('challenge', null)).toBe('it must name compatible_transport and installed_chrome; it names nothing readable')
   })
 })
 
