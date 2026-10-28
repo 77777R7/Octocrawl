@@ -24,6 +24,7 @@ import {
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Download, type Page, type Request, type Response, type Route } from 'playwright'
 import { browserEngineFor, type BrowserEngineName } from './browserEngine.js'
 import { DETECTION_FLAGS_ID, launchInstalledChrome, type InstalledChromeTestSeams } from './installedChrome.js'
+import { HOSTED_CHROME_PROFILE_ID, launchHostedChrome, type HostedChromeLaunch } from './hostedChrome.js'
 import type { BrowserIdentityChoice } from './browserIdentity.js'
 import { solveChallenges, TASK_CONTRACT_UNMET, type CaptchaSolving, type SolveVerdict } from '../vendors/captchaSolver.js'
 import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLaunchOptions, defaultNetworkPolicy, EgressRoutes, pinnedBrowserHostRules, readCappedBody } from '../egress.js'
@@ -382,7 +383,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
      * keeps its own. Only for a browser on the run's own routes: a user's proxy or a host-pinned browser reads its own.
      */
     robotsCache?: RobotsOriginCache,
+    /**
+     * ADR 0005 `hosted_chrome` (revision of 2026-10-27), for the `browserEngine` of that name on the octocrawl-chrome
+     * service: the address guard Chrome goes through and the kind of exit behind it. Null (the default) on every other engine.
+     */
+    private readonly hostedChrome: HostedChromeLaunch | null = null,
   ) {
+    if ((browserEngine === 'hosted_chrome') !== (hostedChrome !== null)) throw new Error('hosted_chrome launches behind its address guard: the engine and its launch go together')
     if (robotsCache !== undefined && (access?.proxy || browserAllowedHosts !== undefined)) {
       throw new Error("a browser on a route of its own (a user's proxy, host pinning) reads robots.txt on that route, not from the run's cache")
     }
@@ -393,8 +400,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       throw new Error('the enhanced browser runs only in the public browser lane, never with a saved login or a managed profile')
     }
     // ADR 0005 installed_chrome: the browser's own identity on the standard public lane, nothing of the hosted preview.
-    if (browserEngine === 'installed_chrome' && (mode !== 'standard' || browserIdentity !== 'actual' || publicPreferenceState !== null || previewProductToken || browserAllowedHosts !== undefined)) {
-      throw new Error('installed_chrome runs only as the standard public browser with its own identity, never on a hosted preview')
+    if ((browserEngine === 'installed_chrome' || browserEngine === 'hosted_chrome') && (mode !== 'standard' || browserIdentity !== 'actual' || publicPreferenceState !== null || previewProductToken || browserAllowedHosts !== undefined)) {
+      throw new Error(`${browserEngine} runs only as the standard public browser with its own identity, never on a hosted preview`)
     }
     if (publicPreferenceState !== null && (mode !== 'standard' || access != null || managedProfileDir !== null)) {
       throw new Error('anonymous public preference state is only available to the standard public browser')
@@ -534,8 +541,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
       throwIfExecutionStopped(execution)
       await raceWithSignal(assertSafeUrl(url, this.networkPolicy), signal)
       const managedContext = this.managedProfileDir === null ? null : await raceWithSignal(this.getManagedContext(execution), signal)
-      if (this.browserEngine === 'installed_chrome') {
-        ownBrowserPending = launchInstalledChrome({ timeout: 30_000, ...chromiumProxyLaunchOptions(this.envProxy) }, this.installedChromeSeams, signal)
+      if (this.browserEngine === 'installed_chrome' || this.hostedChrome !== null) {
+        // hosted_chrome: the same launch, behind its address guard alone (hostedChrome.ts), never the environment's proxy.
+        ownBrowserPending = this.hostedChrome !== null
+          ? launchHostedChrome(this.hostedChrome.guard, { timeout: 30_000 }, this.installedChromeSeams, signal)
+          : launchInstalledChrome({ timeout: 30_000, ...chromiumProxyLaunchOptions(this.envProxy) }, this.installedChromeSeams, signal)
         void ownBrowserPending.then(launched => { if (signal?.aborted) void launched.close().catch(() => {}) }, () => {})
         ownBrowser = await raceWithSignal(ownBrowserPending, signal)
       }
@@ -543,6 +553,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
       // Only a run on another engine says so: a default run's trace is what it always was. installed_chrome names the
       // Chrome it ran and the detection flags it launched with (ADR 0005: the record says which Chrome was measured).
       if (this.browserEngine === 'installed_chrome') trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_engine', detail: { engine: this.browserEngine, version: browser.version(), flags: DETECTION_FLAGS_ID } })
+      else if (this.hostedChrome !== null) {
+        // The record's route, pinned version and launch (hosted_chrome's own identifier), and the kind of exit (ADR 0005 decision four).
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_engine', detail: { engine: this.browserEngine, version: browser.version(), flags: HOSTED_CHROME_PROFILE_ID } })
+        trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'egress_kind', detail: { kind: this.hostedChrome.egressKind } })
+      }
       else if (this.browserEngine !== 'playwright') trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'browser_engine', detail: { engine: this.browserEngine, version: this.engineVersion } })
       throwIfExecutionStopped(execution)
       // Real Chromium major, not the floor constant: declaring a Chrome
@@ -1000,7 +1015,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         // check whose script runs and reloads the page) is waited out, up to its gate's cap (CHALLENGE_WAIT_CAP_MS). The
         // page is only read again, never touched; what it shows when the wait ends is read as any page is. A captcha is
         // recorded as not waited on and goes straight to the solver below, where the grant has one.
-        if (this.browserEngine === 'installed_chrome') {
+        if (this.browserEngine === 'installed_chrome' || this.browserEngine === 'hosted_chrome') {
           const waited = await waitOutChallenge(page, documents, response, execution, signal)
           if (waited !== null) {
             trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'challenge_wait', detail: waited })

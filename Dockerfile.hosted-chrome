@@ -1,0 +1,38 @@
+# The octocrawl-chrome service (ADR 0005, revision of 2026-10-27: hosted_chrome; ROADMAP stage H, decision D1): one
+# page per request in a pinned Google Chrome, headed under Xvfb, behind its address guard (packages/mcp/src/hostedChrome.ts).
+# From the G4 image that measured this Chrome on Cloud Run gen2 (research/access/g4-cloudrun/Dockerfile,
+# research/access/runs/2026-10-21-g4-cloudrun-fixed-runtime-22c9e1ca.md): the base image pinned by digest, Chrome by
+# version and SHA-256, Playwright (the CDP driver) by package-lock.json.
+FROM node:26.8.1-bookworm@sha256:53eaddc9c421e3e33f5365bb605cb4d85477886745573216219933e22ac13ab0
+
+# Google Chrome 155.0.8059.79, the build G4 measured, from Google's pool, checked against the SHA-256 G4 took on
+# 2026-10-21. A new version is a change to the launch: it passes ADR 0005's gate (two challenge16 runs) before it serves.
+# Xvfb as its display, tini as PID 1, the 2026-10-14 fonts; python3, make and g++ for better-sqlite3's fallback build.
+ARG CHROME_VERSION=155.0.8059.79-1
+ARG CHROME_SHA256=b7726070ca707965e9a17b38e4f15ba283bf6f65c339626c092862af7b19badc
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget xvfb xauth tini fonts-liberation fonts-noto-cjk python3 make g++ \
+    && wget -qO /tmp/chrome.deb "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${CHROME_VERSION}_amd64.deb" \
+    && echo "${CHROME_SHA256}  /tmp/chrome.deb" | sha256sum -c - \
+    && apt-get install -y --no-install-recommends /tmp/chrome.deb && rm /tmp/chrome.deb \
+    && rm -f /etc/apt/sources.list.d/google-chrome.list \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
+COPY packages ./packages
+COPY deploy/hosted-chrome ./deploy/hosted-chrome
+# Playwright drives the installed Chrome over CDP: no bundled browser is downloaded. What the image holds is written down.
+RUN npm ci && npx tsc --build \
+    && { google-chrome --version; node --version; npx playwright --version; dpkg-query -W -f '${Package} ${Version}\n'; } > /app/.hosted-chrome-manifest.txt
+
+# Locale and time zone stated, as G4's image had them; the launch passes no --lang and no time zone (ADR 0005).
+ENV LANG=C.UTF-8 TZ=Etc/UTC NODE_ENV=production PORT=8080
+# Chrome runs as a user, never root, so its own sandbox stays on: the launch takes no --no-sandbox (ADR 0005). Each call's
+# profile is a fresh temporary directory, deleted when its Chrome closes (installedChrome.ts launchInstalledChrome).
+# The flags that would turn off Chrome's background downloads are not here: their hook, HOSTED_CHROME_BACKGROUND_DOWNLOAD_FLAGS
+# (packages/bench/src/subjects/hostedChrome.ts), stays empty until ADR 0005 item 8's two challenge16 runs admit them.
+RUN useradd --create-home octo && chown -R octo /app
+USER octo
+EXPOSE 8080
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD ["bash", "deploy/hosted-chrome/start.sh"]

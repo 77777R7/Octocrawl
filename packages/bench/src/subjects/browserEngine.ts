@@ -19,8 +19,9 @@ import { launchInstalledChrome } from './installedChrome.js'
 /**
  * `installed_chrome` (ADR 0005, installedChrome.ts) is not chosen here: it is a rung of its own, which the ladder builds
  * only for a grant that names it and a request for enhanced access, and its subject launches one Chrome per fetch.
+ * `hosted_chrome` (hostedChrome.ts) is the octocrawl-chrome service's: its subject launches it behind its address guard.
  */
-export type BrowserEngineName = 'playwright' | 'patchright' | 'installed_chrome'
+export type BrowserEngineName = 'playwright' | 'patchright' | 'installed_chrome' | 'hosted_chrome'
 
 export interface BrowserEngine {
   name: BrowserEngineName
