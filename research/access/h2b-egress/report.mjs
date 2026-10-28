@@ -110,7 +110,7 @@ const refusedNote = (t) => {
   const site = siteHost.get(t.id)
   const own = kept.find((x) => x.host === site)
   if (own) return `; exit refused the site ${own.status}`
-  return `; exit refused other hosts${kept.length >= 5 ? ', site unknown' : ''}`
+  return `; exit refused other hosts${(t.bytes?.refusals ?? []).length >= 5 ? ', site unknown' : ''}`
 }
 const ids = [...new Set(runs.flatMap((r) => r.tasks.map((t) => t.id)))]
 out.push(`| Task | ${runs.map((r) => `w${r.window} ${r.arm}${r.cpus === 4 ? ' 4 vCPU' : ''}`).join(' | ')} |`)
