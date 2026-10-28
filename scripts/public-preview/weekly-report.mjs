@@ -58,8 +58,10 @@ export function summarizeSiteEvents(lines) {
   const previews = new Map()
   for (const line of kept) if (line.event === 'w2l_preview') previews.set(line.status ?? '(unknown)', (previews.get(line.status ?? '(unknown)') ?? 0) + 1)
   // ChatGPT adds utm_source=chatgpt.com to the links it shows, and the tag was missing for about a week in October 2026.
-  // Of the page views that come from ChatGPT (the tag or a ChatGPT referrer), how many carry the tag. A view with neither
-  // is counted as direct, so this is a floor, and a drop in the tagged share is the sign that the tag has gone again.
+  // Of the page views that can be told to come from ChatGPT (the tag, or a ChatGPT referrer), how many carry the tag.
+  // A view with neither is counted as direct and is in neither number: `views` is a floor of ChatGPT's visits, but the
+  // share is not, because it leaves out exactly the views an outage produces (no tag and no referrer). A tag that has
+  // gone shows as fewer ChatGPT views a day, and as a lower share only if the referrer survives.
   const chatgptDays = new Map()
   for (const line of views) {
     const props = line.props ?? {}
@@ -180,7 +182,7 @@ export function renderReport(report) {
     out.push(`${s.pageViews} page views from ${s.visitorDays} visitor-days.`, '')
     out.push(markdownTable(['Day', 'Visitors'], s.perDay), '')
     out.push('### Where they came from', '', markdownTable(['Source', 'Visitor-days', 'Page views'], s.sources.map(r => [r.source, r.visitorDays, r.views])), '')
-    if (s.chatgptTag?.views > 0) out.push(`From ChatGPT: ${s.chatgptTag.views} page views, ${s.chatgptTag.tagged} of them with utm_source=chatgpt.com (${(s.chatgptTag.taggedShare * 100).toFixed(0)}%). A view with neither the tag nor a ChatGPT referrer is counted as direct, so this is a floor; a fall in the tagged share means the tag has gone again.`, '')
+    if (s.chatgptTag?.views > 0) out.push(`From ChatGPT, by tag or referrer: ${s.chatgptTag.views} page view${s.chatgptTag.views === 1 ? '' : 's'}, ${s.chatgptTag.tagged} with utm_source=chatgpt.com (${(s.chatgptTag.taggedShare * 100).toFixed(0)}%). A view with neither the tag nor a ChatGPT referrer is counted as direct and is not in these numbers, so a tag that has gone shows as fewer ChatGPT views a day, not necessarily as a lower share.`, '')
     out.push('### Pages', '', markdownTable(['Path', 'Page views'], s.paths), '')
     out.push('### The site\'s own links (`from`)', '', s.fromTags.length ? markdownTable(['from', 'Page views'], s.fromTags) : 'None.', '')
     out.push('### What they did', '', s.actions.length ? markdownTable(['Event', 'Count'], s.actions) : 'No events besides page views.', '')

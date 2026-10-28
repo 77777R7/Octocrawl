@@ -26,7 +26,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   GSC_SITE, SITE_ORIGIN, canonicalPath, describeInspection, gscWindow, indexChanges, indexCell, launchCell, pagesByPath,
-  parseSitemap, previousFor, readSeries, renderSummary, seriesAppend, seriesEntry, snapshotId, sourceOfPath, summarizeAiReferrals,
+  firstPartySummary, parseSitemap, previousFor, readSeries, renderSummary, seriesAppend, seriesEntry, snapshotId, sourceOfPath,
   summarizeGsc, summarizeInspections, updateTracker,
 } from './snapshot-lib.mjs'
 
@@ -201,9 +201,8 @@ async function main(argv) {
     const attempt = await settle(() => readFirstParty(repoRoot))
     if (attempt.error) notRead['Site analytics'] = attempt.error
     else {
-      const site = attempt.value.site.value
       firstPartyRaw = attempt.value
-      firstParty = { days: FIRST_PARTY_DAYS, pageViews: site.pageViews, visitorDays: site.visitorDays, ai: summarizeAiReferrals(site.sources, site.pageViews), chatgptTag: site.chatgptTag ?? null }
+      firstParty = firstPartySummary(attempt.value.site.value, FIRST_PARTY_DAYS)
     }
   }
 

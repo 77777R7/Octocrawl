@@ -335,6 +335,11 @@ export function summarizeAiReferrals(sources, pageViews) {
   return { views, visitorDays: assistants.reduce((n, entry) => n + entry.visitorDays, 0), viewShare: pageViews > 0 ? views / pageViews : null, assistants }
 }
 
+/** The first-party block of a series entry, from the weekly report's `site` summary. */
+export function firstPartySummary(site, days) {
+  return { days, pageViews: site.pageViews, visitorDays: site.visitorDays, ai: summarizeAiReferrals(site.sources, site.pageViews), chatgptTag: site.chatgptTag ?? null }
+}
+
 /** The series line for one snapshot: only numbers that were read; a source that was not read is null with its reason in
  * `notRead`. */
 export function seriesEntry({ id, takenAt, sourceCommit, dirty, scriptSha256, route, window, gsc, index, firstParty, notRead }) {
@@ -374,9 +379,9 @@ export function renderSummary(entry, previous, extras = {}) {
     const f = entry.firstParty
     out.push('## First-party site analytics', '', `${f.days} days: ${num(f.pageViews)} page views, ${num(f.visitorDays)} visitor-days (automated and internal lines left out).`, '')
     if (f.ai) {
-      out.push(`From AI assistants (at least; counted by the weekly report's source label, which is the referrer when there is one and the utm tag otherwise; a visit with neither counts as direct): ${num(f.ai.views)} page views${f.ai.viewShare === null ? '' : ` (${pct(f.ai.viewShare)} of all)`}${f.ai.assistants.length ? `: ${f.ai.assistants.map(a => `${a.name} ${num(a.views)} views, ${num(a.visitorDays)} visitor-days`).join('; ')}` : ''}.`, '')
+      out.push(`From AI assistants (at least; counted by the weekly report's source label, which is the referrer when there is one and the utm tag otherwise; a visit with neither counts as direct): ${num(f.ai.views)} page views${f.ai.viewShare === null ? '' : ` (${pct(f.ai.viewShare)} of all)`}${f.ai.assistants.length ? `: ${f.ai.assistants.map(a => `${a.name} ${num(a.views)} views, ${num(a.visitorDays)} visitor-days`).join('; ')}` : ''}. Visitor-days are counted per source label, so one that came through two labels counts twice.`, '')
     }
-    if (f.chatgptTag) out.push(f.chatgptTag.views > 0 ? `ChatGPT page views by tag or by referrer: ${num(f.chatgptTag.views)}, of which ${num(f.chatgptTag.tagged)} carry utm_source=chatgpt.com (${pct(f.chatgptTag.taggedShare)}; this can exceed the ChatGPT line above by views that have a tag and another site's referrer); by day (views, tagged): ${f.chatgptTag.byDay.map(([date, views, tagged]) => `${date} ${views}, ${tagged}`).join('; ')}.` : 'ChatGPT page views by tag or by referrer: none in the window, so the tagged share is unknown.', '')
+    if (f.chatgptTag) out.push(f.chatgptTag.views > 0 ? `ChatGPT page views by tag or by referrer: ${num(f.chatgptTag.views)}, of which ${num(f.chatgptTag.tagged)} carry utm_source=chatgpt.com (${pct(f.chatgptTag.taggedShare)}; this can exceed the ChatGPT line above by views that have a tag and another site's referrer. A view with neither the tag nor a ChatGPT referrer is not counted here, so a tag that has gone shows as fewer views a day, not necessarily as a lower share); by day (views, tagged): ${f.chatgptTag.byDay.map(([date, views, tagged]) => `${date} ${views}, ${tagged}`).join('; ')}.` : 'ChatGPT page views by tag or by referrer: none in the window, so the tagged share is unknown.', '')
   }
   if (extras.topQueries?.length) out.push('## Top queries', '', '| Query | Clicks | Impressions | Position |', '|---|---:|---:|---:|', ...extras.topQueries.map(row => `| ${row.keys[0].replace(/\|/g, '\\|')} | ${row.clicks} | ${row.impressions} | ${row.position.toFixed(1)} |`), '')
   if (extras.topPages?.length) out.push('## Top pages', '', '| Page | Clicks | Impressions | Position |', '|---|---:|---:|---:|', ...extras.topPages.map(row => `| ${row.keys[0].replace(/\|/g, '\\|')} | ${row.clicks} | ${row.impressions} | ${row.position.toFixed(1)} |`), '')

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import {
   DATA_LINE_PREFIX, canonicalPath, describeInspection, gscWindow, indexChanges, indexCell, launchCell, mergeDataLine, pagesByPath,
   parseSitemap, previousFor, readSeries, renderSummary, seriesAppend, seriesEntry, snapshotId, sourceOfPath, summarizeGsc,
-  summarizeInspections, summarizeAiReferrals, assistantOf, updateTracker,
+  summarizeInspections, summarizeAiReferrals, assistantOf, firstPartySummary, updateTracker,
 } from './snapshot-lib.mjs'
 import { parseArgs } from './snapshot.mjs'
 
@@ -300,7 +300,8 @@ test('the summary shows the AI-assistant views as at least, and the ChatGPT tag 
   const ai = summarizeAiReferrals([{ source: 'utm_source=chatgpt.com', views: 27, visitorDays: 23 }], 90)
   const withTag = renderSummary(seriesEntry({ ...base, firstParty: { days: 7, pageViews: 90, visitorDays: 49, ai, chatgptTag: { views: 30, tagged: 27, taggedShare: 0.9, byDay: [['2026-10-20', 10, 9], ['2026-10-21', 20, 18]] } } }), null)
   assert.match(withTag, /From AI assistants \(at least; counted by the weekly report's source label, which is the referrer when there is one and the utm tag otherwise; a visit with neither counts as direct\): 27 page views \(30\.00% of all\): ChatGPT 27 views, 23 visitor-days\./)
-  assert.match(withTag, /ChatGPT page views by tag or by referrer: 30, of which 27 carry utm_source=chatgpt\.com \(90\.00%; this can exceed the ChatGPT line above by views that have a tag and another site's referrer\); by day \(views, tagged\): 2026-10-20 10, 9; 2026-10-21 20, 18\./)
+  assert.match(withTag, /ChatGPT page views by tag or by referrer: 30, of which 27 carry utm_source=chatgpt\.com \(90\.00%; this can exceed the ChatGPT line above by views that have a tag and another site's referrer\. A view with neither the tag nor a ChatGPT referrer is not counted here, so a tag that has gone shows as fewer views a day, not necessarily as a lower share\); by day \(views, tagged\): 2026-10-20 10, 9; 2026-10-21 20, 18\./)
+  assert.match(withTag, /Visitor-days are counted per source label, so one that came through two labels counts twice\./)
   const none = renderSummary(seriesEntry({ ...base, firstParty: { days: 7, pageViews: 90, visitorDays: 49, ai: summarizeAiReferrals([], 90), chatgptTag: { views: 0, tagged: 0, taggedShare: null, byDay: [] } } }), null)
   assert.match(none, /From AI assistants \(at least; .*\): 0 page views \(0\.00% of all\)\./)
   assert.match(none, /ChatGPT page views by tag or by referrer: none in the window, so the tagged share is unknown/)
@@ -315,4 +316,37 @@ test('the summary warns that +0 can mean no newer Search Console day when both s
   assert.match(renderSummary(now, { gsc: gsc('2026-10-25'), index: null }), /newest day with data is 2026-10-25 in both snapshots, so a change of \+0 can mean that Search Console has no newer day yet/)
   assert.doesNotMatch(renderSummary(now, { gsc: gsc('2026-10-24'), index: null }), /in both snapshots/)
   assert.doesNotMatch(renderSummary(now, { gsc: null, index: null }), /in both snapshots/)
+})
+
+test('every utm_source value and referrer host on the documented AI lists names its assistant', () => {
+  const expected = {
+    ChatGPT: { utm: ['chatgpt', 'chatgpt.com'], hosts: ['chatgpt.com', 'chat.openai.com'] },
+    Claude: { utm: ['claude', 'claude.ai'], hosts: ['claude.ai'] },
+    Perplexity: { utm: ['perplexity'], hosts: ['perplexity.ai', 'ai.perplexity.app'] },
+    Gemini: { utm: ['gemini'], hosts: ['gemini.google.com'] },
+    Copilot: { utm: ['copilot', 'copilot.com'], hosts: ['copilot.microsoft.com', 'copilot.cloud.microsoft', 'copilot.com'] },
+    DeepSeek: { utm: ['deepseek'], hosts: ['chat.deepseek.com', 'deepseek.com'] },
+    Grok: { utm: ['grok'], hosts: ['grok.com'] },
+    'Other assistants': { utm: [], hosts: ['meta.ai', 'you.com', 'phind.com', 'chat.mistral.ai', 'kimi.com'] },
+  }
+  for (const [name, { utm, hosts }] of Object.entries(expected)) {
+    for (const value of utm) assert.equal(assistantOf(`utm_source=${value}`), name, `utm_source=${value}`)
+    for (const host of hosts) assert.equal(assistantOf(host), name, host)
+  }
+  assert.equal(assistantOf('utm_source=meta.ai'), null)
+  assert.equal(assistantOf('claude'), null)
+})
+
+test('the first-party block carries the weekly report\'s page views, visitor-days, AI sources and ChatGPT tag counts, each in its own field', () => {
+  const site = {
+    pageViews: 112, visitorDays: 60,
+    sources: [{ source: 'utm_source=chatgpt.com', views: 38, visitorDays: 32 }, { source: 'google.com', views: 1, visitorDays: 1 }],
+    chatgptTag: { views: 39, tagged: 39, taggedShare: 1, byDay: [['2026-10-27', 12, 12]] },
+  }
+  assert.deepEqual(firstPartySummary(site, 7), {
+    days: 7, pageViews: 112, visitorDays: 60,
+    ai: { views: 38, visitorDays: 32, viewShare: 38 / 112, assistants: [{ name: 'ChatGPT', views: 38, visitorDays: 32, sources: ['utm_source=chatgpt.com'] }] },
+    chatgptTag: site.chatgptTag,
+  })
+  assert.equal(firstPartySummary({ pageViews: 1, visitorDays: 1, sources: [] }, 7).chatgptTag, null)
 })
