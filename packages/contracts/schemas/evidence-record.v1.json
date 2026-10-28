@@ -407,7 +407,7 @@
           "type": ["string", "null"]
         },
         "externalCostUsd": {
-          "description": "Third-party spend, in USD, of the run that produced the result (for a cache hit, of the fetch it reuses): 0 when no paid service was called, null when a called service stated no price. The egress (a person's own proxy) is not counted.",
+          "description": "Third-party spend, in USD, of the run that produced the result (for a cache hit, of the fetch it reuses): 0 when no paid service was called, null when a called service stated no price or a paid call's share of a fixed monthly rent is part of it (paidCalls[].fixedMonthlyUsd). The egress (a person's own proxy) is not counted.",
           "type": ["number", "null"],
           "minimum": 0
         },
@@ -590,6 +590,11 @@
           "description": "For a third-party CAPTCHA solver's call (third_party_captcha_solver): the solves it was asked for, failed ones included; solves is those it answered. Absent on other calls. Added after bytesCapped.",
           "type": ["integer", "null"],
           "minimum": 0
+        },
+        "fixedMonthlyUsd": {
+          "description": "The provider's fixed monthly rent the call's exit is part of (an ISP or datacenter plan: its per-IP monthly price for each rented IP), charged to the operator's monthly budget, never to the call: ceilingUsd and chargedUsd leave it out. The call's share of it is not known, so a record with such a call has a null externalCostUsd. Absent on a call whose provider charges no fixed rent. Added after solveAttempts.",
+          "type": "number",
+          "exclusiveMinimum": 0
         }
       }
     },

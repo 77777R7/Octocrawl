@@ -74,6 +74,13 @@ export function accessGrantRef(grant: AccessGrant): EvidenceAccessGrant {
  * price (the provider's built-in CAPTCHA solving) needs `maxSolvesPerCall`, the most solves the ceiling allows for;
  * the provider solves what appears, so a call that solved more is charged what it solved, above the ceiling, and the
  * record says so.
+ *
+ * A fixed cost (ADR 0005, revision of 2026-10-27, decision three) is a monthly rent per IP, as ISP and datacenter proxy
+ * plans charge it: `perIpMonthUsd` for each of `rentedIps`. It is charged to the operator's monthly budget once a month
+ * (openMonthlySpendLedger), never reserved or charged per call: tariffCeilingUsd and tariffCostUsd leave it out. A
+ * call's share of it depends on how many calls the month holds, which no call knows, so a call's record never prices it,
+ * neither as 0 nor as an amortised estimate: the paid call names the rent (`fixedMonthlyUsd`) and the page's
+ * third-party cost is null (unknown).
  */
 export interface VendorTariff {
   perCallUsd: number
@@ -90,6 +97,25 @@ export interface VendorTariff {
   perSolveUsd: number
   /** The solves one call's ceiling allows for; null with no per-solve price. */
   maxSolvesPerCall: number | null
+  /** The plan's fixed rent per IP per month (an ISP or datacenter plan); absent or 0: none. Never charged per call. */
+  perIpMonthUsd?: number
+  /** The IPs the plan rents, each at `perIpMonthUsd`; absent or null with no rent. */
+  rentedIps?: number | null
+}
+
+/** The tariff's fixed rent for one month, in US dollars: `perIpMonthUsd` for each rented IP; 0 with no rent. */
+export function tariffMonthlyFixedUsd(tariff: VendorTariff): number {
+  return (tariff.perIpMonthUsd ?? 0) * (tariff.rentedIps ?? 0)
+}
+
+/**
+ * What a paid call's record says of its provider's fixed cost: the month's rent the call's exit is part of, when the
+ * tariff has one (`fixedMonthlyUsd`); nothing otherwise. Its share of this call is not known: a record that carries it
+ * has a null third-party cost (unknown, never 0), whatever the call was charged per call.
+ */
+export function paidCallFixedCost(tariff: VendorTariff): { fixedMonthlyUsd?: number } {
+  const monthly = tariffMonthlyFixedUsd(tariff)
+  return monthly > 0 ? { fixedMonthlyUsd: monthly } : {}
 }
 
 /** What a call's provider sessions used besides time, when the provider reports it: null is unknown, never zero. */
@@ -101,7 +127,7 @@ export interface VendorSessionUsage {
 }
 
 /**
- * The most one call can cost under this tariff, in US dollars: its per-call price, its longest session (at least the
+ * The most one call can cost under this tariff, in US dollars, its fixed monthly rent left out: its per-call price, its longest session (at least the
  * billed minimum and `floorMs`, the shortest session the provider can be told to end at) rounded up to the billing step,
  * the most bytes it may move at the per-GB price, and the solves allowed for at the per-solve price.
  */
@@ -110,7 +136,7 @@ export function tariffCeilingUsd(tariff: VendorTariff, floorMs = 0): number {
 }
 
 /**
- * What one call whose session lasted `sessionMs` costs under this tariff, in US dollars: its per-call price, the
+ * What one call whose session lasted `sessionMs` is charged under this tariff, in US dollars, its fixed monthly rent left out: its per-call price, the
  * session's time (at least the billed minimum) rounded up to the billing step, and what the session used at the per-GB
  * and per-solve prices. A usage the provider did not report (null) is priced at the ceiling's allowance for it.
  */
@@ -123,11 +149,14 @@ export function tariffCostUsd(tariff: VendorTariff, sessionMs: number, usage: Ve
   return tariff.perCallUsd + (tariff.perHourUsd * billedMs) / 3_600_000 + ((tariff.perGbUsd ?? 0) * Math.max(bytes, 0)) / 1e9 + (tariff.perSolveUsd ?? 0) * Math.max(solves, 0)
 }
 
-const TARIFF_PRICES = ['perCallUsd', 'perHourUsd', 'perGbUsd', 'perSolveUsd'] as const
-const TARIFF_LIMITS = ['maxSessionMs', 'minBilledMs', 'billingIncrementMs', 'maxBytesPerCall', 'maxSolvesPerCall'] as const
+const TARIFF_PRICES = ['perCallUsd', 'perHourUsd', 'perGbUsd', 'perSolveUsd', 'perIpMonthUsd'] as const
+const TARIFF_LIMITS = ['maxSessionMs', 'minBilledMs', 'billingIncrementMs', 'maxBytesPerCall', 'maxSolvesPerCall', 'rentedIps'] as const
 
-/** One provider's tariff from its JSON, or the problems with it. */
-function readTariff(vendor: string, input: unknown, problems: AccessGrantProblem[]): VendorTariff | null {
+/**
+ * One provider's tariff from its JSON, or the problems with it. `rent`: whether it may state a fixed monthly rent, which
+ * only a monthly budget can be charged (openMonthlySpendLedger): an operator's, not an access grant's per-run budget.
+ */
+function readTariff(vendor: string, input: unknown, problems: AccessGrantProblem[], rent = false): VendorTariff | null {
   const field = `tariffs.${vendor}`
   if (!isRecord(input)) { problems.push({ field, kind: 'invalid', reason: 'a tariff is an object of prices and limits' }); return null }
   const known = new Set<string>([...TARIFF_PRICES, ...TARIFF_LIMITS])
@@ -148,11 +177,30 @@ function readTariff(vendor: string, input: unknown, problems: AccessGrantProblem
     perCallUsd: price('perCallUsd'), perHourUsd: price('perHourUsd'), maxSessionMs: limit('maxSessionMs'), minBilledMs: limit('minBilledMs') ?? 0, billingIncrementMs: limit('billingIncrementMs') ?? 1,
     perGbUsd: price('perGbUsd'), maxBytesPerCall: limit('maxBytesPerCall'), perSolveUsd: price('perSolveUsd'), maxSolvesPerCall: limit('maxSolvesPerCall'),
   }
-  if (TARIFF_PRICES.every((key) => input[key] === undefined || input[key] === null)) problems.push({ field, kind: 'invalid', reason: 'a tariff names at least one price: perCallUsd, perHourUsd, perGbUsd or perSolveUsd' })
+  // The fixed rent is on the tariff only when it names one, so a tariff without it reads as it did before rents existed.
+  const rentUsd = price('perIpMonthUsd')
+  const rentedIps = limit('rentedIps')
+  const named = (input.perIpMonthUsd ?? null) !== null || rentedIps !== null
+  if (named && !rent) problems.push({ field: `${field}.perIpMonthUsd`, kind: 'invalid', reason: 'a fixed monthly rent is charged to an operator\'s monthly budget, which an access grant\'s per-run budget is not: no route of a grant would charge it' })
+  if (rentUsd > 0 || rentedIps !== null) Object.assign(tariff, { perIpMonthUsd: rentUsd, rentedIps })
+  if (!Number.isFinite(rentUsd * (rentedIps ?? 0))) problems.push({ field: `${field}.rentedIps`, kind: 'invalid', reason: 'the month\'s rent, perIpMonthUsd for each rented IP, is not a finite number of US dollars' })
+  if (TARIFF_PRICES.every((key) => input[key] === undefined || input[key] === null)) problems.push({ field, kind: 'invalid', reason: 'a tariff names at least one price: perCallUsd, perHourUsd, perGbUsd, perSolveUsd or perIpMonthUsd' })
+  if (rentUsd > 0 && rentedIps === null) problems.push({ field: `${field}.rentedIps`, kind: 'invalid', reason: 'a per-IP monthly rent needs the number of IPs the plan rents, or the month\'s fixed cost is unknown' })
+  if (rentedIps !== null && rentUsd === 0) problems.push({ field: `${field}.perIpMonthUsd`, kind: 'invalid', reason: 'rentedIps is for a plan with a positive per-IP monthly rent' })
   if (tariff.perHourUsd > 0 && tariff.maxSessionMs === null) problems.push({ field: `${field}.maxSessionMs`, kind: 'invalid', reason: 'a per-hour price needs the longest session a call may hold, or its cost has no ceiling' })
   if (tariff.perGbUsd > 0 && tariff.maxBytesPerCall === null) problems.push({ field: `${field}.maxBytesPerCall`, kind: 'invalid', reason: 'a per-GB price (the provider\'s proxy bandwidth) needs the most bytes one call may move, or its cost has no ceiling; the vendor lane ends the session there' })
   if (tariff.perSolveUsd > 0 && tariff.maxSolvesPerCall === null) problems.push({ field: `${field}.maxSolvesPerCall`, kind: 'invalid', reason: 'a per-solve price needs the solves one call\'s ceiling allows for' })
   return tariff
+}
+
+/**
+ * A provider tariff from an operator's own configuration (hosted Octocrawl's, ADR 0005, revision of 2026-10-27), which,
+ * unlike an access grant's, may state a fixed monthly rent: its monthly budget is opened with it (openMonthlySpendLedger).
+ */
+export function normalizeVendorTariff(vendor: string, input: unknown): { ok: true; tariff: VendorTariff } | { ok: false; problems: readonly AccessGrantProblem[] } {
+  const problems: AccessGrantProblem[] = []
+  const tariff = readTariff(vendor, input, problems, true)
+  return tariff === null || problems.length > 0 ? { ok: false, problems } : { ok: true, tariff }
 }
 
 export type AccessGrantProblemKind =

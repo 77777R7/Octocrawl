@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createSpendLedger } from '../src/spend.js'
+import { createSpendLedger, openMonthlySpendLedger } from '../src/spend.js'
 
 /** The run's spend ledger (ROADMAP PA item 4): a paid call reserves its ceiling first and settles after. */
 describe('the spend ledger', () => {
@@ -62,5 +62,21 @@ describe('the spend ledger', () => {
     expect(createSpendLedger(null).reserve(Number.NaN)).toBeNull()
     expect(createSpendLedger(null).reserve(-1)).toBeNull()
     expect(() => createSpendLedger(-1)).toThrow(/non-negative/)
+  })
+
+  it('opens the operator\'s month with its fixed rents charged first: what calls may spend is what the cap leaves after them', () => {
+    const rent = { perCallUsd: 0, perHourUsd: 0, maxSessionMs: null, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null, perIpMonthUsd: 2.5, rentedIps: 4 }
+    const perGb = { ...rent, perIpMonthUsd: undefined, rentedIps: undefined, perGbUsd: 3, maxBytesPerCall: 5_000_000 }
+    const month = openMonthlySpendLedger(30, { isp: rent, residential: perGb }, 4)
+    // $10 of rent and $4 the month's calls settled: $16 left of $30.
+    expect(month.settledUsd).toBeCloseTo(14)
+    expect(month.reserve(16.01)).toBeNull()
+    expect(month.reserve(16)).not.toBeNull()
+    // Rents above the cap leave nothing for any call; with no cap the month is only counted.
+    expect(openMonthlySpendLedger(5, { isp: rent }).reserve(0.01)).toBeNull()
+    expect(openMonthlySpendLedger(null, { isp: rent }).settledUsd).toBeCloseTo(10)
+    // Rents each finite but not in sum: refused, never opened as if none were owed.
+    const huge = { ...rent, perIpMonthUsd: 1e308, rentedIps: 1 }
+    expect(() => openMonthlySpendLedger(30, { a: huge, b: huge })).toThrow(/finite/)
   })
 })

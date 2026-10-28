@@ -175,7 +175,10 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
   const text = (value: unknown) => (typeof value === 'string' && value !== '' ? value : null)
   const hit = event('cache_hit')
   const stored = hit?.externalCostUsd
-  const externalCostUsd = hit === undefined ? result.usage.externalCostUsd ?? null : typeof stored === 'number' ? stored : null
+  const paid = paidCalls(result.trace)
+  // A paid call whose exit is part of a fixed monthly rent has a share of it no call knows: the cost is unknown, never 0.
+  const rented = paid.calls?.some((call) => call.fixedMonthlyUsd !== undefined) === true
+  const externalCostUsd = rented ? null : hit === undefined ? result.usage.externalCostUsd ?? null : typeof stored === 'number' ? stored : null
   const read = READ_STATUSES.has(result.status)
   // W2L's own lanes record the proxy they leave through and the task session they read with; a vendor and the person's browser do not say.
   const own = (r: EvidenceAccess['route']) => r === 'http' || r === 'http_compat' || r === 'browser' || r === 'enhanced_browser' || r === 'installed_chrome' || r === 'authed_browser'
@@ -200,7 +203,6 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
     const id = own(r) ? text(laneEvent('session_cookies')?.session) : null
     return id === null ? null : { id }
   }
-  const paid = paidCalls(result.trace)
   const route = (r: EvidenceAccess['route'], executor: string | null, executorVersion: string | null = null, profile: string | null = null, completion: AccessCompletion = 'unattended'): EvidenceAccess =>
     ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null, egress: egress(r), session: session(r), paidCalls: paid.calls, grant: paid.grant })
   const laneRan = result.trace.some((e) => e.event === 'identity_sent' || e.event === 'identity_declared' || e.event === 'provider_selected')
@@ -247,7 +249,7 @@ function paidCalls(trace: readonly TraceEvent[]): { calls: EvidencePaidCall[] | 
   for (const event of trace) {
     if (event.event !== 'paid_calls') continue
     for (const call of Array.isArray(event.detail?.calls) ? (event.detail.calls as Record<string, unknown>[]) : []) {
-      const { provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, sessionMs, proxyBytes, solves, proxyCountry, outcome, reason, answer, paidCallId, bytesCounted, bytesCapped, solveAttempts } = call
+      const { provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, sessionMs, proxyBytes, solves, proxyCountry, outcome, reason, answer, paidCallId, bytesCounted, bytesCapped, solveAttempts, fixedMonthlyUsd } = call
       if (!text(provider) || !text(rung) || !Array.isArray(capabilities) || !capabilities.every(text) || !usd(ceilingUsd) || !usd(chargedUsd)) continue
       if (!(reportedCostUsd === null || usd(reportedCostUsd)) || !(outcome === null || (RESULT_STATUS as readonly unknown[]).includes(outcome)) || !(reason === null || text(reason)) || typeof answer !== 'boolean') continue
       // A measured session time is a whole number of milliseconds; anything else (a trace from before it was kept) is null.
@@ -262,7 +264,9 @@ function paidCalls(trace: readonly TraceEvent[]): { calls: EvidencePaidCall[] | 
       }
       // What the transport's own meter counted (PA G1): on the record only when the call carried it, a figure in another shape unknown.
       const counted = bytesCounted === undefined ? {} : { bytesCounted: count(bytesCounted), bytesCapped: typeof bytesCapped === 'boolean' ? bytesCapped : null }
-      calls.push({ provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, sessionMs: measured, ...used, outcome: outcome as EvidencePaidCall['outcome'], reason: reason as EvidencePaidCall['reason'], answer, ...(text(paidCallId) ? { paidCallId } : {}), ...counted })
+      // A fixed monthly rent the call's exit is part of: on the record only as a positive price; the call's share is not one.
+      const rent = typeof fixedMonthlyUsd === 'number' && Number.isFinite(fixedMonthlyUsd) && fixedMonthlyUsd > 0 ? { fixedMonthlyUsd } : {}
+      calls.push({ provider, rung, capabilities, ceilingUsd, chargedUsd, reportedCostUsd, sessionMs: measured, ...used, outcome: outcome as EvidencePaidCall['outcome'], reason: reason as EvidencePaidCall['reason'], answer, ...(text(paidCallId) ? { paidCallId } : {}), ...counted, ...rent })
     }
     const named = event.detail?.grant as Record<string, unknown> | null | undefined
     if (named != null && text(named.tier) && (named.sha256 === null || (typeof named.sha256 === 'string' && /^[0-9a-f]{64}$/.test(named.sha256))) && (named.attestedAt === null || text(named.attestedAt))) {

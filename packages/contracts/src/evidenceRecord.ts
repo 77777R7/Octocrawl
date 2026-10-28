@@ -62,7 +62,7 @@ export interface EvidenceAccess {
   executorVersion: string | null
   /** The browser profile the HTTP transport sent (impit's); null on every other route. Its TLS fingerprint was not observed. */
   profile: string | null
-  /** Third-party spend of the run that produced the result: 0 when no paid service was called, null when a called service stated no price. */
+  /** Third-party spend of the run that produced the result: 0 when no paid service was called, null when a called service stated no price or a paid call's share of a fixed monthly rent is part of it (`paidCalls[].fixedMonthlyUsd`). */
   externalCostUsd: number | null
   /**
    * How the page was read, counted apart (ROADMAP PA items 7 and 8): `unattended` (W2L's own lanes, no session of the
@@ -160,7 +160,14 @@ export interface EvidencePaidCall {
    */
   bytesCounted?: number | null
   /** True when the transport ended a session at the tariff's maxBytesPerCall; null when not known. Added with `bytesCounted`. */
-  bytesCapped?: boolean | null
+  bytesCapped?: boolean | null  /**
+   * The provider's fixed monthly rent the call's exit is part of (ADR 0005, revision of 2026-10-27: an ISP or datacenter
+   * plan's per-IP monthly price for each rented IP), charged to the operator's monthly budget, never to the call:
+   * `ceilingUsd` and `chargedUsd` leave it out. The call's share of it is not known, so a record with such a call has a
+   * null `externalCostUsd`, never 0 and never an amortised estimate. Absent on a call whose provider charges no fixed
+   * rent. Added after `solveAttempts`.
+   */
+  fixedMonthlyUsd?: number
 }
 
 /** The access grant paid calls were made under: enough to name it, not a copy. */
@@ -430,7 +437,7 @@ export const EVIDENCE_RECORD_KEYS = {
   accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit']),
   accessEgressExit: keysOf<EvidenceAccessEgressExit>()(['ip', 'country', 'observedAt']),
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
-  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts']),
+  accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts', 'fixedMonthlyUsd']),
   accessGrant: keysOf<EvidenceAccessGrant>()(['sha256', 'tier', 'attestedAt']),
   verification: keysOf<EvidenceVerification>()(['status', 'verifier', 'contractSha256', 'reason', 'failed']),
   readiness: keysOf<EvidenceReadiness>()(['state', 'basis']),
@@ -449,5 +456,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   fieldEvidence: ['reading'],
   access: ['completion', 'egress', 'session', 'paidCalls', 'grant'],
   accessEgress: ['exit'],
-  accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts'],
+  accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts', 'fixedMonthlyUsd'],
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeAccessGrant, tariffCeilingUsd, tariffCostUsd } from '../src/accessGrant.js'
+import { normalizeAccessGrant, normalizeVendorTariff, paidCallFixedCost, tariffCeilingUsd, tariffCostUsd, tariffMonthlyFixedUsd } from '../src/accessGrant.js'
 
 const ATTESTATION = { principal: 'tester', at: '2026-10-05T00:00:00Z', statement: 'I accept these routes.' }
 
@@ -25,6 +25,40 @@ describe('normalizeAccessGrant', () => {
     expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 90_000, minBilledMs: 0, billingIncrementMs: 60_000, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null })).toBeCloseTo(0.004)
     // A provider that cannot be told to end a session before 60 s bills up to then when a release fails.
     expect(tariffCeilingUsd({ perCallUsd: 0, perHourUsd: 0.12, maxSessionMs: 20_000, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null }, 60_000)).toBeCloseTo(0.002)
+  })
+
+  it('takes a fixed monthly rent per IP from an operator\'s tariff, which no call is reserved or charged (ADR 0005, revision of 2026-10-27)', () => {
+    const tariff = (input: unknown) => { const result = normalizeVendorTariff('isp', input); if (!result.ok) throw new Error(JSON.stringify(result.problems)); return result.tariff }
+    const isp = tariff({ perIpMonthUsd: 2.5, rentedIps: 4 })
+    const dc = tariff({ perIpMonthUsd: 0.03, rentedIps: 100, perGbUsd: 1, maxBytesPerCall: 5_000_000 })
+    expect(isp).toEqual({ perCallUsd: 0, perHourUsd: 0, maxSessionMs: null, minBilledMs: 0, billingIncrementMs: 1, perGbUsd: 0, maxBytesPerCall: null, perSolveUsd: 0, maxSolvesPerCall: null, perIpMonthUsd: 2.5, rentedIps: 4 })
+    // The month's rent: each rented IP at its price.
+    expect(tariffMonthlyFixedUsd(isp)).toBeCloseTo(10)
+    expect(tariffMonthlyFixedUsd(dc)).toBeCloseTo(3)
+    // Nothing of it is reserved or charged per call: a rent alone has a ceiling and a cost of 0 per call, and a per-GB price beside it is the call's alone.
+    expect(tariffCeilingUsd(isp)).toBe(0)
+    expect(tariffCostUsd(isp, 20_000, { proxyBytes: 1_000_000, solves: null })).toBe(0)
+    expect(tariffCostUsd(dc, 20_000, { proxyBytes: 1_000_000, solves: null })).toBeCloseTo(0.001)
+    // A call's record names the rent; its share is not a figure of the record.
+    expect(paidCallFixedCost(isp)).toEqual({ fixedMonthlyUsd: 10 })
+    expect(paidCallFixedCost(tariff({ perCallUsd: 0.01 }))).toEqual({})
+    // A tariff without a rent reads as it did before rents existed.
+    expect(tariff({ perCallUsd: 0.01 })).not.toHaveProperty('perIpMonthUsd')
+  })
+
+  it('refuses a rent in an access grant, whose per-run budget would never be charged it', () => {
+    const result = normalizeAccessGrant({ tariffs: { steel: { perIpMonthUsd: 2.5, rentedIps: 4 } } })
+    expect(result.ok).toBe(false)
+    expect(!result.ok && result.problems.map((problem) => problem.field)).toEqual(['tariffs.steel.perIpMonthUsd'])
+  })
+
+  it('refuses a rent without the IPs it rents, IPs without a rent, a rent that is not a price, and a month that is not finite', () => {
+    const problems = (input: unknown) => { const result = normalizeVendorTariff('isp', input); return result.ok ? [] : result.problems.map((problem) => problem.field) }
+    expect(problems({ perIpMonthUsd: 2.5 })).toEqual(['tariffs.isp.rentedIps'])
+    expect(problems({ perCallUsd: 0.01, rentedIps: 4 })).toEqual(['tariffs.isp.perIpMonthUsd'])
+    expect(problems({ perIpMonthUsd: -1, rentedIps: 4 })).toEqual(['tariffs.isp.perIpMonthUsd', 'tariffs.isp.perIpMonthUsd'])
+    expect(problems({ perIpMonthUsd: 2.5, rentedIps: 1.5 })).toEqual(['tariffs.isp.rentedIps', 'tariffs.isp.rentedIps'])
+    expect(problems({ perIpMonthUsd: 1e308, rentedIps: 1e300 })).toEqual(['tariffs.isp.rentedIps'])
   })
 
   it('prices a session by its measured time under the tariff (ROADMAP PA item 4)', () => {

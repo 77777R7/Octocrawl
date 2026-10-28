@@ -5,6 +5,7 @@
  */
 
 import type { SpendLedger, SpendReservation } from '@w2l/contracts'
+import { tariffMonthlyFixedUsd, type VendorTariff } from './accessGrant.js'
 
 /** Floating sums of cents: a reservation equal to what is left still fits. */
 const EPSILON = 1e-9
@@ -58,4 +59,17 @@ export function createSpendLedger(capUsd: number | null, alreadySettledUsd = 0):
   const ledger = new Ledger(capUsd, null)
   if (Number.isFinite(alreadySettledUsd) && alreadySettledUsd > 0) ledger.settledUsd = alreadySettledUsd
   return ledger
+}
+
+/**
+ * The operator's ledger for one month (ADR 0005, revision of 2026-10-27, decision three): its monthly cap (null: none),
+ * opened with the month's fixed rents settled first, each tariff's `perIpMonthUsd` for every rented IP, and what the
+ * month's calls already settled. A rent is charged here once a month, never to a call; what a call may spend is what
+ * the cap leaves after it.
+ */
+export function openMonthlySpendLedger(capUsd: number | null, tariffs: Readonly<Record<string, VendorTariff>>, settledThisMonthUsd = 0): SpendLedger {
+  const fixedUsd = Object.values(tariffs).reduce((sum, tariff) => sum + tariffMonthlyFixedUsd(tariff), 0)
+  // A month whose rents do not sum to a finite amount is never opened as if none were owed.
+  if (!Number.isFinite(fixedUsd)) throw new Error('the month\'s fixed rents do not sum to a finite number of US dollars')
+  return createSpendLedger(capUsd, fixedUsd + Math.max(settledThisMonthUsd, 0))
 }

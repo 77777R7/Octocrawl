@@ -185,6 +185,17 @@ describe('toEvidenceRecord', () => {
     const solver = { ...measured, solveAttempts: 1, solves: 0 }
     expect(timed([solver, { ...solver, solveAttempts: -1 }])).toEqual([solver, { ...solver, solveAttempts: null }])
     expect(timed([measured])![0]).not.toHaveProperty('solveAttempts')
+    // A call through an exit with a fixed monthly rent names the rent; its share is unknown, so the page's third-party
+    // cost is null, never 0 and never an estimate, whatever the call was charged per call (ADR 0005, revision of 2026-10-27).
+    const rented = { ...call, ceilingUsd: 0, chargedUsd: 0, sessionMs: null, fixedMonthlyUsd: 10 }
+    const priced = (calls: unknown[]) => toEvidenceRecord(result({ lane: 'provider', usage: { ...result().usage, externalCostUsd: 0 } }, [{ at: 0, lane: 'provider', event: 'provider_selected', detail: { provider: 'steel' } }, { ...own, detail: { grant, calls } }]), { mode: 'standard' }, {}, { sourceCommit: null }).access
+    expect(priced([rented])).toMatchObject({ externalCostUsd: null, paidCalls: [rented] })
+    // A rent in another shape is not one: the call is kept without it, and the page's own cost stands.
+    for (const fixedMonthlyUsd of [0, -1, '10']) {
+      const access = priced([{ ...rented, fixedMonthlyUsd }])
+      expect(access?.externalCostUsd, String(fixedMonthlyUsd)).toBe(0)
+      expect(access?.paidCalls?.[0], String(fixedMonthlyUsd)).not.toHaveProperty('fixedMonthlyUsd')
+    }
   })
 
   it('records the device the answering lane declared and the custom headers it sent, sorted by name', () => {
