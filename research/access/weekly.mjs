@@ -232,7 +232,7 @@ async function freeArm() {
   } finally { await stopApi() }
   const ic = runs.filter((r) => r.label.startsWith('free-ic16'))
   const extra = [
-    `- API: http://127.0.0.1:${port}, started by this script twice: with W2L_ACCESS_GRANT=${grantFile} (SHA-256 \`${grant.sha256}\`, capabilities: ${grant.capabilities.join(', ')}) for the healthy and rotation tasks with access "standard", then with W2L_ACCESS_GRANT=${compatFile} (SHA-256 \`${compat.sha256}\`, capabilities: ${compat.capabilities.join(', ')}; compatible_transport on its default hosts) for the 16 challenge tasks with "enhanced"; stopped after each`,
+    `- API: http://127.0.0.1:${port}, started by this script twice: with W2L_ACCESS_GRANT=${grantFile} (SHA-256 \`${grant.sha256}\`, capabilities: ${grant.capabilities.join(', ')}) for the healthy and rotation tasks with access "standard", then with W2L_ACCESS_GRANT=${compatFile} (SHA-256 \`${compat.sha256}\`, capabilities: ${compat.capabilities.join(', ')}; ${process.env.W2L_COMPAT_HOSTS ? `W2L_COMPAT_HOSTS=${process.env.W2L_COMPAT_HOSTS} from the shell` : 'compatible_transport on its default hosts'}) for the 16 challenge tasks with "enhanced"; stopped after each`,
     ...ic.map((r) => `${baselineLine(r.summary.totals.cold?.verified ?? null)}${ic.length > 1 ? ` (run ${r.label})` : ''}`),
     ...(ic.length === 0 ? [baselineLine(null)] : []),
     ...failures,

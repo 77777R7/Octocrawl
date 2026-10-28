@@ -496,7 +496,7 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - 假成功每臂都是窗口 1 一道、窗口 2 两道，两个窗口合计 3/184（95% 上限 4.2%）。
 - 两个窗口都成立的：ic_compat 相对 installed_chrome 增 1（T011）、退 0；ic_compat 和 combined 之间两个方向都是 0。
 - T007 和 T018 两个窗口都由 ic_compat 经 http_compat（impit）通过。
-- 去掉 Steel 丢的题，没有一道在两个窗口里都成立。窗口 1 里 combined 多出的 T052、T053、T059 不是 Steel 交付的（installed_chrome/chrome、installed_chrome/chrome、browser/playwright），三道都在 combined 先跑的第 2 块，ic_compat 在窗口 2 的首次调用里三道都通过了。窗口 2 里 Steel 交付了 ic_compat 没过的 T014、T030、T031、T050，这四道 combined 在窗口 1 都没过。
+- 去掉 Steel 丢的题，没有一道在两个窗口里都成立。窗口 1 里 combined 多出的 T052、T053、T059 不是 Steel 交付的（installed_chrome/chrome、installed_chrome/chrome、browser/playwright），三道都在 combined 先跑的那一块（记录里的 b2，从 0 数），ic_compat 在窗口 2 的首次调用里三道都通过了。窗口 2 里 Steel 交付了 ic_compat 没过的 T014、T030、T031、T050，这四道 combined 在窗口 1 都没过。
 - 费用：ic_compat 两个窗口的账本都是 $0；combined 是 $0.0250 加一次账本没报的调用，和 $0.0168。Clash 带宽和本机算力没有测量，记为 unknown exposure。
 - p95（全部尝试）：ic_compat 26239 和 25980 ms，combined 166619 和 46418 ms，installed_chrome 28307 和 18850 ms。
 
