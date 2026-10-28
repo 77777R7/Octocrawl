@@ -1,6 +1,6 @@
 # 每周复盘
 
-状态：v0.1，2026-10-28。**提议，未经 Howard 批准**；谁来跑还没定（[decisions.md](decisions.md) S-18）。
+状态：v0.1，2026-10-28。**提议，未经 Howard 批准**；负责人是 Howard（[decisions.md](decisions.md) S-04），是否建定时任务待定（S-18）。
 这份文件规定每周看什么、拿什么判据去对、怎么记。**它不新增指标**：指标与周期在 [框架 §6.2](../core-seo-framework.md)，继续还是停的判据在 §6.4，数据卫生在 §6.5。
 
 ## 为什么要有它
@@ -13,7 +13,8 @@
 
 - 每周一次，建议周一：Search Console 的数据滞后约 2 天，周一取到的窗口截止上周六。
 - 里程碑另加：2026-11-13、11-20 的 Google AI Mode 12 题重测（框架 阶段 0）；2026-12-06 的 GTM 第 45 天复盘；2027-01-17 的第 16 周复盘。竞品表（[competitors.md](competitors.md)）每月或有重大变化时刷新。
-- 谁跑、是否建定时任务：待定（S-18）。定时任务是仓库之外的常驻配置，建之前要 Howard 批准。没有批准之前，这份文件是手动执行的清单。
+- 负责人是 Howard（S-04）。项目目前只有他一个人，所以**一次复盘只占他读一页的时间**：取数、对判据、起草记录由 agent 做，记录开头有一块「需要你决定」，他读这一块、批准其中的动作；数字不让他手抄。
+- 是否建每周定时任务：待定（S-18）。定时任务是仓库之外的常驻配置，建之前要 Howard 批准。没有批准之前，这份文件是手动执行的清单，由 agent 在 Howard 要求时跑。
 
 ## 一次复盘的步骤
 
@@ -23,7 +24,7 @@
 4. **查新页面。**上线后第 2、4、8 周的页面，逐个看收录结论、第一次展示、第一个查询（追踪表 [page-tracker.md](page-tracker.md)）。追踪表里没有的写「未知」。
 5. **对判据（框架 §6.4）。**每条判据填：条件、本周的值、状态（不适用、未到期、数据不足、未触发、触发）。数据不够就写数据不足，不下结论。
 6. **GEO 一块。**协议（[geo-protocol.md](geo-protocol.md)）批准后才填；批准前这一块写「未启动」。
-7. **写动作。**每个动作：做什么、对应的框架条目、是否需要 Howard 批准（框架里每个「做」都要批准）、做完的判断标准。
+7. **写动作。**每个动作：做什么、对应的框架条目、是否需要 Howard 批准（框架里每个「做」都要批准）、做完的判断标准。需要他批准的汇总到记录开头的「Needs your decision」，一周的批准一次问完，不零散地问。
 8. **回写。**这周变了的活表一并更新：追踪表（脚本已回填）、[internal-links.md](internal-links.md)（新页面上线前登记）、[keyword-map.md](keyword-map.md)（重读过 SERP 才改）；有决定就在 [decisions.md](decisions.md) 记一行；数字变了的框架行改成新数字并写明来源快照。
 9. **存档。**记录写成 `research/seo/<日期>-weekly-review.md`，走一个 PR。**写完不再改**；错了在下一次复盘里更正并说明。
 
@@ -44,7 +45,10 @@
 # SEO weekly review YYYY-MM-DD
 
 Snapshot: <id>, source commit <sha>, working tree clean|dirty, run proxied|direct. Compared with: <earlier review date|none>.
-Run by: <who>. Search Console window: <start> to <end> (<days> days).
+Run by: <agent session>, for Howard (owner, decision S-04). Search Console window: <start> to <end> (<days> days).
+
+## Needs your decision
+- <action or question, the framework item it comes from, and what happens if it waits>. (Write "nothing this week" if there is nothing.)
 
 ## Not read this week
 - <source>: <reason>. (Unknown, not zero.)
