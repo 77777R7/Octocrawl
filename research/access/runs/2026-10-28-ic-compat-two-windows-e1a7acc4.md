@@ -1,7 +1,7 @@
 # installed_chrome with compatible_transport and no Steel, two windows: 2026-10-27 and 2026-10-28
 
 - Item: ROADMAP.md, current phase (decision 17), stage L item 1. Windows `.w2l/access/ic-compat/2026-10-27-w1` (runner `e1a7acc4`) and `.w2l/access/ic-compat/2026-10-28-w2` (runner `e1a7acc4`); ic_compat grant `bf5f2882e2e3a0a42dbc10aab8cfe4b5161fe8135448201b7f8147a1e78b32a5` / `bf5f2882e2e3a0a42dbc10aab8cfe4b5161fe8135448201b7f8147a1e78b32a5`, combined grant `0671de738caa095d61d2aefecf86b300bed072abe4c4ebe3e166658ae0ff8fec` / `0671de738caa095d61d2aefecf86b300bed072abe4c4ebe3e166658ae0ff8fec`; arms listed installed_chrome, ic_compat, combined in window 1 and installed_chrome, combined, ic_compat in window 2. Each window's own record has its conditions.
-- Command: `node research/access/combinedReport.mjs .w2l/access/ic-compat/2026-10-27-w1 .w2l/access/ic-compat/2026-10-28-w2 --out research/access/runs/2026-10-28-ic-compat-two-windows-e1a7acc4.md`. First calls only.
+- Command: `node research/access/combinedReport.mjs .w2l/access/ic-compat/2026-10-27-w1 .w2l/access/ic-compat/2026-10-28-w2 --out research/access/runs/2026-10-28-ic-compat-two-windows-e1a7acc4.md --decision .w2l/access/ic-compat/decision.md`. First calls only.
 - Window 2's record carries a note on the window (First start of this window, stopped and not counted); nothing it describes is counted here.
 
 ## Verified per window and across both, all 92 tasks
@@ -69,6 +69,7 @@ In both windows, ic_compat verifies at least the combined arm's count minus 2, w
 | 2 (2026-10-28) | frozen 50 | 32 | 32 | 30 | 2 | 2 | yes | yes | yes |
 
 - Exit not met on all 92 tasks.
+- Howard accepted this miss as an exception on 2026-10-28. Its basis, in this record's terms: no task was lost in both windows when Steel was dropped (the combined arm's gains over ic_compat that held: none); window 1's extra combined tasks over ic_compat, T052, T053 and T059, were not delivered by Steel (installed_chrome/chrome, installed_chrome/chrome, browser/playwright), and ic_compat verified all three in window 2's first calls; and the exit is met on the frozen 50 in both windows. The counts above are as measured, and the exit on all 92 tasks is not met.
 
 ## The combined arm's gains over installed_chrome that held, by delivering route
 

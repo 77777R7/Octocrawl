@@ -6,7 +6,8 @@
 //          one window: research/access/runs/<label>-summary.md and one <label>-<arm>.md per arm (the runner's records);
 //          --out <dir> writes them elsewhere
 //        node research/access/combinedReport.mjs <w1 dir> <w2 dir> --out <record.md>
-//          the two-window record: what held in both windows
+//          the two-window record: what held in both windows; --decision <file> writes a decision taken on its exit
+//          (a file of lines, as is) under the exit line, leaving the measured exit as it is
 //   A file that exists is never replaced. The arms are those the manifests ran (combinedArms.mjs): the combined-grant
 //   measurement's standard, installed_chrome, combined and Firecrawl, or the ic_compat measurement's installed_chrome,
 //   ic_compat and combined (ROADMAP current phase, decision 17, stage L item 1), which adds its exit, each arm's Steel
@@ -35,9 +36,11 @@ import { exitOf, pairsFor, REPORT_ARMS, reportArms, steelCalls, steelTally } fro
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../..')
 const args = process.argv.slice(2)
-const dirs = args.filter((a, i) => !a.startsWith('--') && !['--label', '--out'].includes(args[i - 1]))
+const dirs = args.filter((a, i) => !a.startsWith('--') && !['--label', '--out', '--decision'].includes(args[i - 1]))
 const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : undefined)
 if (!(dirs.length === 1 && opt('--label')) && !(dirs.length === 2 && opt('--out'))) throw new Error('usage: combinedReport.mjs <dir> --label <label> | <w1 dir> <w2 dir> --out <record.md>')
+/** A decision taken on the two-window exit (--decision), written under the exit line as is. */
+let decision = null
 const outDir = (dirs.length === 1 && opt('--out')) || join(repo, 'research/access/runs')
 
 const tasks = JSON.parse(await readFile(join(here, 'tasks.v1.json'), 'utf8')).tasks
@@ -262,7 +265,7 @@ function twoWindowRecord(W) {
     `- Item: ROADMAP.md, PA bar, the first item to measure next. Windows \`${A.dir}\` (runner \`${A.m.runner}\`) and \`${B.dir}\` (runner \`${B.m.runner}\`); combined grant \`${A.m.grants.combined?.sha256}\` / \`${B.m.grants.combined?.sha256}\`. Each window's own record has its conditions.`)
   else P(`# installed_chrome with compatible_transport and no Steel, two windows: ${A.m.date} and ${B.m.date}`, '',
     `- Item: ROADMAP.md, current phase (decision 17), stage L item 1. Windows \`${A.dir}\` (runner \`${A.m.runner}\`) and \`${B.dir}\` (runner \`${B.m.runner}\`); ic_compat grant \`${A.m.grants.ic_compat?.sha256}\` / \`${B.m.grants.ic_compat?.sha256}\`, combined grant \`${A.m.grants.combined?.sha256}\` / \`${B.m.grants.combined?.sha256}\`; arms listed ${A.m.arms.join(', ')} in window 1 and ${B.m.arms.join(', ')} in window 2. Each window's own record has its conditions.`)
-  P(`- Command: \`node research/access/combinedReport.mjs ${A.dir} ${B.dir} --out ${opt('--out')}\`. First calls only.`)
+  P(`- Command: \`node research/access/combinedReport.mjs ${A.dir} ${B.dir} --out ${opt('--out')}${opt('--decision') ? ` --decision ${opt('--decision')}` : ''}\`. First calls only.`)
   for (const [n, X] of [[1, A], [2, B]]) if (X.note) P(`- Window ${n}'s record carries a note on the window (${X.note.split('\n')[0].replace(/^#+\s*/, '')}); nothing it describes is counted here.`)
   for (const [name, set] of [['all 92 tasks', ids], [`the ${frozen.size} frozen tasks`, ids.filter((id) => frozen.has(id))]]) {
     const S = new Set(set)
@@ -289,6 +292,7 @@ function twoWindowRecord(W) {
       ...HELD_716.map(([id, r]) => `| ${id} | ${r} | ${verdict(A, 'ic_compat', id)} | ${verdict(B, 'ic_compat', id)} | ${verdict(A, 'combined', id)} | ${verdict(B, 'combined', id)} | ${[A, B].map((w) => (ver(w, 'installed_chrome', id) ? 'yes' : 'no')).join(' / ')} |`),
       '', '## Exit', '', 'In both windows, ic_compat verifies at least the combined arm\'s count minus 2, with no more false successes (unknown when tasks not run could decide it). The exit is read on all 92 tasks; the frozen 50 are shown beside it.', '', ...exitRows([A, B]),
       '', `- Exit ${(() => { const e = [A, B].map((w) => exitOf(figures(w, 'ic_compat', ALL), figures(w, 'combined', ALL)).met); return e.every((x) => x === true) ? 'met' : e.some((x) => x === false) ? 'not met' : 'unknown' })()} on all 92 tasks.`)
+    if (decision) P(decision)
   }
   if (ARMS.includes('combined') && ARMS.includes('installed_chrome')) P('', '## The combined arm\'s gains over installed_chrome that held, by delivering route', '', heldBy('combined', 'installed_chrome'))
   const fc = ARMS.includes('firecrawl')
@@ -321,6 +325,7 @@ if (dirs.length === 1) {
   const out = opt('--out')
   if (existsSync(out)) throw new Error(`${out} exists`)
   const W = [await load(dirs[0]), await load(dirs[1])]
+  if (opt('--decision')) decision = (await readFile(opt('--decision'), 'utf8')).trim()
   ARMS = reportArms(...W.map((w) => w.m.arms))
   await writeFile(out, twoWindowRecord(W))
   console.log(`wrote ${out}`)
