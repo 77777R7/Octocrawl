@@ -459,6 +459,12 @@ export W2L_CHROME_URL="$(gcloud run services describe octocrawl-chrome --region=
 curl -s -o /dev/null -w '%{http_code}\n' "$W2L_CHROME_URL/health"   # 403: no unauthenticated call reaches it
 ```
 
+The first revision, `octocrawl-chrome-c1-95be03e` (2026-10-28, image of `95be03ee`), differs from these commands in four ways, and the API cannot reach it until the first two change:
+- it was deployed with `--ingress=internal`, which a caller without VPC egress cannot reach. From outside, `/health` answered 404 with and without an ID token. Change it with `gcloud run services update octocrawl-chrome --ingress=all`;
+- it has no invoker binding: add the `add-iam-policy-binding` above for `w2l-preview`;
+- it runs as `w2l-preview`, which also holds the project's Firestore role. The commands above give it `octocrawl-chrome`, which holds no role but reading its proxy list, so a page that got past Chrome reaches no account worth having. That needs a redeploy with `--service-account`;
+- it has neither the proxy secret nor `W2L_HOSTED_CHROME_PROXIES_FILE`, so it leaves from Cloud Run's own egress (`google`), with `--max-instances=1`.
+
 Its log's `hosted_chrome_started` line says `egressKind: "datacenter"` and the count of proxies. Without the `W2L_HOSTED_CHROME_PROXIES_FILE` variable and the secret, it says `google`.
 
 The operator's statement and tariff, as secrets the runtime account reads:
