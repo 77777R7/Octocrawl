@@ -7,7 +7,7 @@ import {
   EVIDENCE_RECORD_ADDED_KEYS,
   EVIDENCE_RECORD_KEYS,
   EVIDENCE_SCHEMA_VERSION,
-  ACCESS_COMPLETIONS, ACCESS_ROUTES,
+  ACCESS_COMPLETIONS, ACCESS_EGRESS_KINDS, ACCESS_ROUTES,
   DOCUMENT_RESPONSE_MATCHES,
   FAILURE_REASON,
   FIELD_EVIDENCE_SOURCES,
@@ -51,7 +51,7 @@ describe('Evidence Record v1 schema file', () => {
   it('has exactly the type\'s nested objects; a key added to v1 later is optional, every other one required', () => {
     const { record: _record, ...nested } = EVIDENCE_RECORD_KEYS
     expect(Object.keys(schema.$defs).filter(name => name !== 'sha256').sort()).toEqual(Object.keys(nested).sort())
-    expect(EVIDENCE_RECORD_ADDED_KEYS).toEqual({ record: ['contentEncoding', 'pageActions', 'access', 'verification', 'readiness', 'document'], artifact: ['bytes', 'contentType'], identity: ['device', 'requestHeaders'], robotsDecision: ['overrideBasis'], fieldEvidence: ['reading'], access: ['completion', 'egress', 'session', 'paidCalls', 'grant'], accessEgress: ['exit'], accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts', 'fixedMonthlyUsd'] })
+    expect(EVIDENCE_RECORD_ADDED_KEYS).toEqual({ record: ['contentEncoding', 'pageActions', 'access', 'verification', 'readiness', 'document'], artifact: ['bytes', 'contentType'], identity: ['device', 'requestHeaders'], robotsDecision: ['overrideBasis'], fieldEvidence: ['reading'], access: ['completion', 'egress', 'session', 'paidCalls', 'grant'], accessEgress: ['exit', 'kind'], accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts', 'fixedMonthlyUsd'] })
     for (const [name, keys] of Object.entries(nested)) {
       const def = schema.$defs[name]!
       const added: readonly string[] = EVIDENCE_RECORD_ADDED_KEYS[name as keyof typeof EVIDENCE_RECORD_KEYS] ?? []
@@ -75,6 +75,7 @@ describe('Evidence Record v1 schema file', () => {
     expect(d.robotsDecision!.properties.unreachable!.enum).toEqual(['server_error', 'network_error', 'timeout', null])
     expect(d.access!.properties.route!.enum).toEqual([...ACCESS_ROUTES, null])
     expect(d.access!.properties.completion!.enum).toEqual([...ACCESS_COMPLETIONS, null])
+    expect(d.accessEgress!.properties.kind!.enum).toEqual([...ACCESS_EGRESS_KINDS, null])
     // A paid call's outcome and reason are the record's own verdict and reason, for the page that call returned.
     expect(d.accessPaidCall!.properties.outcome!.enum).toEqual([...RESULT_STATUS, null])
     expect(d.accessPaidCall!.properties.reason!.enum).toEqual(p.reason!.enum)

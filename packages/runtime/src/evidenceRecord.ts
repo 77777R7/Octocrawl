@@ -8,6 +8,7 @@
  */
 
 import {
+  ACCESS_EGRESS_KINDS,
   DOCUMENT_RESPONSE_MATCHES,
   EVIDENCE_SCHEMA_VERSION,
   RESULT_STATUS,
@@ -15,6 +16,7 @@ import {
   type ActionsResult,
   type CrawlMode,
   type AccessCompletion,
+  type AccessEgressKind,
   type EvidenceAccess,
   type EvidenceAccessEgress,
   type EvidenceAccessGrant,
@@ -124,7 +126,8 @@ export function toEvidenceRecord(
       output.json.evidence.map((item): [string, EvidenceFieldLocation] => [item.path, { source: item.source, locator: item.evidencePath ?? null, reading: fieldReading(item) }]),
     ),
     artifacts: evidence.artifacts.map(path => artifact(path, result.file, result.screenshot ?? undefined, result.actions)),
-    proxy: evidence.envProxy ?? null,
+    // The proxy's host:port alone, whatever the lane kept with it: never its login.
+    proxy: hostPort(evidence.envProxy),
     identity: {
       userAgent,
       mode: result.compliance?.mode ?? identityEvent(result.trace)?.mode ?? request.mode,
@@ -181,14 +184,17 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
   const externalCostUsd = rented ? null : hit === undefined ? result.usage.externalCostUsd ?? null : typeof stored === 'number' ? stored : null
   const read = READ_STATUSES.has(result.status)
   // W2L's own lanes record the proxy they leave through and the task session they read with; a vendor and the person's browser do not say.
-  const own = (r: EvidenceAccess['route']) => r === 'http' || r === 'http_compat' || r === 'browser' || r === 'enhanced_browser' || r === 'installed_chrome' || r === 'authed_browser'
+  const own = (r: EvidenceAccess['route']) => r === 'http' || r === 'http_compat' || r === 'browser' || r === 'enhanced_browser' || r === 'installed_chrome' || r === 'hosted_chrome' || r === 'authed_browser'
   const laneEvent = (name: string) => [...result.trace].reverse().find((e) => e.event === name && sameLaneFamily(e.lane, result.lane))?.detail
   const egress = (r: EvidenceAccess['route']): EvidenceAccessEgress | null => {
     if (!own(r)) return null
     const proxy = laneEvent('egress_proxy')
+    // The kind of address the lane said it left from (hosted_chrome's `egress_kind`); unknown otherwise, never guessed.
+    const stated = laneEvent('egress_kind')?.kind
+    const kind = (ACCESS_EGRESS_KINDS as readonly unknown[]).includes(stated) ? stated as AccessEgressKind : null
     // No proxy event: direct only when a page response proves a request was sent; a lane that stopped before one
     // (robots, an address check, a deadline) leaves the egress unknown.
-    if (proxy === undefined) return typeof result.evidence.httpStatus === 'number' ? { proxy: null, source: 'direct', switchedFrom: null, exit: null } : null
+    if (proxy === undefined) return typeof result.evidence.httpStatus === 'number' ? { proxy: null, source: 'direct', switchedFrom: null, exit: null, kind } : null
     // The task may have moved twice before this page was read; the last move names where it came from.
     const moved = [...result.trace].reverse().find((e) => e.event === 'egress_switched')?.detail
     const source = proxy.source === 'environment' ? 'environment' : 'pool'
@@ -197,7 +203,7 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
     const ip = text(seen?.ip)
     const observedAt = text(seen?.observedAt)
     const exit = ip === null || observedAt === null ? null : { ip, country: text(seen?.country), observedAt }
-    return { proxy: text(proxy.proxy), source, switchedFrom: text(moved?.from), exit }
+    return { proxy: hostPort(proxy.proxy), source, switchedFrom: hostPort(moved?.from), exit, kind }
   }
   const session = (r: EvidenceAccess['route']): EvidenceAccessSession | null => {
     const id = own(r) ? text(laneEvent('session_cookies')?.session) : null
@@ -220,6 +226,8 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
       const engine = event('browser_engine')
       if (event('session_attached') !== undefined) return route('authed_browser', 'playwright', null, null, 'authorized_session')
       if (engine !== undefined && engine.engine === 'installed_chrome') return route('installed_chrome', 'chrome', text(engine.version), text(engine.flags))
+      // hosted_chrome (ADR 0005, revision of 2026-10-27): the pinned Chrome of the octocrawl-chrome service and its launch's identifier.
+      if (engine !== undefined && engine.engine === 'hosted_chrome') return route('hosted_chrome', 'chrome', text(engine.version), text(engine.flags))
       return engine !== undefined && engine.engine === 'patchright' ? route('enhanced_browser', 'patchright', text(engine.version)) : route('browser', 'playwright')
     }
     case 'browser_local_authed': {
@@ -274,6 +282,17 @@ function paidCalls(trace: readonly TraceEvent[]): { calls: EvidencePaidCall[] | 
     }
   }
   return calls.length === 0 ? { calls: null, grant: null } : { calls, grant }
+}
+
+/**
+ * A proxy as the record names it: its `host:port` alone. Lanes record no more, and a login a lane ever recorded with it
+ * (`user:password@host:port`, or a URL) is never copied (ADR 0005 `secrets_in_records`). Null when it is no text.
+ */
+function hostPort(value: unknown): string | null {
+  if (typeof value !== 'string' || value === '') return null
+  const afterScheme = value.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+  const hostAndPort = afterScheme.slice(afterScheme.lastIndexOf('@') + 1).split('/')[0]!
+  return hostAndPort === '' ? null : hostAndPort
 }
 
 /** The steps that ran on the page, from the lane's own `action` trace events; null when the request had none. */

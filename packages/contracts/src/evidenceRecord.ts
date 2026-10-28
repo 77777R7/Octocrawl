@@ -43,10 +43,11 @@ export type EvidenceArtifactKind = (typeof EVIDENCE_ARTIFACT_KINDS)[number]
  * The route that produced a result (ADR 0005): `http` (W2L's HTTP client, undici), `http_compat` (the
  * browser-compatible HTTP transport, impit), `browser` (the local headless browser), `enhanced_browser`
  * (the local browser on Patchright), `installed_chrome` (the Google Chrome installed on the machine, launched by Octocrawl
- * with a temporary profile), `authed_browser` (the local browser with the user's saved login), `user_browser` (the
- * person's own browser after a handoff), `vendor` (a third-party browser service).
+ * with a temporary profile), `hosted_chrome` (Google Chrome on Octocrawl's own server, the `octocrawl-chrome` service,
+ * launched the same way: ADR 0005, revision of 2026-10-27), `authed_browser` (the local browser with the user's saved
+ * login), `user_browser` (the person's own browser after a handoff), `vendor` (a third-party browser service).
  */
-export const ACCESS_ROUTES = ['http', 'http_compat', 'browser', 'enhanced_browser', 'installed_chrome', 'authed_browser', 'user_browser', 'vendor'] as const
+export const ACCESS_ROUTES = ['http', 'http_compat', 'browser', 'enhanced_browser', 'installed_chrome', 'hosted_chrome', 'authed_browser', 'user_browser', 'vendor'] as const
 export type AccessRoute = (typeof ACCESS_ROUTES)[number]
 
 /**
@@ -183,6 +184,13 @@ export interface EvidenceAccessGrant {
 export const ACCESS_EGRESS_SOURCES = ['pool', 'environment', 'direct'] as const
 export type AccessEgressSource = (typeof ACCESS_EGRESS_SOURCES)[number]
 
+/**
+ * What kind of address the page left from (ADR 0005, revision of 2026-10-27, decision four): `google` (Cloud Run's own
+ * egress), `datacenter`, `isp` (a static ISP proxy) or `residential` (a residential proxy).
+ */
+export const ACCESS_EGRESS_KINDS = ['google', 'datacenter', 'isp', 'residential'] as const
+export type AccessEgressKind = (typeof ACCESS_EGRESS_KINDS)[number]
+
 export interface EvidenceAccessEgress {
   /** The proxy's `host:port`, never its credentials; null when the request went direct. */
   proxy: string | null
@@ -195,6 +203,12 @@ export interface EvidenceAccessEgress {
    * optional, so that earlier records stay valid.
    */
   exit?: EvidenceAccessEgressExit | null
+  /**
+   * What kind of address the page left from (ACCESS_EGRESS_KINDS), as the lane that read it stated: hosted_chrome names
+   * its exit's kind. Null when the lane stated none, which every other route is today: unknown, not direct. Added after
+   * `exit`: optional, so that earlier records stay valid.
+   */
+  kind?: AccessEgressKind | null
 }
 
 export interface EvidenceAccessEgressExit {
@@ -434,7 +448,7 @@ export const EVIDENCE_RECORD_KEYS = {
   pageActionStep: keysOf<EvidencePageActionStep>()(['type', 'outcome']),
   requestHeader: keysOf<EvidenceRequestHeader>()(['name', 'valueSha256']),
   access: keysOf<EvidenceAccess>()(['route', 'executor', 'executorVersion', 'profile', 'externalCostUsd', 'completion', 'egress', 'session', 'paidCalls', 'grant']),
-  accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit']),
+  accessEgress: keysOf<EvidenceAccessEgress>()(['proxy', 'source', 'switchedFrom', 'exit', 'kind']),
   accessEgressExit: keysOf<EvidenceAccessEgressExit>()(['ip', 'country', 'observedAt']),
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
   accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts', 'fixedMonthlyUsd']),
@@ -455,6 +469,6 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   robotsDecision: ['overrideBasis'],
   fieldEvidence: ['reading'],
   access: ['completion', 'egress', 'session', 'paidCalls', 'grant'],
-  accessEgress: ['exit'],
+  accessEgress: ['exit', 'kind'],
   accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts', 'fixedMonthlyUsd'],
 }
