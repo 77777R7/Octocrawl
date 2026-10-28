@@ -95,3 +95,38 @@ test('arguments are read strictly: a missing value or an unknown flag is refused
   assert.throws(() => parseArgs(['--days', '30']), /1 to 29/)
   assert.throws(() => parseArgs(['--weeks', '2']), /Unknown argument/)
 })
+
+test('ChatGPT page views are counted with and without the utm tag, by day, and automated or internal lines are left out', () => {
+  const summary = summarizeSiteEvents([
+    view('2026-10-09T10:00:00Z', 'a', { path: '/', utm_source: 'chatgpt.com' }),
+    view('2026-10-09T10:05:00Z', 'b', { path: '/', ref: 'chatgpt.com' }),
+    view('2026-10-09T10:06:00Z', 'c', { path: '/', ref: 'chat.openai.com', utm_source: 'chatgpt.com' }),
+    view('2026-10-10T09:00:00Z', 'd', { path: '/', utm_source: 'ChatGPT.com' }),
+    view('2026-10-10T09:10:00Z', 'e', { path: '/', ref: 'perplexity.ai' }),
+    view('2026-10-10T09:20:00Z', 'f', { path: '/', utm_source: 'chatgpt.com' }, { automated: true }),
+    view('2026-10-10T09:30:00Z', 'g', { path: '/' }),
+  ])
+  assert.deepEqual(summary.chatgptTag, { views: 4, tagged: 3, taggedShare: 0.75, byDay: [['2026-10-09', 3, 2], ['2026-10-10', 1, 1]] })
+  const none = summarizeSiteEvents([view('2026-10-09T10:00:00Z', 'a', { path: '/' })])
+  assert.deepEqual(none.chatgptTag, { views: 0, tagged: 0, taggedShare: null, byDay: [] })
+})
+
+test('ChatGPT views come from the tag alone, a ChatGPT referrer alone, or both, and are listed by day in order', () => {
+  const summary = summarizeSiteEvents([
+    view('2026-10-11T10:00:00Z', 'a', { path: '/', ref: 'chat.openai.com' }),
+    view('2026-10-09T10:00:00Z', 'b', { path: '/', utm_source: 'chatgpt.com' }),
+    view('2026-10-10T10:00:00Z', 'c', { path: '/', ref: 'chatgpt.com' }),
+    { event: 'w2l_web_event', name: 'link_click', timestamp: '2026-10-10T10:01:00Z', vid: 'c', props: { ref: 'chatgpt.com', utm_source: 'chatgpt.com' } },
+  ])
+  assert.deepEqual(summary.chatgptTag, { views: 3, tagged: 1, taggedShare: 1 / 3, byDay: [['2026-10-09', 1, 1], ['2026-10-10', 1, 0], ['2026-10-11', 1, 0]] })
+})
+
+test('the report says what the ChatGPT numbers leave out, in the right number, and prints nothing extra without ChatGPT views', () => {
+  const rest = { error: 'x' }
+  const report = events => renderReport({ window: { days: 7, start: '2026-10-03', end: '2026-10-09', generatedAt: '2026-10-10 14:00' }, site: { value: summarizeSiteEvents(events) }, waitlist: rest, hosted: rest, quotas: rest, github: rest, npm: rest, pypi: rest, google: rest, bing: rest })
+  const three = report([view('2026-10-09T10:00:00Z', 'a', { path: '/', utm_source: 'chatgpt.com' }), view('2026-10-09T11:00:00Z', 'b', { path: '/', ref: 'chatgpt.com' }), view('2026-10-09T12:00:00Z', 'c', { path: '/', ref: 'chatgpt.com' })])
+  assert.match(three, /From ChatGPT, by tag or referrer: 3 page views, 1 with utm_source=chatgpt\.com \(33%\)\. A view with neither the tag nor a ChatGPT referrer is counted as direct and is not in these numbers, so a tag that has gone shows as fewer ChatGPT views a day, not necessarily as a lower share\./)
+  assert.match(report([view('2026-10-09T10:00:00Z', 'a', { path: '/', ref: 'chatgpt.com' })]), /: 1 page view, 0 with utm_source=chatgpt\.com \(0%\)/)
+  assert.match(report([view('2026-10-09T10:00:00Z', 'a', { path: '/', utm_source: 'chatgpt.com' })]), /: 1 page view, 1 with utm_source=chatgpt\.com \(100%\)/)
+  assert.doesNotMatch(report([view('2026-10-09T10:00:00Z', 'a', { path: '/' })]), /From ChatGPT/)
+})

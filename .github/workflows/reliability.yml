@@ -57,11 +57,11 @@ jobs:
       - name: A batch of 1,000 URLs over 20 hosts survives kill -9 (0 lost, 0 duplicated)
         if: matrix.project == 'unit'
         run: npm run verify:batch-crash-1000
-      # The built site's sitemap against its pages (gate G12), then the tests of the SEO and IndexNow scripts. Both are
+      # The built site's sitemap against its pages (gate G12) and its structured data against its pages (G11), then the tests of the SEO and IndexNow scripts. Both are
       # offline: the build takes seconds and the script tests use local servers and temporary folders.
-      - name: Built sitemap and its pages agree
+      - name: Built sitemap, pages and structured data agree
         if: matrix.project == 'unit'
-        run: npm run build:public && node scripts/seo/check-sitemap.mjs
+        run: npm run build:public && node scripts/seo/check-sitemap.mjs && node scripts/seo/check-jsonld.mjs
       - name: SEO and IndexNow script tests
         if: matrix.project == 'unit'
         run: node --test scripts/seo/*.test.mjs scripts/public-preview/indexnow.test.mjs scripts/public-preview/weekly-report.test.mjs
