@@ -92,7 +92,7 @@
 | `Link: rel=llms-txt` 响应头 | 可选改进，效果未证 | **没有** | 同上 |
 | `llms.txt` | 可选改进，效果未证 | 有，开头对 hosted 范围的描述是对的 | Google Search 忽略它；价值在别的读取者，不要把它算成 Google 的 SEO 工作（G§2） |
 | Search Console「生成式 AI 表现」报告 | 测量来源 | 已读过一次：2026-09-16 至 10-13 共 2 次展示，都在 `/blog/scrape-list-of-urls/`；前一窗口为 0。该报告只给展示，按页面、国家、设备、日期拆分，没有问题文本、引用或品牌提及。之后的窗口没读，需要按周重读 | `docs/seo/ai-visibility.md`、G§4 |
-| Bing Webmaster Tools「AI Performance」 | 测量来源 | 未读。Bing 站点已验证；公测中 | G§2、G§4 |
+| Bing Webmaster Tools「AI Performance」 | 测量来源 | 2026-10-28 读过一次（Howard 导出）：2026-10-07 至 10-25 共 19 天，Citations 和 Cited Pages 每天都是 0；导出里没有页面和查询表，0 是没被引用还是还没采集，分不出来。Bing 站点已验证；公测中 | G§2、G§4 |
 | 第一方分析抓到首访的完整信息 | 前置条件（归因） | 部分：R5 闸门已加首次接触来源，第一个外部注册带 `utm_source=chatgpt.com`（n=1，原因未知）。要保证落地 URL 完整查询串、`document.referrer`、UA 类别、时间戳在跳转前存下来并带到注册 | G§5 |
 | 每天检查「来自 chatgpt.com 的访问里带 `utm_source=chatgpt.com` 的比例」 | 前置条件（归因） | 未做。ChatGPT 的标记在 2026-10-08 至 16 前后消失过约八天（一家厂商的测量，grade B），访问变成直接访问 | G§5 |
 

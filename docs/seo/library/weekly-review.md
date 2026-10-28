@@ -20,7 +20,7 @@
 
 1. **取数。**运行快照脚本 `NODE_USE_ENV_PROXY=1 W2L_PROJECT_ID=<项目> node scripts/seo/snapshot.mjs --update-tracker`（取数方法和限制见 [data-sources.md](data-sources.md)）。看摘要开头的「Not read」：没读到的来源在记录里写「未读」和原因，**不用上周的数填，不写 0**。记下快照编号、源提交、走代理还是直连。
 2. **查数据卫生（框架 §6.5）。**窗口和上周一样长吗（不一样就不比较）；位置 64 到 99 的展示不当作增长；Firecrawl 对比数字注意任务集（50 个与 92 个不混用）；不用脚本抓 Google 搜索结果。
-3. **填「数字」表。**数字从快照摘要抄，不重算；和上次复盘并排放。AI 助手来源的页面浏览数和 ChatGPT 的标记情况在摘要的「First-party site analytics」里。AI 助手来源的页面浏览数是下限（没有来源、没有标记的访问算直接访问）；ChatGPT 标记比例不是下限：它只算能认出是 ChatGPT 的访问（有标记，或有 ChatGPT 来源页），标记消失时表现为每天的 ChatGPT 访问变少，不一定是比例下降。Search Console 的「生成式 AI 表现」和 Bing 的「AI Performance」我没有找到文档化的 API，要手工读，没读就写「未读」。
+3. **填「数字」表。**数字从快照摘要抄，不重算；和上次复盘并排放。AI 助手来源的页面浏览数和 ChatGPT 的标记情况在摘要的「First-party site analytics」里。AI 助手来源的页面浏览数是下限（没有来源、没有标记的访问算直接访问）；ChatGPT 标记比例不是下限：它只算能认出是 ChatGPT 的访问（有标记，或有 ChatGPT 来源页），标记消失时表现为每天的 ChatGPT 访问变少，不一定是比例下降。Search Console 的「生成式 AI 表现」和 Bing 的「AI Performance」我没有找到文档化的 API，要 Howard 手工导出，放在 `<主检出>/.w2l/seo/manual-reads/<读数日期>/`（`raw/` 放导出的原文件，`notes.md` 写数字、窗口和读数日期）。表里抄最新一份并写明读数日期和窗口；它早于本周，就写「上次读数 <日期>」，不当作本周读过；一份都没有就写「未读」。两个报告的窗口都不是 28 天，也互相不同，不相加。
 4. **查新页面。**上线后第 2、4、8 周的页面，逐个看收录结论、第一次展示、第一个查询（追踪表 [page-tracker.md](page-tracker.md)）。追踪表里没有的写「未知」。
 5. **对判据（框架 §6.4）。**每条判据填：条件、本周的值、状态（不适用、未到期、数据不足、未触发、触发）。数据不够就写数据不足，不下结论。
 6. **GEO 一块。**协议（[geo-protocol.md](geo-protocol.md)）批准后才填；批准前这一块写「未启动」。
@@ -65,7 +65,7 @@ Run by: <agent session>, for Howard (owner, decision S-04). Search Console windo
 | Site visitors, last 7 days (visitor-days) | | | |
 | Page views from AI assistants, last 7 days (at least; direct is not counted), by assistant | | | |
 | ChatGPT page views by tag or referrer, and how many carry utm_source=chatgpt.com, by day (a tag that has gone shows as fewer views a day) | | | |
-| Search Console "generative AI" report and Bing "AI Performance" (read by hand, no documented API; write "not read" if not read) | | | |
+| Search Console "generative AI" report and Bing "AI Performance" (exported by Howard, no documented API; copy the newest notes.md in manual-reads with its read date and window; write "not read" if there is none) | | | |
 
 ## Index changes since the last review
 - <path>: <verdict> to <verdict>
