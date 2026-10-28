@@ -1,4 +1,5 @@
 import '../styles.css'
+import '../formatsStage.css'
 import './product.css'
 import { trackLinkClicks, trackPageView } from '../analytics'
 import { mountScrapeFeatures } from './scrapeFeatures'

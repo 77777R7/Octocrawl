@@ -8,8 +8,11 @@ import { pages } from './docsPages.mjs'
 const esc = text => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const pathFor = page => page.slug ? `/docs/${page.slug}/` : '/docs/'
 
-/** What Octocrawl does, as on the home page's What it does section, each with where to read more or try it: its
- * product page or free tool where it has one (scraping: /scrape/; mapping: the Link Extractor), otherwise a guide. */
+/** The Product menu's entries. The menu is off for now (only Docs, Blog and Changelog show) while the product pages
+ * and their demos are made; these stay so it can come back as it was.
+ *
+ * What Octocrawl does, each with where to read more or try it: its product page or free tool where it has one
+ * (scraping: /scrape/; mapping: the Link Extractor), otherwise a guide. */
 export const NAV_CAPABILITIES = [
   { glyph: '▤', title: 'Scrape a page', text: 'Markdown, tables and fields from one URL', href: '/scrape/' },
   { glyph: '├', title: 'Map a site', text: 'Find all pages on a website', href: '/tools/link-extractor/' },
@@ -50,14 +53,8 @@ export function siteNavMarkup(current = '') {
   return `<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" hidden><span class="nav-toggle-mark" aria-hidden="true">≡</span><span class="nav-toggle-text">Menu</span></button>
           <nav class="site-nav" id="site-nav" aria-label="Main navigation">
             <ul class="nav-list">
-              <li class="nav-item"><details class="nav-drop"><summary>Product<span class="nav-caret" aria-hidden="true">▾</span></summary><div class="nav-panel nav-product">
-                <div class="nav-col"><p class="nav-kicker">What it does</p><ul>${NAV_CAPABILITIES.map(item).join('')}</ul></div>
-                <div class="nav-col"><p class="nav-kicker">Use it from</p><ul>${NAV_CLIENTS.map(item).join('')}</ul><p class="nav-kicker">Free tools</p><ul>${NAV_TOOLS.map(item).join('')}</ul></div>
-                <a class="nav-feature" href="/docs/connect-mcp/"><span class="nav-feature-tag">MCP</span> <span class="nav-feature-title">Connect your agent in one line</span> <code>claude mcp add \\\n  --transport http octocrawl \\\n  https://mcp.octocrawl.dev/mcp</code> <span class="nav-feature-note">No account, 20 pages a day. Setup for every client <span aria-hidden="true">→</span></span></a>
-              </div></details></li>
               <li class="nav-item"><details class="nav-drop"><summary${current === 'docs' ? ' aria-current="page"' : ''}>Docs<span class="nav-caret" aria-hidden="true">▾</span></summary><div class="nav-panel nav-docs">${docs}</div></details></li>
               <li class="nav-item"><a class="nav-link" href="/blog/"${current === 'blog' ? ' aria-current="page"' : ''}>Blog</a></li>
-              <li class="nav-item"><a class="nav-link" href="/docs/limits/">Free tiers</a></li>
               <li class="nav-item"><a class="nav-link" href="/changelog/"${current === 'changelog' ? ' aria-current="page"' : ''}>Changelog</a></li>
             </ul>
           </nav>`

@@ -71,7 +71,9 @@ export function openGame(opener: HTMLElement): void {
   if (!context) { open = false; return }
   const ctx: CanvasRenderingContext2D = context
 
-  // The page behind keeps still while the game is open.
+  // The page behind keeps still while the game is open: overflow stops the browser's scrolling, and the damped
+  // scrolling (smoothScroll.ts) leaves a wheel over the game alone.
+  root.setAttribute('data-lenis-prevent', '')
   const html = document.documentElement
   const overflow = html.style.overflow
   html.style.overflow = 'hidden'

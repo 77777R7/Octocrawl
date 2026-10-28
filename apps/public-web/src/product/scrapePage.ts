@@ -1,6 +1,7 @@
 import { footerMarkup, siteHeaderMarkup } from '../page'
 import { glyphCloud } from '../glyphArt'
 import { foldMarkdown, foldedText } from './scrapeMarkdown'
+import { cardWindow, markdownSegments, type Segment } from './fxWindow'
 import { AMAZON_FIELDS, AMAZON_ISSUE, DATETIME_TABLE, DEMOS, DOCS, DOCS_CELL, HARD, OCTOPUS_SIZES, PDF_READ } from './scrapeRun'
 
 /** /scrape/: what scraping a page with Octocrawl gives, shown on real scrapes recorded on hosted Octocrawl
@@ -51,27 +52,6 @@ function demo(): string {
 
 /** A line of a card's window: segments of text, each with its class (h heading, p punctuation, u link target, k key,
  * v value, c comment, a author, w warning). */
-type Segment = readonly [string, string]
-
-/** A card's window: a small dark browser window on the painting holding one real result. With `source`, scrapeWindows.ts
- * shows that text in the window's shape first (the raw HTML) and decodes it into the result when the card comes to the
- * front; without it the result types itself in. */
-function cardWindow(o: { icon?: string; url: string; tag: string; label: string; source?: string; wrap?: boolean; lines: Segment[][] }): string {
-  const lines = o.lines.map((line) => `<span class="fx-ln">${line.map(([cls, text]) => `<span class="${cls}">${esc(text)}</span>`).join('')}</span>`).join('\n')
-  const text = o.lines.map((line) => line.map(([, t]) => t).join('').trimEnd()).join('\n')
-  // The window decodes in place (scrapeWindows.ts), so assistive tech reads the result from a copy that never changes.
-  return `<div class="fx-win${o.wrap ? ' is-wrap' : ''}"${o.source ? ` data-source="${esc(o.source)}"` : ''}>
-              <pre class="visually-hidden">${esc(`${o.label}:\n${text}`)}</pre>
-              <p class="fx-win-bar" aria-hidden="true">${o.icon ? `<img src="/assets/sites/${o.icon}.png" alt="" width="16" height="16" />` : '<span class="fx-win-dot" aria-hidden="true"></span>'}<span class="fx-win-url">${esc(o.url)}</span><b class="fx-win-tag">${esc(o.tag)}</b></p>
-              <pre class="fx-win-body" aria-hidden="true">${lines}</pre>
-            </div>`
-}
-
-/** A Markdown line split into segments: ** and link brackets as punctuation, link targets as links. */
-function markdownSegments(text: string): Segment[] {
-  return text.split(/(\*\*|\]\([^)]*\)|\[)/).filter(Boolean).map((part) => [part === '**' || part === '[' ? 'p' : part.startsWith('](') ? 'u' : 'b', part] as const)
-}
-
 /** Card 1: the Octopus page's raw HTML decoding into the start of its Markdown, the lead paragraph cut short. */
 function markdownWindow(): string {
   const lead = foldedText(DEMOS[0]!.markdownHead.split('\n')[2]!)
