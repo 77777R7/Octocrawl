@@ -1723,7 +1723,7 @@ function deadlineFailure(url: string, lane: Lane, wallMs: number): FetchResult {
 }
 
 function laneOf(channelId: string | null): Lane {
-  return channelId === 'provider' ? 'provider' : channelId === 'authed_session' ? 'browser_local_authed' : channelId === 'browser_local' || channelId === 'installed_chrome' ? 'browser_local' : 'http'
+  return channelId === 'provider' ? 'provider' : channelId === 'authed_session' ? 'browser_local_authed' : channelId === 'browser_local' || channelId === 'installed_chrome' || channelId === 'hosted_chrome' ? 'browser_local' : 'http'
 }
 
 /**

@@ -50,13 +50,21 @@ export const INSTALLED_CHROME_MAX_WINDOWS = 2
  * actions, screenshot, phone identity, added headers or relaxed certificate check, each of which would drive or dress
  * the window beyond what was measured. The rung's refusal and the hint that recommends the route read the same rule.
  */
-export function installedChromeRefusal(options: Pick<FetchOptions, 'actions' | 'screenshot' | 'mobile' | 'headers' | 'skipTlsVerification'>): string | null {
-  const asked = [
+export function installedChromeRefusal(options: ChromeRefusedOptions): string | null {
+  const asked = chromeRefusedOptions(options)
+  return asked.length === 0 ? null : `installed_chrome reads the page as Chrome opened it and takes no ${asked.join(', ')} (ADR 0005)`
+}
+
+/** The options a Chrome launched as measured takes none of: installed_chrome's, and hosted_chrome's (ADR 0005, revision of 2026-10-27). */
+export type ChromeRefusedOptions = Pick<FetchOptions, 'actions' | 'screenshot' | 'mobile' | 'headers' | 'skipTlsVerification'>
+
+/** The refused options a request asks for, by name, in a fixed order. */
+export function chromeRefusedOptions(options: ChromeRefusedOptions): string[] {
+  return [
     ...((options.actions?.length ?? 0) > 0 ? ['actions'] : []), ...(options.screenshot !== undefined ? ['screenshot'] : []),
     ...(options.mobile === true ? ['mobile'] : []), ...(Object.keys(options.headers ?? {}).length > 0 ? ['headers'] : []),
     ...(options.skipTlsVerification === true ? ['skipTlsVerification'] : []),
   ]
-  return asked.length === 0 ? null : `installed_chrome reads the page as Chrome opened it and takes no ${asked.join(', ')} (ADR 0005)`
 }
 
 /** The error a launch fails with when no Google Chrome is found; browserNotInstalled (browserInstall.ts) reads it. */

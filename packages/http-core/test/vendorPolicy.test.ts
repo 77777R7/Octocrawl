@@ -51,7 +51,7 @@ describe('ADR 0005: the three capability classes', () => {
       'own_browser_engine', 'own_fingerprint_patches', 'own_captcha_model', 'own_residential_network', 'camoufox', 'hosted_browser_cluster',
     ])
     expect(AUTHORIZABLE_NAMES).toEqual([
-      'compatible_transport', 'egress_sessions', 'enhanced_browser', 'installed_chrome',
+      'compatible_transport', 'egress_sessions', 'enhanced_browser', 'installed_chrome', 'hosted_chrome',
       'vendor_remote_browser', 'vendor_residential_proxy', 'vendor_unlock_html', 'vendor_captcha_solving', 'vendor_stealth',
       'third_party_captcha_solver',
     ])
@@ -86,12 +86,21 @@ describe('ADR 0005: the three capability classes', () => {
     })
   })
 
-  it.each(AUTHORIZABLE_NAMES)('enables %s only when a grant names it', (name) => {
+  it.each(AUTHORIZABLE_NAMES.filter((name) => name !== 'hosted_chrome'))('enables %s only when a grant names it', (name) => {
     expect(evaluateAccessCapability(name, []).decision).toBe('not_granted')
     expect(evaluateAccessCapability(name, EVERY_NAME.filter((n) => n !== name)).decision).toBe('not_granted')
     expect(evaluateAccessCapability(name, [name]).decision).toBe('granted')
     const grant = normalizeAccessGrant(grantNaming([name]))
     expect(grant.ok && grant.grant.capabilities).toEqual([name])
+  })
+
+  it('grants hosted_chrome per call alone, never by a grant (ADR 0005, revision of 2026-10-27)', () => {
+    // A class-3 capability, off unless named: what names it is hosted Octocrawl's per-call set, not a grant file.
+    expect(AUTHORIZABLE.find((e) => e.capability === 'hosted_chrome')).toEqual({ capability: 'hosted_chrome', tier: 'enhanced', thirdPartyCost: false })
+    expect(evaluateAccessCapability('hosted_chrome', []).decision).toBe('not_granted')
+    expect(evaluateAccessCapability('hosted_chrome', ['hosted_chrome']).decision).toBe('granted')
+    const grant = normalizeAccessGrant(grantNaming(['hosted_chrome']))
+    expect(grant).toEqual({ ok: false, problems: [expect.objectContaining({ field: 'capabilities.hosted_chrome', kind: 'invalid', reason: expect.stringMatching(/granted per call/) })] })
   })
 
   it('maps every grant-gated vendor capability into a class', () => {

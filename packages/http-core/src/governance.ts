@@ -100,7 +100,9 @@ export function evaluateGovernance(url: string, policy: CrawlPolicy): Governance
     return { allowed: false, permittedChannels: [], reason: `unknown mode: ${policy.mode}` }
   }
 
-  // Enhanced access also permits the installed_chrome rung of a local server (ADR 0005), built only under a grant that names it.
-  const enhanced = policy.enhanced === true ? [...(permitted.includes('provider') ? [] : ['provider']), ...(permitted.includes('browser_local') ? ['installed_chrome'] : [])] : []
+  // Enhanced access also permits the installed_chrome rung of a local server (ADR 0005), built only under a grant that names
+  // it, and hosted_chrome on hosted Octocrawl (revision of 2026-10-27), built only with its operator's config and used only
+  // by a call that holds it.
+  const enhanced = policy.enhanced === true ? [...(permitted.includes('provider') ? [] : ['provider']), ...(permitted.includes('browser_local') ? ['installed_chrome', 'hosted_chrome'] : [])] : []
   return { allowed: true, permittedChannels: enhanced.length === 0 ? permitted : [...permitted, ...enhanced], reason: null }
 }
