@@ -204,7 +204,7 @@ function windowRecord(W, label) {
       ...Object.entries(byRung).sort((x, y) => y[1].length - x[1].length).map(([r, t]) => `| ${r} | ${list(t)} |`),
       '', `- ${a === 'combined' ? 'Combined' : a}-arm answers that list a ${steel ? 'Steel ' : ''}paid call: ${list(paid.map((x) => x.taskId))}; of those, verified with ${steel ?? 'a paid call'} as the answer: ${list(paid.filter((x) => x.outcome.verified && (x.resp.evidenceRecord.access.paidCalls ?? []).some((c) => c.answer)).map((x) => x.taskId))}.`,
       `- ${a === 'combined' ? 'Combined' : a}-arm gains over installed_chrome, by delivering route: ${routed(a, 'installed_chrome')}.`,
-      ...(a === 'ic_compat' && ARMS.includes('combined') ? [`- What dropping Steel lost in this window: the combined arm's gains over ic_compat, by combined's delivering route: ${routed('combined', 'ic_compat')}.`, `- ic_compat-arm gains over combined, by delivering route: ${routed('ic_compat', 'combined')}.`] : []))
+      ...(a === 'ic_compat' && ARMS.includes('combined') ? [`- The combined arm's gains over ic_compat in this window, by combined's delivering route: ${routed('combined', 'ic_compat')}; of those, delivered by Steel (vendor/steel), what dropping Steel lost: ${list(ids.filter((id) => ver(W, 'combined', id) && !ver(W, 'ic_compat', id) && rungOf(W.first.combined.get(id)) === 'vendor/steel'))}.`, `- ic_compat-arm gains over combined, by delivering route: ${routed('ic_compat', 'combined')}.`] : []))
   }
   if (ARMS.includes('firecrawl')) {
     const fc = figures(W, 'firecrawl', ALL).verified, ff = figures(W, 'firecrawl', frozen).verified
@@ -282,7 +282,7 @@ function twoWindowRecord(W) {
   if (ic) {
     const verdict = (w, a, id) => { const x = w.first[a].get(id); return !x ? 'not run' : x.outcome.verified ? `yes (${rungOf(x)})` : x.outcome.falseSuccess ? 'FALSE' : `no (${reasonOf(x)})` }
     P('', '## The ic_compat arm\'s gains over installed_chrome that held, by delivering route', '', heldBy('ic_compat', 'installed_chrome'),
-      '', '## What dropping Steel lost: the combined arm\'s gains over ic_compat that held, by combined\'s delivering route', '', heldBy('combined', 'ic_compat'),
+      '', '## The combined arm\'s gains over ic_compat that held, by combined\'s delivering route (one Steel delivered in both windows is what dropping Steel lost)', '', heldBy('combined', 'ic_compat'),
       '', '## The ic_compat arm\'s gains over combined that held, by delivering route', '', heldBy('ic_compat', 'combined'),
       '', '## #716\'s held gains over installed_chrome, in these windows', '', 'The five tasks the combined grant gained over installed_chrome in both of #716\'s windows (research/access/runs/2026-10-26-combined-two-windows-22bf90e7.md), with the route #716 recorded.', '',
       '| Task | #716 route | ic_compat w1 | ic_compat w2 | Combined w1 | Combined w2 | installed_chrome w1 / w2 |', '| --- | --- | --- | --- | --- | --- | --- |',

@@ -71,7 +71,7 @@ Cost per 1,000 verified divides the first calls' whole cost (failures included) 
 
 - ic_compat-arm answers that list a paid call: 0; of those, verified with a paid call as the answer: 0.
 - ic_compat-arm gains over installed_chrome, by delivering route: T008 http/undici; T011 browser/playwright; T025 installed_chrome/chrome.
-- What dropping Steel lost in this window: the combined arm's gains over ic_compat, by combined's delivering route: T052 installed_chrome/chrome; T053 installed_chrome/chrome; T059 browser/playwright.
+- The combined arm's gains over ic_compat in this window, by combined's delivering route: T052 installed_chrome/chrome; T053 installed_chrome/chrome; T059 browser/playwright; of those, delivered by Steel (vendor/steel), what dropping Steel lost: 0.
 - ic_compat-arm gains over combined, by delivering route: none.
 
 ## Which rung delivered each combined-arm success (first calls)

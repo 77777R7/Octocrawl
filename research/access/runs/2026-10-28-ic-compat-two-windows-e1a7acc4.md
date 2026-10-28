@@ -37,7 +37,7 @@ A gain: the arm verified the task in both windows and the baseline in neither. A
 
 - T011: window 1 browser/playwright, window 2 installed_chrome/chrome
 
-## What dropping Steel lost: the combined arm's gains over ic_compat that held, by combined's delivering route
+## The combined arm's gains over ic_compat that held, by combined's delivering route (one Steel delivered in both windows is what dropping Steel lost)
 
 - None.
 
