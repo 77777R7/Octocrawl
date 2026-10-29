@@ -130,6 +130,7 @@ export async function waitForRenderedStability(
           size: root?.outerHTML.length ?? 0,
           text: body?.innerText ?? '',
           loading: ${LOADING_PROBE},
+          bodyless: body === null && document.readyState === 'loading',
         })
       })()`)
     } catch (error) {
@@ -144,9 +145,13 @@ export async function waitForRenderedStability(
       continue
     }
     const current = typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot)
-    loading = isLoading(current)
+    // A document whose parser has not reached its body yet (held at a script in its head) is still loading, never
+    // stable: a capture now would read an empty page (ADR 0005 gate run 1, 2026-10-29: T076 read empty after its check
+    // cleared). A finished document with no body (an SVG opened directly) is not.
+    const bodyless = isBodyless(current)
+    loading = isLoading(current) || bodyless
     loadingSeen ||= loading
-    if (current === previous) stableRounds++
+    if (current === previous && !bodyless) stableRounds++
     else stableRounds = 0
     previous = current
 
@@ -211,6 +216,10 @@ export function withStillChangingWarning(result: FetchResult): FetchResult {
 
 function isLoading(snapshot: string): boolean {
   try { return (JSON.parse(snapshot) as { loading?: unknown }).loading === true } catch { return false }
+}
+
+function isBodyless(snapshot: string): boolean {
+  try { return (JSON.parse(snapshot) as { bodyless?: unknown }).bodyless === true } catch { return false }
 }
 
 /**

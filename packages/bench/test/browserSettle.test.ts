@@ -76,6 +76,27 @@ describe('waitForRenderedStability', () => {
     expect(await waitForRenderedStability(plain.page, { minMs: 20, maxMs: 60, sampleMs: 20 })).toMatchObject({ loadingSeen: false })
   })
 
+  it('never counts a document with no body yet as stable, and waits for one as for a loading page (ADR 0005 gate run 1, T076)', async () => {
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+    // The parser waits on a script in the head for the first ten samples: the same empty snapshot, but no body.
+    const parked = () => {
+      let reads = 0
+      return {
+        page: { async evaluate() { return JSON.stringify(++reads <= 10 ? { size: 60, text: '', loading: false, bodyless: true } : { size: 900, text: 'the data', loading: false, bodyless: false }) }, waitForTimeout: sleep },
+        reads: () => reads,
+      }
+    }
+    const waited = parked()
+    expect(await waitForRenderedStability(waited.page, { minMs: 20, maxMs: 60, loadingMaxMs: 5_000, sampleMs: 20 })).toMatchObject({ loadingSeen: true, stillLoading: false })
+    expect(waited.reads()).toBeGreaterThan(10)
+    // Without the longer bound it still never ends early on a bodyless document: it runs to maxMs and says it was loading.
+    const plain = parked()
+    expect(await waitForRenderedStability(plain.page, { minMs: 20, maxMs: 100, sampleMs: 20 })).toMatchObject({ loadingSeen: true, stillLoading: true })
+    // A finished document with no body (an SVG opened directly: the probe reports it as not bodyless) settles at once.
+    const svg = { async evaluate() { return JSON.stringify({ size: 300, text: '', loading: false, bodyless: false }) }, waitForTimeout: sleep }
+    expect(await waitForRenderedStability(svg, { minMs: 20, maxMs: 60, loadingMaxMs: 5_000, sampleMs: 20 })).toMatchObject({ loadingSeen: false, stillLoading: false })
+  })
+
   it('records the loading wait and warns on a page read as content while still loading', () => {
     expect(loadingWaitEvent(undefined, 5, 'provider')).toBeNull()
     expect(loadingWaitEvent({ loadingSeen: false, stillLoading: false, waitedMs: 600 }, 5, 'provider')).toBeNull()

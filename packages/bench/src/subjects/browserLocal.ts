@@ -909,6 +909,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const shownPage = page
       // Documents loaded when the last wait for stability began: one loaded since has not settled.
       let settledLoads = 0
+      // How long a page still loading is waited for in all, leaving the capture reserve before the deadline.
+      const loadingBound = () => execution.deadlineAt === undefined ? LOADING_WAIT_MAX_MS : Math.max(1, Math.min(LOADING_WAIT_MAX_MS, execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now()))
       const settle = async (maxMs: number, loadingMaxMs = maxMs) => {
         settledLoads = documents.loads
         return await raceWithSignal(waitForRenderedStability(shownPage, { maxMs, loadingMaxMs }), signal)
@@ -989,7 +991,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         // not when the request waits itself (waitFor) or runs steps on the page, whose time this wait would take.
         const callerWaits = (options.waitFor ?? 0) > 0 || (options.actions?.length ?? 0) > 0
         const usual = remainingTimeout(execution, 1_500)
-        const settled = await settle(usual, callerWaits ? usual : execution.deadlineAt === undefined ? LOADING_WAIT_MAX_MS : Math.max(1, Math.min(LOADING_WAIT_MAX_MS, execution.deadlineAt - CAPTURE_RESERVE_MS - Date.now())))
+        const settled = await settle(usual, callerWaits ? usual : loadingBound())
         const waited = callerWaits ? null : loadingWaitEvent(settled, Date.now() - start, 'browser_local')
         if (waited !== null) trace.push(waited)
         throwIfExecutionStopped(execution)
@@ -1022,7 +1024,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
           const waited = await waitOutChallenge(page, documents, response, execution, signal)
           if (waited !== null) {
             trace.push({ at: Date.now() - start, lane: 'browser_local', event: 'challenge_wait', detail: waited })
-            if (waited.outcome === 'cleared') await settle(remainingTimeout(execution, 1_500))
+            // The page the check reloads into is a new load: waited for as the first one is, a loading page longer.
+            if (waited.outcome === 'cleared') await settle(remainingTimeout(execution, 1_500), loadingBound())
           }
         }
         // ADR 0005 `third_party_captcha_solver`: a page still stopped at a check, judged as its capture below will judge
