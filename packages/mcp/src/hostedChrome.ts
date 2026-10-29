@@ -29,7 +29,7 @@ import type { AddressInfo } from 'node:net'
 import { hostedNetworkPolicy, hostedVerifyRefusal, withOperatorContact, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
 import { BrowserLocalSubject, CompatAddressGuard, hostedChromeRefusal, type GuardResolver, type HostedChromeClient, type InstalledChromeTestSeams } from '@w2l/api'
 import type { HostedChromeExit } from './hostedChromeEgress.js'
-import { withRegexLedger } from '@w2l/runtime'
+import { withRegexLedger, type RegexStats } from '@w2l/runtime'
 
 /**
  * What each page option is to the service, for every key of FetchOptions (a key added there fails to compile until it is
@@ -72,8 +72,11 @@ export interface HostedChromeRead {
 /** How the service reads a page; the browser lane in production (hostedChromeReader), a stand-in in tests. */
 export type HostedChromeReader = (read: HostedChromeRead, signal: AbortSignal) => Promise<FetchResult>
 
-/** The service's HTTP app (see the top of this file). */
-export function createHostedChromeService(read: HostedChromeReader, clock: () => number = Date.now): Hono {
+/**
+ * The service's HTTP app (see the top of this file). `regexChecks`: it takes a contract's regular-expression checks, as
+ * its start-up self-test passed (hostedChromeCli.ts); its callers, the hosted API and the job worker, admitted them first.
+ */
+export function createHostedChromeService(read: HostedChromeReader, clock: () => number = Date.now, options: { regexChecks?: boolean } = {}): Hono {
   const app = new Hono()
   let reading = false
   app.get('/health', (c) => c.json({ ok: true }))
@@ -83,7 +86,7 @@ export function createHostedChromeService(read: HostedChromeReader, clock: () =>
     if (Buffer.byteLength(text) > MAX_BODY_BYTES) return c.json({ error: 'the request body is over 256 KiB' }, 400)
     let body: unknown
     try { body = JSON.parse(text) } catch { return c.json({ error: 'the request body must be JSON' }, 400) }
-    const parsed = readOf(body, clock())
+    const parsed = readOf(body, clock(), options.regexChecks === true)
     if (typeof parsed === 'string') return c.json({ error: parsed }, 400)
     if (reading) return c.json({ error: 'this instance is reading a page: one window at a time' }, 503)
     reading = true
@@ -97,7 +100,7 @@ export function createHostedChromeService(read: HostedChromeReader, clock: () =>
 }
 
 /** The request as the service takes it, or why it does not. */
-function readOf(body: unknown, now: number): HostedChromeRead | string {
+function readOf(body: unknown, now: number, regexChecks: boolean): HostedChromeRead | string {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return 'the request is { url, options?, deadlineAt? }'
   const { url, options = {}, deadlineAt } = body as Record<string, unknown>
   if (typeof url !== 'string') return 'url is a string'
@@ -110,8 +113,9 @@ function readOf(body: unknown, now: number): HostedChromeRead | string {
     const outside = Object.keys(options).filter((key) => !HOSTED_CHROME_READ_OPTIONS.has(key))
     if (outside.length > 0) return `hosted_chrome takes no ${outside.join(', ')}: robots.txt is obeyed on every hosted rung, and the rest is no caller's to send`
   }
-  // The hosted API's own check of a task contract, made again: hosted refuses the regular-expression checks for now (ADR 0006, amendment of 2026-10-29).
-  const verifyRefusal = hostedVerifyRefusal((options as FetchOptions).verify)
+  // The hosted API's own check of a task contract, made again: the regular-expression checks only on a service whose
+  // self-test passed (ADR 0006, amendment of 2026-10-29).
+  const verifyRefusal = hostedVerifyRefusal((options as FetchOptions).verify, { regexChecks })
   if (verifyRefusal !== null) return verifyRefusal
   if (refusal !== null) return refusal
   if (deadlineAt !== undefined && (typeof deadlineAt !== 'number' || !Number.isFinite(deadlineAt))) return 'deadlineAt is a time in milliseconds since the epoch'
@@ -125,13 +129,13 @@ function readOf(body: unknown, now: number): HostedChromeRead | string {
  * own egress, or the operator's datacenter proxies as the guard's dial, one chosen for each read before it starts. One
  * subject and one guard for the process; each read launches its own Chrome and profile, and deletes them after.
  */
-export function hostedChromeReader(networkPolicy: NetworkPolicy, exit: HostedChromeExit, seams: InstalledChromeTestSeams = {}, resolve?: GuardResolver): { read: HostedChromeReader; close: () => Promise<void> } {
+export function hostedChromeReader(networkPolicy: NetworkPolicy, exit: HostedChromeExit, seams: InstalledChromeTestSeams = {}, resolve?: GuardResolver, onRegexChecks?: (stats: RegexStats) => void): { read: HostedChromeReader; close: () => Promise<void> } {
   const guard = new CompatAddressGuard(networkPolicy, resolve, { login: false, ...(exit.dial === undefined ? {} : { dial: exit.dial }) })
   const subject = new BrowserLocalSubject('standard', null, true, networkPolicy, null, undefined, null, undefined, undefined, null, false, undefined, 'hosted_chrome', 'actual', seams, null, undefined, { guard, egressKind: exit.kind, proxy: () => exit.proxy() })
   return {
     // The service reads one page at a time (createHostedChromeService), so the read's exit is chosen here and held by all its connections.
     // One read is one request for its regular-expression checks: the region wait and the extraction candidates share its steering pool.
-    read: (request, signal) => { exit.choose(); return withRegexLedger(() => subject.fetch(request.url, request.deadlineAt, signal, undefined, request.options)) },
+    read: (request, signal) => { exit.choose(); return withRegexLedger(() => subject.fetch(request.url, request.deadlineAt, signal, undefined, request.options), onRegexChecks) },
     close: async () => { await subject.teardown(); await guard.close() },
   }
 }

@@ -400,6 +400,12 @@ export interface ApiEngineOptions {
    * when it ends, for one that ran a check, with its account where the call had one. For a log line, never for the verdict.
    */
   onRegexChecks?: (stats: RegexStats, about: { kind: 'scrape' | 'page'; account?: string }) => void
+  /**
+   * A hosted engine takes the regular-expression checks (markdownMatches, markdownCountMin) of a task contract: its
+   * operator switched them on and the start-up self-test passed (hostedRegexChecksFromEnv in @w2l/mcp). Default false:
+   * a hosted engine refuses them by name, as before (ADR 0006, amendment of 2026-10-29).
+   */
+  hostedRegexChecks?: boolean
   taskRoot?: string
   monitorLeaseMs?: number
   monitorAttemptTimeoutMs?: number
@@ -977,8 +983,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     if (hosted && req.skipTlsVerification === true) throw new RequestError('skipTlsVerification is not available in hosted mode', 'invalid_request', undefined, [REFUSAL_HINTS.hostedSkipTlsVerification])
     // A step runs the caller's clicks and scripts in the operator's browser; a hosted engine takes none until that isolation is reviewed.
     if (hosted && req.actions !== undefined) throw new RequestError('actions are not available in hosted mode: run Octocrawl locally to use them')
-    // The regular-expression checks run with a time limit, and hosted refuses them until a later change opens them there (ADR 0006, amendment of 2026-10-29).
-    const regexRefusal = hosted ? hostedVerifyRefusal(req.verify) : null
+    // The regular-expression checks run with a time limit; a hosted engine takes them when its operator switched them on (ADR 0006, amendment of 2026-10-29).
+    const regexRefusal = hosted ? hostedVerifyRefusal(req.verify, { regexChecks: options.hostedRegexChecks === true }) : null
     if (regexRefusal !== null) throw new RequestError(regexRefusal, 'unsupported_parameter', { parameters: ['verify'] })
   }
   /**

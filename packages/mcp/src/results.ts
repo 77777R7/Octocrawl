@@ -6,6 +6,7 @@
  */
 import { createHash } from 'node:crypto'
 import type { VerifyContract } from '@w2l/contracts'
+import type { RegexLedger } from '@w2l/runtime'
 import { resultProjection, type ResultProjection } from './resultVerification.js'
 
 export const RESULT_TEXT_MAX = 50_000
@@ -17,10 +18,13 @@ const MAX_HINTS = 5
 export type ImageBlock = { type: 'image'; data: string; mimeType: string }
 type Json = Record<string, unknown>
 
-/** A tool's result as the MCP server answers it: the verdict first, cut to the budget, and a screenshot as an image block. */
-export function shapeResult(tool: string, result: unknown, contract?: VerifyContract): { value: unknown; images: ImageBlock[] } {
+/**
+ * A tool's result as the MCP server answers it: the verdict first, cut to the budget, and a screenshot as an image block.
+ * A scrape's versions are judged on `ledger`, the call's, when one is given (resultProjection).
+ */
+export function shapeResult(tool: string, result: unknown, contract?: VerifyContract, ledger?: RegexLedger): { value: unknown; images: ImageBlock[] } {
   if (!isObject(result)) return { value: result, images: [] }
-  if (tool === 'scrape') return { value: withinBudget(verdictFirst(result), RESULT_TEXT_MAX, withoutBase64, resultProjection(result, contract)), images: screenshotImage(result) }
+  if (tool === 'scrape') return { value: withinBudget(verdictFirst(result), RESULT_TEXT_MAX, withoutBase64, resultProjection(result, contract, 'mcp_result_truncated', ledger)), images: screenshotImage(result) }
   if ((tool === 'get_crawl_pages' || tool === 'get_batch_items') && Array.isArray(result.items)) return { value: pageListWithinBudget(result), images: [] }
   return { value: result, images: [] }
 }
@@ -33,7 +37,7 @@ export function shapeResult(tool: string, result: unknown, contract?: VerifyCont
  * listed to read it back (`keepScrapeId`: an account's connection); that record is answered as a scrape's result is. Its hints lose their
  * campaign tags, as error texts do. debug asks for the whole.
  */
-export function withoutTelemetry(tool: string, result: unknown, args: unknown, contract?: VerifyContract, options: { keepScrapeId?: boolean } = {}): unknown {
+export function withoutTelemetry(tool: string, result: unknown, args: unknown, contract?: VerifyContract, options: { keepScrapeId?: boolean; ledger?: RegexLedger } = {}): unknown {
   if (!isObject(result) || (isObject(args) && args.debug === true)) return result
   // A job's items (H2 M8) lose their usage and trace, as get_crawl_pages says pages do without debug; the Evidence Record stays whole.
   if (JOB_ITEM_TOOLS.has(tool) && Array.isArray(result.items)) {
@@ -49,7 +53,7 @@ export function withoutTelemetry(tool: string, result: unknown, args: unknown, c
     const { scrapeId, concurrencyLimited: _limited, concurrencyQueueDurationMs: _queued, ...metadata } = untagged.metadata
     minimized = { ...untagged, metadata: options.keepScrapeId === true && scrapeId !== undefined ? { ...metadata, scrapeId } : metadata }
   }
-  return tool === 'scrape' && contract !== undefined ? resultProjection(result, contract, 'mcp_result_minimized').deliver(minimized) : minimized
+  return tool === 'scrape' && contract !== undefined ? resultProjection(result, contract, 'mcp_result_minimized', options.ledger).deliver(minimized) : minimized
 }
 
 const JOB_ITEM_TOOLS: ReadonlySet<string> = new Set(['get_batch_items', 'get_batch_errors', 'get_crawl_pages', 'get_crawl_errors'])

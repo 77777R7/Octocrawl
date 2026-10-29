@@ -20,10 +20,12 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { BlockList, isIP } from 'node:net'
 import { readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createHistogram } from 'node:perf_hooks'
 import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
 import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine, type ApiEngineOptions, type HostedChromeOperator } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy, type ScrapeRun } from '@w2l/contracts'
+import type { RegexStats } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
 import { serverInstructions } from './instructions.js'
@@ -233,13 +235,14 @@ export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', '
 
 /** The tools hosted Octocrawl lists to a caller: scrape_product only to a key with the browser lane, since it needs one,
  * so every tool a client sees can answer. All are read-only here: hosted Octocrawl refuses page actions and logins.
- * scrape's description names get_scrape only to a connection that lists it (`jobs`). */
-export function hostedTools(browser: boolean, jobs = false) {
+ * scrape's description names get_scrape only to a connection that lists it (`jobs`), and its verify the regular-expression
+ * checks only on a server that takes them (`regexChecks`, HostedApiConfig). */
+export function hostedTools(browser: boolean, jobs = false, regexChecks = false) {
   return TOOLS.filter((tool) => (HOSTED_API_TOOLS.has(tool.name) && (browser || tool.name !== 'scrape_product')) || (jobs && HOSTED_JOB_TOOLS.has(tool.name)))
     .map((tool) => HOSTED_JOB_TOOLS.has(tool.name) ? hostedJobTool(tool, browser) : ({
       ...tool,
       description: jobs ? tool.description : tool.description.replace(SCRAPE_RECORD_HINT, ''),
-      inputSchema: hostedInputSchema(tool.name, tool.inputSchema, browser),
+      inputSchema: hostedInputSchema(tool.name, tool.inputSchema, browser, regexChecks),
       annotations: { ...tool.annotations, readOnlyHint: true },
       _meta: { ...('_meta' in tool ? tool._meta : {}), ...HOSTED_INVOCATION[tool.name as keyof typeof HOSTED_INVOCATION] },
     }))
@@ -331,7 +334,7 @@ export const HOSTED_MCP_SCRAPE_TIMEOUT_MS = MCP_SCRAPE_TIMEOUT_MS
 export const HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS = 180_000
 
 /** A hosted copy of a tool's input schema, with only what this connection can use. */
-function hostedInputSchema(name: string, schema: unknown, browser: boolean): unknown {
+function hostedInputSchema(name: string, schema: unknown, browser: boolean, regexChecks = false): unknown {
   if (name !== 'scrape' && name !== 'map') return schema
   if (name === 'map') {
     const copy = structuredClone(schema) as { properties: Record<string, Record<string, unknown>> }
@@ -347,11 +350,13 @@ function hostedInputSchema(name: string, schema: unknown, browser: boolean): unk
   const properties = copy.properties
   properties.timeout = { ...properties.timeout, maximum: HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, description: `Deadline in milliseconds for the whole scrape. When it fires the result is partial with the content so far, or failed/timeout. Here by default ${HOSTED_MCP_SCRAPE_TIMEOUT_MS}, max ${HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS}; a longer one is lowered to it.` }
   properties.maxFileBytes = { ...properties.maxFileBytes, maximum: HOSTED_MAX_FILE_BYTES }
-  const verify = properties.verify as { description: string; properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }
-  const checkType = verify.properties.checks.items.properties.type
-  checkType.enum = checkType.enum.filter((type) => !(VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(type))
-  // Its description names the types too, and the job tools' verify is "Same as scrape.": neither offers what hosted refuses.
-  for (const type of VERIFY_REGEX_CHECK_TYPES) verify.description = verify.description.replace(` ${type},`, '')
+  if (!regexChecks) {
+    const verify = properties.verify as { description: string; properties: { checks: { items: { properties: { type: { enum: string[] } } } } } }
+    const checkType = verify.properties.checks.items.properties.type
+    checkType.enum = checkType.enum.filter((type) => !(VERIFY_REGEX_CHECK_TYPES as readonly string[]).includes(type))
+    // Its description names the types too, and the job tools' verify is "Same as scrape.": neither offers what hosted refuses.
+    for (const type of VERIFY_REGEX_CHECK_TYPES) verify.description = verify.description.replace(` ${type},`, '')
+  }
   if (!browser) {
     // Without the browser lane there is no screenshot and nothing to wait for.
     delete properties.waitFor
@@ -397,10 +402,10 @@ const HOSTED_INVOCATION = {
  * The tools /mcp-oauth lists: each declares that it needs OAuth with the `mcp` scope, top level and mirrored in `_meta`
  * for clients that read only `_meta`, as ChatGPT asks (https://developers.openai.com/apps-sdk/build/auth, read 2026-10-16).
  */
-export function oauthTools(browser: boolean, jobs = false) {
+export function oauthTools(browser: boolean, jobs = false, regexChecks = false) {
   const securitySchemes = [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]
   // Merged, not replaced: the hosted copies' own _meta (status lines) stays beside securitySchemes.
-  return hostedTools(browser, jobs).map((tool) => ({ ...tool, securitySchemes, _meta: { ...('_meta' in tool ? tool._meta : {}), securitySchemes } }))
+  return hostedTools(browser, jobs, regexChecks).map((tool) => ({ ...tool, securitySchemes, _meta: { ...('_meta' in tool ? tool._meta : {}), securitySchemes } }))
 }
 /** /mcp-oauth's Protected Resource Metadata (RFC 9728). */
 export function oauthResourceMetadata() {
@@ -409,13 +414,14 @@ export function oauthResourceMetadata() {
 /**
  * What directories that list MCP servers read before, or instead of, a live scan (Smithery's static server card,
  * https://smithery.ai/docs/build/publish): the server, that it needs no sign-in, and the tools it offers, taken from
- * the same definitions tools/list answers a caller without a key, so the card cannot drift from the server.
+ * the same definitions tools/list answers a caller without a key, so the card cannot drift from the server: with the
+ * regular-expression checks when the server takes them (`regexChecks`, HostedApiConfig).
  */
-export function hostedServerCard() {
+export function hostedServerCard(regexChecks = false) {
   return {
     serverInfo: { ...SERVER_IDENTITY, version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server-card&utm_medium=listing' },
     authentication: { required: false },
-    tools: hostedTools(false),
+    tools: hostedTools(false, false, regexChecks),
     resources: [],
     prompts: [],
   }
@@ -484,6 +490,12 @@ export interface HostedApiConfig {
    * revision of 2026-10-27, decision two). Absent: no rung, and `access: "enhanced"` is refused.
    */
   hostedChrome?: HostedChromeOperator
+  /**
+   * The regular-expression checks of a task contract (markdownMatches, markdownCountMin) are taken on every surface: the
+   * operator's W2L_HOSTED_REGEX_CHECKS with the start-up self-test passed (hostedRegex.ts; ADR 0006, amendment of
+   * 2026-10-29). Absent: refused by name, and left out of the MCP schema.
+   */
+  regexChecks?: boolean
   /** The hosts a call that holds compatible_transport reads over it; default the local default (COMPAT_BENEFIT_HOSTS). A test names its own. */
   compatHosts?: readonly string[]
   /** Shared with the Cloudflare Worker; proves CF-Connecting-IP. Absent: the socket address is the keyless identity. */
@@ -592,6 +604,42 @@ export function scrapePhaseLine(url: string, run: ScrapeRun, scrapeId: string | 
   }
 }
 
+/** How often the event loop is sampled while a scrape with a task contract runs (phaseObserver). */
+const LOOP_SAMPLE_MS = 10
+
+/**
+ * A hosted scrape's phase line (scrapePhaseLine), as its `observe` hook. For a scrape with a task contract the line adds
+ * how long this process's event loop waited while the scrape ran, other calls' work included: its regular-expression
+ * checks hold the loop while they scan (ADR 0006, amendment of 2026-10-29), and the checks before the switch serves
+ * callers compare such a contract with one of markdownIncludes alone (docs/hosted-api.md, Turning them on). A timer
+ * samples the loop from the scrape's start, and `stop` takes the last sample as the scrape answers or throws, so a hold
+ * at either end counts, the final judgement's included, and what runs after it (the answer's serialization, an MCP
+ * result's re-judgements) does not. `loopMaxMs` and `loopP99Ms` are the waits beyond the sampling interval. `observe`
+ * runs before the final judgement, so that line is written by `stop`; a scrape without a contract starts no timer and is
+ * logged by `observe`, as before.
+ */
+function phaseObserver(req: { url: string; verify?: unknown }, log: (line: string) => void): { observe: (run: ScrapeRun, scrapeId: string) => void; stop: () => void } {
+  const loop = req.verify === undefined ? null : createHistogram()
+  // The first interval counts from now: monitorEventLoopDelay skips its first one, and with it a hold that begins at once.
+  loop?.recordDelta()
+  const sampler = loop === null ? undefined : setInterval(() => loop.recordDelta(), LOOP_SAMPLE_MS).unref()
+  let line: Record<string, unknown> | null = null
+  const waited = (ns: number): number | null => loop!.count === 0 ? null : Math.round(Math.max(0, ns / 1e6 - LOOP_SAMPLE_MS) * 10) / 10
+  return {
+    observe: (run, scrapeId) => {
+      line = scrapePhaseLine(req.url, run, scrapeId)
+      if (loop === null) log(JSON.stringify(line))
+    },
+    stop: () => {
+      if (loop === null) return
+      clearInterval(sampler)
+      // The interval since the last sample: a hold that has just ended counts without waiting for a timer.
+      loop.recordDelta()
+      if (line !== null) log(JSON.stringify({ ...line, loopMaxMs: waited(loop.max), loopP99Ms: waited(loop.percentile(99)) }))
+    },
+  }
+}
+
 export interface HostedCaller {
   kind: 'key' | 'keyless'
   /** Keyless calls from Claude's egress range, which share one pool. */
@@ -657,8 +705,18 @@ function clientText(value: unknown): string | null {
 function secondsToUtcMidnight(now: Date): number {
   return Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime()) / 1000))
 }
-function digest(hashKey: string, kind: 'key' | 'ip' | 'oca', value: string): string {
+function digest(hashKey: string, kind: 'key' | 'ip' | 'oca' | 'acct', value: string): string {
   return createHmac('sha256', hashKey).update(`${kind}:${value}`).digest('hex')
+}
+/**
+ * The log line for the regular-expression checks of one scrape (ApiEngineOptions.onRegexChecks; a hosted job's pages are
+ * logged by the worker), or of one MCP scrape result's re-judgements (`mcp_result`, McpServerOptions.onRegexChecks): what
+ * they cost, the account by a keyed digest, never the page's text or the pattern. Cloud Run's logs give the scans' times
+ * on its CPU, for the checks before the switch serves callers (ADR 0006, amendment of 2026-10-29; docs/hosted-api.md).
+ */
+export function regexChecksLine(hashKey: string, stats: RegexStats, about: { kind: 'scrape' | 'page' | 'mcp_result'; account?: string }): string {
+  const ms = (value: number): number => Math.round(value * 10) / 10
+  return JSON.stringify({ event: 'regex_checks', kind: about.kind, account: about.account === undefined ? null : digest(hashKey, 'acct', about.account).slice(0, 16), scans: stats.scans, memoHits: stats.memoHits, totalMs: ms(stats.totalMs), maxMs: ms(stats.maxMs), maxCallMs: ms(stats.maxCallMs), limited: stats.limited })
 }
 /** The document id a key is stored under: scripts/hosted/issue-key.mjs writes it, the service looks it up. */
 export function keyDigest(hashKey: string, key: string): string { return digest(hashKey, 'key', key) }
@@ -696,7 +754,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const env = config.env ?? process.env
   const log = config.log ?? ((line: string) => console.log(line))
   // A job's request is checked at its start on an engine configured as the worker's, which creates no task here.
-  const jobChecks = config.jobs === undefined || config.credits === undefined ? null : createApiEngine(jobEngineOptions(join(config.taskRoot, 'job-checks'), { ...(config.networkPolicy === undefined ? {} : { networkPolicy: config.networkPolicy }), ...(config.hostedChrome === undefined ? {} : { hostedChrome: config.hostedChrome }) }))
+  const jobChecks = config.jobs === undefined || config.credits === undefined ? null : createApiEngine(jobEngineOptions(join(config.taskRoot, 'job-checks'), { ...(config.networkPolicy === undefined ? {} : { networkPolicy: config.networkPolicy }), ...(config.hostedChrome === undefined ? {} : { hostedChrome: config.hostedChrome }), hostedRegexChecks: config.regexChecks === true }))
   /**
    * ADR 0005 hosted_chrome (revision of 2026-10-27): `access: "enhanced"` is taken only from a call the account switch grants
    * the rung, on a deploy with its operator config. Every other call is refused as a deploy without the rung refuses it;
@@ -706,7 +764,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const enhancedRefusal = (req: { access?: string }, capabilities: readonly string[]): RequestError | null =>
     req.access !== 'enhanced' || config.hostedChrome === undefined || capabilities.includes('hosted_chrome') ? null
       : new RequestError('access enhanced: hosted_chrome is not switched on for this caller on hosted Octocrawl; ask with access standard, or run it on your computer with an access grant (npx octocrawl serve)', 'unsupported_parameter', { parameters: ['access'] })
-  const jobRoutes = jobChecks === null ? null : createJobRoutes({ checkStart: { batch: (request) => jobChecks.checkBatchStart(request), crawl: (request) => jobChecks.checkCrawlStart(request) }, admitsEnhanced: (uid) => admitsEnhanced({ uid }), ...config.jobs! }, config.credits!, log)
+  const jobRoutes = jobChecks === null ? null : createJobRoutes({ checkStart: { batch: (request) => jobChecks.checkBatchStart(request), crawl: (request) => jobChecks.checkCrawlStart(request) }, admitsEnhanced: (uid) => admitsEnhanced({ uid }), regexChecks: config.regexChecks === true, ...config.jobs! }, config.credits!, log)
   const keylessDaily = config.keylessDaily ?? DEFAULT_KEYLESS_DAILY
   const claudeDaily = config.claudeDaily ?? DEFAULT_CLAUDE_DAILY
   const siteDaily = config.siteDaily ?? DEFAULT_SITE_DAILY
@@ -734,6 +792,9 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     compatHosts: config.compatHosts ?? HOSTED_ACCESS_ENGINE.compatHosts,
     // ADR 0005 hosted_chrome, for a call that holds it and chose access enhanced, counted by the operator's meter.
     ...(config.hostedChrome === undefined ? {} : { hostedChrome: config.hostedChrome }),
+    // The regular-expression checks, when the operator switched them on and the self-test passed (ADR 0006, amendment of 2026-10-29).
+    hostedRegexChecks: config.regexChecks === true,
+    onRegexChecks: (stats, about) => log(regexChecksLine(config.hashKey, stats, about)),
   })
   const inner = createApp(engine, { exposeInternalErrors: false, jobStreams: false })
   // A process-local secret lets the MCP handler hand the gate a keyless caller's identity; no outside request can present it.
@@ -797,7 +858,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   gate.get('/health', (c) => c.json({ ok: true, service: 'octocrawl-hosted-api', tools: [...HOSTED_API_TOOLS] }))
   // Discovery files are public and cheap: the server card, and a plain 404 for every other /.well-known file, so a client
   // looking for OAuth metadata learns there is none instead of reading a refusal as a sign-in wall.
-  gate.get('/.well-known/mcp/server-card.json', (c) => c.json(hostedServerCard(), 200, { 'cache-control': 'public, max-age=3600' }))
+  gate.get('/.well-known/mcp/server-card.json', (c) => c.json(hostedServerCard(config.regexChecks === true), 200, { 'cache-control': 'public, max-age=3600' }))
   // /mcp-oauth signs in, so its metadata is published (RFC 9728); /mcp needs no sign-in and has none.
   gate.get('/.well-known/oauth-protected-resource/mcp-oauth', (c) => c.json(oauthResourceMetadata(), 200, { 'cache-control': 'public, max-age=3600', 'access-control-allow-origin': '*' }))
   gate.all('/.well-known/*', (c) => refuse(c, 404, 'not_found', `${c.req.path} is not published by hosted Octocrawl`, ['the server card is at /.well-known/mcp/server-card.json; no sign-in is needed: call POST /mcp without an Authorization header']))
@@ -923,7 +984,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const capabilities = await grantedCapabilities(config.access, caller)
       const refusedEnhanced = enhancedRefusal(req, capabilities)
       if (refusedEnhanced !== null) throw refusedEnhanced
-      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }), 200)
+      const phases = phaseObserver(req, log)
+      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: phases.observe, ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }).finally(phases.stop), 200)
     }
     await next()
     return c.res
@@ -1012,7 +1074,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const capabilities = await grantedCapabilities(config.access, caller)
           const refusedEnhanced = enhancedRefusal(req, capabilities)
           if (refusedEnhanced !== null) throw refusedEnhanced
-          const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: (run, scrapeId) => log(JSON.stringify(scrapePhaseLine(req.url, run, scrapeId))), ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) })
+          const phases = phaseObserver(req, log)
+          const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: phases.observe, ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) }).finally(phases.stop)
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
           // Two more where the model was called for the page: never more than was reserved, as only a reserved gate admits.
           modelCharged = modelExtra > 0 && (model?.pagesCalled() ?? 0) > 0 ? CREDITS.model : 0
@@ -1139,13 +1202,15 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     // While jobs are invite only (hostedConfig/jobs.allowedUids), an account not on the list is not offered them.
     const invited = account && await jobRoutes!.allows(caller.uid!)
     const jobs = account && invited
-    const tools = oauth ? oauthTools(caller.browser, jobs) : hostedTools(caller.browser === true, jobs)
+    const tools = oauth ? oauthTools(caller.browser, jobs, config.regexChecks === true) : hostedTools(caller.browser === true, jobs, config.regexChecks === true)
     const instructions = serverInstructions(tools.map((tool) => tool.name), { kind: 'hosted', connection: oauth ? 'oauth' : caller.kind === 'key' ? 'key' : 'keyless', browser: caller.browser === true, sharedPool: caller.kind === 'keyless' && caller.pool === 'claude' })
     await serveMcpPost(req, res, parsed, () => createMcpServer(client, {
       allowedTools: jobs ? new Set([...HOSTED_API_TOOLS, ...HOSTED_JOB_TOOLS]) : HOSTED_API_TOOLS,
       tools,
       instructions,
       minimalResults: true,
+      // What a scrape result's re-judgements cost, when they ran a pattern scan: the engine's line does not see them.
+      onRegexChecks: (stats) => log(regexChecksLine(config.hashKey, stats, { kind: 'mcp_result', ...(caller.uid === undefined ? {} : { account: caller.uid }) })),
       calls: post,
       unavailableHint: jobs
         ? 'Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.'

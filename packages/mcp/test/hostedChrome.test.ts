@@ -71,6 +71,18 @@ describe('the octocrawl-chrome service', () => {
     expect(reads).toEqual([])
   })
 
+  it('takes a contract\'s regular-expression checks when its start-up self-test passed, and hands them to the read (ADR 0006, amendment of 2026-10-29)', async () => {
+    const taken: HostedChromeRead[] = []
+    const open = createHostedChromeService(async (read) => { taken.push(read); return page(read.url) }, () => NOW, { regexChecks: true })
+    const send = (body: unknown) => open.request('/v1/read', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    const verify = { checks: [{ type: 'markdownMatches', pattern: 'Tides' }, { type: 'markdownCountMin', pattern: 'Tide', min: 1 }] }
+    expect((await send({ url: 'https://shop.test/item', options: { verify } })).status).toBe(200)
+    expect(taken.map((read) => read.options)).toEqual([{ verify }])
+    // What else it refuses, it still refuses.
+    expect((await send({ url: 'https://shop.test/item', options: { verify, mobile: true } })).status).toBe(400)
+    expect(taken).toHaveLength(1)
+  })
+
   it('reads one page at a time: a second request while one is read is told to come back', async () => {
     let finish!: () => void
     const held = new Promise<void>((resolve) => { finish = resolve })

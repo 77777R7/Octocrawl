@@ -388,6 +388,31 @@ describe('hosted job worker', () => {
     expect(refusals.map((line) => line.message)).toEqual([expect.stringMatching(/^includeTags entry uses .*: div:has\(p\)/), expect.stringMatching(/^includeTags entry uses .*: div:has\(p\)/)])
   })
 
+  it('runs a job\'s regular-expression checks on a hosted engine whose operator switched them on, logging what each page\'s cost, and refuses them at the first slice otherwise (ADR 0006, amendment of 2026-10-29)', async () => {
+    for (const regexChecks of [true, false]) {
+      const { origin, store, deps, create, drain, exportLines } = await setup()
+      const lines: string[] = []
+      deps.log = (line) => lines.push(line)
+      deps.regexChecks = regexChecks
+      const local = deps.engineOptions!
+      deps.engineOptions = () => ({ ...local(), hosted: true })
+      const id = await create(parseBatchStartRequest({ urls: [`${origin}/a`], fastMode: true, verify: { checks: [{ type: 'markdownCountMin', pattern: 'page /a', min: 1 }, { type: 'markdownMatches', pattern: '^# Page /a$', flags: 'm' }] } }))
+      await drain(id)
+      const job = (await store.get(id))!
+      const logged = lines.map((line) => JSON.parse(line) as Record<string, unknown>)
+      if (regexChecks) {
+        expect(job).toMatchObject({ status: 'completed', counts: { pages: 1, errors: 0 } })
+        expect(exportLines(job)).toEqual([expect.objectContaining({ status: 'success', verification: expect.objectContaining({ status: 'passed' }) })])
+        expect(logged.filter((line) => line.event === 'regex_checks')).toEqual([{ event: 'regex_checks', kind: 'page', jobId: id, scans: expect.any(Number), memoHits: expect.any(Number), totalMs: expect.any(Number), maxMs: expect.any(Number), maxCallMs: expect.any(Number), limited: 0 }])
+        expect(lines.join('\n')).not.toMatch(/page \/a|Page \/a/)
+      } else {
+        expect(job).toMatchObject({ status: 'failed', failureReason: 'request_refused', counts: { pages: 0 } })
+        expect(logged.find((line) => line.event === 'hosted_job_request_refused')?.message).toMatch(/^verify: markdownCountMin and markdownMatches checks are not available in hosted mode/)
+        expect(logged.filter((line) => line.event === 'regex_checks')).toEqual([])
+      }
+    }
+  })
+
   it('reads what the credits allow, then fails the job for credits; and stops at the job\'s maxCredits', async () => {
     const short = await setup({ balance: 3, limits: { slicePages: 5 } })
     const id = await short.create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/'].map((path) => `${short.origin}${path}`), fastMode: true }))

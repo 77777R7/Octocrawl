@@ -28,7 +28,7 @@ let close: (() => Promise<void>) | undefined
 let root: string | undefined
 afterEach(async () => { await close?.(); close = undefined; if (root) await rm(root, { recursive: true, force: true }); root = undefined })
 
-async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean; allowed?: readonly string[]; failEnqueue?: boolean | ((job: HostedJob) => boolean); finish?: boolean; failFinish?: boolean } = {}) {
+async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean; allowed?: readonly string[]; failEnqueue?: boolean | ((job: HostedJob) => boolean); finish?: boolean; failFinish?: boolean; regexChecks?: boolean } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-job-routes-'))
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening')
   const port = (probe.address() as AddressInfo).port
@@ -45,7 +45,7 @@ async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean;
   const keys = new MemoryHostedKeys(new Map(Object.entries(KEYS).map(([key, record]) => [keyDigest(HASH_KEY, key), record])))
   const service = createHostedApi({
     port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys, oauthTokens: new MemoryHostedOAuthTokens(new Map()), quota: new MemoryHostedQuota(), credits,
-    networkPolicy: hostedNetworkPolicy(), log: () => {},
+    networkPolicy: hostedNetworkPolicy(), log: () => {}, ...(options.regexChecks === undefined ? {} : { regexChecks: options.regexChecks }),
     jobs: {
       store, files,
       enqueueSlice: async (job) => { if (options.failEnqueue === true || (typeof options.failEnqueue === 'function' && options.failEnqueue(job))) throw new Error('queue down'); enqueued.push(job) },
@@ -164,6 +164,18 @@ describe('hosted job routes', () => {
     expect(enqueued).toEqual([])
     // markdownIncludes and the structured checks start a job as before.
     expect((await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', verify: { checks: [{ type: 'markdownIncludes', text: 'Example' }] } })).status).toBe(202)
+  })
+
+  it('starts a job with the regular-expression checks on a server whose operator switched them on, as its worker then runs them (ADR 0006, amendment of 2026-10-29)', async () => {
+    const { call, enqueued, store } = await start({ regexChecks: true })
+    const verify = { checks: [{ type: 'markdownIncludes', text: 'Example' }, { type: 'markdownMatches', pattern: 'Example' }, { type: 'markdownCountMin', pattern: 'Example', min: 1 }] }
+    for (const [path, body] of [['/v1/crawl', { url: 'https://example.com/', verify }], ['/v1/batches', { urls: urls(1), verify }]] as const) {
+      const response = await call('POST', path, 'oc_one', body)
+      expect(response.status, path).toBe(202)
+      const { taskId } = await response.json() as { taskId: string }
+      expect(store.jobs.get(taskId)?.request, path).toMatchObject({ verify })
+    }
+    expect(enqueued).toHaveLength(2)
   })
 
   describe('refuses at the start, by name, what the worker\'s engine would refuse at the first slice (stage H W0)', () => {

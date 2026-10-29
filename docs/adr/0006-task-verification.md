@@ -95,6 +95,7 @@ Howard 的原话："我觉得方案没问题了"。这条修订认定"后果"一
 - **Node 26 上的两点（2026-10-29 在本机 darwin 版 26.8.1 上实测）。**
   - 一次在匹配途中被打断的正则，会让同一进程之后的全局匹配慢约 3.7 倍。Node 22 没有这个问题。
   - `pathFilter.ts` 在运行时打开线性引擎的 flag 之后，V8 新建的任何 context 都会让进程崩溃。现在它在设 flag 之前先让 Node 把自己要用的 context 建好，正则判定的 context 也在这之前建好。
+- **托管的开关（2026-10-30）。** 托管 API 和 jobs worker 要同时满足两条才接受正则判定：`W2L_HOSTED_REGEX_CHECKS=1`，启动自检通过（`packages/runtime/src/regexSelfTest.ts`）。不满足时照旧按名字拒绝，文字不变。chrome 服务只要自检通过就接受，因为它的调用方已经放行过。两个托管镜像构建时都在镜像里跑同一个自检，再加上仓库任务文件里的全部正则；不过就不推送。Howard 2026-10-30 决定 chrome 服务的镜像从 Node 26.8.1 换成和 API 相同的 Node 22.23.4（原话 "Yes, Node 22"），原因是上一条的变慢。开关默认关，什么时候打开由 Howard 定（`docs/hosted-api.md` 的 The regular-expression checks）。
 
 ### 3. 结果：`verification`，顶层 `status` 不变
 

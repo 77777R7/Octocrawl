@@ -10,6 +10,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { hostedNetworkPolicy, VERIFY_REGEX_CHECK_TYPES } from '@w2l/contracts'
 import { createHostedApi, hostedScrapeArguments, hostedTools, keyDigest, MemoryHostedKeys, MemoryHostedQuota, oauthTools, withMcpScrapeDeadline } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
+import { TOOLS } from '../src/tools.js'
 import { collectGarbage } from './collectGarbage.js'
 
 /**
@@ -64,6 +65,15 @@ describe('hosted tool schemas', () => {
     const keyed = schemaOf(hostedTools(true), 'scrape')
     expect('waitFor' in keyed.properties).toBe(true)
     expect((keyed.properties.formats?.items?.anyOf ?? []).some((variant) => (variant.enum ?? []).includes('screenshot'))).toBe(true)
+  })
+
+  it('lists the regular-expression checks as a local server does on a server that takes them, on every connection (ADR 0006, amendment of 2026-10-29)', () => {
+    const local = schemaOf(TOOLS, 'scrape').properties.verify
+    for (const [surface, tools] of [['keyless', hostedTools(false, false, true)], ['key', hostedTools(true, false, true)], ['jobs', hostedTools(true, true, true)], ['oauth', oauthTools(true, true, true)]] as const) {
+      expect([surface, schemaOf(tools, 'scrape').properties.verify]).toEqual([surface, local])
+      // What else hosted leaves out, it still leaves out.
+      expect([surface, NEVER_HOSTED.filter((key) => key in schemaOf(tools, 'scrape').properties)]).toEqual([surface, []])
+    }
   })
 
   it('gives a hosted MCP scrape a local one\'s 120 s when it names no deadline, 180 s at most, and leaves other arguments alone (stage H W0)', () => {

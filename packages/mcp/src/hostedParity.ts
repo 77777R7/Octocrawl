@@ -81,7 +81,7 @@ const LOGINS = 'Hosted keeps no saved logins. Stage H item 5: Howard chooses bet
 const MONITORS = 'Monitors run on a server on the person\'s computer; stage H item 4 brings them to hosted.'
 const DELIVERY = 'Webhook destinations for Monitors and jobs are a local server\'s; stage H item 4 brings them to hosted. A hosted job\'s end can already be posted over REST (POST /v1/crawl, POST /v1/batches).'
 const SCREENSHOT = `A connection with the browser lane only, at ${CREDITS.browserPage} credits a page; an account with fewer credits reads over HTTP alone, where a screenshot is refused.`
-const REGEX = 'ADR 0006 (amendment of 2026-10-29): pattern checks now run with a time limit, the same on every server, but hosted refuses them until a later change opens them behind a switch and a start-up self-test; markdownIncludes and the structured checks are served.'
+const REGEX = 'ADR 0006 (amendment of 2026-10-29): pattern checks run with a time limit, the same on every server. Hosted serves them once its operator sets W2L_HOSTED_REGEX_CHECKS=1 and its start-up self-test passes, and refuses them by name until then; markdownIncludes and the structured checks are served.'
 const FILE_CAP = `At most ${mib(HOSTED_MAX_FILE_BYTES)} (local ${mib(MAX_FILE_BYTES_CEILING)}).`
 const BROWSER_LANE = 'A connection with the browser lane only; one without reads over HTTP alone.'
 const WEBHOOK = 'REST takes it for the job\'s end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript.'

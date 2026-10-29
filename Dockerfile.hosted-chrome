@@ -2,8 +2,10 @@
 # page per request in a pinned Google Chrome, headed under Xvfb, behind its address guard (packages/mcp/src/hostedChrome.ts).
 # From the G4 image that measured this Chrome on Cloud Run gen2 (research/access/g4-cloudrun/Dockerfile,
 # research/access/runs/2026-10-21-g4-cloudrun-fixed-runtime-22c9e1ca.md): the base image pinned by digest, Chrome by
-# version and SHA-256, Playwright (the CDP driver) by package-lock.json.
-FROM node:26.8.1-bookworm@sha256:53eaddc9c421e3e33f5365bb605cb4d85477886745573216219933e22ac13ab0
+# version and SHA-256, Playwright (the CDP driver) by package-lock.json. Node 22.23.4, the hosted API's (Howard,
+# 2026-10-30): on Node 26.8.1 a regular expression stopped at its time limit left later matches about 3.7 times slower
+# (ADR 0006, amendment of 2026-10-29). Node drives Playwright only; the Chrome below is the launch ADR 0005 measures.
+FROM node:22.23.4-bookworm@sha256:18a6d90fd60542269850c80ca03b29b1d9b14d6b221ac7ee8e35b0d33ef904bd
 
 # Google Chrome 155.0.8059.79, the build G4 measured, from Google's pool, checked against the SHA-256 G4 took on
 # 2026-10-21. A new version is a change to the launch: it passes ADR 0005's gate (two challenge16 runs) before it serves.
