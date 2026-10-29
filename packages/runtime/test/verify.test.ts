@@ -225,3 +225,57 @@ describe('the task verifier (ADR 0006)', () => {
     expect(contractSha256({ checks: [{ type: 'markdownCountMin', pattern: '\\$\\d', min: 6, flags: 'i' }], emptyOk: false })).not.toBe(a)
   })
 })
+
+describe('bounded regular-expression checks (ADR 0006, amendment of 2026-10-29)', () => {
+  // The regexp backtrack stack overflows near 4,194,288 characters for ^(a)*$ (Node 22; 4,194,296 on Node 26): one size
+  // well above it on every build, one well below.
+  const overflowing = 'a'.repeat(4_300_000)
+  const fitting = 'a'.repeat(4_000_000)
+
+  it('records a pattern the engine cannot run on a page as not judged, without a count and without the page size', () => {
+    for (const check of [{ type: 'markdownMatches', pattern: '^(a)*$' }, { type: 'markdownCountMin', pattern: '^(a)*$', min: 1 }] as VerifyCheck[]) {
+      const verification = verify({ checks: [check] }, { status: 'success', markdown: overflowing })
+      expect(verification).toMatchObject({ status: 'failed', reason: 'checks_failed', checks: [{ passed: null, limit: 'error' }] })
+      if (verification.status === 'not_requested') throw new Error('unreachable')
+      expect(verification.checks[0]).not.toHaveProperty('observedCount')
+      expect(verification.checks[0]!.observed).toMatch(/^not judged: /)
+      expect(verification.checks[0]!.observed).not.toMatch(/4,300,000|4300000/)
+    }
+    expect(verify({ checks: [{ type: 'markdownMatches', pattern: '^(a)*$' }] }, { status: 'success', markdown: fitting })).toMatchObject({ status: 'passed', checks: [{ passed: true }] })
+  })
+
+  it('never passes a contract with a check left undecided, on a partial view or the result itself', () => {
+    const contract: VerifyContract = { checks: [{ type: 'markdownIncludes', text: 'a' }, { type: 'markdownMatches', pattern: '^(a)*$' }] }
+    for (const options of [{}, { partial: true }]) {
+      expect(verify(contract, { status: 'success', markdown: overflowing }, options)).toMatchObject({ status: 'failed', reason: 'checks_failed', checks: [{ passed: true }, { passed: null, limit: 'error' }] })
+    }
+    // A definite failure stays in the checks beside the undecided one.
+    const both = verify({ checks: [{ type: 'markdownIncludes', text: 'Price' }, { type: 'markdownMatches', pattern: '^(a)*$' }] }, { status: 'success', markdown: overflowing })
+    expect(both).toMatchObject({ status: 'failed', checks: [{ passed: false }, { passed: null, limit: 'error' }] })
+    // At a minimum of 0 the count decides nothing: the check passes, with its limit noted.
+    expect(verify({ checks: [{ type: 'markdownCountMin', pattern: '^(a)*$', min: 0 }] }, { status: 'success', markdown: overflowing })).toMatchObject({ status: 'passed', checks: [{ passed: true, limit: 'error' }] })
+  })
+
+  it('counts exactly as String.prototype.match does, the same script run again and again', () => {
+    const count = (pattern: string, flags: string | undefined, markdown: string): unknown => {
+      const verification = verify({ checks: [{ type: 'markdownCountMin', pattern, ...(flags === undefined ? {} : { flags }), min: 0 }] }, { status: 'success', markdown })
+      return verification.status === 'not_requested' ? null : verification.checks[0]!.observedCount
+    }
+    const emoji = '\u{1F600}a\u{1F600}'
+    for (let round = 0; round < 3; round++) {
+      expect(count('a*', undefined, 'baab')).toBe(4)
+      expect(count('', 'u', emoji)).toBe(4)
+      expect(count('', undefined, emoji)).toBe(6)
+      expect(count('a', 'y', 'aab a')).toBe(2)
+      expect(count('k', 'iu', 'k K K')).toBe(3)
+      expect(count('k', 'i', 'k K K')).toBe(2)
+      expect(count('^x', undefined, 'x\nx')).toBe(1)
+      expect(count('^x', 'm', 'x\nx')).toBe(2)
+    }
+    // markdownMatches keeps its default m only when no flags are given, and y matches at the start.
+    expect(verify({ checks: [{ type: 'markdownMatches', pattern: '^b' }] }, { status: 'success', markdown: 'a\nb' })).toMatchObject({ status: 'passed' })
+    expect(verify({ checks: [{ type: 'markdownMatches', pattern: '^b', flags: 'i' }] }, { status: 'success', markdown: 'a\nb' })).toMatchObject({ status: 'failed' })
+    expect(verify({ checks: [{ type: 'markdownMatches', pattern: 'a', flags: 'y' }] }, { status: 'success', markdown: 'ab' })).toMatchObject({ status: 'passed' })
+    expect(verify({ checks: [{ type: 'markdownMatches', pattern: 'b', flags: 'y' }] }, { status: 'success', markdown: 'ab' })).toMatchObject({ status: 'failed' })
+  })
+})

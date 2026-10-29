@@ -347,3 +347,24 @@ describe('table contracts during the region wait', () => {
     expect(once).toEqual([0])
   })
 })
+
+describe('a regular-expression check stopped at its limit (ADR 0006, amendment of 2026-10-29)', () => {
+  it('ends the wait at that read, with check_limit, and never reads the region as ready', async () => {
+    // Quadratic on text with no x: the check stops at its 250 ms limit on every read, and waiting does not change that.
+    const contract: VerifyContract = { checks: [{ type: 'markdownIncludes', text: 'ab' }, { type: 'markdownMatches', pattern: '(?:\\s|\\S)*x' }] }
+    const slow = page([view('ab'.repeat(100_000))])
+    const outcome = await waitForRegion(slow, { contract }, { maxMs: 10_000, now: slow.now })
+    expect(outcome).toMatchObject({ ready: false, reads: 1, judged: 1, unjudged: 'check_limit', checks: [{ passed: true }, { passed: null }] })
+    expect(slow.reads()).toBe(1)
+  })
+
+  it('ends it too when the check holds on the whole page and stops at its limit on what the answer will hold', async () => {
+    // The page has its x outside what the answer keeps: the pattern holds on the page, and runs quadratic on the answer.
+    const contract: VerifyContract = { checks: [{ type: 'markdownMatches', pattern: '(?:\\s|\\S)*x' }] }
+    const held = page([view('ab x')])
+    const outcome = await waitForRegion(held, { contract, answerMarkdown: () => 'ab'.repeat(100_000) }, { maxMs: 10_000, now: held.now, scroll: false })
+    // The answer is judged on the second read, the first that holds.
+    expect(outcome).toMatchObject({ ready: false, reads: 2, unjudged: 'check_limit', checks: [{ passed: null }] })
+    expect(held.reads()).toBe(2)
+  })
+})

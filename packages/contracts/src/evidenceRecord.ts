@@ -420,6 +420,11 @@ export interface EvidenceVerification {
   reason: 'checks_failed' | 'page_not_read' | 'empty_not_allowed' | null
   /** The type of each check that failed, in the contract's order. */
   failed: string[]
+  /**
+   * The type of each check that could not be decided, in the contract's order: a regular expression stopped at a limit
+   * (ADR 0006, amendment of 2026-10-29). Such a verification is never `passed`. Added to v1 later (EVIDENCE_RECORD_ADDED_KEYS).
+   */
+  undecided: string[]
 }
 
 /** The result's readiness (Readiness in result.ts): its state and the signal codes it was read from, without the wait. */
@@ -453,7 +458,7 @@ export const EVIDENCE_RECORD_KEYS = {
   accessSession: keysOf<EvidenceAccessSession>()(['id']),
   accessPaidCall: keysOf<EvidencePaidCall>()(['provider', 'rung', 'capabilities', 'ceilingUsd', 'chargedUsd', 'reportedCostUsd', 'sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'outcome', 'reason', 'answer', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts', 'fixedMonthlyUsd']),
   accessGrant: keysOf<EvidenceAccessGrant>()(['sha256', 'tier', 'attestedAt']),
-  verification: keysOf<EvidenceVerification>()(['status', 'verifier', 'contractSha256', 'reason', 'failed']),
+  verification: keysOf<EvidenceVerification>()(['status', 'verifier', 'contractSha256', 'reason', 'failed', 'undecided']),
   readiness: keysOf<EvidenceReadiness>()(['state', 'basis']),
   document: keysOf<EvidenceDocument>()(['captureId', 'generation', 'responseMatch']),
 } as const
@@ -471,4 +476,5 @@ export const EVIDENCE_RECORD_ADDED_KEYS: Partial<Record<keyof typeof EVIDENCE_RE
   access: ['completion', 'egress', 'session', 'paidCalls', 'grant'],
   accessEgress: ['exit', 'kind'],
   accessPaidCall: ['sessionMs', 'proxyBytes', 'solves', 'proxyCountry', 'paidCallId', 'bytesCounted', 'bytesCapped', 'solveAttempts', 'fixedMonthlyUsd'],
+  verification: ['undecided'],
 }

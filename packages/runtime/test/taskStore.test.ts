@@ -396,6 +396,7 @@ describe('@w2l/runtime public surface', () => {
       'MemoryTaskStore',
       'MonitorStore',
       'PageCache',
+      'ROUTE_VERIFIER_VERSION',
       'RecipeStore',
       'SqliteTaskStore',
       'VERIFIER_VERSION',

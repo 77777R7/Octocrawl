@@ -24,7 +24,7 @@ export interface VerifyContract {
 
 export type VerifyCheckType = VerifyCheck['type']
 export const VERIFY_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownIncludes', 'markdownMatches', 'markdownCountMin', 'minTables', 'tableRowsMin', 'listRecordsMin', 'recordFields', 'field']
-/** Checks whose patterns are JavaScript regular expressions, which cannot be bounded in time: a hosted server refuses them. */
+/** Checks whose patterns are JavaScript regular expressions: they run with a time limit (regexCheck.ts in @w2l/runtime), and a hosted server refuses them until a later change opens them there (ADR 0006, amendment of 2026-10-29). */
 export const VERIFY_REGEX_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownMatches', 'markdownCountMin']
 export const MAX_VERIFY_CHECKS = 32
 export const MAX_VERIFY_TEXT = 1_000
@@ -38,7 +38,7 @@ const MAX_RECORD_FIELDS = 50
 export function hostedVerifyRefusal(contract: VerifyContract | undefined): string | null {
   const types = [...new Set(contract?.checks.filter((check) => VERIFY_REGEX_CHECK_TYPES.includes(check.type)).map((check) => check.type) ?? [])]
   if (types.length === 0) return null
-  return `verify: ${types.join(' and ')} checks are not available in hosted mode (a regular expression cannot be bounded in time); use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally`
+  return `verify: ${types.join(' and ')} checks are not available in hosted mode yet; use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally`
 }
 
 /**
@@ -51,17 +51,35 @@ export function isDataCheck(check: VerifyCheck): boolean {
 
 export type VerificationReason = 'checks_failed' | 'page_not_read' | 'empty_not_allowed'
 
+/**
+ * Why a regular-expression check was not judged (ADR 0006, amendment of 2026-10-29): its scan ran past its time limit,
+ * the verification's time for regular expressions was spent before it, or the engine could not run it on this text.
+ */
+export type VerificationLimit = 'time' | 'budget' | 'error'
+
 export interface VerificationCheck {
   index: number
   type: VerifyCheckType
   data: boolean
-  /** null: the view judged did not have what the check reads (a DOM view has no `json`). */
+  /**
+   * null: the view judged did not have what the check reads (a DOM view has no `json`), or, with `limit`, the check
+   * could not be decided; a verification with such a check is never `passed`.
+   */
   passed: boolean | null
   /** What was seen, in a sentence, for a person; never the page's text. */
   observed: string
-  /** For the count checks: the number seen and the number asked. */
+  /** For the count checks: the number seen and the number asked. Absent when the count was not finished. */
   observedCount?: number
   asked?: number
+  /** A regular-expression check stopped before it finished: which limit it met. */
+  limit?: VerificationLimit
+  /** The time the stopped scan was allowed, in milliseconds; 0 when it had none left to start. */
+  limitMs?: number
+}
+
+/** A check that could not be decided (a regular expression stopped at a limit); one that holds at any count was decided. */
+export function undecidedCheck(check: Pick<VerificationCheck, 'passed' | 'limit'>): boolean {
+  return check.passed === null && check.limit !== undefined
 }
 
 export type Verification =

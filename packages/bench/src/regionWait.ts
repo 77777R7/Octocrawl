@@ -9,7 +9,7 @@
  * The view only judges readiness: the task's verdict is still the contract run on what was extracted.
  */
 
-import type { FetchOptions, Lane, ListField, PageTable, TraceEvent, VerificationCheck, VerifyContract } from '@w2l/contracts'
+import { undecidedCheck, type FetchOptions, type Lane, type ListField, type PageTable, type TraceEvent, type VerificationCheck, type VerifyContract } from '@w2l/contracts'
 import { htmlToMarkdown } from '@w2l/extract-tf'
 import { contractSha256, verify, type VerifyView } from '@w2l/runtime'
 import { isNavigationError, LOADING_PROBE, type SettlePage } from './browserSettle.js'
@@ -192,9 +192,10 @@ interface RegionView {
 /**
  * Why the live page could judge none of the contract's checks: its HTML was over MAX_VIEW_HTML for the Markdown checks
  * (the page sends none past it), or no check reads the live page at all (a `field` on `json`, a list check without the
- * list format's items and fields).
+ * list format's items and fields). `check_limit`: a regular-expression check stopped at its limit on a read (ADR 0006,
+ * amendment of 2026-10-29), so no later read can decide the contract either.
  */
-export type RegionUnjudged = 'html_too_large' | 'checks_not_on_page'
+export type RegionUnjudged = 'html_too_large' | 'checks_not_on_page' | 'check_limit'
 
 /** What the wait saw: whether the region was ready (or an accepted empty list), how long and how many reads, and the checks as last judged, by their counts. */
 export interface RegionOutcome {
@@ -295,6 +296,11 @@ export class RegionTracker {
       const tooLarge = this.needsMarkdown && (view.html === null || (typeof view.html === 'string' && view.html.length > MAX_VIEW_HTML))
       this.unjudged = tooLarge ? 'html_too_large' : 'checks_not_on_page'
     }
+    // A check stopped at its limit decides nothing, and waiting does not change that: the wait ends at this read.
+    if (verification.status !== 'not_requested' && verification.checks.some(undecidedCheck)) {
+      this.judgeable = false
+      this.unjudged = 'check_limit'
+    }
     const key = JSON.stringify(checks.map((check) => [check.passed, check.observedCount ?? null]))
     const steady = this.previousText === undefined ? null : this.previousText === view.text
     const loading = view.loading === true
@@ -316,6 +322,11 @@ export class RegionTracker {
         if (answer.status !== 'passed') {
           passed = false
           if (answer.status !== 'not_requested') reported = answer.checks.map(({ index, type, passed: held, observedCount }) => ({ index, type, passed: held, ...(observedCount === undefined ? {} : { observedCount }) }))
+          // Stopped at its limit on what the answer will hold: no later read decides it there either.
+          if (answer.status !== 'not_requested' && answer.checks.some(undecidedCheck)) {
+            this.judgeable = false
+            this.unjudged = 'check_limit'
+          }
         }
       }
     }

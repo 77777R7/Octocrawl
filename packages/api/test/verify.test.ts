@@ -26,6 +26,8 @@ const PAGES: Record<string, string> = {
   '/media-feed': '<!doctype html><html><head><title>Video feed</title></head><body><nav><a href="/help">Help menu</a></nav><main><div><article class="clip"><video src="/a.mp4"></video><a href="/Ada">Ada</a><p>Glass sculpture</p></article><article class="clip"><video src="/b.mp4"></video><a href="/Bo">Bo</a><p>Clay carving</p></article></div></main></body></html>',
   '/duplicate-list': '<html><body><main><div class="card" data-id="a"><a class="name">Glass vase</a><span class="price">12</span></div><div class="card" data-id="a"><a class="name">Glass vase</a><span class="price">12</span></div><div class="card" data-id="b"><a class="name">Clay bowl</a><span class="price">9</span></div></main></body></html>',
   '/article': `<!doctype html><html lang="en"><head><title>Tide report</title></head><body><main><article><h1>Tide report</h1><p>${PROSE}</p><p>High water at 06:12, low water at 12:30.</p></article></main></body></html>`,
+  // Markdown well past the 4.19M characters at which ^([\s\S])*$ overflows the regexp backtrack stack.
+  '/long': `<!doctype html><html lang="en"><head><title>Long page</title></head><body><main><p>${PROSE.repeat(10_000)}</p></main></body></html>`,
 }
 
 let server: Server
@@ -186,10 +188,10 @@ describe('task verification on a request (ADR 0006)', () => {
     const passed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })
     expect(passed.status).toBe(200)
     expect(passed.json.status).toBe('success')
-    expect(passed.json.verification).toMatchObject({ status: 'passed', verifier: 'verify/9', reason: null, checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true }, { index: 1, type: 'markdownCountMin', passed: true, observedCount: 2, asked: 2 }] })
+    expect(passed.json.verification).toMatchObject({ status: 'passed', verifier: 'verify/10', reason: null, checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true }, { index: 1, type: 'markdownCountMin', passed: true, observedCount: 2, asked: 2 }] })
     expect(passed.json.verification.contractSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(validate(passed.json.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
-    expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/9', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [] })
+    expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/10', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [], undecided: [] })
 
     // The fetch succeeded and the task was not done: the status says the first, the verification the second.
     const failed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: failing, formats: ['markdown', 'links'], debug: false })
@@ -205,7 +207,7 @@ describe('task verification on a request (ADR 0006)', () => {
     const plain = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article` })
     expect(plain.json.verification).toEqual({ status: 'not_requested' })
     expect(validate(plain.json.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
-    expect(plain.json.evidenceRecord.verification).toEqual({ status: 'not_requested', verifier: null, contractSha256: null, reason: null, failed: [] })
+    expect(plain.json.evidenceRecord.verification).toEqual({ status: 'not_requested', verifier: null, contractSha256: null, reason: null, failed: [], undecided: [] })
   })
 
   it('verifies each page of a batch against the task contract', async () => {
@@ -260,7 +262,7 @@ describe('task verification on a request (ADR 0006)', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
     const [item] = (await call(engine, 'GET', `/v1/batches/${id}/items?debug=true`)).json.items as Record<string, any>[]
-    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/9', reason: 'page_not_read', checks: [] } })
+    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/10', reason: 'page_not_read', checks: [] } })
     expect(validate(item!.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
     expect(item!.evidenceRecord.verification).toMatchObject({ status: 'failed', reason: 'page_not_read', contractSha256: item!.verification.contractSha256 })
   })
@@ -281,11 +283,36 @@ describe('task verification on a request (ADR 0006)', () => {
     expect(plain.json).toMatchObject({ lane: 'http', channelsTried: ['http'] })
   })
 
+  it('answers a pattern the engine cannot run on a long page with a 200 and an undecided check, and keeps a batch page read (ADR 0006, amendment of 2026-10-29)', async () => {
+    const engine = engineWith()
+    const contract = { checks: [{ type: 'markdownMatches', pattern: '^([\\s\\S])*$' }] }
+    const scraped = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/long`, verify: contract })
+    expect(scraped.status).toBe(200)
+    expect(scraped.json.status).toBe('success')
+    // The Markdown, not the page's bytes, is what clears the margin.
+    expect(scraped.json.markdown.length).toBeGreaterThan(4_300_000)
+    expect(scraped.json.verification).toMatchObject({ status: 'failed', reason: 'checks_failed', checks: [{ passed: null, limit: 'error' }] })
+    expect(scraped.json.evidenceRecord.verification).toMatchObject({ status: 'failed', failed: [], undecided: ['markdownMatches'] })
+    expect(validate(scraped.json.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
+    // A batch page is read and judged undecided: not a fetch that threw (failed/internal_error), as before.
+    const started = await call(engine, 'POST', '/v1/batches', { urls: [`${origin}/long`], verify: contract })
+    const id = started.json.taskId ?? started.json.id
+    for (let i = 0; i < 400; i++) {
+      if (!['pending', 'running'].includes((await call(engine, 'GET', `/v1/batches/${id}`)).json.status)) break
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    const [item] = (await call(engine, 'GET', `/v1/batches/${id}/items?debug=true`)).json.items as Record<string, any>[]
+    expect(item).toMatchObject({ status: 'success', verification: { status: 'failed', checks: [{ passed: null, limit: 'error' }] } })
+    expect((await call(engine, 'GET', `/v1/batches/${id}`)).json).toMatchObject({ succeeded: 1, verified: 0, verificationFailed: 1 })
+  }, 60_000)
+
   it('is refused with its regex checks by a hosted server, which takes the others', async () => {
     const hosted = engineWith({ hosted: true })
     const refused = await call(hosted, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })
     expect(refused.status).toBe(400)
     expect(JSON.stringify(refused.json)).toContain('markdownCountMin checks are not available in hosted mode')
+    // Since the amendment of 2026-10-29 the checks do run with a time limit: the refusal no longer says they cannot.
+    expect(JSON.stringify(refused.json)).not.toContain('cannot be bounded in time')
     const batch = await call(hosted, 'POST', '/v1/batches', { urls: [`${origin}/article`], verify: { checks: [{ type: 'markdownMatches', pattern: 'High' }] } })
     expect(batch.status).toBe(400)
   })

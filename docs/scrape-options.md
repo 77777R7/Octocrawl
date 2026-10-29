@@ -186,7 +186,8 @@ The my-browser lane reads a page that is through only once it has settled: no lo
 With a task contract (`verify`, see [JSON extraction](json-extraction.md)), the verification and the browser's wait for the region the contract needs decide first, except that a failed contract on a page that declares a source error (`source_data_error`, `source_unavailable`, below) is `not_served` with that code:
 
 - `ready` with `verified` when the contract passed, whatever page-wide signal there was.
-- When it failed (`checks_failed`), the wait for this contract's region on the live page decides, when one judged at least one read:
+- When no check failed but a pattern check was not judged (`passed: null` with a `limit`, see [JSON extraction](json-extraction.md)), neither the wait for the region nor the http lane decides: the state is the one the page's own signals give, `not_extracted` where they would say `ready`, with `checks_undecided` added to the basis.
+- When a check failed (`checks_failed`), the wait for this contract's region on the live page decides, when one judged at least one read:
   - `not_extracted` with `region_ready`: the checks held on the live page, not in what was extracted.
   - `not_loaded` with `region_not_ready` and `page_still_loading`, `page_still_changing` or `steady_unknown` (one judged read, nothing to compare): they never held, and the page had not settled. With `scroll_unfinished`: the page had settled, and the wait ran out while it was scrolling toward the region, before it reached the page's end. The rest of the page was not read, so the region is not known to be absent; a page longer than the wait can scroll in its 10 s (at most 19 screens) whose region never came reads so too.
   - `not_served` with `region_absent`: they never held on a settled page that the wait did not need to scroll, or scrolled to its end; with `region_empty`: the list showed no record on a settled page (the site served none, or the selector names none).

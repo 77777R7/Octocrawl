@@ -73,6 +73,25 @@ MCP 的 `scrape` 在 API 验证之后仍可能为 50,000 字符结果预算裁�
 
 `get_crawl_pages` / `get_batch_items` 的首个超大页面也可能被裁短，而回读结果没有原契约。此时不能从旧检查摘要猜契约或保留 passed：原契约身份保留，检查记为未复核（passed:null、说明原契约缺失，移除旧 observedCount），整体为 failed/checks_failed，readiness 和 ER 同步。page_not_read、empty_not_allowed 等已有失败原因保留；未裁的页不改。传输裁剪不回写 API 缓存或存储记录，不触发重新抓取，也不证明独立准确性验收通过。
 
+### 2026-10-29：正则判定有了时限（Howard，2026-10-29，在对话中）
+
+Howard 的原话："我觉得方案没问题了"。这条修订认定"后果"一节和确认第 2 条里说的"能限时的正则引擎"已经有了，原文保留不改。托管服务开放正则判定是后续的单独改动，要有开关和启动自检；在那之前，第 1 节"托管服务拒绝正则判定"那条照旧。
+
+- **引擎不换。** 仍用 V8 自带的 irregexp，只是放进一个 vm 脚本里跑，因为时限只有在 vm 里才能打断一次匹配。vm 的 context 在模块加载时就建好（`packages/runtime/src/regexCheck.ts`）。跑完的判定，结论和计数与以前一字不差。
+- **时限。** 每条判定对一段文本最多跑 250 ms；一次 `verify()` 里的正则判定合计最多 1,000 ms。本地和托管相同，没有覆盖开关。
+- **计数。** `markdownCountMin` 改用 matchAll 逐个数，不再一次拿到全部匹配：结果相同（同一套 `AdvanceStringIndex`），内存不再随匹配数增长。以前 96 MiB 的文本要 2.3 GB，再大就直接崩溃。
+- **判定不了时怎么记。**
+  - 该条判定为 `passed: null`，另记 `limit` 和 `limitMs`：`time` 是这次扫描超过了 250 ms；`budget` 是这次验证的 1,000 ms 已经用完；`error` 是引擎在这段文本上跑不了，例如 Markdown 达到约 419 万字符时 `^(a)*$` 会撑爆回溯栈。
+  - 不给 `observedCount`：未知不是 0。
+  - 有这样一条判定，验证就不会是 `passed`，结果是 `failed`/`checks_failed`。reason 的枚举不变。Evidence Record 新增 `verification.undecided[]`（v1 后加的键）。
+  - `markdownCountMin` 且 `min` 为 0 的判定，任何计数都成立，照样记 `passed: true` 并注明 limit。
+- **对执行阶梯。** 只有判定不了、没有明确失败的判定时，这一级的结论是 null，不会因为它往下一级走，也不会多花付费调用；有明确失败时照常往下走。区域等待在第一次读到判定不了的判定时就结束（`check_limit`，见 ADR 0007 同日修订）。
+- **版本。** 验证器的版本改为 `verify/10`。路由历史按另一个常量 `ROUTE_VERIFIER_VERSION`（仍是 `verify/9`）分开记，因为跑完的判定结论没有变，已经学到的路由照样有效。
+- **一致的条件。** 同一个 commit、同一个 Node 主版本、同一份最终页面，并且每条判定都在时限内跑完时，本地和托管给出相同的验证结论。接近时限的判定，快的机器能跑完、慢的跑不完，这时只会判失败，并记下 limit。
+- **Node 26 上的两点（2026-10-29 在本机 darwin 版 26.8.1 上实测）。**
+  - 一次在匹配途中被打断的正则，会让同一进程之后的全局匹配慢约 3.7 倍。Node 22 没有这个问题。
+  - `pathFilter.ts` 在运行时打开线性引擎的 flag 之后，V8 新建的任何 context 都会让进程崩溃。现在它在设 flag 之前先让 Node 把自己要用的 context 建好，正则判定的 context 也在这之前建好。
+
 ### 3. 结果：`verification`，顶层 `status` 不变
 
 每个 scrape 结果、batch 和 crawl 的每一页（`CrawlPage`）、webhook 的 page 事件都带上：

@@ -109,7 +109,7 @@ function readOf(body: unknown, now: number): HostedChromeRead | string {
     const outside = Object.keys(options).filter((key) => !HOSTED_CHROME_READ_OPTIONS.has(key))
     if (outside.length > 0) return `hosted_chrome takes no ${outside.join(', ')}: robots.txt is obeyed on every hosted rung, and the rest is no caller's to send`
   }
-  // The hosted API's own check of a task contract, made again: a regular expression cannot be bounded in time (ADR 0006).
+  // The hosted API's own check of a task contract, made again: hosted refuses the regular-expression checks for now (ADR 0006, amendment of 2026-10-29).
   const verifyRefusal = hostedVerifyRefusal((options as FetchOptions).verify)
   if (verifyRefusal !== null) return verifyRefusal
   if (refusal !== null) return refusal

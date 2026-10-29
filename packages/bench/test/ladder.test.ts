@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createSpendLedger } from '@w2l/http-core'
-import { contractSha256, VERIFIER_VERSION } from '@w2l/runtime'
+import { contractSha256, ROUTE_VERIFIER_VERSION } from '@w2l/runtime'
 import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
 import {
   CONTENTFUL_STATUS,
@@ -1791,8 +1791,8 @@ describe('LadderRunner — a task contract (ADR 0006)', () => {
     expect(run.result.lane).toBe('browser_local')
     expect(run.channelsTried).toEqual(['http', 'browser_local'])
     expect(steps(run, 'verification_checked').map((t) => t.detail)).toEqual([
-      { vendorId: null, status: 'failed', reason: 'checks_failed', verdict: 'failed', failed: ['markdownIncludes'], notJudged: 0 },
-      { vendorId: null, status: 'passed', reason: null, verdict: 'passed', failed: [], notJudged: 0 },
+      { vendorId: null, status: 'failed', reason: 'checks_failed', verdict: 'failed', failed: ['markdownIncludes'], notJudged: 0, limited: 0 },
+      { vendorId: null, status: 'passed', reason: null, verdict: 'passed', failed: [], notJudged: 0, limited: 0 },
     ])
     // Read without its scripts, the page may hold the data once a browser runs them (region readiness, ADR 0007).
     expect(steps(run, 'ladder_step')[0]?.detail).toMatchObject({ escalate: 'verification_failed', readiness: 'not_loaded' })
@@ -1873,6 +1873,21 @@ describe('LadderRunner — a task contract (ADR 0006)', () => {
     expect(run.result.lane).toBe('http')
     expect(browser.calls).toEqual([])
     expect(steps(run, 'verification_checked')[0]?.detail).toMatchObject({ verdict: null, notJudged: 1 })
+  })
+
+  it('decides nothing on a regular-expression check stopped at its limit, and spends no rung on it (ADR 0006, amendment of 2026-10-29)', async () => {
+    // Quadratic on text with no x: stopped at its 250 ms limit, the check is undecided, never failed.
+    const slow = { checks: [{ type: 'markdownMatches' as const, pattern: '(?:\\s|\\S)*x' }] }
+    const browser = channel('browser_local', [page('browser_local', 'ab'.repeat(100_000))])
+    const run = await new LadderRunner([channel('http', [page('http', 'ab'.repeat(100_000))]), browser], { mode: 'authed' }, null, null, null, { verify: slow }).run(url)
+    expect(run.result.lane).toBe('http')
+    expect(browser.calls).toEqual([])
+    expect(steps(run, 'verification_checked')[0]?.detail).toMatchObject({ verdict: null, notJudged: 1, limited: 1 })
+    // A definite failure beside it still goes on up.
+    const failing = { checks: [{ type: 'markdownIncludes' as const, text: 'Price' }, ...slow.checks] }
+    const next = channel('browser_local', [page('browser_local', 'Price 12, tax included')])
+    const climbed = await new LadderRunner([channel('http', [page('http', 'ab'.repeat(100_000))]), next], { mode: 'authed' }, null, null, null, { verify: failing }).run(url)
+    expect(climbed.result.lane).toBe('browser_local')
   })
 
   it('counts a vendor\'s success by the contract when it has one', async () => {
@@ -1983,7 +1998,8 @@ describe('LadderRunner — the route a vendor\'s history is kept under (PA G2b)'
     const url = 'https://example.com/products/12345?ref=x'
     const providers = () => [channel('provider', [contentfulResult(url, 'provider')], 'steel'), channel('provider', [contentfulResult(url, 'provider')], 'bb')]
     await new LadderRunner([channel('http', [blockedResult(url, 'bot_detected_generic')]), ...providers()], { mode: 'authed' }, history).run(url, null, {}, { includeTables: true, includeHtml: true })
-    const versions = `${EXTRACTOR_VERSION}|${VERIFIER_VERSION}`
+    // Under the verdicts' own version (ROUTE_VERIFIER_VERSION), which a change that only adds limits leaves as it was.
+    const versions = `${EXTRACTOR_VERSION}|${ROUTE_VERIFIER_VERSION}`
     expect(seen).toEqual([
       { op: 'read', domain: 'example.com', route: { family: 'path:/products/*', formats: 'html,markdown,tables', versions } },
       { op: 'record', domain: 'example.com', route: { family: 'path:/products/*', formats: 'html,markdown,tables', versions } },
