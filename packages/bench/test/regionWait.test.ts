@@ -357,4 +357,14 @@ describe('a regular-expression check stopped at its limit (ADR 0006, amendment o
     expect(outcome).toMatchObject({ ready: false, reads: 1, judged: 1, unjudged: 'check_limit', checks: [{ passed: true }, { passed: null }] })
     expect(slow.reads()).toBe(1)
   })
+
+  it('ends it too when the check holds on the whole page and stops at its limit on what the answer will hold', async () => {
+    // The page has its x outside what the answer keeps: the pattern holds on the page, and runs quadratic on the answer.
+    const contract: VerifyContract = { checks: [{ type: 'markdownMatches', pattern: '(?:\\s|\\S)*x' }] }
+    const held = page([view('ab x')])
+    const outcome = await waitForRegion(held, { contract, answerMarkdown: () => 'ab'.repeat(100_000) }, { maxMs: 10_000, now: held.now, scroll: false })
+    // The answer is judged on the second read, the first that holds.
+    expect(outcome).toMatchObject({ ready: false, reads: 2, unjudged: 'check_limit', checks: [{ passed: null }] })
+    expect(held.reads()).toBe(2)
+  })
 })

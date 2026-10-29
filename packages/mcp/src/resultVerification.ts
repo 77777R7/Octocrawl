@@ -28,7 +28,7 @@ export function resultProjection(original: Json, contract?: VerifyContract, basi
     if (contract !== undefined) verification = verify(contract, dataOf(projection))
     else if (previous !== undefined && previous.status !== 'not_requested' && (previous.reason === null || previous.reason === 'checks_failed')) {
       // A stored crawl/batch page does not carry the original contract. Do not invent it from check summaries.
-      verification = { ...previous, status: 'failed', reason: 'checks_failed', checks: previous.checks.map(({ observedCount: _count, ...check }) => ({ ...check, passed: null, observed: 'not rechecked after MCP shortened this page: the original contract is unavailable' })) }
+      verification = { ...previous, status: 'failed', reason: 'checks_failed', checks: previous.checks.map(({ observedCount: _count, limit: _limit, limitMs: _limitMs, ...check }) => ({ ...check, passed: null, observed: 'not rechecked after MCP shortened this page: the original contract is unavailable' })) }
     }
     let readiness = priorReadiness
     if (verification?.status === 'passed') readiness = { ...priorReadiness, state: 'ready', basis: ['verified'] }

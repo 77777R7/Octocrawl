@@ -152,7 +152,8 @@ describe('MCP result budget', () => {
 
   it('does not reuse a stored page pass after cutting it without its original contract', async () => {
     const markdown = 'word '.repeat(20_000) + 'REQUIRED_TAIL_FIELD'
-    const verification = { status: 'passed', verifier: 'verify/9', contractSha256: 'a'.repeat(64), reason: null, checks: [{ index: 0, type: 'markdownCountMin', data: true, passed: true, observed: '1 match, at least 1 asked', observedCount: 1, asked: 1 }] }
+    // The second check was decided at a minimum of 0 although its scan stopped at a limit (ADR 0006, amendment of 2026-10-29).
+    const verification = { status: 'passed', verifier: 'verify/10', contractSha256: 'a'.repeat(64), reason: null, checks: [{ index: 0, type: 'markdownCountMin', data: true, passed: true, observed: '1 match, at least 1 asked', observedCount: 1, asked: 1 }, { index: 1, type: 'markdownCountMin', data: true, passed: true, limit: 'error', limitMs: 250, asked: 0, observed: 'not judged: the regular-expression engine could not run the pattern here (RangeError); at least 0 asked, which any count holds' }] }
     const readiness = { state: 'ready', basis: ['verified'], waitedMs: 123 }
     const first = { ...page(1, markdown), verification, readiness, evidenceRecord: { rawSha256: 'b'.repeat(64), outputSha256: { markdown: createHash('sha256').update(markdown).digest('hex'), json: null }, verification: { status: 'passed' }, readiness: { state: 'ready', basis: ['verified'] } } }
     const mcp = await connect(apiAnswering(() => ({ items: [first, page(2, 'later')], nextCursor: null, hasMore: false })))
@@ -162,10 +163,13 @@ describe('MCP result budget', () => {
       const value = (reply.structuredContent!.items as Array<Record<string, any>>)[0]!
       expect(value.truncated).toBe(true)
       expect(value.markdown).not.toContain('REQUIRED_TAIL_FIELD')
-      expect(value.verification).toMatchObject({ status: 'failed', contractSha256: verification.contractSha256, checks: [{ passed: null, observed: expect.stringContaining('original contract is unavailable') }] })
+      expect(value.verification).toMatchObject({ status: 'failed', contractSha256: verification.contractSha256, checks: [{ passed: null, observed: expect.stringContaining('original contract is unavailable') }, { passed: null, observed: expect.stringContaining('original contract is unavailable') }] })
       expect(value.verification.checks[0].observedCount).toBeUndefined()
+      // Not rechecked is not stopped at a limit: the old limit goes with the old verdict.
+      expect(value.verification.checks[1]).not.toHaveProperty('limit')
+      expect(value.verification.checks[1]).not.toHaveProperty('limitMs')
       expect(value.readiness).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'mcp_result_truncated'], waitedMs: 123 })
-      expect(value.evidenceRecord.verification).toMatchObject({ status: 'failed', failed: [] })
+      expect(value.evidenceRecord.verification).toMatchObject({ status: 'failed', failed: [], undecided: [] })
       expect(value.evidenceRecord.readiness).toEqual({ state: 'not_extracted', basis: ['checks_failed', 'mcp_result_truncated'] })
       expect(value.evidenceRecord.outputSha256.markdown).toBe(createHash('sha256').update(value.markdown).digest('hex'))
       expect(value.evidenceRecord.rawSha256).toBe('b'.repeat(64))

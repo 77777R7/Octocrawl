@@ -322,6 +322,11 @@ export class RegionTracker {
         if (answer.status !== 'passed') {
           passed = false
           if (answer.status !== 'not_requested') reported = answer.checks.map(({ index, type, passed: held, observedCount }) => ({ index, type, passed: held, ...(observedCount === undefined ? {} : { observedCount }) }))
+          // Stopped at its limit on what the answer will hold: no later read decides it there either.
+          if (answer.status !== 'not_requested' && answer.checks.some(undecidedCheck)) {
+            this.judgeable = false
+            this.unjudged = 'check_limit'
+          }
         }
       }
     }
