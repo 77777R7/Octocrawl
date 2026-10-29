@@ -23,6 +23,8 @@
 import { setFlagsFromString } from 'node:v8'
 import { createContext, Script } from 'node:vm'
 import { REGEX_SUBJECT_MAX_LENGTH } from '@w2l/contracts'
+// The checks' own context, made when that module loads: before the flag below can be set, as Node 26.8.1 requires.
+import './regexCheck.js'
 
 /** How long a backtracking path filter may take on one link. */
 export const PATH_FILTER_TIME_LIMIT_MS = 100
@@ -36,6 +38,10 @@ let linearEngine: boolean | undefined
 
 function linearRegExp(pattern: string, flags: string): RegExp | null {
   if (linearEngine === undefined) {
+    // On Node 26.8.1, a context V8 makes after this flag is set at run time aborts the process (a fatal error, exit
+    // code 133), and Node makes one for itself the first time a Web Streams reader or writer lets go or a stream pipes
+    // (2026-10-29). It is made now, before the flag. Contexts of W2L's own are made when their modules load.
+    try { new ReadableStream().getReader().releaseLock() } catch { /* no Web Streams: no such context */ }
     try { setFlagsFromString('--enable-experimental-regexp-engine') } catch { /* checked below */ }
     try {
       new RegExp('', 'l')

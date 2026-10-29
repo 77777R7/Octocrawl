@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FetchResult, TraceEvent } from '@w2l/contracts'
+import type { FetchResult, TraceEvent, VerificationCheck } from '@w2l/contracts'
 import { readinessOf, SHELL_TEXT_MAX } from '../src/readiness.js'
 
 function result(over: Partial<FetchResult> = {}, trace: TraceEvent[] = []): FetchResult {
@@ -184,4 +184,15 @@ describe('explicit source outage readiness', () => {
     expect(readinessOf(result({}, [extract(true), extract(false)]))).toEqual({ state: 'ready', basis: [] })
     expect(readinessOf(result({ status: 'blocked', blockReason: 'captcha' }, [extract(true)]))).toEqual({ state: 'not_served', basis: ['captcha'] })
   })
+})
+
+it('never reads a page ready, or its region absent, when a check stopped at its limit and none failed (ADR 0006, amendment of 2026-10-29)', () => {
+  const undecided = { index: 0, type: 'markdownMatches' as const, data: true, passed: null, limit: 'time' as const, limitMs: 250, observed: 'not judged' }
+  const failedCheck = { index: 1, type: 'markdownIncludes' as const, data: true, passed: false, observed: 'the text is not in the Markdown' }
+  const verification = (checks: VerificationCheck[]) => ({ status: 'failed' as const, verifier: 'verify/10', contractSha256: 'f'.repeat(64), reason: 'checks_failed' as const, checks })
+  expect(readinessOf(result({ verification: verification([undecided]) }))).toEqual({ state: 'not_extracted', basis: ['checks_undecided'] })
+  // A page still loading stays not loaded, with the same basis added.
+  expect(readinessOf(result({ verification: verification([undecided]), warnings: warned('page_still_loading') }))).toMatchObject({ state: 'not_loaded', basis: ['page_still_loading', 'checks_undecided'] })
+  // A definite failure beside it is read as any failed contract.
+  expect(readinessOf(result({ lane: 'http', verification: verification([undecided, failedCheck]) })).basis).toEqual(['checks_failed', 'not_rendered'])
 })

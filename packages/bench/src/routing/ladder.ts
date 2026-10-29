@@ -17,7 +17,7 @@
  */
 
 import type { CaptchaSolveLog, EvidenceAccessGrant, EvidencePaidCall, ExecutionContext, PaidCallRecord, PaidCallState, SpendLedger, Escalation, FetchOptions, FetchResult, FetchWarning, HandoffRequest, IdentityBundle, Lane, LadderAttempt, LadderExecutionSummary, Meter, ReadinessState, RobotsOverrideApplied, SpendReservation, TraceEvent, Verification, VerifyContract } from '@w2l/contracts'
-import { carryPaidCalls, CONTENTFUL_STATUS, identityBundleIssues, QUALITY_ESCALATION_MAX_CONFIDENCE, RENDERED_LOW_YIELD_MAX_TOKENS } from '@w2l/contracts'
+import { carryPaidCalls, CONTENTFUL_STATUS, identityBundleIssues, QUALITY_ESCALATION_MAX_CONFIDENCE, RENDERED_LOW_YIELD_MAX_TOKENS, undecidedCheck } from '@w2l/contracts'
 import {
   createExecutionScope,
   createSpendLedger,
@@ -29,7 +29,7 @@ import {
   type CrawlPolicy,
   type RoutingFailureClass,
 } from '@w2l/http-core'
-import { contractSha256, readinessOf, verify, VERIFIER_VERSION } from '@w2l/runtime'
+import { contractSha256, readinessOf, ROUTE_VERIFIER_VERSION, verify } from '@w2l/runtime'
 import { EXTRACTOR_VERSION } from '@w2l/extract-tf'
 import { createHash } from 'node:crypto'
 import { BROWSER_INSTALL_COMMAND } from '../browserInstall.js'
@@ -479,7 +479,7 @@ function routeContextOf(url: string, options: FetchOptions, contract: VerifyCont
     family = first === undefined ? 'path:/' : `path:/${KIND_SEGMENT.test(first.toLowerCase()) ? first.toLowerCase() : '*'}${segments.length > 1 ? '/*' : ''}`
   }
   const formats = ['markdown', ...(options.includeHtml ? ['html'] : []), ...(options.includeRawHtml ? ['rawHtml'] : []), ...(options.includeImages ? ['images'] : []), ...(options.includeTables ? ['tables'] : []), ...(options.attributes !== undefined && options.attributes.length > 0 ? ['attributes'] : []), ...(options.list !== undefined ? ['list'] : []), ...(options.screenshot !== undefined ? ['screenshot'] : [])].sort()
-  return { family, formats: formats.join(','), versions: `${EXTRACTOR_VERSION}|${VERIFIER_VERSION}` }
+  return { family, formats: formats.join(','), versions: `${EXTRACTOR_VERSION}|${ROUTE_VERIFIER_VERSION}` }
 }
 
 /** A number the last such trace event's detail holds, else null. */
@@ -568,6 +568,8 @@ function verificationCheckedEvent(channel: Channel, result: FetchResult, checked
       verdict: checked.verdict,
       failed: checks.filter((check) => check.passed === false).map((check) => check.type),
       notJudged: checks.filter((check) => check.passed === null).length,
+      // Of those, the regular-expression checks stopped at a limit (ADR 0006, amendment of 2026-10-29).
+      limited: checks.filter(undecidedCheck).length,
     },
   }
 }

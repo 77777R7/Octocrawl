@@ -51,17 +51,35 @@ export function isDataCheck(check: VerifyCheck): boolean {
 
 export type VerificationReason = 'checks_failed' | 'page_not_read' | 'empty_not_allowed'
 
+/**
+ * Why a regular-expression check was not judged (ADR 0006, amendment of 2026-10-29): its scan ran past its time limit,
+ * the verification's time for regular expressions was spent before it, or the engine could not run it on this text.
+ */
+export type VerificationLimit = 'time' | 'budget' | 'error'
+
 export interface VerificationCheck {
   index: number
   type: VerifyCheckType
   data: boolean
-  /** null: the view judged did not have what the check reads (a DOM view has no `json`). */
+  /**
+   * null: the view judged did not have what the check reads (a DOM view has no `json`), or, with `limit`, the check
+   * could not be decided; a verification with such a check is never `passed`.
+   */
   passed: boolean | null
   /** What was seen, in a sentence, for a person; never the page's text. */
   observed: string
-  /** For the count checks: the number seen and the number asked. */
+  /** For the count checks: the number seen and the number asked. Absent when the count was not finished. */
   observedCount?: number
   asked?: number
+  /** A regular-expression check stopped before it finished: which limit it met. */
+  limit?: VerificationLimit
+  /** The time the stopped scan was allowed, in milliseconds; 0 when it had none left to start. */
+  limitMs?: number
+}
+
+/** A check that could not be decided (a regular expression stopped at a limit); one that holds at any count was decided. */
+export function undecidedCheck(check: Pick<VerificationCheck, 'passed' | 'limit'>): boolean {
+  return check.passed === null && check.limit !== undefined
 }
 
 export type Verification =

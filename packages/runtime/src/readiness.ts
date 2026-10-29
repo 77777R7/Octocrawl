@@ -6,7 +6,7 @@
  * never held on a page still loading or changing had not loaded; one that never held on a settled page was not served.
  */
 
-import type { FetchResult, Readiness } from '@w2l/contracts'
+import { undecidedCheck, type FetchResult, type Readiness } from '@w2l/contracts'
 
 /**
  * A rendered page with no main content and no more visible text than this is read as one whose content had not come
@@ -136,6 +136,12 @@ function verifiedReadiness(result: FetchResult, verification: Exclude<NonNullabl
   }
   // A page proven empty that the contract does not accept: what the task needs was not served.
   if (verification.reason === 'empty_not_allowed') return readiness('not_served', ['empty_not_allowed'], result)
+  // A check stopped at its limit (ADR 0006, amendment of 2026-10-29) and none failed: whether the region was there is
+  // not known. Never ready, and never absent: the page's own signals tell whether it had come (ADR 0007, 2026-10-29).
+  if (verification.checks.some(undecidedCheck) && !verification.checks.some((check) => check.passed === false)) {
+    const signals = signalReadiness(result)
+    return { ...signals, state: signals.state === 'ready' ? 'not_extracted' : signals.state, basis: [...signals.basis, 'checks_undecided'] }
+  }
   const region = regionWaitOf(result, verification.contractSha256)
   if (region !== undefined) {
     if (region.ready && !region.empty) return readiness('not_extracted', ['checks_failed', 'region_ready'], result)

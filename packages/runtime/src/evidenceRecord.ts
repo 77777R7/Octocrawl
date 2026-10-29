@@ -8,6 +8,7 @@
  */
 
 import {
+  undecidedCheck,
   ACCESS_EGRESS_KINDS,
   DOCUMENT_RESPONSE_MATCHES,
   EVIDENCE_SCHEMA_VERSION,
@@ -338,8 +339,8 @@ export function sourceCommitFromEnv(): string | null {
 /** The result's verification without the checks' sentences (EvidenceVerification): a result that carries none was not verified. */
 function evidenceVerification(result: FetchResult): EvidenceVerification {
   const v = result.verification
-  if (v === undefined || v.status === 'not_requested') return { status: 'not_requested', verifier: null, contractSha256: null, reason: null, failed: [] }
-  return { status: v.status, verifier: v.verifier, contractSha256: v.contractSha256, reason: v.reason, failed: v.checks.filter((check) => check.passed === false).map((check) => check.type) }
+  if (v === undefined || v.status === 'not_requested') return { status: 'not_requested', verifier: null, contractSha256: null, reason: null, failed: [], undecided: [] }
+  return { status: v.status, verifier: v.verifier, contractSha256: v.contractSha256, reason: v.reason, failed: v.checks.filter((check) => check.passed === false).map((check) => check.type), undecided: v.checks.filter(undecidedCheck).map((check) => check.type) }
 }
 
 /**
