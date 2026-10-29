@@ -32,6 +32,10 @@ beforeAll(async () => {
   server = await startFixtureServer()
   attacker = createServer((req, res) => {
     if (req.url?.startsWith('/clears') && (req.headers.cookie ?? '').includes('cleared=1')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ARTICLE); return }
+    // The page a cleared check reloads into holds its parser at a script in its head, so for a while the document has no body.
+    if (req.url?.startsWith('/slowhead') && (req.headers.cookie ?? '').includes('passed=1')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(ARTICLE.replace('<main>', '<script src="/slow.js"></script><main>')); return }
+    if (req.url?.startsWith('/slow.js')) { setTimeout(() => { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end('') }, 3_000); return }
+    if (req.url?.startsWith('/slowhead')) { res.writeHead(403, { 'content-type': 'text/html', 'cf-mitigated': 'challenge' }); res.end(CHALLENGE + `<script>setTimeout(() => { document.cookie = 'passed=1; path=/'; location.reload() }, 1500)</script>`); return }
     if (req.url?.startsWith('/datadome')) { res.writeHead(403, { 'content-type': 'text/html', 'x-datadome-cid': 'abc' }); res.end(DATADOME); return }
     if (req.url?.startsWith('/widget')) { res.writeHead(200, { 'content-type': 'text/html' }); res.end(WIDGET); return }
     if (req.url?.startsWith('/clears') || req.url?.startsWith('/holds')) {
@@ -140,6 +144,18 @@ describe('installed_chrome: the browser lane on it', () => {
       expect(widget.trace).toContainEqual(expect.objectContaining({ event: 'ads_blocked', detail: expect.objectContaining({ hosts: ['www.google.com'] }) }))
       expect(widget.trace.some((event) => event.event === 'challenge_wait')).toBe(false)
       expect(Date.now() - widgetStarted).toBeLessThan(15_000)
+    } finally {
+      await subject.teardown()
+    }
+  }, 90_000)
+
+  it('reads the page a cleared check reloads into once it has a body, not while its parser waits on a script in its head (ADR 0005 gate run 1, T076)', async () => {
+    const subject = new BrowserLocalSubject('standard', null, true, undefined, null, undefined, null, undefined, undefined, null, false, ['google.com'], 'installed_chrome', 'actual', seams)
+    try {
+      const out = await subject.fetch(`${attackerUrl}slowhead`)
+      expect(out.trace).toContainEqual(expect.objectContaining({ event: 'challenge_wait', detail: expect.objectContaining({ blockReason: 'cloudflare_challenge', outcome: 'cleared' }) }))
+      expect(out).toMatchObject({ status: 'success', evidence: { httpStatus: 200 } })
+      expect(out.markdown).toContain('harbour office')
     } finally {
       await subject.teardown()
     }
