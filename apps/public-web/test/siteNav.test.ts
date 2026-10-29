@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { blogPath, posts } from '../scripts/blogPosts.mjs'
 import { pages } from '../scripts/docsPages.mjs'
-import { NAV_CAPABILITIES, siteActionsMarkup, siteNavMarkup } from '../scripts/siteNav.mjs'
-import { pageMarkup } from '../src/page.js'
+import { NAV_CAPABILITIES, docFooterMarkup, siteActionsMarkup, siteNavMarkup } from '../scripts/siteNav.mjs'
+import { footerMarkup, pageMarkup } from '../src/page.js'
 import { TOOL_PAGES } from '../src/tools/pages'
 
 const app = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url))
@@ -65,5 +65,20 @@ describe('Top navigation', () => {
     expect(siteNavMarkup('changelog')).toContain('href="/changelog/" aria-current="page"')
     expect(siteNavMarkup('blog')).toContain('href="/blog/" aria-current="page"')
     expect(siteNavMarkup()).not.toContain('aria-current')
+  })
+})
+
+describe('Footers', () => {
+  it('link every page to the scraping API and the free tools while the Product menu is off', () => {
+    // The home page's footer, the one the product and tool pages share, and the docs, blog and changelog footer.
+    for (const footer of [footerMarkup(), footerMarkup('/', false), docFooterMarkup()]) {
+      expect(footer).toContain('href="/scrape/"')
+      expect(footer).toContain('href="/tools/"')
+    }
+    // build-docs.mjs gives the docs footer to every docs page, the changelog, the blog's articles and its index.
+    const build = readFileSync(app('scripts/build-docs.mjs'), 'utf8')
+    expect(build).toContain('${adjacent}${docFooterMarkup()}</main>')
+    expect(build).toContain('Octocrawl / Changelog</p><article class="doc-article">${content}</article>${docFooterMarkup()}</main>')
+    expect(build).toContain('const blogFooter = docFooterMarkup()')
   })
 })
