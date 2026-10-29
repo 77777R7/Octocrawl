@@ -265,9 +265,10 @@ a[aria-current=page] .doc-nav-mark{background:var(--orange)}
 .doc-adjacent a:last-child{text-align:right}
 .doc-adjacent a:hover{border-color:var(--orange)}
 .doc-adjacent small{color:var(--rust);font:700 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.12em;text-transform:uppercase}
-.doc-footer{margin-top:44px;padding-top:18px;display:flex;justify-content:space-between;gap:20px;color:#7488a6;font-size:12px;background:radial-gradient(circle,#b4c3d8 1px,transparent 1.45px) 0 0/8px 3px repeat-x}
+.doc-footer{margin-top:44px;padding-top:18px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px 20px;color:#7488a6;font-size:12px;background:radial-gradient(circle,#b4c3d8 1px,transparent 1.45px) 0 0/8px 3px repeat-x}
 .doc-footer a{color:#1d5f9f;white-space:nowrap}
-.doc-footer-links{display:flex;gap:16px}
+.doc-footer-note{flex:1 1 320px}
+.doc-footer-links{display:flex;flex-wrap:wrap;gap:6px 16px}
 
 /* On this page: the sections, the one being read marked in orange. */
 .doc-toc nav{position:sticky;top:28px}
@@ -291,6 +292,7 @@ a[aria-current=page] .doc-nav-mark{background:var(--orange)}
   .doc-header{background:linear-gradient(90deg,#071b4f 45%,rgba(7,27,79,.6)),url(/assets/mountain-hero.webp) right 62%/760px auto no-repeat,#071b4f}
   .doc-article h2{margin-top:46px}
   .doc-footer{flex-direction:column}
+  .doc-footer-note{flex:none}
 }
 @media(max-width:460px){
   .doc-header nav{gap:12px}
