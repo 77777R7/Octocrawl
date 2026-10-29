@@ -19,4 +19,15 @@ describe('the pattern checks of a shortened MCP result (ADR 0006, amendment of 2
     expect(value.verification).toEqual(verify(contract, data))
     expect(value.verification.checks[0]).toMatchObject({ passed: null, limit: 'time', limitMs: 250 })
   })
+
+  it('judges afresh a result no cut can fit, whatever the search spent', () => {
+    // A JSON field nothing shortens keeps the result over the budget after every cut.
+    const contract = { checks: [{ type: 'markdownMatches' as const, pattern: '(?:\\s|\\S)*x|^$' }] }
+    const result = { status: 'success', url: 'https://example.com/long', markdown: 'ab '.repeat(310_000), json: { big: 'z'.repeat(60_000) } }
+    const { value } = shapeResult('scrape', result, contract) as { value: Record<string, any> }
+    expect(JSON.stringify(value).length).toBeGreaterThan(RESULT_TEXT_MAX)
+    const { verification: _verification, readiness: _readiness, evidenceRecord: _record, ...data } = value
+    expect(value.verification).toEqual(verify(contract, data))
+    expect(value.verification.status).toBe('passed')
+  })
 })

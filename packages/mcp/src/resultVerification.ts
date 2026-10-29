@@ -27,7 +27,8 @@ export type ResultProjection = ((projection: Json) => Json) & { deliver: (projec
  * Recheck a minimized result or each candidate prefix inside the budget calculation. The checks of every candidate (and
  * of the result before any cut) share one ledger and REGEX_PROJECTION_POOL_MS; the version delivered is judged again
  * by `deliver`, on a pool of its own, replaying what the ledger's scans found at their cost, so its verdict does not
- * depend on how many candidates the search tried.
+ * depend on how many candidates the search tried. The one exception is the budget's (results.ts withinBudget): a
+ * version whose fresh sentences no longer fit the budget its cut fitted keeps the verdict it was cut with.
  */
 export function resultProjection(original: Json, contract?: VerifyContract, basis = 'mcp_result_truncated'): ResultProjection {
   let before: Verification | undefined

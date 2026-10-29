@@ -107,9 +107,10 @@ function withinBudget(result: Json, max: number, measure: Measure, project: Resu
   // A result with nothing to shorten goes out whole rather than marked cut.
   if (!cutAny) return result
   // The version delivered is judged again on a pool of its own (ADR 0006, amendment of 2026-10-29): its verdict is not the
-  // search's. Its sentences may differ in length from the ones it was cut with; one that then no longer fits keeps those.
+  // search's. Its sentences may differ in length from the ones it was cut with: one the search fitted that then no longer
+  // fits keeps those. One no cut could fit (a field nothing shortens, such as json) goes out judged afresh.
   const delivered = verdictFirst(project.deliver(cut))
-  return measure(delivered) <= max ? delivered : cut
+  return measure(delivered) <= max || measure(cut) > max ? delivered : cut
 }
 
 /**
