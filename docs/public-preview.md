@@ -152,7 +152,7 @@ export W2L_IMAGE="${W2L_REGION}-docker.pkg.dev/${W2L_PROJECT_ID}/${W2L_REPOSITOR
 gcloud builds submit . --config=cloudbuild.public-preview.yaml --region="$W2L_REGION" --timeout=20m --substitutions="_IMAGE=${W2L_IMAGE}" --project="$W2L_PROJECT_ID"
 gcloud run deploy w2l-public-preview --image="$W2L_IMAGE" --region="$W2L_REGION" --project="$W2L_PROJECT_ID" \
   --service-account="$W2L_RUNTIME_SA" --allow-unauthenticated \
-  --cpu=1 --memory=2Gi --concurrency=1 --min-instances=0 --max-instances=2 --timeout=60s \
+  --cpu=1 --memory=2Gi --concurrency=4 --min-instances=0 --max-instances=2 --timeout=130s \
   --set-env-vars="W2L_FIRESTORE_PROJECT_ID=${W2L_PROJECT_ID},W2L_AMAZON_PUBLIC_STATE_FILE=/var/secrets/amazon-state.json,W2L_PREVIEW_ENABLED=true,W2L_SOURCE_COMMIT=${W2L_SOURCE_SHA},W2L_PUBLIC_ORIGIN=https://octocrawl.dev" \
   --update-secrets='/var/secrets/amazon-state.json=w2l-amazon-state:latest,W2L_QUOTA_HASH_KEY=w2l-quota-hash-key:latest,W2L_EVAL_TOKEN=w2l-eval-token:latest,W2L_PROXY_SECRET=w2l-proxy-secret:latest'
 gcloud run services describe w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --format='value(status.url)'
@@ -192,11 +192,13 @@ The initial Cloud Run settings are:
 | --- | --- |
 | Region | `asia-southeast1` |
 | CPU / memory | 1 vCPU / 2 GiB |
-| Concurrency / instances | 1 per instance / min 0, max 2 |
-| Request timeout | 60 seconds (preview deadline 40 seconds) |
+| Concurrency / instances | 4 per instance / min 0, max 2 |
+| Request timeout | 130 seconds (preview deadline 40 seconds) |
 | Access | Public HTTPS `*.run.app` |
 | Environment | `W2L_FIRESTORE_PROJECT_ID`, `W2L_AMAZON_PUBLIC_STATE_FILE=/var/secrets/amazon-state.json`, `W2L_PREVIEW_ENABLED=true`, `W2L_SOURCE_COMMIT` |
 | Secrets | Mount Amazon state at `/var/secrets/amazon-state.json`; expose quota hash key and evaluation token as server environment variables |
+
+Four requests share an instance. Until 2026-10-30 it was one, and a page's parallel requests (its HTML, then its stylesheets and scripts) started a second instance and waited 4 to 7 s for it: 65% of the instance starts from 2026-10-15 to 10-29. Chromium runs only for Amazon.sg, one at a time across the service (the Amazon gate), so memory is not what limits it. To change it on the running service, pass `--concurrency` to a later `gcloud run deploy`. The start-up line each instance logs (`startup`: `processStartedAt`, `nodeBootMs`, `importsMs`, `setupMs`, `readyMs`) splits a cold start between Cloud Run, Node, the modules and the setup.
 
 The image is built from `Dockerfile.public-preview` and includes Chromium. Do not deploy the archived `docs/archive/render.yaml` managed MCP service as this anonymous page: that service has durable Monitor/Delivery semantics and a different authentication policy. Cloud Run's local files are ephemeral, so they cannot back persistent tasks. [Cloud Run browser support](https://docs.cloud.google.com/run/docs/browser-automation) · [container filesystem](https://docs.cloud.google.com/run/docs/container-contract)
 

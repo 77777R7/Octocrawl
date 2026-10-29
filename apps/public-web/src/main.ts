@@ -220,6 +220,15 @@ const codeDialog = document.querySelector<HTMLDialogElement>('#code-dialog')!
 let outputView: OutputView = 'markdown'
 let capabilityTimer: number | undefined
 let capabilityRequest: AbortController | undefined
+/** A run is in flight: the preview (setBusy) and the Link Extractor's map (tools/mapResults.ts) both mark the form. */
+const formBusy = (): boolean => form.getAttribute('aria-busy') === 'true'
+function cancelCapability(): void {
+  window.clearTimeout(capabilityTimer)
+  capabilityRequest?.abort()
+}
+// A submit drops a hint still waiting for its 300 ms: sent beside the run, it can start another instance of the
+// service and wait seconds for it. Capture, so this runs before the map's handler (tools/mapResults.ts) stops the event.
+document.addEventListener('submit', (event) => { if (event.target === form) cancelCapability() }, true)
 const VIEW_NAMES: Record<OutputView, string> = { markdown: 'Markdown', links: 'Links', info: 'Page info', fields: 'Fields', json: 'JSON' }
 /** Website to Text (page.ts, heroMarkup `tool.text`) shows a page's Markdown as plain text, and names that view Text. */
 const toolText = document.querySelector<HTMLElement>('.hero')?.dataset.toolText === 'on'
@@ -248,6 +257,8 @@ function resultFilename(result: PreviewResponse, extension: ViewText['extension'
 }
 
 document.querySelector<HTMLButtonElement>('#example-button')!.addEventListener('click', () => {
+  // During a run the address field holds the page being read.
+  if (formBusy()) return
   track('example_click')
   // A free tool's page has an example of its own (page.ts, heroMarkup `tool.example`).
   input.value = hero.dataset.toolExample ?? 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'
@@ -290,8 +301,8 @@ function setInvalid(invalid: boolean): void {
 }
 
 function scheduleCapability(): void {
-  window.clearTimeout(capabilityTimer)
-  capabilityRequest?.abort()
+  cancelCapability()
+  if (formBusy()) return
   const entered = input.value.trim()
   capabilityMessage.textContent = ''
   urlHelp.hidden = false
