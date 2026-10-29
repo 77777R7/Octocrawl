@@ -2,7 +2,20 @@
 
 These terms cover the public Octocrawl page at this address and its preview service (“the preview”). They do not cover the Octocrawl software: its code is licensed under the [GNU AGPL-3.0](https://github.com/77777R7/Octocrawl/blob/main/LICENSE), and nothing here limits your rights under that licence. When you run Octocrawl on your own computer, these terms do not apply.
 
-Last updated 24 October 2026.
+Last updated 29 October 2026.
+
+## In short
+
+This is the short version, and it leaves things out. The sections below are the full text, and they are what counts.
+
+1. The preview, the hosted API and MCP are a free, limited service with no payment yet. We may change, slow down, pause or stop them at any time, without notice.
+2. The Octocrawl software is under the AGPL-3.0, and nothing here limits that licence. If you run it on your own computer, these terms do not apply.
+3. Results come as they are. A page can come back blocked, incomplete or wrong, so check a result's status before you rely on it. As far as the law allows, the operator is not liable for loss from using the preview or relying on its results.
+4. You are responsible for the addresses you submit and for what you do with the results. A page's content belongs to its owners.
+5. The preview and the hosted API obey robots.txt, and the hosted API offers no proxies, CAPTCHA solving or stealth. You must follow the acceptable use policy.
+6. We may suspend an account or revoke a key that breaks these terms, for example by making extra accounts for free credits or sharing a key to get around a limit. You can delete your account at any time.
+7. It is run by Howard Lun, an individual in British Columbia, Canada. The law of British Columbia governs these terms, and if you use it as a consumer, the mandatory consumer laws of where you live still protect you.
+8. When these terms change, the date at the top changes with them, and using the preview after that means you accept the new terms.
 
 ## Who runs the preview
 
@@ -28,7 +41,7 @@ The preview is run by Howard Lun, an individual in British Columbia, Canada. You
 - Credits have no cash value and cannot be transferred. A month's free credits do not roll over. The amount and the costs may change, and this site says what applies.
 - One person, one account. Making accounts to collect more free credits, or sharing a key to get around a limit, may get the accounts suspended and their keys revoked.
 - Keep your keys secret. A key's calls spend its account's credits, whoever makes them.
-- We may suspend an account or revoke a key that breaks these terms or the [acceptable use policy](/docs/acceptable-use/). You can delete your account at any time, in your dashboard's Settings or by email. Deleting it ends its keys and its credits, bought ones included.
+- We may suspend an account or revoke a key that breaks these terms or the [acceptable use policy](/docs/acceptable-use/). You can delete your account at any time, in your dashboard's Settings or by email. Deleting it ends its keys and its credits.
 
 ## Results
 
