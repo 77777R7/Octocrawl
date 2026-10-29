@@ -30,8 +30,10 @@ def _init(mineru: str, traf: bool) -> None:
     global ARGS
     sys.path.insert(0, mineru)
     from eval_baselines.utils import calc_rouge_n_score
-    from eval_baselines.baselines.base import HTML2TextWrapper
-    ARGS = {"rouge": calc_rouge_n_score, "h2t": HTML2TextWrapper(), "traf": None}
+    from eval_baselines.baselines.base import html_to_text_func
+    # The authors' conversion, a new html2text converter per page: one converter reused across pages carries state from
+    # one page into the next.
+    ARGS = {"rouge": calc_rouge_n_score, "h2t": lambda html, url: html_to_text_func(html, url, "MD"), "traf": None}
     if traf:
         from eval_baselines.baselines.trafilatura import Trafilatura_HTML_MD_Extractor
         ARGS["traf"] = Trafilatura_HTML_MD_Extractor()
@@ -53,6 +55,16 @@ def without_links(markdown: str) -> str:
     return MD_LINK.sub(r"\1", MD_IMAGE.sub("", markdown))
 
 
+def html_md(html: str | None, url: str) -> str:
+    """Main HTML as the authors' MainHTMLExtractor turns it into Markdown: empty when it fails."""
+    if not html:
+        return ""
+    try:
+        return ARGS["h2t"](html, url)
+    except Exception:
+        return ""
+
+
 def score_line(pair: tuple[str, str | None]) -> dict:
     d, o = json.loads(pair[0]), json.loads(pair[1]) if pair[1] else None
     gt, out = d["convert_main_content"], {"track_id": d["track_id"], "level": level_of(d.get("meta"))}
@@ -64,7 +76,7 @@ def score_line(pair: tuple[str, str | None]) -> dict:
     else:
         out["octocrawl-md"] = ARGS["rouge"](gt, o["markdown"])["f1"]
         out["octocrawl-md-nolinks"] = ARGS["rouge"](gt, without_links(o["markdown"]))["f1"]
-        out["octocrawl-html-md"] = ARGS["rouge"](gt, ARGS["h2t"](o["mainHtml"] or "", d["url"]) if o["mainHtml"] else "")["f1"]
+        out["octocrawl-html-md"] = ARGS["rouge"](gt, html_md(o["mainHtml"], d["url"]))["f1"]
         out["fallback"] = o["fallback"]
     if ARGS["traf"] is not None:
         try:

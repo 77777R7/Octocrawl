@@ -32,5 +32,8 @@ Frozen HTML (HF `opendatalab/WebMainBench`), so only Octocrawl's extractor and M
 
 - `octocrawl-convert.mjs` runs the compiled `packages/extract-tf/dist` on JSONL lines of `{track_id, html, url}`.
 - `score_full.py` scores the 7,809-page set with ROUGE-N F1 (N=5) from the authors' MinerU-HTML `eval_baselines`, with
-  the authors' Trafilatura baseline beside it as a check of the scorer.
-- `run_545.py` runs the toolkit's fine-grained metrics on the 545-page subset with the LLM splitting off.
+  the authors' Trafilatura baseline beside it as a check of the scorer. Three Octocrawl views: its Markdown as
+  delivered, the same without link targets and images (the ground truth has none), and its main HTML through the
+  authors' html2text conversion (their table's "Html+MD" mode, a converter per page as theirs).
+- `run_545.py` runs the toolkit's fine-grained metrics on the 545-page subset with the LLM splitting off, for
+  Octocrawl's Markdown as delivered and without link targets and images.

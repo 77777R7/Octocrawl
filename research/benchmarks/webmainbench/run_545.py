@@ -5,9 +5,12 @@
 
 The `octocrawl` extractor returns the Markdown octocrawl-convert.mjs made from the same stored HTML (matched by URL, which
 is unique in the subset), so the toolkit scores exactly what Octocrawl's converter produced. Feed the converter the HTML
-after the toolkit's clean_browser_annotation_artifacts, as every other extractor receives it (--dump-input writes that). The authors' published table used an
-LLM to split formulas, tables and code; no paid service is used here (use_llm False), so the extractors named in --with
-are run under the same setting as a reference, and the published numbers are quoted apart.
+after the toolkit's clean_browser_annotation_artifacts, as every other extractor receives it (--dump-input writes that).
+`octocrawl-nolinks` scores the same Markdown with link targets and images dropped, as score_full.py's view of that name.
+
+The authors' published table used an LLM to split formulas, tables and code; no paid service is used here (use_llm
+False), so the extractors named in --with are run under the same setting as a reference, and the published numbers are
+quoted apart.
 """
 from __future__ import annotations
 
@@ -15,6 +18,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+
+from score_full import without_links
 
 METRICS = ["overall", "text_edit", "code_edit", "formula_edit", "table_edit", "table_TEDS"]
 
@@ -63,9 +68,18 @@ def main() -> None:
                 return ExtractionResult(content="", content_list=[], success=True)
             return ExtractionResult(content=r["markdown"], content_list=[], success=True)
 
+    @extractor("octocrawl-nolinks")
+    class OctocrawlNoLinksExtractor(OctocrawlExtractor):
+        description = "The same Markdown with link targets and images dropped (score_full.py's octocrawl-md-nolinks)"
+
+        def _extract_content(self, html: str, url: str = None) -> ExtractionResult:
+            result = super()._extract_content(html, url)
+            result.content = without_links(result.content)
+            return result
+
     cfg = {"use_llm": False}
     dataset = DataLoader.load_jsonl(a.bench)
-    results = Evaluator(llm_config=cfg, metric_config=cfg).compare_extractors(dataset, ["octocrawl", *[x for x in a.others.split(",") if x]])
+    results = Evaluator(llm_config=cfg, metric_config=cfg).compare_extractors(dataset, ["octocrawl", "octocrawl-nolinks", *[x for x in a.others.split(",") if x]])
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     table = {}
