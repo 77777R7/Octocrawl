@@ -97,7 +97,8 @@ export interface Channel {
    * (ADR 0005 hosted_chrome's D5 counter). A refusal leaves the rung out of this run as if it had not been reached: the
    * trace says why (`ladder_channel_skipped`), the result carries the refusal's warning, and the earlier rung's answer
    * stands. An admitted call is settled once, with what the rung read (null when it threw), and whether its call went
-   * out. Absent: the rung runs whenever it is reached.
+   * out; one through a priced exit the admission names (`exit`) goes on the run's paid calls, charged what its
+   * settlement answers (settleAdmitted). Absent: the rung runs whenever it is reached.
    */
   admit?(url: string, execution: ExecutionContext): Promise<ChannelAdmission>
   /** Release the channel's resources (browser processes, vendor sessions).
@@ -105,9 +106,27 @@ export interface Channel {
   close?(): Promise<void>
 }
 
-/** A rung's answer to `Channel.admit`. */
+/**
+ * The priced exit an admitted call leaves through (ADR 0005 hosted_chrome's egress tariff, revision of 2026-10-27), as
+ * the call's paid call names it.
+ */
+export interface PricedExit {
+  /** The exit's provider, as the operator's tariff names it. */
+  provider: string
+  /** The ADR 0005 capabilities the call is made under. */
+  capabilities: readonly string[]
+  /** The most one call is charged, a fixed rent left out. */
+  ceilingUsd: number
+  /** The month's fixed rent the exit is part of (paidCallFixedCost), absent with none: a call's share of it is not known. */
+  fixedMonthlyUsd?: number
+}
+
+/**
+ * A rung's answer to `Channel.admit`. An admission that names a priced exit settles to what it charged the call; one
+ * that says no figure has it charged its ceiling.
+ */
 export type ChannelAdmission =
-  | { ok: true; settle(result: FetchResult | null, called: boolean): Promise<void> }
+  | { ok: true; exit?: PricedExit; settle(result: FetchResult | null, called: boolean): Promise<number | void> }
   | { ok: false; reason: string; warning: FetchWarning; detail?: Readonly<Record<string, unknown>> }
 
 /** The human in the loop. Called exactly when a result asks for takeover. */
@@ -1267,14 +1286,14 @@ export class LadderRunner {
       return null
     }
     let called = false
-    let result: FetchResult | null = null
+    let result: FetchResult | null
     try {
       result = await this.meteredFetch(channel, label, url, session, execution, options, progress, () => { called = true; onCall() })
-      return result
-    } finally {
-      // The admission's own failure to settle is its to report: the page it paid for is still the answer.
-      await admission.settle(result, called).catch(() => {})
+    } catch (error) {
+      await settleAdmitted(progress, admission, label, null, called)
+      throw error
     }
+    return await settleAdmitted(progress, admission, label, result, called)
   }
 
   private async meteredFetch(channel: Channel, label: string, url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, progress: LadderProgress, onCall: () => void): Promise<FetchResult | null> {
@@ -1645,9 +1664,10 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
 
 /**
  * One call the ledger settled, added to the run's charge and to its paid calls: Octocrawl's verdict on the page the call
- * returned (null when it returned none), never the provider's word. Returns the call's number in the run.
+ * returned (null when it returned none), never the provider's word, with what its sessions used and a fixed rent its
+ * exit is part of. Returns the call's number in the run.
  */
-function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceilingUsd: number, chargedUsd: number, reportedCostUsd: number | null, result: FetchResult | null, sessionMs: number | null = null, used: { proxyBytes?: number | null; solves?: number | null; proxyCountry?: string; bytesCounted?: number | null; bytesCapped?: boolean | null } = {}, paidCallId?: string): number {
+function paidCall(progress: LadderProgress, channel: Pick<Channel, 'id' | 'vendorId' | 'grant' | 'grantCapabilities'>, rung: string, ceilingUsd: number, chargedUsd: number, reportedCostUsd: number | null, result: FetchResult | null, sessionMs: number | null = null, used: { proxyBytes?: number | null; solves?: number | null; proxyCountry?: string; bytesCounted?: number | null; bytesCapped?: boolean | null; fixedMonthlyUsd?: number } = {}, paidCallId?: string): number {
   progress.charged = (progress.charged ?? 0) + chargedUsd
   progress.grant ??= channel.grant ?? null
   const call = progress.paidCalls.length + 1
@@ -1657,8 +1677,35 @@ function paidCall(progress: LadderProgress, channel: Channel, rung: string, ceil
     outcome: result?.status ?? null, reason: result === null ? null : result.failureReason ?? result.blockReason ?? result.budgetExceeded ?? null, call,
     ...(paidCallId === undefined ? {} : { paidCallId }),
     ...(used.bytesCounted === undefined ? {} : { bytesCounted: used.bytesCounted, bytesCapped: used.bytesCapped ?? null }),
+    ...(used.fixedMonthlyUsd === undefined ? {} : { fixedMonthlyUsd: used.fixedMonthlyUsd }),
   })
   return call
+}
+
+/**
+ * An admitted call settled with its admission (Channel.admit), once, also when it threw (no result): the admission's own
+ * failure to settle is its to report, and the page it paid for is still the answer. A call through a priced exit
+ * (`exit`) goes on the run's paid calls, charged what the settlement answers, else its ceiling. The exit's provider
+ * states no price for a call, and a call's share of a fixed rent is not known, so the page's own third-party cost is
+ * unknown (null), never the 0 its lane reported (ADR 0005, revision of 2026-10-27, decision three).
+ */
+async function settleAdmitted(progress: LadderProgress, admission: Extract<ChannelAdmission, { ok: true }>, rung: string, result: FetchResult | null, called: boolean): Promise<FetchResult | null> {
+  const answered = await admission.settle(result, called).catch(() => undefined)
+  const { exit } = admission
+  if (exit === undefined || !called) return result
+  const told = typeof answered === 'number' && Number.isFinite(answered) && answered >= 0 ? answered : null
+  const chargedUsd = told ?? exit.ceilingUsd
+  const call = paidCall(progress, { id: rung, vendorId: exit.provider, grantCapabilities: exit.capabilities }, rung, exit.ceilingUsd, chargedUsd, null, result, null, exit.fixedMonthlyUsd === undefined ? {} : { fixedMonthlyUsd: exit.fixedMonthlyUsd })
+  const settled = { vendorId: exit.provider, ceilingUsd: exit.ceilingUsd, chargedUsd, basis: told !== null && result !== null ? 'measured' : 'ceiling', call }
+  if (result === null) {
+    progress.ladderTrace.push({ at: Math.max(0, performance.now() - progress.startedAt), event: 'spend_settled', channel: rung, detail: { ...settled, ended: 'without_an_answer' } })
+    return null
+  }
+  return {
+    ...result,
+    usage: { ...result.usage, externalCostUsd: null, externalCostChargedUsd: (result.usage.externalCostChargedUsd ?? 0) + chargedUsd },
+    trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'spend_settled', detail: settled }],
+  }
 }
 
 /**
@@ -1725,12 +1772,16 @@ function withNotAdmitted(run: LadderRunResult, progress: LadderProgress): Ladder
 }
 
 function withRunCost(run: LadderRunResult, progress: LadderProgress): LadderRunResult {
+  // A call through a rented exit has a share of a fixed monthly rent no call knows, whether or not it returned a page (a
+  // rung the deadline cut): the run's cost is unknown, as its record's is (ADR 0005, revision of 2026-10-27, decision three).
+  const rented = progress.paidCalls.some((call) => call.fixedMonthlyUsd !== undefined)
+  const summary = rented ? { ...run.summary, externalCostUsd: null, externalCost: { ...run.summary.externalCost, unknown: true } } : run.summary
   const { externalCostChargedUsd: _attempt, ...usage } = run.result.usage
-  const result: FetchResult = { ...run.result, usage: { ...usage, externalCostUsd: run.summary.externalCostUsd, ...(progress.charged === null ? {} : { externalCostChargedUsd: progress.charged }) } }
+  const result: FetchResult = { ...run.result, usage: { ...usage, externalCostUsd: summary.externalCostUsd, ...(progress.charged === null ? {} : { externalCostChargedUsd: progress.charged }) } }
   if (progress.paidCalls.length === 0) return { ...run, result }
   // The answer is a paid call's page when its own trace holds that call's settlement, or the call of a solve made on it.
   const own = new Set(result.trace.filter((event) => event.event === 'spend_settled' || event.event === 'captcha_solve').map((event) => event.detail?.call).filter((call) => call !== undefined))
-  return { ...run, result: { ...result, trace: [...result.trace, paidCallsEvent(progress, own, result.usage.wallMs, result.lane)] } }
+  return { ...run, summary, result: { ...result, trace: [...result.trace, paidCallsEvent(progress, own, result.usage.wallMs, result.lane)] } }
 }
 
 /** The run's paid calls as one `paid_calls` event, the calls numbered in `answer` marked as the answer's. */

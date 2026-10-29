@@ -18,9 +18,9 @@ export { closeIdleOnlyWhenUnread } from './keepAlive.js'
 export { loadImpit, loadPatchrightEngine } from '@w2l/bench'
 // The octocrawl-chrome service's browser lane (ADR 0005 hosted_chrome), for @w2l/mcp's hostedChrome.ts.
 export { BrowserLocalSubject, CompatAddressGuard, HOSTED_CHROME_PROFILE_ID, hostedChromeRefusal } from '@w2l/bench'
-export type { GuardDial, GuardResolver, InstalledChromeTestSeams } from '@w2l/bench'
+export type { GuardDial, GuardResolver, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 // The operator's monthly ledger and its tariffs, for @w2l/mcp's hostedChromeMeter.ts (ADR 0005 hosted_chrome, D5).
-export { normalizeVendorTariff, openMonthlySpendLedger, tariffCeilingUsd, tariffCostUsd, tariffMonthlyFixedUsd } from '@w2l/http-core'
+export { normalizeVendorTariff, openMonthlySpendLedger, paidCallFixedCost, tariffCeilingUsd, tariffCostUsd, tariffMonthlyFixedUsd } from '@w2l/http-core'
 export type { VendorTariff } from '@w2l/http-core'
 // The hosts the compatible transport serves by default, which hosted Octocrawl's per-request grant uses too (ADR 0005 compatible_transport).
 export { COMPAT_BENEFIT_HOSTS } from '@w2l/bench'

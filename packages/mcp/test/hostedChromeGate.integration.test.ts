@@ -2,10 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
 import type { AddressInfo } from 'node:net'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { hostedNetworkPolicy, type FetchResult } from '@w2l/contracts'
+import Ajv2020 from 'ajv/dist/2020.js'
+import { hostedNetworkPolicy, type EvidenceRecord, type FetchResult } from '@w2l/contracts'
 import type { HostedChromeOperator } from '@w2l/api'
 import { createHostedApi, keyDigest, MemoryHostedKeys, MemoryHostedQuota } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
@@ -17,6 +19,10 @@ import { HostedChromeCounter, MemoryHostedChromeSpend } from '../src/hostedChrom
 // "enhanced"` is taken only from a call the account switch admits, and refused for any other; the rung is used after the
 // rungs before it were blocked, and counted for its account, and a call the counter turns away gets the earlier page. The octocrawl-chrome
 // service is a stand-in that answers the article; the rungs before it run for real (HTTP, then Playwright's Chromium).
+
+const schema = JSON.parse(readFileSync(new URL('../../contracts/schemas/evidence-record.v1.json', import.meta.url), 'utf8')) as object
+const AjvClass = Ajv2020 as unknown as new (options: object) => { compile(schema: object): ((data: unknown) => boolean) & { errors?: unknown } }
+const validate = new AjvClass({ allErrors: true, allowUnionTypes: true }).compile(schema)
 
 const HASH_KEY = 'h'.repeat(40)
 const ARTICLE = `<!doctype html><title>Tide tables</title><main><h1>Tide tables</h1>${'<p>The harbour office records tide height for every hour of the day.</p>'.repeat(6)}</main>`
@@ -75,13 +81,19 @@ describe('the hosted gate with hosted_chrome\'s operator config', () => {
     })
     if (!service.server.listening) await once(service.server, 'listening')
     const scrape = (body: Record<string, unknown>, key?: string) => fetch(`http://127.0.0.1:${port}/v1/scrape`, { method: 'POST', headers: { 'content-type': 'application/json', ...(key === undefined ? {} : { authorization: `Bearer ${key}` }) }, body: JSON.stringify({ debug: true, ...body }) })
-    type Read = { status: string; channelsTried: string[]; markdown: string | null; evidenceRecord: { access: { route: string | null; egress: { kind: string | null } | null } | null } }
+    type Read = { status: string; channelsTried: string[]; markdown: string | null; evidenceRecord: EvidenceRecord }
     try {
       const one = await scrape({ url: `${origin}/challenge`, access: 'enhanced' }, 'oc_one')
       expect(one.status).toBe(200)
       const read = await one.json() as Read
       expect(read.channelsTried).toEqual(['http', 'browser_local', 'hosted_chrome'])
       expect(read).toMatchObject({ status: 'success', markdown: expect.stringContaining('Tide tables'), evidenceRecord: { access: { route: 'hosted_chrome', egress: { kind: 'datacenter' } } } })
+      // It left through the rented exit: the record names the provider and the month's rent, and its cost is unknown
+      // (null), never 0 (ADR 0005, revision of 2026-10-27, decision three); the schema takes it.
+      expect(read.evidenceRecord.access).toMatchObject({ externalCostUsd: null, grant: null, paidCalls: [
+        { provider: 'webshare', rung: 'hosted_chrome', capabilities: ['hosted_chrome'], ceilingUsd: 0, chargedUsd: 0, reportedCostUsd: null, outcome: 'success', reason: null, answer: true, fixedMonthlyUsd: 2.99 },
+      ] })
+      expect(validate(read.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
       expect(asked).toEqual(['/challenge'])
       // Counted for the account (D5): one attempt of the day, and the read settled in the month at $0 a read (rent only).
       expect([...quota.counts].filter(([id]) => id.includes('-hostedChrome-'))).toEqual([[`${new Date().toISOString().slice(0, 10)}-hostedChrome-account-1`, 1]])
