@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CRAWL_BUDGET, type CrawlReport, type ExecutionContext, type FetchResult, type ListPageRead, type ScrapeAtom, type ScrapeOutcome, type SitemapFileRecord, type SitemapLoadRequest, type SitemapLoadResult, type SitemapSource } from '@w2l/contracts'
+import { carryPaidCalls, DEFAULT_CRAWL_BUDGET, type CrawlReport, type ExecutionContext, type FetchResult, type ListPageRead, type ScrapeAtom, type ScrapeOutcome, type SitemapFileRecord, type SitemapLoadRequest, type SitemapLoadResult, type SitemapSource } from '@w2l/contracts'
 import { CrawlOrchestrator, type CrawlClock } from '../src/orchestrator.js'
 import { crawlReportFromStore } from '../src/crawlReport.js'
 import { MemoryTaskStore } from '../src/memoryStore.js'
@@ -469,6 +469,33 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
     expect(failedA?.result).toMatchObject({ status: 'failed', failureReason: 'internal_error', markdown: null })
     expect(failedA?.result?.trace).toContainEqual(expect.objectContaining({ event: 'scrape_error', detail: expect.objectContaining({ error: expect.stringMatching(/fake atom has no page/) }) }))
     expect(steps.find((s) => s.canonicalUrl === ITEM_B)?.result).toMatchObject({ status: 'failed', failureReason: 'timeout' })
+  })
+
+  it('leaves the cost of a page whose scrape threw unknown when a paid call it carries names a rent, not the 0 a scrape that threw is taken to cost (ADR 0005 decision three)', async () => {
+    // hosted_chrome's read through the rented exit, which the octocrawl-chrome service answered 503: on the run's paid calls.
+    const rented = { provider: 'webshare', rung: 'hosted_chrome', capabilities: ['hosted_chrome'], ceilingUsd: 0, chargedUsd: 0, reportedCostUsd: null, sessionMs: null, outcome: null, reason: null, answer: false, fixedMonthlyUsd: 2.99 }
+    const run = async (paid: boolean) => {
+      const failure = new Error('the octocrawl-chrome service answered 503')
+      const atom: ScrapeAtom = {
+        async scrape(url) {
+          // The seed costs a known 0, so the report's cost is what the page that threw makes it.
+          if (url !== ITEM_A) return { result: page(url, { links: [ITEM_A], cost: 0 }), links: [ITEM_A] }
+          throw paid ? carryPaidCalls(failure, { at: 1, lane: 'provider', event: 'paid_calls', detail: { calls: [rented], grant: null } }) : failure
+        },
+        async close() {},
+      }
+      const store = new MemoryTaskStore()
+      const report = await new CrawlOrchestrator({ store, atom, clock: new FakeClock(), scrapeErrorCostUsd: 0 }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl' })
+      return { report, failed: (await store.listSteps(report.taskId, report.attemptId)).find((s) => s.canonicalUrl === ITEM_A)?.result }
+    }
+    const threw = await run(true)
+    expect(threw.failed).toMatchObject({ status: 'failed', failureReason: 'internal_error', usage: { externalCostUsd: null } })
+    expect(threw.failed?.trace).toContainEqual(expect.objectContaining({ event: 'paid_calls', detail: { calls: [rented], grant: null } }))
+    expect(threw.report).toMatchObject({ costUsd: null, costUnknown: true })
+    // Without a paid call it carries, the page costs what a scrape that threw is taken to cost.
+    const plain = await run(false)
+    expect(plain.failed?.usage.externalCostUsd).toBe(0)
+    expect(plain.report).toMatchObject({ costUsd: 0, costUnknown: false })
   })
 
   it('runs bounded workers instead of awaiting every page serially', async () => {

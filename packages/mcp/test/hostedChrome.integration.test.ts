@@ -72,7 +72,8 @@ describe('hosted_chrome: the octocrawl-chrome service end to end', () => {
       expect([...quota.counts.values()]).toEqual([1])
       expect(read.status).toBe('success')
       expect(read.markdown).toContain('Tide tables')
-      expect(read.evidenceRecord.access).toMatchObject({ route: 'hosted_chrome', executor: 'chrome', profile: HOSTED_CHROME_PROFILE_ID, egress: { proxy: null, source: 'direct', kind: 'google' } })
+      // Cloud Run's own egress pays no third party: no paid call, and a cost of $0.
+      expect(read.evidenceRecord.access).toMatchObject({ route: 'hosted_chrome', executor: 'chrome', profile: HOSTED_CHROME_PROFILE_ID, egress: { proxy: null, source: 'direct', kind: 'google' }, externalCostUsd: 0, paidCalls: null })
       expect(read.evidenceRecord.access!.executorVersion).toMatch(/^\d+\.\d+\.\d+\.\d+$/)
       // The service read robots.txt and obeyed it, as every hosted rung does: a disallowed page is not opened.
       const before = asked.filter((path) => path === '/private').length

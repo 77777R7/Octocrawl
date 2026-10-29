@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FetchResult } from '@w2l/contracts'
 import { MemoryHostedAccess, type HostedChromeSwitch } from '../src/hostedAccess.js'
 import { MemoryHostedQuota } from '../src/hostedApi.js'
-import { FirestoreHostedChromeSpend, HOSTED_CHROME_REFUSALS, HostedChromeCounter, MemoryHostedChromeSpend } from '../src/hostedChromeMeter.js'
+import { FirestoreHostedChromeSpend, HOSTED_CHROME_REFUSALS, HostedChromeCounter, MemoryHostedChromeSpend, type HostedChromeEgress } from '../src/hostedChromeMeter.js'
 
 /**
  * D5 counting for hosted_chrome (ADR 0005, revision of 2026-10-27): the switch's monthlyCapUsd against the operator's
@@ -24,7 +24,7 @@ function read(status: FetchResult['status'] = 'success', vendorProxyBytes?: numb
   }
 }
 
-function counter(hostedChrome: HostedChromeSwitch = ON, options: { egress?: typeof DATACENTER | null; spend?: MemoryHostedChromeSpend; quota?: MemoryHostedQuota; now?: () => Date } = {}) {
+function counter(hostedChrome: HostedChromeSwitch = ON, options: { egress?: HostedChromeEgress | null; spend?: MemoryHostedChromeSpend; quota?: MemoryHostedQuota; now?: () => Date } = {}) {
   const lines: string[] = []
   const spend = options.spend ?? new MemoryHostedChromeSpend()
   const quota = options.quota ?? new MemoryHostedQuota()
@@ -59,6 +59,32 @@ describe('hosted_chrome D5 counting', () => {
     expect(never.ok).toBe(true)
     if (never.ok) await never.settle(null, false)
     expect(spend.months.get('2026-10')).toEqual({ settledMicroUsd: 20_000, calls: 2 })
+  })
+
+  it('names its priced exit on each admission and settles a read to what it charged, for the read\'s record; Cloud Run\'s own egress names none', async () => {
+    const { meter } = counter({ ...ON, monthlyCapUsd: 30, dailyAttemptsPerAccount: 5 })
+    const admission = await meter.admit({ account: 'account-1' })
+    // The provider as the operator's config names it, the capability, a read's ceiling, and the month's rent: 10 IPs at $2.
+    expect(admission).toMatchObject({ ok: true, exit: { provider: 'datacenter', capabilities: ['hosted_chrome'], ceilingUsd: 0.01, fixedMonthlyUsd: 20 } })
+    // 4 MB at $0.50 a GB; a read that threw at its ceiling; a call that never went out was charged nothing, and says no figure.
+    if (admission.ok) expect(await admission.settle(read('success', 4_000_000), true)).toBe(0.002)
+    const threw = await meter.admit({ account: 'account-1' })
+    expect(threw.ok).toBe(true)
+    if (threw.ok) expect(await threw.settle(null, true)).toBe(0.01)
+    const never = await meter.admit({ account: 'account-1' })
+    expect(never.ok).toBe(true)
+    if (never.ok) expect(await never.settle(null, false)).toBeUndefined()
+    // D2's plan as the deploy names it: 100 IPs at $0.0299 are $2.99 a month (not the float product 2.9899999999999998),
+    // and a read has no price of its own.
+    const { meter: webshare } = counter({ ...ON, monthlyCapUsd: 30 }, { egress: { vendor: 'webshare', tariff: { perIpMonthUsd: 0.0299, rentedIps: 100 } } })
+    const rented = await webshare.admit({ account: 'account-1' })
+    expect(rented).toMatchObject({ ok: true, exit: { provider: 'webshare', capabilities: ['hosted_chrome'], ceilingUsd: 0, fixedMonthlyUsd: 2.99 } })
+    if (rented.ok) expect(await rented.settle(read(), true)).toBe(0)
+    // Cloud Run's own egress pays no third party: there is no exit to name.
+    const { meter: google } = counter(ON, { egress: null })
+    const own = await google.admit({ account: 'account-1' })
+    expect(own.ok).toBe(true)
+    expect(own).not.toHaveProperty('exit')
   })
 
   it('refuses a call past the account\'s attempts for the UTC day, and admits it again the next day', async () => {

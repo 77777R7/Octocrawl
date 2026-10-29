@@ -103,9 +103,12 @@ export interface VendorTariff {
   rentedIps?: number | null
 }
 
-/** The tariff's fixed rent for one month, in US dollars: `perIpMonthUsd` for each rented IP; 0 with no rent. */
+/**
+ * The tariff's fixed rent for one month, in US dollars: `perIpMonthUsd` for each rented IP, to the micro-dollar (100 IPs
+ * at $0.0299 are $2.99, not the float product 2.9899999999999998); 0 with no rent.
+ */
 export function tariffMonthlyFixedUsd(tariff: VendorTariff): number {
-  return (tariff.perIpMonthUsd ?? 0) * (tariff.rentedIps ?? 0)
+  return Math.round((tariff.perIpMonthUsd ?? 0) * (tariff.rentedIps ?? 0) * 1_000_000) / 1_000_000
 }
 
 /**

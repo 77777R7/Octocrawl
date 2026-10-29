@@ -53,6 +53,7 @@ import {
   type PaidCallRecord,
   type StepRecord,
   type Task,
+  type TraceEvent,
 } from '@w2l/contracts'
 import { abortableSleep, createExecutionScope, createSpendLedger, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { paidCallExposureUsd, paidCallTotals, reportFromTaskAttempt } from './crawlReport.js'
@@ -420,6 +421,9 @@ export class CrawlOrchestrator {
                 // The paid calls the run made before it threw stay on the page's record (ROADMAP PA item 4).
                 const paid = paidCallsOfError(error)
                 if (paid !== null) outcome = { ...outcome, result: { ...outcome.result, trace: [...outcome.result.trace, paid] } }
+                // One through a rented exit has a share of a fixed monthly rent no call knows: the page's cost is unknown, as
+                // its record's is, not what a scrape that threw is taken to cost (ADR 0005, revision of 2026-10-27, decision three).
+                if (paid !== null && namesRent(paid)) outcome = { ...outcome, result: { ...outcome.result, usage: { ...outcome.result.usage, externalCostUsd: null } } }
                 // Every paid call of this page reserved through its ledger before it was made: what that ledger settled is the
                 // page's whole paid spend, though the scrape threw before reporting a cost.
                 if (pageLedger !== undefined) outcome = { ...outcome, result: { ...outcome.result, usage: { ...outcome.result.usage, externalCostChargedUsd: pageLedger.settledUsd } } }
@@ -918,6 +922,12 @@ function newAttempt(id: string, taskId: string, startedAt: string, recoveredFrom
     budgetExceeded: null,
     recoveredFromAttemptId,
   }
+}
+
+/** Whether a `paid_calls` event holds a call through a rented exit: a positive `fixedMonthlyUsd`, as the record reads it. */
+function namesRent(event: TraceEvent): boolean {
+  const calls = event.detail?.calls
+  return Array.isArray(calls) && calls.some((call) => typeof call?.fixedMonthlyUsd === 'number' && Number.isFinite(call.fixedMonthlyUsd) && call.fixedMonthlyUsd > 0)
 }
 
 /**

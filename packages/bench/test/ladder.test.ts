@@ -541,6 +541,38 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     expect(settled).toEqual([[null, false]])
   })
 
+  it('puts a read through an admitted rung\'s priced exit on the run\'s paid calls, with the rent it is part of: its cost unknown, never 0 (ADR 0005 decision three)', async () => {
+    const url = 'https://example.com/p'
+    // Every rung reports the 0 of a lane that paid no third party itself, as the octocrawl-chrome service's lane does.
+    const free = (r: FetchResult): FetchResult => ({ ...r, usage: { ...r.usage, externalCostUsd: 0 } })
+    const rungs = (rung: Channel): Channel[] => [channel('http', [free(blockedResult(url, 'cloudflare_challenge'))]), channel('browser_local', [free({ ...blockedResult(url, 'cloudflare_challenge'), lane: 'browser_local' })]), rung]
+    // D2's datacenter plan: a rent of $2.99 a month and no price of its own a read, so the admission charges a read 0.
+    const exit = { provider: 'webshare', capabilities: ['hosted_chrome'], ceilingUsd: 0, fixedMonthlyUsd: 2.99 }
+    const rented = { ...channel('hosted_chrome', [free(contentfulResult(url, 'browser_local'))]), admit: async () => ({ ok: true as const, exit, settle: async () => 0 }) }
+    const run = await new LadderRunner(rungs(rented), { mode: 'standard', enhanced: true }).run(url)
+    expect(run.channelsTried).toEqual(['http', 'browser_local', 'hosted_chrome'])
+    expect(run.result.trace.filter((event) => event.event === 'paid_calls').map((event) => event.detail)).toEqual([{ grant: null, calls: [
+      { provider: 'webshare', rung: 'hosted_chrome', capabilities: ['hosted_chrome'], ceilingUsd: 0, chargedUsd: 0, reportedCostUsd: null, sessionMs: null, outcome: 'success', reason: null, answer: true, fixedMonthlyUsd: 2.99 },
+    ] }])
+    expect(run.result.usage).toMatchObject({ externalCostUsd: null, externalCostChargedUsd: 0 })
+    expect(run.summary).toMatchObject({ externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true } })
+    // Cloud Run's own egress: the admission names no exit, so no paid call, and the lanes' 0 stands.
+    const own = { ...channel('hosted_chrome', [free(contentfulResult(url, 'browser_local'))]), admit: async () => ({ ok: true as const, settle: async () => 0 }) }
+    const google = await new LadderRunner(rungs(own), { mode: 'standard', enhanced: true }).run(url)
+    expect(google.result.trace.some((event) => event.event === 'paid_calls')).toBe(false)
+    expect(google.result.usage.externalCostUsd).toBe(0)
+    // A read the deadline cut: on the paid calls with no page, and the run's cost unknown, as its record's is.
+    const hanging: Channel = { ...rented, fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })) }
+    const cut = await new LadderRunner(rungs(hanging), { mode: 'standard', enhanced: true }).run(url, undefined, { deadlineAt: Date.now() + 150 })
+    expect(cut.result.usage).toMatchObject({ deadlineExceeded: true, externalCostUsd: null, externalCostChargedUsd: 0 })
+    expect(cut.summary).toMatchObject({ externalCostUsd: null, externalCost: { knownSubtotal: 0, unknown: true } })
+    expect(cut.result.trace.find((event) => event.event === 'paid_calls')?.detail?.calls).toEqual([expect.objectContaining({ provider: 'webshare', chargedUsd: 0, outcome: null, answer: false, fixedMonthlyUsd: 2.99 })])
+    // A read that threw: on the paid calls at what its admission charged it, with no page, and carried on the run's error.
+    const throwing = { ...rented, admit: async () => ({ ok: true as const, exit: { ...exit, ceilingUsd: 0.002 }, settle: async () => 0.002 }), fetch: async () => { throw new Error('the service went away') } }
+    const thrown = await new LadderRunner(rungs(throwing), { mode: 'standard', enhanced: true }).run(url).then(() => null, (error: unknown) => error)
+    expect((paidCallsOfError(thrown)?.detail as { calls: Record<string, unknown>[] }).calls).toEqual([{ provider: 'webshare', rung: 'hosted_chrome', capabilities: ['hosted_chrome'], ceilingUsd: 0.002, chargedUsd: 0.002, reportedCostUsd: null, sessionMs: null, outcome: null, reason: null, answer: false, fixedMonthlyUsd: 2.99 }])
+  })
+
   it('leaves out a provider rung that refuses the request, and says why (PA B4)', async () => {
     const url = 'https://example.com/p'
     const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'acme'), refusal: (_url: string, options: FetchOptions) => options.screenshot !== undefined ? 'provider takes no screenshot' : null }

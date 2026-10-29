@@ -121,7 +121,7 @@ import {
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessAttestationInput, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
 import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, withRegexLedger, type RegexStats, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
-import type { BrowserEngineName, BrowserIdentityChoice, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams } from '@w2l/bench'
+import type { BrowserEngineName, BrowserIdentityChoice, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
 import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
@@ -196,14 +196,16 @@ export interface HostedChromeOperator {
  * or SliceLimits.account; undefined for a call without one). A refusal leaves the rung out of the call, which keeps the
  * page the rungs before it read and says why: a `hosted_chrome_not_admitted` warning with the refusal's message, and a
  * `ladder_channel_skipped` event with its reason and detail. An admitted read is settled once with what it read (null
- * when it threw) and whether it went out.
+ * when it threw) and whether it went out. A read through a priced exit is admitted with it (`exit`) and settles to what
+ * it was charged: the read is on its record's paid calls with the exit's rent, and its cost is unknown (null), never 0
+ * (ADR 0005, revision of 2026-10-27, decision three). Cloud Run's own egress names no exit.
  */
 export interface HostedChromeMeter {
   admit(call: { account: string | undefined }): Promise<HostedChromeAdmission>
 }
 
 export type HostedChromeAdmission =
-  | { ok: true; settle(result: FetchResult | null, called: boolean): Promise<void> }
+  | { ok: true; exit?: PricedExit; settle(result: FetchResult | null, called: boolean): Promise<number | void> }
   | { ok: false; reason: string; message: string; detail?: Readonly<Record<string, unknown>> }
 
 /** How the engine reaches the octocrawl-chrome service. The service obeys robots.txt and its address guard itself. */

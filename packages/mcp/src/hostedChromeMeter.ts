@@ -23,11 +23,16 @@
  * budget's, not this cap's. The month's total counts settled reads only, so instances that reserve at once can pass the
  * cap by at most the ceilings of the reads the other instances have in flight.
  *
+ * Through a priced exit, each admission names it for the read's record (`exit`: the provider the config names, a read's
+ * ceiling and the month's rent, paidCallFixedCost), and its settlement answers what the read was charged: the record
+ * lists the read as a paid call that names the rent, and its cost is null (unknown), never 0 (ADR 0005, revision of
+ * 2026-10-27, decision three). Cloud Run's own egress names none: its reads stay at $0, with no paid call.
+ *
  * Log lines name the month, the day, the charge and the limits; never the page, the proxy or its login.
  */
 import {
-  normalizeVendorTariff, openMonthlySpendLedger, tariffCeilingUsd, tariffCostUsd, tariffMonthlyFixedUsd,
-  type HostedChromeAdmission, type HostedChromeMeter, type VendorTariff,
+  normalizeVendorTariff, openMonthlySpendLedger, paidCallFixedCost, tariffCeilingUsd, tariffCostUsd, tariffMonthlyFixedUsd,
+  type HostedChromeAdmission, type HostedChromeMeter, type PricedExit, type VendorTariff,
 } from '@w2l/api'
 import type { FetchResult } from '@w2l/contracts'
 import { HOSTED_CHROME_OFF, hostedChromeAdmits, type HostedAccessSource } from './hostedAccess.js'
@@ -85,6 +90,8 @@ export class HostedChromeCounter implements HostedChromeMeter {
   private readonly tariff: VendorTariff | null
   private readonly ceilingUsd: number
   private readonly fixedMonthlyUsd: number
+  /** The priced exit a read's record names; null for Cloud Run's own egress. */
+  private readonly exit: PricedExit | null
   /** What this instance's admitted reads reserved and have not settled, by month. */
   private readonly inFlight = new Map<string, number>()
   private readonly log: (line: string) => void
@@ -104,6 +111,8 @@ export class HostedChromeCounter implements HostedChromeMeter {
     this.ceilingUsd = this.tariff === null ? 0 : tariffCeilingUsd(this.tariff)
     this.fixedMonthlyUsd = this.tariff === null ? 0 : tariffMonthlyFixedUsd(this.tariff)
     if (!Number.isFinite(this.ceilingUsd) || this.ceilingUsd < 0) throw new Error('hosted_chrome\'s egress tariff has no finite ceiling a read')
+    this.exit = options.egress === null || this.tariff === null ? null
+      : { provider: options.egress.vendor, capabilities: ['hosted_chrome'], ceilingUsd: this.ceilingUsd, ...paidCallFixedCost(this.tariff) }
     this.log = options.log ?? ((line: string) => console.log(line))
     this.now = options.now ?? (() => new Date())
   }
@@ -145,20 +154,23 @@ export class HostedChromeCounter implements HostedChromeMeter {
     let open = true
     return {
       ok: true,
+      ...(this.exit === null ? {} : { exit: this.exit }),
       settle: async (result: FetchResult | null, called: boolean) => {
         if (!open) return
         open = false
         // A read that never went out costs nothing; its attempt stays taken.
         if (!called) { this.hold(month, -this.ceilingUsd); reservation.release(); return }
         const charged = reservation.settle(this.costUsd(result))
-        const micro = Math.ceil(charged * MICRO - 1e-6)
+        // At least 0: a read charged nothing would otherwise round to -0.
+        const micro = Math.max(0, Math.ceil(charged * MICRO - 1e-6))
         // The ceiling is held until the month's total has the read, so no read admitted meanwhile here misses it.
         try { await this.options.spend.settle(month, micro) } catch (error) {
-          // Not counted: the month's total is short by this read, which the line names.
+          // Not counted: the month's total is short by this read, which the line names. The read's record still says what it was charged.
           this.log(JSON.stringify({ severity: 'ERROR', event: 'hosted_chrome_settle_failed', month, chargedUsd: micro / MICRO, message: error instanceof Error ? error.message : String(error) }))
-          return
+          return micro / MICRO
         } finally { this.hold(month, -this.ceilingUsd) }
         this.log(JSON.stringify({ severity: 'INFO', event: 'hosted_chrome_read', month, day, chargedUsd: micro / MICRO, ceilingUsd: this.ceilingUsd, answered: result !== null }))
+        return micro / MICRO
       },
     }
   }
