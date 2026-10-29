@@ -272,6 +272,10 @@ function movedPagesOf(root: string): Promise<Map<string, string>> {
   return moved
 }
 
+/** Files the build writes for this server, not for visitors: the moved addresses above and the body of every 404.
+ * Asked for by name, they answer 404 like an address without a page. */
+const SERVER_FILES = new Set(['redirects.json', '404.html'])
+
 async function serveStatic(req: IncomingMessage, res: ServerResponse, directory: string, pathname: string, search: string, origin: string, onPage: () => void): Promise<void> {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return }
   const root = resolve(directory)
@@ -283,6 +287,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, directory:
   let info = await stat(file).catch(() => null)
   const isDirectory = info?.isDirectory() === true
   if (isDirectory) { file = resolve(file, 'index.html'); info = await stat(file).catch(() => null) }
+  if (info?.isFile() && SERVER_FILES.has(relative(root, file))) info = null
   const moved = info?.isFile() ? pageAddressRedirect(pathname, isDirectory, !isDirectory && basename(file) === 'index.html') : null
   if (moved !== null) { res.writeHead(301, { location: `${moved}${search}`, 'cache-control': 'public, max-age=3600', ...transportHeaders(origin) }).end(); return }
   // A page that moved answers with a 301 to where it is now, with or without its trailing slash.

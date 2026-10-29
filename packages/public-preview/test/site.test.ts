@@ -66,6 +66,18 @@ describe('public site routes', () => {
     expect((await fetch(url)).status).toBe(200)
   })
 
+  it('keeps the files the build writes for the server to itself: redirects.json and the 404 page answer 404', async () => {
+    const { url } = await site()
+    await writeFile(join(tempDirs.at(-1)!, 'redirects.json'), '{ "/old/": "/docs/limits/" }')
+    for (const path of ['/redirects.json', '/404.html', '/%34%30%34.html']) {
+      const response = await fetch(`${url}${path}`)
+      expect([path, response.status, response.headers.get('cache-control')]).toEqual([path, 404, 'no-store'])
+      expect(await response.text()).toContain('Page not found')
+    }
+    // The server still reads them: the moved address answers from redirects.json.
+    expect((await fetch(`${url}/old/`, { redirect: 'manual' })).headers.get('location')).toBe('/docs/limits/')
+  })
+
   it('writes the request origin, or the configured public origin, into pages and robots.txt', async () => {
     const local = await site()
     expect(await (await fetch(local.url)).text()).toContain(`<link rel="canonical" href="${local.url}/" />`)
@@ -152,7 +164,7 @@ describe('public site routes', () => {
   it('sets the visitor cookie on pages only, so robots.txt stays publicly cacheable', async () => {
     const { url } = await site({ visitorCookieSecret: 's'.repeat(32) })
     expect((await fetch(url)).headers.get('set-cookie')).toMatch(/^w2l_visitor=/)
-    for (const path of ['/robots.txt', '/docs/limits/index.md', '/docs/limits', '/missing']) {
+    for (const path of ['/robots.txt', '/docs/limits/index.md', '/docs/limits', '/missing', '/404.html']) {
       expect([path, (await fetch(`${url}${path}`, { redirect: 'manual' })).headers.get('set-cookie')]).toEqual([path, null])
     }
     expect((await fetch(`${url}/robots.txt`)).headers.get('cache-control')).toBe('public, max-age=3600')
