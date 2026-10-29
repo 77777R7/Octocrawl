@@ -948,6 +948,9 @@ function bodyReadFailure(error: unknown): 'timeout' | 'connection_error' | null 
   const code = (error as { code?: unknown }).code
   if (error.name === 'BodyTimeoutError' || code === 'UND_ERR_BODY_TIMEOUT') return 'timeout'
   if (error.name === 'SocketError' || code === 'UND_ERR_SOCKET' || code === 'ECONNRESET' || code === 'EPIPE' || code === 'UND_ERR_CLOSED') return 'connection_error'
+  // A connection the server closed before the length it declared, as it said it would ("Connection: close"): the body
+  // broke off all the same (a PDF on library.qiangtu.com answered HTTP 500 internal_error, 2026-10-30).
+  if (error.name === 'ResponseContentLengthMismatchError' || code === 'UND_ERR_RES_CONTENT_LENGTH_MISMATCH') return 'connection_error'
   return null
 }
 

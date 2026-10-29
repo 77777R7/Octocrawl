@@ -246,6 +246,31 @@ const PX_CAPTCHA_CONTAINER = /<[a-z][^>]*\sid\s*=\s*["']?px-captcha(?=["'\s>/])/
  */
 const DATADOME_CHALLENGE = /<iframe\b[^>]{0,2000}?\bsrc\s*=\s*["']?https?:\/\/(?:[a-z0-9-]+\.)*captcha-delivery\.com\/(interstitial|captcha)\//i
 
+/** The path of Imperva's challenge script, which its JS interstitial loads and its protected pages carry as well. */
+const INCAPSULA_RESOURCE = '/_incapsula_resource'
+/** How far before that path the script tag loading it may open: the tag's other attributes. */
+const SCRIPT_TAG_MAX_CHARS = 600
+/** The most text Imperva's interstitial shows beside its script: it shows none, and an article's first line is longer. */
+const INTERSTITIAL_MAX_TEXT = 20
+
+/**
+ * Whether a lowercased head loads Imperva's challenge script: the path sits inside a <script> tag, the nearest tag that
+ * opens before it and has not closed. Each occurrence is read in a bounded window, so a page of half-open tags stays linear.
+ */
+function loadsIncapsulaResource(lower: string): boolean {
+  for (let at = lower.indexOf(INCAPSULA_RESOURCE); at !== -1; at = lower.indexOf(INCAPSULA_RESOURCE, at + INCAPSULA_RESOURCE.length)) {
+    const before = lower.slice(Math.max(0, at - SCRIPT_TAG_MAX_CHARS), at)
+    const open = before.lastIndexOf('<')
+    if (open !== -1 && /^<script[\s/]/.test(before.slice(open, open + 8)) && !before.includes('>', open)) return true
+  }
+  return false
+}
+
+/** Whether a page is Imperva's JS interstitial: its challenge script and next to no visible text. */
+function impervaInterstitial(body: string): boolean {
+  return loadsIncapsulaResource(body.slice(0, HEAD_BYTES).toLowerCase()) && pageText(body, INTERSTITIAL_MAX_TEXT) !== null
+}
+
 /** The PerimeterX challenge's signals, or null when the page is not the challenge. */
 function perimeterXChallenge(head: string, lower: string): string[] | null {
   if (!lower.includes('_pxappid') || !PX_CAPTCHA_SCRIPT.test(lower)) return null
@@ -334,6 +359,14 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     // header alone names a block only on an answer that is not a success; a 2xx is judged by its body, which still names
     // DataDome's interstitial or captcha (DATADOME_CHALLENGE). A 202 meets its own rule below.
     if (name === 'x-datadome' && res.status >= 200 && res.status < 300) continue
+    // Imperva sends x-iinfo on every answer of a site it fronts, and injects its _Incapsula_Resource script into the
+    // pages it lets through (in-n-out.com, aaii.com and lizearle.com rendered in full with both, Firecrawl's scrape
+    // content set, 2026-10-30). On a 2xx the header names a block only on its JS interstitial: a page of that script
+    // and next to no text. Its refusal names itself in the body (text_incapsula_incident) or comes with a 403.
+    if (name === 'x-iinfo' && res.status >= 200 && res.status < 300) {
+      if (res.header(name) !== null && impervaInterstitial(res.body)) return { reason, signals: [signal, 'incapsula_resource_script', 'short_page'] }
+      continue
+    }
     if (res.header(name) !== null) {
       // These headers name DataDome, but its actual captcha iframe says what the person must do.
       // Keep the header as evidence without letting its generic verdict hide the specific gate.

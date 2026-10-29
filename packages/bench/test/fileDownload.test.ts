@@ -47,6 +47,8 @@ beforeAll(async () => {
     if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /private\n'); return }
     // The connection breaks off after the headers and part of the body.
     if (req.url === '/broken.pdf') { res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': String(REPORT.length) }); res.write(Buffer.from(REPORT).subarray(0, 100), () => res.socket?.destroy()); return }
+    // The server closes the connection, as it said it would, before the length it declared (library.qiangtu.com, 2026-10-30).
+    if (req.url === '/short.pdf') { res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': String(REPORT.length), connection: 'close' }); res.write(Buffer.from(REPORT).subarray(0, 100), () => res.socket?.end()); return }
     const file = FILES[req.url ?? '']
     if (file === undefined) { res.writeHead(404).end(); return }
     const body = typeof file.body === 'string' ? Buffer.from(file.body) : Buffer.from(file.body)
@@ -151,6 +153,14 @@ describe('files on the HTTP lane', () => {
     expect(out).toMatchObject({ status: 'failed', failureReason: 'connection_error', markdown: null })
     expect(out.evidence).toMatchObject({ httpStatus: 200, contentType: 'application/pdf', rawBodySha256: null, artifacts: [] })
     expect(out.trace.some(event => event.event === 'body_read_failed')).toBe(true)
+    expect(await saved(dir())).toEqual(before)
+  })
+
+  it('fails a body shorter than its declared length as a connection error, not an internal error', async () => {
+    const before = await saved(dir())
+    const out = await http.fetch(`${origin}/short.pdf`)
+    expect(out).toMatchObject({ status: 'failed', failureReason: 'connection_error', markdown: null })
+    expect(out.trace.find(event => event.event === 'body_read_failed')?.detail).toMatchObject({ reason: 'connection_error' })
     expect(await saved(dir())).toEqual(before)
   })
 
