@@ -136,6 +136,14 @@ export class RegexLedger {
     this.stats.maxCallMs = Math.max(this.stats.maxCallMs, ms)
     this.stats.limited += limited
   }
+
+  /**
+   * The request is over: what its scans found goes, texts of megabytes among it. A socket or timer the request made can
+   * keep its store, and so this ledger, reachable long after.
+   */
+  close(): void {
+    this.memo.clear()
+  }
 }
 
 /** A remembered scan as a fresh run on `pool` would end: finished within what the pool allows, else stopped there. */
@@ -163,6 +171,7 @@ export async function withRegexLedger<T>(fn: () => Promise<T>, onClose?: (stats:
     try {
       return await fn()
     } finally {
+      ledger.close()
       if (onClose !== undefined && (ledger.stats.scans > 0 || ledger.stats.memoHits > 0)) {
         try { onClose(ledger.stats) } catch { /* the observer's own fault */ }
       }

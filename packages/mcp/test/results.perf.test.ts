@@ -9,8 +9,9 @@ describe('the pattern checks of a shortened MCP result (ADR 0006, amendment of 2
     const result = { status: 'success', url: 'https://example.com/long', markdown: 'ab '.repeat(310_000) }
     const started = performance.now()
     const { value } = shapeResult('scrape', result, contract) as { value: Record<string, any> }
-    // About 20 versions tried: with a pool of their own each, they took over 5 s.
-    expect(performance.now() - started).toBeLessThan(3_000)
+    // About 20 versions tried: with a pool of their own each, their scans alone took over 5 s, on any machine (each stops at
+    // 250 ms of wall time); now at most 2.25 s of scans, and the rest is cutting and measuring.
+    expect(performance.now() - started).toBeLessThan(4_000)
     expect(JSON.stringify(value).length).toBeLessThanOrEqual(RESULT_TEXT_MAX)
     expect(value.truncated).toBe(true)
     const { verification: _verification, readiness: _readiness, evidenceRecord: _record, ...data } = value

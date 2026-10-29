@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 import { describe, expect, it } from 'vitest'
 import type { VerifyCheck } from '@w2l/contracts'
-import { currentRegexLedger, withRegexLedger, type RegexStats } from '../src/regexCheck.js'
+import { currentRegexLedger, RegexPool, withRegexLedger, type RegexLedger, type RegexStats } from '../src/regexCheck.js'
 import { verify } from '../src/verify.js'
 
 // Quadratic on text without the letter they end with, so every scan stops at its 250 ms limit; distinct, so none is reused.
@@ -69,5 +69,20 @@ describe("a request's regular-expression ledger (ADR 0006, amendment of 2026-10-
     let closed = 0
     await withRegexLedger(async () => { verify({ checks: [{ type: 'markdownIncludes', text: 'a' }] }, { status: 'success', markdown: 'a' }) }, () => { closed++ })
     expect(closed).toBe(0)
+  })
+})
+
+describe('a closed ledger', () => {
+  it('lets go of the texts its scans remembered once the request ends', async () => {
+    let ledger: RegexLedger | undefined
+    const text = 'ab'.repeat(1_000)
+    await withRegexLedger(async () => {
+      ledger = currentRegexLedger()
+      verify({ checks: [{ type: 'markdownMatches', pattern: 'b' }] }, { status: 'success', markdown: text }, { partial: true })
+    })
+    // Something the request made (a pooled socket, a timer) can keep its store, and so its ledger, reachable: the texts
+    // its scans remembered are gone, so the same scan runs again rather than being reused.
+    ledger!.scan('test', 'b', 'm', text, new RegexPool(1_000), false)
+    expect(ledger!.stats).toMatchObject({ scans: 2, memoHits: 0 })
   })
 })
