@@ -58,12 +58,12 @@ function answered(result: FetchResult): boolean {
   return typeof status === 'number' && status >= 200 && status < 300
 }
 
-/** How long the lane waited for the page: its last settle wait (loading_wait, steady_wait) and its last region wait, together. A region wait that could judge none of the checks read the page once and waited for nothing. */
+/** How long the lane waited for the page: its last settle wait (loading_wait, steady_wait) and its last region wait, together. A region wait that could judge none of the checks read the page once and waited for nothing; one that a check stopped at its limit ended (`check_limit`) waited until then. */
 function waitedOf(result: FetchResult): number | undefined {
   const last = (names: readonly string[]): number | undefined => {
     for (let i = result.trace.length - 1; i >= 0; i--) {
       const event = result.trace[i]!
-      if (!names.includes(event.event) || event.detail?.unjudged !== undefined) continue
+      if (!names.includes(event.event) || (event.detail?.unjudged !== undefined && event.detail.unjudged !== 'check_limit')) continue
       const waited = Number(event.detail?.waitedMs)
       if (Number.isFinite(waited) && waited >= 0) return Math.round(waited)
     }

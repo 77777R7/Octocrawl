@@ -311,6 +311,8 @@ describe('task verification on a request (ADR 0006)', () => {
     const refused = await call(hosted, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })
     expect(refused.status).toBe(400)
     expect(JSON.stringify(refused.json)).toContain('markdownCountMin checks are not available in hosted mode')
+    // Since the amendment of 2026-10-29 the checks do run with a time limit: the refusal no longer says they cannot.
+    expect(JSON.stringify(refused.json)).not.toContain('cannot be bounded in time')
     const batch = await call(hosted, 'POST', '/v1/batches', { urls: [`${origin}/article`], verify: { checks: [{ type: 'markdownMatches', pattern: 'High' }] } })
     expect(batch.status).toBe(400)
   })

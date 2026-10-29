@@ -195,4 +195,7 @@ it('never reads a page ready, or its region absent, when a check stopped at its 
   expect(readinessOf(result({ verification: verification([undecided]), warnings: warned('page_still_loading') }))).toMatchObject({ state: 'not_loaded', basis: ['page_still_loading', 'checks_undecided'] })
   // A definite failure beside it is read as any failed contract.
   expect(readinessOf(result({ lane: 'http', verification: verification([undecided, failedCheck]) })).basis).toEqual(['checks_failed', 'not_rendered'])
+  // A region wait that a check stopped at its limit ended did wait, and that time counts.
+  const ended: TraceEvent = { at: 1, lane: 'browser_local', event: 'region_wait', detail: { ready: false, empty: false, waitedMs: 1_500, reads: 3, judged: 3, loading: false, steady: true, contractSha256: 'f'.repeat(64), unjudged: 'check_limit', checks: [] } }
+  expect(readinessOf(result({ verification: verification([undecided]) }, [ended]))).toEqual({ state: 'not_extracted', basis: ['checks_undecided'], waitedMs: 1_500 })
 })

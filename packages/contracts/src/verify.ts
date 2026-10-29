@@ -24,7 +24,7 @@ export interface VerifyContract {
 
 export type VerifyCheckType = VerifyCheck['type']
 export const VERIFY_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownIncludes', 'markdownMatches', 'markdownCountMin', 'minTables', 'tableRowsMin', 'listRecordsMin', 'recordFields', 'field']
-/** Checks whose patterns are JavaScript regular expressions, which cannot be bounded in time: a hosted server refuses them. */
+/** Checks whose patterns are JavaScript regular expressions: they run with a time limit (regexCheck.ts in @w2l/runtime), and a hosted server refuses them until a later change opens them there (ADR 0006, amendment of 2026-10-29). */
 export const VERIFY_REGEX_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownMatches', 'markdownCountMin']
 export const MAX_VERIFY_CHECKS = 32
 export const MAX_VERIFY_TEXT = 1_000
@@ -38,7 +38,7 @@ const MAX_RECORD_FIELDS = 50
 export function hostedVerifyRefusal(contract: VerifyContract | undefined): string | null {
   const types = [...new Set(contract?.checks.filter((check) => VERIFY_REGEX_CHECK_TYPES.includes(check.type)).map((check) => check.type) ?? [])]
   if (types.length === 0) return null
-  return `verify: ${types.join(' and ')} checks are not available in hosted mode (a regular expression cannot be bounded in time); use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally`
+  return `verify: ${types.join(' and ')} checks are not available in hosted mode yet; use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally`
 }
 
 /**
