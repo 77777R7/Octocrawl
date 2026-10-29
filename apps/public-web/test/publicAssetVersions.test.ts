@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { VERSIONED_PUBLIC_FILES, versionAssetReferences, versionPublicAssets } from '../scripts/publicAssetVersions.mjs'
+import { ROOT_ICONS, VERSIONED_PUBLIC_FILES, copyRootIcons, versionAssetReferences, versionPublicAssets } from '../scripts/publicAssetVersions.mjs'
 
 const publicDir = fileURLToPath(new URL('../public', import.meta.url))
 const hashOf = (path: string) => createHash('sha256').update(readFileSync(`${publicDir}${path}`)).digest('hex').slice(0, 12)
@@ -22,6 +25,24 @@ describe('versionPublicAssets', () => {
 
   it('lists only files that exist, so a renamed icon fails the build instead of shipping a dead link', () => {
     for (const path of VERSIONED_PUBLIC_FILES) expect(() => readFileSync(`${publicDir}${path}`)).not.toThrow()
+  })
+})
+
+describe('copyRootIcons', () => {
+  it('puts the icons browsers and crawlers ask for at the root, each the same bytes as the icon the pages link', async () => {
+    const dist = await mkdtemp(join(tmpdir(), 'w2l-root-icons-'))
+    try {
+      await copyRootIcons(publicDir, dist)
+      const size = (png: Buffer) => [png.readUInt32BE(16), png.readUInt32BE(20)]
+      for (const [address, file] of Object.entries(ROOT_ICONS)) {
+        expect([address, VERSIONED_PUBLIC_FILES.includes(file)]).toEqual([address, true])
+        expect([address, readFileSync(join(dist, address)).equals(readFileSync(`${publicDir}${file}`))]).toEqual([address, true])
+      }
+      expect(size(readFileSync(join(dist, 'apple-touch-icon.png')))).toEqual([180, 180])
+      expect(size(readFileSync(join(dist, 'favicon.png')))).toEqual([192, 192])
+    } finally {
+      await rm(dist, { recursive: true, force: true })
+    }
   })
 })
 

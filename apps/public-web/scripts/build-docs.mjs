@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import MarkdownIt from 'markdown-it'
-import { versionAssetReferences, versionPublicAssets } from './publicAssetVersions.mjs'
+import { copyRootIcons, versionAssetReferences, versionPublicAssets } from './publicAssetVersions.mjs'
 import { HOME_UPDATED, pages } from './docsPages.mjs'
 import { BLOG_AUTHOR, BLOG_CATEGORIES, BLOG_UPDATED, blogPath, categoryPath, guideRedirects, posts } from './blogPosts.mjs'
 import { docFooterMarkup, siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
@@ -451,7 +451,9 @@ for (const [path, title, lead, body] of DASHBOARD_BODIES) {
 // Crawlers may read every page; the API is not for them. The sitemap lists the home page, the free tool pages, the product pages, each docs page, the blog and
 // its articles, and the changelog.
 await writeFile(join(root, 'dist', 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${ORIGIN}/sitemap.xml\n`)
+// The icons browsers and crawlers ask for at the root by convention, copied from the ones the pages link.
+await copyRootIcons(join(root, 'public'), join(root, 'dist'))
 // The changelog changes with almost every merge, so it carries no lastmod rather than a day that is soon wrong.
 const locations = [['/', HOME_UPDATED], [TOOLS_HUB_PATH, TOOLS_HUB_UPDATED], ...TOOL_LOCATIONS, [SCRAPE_PATH, SCRAPE_UPDATED], ...pages.map(page => [pathFor(page), page.updated]), [BLOG_PATH, BLOG_UPDATED], ...posts.map(post => [blogPath(post), post.updatedDate ?? post.pubDate]), [CHANGELOG_PATH, null]]
 await writeFile(join(root, 'dist', 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locations.map(([path, updated]) => `  <url><loc>${ORIGIN}${path}</loc>${updated ? `<lastmod>${updated}</lastmod>` : ''}</url>`).join('\n')}\n</urlset>\n`)
-console.log(`Built ${pages.length} Octocrawl documentation pages in ${output} and ${posts.length} blog articles, with Markdown copies, the changelog, llms.txt, 404.html, robots.txt, sitemap.xml and redirects.json`)
+console.log(`Built ${pages.length} Octocrawl documentation pages in ${output} and ${posts.length} blog articles, with Markdown copies, the changelog, llms.txt, 404.html, robots.txt, sitemap.xml, redirects.json and the root icons`)
