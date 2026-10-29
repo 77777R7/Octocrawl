@@ -6,6 +6,7 @@
 // docs' stylesheets).
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export const VERSIONED_PUBLIC_FILES = [
@@ -70,4 +71,18 @@ export function versionAssetReferences(text, publicDir) {
   const versions = publicAssetVersions(publicDir)
   return text.replace(/(['"`(])((?:__W2L_ORIGIN__)?)(\/[^'"`()?\s]+)(?=['"`)])/g, (match, open, origin, path) =>
     path in versions ? `${open}${origin}${path}?v=${versions[path]}` : match)
+}
+
+/** Icons that browsers and crawlers ask for at the site root by convention (Safari's touch icon, favicon fetchers), each
+ * one the pages link under /assets/. There is no SVG icon yet, so /favicon.svg stays a 404. */
+export const ROOT_ICONS = {
+  '/apple-touch-icon.png': '/assets/apple-touch-icon.png',
+  '/apple-touch-icon-precomposed.png': '/assets/apple-touch-icon.png',
+  '/favicon.png': '/assets/favicon-192.png',
+}
+
+/** Copies each root icon from public/ into the built site (scripts/build-docs.mjs), so both addresses answer with the
+ * same bytes and a new icon reaches both. */
+export async function copyRootIcons(publicDir, distDir) {
+  for (const [address, file] of Object.entries(ROOT_ICONS)) await copyFile(join(publicDir, file), join(distDir, address))
 }
