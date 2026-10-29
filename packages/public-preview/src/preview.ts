@@ -137,7 +137,7 @@ const LINKS_TOTAL_CHARS = 256 * 1024
 const METADATA_CHARS = 2048
 /** The largest fields result a preview returns (characters of JSON). */
 const FIELDS_CHARS = 64 * 1024
-/** The largest file a preview reads: a public page may be a PDF, and the service has 2 GiB for one request. */
+/** The largest file a preview reads: a public page may be a PDF, and the service has 2 GiB for up to four requests. */
 export const PREVIEW_FILE_BYTES = 5 * 1024 * 1024
 
 /** The network policy of every preview capture: hosted SSRF rules, few redirects, small pages and files. */

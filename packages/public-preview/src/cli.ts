@@ -10,7 +10,10 @@ import { validateAmazonPublicState } from './preview.js'
 import { createAuthRoutes, FirestoreAccountStore, IdentityToolkit } from './auth.js'
 import { createAccountRoutes, FirestoreAccountData } from './account.js'
 import { accountConnections, createOAuthRoutes, FirestoreOAuthStore } from './oauth.js'
+import { startupTimings } from './startup.js'
 
+// Every module above has loaded by now; the start-up line below splits the start with it.
+const importsDoneMs = performance.now()
 if (process.env.W2L_CAPTURE_RAW_DIR) throw new Error('Anonymous preview cannot persist raw capture artifacts')
 const stateFile = process.env.W2L_AMAZON_PUBLIC_STATE_FILE
 const amazonState = stateFile ? readFileSync(stateFile, 'utf8') : null
@@ -82,6 +85,6 @@ const server = createPreviewServer({
   ...(oauth === undefined ? {} : { oauth }),
 })
 server.listen(port, '0.0.0.0', () => {
-  console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false' }))
+  console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false', startup: startupTimings(importsDoneMs) }))
 })
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => server.close(() => process.exit(0)))
