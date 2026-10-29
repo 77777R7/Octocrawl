@@ -59,6 +59,7 @@ import { paidCallExposureUsd, paidCallTotals, reportFromTaskAttempt } from './cr
 import { Frontier, type FrontierEnqueueResult, type FrontierItem } from './frontier.js'
 import { canonicalizeUrl, hostOf } from './canonicalize.js'
 import type { TaskStore } from './taskStore.js'
+import { withRegexLedger, type RegexStats } from './regexCheck.js'
 
 /** The URL-scope options a run gives its frontier (CrawlStartRequest names them). */
 type CrawlScopeOptions = Required<Pick<CrawlSpec, 'regexOnFullURL' | 'ignoreQueryParameters' | 'deduplicateSimilarURLs' | 'crawlEntireDomain' | 'allowSubdomains' | 'allowExternalLinks'>>
@@ -122,6 +123,11 @@ export interface OrchestratorOptions {
    * `usage_pending` one stays as it is): it counts at its ceiling, and nothing releases it on its own.
    */
   reconcilePaidCall?: (call: PaidCallRecord) => Promise<PaidCallRecord>
+  /**
+   * What each page's regular-expression checks cost (regexCheck.ts): every page is read under a ledger of its own, and
+   * this is called when its read ends, for a page that ran one.
+   */
+  onRegexChecks?: (stats: RegexStats) => void
 }
 
 const EMPTY_USAGE = {
@@ -149,6 +155,7 @@ export class CrawlOrchestrator {
   private readonly sitemapSource?: SitemapSource
   private readonly onStep?: (step: StepRecord) => void | Promise<void>
   private readonly reconcilePaidCall?: (call: PaidCallRecord) => Promise<PaidCallRecord>
+  private readonly onRegexChecks?: (stats: RegexStats) => void
   private ahead: (() => number) | null = null
 
   constructor(options: OrchestratorOptions) {
@@ -165,6 +172,7 @@ export class CrawlOrchestrator {
     this.sitemapSource = options.sitemapSource
     this.onStep = options.onStep
     this.reconcilePaidCall = options.reconcilePaidCall
+    this.onRegexChecks = options.onRegexChecks
   }
 
   /**
@@ -401,7 +409,8 @@ export class CrawlOrchestrator {
                 onListPage: (page: ListPageRead) => { void this.store.putPageRead(runningTask.id, item.canonicalUrl, page).catch(() => {}) },
                 ...(pagesRead.length === 0 ? {} : { listResume: { pages: pagesRead } }),
               }
-              try { outcome = await raceWithSignal(this.atom.scrape(item.url, pageScope), scope.signal) }
+              // Each page is one request for its regular-expression checks: its own steering pool and ledger (regexCheck.ts).
+              try { outcome = await raceWithSignal(withRegexLedger(() => this.atom.scrape(item.url, pageScope), this.onRegexChecks), scope.signal) }
               catch (error) {
                 // Cancellation, shutdown and the crawl's own budget stop the run.
                 // Any other exception belongs to this URL: it becomes the URL's

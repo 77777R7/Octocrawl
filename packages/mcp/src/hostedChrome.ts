@@ -29,6 +29,7 @@ import type { AddressInfo } from 'node:net'
 import { hostedNetworkPolicy, hostedVerifyRefusal, withOperatorContact, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
 import { BrowserLocalSubject, CompatAddressGuard, hostedChromeRefusal, type GuardResolver, type HostedChromeClient, type InstalledChromeTestSeams } from '@w2l/api'
 import type { HostedChromeExit } from './hostedChromeEgress.js'
+import { withRegexLedger } from '@w2l/runtime'
 
 /**
  * What each page option is to the service, for every key of FetchOptions (a key added there fails to compile until it is
@@ -129,7 +130,8 @@ export function hostedChromeReader(networkPolicy: NetworkPolicy, exit: HostedChr
   const subject = new BrowserLocalSubject('standard', null, true, networkPolicy, null, undefined, null, undefined, undefined, null, false, undefined, 'hosted_chrome', 'actual', seams, null, undefined, { guard, egressKind: exit.kind, proxy: () => exit.proxy() })
   return {
     // The service reads one page at a time (createHostedChromeService), so the read's exit is chosen here and held by all its connections.
-    read: (request, signal) => { exit.choose(); return subject.fetch(request.url, request.deadlineAt, signal, undefined, request.options) },
+    // One read is one request for its regular-expression checks: the region wait and the extraction candidates share its steering pool.
+    read: (request, signal) => { exit.choose(); return withRegexLedger(() => subject.fetch(request.url, request.deadlineAt, signal, undefined, request.options)) },
     close: async () => { await subject.teardown(); await guard.close() },
   }
 }
