@@ -177,7 +177,9 @@ const solverProviders = flag('--solver-providers')?.split(',').map((s) => s.trim
 const api = process.env.W2L_API_URL ?? 'http://127.0.0.1:8787'
 const apiKey = process.env.W2L_API_KEY_FILE ? (await readFile(process.env.W2L_API_KEY_FILE, 'utf8')).trim() : null
 const target = flag('--target') ?? 'octocrawl'
-const TARGETS = { octocrawl: /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/.test(api) ? 'the local Octocrawl API' : 'the Octocrawl API at W2L_API_URL (the pages are read from its servers; the network and exit lines are the runner\'s way to it)', firecrawl: 'Firecrawl Cloud, POST /v2/scrape (proxy auto, maxAge 0, storeInCache false)', zenrows: 'ZenRows Fetch API, GET /v1/ (mode=auto, response_type=markdown)' }
+// A hosted API (W2L_API_URL not a loopback address) reads the pages from its own servers.
+const octocrawlTarget = (url) => /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(url) ? TARGETS.octocrawl : 'the Octocrawl API at W2L_API_URL (the pages are read from its servers; the network and exit lines are the runner\'s way to it)'
+const TARGETS = { octocrawl: 'the local Octocrawl API', firecrawl: 'Firecrawl Cloud, POST /v2/scrape (proxy auto, maxAge 0, storeInCache false)', zenrows: 'ZenRows Fetch API, GET /v1/ (mode=auto, response_type=markdown)' }
 if (!(target in TARGETS)) throw new Error(`--target must be one of ${Object.keys(TARGETS).join(', ')}`)
 if (target !== 'octocrawl' && flag('--access') !== undefined) throw new Error('--access is an Octocrawl option; a competitor runs with its own strongest route')
 if (target !== 'octocrawl' && extraRequest !== null) throw new Error('--request is an Octocrawl option')
@@ -552,7 +554,7 @@ if (rejudgeDir !== undefined) {
   }
   await writeFile(join(runDir, `attempts.rejudged-${rejudgeStamp}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n')
   rejudged = { at: environment.startedAt, command: `node research/access/run-set.mjs ${args.join(' ')}`, commit: environment.commit, tasksSha256 }
-  Object.assign(environment, prior.environment)
+  Object.assign(environment, { apiKeySent: false }, prior.environment)
   // A run recorded before proxy settings were shown this way keeps no more of them than a new one.
   const shown = shownEnv(prior.environment.proxyEnv ?? {})
   Object.assign(environment, shown, { proxyCredentialsRemoved: [...new Set([...(prior.environment.proxyCredentialsRemoved ?? []), ...shown.proxyCredentialsRemoved])] })
@@ -698,7 +700,7 @@ if (recordFile !== undefined) {
     ...(rejudged === null ? [] : [`- Rejudged: ${rejudged.at} against ${basename(tasksFile)} with SHA-256 \`${rejudged.tasksSha256}\` (\`${rejudged.command}\`); statuses and timings are the run's own`]),
     `- Source commit: \`${environment.commit}\`${environment.dirty ? ' (working tree had uncommitted changes)' : ''}`,
     `- Network: ${environment.proxied ? `proxied (HTTPS_PROXY=${environment.proxyEnv.HTTPS_PROXY ?? ''}, HTTP_PROXY=${environment.proxyEnv.HTTP_PROXY ?? ''}, NO_PROXY=${environment.proxyEnv.NO_PROXY ?? ''}${environment.proxyCredentialsRemoved.length === 0 ? '' : `; credentials and query of ${environment.proxyCredentialsRemoved.join(', ')} not recorded`})` : 'direct'}`,
-    `- Target: ${TARGETS[environment.target ?? 'octocrawl']}${(environment.target ?? 'octocrawl') === 'octocrawl' ? '' : ' (the network line is the driver\'s way to its API; the provider fetches from its own cloud)'}`,
+    `- Target: ${(environment.target ?? 'octocrawl') === 'octocrawl' ? octocrawlTarget(environment.api) : TARGETS[environment.target]}${(environment.target ?? 'octocrawl') === 'octocrawl' ? '' : ' (the network line is the driver\'s way to its API; the provider fetches from its own cloud)'}`,
     `- API: ${(environment.target ?? 'octocrawl') === 'octocrawl' ? `${environment.api}${environment.apiKeySent ? ' (an account key was sent, not recorded)' : ''}` : 'the provider\'s'}; access option: ${(priorRun === null ? access ?? null : priorRun.access) === null ? 'none' : `\`${JSON.stringify(priorRun === null ? access : priorRun.access)}\``}${(priorRun === null ? extraRequest : priorRun.request ?? null) === null ? '' : `; request options added to every task: \`${JSON.stringify(priorRun === null ? extraRequest : priorRun.request)}\``}`,
     `- Exit address: ${environment.exitIp ?? 'not recorded'}`,
     grantLine(environment.grant),
