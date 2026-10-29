@@ -306,6 +306,24 @@ describe('task verification on a request (ADR 0006)', () => {
     expect((await call(engine, 'GET', `/v1/batches/${id}`)).json).toMatchObject({ succeeded: 1, verified: 0, verificationFailed: 1 })
   }, 60_000)
 
+  it("tells the engine's observer what the pattern checks of each scrape and each job page cost (ADR 0006, amendment of 2026-10-29)", async () => {
+    const seen: { kind: string; scans: number; limited: number }[] = []
+    const engine = engineWith({ onRegexChecks: (stats, about) => { seen.push({ kind: about.kind, scans: stats.scans, limited: stats.limited }) } })
+    await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })
+    expect(seen).toEqual([{ kind: 'scrape', scans: expect.any(Number), limited: 0 }])
+    expect(seen[0]!.scans).toBeGreaterThan(0)
+    // A contract without a pattern check tells nothing.
+    await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: failing })
+    expect(seen).toHaveLength(1)
+    const started = await call(engine, 'POST', '/v1/batches', { urls: [`${origin}/article`], verify: passing })
+    const id = started.json.taskId ?? started.json.id
+    for (let i = 0; i < 200; i++) {
+      if (!['pending', 'running'].includes((await call(engine, 'GET', `/v1/batches/${id}`)).json.status)) break
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    expect(seen.slice(1)).toEqual([{ kind: 'page', scans: expect.any(Number), limited: 0 }])
+  })
+
   it('is refused with its regex checks by a hosted server, which takes the others', async () => {
     const hosted = engineWith({ hosted: true })
     const refused = await call(hosted, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })

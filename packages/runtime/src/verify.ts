@@ -9,7 +9,7 @@
 import { isDataCheck, undecidedCheck, type JsonValue, type Verification, type VerificationCheck, type VerifyCheck, type VerifyContract } from '@w2l/contracts'
 import { sha256Utf8 } from '@w2l/http-core'
 import { canonicalJson } from './evidenceRecord.js'
-import { REGEX_VERIFY_POOL_MS, RegexPool, scanRegex, type RegexScan } from './regexCheck.js'
+import { currentRegexLedger, REGEX_VERIFY_POOL_MS, RegexPool, scanRegex, type RegexLedger, type RegexScan } from './regexCheck.js'
 
 /** Changes when checks are added or judged differently, as EXTRACTOR_VERSION does for the Markdown. */
 export const VERIFIER_VERSION = 'verify/10'
@@ -31,6 +31,10 @@ export type VerifyView = { status?: unknown; markdown?: unknown; tableCount?: nu
 export interface VerifyOptions {
   /** A view that holds only some of the page's readings: a check that reads what it lacks is `passed: null`. */
   partial?: boolean
+  /** The request's regular-expression ledger, when it is not the one the call runs in (withRegexLedger). */
+  regex?: RegexLedger
+  /** The pool this call's regular-expression checks draw from, in place of the one its kind of judgement gets. */
+  regexPool?: RegexPool
 }
 
 const READ = new Set(['success', 'partial'])
@@ -58,13 +62,19 @@ export function contractSha256(contract: VerifyContract): string {
 type Judged = Pick<VerificationCheck, 'passed' | 'observed' | 'observedCount' | 'asked' | 'limit' | 'limitMs'>
 
 /** Why a stopped scan decided nothing, in a sentence without the page's text. */
-function notJudged(scan: Extract<RegexScan, { done: false }>, md: string): string {
+function notJudged(scan: Extract<RegexScan, { done: false }>, md: string, pool: RegexPool): string {
   if (scan.limit === 'time') return `not judged: the pattern did not finish within ${scan.limitMs} ms on ${plural(md.length, 'character')} of Markdown`
-  if (scan.limit === 'budget') return `not judged: this verification's ${REGEX_VERIFY_POOL_MS} ms for regular expressions was spent by the checks before it`
+  if (scan.limit === 'budget') return `not judged: ${pool.spent}`
   return `not judged: the regular-expression engine could not run the pattern here (${scan.error ?? 'error'})`
 }
 
-function judge(check: VerifyCheck, view: VerifyView, partial: boolean, pool: RegexPool): Judged {
+/** How one verify() call runs its regular-expression checks: on its pool, through the request's ledger when there is one. */
+interface Scanner {
+  pool: RegexPool
+  scan(kind: 'test' | 'count', pattern: string, flags: string, subject: string): RegexScan
+}
+
+function judge(check: VerifyCheck, view: VerifyView, partial: boolean, scanner: Scanner): Judged {
   const unavailable: Judged = { passed: null, observed: 'not available in this view' }
   const hasMarkdown = typeof view.markdown === 'string'
   const md = hasMarkdown ? view.markdown as string : ''
@@ -75,17 +85,17 @@ function judge(check: VerifyCheck, view: VerifyView, partial: boolean, pool: Reg
       return md.includes(check.text) ? { passed: true, observed: 'the text is in the Markdown' } : { passed: false, observed: 'the text is not in the Markdown' }
     case 'markdownMatches': {
       if (partial && !hasMarkdown) return unavailable
-      const scan = scanRegex('test', check.pattern, check.flags ?? 'm', md, pool)
-      if (!scan.done) return { passed: null, limit: scan.limit, limitMs: scan.limitMs, observed: notJudged(scan, md) }
+      const scan = scanner.scan('test', check.pattern, check.flags ?? 'm', md)
+      if (!scan.done) return { passed: null, limit: scan.limit, limitMs: scan.limitMs, observed: notJudged(scan, md, scanner.pool) }
       return scan.value === true ? { passed: true, observed: 'the pattern matches the Markdown' } : { passed: false, observed: 'the pattern does not match the Markdown' }
     }
     case 'markdownCountMin': {
       if (partial && !hasMarkdown) return unavailable
-      const scan = scanRegex('count', check.pattern, (check.flags ?? '').replace('g', '') + 'g', md, pool)
+      const scan = scanner.scan('count', check.pattern, (check.flags ?? '').replace('g', '') + 'g', md)
       if (scan.done) return counted(scan.value as number, check.min, 'match')
       // At a minimum of 0 any count holds: the check is decided without one.
-      if (check.min === 0) return { passed: true, limit: scan.limit, limitMs: scan.limitMs, asked: 0, observed: `${notJudged(scan, md)}; at least 0 asked, which any count holds` }
-      return { passed: null, limit: scan.limit, limitMs: scan.limitMs, asked: check.min, observed: notJudged(scan, md) }
+      if (check.min === 0) return { passed: true, limit: scan.limit, limitMs: scan.limitMs, asked: 0, observed: `${notJudged(scan, md, scanner.pool)}; at least 0 asked, which any count holds` }
+      return { passed: null, limit: scan.limit, limitMs: scan.limitMs, asked: check.min, observed: notJudged(scan, md, scanner.pool) }
     }
     case 'minTables':
       if (partial && !hasMarkdown && view.tableCount === undefined) return unavailable
@@ -155,8 +165,9 @@ function judge(check: VerifyCheck, view: VerifyView, partial: boolean, pool: Reg
  * The verification of one view against a contract: `not_requested` without one; for a page not read as content (a
  * status other than success, partial or empty_verified) `failed`/`page_not_read` with no check run; for
  * `empty_verified`, `passed` when the contract allows an empty result, else `failed`/`empty_not_allowed`; otherwise
- * each check judged, `passed` when every one that could be judged passed and none was left undecided. The
- * regular-expression checks of one call share REGEX_VERIFY_POOL_MS.
+ * each check judged, `passed` when every one that could be judged passed and none was left undecided. A final
+ * judgement's regular-expression checks share REGEX_VERIFY_POOL_MS of their own; a partial one's draw from the request's
+ * steering pool (regexCheck.ts).
  */
 export function verify(contract: VerifyContract | undefined, view: VerifyView, options: VerifyOptions = {}): Verification {
   if (contract === undefined) return { status: 'not_requested' }
@@ -166,8 +177,20 @@ export function verify(contract: VerifyContract | undefined, view: VerifyView, o
   }
   if (!READ.has(view.status as string)) return { status: 'failed', ...base, reason: 'page_not_read', checks: [] }
   const partial = options.partial === true
-  const pool = new RegexPool(REGEX_VERIFY_POOL_MS)
-  const checks: VerificationCheck[] = contract.checks.map((check, index) => ({ index, type: check.type, data: isDataCheck(check), ...judge(check, view, partial, pool) }))
+  const ledger = options.regex ?? currentRegexLedger()
+  const pool = options.regexPool ?? (partial && ledger !== undefined ? ledger.steering : new RegexPool(REGEX_VERIFY_POOL_MS))
+  let heldMs = 0
+  const scanner: Scanner = {
+    pool,
+    scan: (kind, pattern, flags, subject) => {
+      if (ledger === undefined) return scanRegex(kind, pattern, flags, subject, pool)
+      const { scan, ms } = ledger.scan(kind, pattern, flags, subject, pool, !partial)
+      heldMs += ms
+      return scan
+    },
+  }
+  const checks: VerificationCheck[] = contract.checks.map((check, index) => ({ index, type: check.type, data: isDataCheck(check), ...judge(check, view, partial, scanner) }))
+  ledger?.noteCall(heldMs, checks.filter(undecidedCheck).length)
   const judged = checks.filter((check) => check.passed !== null)
   // An undecided check is never a pass: dropping it as a view's unavailable check is dropped would pass on the rest.
   const passed = judged.length > 0 && judged.every((check) => check.passed === true) && !checks.some(undecidedCheck)

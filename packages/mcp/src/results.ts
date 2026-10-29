@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto'
 import type { VerifyContract } from '@w2l/contracts'
-import { resultProjection } from './resultVerification.js'
+import { resultProjection, type ResultProjection } from './resultVerification.js'
 
 export const RESULT_TEXT_MAX = 50_000
 
@@ -49,7 +49,7 @@ export function withoutTelemetry(tool: string, result: unknown, args: unknown, c
     const { scrapeId, concurrencyLimited: _limited, concurrencyQueueDurationMs: _queued, ...metadata } = untagged.metadata
     minimized = { ...untagged, metadata: options.keepScrapeId === true && scrapeId !== undefined ? { ...metadata, scrapeId } : metadata }
   }
-  return tool === 'scrape' && contract !== undefined ? resultProjection(result, contract, 'mcp_result_minimized')(minimized) : minimized
+  return tool === 'scrape' && contract !== undefined ? resultProjection(result, contract, 'mcp_result_minimized').deliver(minimized) : minimized
 }
 
 const JOB_ITEM_TOOLS: ReadonlySet<string> = new Set(['get_batch_items', 'get_batch_errors', 'get_crawl_pages', 'get_crawl_errors'])
@@ -93,7 +93,7 @@ function screenshotImage(result: Json): ImageBlock[] {
  * still over, its images, links and tables kept to the longest prefix that fits (a table cut by rows), each with a
  * hint saying how many were kept. Every cut is re-verified against the request's contract.
  */
-function withinBudget(result: Json, max: number, measure: Measure, project = resultProjection(result)): Json {
+function withinBudget(result: Json, max: number, measure: Measure, project: ResultProjection = resultProjection(result)): Json {
   if (measure(result) <= max) return result
   let cut = result
   let cutAny = false
@@ -105,7 +105,12 @@ function withinBudget(result: Json, max: number, measure: Measure, project = res
     if (measure(cut) <= max) break
   }
   // A result with nothing to shorten goes out whole rather than marked cut.
-  return cutAny ? cut : result
+  if (!cutAny) return result
+  // The version delivered is judged again on a pool of its own (ADR 0006, amendment of 2026-10-29): its verdict is not the
+  // search's. Its sentences may differ in length from the ones it was cut with: one the search fitted that then no longer
+  // fits keeps those. One no cut could fit (a field nothing shortens, such as json) goes out judged afresh.
+  const delivered = verdictFirst(project.deliver(cut))
+  return measure(delivered) <= max || measure(cut) > max ? delivered : cut
 }
 
 /**

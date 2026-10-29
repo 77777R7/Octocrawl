@@ -119,7 +119,7 @@ import {
   type ScrapeOutcome,
 } from '@w2l/contracts'
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessAttestationInput, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
-import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, type StepPageQuery } from '@w2l/runtime'
+import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, withRegexLedger, type RegexStats, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, BrowserIdentityChoice, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
@@ -393,6 +393,11 @@ export interface ApiEngine {
 }
 
 export interface ApiEngineOptions {
+  /**
+   * What the regular-expression checks of one scrape, or of one job page, cost (ADR 0006, amendment of 2026-10-29): called
+   * when it ends, for one that ran a check, with its account where the call had one. For a log line, never for the verdict.
+   */
+  onRegexChecks?: (stats: RegexStats, about: { kind: 'scrape' | 'page'; account?: string }) => void
   taskRoot?: string
   monitorLeaseMs?: number
   monitorAttemptTimeoutMs?: number
@@ -1863,6 +1868,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       signal: controller.signal,
       ...(sitemapSource === undefined ? {} : { sitemapSource }),
       onStep,
+      ...(options.onRegexChecks === undefined ? {} : { onRegexChecks: (stats: RegexStats) => options.onRegexChecks!(stats, { kind: 'page', ...(req.slice?.account === undefined ? {} : { account: req.slice.account }) }) }),
     })
     const job = (async () => {
       // A resumed or restarted job offers its persisted steps to the webhook again before fetching more; those already enqueued are ignored.
@@ -1944,7 +1950,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * Monitor's capture mints an id for its response but leaves no record: a
    * preview persists nothing, and a run's observation is the Monitor's own.
    */
-  async function runScrape(req: ScrapeRequest, context: ScrapeContext, record: boolean, hooks: HandoffHooks = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
+  /** One scrape is one request for its regular-expression checks (regexCheck.ts): a steering pool and a ledger of its own. */
+  function runScrape(req: ScrapeRequest, context: ScrapeContext, record: boolean, hooks: HandoffHooks = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
+    const onClose = options.onRegexChecks === undefined ? undefined : (stats: RegexStats) => options.onRegexChecks!(stats, { kind: 'scrape', ...(context.account === undefined ? {} : { account: context.account }) })
+    return withRegexLedger(() => scrapeOnce(req, context, record, hooks), onClose)
+  }
+
+  async function scrapeOnce(req: ScrapeRequest, context: ScrapeContext, record: boolean, hooks: HandoffHooks = {}): Promise<ScrapeResponse | CompactScrapeResponse> {
     checkHandoff(req)
     checkAccessChoice(req)
     checkMyBrowser(req)

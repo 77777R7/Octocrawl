@@ -396,8 +396,13 @@ describe('@w2l/runtime public surface', () => {
       'MemoryTaskStore',
       'MonitorStore',
       'PageCache',
+      'REGEX_SCAN_LIMIT_MS',
+      'REGEX_STEERING_POOL_MS',
+      'REGEX_VERIFY_POOL_MS',
       'ROUTE_VERIFIER_VERSION',
       'RecipeStore',
+      'RegexLedger',
+      'RegexPool',
       'SqliteTaskStore',
       'VERIFIER_VERSION',
       'WebhookInbox',
@@ -410,6 +415,7 @@ describe('@w2l/runtime public surface', () => {
       'contractSha256',
       'crawlReportFromStore',
       'createHttpsWebhookTransport',
+      'currentRegexLedger',
       'decodeStepCursor',
       'diffDocument',
       'encodeStepCursor',
@@ -438,6 +444,7 @@ describe('@w2l/runtime public surface', () => {
       'webhookSignature',
       'withCacheMiss',
       'withCacheStored',
+      'withRegexLedger',
     ])
     expect(runtime).not.toHaveProperty('SCHEMA')
     expect(runtime).not.toHaveProperty('Database')
