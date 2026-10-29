@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import MarkdownIt from 'markdown-it'
 import { versionAssetReferences, versionPublicAssets } from './publicAssetVersions.mjs'
 import { HOME_UPDATED, pages } from './docsPages.mjs'
-import { BLOG_AUTHOR, BLOG_CATEGORIES, BLOG_UPDATED, blogPath, categoryPath, posts } from './blogPosts.mjs'
+import { BLOG_AUTHOR, BLOG_CATEGORIES, BLOG_UPDATED, blogPath, categoryPath, guideRedirects, posts } from './blogPosts.mjs'
 import { docFooterMarkup, siteActionsMarkup, siteNavMarkup } from './siteNav.mjs'
 import { DASHBOARD_BODIES, dashboardPageHtml } from './dashboardPages.mjs'
 // The free tool pages, built by Vite (vite.config.ts) and listed in the sitemap here.
@@ -389,7 +389,7 @@ ${body}</body></html>`
 }
 // Each docs guide that became an article answers with a 301 to it (packages/public-preview reads this file), and so
 // does the account page, which became the dashboard on 2026-10-12, and the dashboard's Account page, now Settings.
-await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify({ ...Object.fromEntries(posts.flatMap(post => [[post.from, blogPath(post)], [`${post.from}index.md`, `${blogPath(post)}index.md`]])), '/account/': '/dashboard/', '/dashboard/account/': '/dashboard/settings/' }, null, 2)}\n`)
+await writeFile(join(root, 'dist', 'redirects.json'), `${JSON.stringify({ ...guideRedirects, '/account/': '/dashboard/', '/dashboard/account/': '/dashboard/settings/' }, null, 2)}\n`)
 
 // llms.txt (https://llmstxt.org): what Octocrawl is, and a link to the Markdown copy of every page. llms-full.txt carries
 // all of them in one file.

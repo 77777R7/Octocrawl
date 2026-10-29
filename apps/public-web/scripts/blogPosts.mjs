@@ -9,7 +9,8 @@
 // - pubDate: the day the article first went live; it never changes. updatedDate: only when its facts, data or
 //   structure changed, later than pubDate; null otherwise. The sitemap's lastmod is updatedDate ?? pubDate.
 // - cover: optional existing artwork folder reused for a related topic; defaults to slug.
-// - from: the docs address the article replaced, answered with a 301 (scripts/build-docs.mjs writes redirects.json).
+// - from: the docs address the article replaced, answered with a 301 (guideRedirects, which scripts/build-docs.mjs
+//   writes to redirects.json); null for an article that replaced none.
 // - category: one of BLOG_CATEGORIES; the index's tabs list each category with its articles at /blog/category/<slug>/.
 // - related: the slugs listed under Keep reading, all published.
 // Keep each entry on one line, with file before pubDate, as test/blogPosts.test.ts reads them.
@@ -40,3 +41,7 @@ export const BLOG_UPDATED = posts.map(post => post.updatedDate ?? post.pubDate).
 
 export const blogPath = post => `/blog/${post.slug}/`
 export const categoryPath = category => `/blog/category/${category.slug}/`
+
+/** Each docs address an article replaced, and its Markdown copy, to the article: the 301s scripts/build-docs.mjs writes
+ * to redirects.json for packages/public-preview. An article that replaced no docs page (from: null) has none. */
+export const guideRedirects = Object.fromEntries(posts.filter(post => post.from).flatMap(post => [[post.from, blogPath(post)], [`${post.from}index.md`, `${blogPath(post)}index.md`]]))

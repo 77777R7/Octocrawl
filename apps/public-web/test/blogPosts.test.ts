@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { BLOG_CATEGORIES, BLOG_UPDATED, blogPath, posts } from '../scripts/blogPosts.mjs'
+import { BLOG_CATEGORIES, BLOG_UPDATED, blogPath, guideRedirects, posts } from '../scripts/blogPosts.mjs'
 import { pages } from '../scripts/docsPages.mjs'
 
 const app = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url))
@@ -59,6 +59,12 @@ describe('Blog articles', () => {
         expect(pages.some(page => docsPath(page) === post.from)).toBe(false)
       }
     }
+  })
+
+  it('send only the docs addresses they replaced, and their Markdown copies, to them (redirects.json)', () => {
+    const replaced = posts.filter(post => post.from !== null)
+    expect(Object.keys(guideRedirects).sort()).toEqual(replaced.flatMap(post => [post.from, `${post.from}index.md`]).sort())
+    for (const post of replaced) expect([guideRedirects[post.from!], guideRedirects[`${post.from}index.md`]]).toEqual([blogPath(post), `${blogPath(post)}index.md`])
   })
 
   it('give real days: published no later than tomorrow, updated only after that', () => {
