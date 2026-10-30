@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { VerifyCheck } from '@w2l/contracts'
-import { currentRegexLedger, RegexPool, withRegexLedger, type RegexLedger, type RegexStats } from '../src/regexCheck.js'
+import { currentRegexLedger, REGEX_SCAN_LIMIT_MS, RegexPool, scanRegex, withRegexLedger, type RegexLedger, type RegexStats } from '../src/regexCheck.js'
 import { verify } from '../src/verify.js'
 
 // Quadratic on text without the letter they end with, so every scan stops at its 250 ms limit; distinct, so none is reused.
@@ -69,6 +69,20 @@ describe("a request's regular-expression ledger (ADR 0006, amendment of 2026-10-
     let closed = 0
     await withRegexLedger(async () => { verify({ checks: [{ type: 'markdownIncludes', text: 'a' }] }, { status: 'success', markdown: 'a' }) }, () => { closed++ })
     expect(closed).toBe(0)
+  })
+})
+
+describe('a pool (ADR 0006, amendment of 2026-10-29)', () => {
+  it('is charged the whole limit of a scan the engine stopped there, though this process measured it shorter', () => {
+    // vm's watchdog keeps whole milliseconds of a clock of its own, and can stop a scan up to a millisecond before
+    // performance.now() says its limit has passed: four stops at 250 ms once measured under 999 ms on CI, and the fifth
+    // check of the verification ran on the 1 ms that seemed left, stopped at it, instead of finding the pool spent.
+    const pool = new RegexPool(REGEX_SCAN_LIMIT_MS)
+    const clock = vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValueOnce(REGEX_SCAN_LIMIT_MS - 2)
+    try {
+      expect(scanRegex('test', '(?:\\s|\\S)*x', 'm', slowPage.markdown, pool)).toEqual({ done: false, limit: 'time', limitMs: REGEX_SCAN_LIMIT_MS })
+    } finally { clock.mockRestore() }
+    expect(scanRegex('test', '(?:\\s|\\S)*y', 'm', slowPage.markdown, pool)).toEqual({ done: false, limit: 'budget', limitMs: 0 })
   })
 })
 
