@@ -37,7 +37,7 @@ import { isNavigationError, LOADING_WAIT_MAX_MS, loadingWaitEvent, waitForRender
 import { REGION_WAIT_MAX_MS, regionSpecOf, regionWaitEvent, waitForRegion } from '../regionWait.js'
 import { captureLayout, LAYOUT_MAX_ELEMENTS, SHADOW_TABLE_LIMITS } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
-import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, regionTables, selectionAsked, tablesFormat, tablesSource, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, withListCaveat, markdownOptions, regionTables, selectionAsked, tablesFormat, tablesSource, tagOptions, wholePageAsked, wholePageDelivered, wholePageMarkdown, NO_MAIN_CONTENT_WARNING, WHOLE_PAGE_MIN_CHARS } from './errorPage.js'
 import { captureRawHtml } from '../rawArtifact.js'
 import { captureScreenshot, screenshotViewport } from './screenshot.js'
 import { amazonVariantFollowupUrl } from './amazonVariantFollowup.js'
@@ -1496,7 +1496,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       const sourceWarnings = sourceDataWarnings(body, pageUrl)
       // No main content: the whole rendered page stays on the failed result
-      // as evidence, never content. onlyMainContent: false asks for the whole
+      // as evidence, unless it is long enough to be the answer
+      // (wholePageDelivered). onlyMainContent: false asks for the whole
       // page, not the main content, so there it is the answer; so is what
       // includeTags names, on any page that is not blocked.
       let wholePage: string | null = null
@@ -1504,6 +1505,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       let listPage = false
       // So is a page whose whole text holds the request's task contract, its region there on the live page (C011).
       let contractPage = false
+      // So is a page with no main region whose whole page is long enough (wholePageDelivered); its html and tables are the whole page's too.
+      let delivered = false
       // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
       if ((extracted.escalate || extracted.lastResort === true) && gate !== null) return blocked(gate)
       if (extracted.escalate && !selectionAsked(options)) {
@@ -1526,9 +1529,16 @@ export class BrowserLocalSubject implements SubjectAdapter {
             ...(waitCutShort ? { usage: { ...base.usage, deadlineExceeded: true } } : {}),
           }
           const chosen = wholePageChosen(failed, { html: converted, url: pageUrl, options, lane: 'browser_local', at: wallMs })
-          if (chosen === null) return failed
-          trace.push(chosen)
-          contractPage = true
+          if (chosen !== null) {
+            trace.push(chosen)
+            contractPage = true
+          } else if (wholePageDelivered(extracted, wholePage, trace, waitCutShort, listPage)) {
+            trace.push({ at: wallMs, lane: 'browser_local', event: 'whole_page_delivered', detail: { markdownChars: wholePage!.length, minChars: WHOLE_PAGE_MIN_CHARS } })
+            sourceWarnings.push(NO_MAIN_CONTENT_WARNING)
+            delivered = true
+          } else {
+            return failed
+          }
         }
       }
 
@@ -1543,13 +1553,13 @@ export class BrowserLocalSubject implements SubjectAdapter {
 
       // onlyMainContent: false emits the whole rendered page (header,
       // navigation and footer kept) through the same converter and base URL.
-      const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, converted.length)) || contractPage
+      const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, converted.length)) || contractPage || delivered
         ? wholePage ?? htmlToMarkdown(converted, { baseUrl: pageUrl, exclude: options.excludeTags, ...markdownOptions(options) })
         : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
       // The images and attributes formats read the rendered DOM as received, like links.
       const extra = extraFormats(body, pageUrl, options, trace, 'browser_local', wallMs)
       // The tables format reads what the Markdown was written from, with the same options.
-      const tables = tablesFormat(tablesSource(converted, pageUrl, options, extracted), pageUrl, options, trace, 'browser_local', wallMs)
+      const tables = tablesFormat(tablesSource(converted, pageUrl, options, extracted, wholePageAsked(options) || delivered), pageUrl, options, trace, 'browser_local', wallMs)
       // A contract that fails on what was extracted reads this capture again before any other rung (candidateExtraction.ts).
       return withExtractionCandidates({
         ...base,
@@ -1579,7 +1589,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           declaredValues: extracted.declaredValues,
         },
         // rawHtml is the page as rendered; html comes from the copy extraction read, without its layout markers.
-        ...htmlFormats(body, converted, extracted.mainHtml, options),
+        ...htmlFormats(body, converted, extracted.mainHtml, options, wholePageAsked(options) || delivered),
         usage: { ...base.usage, contentTokens: estimateTokens(markdown), ...(waitCutShort ? { deadlineExceeded: true } : {}) },
       }, { html: converted, url: pageUrl, options, lane: 'browser_local', at: wallMs })
     } catch (err) {

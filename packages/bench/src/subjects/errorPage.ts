@@ -59,6 +59,28 @@ export function wholePageMarkdown(html: string, url: string, options: FetchOptio
   return visibleText(markdown) === '' ? null : markdown
 }
 
+/** A rendered page with no main region whose whole page has more Markdown characters than this is its whole page (wholePageDelivered). */
+export const WHOLE_PAGE_MIN_CHARS = 1000
+
+/** The caveat on a page delivered whole because no main region was found in it. */
+export const NO_MAIN_CONTENT_WARNING: FetchWarning = {
+  code: 'no_main_content',
+  message: 'No main content was found on the rendered page; the Markdown is the whole page, its header, navigation and footer kept.',
+}
+
+/**
+ * Whether a rendered page whose extractor found no main region at all (`noRegion`, as opposed to one that was hidden,
+ * empty under the page's frame or only headings, which say the content had not come) is answered with its whole
+ * page: when that page holds more than WHOLE_PAGE_MIN_CHARS characters of Markdown, its wait was not cut short, it did
+ * not still show a loading indicator when read (`loading_wait` not cleared), and it is not a page of list records
+ * (answered whole already). On the Firecrawl 1k set (2026-10-30), 11 of the 17 such rendered pages over the bar held
+ * the dataset's text, and 3 none of it; under it, few held any.
+ */
+export function wholePageDelivered(extracted: { noRegion?: boolean }, wholePage: string | null, trace: readonly TraceEvent[], waitCutShort: boolean, listPage: boolean): boolean {
+  const stillLoading = trace.some((event) => event.event === 'loading_wait' && event.detail?.cleared === false)
+  return extracted.noRegion === true && wholePage !== null && wholePage.length > WHOLE_PAGE_MIN_CHARS && !waitCutShort && !stillLoading && !listPage
+}
+
 /**
  * The Markdown options a request's page options choose: `removeBase64Images:
  * false` keeps `data:` images as targets; the default drops them and keeps
@@ -120,8 +142,8 @@ export function tablesFormat(source: { html: string; options: MarkdownOptions },
 }
 
 /** The HTML the tables format reads, with its options: the whole page when asked for, else what the Markdown was written from (the selection or main content `extracted`). */
-export function tablesSource(html: string, url: string, options: FetchOptions, extracted: { mainHtml: string; baseUrl: string | null }): { html: string; options: MarkdownOptions } {
-  return wholePageAsked(options)
+export function tablesSource(html: string, url: string, options: FetchOptions, extracted: { mainHtml: string; baseUrl: string | null }, whole = wholePageAsked(options)): { html: string; options: MarkdownOptions } {
+  return whole
     ? { html, options: { baseUrl: url, exclude: options.excludeTags, ...markdownOptions(options) } }
     : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }
 }
@@ -232,9 +254,9 @@ export function tagOptions(options: FetchOptions): Pick<FetchOptions, 'includeTa
  * Markdown was written from: `mainHtml` (the main content or the
  * `includeTags` selection), or the whole page.
  */
-export function htmlFormats(raw: string, page: string, mainHtml: string, options: FetchOptions): Pick<FetchResult, 'html' | 'rawHtml'> {
+export function htmlFormats(raw: string, page: string, mainHtml: string, options: FetchOptions, whole = wholePageAsked(options)): Pick<FetchResult, 'html' | 'rawHtml'> {
   return {
-    ...(options.includeHtml ? { html: wholePageAsked(options) ? wholePageBody(page, options.excludeTags) : withoutLayoutMarkers(mainHtml) } : {}),
+    ...(options.includeHtml ? { html: whole ? wholePageBody(page, options.excludeTags) : withoutLayoutMarkers(mainHtml) } : {}),
     ...(options.includeRawHtml ? { rawHtml: raw } : {}),
   }
 }
