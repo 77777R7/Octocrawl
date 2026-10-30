@@ -444,7 +444,87 @@ export function cleanTree(doc: Document, excluded: ReadonlySet<Element> = new Se
     while (form.firstChild) form.parentNode?.insertBefore(form.firstChild, form)
     detach(form)
   }
+  // An <aside> that holds the whole page is not a sidebar, and is unwrapped
+  // the same way (social27.com, 2026-10-30: a site builder's
+  // `<aside class="page-wrapper">` around the navigation, <main> and footer
+  // was removed, and the page read as empty). A sidebar inside it still goes.
+  for (const aside of pageWrappers(doc)) {
+    if (excluded.has(aside)) continue
+    while (aside.firstChild) aside.parentNode?.insertBefore(aside.firstChild, aside)
+    detach(aside)
+  }
   for (const el of qsa(doc, CLEANED_SELECTOR)) detach(el)
+}
+
+/**
+ * The <aside> elements that hold the whole page: around the page's one main
+ * landmark (`<main>` or `role="main"`), with nothing beside them up to the
+ * body that shows text, nothing hidden or never shown on the way down to
+ * the landmark, and the landmark showing at least half of the text left in
+ * them once they are cleaned. A script, an empty element or a frame beside
+ * them (the container a captcha script adds to a rendered page) shows no
+ * text. An <aside> without the landmark is a sidebar, even when it holds
+ * all the text there is, and so is one whose landmark is empty or says next
+ * to nothing beside its other text: the sidebar of an application shell
+ * whose scripts have yet to fill its <main>. Linear: one walk from the body
+ * down to the landmark, which looks into each element beside the way once,
+ * and one through the innermost <aside>, which holds all the text the
+ * others do.
+ */
+function pageWrappers(doc: Document): Element[] {
+  const body = doc.body
+  const landmarks = qsa(doc, 'main,[role="main"]')
+  if (body === null || landmarks.length !== 1) return []
+  const landmark = landmarks[0]!
+  const way: Element[] = []
+  for (let el: Element | null = landmark; el !== body; el = el.parentElement) {
+    if (el === null || NEVER_SHOWN.has(el.localName) || el.hasAttribute('hidden')) return []
+    if (el !== landmark) way.push(el)
+  }
+  const wrappers: Element[] = []
+  let parent: Element = body
+  for (const el of way.reverse()) {
+    let beside = false
+    for (let node = parent.firstChild; node !== null && !beside; node = node.nextSibling) beside = node !== el && showsText(node)
+    if (beside) break
+    if (el.localName === 'aside') wrappers.push(el)
+    parent = el
+  }
+  const innermost = wrappers[wrappers.length - 1]
+  if (innermost === undefined) return wrappers
+  const cleaned = new Set(qsa(innermost, CLEANED_SELECTOR))
+  // A landmark the cleaning removes, with what holds it, shows nothing.
+  for (let el: Element | null = landmark; el !== innermost; el = el.parentElement) {
+    if (el === null || cleaned.has(el)) return []
+  }
+  return cleanedTextLength(landmark, cleaned) * 2 >= cleanedTextLength(innermost, cleaned) ? wrappers : []
+}
+
+/** The length of the text an element shows outside what Markdown never shows, what the page hides and the `cleaned` elements. A loop, not recursion. */
+function cleanedTextLength(root: Element, cleaned: ReadonlySet<Element>): number {
+  let length = 0
+  const stack: Node[] = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    if (node.nodeType === 3) length += (node.textContent ?? '').replace(/\s+/g, ' ').trim().length
+    if (node.nodeType !== 1) continue
+    const el = node as Element
+    if (el !== root && (cleaned.has(el) || NEVER_SHOWN.has(el.localName) || el.hasAttribute('hidden'))) continue
+    for (let child = el.firstChild; child !== null; child = child.nextSibling) stack.push(child)
+  }
+  return length
+}
+
+/** Whether a node shows text outside what Markdown never shows. A loop, not recursion. */
+function showsText(node: Node): boolean {
+  const stack: Node[] = [node]
+  while (stack.length > 0) {
+    const next = stack.pop()!
+    if (next.nodeType === 3 && (next.textContent ?? '').trim() !== '') return true
+    if (next.nodeType !== 1 || NEVER_SHOWN.has((next as Element).localName)) continue
+    for (let child = next.firstChild; child !== null; child = child.nextSibling) stack.push(child)
+  }
+  return false
 }
 
 /** Text outside form controls that makes a form more than a form. */
