@@ -214,6 +214,29 @@ describe('classifyGate — captcha widgets are distinct from interstitials', () 
     ).toBe('captcha')
   })
 
+  it('does not take a widget guarding a form on a page with plenty of text, or widgets named in a script\'s code, for a captcha wall', () => {
+    // Two pages whose extractor found no main content, read as captcha walls in the 2026-10-30 run of Firecrawl's set.
+    // social27.com/ai-solutions: Google's script in the head and a reCAPTCHA in the contact form, among some 14,000
+    // characters of text (the extractor dropped the <aside> the whole page sits in).
+    const section = (n: number) => `<section><h2>Consulting ${n}</h2><p>Design and implement tailored strategies that drive a business's digital transformation.</p></section>`
+    const guarded = '<html><head><title>AI Solutions</title><script src="https://www.google.com/recaptcha/api.js" type="text/javascript"></script></head>' +
+      `<body><aside class="page-wrapper"><main>${Array.from({ length: 20 }, (_, n) => section(n)).join('')}<form id="wf-form-Contact" method="get">` +
+      '<input name="Company-Email" placeholder="Company Email" type="text"><div data-sitekey="6Ld9" class="w-form-formrecaptcha g-recaptcha g-recaptcha-error g-recaptcha-disabled"></div>' +
+      '<input type="submit" data-wait="Please wait..." value="Submit"></form></main></aside></body></html>'
+    expect(classifyGate(res({ body: guarded }))).toBeNull()
+    // pastificioboulder.com/pages/contact: a short contact page whose store script lists the widgets' response fields in
+    // its code, with no widget on the page.
+    const listed = '<html><head><title>Contact</title><script>(()=>{const i=\'password\',u=\'form_key\',d=[\'recaptcha-v3-token\',\'g-recaptcha-response\',\'h-captcha-response\',i]})()</script></head>' +
+      '<body><header><a href="/">Pastificio</a> <a href="/pages/contact">Contact</a> <a href="/account/login">Login</a></header><main><h1>Contact</h1>' +
+      '<form method="post" action="/contact#contact_form"><input type="hidden" name="form_type" value="contact"><label>Name</label><input type="text" name="contact[name]">' +
+      '<label>E-mail</label><input type="email" name="contact[email]"><label>Message</label><textarea name="contact[body]"></textarea><button type="submit">Send message</button></form>' +
+      '<p>Wholesale inquiries: orders@pastificio.test</p></main></body></html>'
+    expect(classifyGate(res({ body: listed }))).toBeNull()
+    // A widget on a short page is still the check, named by the markup that carries it, not by a script's code.
+    const wall = listed.replace(/<main>.*<\/main>/, '<main><h1>One more step</h1><div class="h-captcha" data-sitekey="k"></div></main>')
+    expect(classifyGate(res({ body: wall }))).toEqual({ reason: 'captcha', signals: ['widget_hcaptcha_class', 'widget_sitekey'] })
+  })
+
   it('classifies a captcha the site serves itself, by its own widget script and its ask, as captcha', () => {
     // As studylib.net's "Security Check" (2026-10-15): a 403 past Cloudflare's challenge, the site's own widget.
     const page = (script: string, text: string) => `<html><head><title>Security Check</title>${script}</head><body><h1>${text}</h1>` +
@@ -509,12 +532,41 @@ describe('classifyGate — a short page that refuses automated visitors (ROADMAP
 <main><h1 class="header">We've noticed some unusual activity</h1><p class="copy">If you are an individual customer, and you believe this is a mistake, contact our Customer Service.</p>
 <p>To keep our site secure, we don’t allow unidentified, automated traffic. If you’d like access to our data via automation, apply to join our affiliate network!</p></main>
 <footer>© 2026 Example, Inc.</footer></body></html>`
+  // Akamai's bot check, which the installed Chrome read in place of three articles (businesswire.com, money.usnews.com,
+  // lequipe.fr) with HTTP 200 in the 2026-10-30 run of Firecrawl's set, as Chrome for Testing 152 rendered
+  // businesswire.com's that day: its scripts' paths and tokens shortened. Its script reloads the page once the check's
+  // request is answered.
+  const behavioral = `<html><head></head><body><script type="text/javascript" src="/AAxJAU13aQzB/rL5mhmQir57Q?v=fc7afe4f&amp;t=152967617"></script>
+<div id="sec-if-cpt-container" role="main" style="display: none"><div class="behavioral-content"><div id="sec-bc-text-container"></div>
+<div id="sec-bc-tile-parent"><div id="sec-bc-tile-container"></div></div><div class="sec-bc-button-parent"><div class="behavioral-button progress-btn-disabled">
+<div class="btn" id="progress-button" role="button" tabindex="0" disabled=""></div><div class="progress"></div></div></div>
+<div class="scf-akamai-logo-sec-abc"><div class="scf-akamai-logo-msg"><p class="scf-akamai-protected-by">Powered and protected by</p></div>
+<div class="scf-akamai-logo-img"><img src="https://www.akamai.com/site/ko/images/logo/akamai-logo1.svg" class="scf-akamai-logo" loading="lazy" alt="Akamai"></div>
+<div class="akamai-privacy"><a href="https://www.akamai.com/privacy" target="_blank">Privacy<span class="_hidden"></span></a></div></div></div></div>
+<script>(function() { var chlgeId = ''; var context = 't'; /* … */ if (context === 't') { location.reload(true); } })();</script>
+<noscript><img src="https://www.example.test/akam/13/pixel_7eaca161?a=dD0x" style="visibility: hidden; position: absolute; left: -999px; top: -999px;" /></noscript>
+</body></html>`
 
   it('names an Akamai refusal by its reference number on a short page, read as content or not', () => {
     for (const contentful of [true, false]) {
       expect(classifyGate(res({ body: akamai, contentful }))).toEqual({ reason: 'bot_detected_generic', signals: ['akamai_reference', 'short_page'] })
     }
     expect(classifyGate(res({ body: accessDenied, contentful: true }))?.signals).toContain('akamai_reference')
+  })
+
+  it('names Akamai\'s bot check by the line and the logo it shows on a short page, read as content or not', () => {
+    const want = { reason: 'bot_detected_generic', signals: ['text_powered_and_protected_by', 'akamai_logo', 'short_page'] }
+    for (const contentful of [true, false]) expect(classifyGate(res({ body: behavioral, contentful }))).toEqual(want)
+    // The logo by its source or by its name.
+    expect(classifyGate(res({ body: behavioral.replace(' alt="Akamai"', ' alt=""') }))).toEqual(want)
+    expect(classifyGate(res({ body: behavioral.replace('https://www.akamai.com/site/ko/images/logo/akamai-logo1.svg', '/akam/logo.svg') }))).toEqual(want)
+    // The line beside another logo, Akamai's logo without the line, either in a script, and both in a long page's footer are no check.
+    expect(classifyGate(res({ body: behavioral.replace(/<img src="https:\/\/www\.akamai\.com[^>]*>/, '<img src="/badge.svg" alt="Example CDN">') }))).toBeNull()
+    expect(classifyGate(res({ body: behavioral.replace('Powered and protected by', 'Our network partner') }))).toBeNull()
+    const footer = '<p>Powered and protected by</p><img src="https://www.akamai.com/site/en/images/logo/akamai-logo1.svg" alt="Akamai">'
+    expect(classifyGate(res({ body: `<html><body><h1>Shop</h1><script>var footer = '${footer}'</script></body></html>` }))).toBeNull()
+    const article = `<html><body><article>${'<p>An ordinary paragraph of a long article about the web and its checks.</p>'.repeat(30)}</article><footer>${footer}</footer></body></html>`
+    for (const contentful of [true, false]) expect(classifyGate(res({ body: article, contentful }))).toBeNull()
   })
 
   it('names a wall whose heading reports unusual activity and whose copy refuses automated traffic, past the head it reads', () => {

@@ -77,8 +77,8 @@ export interface GateVerdict {
 
 /**
  * Common markers inspect only the head, bounding the cost of lower-casing a
- * multi-megabyte body. The bounded short-wall and interactive-page checks
- * below separately read visible text and controls beyond a script-heavy head.
+ * multi-megabyte body. The bounded short-wall, captcha-wall and interactive-page
+ * checks below separately read visible text and controls beyond a script-heavy head.
  */
 const HEAD_BYTES = 65_536
 
@@ -414,10 +414,10 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   // Reached only when no Cloudflare managed-challenge marker fired, so a
   // Turnstile hit here is a site that embedded the widget itself. A widget
   // needs a person, which is a different escalation than a JS interstitial.
-  const captcha = matched(lower, CAPTCHA_MARKERS)
-  if (captcha.length > 0) {
-    return { reason: 'captcha', signals: captcha }
-  }
+  // A marker in the head is read as a wall only on a short page that carries
+  // the widget (captchaWall).
+  const captcha = matched(lower, CAPTCHA_MARKERS).length > 0 ? captchaWall(res.body) : null
+  if (captcha !== null) return captcha
   const siteCaptchaText = matched(lower, SITE_CAPTCHA_PHRASES)
   if (siteCaptchaText.length > 0 && SITE_CAPTCHA_SCRIPT.test(head)) {
     return { reason: 'captcha', signals: ['site_captcha_script', ...siteCaptchaText] }
@@ -483,7 +483,9 @@ const WALL_PAGE_MAX_TEXT = 1_500
 const AKAMAI_REFERENCE = /\b(?:reference|incident)\b\s*(?:number|id|no\.?)?\s*[:#]?\s*#?\s*\d{1,3}\.[0-9a-f]{6,8}\.\d{10}\.[0-9a-f]{6,12}\b/i
 const UNUSUAL_ACTIVITY = /\b(?:unusual|suspicious) (?:activity|traffic)\b/i
 /** A word one of the short-wall signs needs: a page without any is not read for them. */
-const WALL_TRIGGER = /\b(?:reference|incident|unusual|suspicious|blocked|interruption|automated|robot|human|humans|bot|checking|wait|moment|security|ddos|denied)\b/i
+const WALL_TRIGGER = /\b(?:reference|incident|unusual|suspicious|blocked|interruption|automated|robot|human|humans|bot|checking|wait|moment|security|ddos|denied|protected)\b/i
+/** Akamai's logo as its bot check shows it, by its source on akamai.com; its name ("Akamai") also names it. */
+const AKAMAI_LOGO_SOURCE = /^(?:https?:)?\/\/(?:[a-z0-9-]+\.)*akamai\.com(?:[/?#:]|$)/
 /** The weak signs of a browser check; a page asking for JavaScript is a shell its scripts fill, not a wall, so those are left out. */
 const WALL_WEAK_MARKERS = BOT_WEAK_MARKERS.filter(([, signal]) => signal !== 'weak_enable_js_and_cookies' && signal !== 'weak_enable_javascript')
 const AUTOMATED_TRAFFIC = /\bautomated (?:traffic|access|requests|queries|browsing)\b/i
@@ -500,6 +502,10 @@ const ARIA_LABEL_ATTRIBUTE = /\saria-label\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+
 const ROLE_ATTRIBUTE = /\srole\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
 const ID_ATTRIBUTE = /\sid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
 const TITLE_ATTRIBUTE = /\stitle\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+/** A tag that names one of CAPTCHA_MARKERS, found before the tag is lowercased to say which. */
+const CAPTCHA_MARKER = new RegExp(CAPTCHA_MARKERS.map(([marker]) => marker.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|'), 'i')
+const SRC_ATTRIBUTE = /\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+const ALT_ATTRIBUTE = /\salt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
 
 function attributeText(tag: string, pattern: RegExp): string {
   const match = pattern.exec(tag)
@@ -544,8 +550,9 @@ function interactivePage(body: string, finalUrl: string | undefined): GateVerdic
  * refused request, and Nordstrom's wall, whose heading reports unusual activity and whose copy refuses automated
  * traffic, 120 KB past the head the rest of the classifier reads. Each needs the page's visible text to be short
  * (WALL_PAGE_MAX_TEXT): an article quoting either is long. Not on an error status: Akamai prints the same reference on
- * its 5xx and 4xx error pages, which are the page's own answer. The body is read in one linear pass that stops at the
- * bound (pageText).
+ * its 5xx and 4xx error pages, which are the page's own answer. Akamai's bot check, which shows only its vendor's line
+ * and logo while its script runs, was read as an empty page in the installed Chrome (2026-10-30). The body is read in
+ * one linear pass that stops at the bound (pageText).
  */
 function shortWallPage(body: string): GateVerdict | null {
   if (!WALL_TRIGGER.test(body)) return null
@@ -553,6 +560,9 @@ function shortWallPage(body: string): GateVerdict | null {
   if (page === null) return null
   const bot = (signals: string[]): GateVerdict => ({ reason: 'bot_detected_generic', signals })
   if (AKAMAI_REFERENCE.test(page.text)) return bot(['akamai_reference', 'short_page'])
+  // businesswire.com, money.usnews.com and lequipe.fr answered 200 with it, "Powered and protected by" beside Akamai's
+  // logo and a privacy link: both, since the line beside another logo, or Akamai's logo alone, may be any page's.
+  if (page.akamaiLogo && page.text.toLowerCase().includes('powered and protected by')) return bot(['text_powered_and_protected_by', 'akamai_logo', 'short_page'])
   if (page.headings.some((h) => UNUSUAL_ACTIVITY.test(h)) && AUTOMATED_TRAFFIC.test(page.text)) return bot(['heading_unusual_activity', 'text_automated_traffic', 'short_page'])
   // The short page's heading names a refusal outright ("Pardon Our Interruption"), or a browser check its text names
   // twice over (eBay's "Checking your browser before you access eBay" … "Please wait", T021): read in what the page
@@ -571,13 +581,28 @@ function shortWallPage(body: string): GateVerdict | null {
 }
 
 /**
+ * A captcha wall, or null: a short page (WALL_PAGE_MAX_TEXT) whose purpose is the check, carrying the widget in its markup
+ * or showing its prompt. Two pages the extractor found no main content in were no wall (2026-10-30): social27.com, whose
+ * reCAPTCHA guards a contact form among some 14,000 characters of text, and a Shopify store's contact page, whose script
+ * names the widgets' response fields in its code with no widget on the page. The signals are what the whole page carries.
+ */
+function captchaWall(body: string): GateVerdict | null {
+  const page = pageText(body, WALL_PAGE_MAX_TEXT, false, true)
+  if (page === null) return null
+  const shown = page.text.toLowerCase()
+  const signals = CAPTCHA_MARKERS.filter(([marker, signal]) => page.widgets.has(signal) || shown.includes(marker)).map(([, signal]) => signal)
+  return signals.length > 0 ? { reason: 'captcha', signals } : null
+}
+
+/**
  * The text a page shows and the text of its headings (h1–h3, its title), roughly: markup, comments, the head's other
  * content and the content of scripts, styles, templates and SVG left out, entities decoded, whitespace collapsed. Null
  * once the visible text passes WALL_PAGE_MAX_TEXT. One pass in linear time: each tag, comment and hidden element's end is
  * found once, from where the last one ended, and an end that is missing ends the reading there (a page cut off, or one
- * built to make a scanner search again and again).
+ * built to make a scanner search again and again). It notes an image of Akamai's logo the page shows and, asked to,
+ * the controls its body shows (readControls) and the captcha widgets its tags name (readWidgets).
  */
-function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = false): { text: string; headings: string[]; primaryHeadings: string[]; controls: { webauthn: boolean; passkey: boolean; button: boolean; image: boolean; pxCaptcha: boolean; humanChallengeFrame: boolean; pxLoader: boolean } } | null {
+function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = false, readWidgets = false): { text: string; headings: string[]; primaryHeadings: string[]; akamaiLogo: boolean; widgets: ReadonlySet<string>; controls: { webauthn: boolean; passkey: boolean; button: boolean; image: boolean; pxCaptcha: boolean; humanChallengeFrame: boolean; pxLoader: boolean } } | null {
   // Positions are the body's own: a lowercased copy can be longer ("İ" lowercases to two characters), so tags are matched
   // case-insensitively in place.
   const visible: string[] = []
@@ -585,6 +610,8 @@ function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = fal
   const headings: string[] = []
   const primaryHeadings: string[] = []
   const controls = { webauthn: false, passkey: false, button: false, image: false, pxCaptcha: false, humanChallengeFrame: false, pxLoader: false }
+  let akamaiLogo = false
+  const widgets = new Set<string>()
   let heading: { name: string; parts: string[] } | null = null
   let inHead = false
   let at = 0
@@ -627,6 +654,15 @@ function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = fal
       }
       continue
     }
+    // A captcha widget on the page is named by a tag, a script's in the head too; never by a script's code, skipped below.
+    if (readWidgets && closing === '') {
+      const tagText = body.slice(open, Math.min(end + 1, open + 2_000))
+      if (CAPTCHA_MARKER.test(tagText)) for (const signal of matched(tagText.toLowerCase(), CAPTCHA_MARKERS)) widgets.add(signal)
+    }
+    if (!akamaiLogo && closing === '' && name === 'img' && !inHead) {
+      const tagText = body.slice(open, Math.min(end + 1, open + 2_000))
+      akamaiLogo = AKAMAI_LOGO_SOURCE.test(attributeText(tagText, SRC_ATTRIBUTE)) || /^akamai\b/.test(attributeText(tagText, ALT_ATTRIBUTE).trim())
+    }
     if (readControls && closing === '' && !inHead && !HIDDEN_ELEMENTS.has(name)) {
       const tagText = body.slice(open, Math.min(end + 1, open + 2_000))
       if (name === 'input') {
@@ -651,7 +687,7 @@ function pageText(body: string, maxText = WALL_PAGE_MAX_TEXT, readControls = fal
     }
   }
   const visibleText = collapse(decodeEntities(visible.join(' ')))
-  return visibleText.length > maxText ? null : { text: visibleText, headings, primaryHeadings, controls }
+  return visibleText.length > maxText ? null : { text: visibleText, headings, primaryHeadings, akamaiLogo, widgets, controls }
 }
 
 function collapse(text: string): string {
