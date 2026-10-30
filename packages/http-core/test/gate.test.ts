@@ -244,6 +244,27 @@ describe('classifyGate — captcha widgets are distinct from interstitials', () 
     expect(classifyGate(res({ status: 403, body: page(script, 'Please Verify You Are Human'), contentful: true }))).toBeNull()
   })
 
+  it('finds the site captcha script by the src of the script tag that loads it', () => {
+    const page = (script: string) => `<html><head><title>Security Check</title>${script}</head><body><h1>Please Verify You Are Human</h1></body></html>`
+    // The src however the tag spells it: after other attributes, quoted either way or not, spaced around `=`, in
+    // capitals, or named after a `/` or a closing quote, as a browser reads the tag.
+    for (const script of [
+      '<script async type="text/javascript" src="/captcha/widget.js"></script>',
+      "<SCRIPT SRC = '/CAPTCHA/widget.js'></SCRIPT>",
+      '<script src=/captcha/widget.js></script>',
+      '<script/src="/captcha/widget.js"></script>',
+      '<script type="module"src="/captcha/widget.js"></script>',
+    ]) expect(classifyGate(res({ status: 403, body: page(script) }))?.reason, script).toBe('captcha')
+    // The path anywhere else loads no widget: in the script's own text, in another tag, in an attribute other than src
+    // (data-src is one: a browser does not load it).
+    for (const script of [
+      '<script>var widget = "/captcha/widget.js"</script>',
+      '<img src="/captcha/widget.png">',
+      '<script src="/js/app.js" data-endpoint="/captcha/verify"></script>',
+      '<script data-src="/captcha/widget.js"></script>',
+    ]) expect(classifyGate(res({ status: 403, body: page(script) }))?.reason, script).toBe('bot_detected_generic')
+  })
+
   it('prefers the Cloudflare verdict when a managed challenge also embeds Turnstile', () => {
     // Vendor plumbing wins over the widget: the interstitial is the gate, and
     // its escalation path (run the JS) differs from a widget needing a person.

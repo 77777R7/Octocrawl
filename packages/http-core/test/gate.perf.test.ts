@@ -59,4 +59,14 @@ describe('classifyGate on large or hostile pages', () => {
     }
     for (const [name, body] of Object.entries(shapes)) expect(timed(body), name).toBeLessThan(1_500)
   })
+
+  it('reads a page that asks to verify you are human for a site captcha script in bounded time', () => {
+    // A regex reading of the script tag took 6 to 8 s on the first body (review of the x-iinfo change, 2026-10-30).
+    const bodies = ['<script/src='.repeat(5_460), '<script ' + '/captcha/'.repeat(7_000), ('<script src=x ' + '/captcha/'.repeat(100)).repeat(70), '<script'.repeat(100_000)]
+    for (const body of bodies) {
+      const started = performance.now()
+      expect(classifyGate({ status: 200, header: () => null, body: 'verify you are human' + body })?.reason).toBe('bot_detected_generic')
+      expect(performance.now() - started).toBeLessThan(1_500)
+    }
+  })
 })
