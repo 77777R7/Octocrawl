@@ -268,6 +268,18 @@ const PX_CAPTCHA_CONTAINER = /<[a-z][^>]*\sid\s*=\s*["']?px-captcha(?=["'\s>/])/
  */
 const DATADOME_CHALLENGE = /<iframe\b[^>]{0,2000}?\bsrc\s*=\s*["']?https?:\/\/(?:[a-z0-9-]+\.)*captcha-delivery\.com\/(interstitial|captcha)\//i
 
+/**
+ * Anubis's proof-of-work check: its page keeps the challenge as a JSON object in a script element of its own (since
+ * v1.17), and loads its script, styles and images from `/.within.website/x/cmd/anubis/`. The element with an object is
+ * the check: Anubis's error and refusal pages carry it with null (since v1.22), a page about Anubis may show its mascot
+ * from that path, and an article quoting the element shows it escaped. The element's attributes are bounded, so a body of
+ * unclosed tags stays linear.
+ */
+const ANUBIS_CHALLENGE = /<script\b[^>]{0,200}?\sid\s*=\s*["']?anubis_challenge(?:["'\s/][^>]{0,200})?>\s*\{/i
+const ANUBIS_ASSETS = '/.within.website/x/cmd/anubis/'
+/** The most text Anubis's check shows is about 1,600 characters (its longer explanation of v1.21 to v1.27, in French). */
+const ANUBIS_PAGE_MAX_TEXT = 4_000
+
 /** The path of Imperva's challenge script, which its JS interstitial loads and its protected pages carry as well. */
 const INCAPSULA_RESOURCE = '/_incapsula_resource'
 /** How far before that path the script tag loading it may open: the tag's other attributes. */
@@ -299,6 +311,12 @@ function perimeterXChallenge(head: string, lower: string): string[] | null {
   const signals = ['px_captcha_script', 'px_app_id']
   if (PX_CAPTCHA_CONTAINER.test(head)) signals.push('px_captcha_container')
   return signals
+}
+
+/** Anubis's check (ANUBIS_CHALLENGE) on a short page, with its assets as a signal where the page loads them, or null. */
+function anubisChallenge(body: string, lower: string): GateVerdict | null {
+  if (!ANUBIS_CHALLENGE.test(lower) || pageText(body, ANUBIS_PAGE_MAX_TEXT) === null) return null
+  return { reason: 'bot_detected_generic', signals: ['anubis_challenge', ...(lower.includes(ANUBIS_ASSETS) ? ['anubis_assets'] : []), 'short_page'] }
 }
 
 function challengePlatformBeyondJsd(lower: string): boolean {
@@ -458,6 +476,12 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   // (js.datadome.co) is on pages it lets through and decides nothing.
   const dd = DATADOME_CHALLENGE.exec(res.body)
   if (dd !== null) return dd[1]!.toLowerCase() === 'captcha' ? { reason: 'captcha', signals: ['datadome_captcha'] } : { reason: 'bot_detected_generic', signals: ['datadome_interstitial'] }
+
+  // Anubis's proof-of-work check, which proforto.nl answered a product page with on 2026-10-29 and 2026-10-30: the http
+  // lane and the bundled Chromium, whose capture caught its script calculating, both read it as content. A browser clears
+  // it by running that script, so it is a bot check, not a captcha.
+  const anubis = anubisChallenge(res.body, lower)
+  if (anubis !== null) return anubis
 
   // A short page answered with a 2xx that is only a refusal of automated visitors, read past the head: such walls often
   // sit behind a page's worth of scripts (ROADMAP PA item 4). Decisive on a page read as content; on one that was not, a

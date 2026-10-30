@@ -329,6 +329,77 @@ ${'<script>window.__app = "' + 'x'.repeat(70_000) + '"</script>'}${extra}</body>
   })
 })
 
+describe('classifyGate — Anubis proof-of-work check', () => {
+  // proforto.nl answered a product page with Anubis's check (Hypernode's build of 1.28.1) and HTTP 200 on 2026-10-29 and
+  // 2026-10-30, and both lanes returned it as success: the http lane the page as served, the bundled Chromium the page
+  // its script was still calculating on. A browser clears the check by running that script, so it is a bot check.
+  const served = `<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Human verification</title>
+        <link rel="stylesheet" href="/.within.website/x/cmd/anubis/static/css/botstopper.css" />
+        <script id="anubis_version" type="application/json">"1.28.1+hypernode1"
+</script><script id="anubis_challenge" type="application/json">{"rules":{"algorithm":"fast","difficulty":2},"challenge":{"issuedAt":"2026-10-30T07:33:23.738849726Z","metadata":{"Referer":"","User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36","X-Real-IP":"203.0.113.7"},"id":"01a18bba-489a-7cee-9ffe-bbfaa2d3da68","method":"fast","randomData":"402ff1c521b82d27b9c275f1cc672d617803b30ed2055d8bbceab68ed9137cbc","policyRuleHash":"8a70f4a00fe5d250","difficulty":2,"spent":false,"extensions":null}}
+</script><script id="anubis_base_prefix" type="application/json">""
+</script><script id="anubis_public_url" type="application/json">""
+</script>
+    </head>
+    <body>
+        <div class="page-content-wrapper">
+            <div class="page-content">
+                <img width="137" height="17" src="/.within.website/x/cmd/anubis/static/img/logo.svg" />
+                <div class="content">
+                    <h2>Checking if you're human</h2>
+                    <p>We are running a quick security check to protect this site from bots. This should only take a few seconds.</p>
+                    <div class="centered-div"><p id="status">Loading...</p><p id="anubis-script-error" style="display:none;">Anubis could not load its JavaScript. The server may be overloaded. Please reload the page to try again.</p><script id="anubis-main" defer type="module" src="/.within.website/x/cmd/anubis/static/js/main.mjs?cacheBuster=1.28.1+hypernode1"></script><script>(()=>{let e=document.getElementById("anubis-main");if(!e)return;e.onerror=()=>setTimeout(()=>document.head.appendChild(Object.assign(document.createElement("script"),{type:"module",src:e.getAttribute("src")+"&anubisRetry=1"})),750)})();</script><div id="progress" role="progressbar" aria-labelledby="status"><div class="bar-inner"></div></div><div id="testarea"></div></div>
+                    <img width="48" height="48" class="loader" src="/.within.website/x/cmd/anubis/static/img/loader.png" alt="Checking your browser" />
+                    <p class="loader-alt">Checking your browser...</p>
+                    <p>If this takes more than 30 seconds, try refreshing the page.</p>
+                    <p>Need help? <a href="mailto:support@hypernode.com">Contact support</a></p>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>`
+  const rendered = served.replace('<p id="status">Loading...</p>', '<p id="status">Calculating...<br>Difficulty: 2, Speed: 0kH/s</p>')
+  const check = { reason: 'bot_detected_generic', signals: ['anubis_challenge', 'anubis_assets', 'short_page'] }
+
+  it('names the check by its challenge and its assets, served or rendered, read as content or not', () => {
+    for (const body of [served, rendered]) {
+      expect(classifyGate(res({ body, contentful: true }))).toEqual(check)
+      expect(classifyGate(res({ body }))).toEqual(check)
+    }
+    // A site may answer the check with another status (403 in Anubis's documentation).
+    expect(classifyGate(res({ status: 403, body: served }))).toEqual(check)
+    // Anubis's longer explanation of v1.21 to v1.27 runs to about 1,600 characters in French.
+    const explained = served.replace('</h2>', `</h2><details><p>${'Votre navigateur calcule une preuve de travail avant de charger la page. '.repeat(22)}</p></details>`)
+    expect(classifyGate(res({ body: explained, contentful: true }))).toEqual(check)
+  })
+
+  it('leaves an article about Anubis, a long page that carries its challenge, and its error page to the rest of the classifier', () => {
+    // Its markup quoted as code and its mascot shown from its assets: no challenge on the page.
+    const article = `<!doctype html><html><head><title>Anubis, the toll on scrapers</title></head><body><article><h1>Anubis, the toll on scrapers</h1>
+<p>Anubis answers a visitor with a proof-of-work page and lets the browser in once its script has calculated a hash. The page keeps the
+challenge in <code>&lt;script id="anubis_challenge" type="application/json"&gt;</code> and its assets under <code>/.within.website/x/cmd/anubis/</code>.</p>
+<img src="https://anubis.techaro.lol/.within.website/x/cmd/anubis/static/img/happy.webp" alt="Anubis's mascot"></article></body></html>`
+    expect(classifyGate(res({ body: article }))).toBeNull()
+    expect(classifyGate(res({ body: article, contentful: true }))).toBeNull()
+    const long = served.replace('<div class="content">', `<div class="content">${'<p>An ordinary paragraph of a long page about work shoes and their soles.</p>'.repeat(60)}`)
+    expect(classifyGate(res({ body: long, contentful: true }))).toBeNull()
+    // Anubis's error and refusal pages, as v1.28.2's templates render them, hold null where the challenge would be.
+    const refused = `<!DOCTYPE html><html lang="en"><head><title>Oh noes!</title><link rel="stylesheet" href="/.within.website/x/xess/xess.min.css?cachebuster=v1.28.2"/>
+<script id="anubis_version" type="application/json">"v1.28.2"
+</script><script id="anubis_challenge" type="application/json">null
+</script></head><body id="top"><main><h1 id="title" class="centered-div">Oh noes!</h1><div class="centered-div">
+<img id="image" alt="Sad Anubis" style="width:100%;max-width:256px;" src="/.within.website/x/cmd/anubis/static/img/reject.webp?cacheBuster=v1.28.2"/>
+<p>Access Denied: error code 8a70f4a00fe5d250.</p><p><a href="/">Go home</a></p></div><footer><div class="centered-div">
+<p>Protected by <a href="https://github.com/TecharoHQ/anubis">Anubis</a> From <a href="https://techaro.lol">Techaro</a>. Made with ❤️ in 🇨🇦.</p>
+<p>This website is running Anubis version <code>v1.28.2</code>.</p></div></footer></main></body></html>`
+    for (const contentful of [false, true]) expect(classifyGate(res({ body: refused, contentful }))?.signals ?? []).not.toContain('anubis_challenge')
+  })
+})
+
 describe('classifyGate — PerimeterX press-and-hold', () => {
   // Shaped like the page Walmart served with HTTP 200 on 2026-10-05, which the
   // browser lane returned as success. The reason is captcha, not
