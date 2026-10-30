@@ -568,6 +568,77 @@ ${div('Kiln equipment is depreciated on a straight-line basis over its useful li
     expect(out.mainHtml).not.toContain('Leave a reply')
   })
 
+  const POPULAR = `<h3>Popular</h3><p>Sidebar marker: the most read notes of the month, from the studio's glaze ledger and its firing log.</p>
+<ul><li><a href="/notes/1">Older note one</a></li><li><a href="/notes/2">Older note two</a></li></ul>`
+  const SIDEBAR = `<aside class="sidebar">${POPULAR}</aside>`
+
+  it('reads a page whose whole body sits in one <aside>, and still drops the sidebar inside it', () => {
+    // social27.com/ai-solutions, 2026-10-30: a site builder's `<aside class="page-wrapper">` around the navigation,
+    // the <main> and the footer, with only scripts beside it, was cleaned as a sidebar and the page read as empty.
+    const html = `<!doctype html><html><head><title>Kiln services for small studios</title></head><body>
+<aside class="page-wrapper"><div class="global-styles w-embed"><style>.page-wrapper{overflow:clip}</style></div>
+<nav class="navbar"><a href="/">Home</a> <a href="/pricing">Pricing</a> <a href="/contact">Contact</a></nav>
+<main class="main-wrapper"><section class="hero"><h1>Kiln services for small studios</h1>
+<p>We fire stoneware and porcelain for studios that run no kiln of their own, and return every piece within ten days.</p></section>
+<section class="details"><h2>How a firing works</h2>
+<p>Pieces are packed by glaze family, fired to cone ten over eleven hours, and cooled slowly so that every glaze settles evenly.</p>
+<h2>What it costs</h2>
+<p>A shelf costs forty dollars for a bisque firing and sixty for a glaze firing, less for a studio that fills the whole kiln.</p></section>
+${SIDEBAR}</main>
+<footer class="footer"><p>Copyright 2026 Synthetic Fixture Kilns. All rights reserved.</p></footer></aside>
+<script src="/js/site.js"></script><noscript><img src="/pixel.gif" alt=""></noscript>
+</body></html>`
+    for (const page of [
+      html,
+      // The same <aside> inside one more wrapper.
+      html.replace('<aside class="page-wrapper">', '<div class="page"><aside class="page-wrapper">').replace('</aside>\n<script', '</aside></div>\n<script'),
+      // As a browser renders it: a captcha script has added its frame's container beside the <aside>.
+      html.replace('</body>', '<div style="visibility: hidden; position: absolute"><iframe title="captcha challenge" src="https://captcha.fixture.test/frame"></iframe></div></body>'),
+    ]) {
+      const out = extractTf.extract(page)
+      const md = htmlToMarkdown(out.mainHtml, { baseUrl: out.baseUrl })
+      expect(md).toContain('# Kiln services for small studios')
+      expect(md).toContain('We fire stoneware and porcelain')
+      expect(md).toContain('A shelf costs forty dollars')
+      expect(md).not.toContain('Sidebar marker')
+      expect(md).not.toContain('Pricing')
+      expect(md).not.toContain('Copyright 2026')
+      expect(out.escalate).toBe(false)
+      expect(out.confidence).toBeGreaterThan(0.5)
+    }
+  })
+
+  it('still drops an <aside> beside the page\'s content, also when it holds all the text of a page yet to be drawn', () => {
+    // Beside the article, a sidebar that holds the page's one <main> is still a sidebar.
+    const beside = parse(`<!doctype html><html><body><article><h1>Kiln temperatures</h1>
+<p>The kiln reached 1240 degrees before the glaze vitrified. Every reading was logged in the ledger kept by the harbour office.</p></article>
+<aside class="sidebar"><main class="widget">${POPULAR}</main></aside></body></html>`)
+    cleanTree(beside.document)
+    expect(beside.document.body.textContent).toContain('The kiln reached 1240 degrees')
+    expect(beside.document.body.textContent).not.toContain('Sidebar marker')
+    beside.close()
+    // An application whose scripts draw the page: the sidebar is all the HTML shows, and it is still not the page,
+    // whether the <main> they will fill sits beside it, is not there yet, sits inside it (an <aside> left open) or
+    // beside it in a page wrapper, or says only "Loading". Nor is a sidebar beside a <main> that is only in a
+    // noscript, or in an element the cleaning removes, nor a hidden <aside> around a <main>.
+    const app = '<main id="app"></main>'
+    const article = '<h1>Kiln temperatures</h1><p>The kiln reached 1240 degrees before the glaze vitrified, and every reading went into the ledger kept by the harbour office.</p>'
+    for (const body of [
+      `<div class="column">${SIDEBAR}</div>${app}`,
+      `<div class="column">${SIDEBAR}</div>`,
+      `<aside class="sidebar">${POPULAR}${app}`,
+      `<aside class="page-wrapper"><div class="sidebar">${POPULAR}</div>${app}</aside>`,
+      `<aside class="page-wrapper"><div class="sidebar">${POPULAR}</div><main id="app"><p>Loading…</p></main></aside>`,
+      `<aside class="sidebar">${POPULAR}<noscript><main>${article}</main></noscript></aside>`,
+      `<aside class="layout"><div class="sidebar">${POPULAR}</div><aside class="content"><main>${article}</main></aside></aside>`,
+      `<aside class="drawer" hidden><main>${POPULAR}</main></aside>`,
+    ]) {
+      const shell = extractTf.extract(`<!doctype html><html><body>${body}<script src="/app.js"></script></body></html>`)
+      expect(shell.mainHtml).not.toContain('Sidebar marker')
+      expect(shell.escalate).toBe(true)
+    }
+  })
+
   it('reads label/value pairs from two-cell rows and definition lists in the main content', () => {
     const html = `<!doctype html><html><body>
 <aside><table><tr><th>Sidebar label</th><td>not main content</td></tr></table></aside>
