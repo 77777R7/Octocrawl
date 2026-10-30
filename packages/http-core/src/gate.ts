@@ -142,12 +142,34 @@ const CAPTCHA_MARKERS: readonly (readonly [marker: string, signal: string])[] = 
  * they are human (studylib.net's "Security Check", 2026-10-15). Both, so a page that only loads such a script for a form
  * is not one; a page read as content never reaches this check.
  */
-const SITE_CAPTCHA_SCRIPT = /<script\b[^>]{0,500}?\bsrc\s*=\s*["']?[^"'\s>]*\/captcha\/[^"'\s>]*/i
+const SITE_CAPTCHA_PATH = '/captcha/'
 const SITE_CAPTCHA_PHRASES: readonly (readonly [phrase: string, signal: string])[] = [
   ['verify you are human', 'text_verify_you_are_human'],
   ['complete the security check', 'text_complete_the_security_check'],
   ['prove you are human', 'text_prove_you_are_human'],
 ]
+/** How far before a `/captcha/` path its <script> tag may open: the tag's other attributes and the address up to it. */
+const SITE_CAPTCHA_TAG_MAX_CHARS = 1_000
+/**
+ * A src attribute in a tag's text, named after a space, a closing quote or a `/` as a browser reads the tag, whose
+ * address runs on to the end of the text with no quote, space or `>` in it.
+ */
+const SRC_TO_END = /(?:^|[\s"'])\/?src\s*=\s*["']?[^"'\s>]*$/
+
+/**
+ * Whether a lowercased head loads a site's own captcha script: the path sits in the src of the nearest <script> tag that
+ * opens before it and has not closed. Each path is read in a bounded window, so a page of half-open tags stays linear.
+ */
+function loadsSiteCaptchaScript(lower: string): boolean {
+  for (let at = lower.indexOf(SITE_CAPTCHA_PATH); at !== -1; at = lower.indexOf(SITE_CAPTCHA_PATH, at + SITE_CAPTCHA_PATH.length)) {
+    const before = lower.slice(Math.max(0, at - SITE_CAPTCHA_TAG_MAX_CHARS), at)
+    const open = before.lastIndexOf('<script')
+    if (open === -1 || before.includes('>', open)) continue
+    const attributes = before.slice(open + '<script'.length)
+    if (!/^\w/.test(attributes) && SRC_TO_END.test(attributes)) return true
+  }
+  return false
+}
 
 /** Phrases that make a login the page's purpose rather than one of its widgets. */
 const LOGIN_INTENT_PHRASES: readonly string[] = [
@@ -419,7 +441,7 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
     return { reason: 'captcha', signals: captcha }
   }
   const siteCaptchaText = matched(lower, SITE_CAPTCHA_PHRASES)
-  if (siteCaptchaText.length > 0 && SITE_CAPTCHA_SCRIPT.test(head)) {
+  if (siteCaptchaText.length > 0 && loadsSiteCaptchaScript(lower)) {
     return { reason: 'captcha', signals: ['site_captcha_script', ...siteCaptchaText] }
   }
   const interaction = interactivePage(res.body, res.finalUrl)
