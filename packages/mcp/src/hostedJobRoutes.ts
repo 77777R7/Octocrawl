@@ -117,6 +117,11 @@ export interface HostedJobsConfig {
    */
   checkStart?: { batch: (request: ParsedBatchStartRequest) => void; crawl: (request: ParsedCrawlStartRequest) => void }
   /**
+   * The worker takes the regular-expression checks of a task contract (HostedApiConfig.regexChecks; ADR 0006, amendment of
+   * 2026-10-29). Absent: the start refuses them by name.
+   */
+  regexChecks?: boolean
+  /**
    * Whether the account's start may name `access: "enhanced"` (ADR 0005 hosted_chrome, revision of 2026-10-27): the switch
    * grants it hosted_chrome now, on a deploy with the rung's operator config. Absent, or false: `access` is refused, as the
    * key sets refuse it. createHostedApi fills it.
@@ -239,9 +244,9 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     try { parsed = kind === 'batch' ? parseBatchStartRequest(body) : parseCrawlStartRequest(body) }
     catch (error) { return refusal(400, 'invalid_request', error instanceof RequestError || error instanceof Error ? error.message : String(error)) }
     if (kind === 'crawl' && !((parsed as ParsedCrawlStartRequest).maxPages! >= 1 && (parsed as ParsedCrawlStartRequest).maxPages! <= JOB_MAX_CRAWL_PAGES)) return refusal(400, 'invalid_request', `maxPages must be 1 to ${JOB_MAX_CRAWL_PAGES} on hosted Octocrawl`)
-    // The worker's hosted engine refuses these at the job's first slice, which fails and is retried until the job ends
-    // failed (delivery_failed) without naming why: the start refuses them by name instead.
-    const regexRefusal = hostedVerifyRefusal(parsed.verify)
+    // The worker's hosted engine refuses these at the job's first slice (unless its operator switched them on), which fails
+    // and is retried until the job ends failed (delivery_failed) without naming why: the start refuses them by name instead.
+    const regexRefusal = hostedVerifyRefusal(parsed.verify, { regexChecks: config.regexChecks === true })
     if (regexRefusal !== null) return refusal(400, 'unsupported_parameter', regexRefusal)
     // A batch's maxConcurrency is lowered to the slice's workers when it runs (engine.ts); a crawl's engine refuses one above
     // them, so a crawl's is lowered here.

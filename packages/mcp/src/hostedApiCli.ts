@@ -24,6 +24,9 @@
  *   W2L_HOSTED_CHROME_URL, W2L_HOSTED_CHROME_ATTESTATION, W2L_HOSTED_CHROME_EGRESS
  *                               hosted_chrome's operator config, all three or none (hostedChromeOperator.ts); needs the
  *                               Firestore store, where its switch and counters are
+ *   W2L_HOSTED_REGEX_CHECKS     1: take a task contract's regular-expression checks (markdownMatches, markdownCountMin),
+ *                               when the start-up self-test passes (hostedRegex.ts; ADR 0006, amendment of 2026-10-29);
+ *                               unset or 0: refuse them by name. The worker takes the same value.
  * The compatible transport (ADR 0005 compatible_transport) is granted per request while `hostedConfig/compatibleTransport`
  * says so (hostedAccess.ts); a memory store grants it to no call.
  */
@@ -38,6 +41,7 @@ import { FirestoreModelSpend, firestoreModelSettings, HostedModel } from './host
 import { firestoreHostedAccess } from './hostedAccess.js'
 import { FirestoreHostedChromeSpend } from './hostedChromeMeter.js'
 import { hostedChromeConfigFromEnv, hostedChromeOperator } from './hostedChromeOperator.js'
+import { hostedRegexChecksFromEnv } from './hostedRegex.js'
 
 function positive(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -88,12 +92,16 @@ if (chromeConfig !== null && access === undefined) throw new Error('hosted_chrom
 const hostedChrome = chromeConfig === null ? undefined : hostedChromeOperator(chromeConfig, { settings: access!, spend: new FirestoreHostedChromeSpend(process.env.W2L_FIRESTORE_PROJECT_ID!, serviceAccessToken()), quota })
 // impit, the compatible transport's native module, loaded now: a platform without it stops the start, not a page.
 await loadImpit()
+// The regular-expression checks: the operator's switch, honoured only when this process's self-test passes.
+const regex = hostedRegexChecksFromEnv(process.env)
+if (regex.failures.length > 0) console.log(JSON.stringify({ severity: 'ERROR', event: 'regex_self_test_failed', failures: regex.failures, node: process.version }))
 const notice = hostedProxyNotice(process.env)
 if (notice) console.log(`octocrawl-hosted-api: ${notice}`)
 const service = createHostedApi({
   port, host: '0.0.0.0',
   taskRoot: process.env.W2L_TASK_ROOT ?? '/tmp/octocrawl-hosted',
   hashKey, keys, oauthTokens, quota, leases, credits, ...(model === undefined ? {} : { model }), ...(access === undefined ? {} : { access }), ...(hostedChrome === undefined ? {} : { hostedChrome }),
+  regexChecks: regex.enabled,
   ...(jobsCloud === null ? {} : { jobs: { store: new FirestoreHostedJobStore(jobsCloud.project, serviceAccessToken()), files: gcsJobFiles(jobsCloud.bucket), enqueueSlice: jobsCloud.enqueueSlice, enqueueFinish: jobsCloud.enqueueFinish, enabled: jobsCloud.enabled, allows: jobsCloud.allows } }),
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
   keylessDaily: positive('W2L_KEYLESS_DAILY', 20),
@@ -106,4 +114,4 @@ const service = createHostedApi({
   publicOrigin: process.env.W2L_PUBLIC_API_ORIGIN || undefined,
 })
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void service.close().then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) }) })
-console.log(JSON.stringify({ service: 'octocrawl-hosted-api', port, store, keylessDaily: positive('W2L_KEYLESS_DAILY', 20), claudeDaily: positive('W2L_CLAUDE_DAILY', 200), siteDaily: positive('W2L_SITE_DAILY', 1_500), keylessTotalDaily: positive('W2L_KEYLESS_TOTAL_DAILY', 500), accountDaily: positive('W2L_ACCOUNT_DAILY', 500), accountsDaily: positive('W2L_ACCOUNTS_DAILY', 3_000), monthlyCredits, extractModel: model === undefined ? null : extractModel?.model ?? null, hostedChrome: chromeConfig === null ? null : { egress: chromeConfig.egress?.vendor ?? 'google' }, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))
+console.log(JSON.stringify({ service: 'octocrawl-hosted-api', port, store, regexChecks: regex.enabled, node: process.version, keylessDaily: positive('W2L_KEYLESS_DAILY', 20), claudeDaily: positive('W2L_CLAUDE_DAILY', 200), siteDaily: positive('W2L_SITE_DAILY', 1_500), keylessTotalDaily: positive('W2L_KEYLESS_TOTAL_DAILY', 500), accountDaily: positive('W2L_ACCOUNT_DAILY', 500), accountsDaily: positive('W2L_ACCOUNTS_DAILY', 3_000), monthlyCredits, extractModel: model === undefined ? null : extractModel?.model ?? null, hostedChrome: chromeConfig === null ? null : { egress: chromeConfig.egress?.vendor ?? 'google' }, sourceCommit: process.env.W2L_SOURCE_COMMIT ?? null }))

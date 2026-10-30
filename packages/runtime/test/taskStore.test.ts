@@ -428,6 +428,7 @@ describe('@w2l/runtime public surface', () => {
       'pageCacheKey',
       'parseWebhookRetryAfter',
       'readinessOf',
+      'regexBoundSelfTest',
       'registerDeliveryDestination',
       'reportFromTaskAttempt',
       'requestFingerprint',

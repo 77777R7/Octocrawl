@@ -35,3 +35,5 @@ export { ROUTE_VERIFIER_VERSION, VERIFIER_VERSION, contractSha256, verify } from
 export type { VerifyOptions, VerifyView } from './verify.js'
 export { currentRegexLedger, REGEX_SCAN_LIMIT_MS, REGEX_STEERING_POOL_MS, REGEX_VERIFY_POOL_MS, RegexLedger, RegexPool, withRegexLedger } from './regexCheck.js'
 export type { RegexStats } from './regexCheck.js'
+export { regexBoundSelfTest } from './regexSelfTest.js'
+export type { RegexSelfTest } from './regexSelfTest.js'

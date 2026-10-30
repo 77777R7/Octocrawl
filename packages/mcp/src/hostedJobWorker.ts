@@ -74,6 +74,12 @@ export interface JobWorkerDeps {
   access?: HostedAccessSource
   /** hosted_chrome's operator config (hostedChromeOperator.ts), for a slice whose job chose access enhanced; absent: no rung. */
   hostedChrome?: HostedChromeOperator
+  /**
+   * The slices' engine takes the regular-expression checks of a job's task contract: the operator's W2L_HOSTED_REGEX_CHECKS
+   * with the start-up self-test passed (hostedRegex.ts; ADR 0006, amendment of 2026-10-29). Absent: refused, as the
+   * hosted API's start refuses them.
+   */
+  regexChecks?: boolean
   /** The engine's network and lanes; a test passes a local policy and HTTP-only channels. Default: the hosted policy. */
   engineOptions?: () => Partial<ApiEngineOptions>
   /** A directory the worker may write task directories in. */
@@ -242,7 +248,9 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
 
     // The slice: a new engine over the restored task, stopped by the job's cancel or the switch meanwhile.
     // The policy a hosted scrape reads under (its 5 MiB file cap and the operator's contact), on whatever network a test gives.
-    const extra = { ...(deps.hostedChrome === undefined ? {} : { hostedChrome: deps.hostedChrome }), ...deps.engineOptions?.() }
+    // Each page's regular-expression checks, when the operator switched them on: one log line a page, by the job, never its text.
+    const regex: Partial<ApiEngineOptions> = { hostedRegexChecks: deps.regexChecks === true, onRegexChecks: (stats) => log(JSON.stringify({ event: 'regex_checks', kind: 'page', jobId, scans: stats.scans, memoHits: stats.memoHits, totalMs: Math.round(stats.totalMs * 10) / 10, maxMs: Math.round(stats.maxMs * 10) / 10, maxCallMs: Math.round(stats.maxCallMs * 10) / 10, limited: stats.limited })) }
+    const extra = { ...(deps.hostedChrome === undefined ? {} : { hostedChrome: deps.hostedChrome }), ...regex, ...deps.engineOptions?.() }
     // Each page's model call is admitted by the switch and the day's cap, and only while the slice holds its two credits;
     // a worker without a hosted model refuses every call, whatever engine options a caller passed.
     const model = deps.model?.gate(modelRefusal) ?? { gate: { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) } }

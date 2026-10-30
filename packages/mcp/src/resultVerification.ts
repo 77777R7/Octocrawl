@@ -28,13 +28,13 @@ export type ResultProjection = ((projection: Json) => Json) & { deliver: (projec
  * of the result before any cut) share one ledger and REGEX_PROJECTION_POOL_MS; the version delivered is judged again
  * by `deliver`, on a pool of its own, replaying what the ledger's scans found at their cost, so its verdict does not
  * depend on how many candidates the search tried. The one exception is the budget's (results.ts withinBudget): a
- * version whose fresh sentences no longer fit the budget its cut fitted keeps the verdict it was cut with.
+ * version whose fresh sentences no longer fit the budget its cut fitted keeps the verdict it was cut with. `ledger` is
+ * the MCP call's when it judges more than one projection of the same result (server.ts), which then scan its text once.
  */
-export function resultProjection(original: Json, contract?: VerifyContract, basis = 'mcp_result_truncated'): ResultProjection {
+export function resultProjection(original: Json, contract?: VerifyContract, basis = 'mcp_result_truncated', ledger = new RegexLedger()): ResultProjection {
   let before: Verification | undefined
   const previous = original.verification as Verification | undefined
   const priorReadiness = object(original.readiness) ? original.readiness as unknown as Readiness : undefined
-  const ledger = new RegexLedger()
   const probes = new RegexPool(REGEX_PROJECTION_POOL_MS, `this result's ${REGEX_PROJECTION_POOL_MS} ms for regular expressions on its shortened versions was spent`)
   const build = (projection: Json, pool: RegexPool | undefined): Json => {
     if (contract !== undefined) before ??= verify(contract, dataOf(original), { regex: ledger, regexPool: probes })

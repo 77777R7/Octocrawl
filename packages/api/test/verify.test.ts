@@ -335,6 +335,26 @@ describe('task verification on a request (ADR 0006)', () => {
     expect(batch.status).toBe(400)
   })
 
+  it('is taken with its regex checks by a hosted server whose operator switched them on, and judged as a local server judges it (ADR 0006, amendment of 2026-10-29)', async () => {
+    const hosted = engineWith({ hosted: true, hostedRegexChecks: true })
+    const local = engineWith()
+    const contract = { checks: [...passing.checks, { type: 'markdownMatches', pattern: '^high water', flags: 'im' }, { type: 'markdownCountMin', pattern: 'water', min: 3 }] }
+    const [served, read] = [await call(hosted, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: contract }), await call(local, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: contract })]
+    expect(served.status).toBe(200)
+    expect(served.json.verification).toMatchObject({ status: 'failed', reason: 'checks_failed', checks: [{ passed: true }, { passed: true, observedCount: 2 }, { passed: true }, { passed: false, observedCount: 2 }] })
+    expect(served.json.verification).toEqual(read.json.verification)
+    // A batch page too, through the job's engine.
+    const started = await call(hosted, 'POST', '/v1/batches', { urls: [`${origin}/article`], verify: contract })
+    expect(started.status).toBeLessThan(300)
+    const id = started.json.taskId ?? started.json.id
+    for (let i = 0; i < 200; i++) {
+      if (!['pending', 'running'].includes((await call(hosted, 'GET', `/v1/batches/${id}`)).json.status)) break
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    const [item] = (await call(hosted, 'GET', `/v1/batches/${id}/items`)).json.items as Record<string, any>[]
+    expect(item!.verification).toEqual(read.json.verification)
+  })
+
   it('refuses a malformed contract before anything is fetched', async () => {
     const res = await call(engineWith(), 'POST', '/v1/scrape', { url: `${origin}/article`, verify: { checks: [{ type: 'markdownCountMin', pattern: '(a+)+$', min: 1 }] } })
     expect(res.status).toBe(400)

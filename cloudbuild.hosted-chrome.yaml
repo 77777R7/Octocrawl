@@ -9,5 +9,16 @@ steps:
       - -t
       - ${_IMAGE}
       - .
+  # The regular-expression checks' self-test in the image just built (packages/runtime/src/regexSelfTestCli.ts; ADR 0006,
+  # amendment of 2026-10-29), with every pattern of the repository's task files (.gcloudignore uploads them): an image
+  # whose Node does not bound the checks, or judges one of those patterns otherwise than RegExp does, is never pushed.
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - >-
+        set -o pipefail;
+        { printf '['; cat research/access/tasks.v1.json; printf ','; cat research/access/captcha-tasks.v1.json; printf ','; cat research/parity/sites.v1.json; printf ']'; }
+        | docker run -i --rm --entrypoint node ${_IMAGE} packages/runtime/dist/regexSelfTestCli.js --corpus -
 images:
   - ${_IMAGE}

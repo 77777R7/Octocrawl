@@ -8,7 +8,7 @@ import { chromium } from 'playwright'
 import { hostedNetworkPolicy, identityBundleFrom, modeIdentity, parseScrapeRequest, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
 import { createApiEngine } from '@w2l/api'
 import { HOSTED_CHROME_PROFILE_ID, type Channel } from '@w2l/bench'
-import { toEvidenceRecord } from '@w2l/runtime'
+import { toEvidenceRecord, type RegexStats } from '@w2l/runtime'
 import { createHostedChromeService, hostedChromeReader, httpHostedChromeClient, serveHostedChrome } from '../src/hostedChrome.js'
 import { MemoryHostedAccess } from '../src/hostedAccess.js'
 import { datacenterExit, GOOGLE_EXIT } from '../src/hostedChromeEgress.js'
@@ -121,6 +121,23 @@ describe('hosted_chrome: the octocrawl-chrome service end to end', () => {
     } finally {
       await reader.close()
       await new Promise<void>((resolve) => proxy.close(() => resolve()))
+    }
+  }, 90_000)
+
+  it('runs a read\'s regular-expression checks as one request, and tells its observer what they cost, never the page (ADR 0006, amendment of 2026-10-29)', async () => {
+    const costs: RegexStats[] = []
+    const reader = hostedChromeReader(policy, GOOGLE_EXIT, seams, undefined, (stats) => costs.push(stats))
+    try {
+      const verify = { checks: [{ type: 'markdownCountMin' as const, pattern: 'tide height', min: 6 }, { type: 'markdownMatches' as const, pattern: '^# Tide tables$', flags: 'm' }] }
+      const read = await reader.read({ url: `${origin}/article`, options: { verify }, deadlineAt: Date.now() + 60_000 }, new AbortController().signal)
+      expect(read.status).toBe('success')
+      expect(costs).toEqual([{ scans: expect.any(Number), memoHits: expect.any(Number), totalMs: expect.any(Number), maxMs: expect.any(Number), maxCallMs: expect.any(Number), limited: 0 }])
+      expect(costs[0]!.scans).toBeGreaterThan(0)
+      // A read without a pattern check tells nothing.
+      await reader.read({ url: `${origin}/article`, options: { verify: { checks: [{ type: 'markdownIncludes', text: 'Tide tables' }] } }, deadlineAt: Date.now() + 60_000 }, new AbortController().signal)
+      expect(costs).toHaveLength(1)
+    } finally {
+      await reader.close()
     }
   }, 90_000)
 })

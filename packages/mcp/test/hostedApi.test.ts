@@ -13,7 +13,7 @@ import { hostedNetworkPolicy, parseScrapeRequest, type CompactScrapeResponse, ty
 import { MCP_VERSION } from '../src/server.js'
 import { expectUsableInstructions } from './instructionChecks.js'
 import { TOOL_NAMES } from '../src/tools.js'
-import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, noteScrape, scrapePhaseLine, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
+import { accessTokenDigest, BROWSER_BUSY_RETRY_MAX_S, createHostedApi, FirestoreHostedKeys, FirestoreHostedLeases, FirestoreHostedOAuthTokens, fromClaude, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, noteScrape, regexChecksLine, scrapePhaseLine, MemoryHostedLeases, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, SITE_ACCOUNT_TTL_MS, siteAccountAssertion, sweepTaskRoot, verifySiteAccount, type HostedKeyRecord, type HostedKeys, type HostedOAuthTokenRecord, type HostedOAuthTokens } from '../src/hostedApi.js'
 import { MemoryCreditsStore, type CreditsStore, type RequestNote } from '../src/hostedCredits.js'
 import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } from '../src/hostedModel.js'
 import { MemoryHostedAccess, type HostedAccessSource } from '../src/hostedAccess.js'
@@ -55,7 +55,7 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; siteDaily?: number; accountDaily?: number; accountsDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void; model?: HostedModel; access?: HostedAccessSource; compatHosts?: string[] } = {}) {
+async function start(options: { keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; siteDaily?: number; accountDaily?: number; accountsDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void; model?: HostedModel; access?: HostedAccessSource; compatHosts?: string[]; regexChecks?: boolean } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
   // `keys` are stored under their plaintext's digest; `keyRecords` under their own id, as a connection's key record has no plaintext.
@@ -68,6 +68,7 @@ async function start(options: { keylessDaily?: number; claudeDaily?: number; key
     ...(options.model === undefined ? {} : { model: options.model }),
     ...(options.access === undefined ? {} : { access: options.access }),
     ...(options.compatHosts === undefined ? {} : { compatHosts: options.compatHosts }),
+    ...(options.regexChecks === undefined ? {} : { regexChecks: options.regexChecks }),
     keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: options.siteDaily ?? 100, keylessTotalDaily: options.keylessTotalDaily, accountDaily: options.accountDaily, accountsDaily: options.accountsDaily, proxySecret: options.proxySecret,
     networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: options.log ?? (() => {}),
   })
@@ -1103,6 +1104,70 @@ it('a scrape\'s phase line says how long each rung took and what the page waited
   // A rung that never stepped (its call threw) has no duration; a URL that does not parse has no host.
   expect(scrapePhaseLine('not a url', { status: 'failed', lane: 'http', failureReason: 'timeout', channelsTried: ['http'], usage: { wallMs: 5 }, ladderTrace: [{ at: 0, event: 'ladder_channel_started', channel: 'http' }], trace: [] } as unknown as ScrapeRun))
     .toMatchObject({ host: null, reason: 'timeout', browserMs: null, headersTimeoutFallback: false, rungs: [{ channel: 'http', startMs: 0, ms: null, status: null }], waits: [] })
+})
+
+describe('the regular-expression checks of a task contract (ADR 0006, amendment of 2026-10-29)', () => {
+  const contract = { checks: [{ type: 'markdownCountMin', pattern: 'tide height', min: 4 }, { type: 'markdownMatches', pattern: '^# Tides$', flags: 'm' }] }
+  const keys = { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: false, uid: 'account-1' }, oc_plain: { enabled: true, plan: 'free', dailyLimit: 5, browser: false } } satisfies Record<string, HostedKeyRecord>
+  const verifyTypes = (tools: { name: string; inputSchema: unknown }[]) => (tools.find((tool) => tool.name === 'scrape')!.inputSchema as { properties: { verify: { properties: { checks: { items: { properties: { type: { enum: string[] } } } } } } } }).properties.verify.properties.checks.items.properties.type.enum
+  const parsed = (lines: string[]) => lines.filter((line) => line.startsWith('{')).map((line) => JSON.parse(line) as Record<string, unknown>)
+
+  it('takes them on REST and MCP when the operator switched them on, logging what they cost by account, never the page or the pattern', async () => {
+    const lines: string[] = []
+    const { url } = await start({ regexChecks: true, keylessDaily: 10, credits: new MemoryCreditsStore(1_000), log: (line) => lines.push(line), keys })
+    for (const headers of [{}, { authorization: 'Bearer oc_plain' }, { authorization: 'Bearer oc_account' }] as Record<string, string>[]) {
+      const response = await post(url, '/v1/scrape', { url: `${origin}/tides`, verify: contract }, headers)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ status: 'success', verification: { status: 'passed', checks: [{ observedCount: 4 }, { passed: true }] } })
+    }
+    const costs = parsed(lines).filter((line) => line.event === 'regex_checks')
+    const account = (line: Record<string, unknown>) => line.account
+    expect(costs.map(account)).toEqual([null, null, expect.stringMatching(/^[0-9a-f]{16}$/)])
+    for (const line of costs) expect(line).toEqual({ event: 'regex_checks', kind: 'scrape', account: line.account, scans: 2, memoHits: expect.any(Number), totalMs: expect.any(Number), maxMs: expect.any(Number), maxCallMs: expect.any(Number), limited: 0 })
+    expect(JSON.stringify(costs)).not.toMatch(/account-1|tide height|Tides|harbour/)
+    // A scrape with a contract also says how long the event loop waited while it ran (hostedLoopDelay.perf.test.ts
+    // measures it); one without says nothing of it.
+    await post(url, '/v1/scrape', { url: `${origin}/plain` }, { authorization: 'Bearer oc_plain' })
+    const phases = parsed(lines).filter((line) => line.event === 'hosted_scrape_phases')
+    expect(phases.map((line) => [typeof line.loopMaxMs, typeof line.loopP99Ms])).toEqual([['number', 'number'], ['number', 'number'], ['number', 'number'], ['undefined', 'undefined']])
+    // MCP lists them, as the server card does, and a call that sends them is judged; its result's re-judgements have a line of their own.
+    const card = await (await fetch(`${url}/.well-known/mcp/server-card.json`)).json() as { tools: { name: string; description: string; inputSchema: unknown }[] }
+    const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: { authorization: 'Bearer oc_plain' } } }))
+      const listed = (await client.listTools()).tools
+      expect(verifyTypes(listed)).toEqual(expect.arrayContaining(['markdownMatches', 'markdownCountMin']))
+      expect(card.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))).toEqual(listed.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })))
+      const text = (((await client.callTool({ name: 'scrape', arguments: { url: `${origin}/tides`, verify: contract } })).content) as { type: string; text: string }[])[0]!.text
+      expect(JSON.parse(text)).toMatchObject({ status: 'success', verification: { status: 'passed' } })
+    } finally { await client.close() }
+    const results = parsed(lines).filter((line) => line.event === 'regex_checks' && line.kind === 'mcp_result')
+    expect(results).toEqual([{ event: 'regex_checks', kind: 'mcp_result', account: null, scans: expect.any(Number), memoHits: expect.any(Number), totalMs: expect.any(Number), maxMs: expect.any(Number), maxCallMs: expect.any(Number), limited: 0 }])
+    expect(results[0]!.scans).toBeGreaterThan(0)
+  })
+
+  it('refuses them by name on REST and leaves them out of the MCP schema when it did not', async () => {
+    const lines: string[] = []
+    const { url } = await start({ log: (line) => lines.push(line), keys })
+    const response = await post(url, '/v1/scrape', { url: `${origin}/tides`, verify: contract }, { authorization: 'Bearer oc_plain' })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'unsupported_parameter', error: expect.stringMatching(/^verify: markdownCountMin and markdownMatches checks are not available in hosted mode yet/) })
+    const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: { authorization: 'Bearer oc_plain' } } }))
+      expect(verifyTypes((await client.listTools()).tools)).not.toEqual(expect.arrayContaining(['markdownMatches']))
+    } finally { await client.close() }
+    expect(parsed(lines).filter((line) => line.event === 'regex_checks')).toEqual([])
+  })
+
+  it('logs an account by a digest under the operator\'s key, and times to a tenth of a millisecond', () => {
+    const stats = { scans: 3, memoHits: 1, totalMs: 12.345, maxMs: 9.87, maxCallMs: 10.04, limited: 1 }
+    const line = JSON.parse(regexChecksLine(HASH_KEY, stats, { kind: 'page', account: 'account-1' })) as Record<string, unknown>
+    expect(line).toEqual({ event: 'regex_checks', kind: 'page', account: expect.stringMatching(/^[0-9a-f]{16}$/), scans: 3, memoHits: 1, totalMs: 12.3, maxMs: 9.9, maxCallMs: 10, limited: 1 })
+    expect(JSON.parse(regexChecksLine(HASH_KEY, stats, { kind: 'page', account: 'account-1' })).account).toBe(line.account)
+    expect(JSON.parse(regexChecksLine('g'.repeat(40), stats, { kind: 'page', account: 'account-1' })).account).not.toBe(line.account)
+    expect(JSON.parse(regexChecksLine(HASH_KEY, stats, { kind: 'scrape' })).account).toBeNull()
+  })
 })
 
 it('logs one phase line for every hosted scrape, with or without debug, and never puts it in the answer', async () => {

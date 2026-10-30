@@ -9,10 +9,10 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
 import { buildChannels } from '@w2l/bench'
 import { createApiEngine, createApp, type ApiEngine } from '@w2l/api'
-import { decodeStepCursor } from '@w2l/runtime'
+import { decodeStepCursor, RegexLedger } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer } from '../src/server.js'
-import { RESULT_TEXT_MAX, withoutTelemetry } from '../src/results.js'
+import { RESULT_TEXT_MAX, shapeResult, withoutTelemetry } from '../src/results.js'
 import { TOOLS } from '../src/tools.js'
 
 /**
@@ -328,5 +328,20 @@ describe('withoutTelemetry: hosted results without telemetry, internal ids or ca
     expect(withoutTelemetry('map', map, {})).toBe(map)
     const other = { taskId: 't1', status: 'running' }
     expect(withoutTelemetry('get_crawl', other, {})).toBe(other)
+  })
+})
+
+describe('one MCP call\'s re-judgements of a scrape (ADR 0006, amendment of 2026-10-29)', () => {
+  it('share the call\'s ledger, so the page\'s text is scanned once and its cost counted in one place, with the verdicts unchanged', () => {
+    const contract = { checks: [{ type: 'markdownCountMin' as const, pattern: 'tide', min: 2 }, { type: 'markdownMatches' as const, pattern: '^# Tides$', flags: 'm' }] }
+    const result = { status: 'success', markdown: '# Tides\n\nThe tide tables give each tide.', usage: { wallMs: 1 }, channelsTried: ['http'] }
+    const judged = (ledger?: RegexLedger) => shapeResult('scrape', withoutTelemetry('scrape', result, {}, contract, { ledger }), contract, ledger).value as { verification: { status: string } }
+    const shared = new RegexLedger()
+    const once = judged(shared)
+    // Two checks, each scanned once on the one text; every later judgement reuses the scan.
+    expect(shared.stats).toMatchObject({ scans: 2, limited: 0 })
+    expect(shared.stats.memoHits).toBeGreaterThan(0)
+    expect(once).toEqual(judged())
+    expect(once.verification).toMatchObject({ status: 'passed' })
   })
 })

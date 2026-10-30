@@ -1,5 +1,6 @@
 import { CLIENT_INFO_META_KEY, Server, type Implementation, type Tool } from '@modelcontextprotocol/server'
 import { isApiErrorCode, readVerify, type VerifyContract } from '@w2l/contracts'
+import { RegexLedger, type RegexStats } from '@w2l/runtime'
 import { W2L, W2LError } from '@w2l/sdk'
 import type { PostCalls } from './inFlight.js'
 import { serverInstructions } from './instructions.js'
@@ -33,6 +34,11 @@ export interface McpServerOptions {
   progress?: boolean | { everyMs?: number; heartbeatMs?: number }
   /** Answer results without telemetry and internal ids (withoutTelemetry): hosted Octocrawl, whose tools look up none but a scrape's record. */
   minimalResults?: boolean
+  /**
+   * Told what a scrape result's re-judgements cost (resultVerification.ts), once a call, when they ran a pattern scan:
+   * hosted Octocrawl logs it, as the engine's own line does not see them (ADR 0006, amendment of 2026-10-29).
+   */
+  onRegexChecks?: (stats: RegexStats) => void
 }
 
 /** This server's own version: the `origin` of a call whose client declared no name and version. */
@@ -109,7 +115,13 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       const declared = TOOLS.find(tool => tool.name === request.params.name)
       const structured = declared !== undefined && 'outputSchema' in declared
       // The verdict first, cut to the budget, and a screenshot as an image block too (docs/mcp-client-ux-tasks.md W8).
-      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments, contract, { keepScrapeId }) : result, contract)
+      // One ledger for the call's re-judgements of a scrape, so they scan its text once and their cost is told once.
+      const ledger = contract === undefined ? undefined : new RegexLedger()
+      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments, contract, { keepScrapeId, ledger }) : result, contract, ledger)
+      if (ledger !== undefined) {
+        ledger.close()
+        if (ledger.stats.scans > 0 || ledger.stats.memoHits > 0) { try { options.onRegexChecks?.(ledger.stats) } catch { /* the observer's own fault */ } }
+      }
       return { content: [{ type: 'text', text: JSON.stringify(value) }, ...images], ...(structured ? { structuredContent: value as Record<string, unknown> } : {}) }
     } finally { call?.end() }
   })

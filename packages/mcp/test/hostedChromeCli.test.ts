@@ -1,38 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { createServer, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { runHostedCli as run } from './hostedCliRun.js'
 
 // The hosted CLIs and hosted_chrome's variables: none set changes nothing, part of them stops the start, and the
 // octocrawl-chrome service names its exit by kind and count alone. Every value here is made up.
 
-const SRC = fileURLToPath(new URL('../src/', import.meta.url))
 const LOGIN = 'made-up-pass-4d1e'
-
-/** Runs a CLI until it prints its startup line or exits; answers what it printed and its exit code (null: it was serving). */
-async function run(cli: string, env: Record<string, string>): Promise<{ out: string; code: number | null }> {
-  // The hosted API takes no port 0: a free one, as its tests pick.
-  const probe = createServer()
-  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve))
-  const port = String((probe.address() as AddressInfo).port)
-  await new Promise<void>((resolve) => probe.close(() => resolve()))
-  return new Promise((resolve) => {
-    const base = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('W2L_') && !/^https?_proxy$/i.test(key)))
-    const child = spawn(process.execPath, ['--import', 'tsx', join(SRC, cli)], { env: { ...base, PORT: port, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
-    let out = ''
-    const timer = setTimeout(() => child.kill('SIGKILL'), 30_000)
-    const onOutput = (chunk: Buffer) => {
-      out += chunk.toString()
-      if (/"service":"octocrawl-hosted-api"|"event":"hosted_chrome_started"/.test(out)) { clearTimeout(timer); child.kill('SIGTERM'); resolve({ out, code: null }) }
-    }
-    child.stdout.on('data', onOutput)
-    child.stderr.on('data', onOutput)
-    child.on('exit', (code) => { clearTimeout(timer); resolve({ out, code }) })
-  })
-}
 
 const API = { W2L_HOSTED_STORE: 'memory', W2L_QUOTA_HASH_KEY: 'k'.repeat(40) }
 const CHROME = {
@@ -50,6 +25,8 @@ describe('the hosted API\'s start and hosted_chrome\'s variables', () => {
     const { out, code } = await run('hostedApiCli.ts', { ...API, W2L_TASK_ROOT: join(dir, 'none') })
     expect(code).toBeNull()
     expect(out).toContain('"hostedChrome":null')
+    // Nor are the regular-expression checks taken (ADR 0006, amendment of 2026-10-29): hostedRegexCli.perf.test.ts switches them on.
+    expect(out).toContain('"regexChecks":false')
   }, 40_000)
 
   it('does not start with part of them, naming what is missing', async () => {

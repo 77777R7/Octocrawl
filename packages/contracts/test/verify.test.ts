@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_VERIFY_CHECKS, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError } from '../src/index.js'
+import { hostedVerifyRefusal, MAX_VERIFY_CHECKS, parseBatchStartRequest, parseCrawlStartRequest, parseScrapeRequest, RequestError, type VerifyContract } from '../src/index.js'
 
 const scrape = (verify: unknown) => parseScrapeRequest({ url: 'https://example.com/', verify })
 const refused = (verify: unknown): string => {
@@ -75,5 +75,16 @@ describe('a task contract on a request (verify, ADR 0006)', () => {
     expect(refused({ checks: [{ type: 'field', path: 'lane', in: [{}] }] })).toContain('.in must be a list')
     expect(refused({ checks: [{ type: 'listRecordsMin', min: 1.5 }] })).toContain('must be an integer')
     expect(refused({ checks: [{ type: 'recordFields', fields: [], min: 1 }] })).toContain('fields must be a list')
+  })
+})
+
+describe('a hosted server and the regular-expression checks (ADR 0006, amendment of 2026-10-29)', () => {
+  it('refuses them by name, once each, unless its operator switched them on; the other checks always pass', () => {
+    const contract: VerifyContract = { checks: [{ type: 'markdownIncludes', text: 'Tides' }, { type: 'markdownCountMin', pattern: 'tide', min: 1 }, { type: 'markdownMatches', pattern: 'Tides' }, { type: 'markdownCountMin', pattern: 'hour', min: 2 }] }
+    expect(hostedVerifyRefusal(contract)).toBe('verify: markdownCountMin and markdownMatches checks are not available in hosted mode yet; use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally')
+    expect(hostedVerifyRefusal(contract, { regexChecks: false })).toBe(hostedVerifyRefusal(contract))
+    expect(hostedVerifyRefusal(contract, { regexChecks: true })).toBeNull()
+    expect(hostedVerifyRefusal({ checks: [{ type: 'markdownIncludes', text: 'Tides' }, { type: 'minTables', min: 1 }] })).toBeNull()
+    expect(hostedVerifyRefusal(undefined)).toBeNull()
   })
 })

@@ -24,7 +24,7 @@ export interface VerifyContract {
 
 export type VerifyCheckType = VerifyCheck['type']
 export const VERIFY_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownIncludes', 'markdownMatches', 'markdownCountMin', 'minTables', 'tableRowsMin', 'listRecordsMin', 'recordFields', 'field']
-/** Checks whose patterns are JavaScript regular expressions: they run with a time limit (regexCheck.ts in @w2l/runtime), and a hosted server refuses them until a later change opens them there (ADR 0006, amendment of 2026-10-29). */
+/** Checks whose patterns are JavaScript regular expressions: they run with a time limit (regexCheck.ts in @w2l/runtime), and a hosted server takes them only when its operator switches them on (hostedVerifyRefusal; ADR 0006, amendment of 2026-10-29). */
 export const VERIFY_REGEX_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownMatches', 'markdownCountMin']
 export const MAX_VERIFY_CHECKS = 32
 export const MAX_VERIFY_TEXT = 1_000
@@ -32,10 +32,12 @@ const MAX_VERIFY_COUNT = 1_000_000
 const MAX_RECORD_FIELDS = 50
 
 /**
- * Why a hosted server refuses a contract, naming its regular-expression checks, or null when it holds none: a hosted
+ * Why a hosted server refuses a contract, naming its regular-expression checks, or null when it holds none or the server
+ * takes them (`regexChecks`: its operator's W2L_HOSTED_REGEX_CHECKS, with the start-up self-test passed): a hosted
  * engine's scrape, crawl and batch and a hosted job's start refuse it in these words, before anything is fetched or stored.
  */
-export function hostedVerifyRefusal(contract: VerifyContract | undefined): string | null {
+export function hostedVerifyRefusal(contract: VerifyContract | undefined, options: { regexChecks?: boolean } = {}): string | null {
+  if (options.regexChecks === true) return null
   const types = [...new Set(contract?.checks.filter((check) => VERIFY_REGEX_CHECK_TYPES.includes(check.type)).map((check) => check.type) ?? [])]
   if (types.length === 0) return null
   return `verify: ${types.join(' and ')} checks are not available in hosted mode yet; use markdownIncludes, minTables, listRecordsMin, recordFields or field, or run Octocrawl locally`
