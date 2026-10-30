@@ -476,7 +476,7 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - 这类参数多半是 `--disable-features=…` 或 `--disable-component-update`，按上文"启动参数分两类"属于会影响指纹或检测的那一类。那一条的门槛是"要先在 16 道题上至少跑两次，并且结果不低于当前基线"。对这一级写明如下：
   - 在 challenge16（`research/access/subsets.v1.json`）上跑两次；
   - 每次的验证通过数不低于基线，假成功不多于基线；
-  - 基线是这一级当时在用的启动方式，在同一类出口上的结果。
+  - 基线是这一级当时在用的启动方式，在同一类出口上的结果（`hosted_chrome` 开始服务前的那次门槛，基线怎样取，见修订 2026-10-30）。
   两次都满足，这样的参数才生效；生效后 `profile` 换成新的标识。
 - 这道门槛对 `hosted_chrome` 启动方式的每一项改动都适用。升级钉住的 Chrome 版本怎样过门槛，包括安全更新能不能先上、再补跑，另行决定。
 - 本地 `installed_chrome` 的启动参数和门槛不因本修订改变。
@@ -523,3 +523,41 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 - 引擎代码不变：阶梯、能力、grant 的规则和 Steel 的适配器都没改。改的只有推荐的措辞、本地 agentHint 的文字和每周重跑的臂。
 - 每周定时任务的调用参数不在本修订里，由协调会话另行调整。如果那个任务显式写了 `--arms` 并且含 `steel`，Steel 臂照样会跑。
 - 本修订引用的测量记录在 #747，要在 #747 合入之后才在 `main` 上。
+
+## 修订 2026-10-30：`hosted_chrome` 门槛的基线和两次运行（ROADMAP 阶段 H，H2c 验收）
+
+**背景。** `hosted_chrome` 的启动方式比本机 `installed_chrome` 多一个 WebRTC 偏好（`nodriver-0.50.6-no-allow-origins+webrtc-proxied-udp-only`，`packages/bench/src/subjects/hostedChrome.ts`），所以它开始服务之前要过决定八的门槛：在 challenge16 上跑两次，每次的验证通过数不低于基线，假成功不多于基线。决定八没写三件事：基线用现成的数还是每次重测，两次要不要在同一个构建上，由谁来定。
+
+已经跑过的两次都没带任务契约，因为当时部署的托管还不收 `markdownMatches` 和 `markdownCountMin`：
+
+- [第 1 次](../../research/access/runs/2026-10-29-hosted-chrome-gate-r1-132f6352.md)：镜像 `338775e6`，验证通过 3 道，假成功 1 道；
+- [第 2 次](../../research/access/runs/2026-10-30-hosted-chrome-gate-r2-637af767.md)：镜像 `8ed40c92`，验证通过 4 道，假成功 0 道。
+
+最接近的已测结果是 H2b 窗口 2 的数据中心臂（[记录](../../research/access/runs/2026-10-27-h2b-egress-8ece08ab.md)，2026-10-28，Cloud Run）：本机 `installed_chrome` 的启动方式，Webshare 数据中心出口，带任务契约，challenge16 上验证通过 6 道，假成功 0 道。这一臂只跑过这一个窗口。
+
+**决定（Howard，2026-10-30，在对话中选了"当天配对重测"）。**
+
+- **基线在每次门槛的同一天重测。** 用同一个源 commit 构建的镜像，在 H2b 的 Cloud Run 工具（`research/access/h2b-egress/`）里只跑数据中心臂：
+  - 启动方式是本机 `installed_chrome` 的 `nodriver-0.50.6-no-allow-origins`；
+  - 出口是 `hosted_chrome` 用的那份 Webshare 数据中心列表；
+  - 只发 challenge16，带任务契约；
+  - robots.txt 不允许的题不发送，算未通过，和托管拒绝它们一样。
+
+  这一轮的验证通过数和假成功数，就是当天那次门槛的基线。
+- **两次跑在同一个发布构建上**，都带任务契约。两次之间不重新部署 `octocrawl-chrome` 和 API 的 tag。
+- 正则检查开关发布以后，在 tag 上跑的第一项检查（`docs/hosted-api.md` 的 "The regular-expression checks"：带任务契约的 challenge16）同时算第 1 次门槛。它要照门槛的条件跑才算数：`--access "enhanced"`，用允许名单里那个账户的 key，tag 的 revision 带 `hosted_chrome` 的运营配置，客户端等待 330 s。一个账户每天在这一级上只有 20 次（`dailyAttemptsPerAccount`），一轮最多用 14 次，所以门槛当天这个账户不做别的 `hosted_chrome` 读取。
+- 上面已经跑过的两次不计入门槛，留作记录。
+- H2b 窗口 2 的 6 道和 0 道只作参考，不作基线。
+
+**两边仍然不同的地方。** 下面几项不单独测，每次的记录里写明：
+
+- WebRTC 偏好，这正是门槛要查的；
+- 托管服务这条路径：托管是 API 的阶梯逐次调用服务，工具里是 run-set 调同一个 job 里的本地 API；
+- 每次读用哪个代理：托管由服务自己挑，工具按打乱后的列表顺序取；
+- 域名由谁解析：托管的地址检查在 Cloud Run 上解析域名，再让代理连到检查过的 IP；工具的转发器把域名交给 Webshare 代理去解析。H2b 的数据中心轮里，T047 和 T048 连 Cloudflare 的验证主机 `brunhild.challenges.cloudflare.com` 都被代理拒绝（`502 target_connect_resolve_failed`，代理解析不了这个域名），两道题都停在验证页上。托管这条路径不会出现这种拒绝；
+- 客户端等待上限：门槛运行给 330 s，工具里的 run-set 用默认值（题目自己的 `timeoutMs`，没有就 180 s），和 H2b 一样；
+- Node 版本：托管是 22.23.4，工具镜像是 26.8.1。
+
+**没定的。** 一次不满足以后怎样重跑，另行决定。
+
+**本修订合入时的边界。** 引擎代码不变。`research/access/h2b-egress/cloud.sh` 加了三个环境变量：`H2B_ONLY` 让工具只建、只跑指定的 job，`H2B_DC_START` 指定数据中心列表从哪个位置开始取，`H2B_TASKS` 指定只发哪些题。门槛的结果另写记录，本修订不判过没过。
