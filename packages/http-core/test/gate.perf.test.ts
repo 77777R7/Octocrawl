@@ -26,6 +26,22 @@ describe('classifyGate on large or hostile pages', () => {
     }
   })
 
+  it('reads a page with no main content for a captcha widget\'s tags or Akamai\'s logo in bounded time', () => {
+    // A widget's marker in the head has the whole body read for the tags that carry it; Akamai's line, for its logo.
+    const head = '<html><head><script src="https://www.google.com/recaptcha/api.js"></script></head><body>'
+    const shapes: Record<string, string> = {
+      'tags without text': head + '<div class="row" data-x="aaaaaaaaaaaaaaaaaaaa">'.repeat(200_000),
+      'tags each naming widgets': head + '<div class="g-recaptcha h-captcha cf-turnstile" data-sitekey="k">'.repeat(100_000),
+      'long tags almost naming one': head + `<div class="${'g-recaptch hcaptcha.co data-siteke '.repeat(55)}">`.repeat(2_800),
+      'images beside Akamai\'s line': '<html><body><p>Powered and protected by</p>' + '<img src="https://www.akamai.co/a.png" alt="akamaix">'.repeat(100_000),
+    }
+    for (const [name, body] of Object.entries(shapes)) {
+      const started = performance.now()
+      classifyGate({ ...res(body), contentful: false })
+      expect(performance.now() - started, name).toBeLessThan(1_500)
+    }
+  })
+
   it('bounds the dedicated challenge scan and keeps hostile tags linear', () => {
     const finalUrl = 'https://www.skyscanner.net/sttc/px/captcha-v2/index.html'
     for (const body of ['<h1>Are you a person or a robot?</h1>' + '<iframe'.repeat(100_000), '<script>' + 'x'.repeat(1_000_001) + '</script>']) {
