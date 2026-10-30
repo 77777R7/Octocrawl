@@ -176,7 +176,7 @@ interface LadderProgress {
   ledger: SpendLedger | null
   /** CAPTCHA solves attempted for this page, by every rung and retry: charged, or refused before a task (ADR 0005 third_party_captcha_solver). */
   solves: number
-  /** The last page the ladder stepped past for a stronger rung (strongerRungMayAnswer), kept over a later failure with none. */
+  /** The last page the ladder stepped past for a stronger rung (strongerRungMayAnswer) or blocked on, kept over a later failure with none. */
   steppedPast: { channel: string; result: FetchResult } | null
   /**
    * The shadow decision (decideNext, PA F4) on the last rung that answered, written as `ladder_action_decision` once
@@ -687,12 +687,13 @@ export class LadderRunner {
         ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_evidence_kept', channel: kept.channel, detail: { kept: kept.channel, failed: channelsTried.at(-1) ?? null, reason: result.failureReason } })
         return notImproved(kept.result)
       }
-      // A page the ladder stepped past for a stronger rung (a 403 the site answered, a page rendered with no main content)
-      // says more than a later rung's failure with no page at all: a network error, a provider's own error, a timeout.
+      // A page the ladder stepped past for a stronger rung (a 403 the site answered, a page rendered with no main content),
+      // or a block the site gave a rung, says more than a later rung's failure with no page at all: a network error, a
+      // provider's own error, a timeout. Not Octocrawl's own crash on a page its rung captured (internal_error, K1 T016).
       const stepped = progress.steppedPast
-      if (stepped === null || stepped.result === result || (result.evidence.httpStatus != null && result.failureReason !== 'provider_error')) return result
+      if (stepped === null || stepped.result === result || result.failureReason === 'internal_error' || (result.evidence.httpStatus != null && result.failureReason !== 'provider_error')) return result
       ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_evidence_kept', channel: stepped.channel, detail: { kept: stepped.channel, failed: channelsTried.at(-1) ?? null, reason: result.failureReason ?? result.blockReason } })
-      return notImproved(stepped.result)
+      return notImproved(withoutPassedRetryAt(stepped.result))
     }
 
     // Sessions exist for authed mode ONLY. standard/research never load or
@@ -1078,6 +1079,8 @@ export class LadderRunner {
         bestSize = -1
         bestChannel = null
       }
+      // The site's refusal is kept over a later rung's failure with no page (failedAnswer, deadlineOutcome).
+      if (result.status === 'blocked') progress.steppedPast = { channel: channel.id, result }
 
       if (result.handoff) {
         if (!sessionsPermitted) {
@@ -1648,9 +1651,10 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
     // A page a rung kept as evidence when it found no main content stays on
     // the timeout, as evidence.
     const evidence = noMainContentEvidence(attempts)
-    // Else the page a rung was stepped past for (a 403 the site answered), over a cut rung that returned no page.
-    const stepped = evidence === null && (returned === null || returned.evidence.httpStatus == null) ? progress.steppedPast : null
-    const base = evidence?.result ?? stepped?.result ?? (returned?.status === 'failed' ? returned : deadlineFailure(url, laneOf(interrupted), at))
+    // Else the page a rung was stepped past for (a 403 the site answered, a block), over a cut rung that returned no page.
+    const stepped = evidence === null && (returned === null || returned.evidence.httpStatus == null) && progress.steppedPast !== null
+      ? { ...progress.steppedPast, result: withoutPassedRetryAt(progress.steppedPast.result) } : null
+    const base = evidence?.result ?? stepped?.result ??(returned?.status === 'failed' ? returned : deadlineFailure(url, laneOf(interrupted), at))
     const kept = evidence?.channel ?? stepped?.channel ?? null
     const event: TraceEvent = { at, lane: base.lane, event: 'deadline_exceeded', detail: kept === null ? detail : { ...detail, evidence: kept } }
     result = { ...base, status: 'failed', failureReason: 'timeout', blockReason: null, budgetExceeded: null, markdown: evidence?.result.markdown ?? stepped?.result.markdown ?? null, usage: { ...base.usage, contentTokens: null, deadlineExceeded: true }, trace: [...base.trace, event] }
@@ -1800,6 +1804,16 @@ function noMainContentEvidence(attempts: readonly LadderAttempt[]): LadderAttemp
     if (result.status === 'failed' && result.failureReason === 'empty_unverified' && result.markdown !== null) return attempts[i]!
   }
   return null
+}
+
+/**
+ * A kept block without the Retry-After the ladder already waited out (a 429 or 503 challenge it went on past): a time
+ * that has passed asks the caller to wait for nothing. One still ahead stays.
+ */
+function withoutPassedRetryAt(result: FetchResult): FetchResult {
+  if (result.retryAt === undefined || result.retryAt > Date.now()) return result
+  const { retryAt: _passed, ...rest } = result
+  return rest
 }
 
 /** A timeout for a rung the deadline interrupted before it returned anything. */
