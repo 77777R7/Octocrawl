@@ -17,15 +17,15 @@ describe('cleanTree', () => {
       doc.close()
       return elapsed
     }
-    run(5_000)
+    run(2_500)
     // The two sizes take turns, so a busy moment of the machine slows both.
     let smallBest = Infinity
     let largeBest = Infinity
     for (let i = 0; i < 5; i++) {
-      smallBest = Math.min(smallBest, run(5_000))
+      smallBest = Math.min(smallBest, run(2_500))
       largeBest = Math.min(largeBest, run(10_000))
     }
-    // Twice the page takes about twice the time; it took four times as long when each <aside> looked at every element beside it, and above it, on its own.
-    expect(largeBest / smallBest).toBeLessThan(3)
+    // Four times the page takes about four times as long (3.9 to 4.3 measured); a check that looked, for each <aside>, at every element beside it and above it would take about sixteen.
+    expect(largeBest / smallBest).toBeLessThan(8)
   })
 })
