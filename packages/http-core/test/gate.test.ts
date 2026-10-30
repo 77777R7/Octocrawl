@@ -123,6 +123,21 @@ describe('classifyGate — vendor headers are decisive', () => {
     expect(classifyGate(withHeaders({ 'x-datadome': 'protected' }, { status: 202, body: '' }))?.reason).toBe('bot_detected_generic')
   })
 
+  it('does not take x-iinfo alone on a success for a block: Imperva sends it on the pages it lets through', () => {
+    // in-n-out.com, aaii.com, lizearle.com and info.buy.nsw.gov.au in the browser lane (Firecrawl scrape-content set,
+    // 2026-10-30): each page rendered in full with Imperva's x-iinfo header and its injected _Incapsula_Resource script.
+    const page = ARTICLE.replace('</head>', '<script src="/_Incapsula_Resource?SWJIYLWA=719d34d31c8e3a6e6fffd425f7e032f3&ns=1"></script></head>')
+    expect(classifyGate(withHeaders({ 'x-iinfo': '48-101238498-0 0NNN RT(1793301371027 129)' }, { status: 200, body: page, contentful: true }))).toBeNull()
+    expect(classifyGate(withHeaders({ 'x-iinfo': '48-101238498-0 0NNN RT(1793301371027 129)' }, { status: 200, body: page }))).toBeNull()
+    // Its JS interstitial is a page of nothing but its script, answered with 200: that is still the gate.
+    const interstitial = '<html><head><META NAME="robots" CONTENT="noindex,nofollow"><script src="/_Incapsula_Resource?SWJIYLWA=5074a744e2e3d891814e9a2dace20bd4,719d34d31c8e3a6e6fffd425f7e032f3"></script><body></body></html>'
+    expect(classifyGate(withHeaders({ 'x-iinfo': '48-101238498-0 0NNN' }, { status: 200, body: interstitial, contentful: true }))).toEqual({
+      reason: 'bot_detected_generic', signals: ['header_x_iinfo_imperva', 'incapsula_resource_script', 'short_page'],
+    })
+    // A refusal is no success: the header stays decisive on it.
+    expect(classifyGate(withHeaders({ 'x-iinfo': '48-101238498-0 0NNN' }, { status: 403 }))).toEqual({ reason: 'bot_detected_generic', signals: ['header_x_iinfo_imperva'] })
+  })
+
   it('matches vendor headers case-insensitively', () => {
     const v = classifyGate(withHeaders({ 'X-IInfo': '1-2-3' }, { status: 403 }))
     expect(v?.reason).toBe('bot_detected_generic')

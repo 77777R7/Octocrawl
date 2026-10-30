@@ -1333,10 +1333,14 @@ export function selectProduct(doc: Document, blocks: readonly TextBlock[]): Elem
   }
 
   // No price landmark: the smallest container holding the heading and at
-  // least one text block still beats scoring the whole page by volume.
+  // least one text block still beats scoring the whole page by volume. The
+  // heading's own block does not count: a title long enough to read as prose
+  // ("Moms Don't Have Time to: A Quarantine Anthology", in the page's banner)
+  // was a region of its own, and the description beside it was dropped.
   if (heading) {
+    const beside = blocks.filter((b) => !heading.contains(b.el))
     for (let p = heading.parentElement; p && !isRootish(doc, p); p = p.parentElement) {
-      if (blocks.some((b) => p!.contains(b.el))) return p
+      if (beside.some((b) => p!.contains(b.el))) return p
     }
   }
   return null

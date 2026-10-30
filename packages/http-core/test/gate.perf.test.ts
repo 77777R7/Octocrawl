@@ -35,6 +35,19 @@ describe('classifyGate on large or hostile pages', () => {
     }
   })
 
+  it('reads an Imperva 2xx for its interstitial in bounded time', () => {
+    // A regex reading of the script tag took 6 s on the first body (review of the x-iinfo change, 2026-10-30).
+    const imperva = (body: string): GateResponse => ({ status: 200, header: (name) => (name.toLowerCase() === 'x-iinfo' ? '1-2-3' : null), body })
+    const bodies = ['<script/src='.repeat(5_462), '<script src=/_incapsula_resource'.repeat(2_000), '/_incapsula_resource'.repeat(3_300), '<script'.repeat(100_000)]
+    for (const body of bodies) {
+      for (const contentful of [false, true]) {
+        const started = performance.now()
+        classifyGate({ ...imperva(body), contentful })
+        expect(performance.now() - started).toBeLessThan(1_500)
+      }
+    }
+  })
+
   it('reads each in bounded time', () => {
     const shapes: Record<string, string> = {
       'unclosed svg openers': 'reference ' + '<svg'.repeat(100_000),

@@ -792,6 +792,22 @@ describe('PDP region selection', () => {
     }
   })
 
+  it('does not take a title in the banner for the product region when the price is far from it', () => {
+    // nappaawards.com (Firecrawl scrape-content set, row 214): the h1 sits in the site's banner, the price and the
+    // description in <main>. The title, long enough to read as prose, was the region on its own.
+    const ld = '<script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","name":"Moms Don’t Have Time to: A Quarantine Anthology","offers":{"@type":"Offer","price":"15.99","priceCurrency":"USD"}}</script>'
+    const html = `<!doctype html><html><head><title>Moms Don’t Have Time to: A Quarantine Anthology</title>${ld}</head><body>
+<header class="site-header"><div class="banner"><h1 class="pagetitle">Moms Don’t Have Time to: A Quarantine Anthology</h1></div></header>
+<div class="site-inner"><main class="content"><section id="product"><div class="product-content">
+<p>It’s impossible to ignore how life has changed since the pandemic spread across the world, and mothers carried much of it.</p>
+<p>Authors who had been on her podcast wrote original essays about the months they spent at home with their children.</p>
+<div class="price">$15.99</div></div></section></main></div></body></html>`
+    const out = extractTf.extract(html, { url: 'https://www.nappaawards.com/product/moms-dont-have-time-to' })
+    expect(out.pageType).toBe('product')
+    expect(out.mainHtml).toContain('impossible to ignore how life has changed')
+    expect(out.mainHtml).toContain('$15.99')
+  })
+
   it('widens a bare buy box to the product that holds its description', () => {
     // books.toscrape.com: title, price and stock sit in one column, the
     // description and the Product Information table two levels further up.
