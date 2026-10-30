@@ -6,7 +6,7 @@ import { createPreviewServer } from './server.js'
 import { firestoreQuotaFromEnv } from './quota.js'
 import { firestoreAmazonGateFromEnv } from './amazonGate.js'
 import { firestoreWaitlistFromEnv } from './waitlist.js'
-import { validateAmazonPublicState } from './preview.js'
+import { validateAmazonPublicState } from './previewUrl.js'
 import { createAuthRoutes, FirestoreAccountStore, IdentityToolkit } from './auth.js'
 import { createAccountRoutes, FirestoreAccountData } from './account.js'
 import { accountConnections, createOAuthRoutes, FirestoreOAuthStore } from './oauth.js'
@@ -86,5 +86,15 @@ const server = createPreviewServer({
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false', startup: startupTimings(importsDoneMs) }))
+  // The reading engine, which server.ts loads on the first run, loads now behind the first answers. One that cannot load
+  // stops the instance, as it did when it loaded before listening, instead of failing each visitor's run.
+  const engineStarted = performance.now()
+  Promise.all([import('./preview.js'), import('./map.js')]).then(
+    () => console.log(JSON.stringify({ service: 'w2l-public-preview', engineLoadedMs: Math.round(performance.now() - engineStarted) })),
+    (error: unknown) => {
+      console.error(JSON.stringify({ severity: 'ERROR', service: 'w2l-public-preview', message: 'The reading engine could not load', error: error instanceof Error ? error.stack ?? error.message : String(error) }))
+      process.exit(1)
+    },
+  )
 })
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => server.close(() => process.exit(0)))
