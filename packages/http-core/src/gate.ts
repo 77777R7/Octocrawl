@@ -507,7 +507,8 @@ export function classifyGate(res: GateResponse): GateVerdict | null {
   }
 
   // A short wall the checks above, which read the head, did not name: its copy past the head, or its signs only together.
-  return wall
+  // On a 403, which has no such wall, Akamai's refusal as the site words it (akamaiDenyPage).
+  return res.status === 403 ? akamaiDenyPage(res.body) : wall
 }
 
 /** A page with no more visible text than this may be nothing but a refusal; any longer page is read for its content. */
@@ -569,6 +570,30 @@ function interactivePage(body: string, finalUrl: string | undefined): GateVerdic
     return { reason: 'captcha', signals: ['verification_url', 'heading_security_verification', 'object_count_instruction', 'interactive_image'] }
   }
   return null
+}
+
+/**
+ * Akamai's reference in AKAMAI_REFERENCE's shape, under whatever label a site's own deny page gives it, or none: "Reference
+ * Error ID: 0.c6753617.1793341935.8c7cebc3" (businesswire.com), "error code: 0.d154b17.1793341933.a0e31b33"
+ * (money.usnews.com), "0.3f283417.1793343654.44812c88" on a line of its own (ebay.com).
+ */
+const AKAMAI_DENY_REFERENCE = /\b\d{1,3}\.[0-9a-f]{6,8}\.\d{10}\.[0-9a-f]{6,12}\b/i
+/** The reference's Unix time: a page without ten digits in a row is not read for it. */
+const AKAMAI_DENY_TRIGGER = /\d{10}/
+
+/**
+ * Akamai's refusal served with 403 as a site words its deny page, or null: a short page (WALL_PAGE_MAX_TEXT) whose text
+ * carries Akamai's reference to the refused request. The bundled Chromium got three on 2026-10-30, each reported as
+ * http_error: money.usnews.com's "flagged this request as exhibiting automated behavior", businesswire.com's "Page
+ * Unavailable" and ebay.com's "Something went wrong on our end", none with the "Access Denied" of Akamai's own page. The
+ * reference names Akamai, not the status: a bare 403 stays null. A page read as content never reaches this: a refusal is
+ * no check to wait out.
+ */
+function akamaiDenyPage(body: string): GateVerdict | null {
+  if (!AKAMAI_DENY_TRIGGER.test(body)) return null
+  const page = pageText(body)
+  if (page === null || !AKAMAI_DENY_REFERENCE.test(page.text)) return null
+  return { reason: 'bot_detected_generic', signals: ['akamai_reference', 'status_403', 'short_page'] }
 }
 
 /**
