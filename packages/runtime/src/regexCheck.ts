@@ -69,19 +69,26 @@ export function scanRegex(kind: 'test' | 'count', pattern: string, flags: string
   if (pool.remaining < 1) return { done: false, limit: 'budget', limitMs: 0 }
   const limitMs = Math.max(1, Math.min(REGEX_SCAN_LIMIT_MS, Math.floor(pool.remaining)))
   const started = performance.now()
+  // A scan stopped at its limit is charged the whole limit, as a replayed one is. vm's watchdog keeps whole milliseconds
+  // of a clock of its own and can stop a scan up to a millisecond before performance.now() says the limit has passed:
+  // four stops at 250 ms then left a verification's pool a millisecond, and its fifth check ran on it.
+  let stoppedAt = 0
   try {
     sandbox.re = new RegExp(pattern, flags)
     sandbox.s = subject
     const value = (kind === 'test' ? TEST : COUNT).runInContext(sandbox, { timeout: limitMs }) as number | boolean
     return { done: true, value }
   } catch (error) {
-    if ((error as { code?: unknown }).code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') return { done: false, limit: 'time', limitMs }
+    if ((error as { code?: unknown }).code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') {
+      stoppedAt = limitMs
+      return { done: false, limit: 'time', limitMs }
+    }
     // The backtrack stack, or the native stack under a deep caller: neither says the text's size alone caused it.
     const name = (error as { name?: unknown }).name
     if (name === 'RangeError' || name === 'SyntaxError') return { done: false, limit: 'error', limitMs, error: name }
     throw error
   } finally {
-    pool.charge(performance.now() - started)
+    pool.charge(Math.max(stoppedAt, performance.now() - started))
     sandbox.re = null
     sandbox.s = ''
   }
