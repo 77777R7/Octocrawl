@@ -645,7 +645,7 @@ describe('classifyGate — a short page that refuses automated visitors (ROADMAP
     expect(classifyGate(res({ body: page('Shop', '<h1>Shop</h1>', 'We saw unusual activity and block automated traffic.'), contentful: true }))).toBeNull()
   })
 
-  it('names Akamai only by a reference in its own shape, and only on a page answered with a 2xx', () => {
+  it('names Akamai only by a reference in its own shape, and not on the error pages that print it too', () => {
     for (const ref of ['See the reference: Version 18.90ac3017.1791543951.f255f62e', 'Reference #18.2f1d3e17.17915.6a0b2c', 'Reference #18.zzzzzzzz.1791543951.6a0b2c']) {
       expect(classifyGate(res({ body: `<html><body><h1>Notes</h1><p>${ref}</p></body></html>`, contentful: true })), ref).toBeNull()
     }
@@ -724,6 +724,75 @@ describe('classifyGate — a short page that refuses automated visitors (ROADMAP
     expect(classifyGate(res({ body: '<html><body><h1>Unusual activity</h1><p>&#99999999; &#x110000; no automation here</p></body></html>', contentful: true }))).toBeNull()
     // A short page with a dotted number that is not a reference.
     expect(classifyGate(res({ body: '<html><body><h1>Release notes</h1><p>Version 18.90ac3017.1791543951.f255f62e is out.</p></body></html>', contentful: true }))).toBeNull()
+  })
+})
+
+describe('classifyGate — Akamai\'s refusal served with 403 as a site words it', () => {
+  // The bundled Chromium's 403s on money.usnews.com, businesswire.com and ebay.com (2026-10-30), which the Firecrawl
+  // scrape-content run reported as failed: http_error: each site's own deny page, carrying Akamai's reference to the
+  // refused request under the site's own label or none, and Akamai's sensor script. The installed Chrome got Akamai's bot
+  // check on the first two, and eBay's page for the ended listing (a 404) on the third.
+  const usnews = `<!DOCTYPE html><html><head>
+    <title>Blocked</title>
+    <style type="text/css">body { text-align: Center; padding: 100px; }h1 { font-size: 24px; }</style>
+</head>
+<body>
+    <div id="error">
+    <h1>Our company keeps high security standards and one of our security tools has flagged this request as exhibiting automated behavior. To protect our platform's integrity, we restrict programmatic access from unauthorized commercial tools.</h1>
+    <div>
+        <hr>
+        <p>If you believe this is an error, please contact Helpdesk or use this <a href="https://www.usnews.com/info/features/contact" target="_blank">form</a>.
+          <br><br>Please provide the URL you were trying, your <a href="https://whatismyipaddress.com/" target="_blank">public IP</a> and this error code:<br>0.d154b17.1793341933.a0e31b33</p>
+    </div>
+    </div>
+<script type="text/javascript" src="/20XJQ49AQ7xJd25Nc6St/zr5hDhY33ha5/Ph5ncAkbBg/I2EKLi/QuEyBUAQ?v=901bca94-7149-18d7-1c76-2c189efc174b" defer=""></script>
+</body></html>`
+  const businesswire = `<!DOCTYPE html><html class=""><head>
+<title>Page Unavailable</title>
+<style type="text/css">body { text-align: center; padding: 150px; }h1 { font-size: 40px; }</style>
+</head>
+<body>
+<div id="error">
+<h1>Page Unavailable</h1>
+<div>
+<hr>
+<p>Please be advised that this page is unavailable.</p>
+<p>Call +1.800.555.0100 for our Web Support team or <a href="mailto:websupport@example.com">open a support ticket</a> if you need further assistance. </p>
+<p>Reference Error ID: <code>0.c6753617.1793341935.8c7cebc3</code> </p>
+<p>Client IP: <ip>203.0.113.7</ip></p>
+</div>
+</div>
+<script type="text/javascript" src="/AAxJAU13aQzBLmfNBsUDYBh7/rL5mhmQir57Q/MkJJAQ/clMHCW/8TQXpTAQ?v=81551f85-91d0-92f4-270b-a3f331f01736" defer=""></script>
+</body></html>`
+  const ebay = `<!DOCTYPE html><html lang="en" class=""><head><meta charset="UTF-8"><meta name="robots" content="noindex,nofollow"><title>Error Page | eBay</title></head><body><main class="main-content"><div class="status--container"><div class="error-header"><div class="error-header__text-block"><p class="error-header__headline">SORRY</p><div id="error-info"><p>Something went wrong on our end</p><hr><p class="reference-id">0.3f283417.1793343654.44812c88</p><hr><p>Please go back and try again.</p></div></div></div></div></main><footer id="glbfooter"><p>Copyright © 1995-2026 eBay Inc. All Rights Reserved.</p></footer><script type="text/javascript" src="/fO3gIU/T/E/df6KpxvpAw/pk1tkw7QtO1X/JXtmXmhnIQk/Fk/EEeTR5NDxUAQ?v=7260b7c5-4162-c48c-9dee-af8a91281734" defer=""></script></body></html>`
+  const refused = { reason: 'bot_detected_generic', signals: ['akamai_reference', 'status_403', 'short_page'] }
+
+  it('names each page by the Akamai reference it carries', () => {
+    expect(classifyGate(res({ status: 403, body: usnews }))).toEqual(refused)
+    expect(classifyGate(res({ status: 403, body: businesswire }))).toEqual(refused)
+    expect(classifyGate(res({ status: 403, body: ebay }))).toEqual(refused)
+  })
+
+  it('takes the reference under any label or none, and only in its own shape', () => {
+    const page = (line: string) => `<html><head><title>Unavailable</title></head><body><h1>Sorry</h1><p>${line}</p></body></html>`
+    for (const line of ['Reference #18.2f1d3e17.1791543951.6a0b2c', 'Reference&#32;&#35;18&#46;2f1d3e17&#46;1791543951&#46;6a0b2c', 'Incident Number: 18.90ac3017.1791543951.f255f62e', 'Error code: 0.d154b17.1793341933.a0e31b33', 'Error ID 0.c6753617.1793341935.8c7cebc3', '0.3f283417.1793343654.44812c88']) {
+      expect(classifyGate(res({ status: 403, body: page(line) })), line).toEqual(refused)
+    }
+    // A dotted number like it in any other shape: a short time, a group that is not hexadecimal, a longer first group, a missing id.
+    for (const line of ['Error code: 0.c6753617.17933.8c7cebc3', 'Error code: 0.zz753617.1793341935.8c7cebc3', 'Error code: 1234.c6753617.1793341935.8c7cebc3', 'Order 0.c6753617.1793341935']) {
+      expect(classifyGate(res({ status: 403, body: page(line) })), line).toBeNull()
+    }
+  })
+
+  it('leaves a 403 without the reference, another status, a page read as content and a long page as they were', () => {
+    // Without the reference the page is a 403 like any other.
+    expect(classifyGate(res({ status: 403, body: businesswire.replace('0.c6753617.1793341935.8c7cebc3', '') }))).toBeNull()
+    // Akamai prints its reference on the error pages that are a page's own answer, too.
+    for (const status of [400, 404, 500, 503]) expect(classifyGate(res({ status, body: businesswire })), `${status}`).toBeNull()
+    // A refusal does not clear by itself: the installed Chrome's wait for a check, which reads pages as content, does not wait on it.
+    expect(classifyGate(res({ status: 403, body: usnews, contentful: true }))).toBeNull()
+    // A long page that prints a reference is a page of its own.
+    expect(classifyGate(res({ status: 403, body: businesswire.replace('<hr>', `<hr>${'<p>An ordinary paragraph of a long page about the company and its news.</p>'.repeat(30)}`) }))).toBeNull()
   })
 })
 
