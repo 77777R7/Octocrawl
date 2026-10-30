@@ -230,6 +230,20 @@ describe('routePage', () => {
     })
   })
 
+  describe('a review routed as a product whose buy box is a fragment of the page', () => {
+    // pcgamer.com's laptop review and digikey.com's part page (Firecrawl 1k set, 2026-10-30): the product region held
+    // the title and the price, under a tenth of the page's text, and the review answered `success` with it alone.
+    const paragraph = (n: number) => `<p>Paragraph ${n} of the review: the panel is bright, the keyboard is firm, and the battery lasted a full working day in our tests, which is better than most rivals manage.</p>`
+    const page = wrap(`<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: 'Flow Z13', offers: { '@type': 'Offer', price: '1999.00', priceCurrency: 'USD' } })}</script>
+<header><div class="buy"><h1>Flow Z13 review</h1><div class="price">$1,999.00</div></div></header><article>${Array.from({ length: 8 }, (_, i) => paragraph(i + 1)).join('')}</article>`)
+
+    it('reads the review, and keeps the page a product page', () => {
+      const out = extractTf.extract(page)
+      expect(out.pageType).toBe('product')
+      expect(out.mainHtml).toContain('Paragraph 8 of the review')
+    })
+  })
+
   describe('a product page titled by its one h2, beside related products', () => {
     // sandbox.oxylabs.io: no h1 and nothing declared; the game's title is the
     // page's one h2, its price follows in the same block, and two related
