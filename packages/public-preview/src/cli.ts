@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { Worker } from 'node:worker_threads'
 import { createPreviewServer } from './server.js'
 import { firestoreQuotaFromEnv } from './quota.js'
 import { firestoreAmazonGateFromEnv } from './amazonGate.js'
@@ -86,15 +87,21 @@ const server = createPreviewServer({
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false', startup: startupTimings(importsDoneMs) }))
-  // The reading engine, which server.ts loads on the first run, loads now behind the first answers. One that cannot load
-  // stops the instance, as it did when it loaded before listening, instead of failing each visitor's run.
+  // The reading engine, which server.ts loads on the first run, loads now in a worker thread, so the files are read once
+  // without holding up the first answers (on Cloud Run, 6 s that held the event loop when loaded here; the first run then
+  // loads it in about 1.3 s). One that cannot load stops the instance, as it did when it loaded before listening.
   const engineStarted = performance.now()
-  Promise.all([import('./preview.js'), import('./map.js')]).then(
-    () => console.log(JSON.stringify({ service: 'w2l-public-preview', engineLoadedMs: Math.round(performance.now() - engineStarted) })),
-    (error: unknown) => {
-      console.error(JSON.stringify({ severity: 'ERROR', service: 'w2l-public-preview', message: 'The reading engine could not load', error: error instanceof Error ? error.stack ?? error.message : String(error) }))
+  let engineError: unknown
+  new Worker(new URL('./engineCheck.js', import.meta.url))
+    .on('error', (error) => { engineError = error })
+    .on('exit', (code) => {
+      if (code === 0) {
+        console.log(JSON.stringify({ service: 'w2l-public-preview', engineCheckedMs: Math.round(performance.now() - engineStarted) }))
+        return
+      }
+      const error = engineError instanceof Error ? engineError.stack ?? engineError.message : `exit code ${code}`
+      console.error(JSON.stringify({ severity: 'ERROR', service: 'w2l-public-preview', message: 'The reading engine could not load', error }))
       process.exit(1)
-    },
-  )
+    })
 })
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => server.close(() => process.exit(0)))
