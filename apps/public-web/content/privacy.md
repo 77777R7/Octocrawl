@@ -2,7 +2,19 @@
 
 This page covers the public Octocrawl page and its preview service. When you run Octocrawl on your own computer, none of it applies: requests, results and logs stay on your machine.
 
-Last updated 24 October 2026.
+Last updated 29 October 2026.
+
+## In short
+
+This is the short version, and it leaves things out. The sections below are the full text, and they are what counts.
+
+1. If you run Octocrawl on your own computer, none of this applies. Requests, results and logs stay on your machine.
+2. The web preview does not save what you extract. The hosted API keeps a call's result for ten minutes, and a crawl or batch job keeps its pages for 7 days after it ends.
+3. The preview logs the host of the site you asked for, never its path. An account's request history keeps the address you asked for, never the page's content. Both are deleted after 30 days.
+4. A cookie counts your five previews a day. If your browser sends Do Not Track or Global Privacy Control, the page records no events and no preview outcomes.
+5. Nothing is sold or shared for advertising, and the page loads no outside scripts, fonts, ads or trackers.
+6. Cloudflare passes requests along, and the service runs on Google Cloud in Singapore. Anthropic gets a page's content only when an account turns on the json model fallback and the page's own data leaves a required field empty.
+7. To delete your account, use Settings in your dashboard or email us. Most of your data goes at once; job files and logs expire on their own about 30 days on, and job files stay recoverable by us for 7 more days.
 
 ## What you submit
 
@@ -27,7 +39,7 @@ Requests to octocrawl.dev first pass through Cloudflare, which forwards them to 
 
 ## What is never recorded
 
-- The content of the pages you extract, or the path and query of the address you submit through **Extract page**. The page never sends a page's content to a model; the hosted API's json model fallback (below) is the one case where page content goes to another company, and only when you ask for it.
+- The content of the pages you extract on the preview page, or the path and query of the address you submit through **Extract page**. The preview page never sends a page's content to a model. The hosted API is different (below): it keeps a call's result for ten minutes and a job's pages for 7 days after the job ends, and its json model fallback is the one case where page content goes to another company, and only when you ask for it.
 - Anything from a third party: the page loads no outside scripts, fonts, ads or trackers, and its security policy allows connections to this site only.
 - An account, unless you sign in (below). Without one, your email address is kept only if you join the waitlist.
 
@@ -64,14 +76,14 @@ A sign-in link is sent by Firebase. GitHub and Google show you what they share b
 - **Your account:** your email address, when you first and last signed in, and which ways you signed in. When the sign-in makes the account, also how your browser first reached the site, from the `w2l_src` cookie (above), and whether the sign-in was for an MCP client. Nothing is written when your browser sends Do Not Track or Global Privacy Control.
 - **A session for each sign-in:** a keyed hash of the session's id (never the id), your account, your email address and when it ends. It is deleted 30 days on, or when you sign out.
 - **Your credits:** this month's balance, and for each UTC day the number of calls by kind and the credits they cost. Daily counts are deleted after 90 days.
-- **Your requests:** for each call made with one of your keys or in your dashboard's Playground, a line with the address you asked for and the one finally read, when, which key (or the Playground), the formats a scrape asked for, the result (status, HTTP status, robots.txt decision, the reading route), how long the call took and the SHA-256 of what was read, with the credits it cost and, when the scrape asked for the json model fallback, the credits the model's part cost. Never the page's content. Only you see these lines, on your dashboard's Activity page, and each one is deleted 30 days after the call.
+- **Your requests:** for each call made with one of your keys or in your dashboard's Playground, a line with the address you asked for and the one finally read, when, which key (or the Playground), the formats a scrape asked for, the result (status, HTTP status, robots.txt decision, the reading route), how long the call took and the SHA-256 of what was read, with the credits it cost and, when the scrape asked for the json model fallback, the credits the model's part cost. Never the page's content. They are listed on your dashboard's Activity page, which only you can open, and each one is deleted 30 days after the call.
 - **Your API keys:** for each key, a hash (never the key), the name you gave it, its first seven characters and when it was made. Revoking a key stops it, and the record stays so your keys page can show it.
 
 **Cookies.** A sign-in sets `w2l_session`, which holds the session's id. Your browser keeps it for 30 days, and scripts on the page cannot read it. It also sets `w2l_account=1`, which tells the page to show **Dashboard** in place of **Sign in**. While you sign in, two short cookies hold the sign-in's state: one for 10 minutes and one for an hour. If you sign in with GitHub or Google using an email address that already has an account, a third cookie keeps that provider's sign-in for 30 minutes, encrypted. When you then sign in the way you did before, the provider is added to your account and the cookie is deleted. Starting to delete your account sets `w2l_delete` for 10 minutes: it names the account to delete when you sign in again, and is removed then, or when you sign out.
 
 **Logs.** The service's own log lines say that a sign-in happened, the way it happened and whether it worked, without your email address. When a sign-in makes an account, a line also gives a short name for how the browser first reached the site (the `utm_source`, the referring host, the `from` tag, or that it was for an MCP client), without the account. The request log (above, 30 days) keeps each request's path and query, so it holds the one-time code a sign-in carried back. Such a code works once and expires within an hour. For an account's key, the hosted API logs one line per call with the account's id, the kind of call and the credits it cost.
 
-**Deleting your account.** In your dashboard, Settings → Delete account: type the account's email address, then sign in once more the way you usually do. As soon as you are signed in, the service deletes your keys (they stop working within a minute), your credits, bought ones included, your daily usage, your request lines, your hosted jobs' records, your account record and its sessions, and then your Firebase account. The pages and exports your jobs kept are not deleted at that moment: the storage's own expiry deletes them about 30 days after they were written, and they stay recoverable by us for 7 days after that. Service logs that name the account's id are deleted with the rest of the logs, 30 days on. If the deletion stops part way, sign in and delete again to finish it. If you used some of this month's free credits, the service keeps a keyed hash of your email address (not the address), the month and how many free credits were left, until the month ends (Firestore deletes it within about a day after); an account made again with the same address this month starts with what was left instead of a new grant, and the record is then deleted. You can also email [hello@octocrawl.dev](mailto:hello@octocrawl.dev) from the account's address and we delete it for you.
+**Deleting your account.** In your dashboard, Settings → Delete account: type the account's email address, then sign in once more the way you usually do. As soon as you are signed in, the service deletes your keys (they stop working within a minute), your credits, your daily usage, your request lines, your hosted jobs' records, your account record and its sessions, and then your Firebase account. The pages and exports your jobs kept are not deleted at that moment: the storage's own expiry deletes them about 30 days after they were written, and they stay recoverable by us for 7 days after that. Service logs that name the account's id are deleted with the rest of the logs, 30 days on. If the deletion stops part way, sign in and delete again to finish it. If you used some of this month's free credits, the service keeps a keyed hash of your email address (not the address), the month and how many free credits were left, until the month ends (Firestore deletes it within about a day after); an account made again with the same address this month starts with what was left instead of a new grant, and the record is then deleted. You can also email [hello@octocrawl.dev](mailto:hello@octocrawl.dev) from the account's address and we delete it for you.
 
 ## Waitlist
 
