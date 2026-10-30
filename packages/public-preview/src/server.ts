@@ -5,9 +5,10 @@ import { isIP } from 'node:net'
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import { VISITOR_DAILY_PREVIEWS, type PreviewQuota, type QuotaDecision, type QuotaStatus } from './quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate, type AmazonOriginPermit } from './amazonGate.js'
-import { capturePreview, mapPreviewResult, normalizePreviewUrl, type PreviewCapture, type PreviewResponse, type PreviewStage } from './preview.js'
+import type { PreviewCapture, PreviewResponse, PreviewStage } from './preview.js'
+import { normalizePreviewUrl } from './previewUrl.js'
 import { isPreviewTargetStaticallyDenied, resolvePreviewCapability } from './capability.js'
-import { mapPreview, type PreviewMap, type PreviewMapper } from './map.js'
+import type { PreviewMap, PreviewMapper } from './map.js'
 import { hasOptions, parsePreviewRequest, PREVIEW_BODY_BYTES, type PreviewRequest } from './options.js'
 import { canonicalRedirect, dailyVisitorId, optedOut, siteHost, EVENT_BODY_BYTES, INTERNAL_COOKIE, internalVisit, looksAutomated, ORIGIN_TOKEN, parsePublicOrigin, parseWebEvent,
   landingSource, readSourceCookie, requestOrigin, sourceCookie, stdoutLogger, targetHost, type Logger } from './site.js'
@@ -15,6 +16,12 @@ import { parseWaitlistEntry, WAITLIST_BODY_BYTES, WAITLIST_DAILY_SUBMISSIONS, ty
 import type { createAuthRoutes } from './auth.js'
 import type { createAccountRoutes } from './account.js'
 import type { createOAuthRoutes } from './oauth.js'
+
+// The reading engine (preview.ts, map.ts and the packages they load) loads on the first run, not at start-up: on Cloud
+// Run each file a new instance reads first costs milliseconds, and most requests a new instance answers are pages.
+const loadPreview = () => import('./preview.js')
+const capturePreview: PreviewCapture = async (...args) => (await loadPreview()).capturePreview(...args)
+const mapPreview: PreviewMapper = async (...args) => (await import('./map.js')).mapPreview(...args)
 
 export interface PreviewServerOptions {
   quota: PreviewQuota
@@ -659,7 +666,7 @@ export function createPreviewHandler(options: PreviewServerOptions): (req: Incom
               retryNotes.push(permit.noteRetryAfter(retryAt).catch(() => {}))
             }, options.localPlatformProxyUrl, options.localPlatformRobotsException, request.options, stage)
             if (outcome.result.retryAt !== undefined) observedRetryAt = Math.max(observedRetryAt, outcome.result.retryAt)
-            const mapped = mapPreviewResult(submitted, target, outcome, Math.max(0, performance.now() - started), request.options)
+            const mapped = (await loadPreview()).mapPreviewResult(submitted, target, outcome, Math.max(0, performance.now() - started), request.options)
             if (evaluation) {
               mapped.evaluation = {
                 rawBodySha256: outcome.result.evidence.rawBodySha256,
