@@ -1529,10 +1529,11 @@ describe('a failure a stronger rung may still answer (ROADMAP PA item 4)', () =>
     expect(run.result.status).toBe('success')
     expect(run.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_step', channel: 'browser_local', detail: expect.objectContaining({ escalate: 'connection_error' }) }))
     expect(provider.calls).toEqual([])
-    // The installed Chrome shares the exit: its own refused connection is not offered on to a paid provider either.
+    // The installed Chrome shares the exit: its own refused connection is not offered on to a paid provider either. The
+    // site's challenge to the http rung stays the answer over the browsers' network failures (ladder_evidence_kept).
     const down = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [failed('connection_error', null, 'browser_local')]), channel('installed_chrome', [failed('connection_error', null, 'browser_local')]), { ...provider, calls: [] }], { mode: 'standard', enhanced: true }).run(url)
     expect(down.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome'])
-    expect(down.result).toMatchObject({ status: 'failed', failureReason: 'connection_error' })
+    expect(down.result).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge', lane: 'http' })
   })
 
   it('stops on Octocrawl\'s own crash after the browser captured the page: no other rung, free or paid (K1 T016)', async () => {
@@ -1544,6 +1545,10 @@ describe('a failure a stronger rung may still answer (ROADMAP PA item 4)', () =>
     expect(run.result).toMatchObject({ status: 'failed', failureReason: 'internal_error', lane: 'browser_local' })
     expect(chrome.calls).toEqual([])
     expect(provider.calls).toEqual([])
+    // Nor does a page the ladder stepped past take the crash's place: the browser had captured a page of its own.
+    const forbidden = { ...failed('http_error', 403), markdown: '# Forbidden' }
+    const crashed = await new LadderRunner([channel('http', [forbidden]), channel('browser_local', [failed('internal_error', null, 'browser_local')])], { mode: 'standard' }).run(url)
+    expect(crashed.result).toMatchObject({ status: 'failed', failureReason: 'internal_error', lane: 'browser_local' })
   })
 
   it('leaves an http rung\'s own empty page to that rung, which asks for the browser itself when it should', async () => {
@@ -1568,6 +1573,38 @@ describe('a failure a stronger rung may still answer (ROADMAP PA item 4)', () =>
     const hanging: Channel = { id: 'browser_local', identity: COHERENT, fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })) }
     const cut = await new LadderRunner([channel('http', [forbidden]), hanging], { mode: 'standard' }).run(url, undefined, { deadlineAt: Date.now() + 150 })
     expect(cut.result).toMatchObject({ status: 'failed', failureReason: 'timeout', lane: 'http', markdown: '# Forbidden', evidence: { httpStatus: 403 }, usage: { deadlineExceeded: true } })
+  })
+
+  it('answers with the block an earlier rung met when the stronger rungs fail with no page, and says so', async () => {
+    // Akamai's deny page on the bundled browser (blocked, as #787 reads it) after the http rung's 403: the installed Chrome cannot connect.
+    const forbidden = { ...failed('http_error', 403), markdown: '# Forbidden' }
+    const denied: FetchResult = { ...blockedResult(url, 'bot_detected_generic'), lane: 'browser_local', markdown: 'Blocked. error code: 0.d154b17.1793341933.a0e31b33' }
+    const unreachable = await new LadderRunner([channel('http', [forbidden]), channel('browser_local', [denied]), channel('installed_chrome', [failed('connection_error', null, 'browser_local')])], { mode: 'standard', enhanced: true }).run(url)
+    expect(unreachable.channelsTried).toEqual(['http', 'browser_local', 'installed_chrome'])
+    expect(unreachable.result).toMatchObject({ status: 'blocked', blockReason: 'bot_detected_generic', lane: 'browser_local', markdown: denied.markdown, evidence: { httpStatus: 403 } })
+    expect(unreachable.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_evidence_kept', channel: 'browser_local', detail: { kept: 'browser_local', failed: 'installed_chrome', reason: 'connection_error' } }))
+    expect(unreachable.summary.attempts.at(-1)?.result).toMatchObject({ status: 'failed', failureReason: 'connection_error' })
+    // A provider's own error keeps the http rung's challenge.
+    const provider = { ...channel('provider', [providerErrorResult(url, 'steel')], 'steel'), priceCeilingUsd: 0.01 }
+    const vendorDown = await new LadderRunner([channel('http', [blockedResult(url, 'captcha')]), provider], ALLOWED_ALL).run(url)
+    expect(vendorDown.channelsTried).toEqual(['http', 'provider'])
+    expect(vendorDown.result).toMatchObject({ status: 'blocked', blockReason: 'captcha', lane: 'http' })
+    expect(vendorDown.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_evidence_kept', detail: { kept: 'http', failed: 'provider', reason: 'provider_error' } }))
+    // A challenge served with 503 whose cooldown the ladder went on past keeps no Retry-After that has already passed.
+    const waited = { ...blockedResult(url, 'cloudflare_challenge'), evidence: { ...blockedResult(url, 'cloudflare_challenge').evidence, httpStatus: 503 }, retryAt: Date.now() - 1 }
+    const cooled = await new LadderRunner([channel('http', [waited]), channel('browser_local', [failed('connection_error', null, 'browser_local')])], { mode: 'standard' }).run(url)
+    expect(cooled.result).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge', lane: 'http' })
+    expect(cooled.result.retryAt).toBeUndefined()
+    // The deadline cuts the browser: the run ends on time, with the challenge page as its evidence.
+    const challenge = { ...blockedResult(url, 'cloudflare_challenge'), markdown: 'Just a moment...' }
+    const hanging: Channel = { id: 'browser_local', identity: COHERENT, fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason), { once: true })) }
+    const cut = await new LadderRunner([channel('http', [challenge]), hanging], { mode: 'standard' }).run(url, undefined, { deadlineAt: Date.now() + 150 })
+    expect(cut.result).toMatchObject({ status: 'failed', failureReason: 'timeout', blockReason: null, lane: 'http', markdown: 'Just a moment...', evidence: { httpStatus: 403 }, usage: { deadlineExceeded: true } })
+    expect(cut.result.trace).toContainEqual(expect.objectContaining({ event: 'deadline_exceeded', detail: { channel: 'browser_local', kept: null, evidence: 'http' } }))
+    // A rung that reached the page answers for it: the installed Chrome's 404 (the item is gone) is not a failure with no page.
+    const gone = await new LadderRunner([channel('http', [forbidden]), channel('browser_local', [denied]), channel('installed_chrome', [failed('http_error', 404, 'browser_local')])], { mode: 'standard', enhanced: true }).run(url)
+    expect(gone.result).toMatchObject({ status: 'failed', failureReason: 'http_error', evidence: { httpStatus: 404 } })
+    expect(gone.ladderTrace.some((event) => event.event === 'ladder_evidence_kept')).toBe(false)
   })
 
   it('never steps past the saved login: the rungs after it do not carry it', async () => {
