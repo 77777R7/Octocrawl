@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { REGEX_SCAN_LIMIT_MS, scanRegex } from '../src/regexCheck.js'
 import { regexBoundSelfTest, regexChecksIn, regexCorpusSelfTest } from '../src/regexSelfTest.js'
 
 // The self-test hosted Octocrawl runs at its start and its images at their build (ADR 0006, amendment of 2026-10-29). A
@@ -32,5 +33,15 @@ describe('the regular-expression checks\' self-test (ADR 0006, amendment of 2026
 
   it('finds this Node bounds the checks as promised', () => {
     expect(regexBoundSelfTest()).toEqual({ ok: true, failures: [] })
+  })
+
+  it('runs the backtrack-stack scan again when it meets its time limit first, as on a cold Cloud Run instance (2026-10-31)', () => {
+    // The first `slow` scans of the overflow pattern stop at the time limit; the rest run.
+    const coldFor = (slow: number): typeof scanRegex => {
+      let left = slow
+      return (kind, pattern, flags, subject, pool) => pattern === '^(a)*$' && left-- > 0 ? { done: false, limit: 'time', limitMs: REGEX_SCAN_LIMIT_MS } : scanRegex(kind, pattern, flags, subject, pool)
+    }
+    expect(regexBoundSelfTest(coldFor(2))).toEqual({ ok: true, failures: [] })
+    expect(regexBoundSelfTest(coldFor(3))).toEqual({ ok: false, failures: [expect.stringMatching(/^a scan past the backtrack stack met its time limit in each of 3 tries .*"limit":"time"/)] })
   })
 })
