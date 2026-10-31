@@ -7,6 +7,9 @@ import { VERIFY_REGEX_CHECK_TYPES, type VerifyCheck } from '@w2l/contracts'
 import { REGEX_VERIFY_POOL_MS, RegexPool, scanRegex } from './regexCheck.js'
 import { verify } from './verify.js'
 
+/** How many times the scan past the backtrack stack runs while it meets its time limit before the stack. */
+const OVERFLOW_TRIES = 3
+
 export interface RegexSelfTest {
   ok: boolean
   /** Each property that does not hold, in words. */
@@ -18,27 +21,34 @@ export interface RegexSelfTest {
  * it; a scan past the backtrack stack is an engine error, not a crash; and counts and matches are String.prototype.match's.
  * About 0.1 s. Its stopped scan is a regular expression ended mid-match: on Node 26.8.1 that leaves every later global
  * match in the process about 3.7 times slower (2026-10-29), which is why hosted Octocrawl runs on Node 22.
+ *
+ * The scan past the backtrack stack takes about 15 ms, but on a Cloud Run instance at its start it once met its 250 ms
+ * time limit first (2026-10-31), where the same image overflowed at its build. A scan stopped there shows nothing either
+ * way, so it runs again, up to OVERFLOW_TRIES times. `scan` is for tests.
  */
-export function regexBoundSelfTest(): RegexSelfTest {
+export function regexBoundSelfTest(scan: typeof scanRegex = scanRegex): RegexSelfTest {
   const failures: string[] = []
   const started = performance.now()
-  const stopped = scanRegex('test', '(?:\\s|\\S)*x', 'm', 'ab'.repeat(100_000), new RegexPool(50))
+  const stopped = scan('test', '(?:\\s|\\S)*x', 'm', 'ab'.repeat(100_000), new RegexPool(50))
   const took = performance.now() - started
   if (stopped.done || stopped.limit !== 'time' || stopped.limitMs !== 50) failures.push(`a quadratic scan did not stop at its 50 ms limit (${JSON.stringify(stopped)})`)
   else if (took > 50 + 150) failures.push(`a quadratic scan stopped ${Math.round(took - 50)} ms after its 50 ms limit`)
-  const overflow = scanRegex('test', '^(a)*$', 'm', 'a'.repeat(4_300_000), new RegexPool(REGEX_VERIFY_POOL_MS))
-  if (overflow.done || overflow.limit !== 'error') failures.push(`a scan past the backtrack stack was not an engine error (${JSON.stringify(overflow)})`)
+  const deep = 'a'.repeat(4_300_000)
+  let overflow = scan('test', '^(a)*$', 'm', deep, new RegexPool(REGEX_VERIFY_POOL_MS))
+  for (let tries = 1; tries < OVERFLOW_TRIES && !overflow.done && overflow.limit === 'time'; tries++) overflow = scan('test', '^(a)*$', 'm', deep, new RegexPool(REGEX_VERIFY_POOL_MS))
+  if (!overflow.done && overflow.limit === 'time') failures.push(`a scan past the backtrack stack met its time limit in each of ${OVERFLOW_TRIES} tries (${JSON.stringify(overflow)})`)
+  else if (overflow.done || overflow.limit !== 'error') failures.push(`a scan past the backtrack stack was not an engine error (${JSON.stringify(overflow)})`)
   const emoji = '\u{1F600}a\u{1F600}'
   const counts: [string, string, string][] = [['a*', 'g', 'baab'], ['', 'ug', emoji], ['', 'g', emoji], ['a', 'yg', 'aab a'], ['k', 'iug', 'k K K'], ['^x', 'mg', 'x\nx'], ['\\$\\d+', 'g', 'from $5 to $120']]
   for (const [pattern, flags, subject] of counts) {
     const want = (subject.match(new RegExp(pattern, flags)) ?? []).length
-    const got = scanRegex('count', pattern, flags, subject, new RegexPool(REGEX_VERIFY_POOL_MS))
+    const got = scan('count', pattern, flags, subject, new RegexPool(REGEX_VERIFY_POOL_MS))
     if (!got.done || got.value !== want) failures.push(`/${pattern}/${flags} counted ${JSON.stringify(got)}, String.prototype.match ${want}`)
   }
   const tests: [string, string, string][] = [['^b', 'm', 'a\nb'], ['^b', 'i', 'a\nb'], ['b', 'y', 'ab'], ['Price', 'i', 'PRICE 12']]
   for (const [pattern, flags, subject] of tests) {
     const want = new RegExp(pattern, flags).test(subject)
-    const got = scanRegex('test', pattern, flags, subject, new RegexPool(REGEX_VERIFY_POOL_MS))
+    const got = scan('test', pattern, flags, subject, new RegexPool(REGEX_VERIFY_POOL_MS))
     if (!got.done || got.value !== want) failures.push(`/${pattern}/${flags} tested ${JSON.stringify(got)}, RegExp.prototype.test ${want}`)
   }
   return { ok: failures.length === 0, failures }
