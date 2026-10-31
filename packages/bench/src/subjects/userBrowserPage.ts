@@ -17,7 +17,7 @@ import { sourceDataWarnings } from './sourceData.js'
 import { estimateTokens, givenUpPaidCalls, type BlockReason, type FetchOptions, type FetchResult, type TraceEvent } from '@w2l/contracts'
 import { collectLinks, extractTf, htmlToMarkdown } from '@w2l/extract-tf'
 import { classifyGate, sha256Utf8 } from '@w2l/http-core'
-import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageMarkdown, withListCaveat } from './errorPage.js'
+import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageDelivered, wholePageMarkdown, withListCaveat, NO_MAIN_CONTENT_WARNING, WHOLE_PAGE_MIN_CHARS } from './errorPage.js'
 import { steadyWaitEvents, withStillChangingWarning, withStillLoadingWarning, type SteadyOutcome } from '../browserSettle.js'
 import { regionWaitEvent, type RegionOutcome } from '../regionWait.js'
 
@@ -132,6 +132,8 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   const sourceWarnings = sourceDataWarnings(body, finalUrl)
   let wholePage: string | null = null
   let listPage = false
+  // A page with no main region over WHOLE_PAGE_MIN_CHARS is answered with its whole page (wholePageDelivered).
+  let delivered = false
   // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
   const judged = whole === body || gate === null ? extracted : extractTf.extract(whole, { url: finalUrl, pruneSelectors: options.excludeTags, includeSelectors: contentSelectors(options, whole.length), blockAds: options.blockAds })
   if ((judged.escalate || judged.lastResort === true) && gate !== null) return blocked(gate)
@@ -139,16 +141,21 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     wholePage = wholePageMarkdown(body, finalUrl, options)
     listPage = listRecordsFound(body, finalUrl, options)
     if ((options.onlyMainContent !== false && !listPage) || wholePage === null) {
-      return { ...base, status: 'failed', failureReason: 'empty_unverified', blockReason: null, budgetExceeded: null, lane: LANE, escalations: [], markdown: wholePage, ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}), ...(wholePage === null ? {} : { links }) }
+      if (!wholePageDelivered(extracted, wholePage, trace, false, listPage)) {
+        return { ...base, status: 'failed', failureReason: 'empty_unverified', blockReason: null, budgetExceeded: null, lane: LANE, escalations: [], markdown: wholePage, ...(sourceWarnings.length ? { warnings: sourceWarnings } : {}), ...(wholePage === null ? {} : { links }) }
+      }
+      trace.push({ at: wallMs, lane: LANE, event: 'whole_page_delivered', detail: { markdownChars: wholePage!.length, minChars: WHOLE_PAGE_MIN_CHARS } })
+      sourceWarnings.push(NO_MAIN_CONTENT_WARNING)
+      delivered = true
     }
   }
   const decisive = classifyGate({ status, header: () => null, body: whole, finalUrl, contentful: true })
   if (decisive !== null) return blocked(decisive)
-  const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, body.length))
+  const markdown = wholePageAsked(options) || (listPage && !listSelectionAsked(options, body.length)) || delivered
     ? wholePage ?? htmlToMarkdown(body, { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) })
     : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
   const extra = extraFormats(body, finalUrl, options, trace, LANE, wallMs)
-  const tables = tablesFormat(wholePageAsked(options)
+  const tables = tablesFormat(wholePageAsked(options) || delivered
     ? { html: body, options: { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
     : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, finalUrl, options, trace, LANE, wallMs)
   return withReadHiddenWarning(read, withStillChangingWarning(withStillLoadingWarning(withListCaveat({
@@ -178,7 +185,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
       labelledValues: extracted.labelledValues,
       declaredValues: extracted.declaredValues,
     },
-    ...htmlFormats(whole, body, extracted.mainHtml, options),
+    ...htmlFormats(whole, body, extracted.mainHtml, options, wholePageAsked(options) || delivered),
     usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
   }))))
 }
