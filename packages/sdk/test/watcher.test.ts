@@ -212,6 +212,28 @@ describe('JobWatcher', () => {
     expect(closed.transport).toBeNull()
   })
 
+  it('polls when hosted refuses the stream routes as hosted_unavailable, and keeps any other 403 final', async () => {
+    // Hosted Octocrawl serves a job's status and listings but not /ws or /events, which it answers 403 hosted_unavailable before it reads the token.
+    FakeSocket.script = (socket) => socket.fire('error')
+    const unavailable = () => json({ error: 'GET /v1/crawl/task-1/events is not served by hosted Octocrawl', code: 'hosted_unavailable', agentHints: [] }, 403)
+    const hosted = fakeFetch((url) => {
+      if (url.pathname.endsWith('/events')) return unavailable()
+      if (url.pathname === '/v1/crawl/task-1') return json(report('completed', { pagesFetched: 1 }))
+      if (url.pathname === '/v1/crawl/task-1/pages') return list([page('a')])
+      if (url.pathname === '/v1/crawl/task-1/errors') return list([])
+      return undefined
+    })
+    const watcher = new W2L({ baseUrl: BASE, token: 'secret', fetch: hosted.fetch }).watcher('task-1', { pollIntervalMs: 250, WebSocket: FakeSocket })
+    const events = await collect(watcher)
+    expect(watcher.transport).toBe('poll')
+    expect(documentIds(events)).toEqual(['a'])
+    expect(events.at(-1)).toMatchObject({ type: 'done', data: { status: 'completed' } })
+    expect(hosted.paths()[0]).toBe('/v1/crawl/task-1/events')
+    const forbidden = fakeFetch((url) => url.pathname.endsWith('/events') ? json({ error: 'this key may not read jobs', code: 'forbidden' }, 403) : undefined)
+    expect(await collect(new W2L({ baseUrl: BASE, fetch: forbidden.fetch }).watcher('task-1', { WebSocket: null }))).toEqual([{ type: 'error', error: { code: 'unauthorized', message: 'GET /v1/crawl/task-1/events answered 403' } }])
+    expect(forbidden.paths()).toEqual(['/v1/crawl/task-1/events'])
+  })
+
   it('crawlAndWatch and batchScrapeAndWatch start the job and watch the returned task id under its kind', async () => {
     const f = fakeFetch((url, init) => {
       if (init?.method === 'POST' && url.pathname === '/v1/crawl') return json({ taskId: 'task-9' }, 202)
