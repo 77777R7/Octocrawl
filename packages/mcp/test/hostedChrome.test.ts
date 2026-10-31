@@ -112,6 +112,20 @@ describe('the hosted API\'s client for the service', () => {
     expect(seen.map((request) => request.body)).toEqual([{ url: 'https://shop.test/item', options: { waitFor: 500, removeBase64Images: false } }])
   })
 
+  it('sends a refused option only when it asks for something: a hosted job\'s skipTlsVerification false still reads the page', async () => {
+    const seen: { auth: string | undefined; body: unknown }[] = []
+    const served = await serveHostedChrome(createHostedChromeServiceWith(seen), 0)
+    server = served.server
+    const client = httpHostedChromeClient(`http://127.0.0.1:${served.port}`, async () => 'id-token-for-test')
+    // A hosted engine stores a job's page options with skipTlsVerification false (engine.ts); a caller may send the others.
+    const read = await client.fetch('https://shop.test/item', { onlyMainContent: true, skipTlsVerification: false, mobile: false, headers: {}, actions: [] }, undefined)
+    expect(read).toMatchObject({ requestedUrl: 'https://shop.test/item', status: 'success' })
+    expect(seen.map((request) => request.body)).toEqual([{ url: 'https://shop.test/item', options: { onlyMainContent: true } }])
+    // One that asks is still sent, and refused by name.
+    await expect(client.fetch('https://shop.test/item', { skipTlsVerification: true }, undefined)).rejects.toThrow(/answered 400/)
+    expect(seen.at(-1)?.body).toEqual({ url: 'https://shop.test/item', options: { skipTlsVerification: true } })
+  })
+
   it('reaches the service over https alone (loopback http is a test\'s), and keeps an ID token until shortly before it expires', async () => {
     expect(() => httpHostedChromeClient('http://octocrawl-chrome.example.run.app', async () => 't')).toThrow(/https/)
     expect(() => httpHostedChromeClient('https://octocrawl-chrome-abc.a.run.app', async () => 't')).not.toThrow()

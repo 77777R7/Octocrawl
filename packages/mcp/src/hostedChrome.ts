@@ -170,11 +170,16 @@ export function httpHostedChromeClient(serviceUrl: string, idToken: () => Promis
 }
 
 /**
- * The options a read is sent with: the ones the service takes, and the options the rung refuses, which the service then
- * refuses by name. A ladder's own flags, and a robots.txt override no hosted engine sets, are not sent.
+ * The options a read is sent with: the ones the service takes, and the options the rung refuses that ask for something,
+ * which the service then refuses by name. One that asks for nothing (a hosted job's stored `skipTlsVerification: false`,
+ * `mobile: false`, empty `headers` or `actions`) is not sent, as the service refuses any key it does not read. A ladder's
+ * own flags, and a robots.txt override no hosted engine sets, are not sent.
  */
 function readOptions(options: FetchOptions | undefined): Partial<FetchOptions> {
-  return Object.fromEntries(Object.entries(options ?? {}).filter(([key, value]) => value !== undefined && FETCH_OPTION_ROLE[key as keyof FetchOptions] !== undefined && FETCH_OPTION_ROLE[key as keyof FetchOptions] !== 'ladder'))
+  return Object.fromEntries(Object.entries(options ?? {}).filter(([key, value]) => {
+    const role = FETCH_OPTION_ROLE[key as keyof FetchOptions]
+    return value !== undefined && (role === 'read' || (role === 'refused' && hostedChromeRefusal({ [key]: value }) !== null))
+  }))
 }
 
 /** A Google ID token for `audience` (the service's URL) from the metadata server, kept until five minutes before it expires. */
