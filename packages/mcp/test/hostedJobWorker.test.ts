@@ -151,7 +151,7 @@ describe('hosted job worker', () => {
   })
 
   it('gives a slice\'s pages hosted_chrome only while its switch lists the job\'s account (ADR 0005, revision of 2026-10-27)', async () => {
-    const { origin, deps, create, drain } = await setup()
+    const { origin, store, files, deps, create, drain } = await setup()
     const asked: string[] = []
     const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
     // The operator's config with a stand-in for the octocrawl-chrome service; the rungs before it find every page blocked.
@@ -170,9 +170,14 @@ describe('hosted job worker', () => {
     const on = { enabled: true, allowedUids: ['account-1'], monthlyCapUsd: 30, dailyAttemptsPerAccount: 50 }
     deps.access = new MemoryHostedAccess({ compatibleTransport: { enabled: false, allowedUids: null }, hostedChrome: on })
     const granted = await create(parseBatchStartRequest({ urls: [`${origin}/a`], access: 'enhanced' }))
-    await drain(granted)
+    expect((await drain(granted)).at(-1)).toBe('completed')
     expect(asked).toEqual(['/a'])
     expect(counted).toEqual(['account-1'])
+    // The service that read nothing is the rung failing, not the page: the page is the block the rungs before it met,
+    // where a throw once made it internal_error (batch 813ed4ca, 2026-10-31).
+    const job = (await store.get(granted))!
+    const items = gunzipSync(files.objects.get(job.segments![0]!)!.body).toString('utf8').split('\n').map((line) => JSON.parse(line) as { url: string; status: string; failureReason: string | null; blockReason: string | null })
+    expect(items).toEqual([expect.objectContaining({ url: `${origin}/a`, status: 'blocked', failureReason: null, blockReason: 'cloudflare_challenge' })])
     // Listing another account, or leaving a D5 number unset: the next job's slices hold nothing.
     for (const hostedChrome of [{ ...on, allowedUids: ['account-2'] }, { ...on, dailyAttemptsPerAccount: null }]) {
       asked.length = 0

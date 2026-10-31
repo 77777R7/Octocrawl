@@ -101,6 +101,14 @@ export interface Channel {
    * settlement answers (settleAdmitted). Absent: the rung runs whenever it is reached.
    */
   admit?(url: string, execution: ExecutionContext): Promise<ChannelAdmission>
+  /**
+   * Whether a throw from this rung's call, once the call went out and other than the run's cancellation or deadline, is
+   * this rung failing and not the run: the ladder records it (`ladder_channel_threw`) as a failed attempt (`internal_error`)
+   * and goes on by its own rules, so a page a rung before it read stays the answer. Its admission is still settled as a
+   * call that threw. A rung that reads through a service of its own sets it (hosted_chrome). Absent: the throw ends the
+   * run, as a paid provider's must, with its paid calls on the error (ROADMAP PA item 4).
+   */
+  readonly throwIsFailure?: boolean
   /** Release the channel's resources (browser processes, vendor sessions).
    *  The owner of the channel list calls this when the run is over. */
   close?(): Promise<void>
@@ -689,9 +697,11 @@ export class LadderRunner {
       }
       // A page the ladder stepped past for a stronger rung (a 403 the site answered, a page rendered with no main content),
       // or a block the site gave a rung, says more than a later rung's failure with no page at all: a network error, a
-      // provider's own error, a timeout. Not Octocrawl's own crash on a page its rung captured (internal_error, K1 T016).
+      // provider's own error, a timeout, a rung whose call threw (rungThrew). Not Octocrawl's own crash on a page its rung
+      // captured (internal_error, K1 T016).
       const stepped = progress.steppedPast
-      if (stepped === null || stepped.result === result || result.failureReason === 'internal_error' || (result.evidence.httpStatus != null && result.failureReason !== 'provider_error')) return result
+      const crashed = result.failureReason === 'internal_error' && !result.trace.some((event) => event.event === 'rung_threw')
+      if (stepped === null || stepped.result === result || crashed || (result.evidence.httpStatus != null && result.failureReason !== 'provider_error')) return result
       ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_evidence_kept', channel: stepped.channel, detail: { kept: stepped.channel, failed: channelsTried.at(-1) ?? null, reason: result.failureReason ?? result.blockReason } })
       return notImproved(withoutPassedRetryAt(stepped.result))
     }
@@ -834,23 +844,34 @@ export class LadderRunner {
         const callOptions = channel.id === 'http' && channel.vendorId === undefined && channelsTried.length === 0 && effectiveSession === null
           && fallbackBrowserAfter(channel) !== null ? { ...options, headersTimeoutFallback: true } : options
         const callStarted = performance.now()
+        const paidBefore = progress.paidCalls.length
         // The fallback's own 30 s ends before the caller's deadline, unless a promised fallback had less left (ADR 0007, 2026-10-26).
         const ownDeadline = fallback && Date.now() + HEADERS_TIMEOUT_FALLBACK_MS < execution.deadlineAt!
         const localScope = fallback ? createExecutionScope({ ...execution, deadlineAt: Math.min(execution.deadlineAt!, Date.now() + HEADERS_TIMEOUT_FALLBACK_MS) }) : null
         const callExecution = localScope ?? execution
         let fetched: FetchResult | null
+        let wentOut = false
         try {
           fetched = await this.paidFetch(channel, channel.id, url, effectiveSession, callExecution, callOptions, progress, () => {
+            wentOut = true
             channelsTried.push(channel.id)
             writeDecision(progress, fallback ? 'keep_591_fallback' : 'next_rung')
             ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_channel_started', channel: channel.id, detail: { vendorId: channel.vendorId ?? null, remainingMs: callExecution.deadlineAt === undefined ? null : Math.max(0, callExecution.deadlineAt - Date.now()) } })
           })
         } catch (error) {
-          // Only the fallback's own cap becomes a local timeout. Caller cancellation and the run deadline keep their semantics.
-          if (localScope === null || !deadlineReached(localScope) || deadlineReached(execution) || execution.signal?.aborted) throw error
-          const timedOut = deadlineFailure(url, 'browser_local', Math.max(0, performance.now() - callStarted))
-          fetched = { ...timedOut, usage: { ...timedOut.usage, deadlineExceeded: true } }
-          ladderTrace.push({ at: fetched.usage.wallMs, event: 'ladder_headers_timeout_fallback_expired', channel: channel.id, detail: { maxMs: HEADERS_TIMEOUT_FALLBACK_MS } })
+          if (channel.throwIsFailure === true && wentOut && localScope === null && !execution.signal?.aborted && !deadlineReached(execution)) {
+            // The rung failed, not the run (Channel.throwIsFailure): its attempt is a failed result, judged as any other.
+            const name = error instanceof Error ? error.name : typeof error
+            const message = (error instanceof Error ? error.message : String(error)).slice(0, 500)
+            fetched = rungThrew(url, laneOf(channel.id), Math.max(0, performance.now() - callStarted), name, message, progress.paidCalls.length > paidBefore)
+            ladderTrace.push({ at: Math.round(performance.now() - progress.startedAt), event: 'ladder_channel_threw', channel: channel.id, detail: { name, error: message } })
+          } else {
+            // Only the fallback's own cap becomes a local timeout. Caller cancellation and the run deadline keep their semantics.
+            if (localScope === null || !deadlineReached(localScope) || deadlineReached(execution) || execution.signal?.aborted) throw error
+            const timedOut = deadlineFailure(url, 'browser_local', Math.max(0, performance.now() - callStarted))
+            fetched = { ...timedOut, usage: { ...timedOut.usage, deadlineExceeded: true } }
+            ladderTrace.push({ at: fetched.usage.wallMs, event: 'ladder_headers_timeout_fallback_expired', channel: channel.id, detail: { maxMs: HEADERS_TIMEOUT_FALLBACK_MS } })
+          }
         } finally { localScope?.dispose() }
         if (fetched === null) continue
         const result = fetched
@@ -1837,6 +1858,17 @@ function deadlineFailure(url: string, lane: Lane, wallMs: number): FetchResult {
     usage: { wallMs, bytesWire: null, bytesDecompressed: 0, requestCount: 0, attemptCount: 0, contentTokens: null, browserMs: 0, externalCostUsd: lane === 'provider' ? null : 0 },
     trace: [],
   }
+}
+
+/**
+ * The attempt of a rung whose call threw and whose throw is its failure (Channel.throwIsFailure): failed, internal_error,
+ * with what it threw. Its own traffic was not measured. A call through a priced exit (`paid`) is on the run's paid calls,
+ * where its admission settled it (settleAdmitted), and its third-party cost is unknown, as an answered one's is; else the
+ * lane's own 0.
+ */
+function rungThrew(url: string, lane: Lane, wallMs: number, name: string, error: string, paid: boolean): FetchResult {
+  const failed = deadlineFailure(url, lane, wallMs)
+  return { ...failed, failureReason: 'internal_error', usage: { ...failed.usage, externalCostUsd: paid ? null : failed.usage.externalCostUsd }, trace: [{ at: wallMs, lane, event: 'rung_threw', detail: { name, error } }] }
 }
 
 function laneOf(channelId: string | null): Lane {

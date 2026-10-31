@@ -573,6 +573,48 @@ describe('LadderRunner — consuming FetchResult.escalations', () => {
     expect((paidCallsOfError(thrown)?.detail as { calls: Record<string, unknown>[] }).calls).toEqual([{ provider: 'webshare', rung: 'hosted_chrome', capabilities: ['hosted_chrome'], ceilingUsd: 0.002, chargedUsd: 0.002, reportedCostUsd: null, sessionMs: null, outcome: null, reason: null, answer: false, fixedMonthlyUsd: 2.99 }])
   })
 
+  it('takes a throw from a rung whose throw is its failure as that rung failing: what the rungs before it read stands', async () => {
+    const url = 'https://example.com/p'
+    const settled: [string | null, boolean][] = []
+    const exit = { provider: 'webshare', capabilities: ['hosted_chrome'], ceilingUsd: 0.002, fixedMonthlyUsd: 2.99 }
+    // hosted_chrome's client throws when the octocrawl-chrome service answers other than 200 (batch 813ed4ca, 2026-10-31).
+    const throwing = (): Channel => ({
+      ...channel('hosted_chrome', []),
+      throwIsFailure: true,
+      admit: async () => ({ ok: true as const, exit, settle: async (result: FetchResult | null, called: boolean) => { settled.push([result?.status ?? null, called]); return 0.002 } }),
+      fetch: async () => { throw new Error('the octocrawl-chrome service answered 400') },
+    })
+    // Content a rung before it read is the answer, and the read is settled as one that threw: with no page, at its ceiling.
+    const kept = await new LadderRunner([channel('http', [clientRenderedHttpSuccess(url)]), throwing()], { mode: 'standard', enhanced: true }).run(url)
+    expect(kept.channelsTried).toEqual(['http', 'hosted_chrome'])
+    expect(kept.result).toMatchObject({ status: 'success', lane: 'http', markdown: 'MAIN CONTENT' })
+    expect(kept.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_channel_threw', channel: 'hosted_chrome', detail: { name: 'Error', error: 'the octocrawl-chrome service answered 400' } }))
+    expect(settled).toEqual([[null, true]])
+    expect(kept.result.trace.find((event) => event.event === 'paid_calls')?.detail?.calls).toEqual([expect.objectContaining({ provider: 'webshare', rung: 'hosted_chrome', chargedUsd: 0.002, outcome: null, answer: false })])
+    // Blocked before it: the run ends with the block the site gave the rung before it, not an error.
+    const gated = { ...blockedResult(url, 'cloudflare_challenge'), lane: 'browser_local' as const }
+    const failed = await new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), channel('browser_local', [gated]), throwing()], { mode: 'standard', enhanced: true }).run(url)
+    expect(failed.channelsTried).toEqual(['http', 'browser_local', 'hosted_chrome'])
+    expect(failed.result).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge', lane: 'browser_local' })
+    expect(failed.ladderTrace).toContainEqual(expect.objectContaining({ event: 'ladder_evidence_kept', channel: 'browser_local', detail: { kept: 'browser_local', failed: 'hosted_chrome', reason: 'internal_error' } }))
+    // Through a priced exit with no rent the thrown read's cost is unknown, as an answered one's is, never 0; through no
+    // exit (Cloud Run's own egress) it is the lane's 0.
+    const free = (r: FetchResult): FetchResult => ({ ...r, usage: { ...r.usage, externalCostUsd: 0 } })
+    const blockedFree = (): Channel[] => [channel('http', [free(blockedResult(url, 'cloudflare_challenge'))]), channel('browser_local', [free(gated)])]
+    const unrented = await new LadderRunner([...blockedFree(), { ...throwing(), admit: async () => ({ ok: true as const, exit: { provider: 'webshare', capabilities: ['hosted_chrome'], ceilingUsd: 0.002 }, settle: async () => 0.002 }) }], { mode: 'standard', enhanced: true }).run(url)
+    expect(unrented.result.usage).toMatchObject({ externalCostUsd: null, externalCostChargedUsd: 0.002 })
+    expect(unrented.summary).toMatchObject({ externalCostUsd: null })
+    const own = await new LadderRunner([...blockedFree(), { ...throwing(), admit: async () => ({ ok: true as const, settle: async () => 0 }) }], { mode: 'standard', enhanced: true }).run(url)
+    expect(own.result.usage.externalCostUsd).toBe(0)
+    // Cancellation is still the run's, not the rung's.
+    const controller = new AbortController()
+    const cancelled = { ...throwing(), fetch: async () => { controller.abort(new DOMException('the caller left', 'AbortError')); throw new DOMException('the caller left', 'AbortError') } }
+    await expect(new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), cancelled], { mode: 'standard', enhanced: true }).run(url, null, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+    // A rung that does not say so ends the run, as a paid provider's throw must (ROADMAP PA item 4).
+    const plain = { ...throwing(), throwIsFailure: undefined }
+    await expect(new LadderRunner([channel('http', [blockedResult(url, 'cloudflare_challenge')]), plain], { mode: 'standard', enhanced: true }).run(url)).rejects.toThrow('answered 400')
+  })
+
   it('leaves out a provider rung that refuses the request, and says why (PA B4)', async () => {
     const url = 'https://example.com/p'
     const provider = { ...channel('provider', [contentfulResult(url, 'provider')], 'acme'), refusal: (_url: string, options: FetchOptions) => options.screenshot !== undefined ? 'provider takes no screenshot' : null }
