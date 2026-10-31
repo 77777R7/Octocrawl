@@ -1,6 +1,8 @@
 # hosted_chrome gate runs on tag h45regex, 2026-10-31
 
-The day's gate runs (ADR 0005, decision eight, revision of 2026-10-30) and the same-day baselines they are paired with. This record lists what the runs showed. It does not say whether the gate passed: that is Howard's call.
+The day's gate runs (ADR 0005, decision eight, revision of 2026-10-30) and the same-day baselines they are paired with. This record lists what the runs showed.
+
+**Decision (Howard, 2026-10-31, in chat).** The baseline for each gate run is the baseline window that overlapped it in time: w4 for run 1 and w5 for run 2. Measured that way, both runs meet the gate: run 1 verified 5, against w4's 4, and run 2 verified 6, against w5's 6; every run and baseline had 0 false successes. Howard counts the gate as passed. The comparison against the morning baseline w3 (below) stays in the record and is not used.
 
 - Build: one release build, source commit `4df8feed`. API revision `octocrawl-api-regex-4df8fee` (tag h45regex, created 2026-10-30T07:48:12Z); `octocrawl-chrome-c4-4df8fee` (created 2026-10-30T07:46:42Z, 100 % of its traffic). Neither was redeployed during the day; checked with `gcloud run services describe` and `gcloud run revisions list` after the last run.
 - Gate runs: `research/access/run-set.mjs` against `https://h45regex---octocrawl-api-c7fpmz73tq-as.a.run.app`, with the allowlisted account's key, `--access '"enhanced"'`, task contracts on, `--client-timeout-ms 330000`, `--save-responses`. Proxied from Howard's Mac (HTTPS_PROXY=http://127.0.0.1:7890). The command and timings are in each run's record.
