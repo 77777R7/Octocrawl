@@ -7,7 +7,8 @@
  *
  * hostedParity.test.ts holds the manifest to the code: a local tool, option or left-out value without an entry fails,
  * and so does an entry that claims more than hostedTools(), the hosted key sets and the hosted engine serve, or a
- * refusal hosted no longer makes. The table under "Hosted and local, side by side" in docs/hosted-api.md is
+ * refusal hosted no longer makes. It describes hosted as deployed: with the regular-expression checks' switch on
+ * (`regexChecks`, HostedApiConfig), as api.octocrawl.dev has run since 2026-10-31. The table under "Hosted and local, side by side" in docs/hosted-api.md is
  * parityTable()'s output, checked by the same test: `node --import tsx scripts/hosted/parity-table.ts --write` rewrites it.
  */
 import { HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS } from '@w2l/contracts'
@@ -81,7 +82,7 @@ const LOGINS = 'Hosted keeps no saved logins. Stage H item 5: Howard chooses bet
 const MONITORS = 'Monitors run on a server on the person\'s computer; stage H item 4 brings them to hosted.'
 const DELIVERY = 'Webhook destinations for Monitors and jobs are a local server\'s; stage H item 4 brings them to hosted. A hosted job\'s end can already be posted over REST (POST /v1/crawl, POST /v1/batches).'
 const SCREENSHOT = `A connection with the browser lane only, at ${CREDITS.browserPage} credits a page; an account with fewer credits reads over HTTP alone, where a screenshot is refused.`
-const REGEX = 'ADR 0006 (amendment of 2026-10-29): pattern checks run with a time limit, the same on every server. Hosted serves them once its operator sets W2L_HOSTED_REGEX_CHECKS=1 and its start-up self-test passes, and refuses them by name until then; markdownIncludes and the structured checks are served.'
+const REGEX = 'Every check type, markdownMatches and markdownCountMin included: pattern checks run with the same time limits on every server (ADR 0006, amendment of 2026-10-29). Hosted takes those two behind its operator\'s switch, W2L_HOSTED_REGEX_CHECKS=1, on api.octocrawl.dev and the job worker since 2026-10-31; an instance whose start-up self-test failed refuses them by name.'
 const FILE_CAP = `At most ${mib(HOSTED_MAX_FILE_BYTES)} (local ${mib(MAX_FILE_BYTES_CEILING)}).`
 const BROWSER_LANE = 'A connection with the browser lane only; one without reads over HTTP alone.'
 const WEBHOOK = 'REST takes it for the job\'s end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript.'
@@ -149,7 +150,7 @@ const SCRAPE_PAGE_OPTIONS = {
   fastMode: supported,
   blockAds: supported,
   removeBase64Images: supported,
-  verify: supported,
+  verify: { status: 'supported', note: REGEX },
   maxAge: cacheOption('not_honoured', ' Taken, and always read live.'),
   minAge: cacheOption('not_honoured', ' Taken, and always read live.'),
   storeInCache: cacheOption('not_honoured', ' Taken, and nothing is stored.'),
@@ -265,19 +266,12 @@ export const VALUE_PARITY: Record<OptionTool, Record<string, ValueEntry>> = {
     'formats=screenshot': { status: 'limited', note: SCREENSHOT },
     'formats=screenshot@fullPage': { status: 'limited', note: SCREENSHOT },
     'formats=json.modelFallback': { status: 'planned', item: 'model_fallback', note: MODEL_FALLBACK, sent: 'not_honoured', listed: true },
-    'verify=markdownMatches': { status: 'planned', item: null, note: REGEX, sent: 'refused' },
-    'verify=markdownCountMin': { status: 'planned', item: null, note: REGEX, sent: 'refused' },
   },
   map: {},
-  crawl: {
-    'verify=markdownMatches': { status: 'planned', item: null, note: REGEX, sent: 'refused' },
-    'verify=markdownCountMin': { status: 'planned', item: null, note: REGEX, sent: 'refused' },
-  },
+  crawl: {},
   batch_scrape: {
     'mode=authed': { status: 'planned', item: 'identity', note: 'Hosted holds no saved logins; the start refuses the value by name.', sent: 'refused' },
     'access=my-browser': { status: 'different_on_purpose', note: PERSON_CHROME, sent: 'refused' },
-    'verify=markdownMatches': { status: 'planned', item: null, note: REGEX, sent: 'refused' },
-    'verify=markdownCountMin': { status: 'planned', item: null, note: REGEX, sent: 'refused' },
   },
 }
 

@@ -583,9 +583,9 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 <!-- hosted-parity:start -->
 **Tools.** Of the local server's 39 MCP tools, hosted serves 17: 2 as locally and 15 limited. 21 are planned and 1 is different on purpose.
 
-**Options.** Of the 118 local options of scrape, map, crawl and batch_scrape, hosted lists 85: 73 as locally and 12 limited. 23 are planned and 10 different on purpose. Below the options, 13 option values that hosted leaves out or limits.
+**Options.** Of the 118 local options of scrape, map, crawl and batch_scrape, hosted lists 85: 73 as locally and 12 limited. 23 are planned and 10 different on purpose. Below the options, 7 option values that hosted leaves out or limits.
 
-**Planned, by stage H item** (tools, options and values): item 2, hosted access: 3; item 3, actions and waitFor: 2; item 4, monitors and delivery: 18; item 5, identity-bound features: 5; item 7, the json model fallback: 1; item 8, beyond local: 13; no item yet: 11.
+**Planned, by stage H item** (tools, options and values): item 2, hosted access: 3; item 3, actions and waitFor: 2; item 4, monitors and delivery: 18; item 5, identity-bound features: 5; item 7, the json model fallback: 1; item 8, beyond local: 13; no item yet: 5.
 
 | Tool | Hosted | How |
 | --- | --- | --- |
@@ -652,7 +652,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `scrape` `fastMode` | Supported |  |
 | `scrape` `blockAds` | Supported |  |
 | `scrape` `removeBase64Images` | Supported |  |
-| `scrape` `verify` | Supported |  |
+| `scrape` `verify` | Supported | Every check type, markdownMatches and markdownCountMin included: pattern checks run with the same time limits on every server (ADR 0006, amendment of 2026-10-29). Hosted takes those two behind its operator's switch, W2L_HOSTED_REGEX_CHECKS=1, on api.octocrawl.dev and the job worker since 2026-10-31; an instance whose start-up self-test failed refuses them by name. |
 | `scrape` `maxAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Taken, and always read live. Sent anyway: taken, not honoured. |
 | `scrape` `minAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Taken, and always read live. Sent anyway: taken, not honoured. |
 | `scrape` `storeInCache` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Taken, and nothing is stored. Sent anyway: taken, not honoured. |
@@ -710,7 +710,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `crawl` `fastMode` | Supported |  |
 | `crawl` `blockAds` | Supported |  |
 | `crawl` `removeBase64Images` | Supported |  |
-| `crawl` `verify` | Supported |  |
+| `crawl` `verify` | Supported | Every check type, markdownMatches and markdownCountMin included: pattern checks run with the same time limits on every server (ADR 0006, amendment of 2026-10-29). Hosted takes those two behind its operator's switch, W2L_HOSTED_REGEX_CHECKS=1, on api.octocrawl.dev and the job worker since 2026-10-31; an instance whose start-up self-test failed refuses them by name. |
 | `crawl` `maxAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
 | `crawl` `minAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
 | `crawl` `storeInCache` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
@@ -734,7 +734,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `batch_scrape` `fastMode` | Supported |  |
 | `batch_scrape` `blockAds` | Supported |  |
 | `batch_scrape` `removeBase64Images` | Supported |  |
-| `batch_scrape` `verify` | Supported |  |
+| `batch_scrape` `verify` | Supported | Every check type, markdownMatches and markdownCountMin included: pattern checks run with the same time limits on every server (ADR 0006, amendment of 2026-10-29). Hosted takes those two behind its operator's switch, W2L_HOSTED_REGEX_CHECKS=1, on api.octocrawl.dev and the job worker since 2026-10-31; an instance whose start-up self-test failed refuses them by name. |
 | `batch_scrape` `maxAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
 | `batch_scrape` `minAge` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
 | `batch_scrape` `storeInCache` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
@@ -754,12 +754,6 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `scrape` `formats: screenshot` | Limited | A connection with the browser lane only, at 5 credits a page; an account with fewer credits reads over HTTP alone, where a screenshot is refused. The same on crawl and batch_scrape. |
 | `scrape` `formats: screenshot@fullPage` | Limited | A connection with the browser lane only, at 5 credits a page; an account with fewer credits reads over HTTP alone, where a screenshot is refused. The same on crawl and batch_scrape. |
 | `scrape` `formats: json.modelFallback` | Planned: stage H item 7, the json model fallback | Listed, and answered as switched off until the model fallback is deployed with a model and switched on (hostedConfig/model); the live service's state is not checked here. Sent anyway: taken, not honoured. The same on crawl and batch_scrape. |
-| `scrape` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006 (amendment of 2026-10-29): pattern checks run with a time limit, the same on every server. Hosted serves them once its operator sets W2L_HOSTED_REGEX_CHECKS=1 and its start-up self-test passes, and refuses them by name until then; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
-| `scrape` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006 (amendment of 2026-10-29): pattern checks run with a time limit, the same on every server. Hosted serves them once its operator sets W2L_HOSTED_REGEX_CHECKS=1 and its start-up self-test passes, and refuses them by name until then; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
-| `crawl` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006 (amendment of 2026-10-29): pattern checks run with a time limit, the same on every server. Hosted serves them once its operator sets W2L_HOSTED_REGEX_CHECKS=1 and its start-up self-test passes, and refuses them by name until then; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
-| `crawl` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006 (amendment of 2026-10-29): pattern checks run with a time limit, the same on every server. Hosted serves them once its operator sets W2L_HOSTED_REGEX_CHECKS=1 and its start-up self-test passes, and refuses them by name until then; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
 | `batch_scrape` `mode: authed` | Planned: stage H item 5, identity-bound features | Hosted holds no saved logins; the start refuses the value by name. Sent anyway: refused by name. |
 | `batch_scrape` `access: my-browser` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server. Sent anyway: refused by name. |
-| `batch_scrape` `verify: markdownMatches` | Planned: no stage H item yet | ADR 0006 (amendment of 2026-10-29): pattern checks run with a time limit, the same on every server. Hosted serves them once its operator sets W2L_HOSTED_REGEX_CHECKS=1 and its start-up self-test passes, and refuses them by name until then; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
-| `batch_scrape` `verify: markdownCountMin` | Planned: no stage H item yet | ADR 0006 (amendment of 2026-10-29): pattern checks run with a time limit, the same on every server. Hosted serves them once its operator sets W2L_HOSTED_REGEX_CHECKS=1 and its start-up self-test passes, and refuses them by name until then; markdownIncludes and the structured checks are served. Sent anyway: refused by name. |
 <!-- hosted-parity:end -->
