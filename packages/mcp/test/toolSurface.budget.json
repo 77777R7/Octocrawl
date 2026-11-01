@@ -1,11 +1,11 @@
 {
   "local": {
     "scrape": {
-      "inputBytes": 9983,
+      "inputBytes": 9999,
       "descriptionChars": 450
     },
     "map": {
-      "inputBytes": 3117,
+      "inputBytes": 3094,
       "descriptionChars": 597
     },
     "get_scrape": {
@@ -13,7 +13,7 @@
       "descriptionChars": 277
     },
     "crawl": {
-      "inputBytes": 4629,
+      "inputBytes": 4606,
       "descriptionChars": 603
     },
     "get_crawl": {
@@ -45,7 +45,7 @@
       "descriptionChars": 221
     },
     "batch_scrape": {
-      "inputBytes": 5162,
+      "inputBytes": 5139,
       "descriptionChars": 550
     },
     "get_batch": {
@@ -159,21 +159,21 @@
   },
   "hosted-keyless": {
     "scrape": {
-      "inputBytes": 5846,
+      "inputBytes": 5894,
       "descriptionChars": 392
     },
     "map": {
-      "inputBytes": 2761,
+      "inputBytes": 2738,
       "descriptionChars": 597
     }
   },
   "hosted-key": {
     "scrape": {
-      "inputBytes": 6474,
+      "inputBytes": 6522,
       "descriptionChars": 392
     },
     "map": {
-      "inputBytes": 2761,
+      "inputBytes": 2738,
       "descriptionChars": 597
     },
     "scrape_product": {
@@ -183,21 +183,21 @@
   },
   "oauth-http": {
     "scrape": {
-      "inputBytes": 5846,
+      "inputBytes": 5894,
       "descriptionChars": 392
     },
     "map": {
-      "inputBytes": 2761,
+      "inputBytes": 2738,
       "descriptionChars": 597
     }
   },
   "oauth-browser": {
     "scrape": {
-      "inputBytes": 6474,
+      "inputBytes": 6522,
       "descriptionChars": 392
     },
     "map": {
-      "inputBytes": 2761,
+      "inputBytes": 2738,
       "descriptionChars": 597
     },
     "scrape_product": {
@@ -207,11 +207,11 @@
   },
   "local-core": {
     "scrape": {
-      "inputBytes": 9983,
+      "inputBytes": 9999,
       "descriptionChars": 450
     },
     "map": {
-      "inputBytes": 3117,
+      "inputBytes": 3094,
       "descriptionChars": 597
     },
     "get_scrape": {
@@ -221,11 +221,11 @@
   },
   "local-read-only": {
     "scrape": {
-      "inputBytes": 7653,
+      "inputBytes": 7669,
       "descriptionChars": 450
     },
     "map": {
-      "inputBytes": 3117,
+      "inputBytes": 3094,
       "descriptionChars": 597
     },
     "get_scrape": {

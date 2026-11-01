@@ -117,7 +117,8 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       // The verdict first, cut to the budget, and a screenshot as an image block too (docs/mcp-client-ux-tasks.md W8).
       // One ledger for the call's re-judgements of a scrape, so they scan its text once and their cost is told once.
       const ledger = contract === undefined ? undefined : new RegexLedger()
-      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments, contract, { keepScrapeId, ledger }) : result, contract, ledger)
+      const offset = (request.params.arguments as Record<string, unknown> | undefined)?.markdownOffset
+      const { value, images } = shapeResult(request.params.name, options.minimalResults === true ? withoutTelemetry(request.params.name, result, request.params.arguments, contract, { keepScrapeId, ledger }) : result, contract, ledger, typeof offset === 'number' ? offset : undefined)
       if (ledger !== undefined) {
         ledger.close()
         if (ledger.stats.scans > 0 || ledger.stats.memoHits > 0) { try { options.onRegexChecks?.(ledger.stats) } catch { /* the observer's own fault */ } }

@@ -57,20 +57,20 @@ const VERIFY_PROPERTY = {
 
 /** Options scrape, crawl and batch_scrape share; crawl and batch apply them to every page. */
 const PAGE_OPTION_PROPERTIES = {
-  onlyMainContent: { type: 'boolean', description: 'false keeps the whole page (header, navigation, footer). Default true.' },
+  onlyMainContent: { type: 'boolean', description: 'false also keeps header, navigation and footer. Default true.' },
   waitFor: { type: 'integer', minimum: 0, maximum: 60000, description: 'Ms the browser waits after load before reading; starts in the browser. Default 0.' },
   timeout: { type: 'integer', minimum: 1000, maximum: 300000, description: 'Deadline in ms; then partial or failed/timeout. Default 120000 on scrape, 300000 per page on crawl and batch.' },
   maxFileBytes: { type: 'integer', minimum: 1, maximum: MAX_FILE_BYTES_CEILING, description: 'Largest file to download; a larger one is failed/body_too_large.' },
   includeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'CSS selectors of the only elements to keep, whatever onlyMainContent says (no sibling combinators, :nth-child or :has).' },
   excludeTags: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 }, description: 'CSS selectors removed with their contents.' },
-  headers: { type: 'object', maxProperties: 32, additionalProperties: { type: 'string', maxLength: 4096 }, description: 'Extra headers to the page\'s origin, recorded; User-Agent, client hints, authorization and cookie are refused.' },
+  headers: { type: 'object', maxProperties: 32, additionalProperties: { type: 'string', maxLength: 4096 }, description: 'Extra headers to the page\'s origin, recorded; User-Agent, client hints, authorization and cookie refused.' },
   mobile: { type: 'boolean', description: 'Read as declared mobile Chrome (Android UA, 412x915). Default false.' },
-  skipTlsVerification: { type: 'boolean', description: 'Local only: accept an invalid or self-signed certificate (tls_unverified warning).' },
-  fastMode: { type: 'boolean', description: 'HTTP only: a page needing scripts returns the HTTP verdict (a shell is failed/empty_unverified). Default false.' },
-  blockAds: { type: 'boolean', description: 'Block ad hosts and ad or cookie-banner elements in the browser. Default true.' },
+  skipTlsVerification: { type: 'boolean', description: 'Local only: accept an invalid or self-signed certificate (tls_unverified).' },
+  fastMode: { type: 'boolean', description: 'HTTP only: a page needing scripts gets the HTTP verdict (a shell: failed/empty_unverified). Default false.' },
+  blockAds: { type: 'boolean', description: 'Block ad hosts, ads and cookie banners in the browser. Default true.' },
   removeBase64Images: { type: 'boolean', description: 'Drop data: URI images from the Markdown, keeping alt text. Default true.' },
   verify: VERIFY_PROPERTY,
-  maxAge: { type: 'integer', minimum: 0, maximum: MAX_CACHE_AGE_MS, description: 'Reuse a stored result up to this many ms old with the same options (cacheState hit). Default 0: live.' },
+  maxAge: { type: 'integer', minimum: 0, maximum: MAX_CACHE_AGE_MS, description: 'Reuse a stored result up to this many ms old, same options (cacheState hit). Default 0: live.' },
   minAge: { type: 'integer', minimum: 0, maximum: MAX_CACHE_AGE_MS, description: 'Reuse only a stored result at least this many ms old.' },
   storeInCache: { type: 'boolean', description: 'Store a successful result for reuse. Default true; with custom headers only when true.' },
   lockdown: { type: 'boolean', description: 'Answer from the cache only; none stored is failed/cache_miss.' },
@@ -96,7 +96,7 @@ const WEBHOOK_PROPERTY = {
 } as const
 /** The caller's own label for its integration; `origin` is not a tool option: the server records the client's name and version. */
 const INTEGRATION_PROPERTY = {
-  integration: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[\\x21-\\x7e]+$', description: 'Your workflow label (printable, no spaces); recorded, not sent to sites.' },
+  integration: { type: 'string', minLength: 1, maxLength: 100, pattern: '^[\\x21-\\x7e]+$', description: 'Your workflow label; recorded, not sent to sites.' },
 } as const
 /** html and rawHtml are carried only when asked for, and are null for a file or a page that was not read as content; images and attributes are absent then; screenshot is null then. */
 const FORMATS_DESCRIPTION = 'What to return (default markdown): markdown, links, html, rawHtml, images, tables, json, attributes ({ selectors }), list ({ itemSelector?, fields? }: a record per repeated item, detected without itemSelector), screenshot or screenshot@fullPage (browser only).'
@@ -200,7 +200,7 @@ const ACTIONS_SCHEMA = {
 
 const ROBOTS_OVERRIDE_SCHEMA = {
   type: 'object',
-  description: 'Why you fetch this URL though robots.txt disallows it; recorded with a robots_overridden warning. Refused hosted.',
+  description: 'Why you fetch this URL though robots.txt disallows it; recorded with a robots_overridden warning.',
   properties: ROBOTS_OVERRIDE_PROPERTIES,
   required: ['reason'],
   additionalProperties: false,
@@ -288,8 +288,9 @@ const DEFINITIONS = [
           description: FORMATS_DESCRIPTION,
           items: FORMAT_ITEMS,
         },
-        includeLinks: { type: 'boolean', description: 'Also return the page\'s outbound links. Default false.' },
+        includeLinks: { type: 'boolean', description: 'Also return the page\'s links. Default false.' },
         debug: { type: 'boolean', description: 'Return the full audit: trace, ladderTrace and every attempt.' },
+        markdownOffset: { type: 'integer', minimum: 0, description: 'Read on from a cut markdown\'s truncatedAt.' },
         ...PAGE_OPTION_PROPERTIES,
         actions: ACTIONS_SCHEMA,
         robotsOverride: ROBOTS_OVERRIDE_SCHEMA,
@@ -606,6 +607,7 @@ const SCRAPE_OUTPUT = {
     agentHints: { type: 'array', items: { type: 'string' } },
     truncated: { type: 'boolean' },
     truncatedAt: { type: ['integer', 'null'] },
+    markdownOffset: { type: 'integer' },
     finalUrl: NULLABLE_STRING,
     evidenceRecord: { type: ['object', 'null'] },
     markdown: NULLABLE_STRING,
@@ -684,7 +686,9 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: T
     return client.batchScrape(urls,{mode:'standard',formats:[{type:'json',schema:AMAZON_PRODUCT_SCHEMA,modelFallback:false}],includeLinks:false},request)
   }
   if (name === 'scrape') {
-    const raw = readRecord(args)
+    // markdownOffset chooses what the answer shows (results.ts), not what is read: the API never sees it.
+    const { markdownOffset, ...raw } = readRecord(args)
+    if (markdownOffset !== undefined && !(Number.isSafeInteger(markdownOffset) && (markdownOffset as number) >= 0)) throw new RequestError('markdownOffset must be a whole number of characters, 0 or more')
     // A read that waits for the person (my-browser, a handoff) keeps the longer default.
     const waitsForPerson = raw.lane === 'my-browser' || raw.access === 'my-browser' || (raw.handoff !== undefined && raw.handoff !== false)
     const req = parseScrapeRequest(withoutOrigin('timeout' in raw || waitsForPerson ? raw : { ...raw, timeout: MCP_SCRAPE_TIMEOUT_MS }))
