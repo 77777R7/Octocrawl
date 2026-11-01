@@ -23,13 +23,16 @@ type Variant = { enum?: unknown[]; properties?: Record<string, unknown> & { type
 type Property = { enum?: unknown[]; maximum?: number; items?: { anyOf?: Variant[] }; properties?: { checks?: { items?: { properties?: { type?: { enum?: string[] } } } } } }
 type Listed = readonly { name: string; inputSchema: unknown }[]
 
-/** Every hosted connection, by the tools it lists: keyless (as a key without the browser lane), a key with it, an account's without and with it, and one signed in. */
+/**
+ * Every hosted connection, by the tools it lists: keyless (as a key without the browser lane), a key with it, an account's
+ * without and with it, and one signed in; on a server that takes the regular-expression checks, as hosted is deployed.
+ */
 const CONNECTIONS: readonly { name: string; tools: Listed }[] = [
-  { name: 'keyless', tools: hostedTools(false) },
-  { name: 'key with the browser lane', tools: hostedTools(true) },
-  { name: 'account without the browser lane', tools: hostedTools(false, true) },
-  { name: 'account with the browser lane', tools: hostedTools(true, true) },
-  { name: 'signed in', tools: oauthTools(true, true) },
+  { name: 'keyless', tools: hostedTools(false, false, true) },
+  { name: 'key with the browser lane', tools: hostedTools(true, false, true) },
+  { name: 'account without the browser lane', tools: hostedTools(false, true, true) },
+  { name: 'account with the browser lane', tools: hostedTools(true, true, true) },
+  { name: 'signed in', tools: oauthTools(true, true, true) },
 ]
 const propertiesOf = (tools: Listed, name: string) => (tools.find((tool) => tool.name === name)?.inputSchema as { properties: Record<string, Property> } | undefined)?.properties
 const local = (name: string) => propertiesOf(TOOLS, name)!
@@ -160,8 +163,6 @@ const VALUE_SAMPLES: Record<string, Record<string, unknown>> = {
   'mode=authed': { mode: 'authed' },
   'access=my-browser': { access: 'my-browser' },
   'formats=json.modelFallback': JSON_MODEL,
-  'verify=markdownMatches': { verify: { checks: [{ type: 'markdownMatches', pattern: 'Tides' }] } },
-  'verify=markdownCountMin': { verify: { checks: [{ type: 'markdownCountMin', pattern: 'Tides', min: 1 }] } },
 }
 const sample = (tool: OptionTool, option: string): Record<string, unknown> => {
   // One worker engine takes every job below, so each tool's start claims its own key.
@@ -212,7 +213,7 @@ describe('what hosted does with what it does not list', () => {
     await new Promise<void>((resolve) => probe.close(() => resolve()))
     const keys = new MemoryHostedKeys(new Map(Array.from({ length: 300 }, (_, i) => [keyDigest(HASH_KEY, `oc_parity_${i}`), { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: `account-${i}` }] as const)))
     const service = createHostedApi({
-      port, host: '127.0.0.1', taskRoot: join(root, 'api'), hashKey: HASH_KEY, keys, quota: new MemoryHostedQuota(), credits: new MemoryCreditsStore(), addressPerMinute: 10_000,
+      port, host: '127.0.0.1', taskRoot: join(root, 'api'), hashKey: HASH_KEY, keys, quota: new MemoryHostedQuota(), credits: new MemoryCreditsStore(), addressPerMinute: 10_000, regexChecks: true,
       networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: () => {},
       jobs: { store: jobs, files: { segment: async () => null, exportUrl: async (job) => `https://storage.example/${job.id}` }, enqueueSlice: async () => {} },
     })
