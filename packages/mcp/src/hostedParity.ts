@@ -181,6 +181,7 @@ export const OPTION_PARITY: { [N in OptionTool]: Record<OptionOf<N>, OptionEntry
     formats: supported,
     includeLinks: supported,
     debug: supported,
+    markdownOffset: { status: 'supported', note: 'MCP only, here and locally: where the answer\'s Markdown starts, to read on from a cut answer. REST answers the whole Markdown.' },
     ...SCRAPE_PAGE_OPTIONS,
     actions: { status: 'planned', item: 'actions', note: 'A step runs the caller\'s clicks and scripts in the operator\'s browser; hosted takes none until that isolation is reviewed, and stage H item 3 brings actions to keyed callers.', sent: 'refused' },
     robotsOverride: { status: 'different_on_purpose', note: ROBOTS, sent: 'refused' },

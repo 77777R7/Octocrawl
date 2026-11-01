@@ -322,8 +322,9 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
  * authed reads anonymously, as it holds no saved login; lockdown always misses, since nothing is cached; storeInCache,
  * maxAge and minAge do nothing for the same reason). Measured against createHostedApi on 2026-10-17;
  * hostedSchema.integration.test.ts calls every listed option, so a new local option reaches hosted only when added here.
+ * markdownOffset is the MCP server's own (results.ts) and never reaches REST.
  */
-export const HOSTED_SCRAPE_KEYS: ReadonlySet<string> = new Set(['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'fastMode', 'blockAds', 'removeBase64Images', 'verify', 'integration'])
+export const HOSTED_SCRAPE_KEYS: ReadonlySet<string> = new Set(['url', 'mode', 'allowlistedDomains', 'formats', 'includeLinks', 'debug', 'markdownOffset', 'onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'fastMode', 'blockAds', 'removeBase64Images', 'verify', 'integration'])
 /** A hosted MCP scrape's deadline when it names none: a local MCP scrape's. */
 export const HOSTED_MCP_SCRAPE_TIMEOUT_MS = MCP_SCRAPE_TIMEOUT_MS
 /**

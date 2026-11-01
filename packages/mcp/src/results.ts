@@ -12,7 +12,7 @@ import { resultProjection, type ResultProjection } from './resultVerification.js
 export const RESULT_TEXT_MAX = 50_000
 
 /** The fields that say what happened, serialised before the page body (W8.2). */
-const VERDICT_KEYS = ['status', 'failureReason', 'blockReason', 'verification', 'readiness', 'agentHints', 'truncated', 'truncatedAt'] as const
+const VERDICT_KEYS = ['status', 'failureReason', 'blockReason', 'verification', 'readiness', 'agentHints', 'truncated', 'truncatedAt', 'markdownOffset'] as const
 const MAX_HINTS = 5
 
 export type ImageBlock = { type: 'image'; data: string; mimeType: string }
@@ -20,10 +20,15 @@ type Json = Record<string, unknown>
 
 /**
  * A tool's result as the MCP server answers it: the verdict first, cut to the budget, and a screenshot as an image block.
- * A scrape's versions are judged on `ledger`, the call's, when one is given (resultProjection).
+ * A scrape's versions are judged on `ledger`, the call's, when one is given (resultProjection). `markdownOffset`, a
+ * scrape's, starts its Markdown there, so a cut answer can be read on from its truncatedAt.
  */
-export function shapeResult(tool: string, result: unknown, contract?: VerifyContract, ledger?: RegexLedger): { value: unknown; images: ImageBlock[] } {
+export function shapeResult(tool: string, result: unknown, contract?: VerifyContract, ledger?: RegexLedger, markdownOffset?: number): { value: unknown; images: ImageBlock[] } {
   if (!isObject(result)) return { value: result, images: [] }
+  if (tool === 'scrape' && markdownOffset !== undefined) {
+    const project = resultProjection(result, contract, 'mcp_result_offset', ledger)
+    return { value: withinBudget(verdictFirst(fromOffset(result, markdownOffset, project)), RESULT_TEXT_MAX, withoutBase64, project, { markdownOffset }), images: screenshotImage(result) }
+  }
   if (tool === 'scrape') return { value: withinBudget(verdictFirst(result), RESULT_TEXT_MAX, withoutBase64, resultProjection(result, contract, 'mcp_result_truncated', ledger)), images: screenshotImage(result) }
   if ((tool === 'get_crawl_pages' || tool === 'get_batch_items') && Array.isArray(result.items)) return { value: pageListWithinBudget(result), images: [] }
   return { value: result, images: [] }
@@ -74,6 +79,21 @@ function isObject(value: unknown): value is Json {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+/**
+ * A scrape's result with its Markdown from `offset` on, judged again as the version that goes out; one past the end
+ * has none of it, and a hint says how long it is. A result without Markdown is left alone.
+ */
+function fromOffset(result: Json, offset: number, project: ResultProjection): Json {
+  const markdown = result.markdown
+  if (typeof markdown !== 'string') return result
+  const windowed: Json = { ...result, markdown: markdown.slice(offset), markdownOffset: offset }
+  if (offset >= markdown.length) {
+    const hints = Array.isArray(result.agentHints) ? (result.agentHints as unknown[]).filter((hint): hint is string => typeof hint === 'string') : []
+    windowed.agentHints = [...hints.slice(0, MAX_HINTS - 1), `markdownOffset ${offset} is at or past the end of the markdown, which is ${markdown.length} characters long`]
+  }
+  return project.deliver(windowed)
+}
+
 function verdictFirst(result: Json): Json {
   const ordered: Json = {}
   for (const key of VERDICT_KEYS) if (key in result) ordered[key] = result[key]
@@ -97,12 +117,12 @@ function screenshotImage(result: Json): ImageBlock[] {
  * still over, its images, links and tables kept to the longest prefix that fits (a table cut by rows), each with a
  * hint saying how many were kept. Every cut is re-verified against the request's contract.
  */
-function withinBudget(result: Json, max: number, measure: Measure, project: ResultProjection = resultProjection(result)): Json {
+function withinBudget(result: Json, max: number, measure: Measure, project: ResultProjection = resultProjection(result), from: ReadOn = {}): Json {
   if (measure(result) <= max) return result
   let cut = result
   let cutAny = false
   for (const field of CUT_ORDER) {
-    const next = BODY_FIELDS.has(field) ? cutBody(cut, field, max, measure, project) : cutList(cut, field, max, measure, project)
+    const next = BODY_FIELDS.has(field) ? cutBody(cut, field, max, measure, project, from) : cutList(cut, field, max, measure, project)
     if (next === null) continue
     cut = next
     cutAny = true
@@ -136,11 +156,19 @@ function longest(high: number, fits: (keep: number) => boolean): number {
   return low
 }
 
+/**
+ * How a cut Markdown is read on: where it begins in the page's (`markdownOffset`, a scrape's answered from one), so
+ * truncatedAt is where to read on from, and whether it is a page of a list, which a scrape of its url with the job's
+ * page options reads on.
+ */
+type ReadOn = { markdownOffset?: number; listed?: boolean }
+
 /** A page body shortened to the longest prefix that fits, or null when there is none to shorten. */
-function cutBody(cut: Json, field: string, max: number, measure: Measure, project: (value: Json) => Json): Json | null {
+function cutBody(cut: Json, field: string, max: number, measure: Measure, project: (value: Json) => Json, from: ReadOn): Json | null {
   const body = cut[field]
   if (typeof body !== 'string' || body === '') return null
-  const keeping = (keep: number): Json => verdictFirst(project({ ...cut, [field]: body.slice(0, keep), truncated: true, truncatedAt: keep, agentHints: hintsWith(cut, field, keep) }))
+  const start = field === 'markdown' ? from.markdownOffset ?? 0 : 0
+  const keeping = (keep: number): Json => verdictFirst(project({ ...cut, [field]: body.slice(0, keep), truncated: true, truncatedAt: start + keep, agentHints: hintsWith(cut, field, start + keep, start + body.length, from.listed === true) }))
   // JSON escapes make the text longer than the body, so search rather than subtract.
   return keeping(longest(body.length, keep => measure(keeping(keep)) <= max))
 }
@@ -186,11 +214,14 @@ function listHintsWith(result: Json, field: string, kept: number, of: number, ro
 }
 const LIST_CUT_HINT = /^the (images|links|tables) were cut to \d+ of \d+/
 
-function hintsWith(result: Json, field: string, at: number): string[] {
+function hintsWith(result: Json, field: string, at: number, length: number, listed: boolean): string[] {
   const hints = Array.isArray(result.agentHints) ? (result.agentHints as unknown[]).filter((hint): hint is string => typeof hint === 'string' && !CUT_HINT.test(hint)) : []
-  return [...hints.slice(0, MAX_HINTS - 1), `the ${field} was cut at character ${at} to fit this answer; narrow it with onlyMainContent, includeTags or excludeTags`]
+  const cut = field === 'markdown'
+    ? `the markdown was cut at character ${at} of ${length} to fit this answer; read on by ${listed ? 'scraping its url with the job\'s page options and' : 'sending the same scrape with'} markdownOffset: ${at} (the page is read and charged again), or narrow it with onlyMainContent, includeTags or excludeTags`
+    : `the ${field} was cut at character ${at} to fit this answer; narrow it with onlyMainContent, includeTags or excludeTags`
+  return [...hints.slice(0, MAX_HINTS - 1), cut]
 }
-const CUT_HINT = /^the (rawHtml|html|markdown) was cut at character \d+ to fit this answer/
+const CUT_HINT = /^the (rawHtml|html|markdown) was cut at character \d+ (of \d+ )?to fit this answer/
 
 /** The API's cursor after a page: base64url of its createdAt and id, as @w2l/runtime's encodeStepCursor writes it (kept here so the stdio package stays free of the runtime). */
 function cursorAfter(page: unknown): string | null {
@@ -221,7 +252,7 @@ function pageListWithinBudget(list: Json, max = RESULT_TEXT_MAX): Json {
   while (count > 1 && whole(stopped(items.slice(0, count))) > max) count -= 1
   if (count === 0) {
     const first = items[0]
-    const cutFirst = isObject(first) ? withinBudget(first, max - envelope, whole) : first
+    const cutFirst = isObject(first) ? withinBudget(first, max - envelope, whole, resultProjection(first), { listed: true }) : first
     return items.length === 1 ? { ...all, items: [cutFirst] } : stopped([cutFirst])
   }
   return stopped(items.slice(0, count))

@@ -119,7 +119,7 @@ describe('hosted tool schemas', () => {
       scrape: {
         mode: 'research', allowlistedDomains: ['127.0.0.1'], formats: ['markdown', 'html', 'links', 'tables'], includeLinks: true, debug: true, onlyMainContent: false,
         waitFor: 200, timeout: 20_000, maxFileBytes: 1_000_000, includeTags: ['main'], excludeTags: ['nav'], headers: { 'accept-language': 'en' }, mobile: true,
-        fastMode: true, blockAds: false, removeBase64Images: false, verify: { checks: [{ type: 'markdownIncludes', text: 'Tides' }] }, integration: 'schema-check',
+        fastMode: true, blockAds: false, removeBase64Images: false, verify: { checks: [{ type: 'markdownIncludes', text: 'Tides' }] }, integration: 'schema-check', markdownOffset: 1,
       },
       map: {
         search: 'b', sitemap: 'skip', includeSubdomains: true, ignoreQueryParameters: true, limit: 10, timeout: 20_000, includePaths: ['/'], excludePaths: ['/x'],

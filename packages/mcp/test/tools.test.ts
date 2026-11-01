@@ -710,11 +710,13 @@ describe('MCP tools', () => {
   it('takes on scrape, batch_scrape and crawl every key the request takes, verify among them, but origin and parsers', () => {
     // origin is the host's own; parsers (PDF options) are not offered over MCP; maxCredits is offered by the hosted tools only (H2 M6).
     const notOffered = ['origin', 'parsers', 'maxCredits']
+    // The MCP server's own: debug, and scrape's markdownOffset, which chooses what the answer shows (results.ts).
+    const mcpOnly = ['debug', 'markdownOffset']
     for (const [name, keys] of [['scrape', SCRAPE_KEYS], ['batch_scrape', BATCH_KEYS], ['crawl', CRAWL_KEYS]] as const) {
       const tool = TOOLS.find((t) => t.name === name)!
       const properties = Object.keys(tool.inputSchema.properties)
       expect((keys as readonly string[]).filter((key) => !properties.includes(key) && !notOffered.includes(key)), name).toEqual([])
-      expect(properties.filter((key) => !(keys as readonly string[]).includes(key) && key !== 'debug'), name).toEqual([])
+      expect(properties.filter((key) => !(keys as readonly string[]).includes(key) && !mcpOnly.includes(key)), name).toEqual([])
       // crawl and batch_scrape declare verify loosely (docs/mcp-client-ux-tasks.md W7.4); scrape carries its shape.
       expect((tool.inputSchema.properties as Record<string, { required?: string[] }>).verify?.required, name).toEqual(name === 'scrape' ? ['checks'] : undefined)
     }

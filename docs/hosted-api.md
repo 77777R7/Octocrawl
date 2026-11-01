@@ -583,7 +583,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 <!-- hosted-parity:start -->
 **Tools.** Of the local server's 39 MCP tools, hosted serves 17: 2 as locally and 15 limited. 21 are planned and 1 is different on purpose.
 
-**Options.** Of the 118 local options of scrape, map, crawl and batch_scrape, hosted lists 85: 73 as locally and 12 limited. 23 are planned and 10 different on purpose. Below the options, 7 option values that hosted leaves out or limits.
+**Options.** Of the 119 local options of scrape, map, crawl and batch_scrape, hosted lists 86: 74 as locally and 12 limited. 23 are planned and 10 different on purpose. Below the options, 7 option values that hosted leaves out or limits.
 
 **Planned, by stage H item** (tools, options and values): item 2, hosted access: 3; item 3, actions and waitFor: 2; item 4, monitors and delivery: 18; item 5, identity-bound features: 5; item 7, the json model fallback: 1; item 8, beyond local: 13; no item yet: 5.
 
@@ -640,6 +640,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `scrape` `formats` | Supported |  |
 | `scrape` `includeLinks` | Supported |  |
 | `scrape` `debug` | Supported |  |
+| `scrape` `markdownOffset` | Supported | MCP only, here and locally: where the answer's Markdown starts, to read on from a cut answer. REST answers the whole Markdown. |
 | `scrape` `onlyMainContent` | Supported |  |
 | `scrape` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
 | `scrape` `timeout` | Limited | At most 180 s, and 120 s when left out (local 300 s, and 120 s when left out): 60 s inside the 240 s claude.ai gives a tool call, under Cloud Run's 300 s request timeout. |

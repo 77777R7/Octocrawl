@@ -14,6 +14,8 @@ A client that takes only so many tools, or loads every definition up front, can 
 
 `--read-only` (or `W2L_MCP_READ_ONLY=1`; a value other than yes or no stops the server) lists the tools that only read, plus a `scrape` without the options that act as the person (`actions`, `lane`, `handoff`, `mode` authed, `access` my-browser), marked read-only so a client can run it without asking. A call that sends one of those options anyway is refused before any request.
 
+An answer holds at most 50,000 characters, the size at which Claude Code saves a result to a file instead of showing it. A longer `scrape` Markdown is cut, and the answer says where: `truncated: true`, `truncatedAt`, and a hint that names the markdown and its full length (a cut `html` or `rawHtml` is named the same way, and its `truncatedAt` is not an offset into the Markdown). To read on, send the same `scrape` with `markdownOffset` set to that `truncatedAt`. The page is read, and on hosted Octocrawl charged, again; compare `evidenceRecord.rawSha256` to see that it did not change between reads.
+
 Claude Code:
 
 ```bash

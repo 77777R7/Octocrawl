@@ -163,6 +163,7 @@ describe('MCP result budget', () => {
       const value = (reply.structuredContent!.items as Array<Record<string, any>>)[0]!
       expect(value.truncated).toBe(true)
       expect(value.markdown).not.toContain('REQUIRED_TAIL_FIELD')
+      expect(value.agentHints.at(-1)).toMatch(new RegExp(`^the markdown was cut at character ${value.truncatedAt} of ${markdown.length} .*scraping its url with the job's page options and markdownOffset: ${value.truncatedAt} `))
       expect(value.verification).toMatchObject({ status: 'failed', contractSha256: verification.contractSha256, checks: [{ passed: null, observed: expect.stringContaining('original contract is unavailable') }, { passed: null, observed: expect.stringContaining('original contract is unavailable') }] })
       expect(value.verification.checks[0].observedCount).toBeUndefined()
       // Not rechecked is not stopped at a limit: the old limit goes with the old verdict.
@@ -190,6 +191,61 @@ describe('MCP result budget', () => {
   })
 
   const scrapeAnswering = (fields: Record<string, unknown>) => apiAnswering(() => ({ requestedUrl: 'https://example.com/', status: 'success', failureReason: null, blockReason: null, verification: { status: 'not_requested' }, truncated: false, truncatedAt: null, ...fields }))
+
+  it('reads on from where a cut answer stopped with markdownOffset, until the whole Markdown is read, and keeps the offset from the API', async () => {
+    const markdown = Array.from({ length: 12_000 }, (_, i) => `line ${i}\n`).join('')
+    const sent: unknown[] = []
+    const client = new W2L({ baseUrl: 'http://api.test', fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({ requestedUrl: 'https://example.com/', status: 'success', failureReason: null, blockReason: null, markdown, verification: { status: 'not_requested' }, truncated: false, truncatedAt: null }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch })
+    const mcp = await connect(client)
+    const pieces: string[] = []
+    let offset = 0
+    for (;;) {
+      const result = (await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', ...(offset === 0 ? {} : { markdownOffset: offset }) } })) as ToolResult
+      expect(expectTyped('scrape', result).length).toBeLessThanOrEqual(RESULT_TEXT_MAX)
+      const value = result.structuredContent!
+      expect(value.markdownOffset).toBe(offset === 0 ? undefined : offset)
+      pieces.push(value.markdown as string)
+      if (value.truncated !== true) break
+      const at = value.truncatedAt as number
+      expect(at).toBe(offset + (value.markdown as string).length)
+      expect((value.agentHints as string[]).at(-1)).toMatch(new RegExp(`^the markdown was cut at character ${at} of ${markdown.length} .*markdownOffset: ${at}`))
+      offset = at
+    }
+    expect(pieces.length).toBeGreaterThan(2)
+    expect(pieces.join('')).toBe(markdown)
+    expect(sent.length).toBe(pieces.length)
+    expect(sent.filter((body) => 'markdownOffset' in (body as object))).toEqual([])
+    await mcp.close()
+  })
+
+  it('answers an offset at or past the end of the Markdown with none of it, and says how long it is', async () => {
+    const mcp = await connect(scrapeAnswering({ markdown: 'short page' }))
+    const result = (await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', markdownOffset: 10 } })) as ToolResult
+    expectTyped('scrape', result)
+    expect(result.structuredContent).toMatchObject({ markdown: '', markdownOffset: 10 })
+    expect((result.structuredContent!.agentHints as string[]).at(-1)).toBe('markdownOffset 10 is at or past the end of the markdown, which is 10 characters long')
+    await mcp.close()
+  })
+
+  it('judges a check on the part of the Markdown it answers, so text before the offset no longer passes it', async () => {
+    const markdown = 'HEAD_FIELD ' + 'word '.repeat(100)
+    const mcp = await connect(scrapeAnswering({ markdown, verification: { status: 'passed', verifier: 'verify/10', contractSha256: 'a'.repeat(64), reason: null, checks: [{ index: 0, type: 'markdownIncludes', passed: true }] }, readiness: { state: 'ready', basis: ['verified'] } }))
+    const result = (await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', markdownOffset: 11, verify: { checks: [{ type: 'markdownIncludes', text: 'HEAD_FIELD' }] } } })) as ToolResult
+    expectTyped('scrape', result)
+    expect(result.structuredContent).toMatchObject({ markdown: markdown.slice(11), verification: { status: 'failed' }, readiness: { state: 'not_extracted', basis: ['checks_failed', 'mcp_result_offset'] } })
+    await mcp.close()
+  })
+
+  it('refuses a markdownOffset that is not a whole number of characters', async () => {
+    const mcp = await connect(scrapeAnswering({ markdown: 'page' }))
+    const result = (await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', markdownOffset: -1 } })) as ToolResult
+    expect(result.isError).toBe(true)
+    expect(result.content[0]!.text).toMatch(/markdownOffset must be a whole number of characters/)
+    await mcp.close()
+  })
 
   it('keeps as many links as fit when the links alone are over the budget, and says how many', async () => {
     const links = Array.from({ length: 3_000 }, (_, n) => `https://example.com/catalogue/item-${n}`)
