@@ -5,6 +5,7 @@ COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
 COPY packages ./packages
 COPY apps ./apps
 COPY CHANGELOG.md ./CHANGELOG.md
+COPY scripts/public-preview/bundle.mjs ./scripts/public-preview/bundle.mjs
 COPY research/amazon-product-schema.v1.json ./research/amazon-product-schema.v1.json
 
 # better-sqlite3 is in the existing workspace dependency graph. Supply a
@@ -16,4 +17,5 @@ RUN npm ci && npx playwright install --with-deps chromium && npm run build:publi
 ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080
-CMD ["node", "packages/public-preview/dist/cli.js"]
+# The bundle (scripts/public-preview/bundle.mjs, run by build:public) starts faster than dist/ on Cloud Run.
+CMD ["node", "packages/public-preview/bundle/cli.js"]

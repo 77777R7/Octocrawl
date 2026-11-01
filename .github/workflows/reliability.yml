@@ -62,9 +62,9 @@ jobs:
       - name: Built sitemap, pages and structured data agree
         if: matrix.project == 'unit'
         run: npm run build:public && node scripts/seo/check-sitemap.mjs && node scripts/seo/check-jsonld.mjs
-      - name: SEO and IndexNow script tests
+      - name: SEO, IndexNow and server bundle script tests
         if: matrix.project == 'unit'
-        run: node --test scripts/seo/*.test.mjs scripts/public-preview/indexnow.test.mjs scripts/public-preview/weekly-report.test.mjs
+        run: node --test scripts/seo/*.test.mjs scripts/public-preview/indexnow.test.mjs scripts/public-preview/weekly-report.test.mjs scripts/public-preview/bundle.test.mjs
       - name: Check for orphaned Chromium processes
         if: always()
         run: |

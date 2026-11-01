@@ -11,6 +11,12 @@ examples
 scripts
 !apps/public-web/scripts/
 !apps/public-web/scripts/build-docs.mjs
+# The image builds the server bundle with this one script (Dockerfile.public-preview).
+!/scripts/
+/scripts/*
+!/scripts/public-preview/
+/scripts/public-preview/*
+!/scripts/public-preview/bundle.mjs
 .github
 Dockerfile
 .dockerignore

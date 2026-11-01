@@ -1,6 +1,7 @@
 # Node
 node_modules/
 dist/
+packages/public-preview/bundle/
 *.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
