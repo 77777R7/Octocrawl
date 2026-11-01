@@ -2808,6 +2808,8 @@ function withHostedChrome(channels: Channel[], operator: HostedChromeOperator): 
     identity: channels[at]!.identity,
     waitsFor: true,
     refusal: (_url, page) => hostedChromeRefusal(page),
+    // The service answering an error, or not answering, is this rung failing: the page is what the rungs before it read.
+    throwIsFailure: true,
     fetch: (url, _session, execution, page) => operator.client.fetch(url, page, execution),
   }
   return [...channels.slice(0, at + 1), rung, ...channels.slice(at + 1)]
