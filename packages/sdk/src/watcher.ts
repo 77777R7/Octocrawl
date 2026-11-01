@@ -152,6 +152,14 @@ function statusOf(error: unknown): number | null {
   return error !== null && typeof error === 'object' && typeof (error as { status?: unknown }).status === 'number' ? (error as { status: number }).status : null
 }
 
+/** The `code` of an API refusal's JSON body (`{ error, code }`), or null when the body is not one. */
+async function refusalCode(res: Response): Promise<string | null> {
+  try {
+    const body: unknown = await res.json()
+    return body !== null && typeof body === 'object' && typeof (body as { code?: unknown }).code === 'string' ? (body as { code: string }).code : null
+  } catch { return null }
+}
+
 /** Resolves after ms, or rejects with the signal's reason when it aborts first. */
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -307,13 +315,17 @@ export class JobWatcher extends EventTarget {
     })
   }
 
-  /** The server-sent events route: 404 leaves it to polling, 401/403 ends the watch, a stream that ends before done hands over from the last cursor. */
+  /**
+   * The server-sent events route: 404 leaves it to polling, and so does hosted Octocrawl's 403 `hosted_unavailable` (it serves a job's
+   * status and listings, not its streams); any other 401/403 ends the watch. A stream that ends before done hands over from the last cursor.
+   */
   private async watchEvents(): Promise<Outcome> {
     const url = this.streamUrl('events')
     let res: Response
     try { res = await this.client.fetch(url, { headers: this.client.headers({ accept: 'text/event-stream' }), signal: this.controller.signal }) }
     catch { return this.stopped ? 'closed' : 'fallback' }
     if (res.status === 404) return 'fallback'
+    if (res.status === 403 && await refusalCode(res) === 'hosted_unavailable') return 'fallback'
     if (res.status === 401 || res.status === 403) { this.fail({ code: 'unauthorized', message: `GET ${new URL(url).pathname} answered ${res.status}` }); return 'fatal' }
     if (!res.ok || res.body === null) return 'fallback'
     if (this.stopped) return 'closed'
