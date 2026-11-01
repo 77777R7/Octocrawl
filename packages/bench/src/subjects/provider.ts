@@ -25,7 +25,7 @@ import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '
 import type { SubjectAdapter } from '../subject.js'
 import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
-import { contentSelectors, contentSelectionEvent, listSelectionAsked, listRecordsFound, errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, regionTables, tablesFormat, tablesSource, tagOptions, wholePageAsked, wholePageMarkdown } from './errorPage.js'
+import { contentSelectors, contentSelectionEvent, listSelectionAsked, listRecordsFound, errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, regionTables, tablesFormat, tablesSource, tagOptions, wholePageAsked, wholePageDelivered, wholePageMarkdown, NO_MAIN_CONTENT_WARNING, WHOLE_PAGE_MIN_CHARS } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import { loadingWaitEvent, withStillLoadingWarning, type SettleOutcome } from '../browserSettle.js'
 import { regionSpecOf, regionWaitEvent, type RegionOutcome, type RegionSpec } from '../regionWait.js'
@@ -612,15 +612,21 @@ export class ProviderSubject implements SubjectAdapter {
 
     const sourceWarnings = sourceDataWarnings(res.body, res.finalUrl)
     // No main content: the whole page stays on the failed result as evidence,
-    // never content. onlyMainContent: false asks for the whole page, so there
-    // it is the answer; so is what includeTags names, on any page that is not
-    // blocked.
+    // unless it is long enough to be the answer (wholePageDelivered).
+    // onlyMainContent: false asks for the whole page, so there it is the
+    // answer; so is what includeTags names, on any page that is not blocked.
     let wholePage: string | null = null
+    // A page with no main region over WHOLE_PAGE_MIN_CHARS is answered with its whole page (wholePageDelivered).
+    let delivered = false
     // A page whose content is only the extractor's last resort is checked for a wall as one with none found.
     if ((extracted.escalate || extracted.lastResort === true) && gate !== null) return blocked(gate)
     if (extracted.escalate && !selectionAsked(options) && !(listSelectionAsked(options, res.body.length) && listRecordsFound(res.body, res.finalUrl, options))) {
       wholePage = wholePageMarkdown(res.body, res.finalUrl, options)
-      if (options.onlyMainContent !== false || wholePage === null) return {
+      if (options.onlyMainContent !== false && wholePageDelivered(extracted, wholePage, trace, false, false)) {
+        trace.push({ at: wallMs, lane: 'provider', event: 'whole_page_delivered', detail: { markdownChars: wholePage!.length, minChars: WHOLE_PAGE_MIN_CHARS } })
+        sourceWarnings.push(NO_MAIN_CONTENT_WARNING)
+        delivered = true
+      } else if (options.onlyMainContent !== false || wholePage === null) return {
         ...base,
         status: 'failed',
         failureReason: 'empty_unverified',
@@ -644,7 +650,7 @@ export class ProviderSubject implements SubjectAdapter {
     if (decisive !== null) return blocked(decisive)
 
     // onlyMainContent: false emits the whole page through the same converter and base URL.
-    const markdown = wholePageAsked(options)
+    const markdown = wholePageAsked(options) || delivered
       ? wholePage ?? htmlToMarkdown(res.body, { baseUrl: res.finalUrl, exclude: options.excludeTags, ...markdownOptions(options) })
       : htmlToMarkdown(extracted.mainHtml, { baseUrl: extracted.baseUrl, ...markdownOptions(options) })
 
@@ -671,7 +677,7 @@ export class ProviderSubject implements SubjectAdapter {
     // The images and attributes formats read the page the vendor returned, like links.
     const extra = extraFormats(res.body, res.finalUrl, options, trace, 'provider', wallMs)
     // The tables format reads what the Markdown was written from, with the same options.
-    const tables = tablesFormat(tablesSource(res.body, res.finalUrl, options, extracted), res.finalUrl, options, trace, 'provider', wallMs)
+    const tables = tablesFormat(tablesSource(res.body, res.finalUrl, options, extracted, wholePageAsked(options) || delivered), res.finalUrl, options, trace, 'provider', wallMs)
     // A contract that fails on what was extracted reads this capture again before any other rung (candidateExtraction.ts).
     return withListCaveat(withExtractionCandidates({
       ...base,
@@ -698,7 +704,7 @@ export class ProviderSubject implements SubjectAdapter {
         labelledValues: extracted.labelledValues,
         declaredValues: extracted.declaredValues,
       },
-      ...htmlFormats(res.body, res.body, extracted.mainHtml, options),
+      ...htmlFormats(res.body, res.body, extracted.mainHtml, options, wholePageAsked(options) || delivered),
       ...extra,
       ...tables,
       usage: { ...base.usage, contentTokens: estimateTokens(markdown) },

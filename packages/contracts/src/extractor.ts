@@ -411,6 +411,11 @@ export interface ExtractorOutput {
    * with nothing found, since a list sits beside many walls.
    */
   lastResort?: boolean
+  /**
+   * True when no strategy, the last resort included, found a region on the page at all, as opposed to one it found
+   * hidden, only headings, or in the page's frame. Whatever `includeSelectors` matched does not change it.
+   */
+  noRegion?: boolean
   /** Page type the router detected. */
   pageType: PageType
   /**

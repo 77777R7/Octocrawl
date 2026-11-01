@@ -185,6 +185,15 @@ beforeAll(async () => {
       // As Temu's verification page (T031, 2026-10-12): 300 zero-width spaces and no other text, its dialog not yet drawn.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       res.end('<!doctype html><html><head><title> </title></head><body><div id="verification">' + '<span>\u200b</span>'.repeat(300) + '</div></body></html>')
+    } else if (req.url === '/nav-long') {
+      // As a docs page whose sidebar is its text and whose article never came (scanpy.readthedocs.io, Firecrawl 1k set,
+      // 2026-10-30): no main block, and the whole page well over 1,000 characters.
+      const entries = Array.from({ length: 40 }, (_, i) => `<li><a href="/api/${i}">Reference entry number ${i + 1} of the harbour API</a></li>`).join('')
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>Harbour API</title></head><body><header><a href="/">Harbour office</a></header>' +
+          `<nav><ul>${entries}</ul></nav><footer><p>Published by the harbour office</p></footer></body></html>`,
+      )
     } else if (req.url === '/nav-only') {
       // Navigation and a footer, no main block: the extractor finds no content.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -670,6 +679,27 @@ describe('BrowserLocalSubject transport', () => {
       expect(full.usage.contentTokens).toBeGreaterThan(0)
       expect(full.evidence.rawBodySha256).toBe(main.evidence.rawBodySha256)
       expect(full.trace).toContainEqual(expect.objectContaining({ event: 'extract', detail: expect.objectContaining({ escalate: true, onlyMainContent: false }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('delivers the whole page of a page with no main block over 1,000 characters, with a no_main_content warning', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const long = await subject.fetch(`${url}/nav-long`, undefined, undefined, undefined, { includeHtml: true })
+      expect(long).toMatchObject({ status: 'success', failureReason: null })
+      // Its html is the page the Markdown was written from, not the empty main region.
+      expect(long.html).toContain('Reference entry number 40 of the harbour API')
+      expect(long.markdown).toContain('Reference entry number 40 of the harbour API')
+      expect(long.markdown!.length).toBeGreaterThan(1000)
+      expect(long.warnings).toContainEqual(expect.objectContaining({ code: 'no_main_content' }))
+      expect(long.usage.contentTokens).toBeGreaterThan(0)
+      expect(long.trace).toContainEqual(expect.objectContaining({ event: 'whole_page_delivered', detail: expect.objectContaining({ markdownChars: long.markdown!.length }) }))
+      // Under the bar, the page stays evidence of a failure (the nav-only test above).
+      const short = await subject.fetch(`${url}/nav-only`)
+      expect(short).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
+      expect(short.warnings ?? []).not.toContainEqual(expect.objectContaining({ code: 'no_main_content' }))
     } finally {
       await subject.teardown()
     }

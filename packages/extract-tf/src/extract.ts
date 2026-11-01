@@ -393,6 +393,7 @@ export class ExtractTf implements Extractor {
       // Routing to a non-article strategy is not by itself an escalation reason.
       escalate: main === null || hiddenRegion(main) || (strategy === 'article' && headingsOnly(main)) || frameWhileMainEmpty(doc.document, main),
       ...(lastResort ? { lastResort: true } : {}),
+      ...(main === null ? { noRegion: true } : {}),
       pageType: decision.type,
       strategy,
       product,
