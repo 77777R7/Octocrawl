@@ -431,9 +431,11 @@ gcloud firestore fields ttls update expireAt --collection-group=hostedChromeSpen
   - Howard decides to move traffic: until then only a tagged API revision carries the operator's config;
   - the switch carries the values above.
 
+All three held on 2026-10-31: Howard counted the gate as passed (PR #795) and moved the API's traffic to a revision with the config, and the job worker was released with it the same day. The switch has carried the values set on 2026-10-29 (above) since that day.
+
 ### Deploying hosted_chrome
 
-Nothing below has been run. Pass `--project` on every call. Build from a clean commit.
+These steps were run between 2026-10-28 and 2026-10-31: the service on 2026-10-28, its proxies and the API's tagged revision on 2026-10-29, the API's traffic and the job worker on 2026-10-31. The first revision's differences are listed below. Pass `--project` on every call. Build from a clean commit.
 
 The service's own runtime account, with no role but reading its proxy list. Then the list: the provider's Direct connection list, one `host:port:user:pass` a line, from a file that is never printed or pasted into a shell:
 
@@ -513,7 +515,7 @@ A task contract's pattern checks, `markdownMatches` and `markdownCountMin`, run 
 
 ### Turning them on
 
-Nothing below has been run. Each service is released from the same commit, in this order:
+First run for the release from `4df8feed`: `octocrawl-chrome` and the API's tag `h45regex` on 2026-10-30, the API's traffic and `octocrawl-jobs` on 2026-10-31. Each service is released from the same commit, in this order:
 
 1. `octocrawl-chrome`, as in Deploying hosted_chrome. Its `hosted_chrome_started` line says `"regexChecks":true` and `"node":"v22.23.4"`.
 2. `octocrawl-jobs`, with `--update-env-vars=W2L_HOSTED_REGEX_CHECKS=1`. Its startup line says `"regexChecks":true`.
