@@ -293,6 +293,18 @@ export class ExtractTf implements Extractor {
       case 'product': {
         const blocks = classifyBlocks(doc.document, classifyOptions)
         main = (amazonProduct ? selectAmazonProduct(doc.document) : null) ?? selectProduct(doc.document, blocks)
+        // A product region holding less than PRODUCT_FRAGMENT_SHARE of the article cascade's text is a fragment of the
+        // page (the title and price of a review, a part listing or a converter; Firecrawl 1k set, 2026-10-30): the
+        // article region is the content. The page stays a product page, its facts read as before.
+        if (main !== null && !amazonProduct) {
+          const articleMain = selectMain(doc.document, blocks)
+          const productText = textOf(main).replace(/\s+/g, ' ').trim().length
+          const articleText = articleMain ? textOf(articleMain).replace(/\s+/g, ' ').trim().length : 0
+          if (articleMain !== null && productText < articleText * PRODUCT_FRAGMENT_SHARE) {
+            strategy = 'article'
+            main = articleMain
+          }
+        }
         if (main === null) {
           // No defensible product region. The page is still a product page;
           // the article cascade is just what produced the HTML.
@@ -424,6 +436,12 @@ export function frameWhileMainEmpty(doc: Document, region: Element): boolean {
   const landmarks = Array.from(doc.querySelectorAll('main, [role="main"]'))
   return landmarks.length > 0 && landmarks.every((landmark) => !landmark.contains(region) && textOf(landmark).trim() === '' && landmark.querySelector('img[src]') === null)
 }
+
+/**
+ * A product region with less than this share of the article cascade's text is a fragment, not the product. A list
+ * page uses half; a product's own region beside its related cards often holds nearly half, so the bar is lower.
+ */
+const PRODUCT_FRAGMENT_SHARE = 0.25
 
 /** A region whose headings hold no more text than this, and that says next to nothing beside them, names a page without its content. */
 const HEADINGS_ONLY_MAX_CHARS = 100
