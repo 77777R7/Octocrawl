@@ -1,8 +1,8 @@
 /**
- * Files among responses: which responses are a PDF, CSV, JSON, plain-text,
- * XLSX, XLS or ZIP file rather than a web page, and the text of those that
- * are text. Every lane uses these rules, so a file is recognised the same way
- * whichever lane received it.
+ * Files among responses: which responses are a PDF, CSV, JSON, plain-text
+ * (Markdown sent as `text/markdown` among it), XLSX, XLS or ZIP file rather
+ * than a web page, and the text of those that are text. Every lane uses these
+ * rules, so a file is recognised the same way whichever lane received it.
  *
  * The Content-Type decides first. Where it does not say (none, or
  * `application/octet-stream` and its kin), the bytes do: a `%PDF-` header
@@ -48,6 +48,8 @@ const DECLARED: Readonly<Record<string, FileKind>> = {
   'text/csv': 'csv', 'application/csv': 'csv', 'text/comma-separated-values': 'csv', 'text/x-csv': 'csv', 'application/x-csv': 'csv', 'text/x-comma-separated-values': 'csv',
   'application/json': 'json', 'text/json': 'json',
   'text/plain': 'text',
+  // Markdown is returned as sent, as plain text is, rather than read as HTML.
+  'text/markdown': 'text', 'text/x-markdown': 'text',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
   'application/vnd.ms-excel': 'xls', 'application/msexcel': 'xls', 'application/x-msexcel': 'xls', 'application/x-excel': 'xls',
   'application/zip': 'zip', 'application/x-zip-compressed': 'zip', 'application/x-zip': 'zip', 'multipart/x-zip': 'zip',

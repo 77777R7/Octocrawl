@@ -15,6 +15,8 @@ describe('file detection', () => {
     expect(classifyContentType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')).toEqual({ kind: 'xlsx' })
     expect(classifyContentType('application/vnd.ms-excel')).toEqual({ kind: 'xls' })
     expect(classifyContentType('application/x-zip-compressed')).toEqual({ kind: 'zip' })
+    expect(classifyContentType('text/markdown; charset=utf-8')).toEqual({ kind: 'text' })
+    expect(classifyContentType('text/x-markdown')).toEqual({ kind: 'text' })
     expect(classifyContentType(null)).toBe('maybe_file')
     expect(classifyContentType('application/octet-stream')).toBe('maybe_file')
     expect(classifyContentType('image/png')).toBe('unsupported')

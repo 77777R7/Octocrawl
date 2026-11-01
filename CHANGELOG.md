@@ -25,6 +25,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **Fix: a page served as `text/markdown` comes back as sent instead of being read as HTML.** Docs sites that serve Markdown to agents (Mintlify's `.md` pages such as code.claude.com's, GitHub Docs asked with `Accept: text/markdown`) were run through the web-page extractor: the Markdown came back escaped and run together on one line and marked `failed`/`empty_unverified` over HTTP, and empty over the browser. `text/markdown` and `text/x-markdown` are now text files, like `text/plain`: their `markdown` is the text as received, with the `file-text` extractor in the Evidence Record.
+
 ## 0.8.0 — 2026-11-01
 
 The published packages at 0.8.0, 227 commits after 0.7.0. **On your own machine the recommended route is now `installed_chrome` with `compatible_transport`, and Steel is no longer recommended;** nothing changes until you write the grant. A `markdownMatches` or `markdownCountMin` check now runs with a time limit, and one that does not finish fails its verification (`verification.undecided`) instead of holding the process. With an account, `crawl` and `batch_scrape` run as hosted jobs from any MCP client, the TypeScript SDK and the Python client, and the SDK's `watcher()` follows such a job by polling. Entries that name hosted Octocrawl describe its service, which is deployed apart from the packages.

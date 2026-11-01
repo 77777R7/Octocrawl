@@ -31,6 +31,8 @@ function valid(record: EvidenceRecord | null | undefined): EvidenceRecord {
 const REPORT = textPdf([['Annual data summary', 'Capacity reached 120 MW.'], ['Portfolio PUE: 1.32', 'Reporting year: 2024']])
 const SCAN = textPdf([null])
 const CSV = 'year,pue\n2023,1.35\n2024,1.32\n'
+// A docs page served as Markdown (Mintlify's .md pages, GitHub Docs asked with Accept: text/markdown), with a placeholder in angle brackets as such pages have.
+const GUIDE = '# Manage sessions\n\nRun `claude --resume <id>` to reopen one.\n\n| Command | What it does |\n| :- | :- |\n| `/resume` | Opens the picker |\n'
 const HUB = '<!doctype html><html><head><title>Reports</title></head><body><main><article><h1>Reports</h1><p>The operator publishes its annual data summary as a PDF and the underlying figures as a CSV file, both linked below for anyone who needs them.</p><p><a href="/report.pdf">Data summary (PDF)</a> <a href="/data.csv">Figures (CSV)</a></p></article></main></body></html>'
 const sha = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
 
@@ -40,6 +42,7 @@ const RESPONSES: Record<string, { type: string; body: Uint8Array | string }> = {
   '/report.pdf': { type: 'application/pdf', body: REPORT },
   '/scan.pdf': { type: 'application/pdf', body: SCAN },
   '/data.csv': { type: 'text/csv', body: CSV },
+  '/guide.md': { type: 'text/markdown; charset=utf-8', body: GUIDE },
   '/private/report.pdf': { type: 'application/pdf', body: REPORT },
 }
 
@@ -117,6 +120,12 @@ describe('file download on scrape', () => {
     const csv = await scrape({ url: `${origin}/data.csv` })
     expect(csv).toMatchObject({ status: 'success', markdown: CSV })
     expect(valid(csv.evidenceRecord)).toMatchObject({ extractor: { name: 'file-text', version: FILE_TEXT_VERSION }, artifacts: [fileArtifact(CSV, 'text/csv', 'csv')] })
+  })
+
+  it('returns a page served as text/markdown as it was sent, not read as HTML', async () => {
+    const guide = await scrape({ url: `${origin}/guide.md` })
+    expect(guide).toMatchObject({ status: 'success', markdown: GUIDE, file: { kind: 'text' }, channelsTried: ['http'] })
+    expect(valid(guide.evidenceRecord)).toMatchObject({ extractor: { name: 'file-text', version: FILE_TEXT_VERSION }, artifacts: [fileArtifact(GUIDE, 'text/markdown; charset=utf-8', 'txt')] })
   })
 
   it('has no html to give for a file: html and rawHtml are null, and the tag options leave its text as it is', async () => {
