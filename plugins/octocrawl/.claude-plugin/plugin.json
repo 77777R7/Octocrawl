@@ -1,6 +1,6 @@
 {
   "name": "octocrawl",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Pages, crawls and URL batches as clean Markdown and JSON for AI agents, with an Evidence Record.",
   "author": {
     "name": "Octocrawl",
