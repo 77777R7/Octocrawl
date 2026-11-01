@@ -13,7 +13,7 @@
     "typecheck": "tsc --build && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:live": "vitest run --config vitest.live.config.ts",
-    "build:public": "tsc --build && npm run build --workspace @w2l/public-web",
+    "build:public": "tsc --build && npm run build --workspace @w2l/public-web && node scripts/public-preview/bundle.mjs",
     "public:preview": "npm run build:public && node packages/public-preview/dist/cli.js",
     "public:preview:local": "npm run build:public && node scripts/section-c/public-preview-local.mjs",
     "bench": "tsc --build && node --import tsx packages/bench/src/cli.ts",
@@ -66,6 +66,7 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "ajv": "^8.20.0",
+    "esbuild": "^0.28.2",
     "happy-dom": "^20.14.6",
     "linkedom": "^0.18.13",
     "tsup": "^8.5.1",

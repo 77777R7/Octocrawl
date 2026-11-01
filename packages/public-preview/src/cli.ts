@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
-import { Worker } from 'node:worker_threads'
+import { readdir, readFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createPreviewServer } from './server.js'
 import { firestoreQuotaFromEnv } from './quota.js'
 import { firestoreAmazonGateFromEnv } from './amazonGate.js'
@@ -15,6 +15,16 @@ import { startupTimings } from './startup.js'
 
 // Every module above has loaded by now; the start-up line below splits the start with it.
 const importsDoneMs = performance.now()
+// Read this directory's files now, while Cloud Run gives a starting instance its CPU; an idle one gets almost none later.
+// Run from the bundle (scripts/public-preview/bundle.mjs) they are the reading engine's chunks, about 0.1 s to read,
+// which server.ts then loads on the first run in about 1 s instead of 3 to 7 s. Nothing waits for it.
+const ownDir = dirname(fileURLToPath(import.meta.url))
+readdir(ownDir)
+  .then(names => Promise.all(names.filter(name => name.endsWith('.js')).map(name => readFile(join(ownDir, name)))))
+  .then(
+    files => console.log(JSON.stringify({ service: 'w2l-public-preview', filesRead: files.length, filesReadMs: Math.round(performance.now() - importsDoneMs) })),
+    (error: unknown) => console.warn(JSON.stringify({ severity: 'WARNING', service: 'w2l-public-preview', message: 'Could not read the server files ahead', error: String(error) })),
+  )
 if (process.env.W2L_CAPTURE_RAW_DIR) throw new Error('Anonymous preview cannot persist raw capture artifacts')
 const stateFile = process.env.W2L_AMAZON_PUBLIC_STATE_FILE
 const amazonState = stateFile ? readFileSync(stateFile, 'utf8') : null
@@ -87,21 +97,5 @@ const server = createPreviewServer({
 })
 server.listen(port, '0.0.0.0', () => {
   console.log(JSON.stringify({ service: 'w2l-public-preview', port, anonymousPreviewEnabled: process.env.W2L_PREVIEW_ENABLED !== 'false', startup: startupTimings(importsDoneMs) }))
-  // The reading engine, which server.ts loads on the first run, loads now in a worker thread, so the files are read once
-  // without holding up the first answers (on Cloud Run, 6 s that held the event loop when loaded here; the first run then
-  // loads it in about 1.3 s). One that cannot load stops the instance, as it did when it loaded before listening.
-  const engineStarted = performance.now()
-  let engineError: unknown
-  new Worker(new URL('./engineCheck.js', import.meta.url))
-    .on('error', (error) => { engineError = error })
-    .on('exit', (code) => {
-      if (code === 0) {
-        console.log(JSON.stringify({ service: 'w2l-public-preview', engineCheckedMs: Math.round(performance.now() - engineStarted) }))
-        return
-      }
-      const error = engineError instanceof Error ? engineError.stack ?? engineError.message : `exit code ${code}`
-      console.error(JSON.stringify({ severity: 'ERROR', service: 'w2l-public-preview', message: 'The reading engine could not load', error }))
-      process.exit(1)
-    })
 })
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => server.close(() => process.exit(0)))
