@@ -46,6 +46,71 @@ describe('first-party event sender and actual receiver', () => {
     await window.happyDOM.close()
   })
 
+  it('counts a tool’s next step: shown once, and its links with trigger next-step, never the URL run', async () => {
+    const { base, lines } = await receiver()
+    const window = new Window({ url: `${base}/tools/link-extractor/` })
+    const networkFetch = globalThis.fetch
+    const deliveries: Promise<Response>[] = []
+    vi.stubGlobal('navigator', { sendBeacon: () => false })
+    vi.stubGlobal('location', window.location)
+    vi.stubGlobal('document', window.document)
+    vi.stubGlobal('HTMLAnchorElement', window.HTMLAnchorElement)
+    vi.stubGlobal('fetch', (url: string, options: RequestInit) => {
+      const response = networkFetch(`${base}${url}`, { ...options, headers: { origin: base, 'content-type': 'application/json' } })
+      deliveries.push(response)
+      return response
+    })
+    const { trackLinkClicks } = await import('../src/analytics')
+    const { toolNextStep } = await import('../src/tools/nextStep')
+    const box = toolNextStep('map', 'https://private.example/secret?key=hidden')
+    window.document.body.append(box as unknown as Node)
+    const links = [...box.querySelectorAll('a')]
+    // Signed out, the Playground link goes through sign-in without the URL run: it would reach request logs.
+    expect(links.map(link => link.getAttribute('href'))).toEqual(['/docs/connect-mcp/?from=tool-link-extractor', '/signin/?next=%2Fdashboard%2Fmap%2F'])
+    expect(box.innerHTML).not.toContain('private.example')
+    expect(links[1]!.textContent).toBe('Sign in and run it →')
+    // A map has no Get code dialog to open; one that stopped at 500 says the site has more.
+    expect(box.querySelector('button')).toBeNull()
+    expect(box.textContent).not.toContain('more than 500')
+    expect(toolNextStep('map', 'https://docs.example/', { morePages: true }).textContent).toContain('This site has more than 500 pages.')
+    trackLinkClicks(window.document.body as unknown as HTMLElement)
+    window.document.body.addEventListener('click', event => event.preventDefault())
+    for (const link of links) link.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }) as unknown as Event)
+    expect((await Promise.all(deliveries)).map(response => response.status)).toEqual([204, 204, 204, 204])
+    expect(lines.map(line => [line.name, line.props])).toEqual([
+      ['next_step_view', { path: '/tools/link-extractor/', view: 'map' }],
+      ['next_step_view', { path: '/tools/link-extractor/', view: 'map' }],
+      ['link_click', { path: '/tools/link-extractor/', target: 'docs', href: '/docs/connect-mcp/', trigger: 'next-step' }],
+      ['link_click', { path: '/tools/link-extractor/', target: 'site', href: '/signin/', trigger: 'next-step' }],
+    ])
+    expect(JSON.stringify(lines)).not.toContain('private.example')
+    await window.happyDOM.close()
+  })
+
+  it('gives a page read the Playground for one page and the Get code dialog, by the account the cookie names', async () => {
+    const window = new Window({ url: 'https://octocrawl.dev/tools/website-to-text/' })
+    window.document.cookie = 'w2l_account=1'
+    vi.stubGlobal('navigator', { sendBeacon: () => true })
+    vi.stubGlobal('location', window.location)
+    vi.stubGlobal('document', window.document)
+    const { toolNextStep } = await import('../src/tools/nextStep')
+    const beacon = vi.fn(() => true)
+    vi.stubGlobal('navigator', { sendBeacon: beacon })
+    const code = vi.fn()
+    const box = toolNextStep('page', 'https://docs.example/a b')
+    expect(box.querySelector('button')).toBeNull()
+    // A run shown again from Recent runs builds the block again without reporting it again.
+    toolNextStep('page', 'https://docs.example/a b', { counted: true })
+    expect(beacon).toHaveBeenCalledTimes(1)
+    const withCode = toolNextStep('page', 'https://docs.example/a b', { code })
+    const links = [...withCode.querySelectorAll('a')]
+    expect(links.map(link => link.getAttribute('href'))).toEqual(['/docs/connect-mcp/?from=tool-website-to-text', '/dashboard/scrape/?url=https%3A%2F%2Fdocs.example%2Fa+b'])
+    expect(links[1]!.textContent).toBe('Open it in your Playground →')
+    withCode.querySelector('button')!.click()
+    expect(code).toHaveBeenCalledTimes(1)
+    await window.happyDOM.close()
+  })
+
   it.each([true, false])('delivers once with page path, beacon accepted=%s', async accepted => {
     const { base, lines } = await receiver()
     const networkFetch = globalThis.fetch

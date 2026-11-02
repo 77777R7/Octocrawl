@@ -377,6 +377,9 @@ describe('first-party analytics', () => {
     expect(parseWebEvent({ name: 'page_view', props: { path: '/', from: 'blog-web-scraping-for-rag', utm_source: 'npm' } })).toEqual({ name: 'page_view', props: { path: '/', from: 'blog-web-scraping-for-rag', utm_source: 'npm' } })
     expect(parseWebEvent({ name: 'result_copy', props: { view: 'x'.repeat(121) } })).toBeNull()
     expect(parseWebEvent({ name: 'result_copy', props: { view: { nested: true } } })).toBeNull()
+    // A tool's next step: shown, and a click on one of its links.
+    expect(parseWebEvent({ name: 'next_step_view', props: { path: '/tools/link-extractor/', view: 'map' } })).toEqual({ name: 'next_step_view', props: { path: '/tools/link-extractor/', view: 'map' } })
+    expect(parseWebEvent({ name: 'link_click', props: { target: 'site', href: '/dashboard/map/', trigger: 'next-step' } })).toEqual({ name: 'link_click', props: { target: 'site', href: '/dashboard/map/', trigger: 'next-step' } })
     // The Markdown's source/preview switch takes only the page's two modes.
     expect(parseWebEvent({ name: 'markdown_mode', props: { mode: 'preview' } })).toEqual({ name: 'markdown_mode', props: { mode: 'preview' } })
     expect(parseWebEvent({ name: 'markdown_mode', props: { mode: 'raw' } })).toBeNull()

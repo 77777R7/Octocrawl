@@ -45,6 +45,8 @@ export function trackLinkClicks(root: HTMLElement): void {
     const target = url.host === location.host
       ? url.pathname.startsWith('/docs') ? 'docs' : url.hash ? 'section' : 'site'
       : url.hostname === 'github.com' ? 'github' : 'external'
-    track('link_click', { target, href: url.host === location.host ? `${url.pathname}${url.hash}`.slice(0, 120) : `${url.hostname}${url.pathname}`.slice(0, 120) })
+    // A link in a tool's next step (tools/nextStep.ts) says so, to count what that step leads to.
+    const trigger = link.closest('[data-next-step]') ? 'next-step' : undefined
+    track('link_click', { target, href: url.host === location.host ? `${url.pathname}${url.hash}`.slice(0, 120) : `${url.hostname}${url.pathname}`.slice(0, 120), trigger })
   })
 }

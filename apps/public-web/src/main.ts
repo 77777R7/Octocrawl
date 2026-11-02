@@ -18,6 +18,7 @@ import { taskStatus, type TaskState } from './taskStatus'
 import { buildWindow } from './windowBuild'
 import { markdownToText } from './markdownText'
 import { mountMapResults } from './tools/mapResults'
+import { toolNextStep } from './tools/nextStep'
 import { API_SERVER, fieldsSchema, HOSTED_MCP, isAmazonProduct, MCP_SERVER, mcpPrompt, mcpSnippet, playgroundHref, restSnippet, type FieldRequest, type FieldType, type OutputView } from './getCode'
 
 type PreviewStatus = 'success' | 'incomplete' | 'blocked' | 'failed' | 'timeout' | 'invalid_url' | 'quota_exceeded'
@@ -962,6 +963,8 @@ const MARKDOWN_PREVIEW_LIMIT = 150_000
 /** The result as a window: its views as tabs, Copy and Download beside them, the content scrolling inside the
  * window (the page stays short however long the page read was), and under it the file Download saves. `build`
  * prints it in glyphs: the whole window for a new result, the body alone for another view. */
+/** Runs whose next step (tools/nextStep.ts) has reported being shown. */
+const nextStepCounted = new WeakSet<PreviewResponse>()
 function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | 'none' = 'none'): void {
   content.querySelector('.output-panel')?.remove()
   // A failed capture has no content to show; its guidance panel offers the JSON view.
@@ -1092,17 +1095,11 @@ function renderOutputPanel(result: PreviewResponse, build: 'window' | 'body' | '
   for (const note of notes) output.append(textElement('p', note, 'window-note'))
   output.append(body, foot)
   content.append(output)
-  // On a free tool page, one quiet line under the page's content: the same call from code. It follows the panel,
-  // which is built again when the view changes.
+  // On a free tool page, under the page's content: where to take the task next (tools/nextStep.ts). It follows the
+  // panel, which is built again when the view changes; a run shown again from Recent runs is not counted again.
   if (hero.classList.contains('is-tool') && isPageRead(result)) {
-    let next = content.querySelector<HTMLElement>('.result-next')
-    if (!next) {
-      next = textElement('p', 'Need this for many pages, or inside your agent? ', 'result-next')
-      const open = textElement('button', 'Get the same call as code →', 'result-next-link')
-      open.type = 'button'
-      open.addEventListener('click', () => codeButton.click())
-      next.append(open)
-    }
+    const next = content.querySelector<HTMLElement>('.tool-next') ?? toolNextStep('page', result.requestedUrl, { code: () => codeButton.click(), counted: nextStepCounted.has(result) })
+    nextStepCounted.add(result)
     content.append(next)
   }
   if (build === 'none') return
