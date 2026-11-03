@@ -90,6 +90,20 @@ describe('waitForMainContent', () => {
     expect(await waitForMainContent(page, { maxMs: 5_000, hasContent, requests: () => requests, quietMs: 20, sampleMs: 5 })).toMatchObject({ ended: 'content' })
   })
 
+  it('still waits for a query sent to the same URL beside two quick ones that changed nothing (one GraphQL endpoint)', async () => {
+    const state = { text: 20, html: '<nav>Docs</nav><div id="app"></div>' }
+    const requests: AwaitedRequest[] = []
+    const graphql = 'https://example.test/graphql'
+    const page = fakePage(state, (samples) => {
+      if (samples === 2) {
+        requests.push({ ...sent(true, Date.now(), graphql), finishedAt: Date.now() + 1 }, { ...sent(true, Date.now(), graphql), finishedAt: Date.now() + 1 })
+        requests.push(sent(true, Date.now(), graphql))
+      }
+      if (samples === 40) { requests[2]!.finishedAt = Date.now(); state.text = 27; state.html = '<nav>Docs</nav><main>Session</main>' }
+    })
+    expect(await waitForMainContent(page, { maxMs: 5_000, hasContent, requests: () => requests, quietMs: 20, sampleMs: 5 })).toMatchObject({ ended: 'content' })
+  })
+
   it('reads a page that goes on changing with nothing to fetch (an animation, a typewriter headline) as done, not as loading', async () => {
     const state = { text: 20, html: '<nav>Docs</nav><h1>A</h1>' }
     const page = fakePage(state, (samples) => { state.text = 20 + (samples % 7); state.html = `<nav>Docs</nav><h1>${'A'.repeat(samples % 7)}</h1>` })

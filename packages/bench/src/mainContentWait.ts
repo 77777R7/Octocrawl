@@ -101,16 +101,21 @@ export async function waitForMainContent(page: MainContentWaitPage, wait: MainCo
     if (!isNavigationError(error)) throw error
   }
   // When the page was seen to change; the data requests sent during the wait already judged; per URL, the answers that left
-  // the page as it was.
+  // the page as it was, and since when it is read as polled.
   const changes: number[] = []
   const judged = new Set<AwaitedRequest>()
   const idleAnswers = new Map<string, number>()
+  const polledSince = new Map<string, number>()
   const onTheWay = (now: number): number => {
     for (const request of wait.requests()) {
       // A data request sent during the wait that finished: did the page change while it was out (two samples after it)?
       if (request.data && request.startedAt >= started && request.finishedAt !== undefined && !judged.has(request) && now - request.finishedAt >= 2 * sampleMs) {
         judged.add(request)
-        if (!changes.some((at) => at >= request.startedAt && at <= request.finishedAt! + 2 * sampleMs)) idleAnswers.set(request.path, (idleAnswers.get(request.path) ?? 0) + 1)
+        if (!changes.some((at) => at >= request.startedAt && at <= request.finishedAt! + 2 * sampleMs)) {
+          const idle = (idleAnswers.get(request.path) ?? 0) + 1
+          idleAnswers.set(request.path, idle)
+          if (idle >= POLLING_REPEATS && !polledSince.has(request.path)) polledSince.set(request.path, now)
+        }
       }
     }
     let count = 0
@@ -118,7 +123,9 @@ export async function waitForMainContent(page: MainContentWaitPage, wait: MainCo
       if (request.finishedAt !== undefined) continue
       if (request.respondedAt !== undefined && now - request.respondedAt >= quietMs) continue
       if (now - request.startedAt >= BACKGROUND_REQUEST_MS) continue
-      if (request.data && request.startedAt >= started && (idleAnswers.get(request.path) ?? 0) >= POLLING_REPEATS) continue
+      // Only a request sent once the URL was read as polled: one already out then (a query sent beside two quick ones) still counts.
+      const polled = polledSince.get(request.path)
+      if (request.data && polled !== undefined && request.startedAt >= polled) continue
       count++
     }
     return count
