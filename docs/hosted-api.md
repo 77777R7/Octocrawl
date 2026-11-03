@@ -220,7 +220,7 @@ Deliveries can repeat (Cloud Tasks delivers at least once), so a receiver keys o
 
 ## Keys
 
-Keys are issued by hand from the waitlist in phase 1 (`scripts/public-preview/waitlist.mjs` lists it). A key is printed once; only its HMAC under `w2l-quota-hash-key` is stored, as the id of a document in Firestore's `hostedApiKeys` collection with `enabled`, `plan`, `dailyLimit`, `browser` and `label`. A start (`POST /v1/scrape`, `POST /v1/map`, and an MCP tool call, which goes through the same gate) reads the key's document fresh, so a key revoked by the script stops at its next start (ROADMAP PH item 2). What starts no work (the MCP tool list, reading a result by id) uses a lookup cached for a minute.
+Keys are made on the dashboard after sign-in (Accounts and credits, below); this section is the operator's way to issue one by hand. A key is printed once; only its HMAC under `w2l-quota-hash-key` is stored, as the id of a document in Firestore's `hostedApiKeys` collection with `enabled`, `plan`, `dailyLimit`, `browser` and `label`. A start (`POST /v1/scrape`, `POST /v1/map`, and an MCP tool call, which goes through the same gate) reads the key's document fresh, so a key revoked by the script stops at its next start (ROADMAP PH item 2). What starts no work (the MCP tool list, reading a result by id) uses a lookup cached for a minute.
 
 ```sh
 export W2L_PROJECT_ID='octopus-w2l-20260924-7r7'
@@ -229,7 +229,7 @@ node scripts/hosted/issue-key.mjs list
 node scripts/hosted/issue-key.mjs revoke <digest>
 ```
 
-The script, like `scripts/public-preview/waitlist.mjs`, calls Firestore with Node's `fetch`, which ignores `HTTPS_PROXY`. On a machine that reaches Google only through a proxy, set `NODE_USE_ENV_PROXY=1` (Node 24 and later) so `fetch` uses it; `gcloud` honours the proxy variables on its own. Without it the call ends in `ConnectTimeoutError` against `firestore.googleapis.com` (seen 2026-10-06).
+The script calls Firestore with Node's `fetch`, which ignores `HTTPS_PROXY`. On a machine that reaches Google only through a proxy, set `NODE_USE_ENV_PROXY=1` (Node 24 and later) so `fetch` uses it; `gcloud` honours the proxy variables on its own. Without it the call ends in `ConnectTimeoutError` against `firestore.googleapis.com` (seen 2026-10-06).
 
 The key is printed once. Keep it somewhere ignored by git, such as `.w2l/hosted/`, with owner-only permissions, until it has been sent.
 

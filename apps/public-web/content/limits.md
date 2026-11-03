@@ -95,4 +95,4 @@ This is a support boundary, not a list of sites guaranteed to return content. Se
 
 The 200-page Amazon audit includes a fixed regression set and a separately frozen candidate set; neither cohort passed the 100/100 gate. The repository's R0 failure ledger records same-capture hashes and missing-evidence boundaries. Original HTML remains private on the operator's machine.
 
-Need more than the keyless allowance, or the browser lane? [Sign in](/signin/) for 1,000 credits a month and keys. Need more than that, or something hosted Octocrawl does not do yet? [Tell us](/?from=limits#waitlist).
+Need more than the keyless allowance, or the browser lane? [Sign in](/signin/) for 1,000 credits a month and keys. Need more than that, a team, or something hosted Octocrawl does not do yet? Write to [hello@octocrawl.dev](mailto:hello@octocrawl.dev).

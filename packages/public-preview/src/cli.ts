@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url'
 import { createPreviewServer } from './server.js'
 import { firestoreQuotaFromEnv } from './quota.js'
 import { firestoreAmazonGateFromEnv } from './amazonGate.js'
-import { firestoreWaitlistFromEnv } from './waitlist.js'
 import { validateAmazonPublicState } from './previewUrl.js'
 import { createAuthRoutes, FirestoreAccountStore, IdentityToolkit } from './auth.js'
 import { createAccountRoutes, FirestoreAccountData } from './account.js'
@@ -90,7 +89,6 @@ const server = createPreviewServer({
   publicOrigin: process.env.W2L_PUBLIC_ORIGIN || undefined,
   // Shared with the Cloudflare Worker, so only it can name the domain and the visitor's address.
   proxySecret: process.env.W2L_PROXY_SECRET?.trim() || undefined,
-  waitlist: firestoreWaitlistFromEnv(),
   ...(auth === undefined ? {} : { auth }),
   ...(account === undefined ? {} : { account }),
   ...(oauth === undefined ? {} : { oauth }),

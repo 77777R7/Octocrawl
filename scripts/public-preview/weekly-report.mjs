@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A weekly traffic report for octocrawl.dev and hosted Octocrawl, as one Markdown page: where visitors came from, what
-// the hosted API and MCP served, sign-ups, GitHub, package downloads and search. Counts only; it prints no address, IP,
+// the hosted API and MCP served, GitHub, package downloads and search. Counts only; it prints no address, IP,
 // key or visitor id.
 //
 //   node scripts/public-preview/weekly-report.mjs                 the last 7 days, printed
@@ -134,13 +134,6 @@ export function summarizeQuotaDocs(names) {
   return [...seen].map(([key, callers]) => ({ day: key.slice(0, 10), kind: key.slice(11), callers })).sort((a, b) => a.day.localeCompare(b.day) || a.kind.localeCompare(b.kind))
 }
 
-/** Waitlist entries (role, trigger, ref, createdAt) created in the window, by entry point and referrer; no addresses. */
-export function summarizeWaitlist(entries, since, until) {
-  const recent = entries.filter(entry => entry.createdAt && entry.createdAt >= since && entry.createdAt < until)
-  const by = key => sortedCounts(recent.reduce((counts, entry) => counts.set(entry[key] ?? '(none)', (counts.get(entry[key] ?? '(none)') ?? 0) + 1), new Map()))
-  return { total: entries.length, recent: recent.length, byTrigger: by('trigger'), byRef: by('ref'), byRole: by('role') }
-}
-
 export function markdownTable(headers, rows) {
   const cell = value => String(value ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ')
   return [`| ${headers.map(cell).join(' | ')} |`, `| ${headers.map(() => '---').join(' | ')} |`, ...rows.map(row => `| ${row.map(cell).join(' | ')} |`)].join('\n')
@@ -173,7 +166,7 @@ export function parseArgs(argv) {
 
 /** The report page from the collected sections. Each section is `{ value }` or `{ error }`. */
 export function renderReport(report) {
-  const { window: span, site, hosted, quotas, waitlist, github, npm, pypi, google, bing } = report
+  const { window: span, site, hosted, quotas, github, npm, pypi, google, bing } = report
   const out = [`# Octocrawl traffic, ${span.start} to ${span.end} (UTC)`, '', `${span.days} whole UTC days ending yesterday, generated ${span.generatedAt}. Visitors are visitor-days: one browser on one UTC day. Automated lines (crawlers, headless browsers, Lighthouse) and internal ones (the operator's browsers, the Claude app) are left out.`, '']
   out.push('## Site visitors', '')
   if (site.error) out.push(notRead(site), '')
@@ -187,13 +180,6 @@ export function renderReport(report) {
     out.push('### The site\'s own links (`from`)', '', s.fromTags.length ? markdownTable(['from', 'Page views'], s.fromTags) : 'None.', '')
     out.push('### What they did', '', s.actions.length ? markdownTable(['Event', 'Count'], s.actions) : 'No events besides page views.', '')
     out.push('### Previews', '', s.previews.length ? markdownTable(['Outcome', 'Count'], s.previews) : 'No anonymous previews.', '')
-  }
-  out.push('## Sign-ups (waitlist)', '')
-  if (waitlist.error) out.push(notRead(waitlist), '')
-  else {
-    const w = waitlist.value
-    out.push(`${w.recent} new in the window, ${w.total} in all.`, '')
-    if (w.recent) out.push(markdownTable(['Entry point', 'New'], w.byTrigger), '', markdownTable(['Referrer', 'New'], w.byRef), '')
   }
   out.push('## Hosted API and MCP', '')
   if (hosted.error) out.push(notRead(hosted), '')
@@ -299,11 +285,6 @@ async function main(argv) {
   const report = { window: span }
   report.site = await settle(() => summarizeSiteEvents(readLogs(project, `resource.type="cloud_run_revision" AND resource.labels.service_name="${SITE_SERVICE}" AND (jsonPayload.event="w2l_web_event" OR jsonPayload.event="w2l_preview")`, span)
     .map(entry => ({ ...entry.jsonPayload, timestamp: entry.timestamp }))))
-  report.waitlist = await settle(async () => summarizeWaitlist((await firestoreList(project, 'waitlist')).map(doc => {
-    const f = doc.fields ?? {}
-    const text = field => field?.stringValue ?? null
-    return { role: text(f.role), trigger: text(f.trigger), ref: text(f.ref), createdAt: f.createdAtMs?.integerValue ? new Date(Number(f.createdAtMs.integerValue)).toISOString() : null }
-  }), span.since, span.until))
   report.hosted = await settle(() => summarizeHostedRequests(readLogs(project, `resource.type="cloud_run_revision" AND resource.labels.service_name="${API_SERVICE}" AND logName="projects/${project}/logs/run.googleapis.com%2Frequests"`, span)
     .map(entry => ({ timestamp: entry.timestamp, ...(entry.httpRequest ?? {}) }))))
   report.quotas = await settle(async () => summarizeQuotaDocs((await firestoreList(project, 'hostedQuotas')).map(doc => doc.name)))

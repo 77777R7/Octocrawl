@@ -1,6 +1,6 @@
 import { capabilitiesMarkup, startMarkup } from './featureSections'
 import { glyphCloud } from './glyphArt'
-import { waitlistMarkup } from './waitlistMarkup'
+import { startListMarkup } from './startList'
 import { siteActionsMarkup, siteNavMarkup } from '../scripts/siteNav.mjs'
 
 /** A `[ 0N / 0M ]` bar over a light section. The home page no longer draws them; the archived landing sections
@@ -63,10 +63,10 @@ ${footerMarkup()}  </div>
 }
 
 /** The site's footer. On the home page its section links stay on the page; elsewhere `home` is "/" and they go there.
- * The early-access form comes only where its script runs (main.ts, mountWaitlist). */
-export function footerMarkup(home = '', waitlist = true): string {
+ * `startList` puts the home page's where-to-next band (startList.ts) above it. */
+export function footerMarkup(home = '', startList = true): string {
   return `    <footer class="site-footer">
-${waitlist ? `      ${waitlistMarkup()}\n` : ''}      <div class="band band-dark">
+${startList ? `      ${startListMarkup()}\n` : ''}      <div class="band band-dark">
         <div class="frame footer-top">
           <div class="footer-brand-cell">
             <a class="brand footer-brand" href="/" aria-label="Octocrawl home"><img class="brand-mark" src="/assets/octopus-160.webp" alt="" width="40" height="40" /><img class="brand-name" src="/assets/octocrawl-wordmark.svg" alt="" width="122" height="20" /></a>

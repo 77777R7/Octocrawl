@@ -11,7 +11,6 @@ import { mountFormats } from './product/scrapeFormats'
 import { mountSmoothScroll, scrollPageTo } from './smoothScroll'
 import { mountOctopusSwim } from './octopusSwim'
 import { track, trackLinkClicks, trackPageView } from './analytics'
-import { mountWaitlist } from './waitlist'
 import { mountCrawlView } from './crawlView'
 import { readPreview, STAGE_STREAM } from './previewStream'
 import { readinessNote, taskStatus, type TaskState } from './taskStatus'
@@ -169,11 +168,9 @@ const QUOTA_NOTE = quotaNote.textContent ?? ''
 /** Set when the service says this visitor's previews for today are used up (refreshQuota). */
 let previewsUsedUp = false
 const crawl = mountCrawlView(urlCard, hero)
-// The early-access form opens itself from a ?from= link (waitlist.ts); nothing here opens it.
-mountWaitlist()
 /** After the daily previews run out: a link to sign in, saying what an account gives (the hosted API's monthly
  * credits, docs/hosted-api.md, Accounts and credits). */
-function waitlistLink(className: string): HTMLAnchorElement {
+function moreLink(className: string): HTMLAnchorElement {
   if (signedIn) return playgroundLink(className, 'Need more? Run it in your dashboard with your credits →')
   const link = textElement('a', 'Need more? Sign in for 1,000 free credits a month →', className)
   link.href = '/signin/'
@@ -490,7 +487,7 @@ function renderGuidance(result: PreviewResponse): HTMLElement {
     : textElement('a', 'Limits and result states ↗', 'guidance-link')
   docs.href = result.status === 'quota_exceeded' ? 'https://github.com/77777R7/Octocrawl' : '/docs/limits/'
   actions.append(json, docs)
-  if (result.status === 'quota_exceeded') actions.append(waitlistLink('guidance-link'))
+  if (result.status === 'quota_exceeded') actions.append(moreLink('guidance-link'))
   if (needsBrowser(result)) actions.append(browserLink('guidance-link'))
   panel.append(actions)
   return panel
@@ -1265,7 +1262,7 @@ async function refreshQuota(): Promise<void> {
   } catch { /* An unreadable count shows the static note, never an older number. */ }
   previewsUsedUp = usedUp
   quotaNote.textContent = text
-  if (usedUp) quotaNote.append(' · ', waitlistLink('url-help-link'))
+  if (usedUp) quotaNote.append(' · ', moreLink('url-help-link'))
 }
 type QuotaDecision = 'ok' | 'visitor_limited' | 'global_limited'
 void refreshQuota()

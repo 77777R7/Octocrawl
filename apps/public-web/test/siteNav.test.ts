@@ -81,4 +81,12 @@ describe('Footers', () => {
     expect(build).toContain('Octocrawl / Changelog</p><article class="doc-article">${content}</article>${docFooterMarkup()}</main>')
     expect(build).toContain('const blogFooter = docFooterMarkup()')
   })
+
+  it('end the home page with where to use Octocrawl next, one link a row, and ask for no email', () => {
+    const band = footerMarkup().slice(0, footerMarkup().indexOf('footer-top'))
+    expect([...band.matchAll(/<a class="start-row" href="([^"]+)"/g)].map(match => match[1])).toEqual(['/docs/connect-mcp/', '/dashboard/scrape/', '/docs/scrape/', 'mailto:hello@octocrawl.dev'])
+    expect(pageMarkup()).not.toMatch(/<form class="waitlist-form"|id="waitlist"|type="email"/)
+    // The product and tool pages end with their own next step instead.
+    expect(footerMarkup('/', false)).not.toContain('start-row')
+  })
 })

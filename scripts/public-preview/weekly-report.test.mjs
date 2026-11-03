@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { DIRECT, parseArgs, renderReport, reportWindow, routeOf, summarizeHostedRequests, summarizeQuotaDocs, summarizeSiteEvents, summarizeWaitlist } from './weekly-report.mjs'
+import { DIRECT, parseArgs, renderReport, reportWindow, routeOf, summarizeHostedRequests, summarizeQuotaDocs, summarizeSiteEvents } from './weekly-report.mjs'
 
 const view = (timestamp, vid, props, extra = {}) => ({ event: 'w2l_web_event', name: 'page_view', timestamp, vid, props, automated: false, ...extra })
 
@@ -55,26 +55,14 @@ test('quota documents count distinct callers per day and kind, ignoring other na
   ])
 })
 
-test('waitlist entries are counted in the window by entry point and referrer', () => {
-  const summary = summarizeWaitlist([
-    { role: 'developer', trigger: 'footer', ref: 'news.ycombinator.com', createdAt: '2026-10-09T00:00:00.000Z' },
-    { role: 'researcher', trigger: 'quota', ref: null, createdAt: '2026-09-01T00:00:00.000Z' },
-    { role: 'developer', trigger: 'limits', ref: null, createdAt: '2026-10-10T08:00:00.000Z' },
-  ], '2026-10-03T00:00:00.000Z', '2026-10-10T00:00:00.000Z')
-  assert.equal(summary.total, 3)
-  assert.equal(summary.recent, 1)
-  assert.deepEqual(summary.byTrigger, [['footer', 1]])
-  assert.deepEqual(summary.byRef, [['news.ycombinator.com', 1]])
-})
-
 test('a source that could not be read says so, and is never shown as zero', () => {
   const failed = { error: 'gcloud answered 403' }
   const page = renderReport({
     window: { days: 7, start: '2026-10-03', end: '2026-10-10', generatedAt: '2026-10-10 14:00' },
-    site: failed, waitlist: failed, hosted: failed, quotas: failed, github: failed, npm: failed, pypi: failed, google: failed, bing: failed,
+    site: failed, hosted: failed, quotas: failed, github: failed, npm: failed, pypi: failed, google: failed, bing: failed,
   })
-  assert.equal(page.match(/Not read: gcloud answered 403/g)?.length, 9)
-  assert.doesNotMatch(page, /\b0 page views|\b0 clicks|\b0 new/)
+  assert.equal(page.match(/Not read: gcloud answered 403/g)?.length, 8)
+  assert.doesNotMatch(page, /\b0 page views|\b0 clicks/)
 })
 
 test('the window is whole UTC days ending yesterday, the same for every source', () => {
@@ -123,7 +111,7 @@ test('ChatGPT views come from the tag alone, a ChatGPT referrer alone, or both, 
 
 test('the report says what the ChatGPT numbers leave out, in the right number, and prints nothing extra without ChatGPT views', () => {
   const rest = { error: 'x' }
-  const report = events => renderReport({ window: { days: 7, start: '2026-10-03', end: '2026-10-09', generatedAt: '2026-10-10 14:00' }, site: { value: summarizeSiteEvents(events) }, waitlist: rest, hosted: rest, quotas: rest, github: rest, npm: rest, pypi: rest, google: rest, bing: rest })
+  const report = events => renderReport({ window: { days: 7, start: '2026-10-03', end: '2026-10-09', generatedAt: '2026-10-10 14:00' }, site: { value: summarizeSiteEvents(events) }, hosted: rest, quotas: rest, github: rest, npm: rest, pypi: rest, google: rest, bing: rest })
   const three = report([view('2026-10-09T10:00:00Z', 'a', { path: '/', utm_source: 'chatgpt.com' }), view('2026-10-09T11:00:00Z', 'b', { path: '/', ref: 'chatgpt.com' }), view('2026-10-09T12:00:00Z', 'c', { path: '/', ref: 'chatgpt.com' })])
   assert.match(three, /From ChatGPT, by tag or referrer: 3 page views, 1 with utm_source=chatgpt\.com \(33%\)\. A view with neither the tag nor a ChatGPT referrer is counted as direct and is not in these numbers, so a tag that has gone shows as fewer ChatGPT views a day, not necessarily as a lower share\./)
   assert.match(report([view('2026-10-09T10:00:00Z', 'a', { path: '/', ref: 'chatgpt.com' })]), /: 1 page view, 0 with utm_source=chatgpt\.com \(0%\)/)

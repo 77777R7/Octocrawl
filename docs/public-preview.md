@@ -267,16 +267,9 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
   --project="$W2L_PROJECT_ID" --freshness=7d --format=json
 ```
 
-### Hosted waitlist
+### Where to go next
 
-The home page footer carries a hidden-until-scripted early-access form; it opens from there, from the link shown once a visitor's daily previews run out, and from the Limits page (`/?from=limits#waitlist`). It posts to `POST /api/waitlist` (same origin only, 2 KB, fixed roles and needs, a hidden honeypot field, five sign-ups per visitor per UTC day per instance). Each address is one document in the Firestore `waitlist` collection, with an HMAC of the address under `W2L_QUOTA_HASH_KEY` as its id, so a repeat sign-up replaces the answers and keeps the first sign-up time (`createdAtMs`, epoch milliseconds, because Firestore's `minimum` transform takes numbers only); no cookie, IP address or preview is stored with it, and nothing about it is logged. The runtime service account's `roles/datastore.user` covers the new collection. Read and maintain it as the owner:
-
-```sh
-node scripts/public-preview/waitlist.mjs            # counts by role, need, entry point and referrer
-node scripts/public-preview/waitlist.mjs --emails   # plus every entry as CSV
-node scripts/public-preview/waitlist.mjs --delete someone@example.org
-node scripts/public-preview/waitlist.mjs --expire   # entries older than 12 months, as the privacy page promises
-```
+The home page ends, above its footer, with a band of four links (`apps/public-web/src/startList.ts`): Connect MCP, the dashboard's Playground, the Scrape docs page's first call, and hello@octocrawl.dev for more than an account gives. It replaced the hosted early-access form on 2026-11-03: once signing in gave credits and keys, nobody sent the form (its Firestore `waitlist` collection held 0 entries), and the service no longer serves `POST /api/waitlist`. A click on a row is an ordinary `link_click`.
 
 To pause anonymous capture without removing the public page, run `gcloud run services update w2l-public-preview --region="$W2L_REGION" --project="$W2L_PROJECT_ID" --update-env-vars=W2L_PREVIEW_ENABLED=false`. The deployment must not set `W2L_CAPTURE_RAW_DIR` or the local Reddit/X proxy/exception options. Never enable arbitrary-domain browser fallback: the public browser path is restricted to Amazon.sg and its fixed resource hosts; generic pages use the guarded HTTP path.
 
@@ -331,14 +324,13 @@ A page view records the referring site's host, the address's `utm_source`, `utm_
 | Hints in hosted API and MCP answers | `hosted` | `hint` |
 | A post or listing elsewhere | the venue: `hn`, `reddit`, `devto`, `producthunt`, `smithery`, `glama`, `mcp-directory`, … | `post` or `listing` |
 
-`from` is for the site's own links to its home page (`/?from=blog-<slug>`, `/?from=limits#waitlist`): lowercase letters, digits and hyphens, at most 60 characters, so a link inside the site still says which page sent the visitor. `limits` and `connect-mcp` also open the waitlist form.
+`from` is for the site's own links to its home page (`/?from=blog-<slug>`): lowercase letters, digits and hyphens, at most 60 characters, so a link inside the site still says which page sent the visitor.
 
 ### Weekly report
 
 `scripts/public-preview/weekly-report.mjs` puts a week's numbers on one Markdown page, counts only (no address, IP, key or visitor id):
 
 - site visitors as visitor-days, by referrer or `utm_source`, by page, with their events and preview outcomes (automated and internal lines left out);
-- waitlist sign-ups in the window, by entry point and referrer;
 - hosted API and MCP requests by route and status class, from Cloud Run's request log;
 - distinct scrape and map callers for the days Firestore still keeps (`hostedQuotas` records last two days);
 - GitHub stars, views, clones and referrers;
