@@ -3260,7 +3260,7 @@ function toCrawlPage(step: StepRecord, task: Task, handoffOffered = false, offer
   const handoff = handoffOffered && handoffNeededIn(task, step) ? handoffRequestOf(step) : null
   const mode = task.mode
   // The same hints a scrape of this page would carry, from its stored result and routing audit.
-  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary, ladderTrace: step.audit.ladderTrace }) }, offers)
+  const agentHints = result === null ? [] : agentHintsFor({ fastMode: (task.batch ?? task.crawl)?.fastMode, waitFor: (task.batch ?? task.crawl)?.waitFor }, { channelsTried: step.audit?.channelsTried ?? [result.lane], result, ...(step.audit === undefined ? {} : { summary: step.audit.summary, ladderTrace: step.audit.ladderTrace }) }, offers)
   return {
     ...jobPageContent(task, result),
     id: step.id,

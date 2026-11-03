@@ -90,6 +90,30 @@ beforeAll(async () => {
           (req.url === '/help-shell-stuck' ? '' : '<script>setTimeout(function () { document.getElementById("loader").innerHTML = "<article><h1>Assemblies overview</h1><p>An Assembly is a collection of components that function as a single design, built from parts you model or insert.</p></article>" }, 2500)</script>') +
           '</body></html>',
       )
+    } else if (req.url === '/docs-shell' || req.url === '/docs-shell-nav' || req.url === '/docs-shell-stuck' || req.url === '/docs-shell-static') {
+      // developer.apple.com/documentation (2026-11-03): the static HTML is a small frame (here a header and a footer, and
+      // for -nav a hidden menu of 40 links, over 1,000 characters of Markdown) and an empty <div id="app">; the app fetches
+      // the page's data and only then renders a <main>. No loading indicator, no empty main landmark: the frame stays still
+      // while the data is on the way, 3.5 s here (-stuck: longer than any wait; -static: no app at all, a page that is done).
+      const menu = req.url === '/docs-shell-nav'
+        ? `<ul hidden>${Array.from({ length: 40 }, (_, i) => `<li><a href="/topics/topic-${i + 1}">Developer topic number ${i + 1}</a></li>`).join('')}</ul>`
+        : ''
+      const data = req.url === '/docs-shell-stuck' ? '/docs-data-never' : '/docs-data'
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        `<!doctype html><html><head><title>LanguageModelSession</title></head><body><header><nav><a href="/">Developer</a> <a href="/documentation">Documentation</a>${menu}</nav></header>` +
+          '<div id="app"></div><footer>Copyright 2026</footer>' +
+          (req.url === '/docs-shell-static' ? '' : `<script>fetch(${JSON.stringify(data)}).then(function (r) { return r.text() }).then(function (html) { document.getElementById("app").innerHTML = "<main>" + html + "</main>" })</script>`) +
+          '</body></html>',
+      )
+    } else if (req.url === '/docs-data' || req.url === '/docs-data-never') {
+      const answer = () => {
+        if (res.writableEnded || res.destroyed) return
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        res.end('<article><h1>LanguageModelSession</h1><p>An object that represents a session that interacts with a language model. A session keeps state between requests, so you can reuse it for a conversation.</p></article>')
+      }
+      const timer = setTimeout(answer, req.url === '/docs-data' ? 3_500 : 60_000)
+      res.on('close', () => clearTimeout(timer))
     } else if (req.url === '/fetching-below') {
       // A results list still fetching, its message one can see below a tall header, filled 2.5 s after load: still loading.
       const items = Array.from({ length: 6 }, (_, i) => `<li>Result ${i + 1}: a drill with a price of $${(i + 1) * 20}</li>`).join('')
@@ -300,6 +324,7 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  server.closeAllConnections()
   await new Promise<void>((resolve) => server.close(() => resolve()))
 })
 
@@ -577,6 +602,39 @@ describe('BrowserLocalSubject transport', () => {
       expect(waited.status).toBe('success')
       expect(waited.markdown).toContain('The late paragraph arrives two seconds after load.')
       expect(waited.trace).toContainEqual(expect.objectContaining({ event: 'wait_for', detail: expect.objectContaining({ requestedMs: 2_500 }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('waits for the main content of a page whose app fetches it after load, with no loading indicator to say so', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      // The data comes 3.5 s after load: past the usual settle, which sees a still frame and no loading indicator.
+      for (const path of ['/docs-shell', '/docs-shell-nav']) {
+        const page = await subject.fetch(`${url}${path}`)
+        expect(page.status, path).toBe('success')
+        expect(page.markdown, path).toContain('An object that represents a session that interacts with a language model.')
+        expect(page.trace, path).toContainEqual(expect.objectContaining({ event: 'content_wait', detail: expect.objectContaining({ ended: 'content' }) }))
+        expect(page.trace.some((event) => event.event === 'whole_page_delivered'), path).toBe(false)
+      }
+      // Data that never comes is waited for within the caller's deadline; the frame is not answered as the page, and the
+      // trace says the page was still loading when it was read.
+      const stuck = await subject.fetch(`${url}/docs-shell-stuck`, Date.now() + 6_000)
+      expect(stuck).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
+      expect(stuck.trace).toContainEqual(expect.objectContaining({ event: 'content_wait', detail: expect.objectContaining({ ended: 'deadline' }) }))
+      expect(stuck.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: false }) }))
+      // A page with nothing on the way is not waited for long: it is as empty as it looks.
+      const started = Date.now()
+      const done = await subject.fetch(`${url}/docs-shell-static`)
+      expect(done).toMatchObject({ status: 'failed', failureReason: 'empty_unverified' })
+      expect(done.trace).toContainEqual(expect.objectContaining({ event: 'content_wait', detail: expect.objectContaining({ ended: 'settled' }) }))
+      expect(done.trace.some((event) => event.event === 'loading_wait')).toBe(false)
+      expect(Date.now() - started).toBeLessThan(5_000)
+      // A request that waits itself (waitFor) gets that wait, not this one.
+      const waited = await subject.fetch(`${url}/docs-shell`, undefined, undefined, undefined, { waitFor: 4_000 })
+      expect(waited.markdown).toContain('An object that represents a session')
+      expect(waited.trace.some((event) => event.event === 'content_wait')).toBe(false)
     } finally {
       await subject.teardown()
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -14,7 +14,7 @@ function result(partial: Partial<HintedResult> = {}): HintedResult {
   }
 }
 
-const hints = (res: HintedResult, channelsTried: readonly string[] = ['http'], req: { fastMode?: boolean } = {}) => agentHintsFor(req, { channelsTried, result: res })
+const hints = (res: HintedResult, channelsTried: readonly string[] = ['http'], req: { fastMode?: boolean; waitFor?: number } = {}) => agentHintsFor(req, { channelsTried, result: res })
 
 describe('agent hints', () => {
   it('says nothing about a plain success, a verified empty page or a TLS caveat', () => {
@@ -191,6 +191,19 @@ describe('agent hints', () => {
     // A shell or thin answer already carries its own sentence; under fastMode that option's sentence stands alone.
     expect(hints({ ...empty, warnings: [{ code: 'client_rendered_suspected', message: 'shell' }] })).toEqual(['the page fills its data with JavaScript; the browser lane was not tried'])
     expect(hints({ ...empty, trace: [{ at: 1, lane: 'http', event: 'quality_low_yield' }] }, ['http'], { fastMode: true })).toEqual([FAST_MODE_DECLINED_HINT])
+    // A rendered page read before its main content came (little text, or a wait that ended with it still loading) is told
+    // to wait longer, by more than any waitFor it sent; one the browser saw done, with nothing on the way, keeps the sentence above.
+    const extract = (textChars: number) => ({ at: 2, lane: 'browser_local' as const, event: 'extract', detail: { textChars } })
+    const early = { ...empty, lane: 'browser_local' as const, trace: [extract(40)] }
+    expect(hints(early, ['http', 'browser_local'])).toEqual([renderedNotLoadedHint()])
+    expect(renderedNotLoadedHint()).toContain('pass waitFor (up to 60000 ms)')
+    expect(hints(early, ['browser_local'], { waitFor: 2_000 })).toEqual([renderedNotLoadedHint(2_000)])
+    expect(renderedNotLoadedHint(2_000)).toContain('it waited 2000 ms (waitFor); raise waitFor (up to 60000 ms)')
+    const stillLoading = { ...early, trace: [{ at: 1, lane: 'browser_local' as const, event: 'loading_wait', detail: { waitedMs: 8_000, cleared: false } }, extract(9_000)] }
+    expect(hints(stillLoading, ['browser_local'])).toEqual([renderedNotLoadedHint()])
+    const settled = { ...early, trace: [{ at: 1, lane: 'browser_local' as const, event: 'content_wait', detail: { ended: 'settled', waitedMs: 1_200, pending: 0 } }, extract(40)] }
+    expect(hints(settled, ['browser_local'])).toEqual(["Octocrawl found no main content on the page; onlyMainContent: false returns the whole page's Markdown as content, and includeTags names the elements to read instead"])
+    expect(hints({ ...early, trace: [extract(9_000)] }, ['browser_local'])).toEqual(["Octocrawl found no main content on the page; onlyMainContent: false returns the whole page's Markdown as content, and includeTags names the elements to read instead"])
     // A PDF with no text layer is the one empty page W2L cannot read differently.
     const pdf = { kind: 'pdf', detectedBy: 'content_type', contentType: 'application/pdf', declaredBytes: null, maxBytes: 10, bytes: 10, sha256: 'a'.repeat(64), path: 'files/aaa.pdf', markdownFrom: null, encoding: null, warnings: [], pdf: null } as unknown as NonNullable<HintedResult['file']>
     expect(hints(result({ status: 'failed', failureReason: 'empty_unverified', markdown: null, file: pdf }))).toEqual(['the PDF has no text layer, and Octocrawl runs no OCR', 'the response was a pdf file kept at files/aaa.pdf; it has no markdown'])
