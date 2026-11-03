@@ -13,7 +13,7 @@ const base = (() => { try { return git('merge-base', 'HEAD', 'origin/main') } ca
 /** Each page's content files and lastmod, now and as main had them at `base`. Days are compared as changed or not,
  * never against commit dates, so merges, rebases and time zones cannot trip the check. */
 const PAGES_FILE = 'apps/public-web/scripts/docsPages.mjs'
-const HOME_FILES = ['src/page.ts', 'src/featureSections.ts', 'src/waitlistMarkup.ts']
+const HOME_FILES = ['src/page.ts', 'src/featureSections.ts', 'src/startList.ts']
 const current: Array<[string, string, string[]]> = [
   ['/', HOME_UPDATED, HOME_FILES],
   ...pages.map(page => [page.file, page.updated, [`content/${page.file}`]] as [string, string, string[]]),

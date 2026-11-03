@@ -2,7 +2,7 @@
 
 This page covers the public Octocrawl page and its preview service. When you run Octocrawl on your own computer, none of it applies: requests, results and logs stay on your machine.
 
-Last updated 29 October 2026.
+Last updated 3 November 2026.
 
 ## In short
 
@@ -28,7 +28,7 @@ When the page opens, and after each preview, it asks `GET /api/quota` how many p
 
 - **The visitor cookie, `w2l_visitor`.** A random identifier, signed by the service, kept for a year. It counts your five previews a day, and the same identifier (or, without the cookie, your IP address), hashed per day, is the pseudonym on page events and preview outcomes (below). It is not shared with anyone. A second cookie, `w2l_internal`, is set only when a page is opened with `?internal=1`; the operator uses it to mark their own browser, and `?internal=0` removes it. A third, `w2l_src`, is set by the first page you open here: the `utm_` and `from` tags on its address, the referring site's host (never its path), the page's path and the day. It stays in your browser for 90 days; if you make an account in that time, the service writes it on the account (below) and deletes the cookie. It is not set when your browser sends Do Not Track or Global Privacy Control.
 - **A daily preview counter.** For each UTC day, a count of previews under a keyed hash of that day and your cookie (or, without the cookie, your IP address). Without the service's secret key, the hash cannot be turned back into either. These counters are kept in Google Cloud Firestore and expire one day after the day they count; Firestore then deletes them, usually within a day.
-- **Page events.** The page tells its own service when it is opened and when you choose an example, change the output view, switch the Markdown between source and preview, copy or download a result, open Get code or copy code from it or from the docs, pick an MCP client in the docs, open or send the waitlist form, or follow a link. Each event names the page path, the referring site's host (never its path), any `utm_` or `from` tags on the address, the view or Markdown mode, Get code tab, client or waitlist entry point involved, and for a link, where it leads: its path on this site, or another site's host and path (never a query).
+- **Page events.** The page tells its own service when it is opened and when you choose an example, change the output view, switch the Markdown between source and preview, copy or download a result, open Get code or copy code from it or from the docs, pick an MCP client in the docs, are shown the next step under a free tool's result, or follow a link. Each event names the page path, the referring site's host (never its path), any `utm_` or `from` tags on the address, the view or Markdown mode, Get code tab or client involved, and for a link, where it leads: its path on this site, or another site's host and path (never a query), and whether it was one of that next step's links.
 - **Preview outcomes.** For each preview: its state (for example `success` or `blocked`), the diagnostic code, the **host** of the page you asked for (never its path or query), whether you set options, and the server time.
 
 Events and outcomes carry a pseudonym that changes every UTC day, so a visit can be counted but not followed from one day to the next, a flag for requests that look automated, and an internal flag when the `w2l_internal` cookie is present or the request comes from the browser built into the Claude desktop app (its user agent names `Claude/`), where the operator checks the site. Links taken from a page you extracted (its final address, its Markdown, its link list) are never logged. When your browser sends Do Not Track or Global Privacy Control, the page sends no events and the service logs no preview outcome; the cookie and the daily counter still work, since without them the five-a-day limit could not.
@@ -41,7 +41,7 @@ Requests to octocrawl.dev first pass through Cloudflare, which forwards them to 
 
 - The content of the pages you extract on the preview page, or the path and query of the address you submit through **Extract page**. The preview page never sends a page's content to a model. The hosted API is different (below): it keeps a call's result for ten minutes and a job's pages for 7 days after the job ends, and its json model fallback is the one case where page content goes to another company, and only when you ask for it.
 - Anything from a third party: the page loads no outside scripts, fonts, ads or trackers, and its security policy allows connections to this site only.
-- An account, unless you sign in (below). Without one, your email address is kept only if you join the waitlist.
+- An account, unless you sign in (below). Without one, your email address is not stored; one you ask a sign-in link for goes to Firebase, which sends the link (below).
 
 Nothing here is sold or shared for advertising.
 
@@ -84,14 +84,6 @@ A sign-in link is sent by Firebase. GitHub and Google show you what they share b
 **Logs.** The service's own log lines say that a sign-in happened, the way it happened and whether it worked, without your email address. When a sign-in makes an account, a line also gives a short name for how the browser first reached the site (the `utm_source`, the referring host, the `from` tag, or that it was for an MCP client), without the account. The request log (above, 30 days) keeps each request's path and query, so it holds the one-time code a sign-in carried back. Such a code works once and expires within an hour. For an account's key, the hosted API logs one line per call with the account's id, the kind of call and the credits it cost.
 
 **Deleting your account.** In your dashboard, Settings → Delete account: type the account's email address, then sign in once more the way you usually do. As soon as you are signed in, the service deletes your keys (they stop working within a minute), your credits, your daily usage, your request lines, your hosted jobs' records, your account record and its sessions, and then your Firebase account. The pages and exports your jobs kept are not deleted at that moment: the storage's own expiry deletes them about 30 days after they were written, and they stay recoverable by us for 7 days after that. Service logs that name the account's id are deleted with the rest of the logs, 30 days on. If the deletion stops part way, sign in and delete again to finish it. If you used some of this month's free credits, the service keeps a keyed hash of your email address (not the address), the month and how many free credits were left, until the month ends (Firestore deletes it within about a day after); an account made again with the same address this month starts with what was left instead of a new grant, and the record is then deleted. You can also email [hello@octocrawl.dev](mailto:hello@octocrawl.dev) from the account's address and we delete it for you.
-
-## Waitlist
-
-If you ask for a key, the service stores your email address, and the answers you chose to give: what you do, what you would need, and what you would collect. It also stores which link you joined from (after your daily previews ran out, the home page footer or the Limits page), the site that sent you to this page (its host, never its path), and the date. Your cookie, IP address and previews are not stored with it, and joining again with the same address replaces your earlier answers.
-
-The list is kept in Google Cloud Firestore in Singapore and used only to write to you about a hosted Octocrawl key and, at most once, to ask how it went. Every email from it says how to leave. An entry is deleted 12 months after we have written to you about a key, or 12 months after you joined, whichever comes first. To be removed sooner, or to see what we hold, email [hello@octocrawl.dev](mailto:hello@octocrawl.dev) from that address.
-
-Joining is something you ask for, so it works when your browser sends Do Not Track or Global Privacy Control; the page then sends no event about it.
 
 ## Questions
 
