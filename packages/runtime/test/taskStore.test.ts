@@ -403,6 +403,7 @@ describe('@w2l/runtime public surface', () => {
       'RecipeStore',
       'RegexLedger',
       'RegexPool',
+      'SHELL_TEXT_MAX',
       'SqliteTaskStore',
       'VERIFIER_VERSION',
       'WebhookInbox',

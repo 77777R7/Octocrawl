@@ -34,6 +34,7 @@ import type { SubjectAdapter } from '../subject.js'
 import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { dropLastStep, runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, LOADING_WAIT_MAX_MS, loadingWaitEvent, waitForRenderedStability, withStillLoadingWarning } from '../browserSettle.js'
+import { mainContentWaitEvents, waitForMainContent, type AwaitedRequest } from '../mainContentWait.js'
 import { REGION_WAIT_MAX_MS, regionSpecOf, regionWaitEvent, waitForRegion } from '../regionWait.js'
 import { captureLayout, LAYOUT_MAX_ELEMENTS, SHADOW_TABLE_LIMITS } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
@@ -170,6 +171,12 @@ const CAPTURE_RESERVE_MS = 1_000
  * redirect loop, a meta refresh to itself) fails with `redirect_loop`.
  */
 const CAPTURE_ATTEMPTS = 3
+
+/** The kinds of request a page's main content can wait on: its documents (frames too), scripts and data. */
+const AWAITED_RESOURCES: ReadonlySet<string> = new Set(['document', 'script', 'fetch', 'xhr'])
+
+/** Requests of one page the wait for its main content keeps track of. */
+const AWAITED_REQUESTS_MAX = 5_000
 
 /** Time a page's close may take before W2L closes its context instead. */
 const PAGE_CLOSE_MS = 2_000
@@ -903,6 +910,17 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const seen: { download: Download | null; navigations: Response[] } = { download: null, navigations: [] }
       page.on('download', download => { seen.download ??= download })
       page.on('response', navigation => { if (navigation.request().isNavigationRequest()) seen.navigations.push(navigation) })
+      // The requests the page sent (its documents, scripts and data) and when they got where: what the wait for its main
+      // content waits on (mainContentWait.ts). A page that sends more than AWAITED_REQUESTS_MAX has the rest not waited on.
+      const awaited = new Map<Request, AwaitedRequest>()
+      page.on('request', (request) => {
+        const kind = request.resourceType()
+        if (AWAITED_RESOURCES.has(kind) && awaited.size < AWAITED_REQUESTS_MAX) awaited.set(request, { startedAt: Date.now(), data: kind === 'fetch' || kind === 'xhr', path: request.url().split(/[?#]/, 1)[0]! })
+      })
+      page.on('response', (answer) => { const request = awaited.get(answer.request()); if (request !== undefined) request.respondedAt ??= Date.now() })
+      const ended = (request: Request) => { const known = awaited.get(request); if (known !== undefined) known.finishedAt ??= Date.now() }
+      page.on('requestfinished', ended)
+      page.on('requestfailed', ended)
       // The document the main frame shows, which a script, a meta refresh or
       // the history API can change after the navigation W2L started answered.
       const documents = new MainFrameDocuments(page)
@@ -936,6 +954,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
         ? /^\/dp\/([A-Z0-9]{10})\/?$/i.exec(new URL(url).pathname)?.[1]?.toUpperCase() ?? null
         : null
       let response: Response | null = null
+      // Whether the settle after the navigation ended with the page still showing a loading indicator: it was waited for.
+      let loadingStayed = false
       for (;;) {
         await this.scheduler.beforeRequest(new URL(navigationUrl).origin, signal, onRequestWait)
         previousRequestAtMs = this.lastRequestAtMsByHost.get(host) ?? null
@@ -994,6 +1014,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
         const settled = await settle(usual, callerWaits ? usual : loadingBound())
         const waited = callerWaits ? null : loadingWaitEvent(settled, Date.now() - start, 'browser_local')
         if (waited !== null) trace.push(waited)
+        loadingStayed = !callerWaits && settled.stillLoading
         throwIfExecutionStopped(execution)
         if (status === 200 && variantFollowups === 0 && requestedAmazonAsin !== null) {
           const variant = await raceWithSignal(page.evaluate((asin) => ({
@@ -1212,6 +1233,28 @@ export class BrowserLocalSubject implements SubjectAdapter {
           }), signal)
           throwIfExecutionStopped(execution)
         }
+      }
+      // The main content a page's app fetches after load, with no loading indicator to say so (mainContentWait.ts): not
+      // when the request waits or runs steps itself, asks for a region, a selection, the whole page or a list, or when the
+      // page was already waited for as loading; and only on a page that answered and shows no check.
+      const callerWaited = (options.waitFor ?? 0) > 0 || (options.actions?.length ?? 0) > 0
+      if (!callerWaited && region === undefined && !loadingStayed && !wholePageAsked(options) && !selectionAsked(options) && options.list === undefined) {
+        const outcome = await raceWithSignal(waitForMainContent(shownPage, {
+          maxMs: loadingBound(),
+          requests: () => awaited.values(),
+          // An extractor that throws ends the wait: the extraction after the capture meets it again, as internal_error.
+          hasContent: (html, href) => {
+            try { return !extractTf.extract(html, { url: href, pruneSelectors: options.excludeTags, blockAds: options.blockAds }).escalate } catch { return true }
+          },
+          gated: async () => {
+            const answer = reported(documents.shown() ?? { url: shownPage.url(), response, kind: 'document' }).response
+            const answerStatus = answer?.status() ?? 0
+            if (answerStatus !== 0 && !isSuccessStatus(answerStatus)) return true
+            return classifyGate({ status: answerStatus || 200, header: (name) => answer?.headers()[name.toLowerCase()] ?? null, body: await shownPage.content().catch(() => ''), finalUrl: shownPage.url(), contentful: true }) !== null
+          },
+        }), signal)
+        trace.push(...mainContentWaitEvents(outcome, Date.now() - start, 'browser_local'))
+        throwIfExecutionStopped(execution)
       }
       // The screenshot format: the page as it stands after load, stability
       // and waitFor, before the DOM is read below, so the image and the

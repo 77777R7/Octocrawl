@@ -10,6 +10,7 @@
 
 import { DEFAULT_SCRAPE_TIMEOUT_MS, isOctocrawlRobotsGroup, MAX_WAIT_FOR_MS, type Evidence, type FetchResult, type LadderRunAudit, type MapResponse, type ScrapeRequest } from '@w2l/contracts'
 import { HTTP_CHANNELS, INSTALLED_CHROME_INSTALL } from '@w2l/bench'
+import { SHELL_TEXT_MAX } from '@w2l/runtime'
 
 /** The hint a `fastMode` scrape carries when the http lane asked for the browser lane it was denied. */
 export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane; fastMode declined it; retry without fastMode'
@@ -21,6 +22,17 @@ export function lowContentYieldHint(browserTried: boolean): string {
 
 /** The hint a `low_content_yield` warning on a rendered answer carries: the page was rendered and still held little. */
 export const RENDERED_LOW_YIELD_HINT = `the rendered page's main content was thin and the extraction unsure of it; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) when its data loads late, actions (a click, a scroll, a wait for a selector) when it appears after an interaction, or onlyMainContent: false for the whole page`
+
+/**
+ * The hint a rendered page with no main content carries when it was read before its content came (readiness not_loaded):
+ * a longer wait, not the whole page, is the next step; with a waitFor already sent, a longer one.
+ */
+export function renderedNotLoadedHint(waitFor?: number): string {
+  const wait = waitFor !== undefined && waitFor > 0
+    ? `it waited ${waitFor} ms (waitFor); raise waitFor (up to ${MAX_WAIT_FOR_MS} ms)`
+    : `pass waitFor (up to ${MAX_WAIT_FOR_MS} ms)`
+  return `the browser read the page before its main content came; ${wait} when its data loads late, actions (a click, a scroll, a wait for a selector) when it appears after an interaction, or onlyMainContent: false for the page as it stood`
+}
 
 /** The hint a `browser_not_installed` warning carries: the one command that lets the browser lane start, as the warning names it. */
 export function browserNotInstalledHint(command = 'npx playwright install chromium'): string {
@@ -188,7 +200,7 @@ const ROBOTS_ROUTE = 'A local Octocrawl server fetches a URL a scrape or batch n
  * server offers it: the same result gives the same hints on the full and
  * compact responses, on batch items and crawl pages, and in the scrape record.
  */
-export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedRun, offers: HintOffers = {}): string[] {
+export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, run: HintedRun, offers: HintOffers = {}): string[] {
   const { result } = run
   const hints: string[] = []
   const host = hostOf(result)
@@ -254,6 +266,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
   const shellHinted = result.warnings?.some((warning) => warning.code === 'client_rendered_suspected' || warning.code === 'low_content_yield') === true
   if (result.status === 'failed' && result.failureReason === 'empty_unverified' && !shellHinted && !fastModeDeclined) {
     if (result.file?.kind === 'pdf') hints.push('the PDF has no text layer, and Octocrawl runs no OCR')
+    else if (result.file === undefined && renderedBeforeContent(result)) hints.push(renderedNotLoadedHint(req.waitFor))
     else if (result.file === undefined) hints.push('Octocrawl found no main content on the page; onlyMainContent: false returns the whole page\'s Markdown as content, and includeTags names the elements to read instead')
   }
   if (result.status === 'failed' && result.failureReason === 'http_error') {
@@ -264,6 +277,22 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode'>, run: HintedR
   hints.push(...jsonHints(result))
   if (result.file !== undefined) hints.push(fileHint(result.file))
   return hints.slice(0, MAX_AGENT_HINTS)
+}
+
+/**
+ * Whether a page the local browser rendered with no main content was read before its content came, as its readiness reads it (ADR 0007):
+ * a wait that ended with the page still loading, or little visible text (the lane's `extract` event); unless the browser's
+ * wait for main content saw the page done, nothing on the way and the page still (`content_wait` settled).
+ */
+function renderedBeforeContent(result: HintedResult): boolean {
+  // Only the local browser lane's rungs (browser_local, installed_chrome, hosted_chrome) take waitFor; the person's own
+  // Chrome (my-browser, a handoff) and a provider do not, and the whole-page sentence below holds for them.
+  if (result.lane !== 'browser_local') return false
+  if (result.trace.some((event) => event.event === 'content_wait' && event.detail?.ended === 'settled')) return false
+  if (result.trace.some((event) => (event.event === 'loading_wait' && event.detail?.cleared === false) || (event.event === 'wait_for' && event.detail?.cutShortBy !== undefined))) return true
+  const extract = [...result.trace].reverse().find((event) => event.event === 'extract')
+  const text = extract?.detail?.textChars
+  return typeof text === 'number' && text <= SHELL_TEXT_MAX
 }
 
 /**
