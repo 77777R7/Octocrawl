@@ -14,7 +14,7 @@ import { track, trackLinkClicks, trackPageView } from './analytics'
 import { mountWaitlist } from './waitlist'
 import { mountCrawlView } from './crawlView'
 import { readPreview, STAGE_STREAM } from './previewStream'
-import { taskStatus, type TaskState } from './taskStatus'
+import { readinessNote, taskStatus, type TaskState } from './taskStatus'
 import { buildWindow } from './windowBuild'
 import { markdownToText } from './markdownText'
 import { mountMapResults } from './tools/mapResults'
@@ -263,10 +263,10 @@ document.querySelector<HTMLButtonElement>('#example-button')!.addEventListener('
   track('example_click')
   // A free tool's page has an example of its own (page.ts, heroMarkup `tool.example`).
   input.value = hero.dataset.toolExample ?? 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview'
-  // Focus stays on the button (Extract page is the next stop), so the hero keeps moving: nothing is being typed.
-  message.textContent = 'Example URL added. Select “Extract page” to begin.'
-  message.className = 'form-message'
+  // Clears the hint an earlier address left and shows the quota line again; the submit drops the hint it schedules.
   scheduleCapability()
+  // The example runs at once, through the form's own submit, as Extract page would.
+  form.requestSubmit()
 })
 
 function normalizeUrl(value: string): string {
@@ -384,8 +384,8 @@ function statusText(result: PreviewResponse): string {
   if (diagnostic?.code === 'challenge') return 'Verification page'
   if (status === 'success' && product?.status === 'incomplete') return 'Page read · Product fields need review'
   if (status === 'success' && product?.status === 'invalid') return 'Page read · Product fields invalid'
-  if (isPageRead(result)) return taskStatus(result).label
-  return ({ success: 'Page read · Task unverified', incomplete: 'Partial result', blocked: 'Blocked by site', failed: 'Extraction failed', timeout: 'Timed out', invalid_url: 'Invalid URL', quota_exceeded: 'Daily limit reached' })[status]
+  if (isPageRead(result)) return readStatus(result).label
+  return ({ success: 'Page read', incomplete: 'Partial result', blocked: 'Blocked by site', failed: 'Extraction failed', timeout: 'Timed out', invalid_url: 'Invalid URL', quota_exceeded: 'Daily limit reached' })[status]
 }
 
 function statusDetail(status: PreviewStatus, reason: string | null): string {
@@ -395,6 +395,18 @@ function statusDetail(status: PreviewStatus, reason: string | null): string {
 
 function isPageRead(result: PreviewResponse): boolean {
   return result.status === 'success' || result.status === 'incomplete'
+}
+
+/** The demo sends no task contract (previewBody), so a page it reads comes back with verification not_requested. Such
+ * a run says what happened, "Page read", and its note keeps only what readiness found missing: "not verified against a
+ * task contract" is true of every demo run and tells a visitor nothing. A verdict keeps taskStatus's words. */
+function readStatus(result: PreviewResponse): { label: string; detail: string; tone: 'success' | 'partial' } {
+  const verdict = result.verification?.status
+  if (verdict === 'passed' || verdict === 'failed') return taskStatus(result)
+  const { unavailable, note } = readinessNote(result)
+  if (unavailable) return { label: 'Target data unavailable', detail: note, tone: 'partial' }
+  const partial = result.status === 'incomplete'
+  return { label: partial ? 'Partial result' : 'Page read', detail: note, tone: partial || note ? 'partial' : 'success' }
 }
 
 /** A short heading for results without a page title, e.g. "reddit.com/r/test". */
@@ -1142,7 +1154,7 @@ function runType(run: Run): string {
 function runStatus(run: Run): { text: string; tone: 'loading' | 'success' | 'partial' | 'error' } {
   const result = run.result
   if (!result) return { text: 'Extracting…', tone: 'loading' }
-  const tone = !isPageRead(result) ? 'error' : result.status === 'incomplete' || result.product && result.product.status !== 'complete' || result.diagnostic ? 'partial' : taskStatus(result).tone
+  const tone = !isPageRead(result) ? 'error' : result.status === 'incomplete' || result.product && result.product.status !== 'complete' || result.diagnostic ? 'partial' : readStatus(result).tone
   return { text: statusText(result), tone }
 }
 
@@ -1228,7 +1240,8 @@ function renderDetail(run: Run): void {
   else if (result.reason || result.status === 'incomplete' && !result.product) {
     content.append(textElement('p', statusDetail(result.status, result.reason), 'result-note'))
   }
-  if (isPageRead(result)) content.append(textElement('p', taskStatus(result).detail, 'result-note'))
+  const note = isPageRead(result) ? readStatus(result).detail : ''
+  if (note) content.append(textElement('p', note, 'result-note'))
   if (result.product) content.append(renderProduct(result.product))
   renderOutputPanel(result, 'window')
 }
