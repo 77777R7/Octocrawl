@@ -4,6 +4,7 @@
  * as text or CSV. This page leaves the card to main.ts, which shows the page's links. */
 
 import { track } from '../analytics'
+import { toolNextStep } from './nextStep'
 
 type Via = 'start' | 'link' | 'sitemap'
 type MapLink = { url: string; title?: string; via: Via[]; lastmod?: string; robots: string }
@@ -102,14 +103,9 @@ function render(body: HTMLElement, heading: HTMLElement, reply: MapReply): void 
   // says nothing of them.
   const sitemap = map.sources?.sitemap
   if (sitemap && sitemap.truncated === null && sitemap.files.length > 0 && sitemap.files.every((file) => file.kind === 'absent' || file.kind === 'not_sitemap')) body.append(el('p', 'map-warning', 'This site has no sitemap, so these are the start page’s links. Paste another of its pages to see the links there.'))
-  if (more || map.stoppedBy === 'limit') {
-    const upsell = el('p', 'map-upsell', 'This site has more than 500 pages. Signed in, the Playground lists up to 5,000 for 1 credit, from 1,000 free a month. ')
-    const link = el('a', '', 'Open the Playground →')
-    link.href = document.cookie.includes('w2l_account=1') ? '/dashboard/map/' : '/signin/'
-    upsell.append(link)
-    body.append(upsell)
-  }
   if (!links.length) return
+  // Above the list, which can run to 500 rows: where to take the site's pages next, the Playground's 5,000 among them.
+  body.append(toolNextStep('map', reply.requestedUrl, { morePages: more > 0 || map.stoppedBy === 'limit' }))
 
   const bar = el('div', 'map-bar')
   const filter = el('input', 'map-filter')

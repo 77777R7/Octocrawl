@@ -16,9 +16,14 @@
 .hero.is-tool h1 em { color: var(--orange-200); }
 .hero.is-tool .hero-description { max-width: 58ch; margin: 16px auto 0; }
 .hero.is-tool .hero-scroll { margin-top: 14px; }
-.result-next { margin: 20px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
-.result-next-link { padding: 0; border: 0; color: var(--link); background: none; font: inherit; font-weight: 650; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
-.result-next-link:hover { color: var(--orange-ink); }
+/* Under a tool's result: where to take the task next (src/tools/nextStep.ts). */
+.tool-next { margin: 22px 0 0; padding: 18px 20px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+.tool-next-title { margin: 0; color: #142a57; font-size: 15px; font-weight: 600; }
+.tool-next-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px 22px; margin: 12px 0 0; padding: 0; list-style: none; }
+.tool-next-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.55; }
+.tool-next-item strong { color: #142a57; font-weight: 600; }
+.tool-next-link { align-self: flex-start; margin-top: 2px; padding: 0; border: 0; color: var(--link); background: none; font: inherit; font-weight: 650; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.tool-next-link:hover { color: var(--orange-ink); }
 
 /* The light sections below a tool page's top and the hub's banner. */
 .tl-section { position: relative; color: var(--text); background: var(--page); border-top: 1px solid var(--line); }
@@ -111,8 +116,7 @@
 .map-refused li { padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-soft); background: #fff; font: 12px/1.3 var(--tl-mono); }
 .map-refused li.is-more { border-color: rgba(243, 104, 61, .45); color: var(--orange-ink); }
 .map-warning { margin: 12px 0 0; padding: 10px 14px; border-left: 3px solid #ff9b5f; color: #5e4e39; background: #fff6ec; font-size: 14px; line-height: 1.55; }
-.map-upsell { margin: 12px 0 0; padding: 12px 16px; border: 1px solid rgba(243, 104, 61, .35); border-radius: 12px; color: var(--ink-soft); background: #fff8f3; font-size: 14px; line-height: 1.55; }
-.map-upsell a, .map-next a { color: var(--link); font-weight: 650; }
+.map-next a { color: var(--link); font-weight: 650; }
 .map-guidance { margin-top: 18px; padding: 22px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
 .map-reason { margin: 8px 0 0; color: var(--text); font-size: 16px; }
 .map-next { margin: 12px 0 0; }
