@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { mainContentWaitEvents, waitForMainContent, type MainContentWaitPage } from '../src/mainContentWait.js'
+import { BACKGROUND_REQUEST_MS, mainContentWaitEvents, waitForMainContent, type AwaitedRequest, type MainContentWaitPage } from '../src/mainContentWait.js'
 
-/** A page whose text, HTML and requests on the way the test sets as it goes; each sample is a real 5 ms sleep. */
-function fakePage(state: { text: number; html: string; pending: number }, onSample: (samples: number) => void = () => {}): MainContentWaitPage & { samples: number } {
+/** A page whose text and HTML the test sets as it goes; each sample is a real 5 ms sleep. */
+function fakePage(state: { text: number; html: string }, onSample: (samples: number) => void = () => {}): MainContentWaitPage & { samples: number } {
   const page = {
     samples: 0,
     async evaluate(expression: string) {
@@ -20,47 +20,67 @@ function fakePage(state: { text: number; html: string; pending: number }, onSamp
 }
 
 const hasContent = (html: string) => html.includes('<main>')
+const sent = (data = true, startedAt = Date.now()): AwaitedRequest => ({ startedAt, data })
 
 describe('waitForMainContent', () => {
   it('does not wait on a page with main content, plenty of text, or a check', async () => {
-    const pending = () => 1
-    expect(await waitForMainContent(fakePage({ text: 10, html: '<main>Done</main>', pending: 1 }), { maxMs: 500, hasContent, pending })).toBeNull()
-    expect(await waitForMainContent(fakePage({ text: 5_000, html: '<div></div>', pending: 1 }), { maxMs: 500, hasContent, pending })).toBeNull()
-    expect(await waitForMainContent(fakePage({ text: 10, html: '<div></div>', pending: 1 }), { maxMs: 500, hasContent, pending, gated: async () => true })).toBeNull()
+    const requests = () => [sent()]
+    expect(await waitForMainContent(fakePage({ text: 10, html: '<main>Done</main>' }), { maxMs: 500, hasContent, requests })).toBeNull()
+    expect(await waitForMainContent(fakePage({ text: 5_000, html: '<div></div>' }), { maxMs: 500, hasContent, requests })).toBeNull()
+    expect(await waitForMainContent(fakePage({ text: 10, html: '<div></div>' }), { maxMs: 500, hasContent, requests, gated: async () => true })).toBeNull()
   })
 
   it('keeps waiting on a still frame while its data is on the way, and ends when the main content comes', async () => {
-    const state = { text: 20, html: '<header>Docs</header><div id="app"></div>', pending: 1 }
-    // The frame stays still for 30 samples with a request on the way, far past the quiet window; then the data renders.
-    const page = fakePage(state, (samples) => { if (samples === 30) { state.pending = 0; state.text = 27; state.html = '<header>Docs</header><main>Session</main>' } })
-    const outcome = await waitForMainContent(page, { maxMs: 5_000, hasContent, pending: () => state.pending, quietMs: 20 })
-    expect(outcome).toMatchObject({ ended: 'content', pending: 0 })
+    const state = { text: 20, html: '<header>Docs</header><div id="app"></div>' }
+    const data = sent()
+    // The frame stays still for 30 samples with its data on the way, far past the quiet window; then the data renders.
+    const page = fakePage(state, (samples) => { if (samples === 30) { data.finishedAt = Date.now(); state.text = 27; state.html = '<header>Docs</header><main>Session</main>' } })
+    const outcome = await waitForMainContent(page, { maxMs: 5_000, hasContent, requests: () => [data], quietMs: 20 })
+    expect(outcome).toMatchObject({ ended: 'content', pending: 0, stillLoading: false })
     expect(page.samples).toBe(30)
     expect(mainContentWaitEvents(outcome, 1, 'browser_local')).toEqual([{ at: 1, lane: 'browser_local', event: 'content_wait', detail: { ended: 'content', waitedMs: outcome!.waitedMs, pending: 0 } }])
   })
 
   it('reads a page with nothing on the way that stopped changing as done, not as loading', async () => {
-    const state = { text: 20, html: '<header>Docs</header>', pending: 0 }
-    const outcome = await waitForMainContent(fakePage(state), { maxMs: 5_000, hasContent, pending: () => state.pending, quietMs: 30 })
-    expect(outcome?.ended).toBe('settled')
+    const outcome = await waitForMainContent(fakePage({ text: 20, html: '<header>Docs</header>' }), { maxMs: 5_000, hasContent, requests: () => [], quietMs: 30 })
+    expect(outcome).toMatchObject({ ended: 'settled', stillLoading: false })
     expect(outcome!.waitedMs).toBeLessThan(1_000)
     expect(mainContentWaitEvents(outcome, 1, 'browser_local').map((event) => event.event)).toEqual(['content_wait'])
   })
 
   it('does not read a request that just finished as the page being done before the page changed', async () => {
-    const state = { text: 20, html: '<div id="app"></div>', pending: 1 }
+    const state = { text: 20, html: '<div id="app"></div>' }
+    const data = sent()
     // The request finishes at sample 10, the quiet window (20 ms, about 4 samples) long passed; the app renders 2 samples later.
     const page = fakePage(state, (samples) => {
-      if (samples === 10) state.pending = 0
+      if (samples === 10) data.finishedAt = Date.now()
       if (samples === 12) { state.text = 27; state.html = '<main>Session</main>' }
     })
-    expect(await waitForMainContent(page, { maxMs: 5_000, hasContent, pending: () => state.pending, quietMs: 20 })).toMatchObject({ ended: 'content' })
+    expect(await waitForMainContent(page, { maxMs: 5_000, hasContent, requests: () => [data], quietMs: 20 })).toMatchObject({ ended: 'content' })
+  })
+
+  it('does not wait on a body streamed on and on, a request on the way for long, or a page that polls', async () => {
+    const page = () => fakePage({ text: 20, html: '<nav>Docs</nav>' })
+    // An event stream answered at once whose body never ends.
+    const streamed: AwaitedRequest = { ...sent(), respondedAt: Date.now() }
+    expect(await waitForMainContent(page(), { maxMs: 5_000, hasContent, requests: () => [streamed], quietMs: 30 })).toMatchObject({ ended: 'settled' })
+    // A long poll sent with the page, on the way since before the wait for longer than a page's data takes.
+    const longPoll = sent(true, Date.now() - BACKGROUND_REQUEST_MS)
+    expect(await waitForMainContent(page(), { maxMs: 5_000, hasContent, requests: () => [longPoll], quietMs: 30 })).toMatchObject({ ended: 'settled' })
+    // A page that asks again every 20 ms and changes nothing: after three such requests, what it sends is not waited on.
+    const polls: AwaitedRequest[] = []
+    const polling = fakePage({ text: 20, html: '<nav>Docs</nav>' }, (samples) => {
+      if (samples % 4 === 1) polls.push(sent())
+      if (samples % 4 === 3) polls[polls.length - 1]!.finishedAt = Date.now()
+    })
+    const outcome = await waitForMainContent(polling, { maxMs: 5_000, hasContent, requests: () => polls, quietMs: 30, sampleMs: 5 })
+    expect(outcome).toMatchObject({ ended: 'settled', stillLoading: false })
+    expect(polls.length).toBeLessThan(40)
   })
 
   it('ends at its bound with the data still on the way, and says the page was still loading', async () => {
-    const state = { text: 20, html: '<div id="app"></div>', pending: 2 }
-    const outcome = await waitForMainContent(fakePage(state), { maxMs: 100, hasContent, pending: () => state.pending, quietMs: 10 })
-    expect(outcome).toMatchObject({ ended: 'deadline', pending: 2 })
+    const outcome = await waitForMainContent(fakePage({ text: 20, html: '<div id="app"></div>' }), { maxMs: 100, hasContent, requests: () => [sent(), sent(false)], quietMs: 10 })
+    expect(outcome).toMatchObject({ ended: 'deadline', pending: 2, stillLoading: true })
     expect(mainContentWaitEvents(outcome, 7, 'browser_local')).toEqual([
       { at: 7, lane: 'browser_local', event: 'content_wait', detail: { ended: 'deadline', waitedMs: outcome!.waitedMs, pending: 2 } },
       { at: 7, lane: 'browser_local', event: 'loading_wait', detail: { waitedMs: outcome!.waitedMs, cleared: false } },

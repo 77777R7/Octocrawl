@@ -280,12 +280,14 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
 }
 
 /**
- * Whether a rendered page with no main content was read before its content came, as its readiness reads it (ADR 0007):
+ * Whether a page the local browser rendered with no main content was read before its content came, as its readiness reads it (ADR 0007):
  * a wait that ended with the page still loading, or little visible text (the lane's `extract` event); unless the browser's
  * wait for main content saw the page done, nothing on the way and the page still (`content_wait` settled).
  */
 function renderedBeforeContent(result: HintedResult): boolean {
-  if (HTTP_CHANNELS.has(result.lane)) return false
+  // Only the local browser lane's rungs (browser_local, installed_chrome, hosted_chrome) take waitFor; the person's own
+  // Chrome (my-browser, a handoff) and a provider do not, and the whole-page sentence below holds for them.
+  if (result.lane !== 'browser_local') return false
   if (result.trace.some((event) => event.event === 'content_wait' && event.detail?.ended === 'settled')) return false
   if (result.trace.some((event) => (event.event === 'loading_wait' && event.detail?.cleared === false) || (event.event === 'wait_for' && event.detail?.cutShortBy !== undefined))) return true
   const extract = [...result.trace].reverse().find((event) => event.event === 'extract')

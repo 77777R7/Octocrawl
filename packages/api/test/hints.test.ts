@@ -203,6 +203,10 @@ describe('agent hints', () => {
     expect(hints(stillLoading, ['browser_local'])).toEqual([renderedNotLoadedHint()])
     const settled = { ...early, trace: [{ at: 1, lane: 'browser_local' as const, event: 'content_wait', detail: { ended: 'settled', waitedMs: 1_200, pending: 0 } }, extract(40)] }
     expect(hints(settled, ['browser_local'])).toEqual(["Octocrawl found no main content on the page; onlyMainContent: false returns the whole page's Markdown as content, and includeTags names the elements to read instead"])
+    // The person's own Chrome (my-browser, a handoff) and a provider take no waitFor: the whole-page sentence stays theirs.
+    for (const lane of ['my_browser', 'browser_local_authed', 'provider'] as const) {
+      expect(hints({ ...early, lane, trace: [{ ...extract(40), lane }] }, [lane]), lane).toEqual(["Octocrawl found no main content on the page; onlyMainContent: false returns the whole page's Markdown as content, and includeTags names the elements to read instead"])
+    }
     expect(hints({ ...early, trace: [extract(9_000)] }, ['browser_local'])).toEqual(["Octocrawl found no main content on the page; onlyMainContent: false returns the whole page's Markdown as content, and includeTags names the elements to read instead"])
     // A PDF with no text layer is the one empty page W2L cannot read differently.
     const pdf = { kind: 'pdf', detectedBy: 'content_type', contentType: 'application/pdf', declaredBytes: null, maxBytes: 10, bytes: 10, sha256: 'a'.repeat(64), path: 'files/aaa.pdf', markdownFrom: null, encoding: null, warnings: [], pdf: null } as unknown as NonNullable<HintedResult['file']>

@@ -209,15 +209,29 @@ beforeAll(async () => {
       // As Temu's verification page (T031, 2026-10-12): 300 zero-width spaces and no other text, its dialog not yet drawn.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       res.end('<!doctype html><html><head><title> </title></head><body><div id="verification">' + '<span>\u200b</span>'.repeat(300) + '</div></body></html>')
-    } else if (req.url === '/nav-long') {
+    } else if (req.url === '/nav-long' || req.url === '/nav-long-stream' || req.url === '/nav-long-poll' || req.url === '/nav-long-hung') {
       // As a docs page whose sidebar is its text and whose article never came (scanpy.readthedocs.io, Firecrawl 1k set,
-      // 2026-10-30): no main block, and the whole page well over 1,000 characters.
+      // 2026-10-30): no main block, and the whole page well over 1,000 characters. The variants keep a request going that
+      // has nothing to do with the page's text: an event stream that never ends, a poll every 400 ms, a long poll that hangs.
       const entries = Array.from({ length: 40 }, (_, i) => `<li><a href="/api/${i}">Reference entry number ${i + 1} of the harbour API</a></li>`).join('')
+      const background: Record<string, string> = {
+        '/nav-long-stream': '<script>fetch("/background-stream")</script>',
+        '/nav-long-poll': '<script>setInterval(function () { fetch("/background-poll") }, 400)</script>',
+        '/nav-long-hung': '<script>fetch("/docs-data-never")</script>',
+      }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       res.end(
         '<!doctype html><html><head><title>Harbour API</title></head><body><header><a href="/">Harbour office</a></header>' +
-          `<nav><ul>${entries}</ul></nav><footer><p>Published by the harbour office</p></footer></body></html>`,
+          `<nav><ul>${entries}</ul></nav><footer><p>Published by the harbour office</p></footer>${background[req.url] ?? ''}</body></html>`,
       )
+    } else if (req.url === '/background-stream') {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write('data: ping\n\n')
+      const timer = setInterval(() => res.write('data: ping\n\n'), 300)
+      res.on('close', () => clearInterval(timer))
+    } else if (req.url === '/background-poll') {
+      const timer = setTimeout(() => res.end('{}'), 300)
+      res.on('close', () => clearTimeout(timer))
     } else if (req.url === '/nav-only') {
       // Navigation and a footer, no main block: the extractor finds no content.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -635,6 +649,23 @@ describe('BrowserLocalSubject transport', () => {
       const waited = await subject.fetch(`${url}/docs-shell`, undefined, undefined, undefined, { waitFor: 4_000 })
       expect(waited.markdown).toContain('An object that represents a session')
       expect(waited.trace.some((event) => event.event === 'content_wait')).toBe(false)
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('does not wait for main content on a request a finished page keeps going for something else', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      // An event stream, a poll, a long poll that hangs: the page is not waited on to the bound for them, and is answered whole.
+      for (const path of ['/nav-long-stream', '/nav-long-poll', '/nav-long-hung']) {
+        const before = Date.now()
+        const page = await subject.fetch(`${url}${path}`)
+        expect(page.status, path).toBe('success')
+        expect(page.trace, path).toContainEqual(expect.objectContaining({ event: 'content_wait', detail: expect.objectContaining({ ended: 'settled' }) }))
+        expect(page.trace.some((event) => event.event === 'whole_page_delivered'), path).toBe(true)
+        expect(Date.now() - before, path).toBeLessThan(path === '/nav-long-hung' ? 8_500 : 5_000)
+      }
     } finally {
       await subject.teardown()
     }

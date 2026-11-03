@@ -34,7 +34,7 @@ import type { SubjectAdapter } from '../subject.js'
 import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { dropLastStep, runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, LOADING_WAIT_MAX_MS, loadingWaitEvent, waitForRenderedStability, withStillLoadingWarning } from '../browserSettle.js'
-import { mainContentWaitEvents, waitForMainContent } from '../mainContentWait.js'
+import { mainContentWaitEvents, waitForMainContent, type AwaitedRequest } from '../mainContentWait.js'
 import { REGION_WAIT_MAX_MS, regionSpecOf, regionWaitEvent, waitForRegion } from '../regionWait.js'
 import { captureLayout, LAYOUT_MAX_ELEMENTS, SHADOW_TABLE_LIMITS } from '../browserLayout.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
@@ -174,6 +174,9 @@ const CAPTURE_ATTEMPTS = 3
 
 /** The kinds of request a page's main content can wait on: its documents (frames too), scripts and data. */
 const AWAITED_RESOURCES: ReadonlySet<string> = new Set(['document', 'script', 'fetch', 'xhr'])
+
+/** Requests of one page the wait for its main content keeps track of. */
+const AWAITED_REQUESTS_MAX = 5_000
 
 /** Time a page's close may take before W2L closes its context instead. */
 const PAGE_CLOSE_MS = 2_000
@@ -907,12 +910,17 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const seen: { download: Download | null; navigations: Response[] } = { download: null, navigations: [] }
       page.on('download', download => { seen.download ??= download })
       page.on('response', navigation => { if (navigation.request().isNavigationRequest()) seen.navigations.push(navigation) })
-      // The requests the page sent that have not finished (its documents, scripts and data): what the wait for its main
-      // content waits on (mainContentWait.ts).
-      const unfinished = new Set<Request>()
-      page.on('request', (request) => { if (AWAITED_RESOURCES.has(request.resourceType())) unfinished.add(request) })
-      page.on('requestfinished', (request) => { unfinished.delete(request) })
-      page.on('requestfailed', (request) => { unfinished.delete(request) })
+      // The requests the page sent (its documents, scripts and data) and when they got where: what the wait for its main
+      // content waits on (mainContentWait.ts). A page that sends more than AWAITED_REQUESTS_MAX has the rest not waited on.
+      const awaited = new Map<Request, AwaitedRequest>()
+      page.on('request', (request) => {
+        const kind = request.resourceType()
+        if (AWAITED_RESOURCES.has(kind) && awaited.size < AWAITED_REQUESTS_MAX) awaited.set(request, { startedAt: Date.now(), data: kind === 'fetch' || kind === 'xhr' })
+      })
+      page.on('response', (answer) => { const request = awaited.get(answer.request()); if (request !== undefined) request.respondedAt ??= Date.now() })
+      const ended = (request: Request) => { const known = awaited.get(request); if (known !== undefined) known.finishedAt ??= Date.now() }
+      page.on('requestfinished', ended)
+      page.on('requestfailed', ended)
       // The document the main frame shows, which a script, a meta refresh or
       // the history API can change after the navigation W2L started answered.
       const documents = new MainFrameDocuments(page)
@@ -1233,8 +1241,11 @@ export class BrowserLocalSubject implements SubjectAdapter {
       if (!callerWaited && region === undefined && !loadingStayed && !wholePageAsked(options) && !selectionAsked(options) && options.list === undefined) {
         const outcome = await raceWithSignal(waitForMainContent(shownPage, {
           maxMs: loadingBound(),
-          pending: () => unfinished.size,
-          hasContent: (html, href) => !extractTf.extract(html, { url: href, pruneSelectors: options.excludeTags, blockAds: options.blockAds }).escalate,
+          requests: () => awaited.values(),
+          // An extractor that throws ends the wait: the extraction after the capture meets it again, as internal_error.
+          hasContent: (html, href) => {
+            try { return !extractTf.extract(html, { url: href, pruneSelectors: options.excludeTags, blockAds: options.blockAds }).escalate } catch { return true }
+          },
           gated: async () => {
             const answer = reported(documents.shown() ?? { url: shownPage.url(), response, kind: 'document' }).response
             const answerStatus = answer?.status() ?? 0
