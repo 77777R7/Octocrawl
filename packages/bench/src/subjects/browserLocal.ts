@@ -915,7 +915,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const awaited = new Map<Request, AwaitedRequest>()
       page.on('request', (request) => {
         const kind = request.resourceType()
-        if (AWAITED_RESOURCES.has(kind) && awaited.size < AWAITED_REQUESTS_MAX) awaited.set(request, { startedAt: Date.now(), data: kind === 'fetch' || kind === 'xhr' })
+        if (AWAITED_RESOURCES.has(kind) && awaited.size < AWAITED_REQUESTS_MAX) awaited.set(request, { startedAt: Date.now(), data: kind === 'fetch' || kind === 'xhr', path: request.url().split(/[?#]/, 1)[0]! })
       })
       page.on('response', (answer) => { const request = awaited.get(answer.request()); if (request !== undefined) request.respondedAt ??= Date.now() })
       const ended = (request: Request) => { const known = awaited.get(request); if (known !== undefined) known.finishedAt ??= Date.now() }

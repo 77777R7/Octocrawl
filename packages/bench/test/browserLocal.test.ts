@@ -106,6 +106,17 @@ beforeAll(async () => {
           (req.url === '/docs-shell-static' ? '' : `<script>fetch(${JSON.stringify(data)}).then(function (r) { return r.text() }).then(function (html) { document.getElementById("app").innerHTML = "<main>" + html + "</main>" })</script>`) +
           '</body></html>',
       )
+    } else if (req.url === '/docs-shell-boot') {
+      // An app that boots 1.5 s after load, fetches three small files that change nothing (settings, a locale, a config),
+      // and only then the page's data: one-off requests, not a poll.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><head><title>LanguageModelSession</title></head><body><header><nav><a href="/">Developer</a></nav></header><div id="app"></div><footer>Copyright 2026</footer>' +
+          '<script>setTimeout(function () { Promise.all(["/boot-settings", "/boot-locale", "/boot-config"].map(function (u) { return fetch(u) })).then(function () { return fetch("/docs-data") })' +
+          '.then(function (r) { return r.text() }).then(function (html) { document.getElementById("app").innerHTML = "<main>" + html + "</main>" }) }, 1500)</script></body></html>',
+      )
+    } else if (req.url === '/boot-settings' || req.url === '/boot-locale' || req.url === '/boot-config') {
+      res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
     } else if (req.url === '/docs-data' || req.url === '/docs-data-never') {
       const answer = () => {
         if (res.writableEnded || res.destroyed) return
@@ -209,7 +220,7 @@ beforeAll(async () => {
       // As Temu's verification page (T031, 2026-10-12): 300 zero-width spaces and no other text, its dialog not yet drawn.
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       res.end('<!doctype html><html><head><title> </title></head><body><div id="verification">' + '<span>\u200b</span>'.repeat(300) + '</div></body></html>')
-    } else if (req.url === '/nav-long' || req.url === '/nav-long-stream' || req.url === '/nav-long-poll' || req.url === '/nav-long-hung') {
+    } else if (req.url === '/nav-long' || req.url === '/nav-long-stream' || req.url === '/nav-long-poll' || req.url === '/nav-long-hung' || req.url === '/nav-long-typing') {
       // As a docs page whose sidebar is its text and whose article never came (scanpy.readthedocs.io, Firecrawl 1k set,
       // 2026-10-30): no main block, and the whole page well over 1,000 characters. The variants keep a request going that
       // has nothing to do with the page's text: an event stream that never ends, a poll every 400 ms, a long poll that hangs.
@@ -218,6 +229,7 @@ beforeAll(async () => {
         '/nav-long-stream': '<script>fetch("/background-stream")</script>',
         '/nav-long-poll': '<script>setInterval(function () { fetch("/background-poll") }, 400)</script>',
         '/nav-long-hung': '<script>fetch("/docs-data-never")</script>',
+        '/nav-long-typing': '<h1 id="typed"></h1><script>var n = 0; setInterval(function () { n = (n + 1) % 12; document.getElementById("typed").textContent = "Harbour API".slice(0, n) }, 120)</script>',
       }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       res.end(
@@ -654,11 +666,11 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
-  it('does not wait for main content on a request a finished page keeps going for something else', async () => {
+  it('does not wait for main content on what a finished page keeps doing for something else, and still waits through one-off requests', async () => {
     const subject = new BrowserLocalSubject()
     try {
       // An event stream, a poll, a long poll that hangs: the page is not waited on to the bound for them, and is answered whole.
-      for (const path of ['/nav-long-stream', '/nav-long-poll', '/nav-long-hung']) {
+      for (const path of ['/nav-long-stream', '/nav-long-poll', '/nav-long-hung', '/nav-long-typing']) {
         const before = Date.now()
         const page = await subject.fetch(`${url}${path}`)
         expect(page.status, path).toBe('success')
@@ -666,6 +678,11 @@ describe('BrowserLocalSubject transport', () => {
         expect(page.trace.some((event) => event.event === 'whole_page_delivered'), path).toBe(true)
         expect(Date.now() - before, path).toBeLessThan(path === '/nav-long-hung' ? 8_500 : 5_000)
       }
+      // One-off requests that change nothing before the data are not a poll: the data is still waited for.
+      const boot = await subject.fetch(`${url}/docs-shell-boot`)
+      expect(boot.status).toBe('success')
+      expect(boot.markdown).toContain('An object that represents a session that interacts with a language model.')
+      expect(boot.trace).toContainEqual(expect.objectContaining({ event: 'content_wait', detail: expect.objectContaining({ ended: 'content' }) }))
     } finally {
       await subject.teardown()
     }

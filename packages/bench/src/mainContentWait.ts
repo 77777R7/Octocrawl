@@ -7,8 +7,8 @@ import { isNavigationError, LOADING_PAGE_TEXT_MAX, type SettlePage } from './bro
  * the way, with no loading indicator and no empty main landmark for the loading probe (LOADING_PROBE) to see, so the
  * usual settle ends and the frame was read as the page: failed, or, its hidden menus over WHOLE_PAGE_MIN_CHARS of
  * Markdown, answered whole. Such a page, one with little text and no main content the extractor would answer with, is
- * read again as it changes until it has main content, or until nothing is on the way and it has stopped changing (it is
- * as empty as it looks), or until the bound.
+ * read again as it changes until it has main content, or until nothing has been on the way for a while (it is as empty
+ * as it looks: a page that animates, a typewriter headline, goes on changing with nothing to fetch), or until the bound.
  */
 export interface MainContentWaitPage extends SettlePage {
   content(): Promise<string>
@@ -24,6 +24,8 @@ export interface AwaitedRequest {
   finishedAt?: number
   /** Whether it is a data request (fetch, XHR), the kind a page polls with. */
   data: boolean
+  /** Its URL without the query, by which a poll's requests are known as one. */
+  path: string
 }
 
 export interface MainContentWait {
@@ -36,7 +38,7 @@ export interface MainContentWait {
   /** Whether the page is not one to wait on (an error status, a check): asked only of a page that would be waited for. */
   gated?: () => Promise<boolean>
   sampleMs?: number
-  /** How long the page must stay unchanged, with nothing on the way, to be read as done. */
+  /** How long nothing must be on the way for the page to be read as done. */
   quietMs?: number
 }
 
@@ -48,11 +50,14 @@ export interface MainContentWaitOutcome {
   waitedMs: number
   /** Requests still on the way when the wait ended. */
   pending: number
-  /** At the bound: whether the page was still changing or had requests on the way, so its content may yet have come. */
+  /** At the bound: whether the page had requests on the way, so its content may yet have come. */
   stillLoading: boolean
 }
 
-/** How long a page with nothing on the way must stay unchanged before it is read as done without main content. */
+/**
+ * How long nothing must be on the way before the page is read as done without main content: time for an app to render
+ * data that has just come, or to ask for the next thing it needs.
+ */
 export const MAIN_CONTENT_QUIET_MS = 1_000
 
 /**
@@ -61,8 +66,12 @@ export const MAIN_CONTENT_QUIET_MS = 1_000
  */
 export const BACKGROUND_REQUEST_MS = 5_000
 
-/** Data requests a page sent during the wait that finished without changing it, from which on it is read as polling. */
-export const POLLING_REQUESTS = 3
+/**
+ * How many times a page asked for the same URL (its query aside) during the wait, each answer leaving the page as it was,
+ * before it is read as polling that URL: its next request for it is not waited on. One-off requests (a settings file, a
+ * locale, a config before the data) never count, however many come back without a change.
+ */
+export const POLLING_REPEATS = 2
 
 const SIGNATURE = `(() => {
   const root = document.documentElement
@@ -76,7 +85,7 @@ const TEXT_LENGTH = `(() => document.body === null ? 0 : (document.body.innerTex
  * Waits for the page's main content as above; null when there was nothing to wait for: the page has more text than
  * LOADING_PAGE_TEXT_MAX (it is read for that text, as the loading probe reads it), has main content already, or is gated.
  * What is on the way: a request that has not finished, unless its headers came over quietMs ago (a body streamed on and
- * on), it has been on the way BACKGROUND_REQUEST_MS, or the page polls (POLLING_REQUESTS) and it was sent during the wait.
+ * on), it has been on the way BACKGROUND_REQUEST_MS, or it was sent during the wait to a URL the page polls (POLLING_REPEATS).
  */
 export async function waitForMainContent(page: MainContentWaitPage, wait: MainContentWait): Promise<MainContentWaitOutcome | null> {
   const started = Date.now()
@@ -91,51 +100,49 @@ export async function waitForMainContent(page: MainContentWaitPage, wait: MainCo
     // A page whose document went away while it was looked at is on its way to another one: it is waited for below.
     if (!isNavigationError(error)) throw error
   }
-  // When the page was seen to change, and the data requests sent during the wait already judged for polling.
+  // When the page was seen to change; the data requests sent during the wait already judged; per URL, the answers that left
+  // the page as it was.
   const changes: number[] = []
   const judged = new Set<AwaitedRequest>()
-  let idleRequests = 0
+  const idleAnswers = new Map<string, number>()
   const onTheWay = (now: number): number => {
-    let count = 0
     for (const request of wait.requests()) {
       // A data request sent during the wait that finished: did the page change while it was out (two samples after it)?
       if (request.data && request.startedAt >= started && request.finishedAt !== undefined && !judged.has(request) && now - request.finishedAt >= 2 * sampleMs) {
         judged.add(request)
-        if (!changes.some((at) => at >= request.startedAt && at <= request.finishedAt! + 2 * sampleMs)) idleRequests++
+        if (!changes.some((at) => at >= request.startedAt && at <= request.finishedAt! + 2 * sampleMs)) idleAnswers.set(request.path, (idleAnswers.get(request.path) ?? 0) + 1)
       }
     }
+    let count = 0
     for (const request of wait.requests()) {
       if (request.finishedAt !== undefined) continue
       if (request.respondedAt !== undefined && now - request.respondedAt >= quietMs) continue
       if (now - request.startedAt >= BACKGROUND_REQUEST_MS) continue
-      if (idleRequests >= POLLING_REQUESTS && request.startedAt >= started) continue
+      if (request.data && request.startedAt >= started && (idleAnswers.get(request.path) ?? 0) >= POLLING_REPEATS) continue
       count++
     }
     return count
   }
   const outcome = (ended: MainContentWaitEnd): MainContentWaitOutcome => {
-    const now = Date.now()
-    const pending = onTheWay(now)
-    const changing = changes.length > 0 && now - changes[changes.length - 1]! < quietMs
-    return { ended, waitedMs: now - started, pending, stillLoading: ended === 'deadline' && (pending > 0 || changing) }
+    const pending = onTheWay(Date.now())
+    return { ended, waitedMs: Date.now() - started, pending, stillLoading: ended === 'deadline' && pending > 0 }
   }
   let previous = ''
-  // Since when the page has not changed and nothing it sent has been on the way.
+  // Since when nothing the page sent has been on the way.
   let quietSince = Date.now()
   while (Date.now() < deadline) {
     await page.waitForTimeout(Math.max(1, Math.min(sampleMs, deadline - Date.now())))
-    let signature: unknown
     try {
-      signature = await page.evaluate(SIGNATURE)
+      // A page that changed is looked at again for its main content.
+      const signature = String(await page.evaluate(SIGNATURE))
       if (signature !== previous) {
         if (previous !== '') changes.push(Date.now())
-        previous = String(signature)
-        quietSince = Date.now()
+        previous = signature
         if (await holds()) return outcome('content')
-        continue
       }
     } catch (error) {
       if (!isNavigationError(error)) throw error
+      // A new document: what it sends is waited on from now.
       previous = ''
       quietSince = Date.now()
       changes.push(Date.now())
@@ -149,7 +156,7 @@ export async function waitForMainContent(page: MainContentWaitPage, wait: MainCo
 
 /**
  * The trace events a wait for main content leaves: `content_wait` with how it ended, and, when the bound came while the
- * page was still fetching or changing, a `loading_wait` that did not clear, which readiness (page_still_loading), the
+ * page still had a request on the way, a `loading_wait` that did not clear, which readiness (page_still_loading), the
  * whole-page answer (wholePageDelivered) and the still-loading warning read as for a loading indicator that stayed.
  */
 export function mainContentWaitEvents(outcome: MainContentWaitOutcome | null, at: number, lane: Lane): TraceEvent[] {
