@@ -26,6 +26,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **Fix: `octocrawl` run under a second Node version says what to run, instead of Node's message about a native module.** npx keeps one install per package whatever the Node version, so with nvm, or an app that starts npx with its own PATH, better-sqlite3 could have been built for another Node, and every command stopped with `NODE_MODULE_VERSION 147. This version of Node.js requires NODE_MODULE_VERSION 127`. The CLI now names both versions and prints the `npm rebuild` command for that install and that Node. It does not rebuild by itself: the install is shared, and a rebuild would break the Node that built it.
+
 ## 0.8.1 — 2026-11-03
 
 The published packages at 0.8.1. **Docs sites read better:** a page whose app fills its content after load (developer.apple.com/documentation) is waited for instead of read as its frame, Markdown that a site serves as `text/markdown` comes back as sent, and an MCP `scrape` answer cut at 50,000 characters can be read on with `markdownOffset`.
