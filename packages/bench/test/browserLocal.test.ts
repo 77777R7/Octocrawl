@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { readinessOf } from '@w2l/runtime'
 import { DEFAULT_NETWORK_POLICY, localNetworkPolicy, PREVIEW_PRODUCT_TOKEN, type RobotsOverrideApplied } from '@w2l/contracts'
 import { AccessConfigError, sha256Utf8, verifyLedger } from '@w2l/http-core'
 import { extractTf } from '@w2l/extract-tf'
@@ -196,7 +197,7 @@ beforeAll(async () => {
     } else if (req.url === '/landing') {
       res.writeHead(200, { 'content-type': 'text/html; charset=iso-8859-1' })
       res.end('<!doctype html><html><body><article><h1>Landing</h1><p>The page two redirects lead to, served with a content type the evidence must repeat as sent.</p></article></body></html>')
-    } else if (req.url?.startsWith('/client/')) {
+    } else if (req.url?.startsWith('/client/') || req.url === '/') {
       // Pages that move on by themselves after they answered: a script, a meta
       // refresh or the history API. /client/gone and /client/spa-missing answer 404.
       const article = (title: string) => `<article><h1>${title}</h1><p>The page the browser shows at the end, long enough for the extraction cascade to select it as the content of the page.</p></article>`
@@ -210,9 +211,13 @@ beforeAll(async () => {
         '/client/spa-missing': [404, 'text/html; charset=utf-8', `${article('Home')}<script>history.replaceState(null, "", "/client/home")</script>`],
         '/client/to-gate': [200, 'text/html; charset=utf-8', '<p>Checking.</p><script>location.replace("/gate")</script>'],
         '/client/refresh-loop': [200, 'text/html; charset=utf-8', `<meta http-equiv="refresh" content="0">${article('Again')}`],
+        // A detail page the site sends to its home page: by a script, or by a 302 (/client/deep/hop-home below).
+        '/client/to-home': [200, 'text/html; charset=utf-8', '<p>Moving on.</p><script>location.replace("/")</script>'],
+        '/': [200, 'text/html; charset=utf-8', article('Home')],
       }
       const page = pages[req.url]
       if (req.url === '/client/hop') res.writeHead(302, { location: '/client/onward' }).end()
+      else if (req.url === '/client/deep/hop-home') res.writeHead(302, { location: '/' }).end()
       else if (req.url === '/client/loop/a' || req.url === '/client/loop/b') res.writeHead(302, { location: req.url.endsWith('a') ? '/client/loop/b' : '/client/loop/a' }).end()
       else if (page === undefined) res.writeHead(404).end()
       else res.writeHead(page[0], { 'content-type': page[1] }).end(`<!doctype html><html><body>${page[2]}</body></html>`)
@@ -1130,6 +1135,24 @@ describe('BrowserLocalSubject after the page moves on by itself', () => {
       const gate = await subject.fetch(`${url}/client/to-gate`)
       expect(gate).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge' })
       expect(gate.evidence).toMatchObject({ finalUrl: `${url}/gate`, httpStatus: 403, redirectChain: [`${url}/client/to-gate`, `${url}/gate`], redirectChainComplete: true })
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('says when the site sent a detail page to its home page, by a redirect or by a script, and keeps a page that stayed (IDS Cologne, 2026-11-04)', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      for (const path of ['/client/deep/hop-home', '/client/to-home']) {
+        const out = await subject.fetch(`${url}${path}`)
+        expect(out.status).toBe('success')
+        expect(out.evidence).toMatchObject({ finalUrl: `${url}/`, httpStatus: 200, redirectChain: [`${url}${path}`, `${url}/`], redirectChainComplete: true })
+        expect(out.warnings?.map((warning) => warning.code)).toEqual(['redirected_off_page'])
+        expect(out.warnings?.[0]?.message).toContain(path)
+        expect(readinessOf(out)).toEqual({ state: 'not_served', basis: ['redirected_off_page'] })
+      }
+      // The history API keeps the document: a page that only changed its address is the page asked for.
+      expect((await subject.fetch(`${url}/client/push`)).warnings).toBeUndefined()
     } finally {
       await subject.teardown()
     }

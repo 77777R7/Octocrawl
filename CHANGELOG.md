@@ -26,6 +26,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A page delivered in place of the one asked for says so.** On 2026-11-04 www.english.ids-cologne.de sent 98 of 272 exhibitor pages of a batch to its home page, each HTTP 200: every item came back `success`, `readiness` `ready`, no warning, and the batch said `failed: 0`; only the fields extracted told. Every lane now compares the final URL's path with the requested one, folded as `map` folds similar URLs, and a result whose page is the root of a site, an ancestor of the requested path or a shorter path with no segment in common carries a `redirected_off_page` warning naming both URLs, with `readiness` `not_served`. A redirect that keeps the page (a new slug, a deeper page, a language prefix, a changed host or query) raises none. A batch's and a crawl's status count such pages as `redirectedOffPage`, and `agentHints` says what to check. The my-browser lane, which recorded `redirectChain: []` whatever address the person's Chrome ended on, now records the requested URL and the page's address when they differ, with `redirectChainComplete: false` since it does not see the hops between ([Pages delivered in place of the one asked for](docs/scrape-options.md#pages-delivered-in-place-of-the-one-asked-for)).
+
 ## 0.8.1 — 2026-11-03
 
 The published packages at 0.8.1. **Docs sites read better:** a page whose app fills its content after load (developer.apple.com/documentation) is waited for instead of read as its frame, Markdown that a site serves as `text/markdown` comes back as sent, and an MCP `scrape` answer cut at 50,000 characters can be read on with `markdownOffset`.

@@ -28,6 +28,7 @@ import { identityCompromised } from '../routing/identity.js'
 import { contentSelectors, contentSelectionEvent, listSelectionAsked, listRecordsFound, errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, regionTables, tablesFormat, tablesSource, tagOptions, wholePageAsked, wholePageDelivered, wholePageMarkdown, NO_MAIN_CONTENT_WARNING, WHOLE_PAGE_MIN_CHARS } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
 import { loadingWaitEvent, withStillLoadingWarning, type SettleOutcome } from '../browserSettle.js'
+import { withOffPageWarning } from '../offPage.js'
 import { regionSpecOf, regionWaitEvent, type RegionOutcome, type RegionSpec } from '../regionWait.js'
 import type { Dispatcher } from 'undici'
 import { captureEvent, documentOf, newCapture, newView, selectionView, viewEvent, type ResponseMatch } from '../capture.js'
@@ -282,7 +283,7 @@ export class ProviderSubject implements SubjectAdapter {
   async fetch(url: string, deadlineMs?: number, signal?: AbortSignal, onRetryAfter?: ExecutionContext['onRetryAfter'], options: FetchOptions = {}): Promise<FetchResult> {
     const scope = createExecutionScope({ signal, deadlineAt: deadlineMs, onRetryAfter })
     // A page read while it still showed a loading indicator says so on the answer.
-    try { return withStillLoadingWarning(await this.fetchWithinBudget(url, scope, options)) } finally { scope.dispose() }
+    try { return withOffPageWarning(withStillLoadingWarning(await this.fetchWithinBudget(url, scope, options))) } finally { scope.dispose() }
   }
 
   private async fetchWithinBudget(url: string, execution: ExecutionContext, options: FetchOptions): Promise<FetchResult> {

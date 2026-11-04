@@ -56,6 +56,8 @@ export interface TaskStore {
    * A step stored without a verification (a fetch that threw) did not pass.
    */
   countVerifications(taskId: string, attemptId?: string): Promise<VerificationCounts>
+  /** How many of an attempt's steps (every attempt's without attemptId) that `succeeded` and `failed` count carry a warning of this code, without reading their text. */
+  countStepsWarned(taskId: string, code: string, attemptId?: string): Promise<number>
   listStepsPage(taskId: string, query: StepPageQuery): Promise<StepPage>
   /**
    * Latest step for this canonical URL on the task (any attempt).
