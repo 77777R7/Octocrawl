@@ -26,6 +26,16 @@ describe('readinessOf (ADR 0007, ROADMAP PA item 11)', () => {
     expect(readinessOf({ ...page, verification: { status: 'passed', verifier: 'test', contractSha256: 'x', reason: null, checks: [] } })).toEqual({ state: 'ready', basis: ['verified'] })
   })
 
+  it('reads a page delivered in place of the one asked for as not served, on every lane, unless a contract passed on it', () => {
+    // www.english.ids-cologne.de, 2026-11-04: an exhibitor page answered with the home page, HTTP 200.
+    const home = (lane: FetchResult['lane']) => result({ lane, requestedUrl: 'https://source.example/exhibitor/acme/', evidence: { ...result().evidence, finalUrl: 'https://source.example/', redirectChain: ['https://source.example/exhibitor/acme/', 'https://source.example/'] }, warnings: warned('redirected_off_page') })
+    for (const lane of ['http', 'browser_local', 'my_browser', 'provider'] as const) expect(readinessOf(home(lane))).toEqual({ state: 'not_served', basis: ['redirected_off_page'] })
+    // Said before the page's own signals: a redirect to a home page still loading is not served, not not_loaded.
+    expect(readinessOf({ ...home('browser_local'), warnings: warned('page_still_loading', 'redirected_off_page') })).toEqual({ state: 'not_served', basis: ['redirected_off_page'] })
+    expect(readinessOf({ ...home('http'), verification: { status: 'failed', verifier: 'test', contractSha256: 'x', reason: 'checks_failed', checks: [] } })).toEqual({ state: 'not_served', basis: ['redirected_off_page'] })
+    expect(readinessOf({ ...home('http'), verification: { status: 'passed', verifier: 'test', contractSha256: 'x', reason: null, checks: [] } })).toEqual({ state: 'ready', basis: ['verified'] })
+  })
+
   it('reads a page with content and no sign of loading as ready', () => {
     expect(readinessOf(result())).toEqual({ state: 'ready', basis: [] })
     expect(readinessOf(result({ status: 'partial' }))).toEqual({ state: 'ready', basis: [] })

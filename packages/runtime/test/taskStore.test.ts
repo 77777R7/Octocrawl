@@ -217,6 +217,22 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.countVerifications('task-1', 'attempt-2')).toEqual({ verified: 0, verificationFailed: 0 })
     })
 
+    it('counts the steps that carry a warning of a code, among those succeeded and failed count, each once', async () => {
+      ;({ store, cleanup } = await open())
+      await seed(store)
+      const warned = (...codes: string[]) => ({ ...pageResult('https://example.com/a/b'), warnings: codes.map((code) => ({ code, message: code })) })
+      await store.putStep(step({ result: warned('robots_overridden', 'redirected_off_page') }))
+      await store.putStep(step({ id: 'step-2', url: 'https://example.com/other', canonicalUrl: 'https://example.com/other', result: warned('redirected_off_page', 'redirected_off_page'), createdAt: LATER }))
+      await store.putStep(step({ id: 'step-3', url: 'https://example.com/plain', canonicalUrl: 'https://example.com/plain', result: pageResult('https://example.com/plain'), createdAt: LATER }))
+      await store.putStep(step({ id: 'step-4', url: 'https://example.com/none', canonicalUrl: 'https://example.com/none', status: 'failed', result: null, createdAt: LATER }))
+      await store.putStep(step({ id: 'step-5', url: 'https://example.com/copy', canonicalUrl: 'https://example.com/copy', status: 'duplicate', result: { ...warned('redirected_off_page'), status: 'duplicate' }, createdAt: LATER }))
+      expect(await store.countStepsWarned('task-1', 'redirected_off_page')).toBe(2)
+      expect(await store.countStepsWarned('task-1', 'redirected_off_page', 'attempt-1')).toBe(2)
+      expect(await store.countStepsWarned('task-1', 'redirected_off_page', 'attempt-2')).toBe(0)
+      expect(await store.countStepsWarned('task-1', 'robots_overridden')).toBe(1)
+      expect(await store.countStepsWarned('task-1', 'redirected_off')).toBe(0)
+    })
+
     it('finds the steps whose trace has an event by name, without a lookalike name or another task\'s', async () => {
       ;({ store, cleanup } = await open())
       await seed(store)

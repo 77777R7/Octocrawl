@@ -1,5 +1,6 @@
 import { sourceDataWarnings } from './sourceData.js'
 import { captureEvent, documentOf, newCapture } from '../capture.js'
+import { withOffPageWarning } from '../offPage.js'
 import {
   estimateTokens,
   fileByteCap,
@@ -579,8 +580,8 @@ export class ResilientHttpSubject implements SubjectAdapter {
     const finish = <T extends FetchResult>(result: T): T => {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const lead = leadWarnings()
-      // The lead warnings go before the list's, never in place of it.
-      const done = withListCaveat(result)
+      // The lead warnings go before the list's, never in place of it. A page delivered in place of the one asked for says so.
+      const done = withOffPageWarning(withListCaveat(result))
       return {
         ...done,
         ...(lead.length === 0 ? {} : { warnings: [...lead, ...(done.warnings ?? [])] }),

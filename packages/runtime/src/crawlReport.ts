@@ -31,8 +31,13 @@ export async function crawlReportFromStore(store: TaskStore, taskId: string): Pr
     steps.filter((step) => step.cached).length,
     steps.some((step) => step.result?.failureReason === 'loop_detected'),
   )
-  // A batch counts its contract over every attempt, where it counts succeeded and failed.
-  const counted = task.batch === undefined && task.crawl?.verify !== undefined ? { ...report, ...(await store.countVerifications(taskId, latest.id)) } : report
+  // A batch counts its contract over every attempt, where it counts succeeded and failed, and its pages delivered in place of the one asked for too.
+  const crawl = task.batch === undefined
+  const counted = {
+    ...report,
+    ...(crawl && task.crawl?.verify !== undefined ? await store.countVerifications(taskId, latest.id) : {}),
+    ...(crawl ? { redirectedOffPage: await store.countStepsWarned(taskId, 'redirected_off_page', latest.id) } : {}),
+  }
   const paid = await store.listPaidCalls(taskId)
   return paid.length === 0 ? counted : { ...counted, paidCalls: paidCallTotals(paid) }
 }

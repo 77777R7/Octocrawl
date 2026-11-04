@@ -1242,6 +1242,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         // A page read, with or without content, succeeded; what the errors report lists failed.
         succeeded: (counts.success ?? 0) + (counts.partial ?? 0) + (counts.empty_verified ?? 0),
         failed: (counts.failed ?? 0) + (counts.blocked ?? 0) + (counts.cancelled ?? 0) + (counts.budget_exceeded ?? 0),
+        // Among the succeeded: the pages the site answered with another page (its home page, one above the URL asked for).
+        redirectedOffPage: await store.countStepsWarned(taskId, 'redirected_off_page'),
         // With a task contract: how many of those passed it and how many did not (ADR 0006).
         ...(task.batch.verify === undefined ? {} : await store.countVerifications(taskId)),
         // The cap in force: the batch's own, never above this service's worker count.
@@ -1393,7 +1395,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         actions,
         ...(merged === null ? {} : { list: merged.list }),
         warnings: [
-          ...(base.warnings ?? []).filter((warning) => warning.code !== 'list_not_exhausted'),
+          // The last page is where the person paged to, not a page delivered in place of the list's.
+          ...(base.warnings ?? []).filter((warning) => warning.code !== 'list_not_exhausted' && warning.code !== 'redirected_off_page'),
           ...(short ? [{ code: 'list_not_exhausted', message: `The list of step ${run.index} (paginate) stopped before its end (${read.stoppedBy === 'max' ? `its limit of ${rounds} pages` : 'the wait for you to page on in your Chrome ended'}): more items may follow.` }] : []),
         ],
         trace: [

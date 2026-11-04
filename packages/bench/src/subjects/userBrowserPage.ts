@@ -20,6 +20,8 @@ import { classifyGate, sha256Utf8 } from '@w2l/http-core'
 import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageEvidence, extraFormats, htmlFormats, isNoContentStatus, isSuccessStatus, listRecordsFound, markdownOptions, selectionAsked, tablesFormat, tagOptions, wholePageAsked, wholePageDelivered, wholePageMarkdown, withListCaveat, NO_MAIN_CONTENT_WARNING, WHOLE_PAGE_MIN_CHARS } from './errorPage.js'
 import { steadyWaitEvents, withStillChangingWarning, withStillLoadingWarning, type SteadyOutcome } from '../browserSettle.js'
 import { regionWaitEvent, type RegionOutcome } from '../regionWait.js'
+import { withOffPageWarning } from '../offPage.js'
+import { sameDocument } from './browserDocuments.js'
 
 /** The lanes a page read in the person's browser is recorded on: after a handoff, or on the my-browser lane. */
 export type UserBrowserLane = 'browser_local_authed' | 'my_browser'
@@ -93,7 +95,8 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     evidence: {
       finalUrl,
       httpStatus: read.status,
-      redirectChain: [],
+      // The person's browser followed the hops, unseen: the chain is the two ends when the page's address changed, and never complete.
+      redirectChain: sameDocument(read.requestedUrl, finalUrl) ? [] : [read.requestedUrl, finalUrl],
       redirectChainComplete: false,
       contentType: read.contentType,
       rawBodySha256: sha256Utf8(whole),
@@ -158,7 +161,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   const tables = tablesFormat(wholePageAsked(options) || delivered
     ? { html: body, options: { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
     : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, finalUrl, options, trace, LANE, wallMs)
-  return withReadHiddenWarning(read, withStillChangingWarning(withStillLoadingWarning(withListCaveat({
+  return withOffPageWarning(withReadHiddenWarning(read, withStillChangingWarning(withStillLoadingWarning(withListCaveat({
     ...base,
     status: 'success',
     failureReason: null,
@@ -187,7 +190,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     },
     ...htmlFormats(whole, body, extracted.mainHtml, options, wholePageAsked(options) || delivered),
     usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
-  }))))
+  })))))
 }
 
 /** A read of the page as it shows that found its tab still out of sight: the whole document was read instead. */

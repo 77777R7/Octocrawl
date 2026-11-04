@@ -41,6 +41,8 @@ describe('persistent URL-array batch', () => {
         if (res.destroyed) return
         // A page the server says has no content: a bare 204, no body and no content-type header.
         if (path.startsWith('/empty/')) { res.writeHead(204).end(); return }
+        // A detail page the site sends to its home page with a 302, as www.english.ids-cologne.de did for 98 of 272 exhibitor pages (2026-11-04).
+        if (path.startsWith('/moved/')) { res.writeHead(302, { location: '/' }).end(); return }
         if (path.startsWith('/missing/')) {
           res.writeHead(404, { 'content-type': 'text/html' })
           res.end('<html><head><title>Not Found</title></head><body><main><h1>Not Found</h1><p>There is no such item on this fixture server; the page you asked for does not exist here and never did, so this answer is the error page itself.</p></main></body></html>')
@@ -473,6 +475,25 @@ describe('persistent URL-array batch', () => {
     const bad = await app.request('http://w2l.test/v1/batches', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ urls, robotsOverrides: [{ url: 'https://elsewhere.test/', reason: 'x' }] }) })
     expect(bad.status).toBe(400)
     expect(await bad.json()).toMatchObject({ error: 'robotsOverrides[0].url is not one of the batch urls', code: 'invalid_request' })
+  })
+
+  it('counts the items whose site answered its home page in place of the page asked for, and says so on each (IDS Cologne, 2026-11-04)', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const accepted = await w2l.batchScrape([`${f.origin}/item/1`, `${f.origin}/moved/2`])
+    const report = await w2l.waitBatch(accepted.taskId)
+    // The page came, so it succeeded; the count beside says it is another page's.
+    expect(report).toMatchObject({ status: 'completed', succeeded: 2, failed: 0, redirectedOffPage: 1 })
+    const items = (await w2l.getBatchItems(accepted.taskId, { limit: 10 })).items
+    const moved = items.find((item) => item.url === `${f.origin}/moved/2`)!
+    expect(moved).toMatchObject({ status: 'success', readiness: { state: 'not_served', basis: ['redirected_off_page'] } })
+    expect(moved.warnings?.map((warning) => warning.code)).toEqual(['redirected_off_page'])
+    expect(moved.warnings?.[0]?.message).toContain(`${f.origin}/moved/2`)
+    expect(moved.evidenceRecord).toMatchObject({ finalUrl: `${f.origin}/`, redirectChain: { urls: [`${f.origin}/moved/2`, `${f.origin}/`] } })
+    expect(moved.agentHints?.some((hint) => hint.includes(`in place of ${f.origin}/moved/2`))).toBe(true)
+    expect(items.find((item) => item.url === `${f.origin}/item/1`)).toMatchObject({ status: 'success', readiness: { state: 'ready' } })
   })
 
   it('persists JSON-only results, paginates all URLs, and sends a terminal SSE event', async () => {

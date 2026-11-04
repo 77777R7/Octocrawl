@@ -72,13 +72,13 @@ const s = (ms: number) => `${(ms / 1000).toLocaleString('en-US')} s`
 const mib = (bytes: number) => `${(bytes / 1024 / 1024).toLocaleString('en-US')} MiB`
 const listCaps = (tool: ToolName, options: readonly string[]) => options.map((option) => `${option} at most ${n(caps(tool, option).hosted)} (local ${n(caps(tool, option).local)})`).join(', ')
 
-const PERSON_CHROME = 'Reads or hands over the page in the person\'s own Chrome. Hosted never drives the person\'s Chrome (ADR 0005); stage H item 5 may forward such calls to their own local server.'
+const PERSON_CHROME = 'Reads or hands over the page in the person\'s own Chrome. Hosted never drives the person\'s Chrome (ADR 0005); stage H item 5 forwards such calls to the server on their own computer (decided 2026-11-04).'
 const ROBOTS = 'Hosted fetches from the operator\'s addresses and obeys robots.txt for every URL (ROADMAP Direction).'
 const TLS = 'A hosted engine never loosens certificate checks for a caller (engine.ts checkHostedOptions).'
 const ACCESS = 'Hosted reads no access grant: its ladder is HTTP, then the Playwright browser for a connection with the browser lane. compatible_transport is granted per request by an operator switch, off by default (hostedConfig/compatibleTransport), on the hosts a local server uses it for; the live service\'s state is not checked here. Stage H item 2 adds hosted_chrome, a real Chrome on Octocrawl\'s servers: a deploy that carries its operator config (W2L_HOSTED_CHROME_*) takes access enhanced from an account its switch lists (hostedConfig/hostedChrome) and refuses it from any other caller; a deploy without it refuses it from everyone. CAPTCHA solving behind a switch comes after.'
 const NO_CACHE = 'Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users.'
 const JOB = 'An account\'s connection only (its key, or signing in at /mcp-oauth)'
-const LOGINS = 'Hosted keeps no saved logins. Stage H item 5: Howard chooses between a hosted, encrypted session store and forwarding these calls to the person\'s own local server.'
+const LOGINS = 'Hosted keeps no saved logins and never will (decided 2026-11-04). Stage H item 5 forwards these calls to the server on the person\'s own computer, which holds their logins; a browser profile on Octocrawl\'s servers the person signed in to themselves is the fallback.'
 const MONITORS = 'Monitors run on a server on the person\'s computer; stage H item 4 brings them to hosted.'
 const DELIVERY = 'Webhook destinations for Monitors and jobs are a local server\'s; stage H item 4 brings them to hosted. A hosted job\'s end can already be posted over REST (POST /v1/crawl, POST /v1/batches).'
 const SCREENSHOT = `A connection with the browser lane only, at ${CREDITS.browserPage} credits a page; an account with fewer credits reads over HTTP alone, where a screenshot is refused.`

@@ -97,6 +97,25 @@ describe('a page read in the person\'s browser', () => {
     expect(pageFromUserBrowser(read(PAGE, { status: null, contentType: null }), STOPPED, {}).evidence).toMatchObject({ httpStatus: null, contentType: null })
   })
 
+  it('says when the person\'s Chrome ended on the site\'s home page in place of the page asked for, and records the change of address (IDS Cologne, 2026-11-04)', () => {
+    // www.english.ids-cologne.de sent 98 of 272 exhibitor pages to its home page, each HTTP 200 and read as success.
+    const requestedUrl = 'https://www.english.ids-cologne.de/exhibitor/some-dental-company/'
+    const finalUrl = 'https://www.english.ids-cologne.de/'
+    const home = '<html><head><title>Dental industry and Dental trade fair | IDS</title></head><body><article><h1>IDS 2027</h1>' + '<p>The leading global trade fair for the dental industry opens its doors again in Cologne. </p>'.repeat(4) + '</article></body></html>'
+    const result = pageFromUserBrowser(read(home, { requestedUrl, finalUrl }), null, {})
+    expect(result).toMatchObject({ status: 'success', lane: 'my_browser' })
+    expect(result.evidence).toMatchObject({ finalUrl, redirectChain: [requestedUrl, finalUrl], redirectChainComplete: false })
+    expect(result.warnings?.map((warning) => warning.code)).toEqual(['redirected_off_page'])
+    expect(result.warnings?.[0]?.message).toContain('/exhibitor/some-dental-company/')
+    expect(readinessOf(result)).toEqual({ state: 'not_served', basis: ['redirected_off_page'] })
+    // The same page at its own address, or at one that only folds to it, is the page asked for.
+    for (const same of [requestedUrl, 'https://english.ids-cologne.de/exhibitor/some-dental-company', 'http://www.english.ids-cologne.de/exhibitor/some-dental-company/index.html']) {
+      const kept = pageFromUserBrowser(read(home, { requestedUrl, finalUrl: same }), null, {})
+      expect(kept.warnings).toBeUndefined()
+      expect(readinessOf(kept).state).toBe('ready')
+    }
+  })
+
   it('answers the formats asked for, a list among them', () => {
     const list = '<html><body><ul class="l">' + [1, 2, 3].map((n) => `<li class="it"><a href="/p/${n}">Item ${n}</a></li>`).join('') + '</ul></body></html>'
     const result = pageFromUserBrowser(read(list), STOPPED, { list: { type: 'list', itemSelector: 'li.it', fields: [{ name: 'name', selector: 'a' }] } })

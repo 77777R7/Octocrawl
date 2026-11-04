@@ -261,6 +261,12 @@ export interface CrawlReport {
    */
   verified?: number
   verificationFailed?: number
+  /**
+   * The pages delivered in place of the one asked for (a `redirected_off_page` warning: the site sent the request to its
+   * home page or a page above it), among the pages `succeeded` counts (a batch's every attempt, a crawl's latest). A local
+   * server always says it, 0 included; absent from a server that does not count it (hosted jobs) and from a crawl with no attempt yet.
+   */
+  redirectedOffPage?: number
   /** Who started the task, as the request said (`origin`, `integration`); absent when it named neither. */
   attribution?: RequestAttribution
   /** The task's webhook and how its deliveries stand; absent when the request set none. */
