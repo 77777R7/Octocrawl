@@ -773,7 +773,7 @@ describe('MCP tools', () => {
       id: 'map-1', status: 'partial', stoppedBy: 'timeout',
       // A link robots.txt keeps out (returned under ignoreRobotsTxt) keeps its verdict; the others carry none.
       links: [{ url: 'https://example.com/docs/', title: 'Docs', description: 'All docs' }, { url: 'https://example.com/docs/a' }, { url: 'https://example.com/docs/private', robots: 'disallowed' }],
-      warning: 'the map stopped at its 1000 ms timeout. 1 sitemap file was not read.', agentHints: ['raise timeout'], counts: { returned: 3, refused: 11 },
+      warning: 'the map stopped at its 1000 ms timeout. 1 sitemap file was not read.', agentHints: ['raise timeout'], counts: { returned: 3, refused: 11, duplicate: 1, collapsed: 2, hostDenied: 3, robots: 1, searchFiltered: 4 },
     })
     expect(bodies[0]).toEqual({ url: 'https://example.com/docs/', search: 'docs', sitemap: 'include', limit: 10, integration: 'nightly', origin: 'mcp-test@1' })
     expect(await callTool(client, 'map', { url: 'https://example.com/docs/', debug: true })).toEqual(native)

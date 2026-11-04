@@ -99,7 +99,7 @@ describe('POST /v1/map', () => {
       { url: `${origin}/docs/news-1`, title: 'Harbour & tide news', titleSource: 'sitemap', via: ['sitemap'], sitemapFile: `${origin}/news.xml`, robots: 'allowed' },
     ])
     expect(map).toMatchObject({ url: `${origin}/docs/`, status: 'completed', stoppedBy: null, warnings: [], identity: { mode: 'standard' } })
-    expect(map).not.toHaveProperty('agentHints')
+    expect(map.agentHints).toEqual([`2 URLs found were outside the start URL's path subtree (/docs/) and are not listed; map ${origin}/ or pass crawlEntireDomain: true for the whole host`])
     expect(map.refused).toMatchObject({ robots: 2, hostDenied: 1, subtreeDenied: 2, collapsed: 1, samples: { robots: [`${origin}/docs/private/y`, `${origin}/docs/private/x`], hostDenied: ['https://other.test/'] } })
     expect(map.sources.startPage).toMatchObject({ httpStatus: 200, status: 'success', lane: 'http', robots: 'allowed', linksFound: 6, title: 'Fixture docs', rawBodySha256: expect.stringMatching(/^[0-9a-f]{64}$/) })
     expect(map.sources.sitemap).toMatchObject({ mode: 'include', sources: ['robots'], listed: 6, accepted: 2, truncated: null, error: null })
@@ -130,7 +130,7 @@ describe('POST /v1/map', () => {
     expect(map.sources.sitemap).toMatchObject({ truncated: 'time' })
     expect(map.sources.sitemap!.files.map((file) => [file.url.replace(origin, ''), file.kind, file.error])).toEqual([['/sitemap-index.xml', 'index', null], ['/stall.xml', 'unreadable', 'timeout']])
     expect(map.warnings.find((warning) => warning.code === 'map_timeout')?.message).toMatch(/^the map stopped at its 1500 ms timeout after \d+ ms with 3 links; 2 sitemap files were not read$/)
-    expect(map.agentHints).toEqual(["the map's deadline cut it before every source was read; raise timeout (up to 300000 ms on this server) or lower limit for a complete list"])
+    expect(map.agentHints).toEqual(["the map's deadline cut it before every source was read; raise timeout (up to 300000 ms on this server) or lower limit for a complete list", `1 URL found was outside the start URL's path subtree (/docs/) and is not listed; map ${origin}/ or pass crawlEntireDomain: true for the whole host`])
   })
 
   it('refuses what the server does not take before anything is fetched, and counts maps in the rate limit', async () => {

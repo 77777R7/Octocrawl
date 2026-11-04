@@ -95,7 +95,8 @@ describe('Firecrawl /scrape /crawl shim', () => {
     // The listing's item links lie outside /crawl/listing/, the start URL's subtree; its title matches the search.
     const { status, body } = await post({ url, search: 'Lantern catalog', ignoreSitemap: false })
     expect(status).toBe(200)
-    expect(body).toEqual({ success: true, id: expect.stringMatching(/^[0-9a-f-]{36}$/), links: [url] })
+    // The subtree rule's refusals are hinted as agent_hints, the shim's name for the native agentHints.
+    expect(body).toEqual({ success: true, id: expect.stringMatching(/^[0-9a-f-]{36}$/), links: [url], agent_hints: [expect.stringMatching(new RegExp(`^\\d+ URLs? found (was|were) outside the start URL's path subtree \\(/crawl/listing\\) and (is|are) not listed; map ${server.url}/ or pass crawlEntireDomain: true for the whole host$`))] })
     // The native record is kept under the same id.
     expect((await (await app.request(`/v1/maps/${body.id}`)).json()).response).toMatchObject({ status: 'completed', refused: { subtreeDenied: 3 }, sources: { sitemap: { mode: 'include' } } })
     expect(await post({ url, useIndex: true, threatProtection: true })).toEqual({
