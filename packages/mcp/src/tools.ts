@@ -485,7 +485,7 @@ const DEFINITIONS = [
           description: 'Robots overrides, one per URL of urls.',
           items: { type: 'object', properties: { url: { type: 'string' }, ...ROBOTS_OVERRIDE_PROPERTIES }, required: ['url', 'reason'], additionalProperties: false },
         },
-        maxConcurrency: { type: 'integer', minimum: 1, maximum: 4, description: 'Pages in flight at once, at most.' },
+        maxConcurrency: { type: 'integer', minimum: 1, description: 'Pages in flight at once, at most.' },
         ignoreInvalidURLs: { type: 'boolean', description: 'List non-URL entries as invalidURLs instead of refusing the batch.' },
         allowExternalLinks: { type: 'boolean', const: false, description: 'false only: a batch follows no link.' },
         includeSubdomains: { type: 'boolean', const: false, description: 'false only: a batch follows no link.' },

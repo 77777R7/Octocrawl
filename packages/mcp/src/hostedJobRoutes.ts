@@ -248,10 +248,9 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     // and is retried until the job ends failed (delivery_failed) without naming why: the start refuses them by name instead.
     const regexRefusal = hostedVerifyRefusal(parsed.verify, { regexChecks: config.regexChecks === true })
     if (regexRefusal !== null) return refusal(400, 'unsupported_parameter', regexRefusal)
-    // A batch's maxConcurrency is lowered to the slice's workers when it runs (engine.ts); a crawl's engine refuses one above
-    // them, so a crawl's is lowered here.
-    const crawl = kind === 'crawl' ? parsed as ParsedCrawlStartRequest : null
-    if (crawl !== null && crawl.maxConcurrency != null && crawl.maxConcurrency > JOB_WORKER_COUNT) parsed = { ...crawl, maxConcurrency: JOB_WORKER_COUNT }
+    // A slice runs JOB_WORKER_COUNT pages at once: a larger maxConcurrency is lowered here, so the stored request and the status
+    // say what the slices run. A crawl's engine would refuse one above its workers; a batch's would lower it when it runs (engine.ts).
+    if (parsed.maxConcurrency != null && parsed.maxConcurrency > JOB_WORKER_COUNT) parsed = { ...parsed, maxConcurrency: JOB_WORKER_COUNT }
     // And every other check the engine makes when it starts the request the job stores: its file cap, its selectors, the
     // formats a check needs.
     try {

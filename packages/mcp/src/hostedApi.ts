@@ -28,6 +28,7 @@ import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP
 import type { RegexStats } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
+import { RepeatedScrapes } from './repeatedScrapes.js'
 import { serverInstructions } from './instructions.js'
 import { MAX_WAIT_MS, MCP_SCRAPE_TIMEOUT_MS, SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
 import { scrapeSchemaWithout } from './toolsets.js'
@@ -290,8 +291,9 @@ function hostedJobTool(tool: (typeof TOOLS)[number], browser: boolean) {
     // REST takes a webhook (H2 W1); a tool does not offer one yet, since its secret would land in the agent's transcript.
     for (const key of Object.keys(schema.properties)) if (!allowed.has(key) || key === 'webhook' || (!browser && key === 'waitFor')) delete schema.properties[key]
     if (tool.name === 'crawl' && schema.properties.maxPages) schema.properties.maxPages = { ...schema.properties.maxPages, maximum: JOB_MAX_CRAWL_PAGES }
-    // A slice reads JOB_WORKER_COUNT pages at once; the start lowers a crawl's larger maxConcurrency to it (hostedJobRoutes.ts).
-    if (tool.name === 'crawl' && schema.properties.maxConcurrency) schema.properties.maxConcurrency = { ...schema.properties.maxConcurrency, maximum: JOB_WORKER_COUNT }
+    // A slice reads JOB_WORKER_COUNT pages at once; the start lowers a larger maxConcurrency to it (hostedJobRoutes.ts). Locally the
+    // schema has no ceiling, since a server lowers it to its own worker count (docs/launch/2026-11-05-batch-concurrency-plan.md D4).
+    if (schema.properties.maxConcurrency) schema.properties.maxConcurrency = { ...schema.properties.maxConcurrency, maximum: JOB_WORKER_COUNT }
     // The job's credit cap, offered where credits are spent: the local tools leave it out, a server on the computer spends none (H2 M6).
     schema.properties.maxCredits = { type: 'integer', minimum: 1, description: 'The most credits this job may spend; it stops when the next page would pass it.' }
     // A page in a job is read as a hosted scrape is (H2 M7, M9): its formats (no screenshot without the browser lane),
@@ -1123,6 +1125,9 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     return gate.fetch(request, { socketAddress: address })
   }) as unknown as (req: IncomingMessage, res: ServerResponse) => void
   const calls = new InFlightCalls()
+  // One count of scrapes by host across every connection, keyed by the caller (a key, or a keyless address), for the hint that
+  // names batch_scrape from a caller's third scrape of a host in ten minutes (repeatedScrapes.ts). Per instance: the count is a hint.
+  const repeatedScrapes = new RepeatedScrapes()
   const sendJson = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers }).end(JSON.stringify(body))
   }
@@ -1212,6 +1217,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       tools,
       instructions,
       minimalResults: true,
+      repeatedScrapes: { tracker: repeatedScrapes, caller: caller.id },
       // What a scrape result's re-judgements cost, when they ran a pattern scan: the engine's line does not see them.
       onRegexChecks: (stats) => log(regexChecksLine(config.hashKey, stats, { kind: 'mcp_result', ...(caller.uid === undefined ? {} : { account: caller.uid }) })),
       calls: post,

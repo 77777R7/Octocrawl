@@ -7,6 +7,7 @@ import { serverInstructions } from './instructions.js'
 import { shapeResult, withoutCampaign, withoutTelemetry } from './results.js'
 export { withoutCampaign } from './results.js'
 import { callTool, TOOLS, type ToolProgress } from './tools.js'
+import { RepeatedScrapes, withRepeatedScrapesHint } from './repeatedScrapes.js'
 
 export interface McpServerOptions {
   allowedTools?: ReadonlySet<string>
@@ -39,7 +40,16 @@ export interface McpServerOptions {
    * hosted Octocrawl logs it, as the engine's own line does not see them (ADR 0006, amendment of 2026-10-29).
    */
   onRegexChecks?: (stats: RegexStats) => void
+  /**
+   * Counts a caller's scrapes of one host for the hint that names batch_scrape, crawl and map from the third in ten minutes
+   * (repeatedScrapes.ts): hosted Octocrawl shares one tracker across its connections and names the key or the keyless
+   * address; a local server counts its one client under `local` by default.
+   */
+  repeatedScrapes?: { tracker: RepeatedScrapes; caller: string }
 }
+
+/** A local server's count of its one client's scrapes by host (repeatedScrapes.ts), when a deployment gives none. */
+const LOCAL_REPEATED_SCRAPES = new RepeatedScrapes()
 
 /** This server's own version: the `origin` of a call whose client declared no name and version. */
 export const MCP_VERSION = '0.8.1'
@@ -67,6 +77,9 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
   const instructions = options.instructions ?? serverInstructions(listed.map(tool => (tool as { name: string }).name), { kind: 'local' })
   // A minimal result keeps a scrape's record id where get_scrape is listed to read it back.
   const keepScrapeId = listed.some(tool => (tool as { name: string }).name === 'get_scrape')
+  // The hint on repeated scrapes names batch_scrape where this deployment lists it, else where it runs (repeatedScrapes.ts).
+  const listsBatch = listed.some(tool => (tool as { name: string }).name === 'batch_scrape')
+  const repeated = options.repeatedScrapes ?? { tracker: LOCAL_REPEATED_SCRAPES, caller: 'local' }
   const server = new Server(
     { ...SERVER_IDENTITY, version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server&utm_medium=listing' },
     { capabilities: { tools: {} }, instructions },
@@ -102,7 +115,14 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
         const token = options.progress === undefined || options.progress === false ? undefined : request.params._meta?.progressToken
         progress = token === undefined ? undefined : progressReporter(request.params.name, args, options.progress === true || options.progress === undefined || options.progress === false ? {} : options.progress, (params) => ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken: token, ...params } }))
         // Nothing is sent once the call has answered.
-        try { result = await callTool(client, request.params.name, args, { signal, origin: mcpOrigin(named ?? server.getClientVersion()), ...(progress === undefined ? {} : { onProgress: progress.update }) }) }
+        try {
+          result = await callTool(client, request.params.name, args, { signal, origin: mcpOrigin(named ?? server.getClientVersion()), ...(progress === undefined ? {} : { onProgress: progress.update }) })
+          // From a caller's third scrape of one host in ten minutes, the answer names the tools that read many pages as one job.
+          if (request.params.name === 'scrape') {
+            const url = (args as Record<string, unknown>).url
+            result = withRepeatedScrapesHint(result, url, repeated.tracker.note(repeated.caller, url), listsBatch)
+          }
+        }
         finally { progress?.stop() }
       } catch (error) {
         if (signal.aborted) throw requestCancelled()

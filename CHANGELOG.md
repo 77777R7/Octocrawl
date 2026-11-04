@@ -26,6 +26,10 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A caller's third `scrape` of one host within ten minutes names the tools that read many pages as one job.** On 2026-11-04 a list of 272 known URLs was read with one `scrape` call per page while `batch_scrape` was listed; nothing in a `scrape` answer pointed at it. From the third `scrape` of a host in ten minutes, and on each one after it, the MCP server appends an `agentHints` entry: a known list of URLs runs as one `batch_scrape` (then `wait_batch` and `get_batch_items`), a section of a site as one `crawl`, and `map` lists a site's URLs. Where a connection lists no `batch_scrape` (hosted Octocrawl without an account), the hint says that an account's connection runs it as a job, or `npx octocrawl serve` does. Hosted counts each key or keyless address apart, per instance; `www.` and the apex count as one host.
+- **A batch's `maxConcurrency` takes any integer from 1; the request no longer caps it at 4.** The server lowers it to its worker count (`W2L_WORKER_COUNT`, 4 by default) and reports the cap in force on `GET /v1/batches/:id`, as before, so a server with more workers can now be asked for them; the MCP `batch_scrape` schema has no `maximum` locally. Hosted lowers a batch's larger value to 2 at the start, as it did a crawl's, so the stored request and the status say what the slices run, and its MCP schema says 2 for both.
+- **Docs:** `wait_batch` waits at most 120 seconds (`docs/batch-scrape.md` said 300); the ROADMAP's 2026-10-13 readiness line says hosted batch and crawl jobs followed on 2026-10-20.
+
 ## 0.8.1 — 2026-11-03
 
 The published packages at 0.8.1. **Docs sites read better:** a page whose app fills its content after load (developer.apple.com/documentation) is waited for instead of read as its frame, Markdown that a site serves as `text/markdown` comes back as sent, and an MCP `scrape` answer cut at 50,000 characters can be read on with `markdownOffset`.

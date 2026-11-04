@@ -444,11 +444,13 @@ describe('MCP tools', () => {
     expect(calls[1]?.line).toBe('GET http://127.0.0.1:8787/v1/batches/batch-1/errors?limit=5')
     const batch = TOOLS.find((tool) => tool.name === 'batch_scrape')?.inputSchema.properties as Record<string, unknown>
     expect(JSON.stringify(batch)).toContain('"maxConcurrency"')
-    expect(batch.maxConcurrency).toMatchObject({ type: 'integer', minimum: 1, maximum: 4 })
+    expect(batch.maxConcurrency).toMatchObject({ type: 'integer', minimum: 1 })
+    // No ceiling in the schema: the server lowers a larger value to its worker count (W2L_WORKER_COUNT) and reports the cap in force.
+    expect(batch.maxConcurrency).not.toHaveProperty('maximum')
     expect(batch.ignoreInvalidURLs).toMatchObject({ type: 'boolean' })
     expect(TOOLS.find((tool) => tool.name === 'get_batch_errors')?.inputSchema).toMatchObject({ properties: { id: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 1000 } }, required: ['id'] })
     // Refused before any call, by the contract's own messages.
-    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], maxConcurrency: 5 })).rejects.toThrow('maxConcurrency must be an integer between 1 and 4')
+    await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/'], maxConcurrency: 0 })).rejects.toThrow('maxConcurrency must be an integer >= 1')
     await expect(callTool(client, 'batch_scrape', { urls: ['https://example.com/', 'not a url'] })).rejects.toThrow('urls[1] must be http(s)')
     await expect(callTool(client, 'get_batch_errors', { id: 'batch-1', limit: 1001 })).rejects.toThrow('limit must be an integer between 1 and 1000')
     await expect(callTool(client, 'get_batch_errors', {})).rejects.toThrow('id is required')

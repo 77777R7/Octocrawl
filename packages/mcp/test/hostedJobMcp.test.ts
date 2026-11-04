@@ -88,6 +88,8 @@ describe('hosted job tools over MCP', () => {
     expect(properties.maxPages?.maximum).toBe(500)
     // A slice reads two pages at once, and a crawl is offered no more (stage H W0).
     expect(properties.maxConcurrency?.maximum).toBe(2)
+    // A batch is offered no more either (docs/launch/2026-11-05-batch-concurrency-plan.md D4): locally the schema has no ceiling.
+    expect((tools.find((tool) => tool.name === 'batch_scrape')!.inputSchema as { properties: Record<string, { maximum?: number }> }).properties.maxConcurrency?.maximum).toBe(2)
     const wait = tools.find((tool) => tool.name === 'wait_crawl')!
     expect((wait.inputSchema as unknown as { properties: { timeoutMs: { maximum: number } } }).properties.timeoutMs.maximum).toBe(120_000)
     // Its instructions say jobs run here, not only on the person's computer.
@@ -261,6 +263,29 @@ describe('hosted job tools over MCP', () => {
     } finally { await new Promise<void>((resolve) => site.close(() => resolve())) }
   })
 
+  it('names batch_scrape from a caller\'s third scrape of one host in ten minutes, counted per key, and tells a keyless caller where it runs', async () => {
+    // docs/launch/2026-11-05-batch-concurrency-plan.md D13: the tracker is the service's, keyed by the caller (hostedApi.ts).
+    const site = createServer((req, res) => {
+      if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n')
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE)
+    })
+    site.listen(0, '127.0.0.1'); await once(site, 'listening')
+    try {
+      const origin = `http://127.0.0.1:${(site.address() as AddressInfo).port}`
+      const { connect } = await start({ privateSites: true })
+      const hints = async (client: Client, path: string) => (JSON.parse(text(await client.callTool({ name: 'scrape', arguments: { url: `${origin}/${path}`, fastMode: true } }))) as { agentHints?: string[] }).agentHints ?? []
+      const account = await connect('oc_account')
+      expect((await hints(account, 'a')).join()).not.toContain('batch_scrape')
+      expect((await hints(account, 'b')).join()).not.toContain('batch_scrape')
+      expect(await hints(account, 'c')).toContainEqual(expect.stringMatching(/^3 scrapes of 127\.0\.0\.1 in the last 10 minutes: a known list of URLs runs as one batch_scrape \(then wait_batch and get_batch_items\)/))
+      // Another key starts its own count; a keyless caller, offered no job tools, is told where batch_scrape runs.
+      expect((await hints(await connect('oc_http'), 'a')).join()).not.toContain('batch_scrape')
+      const keyless = await connect(null)
+      for (const path of ['a', 'b']) await hints(keyless, path)
+      expect(await hints(keyless, 'c')).toContainEqual(expect.stringMatching(/^3 scrapes of 127\.0\.0\.1 in the last 10 minutes: with an account's connection a known list of URLs runs as one batch_scrape job/))
+    } finally { await new Promise<void>((resolve) => site.close(() => resolve())) }
+  })
+
   it('refuses the regular-expression checks at a job tool\'s start by name, and runs a crawl\'s larger maxConcurrency at two (stage H W0)', async () => {
     const { connect, enqueued } = await start()
     const client = await connect('oc_account')
@@ -273,6 +298,10 @@ describe('hosted job tools over MCP', () => {
     const crawl = await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/', maxConcurrency: 8 } })
     expect(crawl.isError ?? false, text(crawl)).toBe(false)
     expect(enqueued.map((job) => job.request)).toMatchObject([{ maxConcurrency: 2 }])
+    // A batch's larger maxConcurrency is lowered at the start too, so the stored request says what the slices run (D4).
+    const batch = await client.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/'], maxConcurrency: 8 } })
+    expect(batch.isError ?? false, text(batch)).toBe(false)
+    expect(enqueued.map((job) => job.request)).toMatchObject([{ maxConcurrency: 2 }, { maxConcurrency: 2 }])
   })
 
   it('refuses at a job tool\'s start, by name, a selector the worker\'s engine would refuse at the first slice (stage H W0)', async () => {

@@ -184,15 +184,15 @@ describe('REST contract: scrape + crawl reuse existing result types', () => {
     expect(() => parseScrapeRequest({ url, sitemap: 'include' })).toThrow('unsupported parameter: sitemap')
     expect(() => parseBatchStartRequest({ urls: [url], sitemap: 'skip' })).toThrow('unsupported parameter: sitemap')
     // A batch has a cap of its own, read by its own rule (below): the crawl's null is not one of its values.
-    expect(() => parseBatchStartRequest({ urls: [url], maxConcurrency: null })).toThrow('maxConcurrency must be an integer between 1 and 4')
+    expect(() => parseBatchStartRequest({ urls: [url], maxConcurrency: null })).toThrow('maxConcurrency must be an integer >= 1')
     expect(DEFAULT_CRAWL_SPEC).toMatchObject({ sitemap: 'include', maxConcurrency: null })
   })
 
-  it('takes a batch\'s maxConcurrency from 1 to 4 and ignoreInvalidURLs, and names the entry a refused URL sits at', () => {
+  it('takes a batch\'s maxConcurrency, any integer from 1 (the service lowers it to its worker count), and ignoreInvalidURLs, and names the entry a refused URL sits at', () => {
     const url = 'https://example.com/'
-    for (const maxConcurrency of [1, 2, 3, 4]) expect(parseBatchStartRequest({ urls: [url], maxConcurrency })).toMatchObject({ maxConcurrency })
+    for (const maxConcurrency of [1, 2, 4, 16]) expect(parseBatchStartRequest({ urls: [url], maxConcurrency })).toMatchObject({ maxConcurrency })
     expect(parseBatchStartRequest({ urls: [url] })).not.toHaveProperty('maxConcurrency')
-    for (const maxConcurrency of [0, 5, 2.5, '2', true]) expect(() => parseBatchStartRequest({ urls: [url], maxConcurrency })).toThrow('maxConcurrency must be an integer between 1 and 4')
+    for (const maxConcurrency of [0, -1, 2.5, '2', true]) expect(() => parseBatchStartRequest({ urls: [url], maxConcurrency })).toThrow('maxConcurrency must be an integer >= 1')
     expect(() => parseCrawlStartRequest({ url, appendToId: 'b1' })).toThrow('unsupported parameter: appendToId')
     const mixed = ['https://example.com', 'not a url', 'ftp://x']
     expect(parseBatchStartRequest({ urls: mixed, ignoreInvalidURLs: true })).toMatchObject({ urls: ['https://example.com'], ignoreInvalidURLs: true, invalidURLs: ['not a url', 'ftp://x'] })
