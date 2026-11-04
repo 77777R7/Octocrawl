@@ -32,6 +32,21 @@ describe('Skyscanner dedicated human challenge', () => {
     expect(verdict(page(heading + '<iframe title="Human verification challenge"></iframe>'))).toBeNull()
   })
 
+  it('classifies the same challenge on the market domains, which serve it from the same path', () => {
+    const loader = '<div id="px-captcha"><div id="px-loader" class="px-loader-wrapper"><div class="px-loading-area"></div></div></div>'
+    // Each host answered this path with the challenge's app on 2026-11-05. Hosted Octocrawl read www.skyscanner.com.hk's as success.
+    for (const host of ['www.skyscanner.com.hk', 'www.skyscanner.com', 'www.skyscanner.de', 'www.skyscanner.jp', 'www.skyscanner.com.au', 'www.skyscanner.co.kr', 'www.skyscanner.co.in', 'www.skyscanner.ae', 'ru.skyscanner.com', 'gr.skyscanner.com', 'www.espanol.skyscanner.com', 'www.tianxun.com', 'skyscanner.net']) {
+      for (const contentful of [false, true]) expect(verdict(page(heading + loader), `https://${host}/sttc/px/captcha-v2/index.html?url=L3JvdXRlcw==`, contentful)).toMatchObject({ reason: 'captcha' })
+    }
+    expect(verdict(page(), 'https://www.skyscanner.com.hk/routes/hkg/tyoa/hong-kong-to-tokyo.html')).toBeNull()
+  })
+
+  it('takes no lookalike host for a market domain', () => {
+    for (const host of ['notskyscanner.net', 'www.notskyscanner.com.hk', 'skyscanner.example.com', 'www.skyscanner.net.example.com', 'www.skyscanner.co.example', 'ru.skyscanner.example.com', 'ru.notskyscanner.com', 'tianxun.example.com']) {
+      expect(verdict(page(), `https://${host}/sttc/px/captcha-v2/index.html`)).toBeNull()
+    }
+  })
+
   it('ignores quoted, commented, hidden-template and script controls and bounds its scan', () => {
     for (const quoted of [`<!--${controls}-->`, `<script>const sample = '${controls}'</script>`, `<template>${controls}</template>`, '&lt;div id="px-captcha"&gt;&lt;iframe title="Human verification challenge"&gt;']) {
       expect(verdict(page(heading + quoted))).toBeNull()

@@ -237,6 +237,12 @@ G01 was added on 2026-10-22 for the Skyscanner human verification rule (#515, [P
 | --- | --- | --- | --- |
 | G01 | [Skyscanner: London to Paris](https://www.skyscanner.net/routes/lond/pari/london-to-paris.html) | Either the route's content, with a final URL that is not the challenge, or `blocked`/`captcha` with no Markdown and readiness `not_served`; never `success` on the challenge page | scrape-execution.error-model |
 
+G01b was added on 2026-11-05, frozen before its first run: G01 on a market domain, where hosted Octocrawl (extractor commit b93c766a) answered `success` on the challenge page on 2026-11-03 and 2026-11-04. Run it with `--only G01b`.
+
+| Case | URL | What it tests | Feature |
+| --- | --- | --- | --- |
+| G01b | [Skyscanner Hong Kong: Hong Kong to Tokyo](https://www.skyscanner.com.hk/routes/hkg/tyoa/hong-kong-to-tokyo.html) | As G01: the route's content, or `blocked`/`captcha` with no Markdown and readiness `not_served`; never `success` on the challenge page | scrape-execution.error-model |
+
 G02 and G03 were added on 2026-10-24 from the outreach pre-checks, frozen before their first run: two docs pages that hosted Octocrawl (extractor commit f7708b3c) failed for reasons of its own. Run them with `--only G02,G03`.
 
 | Case | URL | What it tests | Feature |
