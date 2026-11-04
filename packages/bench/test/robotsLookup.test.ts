@@ -134,8 +134,7 @@ describe('RobotsOriginCache reliability boundaries', () => {
   })
 
   it('reads robots.txt once more after a network failure, but not after a certificate failure', async () => {
-    // 2026-11-04: a reset on the first read of a European site from the hosted region made a page policy_denied for
-    // five minutes; the second read says what the host does.
+    // A transient reset on the first read must not make the origin a complete disallow; the second read clears it.
     let calls = 0
     vi.stubGlobal('fetch', async () => { calls++; if (calls === 1) throw fetchFailed('ECONNRESET', 'read ECONNRESET'); return response('User-agent: *\nDisallow: /x\n') })
     const cache = new RobotsOriginCache()
