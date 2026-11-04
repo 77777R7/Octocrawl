@@ -598,12 +598,15 @@ function attributeText(tag: string, pattern: RegExp): string {
   return decodeEntities(match?.[1] ?? match?.[2] ?? match?.[3] ?? '').toLowerCase()
 }
 
+/** The hosts that answer the challenge's path with its app, measured 2026-11-05: skyscanner.net, the market domains (www.skyscanner.com.hk, www.skyscanner.co.kr), their subdomains (ru.skyscanner.com) and China's www.tianxun.com. */
+const SKYSCANNER_HOST = /(?:^|\.)(?:skyscanner\.(?:[a-z]{2,3}|com?\.[a-z]{2})|tianxun\.com)$/
+
 /** A scoped challenge route plus real heading, container and loading/rendered widget; never quoted article copy. */
 function skyscannerChallenge(body: string, finalUrl: string | undefined): GateVerdict | null {
   if (finalUrl === undefined || !finalUrl.includes('/sttc/px/captcha-v2/') || body.length > INTERACTION_MAX_HTML) return null
   let url: URL
   try { url = new URL(finalUrl) } catch { return null }
-  if (!['skyscanner.net', 'www.skyscanner.net'].includes(url.hostname) || url.pathname !== '/sttc/px/captcha-v2/index.html') return null
+  if (!SKYSCANNER_HOST.test(url.hostname) || url.pathname !== '/sttc/px/captcha-v2/index.html') return null
   const page = pageText(body, WALL_PAGE_MAX_TEXT, true)
   if (page === null || !page.primaryHeadings.some(heading => /^are you a person or a robot\?$/i.test(heading)) ||
     !page.controls.pxCaptcha || !(page.controls.humanChallengeFrame || page.controls.pxLoader)) return null

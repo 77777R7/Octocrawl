@@ -3630,6 +3630,32 @@
       ]
     },
     {
+      "id": "G01b",
+      "batch": "gates",
+      "feature": "scrape-execution.error-model",
+      "url": "https://www.skyscanner.com.hk/routes/hkg/tyoa/hong-kong-to-tokyo.html",
+      "request": {"formats": ["markdown"], "maxAge": 0, "debug": true},
+      "note": "Added 2026-11-05, frozen before its first run. G01 on a market domain: on 2026-11-03 and 2026-11-04 hosted Octocrawl (extractor commit b93c766a) was sent to this host's /sttc/px/captcha-v2/index.html and answered success, because the rule that names the page took only skyscanner.net. Either answer passes, as in G01: the route's content, or an honest blocked/captcha with no Markdown and readiness not_served. A success whose final URL is the challenge page, or whose Markdown is the challenge text, fails.",
+      "checks": [
+        {"item": "FS", "type": "apiStatus", "equals": 200},
+        {"item": "2", "type": "anyOf", "checks": [
+          [
+            {"type": "field", "path": "status", "equals": "blocked"},
+            {"type": "field", "path": "blockReason", "equals": "captcha"},
+            {"type": "field", "path": "markdown", "present": false},
+            {"type": "field", "path": "readiness.state", "equals": "not_served"}
+          ],
+          [
+            {"type": "field", "path": "status", "equals": "success"},
+            {"type": "field", "path": "evidence.finalUrl", "excludes": "/sttc/px/captcha-v2/"},
+            {"type": "markdownMatches", "pattern": "Hong Kong|香港", "flags": "m"},
+            {"type": "markdownMatches", "pattern": "Tokyo|東京", "flags": "m"},
+            {"type": "markdownExcludes", "text": "Are you a person or a robot?"}
+          ]
+        ]}
+      ]
+    },
+    {
       "id": "G02",
       "batch": "gates",
       "feature": "scrape-execution.error-model",
