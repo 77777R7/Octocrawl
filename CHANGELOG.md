@@ -27,6 +27,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **Fix: Skyscanner's human check is named on its market domains, not only on skyscanner.net.** On 2026-11-03 hosted Octocrawl was sent from a www.skyscanner.com.hk route to that host's `/sttc/px/captcha-v2/index.html` and answered `success`, with the check's text as Markdown: the rule that names the page took only `skyscanner.net` and `www.skyscanner.net`, while the market domains answer that path with the same app (measured 2026-11-05). It now takes `skyscanner.*` with its subdomains and `tianxun.com`, and still asks for the same heading and widget, so the page is `blocked`/`captcha`, no Markdown, readiness `not_served`. The heading is still read in English: a session whose `ssculture` cookie asks for another language can get the page translated, and then it is not named.
+
 ## 0.8.2 — 2026-11-05
 
 The published packages at 0.8.2. **Wrong pages and silent failures are named:** a page a site served in place of the one asked for carries a warning instead of passing as a success, a robots.txt that could not be read is recorded as unreachable rather than as a disallow and its lookup gets 15 s, a `dns_error` names the www/apex twin to try, a `map` says why it refused URLs, and `octocrawl` run under a second Node version prints the `npm rebuild` command instead of Node's message about a native module.

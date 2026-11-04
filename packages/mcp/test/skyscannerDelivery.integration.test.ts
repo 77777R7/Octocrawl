@@ -17,6 +17,7 @@ import { createMcpServer } from '../src/server.js'
 
 const route = 'https://www.skyscanner.net/routes/lond/pari/london-to-paris.html'
 const challenge = 'https://www.skyscanner.net/sttc/px/captcha-v2/index.html?url=L3JvdXRlcw=='
+const marketChallenge = 'https://www.skyscanner.com.hk/sttc/px/captcha-v2/index.html?url=L3JvdXRlcw=='
 const heading = '<h1>Are you a person or a robot?</h1>'
 const loader = '<div id="px-captcha"><div id="px-loader"></div></div>'
 const frame = '<div id="px-captcha"><iframe title="Human verification challenge"></iframe></div>'
@@ -50,7 +51,7 @@ describe('Skyscanner challenge classification in final HTTP SDK/MCP responses', 
       fetch: async (url, _deadline, signal) => {
         const kind = new URL(url).searchParams.get('fixture')!
         const response = await fetch(`${origin}/${kind}`, { signal, headers: { 'user-agent': ua } })
-        return { status: response.status, body: await response.text(), finalUrl: kind === 'normal' ? route : challenge, headers: { 'content-type': response.headers.get('content-type')! }, sentUserAgent: response.headers.get('x-fixture-ua') }
+        return { status: response.status, body: await response.text(), finalUrl: kind === 'normal' ? route : kind === 'market' ? marketChallenge : challenge, headers: { 'content-type': response.headers.get('content-type')! }, sentUserAgent: response.headers.get('x-fixture-ua') }
       },
     }, 'standard', null, async () => ({ text: 'User-agent: *\nAllow: /', status: 200, contentType: 'text/plain' }))
     engine = createApiEngine({ taskRoot: root, networkPolicy: policy, sessionsFile: null, userChrome: null, channelsFor: mode => buildChannels(mode, { networkPolicy: policy, localSubjects: { http: {
@@ -85,7 +86,7 @@ describe('Skyscanner challenge classification in final HTTP SDK/MCP responses', 
       return out
     }
 
-    for (const debug of [false, true]) it.each(['loader', 'rendered', 'empty'])(`${surface} classifies %s on ${debug ? 'full' : 'compact'} delivery, regardless of a weak contract`, async kind => {
+    for (const debug of [false, true]) it.each(['loader', 'rendered', 'empty', 'market'])(`${surface} classifies %s on ${debug ? 'full' : 'compact'} delivery, regardless of a weak contract`, async kind => {
       for (const contracted of [false, true]) {
         const out = await scrape(kind, contracted, debug)
         expect(out).toMatchObject({ status: 'blocked', blockReason: 'captcha', failureReason: null, markdown: null })
