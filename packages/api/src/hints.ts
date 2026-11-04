@@ -54,6 +54,11 @@ export const INSTALLED_CHROME_RECOMMENDED_HINT = 'installed_chrome with compatib
 /** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */
 export const SCREENSHOT_UNAVAILABLE_HINT = "the screenshot could not be captured, so screenshot is null while the page result stands; the trace's screenshot_failed event names the error; a viewport capture (fullPage false) is the lighter request, and a longer timeout gives a slow page more time"
 
+/** The hint a `redirected_off_page` warning carries: where the site sent the request, and what to do about the page asked for. */
+export function offPageHint(result: Pick<HintedResult, 'requestedUrl' | 'evidence'>): string {
+  return `${hostOf(result)} answered ${result.evidence.finalUrl} in place of ${result.requestedUrl}, and the content is that page's, not the requested page's; check that the link is still live (the site may have moved or removed the page, or sent an automated request to its home page), and scrape ${result.evidence.finalUrl} on purpose only when it is the page you want`
+}
+
 /** The hint a file result carries: what its markdown is. */
 export function fileHint(file: NonNullable<FetchResult['file']>): string {
   const kept = file.path === null ? 'not saved' : `kept at ${file.path}`
@@ -120,7 +125,7 @@ export function httpLaneAskedForBrowser(result: Pick<FetchResult, 'escalations' 
 }
 
 /** The host the result is about: the final URL's, else the requested URL's. */
-function hostOf(result: HintedResult): string {
+function hostOf(result: Pick<HintedResult, 'requestedUrl' | 'evidence'>): string {
   for (const url of [result.evidence.finalUrl, result.requestedUrl]) {
     try {
       const host = new URL(url).hostname
@@ -235,6 +240,8 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
   if (result.status === 'partial') {
     hints.push(`the result is partial: the deadline passed with this much of the page read; raise timeout (up to ${DEFAULT_SCRAPE_TIMEOUT_MS} ms) for the rest`)
   }
+  // The site answered another page in place of the one asked for: the content is real, and it is not the requested page's.
+  if (result.warnings?.some((warning) => warning.code === 'redirected_off_page')) hints.push(offPageHint(result))
   if (result.retryAt !== undefined) {
     hints.push(`wait until ${new Date(result.retryAt).toISOString()} before asking ${host} again`)
   } else if (result.status === 'blocked' && result.blockReason === 'rate_limit') {

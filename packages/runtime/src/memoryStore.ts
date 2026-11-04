@@ -107,6 +107,15 @@ export class MemoryTaskStore implements TaskStore {
     return { verified, verificationFailed }
   }
 
+  async countStepsWarned(taskId: string, code: string, attemptId?: string): Promise<number> {
+    let count = 0
+    for (const step of this.steps.values()) {
+      if (step.taskId !== taskId || (attemptId !== undefined && step.attemptId !== attemptId) || !VERIFICATION_COUNTED_STATUSES.includes(step.status)) continue
+      if (step.result?.warnings?.some((warning) => warning.code === code) === true) count++
+    }
+    return count
+  }
+
   async countBlockReasons(taskId: string): Promise<Record<string, number>> {
     const counts: Record<string, number> = {}
     for (const step of this.steps.values()) {

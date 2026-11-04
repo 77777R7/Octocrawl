@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, offPageHint, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -22,6 +22,15 @@ describe('agent hints', () => {
     expect(hints(result({ status: 'empty_verified', markdown: null }))).toEqual([])
     expect(hints(result({ warnings: [{ code: 'tls_unverified', message: 'not verified' }] }))).toEqual([])
     expect(hints(result({ status: 'failed', failureReason: 'dns_error', markdown: null }))).toEqual([])
+  })
+
+  it('says where the site sent a request it answered with another page, and what to check', () => {
+    const moved = result({ requestedUrl: 'https://example.test/exhibitor/acme/', evidence: { finalUrl: 'https://example.test/', httpStatus: 200 }, warnings: [{ code: 'redirected_off_page', message: 'The site sent the request on.' }] })
+    expect(hints(moved)).toEqual([offPageHint(moved)])
+    expect(offPageHint(moved)).toBe("example.test answered https://example.test/ in place of https://example.test/exhibitor/acme/, and the content is that page's, not the requested page's; check that the link is still live (the site may have moved or removed the page, or sent an automated request to its home page), and scrape https://example.test/ on purpose only when it is the page you want")
+    // The same hint on the my-browser lane, after a lane-escalation note when there is one; none without the warning.
+    expect(hints({ ...moved, lane: 'my_browser' }, ['my_browser'])).toEqual([offPageHint(moved)])
+    expect(hints(result({ evidence: { finalUrl: 'https://example.test/', httpStatus: 200 } }))).toEqual([])
   })
 
   it('names the robots.txt rule and where it is set aside for a policy denial, and an unreachable robots.txt for what it is', () => {

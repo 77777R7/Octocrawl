@@ -168,9 +168,12 @@ export interface Evidence {
    * loaded, for a page it shows or a file it displays or downloads. The
    * browser lane says false when a follow-up navigation did not start at the
    * requested URL, a document came without a request, or it cut the chain of
-   * a page that kept moving on to its first URL and last 20. Absent when the
-   * lane does not say (the provider lane, which sees where its vendor started
-   * and ended, and results stored before lanes recorded it).
+   * a page that kept moving on to its first URL and last 20. The my-browser
+   * lane and a handoff list the requested URL and the page's address when
+   * they differ, and say false: the person's browser followed the hops
+   * between, unseen. Absent when the lane does not say (the provider lane,
+   * which sees where its vendor started and ended, and results stored before
+   * lanes recorded it).
    */
   redirectChainComplete?: boolean
   /**
@@ -394,6 +397,15 @@ export interface FetchWarning {
    * had no main region at all, and its whole page, over 1,000 characters of
    * Markdown, is the answer, header, navigation and footer kept
    * (`whole_page_delivered` in the trace).
+   * `redirected_off_page`: the site sent the request on to its home page, or
+   * to a page above the one asked for (an ancestor of the requested path, or a
+   * shorter path with no segment in common with it), and that page is the
+   * answer: real content, and another page's (www.english.ids-cologne.de sent
+   * 98 of 272 exhibitor pages to its home page on 2026-11-04, each HTTP 200).
+   * The message names the requested and the final URL; `readiness` reads it
+   * as `not_served`. A redirect that keeps the page (scheme, www, a trailing
+   * slash, index.html, a language prefix, a new slug, a deeper page) raises
+   * none; a page a request's `actions` led elsewhere raises none either.
    */
   code: string
   message: string

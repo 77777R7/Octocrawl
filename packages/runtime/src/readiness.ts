@@ -103,6 +103,11 @@ export function readinessOf(result: FetchResult): Readiness {
     return readiness('not_served', ['source_data_error'], result)
   }
   const verification = result.verification
+  // The site answered another page in place of the one asked for (its home page, a page above it): the requested page was
+  // not served, whatever that page shows (www.english.ids-cologne.de, 2026-11-04). A passed contract still means its checks held.
+  if (verification?.status !== 'passed' && result.warnings?.some((warning) => warning.code === 'redirected_off_page')) {
+    return readiness('not_served', ['redirected_off_page'], result)
+  }
   // A configured pass keeps ADR 0007's semantics. Otherwise an active source outage is not a loading shell.
   if (verification?.status !== 'passed' && sourceUnavailable(result)) return readiness('not_served', ['source_unavailable'], result)
   if (verification !== undefined && verification.status !== 'not_requested') {

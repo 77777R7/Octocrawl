@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { hostedNetworkPolicy } from '@w2l/contracts'
 import { startFixtureServer, type FixtureServer } from '@w2l/fixtures'
+import { readinessOf } from '@w2l/runtime'
 import { ResilientHttpSubject } from '../src/subjects/resilientHttp.js'
 import { captureOf } from '../src/capture.js'
 
@@ -122,17 +123,19 @@ describe('resilient subject on served fixture bytes', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(200)
   })
 
-  it('redirect-to-home: follows to /home; check 4 has no annotation to refute it', async () => {
-    // Documented semantic gap for this phase: transport-wise the redirect is
-    // followed correctly (finalUrl = /home). Deciding that the DELIVERED
-    // content belongs to the wrong page needs the wrong-page probe
-    // (content-identity), which is a later milestone. The fixture's
-    // expectedStatus stays 'failed', so this arm records a status mismatch
-    // there — visible in the bench, not hidden by this test.
+  it('redirect-to-home: follows to /home, and says the page delivered is not the one asked for (redirected_off_page)', async () => {
+    // Transport-wise the redirect is followed (finalUrl = /home) and the content is real, so the status stays success. The
+    // caveat says it belongs to another page: the final path is above the requested one, sharing no segment with it. The
+    // fixture's expectedStatus stays 'failed', so the bench records a status mismatch there, visible, not hidden here.
     const out = await subject.fetch(`${server.url}/wrong/redirect-home`)
     expect(out.evidence.finalUrl).toBe(`${server.url}/home`)
     expect(out.evidence.redirectChain).toHaveLength(2)
     expect(out.status).toBe('success')
+    expect(out.warnings?.map((warning) => warning.code)).toEqual(['redirected_off_page'])
+    expect(out.warnings?.[0]?.message).toContain('/wrong/redirect-home')
+    expect(readinessOf(out)).toEqual({ state: 'not_served', basis: ['redirected_off_page'] })
+    // A redirect that keeps the page (three hops to a deeper path) carries no such caveat.
+    expect((await subject.fetch(`${server.url}/redirect/chain/3`)).warnings).toBeUndefined()
   })
 
   it('limit-huge-body: stops at maxBodyBytes instead of buffering the stream', async () => {
