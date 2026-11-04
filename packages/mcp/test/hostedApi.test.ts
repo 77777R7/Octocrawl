@@ -1066,6 +1066,14 @@ it('a request line names the scrape\'s record and the paid calls on its Evidence
   expect(note).toMatchObject({ scrapeId: 'scrape-2', paidCallIds: [] })
 })
 
+it('a request line tells a robots.txt that could not be read from one that disallows (2026-11-04: 10 of 13 policy_denied were timeouts)', () => {
+  const note: RequestNote = { endpoint: 'scrape', keyId: 'k', url: 'https://example.com/', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: [], ms: null, scrapeId: null, paidCallIds: null }
+  noteScrape(note, { status: 'failed', failureReason: 'policy_denied', evidenceRecord: { reason: 'policy_denied', robotsDecision: { decision: 'disallowed', robotsUrl: 'https://example.com/robots.txt', unreachable: 'timeout' } } })
+  expect(note).toMatchObject({ status: 'failed', reason: 'policy_denied', robots: 'unreachable' })
+  noteScrape(note, { status: 'failed', failureReason: 'policy_denied', evidenceRecord: { reason: 'policy_denied', robotsDecision: { decision: 'disallowed', robotsUrl: 'https://example.com/robots.txt', unreachable: null } } })
+  expect(note.robots).toBe('disallowed')
+})
+
 it('a scrape\'s phase line says how long each rung took and what the page waited for, by the URL\'s host alone', () => {
   // T009 on hosted after O6 (2026-10-27): the http rung's header cap, then browser_local.
   const run = {

@@ -35,13 +35,14 @@ export interface NetworkPolicy {
   /** Minimum delay between requests to the same host. */
   perHostMinDelayMs: number
   respectRobotsTxt: boolean
-  /** How long one robots.txt lookup may take before the file counts as unreachable. Default 5000. */
+  /** How long one robots.txt lookup may take before the file counts as unreachable. Default 15000. */
   robotsTimeoutMs?: number
   /**
-   * How long an unreachable robots.txt (a 5xx, a network error or a lookup
-   * timeout) stays a complete disallow for its origin before it is fetched
-   * again. Other robots.txt results are kept for the life of the process.
-   * Default 300000 (5 minutes).
+   * How long an unreachable robots.txt stays a complete disallow for its
+   * origin before it is fetched again: this long for a 5xx, and at most 30
+   * seconds for a lookup timeout or a network error (which also gets one
+   * more read before it counts). Other robots.txt results are kept for the
+   * life of the process. Default 300000 (5 minutes).
    */
   robotsUnreachableTtlMs?: number
   /**

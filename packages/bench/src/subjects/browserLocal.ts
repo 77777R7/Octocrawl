@@ -34,6 +34,7 @@ import type { SubjectAdapter } from '../subject.js'
 import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { dropLastStep, runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, LOADING_WAIT_MAX_MS, loadingWaitEvent, waitForRenderedStability, withStillLoadingWarning } from '../browserSettle.js'
+import { withOffPageWarning } from '../offPage.js'
 import { mainContentWaitEvents, waitForMainContent, type AwaitedRequest } from '../mainContentWait.js'
 import { REGION_WAIT_MAX_MS, regionSpecOf, regionWaitEvent, waitForRegion } from '../regionWait.js'
 import { captureLayout, LAYOUT_MAX_ELEMENTS, SHADOW_TABLE_LIMITS } from '../browserLayout.js'
@@ -462,8 +463,8 @@ export class BrowserLocalSubject implements SubjectAdapter {
       const totalMs = Math.max(0, performance.now() - monotonicStart)
       const lead = [...(robots.overrideWarning === null ? [] : [robots.overrideWarning]), ...(tlsWarning === null ? [] : [tlsWarning])]
       // The lead warnings go before the ones the steps and the list added, never in place of them.
-      // A page read while it still showed a loading indicator says so on the answer.
-      const done = withStillLoadingWarning(withListCaveat(withActions(result, ran.actions, options.list)))
+      // A page read while it still showed a loading indicator says so on the answer, and so does one delivered in place of the page asked for.
+      const done = withOffPageWarning(withStillLoadingWarning(withListCaveat(withActions(result, ran.actions, options.list))))
       return {
         ...done,
         ...(lead.length === 0 ? {} : { warnings: [...lead, ...(done.warnings ?? [])] }),

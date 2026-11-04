@@ -54,6 +54,11 @@ export const INSTALLED_CHROME_RECOMMENDED_HINT = 'installed_chrome with compatib
 /** The hint a `screenshot_unavailable` warning carries: the page stands, where the error is, and the lighter request. */
 export const SCREENSHOT_UNAVAILABLE_HINT = "the screenshot could not be captured, so screenshot is null while the page result stands; the trace's screenshot_failed event names the error; a viewport capture (fullPage false) is the lighter request, and a longer timeout gives a slow page more time"
 
+/** The hint a `redirected_off_page` warning carries: where the site sent the request, and what to do about the page asked for. */
+export function offPageHint(result: Pick<HintedResult, 'requestedUrl' | 'evidence'>): string {
+  return `${hostOf(result)} answered ${result.evidence.finalUrl} in place of ${result.requestedUrl}, and the content is that page's, not the requested page's; check that the link is still live (the site may have moved or removed the page, or sent an automated request to its home page), and scrape ${result.evidence.finalUrl} on purpose only when it is the page you want`
+}
+
 /** The hint a file result carries: what its markdown is. */
 export function fileHint(file: NonNullable<FetchResult['file']>): string {
   const kept = file.path === null ? 'not saved' : `kept at ${file.path}`
@@ -120,7 +125,7 @@ export function httpLaneAskedForBrowser(result: Pick<FetchResult, 'escalations' 
 }
 
 /** The host the result is about: the final URL's, else the requested URL's. */
-function hostOf(result: HintedResult): string {
+function hostOf(result: Pick<HintedResult, 'requestedUrl' | 'evidence'>): string {
   for (const url of [result.evidence.finalUrl, result.requestedUrl]) {
     try {
       const host = new URL(url).hostname
@@ -178,7 +183,7 @@ function robotsHint(result: HintedResult, host: string): string | null {
   if (disallowed === undefined) return null
   const detail = disallowed.detail ?? {}
   if (typeof detail.unreachable === 'string') {
-    return `robots.txt of ${host} could not be read (${detail.unreachable}), which counts as a complete disallow; Octocrawl asks for it again after five minutes. ${ROBOTS_ROUTE}`
+    return `robots.txt of ${host} could not be read (${detail.unreachable}), which counts as a complete disallow; Octocrawl asks for it again after ${detail.unreachable === 'server_error' ? 'five minutes' : 'half a minute'}. ${ROBOTS_ROUTE}`
   }
   const rules = (Array.isArray(detail.appliedRules) ? detail.appliedRules : [])
     .filter((rule): rule is { pattern: string; allow: boolean } => rule !== null && typeof rule === 'object' && typeof (rule as { pattern?: unknown }).pattern === 'string')
@@ -189,6 +194,28 @@ function robotsHint(result: HintedResult, host: string): string | null {
     return `robots.txt of ${host} disallows this URL for Octocrawl by name (User-agent: ${group}; rule ${rules.length === 0 ? 'unknown' : rules.join(', ')}): the site owner's opt-out, which a named URL and ignoreRobotsTxt do not set aside; only a robotsOverride with your recorded reason does, on a local server`
   }
   return `robots.txt of ${host} disallows this URL for Octocrawl's identity (rule ${rules.length === 0 ? 'unknown' : rules.join(', ')}). ${ROBOTS_ROUTE}`
+}
+
+/**
+ * What the http lane learned about a name that did not resolve, from its `dns_twin_checked` event: whether the www/apex
+ * twin resolves, and then the URL to send; null for a dns_error whose lane checked no twin.
+ */
+function dnsHint(result: HintedResult, host: string): string | null {
+  const checked = result.trace.find((event) => event.event === 'dns_twin_checked')
+  if (checked === undefined) return null
+  const detail = checked.detail ?? {}
+  const failed = typeof detail.host === 'string' ? detail.host : host
+  const twin = typeof detail.twin === 'string' ? detail.twin : 'its www/apex twin'
+  switch (detail.outcome) {
+    case 'resolves': return `${failed} does not resolve; ${twin} does; send ${typeof detail.to === 'string' ? detail.to : 'the URL on that host'} instead (this result stays the record of the URL asked for, which was not fetched)`
+    // ENOTFOUND is the name's own answer; any other resolver failure (EAI_AGAIN, SERVFAIL) may be the resolver's.
+    case 'unresolved': return typeof detail.error === 'string' && !detail.error.includes('ENOTFOUND')
+      ? `${failed} does not resolve, and neither does ${twin} (${detail.error}); check the domain, or the resolver where Octocrawl runs`
+      : `${failed} does not resolve, and neither does ${twin}; check the domain`
+    case 'denied': return `${failed} does not resolve; ${twin} resolves to an address the egress policy refuses${typeof detail.error === 'string' ? ` (${detail.error})` : ''}`
+    case 'timeout': return `${failed} does not resolve; whether ${twin} does was not learned within ${typeof detail.timeoutMs === 'number' ? detail.timeoutMs : 'the check\'s'} ms`
+    default: return null
+  }
 }
 
 /** Where robots.txt is set aside, on the record: a robots refusal now comes from a crawl's or map's link, a Monitor, or a hosted server. */
@@ -206,6 +233,10 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
   const host = hostOf(result)
   if (result.status === 'failed' && result.failureReason === 'policy_denied') {
     const hint = robotsHint(result, host) ?? egressHint(result, host)
+    if (hint !== null) hints.push(hint)
+  }
+  if (result.status === 'failed' && result.failureReason === 'dns_error') {
+    const hint = dnsHint(result, host)
     if (hint !== null) hints.push(hint)
   }
   if (result.status === 'failed' && result.failureReason === 'cache_miss') {
@@ -235,6 +266,8 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
   if (result.status === 'partial') {
     hints.push(`the result is partial: the deadline passed with this much of the page read; raise timeout (up to ${DEFAULT_SCRAPE_TIMEOUT_MS} ms) for the rest`)
   }
+  // The site answered another page in place of the one asked for: the content is real, and it is not the requested page's.
+  if (result.warnings?.some((warning) => warning.code === 'redirected_off_page')) hints.push(offPageHint(result))
   if (result.retryAt !== undefined) {
     hints.push(`wait until ${new Date(result.retryAt).toISOString()} before asking ${host} again`)
   } else if (result.status === 'blocked' && result.blockReason === 'rate_limit') {
@@ -296,18 +329,30 @@ function renderedBeforeContent(result: HintedResult): boolean {
 }
 
 /**
- * The hints of one map, from its warnings: a deadline that cut it (a larger
+ * The hints of one map: from its warnings, a deadline that cut it (a larger
  * timeout, up to this server's cap, or a lower limit), and a start page the
  * http lane found filled by script (a scrape of it with the links format,
- * which the browser lane renders). Empty when neither applies.
+ * which the browser lane renders); from its refusals, the URLs the start
+ * path's subtree kept out (the site root, or crawlEntireDomain), a scope rule
+ * a caller may not expect. Other refusals (other hosts, the caller's own
+ * filters, robots.txt) are counted in the answer and not hinted. Empty when
+ * none applies.
  */
-export function mapAgentHints(response: Pick<MapResponse, 'url' | 'warnings'>, maxTimeoutMs: number): string[] {
+export function mapAgentHints(response: Pick<MapResponse, 'url' | 'warnings' | 'refused'>, maxTimeoutMs: number): string[] {
   const hints: string[] = []
   if (response.warnings.some((warning) => warning.code === 'map_timeout')) {
     hints.push(`the map's deadline cut it before every source was read; raise timeout (up to ${maxTimeoutMs} ms on this server) or lower limit for a complete list`)
   }
   if (response.warnings.some((warning) => warning.code === 'start_page_client_rendered')) {
     hints.push(`the start page fills its links with script; scrape ${response.url} with formats ['links'] (the browser lane renders it) for the rendered page's links`)
+  }
+  const subtreeDenied = response.refused.subtreeDenied
+  if (subtreeDenied > 0) {
+    let start: URL | null = null
+    try { start = new URL(response.url) } catch {}
+    const where = start === null ? '' : ` (${start.pathname})`
+    const root = start === null ? 'the site root' : `${start.origin}/`
+    hints.push(`${subtreeDenied} ${subtreeDenied === 1 ? 'URL found was' : 'URLs found were'} outside the start URL's path subtree${where} and ${subtreeDenied === 1 ? 'is' : 'are'} not listed; map ${root} or pass crawlEntireDomain: true for the whole host`)
   }
   return hints
 }

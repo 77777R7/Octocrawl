@@ -542,7 +542,7 @@ function requestedFormats(body: unknown): string[] {
 
 /** A scrape result's outcome on its request line, from the result and its Evidence Record: never the page's content. */
 export function noteScrape(note: RequestNote, result: unknown): void {
-  const r = (result ?? {}) as { status?: unknown; lane?: unknown; failureReason?: unknown; scrapeId?: unknown; evidenceRecord?: { finalUrl?: unknown; httpStatus?: unknown; reason?: unknown; robotsDecision?: { decision?: unknown } | null; rawSha256?: unknown; access?: { paidCalls?: unknown } | null } }
+  const r = (result ?? {}) as { status?: unknown; lane?: unknown; failureReason?: unknown; scrapeId?: unknown; evidenceRecord?: { finalUrl?: unknown; httpStatus?: unknown; reason?: unknown; robotsDecision?: { decision?: unknown; unreachable?: unknown } | null; rawSha256?: unknown; access?: { paidCalls?: unknown } | null } }
   const evidence = r.evidenceRecord ?? {}
   const text = (value: unknown) => (typeof value === 'string' ? value : null)
   note.status = text(r.status) ?? 'error'
@@ -551,7 +551,9 @@ export function noteScrape(note: RequestNote, result: unknown): void {
   note.httpStatus = typeof evidence.httpStatus === 'number' ? evidence.httpStatus : null
   note.reason = text(evidence.reason) ?? text(r.failureReason)
   const robots = evidence.robotsDecision?.decision
-  note.robots = robots === 'allowed' || robots === 'disallowed' || robots === 'no_robots' ? robots : null
+  // A file that could not be read is a disallow by RFC 9309, but not a rule the site wrote: the line says which.
+  note.robots = typeof evidence.robotsDecision?.unreachable === 'string' ? 'unreachable'
+    : robots === 'allowed' || robots === 'disallowed' || robots === 'no_robots' ? robots : null
   note.sha256 = text(evidence.rawSha256)
   // The scrape's record and its paid calls by id, so the line's credits and the record's USD can be joined (PA EH1).
   note.scrapeId = text(r.scrapeId)

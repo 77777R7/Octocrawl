@@ -388,6 +388,13 @@ export class SqliteTaskStore implements TaskStore {
     return { verified: row.verified, verificationFailed: row.counted - row.verified }
   }
 
+  async countStepsWarned(taskId: string, code: string, attemptId?: string): Promise<number> {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS count FROM steps WHERE task_id = ?${attemptId === undefined ? '' : ' AND attempt_id = ?'} AND status IN (${VERIFICATION_COUNTED_STATUSES.map(() => '?').join(', ')}) AND result_json IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(result_json, '$.warnings') WHERE json_extract(json_each.value, '$.code') = ?)`)
+      .get(taskId, ...(attemptId === undefined ? [] : [attemptId]), ...VERIFICATION_COUNTED_STATUSES, code) as { count: number }
+    return row.count
+  }
+
   async countBlockReasons(taskId: string): Promise<Record<string, number>> {
     const rows = this.db
       .prepare(`SELECT json_extract(result_json, '$.blockReason') AS reason, COUNT(*) AS count FROM steps WHERE task_id = ? AND status = 'blocked' AND result_json IS NOT NULL GROUP BY reason`)

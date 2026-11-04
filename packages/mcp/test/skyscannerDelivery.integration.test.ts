@@ -107,7 +107,9 @@ describe('Skyscanner challenge classification in final HTTP SDK/MCP responses', 
         expect(out.blockReason).toBeNull()
         expect(out.markdown).toContain('London to Paris')
         expect(out.verification.status).toBe('not_requested')
-        expect(out.readiness.state).toBe('ready')
+        // The quoted page is answered at the challenge URL, a path with nothing of the route's: a success, and not the page asked for (redirected_off_page).
+        expect(out.readiness).toMatchObject(kind === 'normal' ? { state: 'ready', basis: [] } : { state: 'not_served', basis: ['redirected_off_page'] })
+        expect(out.warnings?.map((warning) => warning.code) ?? []).toEqual(kind === 'normal' ? [] : ['redirected_off_page'])
       }
     })
   }

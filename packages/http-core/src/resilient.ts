@@ -263,6 +263,70 @@ async function guardUrl(
   }
 }
 
+/**
+ * The name a host is the twin of under the www convention: `www.example.com` <-> `example.com`. Null when the host has
+ * no twin worth asking about: an IP address, a single label (`localhost`), or `www.` alone.
+ */
+export function dnsTwinHost(hostname: string): string | null {
+  const host = hostname.toLowerCase().replace(/\.$/, '')
+  if (host.startsWith('[') || /^[\d.]+$/.test(host) || !host.includes('.')) return null
+  if (host.startsWith('www.')) {
+    const apex = host.slice(4)
+    return apex.includes('.') ? apex : null
+  }
+  return `www.${host}`
+}
+
+/** `url` with its host replaced by its twin (dnsTwinHost); null when it has none or is not a URL. */
+export function dnsTwinUrl(url: string): string | null {
+  let parsed: URL
+  try { parsed = new URL(url) } catch { return null }
+  const twin = dnsTwinHost(parsed.hostname)
+  if (twin === null) return null
+  parsed.hostname = twin
+  return parsed.toString()
+}
+
+/** How long the twin check waits for the guard at most: one extra lookup, never a wait a caller notices. */
+export const DNS_TWIN_TIMEOUT_MS = 2_000
+
+/** What the twin check learned, as the trace's `dns_twin_checked` event records it. */
+export interface DnsTwinCheck {
+  /** The host that did not resolve. */
+  host: string
+  /** Its twin (dnsTwinHost), and the requested URL on that host. */
+  twin: string
+  to: string
+  /** `resolves`: the guard passed the twin URL (it resolves to an address the egress policy allows); `unresolved`: it does not resolve either (`error` says why: ENOTFOUND is the name, EAI_AGAIN or SERVFAIL the resolver); `denied`: it resolves, to an address the policy refuses; `timeout`: the guard did not answer within timeoutMs, or the request's own deadline or cancellation ended the check first (`error` names it). */
+  outcome: 'resolves' | 'unresolved' | 'denied' | 'timeout'
+  error?: string
+  timeoutMs: number
+}
+
+/**
+ * After a name failed to resolve: whether its www/apex twin does, asked through the same guard the request itself went
+ * through (`assertUrl`: the resolver and the egress policy), within `timeoutMs`, and never fetched. Null when the host has
+ * no twin. A hint is read from the outcome; the request's own record stays about the URL asked for: the caller's own
+ * `signal` ends the check as a `timeout` outcome and never throws, since the requested name's verdict is already in.
+ */
+export async function checkDnsTwin(url: string, assertUrl: UrlGuard, options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<DnsTwinCheck | null> {
+  const to = dnsTwinUrl(url)
+  if (to === null) return null
+  const timeoutMs = options.timeoutMs ?? DNS_TWIN_TIMEOUT_MS
+  const timer = AbortSignal.timeout(timeoutMs)
+  const signal = options.signal === undefined ? timer : AbortSignal.any([options.signal, timer])
+  const base = { host: new URL(url).hostname, twin: new URL(to).hostname, to, timeoutMs }
+  try {
+    await raceWithSignal(assertUrl(to), signal)
+    return { ...base, outcome: 'resolves' }
+  } catch (err) {
+    if (options.signal?.aborted) return { ...base, outcome: 'timeout', error: `the request ended the check: ${options.signal.reason instanceof Error ? options.signal.reason.message : String(options.signal.reason)}` }
+    if (timer.aborted) return { ...base, outcome: 'timeout' }
+    const error = err instanceof Error ? err.message : String(err)
+    return { ...base, outcome: hasErrorNamed(err, 'DnsLookupError') ? 'unresolved' : 'denied', error }
+  }
+}
+
 export async function resilientFetch(
   initialUrl: string,
   fetcher: ResilientFetcher,

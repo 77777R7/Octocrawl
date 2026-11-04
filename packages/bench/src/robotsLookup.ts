@@ -7,9 +7,11 @@
  * A 4xx or a non-text/plain body is "no robots.txt" (RFC 9309 §2.3.1.3). A
  * 5xx, a network failure or the lookup's own deadline is unreachable
  * (§2.3.1.4): a complete disallow, in local and hosted mode alike, with the
- * reason kept so it never reads as a rule the publisher wrote. Unreachable
- * entries expire after `robotsUnreachableTtlMs`, so a transient failure is
- * retried; other entries are kept for the life of the process. Only the
+ * reason kept so it never reads as a rule the publisher wrote. A network
+ * failure is read once more before it counts. An unreachable entry expires
+ * after `robotsUnreachableTtlMs` (a 5xx) or `ROBOTS_NETWORK_FAILURE_TTL_MS`
+ * (a timeout or a network failure), so a transient failure is retried;
+ * other entries are kept for the life of the process. Only the
  * caller's own cancellation or deadline aborts a lookup. Cookies a redirect
  * sets go back on the lookup's later hops, as a browser's would, and are
  * dropped with it: a sign-in check that sends a browser away and back ends
@@ -55,6 +57,32 @@ export interface CachedRobots {
    * otherwise is: the page would fail the same way.
    */
   error?: { name: string; code: string | null; tls: boolean }
+}
+
+/**
+ * Whether an error came from the network (a socket or resolver code up its
+ * cause chain, or Node's `fetch failed`), rather than from this lookup's own
+ * limits. The environment proxy refusing the tunnel is the operator's own
+ * egress answering, not the network failing: it is not read again either.
+ */
+function isNetworkFailure(error: unknown): boolean {
+  if (isProxyRefusal(error)) return false
+  return errorCode(error) !== null || (error instanceof TypeError && error.message === 'fetch failed')
+}
+
+/**
+ * Whether the environment proxy answered the CONNECT with something other
+ * than 200: undici's `ProxyConnectError` on a dispatcher, or, under Node's
+ * fetch, an abort whose message quotes the proxy's response.
+ */
+function isProxyRefusal(error: unknown): boolean {
+  let current = error
+  for (let depth = 0; depth < 5 && current !== null && typeof current === 'object'; depth++) {
+    const { name, message } = current as { name?: unknown; message?: unknown }
+    if (name === 'ProxyConnectError' || (typeof message === 'string' && /Proxy response \(\d{3}\)/.test(message))) return true
+    current = 'cause' in current ? current.cause : null
+  }
+  return false
 }
 
 /** The first `code` on an error or up its cause chain (Node's `fetch failed` wraps the socket's). */
@@ -119,9 +147,25 @@ export function robotsOverrideApplied(trace: readonly TraceEvent[], warning: Fet
   return { trace: trace.filter((event) => event.event === 'robots_checked' || event.event === 'robots_disallowed' || event.event === 'robots_overridden'), warning }
 }
 
-const ROBOTS_TIMEOUT_MS = 5_000
-/** How long an unreachable robots.txt stays a complete disallow before it is fetched again. */
+/**
+ * How long one robots.txt lookup may take. A hosted server reads from one
+ * region: a European or Korean site that answered a page in 2 to 3 s from
+ * Singapore timed out at the former 5 s often enough to fail a real run
+ * (2026-11-04, 10 of 13 policy_denied results), while the page itself has
+ * a 120 s deadline.
+ */
+export const ROBOTS_TIMEOUT_MS = 15_000
+/** How long an unreachable robots.txt (a 5xx) stays a complete disallow before it is fetched again. */
 export const ROBOTS_UNREACHABLE_TTL_MS = 5 * 60_000
+/**
+ * How long a lookup that timed out or failed on the network stays one: long
+ * enough that a batch does not read it on every page of the origin, short
+ * enough that a slow or flaky site is asked again soon. A 5xx is the site's
+ * own answer and keeps the full TTL.
+ */
+export const ROBOTS_NETWORK_FAILURE_TTL_MS = 30_000
+/** The pause before the one more read a network failure gets. */
+const ROBOTS_RETRY_DELAY_MS = 250
 
 export class RobotsOriginCache {
   private readonly byOrigin = new Map<string, { entry: CachedRobots; expiresAt: number }>()
@@ -174,8 +218,8 @@ export class RobotsOriginCache {
       // robots.txt to a sign-in check and back, and answers it only when the check's cookie comes back; without it
       // the round trip repeats until the redirect limit.
       const jar = new CookieJar(undefined, { looseMode: true })
-      try {
-      await raceWithSignal(assertSafeUrl(robotsUrl, this.networkPolicy), scope.signal)
+      // One read of the file: the hops of its redirects, ending in the entry, or throwing what the network said.
+      const read = async (): Promise<CachedRobots> => {
       let currentUrl = robotsUrl
       for (let hop = 0; hop <= this.networkPolicy.maxRedirects; hop++) {
         await raceWithSignal(assertSafeUrl(currentUrl, this.networkPolicy), scope.signal)
@@ -230,7 +274,21 @@ export class RobotsOriginCache {
           text,
         }
       }
-      break
+      return entry
+      }
+      throw new Error('robots redirect limit exceeded')
+      }
+      try {
+      await raceWithSignal(assertSafeUrl(robotsUrl, this.networkPolicy), scope.signal)
+      try {
+        entry = await read()
+      } catch (error) {
+        // A socket-level failure (a reset, a refusal, a dropped connection) gets one more read within the same
+        // deadline: the second often says what the host does where the first said only what the network did. The
+        // deadline itself, a certificate that did not verify and the lookup's own limits fail the same way again.
+        if (scope.signal.aborted || isTlsError(error) || !isNetworkFailure(error)) throw error
+        await raceWithSignal(new Promise<void>((resolve) => setTimeout(resolve, ROBOTS_RETRY_DELAY_MS)), scope.signal)
+        entry = await read()
       }
     } catch (error) {
       // Only the waiters leaving cancels the lookup. Its own deadline is an
@@ -243,7 +301,8 @@ export class RobotsOriginCache {
     } finally { scope.dispose() }
 
       controller.signal.throwIfAborted()
-      const expiresAt = entry.unreachable === undefined ? Infinity : Date.now() + (this.networkPolicy.robotsUnreachableTtlMs ?? ROBOTS_UNREACHABLE_TTL_MS)
+      const ttl = this.networkPolicy.robotsUnreachableTtlMs ?? ROBOTS_UNREACHABLE_TTL_MS
+      const expiresAt = entry.unreachable === undefined ? Infinity : Date.now() + (entry.unreachable === 'server_error' ? ttl : Math.min(ttl, ROBOTS_NETWORK_FAILURE_TTL_MS))
       this.byOrigin.set(key, { entry, expiresAt })
       return entry
     })()

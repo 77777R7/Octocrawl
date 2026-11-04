@@ -220,3 +220,7 @@ ADR 0006 已经在质量跳级前面留了一个位置：带契约时遇到 `che
 1. **`readiness` 是不是每个结果都带，就绪的也带 `ready`？** 确认：都带。和 `verification.status` 的 `not_requested` 一样，客户端不用先判断字段有没有。
 2. **区域就绪的等待默认上限多少？** 确认：10 秒，调用方可以通过 `timeout` 放宽。OECD 光是显示 Overview 就要 16 秒，10 秒不够，它会被标成 `not_loaded`。
 3. **`not_extracted` 时，只禁止升到付费的级别，免费的级别照走？** 确认：是。
+
+### 2026-11-05：送到别处的页面
+
+www.english.ids-cologne.de 在 2026-11-04 把一个 batch 里 272 个展商页中的 98 个送到了首页，每个都是 HTTP 200：结果 `success`、`ready`、没有 warning，batch 报 `failed: 0`，只有抽出来的字段说明不对。现在每条通道都把最终 URL 的路径和请求路径比较（按 map 折叠相似 URL 的规则：协议、`www.`、末尾斜杠、`index.html`）：最终路径是任一站点的根、请求路径的上级，或比请求路径短且没有一段相同的路径时，结果带 `redirected_off_page` warning（写明请求和最终 URL），readiness 记为 `not_served`，basis `['redirected_off_page']`：内容是真的，但不是请求的那一页，等待和重抽都不会改变。保留页面的跳转（新 slug、更深的默认页、语言前缀、换主机或查询串）不算；请求的 `actions` 把页面带到别处也不算。契约通过仍是 `ready`。batch 和 crawl 的状态多一个 `redirectedOffPage` 计数。my-browser 通道此前无论 Chrome 停在哪个地址都记 `redirectChain: []`，现在地址变了就记两端，`redirectChainComplete: false`。
