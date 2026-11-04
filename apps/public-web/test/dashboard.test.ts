@@ -492,9 +492,12 @@ describe('Usage', () => {
       { ...line('2026-10-20T11:00:00.000Z', KEY_A, 0), status: 'failed', httpStatus: null, robots: 'disallowed', kind: 'unread', sha256: null },
       { ...line('2026-10-20T10:00:00.000Z', KEY_A, 0), status: 'invalid_request', httpStatus: null, robots: null, kind: 'unread', sha256: null },
       { ...line('2026-10-20T09:00:00.000Z', KEY_A, 0), status: 'failed', reason: 'timeout', httpStatus: null, kind: 'unread', sha256: null },
+      // robots.txt that could not be read: the page was not requested either, but no rule kept it out.
+      { ...line('2026-10-20T08:00:00.000Z', KEY_A, 0), status: 'failed', reason: 'policy_denied', httpStatus: null, robots: 'unreachable', kind: 'unread', sha256: null },
     ]
     const { $ } = await page('/dashboard/usage/', '', OCTOBER.now, octoberAnswers(shown))
-    expect([...$('codes-list').querySelectorAll('li p')].map(row => row.textContent)).toEqual(['Not requested2 · 67%', 'No response1 · 33%'])
+    expect([...$('codes-list').querySelectorAll('li p')].map(row => row.textContent)).toEqual(['Not requested3 · 75%', 'No response1 · 25%'])
+    expect([...$('results-list').querySelectorAll('li p')].map(row => row.textContent)).toEqual(['Kept out by robots.txt1 · 25%', 'Invalid request1 · 25%', 'Timed out1 · 25%', 'robots.txt not readable1 · 25%'])
   })
 
   it('decodes the menu back to its own words even when it is reopened mid-decode', async () => {

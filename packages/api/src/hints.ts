@@ -178,7 +178,7 @@ function robotsHint(result: HintedResult, host: string): string | null {
   if (disallowed === undefined) return null
   const detail = disallowed.detail ?? {}
   if (typeof detail.unreachable === 'string') {
-    return `robots.txt of ${host} could not be read (${detail.unreachable}), which counts as a complete disallow; Octocrawl asks for it again after five minutes. ${ROBOTS_ROUTE}`
+    return `robots.txt of ${host} could not be read (${detail.unreachable}), which counts as a complete disallow; Octocrawl asks for it again after ${detail.unreachable === 'server_error' ? 'five minutes' : 'half a minute'}. ${ROBOTS_ROUTE}`
   }
   const rules = (Array.isArray(detail.appliedRules) ? detail.appliedRules : [])
     .filter((rule): rule is { pattern: string; allow: boolean } => rule !== null && typeof rule === 'object' && typeof (rule as { pattern?: unknown }).pattern === 'string')

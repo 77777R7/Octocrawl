@@ -454,7 +454,7 @@
     const counted = (lines, keyOf) => { const counts = new Map(); for (const line of lines) { const key = keyOf(line); counts.set(key, (counts.get(key) ?? 0) + 1) } return [...counts].sort((a, b) => b[1] - a[1]) }
     meterList('results', counted(activity, category))
     // A call kept out by robots.txt or refused as invalid was never sent, which is not the same as no answer.
-    meterList('codes', counted(scrapes, (line) => (line.httpStatus !== null ? String(line.httpStatus) : line.robots === 'disallowed' || line.status === 'invalid_request' ? 'Not requested' : 'No response')))
+    meterList('codes', counted(scrapes, (line) => (line.httpStatus !== null ? String(line.httpStatus) : line.robots === 'disallowed' || line.robots === 'unreachable' || line.status === 'invalid_request' ? 'Not requested' : 'No response')))
     const lanes = ['http', 'browser'].map((kind) => { const lines = activity.filter((line) => line.kind === kind); return [kind === 'http' ? 'HTTP' : 'Browser', lines.length, `${number(lines.reduce((sum, line) => sum + line.credits, 0))} credits`] }).filter(([, calls]) => calls > 0)
     meterList('lanes', lanes)
     const hoursHost = $('hours-chart')
@@ -472,6 +472,7 @@
     if (line.status === 'success' || line.status === 'empty_verified') return 'Read'
     if (line.status === 'partial') return 'Partly read'
     if (line.robots === 'disallowed') return 'Kept out by robots.txt'
+    if (line.robots === 'unreachable') return 'robots.txt not readable'
     if (line.httpStatus === 404 || line.httpStatus === 410) return 'Not found'
     if (line.status === 'blocked') return 'Blocked by the site'
     if (line.status === 'invalid_request') return 'Invalid request'

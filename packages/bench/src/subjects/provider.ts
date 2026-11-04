@@ -23,7 +23,7 @@ import {
 } from '@w2l/http-core'
 import { DEFAULT_NETWORK_POLICY, type CrawlMode, type RobotsUnreachable } from '@w2l/contracts'
 import type { SubjectAdapter } from '../subject.js'
-import { ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
+import { ROBOTS_NETWORK_FAILURE_TTL_MS, ROBOTS_TIMEOUT_MS, ROBOTS_UNREACHABLE_TTL_MS } from '../robotsLookup.js'
 import { identityCompromised } from '../routing/identity.js'
 import { contentSelectors, contentSelectionEvent, listSelectionAsked, listRecordsFound, errorPageEvidence, extraFormats, htmlFormats, withListCaveat, isNoContentStatus, isSuccessStatus, markdownOptions, selectionAsked, regionTables, tablesFormat, tablesSource, tagOptions, wholePageAsked, wholePageDelivered, wholePageMarkdown, NO_MAIN_CONTENT_WARNING, WHOLE_PAGE_MIN_CHARS } from './errorPage.js'
 import type { VendorResumeContext } from '../vendors/transport.js'
@@ -148,7 +148,7 @@ export type RobotsFetcher = (
 /** The default fetcher; `dispatcherFor` sends it through the operator's egress routes (local mode's environment proxy). */
 export function robotsFetcherVia(dispatcherFor?: (url: string) => Dispatcher): RobotsFetcher {
   return async (robotsUrl, userAgent, execution = {}) => {
-    const scope = createExecutionScope({ signal: execution.signal, deadlineAt: Math.min(execution.deadlineAt ?? Infinity, Date.now() + 5_000) })
+    const scope = createExecutionScope({ signal: execution.signal, deadlineAt: Math.min(execution.deadlineAt ?? Infinity, Date.now() + ROBOTS_TIMEOUT_MS) })
     try {
       throwIfExecutionStopped(scope)
       const res = await fetch(robotsUrl, {
@@ -824,11 +824,14 @@ export class ProviderSubject implements SubjectAdapter {
     if (res === null || 'unreachable' in res || res.status >= 500) {
       // Fetch failure or a 5xx. NOT the same as "no robots.txt": it is a
       // complete disallow (RFC 9309 §2.3.1.4), so a network error can never
-      // be read back as the publisher's permission. Asked again after the TTL.
+      // be read back as the publisher's permission. Asked again after the TTL:
+      // the full one for a 5xx, the short one for a timeout or a network
+      // failure, as the shared cache keeps them (robotsLookup.ts).
+      const unreachable: RobotsUnreachable = res === null ? 'network_error' : 'unreachable' in res ? res.unreachable : 'server_error'
       entry = {
         robotsUrl, robots: null, sha256: null, absent: false,
-        unreachable: res === null ? 'network_error' : 'unreachable' in res ? res.unreachable : 'server_error',
-        expiresAt: Date.now() + ROBOTS_UNREACHABLE_TTL_MS,
+        unreachable,
+        expiresAt: Date.now() + (unreachable === 'server_error' ? ROBOTS_UNREACHABLE_TTL_MS : ROBOTS_NETWORK_FAILURE_TTL_MS),
       }
     } else if (res.status >= 400) {
       entry = { robotsUrl, robots: null, sha256: null, absent: true }
