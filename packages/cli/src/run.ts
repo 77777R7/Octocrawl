@@ -23,6 +23,7 @@ import {
 } from '@w2l/contracts'
 import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOptions } from './flags.js'
 import { login } from './login.js'
+import { nativeModuleHelp } from './nativeModule.js'
 
 export const CLI_VERSION = '0.8.2'
 
@@ -36,6 +37,17 @@ export interface CliIo {
 
 /** Exit codes: 0 a contentful page or a completed job, 1 anything else W2L answered, 2 a refused command line, 130 interrupted. */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
+  try {
+    return await dispatch(argv, io)
+  } catch (error) {
+    const help = nativeModuleHelp(error)
+    if (help === null) throw error
+    io.stderr(`octocrawl: ${help}`)
+    return 1
+  }
+}
+
+async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
   const [name, ...rest] = argv
   if (name === undefined || name === '--help' || name === 'help') {
     io.stdout(usage(null))
