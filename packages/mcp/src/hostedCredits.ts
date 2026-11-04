@@ -44,7 +44,8 @@ export interface RequestNote {
   status: string
   httpStatus: number | null
   reason: string | null
-  robots: 'allowed' | 'disallowed' | 'no_robots' | null
+  /** `unreachable`: robots.txt could not be read (a 5xx, a network error or a timeout), which counts as a disallow without being one the site wrote. */
+  robots: 'allowed' | 'disallowed' | 'no_robots' | 'unreachable' | null
   /** The Evidence Record's `rawSha256`. */
   sha256: string | null
   /** The URLs a map returned. */

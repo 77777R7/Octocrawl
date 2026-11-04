@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { agentHintsFor, BROWSER_NOT_INSTALLED_HINT, offPageHint, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, mapAgentHints, offPageHint, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -48,6 +48,9 @@ describe('agent hints', () => {
     expect(hints(disallowed({ appliedRules: [], unreachable: 'server_error' }))).toEqual([
       'robots.txt of example.test could not be read (server_error), which counts as a complete disallow; Octocrawl asks for it again after five minutes. A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL',
     ])
+    // A timeout or a network failure is asked again sooner (robotsLookup.ts ROBOTS_NETWORK_FAILURE_TTL_MS).
+    expect(hints(disallowed({ appliedRules: [], unreachable: 'timeout' }))[0]).toContain('could not be read (timeout), which counts as a complete disallow; Octocrawl asks for it again after half a minute.')
+    expect(hints(disallowed({ appliedRules: [], unreachable: 'network_error' }))[0]).toContain('asks for it again after half a minute')
     // A denial that was not robots.txt's (an address the policy refuses) names the egress policy and the recorded reason instead of a rule.
     expect(hints(result({ status: 'failed', failureReason: 'policy_denied', markdown: null, trace: [{ at: 1, lane: 'http', event: 'ssrf_denied', detail: { to: URL_, error: 'private address 10.0.0.1' } }] }))).toEqual([
       'the egress policy refused example.test (private address 10.0.0.1) and nothing was fetched; Octocrawl reaches public addresses, and a local server the addresses its policy allowlists',
@@ -242,5 +245,43 @@ describe('agent hints', () => {
     expect(hints(unavailable, ['browser_local'])).toEqual([SCREENSHOT_UNAVAILABLE_HINT])
     expect(SCREENSHOT_UNAVAILABLE_HINT).toContain('screenshot_failed')
     expect(SCREENSHOT_UNAVAILABLE_HINT).toContain('fullPage false')
+  })
+})
+
+describe('dns twin hint', () => {
+  const dns = (detail: Record<string, unknown> | null) => result({
+    requestedUrl: 'https://www.premiumplus.com/', status: 'failed', failureReason: 'dns_error', markdown: null, evidence: { finalUrl: 'https://www.premiumplus.com/', httpStatus: null },
+    trace: [{ at: 1, lane: 'http', event: 'dns_failed', detail: { to: 'https://www.premiumplus.com/', error: 'dns lookup failed for www.premiumplus.com: getaddrinfo ENOTFOUND www.premiumplus.com' } }, ...(detail === null ? [] : [{ at: 2, lane: 'http' as const, event: 'dns_twin_checked', detail }])],
+  })
+  const checked = (outcome: string, extra: Record<string, unknown> = {}) => ({ host: 'www.premiumplus.com', twin: 'premiumplus.com', to: 'https://premiumplus.com/', outcome, timeoutMs: 2000, ...extra })
+
+  it('names the twin that resolves and the URL to send, and keeps the record on the URL asked for', () => {
+    expect(hints(dns(checked('resolves')))).toEqual(['www.premiumplus.com does not resolve; premiumplus.com does; send https://premiumplus.com/ instead (this result stays the record of the URL asked for, which was not fetched)'])
+  })
+
+  it('says when neither name resolves, when the twin resolves to a refused address, and when the check ran out of time', () => {
+    expect(hints(dns(checked('unresolved', { error: 'dns lookup failed for premiumplus.com: getaddrinfo ENOTFOUND premiumplus.com' })))).toEqual(['www.premiumplus.com does not resolve, and neither does premiumplus.com; check the domain'])
+    // A resolver failure that is not the name's own answer may be the resolver's: the hint says so and quotes it.
+    expect(hints(dns(checked('unresolved', { error: 'dns lookup failed for premiumplus.com: getaddrinfo EAI_AGAIN premiumplus.com' })))).toEqual(['www.premiumplus.com does not resolve, and neither does premiumplus.com (dns lookup failed for premiumplus.com: getaddrinfo EAI_AGAIN premiumplus.com); check the domain, or the resolver where Octocrawl runs'])
+    expect(hints(dns(checked('denied', { error: 'ssrf denied https://premiumplus.com/: private address 10.0.0.1' })))).toEqual(['www.premiumplus.com does not resolve; premiumplus.com resolves to an address the egress policy refuses (ssrf denied https://premiumplus.com/: private address 10.0.0.1)'])
+    expect(hints(dns(checked('timeout')))).toEqual(['www.premiumplus.com does not resolve; whether premiumplus.com does was not learned within 2000 ms'])
+  })
+
+  it('says nothing for a dns_error whose lane checked no twin', () => {
+    expect(hints(dns(null))).toEqual([])
+  })
+})
+
+describe('map hints', () => {
+  const refused = (partial: Partial<Parameters<typeof mapAgentHints>[0]['refused']> = {}) => ({ duplicate: 0, collapsed: 0, hostDenied: 0, subtreeDenied: 0, pathDenied: 0, assetDenied: 0, robots: 0, robotsUnchecked: 0, searchFiltered: 0, overLimit: 0, samples: { collapsed: [], hostDenied: [], robots: [] }, ...partial })
+  const url = 'https://www.english.ids-cologne.de/ids-cologne-exhibitors/list-of-exhibitors/'
+
+  it('says how many URLs the start path\'s subtree kept out and what lists them', () => {
+    expect(mapAgentHints({ url, warnings: [], refused: refused({ subtreeDenied: 2555, hostDenied: 3 }) }, 60_000)).toEqual([
+      '2555 URLs found were outside the start URL\'s path subtree (/ids-cologne-exhibitors/list-of-exhibitors/) and are not listed; map https://www.english.ids-cologne.de/ or pass crawlEntireDomain: true for the whole host',
+    ])
+    expect(mapAgentHints({ url, warnings: [], refused: refused({ subtreeDenied: 1 }) }, 60_000)[0]).toMatch(/^1 URL found was outside/)
+    // Other refusals (other hosts, the caller's own filters, robots.txt) are counted, not hinted.
+    expect(mapAgentHints({ url, warnings: [], refused: refused({ hostDenied: 40, pathDenied: 3, robots: 2 }) }, 60_000)).toEqual([])
   })
 })

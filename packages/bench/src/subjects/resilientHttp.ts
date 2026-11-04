@@ -17,7 +17,7 @@ import {
   type TraceEvent,
 } from '@w2l/contracts'
 import { classifyContentType, collectLinks, detectFile, extractTf, htmlToMarkdown, responseFileName } from '@w2l/extract-tf'
-import { resilientFetch, createExecutionScope, raceWithSignal, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type ResilientFetcher } from '@w2l/http-core'
+import { resilientFetch, checkDnsTwin, createExecutionScope, dnsTwinUrl, raceWithSignal, throwIfExecutionStopped, classifyGate, escalationForBlock, parseRetryAfterMs, sha256Utf8, type DnsTwinCheck, type ResilientFetcher } from '@w2l/http-core'
 import { ProxyAgent, request, type Dispatcher } from 'undici'
 import { ContentDecodingError, contentEncodingLabel, decodeContentEncoding, DecompressedTooLargeError, UnsupportedContentEncodingError } from '../contentEncoding.js'
 import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, isLocalPreviewProxyTarget, readCappedBody, SsrfDeniedError, validateLocalPreviewProxy } from '../egress.js'
@@ -309,6 +309,16 @@ export class ResilientHttpSubject implements SubjectAdapter {
       if (!(error instanceof DnsLookupError) && !(error instanceof SsrfDeniedError)) throw error
       const dns = error instanceof DnsLookupError
       trace.push({ at: Date.now() - start, lane: 'http', event: dns ? 'dns_failed' : 'ssrf_denied', detail: { to: url, error: error.message } })
+      // A name that does not resolve may be the www/apex twin of one that does: one more lookup through the same guard,
+      // bounded and on the record, so the hint can name the URL to send. The result stays dns_error for the URL asked
+      // for, whatever the check meets (its verdict is already in; a deadline that ends the check is a timeout outcome on
+      // the record, not of the result). A twin the operator proxy would resolve is not asked, since the guard learns
+      // nothing about it here.
+      const twinUrl = dns ? dnsTwinUrl(url) : null
+      if (twinUrl !== null && this.route.viaOperatorProxy(twinUrl) === null) {
+        const twin: DnsTwinCheck | null = await checkDnsTwin(url, (target) => this.route.assertUrl(target), { signal }).catch(() => null)
+        if (twin !== null) trace.push({ at: Date.now() - start, lane: 'http', event: 'dns_twin_checked', detail: { ...twin } })
+      }
       return timedDenied(dns ? 'dns_error' : 'policy_denied')
     }
 

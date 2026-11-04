@@ -396,18 +396,34 @@ describe('ProviderSubject robots gate', () => {
     }
   })
 
-  it('asks for an unreachable robots.txt again after five minutes', async () => {
+  it('asks for a robots.txt that answered 5xx again after five minutes, and one that failed on the network within half a minute', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     try {
       let calls = 0
-      const fetcher: RobotsFetcher = async () => ++calls === 1 ? null : { text: 'User-agent: *\nAllow: /\n', status: 200, contentType: 'text/plain' }
+      const fetcher: RobotsFetcher = async () => ++calls === 1 ? { text: '', status: 503, contentType: null } : { text: 'User-agent: *\nAllow: /\n', status: 200, contentType: 'text/plain' }
       const subject = new ProviderSubject(decl(), new CountingTransport(), 'standard', null, fetcher)
       expect((await subject.fetch('https://shop.example/dp/A')).failureReason).toBe('policy_denied')
+      vi.setSystemTime(Date.now() + 31_000)
       expect((await subject.fetch('https://shop.example/dp/A')).failureReason).toBe('policy_denied')
       expect(calls).toBe(1)
       vi.setSystemTime(Date.now() + 5 * 60_000)
       expect((await subject.fetch('https://shop.example/dp/A')).status).toBe('success')
       expect(calls).toBe(2)
+
+      // A network failure (the fetcher's null) or the lookup's timeout is the shared cache's short TTL (robotsLookup.ts).
+      let flaky = 0
+      const flakyFetcher: RobotsFetcher = async () => ++flaky === 1 ? null : flaky === 2 ? { unreachable: 'timeout' } : { text: 'User-agent: *\nAllow: /\n', status: 200, contentType: 'text/plain' }
+      const retried = new ProviderSubject(decl(), new CountingTransport(), 'standard', null, flakyFetcher)
+      expect((await retried.fetch('https://shop.example/dp/A')).failureReason).toBe('policy_denied')
+      vi.setSystemTime(Date.now() + 29_000)
+      expect((await retried.fetch('https://shop.example/dp/A')).failureReason).toBe('policy_denied')
+      expect(flaky).toBe(1)
+      vi.setSystemTime(Date.now() + 2_000)
+      expect((await retried.fetch('https://shop.example/dp/A')).failureReason).toBe('policy_denied')
+      expect(flaky).toBe(2)
+      vi.setSystemTime(Date.now() + 31_000)
+      expect((await retried.fetch('https://shop.example/dp/A')).status).toBe('success')
+      expect(flaky).toBe(3)
     } finally { vi.useRealTimers() }
   })
 
@@ -416,7 +432,9 @@ describe('ProviderSubject robots gate', () => {
     try {
       vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason))))
       const pending = robotsFetcherVia()('https://shop.example/robots.txt', 'ProviderBot/1.0')
-      await vi.advanceTimersByTimeAsync(5_000)
+      await vi.advanceTimersByTimeAsync(14_000)
+      expect(vi.getTimerCount()).toBeGreaterThan(0)
+      await vi.advanceTimersByTimeAsync(1_000)
       expect(await pending).toEqual({ unreachable: 'timeout' })
       vi.stubGlobal('fetch', async () => { throw new TypeError('fetch failed') })
       expect(await robotsFetcherVia()('https://shop.example/robots.txt', 'ProviderBot/1.0')).toBeNull()

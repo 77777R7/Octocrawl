@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  checkDnsTwin, DNS_TWIN_TIMEOUT_MS, dnsTwinHost, dnsTwinUrl,
   DEFAULT_RESILIENT_CONFIG,
   isTlsError,
   resilientFetch,
@@ -481,5 +482,36 @@ describe('resilientFetch: certificate failures', () => {
     expect(connection.trace[0]?.detail).toMatchObject({ reason: 'connection_error', code: 'ECONNREFUSED' })
     expect(isTlsError(refused)).toBe(false)
     expect(isTlsError(Object.assign(new Error('write EPROTO: protocol error on a plain socket'), { code: 'EPROTO' }))).toBe(false)
+  })
+})
+
+describe('dns twin check', () => {
+  it('names the www twin of an apex and the apex of a www host, and no twin for an address or a single label', () => {
+    expect(dnsTwinHost('www.premiumplus.com')).toBe('premiumplus.com')
+    expect(dnsTwinHost('premiumplus.com')).toBe('www.premiumplus.com')
+    expect(dnsTwinHost('shop.example.co.uk')).toBe('www.shop.example.co.uk')
+    expect(dnsTwinHost('WWW.Example.COM.')).toBe('example.com')
+    for (const host of ['localhost', 'www.localhost', '10.0.0.1', '[::1]', 'www.']) expect(dnsTwinHost(host), host).toBeNull()
+    expect(dnsTwinUrl('https://www.premiumplus.com/a?b=1#c')).toBe('https://premiumplus.com/a?b=1#c')
+    expect(dnsTwinUrl('https://10.0.0.1/')).toBeNull()
+  })
+
+  it('runs the guard on the twin URL alone and reports what it said: resolves, unresolved, denied, or a timeout, within the bound', async () => {
+    const asked: string[] = []
+    const guard = (outcome: () => Promise<void>) => async (url: string) => { asked.push(url); await outcome() }
+    const dnsError = Object.assign(new Error('dns lookup failed for premiumplus.com: ENOTFOUND'), { name: 'DnsLookupError' })
+    const ssrfError = Object.assign(new Error('ssrf denied https://premiumplus.com/: private address'), { name: 'SsrfDeniedError' })
+    await expect(checkDnsTwin('https://www.premiumplus.com/', guard(async () => {}))).resolves.toEqual({ host: 'www.premiumplus.com', twin: 'premiumplus.com', to: 'https://premiumplus.com/', outcome: 'resolves', timeoutMs: DNS_TWIN_TIMEOUT_MS })
+    await expect(checkDnsTwin('https://www.premiumplus.com/', guard(async () => { throw dnsError }))).resolves.toMatchObject({ outcome: 'unresolved', error: dnsError.message })
+    await expect(checkDnsTwin('https://www.premiumplus.com/', guard(async () => { throw ssrfError }))).resolves.toMatchObject({ outcome: 'denied', error: ssrfError.message })
+    await expect(checkDnsTwin('https://www.premiumplus.com/', guard(() => new Promise(() => {})), { timeoutMs: 20 })).resolves.toMatchObject({ outcome: 'timeout', timeoutMs: 20 })
+    expect(asked).toEqual(['https://premiumplus.com/', 'https://premiumplus.com/', 'https://premiumplus.com/', 'https://premiumplus.com/'])
+    // A host with no twin is not looked up. The caller's own deadline ends the check as a timeout outcome and never throws:
+    // the requested name's verdict is already in, and the check must not change it.
+    await expect(checkDnsTwin('https://10.0.0.1/', guard(async () => {}))).resolves.toBeNull()
+    const controller = new AbortController()
+    const pending = checkDnsTwin('https://www.premiumplus.com/', guard(() => new Promise(() => {})), { signal: controller.signal })
+    controller.abort(new Error('caller cancelled'))
+    await expect(pending).resolves.toMatchObject({ outcome: 'timeout', error: 'the request ended the check: caller cancelled', timeoutMs: DNS_TWIN_TIMEOUT_MS })
   })
 })

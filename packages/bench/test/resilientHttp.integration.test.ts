@@ -500,13 +500,16 @@ describe('HTTP lane egress failures', () => {
     }
   })
 
-  it('reports a host that does not resolve as dns_error, not policy_denied', async () => {
+  it('reports a host that does not resolve as dns_error, not policy_denied, and records whether its www/apex twin resolves', async () => {
     const http = new ResilientHttpSubject()
     try {
-      const out = await http.fetch('http://w2l-dns-failure.invalid/page')
-      expect(out).toMatchObject({ status: 'failed', failureReason: 'dns_error' })
+      const out = await http.fetch('http://www.w2l-dns-failure.invalid/page')
+      expect(out).toMatchObject({ status: 'failed', failureReason: 'dns_error', requestedUrl: 'http://www.w2l-dns-failure.invalid/page' })
       expect(out.usage.requestCount).toBe(0)
       expect(out.trace.some(event => event.event === 'dns_failed')).toBe(true)
+      // The twin is looked up through the same guard, never fetched, and its outcome is on the record (.invalid never resolves).
+      expect(out.trace.find(event => event.event === 'dns_twin_checked')?.detail).toMatchObject({ host: 'www.w2l-dns-failure.invalid', twin: 'w2l-dns-failure.invalid', to: 'http://w2l-dns-failure.invalid/page', outcome: 'unresolved', timeoutMs: 2000 })
+      expect(out.evidence.finalUrl).toBe('http://www.w2l-dns-failure.invalid/page')
     } finally { await http.teardown() }
   })
 })

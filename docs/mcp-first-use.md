@@ -127,7 +127,11 @@ lane alone; it never reads a second page. Ask for, say,
 `map` with `{ "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP", "limit": 100 }`.
 The tool is annotated read-only and idempotent, and declares an output
 schema, so the result comes as `structuredContent` beside the JSON text:
-`{ id, status, stoppedBy, links: [{ url, title?, description? }], warning?, agentHints?, counts: { returned, refused } }`.
+`{ id, status, stoppedBy, links: [{ url, title?, description? }], warning?, agentHints?, counts: { returned, refused, ... } }`,
+where `counts` also carries each refusal counter above zero by its reason
+(`subtreeDenied`, `hostDenied`, `collapsed`, `robots`, ...; the full answer's
+`refused` names them all), and `agentHints` says when the start URL's path
+subtree kept URLs out (map the site root, or pass `crawlEntireDomain: true`).
 `status` is `completed`, `partial` (the deadline cut the map or a source
 failed) or `failed` (nothing found); `stoppedBy` says whether `limit` or
 `timeout` stopped it. A title is the start page's own, an anchor's text or a
