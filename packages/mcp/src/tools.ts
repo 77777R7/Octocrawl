@@ -339,11 +339,11 @@ const DEFINITIONS = [
         stoppedBy: { enum: ['limit', 'timeout', null] },
         links: {
           type: 'array',
-          items: { type: 'object', properties: { url: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, robots: { enum: ['allowed', 'no_robots', 'disallowed', 'unreachable'], description: 'The link\'s robots.txt verdict: every link with debug=true; in the compact answer only on a link robots.txt keeps out, returned under ignoreRobotsTxt.' } }, required: ['url'] },
+          items: { type: 'object', properties: { url: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, robots: { enum: ['allowed', 'no_robots', 'disallowed', 'unreachable'], description: 'The robots.txt verdict; in the compact answer only on a link it keeps out (ignoreRobotsTxt).' } }, required: ['url'] },
         },
         warning: { type: 'string', description: 'The warnings\' messages, joined.' },
         agentHints: { type: 'array', items: { type: 'string' } },
-        counts: { type: 'object', properties: { returned: { type: 'integer' }, refused: { type: 'integer' } } },
+        counts: { type: 'object', description: 'returned, refused, and each refusal reason above zero, by name.', properties: { returned: { type: 'integer' }, refused: { type: 'integer' } }, additionalProperties: { type: 'integer' } },
       },
       required: ['id', 'status', 'stoppedBy', 'links'],
     },
@@ -922,9 +922,10 @@ function required(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new RequestError(`${name} is required`)
   return value
 }
-/** A map for an agent: its links' URLs and titles, the warnings as one string, the hints, and how many URLs it returned and left out. */
+/** A map for an agent: its links' URLs and titles, the warnings as one string, the hints, and how many URLs it returned and left out, the refusals by reason (the nonzero counters, as the full answer's `refused` names them). */
 function compactMap(response: MapResponse) {
   const { samples: _samples, ...counters } = response.refused
+  const byReason = Object.fromEntries(Object.entries(counters).filter(([, n]) => n > 0))
   return {
     id: response.id,
     status: response.status,
@@ -933,7 +934,7 @@ function compactMap(response: MapResponse) {
     links: response.links.map(({ url, title, description, robots }) => ({ url, ...(title === undefined ? {} : { title }), ...(description === undefined ? {} : { description }), ...(robots === 'disallowed' || robots === 'unreachable' ? { robots } : {}) })),
     ...(response.warnings.length === 0 ? {} : { warning: response.warnings.map((warning) => warning.message).join(' ') }),
     ...(response.agentHints === undefined || response.agentHints.length === 0 ? {} : { agentHints: response.agentHints }),
-    counts: { returned: response.links.length, refused: Object.values(counters).reduce((sum, n) => sum + n, 0) },
+    counts: { returned: response.links.length, refused: Object.values(counters).reduce((sum, n) => sum + n, 0), ...byReason },
   }
 }
 function compactMonitor(view: Awaited<ReturnType<W2L['getMonitor']>>) {
