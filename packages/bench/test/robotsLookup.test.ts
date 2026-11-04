@@ -3,7 +3,10 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { localNetworkPolicy } from '@w2l/contracts'
 import { createGuardedDispatcher } from '../src/egress.js'
-import { RobotsOriginCache, robotsFetcherOf } from '../src/robotsLookup.js'
+import { ROBOTS_UNREACHABLE_TTL_MS, RobotsOriginCache, robotsFetcherOf } from '../src/robotsLookup.js'
+
+/** Node's `fetch failed`, wrapping the socket's error as undici does. */
+const fetchFailed = (code: string, message = code) => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(message), { code }) })
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -130,6 +133,69 @@ describe('RobotsOriginCache reliability boundaries', () => {
     } finally { await cache.teardown() }
   })
 
+  it('reads robots.txt once more after a network failure, but not after a certificate failure', async () => {
+    // 2026-11-04: a reset on the first read of a European site from the hosted region made a page policy_denied for
+    // five minutes; the second read says what the host does.
+    let calls = 0
+    vi.stubGlobal('fetch', async () => { calls++; if (calls === 1) throw fetchFailed('ECONNRESET', 'read ECONNRESET'); return response('User-agent: *\nDisallow: /x\n') })
+    const cache = new RobotsOriginCache()
+    try {
+      const entry = await cache.lookup(`${origin}/a`, 'w2l-test')
+      expect(calls).toBe(2)
+      expect(entry).not.toHaveProperty('unreachable')
+      expect(cache.decision(entry, `${origin}/x`, 'w2l-test').decision).toBe('disallowed')
+      expect(cache.decision(entry, `${origin}/y`, 'w2l-test').decision).toBe('allowed')
+    } finally { await cache.teardown() }
+    // A certificate that did not verify fails the same way again, and the lane reports it as the host's tls_error.
+    calls = 0
+    vi.stubGlobal('fetch', async () => { calls++; throw fetchFailed('CERT_HAS_EXPIRED', 'certificate has expired') })
+    const tls = new RobotsOriginCache()
+    try {
+      expect(await tls.lookup(`${origin}/a`, 'w2l-test')).toMatchObject({ unreachable: 'network_error', error: { code: 'CERT_HAS_EXPIRED', tls: true } })
+      expect(calls).toBe(1)
+    } finally { await tls.teardown() }
+    // The lookup's own limits are not the network's either.
+    calls = 0
+    vi.stubGlobal('fetch', async () => { calls++; return response('', 302, { location: `${origin}/robots.txt` }) })
+    const loop = new RobotsOriginCache()
+    try {
+      expect(await loop.lookup(`${origin}/a`, 'w2l-test')).toMatchObject({ unreachable: 'network_error' })
+      expect(calls).toBe(localNetworkPolicy().maxRedirects + 1)
+    } finally { await loop.teardown() }
+  })
+
+  it('asks again within half a minute for a robots.txt that timed out or failed on the network, and after the full TTL for a 5xx', async () => {
+    const base = Date.now()
+    const now = vi.spyOn(Date, 'now').mockReturnValue(base)
+    let calls = 0
+    vi.stubGlobal('fetch', async () => { calls++; throw fetchFailed('ECONNREFUSED', 'connect ECONNREFUSED') })
+    const flaky = new RobotsOriginCache()
+    try {
+      expect((await flaky.lookup(`${origin}/a`, 'w2l-test'))?.unreachable).toBe('network_error')
+      expect(calls).toBe(2)
+      now.mockReturnValue(base + 29_000)
+      await flaky.lookup(`${origin}/b`, 'w2l-test')
+      expect(calls).toBe(2)
+      now.mockReturnValue(base + 31_000)
+      await flaky.lookup(`${origin}/c`, 'w2l-test')
+      expect(calls).toBe(4)
+    } finally { await flaky.teardown() }
+    // A 5xx is the site's own answer and keeps the full TTL.
+    calls = 0
+    vi.stubGlobal('fetch', async () => { calls++; return response('', 503) })
+    const down = new RobotsOriginCache()
+    try {
+      now.mockReturnValue(base)
+      expect((await down.lookup(`${origin}/a`, 'w2l-test'))?.unreachable).toBe('server_error')
+      now.mockReturnValue(base + 31_000)
+      await down.lookup(`${origin}/b`, 'w2l-test')
+      expect(calls).toBe(1)
+      now.mockReturnValue(base + ROBOTS_UNREACHABLE_TTL_MS + 1_000)
+      await down.lookup(`${origin}/c`, 'w2l-test')
+      expect(calls).toBe(2)
+    } finally { await down.teardown() }
+  })
+
   it('treats a redirected robots 404 as unavailable, not as a redirect failure', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 302, headers: { location: '/different-robots.txt' } }))
@@ -146,7 +212,8 @@ describe('RobotsOriginCache reliability boundaries', () => {
   it('treats its own deadline as an unreachable robots.txt; only the caller can cancel', async () => {
     // A robots.txt that never answers must not throw out of the fetch it
     // guards: the lookup's own deadline is a network error like any other.
-    const server = createServer(() => { /* never answers */ })
+    let asked = 0
+    const server = createServer(() => { asked++ /* never answers */ })
     server.listen(0, '127.0.0.1')
     await once(server, 'listening')
     const address = server.address()
@@ -157,6 +224,8 @@ describe('RobotsOriginCache reliability boundaries', () => {
       const cache = new RobotsOriginCache(policy)
       const entry = await cache.lookup(url, 'w2l-test')
       expect(entry).toMatchObject({ robots: null, absent: false, unreachable: 'timeout' })
+      // The deadline is not a network failure: the file is not asked for again within it.
+      expect(asked).toBe(1)
       expect(cache.decision(entry, url, 'w2l-test')).toMatchObject({ decision: 'disallowed', unreachable: 'timeout' })
       // The provider rung reads the same deadline as its own fetcher's timeout.
       expect(await robotsFetcherOf(cache)(url, 'w2l-test')).toEqual({ unreachable: 'timeout' })

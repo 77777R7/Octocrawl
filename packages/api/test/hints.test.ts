@@ -39,6 +39,9 @@ describe('agent hints', () => {
     expect(hints(disallowed({ appliedRules: [], unreachable: 'server_error' }))).toEqual([
       'robots.txt of example.test could not be read (server_error), which counts as a complete disallow; Octocrawl asks for it again after five minutes. A local Octocrawl server fetches a URL a scrape or batch names whatever robots.txt says, and a crawl or map started there with ignoreRobotsTxt fetches the links it disallows, each on the record; a hosted server obeys robots.txt for every URL',
     ])
+    // A timeout or a network failure is asked again sooner (robotsLookup.ts ROBOTS_NETWORK_FAILURE_TTL_MS).
+    expect(hints(disallowed({ appliedRules: [], unreachable: 'timeout' }))[0]).toContain('could not be read (timeout), which counts as a complete disallow; Octocrawl asks for it again after half a minute.')
+    expect(hints(disallowed({ appliedRules: [], unreachable: 'network_error' }))[0]).toContain('asks for it again after half a minute')
     // A denial that was not robots.txt's (an address the policy refuses) names the egress policy and the recorded reason instead of a rule.
     expect(hints(result({ status: 'failed', failureReason: 'policy_denied', markdown: null, trace: [{ at: 1, lane: 'http', event: 'ssrf_denied', detail: { to: URL_, error: 'private address 10.0.0.1' } }] }))).toEqual([
       'the egress policy refused example.test (private address 10.0.0.1) and nothing was fetched; Octocrawl reaches public addresses, and a local server the addresses its policy allowlists',
