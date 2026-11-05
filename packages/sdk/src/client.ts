@@ -10,6 +10,9 @@ import type {
   WebhookDelivery,
   CrawlError,
   CrawlPage,
+  CrawlPageField,
+  CrawlPageListed,
+  CrawlPageProjection,
   CrawlPageList,
   CrawlPageQuery,
   CrawlReport,
@@ -229,6 +232,10 @@ export interface BatchDocuments extends PaginationEnd {
 
 /** A page listing's query (`limit`, `attemptId`, `debug`, `includeDuplicates`) with the caps on how far it follows cursors. */
 export type PagedListOptions = Omit<CrawlPageQuery, 'cursor'> & PaginationLimits
+/** What a page list answers with: whole pages, or, when the options name `fields`, projections (the kept fields and those asked for). */
+export type ListedPage<O extends CrawlPageQuery> = CrawlPageListed<O>
+/** What an errors list answers with: whole error items, or projections when the options name `fields`. */
+export type ListedError<O extends CrawlPageQuery> = O extends { fields: readonly CrawlPageField[] } ? CrawlPageProjection : CrawlError
 
 /** The largest page the API serves: crawl pages up to 1 000, batch items up to 50. */
 const CRAWL_PAGE_MAX_LIMIT = 1_000
@@ -454,22 +461,23 @@ export class W2L {
     return this.get<BatchErrorsResponse>(`/v1/batches/${encodeURIComponent(id)}/errors${suffix}`, request, `batch not found: ${id}`)
   }
 
-  async getBatchItems(id: string, options: CrawlPageQuery = {}, request: RequestOptions = {}): Promise<CrawlPageList<CrawlPage>> {
-    return this.getPageList<CrawlPage>(`/v1/batches/${encodeURIComponent(id)}/items`, options, request)
+  /** A page of a batch's items; `fields` keeps only the named item fields (plus id, url, status, createdAt), so the answer is then a list of CrawlPageProjection. */
+  async getBatchItems<O extends CrawlPageQuery = CrawlPageQuery>(id: string, options: O = {} as O, request: RequestOptions = {}): Promise<CrawlPageList<ListedPage<O>>> {
+    return this.getPageList<ListedPage<O>>(`/v1/batches/${encodeURIComponent(id)}/items`, options, request)
   }
 
   /** Every item of a batch, page by page (at most 50 per request), or as many as the PaginationLimits allow; the generator's return value says where it stopped. */
-  listBatchItems(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): AsyncGenerator<CrawlPage, PaginationEnd> {
-    return this.paginate((query) => this.getBatchItems(id, query, request), options, request, BATCH_ITEM_MAX_LIMIT, 'batch items')
+  listBatchItems<O extends PagedListOptions = PagedListOptions>(id: string, options: O = {} as O, request: RequestOptions = {}): AsyncGenerator<ListedPage<O>, PaginationEnd> {
+    return this.paginate<ListedPage<O>>((query) => this.getBatchItems(id, query, request) as Promise<CrawlPageList<ListedPage<O>>>, options, request, BATCH_ITEM_MAX_LIMIT, 'batch items')
   }
 
   /** The items listBatchItems would yield under the same options, collected, with where the listing stopped. */
-  async collectBatchItems(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): Promise<PageCollection<CrawlPage>> {
+  async collectBatchItems<O extends PagedListOptions = PagedListOptions>(id: string, options: O = {} as O, request: RequestOptions = {}): Promise<PageCollection<ListedPage<O>>> {
     return collect(this.listBatchItems(id, options, request))
   }
 
   /** A batch's status and its items in one answer, every item unless the PaginationLimits stop the listing. */
-  async getBatchDocuments(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): Promise<BatchDocuments> {
+  async getBatchDocuments(id: string, options: Omit<PagedListOptions, 'fields'> = {}, request: RequestOptions = {}): Promise<BatchDocuments> {
     const report = await this.getBatch(id, request)
     const { items, nextCursor, stoppedBy } = await this.collectBatchItems(id, options, request)
     return { report, items, nextCursor, stoppedBy }
@@ -606,8 +614,9 @@ export class W2L {
     return { taskId, report, pages, errors }
   }
 
-  async getCrawlPages(id: string, options: CrawlPageQuery = {}, request: RequestOptions = {}): Promise<CrawlPageList<CrawlPage>> {
-    return this.getPageList<CrawlPage>(`/v1/crawl/${encodeURIComponent(id)}/pages`, options, request)
+  /** A page of a crawl's pages; `fields` keeps only the named item fields (plus id, url, status, createdAt), so the answer is then a list of CrawlPageProjection. */
+  async getCrawlPages<O extends CrawlPageQuery = CrawlPageQuery>(id: string, options: O = {} as O, request: RequestOptions = {}): Promise<CrawlPageList<ListedPage<O>>> {
+    return this.getPageList<ListedPage<O>>(`/v1/crawl/${encodeURIComponent(id)}/pages`, options, request)
   }
 
   /**
@@ -617,17 +626,17 @@ export class W2L {
    * the pages it reuses in its new attempt, so that attempt normally holds
    * every page.
    */
-  listCrawlPages(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): AsyncGenerator<CrawlPage, PaginationEnd> {
-    return this.paginate((query) => this.getCrawlPages(id, query, request), options, request, CRAWL_PAGE_MAX_LIMIT, 'crawl pages')
+  listCrawlPages<O extends PagedListOptions = PagedListOptions>(id: string, options: O = {} as O, request: RequestOptions = {}): AsyncGenerator<ListedPage<O>, PaginationEnd> {
+    return this.paginate<ListedPage<O>>((query) => this.getCrawlPages(id, query, request) as Promise<CrawlPageList<ListedPage<O>>>, options, request, CRAWL_PAGE_MAX_LIMIT, 'crawl pages')
   }
 
   /** The pages listCrawlPages would yield under the same options, collected, with where the listing stopped. */
-  async collectCrawlPages(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): Promise<PageCollection<CrawlPage>> {
+  async collectCrawlPages<O extends PagedListOptions = PagedListOptions>(id: string, options: O = {} as O, request: RequestOptions = {}): Promise<PageCollection<ListedPage<O>>> {
     return collect(this.listCrawlPages(id, options, request))
   }
 
   /** A crawl's status and its pages in one answer, every page unless the PaginationLimits stop the listing. */
-  async getCrawlDocuments(id: string, options: PagedListOptions = {}, request: RequestOptions = {}): Promise<CrawlDocuments> {
+  async getCrawlDocuments(id: string, options: Omit<PagedListOptions, 'fields'> = {}, request: RequestOptions = {}): Promise<CrawlDocuments> {
     const report = await this.getCrawl(id, request)
     const { items, nextCursor, stoppedBy } = await this.collectCrawlPages(id, options, request)
     return { report, pages: items, nextCursor, stoppedBy }
@@ -667,8 +676,9 @@ export class W2L {
     }
   }
 
-  async getCrawlErrors(id: string, options: CrawlPageQuery = {}, request: RequestOptions = {}): Promise<CrawlPageList<CrawlError>> {
-    return this.getPageList<CrawlError>(`/v1/crawl/${encodeURIComponent(id)}/errors`, options, request)
+  /** A page of a crawl's errors; `fields` keeps only the named item fields (plus id, url, status, createdAt), so the answer is then a list of CrawlPageProjection. */
+  async getCrawlErrors<O extends CrawlPageQuery = CrawlPageQuery>(id: string, options: O = {} as O, request: RequestOptions = {}): Promise<CrawlPageList<ListedError<O>>> {
+    return this.getPageList<ListedError<O>>(`/v1/crawl/${encodeURIComponent(id)}/errors`, options, request)
   }
 
   async cancelCrawl(id: string, request: RequestOptions = {}): Promise<CrawlReport> {
@@ -848,6 +858,7 @@ export class W2L {
     if (options.attemptId !== undefined) params.set('attemptId', options.attemptId)
     if (options.debug !== undefined) params.set('debug', String(options.debug))
     if (options.includeDuplicates !== undefined) params.set('includeDuplicates', String(options.includeDuplicates))
+    if (options.fields !== undefined) params.set('fields', options.fields.join(','))
     const suffix = params.size === 0 ? '' : `?${params.toString()}`
     return this.get<CrawlPageList<T>>(`${path}${suffix}`, request, `crawl not found: ${path}`)
   }

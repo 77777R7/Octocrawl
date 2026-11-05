@@ -7,7 +7,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
-import { CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlStartRequest, readWebhook, RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
+import { CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlPageFields, parseCrawlStartRequest, projectCrawlPage, readWebhook, RequestError, type CrawlPageField, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import type { CreditsStore } from './hostedCredits.js'
 import { CREDITS } from './hostedCredits.js'
 import { asksModelFallback } from './hostedModel.js'
@@ -322,6 +322,10 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     const cursor = url.searchParams.get('cursor')
     const from = cursor === null ? [0, 0] : /^\d+:\d+$/.test(cursor) ? cursor.split(':').map(Number) : await afterStep(job, cursor)
     if (from === null || from.length !== 2 || !from.every((n) => Number.isSafeInteger(n) && n >= 0)) return refusal(400, 'invalid_request', 'cursor is not one this API issued')
+    // The item fields asked for (`fields=url,status,json`), as the local server takes them; the whole item without.
+    const fieldsParam = url.searchParams.get('fields')
+    let fields: readonly CrawlPageField[] | undefined
+    try { fields = fieldsParam === null ? undefined : parseCrawlPageFields(fieldsParam) } catch (error) { return refusal(400, 'invalid_request', error instanceof Error ? error.message : String(error)) }
     const items: unknown[] = []
     let bytes = 0
     let full = false
@@ -334,7 +338,7 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
         if (filter === 'pages' && (isError || item.status === 'duplicate')) continue
         if (filter === 'errors' && !isError) continue
         if (items.length === limit || (items.length > 0 && bytes + lines[line]!.length > PAGE_LIST_MAX_BYTES)) { full = true; break }
-        items.push(item)
+        items.push(fields === undefined ? item : projectCrawlPage(item, fields))
         bytes += lines[line]!.length
       }
       if (full) break

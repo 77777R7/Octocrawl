@@ -490,6 +490,10 @@ describe('W2L SDK', () => {
     for await (const item of client.listBatchItems('batch-1', { maxResults: 3 })) items.push(item.id)
     expect(items).toEqual(['p1', 'p2', 'p3'])
     expect(calls.at(-1)).toBe('/v1/batches/batch-1/items?limit=3')
+    await client.getBatchItems('batch-1', { limit: 2, fields: ['url', 'json'] })
+    expect(calls.at(-1)).toBe('/v1/batches/batch-1/items?limit=2&fields=url%2Cjson')
+    await client.collectBatchItems('batch-1', { limit: 5, fields: ['status'] })
+    expect(calls.at(-1)).toContain('fields=status')
     // No caps: everything, and the end is the end.
     expect(await client.collectBatchItems('batch-1', { limit: 5 })).toMatchObject({ items: all.slice(0, 8), nextCursor: null, hasMore: false, stoppedBy: 'end' })
     const whole = await client.getBatchDocuments('batch-1', { limit: 50 })

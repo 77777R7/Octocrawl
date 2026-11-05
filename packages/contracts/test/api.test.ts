@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, cacheLookupRequested, cacheStateOf, CRAWL_MODES, MAX_CACHE_AGE_MS, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageQuery, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, cacheLookupRequested, cacheStateOf, CRAWL_MODES, MAX_CACHE_AGE_MS, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, CRAWL_PAGE_FIELDS, projectCrawlPage, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageFields, parseCrawlPageQuery, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -774,3 +774,25 @@ describe('the list format', () => {
   })
 })
 
+describe('a page list\'s fields projection', () => {
+  it('parses fields from the query as a comma list of item fields, and refuses an unknown or empty one by name', () => {
+    expect(parseCrawlPageQuery({ fields: 'url,status,json' })).toMatchObject({ fields: ['url', 'status', 'json'] })
+    expect(parseCrawlPageQuery({})).not.toHaveProperty('fields')
+    expect(() => parseCrawlPageQuery({ fields: 'url,finalUrl' })).toThrow('fields names no item field: finalUrl (the Evidence Record holds finalUrl; ask for evidenceRecord)')
+    expect(() => parseCrawlPageQuery({ fields: '' })).toThrow('fields must name at least one item field')
+    expect(() => parseCrawlPageQuery({ fields: 'url,,json' })).toThrow('fields must not contain an empty name')
+    // The MCP tool sends an array; a comma string is taken the same way.
+    expect(parseCrawlPageFields(['markdown', 'warnings'])).toEqual(['markdown', 'warnings'])
+    expect(() => parseCrawlPageFields(['url', 7])).toThrow('fields must be a list of item field names')
+    expect(() => parseCrawlPageFields(['nope'])).toThrow('fields names no item field: nope')
+    expect(CRAWL_PAGE_FIELDS).toContain('evidenceRecord')
+    expect(CRAWL_PAGE_FIELDS).not.toContain('finalUrl')
+  })
+
+  it('projects an item to the fields asked for, always keeping id, url, status and createdAt, and leaves out a field the item lacks', () => {
+    const item = { id: 'p1', url: 'https://a.test/', canonicalUrl: 'https://a.test/', status: 'success', markdown: '# A', json: { status: 'complete', data: { title: 'A' } }, evidenceRecord: { finalUrl: 'https://a.test/' }, createdAt: '2026-11-05T00:00:00.000Z', updatedAt: '2026-11-05T00:00:00.000Z', trace: [] }
+    expect(projectCrawlPage(item, ['json', 'markdown'])).toEqual({ id: 'p1', url: 'https://a.test/', status: 'success', json: { status: 'complete', data: { title: 'A' } }, markdown: '# A', createdAt: '2026-11-05T00:00:00.000Z' })
+    expect(Object.keys(projectCrawlPage(item, ['warnings', 'url']))).toEqual(['id', 'url', 'status', 'createdAt'])
+    expect(projectCrawlPage(item, ['evidenceRecord'])).toMatchObject({ evidenceRecord: { finalUrl: 'https://a.test/' } })
+  })
+})

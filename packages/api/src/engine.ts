@@ -69,6 +69,7 @@ import {
   stepStatusFromResult,
   type ParsedBatchStartRequest,
   BATCH_ERRORS_MAX_LIMIT,
+  projectCrawlPage,
   RequestError,
   type FetchResult,
   type ListFormatRequest,
@@ -79,6 +80,9 @@ import {
   type Task,
   type TaskStatus,
   type BudgetKind,
+  type CrawlPageField,
+  type CrawlPageListed,
+  type CrawlPageProjection,
   type HostPace,
   type HostPacing,
   type CrawlPageQuery,
@@ -309,7 +313,8 @@ export interface ApiEngine {
   /** The same for startBatch. A refusal that depends on the server's state (a batch limit, a submission in progress) is not made. */
   checkBatchStart(req: ParsedBatchStartRequest): void
   getBatch(taskId: string): Promise<BatchStatusResponse | null>
-  getBatchItems(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
+  /** A batch's items; with `query.fields` each is a CrawlPageProjection (the kept fields and those asked for). */
+  getBatchItems<Q extends CrawlPageQuery | undefined = undefined>(taskId: string, query?: Q): Promise<CrawlPageList<CrawlPageListed<Q>> | null>
   /**
    * The in-process hub a job's events pass through (`started`, one `page`
    * per persisted step, the `terminal`): what the stream routes subscribe
@@ -335,8 +340,9 @@ export interface ApiEngine {
   getCrawlWithSteps(taskId: string): Promise<CrawlWithSteps | null>
   /** Null when there is no such task; a RequestError for a cursor that does not parse. */
   getCrawlStatusPage(taskId: string, query: { cursor?: string; limit: number }): Promise<CrawlStatusPage | null>
-  getCrawlPages(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlPage> | null>
-  getCrawlErrors(taskId: string, query?: CrawlPageQuery): Promise<CrawlPageList<CrawlError> | null>
+  /** A crawl's pages and its errors; with `query.fields` each is a CrawlPageProjection (the kept fields and those asked for). */
+  getCrawlPages<Q extends CrawlPageQuery | undefined = undefined>(taskId: string, query?: Q): Promise<CrawlPageList<CrawlPageListed<Q>> | null>
+  getCrawlErrors<Q extends CrawlPageQuery | undefined = undefined>(taskId: string, query?: Q): Promise<CrawlPageList<CrawlPageListed<Q>> | null>
   cancelCrawl(taskId: string): Promise<CrawlReport | null>
   /**
    * Restart a paused or failed crawl, or one no process is running, with the
@@ -2396,11 +2402,11 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       return { ...page, items: page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] })) }
     },
 
-    async getBatchItems(taskId, query) {
+    async getBatchItems<Q extends CrawlPageQuery | undefined>(taskId: string, query?: Q) {
       if (await this.getBatch(taskId) === null) return null
       const page = await loadCrawlPageList(taskId, { ...query, limit: Math.min(50, query?.limit ?? 10) }, 'all', true)
-      if (page === null || query?.debug === true) return page
-      return { ...page, items: page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] })) }
+      if (page === null) return null
+      return projected(query?.debug === true ? page : { ...page, items: page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] })) }, query?.fields) as CrawlPageList<CrawlPageListed<Q>>
     },
 
     async getBatchErrors(taskId, query = {}) {
@@ -2467,17 +2473,17 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
       }
     },
 
-    async getCrawlPages(taskId, query) {
+    async getCrawlPages<Q extends CrawlPageQuery | undefined>(taskId: string, query?: Q) {
       const page = await loadCrawlPageList(taskId, query, 'pages')
+      if (page === null) return null
       // Like batch items: the routing audit and trace only with debug=true.
-      if (page === null || query?.debug === true) return page
-      return { ...page, items: page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] })) }
+      return projected(query?.debug === true ? page : { ...page, items: page.items.map(({ audit: _audit, ...item }) => ({ ...item, trace: [] })) }, query?.fields) as CrawlPageList<CrawlPageListed<Q>>
     },
 
-    getCrawlErrors: async (taskId, query) => {
+    getCrawlErrors: async <Q extends CrawlPageQuery | undefined>(taskId: string, query?: Q) => {
       const page = await loadCrawlPageList(taskId, query, 'errors')
       if (page === null) return null
-      return page
+      return projected(page, query?.fields) as CrawlPageList<CrawlPageListed<Q>>
     },
 
     async cancelCrawl(taskId) {
@@ -3420,4 +3426,10 @@ function slowedHosts(task: Task): { pacing?: Record<string, HostPace> } {
     }
   }
   return Object.keys(pacing).length === 0 ? {} : { pacing }
+}
+
+/** A page list under a `fields` projection (CrawlPageQuery.fields): each item keeps id, url, status, createdAt and the fields asked for; the list as it is without one. */
+function projected<T extends CrawlPage>(page: CrawlPageList<T>, fields: readonly CrawlPageField[] | undefined): CrawlPageList<T | CrawlPageProjection> {
+  if (fields === undefined) return page
+  return { ...page, items: page.items.map((item) => projectCrawlPage(item, fields)) }
 }

@@ -3,7 +3,7 @@
  * No resources, no OAuth, no second result type.
  */
 
-import { BATCH_ERRORS_MAX_LIMIT, BLOCK_REASON, FAILURE_REASON, RESULT_STATUS, TASK_STATUS, MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_TYPES, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchHandoffRequest, parseBatchStartRequest, parseLoginImportRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
+import { BATCH_ERRORS_MAX_LIMIT, BLOCK_REASON, FAILURE_REASON, RESULT_STATUS, TASK_STATUS, MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_TYPES, MAX_ACTIONS, PDF_PAPER_FORMATS, DEFAULT_MAP_LIMIT, DEFAULT_MAP_TIMEOUT_MS, MAP_SEARCH_MAX_CHARS, MAX_CACHE_AGE_MS, MAX_FILE_BYTES_CEILING, MAX_MAP_LIMIT, MAX_MAP_TIMEOUT_MS, parseBatchHandoffRequest, parseBatchStartRequest, parseCrawlPageFields, parseLoginImportRequest, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, RequestError, type CacheOptions, type CrawlPageField, type CrawlStartRequest, type MapResponse, type PageOptions, type RequestAttribution } from '@w2l/contracts'
 import { W2LError, type RequestOptions, type W2L } from '@w2l/sdk'
 import type { CrawlReport } from '@w2l/contracts'
 import { hostedAmazonUrl } from './hostedToolPolicy.js'
@@ -242,7 +242,7 @@ const SHARED_ACTIONS = withoutDescriptions(ACTIONS_SCHEMA)
 /** What each batch read tool returns. */
 const BATCH_TOOL_DESCRIPTIONS = {
   get_batch: "Read a batch's status by its taskId: its state, item counts and the items waiting for the person (waitingForPerson).",
-  get_batch_items: 'Page through a batch\'s results by its taskId (cursor, limit up to 50); with maxResults the tool follows the cursors itself and answers { items, nextCursor, hasMore, stoppedBy }.',
+  get_batch_items: 'Page through a batch\'s results by its taskId (cursor, limit up to 50). fields keeps only the named item fields (plus id, url, status, createdAt), e.g. ["json"] for a JSON batch. With maxResults the tool follows the cursors itself and answers { items, nextCursor, hasMore, stoppedBy }.',
   wait_batch: 'Wait up to timeoutMs (default 30000, at most 120000) for a batch to finish and return its status; at the timeout it returns the status so far, so wait again or read get_batch_items.',
   cancel_batch: 'Cancel a batch by its taskId; the items already read stay readable.',
 } as const
@@ -410,7 +410,7 @@ const DEFINITIONS = [
   },
   {
     name: 'get_crawl_pages',
-    description: 'Read a paginated list of crawl page results by task id (the latest attempt\'s unless attemptId is given). Pages omit the routing audit and trace unless debug is true, and leave out pages whose content repeated an earlier page\'s (status duplicate) unless includeDuplicates is true. With maxResults the tool follows cursors itself, up to that many pages, and answers { items, nextCursor, hasMore, stoppedBy }.',
+    description: 'Page through a crawl\'s pages by task id (the latest attempt\'s unless attemptId is given). fields keeps only the named page fields (plus id, url, status, createdAt); debug adds the routing audit and trace; includeDuplicates lists the pages whose content repeated an earlier page\'s. With maxResults the tool follows the cursors itself and answers { items, nextCursor, hasMore, stoppedBy }.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -419,8 +419,9 @@ const DEFINITIONS = [
         limit: { type: 'number', minimum: 1, maximum: 1000 },
         attemptId: { type: 'string' },
         debug: { type: 'boolean' },
-        includeDuplicates: { type: 'boolean', description: 'List the pages whose body repeated an earlier page\'s too (status duplicate, markdown null). Default false.' },
-        maxResults: { type: 'integer', minimum: 1, maximum: 200, description: 'Follow cursors from cursor on and return up to this many pages in all, each request no larger than what is still wanted; nextCursor then continues exactly after the last page returned, and stoppedBy says whether the end or this cap stopped the listing.' },
+        includeDuplicates: { type: 'boolean' },
+        fields: { type: 'array', items: { type: 'string' } },
+        maxResults: { type: 'integer', minimum: 1, maximum: 200, description: 'Follow the cursors and return up to this many pages in all.' },
       },
       required: ['id'],
       additionalProperties: false,
@@ -436,6 +437,7 @@ const DEFINITIONS = [
         cursor: { type: 'string' },
         limit: { type: 'number', minimum: 1, maximum: 1000 },
         attemptId: { type: 'string' },
+        fields: { type: 'array', items: { type: 'string' } },
       },
       required: ['id'],
       additionalProperties: false,
@@ -500,7 +502,7 @@ const DEFINITIONS = [
   ...(['get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch'] as const).map(name => ({
     name,
     description: BATCH_TOOL_DESCRIPTIONS[name],
-    inputSchema: { type: 'object', properties: { id: { type: 'string' }, ...(name === 'get_batch_items' ? { cursor: { type: 'string' }, limit: { type: 'number', minimum: 1, maximum: 50 }, debug: { type: 'boolean' }, maxResults: { type: 'integer', minimum: 1, maximum: 200, description: 'Follow cursors from cursor on and return up to this many items in all (pages of at most 50); the answer is then { items, nextCursor, hasMore, stoppedBy }.' } } : {}), ...(name === 'wait_batch' ? { timeoutMs: { type: 'number', minimum: 1, maximum: MAX_WAIT_MS } } : {}) }, required: ['id'], additionalProperties: false },
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, ...(name === 'get_batch_items' ? { cursor: { type: 'string' }, limit: { type: 'number', minimum: 1, maximum: 50 }, debug: { type: 'boolean' }, fields: { type: 'array', items: { type: 'string' } }, maxResults: { type: 'integer', minimum: 1, maximum: 200, description: 'Follow the cursors and return up to this many items in all.' } } : {}), ...(name === 'wait_batch' ? { timeoutMs: { type: 'number', minimum: 1, maximum: MAX_WAIT_MS } } : {}) }, required: ['id'], additionalProperties: false },
   })),
   {
     name: 'get_batch_errors',
@@ -981,7 +983,7 @@ async function callMonitorTool(client: W2L, name: string, rec: Record<string, un
 /** The largest `maxResults` a listing tool follows cursors for in one call. */
 const MAX_TOOL_RESULTS = 200
 
-function readCrawlQuery(args: unknown): { id: string; maxResults?: number; options: { cursor?: string; limit?: number; attemptId?: string; debug?: boolean; includeDuplicates?: boolean } } {
+function readCrawlQuery(args: unknown): { id: string; maxResults?: number; options: { cursor?: string; limit?: number; attemptId?: string; debug?: boolean; includeDuplicates?: boolean; fields?: readonly CrawlPageField[] } } {
   const rec = args !== null && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : null
   if (typeof rec?.id !== 'string' || rec.id.length === 0) throw new RequestError('id is required')
   if (rec.limit !== undefined && (typeof rec.limit !== 'number' || !Number.isInteger(rec.limit))) throw new RequestError('limit must be an integer')
@@ -997,6 +999,7 @@ function readCrawlQuery(args: unknown): { id: string; maxResults?: number; optio
       attemptId: typeof rec.attemptId === 'string' ? rec.attemptId : undefined,
       debug: rec.debug as boolean | undefined,
       ...(rec.includeDuplicates === undefined ? {} : { includeDuplicates: rec.includeDuplicates as boolean }),
+      ...(rec.fields === undefined ? {} : { fields: parseCrawlPageFields(rec.fields) }),
     },
   }
 }
