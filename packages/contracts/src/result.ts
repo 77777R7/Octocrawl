@@ -393,6 +393,14 @@ export interface FetchWarning {
    * hosted_chrome rung (ADR 0005) refused the read, its message says why
    * (the account's attempts for the day, the operator's monthly budget, the
    * switch); the rung did not run, and the answer is the rungs' before it.
+   * `browser_busy`: hosted Octocrawl runs one scrape at a time in the browser
+   * per key, and another scrape on this key held the lane when this page
+   * needed it; the rung did not run, and the answer is the rungs' before it.
+   * `browser_unavailable`: the same, because the turn could not be read from
+   * hosted Octocrawl's store, not because another scrape held the lane.
+   * `browser_credits`: the same, because the account had too few credits free
+   * for a browser page when this page needed one; its other calls' reservations
+   * count against what is free, and come back when they end.
    * `no_main_content`: a rendered page (browser, provider or my-browser lane)
    * had no main region at all, and its whole page, over 1,000 characters of
    * Markdown, is the answer, header, navigation and footer kept
