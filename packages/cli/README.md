@@ -4,7 +4,7 @@ Octocrawl on the command line: scrape, crawl, batch and map web pages into Markd
 
 ```bash
 npx octocrawl scrape https://books.toscrape.com/ --markdown
-npx octocrawl scrape https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal) --formats markdown,tables --out gdp/
+npx octocrawl scrape 'https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)' --formats markdown,tables --out gdp/
 npx octocrawl batch --urls-file urls.txt --formats markdown,tables --out results/
 npx octocrawl map https://www.sitemaps.org/ --limit 50
 npx octocrawl serve --port 8787
