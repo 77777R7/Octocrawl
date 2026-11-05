@@ -15,6 +15,9 @@ import { SHELL_TEXT_MAX } from '@w2l/runtime'
 /** The hint a `fastMode` scrape carries when the http lane asked for the browser lane it was denied. */
 export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane; fastMode declined it; retry without fastMode'
 
+/** The hint a `wait_for_unavailable` result carries: nothing was read, and the wait is what stopped it, not the site or its robots.txt. */
+export const WAIT_FOR_UNAVAILABLE_HINT = 'waitFor needs the browser lane and no browser rung is open to this request for this URL, so nothing was read; send it without waitFor to read the page without the wait'
+
 /** The hint a `low_content_yield` warning carries: what to change so the browser lane gets a better chance. */
 export function lowContentYieldHint(browserTried: boolean): string {
   return `the http lane's content was thin and the browser lane ${browserTried ? 'did not improve it' : 'was not available'}; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) or a longer timeout with the browser lane available, or actions (a click, a scroll, a wait for a selector) when the data appears after an interaction`
@@ -232,7 +235,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
   const hints: string[] = []
   const host = hostOf(result)
   if (result.status === 'failed' && result.failureReason === 'policy_denied') {
-    const hint = robotsHint(result, host) ?? egressHint(result, host)
+    const hint = result.trace.some((event) => event.event === 'wait_for_unavailable') ? WAIT_FOR_UNAVAILABLE_HINT : robotsHint(result, host) ?? egressHint(result, host)
     if (hint !== null) hints.push(hint)
   }
   if (result.status === 'failed' && result.failureReason === 'dns_error') {
