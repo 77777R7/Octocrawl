@@ -350,6 +350,23 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     expect(await post('/v1/scrape', { url, waitFor: 0, fastMode: true })).toMatchObject({ status: 200, body: { lane: 'http', channelsTried: ['http'] } })
   })
 
+  it('refuses a screenshot with fastMode at the start checks too, in any form, before anything is read', async () => {
+    const seen: Seen[] = []
+    const { origin, post, engine } = await setup(recordingBrowser(seen))
+    const url = `${origin}/chrome`
+    const refused = { status: 400, body: { error: 'screenshot requires the browser lane, which fastMode declines', code: 'invalid_request' } }
+    for (const formats of [['screenshot'], ['markdown', 'screenshot@fullPage'], [{ type: 'screenshot', fullPage: true }]]) {
+      expect(await post('/v1/scrape', { url, formats, fastMode: true })).toEqual(refused)
+      expect(await post('/v1/batches', { urls: [url], formats, fastMode: true })).toEqual(refused)
+      expect(await post('/v1/crawl', { url, formats, fastMode: true })).toEqual(refused)
+      // A hosted job's start asks these two alone, and a stored job's engine does not launch at its start: only the rungs refused it, at its first slice.
+      expect(() => engine.checkBatchStart(parseBatchStartRequest({ urls: [url], formats, fastMode: true }))).toThrow(refused.body.error)
+      expect(() => engine.checkCrawlStart(parseCrawlStartRequest({ url, formats, fastMode: true }))).toThrow(refused.body.error)
+      expect(() => engine.checkBatchStart(parseBatchStartRequest({ urls: [url], formats }))).not.toThrow()
+    }
+    expect(seen).toEqual([])
+  })
+
   it('hands the lanes the request\'s task contract, for the browser to wait for its region (ADR 0007)', async () => {
     const seen: Seen[] = []
     const { origin, post, engine } = await setup(recordingBrowser(seen))
