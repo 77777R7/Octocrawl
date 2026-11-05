@@ -69,6 +69,9 @@ import {
   stepStatusFromResult,
   type ParsedBatchStartRequest,
   BATCH_ERRORS_MAX_LIMIT,
+  batchFloorSeconds,
+  batchRate,
+  BATCH_RATE_WINDOW_PAGES,
   projectCrawlPage,
   RequestError,
   type FetchResult,
@@ -80,6 +83,7 @@ import {
   type Task,
   type TaskStatus,
   type BudgetKind,
+  type BatchRate,
   type CrawlPageField,
   type CrawlPageListed,
   type CrawlPageProjection,
@@ -89,6 +93,7 @@ import {
   type ExecutionContext,
   type StructuredModelGate,
   type AppliedRobotsOverride,
+  type Attempt,
   type RobotsOverride,
   type RobotsUrlOverride,
   type ScrapeFormat,
@@ -1282,6 +1287,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         maxConcurrency: task.batch.lane === 'my-browser' ? 1 : Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
         // The hosts the batch slowed after soft blocks, at the pace they hold now.
         ...slowedHosts(task),
+        // While it runs, how fast, from the latest pages of this run: to now, so a batch that has stalled reads slower.
+        ...(task.status === 'running' || task.status === 'pending' ? { rate: await runningRate(store, taskId, latest, Math.max(0, task.batch.urls.length - completed)) } : {}),
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
         ...(approvalsWaiting.has(taskId) ? { waitingForApproval: true as const } : {}),
@@ -2384,7 +2391,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...attributionOf(req),
         createdAt: now, updatedAt: now,
       }
-      const accepted: BatchAccepted = { taskId, ...(invalidURLs === undefined ? {} : { invalidURLs }) }
+      const minimumSeconds = batchFloorSeconds(req.urls, networkPolicy.perHostMinDelayMs)
+      const accepted: BatchAccepted = { taskId, ...(invalidURLs === undefined ? {} : { invalidURLs }), ...(minimumSeconds === 0 ? {} : { minimumSeconds }) }
       submission.record(taskId, accepted)
       try {
         const store = SqliteTaskStore.open(taskDir)
@@ -3438,4 +3446,13 @@ function slowedHosts(task: Task): { pacing?: Record<string, HostPace> } {
 function projected<T extends CrawlPage>(page: CrawlPageList<T>, fields: readonly CrawlPageField[] | undefined): CrawlPageList<T | CrawlPageProjection> {
   if (fields === undefined) return page
   return { ...page, items: page.items.map((item) => projectCrawlPage(item, fields)) }
+}
+
+/** A running batch's rate: its latest pages of this attempt, up to now; from the attempt's start until a window of them has been read. */
+async function runningRate(store: SqliteTaskStore, taskId: string, attempt: Attempt | undefined, remaining: number): Promise<BatchRate> {
+  if (attempt === undefined) return batchRate({ pages: 0, spanMs: 0, remaining })
+  const times = await store.listRecentStepTimes(taskId, attempt.id, BATCH_RATE_WINDOW_PAGES + 1)
+  const windowed = times.length > BATCH_RATE_WINDOW_PAGES
+  const from = windowed ? times.at(-1)! : attempt.startedAt
+  return batchRate({ pages: windowed ? BATCH_RATE_WINDOW_PAGES : times.length, spanMs: Date.now() - Date.parse(from), remaining })
 }

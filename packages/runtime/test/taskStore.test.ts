@@ -198,6 +198,14 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.getTask('task-1')).toEqual({ ...task(), status: 'cancelled', pacing, updatedAt: LATER })
     })
 
+    it('lists when an attempt\'s latest steps were written, newest first, without reading their bodies', async () => {
+      ;({ store, cleanup } = await open())
+      await seed(store)
+      for (const n of [1, 2, 3]) await store.putStep(step({ id: `step-${n}`, url: `https://example.com/${n}`, canonicalUrl: `https://example.com/${n}`, createdAt: `2026-09-18T00:00:0${n}.000Z` }))
+      expect(await store.listRecentStepTimes('task-1', 'attempt-1', 2)).toEqual(['2026-09-18T00:00:03.000Z', '2026-09-18T00:00:02.000Z'])
+      expect(await store.listRecentStepTimes('task-1', 'attempt-other', 2)).toEqual([])
+    })
+
     it('counts unique completed URLs and pages all outcomes without loading bodies for status', async () => {
       ;({ store, cleanup } = await open())
       await seed(store)

@@ -7,7 +7,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
-import { CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlPageFields, parseCrawlStartRequest, projectCrawlPage, readWebhook, RequestError, type CrawlPageField, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
+import { batchFloorSeconds, batchRate, CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlPageFields, parseCrawlStartRequest, projectCrawlPage, readWebhook, RequestError, type CrawlPageField, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import type { CreditsStore } from './hostedCredits.js'
 import { CREDITS } from './hostedCredits.js'
 import { asksModelFallback } from './hostedModel.js'
@@ -40,7 +40,7 @@ export function readHostedWebhook(value: unknown): Omit<HostedJobWebhook, 'secre
 }
 
 /** A job's status as its routes, its list and its webhook report it; the webhook's secret is never in it. */
-export function jobStatus(job: HostedJob): Record<string, unknown> {
+export function jobStatus(job: HostedJob, nowMs = Date.now()): Record<string, unknown> {
   const requested = job.kind === 'batch' ? (job.request as { urls: readonly string[] }).urls.length : null
   const completed = job.counts.pages + job.counts.errors
   return {
@@ -48,6 +48,9 @@ export function jobStatus(job: HostedJob): Record<string, unknown> {
     // As a local crawl counts them: pagesFetched is every page read, failed ones included; succeeded and failed split them.
     pagesFetched: completed, succeeded: job.counts.pages, failed: job.counts.errors, errors: job.counts.errors, completed,
     ...(requested === null ? {} : { requested, remaining: Math.max(0, requested - completed) }),
+    // While it runs, how fast: its pages since its first slice took it, up to now, the gaps between slices included. Not since
+    // it was accepted: a wait in the queue happens once, and spread over every page left it would say hours for minutes.
+    ...(requested !== null && (job.status === 'queued' || job.status === 'running') ? { rate: batchRate({ pages: completed, spanMs: job.startedAt === null ? 0 : nowMs - Date.parse(job.startedAt), remaining: Math.max(0, requested - completed) }) } : {}),
     credits: { used: job.credits.used, maxCredits: job.credits.maxCredits },
     ...(job.webhook ? { webhook: { url: job.webhook.url, events: job.webhook.events, delivery: job.webhook.delivery } } : {}),
     createdAt: job.createdAt, finishedAt: job.finishedAt, expiresAt: job.expireAt,
@@ -292,12 +295,16 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     if (!created.ok && created.reason === 'conflict') return refusal(409, 'idempotency_conflict', 'this idempotency key started a different job in the last 24 hours')
     if (!created.ok) return refusal(429, 'jobs_busy', `this account has ${created.running} jobs running and ${created.queued} waiting, the most it may`, ['wait for one to finish, or cancel one'], { 'Retry-After': '60' })
     // A replay is the same account retrying a start whose answer it may never have read: it gets the job's secret again.
-    if (created.replayed) return json({ taskId: created.job.id, replayed: true, ...withSecret(created.job) }, 202)
+    // The floor the per-host interval sets for reading every URL (BatchAccepted.minimumSeconds). With maxCredits the job may
+    // stop well before that, so none is said; a balance that runs out is not known here, and the wording allows for it.
+    const minimumSeconds = kind === 'batch' && maxCredits === undefined ? batchFloorSeconds((parsed as ParsedBatchStartRequest).urls, hostedNetworkPolicy().perHostMinDelayMs) : 0
+    const floor = minimumSeconds === 0 ? {} : { minimumSeconds }
+    if (created.replayed) return json({ taskId: created.job.id, replayed: true, ...withSecret(created.job), ...floor }, 202)
     if (created.job.status === 'running' && !(await queueOrFail(created.job, 'start'))) {
       return refusal(503, 'jobs_unavailable', 'the job could not be queued; nothing was charged', ['retry in a minute'], { 'Retry-After': '60' })
     }
     log(JSON.stringify({ severity: 'INFO', event: 'hosted_job_started', workspaceId, jobId: job.id, kind, pages, status: created.job.status }))
-    return json({ ...withSecret(created.job), estimatedCredits, ...(kind === 'batch' && (parsed as ParsedBatchStartRequest).invalidURLs !== undefined ? { invalidURLs: (parsed as ParsedBatchStartRequest).invalidURLs } : {}) }, 202)
+    return json({ ...withSecret(created.job), estimatedCredits, ...floor, ...(kind === 'batch' && (parsed as ParsedBatchStartRequest).invalidURLs !== undefined ? { invalidURLs: (parsed as ParsedBatchStartRequest).invalidURLs } : {}) }, 202)
   }
 
   /** A page of a job's items from its slice files, from a cursor `slice:line`. */
@@ -362,7 +369,7 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     if (from === 0 && before !== null) return refusal(400, 'invalid_request', 'before must be a nextBefore this list returned, of a job still kept')
     const jobs = all.slice(from)
     const page = jobs.slice(0, limit)
-    return json({ items: page.map(status), nextBefore: jobs.length > limit ? page.at(-1)!.id : null, hasMore: jobs.length > limit })
+    return json({ items: page.map((one) => status(one)), nextBefore: jobs.length > limit ? page.at(-1)!.id : null, hasMore: jobs.length > limit })
   }
 
   /**

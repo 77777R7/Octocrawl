@@ -243,7 +243,7 @@ const SHARED_ACTIONS = withoutDescriptions(ACTIONS_SCHEMA)
 const BATCH_TOOL_DESCRIPTIONS = {
   get_batch: "Read a batch's status by its taskId: its state, item counts and the items waiting for the person (waitingForPerson).",
   get_batch_items: 'Page through a batch\'s results by its taskId (cursor, limit up to 50). fields keeps only the named item fields (plus id, url, status, createdAt), e.g. ["json"] for a JSON batch. With maxResults the tool follows the cursors itself and answers { items, nextCursor, hasMore, stoppedBy }.',
-  wait_batch: 'Wait up to timeoutMs (default 30000, at most 120000) for a batch to finish and return its status; at the timeout it returns the status so far, so wait again or read get_batch_items.',
+  wait_batch: 'Wait up to timeoutMs (default 30000, at most 120000) for a batch to finish and return its status; at the timeout it returns the status so far. Its rate (pagesPerMinute, etaSeconds) says how long the rest should take, so wait again or read get_batch_items.',
   cancel_batch: 'Cancel a batch by its taskId; the items already read stay readable.',
 } as const
 

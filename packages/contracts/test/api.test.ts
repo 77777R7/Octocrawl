@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { API_ERROR_CODES, API_ERROR_STATUS, cacheLookupRequested, cacheStateOf, CRAWL_MODES, MAX_CACHE_AGE_MS, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, CRAWL_PAGE_FIELDS, projectCrawlPage, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageFields, parseCrawlPageQuery, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
+import { API_ERROR_CODES, API_ERROR_STATUS, cacheLookupRequested, cacheStateOf, CRAWL_MODES, MAX_CACHE_AGE_MS, DEFAULT_CRAWL_SPEC, DEFAULT_MAX_FILE_BYTES, defaultApiMode, fileByteCap, headerRefusal, isApiCrawlMode, isApiErrorCode, maxFileBytesFromEnv, CRAWL_PAGE_FIELDS, projectCrawlPage, batchFloorSeconds, batchRate, parseBatchErrorsQuery, parseBatchStartRequest, parseCrawlPageFields, parseCrawlPageQuery, parseCrawlStartRequest, parseMapRequest, parseScrapeRequest, RATE_LIMITED_CODE, rateLimitedBody, REFUSAL_HINTS, refusalHint, RequestError, WEBHOOK_EVENTS } from '../src/index.js'
 import type { CrawlAccepted, CrawlStartRequest, ScrapeRequest, ScrapeResponse } from '../src/index.js'
 
 const thrown = (fn: () => unknown): unknown => {
@@ -794,5 +794,29 @@ describe('a page list\'s fields projection', () => {
     expect(projectCrawlPage(item, ['json', 'markdown'])).toEqual({ id: 'p1', url: 'https://a.test/', status: 'success', json: { status: 'complete', data: { title: 'A' } }, markdown: '# A', createdAt: '2026-11-05T00:00:00.000Z' })
     expect(Object.keys(projectCrawlPage(item, ['warnings', 'url']))).toEqual(['id', 'url', 'status', 'createdAt'])
     expect(projectCrawlPage(item, ['evidenceRecord'])).toMatchObject({ evidenceRecord: { finalUrl: 'https://a.test/' } })
+  })
+})
+
+describe('how long a batch takes: what is known, and nothing else', () => {
+  it('measures a rate from pages actually read, and says nothing until there are enough of them', () => {
+    expect(batchRate({ pages: 4, spanMs: 1_000, remaining: 100 })).toEqual({ pagesPerMinute: null, etaSeconds: null, measuredPages: 4 })
+    expect(batchRate({ pages: 0, spanMs: 0, remaining: 100 })).toEqual({ pagesPerMinute: null, etaSeconds: null, measuredPages: 0 })
+    // 5 pages in 30 s: 10 a minute, 100 left: 600 s.
+    expect(batchRate({ pages: 5, spanMs: 30_000, remaining: 100 })).toEqual({ pagesPerMinute: 10, etaSeconds: 600, measuredPages: 5 })
+    expect(batchRate({ pages: 7, spanMs: 60_000, remaining: 1 })).toEqual({ pagesPerMinute: 7, etaSeconds: 9, measuredPages: 7 })
+    // Nothing left is a known 0; a clock that did not move is not a rate.
+    expect(batchRate({ pages: 5, spanMs: 30_000, remaining: 0 })).toMatchObject({ etaSeconds: 0 })
+    expect(batchRate({ pages: 5, spanMs: 0, remaining: 3 })).toEqual({ pagesPerMinute: null, etaSeconds: null, measuredPages: 5 })
+  })
+
+  it('gives the floor the per-host interval sets: the busiest host, rounded down, so it is never above what is true', () => {
+    const urls = ['https://a.test/1', 'https://a.test/2', 'https://a.test/3', 'https://b.test/1']
+    expect(batchFloorSeconds(urls, 1_500)).toBe(3)
+    expect(batchFloorSeconds(urls, 250)).toBe(0)
+    expect(batchFloorSeconds(Array.from({ length: 272 }, (_, i) => `https://a.test/${i}`), 250)).toBe(67)
+    // www and the apex are two hosts to the frontier, and a port is not part of a host.
+    expect(batchFloorSeconds(['https://a.test/1', 'https://www.a.test/1', 'https://a.test:8443/2'], 2_000)).toBe(2)
+    expect(batchFloorSeconds([], 250)).toBe(0)
+    expect(batchFloorSeconds(urls, 0)).toBe(0)
   })
 })
