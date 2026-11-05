@@ -26,6 +26,8 @@ export type { IdempotencyClaim, IdempotencyStoreOptions } from './idempotencySto
 export * from './webhookInbox.js'
 export { sourceCommitFromEnv, toEvidenceRecord } from './evidenceRecord.js'
 export { readinessOf, SHELL_TEXT_MAX } from './readiness.js'
+export { FIRST_SLOW_DELAY_MS, MAX_SLOW_DELAY_MS, OK_PAGES_TO_RECOVER, SIGNALS_TO_SLOW, softBlockSignal } from './pacing.js'
+export type { SoftBlockSignal } from './pacing.js'
 export { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, untriedAudit, withCacheMiss, withCacheStored } from './pageCache.js'
 export type { PageCacheBounds, PageCacheHit, PageCacheOptions } from './pageCache.js'
 export type { EvidenceOutput, EvidenceRecordOptions } from './evidenceRecord.js'

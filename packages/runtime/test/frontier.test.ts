@@ -332,3 +332,97 @@ describe('Frontier does not fetch', () => {
     expect(Object.keys(frontier)).toEqual(['Frontier'])
   })
 })
+
+describe('Frontier adaptive pacing: a host that answers with soft blocks is slowed', () => {
+  const HOST = 'fixture.test'
+  function limited(): Frontier {
+    const frontier = new Frontier({ seedUrl: SEED, perHostConcurrency: 2, perHostMinDelayMs: 250 })
+    frontier.seed()
+    for (const name of ['a', 'b', 'c', 'd', 'e']) frontier.enqueue(`${SEED}${name}`, 1)
+    frontier.setCrawlDelay(HOST, null)
+    return frontier
+  }
+
+  it('changes nothing on one soft block; on the second in a row it holds the host to one page at a time, two seconds apart, and off for those two seconds', () => {
+    const frontier = limited()
+    const t0 = 1_000
+    expect(frontier.dequeue(t0).item?.canonicalUrl).toBe(SEED)
+    expect(frontier.noteResult(HOST, 'rate_limited', t0 + 10)).toBeNull()
+    frontier.release(SEED)
+    expect(frontier.hostDelayMs(HOST)).toBe(250)
+    expect(frontier.dequeue(t0 + 250).item?.canonicalUrl).toBe(`${SEED}a`)
+    expect(frontier.noteResult(HOST, 'rate_limited', t0 + 300)).toEqual({ host: HOST, change: 'slowed', signal: 'rate_limited', ceiling: 1, delayMs: 2_000, untilMs: t0 + 2_300 })
+    frontier.release(`${SEED}a`)
+    expect(frontier.hostDelayMs(HOST)).toBe(2_000)
+    const held = frontier.dequeue(t0 + 500)
+    expect(held.item).toBeNull()
+    expect(held.nextReadyAtMs).toBe(t0 + 2_300)
+    expect(frontier.dequeue(t0 + 2_300).item?.canonicalUrl).toBe(`${SEED}b`)
+    // One page at a time while slowed, though the policy allows two.
+    expect(frontier.dequeue(t0 + 5_000).item).toBeNull()
+    frontier.release(`${SEED}b`)
+    expect(frontier.dequeue(t0 + 4_299).item).toBeNull()
+    expect(frontier.dequeue(t0 + 4_300).item?.canonicalUrl).toBe(`${SEED}c`)
+    expect(frontier.pacing()[HOST]).toEqual({ lastStartedAtMs: t0 + 4_300, crawlDelayMs: null, cooldownUntilMs: t0 + 2_300, adaptive: { ceiling: 1, delayMs: 2_000, signals: 0, okStreak: 0, slowdowns: 1 } })
+  })
+
+  it('doubles the wait on each further slowdown up to 120 s, and every ten normal pages halve it until the baseline, where the ceiling comes back', () => {
+    const frontier = limited()
+    const t0 = 1_000
+    const slow = (at: number) => { frontier.noteResult(HOST, 'challenge', at); return frontier.noteResult(HOST, 'challenge', at) }
+    expect(slow(t0)?.delayMs).toBe(2_000)
+    expect(slow(t0 + 1)?.delayMs).toBe(4_000)
+    for (let i = 0; i < 10; i++) slow(t0 + 2 + i)
+    expect(frontier.hostDelayMs(HOST)).toBe(120_000)
+    expect(frontier.pacing()[HOST]?.adaptive).toMatchObject({ ceiling: 1, delayMs: 120_000, slowdowns: 12 })
+    // A normal page ends the streak of signals, so one more soft block alone does not slow the host again.
+    frontier.noteResult(HOST, null, t0 + 20)
+    expect(frontier.noteResult(HOST, 'rate_limited', t0 + 21)).toBeNull()
+    expect(frontier.pacing()[HOST]?.adaptive).toMatchObject({ signals: 1, okStreak: 0 })
+    const halvings: number[] = []
+    for (let round = 0; round < 12; round++) {
+      for (let i = 0; i < 9; i++) expect(frontier.noteResult(HOST, null, t0 + 100 + round * 10 + i)).toBeNull()
+      const change = frontier.noteResult(HOST, null, t0 + 100 + round * 10 + 9)
+      if (change === null) break
+      halvings.push(change.delayMs)
+      if (change.change === 'restored') break
+    }
+    expect(halvings).toEqual([60_000, 30_000, 15_000, 7_500, 3_750, 1_875, 937, 468, 250])
+    expect(frontier.hostDelayMs(HOST)).toBe(250)
+    expect(frontier.pacing()[HOST]?.adaptive).toBeUndefined()
+    // The ceiling is the policy's again, once the last slowdown's wait has passed.
+    expect(frontier.dequeue(t0 + 200_000).item?.canonicalUrl).toBe(SEED)
+    expect(frontier.dequeue(t0 + 200_250).item?.canonicalUrl).toBe(`${SEED}a`)
+  })
+
+  it('a normal page never slows a host, and a robots.txt Crawl-delay above the adaptive wait wins', () => {
+    const frontier = limited()
+    for (let i = 0; i < 50; i++) expect(frontier.noteResult(HOST, null, 1_000 + i)).toBeNull()
+    expect(frontier.pacing()[HOST]).toBeUndefined()
+    frontier.setCrawlDelay(HOST, 5_000)
+    frontier.noteResult(HOST, 'redirected_off_page', 2_000)
+    frontier.noteResult(HOST, 'redirected_off_page', 2_001)
+    expect(frontier.hostDelayMs(HOST)).toBe(5_000)
+    expect(frontier.pacing()[HOST]?.adaptive?.delayMs).toBe(2_000)
+  })
+
+  it('takes a stored pace back: a frontier built from Task.pacing keeps the host off until its cooldown, at its ceiling and wait', () => {
+    const adaptive = { ceiling: 1, delayMs: 8_000, signals: 0, okStreak: 3, slowdowns: 2 }
+    const frontier = new Frontier({ seedUrl: SEED, perHostConcurrency: 2, perHostMinDelayMs: 250, lastStartedAtMsByHost: new Map([[HOST, 1_000]]), cooldownUntilMsByHost: new Map([[HOST, 12_000]]), adaptiveByHost: new Map([[HOST, adaptive]]) })
+    frontier.seed()
+    frontier.enqueue(`${SEED}a`, 1)
+    frontier.setCrawlDelay(HOST, null)
+    const held = frontier.dequeue(9_500)
+    expect(held.item).toBeNull()
+    expect(held.nextReadyAtMs).toBe(12_000)
+    expect(frontier.dequeue(12_000).item?.canonicalUrl).toBe(SEED)
+    expect(frontier.dequeue(12_000).item).toBeNull()
+    expect(frontier.pacing()[HOST]).toEqual({ lastStartedAtMs: 12_000, crawlDelayMs: null, cooldownUntilMs: 12_000, adaptive })
+    // A cooldown that has passed is not carried on.
+    const later = new Frontier({ seedUrl: SEED, cooldownUntilMsByHost: new Map([[HOST, 500]]), lastStartedAtMsByHost: new Map([[HOST, 400]]) })
+    expect(later.dequeue(1_000).item).toBeNull()
+    later.seed()
+    expect(later.dequeue(1_000).item?.canonicalUrl).toBe(SEED)
+    expect(later.pacing()[HOST]?.cooldownUntilMs).toBeUndefined()
+  })
+})

@@ -17,6 +17,11 @@ export class MemoryTaskStore implements TaskStore {
     this.tasks.set(task.id, cloneJson(task))
   }
 
+  async putTaskPacing(taskId: string, pacing: NonNullable<Task['pacing']>, updatedAt: string): Promise<void> {
+    const task = this.tasks.get(taskId)
+    if (task !== undefined) this.tasks.set(taskId, cloneJson({ ...task, pacing, updatedAt }))
+  }
+
   async getTask(taskId: string): Promise<Task | null> {
     const task = this.tasks.get(taskId)
     return task === undefined ? null : cloneJson(task)

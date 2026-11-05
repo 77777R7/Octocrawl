@@ -1081,3 +1081,43 @@ describe('CrawlOrchestrator execution lifecycle', () => {
     } finally { await local.close(); await other.close(); await rm(dir, { recursive: true, force: true }) }
   })
 })
+
+describe('adaptive pacing: a batch slows a host that pushes back', () => {
+  const HOST_URLS = ['https://paced.test/1', 'https://paced.test/2', 'https://paced.test/3', 'https://paced.test/4']
+  const spec = { seedUrl: HOST_URLS[0]!, taskDir: '/tmp/w2l-paced', maxDepth: 0, allowlistedDomains: [], crawlEntireDomain: true, deduplicateSimilarURLs: false, sitemap: 'skip' as const }
+  const limited = (url: string): ScrapeOutcome => ({ result: { ...page(url), status: 'blocked', blockReason: 'rate_limit', markdown: '', evidence: { ...page(url).evidence, httpStatus: 429 } }, links: [] })
+
+  it('two 429s in a row hold the host to one page at a time two seconds apart, write a pacing_adjusted trace line on the page that tipped it, and keep the pace with the task', async () => {
+    const store = new MemoryTaskStore()
+    await store.putTask({ id: 'paced-1', seedUrl: HOST_URLS[0]!, taskDir: '/tmp/w2l-paced', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls: HOST_URLS, formats: ['markdown'], includeLinks: false }, createdAt: '2026-11-05T00:00:00.000Z', updatedAt: '2026-11-05T00:00:00.000Z' })
+    const clock = new FakeClock()
+    const started: number[] = []
+    const atom: ScrapeAtom = {
+      scrape: async (url) => { started.push(clock.now()); return url.endsWith('/1') || url.endsWith('/2') ? limited(url) : outcome(url, []) },
+      close: async () => {},
+    }
+    // Two workers allowed, but the policy's per-host ceiling is two as well: the fake clock makes every wait exact.
+    const report = await new CrawlOrchestrator({ store, atom, clock, workerCount: 1, perHostConcurrency: 2, perHostMinDelayMs: 250 }).run({ ...spec, taskId: 'paced-1' })
+    expect(report.status).toBe('completed')
+    expect(report.pagesFetched).toBe(4)
+    // The second 429 arrives at 1,250: the host waits 2 s from then, and 2 s between the pages after it.
+    expect(started).toEqual([1_000, 1_250, 3_250, 5_250])
+    const steps = [...(await store.listSteps('paced-1'))].sort((a, b) => a.url.localeCompare(b.url))
+    const adjusted = steps.map((step) => step.result?.trace.filter((event) => event.event === 'pacing_adjusted').map((event) => event.detail) ?? [])
+    expect(adjusted).toEqual([[], [{ host: 'paced.test', change: 'slowed', signal: 'rate_limited', ceiling: 1, delayMs: 2_000, untilMs: 3_250 }], [], []])
+    expect((await store.getTask('paced-1'))?.pacing).toEqual({ 'paced.test': { lastStartedAtMs: 5_250, crawlDelayMs: null, cooldownUntilMs: 3_250, adaptive: { ceiling: 1, delayMs: 2_000, signals: 0, okStreak: 2, slowdowns: 1 } } })
+  })
+
+  it('a resumed run on another orchestrator starts under the stored pace', async () => {
+    const store = new MemoryTaskStore()
+    await store.putTask({ id: 'paced-2', seedUrl: HOST_URLS[0]!, taskDir: '/tmp/w2l-paced', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls: HOST_URLS.slice(0, 2), formats: ['markdown'], includeLinks: false }, pacing: { 'paced.test': { lastStartedAtMs: 900, crawlDelayMs: null, cooldownUntilMs: 4_000, adaptive: { ceiling: 1, delayMs: 3_000, signals: 0, okStreak: 0, slowdowns: 1 } } }, createdAt: '2026-11-05T00:00:00.000Z', updatedAt: '2026-11-05T00:00:00.000Z' })
+    const clock = new FakeClock()
+    const started: number[] = []
+    const atom: ScrapeAtom = { scrape: async (url) => { started.push(clock.now()); return outcome(url, []) }, close: async () => {} }
+    // One worker: the fake clock adds every waiting worker's wait to the time.
+    const report = await new CrawlOrchestrator({ store, atom, clock, workerCount: 1, perHostConcurrency: 2, perHostMinDelayMs: 250 }).run({ ...spec, taskId: 'paced-2' })
+    expect(report.status).toBe('completed')
+    expect(started).toEqual([4_000, 7_000])
+    expect((await store.getTask('paced-2'))?.pacing?.['paced.test']).toMatchObject({ lastStartedAtMs: 7_000, adaptive: { ceiling: 1, delayMs: 3_000, okStreak: 2 } })
+  })
+})

@@ -147,8 +147,29 @@ export interface Task {
 export interface HostPacing {
   lastStartedAtMs: number | null
   crawlDelayMs: number | null
-  /** Until when the site asked to be left alone (a 429's Retry-After, epoch ms); absent when it did not. */
+  /** Until when the host is left alone (a 429's Retry-After, or the wait a slowdown set; epoch ms); absent when nothing holds it. */
   cooldownUntilMs?: number | null
+  /** The pace the task set for the host after soft blocks (adaptive pacing); absent while the host runs at its baseline. */
+  adaptive?: AdaptivePacing | null
+}
+
+/**
+ * How a task paces a host that pushed back (AIMD): two soft-block signals in a row (a 429 or 503, a challenge page, a page
+ * delivered in place of the one asked for, a failed task contract) hold the host to one page at a time and double the
+ * wait between page starts (2 s the first time, at most 120 s); every ten normal pages in a row halve the wait, and at the
+ * baseline the host's ceiling comes back. Signals come from the pages' results alone, never from a guess about the site.
+ */
+export interface AdaptivePacing {
+  /** Pages in flight at once on the host while slowed: 1. */
+  ceiling: number
+  /** The wait between two page starts on the host, ms. */
+  delayMs: number
+  /** Soft-block signals in a row since the last normal page. */
+  signals: number
+  /** Normal pages in a row since the last signal or halving. */
+  okStreak: number
+  /** How many times the task slowed the host. */
+  slowdowns: number
 }
 
 /**
