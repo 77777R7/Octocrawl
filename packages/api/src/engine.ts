@@ -79,6 +79,7 @@ import {
   type Task,
   type TaskStatus,
   type BudgetKind,
+  type HostPace,
   type HostPacing,
   type CrawlPageQuery,
   type ExecutionContext,
@@ -1267,6 +1268,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(task.batch.verify === undefined ? {} : await store.countVerifications(taskId)),
         // The cap in force: the batch's own, never above this service's worker count.
         maxConcurrency: task.batch.lane === 'my-browser' ? 1 : Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
+        // The hosts the batch slowed after soft blocks, at the pace they hold now.
+        ...slowedHosts(task),
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
         ...(approvalsWaiting.has(taskId) ? { waitingForApproval: true as const } : {}),
@@ -2584,7 +2587,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
               const pacing: Record<string, HostPacing> = { ...(current.pacing ?? {}) }
               for (const [origin, until] of Object.entries(cooldowns)) {
                 const host = new URL(origin).host
-                pacing[host] = { lastStartedAtMs: pacing[host]?.lastStartedAtMs ?? null, crawlDelayMs: pacing[host]?.crawlDelayMs ?? null, cooldownUntilMs: Math.max(until, pacing[host]?.cooldownUntilMs ?? 0) }
+                pacing[host] = { ...pacing[host], lastStartedAtMs: pacing[host]?.lastStartedAtMs ?? null, crawlDelayMs: pacing[host]?.crawlDelayMs ?? null, cooldownUntilMs: Math.max(until, pacing[host]?.cooldownUntilMs ?? 0) }
               }
               await writer.putTask({ ...current, pacing })
             }
@@ -3400,4 +3403,21 @@ export function defaultSessionsFile(env: NodeJS.ProcessEnv = process.env): strin
 /** A session store the engine reads but never writes: saved logins come from `octocrawl login import` alone. */
 function readOnlySessions(store: SessionStore): SessionStore {
   return { load: (domain) => store.load(domain), save: async () => {} }
+}
+
+/** The hosts a task slowed (HostPacing.adaptive), as a status reports them (`pacing`); nothing while every host runs at its baseline. */
+function slowedHosts(task: Task): { pacing?: Record<string, HostPace> } {
+  const pacing: Record<string, HostPace> = {}
+  const now = Date.now()
+  for (const [host, pace] of Object.entries(task.pacing ?? {})) {
+    if (pace.adaptive == null || pace.adaptive.slowdowns === 0) continue
+    const cooldownUntilMs = pace.cooldownUntilMs ?? null
+    pacing[host] = {
+      ceiling: pace.adaptive.ceiling,
+      delayMs: pace.adaptive.delayMs,
+      slowdowns: pace.adaptive.slowdowns,
+      ...(cooldownUntilMs !== null && cooldownUntilMs > now ? { cooldownUntil: new Date(cooldownUntilMs).toISOString() } : {}),
+    }
+  }
+  return Object.keys(pacing).length === 0 ? {} : { pacing }
 }

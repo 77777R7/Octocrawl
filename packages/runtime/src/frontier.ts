@@ -40,10 +40,11 @@
  */
 
 import { isIP } from 'node:net'
-import { DEFAULT_NETWORK_POLICY, type HostPacing } from '@w2l/contracts'
+import { DEFAULT_NETWORK_POLICY, type AdaptivePacing, type HostPacing } from '@w2l/contracts'
 import { hostMatchesAllowlist } from '@w2l/http-core'
 import { canonicalizeUrl, hostOf, visitKey } from './canonicalize.js'
 import { compilePathFilter, type PathFilter } from './pathFilter.js'
+import { FIRST_SLOW_DELAY_MS, MAX_SLOW_DELAY_MS, OK_PAGES_TO_RECOVER, SIGNALS_TO_SLOW, type SoftBlockSignal } from './pacing.js'
 
 export interface FrontierItem {
   url: string
@@ -75,6 +76,18 @@ export interface FrontierEnqueueResult {
   collapsedInto?: string
 }
 
+/** What a page's result did to its host's pace (Frontier.noteResult): the host was slowed, its wait halved, or its baseline restored. */
+export interface PacingChange {
+  host: string
+  change: 'slowed' | 'eased' | 'restored'
+  /** The signal that tipped a slowdown; null on an easing. */
+  signal: SoftBlockSignal | null
+  ceiling: number
+  delayMs: number
+  /** Until when the host is left alone after a slowdown (epoch ms); absent on an easing. */
+  untilMs?: number
+}
+
 export interface FrontierDequeue {
   item: FrontierItem | null
   /** When `item` is null and the queue is not empty, the next host delay expiry. */
@@ -95,6 +108,10 @@ export interface FrontierOptions {
   crawlDelayMsByHost?: ReadonlyMap<string, number>
   /** When each host's last page started (epoch ms), from an earlier run of the task: its delay counts from then. */
   lastStartedAtMsByHost?: ReadonlyMap<string, number>
+  /** Until when each host is left alone (epoch ms), from an earlier run of the task; one that has passed is dropped. */
+  cooldownUntilMsByHost?: ReadonlyMap<string, number>
+  /** The pace an earlier run of the task set for each host it slowed (HostPacing.adaptive). */
+  adaptiveByHost?: ReadonlyMap<string, AdaptivePacing>
   includePaths?: readonly string[]
   excludePaths?: readonly string[]
   /** Match includePaths / excludePaths against the canonical URL instead of the pathname. */
@@ -141,6 +158,10 @@ export class Frontier {
   private readonly visited = new Map<string, { canonicalUrl: string; variants: Set<string> }>()
   private readonly inFlight = new Map<string, number>()
   private readonly lastStartedAtMs = new Map<string, number>()
+  /** Until when each host is left alone (epoch ms): the wait a slowdown set. */
+  private readonly cooldownUntilMs = new Map<string, number>()
+  /** The pace of each host the task slowed; a host at its baseline has no entry. */
+  private readonly adaptive = new Map<string, AdaptivePacing>()
   /** Hosts a page has reported robots.txt for, with or without a Crawl-delay. */
   private readonly robotsKnown = new Set<string>()
 
@@ -166,6 +187,8 @@ export class Frontier {
     this.perHostMinDelayMs = options.perHostMinDelayMs ?? DEFAULT_NETWORK_POLICY.perHostMinDelayMs
     this.crawlDelayMsByHost = options.crawlDelayMsByHost ?? new Map()
     for (const [host, at] of options.lastStartedAtMsByHost ?? []) this.lastStartedAtMs.set(host, at)
+    for (const [host, until] of options.cooldownUntilMsByHost ?? []) this.cooldownUntilMs.set(host, until)
+    for (const [host, pace] of options.adaptiveByHost ?? []) this.adaptive.set(host, { ...pace })
   }
 
   seed(url: string = this.seedCanonicalUrl, depth = 0): FrontierEnqueueResult {
@@ -197,15 +220,13 @@ export class Frontier {
         continue
       }
       const inFlight = this.inFlight.get(item.host) ?? 0
-      if (inFlight >= (this.robotsKnown.has(item.host) ? this.perHostConcurrency : 1)) continue
+      if (inFlight >= this.hostCeiling(item.host)) continue
       const delay = this.hostDelayMs(item.host)
       const last = this.lastStartedAtMs.get(item.host)
-      if (last !== undefined) {
-        const readyAt = last + delay
-        if (nowMs < readyAt) {
-          nextReadyAtMs = nextReadyAtMs === null ? readyAt : Math.min(nextReadyAtMs, readyAt)
-          continue
-        }
+      const readyAt = Math.max(last === undefined ? 0 : last + delay, this.cooldownUntilMs.get(item.host) ?? 0)
+      if (nowMs < readyAt) {
+        nextReadyAtMs = nextReadyAtMs === null ? readyAt : Math.min(nextReadyAtMs, readyAt)
+        continue
       }
       this.pending.splice(i, 1)
       this.inFlight.set(item.host, inFlight + 1)
@@ -256,9 +277,61 @@ export class Frontier {
     return total
   }
 
+  /** The wait between two page starts on `host`: the minimum interval, its robots.txt Crawl-delay, or the wait a slowdown set, whichever is longest. */
   hostDelayMs(host: string): number {
+    return Math.max(this.baselineDelayMs(host), this.adaptive.get(host)?.delayMs ?? 0)
+  }
+
+  private baselineDelayMs(host: string): number {
     const robotsDelay = this.crawlDelayMsByHost.get(host) ?? 0
     return Math.max(this.perHostMinDelayMs, robotsDelay)
+  }
+
+  /** Pages in flight at once on `host`: one until its robots.txt is known and while it is slowed, else the policy's. */
+  private hostCeiling(host: string): number {
+    const policy = this.robotsKnown.has(host) ? this.perHostConcurrency : 1
+    return Math.min(policy, this.adaptive.get(host)?.ceiling ?? policy)
+  }
+
+  /**
+   * A page on `host` ended with `signal` (null: a normal page). The second signal in a row slows the host: one page at a
+   * time, the wait doubled (2 s the first time, at most 120 s) and the host left alone for that wait from `nowMs`. Ten
+   * normal pages in a row halve the wait; at the baseline the host runs as the policy allows again. The change, if any.
+   */
+  noteResult(host: string, signal: SoftBlockSignal | null, nowMs: number): PacingChange | null {
+    const current = this.adaptive.get(host)
+    if (signal !== null) {
+      const signals = (current?.signals ?? 0) + 1
+      if (signals < SIGNALS_TO_SLOW) {
+        if (current !== undefined) this.adaptive.set(host, { ...current, signals, okStreak: 0 })
+        else this.adaptive.set(host, { ceiling: this.perHostConcurrency, delayMs: this.baselineDelayMs(host), signals, okStreak: 0, slowdowns: 0 })
+        return null
+      }
+      const delayMs = Math.min(MAX_SLOW_DELAY_MS, Math.max(FIRST_SLOW_DELAY_MS, (current?.slowdowns ?? 0) === 0 ? 0 : (current?.delayMs ?? 0) * 2))
+      const untilMs = nowMs + delayMs
+      this.adaptive.set(host, { ceiling: 1, delayMs, signals: 0, okStreak: 0, slowdowns: (current?.slowdowns ?? 0) + 1 })
+      this.cooldownUntilMs.set(host, Math.max(this.cooldownUntilMs.get(host) ?? 0, untilMs))
+      return { host, change: 'slowed', signal, ceiling: 1, delayMs, untilMs }
+    }
+    if (current === undefined) return null
+    if (current.slowdowns === 0) {
+      // Signals that never reached a slowdown: a normal page ends their streak.
+      this.adaptive.delete(host)
+      return null
+    }
+    const okStreak = current.okStreak + 1
+    if (okStreak < OK_PAGES_TO_RECOVER) {
+      this.adaptive.set(host, { ...current, signals: 0, okStreak })
+      return null
+    }
+    const baseline = this.baselineDelayMs(host)
+    const delayMs = Math.max(baseline, Math.floor(current.delayMs / 2))
+    if (delayMs <= baseline) {
+      this.adaptive.delete(host)
+      return { host, change: 'restored', signal: null, ceiling: this.perHostConcurrency, delayMs: baseline }
+    }
+    this.adaptive.set(host, { ...current, delayMs, signals: 0, okStreak: 0 })
+    return { host, change: 'eased', signal: null, ceiling: current.ceiling, delayMs }
   }
 
   /** A page on `host` reported its robots.txt Crawl-delay (null: none). The strictest one seen holds. */
@@ -271,11 +344,25 @@ export class Frontier {
     this.crawlDelayMsByHost = new Map(this.crawlDelayMsByHost).set(host, next)
   }
 
-  /** Every host's pace as it stands: when its last page started and its Crawl-delay, for the task to keep (Task.pacing). */
+  /**
+   * Every host's pace as it stands, for the task to keep (Task.pacing): when its last page started, its Crawl-delay, and
+   * where the task slowed it, until when it is left alone and the pace it holds. A host whose signals never reached a
+   * slowdown is at its baseline and keeps no adaptive entry.
+   */
   pacing(): Record<string, HostPacing> {
     const out: Record<string, HostPacing> = {}
-    for (const host of new Set([...this.lastStartedAtMs.keys(), ...this.crawlDelayMsByHost.keys()])) {
-      out[host] = { lastStartedAtMs: this.lastStartedAtMs.get(host) ?? null, crawlDelayMs: this.crawlDelayMsByHost.get(host) ?? null }
+    for (const host of new Set([...this.lastStartedAtMs.keys(), ...this.crawlDelayMsByHost.keys(), ...this.cooldownUntilMs.keys(), ...this.adaptive.keys()])) {
+      const adaptive = this.adaptive.get(host)
+      const cooldownUntilMs = this.cooldownUntilMs.get(host)
+      // A cooldown an earlier run set and that passed before this run started a page on the host is over.
+      const last = this.lastStartedAtMs.get(host)
+      const cooldownHolds = cooldownUntilMs !== undefined && (last === undefined || cooldownUntilMs > last || adaptive !== undefined && adaptive.slowdowns > 0)
+      out[host] = {
+        lastStartedAtMs: last ?? null,
+        crawlDelayMs: this.crawlDelayMsByHost.get(host) ?? null,
+        ...(cooldownHolds ? { cooldownUntilMs } : {}),
+        ...(adaptive !== undefined && adaptive.slowdowns > 0 ? { adaptive: { ...adaptive } } : {}),
+      }
     }
     return out
   }

@@ -52,12 +52,14 @@ import {
   type PaidCallLog,
   type PaidCallRecord,
   type StepRecord,
+  type AdaptivePacing,
   type Task,
   type TraceEvent,
 } from '@w2l/contracts'
 import { abortableSleep, createExecutionScope, createSpendLedger, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { paidCallExposureUsd, paidCallTotals, reportFromTaskAttempt } from './crawlReport.js'
-import { Frontier, type FrontierEnqueueResult, type FrontierItem } from './frontier.js'
+import { Frontier, type FrontierEnqueueResult, type FrontierItem, type FrontierOptions } from './frontier.js'
+import { softBlockSignal } from './pacing.js'
 import { canonicalizeUrl, hostOf } from './canonicalize.js'
 import type { TaskStore } from './taskStore.js'
 import { withRegexLedger, type RegexStats } from './regexCheck.js'
@@ -439,6 +441,15 @@ export class CrawlOrchestrator {
               }
             }
             if (item.depth === 0 && CONTENTFUL_STATUS.has(result.status)) frontier.followSeedRedirect(result.evidence.finalUrl)
+            // What the page's answer did to its host's pace: two soft blocks in a row slow the host (one page at a time, a
+            // longer wait), normal pages ease it back. The change goes on the page's record and, at once, on the task's pace
+            // alone (never over its status or URL list, which a cancel or an append may be writing), so a status read or the
+            // job's next slice sees the pace in force.
+            const paceChange = cachedPage ? null : frontier.noteResult(item.host, softBlockSignal(result), this.clock.now())
+            if (paceChange !== null) {
+              result = { ...result, trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'pacing_adjusted', detail: { ...paceChange } }] }
+              if (this.store.putTaskPacing !== undefined) await this.store.putTaskPacing(runningTask.id, frontier.pacing(), new Date(this.clock.now()).toISOString())
+            }
             const latestTask = await this.store.getTask(runningTask.id)
             if (latestTask?.status === 'cancelled') {
               persistedCancellation = true
@@ -740,15 +751,19 @@ export class CrawlOrchestrator {
  * The frontier's pace options with a task's stored pace (Task.pacing) folded in: each host's last start, and the
  * strictest Crawl-delay of the server's and the task's.
  */
-function pacedFrom(serverDelays: ReadonlyMap<string, number> | undefined, pacing: Task['pacing']): { crawlDelayMsByHost?: ReadonlyMap<string, number>; lastStartedAtMsByHost?: ReadonlyMap<string, number> } {
+function pacedFrom(serverDelays: ReadonlyMap<string, number> | undefined, pacing: Task['pacing']): Pick<FrontierOptions, 'crawlDelayMsByHost' | 'lastStartedAtMsByHost' | 'cooldownUntilMsByHost' | 'adaptiveByHost'> {
   if (pacing === undefined) return {}
   const delays = new Map(serverDelays ?? [])
   const starts = new Map<string, number>()
+  const cooldowns = new Map<string, number>()
+  const adaptive = new Map<string, AdaptivePacing>()
   for (const [host, pace] of Object.entries(pacing)) {
     if (pace.crawlDelayMs !== null) delays.set(host, Math.max(delays.get(host) ?? 0, pace.crawlDelayMs))
     if (pace.lastStartedAtMs !== null) starts.set(host, pace.lastStartedAtMs)
+    if (typeof pace.cooldownUntilMs === 'number') cooldowns.set(host, pace.cooldownUntilMs)
+    if (pace.adaptive != null && pace.adaptive.slowdowns > 0) adaptive.set(host, pace.adaptive)
   }
-  return { crawlDelayMsByHost: delays, lastStartedAtMsByHost: starts }
+  return { crawlDelayMsByHost: delays, lastStartedAtMsByHost: starts, cooldownUntilMsByHost: cooldowns, adaptiveByHost: adaptive }
 }
 
 /** Whether a result is a list step stopped at a check the site put up (ListStop `challenge`), its pages kept for a later run. */

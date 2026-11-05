@@ -689,12 +689,31 @@ export interface BatchStatusResponse extends CrawlReport {
   failed: number
   /** The cap in force: the request's `maxConcurrency` or the service's worker count, whichever is lower. */
   maxConcurrency: number
+  /**
+   * The hosts the batch slowed after two soft blocks in a row (a 429 or 503, a challenge page, a page delivered in place of
+   * the one asked for, a failed task contract), by hostname: how many of its pages run at once and the wait between two
+   * page starts, as they stand. Absent while every host runs at its baseline; a slowed host leaves the list once ten
+   * normal pages in a row have brought its wait back to the baseline.
+   */
+  pacing?: Readonly<Record<string, HostPace>>
   /** The entries `ignoreInvalidURLs` skipped at submission; present exactly when the option was on. */
   invalidURLs?: readonly string[]
   /** Items stopped at a check a person can get through in their own Chrome (`POST /v1/batches/:id/handoff`); present on a server that offers the handoff. */
   waitingForPerson?: number
   /** A batch on the my-browser lane waiting for the person to allow its sites in the page Octocrawl opened in their Chrome; present only while it waits. */
   waitingForApproval?: true
+}
+
+/** A slowed host's pace on a batch status (`pacing`). */
+export interface HostPace {
+  /** Pages in flight at once on the host. */
+  ceiling: number
+  /** The wait between two page starts on the host, ms. */
+  delayMs: number
+  /** How many times the batch slowed the host. */
+  slowdowns: number
+  /** Until when the host is left alone, when a wait is in force at the time of the read (ISO 8601). */
+  cooldownUntil?: string
 }
 
 /**
