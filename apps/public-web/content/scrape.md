@@ -84,7 +84,7 @@ A `json` format fills the schema you send from the page itself and gives each va
 
 Octocrawl reads over HTTP first and opens a browser when the page needs scripts to show its content. On 2026-10-17, [quotes.toscrape.com/js/](https://quotes.toscrape.com/js/), whose quotes a script draws, came back with all 10 quotes after HTTP and then the browser (`channelsTried: ["http", "browser_local"]`).
 
-- `fastMode: true` keeps a call over HTTP alone. A page that needs scripts then returns HTTP's verdict instead of its content.
+- `fastMode: true` keeps a call over HTTP alone. A page that needs scripts then returns HTTP's verdict instead of its content. It takes no `waitFor`: the two together are refused with HTTP 400.
 - `waitFor` (milliseconds) starts in the browser and waits that long after the page loads before reading it.
 - `timeout` bounds the whole scrape; when it fires, the answer is `partial` with what was read, or `failed`.
 

@@ -7,7 +7,7 @@ Phase 1 of the roadmap's [PH · Hosted Octocrawl](../ROADMAP.md#ph--hosted-octoc
 | How | No `Authorization` header | `Authorization: Bearer oc_…` | OAuth sign-in; the client sends `Authorization: Bearer oca_…` to `POST /mcp-oauth` |
 | Identity | The address Cloudflare reports, hashed | The key's HMAC | The connection's own key record (`kind: "oauth"`), found from the token's HMAC |
 | Pages a day | `W2L_KEYLESS_DAILY` (20) an address, and `W2L_KEYLESS_TOTAL_DAILY` (500) every keyless caller together | the key's `dailyLimit` | the account's credits, at most `W2L_ACCOUNT_DAILY` (500) starts an account, and `W2L_ACCOUNTS_DAILY` (3000) for every account together |
-| Lane | HTTP only (`fastMode` pinned, and an `agentHints` line says so when a page needed the browser or the call sent `fastMode: false`; no screenshot) | HTTP, then the browser when the key's `browser` is true | HTTP, then the browser when the connection's record has `browser` and the account has credits for a browser page |
+| Lane | HTTP only (`fastMode` pinned, and an `agentHints` line says so when a page needed the browser or the call sent `fastMode: false`; no screenshot, and a scrape's `waitFor` is HTTP 400 naming what the caller lacks) | HTTP, then the browser when the key's `browser` is true | HTTP, then the browser when the connection's record has `browser` and the account has credits for a browser page |
 | Tools and routes | `scrape`, `map`; `POST /v1/scrape`, `POST /v1/map`, `GET /v1/scrapes/:id`, `GET /v1/maps/:id` | the same, plus `scrape_product` | MCP only: `scrape`, `map`, and `scrape_product` with the browser lane; REST `/v1/*` refuses `oca_` tokens |
 | Starts a minute | 10 | 60 | 60 |
 
@@ -250,7 +250,7 @@ A key that names an account (`uid` on its `hostedApiKeys` document) spends that 
   | Anything else: blocked by a check, a challenge or robots.txt, nothing read, an invalid request, a server error | 0 |
 
 - **How it is charged.** A call reserves the most it could cost before it runs: 5 when the key may use the browser lane, else 1. When it ends, it gives back what its result did not cost.
-- **Running short.** An account with at least 1 credit but fewer than 5 reads over HTTP alone for that call. With none left it is refused: `429 quota_exhausted`, with `Retry-After` counting down to the 1st.
+- **Running short.** An account with at least 1 credit but fewer than 5 reads over HTTP alone for that call, where a screenshot or a `waitFor` is refused. With none left it is refused: `429 quota_exhausted`, with `Retry-After` counting down to the 1st.
 - **What the response says.** A scrape or map the gate answered says `X-Credits-Used` and `X-Credits-Remaining`. An error raised inside (an invalid request, a server error) costs nothing but carries neither header. An MCP tool call spends the same way, through the same gate.
 - **Firestore.**
   - `credits/{uid}` holds `month`, `grant` and `purchased`. An account's first balance is written only while `users/{uid}` exists (the same commit checks it): a deleted account (public-preview auth.ts) cannot start a new one through a key the API still has cached, and such a call is `401 unauthorized`. A key issued by hand with `--uid` needs that account to have signed in once.
@@ -643,7 +643,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `scrape` `debug` | Supported |  |
 | `scrape` `markdownOffset` | Supported | MCP only, here and locally: where the answer's Markdown starts, to read on from a cut answer. REST answers the whole Markdown. |
 | `scrape` `onlyMainContent` | Supported |  |
-| `scrape` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
+| `scrape` `waitFor` | Limited | A connection with the browser lane only, at 5 credits a page; one without does not list it, and one that sends it anyway, or an account with fewer credits, is refused: a page is never read without the wait. |
 | `scrape` `timeout` | Limited | At most 180 s, and 120 s when left out (local 300 s, and 120 s when left out): 60 s inside the 240 s claude.ai gives a tool call, under Cloud Run's 300 s request timeout. |
 | `scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). |
 | `scrape` `includeTags` | Supported |  |
@@ -701,7 +701,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `crawl` `idempotencyKey` | Supported |  |
 | `crawl` `webhook` | Planned: stage H item 4, monitors and delivery | REST takes it for the job's end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript. Sent anyway: served over REST only. |
 | `crawl` `onlyMainContent` | Supported |  |
-| `crawl` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
+| `crawl` `waitFor` | Limited | A connection with the browser lane only, at 5 credits a page; one without does not list it, and one that sends it anyway, or an account with fewer credits, is refused: a page is never read without the wait. |
 | `crawl` `timeout` | Supported |  |
 | `crawl` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). REST takes a larger value and the start refuses it by name. |
 | `crawl` `includeTags` | Supported |  |
@@ -725,7 +725,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `batch_scrape` `formats` | Supported |  |
 | `batch_scrape` `includeLinks` | Supported |  |
 | `batch_scrape` `onlyMainContent` | Supported |  |
-| `batch_scrape` `waitFor` | Limited | A connection with the browser lane only; one without reads over HTTP alone. |
+| `batch_scrape` `waitFor` | Limited | A connection with the browser lane only, at 5 credits a page; one without does not list it, and one that sends it anyway, or an account with fewer credits, is refused: a page is never read without the wait. |
 | `batch_scrape` `timeout` | Supported |  |
 | `batch_scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). REST takes a larger value and the start refuses it by name. |
 | `batch_scrape` `includeTags` | Supported |  |

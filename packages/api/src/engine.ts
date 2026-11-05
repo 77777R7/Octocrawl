@@ -988,6 +988,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     if (regexRefusal !== null) throw new RequestError(regexRefusal, 'unsupported_parameter', { parameters: ['verify'] })
   }
   /**
+   * waitFor waits in the browser lane, which fastMode declines: no URL can answer both, so a scrape, a batch and a crawl are
+   * refused at their start (a hosted job's start asks these checks alone, not the rungs). A caller the hosted gate pinned
+   * fastMode for never gets here with a waitFor: the gate refuses that by what the caller lacks.
+   */
+  const checkFastModeWait = (req: PageOptions): void => {
+    if (req.fastMode === true && req.waitFor !== undefined && req.waitFor > 0) throw new RequestError('waitFor requires the browser lane, which fastMode declines')
+  }
+  /**
    * `access: "enhanced"` asks for what the server's access grant of tier enhanced approves (ADR 0005), within its
    * budget: a server without one refuses it by name, naming the other choices. `standard` and `my-browser` need none.
    * A hosted engine with hosted_chrome's operator config takes it (ADR 0005, revision of 2026-10-27, decision two): a
@@ -1978,6 +1986,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     checkVerificationFormats(req)
     checkRobotsOverride('robotsOverride', req.robotsOverride)
     checkHostedOptions(req)
+    checkFastModeWait(req)
     const overallStart = performance.now()
     const requestedAt = new Date().toISOString()
     const scrapeId = crypto.randomUUID()
@@ -2174,6 +2183,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     checkListSelectors(req.formats)
     checkVerificationFormats(req)
     checkHostedOptions(req)
+    checkFastModeWait(req)
     checkAccessChoice(req)
     const webhookConfig = jobWebhooks.check(req.webhook)
     if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
@@ -2194,6 +2204,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     checkVerificationFormats(req)
     checkRobotsOverride('robotsOverrides', req.robotsOverrides)
     checkHostedOptions(req)
+    checkFastModeWait(req)
     checkAccessChoice(req)
     checkMyBrowser(req)
     const webhookConfig = jobWebhooks.check(req.webhook)
