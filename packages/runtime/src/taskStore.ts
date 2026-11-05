@@ -47,6 +47,8 @@ export interface TaskStore {
   putStep(step: StepRecord): Promise<void>
   getStep(stepId: string): Promise<StepRecord | null>
   listSteps(taskId: string, attemptId?: string): Promise<readonly StepRecord[]>
+  /** When an attempt's latest `limit` steps were written, newest first, without reading their bodies. */
+  listRecentStepTimes(taskId: string, attemptId: string, limit: number): Promise<readonly string[]>
   /** Count terminal URL checkpoints without reading their result bodies. */
   countCompletedSteps(taskId: string): Promise<number>
   /** The ids of a task's steps whose result's trace has an event of this name, without reading their bodies. */

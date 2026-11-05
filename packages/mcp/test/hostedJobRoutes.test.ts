@@ -274,7 +274,10 @@ describe('hosted job routes', () => {
     expect(((await refused.json()) as { error: string }).error).toBe('this account has 50 credits; the job\'s first slice needs 100')
     // Over HTTP alone, twenty pages are twenty credits.
     expect((await call('POST', '/v1/batches', 'oc_one', { urls: urls(20), fastMode: true })).status).toBe(202)
-    expect(await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(20), maxCredits: 40 })).json()).toMatchObject({ estimatedCredits: 40 })
+    const capped = await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(20), maxCredits: 40 })).json()
+    expect(capped).toMatchObject({ estimatedCredits: 40 })
+    // A job that may stop at its cap has no floor for reading every URL.
+    expect(capped).not.toHaveProperty('minimumSeconds')
   })
 
   it('counts the json model fallback\'s two credits a page in the estimate, not in what the first slice needs', async () => {
@@ -352,6 +355,18 @@ describe('hosted job routes', () => {
     const second = await (await call('GET', `/v1/batches/${taskId}/items?limit=100&cursor=${first.nextCursor}`, 'oc_one')).json() as { items: Array<{ url: string }>; hasMore: boolean }
     expect(second.items.map((item) => item.url)).toEqual(['b', 'c'])
     expect(second.hasMore).toBe(false)
+  })
+
+  it('says a running batch\'s rate on its status and in the list of jobs alike', async () => {
+    const { call, store, sliceWrote } = await start({ credits: new MemoryCreditsStore(100_000) })
+    const { taskId } = await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(9) })).json() as { taskId: string }
+    await sliceWrote(taskId, urls(5).map((url) => ({ url, status: 'success', markdown: '# Page' })) as never)
+    store.jobs.set(taskId, { ...store.jobs.get(taskId)!, status: 'running', startedAt: new Date(Date.now() - 30_000).toISOString() })
+    const status = await (await call('GET', `/v1/batches/${taskId}`, 'oc_one')).json() as { rate: { pagesPerMinute: number; etaSeconds: number } }
+    expect(status.rate).toMatchObject({ measuredPages: 5, pagesPerMinute: expect.any(Number) })
+    // Read through a list too: an index passed for the clock would give no rate here.
+    const listed = await (await call('GET', '/v1/jobs', 'oc_one')).json() as { items: Array<{ taskId: string; rate: { pagesPerMinute: number | null } }> }
+    expect(listed.items.find((item) => item.taskId === taskId)?.rate.pagesPerMinute).toEqual(expect.any(Number))
   })
 
   it('lists the account\'s own jobs, newest first, a page at a time (H2 P1)', async () => {

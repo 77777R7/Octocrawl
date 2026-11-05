@@ -538,6 +538,41 @@ describe('persistent URL-array batch', () => {
     expect(await refused.text()).toContain('fields names no item field: finalUrl')
   })
 
+  it('says the rate of a running batch from its pages read, null until there are enough, and nothing once it has ended', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    let open = () => {}
+    const held = new Promise<void>((resolve) => { open = resolve })
+    f.setHold(async (path) => { if (path === '/item/9') await held })
+    const urls = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `${f.origin}/item/${n}`)
+    const accepted = await w2l.batchScrape(urls)
+    // This fixture sets no interval between pages, so no floor can be said.
+    expect(accepted).not.toHaveProperty('minimumSeconds')
+    let running = await w2l.getBatch(accepted.taskId)
+    expect(running).toHaveProperty('rate')
+    for (let i = 0; i < 200 && running.completed < 8; i++) { await new Promise((resolve) => setTimeout(resolve, 25)); running = await w2l.getBatch(accepted.taskId) }
+    expect(running.completed).toBe(8)
+    expect(running.rate).toMatchObject({ pagesPerMinute: expect.any(Number), etaSeconds: expect.any(Number), measuredPages: 8 })
+    expect(running.rate!.pagesPerMinute!).toBeGreaterThan(0)
+    open()
+    const report = await w2l.waitBatch(accepted.taskId)
+    expect(report.status).toBe('completed')
+    expect(report).not.toHaveProperty('rate')
+  })
+
+  it('answers a start with the floor the per-host interval sets, and not an append or a batch with no interval', async () => {
+    const f = await fixture()
+    const engine = f.engine({ networkPolicy: { ...localNetworkPolicy(), perHostConcurrency: 1, perHostMinDelayMs: 600 } })
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const accepted = await w2l.batchScrape([1, 2, 3].map((n) => `${f.origin}/item/${n}`))
+    expect(accepted).toMatchObject({ minimumSeconds: 1 })
+    const appended = await w2l.appendToBatch(accepted.taskId, [`${f.origin}/item/4`])
+    expect(appended).not.toHaveProperty('minimumSeconds')
+  })
+
   it('persists JSON-only results, paginates all URLs, and sends a terminal SSE event', async () => {
     const f = await fixture()
     const engine = f.engine()

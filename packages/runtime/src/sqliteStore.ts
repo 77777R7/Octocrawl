@@ -368,6 +368,11 @@ export class SqliteTaskStore implements TaskStore {
     return rows.map(stepFromRow)
   }
 
+  async listRecentStepTimes(taskId: string, attemptId: string, limit: number): Promise<readonly string[]> {
+    const rows = this.db.prepare('SELECT created_at FROM steps WHERE task_id = ? AND attempt_id = ? ORDER BY created_at DESC LIMIT ?').all(taskId, attemptId, limit) as { created_at: string }[]
+    return rows.map((row) => row.created_at)
+  }
+
   async countCompletedSteps(taskId: string): Promise<number> {
     const row = this.db.prepare('SELECT COUNT(DISTINCT canonical_url) AS count FROM steps WHERE task_id = ? AND result_json IS NOT NULL').get(taskId) as { count: number }
     return row.count

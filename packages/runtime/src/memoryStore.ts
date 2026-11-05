@@ -80,6 +80,10 @@ export class MemoryTaskStore implements TaskStore {
       .map(cloneJson)
   }
 
+  async listRecentStepTimes(taskId: string, attemptId: string, limit: number): Promise<readonly string[]> {
+    return [...this.steps.values()].filter((step) => step.taskId === taskId && step.attemptId === attemptId).map((step) => step.createdAt).sort().reverse().slice(0, limit)
+  }
+
   async countCompletedSteps(taskId: string): Promise<number> {
     return new Set([...this.steps.values()]
       .filter(step => step.taskId === taskId && step.result !== null)
