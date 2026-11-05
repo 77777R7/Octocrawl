@@ -2,11 +2,16 @@
  * A task contract (`verify`) and the verification a result carries against it (ADR 0006, ROADMAP PA item 10).
  *
  * The check types are research/access/run-set.mjs's, judged the same way, so a task of the access set can be sent as a
- * contract unchanged; `recordFields` and `emptyOk` are added. The verdict lives beside the result's status, which stays
+ * contract unchanged; `recordFields`, `markdownExcludes` and `emptyOk` are added. The verdict lives beside the result's status, which stays
  * the fetch's: a task is done when `verification.status` is `passed`.
  */
 export type VerifyCheck =
   | { type: 'markdownIncludes'; text: string }
+  /**
+   * The Markdown must not hold this text: a login prompt, a "try again later" notice. Taken only beside a check of what
+   * the page must hold, since a page that never came holds no excluded text either; not judged on a live page.
+   */
+  | { type: 'markdownExcludes'; text: string }
   | { type: 'markdownMatches'; pattern: string; flags?: string }
   | { type: 'markdownCountMin'; pattern: string; flags?: string; min: number }
   | { type: 'minTables'; min: number }
@@ -23,7 +28,7 @@ export interface VerifyContract {
 }
 
 export type VerifyCheckType = VerifyCheck['type']
-export const VERIFY_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownIncludes', 'markdownMatches', 'markdownCountMin', 'minTables', 'tableRowsMin', 'listRecordsMin', 'recordFields', 'field']
+export const VERIFY_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownIncludes', 'markdownExcludes', 'markdownMatches', 'markdownCountMin', 'minTables', 'tableRowsMin', 'listRecordsMin', 'recordFields', 'field']
 /** Checks whose patterns are JavaScript regular expressions: they run with a time limit (regexCheck.ts in @w2l/runtime), and a hosted server takes them only when its operator switches them on (hostedVerifyRefusal; ADR 0006, amendment of 2026-10-29). */
 export const VERIFY_REGEX_CHECK_TYPES: readonly VerifyCheckType[] = ['markdownMatches', 'markdownCountMin']
 export const MAX_VERIFY_CHECKS = 32
@@ -98,6 +103,7 @@ export type Verification =
 /** The keys each check type takes; a check is refused with any other. */
 export const VERIFY_CHECK_KEYS: Readonly<Record<VerifyCheckType, readonly string[]>> = {
   markdownIncludes: ['type', 'text'],
+  markdownExcludes: ['type', 'text'],
   markdownMatches: ['type', 'pattern', 'flags'],
   markdownCountMin: ['type', 'pattern', 'flags', 'min'],
   minTables: ['type', 'min'],

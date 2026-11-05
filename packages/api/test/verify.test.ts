@@ -172,6 +172,7 @@ describe('task verification on a request (ADR 0006)', () => {
 
   it('also requires delivered Markdown for minTables and a field check on Markdown', async () => {
     const engine = engineWith()
+    expect((await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['tables'], verify: { checks: [{ type: 'tableRowsMin', tableIndex: 0, columns: [0], min: 1 }, { type: 'markdownExcludes', text: 'Log in' }] } })).json.error).toContain('formats must include markdown')
     for (const check of [{ type: 'minTables', min: 1 }, { type: 'field', path: 'markdown', present: true }]) {
       const response = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, formats: ['tables'], verify: { checks: [check] } })
       expect(response.status).toBe(400)
@@ -183,15 +184,31 @@ describe('task verification on a request (ADR 0006)', () => {
     expect(plain.json.verification.status).toBe('not_requested')
   })
 
+  it('fails a page that shows what the contract excludes, reads it as not served, and passes one that does not', async () => {
+    const engine = engineWith()
+    const shown = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: { checks: [{ type: 'markdownIncludes', text: 'Tide report' }, { type: 'markdownExcludes', text: 'High water' }] } })
+    expect(shown.status).toBe(200)
+    expect(shown.json.status).toBe('success')
+    expect(shown.json.verification).toMatchObject({ status: 'failed', verifier: 'verify/11', reason: 'checks_failed', checks: [{ passed: true }, { type: 'markdownExcludes', passed: false }] })
+    expect(shown.json.readiness).toMatchObject({ state: 'not_served', basis: expect.arrayContaining(['excluded_text']) })
+    expect(shown.json.evidenceRecord.verification.failed).toEqual(['markdownExcludes'])
+    const clear = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: { checks: [{ type: 'markdownIncludes', text: 'Tide report' }, { type: 'markdownExcludes', text: 'Log in for contact details' }] } })
+    expect(clear.json.verification).toMatchObject({ status: 'passed', reason: null })
+    expect(clear.json.readiness).toMatchObject({ state: 'ready', basis: ['verified'] })
+    const alone = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: { checks: [{ type: 'markdownExcludes', text: 'Log in' }] } })
+    expect(alone.status).toBe(400)
+    expect(alone.json.error).toContain('beside markdownExcludes')
+  })
+
   it('answers with a verification beside an unchanged status, in the full and compact responses and the Evidence Record', async () => {
     const engine = engineWith()
     const passed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: passing })
     expect(passed.status).toBe(200)
     expect(passed.json.status).toBe('success')
-    expect(passed.json.verification).toMatchObject({ status: 'passed', verifier: 'verify/10', reason: null, checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true }, { index: 1, type: 'markdownCountMin', passed: true, observedCount: 2, asked: 2 }] })
+    expect(passed.json.verification).toMatchObject({ status: 'passed', verifier: 'verify/11', reason: null, checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true }, { index: 1, type: 'markdownCountMin', passed: true, observedCount: 2, asked: 2 }] })
     expect(passed.json.verification.contractSha256).toMatch(/^[0-9a-f]{64}$/)
     expect(validate(passed.json.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
-    expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/10', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [], undecided: [] })
+    expect(passed.json.evidenceRecord.verification).toEqual({ status: 'passed', verifier: 'verify/11', contractSha256: passed.json.verification.contractSha256, reason: null, failed: [], undecided: [] })
 
     // The fetch succeeded and the task was not done: the status says the first, the verification the second.
     const failed = await call(engine, 'POST', '/v1/scrape', { url: `${origin}/article`, verify: failing, formats: ['markdown', 'links'], debug: false })
@@ -262,7 +279,7 @@ describe('task verification on a request (ADR 0006)', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
     const [item] = (await call(engine, 'GET', `/v1/batches/${id}/items?debug=true`)).json.items as Record<string, any>[]
-    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/10', reason: 'page_not_read', checks: [] } })
+    expect(item).toMatchObject({ status: 'failed', verification: { status: 'failed', verifier: 'verify/11', reason: 'page_not_read', checks: [] } })
     expect(validate(item!.evidenceRecord), JSON.stringify(validate.errors)).toBe(true)
     expect(item!.evidenceRecord.verification).toMatchObject({ status: 'failed', reason: 'page_not_read', contractSha256: item!.verification.contractSha256 })
   })

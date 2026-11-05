@@ -1600,7 +1600,7 @@ export async function extractStructured(
 
 /** minTables counts Markdown tables too; neither it nor a Markdown field check validates an omitted format. */
 function checksMarkdown(req: Pick<ScrapeRequest, 'verify'>): boolean {
-  return req.verify?.checks.some(check => check.type === 'markdownIncludes' || check.type === 'markdownMatches' ||
+  return req.verify?.checks.some(check => check.type === 'markdownIncludes' || check.type === 'markdownExcludes' || check.type === 'markdownMatches' ||
     check.type === 'markdownCountMin' || check.type === 'minTables' || check.type === 'field' && check.path === 'markdown') === true
 }
 

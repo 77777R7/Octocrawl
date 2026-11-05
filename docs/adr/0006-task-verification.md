@@ -97,6 +97,16 @@ Howard 的原话："我觉得方案没问题了"。这条修订认定"后果"一
   - `pathFilter.ts` 在运行时打开线性引擎的 flag 之后，V8 新建的任何 context 都会让进程崩溃。现在它在设 flag 之前先让 Node 把自己要用的 context 建好，正则判定的 context 也在这之前建好。
 - **托管的开关（2026-10-30）。** 托管 API 和 jobs worker 要同时满足两条才接受正则判定：`W2L_HOSTED_REGEX_CHECKS=1`，启动自检通过（`packages/runtime/src/regexSelfTest.ts`）。不满足时照旧按名字拒绝，文字不变。chrome 服务只要自检通过就接受，因为它的调用方已经放行过。两个托管镜像构建时都在镜像里跑同一个自检，再加上仓库任务文件里的全部正则；不过就不推送。Howard 2026-10-30 决定 chrome 服务的镜像从 Node 26.8.1 换成和 API 相同的 Node 22.23.4（原话 "Yes, Node 22"），原因是上一条的变慢。开关默认关，什么时候打开由 Howard 定（`docs/hosted-api.md` 的 The regular-expression checks）。
 
+### 2026-11-05：加入否定判定 `markdownExcludes`（Howard 同意做 D11；下面的规则是实现时定的）
+
+2026-11-04 的 IDS 任务里，未登录的详情页显示 "Log in for contact details"，结果仍是 `success`。现有判定都是"必须含有"，无法声明"不得含有"，所以加入 `markdownExcludes`。
+
+- **不能单独使用。** 契约里必须还有一条针对页面数据的判定（`isDataCheck`），否则解析时拒绝。没有到达的页面、站点改发的首页，同样不含那段文字，单独使用会把失败判成 `passed`，而 `passed` 又会盖过 `not_served`。
+- **截断不能洗掉失败。** MCP 按大小截断或从 `markdownOffset` 读取时，会对缩短后的文本重判契约。这对「必须含有」是安全的，对否定判定却相反，所以 `verify` 新增 `wholeMarkdown` 选项，否定判定始终读整页 Markdown。
+- **区域等待不判它。** 文字没出现不能证明内容已到，所以 `verify` 新增 `live` 选项：活页面视图上这条判定是 `passed: null`，既不结束等待，也不拖住等待。执行阶梯和候选提取读的是结果本身，照常判定。
+- **就绪状态。** 这条判定失败时，就绪是 `not_served`，依据是 `excluded_text`，不看区域等待：页面就是这样给的，不是提取出了问题。
+- **版本。** 验证器的版本改为 `verify/11`。`ROUTE_VERIFIER_VERSION` 仍是 `verify/9`，因为已有判定的结论没有变。
+
 ### 3. 结果：`verification`，顶层 `status` 不变
 
 每个 scrape 结果、batch 和 crawl 的每一页（`CrawlPage`）、webhook 的 page 事件都带上：

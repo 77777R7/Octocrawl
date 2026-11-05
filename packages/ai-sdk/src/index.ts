@@ -105,6 +105,7 @@ const pattern = { pattern: verifyText, flags: z.string().regex(/^[imsuy]*$/).opt
 const verifyInput = z.object({
   checks: z.array(z.discriminatedUnion('type', [
     z.object({ type: z.literal('markdownIncludes'), text: verifyText }).strict(),
+    z.object({ type: z.literal('markdownExcludes'), text: verifyText }).strict(),
     z.object({ type: z.literal('markdownMatches'), ...pattern }).strict(),
     z.object({ type: z.literal('markdownCountMin'), ...pattern, min: verifyCount }).strict(),
     z.object({ type: z.literal('minTables'), min: verifyCount }).strict(),

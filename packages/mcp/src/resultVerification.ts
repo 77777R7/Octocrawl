@@ -36,10 +36,12 @@ export function resultProjection(original: Json, contract?: VerifyContract, basi
   const previous = original.verification as Verification | undefined
   const priorReadiness = object(original.readiness) ? original.readiness as unknown as Readiness : undefined
   const probes = new RegexPool(REGEX_PROJECTION_POOL_MS, `this result's ${REGEX_PROJECTION_POOL_MS} ms for regular expressions on its shortened versions was spent`)
+  // A cut can only lose a check that asks for text; one that forbids text would pass on a cut that removed it.
+  const whole = typeof original.markdown === 'string' ? { wholeMarkdown: original.markdown } : {}
   const build = (projection: Json, pool: RegexPool | undefined): Json => {
     if (contract !== undefined) before ??= verify(contract, dataOf(original), { regex: ledger, regexPool: probes })
     let verification = previous
-    if (contract !== undefined) verification = verify(contract, dataOf(projection), { regex: ledger, ...(pool === undefined ? {} : { regexPool: pool }) })
+    if (contract !== undefined) verification = verify(contract, dataOf(projection), { regex: ledger, ...whole, ...(pool === undefined ? {} : { regexPool: pool }) })
     else if (previous !== undefined && previous.status !== 'not_requested' && (previous.reason === null || previous.reason === 'checks_failed')) {
       // A stored crawl/batch page does not carry the original contract. Do not invent it from check summaries.
       verification = { ...previous, status: 'failed', reason: 'checks_failed', checks: previous.checks.map(({ observedCount: _count, limit: _limit, limitMs: _limitMs, ...check }) => ({ ...check, passed: null, observed: 'not rechecked after MCP shortened this page: the original contract is unavailable' })) }

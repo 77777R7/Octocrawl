@@ -147,6 +147,9 @@ function verifiedReadiness(result: FetchResult, verification: Exclude<NonNullabl
     const signals = signalReadiness(result)
     return { ...signals, state: signals.state === 'ready' ? 'not_extracted' : signals.state, basis: [...signals.basis, 'checks_undecided'] }
   }
+  // The page shows what the contract excludes (a login prompt, a notice in place of the data): it was read as it stands,
+  // so this is what the site served, whatever the region wait saw, which does not judge excluded text.
+  if (verification.checks.some((check) => check.type === 'markdownExcludes' && check.passed === false)) return readiness('not_served', ['checks_failed', 'excluded_text'], result)
   const region = regionWaitOf(result, verification.contractSha256)
   if (region !== undefined) {
     if (region.ready && !region.empty) return readiness('not_extracted', ['checks_failed', 'region_ready'], result)

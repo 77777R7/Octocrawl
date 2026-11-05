@@ -348,6 +348,25 @@ describe('table contracts during the region wait', () => {
   })
 })
 
+describe('markdownExcludes during the region wait', () => {
+  const excludes = { type: 'markdownExcludes' as const, text: 'Log in for contact details' }
+
+  it('neither ends the wait nor holds it: the checks of what the page must hold decide', async () => {
+    const contract: VerifyContract = { checks: [{ type: 'markdownIncludes', text: 'Exhibitor' }, excludes] }
+    // A shell first: the excluded text is absent from it, and that alone must not read as ready.
+    const loading = page([view(''), view(''), view('Exhibitor'), view('Exhibitor')])
+    expect(await waitForRegion(loading, { contract }, { maxMs: 5_000, sampleMs: 500, now: loading.now })).toMatchObject({ ready: true, reads: 4, checks: [{ passed: true }, { passed: null }] })
+    // The page shows the text: the wait ends as soon as the rest holds, rather than running out; the verdict on the answer says the rest.
+    const shown = page([view('Exhibitor. Log in for contact details')])
+    expect(await waitForRegion(shown, { contract }, { maxMs: 5_000, sampleMs: 500, now: shown.now })).toMatchObject({ ready: true, reads: 2, checks: [{ passed: true }, { passed: null }] })
+  })
+
+  it('does not wait on a contract of excluded text alone, which reaches here only from code: nothing on the page can show it came', async () => {
+    const shell = page([view('')])
+    expect(await waitForRegion(shell, { contract: { checks: [excludes] } }, { maxMs: 5_000, sampleMs: 500, now: shell.now })).toMatchObject({ ready: false, reads: 1, unjudged: 'checks_not_on_page' })
+  })
+})
+
 describe('a regular-expression check stopped at its limit (ADR 0006, amendment of 2026-10-29)', () => {
   it('ends the wait at that read, with check_limit, and never reads the region as ready', async () => {
     // Quadratic on text with no x: the check stops at its 250 ms limit on every read, and waiting does not change that.

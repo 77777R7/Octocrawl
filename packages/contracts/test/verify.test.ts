@@ -68,6 +68,19 @@ describe('a task contract on a request (verify, ADR 0006)', () => {
     expect(refused({ checks: [{ type: 'markdownIncludes', text: 'x'.repeat(1_001) }] })).toContain('1 to 1000 characters')
   })
 
+  it('takes markdownExcludes beside a check of what the page must hold, and refuses it alone: a page that never came holds no excluded text either', () => {
+    const verify = { checks: [{ type: 'markdownIncludes', text: 'Exhibitor' }, { type: 'markdownExcludes', text: 'Log in for contact details' }] }
+    expect(parseBatchStartRequest({ urls: ['https://example.com/'], verify }).verify).toEqual(verify)
+    expect(refused({ checks: [{ type: 'markdownExcludes', text: 'Log in' }] })).toContain('verify.checks needs a check of what the page must hold beside markdownExcludes')
+    expect(refused({ checks: [{ type: 'markdownExcludes', text: 'Log in' }, { type: 'markdownExcludes', text: 'Sign in' }], emptyOk: true })).toContain('beside markdownExcludes')
+    // A check on the fetch says nothing of the page: the home page a site sent instead passes it.
+    expect(refused({ checks: [{ type: 'field', path: 'status', equals: 'success' }, { type: 'markdownExcludes', text: 'Log in' }] })).toContain('beside markdownExcludes')
+    expect(refused({ checks: [{ type: 'minTables', min: 1 }, { type: 'markdownExcludes', text: '' }] })).toContain('1 to 1000 characters')
+    expect(refused({ checks: [{ type: 'minTables', min: 1 }, { type: 'markdownExcludes', text: 'x', flags: 'i' }] })).toContain('flags')
+    // No regular expression in it: a hosted server takes it as it takes markdownIncludes.
+    expect(hostedVerifyRefusal({ checks: [{ type: 'minTables', min: 1 }, { type: 'markdownExcludes', text: 'Log in' }] })).toBeNull()
+  })
+
   it('needs exactly one comparison on a field check, and counts that are whole numbers', () => {
     expect(refused({ checks: [{ type: 'field', path: 'json.data.price' }] })).toContain('exactly one comparison')
     expect(refused({ checks: [{ type: 'field', path: 'json.data.price', present: true, equals: 1 }] })).toContain('exactly one comparison')

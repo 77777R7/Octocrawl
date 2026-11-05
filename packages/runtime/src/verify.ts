@@ -12,12 +12,12 @@ import { canonicalJson } from './evidenceRecord.js'
 import { currentRegexLedger, REGEX_VERIFY_POOL_MS, RegexPool, scanRegex, type RegexLedger, type RegexScan } from './regexCheck.js'
 
 /** Changes when checks are added or judged differently, as EXTRACTOR_VERSION does for the Markdown. */
-export const VERIFIER_VERSION = 'verify/10'
+export const VERIFIER_VERSION = 'verify/11'
 
 /**
  * The verdicts a route's history is kept under (ROADMAP PA G2a): it changes when a check that finishes is judged
- * differently. verify/10 only added the limits a regular-expression check can stop at, so what the routes learned
- * under verify/9 still holds.
+ * differently. verify/10 only added the limits a regular-expression check can stop at and verify/11 the markdownExcludes
+ * check, so what the routes learned under verify/9 still holds.
  */
 export const ROUTE_VERIFIER_VERSION = 'verify/9'
 
@@ -31,6 +31,16 @@ export type VerifyView = { status?: unknown; markdown?: unknown; tableCount?: nu
 export interface VerifyOptions {
   /** A view that holds only some of the page's readings: a check that reads what it lacks is `passed: null`. */
   partial?: boolean
+  /**
+   * A view of a live page, which may still be loading (the region wait): text missing from it proves nothing, so a
+   * markdownExcludes check is `passed: null` there, and neither ends the wait nor holds it.
+   */
+  live?: boolean
+  /**
+   * The page's whole Markdown, when the view holds a shortened version of it (a cut to a size budget, a read from an
+   * offset): a markdownExcludes check reads this, since a cut can take the text out of an answer, not off the page.
+   */
+  wholeMarkdown?: string
   /** The request's regular-expression ledger, when it is not the one the call runs in (withRegexLedger). */
   regex?: RegexLedger
   /** The pool this call's regular-expression checks draw from, in place of the one its kind of judgement gets. */
@@ -74,7 +84,7 @@ interface Scanner {
   scan(kind: 'test' | 'count', pattern: string, flags: string, subject: string): RegexScan
 }
 
-function judge(check: VerifyCheck, view: VerifyView, partial: boolean, scanner: Scanner): Judged {
+function judge(check: VerifyCheck, view: VerifyView, partial: boolean, options: Pick<VerifyOptions, 'live' | 'wholeMarkdown'>, scanner: Scanner): Judged {
   const unavailable: Judged = { passed: null, observed: 'not available in this view' }
   const hasMarkdown = typeof view.markdown === 'string'
   const md = hasMarkdown ? view.markdown as string : ''
@@ -83,6 +93,10 @@ function judge(check: VerifyCheck, view: VerifyView, partial: boolean, scanner: 
     case 'markdownIncludes':
       if (partial && !hasMarkdown) return unavailable
       return md.includes(check.text) ? { passed: true, observed: 'the text is in the Markdown' } : { passed: false, observed: 'the text is not in the Markdown' }
+    case 'markdownExcludes':
+      if (options.live === true) return { passed: null, observed: 'not judged on a page still loading' }
+      if (partial && !hasMarkdown) return unavailable
+      return (options.wholeMarkdown ?? md).includes(check.text) ? { passed: false, observed: 'the text is in the Markdown' } : { passed: true, observed: 'the text is not in the Markdown' }
     case 'markdownMatches': {
       if (partial && !hasMarkdown) return unavailable
       const scan = scanner.scan('test', check.pattern, check.flags ?? 'm', md)
@@ -189,7 +203,7 @@ export function verify(contract: VerifyContract | undefined, view: VerifyView, o
       return scan
     },
   }
-  const checks: VerificationCheck[] = contract.checks.map((check, index) => ({ index, type: check.type, data: isDataCheck(check), ...judge(check, view, partial, scanner) }))
+  const checks: VerificationCheck[] = contract.checks.map((check, index) => ({ index, type: check.type, data: isDataCheck(check), ...judge(check, view, partial, options, scanner) }))
   ledger?.noteCall(heldMs, checks.filter(undecidedCheck).length)
   const judged = checks.filter((check) => check.passed !== null)
   // An undecided check is never a pass: dropping it as a view's unavailable check is dropped would pass on the rest.

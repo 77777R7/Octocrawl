@@ -11,7 +11,7 @@ import { SITEMAP_MODES } from './crawl.js'
 import { MAX_PDF_PAGES, type FetchOptions, type PdfParser } from './execution.js'
 import type { FetchResult, FetchWarning, LadderRunAudit, Readiness, TraceEvent } from './result.js'
 import { unsafeRegexReason } from './regexSafety.js'
-import { MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_KEYS, VERIFY_CHECK_TYPES, type VerifyCheck, type VerifyCheckType, type VerifyContract } from './verify.js'
+import { isDataCheck, MAX_VERIFY_CHECKS, MAX_VERIFY_TEXT, VERIFY_CHECK_KEYS, VERIFY_CHECK_TYPES, type VerifyCheck, type VerifyCheckType, type VerifyContract } from './verify.js'
 import type { DocumentExtraction, PageMetadata } from './extractor.js'
 import type { EvidenceRecord } from './evidenceRecord.js'
 import type { AttributeSelector, ListField, ListFormatRequest, ScrapeFormat, ScreenshotFormatRequest, ScreenshotViewport, StructuredExtractionResult } from './structured.js'
@@ -1902,7 +1902,8 @@ function readVerifyCheck(value: unknown, at: string): VerifyCheck {
   const type = rec.type as VerifyCheckType
   rejectUnknownKeys(rec, VERIFY_CHECK_KEYS[type], at)
   switch (type) {
-    case 'markdownIncludes': return { type, text: verifyText(rec.text, `${at}.text`) }
+    case 'markdownIncludes':
+    case 'markdownExcludes': return { type, text: verifyText(rec.text, `${at}.text`) }
     case 'markdownMatches': return { type, ...verifyPattern(rec, at) }
     case 'markdownCountMin': return { type, ...verifyPattern(rec, at), min: verifyCount(rec.min, `${at}.min`) }
     case 'minTables': return { type, min: verifyCount(rec.min, `${at}.min`) }
@@ -1951,7 +1952,10 @@ export function readVerify(value: unknown): VerifyContract | undefined {
   rejectUnknownKeys(rec, ['checks', 'emptyOk'], 'verify')
   if (!Array.isArray(rec.checks) || rec.checks.length === 0 || rec.checks.length > MAX_VERIFY_CHECKS) throw new RequestError(`verify.checks must be a list of 1 to ${MAX_VERIFY_CHECKS} checks`)
   if (rec.emptyOk !== undefined && typeof rec.emptyOk !== 'boolean') throw new RequestError('verify.emptyOk must be a boolean')
-  return { checks: rec.checks.map((check, i) => readVerifyCheck(check, `verify.checks[${i}]`)), ...(rec.emptyOk === undefined ? {} : { emptyOk: rec.emptyOk as boolean }) }
+  const checks = rec.checks.map((check, i) => readVerifyCheck(check, `verify.checks[${i}]`))
+  // Without a check on the page's data it would pass a page that never came, or the home page a site sent instead: neither holds the excluded text.
+  if (checks.some((check) => check.type === 'markdownExcludes') && !checks.some((check) => check.type !== 'markdownExcludes' && isDataCheck(check))) throw new RequestError('verify.checks needs a check of what the page must hold beside markdownExcludes: a page that never came holds no excluded text either')
+  return { checks, ...(rec.emptyOk === undefined ? {} : { emptyOk: rec.emptyOk as boolean }) }
 }
 
 function readPageOptions(rec: Record<string, unknown>, mode: ApiCrawlMode | undefined): PageOptions {
