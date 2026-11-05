@@ -24,7 +24,7 @@ import { BodyTooLargeError, defaultNetworkPolicy, DnsLookupError, EgressRoutes, 
 import { EgressRoute } from '../egressRoute.js'
 import { prepareHttpIdentity, recordHttpIdentity } from '../httpIdentity.js'
 import { COMPAT_LIBRARY, prepareCompatIdentity, type CompatTransport } from '../compatTransport.js'
-import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
+import { applicableOverride, overriddenDetail, robotsConnectionCode, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { tlsUnverifiedWarning } from '../tlsWarning.js'
 import type { SubjectAdapter } from '../subject.js'
 import { OriginScheduler, type OriginPermit } from './originScheduler.js'
@@ -357,7 +357,7 @@ export class ResilientHttpSubject implements SubjectAdapter {
           at: Date.now() - start,
           lane: 'http',
           event: 'robots_disallowed',
-          detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) },
+          detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }), ...(robotsConnectionCode(cached) === null ? {} : { code: robotsConnectionCode(cached) }) },
         })
         // An override sets the disallow aside for this one URL, a rule the
         // publisher wrote or the complete disallow an unreachable robots.txt

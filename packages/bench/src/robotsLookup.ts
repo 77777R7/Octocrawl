@@ -54,9 +54,16 @@ export interface CachedRobots {
    * its code up the cause chain, and whether it was the host's certificate
    * failing to verify. A lane reports that as `tls_error`, the fact about
    * the host, rather than as the complete disallow an unreadable robots.txt
-   * otherwise is: the page would fail the same way.
+   * otherwise is: the page would fail the same way. `answered`: the host
+   * had answered this lookup before it failed (a redirect, a body cut short),
+   * so the error is not about the first connection to the host.
    */
-  error?: { name: string; code: string | null; tls: boolean }
+  error?: { name: string; code: string | null; tls: boolean; answered: boolean }
+}
+
+/** The code of the failure of the first connection to the host, when that is what made robots.txt unreachable. */
+export function robotsConnectionCode(robots: Pick<CachedRobots, 'error'> | null | undefined): string | null {
+  return robots?.error === undefined || robots.error.answered ? null : robots.error.code
 }
 
 /**
@@ -218,6 +225,7 @@ export class RobotsOriginCache {
       // the round trip repeats until the redirect limit.
       const jar = new CookieJar(undefined, { looseMode: true })
       // One read of the file: the hops of its redirects, ending in the entry, or throwing what the network said.
+      let answered = false
       const read = async (): Promise<CachedRobots> => {
       let currentUrl = robotsUrl
       for (let hop = 0; hop <= this.networkPolicy.maxRedirects; hop++) {
@@ -231,6 +239,7 @@ export class RobotsOriginCache {
         // validates the address again and pins the validated result.
         dispatcher: typeof route === 'function' ? route(currentUrl) : route,
       } as RequestInit & { dispatcher: Dispatcher })
+        answered = true
         for (const line of res.headers.getSetCookie()) await jar.setCookie(line, currentUrl, { ignoreError: true }).catch(() => undefined)
         if (res.status >= 300 && res.status < 400) {
           await res.body?.cancel()
@@ -296,7 +305,7 @@ export class RobotsOriginCache {
       controller.signal.throwIfAborted()
       entry = scope.signal.aborted
         ? { robotsUrl, robots: null, sha256: null, absent: false, unreachable: 'timeout' }
-        : { robotsUrl, robots: null, sha256: null, absent: false, unreachable: 'network_error', error: { name: error instanceof Error ? error.name : String(error), code: errorCode(error), tls: isTlsError(error) } }
+        : { robotsUrl, robots: null, sha256: null, absent: false, unreachable: 'network_error', error: { name: error instanceof Error ? error.name : String(error), code: errorCode(error), answered, tls: isTlsError(error) } }
     } finally { scope.dispose() }
 
       controller.signal.throwIfAborted()

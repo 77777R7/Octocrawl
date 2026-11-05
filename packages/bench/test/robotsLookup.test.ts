@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { localNetworkPolicy } from '@w2l/contracts'
 import { createGuardedDispatcher } from '../src/egress.js'
-import { ROBOTS_UNREACHABLE_TTL_MS, RobotsOriginCache, robotsFetcherOf } from '../src/robotsLookup.js'
+import { ROBOTS_UNREACHABLE_TTL_MS, robotsConnectionCode, RobotsOriginCache, robotsFetcherOf } from '../src/robotsLookup.js'
 
 /** Node's `fetch failed`, wrapping the socket's error as undici does. */
 const fetchFailed = (code: string, message = code) => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(message), { code }) })
@@ -131,6 +131,20 @@ describe('RobotsOriginCache reliability boundaries', () => {
       await cache.lookup(url, 'w2l-test')
       expect(calls).toBe(2)
     } finally { await cache.teardown() }
+  })
+
+  it('names the failure of the first connection, and not one after the host had answered', async () => {
+    // A redirect from a host whose HTTPS works, to a host that refuses: the refusal says nothing of the first host.
+    vi.stubGlobal('fetch', async (url: string) => { if (url === `${origin}/robots.txt`) return new Response(null, { status: 301, headers: { location: `${origin}/moved` } }); throw fetchFailed('ECONNREFUSED', 'connect ECONNREFUSED') })
+    const redirected = new RobotsOriginCache()
+    try {
+      const entry = await redirected.lookup(`${origin}/a`, 'w2l-test')
+      expect(entry).toMatchObject({ unreachable: 'network_error', error: { code: 'ECONNREFUSED', answered: true } })
+      expect(robotsConnectionCode(entry)).toBeNull()
+    } finally { await redirected.teardown() }
+    vi.stubGlobal('fetch', async () => { throw fetchFailed('ECONNREFUSED', 'connect ECONNREFUSED') })
+    const refused = new RobotsOriginCache()
+    try { expect(robotsConnectionCode(await refused.lookup(`${origin}/a`, 'w2l-test'))).toBe('ECONNREFUSED') } finally { await refused.teardown() }
   })
 
   it('reads robots.txt once more after a network failure, but not after a certificate failure', async () => {
