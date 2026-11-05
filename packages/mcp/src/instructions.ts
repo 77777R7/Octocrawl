@@ -15,7 +15,7 @@ export type InstructionsSurface =
  * batch_scrape is listed, in scrape's description, since a client can load either one without the other.
  */
 export function oneScrapeAtATime(listsBatch: boolean): string {
-  return `One scrape runs at a time on this key or sign-in unless fastMode is true: parallel calls come back browser_busy, so ${listsBatch ? 'send many URLs as one batch_scrape' : 'send them in turn'}.`
+  return `One scrape at a time reads in the browser on this key or sign-in: a parallel one whose page needs it comes back with browser_busy, so ${listsBatch ? 'send many URLs as one batch_scrape' : 'send them in turn'}.`
 }
 
 export function serverInstructions(toolNames: Iterable<string>, surface: InstructionsSurface): string {
