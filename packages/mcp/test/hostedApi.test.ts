@@ -123,7 +123,7 @@ it('keyless: reads a page over the HTTP lane alone, within a daily allowance, th
   // A screenshot needs the browser lane, which keyless use never has: refused by name. The start still counts, so a loop of refused requests cannot probe for free.
   const screenshot = await post(url, '/v1/scrape', { url: `${origin}/page`, formats: ['screenshot'] })
   expect(screenshot.status).toBe(400)
-  expect(((await screenshot.json()) as { error: string }).error).toContain('fastMode')
+  expect(((await screenshot.json()) as { error: string }).error).toBe('a screenshot needs the browser lane, which hosted Octocrawl opens only with a key')
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` })).status).toBe(200)
   const third = await post(url, '/v1/scrape', { url: `${origin}/page` })
   expect(third.status).toBe(429)
@@ -456,6 +456,42 @@ it('a caller without the browser lane is told what it lacks when it sends waitFo
   expect(page).toMatchObject({ status: 'success', lane: 'http' })
   // A caller that has the lane closed it itself: fastMode is the cause.
   expect(await refusal({ waitFor: 500, fastMode: true }, { authorization: 'Bearer oc_browser' })).toEqual({ error: 'waitFor requires the browser lane, which fastMode declines', code: 'invalid_request' })
+})
+
+it('a caller without the browser lane is told what it lacks when it asks for a screenshot, in any form, not a fastMode the gate pinned; one with the lane is told fastMode declines it', async () => {
+  const credits = new MemoryCreditsStore(3)
+  const { url } = await start({ keylessDaily: 10, credits, keys: { oc_http: { enabled: true, plan: 'free', dailyLimit: 5, browser: false }, oc_low: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' }, oc_browser: { enabled: true, plan: 'free', dailyLimit: 5, browser: true } } })
+  const refusal = async (body: Record<string, unknown>, headers: Record<string, string> = {}) => {
+    const answer = await post(url, '/v1/scrape', { url: `${origin}/page`, ...body }, headers)
+    expect(answer.status).toBe(400)
+    return await answer.json() as { error: string; code: string; agentHints?: string[] }
+  }
+  const lacks = [
+    [{}, 'a screenshot needs the browser lane, which hosted Octocrawl opens only with a key'],
+    [{ authorization: 'Bearer oc_http' }, 'a screenshot needs the browser lane, which this key does not have'],
+    [{ authorization: 'Bearer oc_low' }, 'a screenshot needs the browser lane, and this account has fewer credits than a browser page (5)'],
+  ] as const
+  for (const [headers, error] of lacks) {
+    for (const body of [{ formats: ['screenshot'] }, { formats: ['markdown', 'screenshot@fullPage'] }, { formats: [{ type: 'screenshot', fullPage: true }] }, { formats: ['screenshot'], fastMode: true }, { formats: ['screenshot'], fastMode: false }]) {
+      const answer = await refusal(body, headers)
+      expect(answer).toMatchObject({ error, code: 'invalid_request' })
+      expect(answer.agentHints?.[0]).toBe('leave out the screenshot format to read this page over HTTP alone')
+    }
+  }
+  // The refused calls cost the account nothing.
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 3 })
+  // A wait is named first when a call asks for both, as the engine names it.
+  expect((await refusal({ formats: ['screenshot'], waitFor: 500 })).error).toBe('waitFor needs the browser lane, which hosted Octocrawl opens only with a key')
+  // A caller that has the lane closed it itself: fastMode is the cause.
+  expect(await refusal({ formats: ['screenshot'], fastMode: true }, { authorization: 'Bearer oc_browser' })).toEqual({ error: 'screenshot requires the browser lane, which fastMode declines', code: 'invalid_request' })
+  // An MCP client that sends the format its list left out gets the same words.
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`)))
+    const refused = await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, formats: ['screenshot'] } })
+    expect(refused.isError).toBe(true)
+    expect(JSON.stringify(refused.content)).toContain('a screenshot needs the browser lane, which hosted Octocrawl opens only with a key')
+  } finally { await client.close() }
 })
 
 it('keeps the pinned HTTP-only hint in the final verified response and stored record', async () => {

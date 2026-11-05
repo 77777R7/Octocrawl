@@ -139,6 +139,26 @@ describe('hosted job routes', () => {
     expect((await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), maxCredits: 0 })).status).toBe(400)
   })
 
+  it('refuses a screenshot with fastMode at the start of a job, in any form, naming why, where it used to run five failing slices to delivery_failed; actions never get that far', async () => {
+    const { call, store } = await start()
+    const starts = [['/v1/batches', { urls: urls(1) }], ['/v1/crawl', { url: 'https://example.com/' }]] as const
+    for (const formats of [['screenshot'], ['markdown', 'screenshot@fullPage'], [{ type: 'screenshot', fullPage: true }]]) {
+      for (const [path, body] of starts) {
+        const answer = await call('POST', path, 'oc_one', { ...body, formats, fastMode: true })
+        expect(answer.status, path).toBe(400)
+        expect(await answer.json(), path).toEqual({ error: 'screenshot requires the browser lane, which fastMode declines', code: 'invalid_request', agentHints: [] })
+      }
+    }
+    expect(store.jobs.size).toBe(0)
+    for (const [path, body] of starts) {
+      const actions = await call('POST', path, 'oc_one', { ...body, actions: [{ type: 'scrape' }], fastMode: true })
+      expect(actions.status, path).toBe(400)
+      expect(((await actions.json()) as { error: string }).error, path).toMatch(/^hosted (batch|crawl) jobs do not take actions$/)
+    }
+    // Without fastMode the job starts: it is the pair that is refused.
+    expect((await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), formats: ['screenshot'] })).status).toBe(202)
+  })
+
   it('takes maxPages null as the default, never as no limit', async () => {
     const { call, store } = await start()
     const body = await (await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', maxPages: null })).json() as { taskId: string }

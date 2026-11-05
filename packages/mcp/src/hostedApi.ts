@@ -23,7 +23,7 @@ import { join } from 'node:path'
 import { createHistogram } from 'node:perf_hooks'
 import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
-import { closeIdleOnlyWhenUnread, createApp, createApiEngine, type ApiEngine, type ApiEngineOptions, type HostedChromeOperator } from '@w2l/api'
+import { closeIdleOnlyWhenUnread, createApp, createApiEngine, hasFormat, type ApiEngine, type ApiEngineOptions, type HostedChromeOperator } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy, type ScrapeRun } from '@w2l/contracts'
 import type { RegexStats } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
@@ -772,11 +772,11 @@ const HTTP_ONLY_HINTS = {
   credits: `this account has fewer credits than a browser page (${CREDITS.browserPage}), so hosted Octocrawl read the page over HTTP alone; the monthly credits come back on the 1st, or ${LOCAL_HINT}`,
 } as const
 
-/** Why a scrape's waitFor is refused, by what the caller lacks: the engine would name the fastMode the gate pins, which the caller did not send. */
-const WAIT_FOR_REFUSALS = {
-  keyless: 'waitFor needs the browser lane, which hosted Octocrawl opens only with a key',
-  key: 'waitFor needs the browser lane, which this key does not have',
-  credits: `waitFor needs the browser lane, and this account has fewer credits than a browser page (${CREDITS.browserPage})`,
+/** Why a scrape's waitFor or screenshot is refused, by what the caller lacks: the engine would name the fastMode the gate pins, which the caller did not send. */
+const BROWSER_LANE_REFUSALS = {
+  keyless: 'needs the browser lane, which hosted Octocrawl opens only with a key',
+  key: 'needs the browser lane, which this key does not have',
+  credits: `needs the browser lane, and this account has fewer credits than a browser page (${CREDITS.browserPage})`,
 } as const
 
 /** The scrape context that tells the engine the gate pinned fastMode: the answer and the stored record then say why, outright to a caller that sent fastMode: false. */
@@ -808,8 +808,12 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const accountsDaily = config.accountsDaily ?? DEFAULT_ACCOUNTS_DAILY
   // Signing in is free and its credits are outside every keyless pool, so a caller without an account is told so first.
   const signInHint = `sign in free for ${(config.monthlyCredits ?? DEFAULT_MONTHLY_CREDITS).toLocaleString('en-US')} credits a month: an MCP client connects to ${MCP_OAUTH_RESOURCE} and signs in there, and the API takes a key made at https://octocrawl.dev/signin/?utm_source=hosted&utm_medium=quota`
-  const waitForRefusal = (lacks: keyof typeof WAIT_FOR_REFUSALS): RequestError =>
-    new RequestError(WAIT_FOR_REFUSALS[lacks], 'invalid_request', undefined, ['leave out waitFor to read this page over HTTP alone', ...(lacks === 'keyless' ? [signInHint] : []), LOCAL_HINT])
+  /** The refusal of a scrape read over HTTP alone that asks for what only the browser lane gives, the wait first, as the engine names it; null when it asks for neither. */
+  const browserLaneRefusal = (req: ReturnType<typeof parseScrapeRequest>, lacks: keyof typeof BROWSER_LANE_REFUSALS): RequestError | null => {
+    const wait = req.waitFor !== undefined && req.waitFor > 0
+    if (!wait && !hasFormat(req.formats ?? [], 'screenshot')) return null
+    return new RequestError(`${wait ? 'waitFor' : 'a screenshot'} ${BROWSER_LANE_REFUSALS[lacks]}`, 'invalid_request', undefined, [`leave out ${wait ? 'waitFor' : 'the screenshot format'} to read this page over HTTP alone`, ...(lacks === 'keyless' ? [signInHint] : []), LOCAL_HINT])
+  }
   const policy = hostedPolicy(config.networkPolicy ?? hostedNetworkPolicy(), env)
   const engine = createApiEngine({
     taskRoot: config.taskRoot,
@@ -1018,7 +1022,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
         ? { ...(body as Record<string, unknown>), storeInCache: false, ...(caller.browser ? {} : { fastMode: true }) }
         : body
       const req = parseScrapeRequest(pinned)
-      if (!caller.browser && req.waitFor !== undefined && req.waitFor > 0) throw waitForRefusal(caller.kind)
+      const refusedLane = caller.browser ? null : browserLaneRefusal(req, caller.kind)
+      if (refusedLane !== null) throw refusedLane
       // The model's +2 is charged in credits, which only an account has.
       const modelGate = { admit: async () => ({ ok: false as const, message: config.model === undefined ? MODEL_REFUSALS.notOffered : MODEL_REFUSALS.needsAccount }) }
       const capabilities = await grantedCapabilities(config.access, caller)
@@ -1111,7 +1116,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const model = config.model?.gate(modelRefusal) ?? null
           const modelGate = model?.gate ?? { admit: async () => ({ ok: false as const, message: MODEL_REFUSALS.notOffered }) }
           const req = parseScrapeRequest(pinned)
-          if (!browser && req.waitFor !== undefined && req.waitFor > 0) throw waitForRefusal(caller.browser ? 'credits' : 'key')
+          const refusedLane = browser ? null : browserLaneRefusal(req, caller.browser ? 'credits' : 'key')
+          if (refusedLane !== null) throw refusedLane
           const capabilities = await grantedCapabilities(config.access, caller)
           const refusedEnhanced = enhancedRefusal(req, capabilities)
           if (refusedEnhanced !== null) throw refusedEnhanced
