@@ -123,7 +123,7 @@ To connect a standalone stdio MCP process to that API, run:
 npm run mcp
 ```
 
-`npm run api` binds `127.0.0.1` and allows loopback/RFC1918 so fixture servers work. Hosted mode is explicit: `npm run api -- --hosted --token $W2L_API_TOKEN`. That binds `0.0.0.0`, requires `Authorization: Bearer`, denies private/metadata IPs, and limits a crawl to 100 pages: an omitted or `null` `maxPages` takes 100, and a larger one is refused with `invalid_request`. It obeys robots.txt for every URL and offers no way past it: `robotsOverride`, `robotsOverrides` and `ignoreRobotsTxt` are refused with `unsupported_parameter` (see below).
+`npm run api` binds `127.0.0.1` and allows loopback/RFC1918 so fixture servers work, and `198.18.0.0/15`, where a proxy client's fake-IP mode answers DNS for every public name. Hosted mode is explicit: `npm run api -- --hosted --token $W2L_API_TOKEN`. That binds `0.0.0.0`, requires `Authorization: Bearer`, denies private/metadata IPs, and limits a crawl to 100 pages: an omitted or `null` `maxPages` takes 100, and a larger one is refused with `invalid_request`. It obeys robots.txt for every URL and offers no way past it: `robotsOverride`, `robotsOverrides` and `ignoreRobotsTxt` are refused with `unsupported_parameter` (see below).
 
 ## Tokens
 

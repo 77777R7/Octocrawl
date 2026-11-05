@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import Database from 'better-sqlite3'
 import { configureControlDatabase } from './sqliteSetup.js'
-import { classifyIp, WEBHOOK_EVENTS, webhookHeaderRefusal, type DeliveryAttempt, type DeliveryDestination, type DeliveryDestinationInput, type DeliveryDestinationKind, type DeliveryPage, type DeliveryPageQuery, type DeliveryQuery, type DeliveryState, type WebhookDelivery, type WebhookEvent, type WebhookEventEnvelope, type WebhookPayload, type WebhookPayloadFormat } from '@w2l/contracts'
+import { isLoopbackAddress, WEBHOOK_EVENTS, webhookHeaderRefusal, type DeliveryAttempt, type DeliveryDestination, type DeliveryDestinationInput, type DeliveryDestinationKind, type DeliveryPage, type DeliveryPageQuery, type DeliveryQuery, type DeliveryState, type WebhookDelivery, type WebhookEvent, type WebhookEventEnvelope, type WebhookPayload, type WebhookPayloadFormat } from '@w2l/contracts'
 
 /** Columns added to delivery_destinations after its first schema, each created when missing. */
 const DESTINATION_COLUMNS: ReadonlyArray<readonly [string, string]> = [
@@ -89,7 +89,7 @@ export interface DestinationUrlOptions {
 /** Whether a URL's host names the machine itself: a loopback literal, or `localhost` (whose resolved address the transport checks again). */
 export function isLoopbackHostname(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, '').toLowerCase()
-  return host === 'localhost' || classifyIp(host) === 'loopback_address'
+  return host === 'localhost' || isLoopbackAddress(host)
 }
 
 export function validateDestinationUrl(value: string, options: DestinationUrlOptions = {}): string {

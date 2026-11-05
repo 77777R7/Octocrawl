@@ -16,7 +16,7 @@
  * Direct requests keep the resolve-validate-pin checks.
  */
 import type { EgressProxy, NetworkPolicy, ProxyServer } from './policy.js'
-import { classifyIp, ipInCidr, isIpAddress } from './ssrf.js'
+import { ipInCidr, isIpAddress, isLoopbackAddress } from './ssrf.js'
 
 export const PROXY_ENV_NAMES = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy'] as const
 
@@ -147,7 +147,7 @@ function ipEntry(address: string, port: string | undefined): NoProxyEntry {
 
 function bypassesProxy(target: URL, noProxy: readonly string[]): boolean {
   const host = target.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase()
-  if (host === 'localhost' || host.endsWith('.localhost') || classifyIp(host) === 'loopback_address') return true
+  if (host === 'localhost' || host.endsWith('.localhost') || isLoopbackAddress(host)) return true
   const port = Number(target.port || (target.protocol === 'https:' ? 443 : 80))
   const literal = isIpAddress(host)
   for (const raw of noProxy) {

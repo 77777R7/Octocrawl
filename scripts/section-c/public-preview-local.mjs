@@ -7,6 +7,7 @@ import { validateLocalPreviewProxy } from '../../packages/bench/dist/index.js'
 
 // Review-only launcher. Production uses Firestore for restart-safe quota and
 // Amazon origin coordination; this process deliberately binds loopback only.
+process.env.W2L_PUBLIC_PREVIEW_LOCAL = 'true'
 const port = Number(process.env.W2L_PUBLIC_PREVIEW_PORT ?? 8798)
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid W2L_PUBLIC_PREVIEW_PORT')
 
