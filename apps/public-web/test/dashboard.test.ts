@@ -694,3 +694,37 @@ describe('the Jobs page', () => {
     expect(opened).toEqual([link])
   })
 })
+
+describe('the first five minutes explain themselves (2026-11-05 audit)', () => {
+  it('names bought credits beside the month\'s grant, and the Overview\'s MCP line is the sign-in URL', async () => {
+    const bought = { ...account(OCTOBER.resetsAt, usageOf(octoberLines())), credits: { remaining: 2382, monthly: { left: 988, of: 1000, resetsAt: OCTOBER.resetsAt }, purchased: 1394 } }
+    const { $ } = await page('/dashboard/', '', OCTOBER.now, { ...octoberAnswers(), 'GET /api/account': [200, bought] })
+    expect($('side-credits').textContent).toBe('2,382')
+    expect($('side-renews').textContent).toBe('of 1,000 this month + 1,394 bought · renews Nov 1 (UTC)')
+    expect($('ov-mcp').textContent).toBe('https://mcp.octocrawl.dev/mcp-oauth')
+    expect($('kpi-left').closest('.kpi')!.textContent).toContain('1 per page over HTTP · 5 per page in a browser · 0 when not read')
+    expect([...$('ev-title').closest('.ev-copy')!.querySelectorAll('a')].map(a => a.textContent!.trim())).toEqual(['Try a page →', 'Connect your agent →', 'What a record holds'])
+  })
+
+  it('says on API keys what a key is for and where an agent goes instead, on both empty lists', async () => {
+    const none = { ...account(OCTOBER.resetsAt, usageOf(octoberLines())), keys: [] }
+    const { $, window } = await page('/dashboard/keys/', '', OCTOBER.now, { ...octoberAnswers(), 'GET /api/account': [200, none], 'GET /api/account/connections': [200, { connections: [] }] })
+    expect(window.document.querySelector('#keys-title + span + p, #keys-title')!.closest('section')!.querySelector('p')!.textContent).toContain('1,000 credits a month instead of the keyless 20 pages a day')
+    expect($('keys-empty').hidden).toBe(false)
+    expect($('keys-empty').querySelector('a')!.getAttribute('href')).toBe('/dashboard/connect/')
+    expect($('connections-empty').querySelector('a')!.getAttribute('href')).toBe('/dashboard/connect/')
+    expect([...window.document.querySelectorAll('th')].map(th => th.textContent)).toContain('Sends you back to')
+  })
+
+  it('tells Connect\'s local section as two steps, and the Playground what the cost chip means', async () => {
+    const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
+    expect(connect.$('c-local-code').textContent).toBe('npx octocrawl serve')
+    expect(connect.$('c-local-claude').textContent).toBe('claude mcp add octocrawl -- npx -y @octocrawl/mcp')
+    expect(connect.$('c-local').closest('section')!.textContent).toContain('Needs Node.js 22.13 or later')
+    expect(connect.$('agents-title').closest('section')!.textContent).toContain('claude mcp remove octocrawl')
+    const play = await page('/dashboard/scrape/', '', OCTOBER.now, octoberAnswers())
+    expect(play.$('play-summary').textContent).toBe('A page read over HTTP costs 1 credit, one that needs a browser 5, and one that is blocked or kept out by robots.txt nothing.')
+    const map = await page('/dashboard/map/', '', OCTOBER.now, octoberAnswers())
+    expect(map.$('play-summary').textContent).toBe('A map that finds URLs costs 1 credit; one that finds none costs nothing.')
+  })
+})
