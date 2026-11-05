@@ -511,6 +511,33 @@ describe('persistent URL-array batch', () => {
     expect(starts.get('/item/4')! - starts.get('/item/3')!).toBeGreaterThanOrEqual(1_900)
   })
 
+  it('lists items with the fields asked for alone (id, url, status and createdAt always), so a JSON batch comes back without markdown or evidence; an unknown field is refused by name', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const app = createApp(engine)
+    const client = new W2L({ baseUrl: 'http://w2l.test', fetch: ((input, init) => app.request(String(input), init)) as typeof fetch })
+    const accepted = await client.batchScrape([`${f.origin}/item/1`, `${f.origin}/moved/2`], { formats: [{ type: 'json', schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } }] })
+    await client.waitBatch(accepted.taskId)
+    const projected = await client.getBatchItems(accepted.taskId, { limit: 10, fields: ['json', 'warnings'] })
+    expect(projected.items).toHaveLength(2)
+    const one = projected.items.find((item) => item.url === `${f.origin}/item/1`)!
+    expect(Object.keys(one).sort()).toEqual(['createdAt', 'id', 'json', 'status', 'url'])
+    expect((one.json?.data as { title: string }).title).toBe('Fixture item 1')
+    const moved = projected.items.find((item) => item.url === `${f.origin}/moved/2`)!
+    expect(moved.warnings?.map((warning) => warning.code)).toEqual(['redirected_off_page'])
+    expect(moved).not.toHaveProperty('evidenceRecord')
+    // Over REST, as a comma list; the cursor still pages.
+    const res = await app.request(`/v1/batches/${accepted.taskId}/items?limit=1&fields=status`)
+    expect(res.status).toBe(200)
+    const body = await res.json() as { items: Array<Record<string, unknown>>; nextCursor: string | null; hasMore: boolean }
+    expect(Object.keys(body.items[0]!).sort()).toEqual(['createdAt', 'id', 'status', 'url'])
+    expect(body.hasMore).toBe(true)
+    const refused = await app.request(`/v1/batches/${accepted.taskId}/items?fields=url,finalUrl`)
+    expect(refused.status).toBe(400)
+    expect(await refused.text()).toContain('fields names no item field: finalUrl')
+  })
+
   it('persists JSON-only results, paginates all URLs, and sends a terminal SSE event', async () => {
     const f = await fixture()
     const engine = f.engine()

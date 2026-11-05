@@ -25,11 +25,11 @@
       "descriptionChars": 181
     },
     "get_crawl_pages": {
-      "inputBytes": 728,
-      "descriptionChars": 406
+      "inputBytes": 464,
+      "descriptionChars": 387
     },
     "get_crawl_errors": {
-      "inputBytes": 212,
+      "inputBytes": 264,
       "descriptionChars": 49
     },
     "cancel_crawl": {
@@ -53,8 +53,8 @@
       "descriptionChars": 116
     },
     "get_batch_items": {
-      "inputBytes": 436,
-      "descriptionChars": 177
+      "inputBytes": 393,
+      "descriptionChars": 284
     },
     "wait_batch": {
       "inputBytes": 161,
@@ -241,11 +241,11 @@
       "descriptionChars": 181
     },
     "get_crawl_pages": {
-      "inputBytes": 728,
-      "descriptionChars": 406
+      "inputBytes": 464,
+      "descriptionChars": 387
     },
     "get_crawl_errors": {
-      "inputBytes": 212,
+      "inputBytes": 264,
       "descriptionChars": 49
     },
     "list_active_crawls": {
@@ -257,8 +257,8 @@
       "descriptionChars": 116
     },
     "get_batch_items": {
-      "inputBytes": 436,
-      "descriptionChars": 177
+      "inputBytes": 393,
+      "descriptionChars": 284
     },
     "wait_batch": {
       "inputBytes": 161,

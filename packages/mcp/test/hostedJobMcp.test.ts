@@ -244,6 +244,22 @@ describe('hosted job tools over MCP', () => {
     }
   })
 
+  it('projects a hosted batch\'s items to the fields asked for, keeping url and status', async () => {
+    const { connect, sliceWrote } = await start()
+    const client = await connect('oc_account')
+    const evidenceRecord = { version: 'w2l.evidence/1', finalUrl: 'https://example.com/', fetchedAt: '2026-10-20T00:00:00.000Z', httpStatus: 200, contentSha256: 'a'.repeat(64) }
+    const page = { id: 's1', url: 'https://example.com/', status: 'success', markdown: '# Example', json: { status: 'complete', data: { title: 'Example' } }, evidenceRecord, usage: { credits: 1 }, trace: [], createdAt: '2026-10-20T00:00:01.000Z' }
+    const batch = structured(await client.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/'] } })).taskId as string
+    sliceWrote(batch, [page])
+    const result = await client.callTool({ name: 'get_batch_items', arguments: { id: batch, fields: ['json'] } })
+    expect(result.isError ?? false, text(result)).toBe(false)
+    const items = structured(result).items as Array<Record<string, unknown>>
+    expect(items).toEqual([{ id: 's1', url: 'https://example.com/', status: 'success', json: { status: 'complete', data: { title: 'Example' } }, createdAt: '2026-10-20T00:00:01.000Z' }])
+    const refused = await client.callTool({ name: 'get_batch_items', arguments: { id: batch, fields: ['finalUrl'] } })
+    expect(refused.isError).toBe(true)
+    expect(text(refused)).toContain('fields names no item field: finalUrl')
+  })
+
   it('starts, reads, pages through and cancels a crawl over MCP, its answers valid against the tools\' output schemas', async () => {
     const { connect, enqueued, sliceWrote } = await start()
     const client = await connect('oc_account')

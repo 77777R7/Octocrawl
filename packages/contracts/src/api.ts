@@ -864,6 +864,50 @@ export interface CrawlPageQuery {
   debug?: boolean
   /** List the pages whose content repeated an earlier page's (status `duplicate`) too; left out by default. */
   includeDuplicates?: boolean
+  /**
+   * The item fields to answer with (CRAWL_PAGE_FIELDS), beside `id`, `url`, `status` and `createdAt`, which every item
+   * keeps; absent: the whole item. Over REST a comma list (`fields=url,status,json`). A list of 272 JSON results read as
+   * `fields: ["json"]` fits an agent's context where the same pages' Markdown would not.
+   */
+  fields?: readonly CrawlPageField[]
+}
+
+/** The fields of a page-list item (CrawlPage) a `fields` projection may name. `finalUrl` is not one: it is in the Evidence Record. */
+export const CRAWL_PAGE_FIELDS = [
+  'id', 'url', 'canonicalUrl', 'depth', 'status', 'lane', 'markdown', 'warnings', 'warning', 'agentHints', 'handoff', 'html', 'rawHtml', 'images', 'tables',
+  'pages', 'attributes', 'screenshot', 'actions', 'list', 'links', 'metadata', 'json', 'verification', 'file', 'failureReason', 'blockReason', 'budgetExceeded',
+  'evidence', 'evidenceRecord', 'readiness', 'usage', 'trace', 'audit', 'cached', 'cacheState', 'cachedAt', 'contentHash', 'createdAt', 'updatedAt',
+] as const
+export type CrawlPageField = (typeof CRAWL_PAGE_FIELDS)[number]
+/** The fields every projected item keeps: what names it, how it ended, and what the page cursor needs. */
+export const CRAWL_PAGE_KEPT_FIELDS = ['id', 'url', 'status', 'createdAt'] as const satisfies readonly CrawlPageField[]
+/** A page-list item under a `fields` projection: the kept fields, and of the rest only what was asked for and the item has. */
+export type CrawlPageProjection = Pick<CrawlPage, (typeof CRAWL_PAGE_KEPT_FIELDS)[number]> & Partial<CrawlPage>
+/** What a page list answers with under query `Q`: whole items, or, when `Q` names `fields`, projections. */
+export type CrawlPageListed<Q extends CrawlPageQuery | undefined> = Q extends { fields: readonly CrawlPageField[] } ? CrawlPageProjection : CrawlPage
+
+const CRAWL_PAGE_FIELD_SET: ReadonlySet<string> = new Set(CRAWL_PAGE_FIELDS)
+
+/** `fields` as a tool or a query sends it: a list of names, or one comma-separated string; each must be a CrawlPage field. */
+export function parseCrawlPageFields(value: unknown): CrawlPageField[] {
+  const names = typeof value === 'string' ? value.split(',') : Array.isArray(value) ? value : null
+  if (names === null || !names.every((name): name is string => typeof name === 'string')) throw new RequestError('fields must be a list of item field names')
+  if (names.length === 0 || (names.length === 1 && names[0] === '')) throw new RequestError('fields must name at least one item field')
+  for (const name of names) {
+    if (name === '') throw new RequestError('fields must not contain an empty name')
+    if (!CRAWL_PAGE_FIELD_SET.has(name)) {
+      throw new RequestError(name === 'finalUrl' ? 'fields names no item field: finalUrl (the Evidence Record holds finalUrl; ask for evidenceRecord)' : `fields names no item field: ${name}`)
+    }
+  }
+  return [...new Set(names as CrawlPageField[])]
+}
+
+/** The item with the kept fields and the fields asked for, in the item's own order; a field the item lacks is left out. */
+export function projectCrawlPage<T extends object>(item: T, fields: readonly CrawlPageField[]): CrawlPageProjection {
+  const wanted = new Set<string>([...CRAWL_PAGE_KEPT_FIELDS, ...fields])
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(item)) if (wanted.has(key)) out[key] = value
+  return out as CrawlPageProjection
 }
 export type CrawlPagesResponse = CrawlPageList<CrawlPage>
 export type CrawlErrorsResponse = CrawlPageList<CrawlError>
@@ -2287,11 +2331,13 @@ export function parseCrawlPageQuery(query: Record<string, string | undefined>): 
   if (query.attemptId !== undefined && query.attemptId.length === 0) throw new RequestError('attemptId must not be empty')
   if (query.debug !== undefined && query.debug !== 'true' && query.debug !== 'false') throw new RequestError('debug must be true or false')
   if (query.includeDuplicates !== undefined && query.includeDuplicates !== 'true' && query.includeDuplicates !== 'false') throw new RequestError('includeDuplicates must be true or false')
+  const fields = query.fields === undefined ? undefined : parseCrawlPageFields(query.fields)
   return {
     cursor: query.cursor,
     limit,
     attemptId: query.attemptId,
     debug: query.debug === undefined ? undefined : query.debug === 'true',
     ...(query.includeDuplicates === undefined ? {} : { includeDuplicates: query.includeDuplicates === 'true' }),
+    ...(fields === undefined ? {} : { fields }),
   }
 }

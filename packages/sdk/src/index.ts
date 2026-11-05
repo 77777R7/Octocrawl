@@ -4,7 +4,7 @@ export type { WatchKind, WatchOptions, WatchTransport, WatcherClient, WatcherErr
 export { SDK_VERSION } from './version.js'
 export type { W2LOptions, RequestOptions, WaitOptions, CreateMonitorRequest, ReviseMonitorRequest, RunMonitorRequest, ScrapeOptions } from './client.js'
 export type { AppendToBatchOptions, ChunkedBatchJob, ChunkedBatchOptions, ChunkedBatchResult } from './client.js'
-export type { BatchCollected, BatchDocuments, CrawlCollected, CrawlDocuments, PageCollection, PagedListOptions, PaginationEnd, PaginationLimits, PaginationStop } from './client.js'
+export type { BatchCollected, BatchDocuments, CrawlCollected, CrawlDocuments, ListedError, ListedPage, PageCollection, PagedListOptions, PaginationEnd, PaginationLimits, PaginationStop } from './client.js'
 export type {
   EvidenceRecord,
   PageTable,
@@ -63,7 +63,10 @@ export type {
   CrawlReport,
   CrawlError,
   CrawlPage,
+  CrawlPageField,
   CrawlPageList,
+  CrawlPageListed,
+  CrawlPageProjection,
   CrawlPageQuery,
   CrawlStartRequest,
   JobStreamEventType,

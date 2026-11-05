@@ -163,6 +163,15 @@ describe('MCP tools', () => {
     expect(await callTool(client, 'get_batch_items', { id: 'batch-1', maxResults: 5 })).toMatchObject({ items: all, nextCursor: null, hasMore: false, stoppedBy: 'end' })
     // Without maxResults the tool answers one page, as before.
     expect(await callTool(client, 'get_crawl_pages', { id: 'task-1', limit: 2 })).toMatchObject({ items: all.slice(0, 2), hasMore: true })
+    // fields goes to the API as a comma list, with maxResults too; an unknown field is refused here.
+    await callTool(client, 'get_batch_items', { id: 'batch-1', limit: 2, fields: ['url', 'json'] })
+    expect(calls.at(-1)?.line).toBe('GET /v1/batches/batch-1/items?limit=2&fields=url%2Cjson')
+    await callTool(client, 'get_batch_items', { id: 'batch-1', maxResults: 3, fields: ['status'] })
+    expect(calls.at(-1)?.line).toContain('fields=status')
+    await expect(callTool(client, 'get_batch_items', { id: 'batch-1', fields: ['finalUrl'] })).rejects.toThrow('fields names no item field: finalUrl')
+    for (const name of ['get_batch_items', 'get_crawl_pages', 'get_crawl_errors']) expect((TOOLS.find((tool) => tool.name === name)?.inputSchema.properties as Record<string, unknown>).fields, name).toMatchObject({ type: 'array', items: { type: 'string' } })
+    await callTool(client, 'get_crawl_pages', { id: 'task-1', limit: 2, fields: ['status', 'json'] })
+    expect(calls.at(-1)?.line).toBe('GET /v1/crawl/task-1/pages?limit=2&fields=status%2Cjson')
     const crawl = TOOLS.find((tool) => tool.name === 'crawl')?.inputSchema.properties as Record<string, unknown>
     expect(crawl.sitemap).toMatchObject({ type: 'string', enum: ['include', 'skip', 'only'] })
     expect(crawl.maxConcurrency).toMatchObject({ type: 'integer', minimum: 1 })
