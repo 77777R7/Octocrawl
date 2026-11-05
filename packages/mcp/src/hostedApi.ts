@@ -23,7 +23,7 @@ import { join } from 'node:path'
 import { createHistogram } from 'node:perf_hooks'
 import { getRequestListener } from '@hono/node-server'
 import { Hono, type Context } from 'hono'
-import { closeIdleOnlyWhenUnread, createApp, createApiEngine, hasFormat, type ApiEngine, type ApiEngineOptions, type HostedChromeOperator } from '@w2l/api'
+import { closeIdleOnlyWhenUnread, createApp, createApiEngine, hasFormat, type ApiEngine, type ApiEngineOptions, type BrowserTurn, type HostedChromeOperator } from '@w2l/api'
 import { API_ERROR_STATUS, hostedNetworkPolicy, HOSTED_MAP_MAX_LIMIT, HOSTED_MAP_MAX_TIMEOUT_MS, parseScrapeRequest, RequestError, VERIFY_REGEX_CHECK_TYPES, withOperatorContact, type NetworkPolicy, type ScrapeRun } from '@w2l/contracts'
 import type { RegexStats } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
@@ -94,8 +94,8 @@ export interface HostedKeys {
 }
 
 /**
- * One browser-lane scrape at a time per key (ROADMAP PH item 1): a lease named for the key, held for the call and
- * released after it, with an expiry so a lease an instance never released (a crash) frees itself.
+ * One browser page at a time per key (ROADMAP PH item 1): a lease named for the key, taken when a browser rung is about to
+ * run and released when the call ends, with an expiry so a lease an instance never released (a crash) frees itself.
  */
 export interface HostedLeases {
   /** Takes the lease `id` for at most `ttlMs`, or says in how many seconds to try again. */
@@ -209,19 +209,60 @@ export const HOSTED_REQUEST_TIMEOUT_MS = 300_000
 export const BROWSER_LEASE_MS = HOSTED_REQUEST_TIMEOUT_MS + 10_000
 
 /**
- * What a scrape refused by the lease is told, the way past the lease first. Retry-After is when to ask again, capped at
- * BROWSER_BUSY_RETRY_MAX_S; the lease stays held for as long as the running call runs. A Playground run (`site`) gets the
- * wait alone: the dashboard shows the first hint and offers neither way past. An OAuth connection has MCP calls only, so
- * no REST route to name and a shorter longest call. `batchJobs`: a job this account starts now would be taken.
+ * What a scrape the lease stopped is told, the way past the lease first. `httpRead`: its page was read over HTTP and the
+ * answer is that read; otherwise it asked to start in the browser and was refused. Retry-After is when to ask again, capped
+ * at BROWSER_BUSY_RETRY_MAX_S; the lease stays held for as long as the running call runs. A Playground run (`site`), refused
+ * before it starts, gets the wait alone: the dashboard shows the first hint of a refusal and offers no way past. An OAuth
+ * connection has MCP calls only, so no REST route to name and a shorter longest call. `batchJobs`: a job this account starts now would be taken.
  */
-function browserBusyHints(retryAfterSeconds: number, via: HostedCaller['via'], batchJobs: boolean): string[] {
+function browserBusyHints(retryAfterSeconds: number, via: HostedCaller['via'], batchJobs: boolean, httpRead: boolean): string[] {
   if (via === 'site') return [`ask again in ${retryAfterSeconds} s: the run before this one may still be going then`]
   const longestMs = via === 'oauth' ? HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS : HOSTED_REQUEST_TIMEOUT_MS
   return [
     ...(batchJobs ? [`several URLs run as one batch job, which does not wait for this: ${via === 'oauth' ? 'batch_scrape' : 'batch_scrape, or POST /v1/batches'}`] : []),
-    'scrape with fastMode: true reads this page now over HTTP alone, which helps only if its text does not come from scripts; it takes no waitFor or screenshot',
-    `or ask again in ${retryAfterSeconds} s: the running call can take up to ${longestMs / 60_000} minutes, so this may be refused again`,
+    ...(httpRead ? [] : ['without waitFor, a screenshot or a json modelFallback this scrape starts over HTTP, and needs no turn unless the page needs the browser']),
+    `${httpRead ? 'for the browser\'s reading of this page, ask' : 'or ask'} again in ${retryAfterSeconds} s: the running call can take up to ${longestMs / 60_000} minutes, so this may be refused again`,
   ]
+}
+
+/** What the lease store answers for one call's turn. */
+type LeaseAnswer = Awaited<ReturnType<HostedLeases['acquire']>>
+
+/**
+ * One call's turn on the browser lane, asked when a rung is about to run a browser (ScrapeContext.browserTurn) and kept to
+ * the call's end, so a later rung of the same call needs no second turn and the lease bound stays one browser per key. Its
+ * answer stands for the call: refused, a later rung does not start beside the other call. A lease store that fails refuses
+ * the turn in its own words (`failed`), since no browser runs without one. A lease that comes in after the call ended is given back at once.
+ */
+export function browserLeaseTurn(acquire: () => Promise<LeaseAnswer>, refused: (retryAfterSeconds: number) => Promise<BrowserTurn>, failed: (error: unknown) => BrowserTurn): { take(): Promise<BrowserTurn>; release(): Promise<void> } {
+  let held: { release: () => Promise<void> } | null = null
+  let answer: BrowserTurn | null = null
+  let ended = false
+  return {
+    take: async () => {
+      if (answer !== null) return answer
+      let taken: LeaseAnswer
+      try { taken = await acquire() } catch (error) {
+        answer = failed(error)
+        return answer
+      }
+      if (taken.ok && ended) await taken.release()
+      else if (taken.ok) held = taken
+      answer = taken.ok && !ended ? { ok: true } : await refused(taken.ok ? 1 : taken.retryAfterSeconds)
+      return answer
+    },
+    release: async () => {
+      ended = true
+      await held?.release()
+    },
+  }
+}
+
+/** Whether a scrape's body starts in the browser, so that no HTTP read would stand if the lane is held: a wait or a screenshot. */
+function startsInBrowser(body: Record<string, unknown>): boolean {
+  if (typeof body.waitFor === 'number' && body.waitFor > 0) return true
+  const named = (format: unknown) => typeof format === 'string' ? format : format !== null && typeof format === 'object' ? (format as { type?: unknown }).type : undefined
+  return Array.isArray(body.formats) && body.formats.some((format) => String(named(format)).startsWith('screenshot'))
 }
 /** Requests of any kind per minute from one address, counted before the key lookup, so unknown keys cannot drive the key store. */
 export const ADDRESS_PER_MINUTE = 120
@@ -514,6 +555,8 @@ export interface HostedApiConfig {
    * revision of 2026-10-27, decision two). Absent: no rung, and `access: "enhanced"` is refused.
    */
   hostedChrome?: HostedChromeOperator
+  /** The rungs, instead of the engine's own: for a test, which has no browser to run. */
+  channelsFor?: ApiEngineOptions['channelsFor']
   /**
    * The regular-expression checks of a task contract (markdownMatches, markdownCountMin) are taken on every surface: the
    * operator's W2L_HOSTED_REGEX_CHECKS with the start-up self-test passed (hostedRegex.ts; ADR 0006, amendment of
@@ -833,6 +876,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     compatHosts: config.compatHosts ?? HOSTED_ACCESS_ENGINE.compatHosts,
     // ADR 0005 hosted_chrome, for a call that holds it and chose access enhanced, counted by the operator's meter.
     ...(config.hostedChrome === undefined ? {} : { hostedChrome: config.hostedChrome }),
+    ...(config.channelsFor === undefined ? {} : { channelsFor: config.channelsFor }),
     // The regular-expression checks, when the operator switched them on and the self-test passed (ADR 0006, amendment of 2026-10-29).
     hostedRegexChecks: config.regexChecks === true,
     onRegexChecks: (stats, about) => log(regexChecksLine(config.hashKey, stats, about)),
@@ -954,30 +998,39 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (retryAfter !== null) return refuse(c, 429, 'rate_limited', `too many requests: at most ${caller.kind === 'key' ? KEY_PER_MINUTE : caller.pool === 'claude' ? CLAUDE_PER_MINUTE : KEYLESS_PER_MINUTE} starts a minute`, [`retry after ${retryAfter} s`], { 'Retry-After': String(retryAfter) })
     const now = new Date()
     const day = utcDay(now)
-    // A key's scrape that may use the browser lane holds the key's lease for its run: a second one waits (ROADMAP PH item 1).
-    // A request that asks for the HTTP lane alone (fastMode) needs none.
+    // One browser page at a time per key (ROADMAP PH item 1). The lease is taken when a rung is about to run a browser, so a
+    // page HTTP reads holds nothing, and what HTTP read stands if the lane is held. A call that starts in the browser has no
+    // such read to keep, so it takes the lease here and waits; one that asks for the HTTP lane alone (fastMode) needs none.
     let lease: { release: () => Promise<void> } | null = null
-    if (path === '/v1/scrape' && caller.kind === 'key' && caller.browser && !(await asksHttpOnly(c))) {
-      const taken = await leases.acquire(`browser-${caller.id}`, BROWSER_LEASE_MS, now)
-      if (!taken.ok) {
-        // Jobs take no such lease, so an account that can run one is pointed at it. A failed read only leaves the hint out: this stays a 429.
-        const batchJobs = jobRoutes !== null && caller.uid !== undefined && await jobRoutes.accepts(caller.uid).catch(() => false)
-        return refuse(c, 429, 'browser_busy', 'this key already has a scrape running on the browser lane: one at a time per key', browserBusyHints(taken.retryAfterSeconds, caller.via, batchJobs), { 'Retry-After': String(taken.retryAfterSeconds) })
+    let browserTurn: (() => Promise<BrowserTurn>) | undefined
+    if (path === '/v1/scrape' && caller.kind === 'key' && caller.browser) {
+      const holder = caller
+      // Jobs take no such lease, so an account that can run one is pointed at it. A failed read only leaves the hint out.
+      const batchJobs = async () => jobRoutes !== null && holder.uid !== undefined && await jobRoutes.accepts(holder.uid).catch(() => false)
+      const body = await c.req.json().catch(() => null) as Record<string, unknown> | null
+      // So does a Playground run, as the dashboard reads a refusal's hint and not a result's, and a call for the model, whose
+      // two credits are priced with the page: these reserve all they could cost, as ever.
+      if (body?.fastMode !== true && (holder.via === 'site' || (body !== null && typeof body === 'object' && (startsInBrowser(body) || asksModelFallback(body.formats))))) {
+        const taken = await leases.acquire(`browser-${holder.id}`, BROWSER_LEASE_MS, now)
+        if (!taken.ok) return refuse(c, 429, 'browser_busy', 'this key already has a scrape running on the browser lane: one at a time per key', browserBusyHints(taken.retryAfterSeconds, holder.via, await batchJobs(), false), { 'Retry-After': String(taken.retryAfterSeconds) })
+        lease = taken
+      } else if (body?.fastMode !== true) {
+        const turn = browserLeaseTurn(() => leases.acquire(`browser-${holder.id}`, BROWSER_LEASE_MS), async (seconds) => ({
+          ok: false, code: 'browser_busy', retryAfterSeconds: seconds, message: 'another scrape on this key holds the browser lane, so this page\'s browser rung did not run', hints: browserBusyHints(seconds, holder.via, await batchJobs(), true),
+        }), (error) => {
+          log(JSON.stringify({ severity: 'WARNING', event: 'hosted_lease_failed', message: error instanceof Error ? error.message : String(error) }))
+          return { ok: false, code: 'browser_unavailable', retryAfterSeconds: 1, message: 'the browser lane could not be reserved just now, so this page\'s browser rung did not run', hints: ['ask again in a moment for the browser\'s reading of this page'] }
+        })
+        browserTurn = turn.take
+        lease = turn
       }
-      lease = taken
     }
     try {
-      return await keyedStart(c, caller, path, day, now, next)
+      return await keyedStart(c, caller, path, day, now, next, browserTurn)
     } finally {
       await lease?.release().catch((error: unknown) => log(JSON.stringify({ severity: 'WARNING', event: 'hosted_lease_release_failed', message: error instanceof Error ? error.message : String(error) })))
     }
   })
-
-  /** Whether a scrape body asks for the HTTP lane alone; a body that is not JSON does not (it is refused later). */
-  async function asksHttpOnly(c: Context<GateEnv>): Promise<boolean> {
-    const body = await c.req.json().catch(() => null) as { fastMode?: unknown } | null
-    return body !== null && typeof body === 'object' && body.fastMode === true
-  }
 
   /**
    * The day's usage line for a start: a key's per key (its digest's first 16 characters, never the key); a keyless one
@@ -994,8 +1047,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   }
 
   /** A start that passed the rate limits: an account's key spends credits, any other caller its daily allowance. */
-  async function keyedStart(c: Context<GateEnv>, caller: HostedCaller, path: string, day: string, now: Date, next: () => Promise<void>) {
-    if (caller.uid !== undefined) return accountStart(c, caller, caller.uid, path, day, now, next)
+  async function keyedStart(c: Context<GateEnv>, caller: HostedCaller, path: string, day: string, now: Date, next: () => Promise<void>, browserTurn?: () => Promise<BrowserTurn>) {
+    if (caller.uid !== undefined) return accountStart(c, caller, caller.uid, path, day, now, next, browserTurn)
     const keylessTotal = `${day}-keyless`
     const entries: QuotaEntry[] = [
       { id: `${day}-site`, limit: siteDaily, alert: true },
@@ -1030,7 +1083,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const refusedEnhanced = enhancedRefusal(req, capabilities)
       if (refusedEnhanced !== null) throw refusedEnhanced
       const phases = phaseObserver(req, log)
-      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: phases.observe, ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }).finally(phases.stop), 200)
+      return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(browserTurn === undefined ? {} : { browserTurn }), ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: phases.observe, ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }).finally(phases.stop), 200)
     }
     await next()
     return c.res
@@ -1042,7 +1095,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
    * An account with too few credits for the model's two runs the page without it; with at least one credit but fewer
    * than five, it reads over HTTP alone this time.
    */
-  async function accountStart(c: Context<GateEnv>, caller: HostedCaller, uid: string, path: string, day: string, now: Date, next: () => Promise<void>) {
+  async function accountStart(c: Context<GateEnv>, caller: HostedCaller, uid: string, path: string, day: string, now: Date, next: () => Promise<void>, browserTurn?: () => Promise<BrowserTurn>) {
     const credits = config.credits
     if (credits === undefined) return c.json({ error: 'account credits are unavailable on this server', code: 'internal_error' }, 503)
     const accounts = { id: `${day}-accounts`, limit: accountsDaily, alert: true }
@@ -1050,7 +1103,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const isScrape = path === '/v1/scrape'
     let browser = isScrape && caller.browser
     // The model's two credits are reserved only where it may be called: asked for, and offered (configured, switched on).
-    const wantsModel = isScrape && asksModelFallback((await c.req.json().catch(() => null) as { formats?: unknown } | null)?.formats)
+    const asked = isScrape ? await c.req.json().catch(() => null) as Record<string, unknown> | null : null
+    const wantsModel = isScrape && asksModelFallback(asked?.formats)
     const offered = wantsModel && config.model !== undefined && await config.model.offered()
     let modelExtra = offered ? CREDITS.model : 0
     let modelRefusal: string | null = modelExtra > 0 ? null : config.model === undefined ? MODEL_REFUSALS.notOffered : MODEL_REFUSALS.switchedOff
@@ -1059,12 +1113,25 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       log(JSON.stringify({ severity: 'ERROR', event: 'hosted_credits_reserve_failed', uid, amount, message: error instanceof Error ? error.message : String(error) }))
       throw error
     })
-    const base = () => browser ? CREDITS.browserPage : isScrape ? CREDITS.httpPage : CREDITS.map
+    // A scrape that may reach the browser reserves an HTTP page here and the rest of a browser page when its rung has the
+    // lease (browserPageTurn): a reservation of a browser page then always comes with the lease, so a parallel scrape is
+    // not told that credits are used up which a running call only holds for a page it may never need the browser for. A
+    // fastMode scrape never reaches the browser, unless it also asks for what fastMode declines, which is refused below by
+    // what the caller lacks; the rest took the lease before they got here.
+    const httpAlone = asked?.fastMode === true && !startsInBrowser(asked)
+    const base = () => browser && browserTurn === undefined && !httpAlone ? CREDITS.browserPage : isScrape ? CREDITS.httpPage : CREDITS.map
     let reserved = await reserve(base() + modelExtra)
     if (!reserved.ok && reserved.limited === 'credits' && modelExtra > 0) {
       modelExtra = 0
       modelRefusal = MODEL_REFUSALS.credits
       reserved = await reserve(base())
+    }
+    // Short of even that with the lease held: what the running browser reserved may come back, so this call hears of it.
+    if (!reserved.ok && reserved.limited === 'credits' && browserTurn !== undefined) {
+      const turn = await browserTurn()
+      if (!turn.ok && turn.code === 'browser_busy') {
+        return refuse(c, 429, 'browser_busy', 'this key already has a scrape running in the browser, and it holds this account\'s credits until it ends', [`ask again in ${turn.retryAfterSeconds} s: what the running call reserved comes back when it ends, if it costs less`], { 'Retry-After': String(turn.retryAfterSeconds) })
+      }
     }
     if (!reserved.ok && reserved.limited === 'credits' && browser && reserved.remaining >= CREDITS.httpPage) {
       browser = false
@@ -1083,7 +1150,28 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     }
     logQuotaThresholds(quotas, reserved.counts, day, log)
     logUsage(caller, path, day)
-    const reservation: Reservation = reserved.reservation
+    let reservation: Reservation = reserved.reservation
+    /** The call's turn with the rest of a browser page reserved, once: settle waits for it, so a call cut meanwhile gives it back. */
+    let pageTurn: Promise<BrowserTurn> | null = null
+    const refusedTurn = (code: 'browser_unavailable' | 'browser_credits', message: string, hint: string): BrowserTurn => ({ ok: false, code, retryAfterSeconds: 1, message, hints: [hint] })
+    const reserveBrowserPage = async (): Promise<BrowserTurn> => {
+      const turn = await browserTurn!()
+      if (!turn.ok) return turn
+      // The call's start was counted with its first reservation, so this one takes credits alone.
+      const more = await credits.reserve(uid, CREDITS.browserPage - CREDITS.httpPage, [], new Date()).catch((error: unknown) => {
+        // A commit that timed out may still have applied: the line names what may have been taken, to check against credits/{uid}.
+        log(JSON.stringify({ severity: 'ERROR', event: 'hosted_credits_reserve_failed', uid, amount: CREDITS.browserPage - CREDITS.httpPage, message: error instanceof Error ? error.message : String(error) }))
+        return null
+      })
+      if (more?.ok === true) {
+        reservation = { ...reservation, fromGrant: reservation.fromGrant + more.reservation.fromGrant, fromPurchased: reservation.fromPurchased + more.reservation.fromPurchased, remaining: more.reservation.remaining }
+        return turn
+      }
+      // What is short may be what another of the account's calls holds, so neither says the account has run out.
+      if (more?.ok === false && more.limited === 'credits') return refusedTurn('browser_credits', `this account had fewer credits than a browser page (${CREDITS.browserPage}) free for this call, so this page's browser rung did not run`, `this account had fewer credits than a browser page (${CREDITS.browserPage}) free for this call, so hosted Octocrawl read the page over HTTP alone; what a running call holds comes back when it ends, and the monthly credits on the 1st at 00:00 UTC`)
+      return refusedTurn('browser_unavailable', 'the browser lane could not be reserved just now, so this page\'s browser rung did not run', 'ask again in a moment for the browser\'s reading of this page')
+    }
+    const browserPageTurn = browserTurn === undefined ? undefined : () => pageTurn ??= reserveBrowserPage()
     let charge: ReturnType<typeof scrapeCharge> = { credits: 0, kind: 'unread' }
     let modelCharged = 0
     // The call's line for the dashboard's Activity page: what was asked for, then what came back.
@@ -1091,6 +1179,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     // From the call's arrival at the gate, so the reservation's round trip counts too.
     const started = now.getTime()
     const settle = async () => {
+      await pageTurn
       note.ms = Date.now() - started
       if (wantsModel) note.modelCredits = modelCharged
       const used = charge.credits + modelCharged
@@ -1122,7 +1211,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const refusedEnhanced = enhancedRefusal(req, capabilities)
           if (refusedEnhanced !== null) throw refusedEnhanced
           const phases = phaseObserver(req, log)
-          const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: phases.observe, ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) }).finally(phases.stop)
+          const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(browserPageTurn === undefined ? {} : { browserTurn: browserPageTurn }), ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: phases.observe, ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) }).finally(phases.stop)
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
           // Two more where the model was called for the page: never more than was reserved, as only a reserved gate admits.
           modelCharged = modelExtra > 0 && (model?.pagesCalled() ?? 0) > 0 ? CREDITS.model : 0
