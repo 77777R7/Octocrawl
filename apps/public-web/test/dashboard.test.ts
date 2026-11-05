@@ -105,6 +105,22 @@ describe('the dashboard pages render', () => {
     $('activity-filters').dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event)
     expect(rowsOf($('activity-body'))).toHaveLength(1)
   })
+
+  it('tells a success the site answered with another page (readiness not_served, #821) from a page that was read, on Activity and in the Results meter', async () => {
+    const shown = [
+      { ...line('2026-10-20T11:00:00.000Z', KEY_A, 1), url: 'https://docs.example/exhibitor/acme/', finalUrl: 'https://docs.example/', readiness: 'not_served' },
+      { ...line('2026-10-20T10:00:00.000Z', KEY_A, 1), readiness: 'ready' },
+    ]
+    const activity = await page('/dashboard/activity/', '', OCTOBER.now, octoberAnswers(shown))
+    const rows = rowsOf(activity.$('activity-body'))
+    expect(rows[0]).toContain('200 · another page')
+    expect(rows[1]).toContain('200')
+    expect(rows[1]).not.toContain('200 · another page')
+    const usage = await page('/dashboard/usage/', '', OCTOBER.now, octoberAnswers(shown), { width: 640 })
+    const results = [...usage.$('results-list').querySelectorAll('li p')].map(row => row.textContent)
+    expect(results).toContain('Read1 · 50%')
+    expect(results).toContain('Another page answered1 · 50%')
+  })
 })
 
 describe('API keys: last used and this month', () => {
@@ -412,6 +428,51 @@ describe('the Playground takes over what the home page asked for', () => {
     const form = new window.FormData($('play-form') as never)
     expect([form.get('url'), form.get('view'), form.get('scope')]).toEqual(['https://docs.example/', 'markdown', 'main'])
     expect($('play-form').querySelectorAll('.pg-field')).toHaveLength(0)
+  })
+})
+
+describe('the Playground says what a result is', () => {
+  const record = {
+    requestedUrl: 'https://docs.example/a', finalUrl: 'https://docs.example/', fetchedAt: '2026-10-20T11:00:00.000Z', httpStatus: 200, status: 'success', reason: null, lane: 'http',
+    robotsDecision: { decision: 'disallowed', robotsUrl: 'https://docs.example/robots.txt', unreachable: 'timeout' }, rawSha256: 'f'.repeat(64), outputSha256: { markdown: 'e'.repeat(64) }, extractor: { name: 'extract-tf', version: 'extract-tf/48' },
+  }
+  const hint = 'docs.example answered https://docs.example/ in place of https://docs.example/a; check that the link is still live'
+  const elsewhere = { status: 'success', requestedUrl: 'https://docs.example/a', markdown: '# Home', warnings: [{ code: 'redirected_off_page', message: 'The site sent the request on.' }], readiness: { state: 'not_served', basis: ['redirected_off_page'] }, agentHints: [hint], evidenceRecord: record }
+  const run = async (answer: unknown) => {
+    const opened = await page('/dashboard/scrape/', '?url=https%3A%2F%2Fdocs.example%2Fa', OCTOBER.now, { ...octoberAnswers(), 'POST /api/account/run': [200, answer] })
+    opened.$('play-form').dispatchEvent(new opened.window.Event('submit', { bubbles: true, cancelable: true }))
+    await settle()
+    return opened
+  }
+  const evidenceRows = ($: Page['$']) => [...$('play-evidence').querySelectorAll('dt')].map((term, i) => [term.textContent, $('play-evidence').querySelectorAll('dd')[i]!.textContent])
+
+  it('marks a page the site answered in place of the one asked for, names both, and says the next step (#821)', async () => {
+    const { $ } = await run(elsewhere)
+    expect($('play-status').textContent).toBe('success · another page')
+    expect($('play-status').className).toBe('status warn')
+    expect($('play-detail').textContent).toMatch(/^Asked for https:\/\/docs\.example\/a; the site answered https:\/\/docs\.example\/ · HTTP 200 · http lane/)
+    expect($('play-next').hidden).toBe(false)
+    expect($('play-next').textContent).toBe(`Next: ${hint}`)
+    // The Evidence Record tells a robots.txt that could not be read from a rule the site wrote.
+    ;($('play-result').querySelector('[data-view="evidence"]') as HTMLElement).click()
+    await settle()
+    expect(evidenceRows($)).toContainEqual(['robots.txt', 'unreachable (timeout): counts as a disallow, not a rule the site wrote'])
+  })
+
+  it('shows a page that was read as read, with no next step, and a failed one with its reason and hint', async () => {
+    const read = { ...elsewhere, warnings: [], readiness: { state: 'ready', basis: [] }, agentHints: [], evidenceRecord: { ...record, finalUrl: 'https://docs.example/a', robotsDecision: { decision: 'allowed', robotsUrl: 'https://docs.example/robots.txt', unreachable: null } } }
+    const ok = await run(read)
+    expect(ok.$('play-status').textContent).toBe('success')
+    expect(ok.$('play-status').className).toBe('status ok')
+    expect(ok.$('play-detail').textContent).toMatch(/^https:\/\/docs\.example\/a · HTTP 200 · http lane/)
+    expect(ok.$('play-next').hidden).toBe(true)
+    ;(ok.$('play-result').querySelector('[data-view="evidence"]') as HTMLElement).click()
+    await settle()
+    expect(evidenceRows(ok.$)).toContainEqual(['robots.txt', 'allowed'])
+    const failed = await run({ status: 'failed', failureReason: 'timeout', requestedUrl: 'https://docs.example/a', markdown: null, agentHints: ['no lane answered within the request\'s deadline; raise timeout (up to 300000 ms over REST, 180000 ms from an MCP tool)'], evidenceRecord: { ...record, status: 'failed', reason: 'timeout', httpStatus: null, finalUrl: 'https://docs.example/a' } })
+    expect(failed.$('play-status').textContent).toBe('failed · timeout')
+    expect(failed.$('play-status').className).toBe('status bad')
+    expect(failed.$('play-next').textContent).toBe('Next: no lane answered within the request\'s deadline; raise timeout (up to 300000 ms over REST, 180000 ms from an MCP tool)')
   })
 })
 

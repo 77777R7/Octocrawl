@@ -1356,6 +1356,16 @@ it('a request line tells a robots.txt that could not be read from one that disal
   expect(note.robots).toBe('disallowed')
 })
 
+it('a request line carries the scrape\'s readiness, so a success the site answered with another page (not_served, #821) is told from a page that was read', () => {
+  const note: RequestNote = { endpoint: 'scrape', keyId: 'k', url: 'https://example.com/exhibitor/acme/', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: [], ms: null, scrapeId: null, paidCallIds: null }
+  noteScrape(note, { status: 'success', readiness: { state: 'not_served', basis: ['redirected_off_page'] }, evidenceRecord: { finalUrl: 'https://example.com/', httpStatus: 200 } })
+  expect(note).toMatchObject({ status: 'success', finalUrl: 'https://example.com/', readiness: 'not_served' })
+  noteScrape(note, { status: 'success', readiness: { state: 'ready', basis: [] }, evidenceRecord: {} })
+  expect(note.readiness).toBe('ready')
+  noteScrape(note, { status: 'failed', evidenceRecord: {} })
+  expect(note.readiness).toBeNull()
+})
+
 it('a scrape\'s phase line says how long each rung took and what the page waited for, by the URL\'s host alone', () => {
   // T009 on hosted after O6 (2026-10-27): the http rung's header cap, then browser_local.
   const run = {

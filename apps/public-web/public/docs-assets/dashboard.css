@@ -433,6 +433,7 @@ a:hover{color:#fff}
 .receipt-copy{flex:none;padding:1px 6px;border:1px solid #c9bea6;border-radius:4px;background:none;color:#1b2747;font:650 10.5px var(--mono);cursor:pointer}
 .receipt-copy:hover{border-color:var(--orange);color:#c4441c}
 .receipt-final{margin:-6px 0 10px;overflow:hidden;color:#6d6553;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
+.pg-next{margin-top:6px;color:#ffcf6b}
 .receipt dd.unknown{color:#8d846f;font-style:italic}
 .receipt dd.wrap{white-space:normal;overflow-wrap:anywhere}
 @media (prefers-reduced-motion:no-preference){

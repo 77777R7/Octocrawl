@@ -608,11 +608,13 @@ function requestedFormats(body: unknown): string[] {
 
 /** A scrape result's outcome on its request line, from the result and its Evidence Record: never the page's content. */
 export function noteScrape(note: RequestNote, result: unknown): void {
-  const r = (result ?? {}) as { status?: unknown; lane?: unknown; failureReason?: unknown; scrapeId?: unknown; evidenceRecord?: { finalUrl?: unknown; httpStatus?: unknown; reason?: unknown; robotsDecision?: { decision?: unknown; unreachable?: unknown } | null; rawSha256?: unknown; access?: { paidCalls?: unknown } | null } }
+  const r = (result ?? {}) as { status?: unknown; lane?: unknown; failureReason?: unknown; scrapeId?: unknown; readiness?: { state?: unknown } | null; evidenceRecord?: { finalUrl?: unknown; httpStatus?: unknown; reason?: unknown; robotsDecision?: { decision?: unknown; unreachable?: unknown } | null; rawSha256?: unknown; access?: { paidCalls?: unknown } | null } }
   const evidence = r.evidenceRecord ?? {}
   const text = (value: unknown) => (typeof value === 'string' ? value : null)
   note.status = text(r.status) ?? 'error'
   note.lane = text(r.lane)
+  // A success the site answered with another page is readiness not_served: the dashboard tells it from a page that was read.
+  note.readiness = text(r.readiness?.state)
   note.finalUrl = text(evidence.finalUrl)
   note.httpStatus = typeof evidence.httpStatus === 'number' ? evidence.httpStatus : null
   note.reason = text(evidence.reason) ?? text(r.failureReason)
