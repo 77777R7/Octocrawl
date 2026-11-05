@@ -702,7 +702,7 @@ describe('the first five minutes explain themselves (2026-11-05 audit)', () => {
     expect($('side-credits').textContent).toBe('2,382')
     expect($('side-renews').textContent).toBe('of 1,000 this month + 1,394 bought · renews Nov 1 (UTC)')
     expect($('ov-mcp').textContent).toBe('https://mcp.octocrawl.dev/mcp-oauth')
-    expect($('kpi-left').closest('.kpi')!.textContent).toContain('1 per page over HTTP · 5 per page in a browser · 0 when not read')
+    expect($('kpi-left').closest('.kpi')!.textContent).toContain('1 per page over HTTP · 5 per page in a browser · 0 when blocked or kept out')
     expect([...$('ev-title').closest('.ev-copy')!.querySelectorAll('a')].map(a => a.textContent!.trim())).toEqual(['Try a page →', 'Connect your agent →', 'What a record holds'])
   })
 
