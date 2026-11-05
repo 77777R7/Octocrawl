@@ -29,6 +29,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A hosted call that chose `access: "enhanced"` can read a site whose robots.txt the hosted network cannot reach.** A robots.txt that timed out or failed on the network used to stop the page at the first rung, and `octocrawl-chrome` read robots.txt outside its own exit, so it failed there too. The service now reads robots.txt through the exit its Chrome uses, behind the same address guard, and the ladder goes on to `hosted_chrome` for such a page. A rule or a 5xx still stops it, the rule found on that route is obeyed, and a call without `access: "enhanced"` is unchanged.
+
 ## 0.8.4 — 2026-11-05
 
 The published packages at 0.8.4. **Every failure names its next step, locally and on hosted Octocrawl:** the command line says on stderr when a result is not the page and its help lists its own flags; `octocrawl serve` prints the command that connects Claude Code to it, and `npx -y @octocrawl/mcp` says at initialize when its API is not running; an `https://` URL of a site with no working HTTPS is read over `http://`, with an `https_unavailable` warning; a batch or crawl slows a host that pushes back and says so; `waitFor` with `fastMode` is refused by name. On hosted Octocrawl the hints name only what hosted can do, the dashboard shows a result that is not the page as such, and the logs say who was refused and why.

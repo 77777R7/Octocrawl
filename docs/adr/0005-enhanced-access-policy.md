@@ -561,3 +561,27 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 **没定的。** 一次不满足以后怎样重跑，另行决定。
 
 **本修订合入时的边界。** 引擎代码不变。`research/access/h2b-egress/cloud.sh` 加了三个环境变量：`H2B_ONLY` 让工具只建、只跑指定的 job，`H2B_DC_START` 指定数据中心列表从哪个位置开始取，`H2B_TASKS` 指定只发哪些题。门槛的结果另写记录，本修订不判过没过。
+
+## 修订 2026-11-05：`hosted_chrome` 在自己的出口上读 robots.txt
+
+**背景。** 2026-11-04 的真实任务（IDS 展商名录）里，一批站点的 robots.txt 从托管网络读不到（超时，或连接失败），按 RFC 9309 算完全禁止，页面没有发出请求。2026-11-05 用展商表里 265 个不同的网站测了一轮：12 个属于这一类，其中 11 个走 `hosted_chrome` 用的 Webshare 数据中心列表能响应。记录是 `~/Code/w2l/.w2l/access/egress-probe-2026-11-05/`（不在仓库里）。
+
+这些调用走不到 `hosted_chrome`，有两个原因：
+
+- 阶梯在 http 这一级就因 `policy_denied` 停了。
+- 服务自己读 robots.txt 也不走出口：Chrome 的连接走代理，robots.txt 从 Cloud Run 直连，同样读不到。上文的规则（"与其他浏览器 rung 走同一套规则"）和 `BrowserLocalSubject` 的说明都写着：有独立路线的浏览器，在那条路线上读 robots.txt。这里是漏了。
+
+**决定（2026-11-05，Howard 在对话中选定）。** 不开放托管的默认出口：托管照样拒绝 `W2L_EGRESS_PROXIES`，没有选 `access: "enhanced"` 的调用，出口上的任何东西都用不到。Howard 看过两个方案，默认对所有账户打开的方案要改本 ADR 的规则，没有选。
+
+- **服务。** 列表挂载时，`octocrawl-chrome` 在出口上读 robots.txt，和 Chrome 用同一个地址检查、同一个 CONNECT 拨号。证书照常校验。
+- **阶梯。** robots.txt 只因为连不上而挡住页面时，后面有 `hosted_chrome` 的调用直接走到这一级，跳过中间同一网络上的 rung。连不上指 `timeout`，或者还没有任何响应时的 `network_error`（记录里有连接错误码）。站点自己说的话不算：一条规则、5xx、重定向循环、过大的响应，阶梯照旧停下。
+- **先走 http 回退。** 站点看起来没有 HTTPS 时（`packages/bench/src/routing/httpFallback.ts`），先读 `http://`，一页 1 credit，这次读取不走这一级。`http://` 也到不了站点，说明那次拒绝不是证据，再用原来的 `https://` 地址走这一级。
+- **这一级没有读到时。** 这一级自己的结果就是答案：出口读到的规则、出口也读不到 robots.txt、页面在出口上失败，都如实写。只有这一级抛异常、什么也没说时，答案才是之前的 robots.txt 读不到。
+- **决定二的三项条件不变：** 运营配置、账户开关、这次调用的 `access: "enhanced"`，缺一项这一级就不在阶梯里。
+- **决定七不变：** 托管对每个 URL 都遵守 robots.txt。这里读到的是站点在这条路线上的 robots.txt，规则一样遵守；出口上也读不到，页面照旧不发请求。
+- **决定四不变：** 走这一级的页面照常记录路线、出口、字节和成本，按决定三的计数器计费，一页 5 credits。
+
+**这样做的代价，写在这里。** 这些站点不响应 GCP 的连接，可能只是网络问题，也可能是站点有意拦云厂商的 IP；从外面分不清。所以这条路只给用户主动选择的调用，不做成默认。
+
+**没定的。** 被站点拦下的页面（403、质询、限流）走这一级，上文已有规则，本修订不改。
+

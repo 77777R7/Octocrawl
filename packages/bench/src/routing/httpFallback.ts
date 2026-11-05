@@ -40,23 +40,35 @@ function httpsAnswered(result: FetchResult): boolean {
 }
 
 export interface HttpFallback { url: string; reason: string }
+export interface FallbackAccess { authed: boolean; session: unknown; execution: ExecutionContext; options: FetchOptions }
 
-/** The URL to ask for again and why, when the run proved the site has no HTTPS; null otherwise. */
-export function httpFallbackFor(url: string, run: LadderRunResult, access: { authed: boolean; session: unknown; execution: ExecutionContext; options: FetchOptions }): HttpFallback | null {
-  if (READ_STATUSES.has(run.result.status) || run.handoffRequested) return null
+/** The URL's http twin, when nothing of this request may not go out in the clear; null otherwise. */
+function plainTwin(url: string, access: FallbackAccess): URL | null {
   if (access.authed || (access.session ?? null) !== null || access.execution.cookieSession !== undefined) return null
   if (Object.keys(access.options.headers ?? {}).length > 0 || (access.options.actions?.length ?? 0) > 0) return null
-  // A paid call's record belongs to its run: a second run would lose it.
-  if (run.result.trace.some((event) => event.event === 'paid_calls')) return null
   let parsed: URL
   try { parsed = new URL(url) } catch { return null }
   if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '' || parsed.search !== '') return null
+  parsed.protocol = 'http:'
+  return parsed
+}
+
+/** Whether this rung's failure is one the fallback will act on: the ladder then spends no paid rung on the page first. */
+export function fallsBackToHttp(url: string, result: FetchResult, access: FallbackAccess): boolean {
+  return plainTwin(url, access) !== null && noHttpsCode(url, result) !== null
+}
+
+/** The URL to ask for again and why, when the run proved the site has no HTTPS; null otherwise. */
+export function httpFallbackFor(url: string, run: LadderRunResult, access: FallbackAccess): HttpFallback | null {
+  if (READ_STATUSES.has(run.result.status) || run.handoffRequested) return null
+  // A paid call's record belongs to its run: a second run would lose it.
+  if (run.result.trace.some((event) => event.event === 'paid_calls')) return null
+  const twin = plainTwin(url, access)
+  if (twin === null) return null
   const results = run.summary.attempts.length > 0 ? run.summary.attempts.map((attempt) => attempt.result) : [run.result]
   if (results.some(httpsAnswered)) return null
   const reason = noHttpsCode(url, results[0]!)
-  if (reason === null) return null
-  parsed.protocol = 'http:'
-  return { url: parsed.href, reason }
+  return reason === null ? null : { url: twin.href, reason }
 }
 
 /** Whether the site answered over http: a status, or a rule of its robots.txt. Anything else says no more than https did. */
