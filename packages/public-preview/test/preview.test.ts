@@ -4,9 +4,9 @@ import type { Server } from 'node:http'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { FetchResult, StructuredExtractionResult } from '@w2l/contracts'
+import { evaluateAddress, type FetchResult, type StructuredExtractionResult } from '@w2l/contracts'
 import { createPreviewServer } from '../src/server.js'
-import { mapPreviewResult, normalizePreviewUrl, type CaptureOutcome } from '../src/preview.js'
+import { mapPreviewResult, normalizePreviewUrl, previewNetworkPolicy, type CaptureOutcome } from '../src/preview.js'
 import { resolvePreviewCapability } from '../src/capability.js'
 import type { PreviewQuota } from '../src/quota.js'
 import { AmazonGateBusyError, type AmazonOriginGate } from '../src/amazonGate.js'
@@ -36,6 +36,17 @@ async function endpoint(quota: PreviewQuota, capture: NonNullable<Parameters<typ
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 }
+
+describe('the preview\'s network policy', () => {
+  it('keeps hosted rules on the service, and takes a fake-IP DNS only on the local launcher', () => {
+    expect(evaluateAddress('fake.test', '198.18.0.1', previewNetworkPolicy()).allowed).toBe(false)
+    process.env.W2L_PUBLIC_PREVIEW_LOCAL = 'true'
+    try {
+      expect(evaluateAddress('fake.test', '198.18.0.1', previewNetworkPolicy()).allowed).toBe(true)
+      expect(evaluateAddress('private.test', '10.0.0.1', previewNetworkPolicy()).allowed).toBe(false)
+    } finally { delete process.env.W2L_PUBLIC_PREVIEW_LOCAL }
+  })
+})
 
 describe('anonymous preview contract', () => {
   it('preserves actual task verification and readiness in the serialized preview', async () => {

@@ -17,7 +17,9 @@ let root:string|undefined
 afterEach(async()=>{await close?.();close=undefined;if(root)await rm(root,{recursive:true,force:true});root=undefined})
 
 it('only opts the local delivery worker into loopback egress explicitly',()=>{
-  expect(localConfigFromEnv({}).deliveryNetworkPolicy).toBeUndefined()
+  // The public rule, with the range a proxy client's fake-IP DNS answers from: a local webhook's name may resolve there.
+  expect(localConfigFromEnv({}).deliveryNetworkPolicy?.privateAllowlist).toEqual(['198.18.0.0/15'])
+  expect(evaluateHostname('127.0.0.1',localConfigFromEnv({}).deliveryNetworkPolicy!)?.allowed).toBe(false)
   const policy=localConfigFromEnv({W2L_LOCAL_DELIVERY_LOOPBACK:'1'}).deliveryNetworkPolicy!
   expect(evaluateHostname('127.0.0.1',policy)?.allowed).toBe(true)
   expect(evaluateHostname('192.168.1.5',policy)?.allowed).toBe(false)

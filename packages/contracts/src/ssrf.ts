@@ -13,6 +13,11 @@ const V4 = {
   linkLocal: [ip4('169.254.0.0'), 16] as const,
   cgnat: [ip4('100.64.0.0'), 10] as const,
   multicast: [ip4('224.0.0.0'), 4] as const,
+  /** No public site has these (RFC 6890): this network, IETF protocol use, documentation, a retired relay, benchmarking, future use and broadcast. */
+  reserved: [
+    [ip4('0.0.0.0'), 8], [ip4('192.0.0.0'), 24], [ip4('192.0.2.0'), 24], [ip4('192.88.99.0'), 24], [ip4('198.18.0.0'), 15],
+    [ip4('198.51.100.0'), 24], [ip4('203.0.113.0'), 24], [ip4('240.0.0.0'), 4],
+  ] as const,
   unspecified: ip4('0.0.0.0'),
   metadata: ip4('169.254.169.254'),
   ecsMetadata: ip4('169.254.170.2'),
@@ -24,10 +29,20 @@ const V6 = {
   linkLocal: [0xfe80n << 112n, 10] as const,
   ula: [0xfcn << 120n, 7] as const,
   multicast: [0xffn << 120n, 8] as const,
-  metadata: 0xfd00ec20000000000000000000000254n,
+  metadata: 0xfd000ec2000000000000000000000254n,
+  /** The only unicast space handed out for the public internet; site-local, discard and local NAT64 all lie outside it. */
+  globalUnicast: [0x2n << 124n, 3] as const,
+  /** Inside it, and no public site's (RFC 6890): the IETF block (Teredo, benchmarking, ORCHID), documentation twice. */
+  special: [[0x2001n << 112n, 23], [0x20010db8n << 96n, 32], [0x3fffn << 112n, 20]] as const,
+  /** Forms that carry an IPv4 address in their last 32 bits, which a translator on the path connects to. */
+  translated: [[0n, 96], [0xffffn << 32n, 96], [0xffffn << 48n, 96], [0x0064ff9bn << 96n, 96]] as const,
+  sixToFour: [0x2002n << 112n, 16] as const,
 }
 
 const METADATA_HOSTS = new Set(['metadata.google.internal', 'metadata.goog'])
+
+/** Where a proxy client on the person's machine answers DNS in its fake-IP mode (Clash, Surge): every public name resolves here. */
+export const FAKE_IP_RANGE = '198.18.0.0/15'
 
 export const LOCAL_PRIVATE_ALLOWLIST = [
   '127.0.0.0/8',
@@ -36,6 +51,7 @@ export const LOCAL_PRIVATE_ALLOWLIST = [
   '172.16.0.0/12',
   '192.168.0.0/16',
   'fc00::/7',
+  FAKE_IP_RANGE,
 ] as const
 
 export function localNetworkPolicy(): NetworkPolicy {
@@ -59,11 +75,26 @@ export function classifyIp(address: string): PolicyViolation | null {
   if (v4 !== null) return classifyV4(v4)
   const v6 = parseV6(address)
   if (v6 !== null) {
-    const mapped = v4Mapped(v6)
-    if (mapped !== null) return classifyV4(mapped)
+    // :: and ::1 are IPv6's own, though they sit in the block that carries IPv4.
+    const carried = v6 > V6.loopback ? carriedV4(v6) : null
+    if (carried !== null) return classifyV4(carried)
     return classifyV6(v6)
   }
   return 'malformed_url'
+}
+
+/**
+ * Whether an address is this machine's own: 127.0.0.0/8, ::1 or its mapped form. classifyIp says `loopback_address` of
+ * more than that, as a form that carries 127.0.0.1 is to be refused like it, but such a form can leave the machine, so a
+ * check that lets something through for being local asks this instead.
+ */
+export function isLoopbackAddress(address: string): boolean {
+  const bare = stripBrackets(address)
+  const v4 = parseV4(bare)
+  if (v4 !== null) return inCidrV4(v4, V4.loopback[0], V4.loopback[1])
+  const v6 = parseV6(bare)
+  if (v6 === null) return false
+  return v6 === V6.loopback || ((v6 >> 32n) === 0xffffn && inCidrV4(Number(v6 & 0xffffffffn) >>> 0, V4.loopback[0], V4.loopback[1]))
 }
 
 /** True for an IPv4 or IPv6 literal (brackets allowed). */
@@ -159,7 +190,8 @@ function classifyV4(ip: number): PolicyViolation | null {
     inCidrV4(ip, V4.rfc1918b[0], V4.rfc1918b[1]) ||
     inCidrV4(ip, V4.rfc1918c[0], V4.rfc1918c[1]) ||
     inCidrV4(ip, V4.cgnat[0], V4.cgnat[1]) ||
-    inCidrV4(ip, V4.multicast[0], V4.multicast[1])
+    inCidrV4(ip, V4.multicast[0], V4.multicast[1]) ||
+    V4.reserved.some(([network, bits]) => inCidrV4(ip, network, bits))
   ) {
     return 'private_address'
   }
@@ -174,6 +206,7 @@ function classifyV6(ip: bigint): PolicyViolation | null {
   if (inCidrV6(ip, V6.ula[0], V6.ula[1]) || inCidrV6(ip, V6.multicast[0], V6.multicast[1])) {
     return 'private_address'
   }
+  if (!inCidrV6(ip, V6.globalUnicast[0], V6.globalUnicast[1]) || V6.special.some(([network, bits]) => inCidrV6(ip, network, bits))) return 'private_address'
   return null
 }
 
@@ -226,8 +259,10 @@ function parseV6(text: string): bigint | null {
   return n
 }
 
-function v4Mapped(ip: bigint): number | null {
-  if ((ip >> 32n) === 0xffffn) return Number(ip & 0xffffffffn) >>> 0
+/** The IPv4 address an IPv6 form carries: mapped, compatible, SIIT, NAT64 or 6to4. A public one stays public; a private one is that address. */
+function carriedV4(ip: bigint): number | null {
+  if (V6.translated.some(([network, bits]) => inCidrV6(ip, network, bits))) return Number(ip & 0xffffffffn) >>> 0
+  if (inCidrV6(ip, V6.sixToFour[0], V6.sixToFour[1])) return Number((ip >> 80n) & 0xffffffffn) >>> 0
   return null
 }
 

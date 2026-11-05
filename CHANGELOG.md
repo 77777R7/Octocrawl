@@ -30,6 +30,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **Fix: the address check refuses every address no public site has.** It named loopback, private, link-local and metadata ranges and passed the rest, so a name could resolve to `240.0.0.0/4`, a documentation range or site-local IPv6 and be connected to, and an IPv4 address inside an IPv6 form (`64:ff9b::a9fe:a9fe`, `2002:a9fe:a9fe::`, `::169.254.169.254`) was not read at all. IPv6 outside global unicast is now refused, and the address an IPv6 form carries is judged as itself. `198.18.0.0/15` is refused on hosted and kept on a local server, where a proxy client's fake-IP mode answers DNS there. AWS's IPv6 metadata address had a wrong digit and is now named.
+
 ## 0.8.5 — 2026-11-06
 
 The published packages at 0.8.5. **A page that shows the wrong thing can now fail its contract:** `markdownExcludes` refuses a page that holds a given text, beside a check of what it must hold. The MCP instructions teach a directory as URLs first, then one `batch_scrape`; a hosted call with `access: "enhanced"` can read a site whose robots.txt the hosted network cannot reach; a `screenshot` is refused for what the caller lacks.

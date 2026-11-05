@@ -1,5 +1,5 @@
 import { buildChannels, isLocalPreviewProxyTarget, LadderRunner, OriginScheduler } from '@w2l/bench'
-import { hostedNetworkPolicy, type FetchResult, type JsonValue, type NetworkPolicy, type PageMetadata, type Readiness, type StructuredExtractionResult, type TraceEvent } from '@w2l/contracts'
+import { FAKE_IP_RANGE, hostedNetworkPolicy, type FetchResult, type JsonValue, type NetworkPolicy, type PageMetadata, type Readiness, type StructuredExtractionResult, type TraceEvent } from '@w2l/contracts'
 import { createExecutionScope } from '@w2l/http-core'
 import { extractStructured } from '@w2l/api/structured'
 import { parseHTML } from 'linkedom'
@@ -121,9 +121,9 @@ const FIELDS_CHARS = 64 * 1024
 /** The largest file a preview reads: a public page may be a PDF, and the service has 2 GiB for up to four requests. */
 export const PREVIEW_FILE_BYTES = 5 * 1024 * 1024
 
-/** The network policy of every preview capture: hosted SSRF rules, few redirects, small pages and files. */
+/** The network policy of every preview capture: hosted SSRF rules, few redirects, small pages and files. The local launcher (public:preview:local) also takes the range a proxy client's fake-IP DNS answers from. */
 export function previewNetworkPolicy(): NetworkPolicy {
-  return { ...hostedNetworkPolicy(), maxRedirects: 3, maxBodyBytes: 2 * 1024 * 1024, maxDecompressedBytes: 4 * 1024 * 1024, maxFileBytes: PREVIEW_FILE_BYTES, perHostConcurrency: 1 }
+  return { ...hostedNetworkPolicy(), ...(process.env.W2L_PUBLIC_PREVIEW_LOCAL === 'true' ? { privateAllowlist: [FAKE_IP_RANGE] } : {}), maxRedirects: 3, maxBodyBytes: 2 * 1024 * 1024, maxDecompressedBytes: 4 * 1024 * 1024, maxFileBytes: PREVIEW_FILE_BYTES, perHostConcurrency: 1 }
 }
 
 /** A step of a running preview that the page shows as it happens: robots.txt was read (whether it allows the page,

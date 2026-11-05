@@ -4,7 +4,7 @@ import { Agent, request } from 'node:https'
 import { request as httpRequest, type ClientRequest } from 'node:http'
 import { isIP, type LookupFunction, type Socket } from 'node:net'
 import { connect as connectTls, checkServerIdentity, type ConnectionOptions, type TLSSocket } from 'node:tls'
-import { classifyIp, evaluateHostname, evaluateResolved, hostedNetworkPolicy, type NetworkPolicy } from '@w2l/contracts'
+import { evaluateHostname, evaluateResolved, hostedNetworkPolicy, isLoopbackAddress, type NetworkPolicy } from '@w2l/contracts'
 import { DeliveryStore, validateDestinationUrl, type DeliveryClaim, type DestinationUrlOptions } from './deliveryStore.js'
 
 export interface WebhookTransportResponse { status: number; retryAfter: string | null }
@@ -67,7 +67,7 @@ async function sendPlainHttpLoopback(url: URL, hostname: string, input: WebhookT
   const addresses = isIP(hostname) ? [hostname] : await abortable(lookup(hostname, { all: true }).then(results => results.map(result => result.address)), input.signal)
   input.signal.throwIfAborted()
   const pinnedAddress = addresses[0]
-  if (pinnedAddress === undefined || addresses.some(address => classifyIp(address) !== 'loopback_address')) throw new Error('webhook egress denied: http is accepted for a loopback receiver only')
+  if (pinnedAddress === undefined || addresses.some(address => !isLoopbackAddress(address))) throw new Error('webhook egress denied: http is accepted for a loopback receiver only')
   return new Promise<WebhookTransportResponse>((resolve, reject) => {
     const req = httpRequest(url, {
       method: 'POST', signal: input.signal, agent: false, lookup: pinnedLookup(pinnedAddress),

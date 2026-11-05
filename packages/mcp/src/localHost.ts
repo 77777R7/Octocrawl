@@ -1,7 +1,7 @@
 import { createServer, type Server as HttpServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { hostedNetworkPolicy, localNetworkPolicy, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
+import { FAKE_IP_RANGE, hostedNetworkPolicy, localNetworkPolicy, withEnvironmentProxy, withOperatorContact, type NetworkPolicy } from '@w2l/contracts'
 import { closeIdleOnlyWhenUnread, defaultSessionsFile, loadEngineConfig, tunedPolicy, type EngineConfig } from '@w2l/api'
 import { createManagedRuntime } from './managedRuntime.js'
 import { createMcpServer } from './server.js'
@@ -32,8 +32,8 @@ export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalC
   if (!Number.isSafeInteger(deliveryPollMs) || deliveryPollMs<10 || deliveryPollMs>300_000) throw new Error('W2L_LOCAL_DELIVERY_POLL_MS must be 10..300000')
   if(env.W2L_LOCAL_DELIVERY_LOOPBACK!==undefined && env.W2L_LOCAL_DELIVERY_LOOPBACK!=='1')throw new Error('W2L_LOCAL_DELIVERY_LOOPBACK must be 1 when set')
   const deliveryNetworkPolicy=env.W2L_LOCAL_DELIVERY_LOOPBACK==='1'
-    ? {...hostedNetworkPolicy(),privateAllowlist:['127.0.0.1/32','::1/128']}
-    : undefined
+    ? {...hostedNetworkPolicy(),privateAllowlist:['127.0.0.1/32','::1/128',FAKE_IP_RANGE]}
+    : {...hostedNetworkPolicy(),privateAllowlist:[FAKE_IP_RANGE]}
   const amazonPublicState=env.W2L_AMAZON_PUBLIC_STATE_FILE ? readFileSync(env.W2L_AMAZON_PUBLIC_STATE_FILE,'utf8') : undefined
   if (amazonPublicState !== undefined) validateAmazonPublicState(amazonPublicState)
   // The same engine options the API server and the octocrawl command read (W2L_ACCESS_GRANT, W2L_BROWSER_*, W2L_COMPAT_HOSTS, W2L_EGRESS_*, W2L_WORKER_COUNT).

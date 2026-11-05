@@ -342,6 +342,8 @@ describe('durable webhook store and worker', () => {
     expect(() => validateDestinationUrl('http://127.0.0.1:8828/hook')).toThrow('HTTPS')
     expect(validateDestinationUrl('http://127.0.0.1:8828/hook', { allowHttpLoopback: true })).toBe('http://127.0.0.1:8828/hook')
     expect(validateDestinationUrl('http://[::1]:8828/hook', { allowHttpLoopback: true })).toBe('http://[::1]:8828/hook')
+    // A form that carries 127.0.0.1 can leave the machine, so it is not the loopback plain http is allowed to.
+    for (const url of ['http://[2002:7f00:1::]:9/h', 'http://[64:ff9b::7f00:1]:9/h', 'http://[::ffff:0:7f00:1]:9/h', 'http://[::7f00:1]:9/h']) expect(() => validateDestinationUrl(url, { allowHttpLoopback: true }), url).toThrow()
     expect(validateDestinationUrl('http://localhost:8828/hook', { allowHttpLoopback: true })).toBe('http://localhost:8828/hook')
     expect(() => validateDestinationUrl('http://10.0.0.5/hook', { allowHttpLoopback: true })).toThrow('HTTPS, or plain http to a loopback receiver')
     expect(() => validateDestinationUrl('http://receiver.example/hook', { allowHttpLoopback: true })).toThrow('HTTPS')
