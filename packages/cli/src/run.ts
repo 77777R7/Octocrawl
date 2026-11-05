@@ -25,7 +25,7 @@ import { COMMANDS, parseCommandLine, UsageError, usage, type Command, type CliOp
 import { login } from './login.js'
 import { nativeModuleHelp } from './nativeModule.js'
 
-export const CLI_VERSION = '0.8.2'
+export const CLI_VERSION = '0.8.3'
 
 export interface CliIo {
   env: NodeJS.ProcessEnv
