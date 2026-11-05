@@ -91,10 +91,12 @@ describe('hosted_chrome: the octocrawl-chrome service end to end', () => {
   it('leaves through the chosen datacenter proxy: the record says datacenter and names it by host:port, never its login', async () => {
     // A stand-in CONNECT proxy (D2's datacenter exit), with a made-up login; it keeps each tunnel's target.
     const targets: string[] = []
+    const carried: string[] = []
     const proxy = createNetServer((client) => {
       client.once('data', (head: Buffer) => {
         const target = head.toString('latin1').split(' ')[1]!
         targets.push(target)
+        client.on('data', (chunk: Buffer) => carried.push(chunk.toString('latin1')))
         const upstream = connectNet(Number(target.split(':')[1]), target.split(':')[0]!, () => {
           client.write('HTTP/1.1 200 Connection Established\r\n\r\n')
           client.pipe(upstream)
@@ -114,6 +116,8 @@ describe('hosted_chrome: the octocrawl-chrome service end to end', () => {
       expect(targets.length).toBeGreaterThan(0)
       // Only checked addresses reach the proxy, never a name: the site's, and any Chrome's own traffic was given.
       expect(targets).toContain(`127.0.0.1:${new URL(origin).port}`)
+      // robots.txt is read on the route the page is read on: a site that does not answer the service's network still answers this.
+      expect(carried.join('')).toContain('GET /robots.txt')
       expect(targets.filter((target) => isIP(target.slice(0, target.lastIndexOf(':'))) === 0)).toEqual([])
       const record = toEvidenceRecord(read, { mode: 'standard' }, { markdown: read.markdown })
       expect(record.access).toMatchObject({ route: 'hosted_chrome', egress: { proxy: `127.0.0.1:${proxyPort}`, source: 'pool', kind: 'datacenter' } })

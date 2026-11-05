@@ -29,6 +29,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A hosted call that chose `access: "enhanced"` can read a site whose robots.txt the hosted network cannot reach.** A robots.txt that timed out or failed on the network used to stop the page at the first rung, and `octocrawl-chrome` read robots.txt outside its own exit, so it failed there too. The service now reads robots.txt through the exit its Chrome uses, behind the same address guard, and the ladder goes on to `hosted_chrome` for such a page. A rule or a 5xx still stops it, the rule found on that route is obeyed, and a call without `access: "enhanced"` is unchanged.
 - **The MCP instructions teach the directory route: URLs first, then one batch.** On 2026-11-04 a directory's 272 detail pages were read with one `scrape` call each. Where `batch_scrape` is listed, the instructions a client reads at `initialize` now say: get the detail pages' URLs first (`map` where a sitemap lists them, else `batch_scrape` the listing pages with `formats: ["links"]` and keep the detail links), then read them as one `batch_scrape`, not one scrape per page. To stay under the 2,000 characters a client keeps whole, four other sentences are shorter, and the rule said beside `browser_busy` reads "One scrape at a time in the browser per key or sign-in". `docs/batch-crawl-map.md` has the route in full (From a directory to its detail pages).
 
 ## 0.8.4 — 2026-11-05

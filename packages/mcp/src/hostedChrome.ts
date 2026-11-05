@@ -27,7 +27,7 @@ import { Hono } from 'hono'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { hostedNetworkPolicy, hostedVerifyRefusal, withOperatorContact, type ExecutionContext, type FetchOptions, type FetchResult, type NetworkPolicy } from '@w2l/contracts'
-import { BrowserLocalSubject, CompatAddressGuard, hostedChromeRefusal, type GuardResolver, type HostedChromeClient, type InstalledChromeTestSeams } from '@w2l/api'
+import { BrowserLocalSubject, CompatAddressGuard, hostedChromeRefusal, RobotsOriginCache, type GuardResolver, type HostedChromeClient, type InstalledChromeTestSeams } from '@w2l/api'
 import type { HostedChromeExit } from './hostedChromeEgress.js'
 import { withRegexLedger, type RegexStats } from '@w2l/runtime'
 
@@ -131,12 +131,15 @@ function readOf(body: unknown, now: number, regexChecks: boolean): HostedChromeR
  */
 export function hostedChromeReader(networkPolicy: NetworkPolicy, exit: HostedChromeExit, seams: InstalledChromeTestSeams = {}, resolve?: GuardResolver, onRegexChecks?: (stats: RegexStats) => void): { read: HostedChromeReader; close: () => Promise<void> } {
   const guard = new CompatAddressGuard(networkPolicy, resolve, { login: false, ...(exit.dial === undefined ? {} : { dial: exit.dial }) })
-  const subject = new BrowserLocalSubject('standard', null, true, networkPolicy, null, undefined, null, undefined, undefined, null, false, undefined, 'hosted_chrome', 'actual', seams, null, undefined, { guard, egressKind: exit.kind, proxy: () => exit.proxy() })
+  // A browser on a route of its own reads robots.txt on that route: what the site says there is what the page will be read under.
+  const route = exit.dial === undefined ? null : guard.dispatcher()
+  const robots = route === null ? undefined : new RobotsOriginCache(networkPolicy, route)
+  const subject = new BrowserLocalSubject('standard', null, true, networkPolicy, null, undefined, null, undefined, undefined, null, false, undefined, 'hosted_chrome', 'actual', seams, null, robots, { guard, egressKind: exit.kind, proxy: () => exit.proxy() })
   return {
     // The service reads one page at a time (createHostedChromeService), so the read's exit is chosen here and held by all its connections.
     // One read is one request for its regular-expression checks: the region wait and the extraction candidates share its steering pool.
     read: (request, signal) => { exit.choose(); return withRegexLedger(() => subject.fetch(request.url, request.deadlineAt, signal, undefined, request.options), onRegexChecks) },
-    close: async () => { await subject.teardown(); await guard.close() },
+    close: async () => { await subject.teardown(); await route?.destroy(); await guard.close() },
   }
 }
 
