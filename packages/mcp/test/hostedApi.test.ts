@@ -211,6 +211,8 @@ it('one account starts at most its share of the site\'s day, refused with nothin
   expect(refusal.code).toBe('quota_exhausted')
   expect(refusal.error).toContain('this account has started its 2 hosted pages for today')
   expect(refusal.agentHints.join(' ')).toContain('00:00 UTC')
+  // The wait is said in hours and minutes; Retry-After keeps the seconds.
+  expect(refusal.agentHints.join(' ')).toMatch(/resets at 00:00 UTC, in (\d+ h \d+ min|\d+ min|under a minute)$/)
   expect(credits.balances.get('account-1')).toMatchObject({ grant: 998 })
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_two' })).status).toBe(200)
 })
@@ -271,7 +273,13 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
   const { url } = await start({ keylessDaily: 3, keys: { 'oc_live': { enabled: true, plan: 'free', dailyLimit: 3, browser: true } } })
   expect((await fetch(`${url}/mcp`, { method: 'GET' })).status).toBe(405)
   expect((await fetch(`${url}/mcp`, { method: 'POST', headers: { 'mcp-protocol-version': 'not-a-version', 'content-type': 'application/json' }, body: '{}' })).status).toBe(400)
-  expect((await fetch(`${url}/mcp`, { method: 'POST', headers: { authorization: 'Bearer oc_nobody', 'content-type': 'application/json' }, body: '{}' })).status).toBe(401)
+  const nobody = await fetch(`${url}/mcp`, { method: 'POST', headers: { authorization: 'Bearer oc_nobody', 'content-type': 'application/json' }, body: '{}' })
+  expect(nobody.status).toBe(401)
+  // A refused bearer says where a key comes from and where a signed-in client belongs, not the bare refusal alone.
+  const refusedKey = await nobody.json() as { error: string; agentHints: string[] }
+  expect(refusedKey.error).toBe('this key is not one Octocrawl issued, or it was revoked')
+  expect(refusedKey.agentHints.join(' ')).toContain('https://octocrawl.dev/dashboard/keys/')
+  expect(refusedKey.agentHints.join(' ')).toContain('/mcp-oauth')
   const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
   const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
   try {

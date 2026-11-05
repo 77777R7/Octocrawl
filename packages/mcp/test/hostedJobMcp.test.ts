@@ -334,7 +334,7 @@ describe('hosted job tools over MCP', () => {
     for (const name of HOSTED_JOB_TOOLS) expect(names, name).not.toContain(name)
     expect(names).toContain('scrape')
     const refused = await other.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/'] } }).then((result) => { expect(result.isError).toBe(true); return text(result) }, (error: Error) => error.message)
-    expect(refused).toMatch(/invited accounts/)
+    expect(refused).toMatch(/not open to this account right now/)
     expect(enqueued).toEqual([])
   })
 

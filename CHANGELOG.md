@@ -28,6 +28,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **Hosted Octocrawl's hints name only what it can do, and its refusals say the next step.** The same hint table served every server, so an agent on hosted was told to use `mode authed` (hosted holds no logins), a handoff, page actions, an access grant or a 300 s timeout, none of which hosted has. A hosted result now says, on a login wall, that hosted never takes your logins and that a server on your computer reads the page as you (`npx octocrawl serve`, `octocrawl login import <host>`, mode `authed`); on a check, that the handoff and the saved login are your computer's; on a thin page, `waitFor` and `onlyMainContent` without the actions clause; on a timeout, the REST and MCP ceilings (300,000 and 180,000 ms); on an incomplete `json`, hosted's own model at 2 credits more. A refused `mode: authed`, `waitFor` or screenshot on a hosted job, a bad key on `/mcp` and `wait_batch`'s timeout now carry an `agentHints` line, a quota's reset is said in hours and minutes beside the `Retry-After` seconds, a local `login_wall` hint names `octocrawl login import`, and an account the hosted job tools are not offered to is told so, not that jobs are "open to invited accounts" (every account has been allowed since 2026-10-22).
+
 ## 0.8.3 — 2026-11-05
 
 The published packages at 0.8.3. **Many pages as one job, and three fixes:** from a caller's third `scrape` of one host within ten minutes, the answer names `batch_scrape`, `crawl` and `map`; a batch's `maxConcurrency` takes any integer from 1 and the server lowers it to its worker count; Skyscanner's human check is named on its market domains; a robots.txt lookup gets 5 s again.

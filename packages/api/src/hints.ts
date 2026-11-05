@@ -15,24 +15,50 @@ import { SHELL_TEXT_MAX } from '@w2l/runtime'
 /** The hint a `fastMode` scrape carries when the http lane asked for the browser lane it was denied. */
 export const FAST_MODE_DECLINED_HINT = 'the http lane asked for the browser lane; fastMode declined it; retry without fastMode'
 
-/** The hint a `low_content_yield` warning carries: what to change so the browser lane gets a better chance. */
-export function lowContentYieldHint(browserTried: boolean): string {
-  return `the http lane's content was thin and the browser lane ${browserTried ? 'did not improve it' : 'was not available'}; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) or a longer timeout with the browser lane available, or actions (a click, a scroll, a wait for a selector) when the data appears after an interaction`
+/** The clause that names page actions as the next step; a hosted server takes none, so its hints leave it out. */
+const ACTIONS_CLAUSE = 'actions (a click, a scroll, a wait for a selector) when it appears after an interaction'
+
+/** The hint a `low_content_yield` warning carries: what to change so the browser lane gets a better chance; `actions` false on a server that takes none. */
+export function lowContentYieldHint(browserTried: boolean, actions = true): string {
+  return `the http lane's content was thin and the browser lane ${browserTried ? 'did not improve it' : 'was not available'}; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) or a longer timeout with the browser lane available${actions ? ', or actions (a click, a scroll, a wait for a selector) when the data appears after an interaction' : ''}`
 }
 
-/** The hint a `low_content_yield` warning on a rendered answer carries: the page was rendered and still held little. */
-export const RENDERED_LOW_YIELD_HINT = `the rendered page's main content was thin and the extraction unsure of it; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) when its data loads late, actions (a click, a scroll, a wait for a selector) when it appears after an interaction, or onlyMainContent: false for the whole page`
+/** The hint a `low_content_yield` warning on a rendered answer carries: the page was rendered and still held little; `actions` false on a server that takes none. */
+export function renderedLowYieldHint(actions = true): string {
+  return `the rendered page's main content was thin and the extraction unsure of it; pass waitFor (up to ${MAX_WAIT_FOR_MS} ms) when its data loads late, ${actions ? `${ACTIONS_CLAUSE}, ` : ''}or onlyMainContent: false for the whole page`
+}
+export const RENDERED_LOW_YIELD_HINT = renderedLowYieldHint()
 
 /**
  * The hint a rendered page with no main content carries when it was read before its content came (readiness not_loaded):
- * a longer wait, not the whole page, is the next step; with a waitFor already sent, a longer one.
+ * a longer wait, not the whole page, is the next step; with a waitFor already sent, a longer one. `actions` false on a
+ * server that takes none.
  */
-export function renderedNotLoadedHint(waitFor?: number): string {
+export function renderedNotLoadedHint(waitFor?: number, actions = true): string {
   const wait = waitFor !== undefined && waitFor > 0
     ? `it waited ${waitFor} ms (waitFor); raise waitFor (up to ${MAX_WAIT_FOR_MS} ms)`
     : `pass waitFor (up to ${MAX_WAIT_FOR_MS} ms)`
-  return `the browser read the page before its main content came; ${wait} when its data loads late, actions (a click, a scroll, a wait for a selector) when it appears after an interaction, or onlyMainContent: false for the page as it stood`
+  return `the browser read the page before its main content came; ${wait} when its data loads late, ${actions ? `${ACTIONS_CLAUSE}, ` : ''}or onlyMainContent: false for the page as it stood`
 }
+
+/**
+ * What hosted Octocrawl says of a page behind a login (ROADMAP, the decision of 2026-11-04): it holds no login state and
+ * never takes the person's; the one route is a server on their own computer, with the login saved there.
+ */
+export const HOSTED_LOGIN_WALL_HINT = 'the page asks for a login; hosted Octocrawl holds no logins and never takes yours; on your computer Octocrawl reads the page as you: npx octocrawl serve, then octocrawl login import <host> (the login stays on your computer), then the scrape in mode authed'
+
+/** What hosted Octocrawl says of a check it does not get past: the routes on the person's own computer, which it has none of. */
+export function hostedGateHint(host: string, lanes: readonly string[]): string {
+  return `${host} gates automated access on the lanes tried (${lanes.join(', ')}); hosted Octocrawl does not solve challenges or change its identity, and has no proxy, session or handoff of yours; on your computer Octocrawl can hand the page to you in your own Chrome (npx octocrawl serve, then the scrape with handoff: true) or read it with a login you saved there (octocrawl login import <host>, then mode authed)`
+}
+
+/** The deadlines a hint names as the most a timeout may be raised to: the engine's, or hosted Octocrawl's two (REST, and the MCP tool's). */
+function timeoutCeiling(hosted: boolean): string {
+  return hosted ? `up to ${DEFAULT_SCRAPE_TIMEOUT_MS} ms over REST, ${HOSTED_MCP_TIMEOUT_CEILING_MS} ms from an MCP tool` : `up to ${DEFAULT_SCRAPE_TIMEOUT_MS} ms`
+}
+
+/** The longest deadline hosted Octocrawl's MCP tools take (packages/mcp HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS), named here so a hosted hint does not ask for more. */
+export const HOSTED_MCP_TIMEOUT_CEILING_MS = 180_000
 
 /** The hint a `browser_not_installed` warning carries: the one command that lets the browser lane start, as the warning names it. */
 export function browserNotInstalledHint(command = 'npx playwright install chromium'): string {
@@ -89,13 +115,20 @@ export type HintedRun = Pick<LadderRunAudit, 'channelsTried'> & Partial<Pick<Lad
 /** The most hints one result carries; the table's order decides which stay. */
 export const MAX_AGENT_HINTS = 5
 
-/** What the answering server can still offer the request beyond the lanes the run tried; the engine decides each. */
+/**
+ * What the answering server can still offer the request beyond the lanes the run tried; the engine decides each. A hint
+ * names only a step the server it appears on can take: a hosted one holds no logins, hands no page to the person,
+ * takes no actions, reads no access grant and has no proxy or session of theirs, so its hints point to a server on the
+ * person's own computer for those.
+ */
 export interface HintOffers {
   /**
    * The installed_chrome route (ADR 0005, revision of 2026-10-23): true on a server on the person's machine whose grant
    * does not name it, for a request its rung would take. Never on a hosted server.
    */
   installedChrome?: boolean
+  /** True on hosted Octocrawl: the hints above the lanes name the routes a server on the person's computer has. */
+  hosted?: boolean
 }
 
 /** A fastMode the scrape's caller pinned, not the person asking (the hosted gate, for a caller without the browser lane). */
@@ -166,12 +199,14 @@ function laneEscalatedHint(run: HintedRun, host: string): string | null {
 }
 
 /** The required fields the json extraction found no source for, and a model fallback that was asked for and did not run; nothing for a complete result. */
-function jsonHints(result: HintedResult): string[] {
+function jsonHints(result: HintedResult, hosted: boolean): string[] {
   const json = result.json
   if (json === undefined || json === null || json.status === 'complete') return []
   const hints: string[] = []
   const missing = json.issues.filter((issue) => issue.code === 'missing_required').map((issue) => issue.path ?? 'a field')
-  if (missing.length > 0) hints.push(`json is incomplete: the required ${missing.length === 1 ? 'field' : 'fields'} ${missing.join(', ')} ${missing.length === 1 ? 'was' : 'were'} not found on the page; modelFallback fills what the page does not state when the server has W2L_EXTRACT_BASE_URL and W2L_EXTRACT_MODEL`)
+  // The model is the operator's on a local server (its env), and hosted Octocrawl's own on hosted (an account, 2 credits more a page).
+  const fallback = hosted ? 'modelFallback: true asks hosted Octocrawl\'s model to fill what the page does not state, for an account at 2 credits more a page, when the model is switched on' : 'modelFallback fills what the page does not state when the server has W2L_EXTRACT_BASE_URL and W2L_EXTRACT_MODEL'
+  if (missing.length > 0) hints.push(`json is incomplete: the required ${missing.length === 1 ? 'field' : 'fields'} ${missing.join(', ')} ${missing.length === 1 ? 'was' : 'were'} not found on the page; ${fallback}`)
   const unavailable = json.issues.find((issue) => issue.code === 'model_unavailable')
   if (unavailable !== undefined) hints.push(`the json model fallback did not run: ${unavailable.message}`)
   return hints
@@ -242,15 +277,16 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
   if (result.status === 'failed' && result.failureReason === 'cache_miss') {
     hints.push('lockdown answers from stored results only and none of this page fits the request (same options, within maxAge and minAge); send it without lockdown to fetch the page')
   }
+  const hosted = offers.hosted === true
   if (result.status === 'blocked' && result.blockReason === 'login_wall') {
     // A saved login was used and the site refused it: it expired or was signed out.
     const rejected = run.ladderTrace?.find((event) => event.event === 'ladder_session_rejected')
     hints.push(rejected === undefined
-      ? 'the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session'
+      ? hosted ? HOSTED_LOGIN_WALL_HINT : 'the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session (octocrawl login import <host> saves it from your Chrome)'
       : `${host} refused your saved login for ${String(rejected.detail?.domain ?? host)} (expired or signed out); sign in to it again in Chrome and run octocrawl login import ${String(rejected.detail?.domain ?? host)}`)
   }
   if (result.status === 'blocked' && result.blockReason !== null && GATES.has(result.blockReason)) {
-    hints.push(`${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); Octocrawl does not solve challenges or change its identity unless this server's access grant names a provider that does (--access-grant, ADR 0005); a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)`)
+    hints.push(hosted ? hostedGateHint(host, run.channelsTried) : `${host} gates automated access on the lanes tried (${run.channelsTried.join(', ')}); Octocrawl does not solve challenges or change its identity unless this server's access grant names a provider that does (--access-grant, ADR 0005); a proxy or session you own is the supported route, or, on your own machine, getting through the check yourself in your own Chrome: handoff: true on a scrape (octocrawl scrape --handoff), or a batch handoff (octocrawl batch --handoff, POST /v1/batches/:id/handoff)`)
     // The bundled browser met the check too: the rung after it, on the person's machine, is their installed Chrome; a run
     // that already tried it (a stored page read before the server's grant changed) is not told to try it.
     if (offers.installedChrome === true && run.channelsTried.includes('browser_local') && !run.channelsTried.includes('installed_chrome')) hints.push(INSTALLED_CHROME_RECOMMENDED_HINT)
@@ -261,10 +297,10 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
     hints.push(`the certificate of ${host} did not verify and Octocrawl keeps verification on; a local server takes skipTlsVerification for one request, recorded in the trace and a tls_unverified warning, and a hosted server refuses it`)
   }
   if (result.status === 'failed' && result.failureReason === 'timeout') {
-    hints.push(`no lane answered within the request's deadline; raise timeout (up to ${DEFAULT_SCRAPE_TIMEOUT_MS} ms)`)
+    hints.push(`no lane answered within the request's deadline; raise timeout (${timeoutCeiling(hosted)})`)
   }
   if (result.status === 'partial') {
-    hints.push(`the result is partial: the deadline passed with this much of the page read; raise timeout (up to ${DEFAULT_SCRAPE_TIMEOUT_MS} ms) for the rest`)
+    hints.push(`the result is partial: the deadline passed with this much of the page read; raise timeout (${timeoutCeiling(hosted)}) for the rest`)
   }
   // The site answered another page in place of the one asked for: the content is real, and it is not the requested page's.
   if (result.warnings?.some((warning) => warning.code === 'redirected_off_page')) hints.push(offPageHint(result))
@@ -291,7 +327,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
     hints.push(`the page fills its data with JavaScript; the browser lane ${browserTried ? 'was tried' : browserMissing ? 'could not start' : 'was not tried'}`)
   }
   // A thin http answer the browser lane did not improve on, or could not be offered to; or a thin rendered answer.
-  if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'low_content_yield')) hints.push(result.lane === 'http' ? lowContentYieldHint(browserTried) : RENDERED_LOW_YIELD_HINT)
+  if (!fastModeDeclined && result.warnings?.some((warning) => warning.code === 'low_content_yield')) hints.push(result.lane === 'http' ? lowContentYieldHint(browserTried, !hosted) : renderedLowYieldHint(!hosted))
   if (fastModeDeclined) hints.push(FAST_MODE_DECLINED_HINT)
   // The browser lane rendered the page but could not capture the screenshot asked for.
   if (result.warnings?.some((warning) => warning.code === 'screenshot_unavailable')) hints.push(SCREENSHOT_UNAVAILABLE_HINT)
@@ -299,7 +335,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
   const shellHinted = result.warnings?.some((warning) => warning.code === 'client_rendered_suspected' || warning.code === 'low_content_yield') === true
   if (result.status === 'failed' && result.failureReason === 'empty_unverified' && !shellHinted && !fastModeDeclined) {
     if (result.file?.kind === 'pdf') hints.push('the PDF has no text layer, and Octocrawl runs no OCR')
-    else if (result.file === undefined && renderedBeforeContent(result)) hints.push(renderedNotLoadedHint(req.waitFor))
+    else if (result.file === undefined && renderedBeforeContent(result)) hints.push(renderedNotLoadedHint(req.waitFor, !hosted))
     else if (result.file === undefined) hints.push('Octocrawl found no main content on the page; onlyMainContent: false returns the whole page\'s Markdown as content, and includeTags names the elements to read instead')
   }
   if (result.status === 'failed' && result.failureReason === 'http_error') {
@@ -307,7 +343,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
     if (result.markdown !== null) hints.push(`the server answered ${status ?? 'an error status'}; the markdown is that error page, not the requested page${status === 404 ? '; check the link' : ''}`)
     else if (status === 404) hints.push('the server answered 404; check the link')
   }
-  hints.push(...jsonHints(result))
+  hints.push(...jsonHints(result, hosted))
   if (result.file !== undefined) hints.push(fileHint(result.file))
   return hints.slice(0, MAX_AGENT_HINTS)
 }

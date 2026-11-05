@@ -752,10 +752,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * request its rung would take: mode standard, a URL the channel policy leaves to the ladder, and none of the options
    * the rung refuses. A browser kept to a list of hosts builds no such rung, so it recommends none.
    */
-  const hintOffers = (mode: Task['mode'], url: string, page: FetchOptions): HintOffers =>
-    userChrome !== null && !installedChrome && options.browserAllowedHosts === undefined && mode === 'standard'
+  const hintOffers = (mode: Task['mode'], url: string, page: FetchOptions): HintOffers => ({
+    // A hosted server's hints name the routes a server on the person's computer has (logins, handoff, actions), never its own.
+    ...(options.hosted === true ? { hosted: true } : {}),
+    ...(userChrome !== null && !installedChrome && options.browserAllowedHosts === undefined && mode === 'standard'
       && (options.channelPolicy?.(url) ?? 'ladder') === 'ladder' && installedChromeRefusal(page) === null
-      ? { installedChrome: true } : {}
+      ? { installedChrome: true } : {}),
+  })
   /** The same for a page of a stored batch or crawl, under the options it was started with. */
   const taskHintOffers = (task: Task, url: string): HintOffers => {
     const stored = task.batch ?? task.crawl
@@ -995,7 +998,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   const checkAccessChoice = (req: { access?: AccessChoice }): void => {
     if (req.access !== 'enhanced' || accessGrant?.tier === 'enhanced' || hostedChrome !== null) return
-    throw new RequestError('access enhanced: this server has no approved budget for enhanced access (an access grant of tier enhanced, --access-grant or W2L_ACCESS_GRANT, ADR 0005); ask with access standard, or my-browser on your own machine', 'unsupported_parameter', { parameters: ['access'] }, [REFUSAL_HINTS.stealth])
+    throw new RequestError('access enhanced: this server has no approved budget for enhanced access (an access grant of tier enhanced, --access-grant or W2L_ACCESS_GRANT, ADR 0005); ask with access standard, or my-browser on your own machine', 'unsupported_parameter', { parameters: ['access'] }, [options.hosted === true ? REFUSAL_HINTS.hostedStealth : REFUSAL_HINTS.stealth])
   }
   // A job's events: durable webhook deliveries (the control database, the worker of the API process or the MCP runtime), and the in-process hub streaming consumers subscribe to.
   const jobEvents = new JobEventHub()

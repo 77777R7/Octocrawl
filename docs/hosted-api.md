@@ -119,7 +119,7 @@ The global switch is the Firestore document `hostedConfig/jobs`, field `enabled`
 
 The same document's `allowedUids`, an array of account uids, makes jobs invite only (H2 R2). It held Howard's account alone from 2026-10-21 and was removed on 2026-10-22, so every account may start jobs now; the rest of this paragraph describes the switch for when it is set again. When the field is absent, every account may start jobs. When it exists, only the listed accounts may; an empty array lets no one. It is read together with `enabled`; a failed read keeps the last value, and with nothing read yet lets no one in.
 - **Starts.** A start from another account answers 403 `jobs_invite_only`, on REST and through MCP, which calls the same gate.
-- **MCP tool lists.** An MCP connection lists the job tools only to an allowed account. Another account gets a hint that jobs are open to invited accounts for now.
+- **MCP tool lists.** An MCP connection lists the job tools only to an allowed account. Another account gets a hint that hosted jobs are not open to it right now (since 2026-10-22 every account is allowed, so the hint shows only while the switch is off).
 - **Reads and cancels.** These stay open on REST, so an account taken off the list can still read and cancel its jobs there. Over MCP the tools are gone for it.
 - **Jobs already queued.** A job an account queued before it left the list still runs when its turn comes.
 - **Replays.** A start replayed by its idempotency key is refused like a new one.

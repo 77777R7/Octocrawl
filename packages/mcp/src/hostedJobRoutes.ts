@@ -54,7 +54,11 @@ export function jobStatus(job: HostedJob): Record<string, unknown> {
   }
 }
 
-export const JOBS_INVITE_ONLY = 'hosted batch and crawl jobs are open to invited accounts for now'
+export const JOBS_INVITE_ONLY = 'hosted batch and crawl jobs are not open to this account yet'
+/** Where a page behind the person's login is read (ROADMAP, the decision of 2026-11-04): a server on their computer, with the login saved there. */
+export const AUTHED_ROUTE_HINT = 'hosted Octocrawl never takes your logins; on your computer Octocrawl reads pages as you: npx octocrawl serve, then octocrawl login import <host> (the login stays on your computer), then the batch in mode authed'
+/** What opens the browser lane to a key that lacks it. */
+export const BROWSER_LANE_HINT = 'the browser lane comes with an account\'s own key (https://octocrawl.dev/dashboard/keys/) or a signed-in MCP connection, and with every page on a server on your computer (npx octocrawl serve)'
 export const JOB_DEFAULT_CRAWL_PAGES = 100
 export const JOB_MAX_CRAWL_PAGES = 500
 /** New pages a slice stores at most (docs/launch/2026-10-19-h1-hosted-jobs-plan.md §5): a start needs the credits for one. */
@@ -228,11 +232,11 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
     catch (error) { return refusal(400, 'invalid_request', error instanceof Error ? error.message : String(error)) }
     delete body.webhook
     if (maxCredits !== undefined && (!Number.isSafeInteger(maxCredits) || (maxCredits as number) < 1)) return refusal(400, 'invalid_request', 'maxCredits must be a positive integer')
-    if (body.mode === 'authed') return refusal(400, 'invalid_request', 'hosted Octocrawl holds no saved logins, so it has no authed mode')
+    if (body.mode === 'authed') return refusal(400, 'invalid_request', 'hosted Octocrawl holds no saved logins, so it has no authed mode', [AUTHED_ROUTE_HINT])
     // A key without the browser lane reads every page over HTTP alone, as its scrapes do.
     if (!caller.browser) {
-      if (typeof body.waitFor === 'number' && body.waitFor > 0) return refusal(400, 'invalid_request', 'waitFor needs the browser lane, which this key does not have')
-      if (Array.isArray(body.formats) && body.formats.some((format) => String(typeof format === 'object' && format !== null ? (format as { type?: unknown }).type : format).startsWith('screenshot'))) return refusal(400, 'invalid_request', 'a screenshot needs the browser lane, which this key does not have')
+      if (typeof body.waitFor === 'number' && body.waitFor > 0) return refusal(400, 'invalid_request', 'waitFor needs the browser lane, which this key does not have', [BROWSER_LANE_HINT])
+      if (Array.isArray(body.formats) && body.formats.some((format) => String(typeof format === 'object' && format !== null ? (format as { type?: unknown }).type : format).startsWith('screenshot'))) return refusal(400, 'invalid_request', 'a screenshot needs the browser lane, which this key does not have', [BROWSER_LANE_HINT])
       body.fastMode = true
     }
     if (kind === 'crawl') {

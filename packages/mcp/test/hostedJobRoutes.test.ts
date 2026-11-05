@@ -9,7 +9,7 @@ import { hostedNetworkPolicy } from '@w2l/contracts'
 import { createHostedApi, keyDigest, MemoryHostedKeys, MemoryHostedOAuthTokens, MemoryHostedQuota, type HostedKeyRecord } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
 import { MemoryHostedJobStore, type HostedJob } from '../src/hostedJobs.js'
-import { gcsJobFiles, isJobRoute, JOB_WORKER_COUNT, type JobFiles } from '../src/hostedJobRoutes.js'
+import { AUTHED_ROUTE_HINT, BROWSER_LANE_HINT, gcsJobFiles, isJobRoute, JOB_WORKER_COUNT, type JobFiles } from '../src/hostedJobRoutes.js'
 import type { GcsBucket } from '../src/hostedCloud.js'
 import { gzipSync } from 'node:zlib'
 
@@ -131,9 +131,17 @@ describe('hosted job routes', () => {
     expect(options.status).toBe(400)
     expect(((await options.json()) as { error: string }).error).toBe('hosted batch jobs do not take robotsOverrides, useCached')
     expect((await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', ignoreRobotsTxt: true })).status).toBe(400)
-    expect((await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', mode: 'authed' })).status).toBe(400)
-    expect((await call('POST', '/v1/batches', 'oc_http', { urls: urls(1), waitFor: 500 })).status).toBe(400)
-    expect((await call('POST', '/v1/batches', 'oc_http', { urls: urls(1), formats: ['screenshot'] })).status).toBe(400)
+    // Each refusal of what hosted has not got names where it is: the person's own computer, or an account's key for the browser lane.
+    const authed = await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', mode: 'authed' })
+    expect(authed.status).toBe(400)
+    expect(((await authed.json()) as { agentHints: string[] }).agentHints).toEqual([AUTHED_ROUTE_HINT])
+    expect(AUTHED_ROUTE_HINT).toContain('octocrawl login import <host>')
+    const waitFor = await call('POST', '/v1/batches', 'oc_http', { urls: urls(1), waitFor: 500 })
+    expect(waitFor.status).toBe(400)
+    expect(((await waitFor.json()) as { agentHints: string[] }).agentHints).toEqual([BROWSER_LANE_HINT])
+    const screenshot = await call('POST', '/v1/batches', 'oc_http', { urls: urls(1), formats: ['screenshot'] })
+    expect(screenshot.status).toBe(400)
+    expect(((await screenshot.json()) as { agentHints: string[] }).agentHints).toEqual([BROWSER_LANE_HINT])
     expect((await call('POST', '/v1/crawl', 'oc_one', { url: 'https://example.com/', maxPages: 501 })).status).toBe(400)
     expect((await call('POST', '/v1/batches', 'oc_one', { urls: urls(1_001) })).status).toBe(400)
     expect((await call('POST', '/v1/batches', 'oc_one', { urls: urls(1), maxCredits: 0 })).status).toBe(400)
@@ -376,7 +384,7 @@ describe('hosted job routes', () => {
     const taskId = ((await started.json()) as { taskId: string }).taskId
     const refused = await call('POST', '/v1/crawl', 'oc_two', { url: 'https://example.com/' })
     expect(refused.status).toBe(403)
-    expect(await refused.json()).toMatchObject({ code: 'jobs_invite_only', error: 'hosted batch and crawl jobs are open to invited accounts for now' })
+    expect(await refused.json()).toMatchObject({ code: 'jobs_invite_only', error: 'hosted batch and crawl jobs are not open to this account yet' })
     expect(enqueued.map((job) => job.id)).toEqual([taskId])
     // Taken off the list later, an account still reads, lists and cancels what it started.
     store.jobs.set(taskId, { ...store.jobs.get(taskId)!, uid: 'account-3', workspaceId: 'ws_account-3' })

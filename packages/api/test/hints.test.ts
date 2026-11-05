@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { agentHintsFor, mapAgentHints, offPageHint, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, INSTALLED_CHROME_MISSING_HINT, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, mapAgentHints, offPageHint, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedGateHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -62,7 +62,7 @@ describe('agent hints', () => {
 
   it('points a login wall to mode authed and a gate to a proxy or session of your own, naming the lanes tried', () => {
     const wall = result({ status: 'blocked', blockReason: 'login_wall', markdown: null })
-    expect(hints(wall)).toEqual(['the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session'])
+    expect(hints(wall)).toEqual(['the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session (octocrawl login import <host> saves it from your Chrome)'])
     // The saved login was used and refused: the fix is a fresh import, not mode authed.
     const refused = agentHintsFor({}, { channelsTried: ['authed_session'], result: wall, ladderTrace: [{ at: 0, event: 'ladder_session_rejected', channel: 'authed_session', detail: { domain: 'example.test', blockReason: 'login_wall' } }] })
     expect(refused).toEqual(['example.test refused your saved login for example.test (expired or signed out); sign in to it again in Chrome and run octocrawl login import example.test'])
@@ -72,6 +72,41 @@ describe('agent hints', () => {
       ])
     }
     expect(hints(result({ status: 'blocked', blockReason: 'geo_restricted', markdown: null }))).toEqual([])
+  })
+
+  it('on hosted Octocrawl names only what a server on the person\'s computer has: no authed mode, handoff, actions, grant or 300 s there', () => {
+    const hosted = { hosted: true }
+    const on = (res: HintedResult, channelsTried: readonly string[] = ['http'], req: { fastMode?: boolean; waitFor?: number } = {}) => agentHintsFor(req, { channelsTried, result: res }, hosted)
+    // A login wall: hosted holds no logins (the decision of 2026-11-04), so the one route is a server on the person's computer with the login saved there.
+    expect(on(result({ status: 'blocked', blockReason: 'login_wall', markdown: null }))).toEqual([HOSTED_LOGIN_WALL_HINT])
+    for (const part of ['hosted Octocrawl holds no logins and never takes yours', 'npx octocrawl serve', 'octocrawl login import <host>', 'mode authed']) expect(HOSTED_LOGIN_WALL_HINT).toContain(part)
+    expect(HOSTED_LOGIN_WALL_HINT).not.toContain('use mode authed with your own session')
+    // A check: no proxy, session, grant or handoff on hosted; the handoff and the saved login are the person's computer's.
+    const gate = on(result({ status: 'blocked', blockReason: 'captcha', markdown: null, evidence: { finalUrl: URL_, httpStatus: 403 } }), ['http', 'browser_local'])
+    expect(gate).toEqual([hostedGateHint('example.test', ['http', 'browser_local'])])
+    for (const part of ['example.test gates automated access on the lanes tried (http, browser_local)', 'has no proxy, session or handoff of yours', 'handoff: true', 'octocrawl login import <host>']) expect(gate[0]).toContain(part)
+    for (const absent of ['--access-grant', 'octocrawl scrape --handoff', 'POST /v1/batches/:id/handoff', 'a proxy or session you own is the supported route']) expect(gate[0]).not.toContain(absent)
+    // Thin pages: waitFor and onlyMainContent stay, the actions clause goes (hosted takes no actions).
+    const thin = result({ warnings: [{ code: 'low_content_yield', message: 'thin' }] })
+    expect(on(thin, ['http', 'browser_local'])).toEqual([lowContentYieldHint(true, false)])
+    expect(on(thin, ['http', 'browser_local'])[0]).not.toContain('actions')
+    expect(on({ ...thin, lane: 'browser_local' }, ['http', 'browser_local'])).toEqual([renderedLowYieldHint(false)])
+    expect(renderedLowYieldHint(false)).not.toContain('actions')
+    expect(renderedLowYieldHint(false)).toContain('onlyMainContent: false')
+    const notLoaded = result({ status: 'failed', failureReason: 'empty_unverified', markdown: null, lane: 'browser_local', trace: [{ at: 1, lane: 'browser_local', event: 'loading_wait', detail: { cleared: false } }] })
+    expect(on(notLoaded, ['http', 'browser_local'], { waitFor: 2000 })).toEqual([renderedNotLoadedHint(2000, false)])
+    expect(renderedNotLoadedHint(2000, false)).not.toContain('actions')
+    // Deadlines: hosted's two ceilings, not the engine's 300 s alone.
+    expect(on(result({ status: 'failed', failureReason: 'timeout', markdown: null }))).toEqual(['no lane answered within the request\'s deadline; raise timeout (up to 300000 ms over REST, 180000 ms from an MCP tool)'])
+    expect(on(result({ status: 'partial' }))[0]).toContain('up to 300000 ms over REST, 180000 ms from an MCP tool')
+    // The json model is hosted Octocrawl's own, charged in credits, not the operator's env.
+    const incomplete = on(result({ json: { status: 'incomplete', issues: [{ code: 'missing_required', path: 'price', message: 'not found' }] } as unknown as HintedResult['json'] }))
+    expect(incomplete).toHaveLength(1)
+    expect(incomplete[0]).toContain('2 credits more a page')
+    expect(incomplete[0]).not.toContain('W2L_EXTRACT_BASE_URL')
+    // The same results on a local server keep their local hints.
+    expect(hints(thin, ['http', 'browser_local'])).toEqual([lowContentYieldHint(true)])
+    expect(hints(result({ status: 'failed', failureReason: 'timeout', markdown: null }))).toEqual(['no lane answered within the request\'s deadline; raise timeout (up to 300000 ms)'])
   })
 
   it('recommends installed_chrome after a gate the bundled browser met too, only where the server offers it (ADR 0005, 2026-10-23)', () => {

@@ -861,9 +861,10 @@ async function waitForTask(
   catch (error) {
     if (!controller.signal.aborted || request.signal?.aborted) throw error
     const status = await read()
-    if (name !== 'wait_crawl' || status === null || typeof status !== 'object') return status
+    if (status === null || typeof status !== 'object') return status
     const hints = (status as { agentHints?: unknown }).agentHints
-    return { ...status, agentHints: [...(Array.isArray(hints) ? hints : []), `still running after ${timeoutMs} ms: wait_crawl again, or read get_crawl_pages for the pages so far`] }
+    const pages = name === 'wait_crawl' ? 'get_crawl_pages for the pages so far' : 'get_batch_items for the items so far'
+    return { ...status, agentHints: [...(Array.isArray(hints) ? hints : []), `still running after ${timeoutMs} ms: ${name} again, or read ${pages}`] }
   } finally { clearTimeout(timer) }
 }
 
