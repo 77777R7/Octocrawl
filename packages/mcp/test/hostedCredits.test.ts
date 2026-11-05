@@ -189,13 +189,13 @@ describe('the Firestore ledger', () => {
     const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
     const reserved = await store.reserve('account-1', 5, [SITE], OCT)
     if (!reserved.ok) throw new Error('unreachable')
-    const note = { endpoint: 'scrape' as const, keyId: 'k'.repeat(64), url: `https://example.org/${'a'.repeat(3_000)}`, finalUrl: 'https://example.org/a', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed' as const, sha256: 'f'.repeat(64), links: null, formats: ['markdown', 'json'], ms: 1_234, scrapeId: 'scrape-1', paidCallIds: ['task-attempt-1'] }
+    const note = { endpoint: 'scrape' as const, keyId: 'k'.repeat(64), url: `https://example.org/${'a'.repeat(3_000)}`, finalUrl: 'https://example.org/a', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed' as const, readiness: 'not_served', sha256: 'f'.repeat(64), links: null, formats: ['markdown', 'json'], ms: 1_234, scrapeId: 'scrape-1', paidCallIds: ['task-attempt-1'] }
     await store.settle(reserved.reservation, 1, 'http', OCT, note)
     const settled = firestore.commits.at(-1) as { writes: Array<{ update: { name: string; fields: Record<string, Record<string, string>> } }> }
     expect(settled.writes).toHaveLength(3)
     const line = settled.writes[2]!.update
     expect(line.name).toBe(`${firestore.resource}/requestLog/account-1/requests/${line.name.split('/').pop()}`)
-    expect(line.fields).toMatchObject({ uid: { stringValue: 'account-1' }, endpoint: { stringValue: 'scrape' }, status: { stringValue: 'success' }, httpStatus: { integerValue: '200' }, robots: { stringValue: 'allowed' }, kind: { stringValue: 'http' }, credits: { integerValue: '1' }, at: { timestampValue: OCT.toISOString() }, expireAt: { timestampValue: new Date(OCT.getTime() + 30 * 86_400_000).toISOString() } })
+    expect(line.fields).toMatchObject({ uid: { stringValue: 'account-1' }, endpoint: { stringValue: 'scrape' }, status: { stringValue: 'success' }, httpStatus: { integerValue: '200' }, robots: { stringValue: 'allowed' }, readiness: { stringValue: 'not_served' }, kind: { stringValue: 'http' }, credits: { integerValue: '1' }, at: { timestampValue: OCT.toISOString() }, expireAt: { timestampValue: new Date(OCT.getTime() + 30 * 86_400_000).toISOString() } })
     expect(line.fields.url!.stringValue).toHaveLength(2_048)
     expect(Object.keys(line.fields)).not.toContain('reason')
     expect(Object.keys(line.fields)).not.toContain('links')

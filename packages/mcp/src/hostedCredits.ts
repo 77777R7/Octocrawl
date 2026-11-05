@@ -67,6 +67,12 @@ export interface RequestNote {
   paidCallIds: string[] | null
   /** The credits of the json model fallback within the line's credits (CREDITS.model, or 0); absent when it was not asked for. */
   modelCredits?: number
+  /**
+   * The scrape's readiness state (`ready`, `not_loaded`, `not_extracted`, `not_served`): a `success` whose page is not the
+   * one asked for (the site answered another page, #821) is `not_served`, and the dashboard says so. Absent on lines from
+   * before 2026-11-05, and null for a map.
+   */
+  readiness?: string | null
 }
 export interface RequestLine extends RequestNote { id: string; at: string; kind: UsageKind; credits: number }
 
@@ -241,7 +247,7 @@ export function validAccountId(uid: string): boolean { return UID.test(uid) && !
 function requestLineFields(line: RequestLine, uid: string, now: Date): Record<string, unknown> {
   const expireAt = new Date(now.getTime() + ACTIVITY_RETENTION_DAYS * 86_400_000).toISOString()
   const fields: Record<string, unknown> = { uid: { stringValue: uid }, at: { timestampValue: line.at }, expireAt: { timestampValue: expireAt }, kind: { stringValue: line.kind }, credits: { integerValue: String(line.credits) } }
-  for (const name of ['endpoint', 'keyId', 'url', 'finalUrl', 'lane', 'status', 'reason', 'robots', 'sha256', 'scrapeId'] as const) {
+  for (const name of ['endpoint', 'keyId', 'url', 'finalUrl', 'lane', 'status', 'reason', 'robots', 'readiness', 'sha256', 'scrapeId'] as const) {
     const value = line[name]
     if (typeof value === 'string') fields[name] = { stringValue: value }
   }

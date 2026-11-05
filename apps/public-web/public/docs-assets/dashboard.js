@@ -288,6 +288,8 @@
   /** What a request line shows as its result, and how it is marked: read, not charged, or failed. */
   const outcome = (line) => {
     if (line.endpoint === 'map') return line.links !== null && line.links > 0 ? [`${number(line.links)} links`, 'ok'] : [line.status === 'invalid_request' ? 'invalid request' : 'no links', 'warn']
+    // A success whose page is another page of the site (readiness not_served, #821) is not a read.
+    if (READ.has(line.status) && line.readiness === 'not_served') return [`${line.httpStatus ? `${line.httpStatus} · ` : ''}another page`, 'warn']
     if (READ.has(line.status)) return [line.httpStatus ? `${line.httpStatus}` : line.status, 'ok']
     if (line.status === 'failed' && (line.httpStatus === 404 || line.httpStatus === 410)) return [`${line.httpStatus}`, 'warn']
     if (line.status === 'invalid_request') return ['invalid request', 'warn']
@@ -367,6 +369,7 @@
     const [label, mark] = outcome(line)
     if (line.endpoint === 'map') return [label, mark]
     if (line.status === 'partial') return [`${line.httpStatus ?? ''} · partly read`.replace(/^ · /, ''), 'warn']
+    if (READ.has(line.status) && line.readiness === 'not_served') return [`${line.httpStatus ?? ''} · another page answered`.replace(/^ · /, ''), 'warn']
     if (READ.has(line.status)) return [`${line.httpStatus ?? ''} · read`.replace(/^ · /, ''), 'ok']
     if (line.httpStatus === 404 || line.httpStatus === 410) return [`${line.httpStatus} · not found`, mark]
     return [label, mark]
@@ -469,6 +472,7 @@
   /** What a call came to, in words a person would use. */
   const category = (line) => {
     if (line.endpoint === 'map') return line.status === 'invalid_request' ? 'Invalid request' : line.links > 0 ? 'Map: URLs found' : 'Map: none found'
+    if (line.readiness === 'not_served' && (line.status === 'success' || line.status === 'partial')) return 'Another page answered'
     if (line.status === 'success' || line.status === 'empty_verified') return 'Read'
     if (line.status === 'partial') return 'Partly read'
     if (line.robots === 'disallowed') return 'Kept out by robots.txt'
@@ -1015,7 +1019,8 @@
       const rows = [
         ['Requested URL', record.requestedUrl], ['Final URL', record.finalUrl], ['Fetched at (UTC)', record.fetchedAt], ['HTTP status', record.httpStatus],
         ['Result', record.reason ? `${record.status} · ${record.reason}` : record.status], ['Lane', record.lane],
-        ['robots.txt', record.robotsDecision ? record.robotsDecision.decision : null], ['Body SHA-256', record.rawSha256],
+        // A robots.txt that could not be read counts as a disallow (RFC 9309), which is not a rule the site wrote: say which.
+        ['robots.txt', !record.robotsDecision ? null : record.robotsDecision.unreachable ? `unreachable (${record.robotsDecision.unreachable}): counts as a disallow, not a rule the site wrote` : record.robotsDecision.decision], ['Body SHA-256', record.rawSha256],
         ['Markdown SHA-256', record.outputSha256 ? record.outputSha256.markdown : null],
         ['Extractor', record.extractor ? `${record.extractor.name} ${record.extractor.version}` : null],
       ]
@@ -1064,8 +1069,12 @@
         return [`${number(links.length)} URLs · ${result.status}`, links.length ? 'ok' : 'warn']
       }
       const reason = result.failureReason || (result.evidenceRecord && result.evidenceRecord.reason)
+      // A page the site answered in place of the one asked for is a success whose content is another page's: never a green read.
+      if (offPage(result) && READ.has(result.status)) return [`${result.status} · another page`, 'warn']
       return [reason ? `${result.status} · ${reason}` : result.status, READ.has(result.status) ? 'ok' : result.status === 'partial' ? 'warn' : 'bad']
     }
+    /** Whether the site answered another page in place of the one asked for (#821): a redirected_off_page warning, or readiness not_served. */
+    const offPage = (result) => (Array.isArray(result.warnings) && result.warnings.some((warning) => warning && warning.code === 'redirected_off_page')) || (result.readiness && result.readiness.state === 'not_served')
     const idle = (note = IDLE_NOTE) => { if (creature) creature.set('idle'); $('pg-stage').classList.remove('is-running'); set('play-summary', note) }
     play.addEventListener('submit', async (event) => {
       event.preventDefault()
@@ -1103,9 +1112,16 @@
         const [label, mark] = outcomeOf(result)
         const pill = $('play-status'); pill.className = `status ${mark}`; pill.textContent = label
         const record = result.evidenceRecord
-        const where = ran === 'scrape' && record ? [record.finalUrl || record.requestedUrl, record.httpStatus ? `HTTP ${record.httpStatus}` : null, record.lane ? `${record.lane} lane` : null] : [result.url]
+        const elsewhere = ran === 'scrape' && record && offPage(result)
+        const where = ran === 'scrape' && record
+          ? [elsewhere ? `Asked for ${record.requestedUrl || result.requestedUrl}; the site answered ${record.finalUrl}` : record.finalUrl || record.requestedUrl, record.httpStatus ? `HTTP ${record.httpStatus}` : null, record.lane ? `${record.lane} lane` : null]
+          : [result.url]
         const spent = used === null ? null : `${used} credit${used === '1' ? '' : 's'} used${left === null ? '' : `, ${number(left)} left`}`
         set('play-detail', [...where, spent].filter(Boolean).join(' · '))
+        // A result that is not the page says the next step, from the answer's own hints; a page that was read needs none.
+        const next = $('play-next')
+        const hint = Array.isArray(result.agentHints) && typeof result.agentHints[0] === 'string' ? result.agentHints[0] : null
+        if (next) { next.hidden = mark === 'ok' || hint === null; next.textContent = next.hidden ? '' : `Next: ${hint}` }
         if (ran === 'scrape') view = play.view.value
         if (view === 'markdown' && !(typeof result.markdown === 'string' && result.markdown.trim()) && record) view = 'evidence'
         idle()

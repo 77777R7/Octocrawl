@@ -28,6 +28,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **The dashboard says when a result is not the page, and what to do next.** A scrape the site answered with another page (`redirected_off_page`, readiness `not_served`) showed as a green `success` in the Playground, in Activity and in the Usage meter; it now shows as `success · another page` in amber, the Playground says `Asked for <URL>; the site answered <URL>`, Activity and the receipts say `another page answered`, and the Results meter counts it apart from the pages read (the hosted request line now carries `readiness`). A result that was not read shows its first agent hint under the pill as `Next: …`. In the Playground's Evidence Record, a robots.txt that could not be read reads `unreachable (timeout): counts as a disallow, not a rule the site wrote` instead of `disallowed`, as the receipts already did.
 - **A hosted `browser_busy` refusal says what to do instead, and connections say the rule before it happens.** Its hints used to lead with "retry after 10 s, when the running call ends", though a running call can take up to 5 minutes. They now name a batch job first where the account can run one, then `fastMode: true` with when it helps, then the wait as it really is. The hosted MCP instructions, and `scrape`'s description where `batch_scrape` is listed, say that one scrape runs at a time. What is refused has not changed.
 
 ## 0.8.3 — 2026-11-05
