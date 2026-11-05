@@ -73,7 +73,7 @@ Kept different on purpose: a hosted server obeys robots.txt for every URL ([Dire
   - The site, sign-in through GitHub and Google, and the dashboard.
   - The keyless hosted MCP from Claude Code, Cursor, OpenCode and Codex.
   - The hosted REST API, keyless and with a key (browser lane, credits, revocation, one browser scrape at a time).
-  - `@octocrawl/sdk`, `@octocrawl/ai-sdk` and the Python client against the hosted API. `batch` is refused there by design, with a clear message.
+  - `@octocrawl/sdk`, `@octocrawl/ai-sdk` and the Python client against the hosted API. `batch` was refused there by design then, with a clear message; hosted batch and crawl jobs for accounts followed on 2026-10-20 (H1).
   - `npx octocrawl serve` with the Python client's `batch` and the local MCP's 38 tools.
   - The one-line install on clean macOS, Windows and Ubuntu, a page that needs the browser included.
   - Not run that day: the hosted MCP with a key inside a client, which is the gate the REST check passed through.

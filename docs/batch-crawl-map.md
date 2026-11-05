@@ -17,7 +17,7 @@ A batch reads a list of URLs you already know, as one durable task. It follows n
 **How fast it runs.**
 
 - The per-origin concurrency ceiling can be set up to four, with a shared Retry-After cooldown and a minimum request interval. The controlled [1/2/4 comparison](evidence/same-origin-concurrency-controlled.json) is local fixture evidence, not an Amazon speed claim.
-- `maxConcurrency` (an integer from 1 to 4) caps how many of the batch's pages are in flight at once, across all its hosts. It can only lower the service's worker count: 4 locally, 2 on the hosted MCP host. `GET /v1/batches/:id` reports the cap in force as `maxConcurrency`.
+- `maxConcurrency` (an integer from 1) caps how many of the batch's pages are in flight at once, across all its hosts. It can only lower the service's worker count: `W2L_WORKER_COUNT`, 4 by default locally; 2 on hosted Octocrawl, where a start lowers a larger value to 2 and the MCP schema says so (locally the schema has no ceiling). `GET /v1/batches/:id` reports the cap in force as `maxConcurrency`.
 - The per-host ceiling and minimum interval still apply. The cap is stored with the task, so a batch resumed after a restart runs under it.
 
 **Invalid URLs.** By default, one entry of `urls` that is not an http(s) URL refuses the whole request, by its index (`urls[2] must be http(s)`). With `ignoreInvalidURLs: true` the batch starts with the valid entries and reports the rest as `invalidURLs`, on the 202 and on the status. An entry that is not a string, or a duplicate, is refused either way.

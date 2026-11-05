@@ -1204,10 +1204,10 @@ function readBatchScopeNoOp(value: unknown, key: keyof typeof BATCH_SCOPE_NOOP_K
   return false
 }
 
-/** A batch's `maxConcurrency`: an integer from 1 to 4; the engine lowers it to its worker count, never raises it. */
+/** A batch's `maxConcurrency`: an integer from 1; the engine lowers it to its worker count (W2L_WORKER_COUNT), never raises it, and the status reports the cap in force. */
 function readMaxConcurrency(value: unknown, name: string): number | undefined {
   if (value === undefined) return undefined
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 4) throw new RequestError(`${name} must be an integer between 1 and 4`)
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new RequestError(`${name} must be an integer >= 1`)
   return value
 }
 

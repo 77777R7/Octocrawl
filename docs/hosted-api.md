@@ -742,7 +742,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `batch_scrape` `lockdown` | Planned: stage H item 8, beyond local | Hosted keeps no page cache (storeInCache is pinned off); stage H item 8 plans one shared across users. Sent anyway: refused by name. |
 | `batch_scrape` `actions` | Planned: stage H item 3, actions and waitFor | Hosted takes no page actions yet; stage H item 3 brings them to keyed callers. Sent anyway: refused by name. |
 | `batch_scrape` `robotsOverrides` | Different on purpose | Hosted fetches from the operator's addresses and obeys robots.txt for every URL (ROADMAP Direction). Sent anyway: refused by name. |
-| `batch_scrape` `maxConcurrency` | Limited | Lowered to 2, the pages a job's slice reads at once, though the schema offers 4 as locally. Stage H item 6, limits and capacity raises it. |
+| `batch_scrape` `maxConcurrency` | Limited | At most 2, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT, with no ceiling in the schema); the start lowers a larger value to 2, as a crawl's. Stage H item 6, limits and capacity raises it. |
 | `batch_scrape` `ignoreInvalidURLs` | Supported |  |
 | `batch_scrape` `allowExternalLinks` | Planned: no stage H item yet | Locally only false is taken, since a batch follows no link; hosted refuses the field by name. Sent anyway: refused by name. |
 | `batch_scrape` `includeSubdomains` | Planned: no stage H item yet | Locally only false is taken, since a batch follows no link; hosted refuses the field by name. Sent anyway: refused by name. |

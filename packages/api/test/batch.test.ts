@@ -126,6 +126,22 @@ describe('persistent URL-array batch', () => {
     expect(await w2l.getBatch(wide.taskId)).not.toHaveProperty('invalidURLs')
   })
 
+  it('takes a maxConcurrency above four where the service has the workers, and reports the cap in force', async () => {
+    // The request's ceiling is the service's worker count (W2L_WORKER_COUNT, up to 64), not a fixed four (docs/launch/2026-11-05-batch-concurrency-plan.md D4);
+    // per host the lower of it and the per-host ceiling still applies.
+    const f = await fixture({ perHostConcurrency: 2 })
+    const engine = f.engine({ workerCount: 6 })
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const urls = [1, 2, 3, 4, 5, 6].map(n => `${f.origin}/item/${n}`)
+    const six = await w2l.batchScrape(urls, { maxConcurrency: 6 })
+    expect(await w2l.waitBatch(six.taskId)).toMatchObject({ status: 'completed', completed: 6, maxConcurrency: 6 })
+    const store = SqliteTaskStore.openReadOnly(join(f.root, six.taskId))
+    try { expect((await store.getTask(six.taskId))?.batch).toMatchObject({ maxConcurrency: 6 }) } finally { await store.close() }
+    // Above the worker count it is lowered, and the cap in force is what the status reports.
+    expect(await w2l.getBatch((await w2l.batchScrape([urls[0]!], { maxConcurrency: 8 })).taskId)).toMatchObject({ maxConcurrency: 6 })
+  })
+
   it('keeps the batch\'s maxConcurrency when an interrupted batch resumes', async () => {
     const f = await fixture({ perHostConcurrency: 2 })
     f.setSlow(true)
