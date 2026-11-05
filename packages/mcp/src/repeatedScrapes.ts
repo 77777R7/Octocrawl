@@ -46,7 +46,7 @@ export function repeatedScrapesHint(count: number, host: string, jobs: boolean, 
   if (count < REPEATED_SCRAPES_FROM) return null
   const seen = `${count} scrapes of ${host} in the last 10 minutes`
   if (jobs) return `${seen}: a known list of URLs runs as one batch_scrape (then wait_batch and get_batch_items), a section of a site as one crawl, and map lists a site's URLs without reading each page`
-  if (local) return `${seen}: this server was started without the batch and crawl toolsets; started with --toolsets=all (or batch,crawl beside core), a known list of URLs runs as one batch_scrape and a section of a site as one crawl`
+  if (local) return `${seen}: this server does not list batch_scrape (its batch toolset is off, or it is read-only); started with --toolsets=all and without --read-only, a known list of URLs runs as one batch_scrape and a section of a site as one crawl`
   return `${seen}: with an account's connection a known list of URLs runs as one batch_scrape job (then wait_batch and get_batch_items); or run Octocrawl on your computer (npx octocrawl serve) for batch_scrape and crawl`
 }
 

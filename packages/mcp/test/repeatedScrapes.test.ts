@@ -67,7 +67,7 @@ describe('repeated scrapes of one host', () => {
     try {
       for (const path of ['a', 'b']) await scrape(`https://example.com/${path}`)
       const hint = (await scrape('https://example.com/c')).agentHints?.[1]
-      expect(hint).toBe('3 scrapes of example.com in the last 10 minutes: this server was started without the batch and crawl toolsets; started with --toolsets=all (or batch,crawl beside core), a known list of URLs runs as one batch_scrape and a section of a site as one crawl')
+      expect(hint).toBe('3 scrapes of example.com in the last 10 minutes: this server does not list batch_scrape (its batch toolset is off, or it is read-only); started with --toolsets=all and without --read-only, a known list of URLs runs as one batch_scrape and a section of a site as one crawl')
       expect(hint).not.toContain('account')
     } finally { await mcp.close() }
   })
