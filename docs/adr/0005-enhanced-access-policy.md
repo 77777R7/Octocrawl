@@ -573,7 +573,7 @@ grant 的规则（`packages/http-core/src/accessGrant.ts` 的 `normalizeAccessGr
 
 **决定（2026-11-05，Howard 在对话中选定）。** 不开放托管的默认出口：托管照样拒绝 `W2L_EGRESS_PROXIES`，没有选 `access: "enhanced"` 的调用，出口上的任何东西都用不到。Howard 看过两个方案，默认对所有账户打开的方案要改本 ADR 的规则，没有选。
 
-- **服务。** 列表挂载时，`octocrawl-chrome` 在出口上读 robots.txt，和 Chrome 用同一个地址检查、同一个 CONNECT 拨号。证书照常校验。
+- **服务。** 列表挂载时，`octocrawl-chrome` 在出口上读 robots.txt，和 Chrome 用同一个地址检查、同一个 CONNECT 拨号。证书照常校验。这条路上的上限是 12 秒：每一跳重定向都要新开隧道，`www.bisico.de` 和 `www.mani-germany.com` 两跳经代理约 6 到 8 秒，站点都有回应，5 秒读不完（2026-11-05 实测）。直连的上限仍是 5 秒。
 - **阶梯。** robots.txt 只因为连不上而挡住页面时，后面有 `hosted_chrome` 的调用直接走到这一级，跳过中间同一网络上的 rung。连不上指 `timeout`，或者还没有任何响应时的 `network_error`（记录里有连接错误码）。站点自己说的话不算：一条规则、5xx、重定向循环、过大的响应，阶梯照旧停下。
 - **先走 http 回退。** 站点看起来没有 HTTPS 时（`packages/bench/src/routing/httpFallback.ts`），先读 `http://`，一页 1 credit，这次读取不走这一级。`http://` 也到不了站点，说明那次拒绝不是证据，再用原来的 `https://` 地址走这一级。
 - **这一级没有读到时。** 这一级自己的结果就是答案：出口读到的规则、出口也读不到 robots.txt、页面在出口上失败，都如实写。只有这一级抛异常、什么也没说时，答案才是之前的 robots.txt 读不到。

@@ -25,11 +25,12 @@ const ARTICLE = `<!doctype html><title>Tide tables</title><main><h1>Tide tables<
 let site: Server
 let origin = ''
 const asked: string[] = []
+let robotsDelayMs = 0
 
 beforeAll(async () => {
   site = createServer((req, res) => {
     if (req.url !== '/favicon.ico') asked.push(req.url ?? '')
-    if (req.url === '/robots.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /private\n')
+    if (req.url === '/robots.txt') return void setTimeout(() => res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nDisallow: /private\n'), robotsDelayMs)
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(ARTICLE)
   })
   await new Promise<void>((resolve) => site.listen(0, '127.0.0.1', resolve))
@@ -111,7 +112,9 @@ describe('hosted_chrome: the octocrawl-chrome service end to end', () => {
     const login = { username: 'made-up-user', password: 'made-up-pass-91c2' }
     const reader = hostedChromeReader(policy, datacenterExit([{ host: '127.0.0.1', port: proxyPort, ...login }]), seams)
     try {
-      const read = await reader.read({ url: `${origin}/article`, options: {}, deadlineAt: Date.now() + 60_000 }, new AbortController().signal)
+      // Slower than the 5 s a direct lookup gets: a redirect and a slow first byte take that through a proxy (2026-11-05).
+      robotsDelayMs = 5_500
+      const read = await reader.read({ url: `${origin}/article`, options: {}, deadlineAt: Date.now() + 60_000 }, new AbortController().signal).finally(() => { robotsDelayMs = 0 })
       expect(read.status).toBe('success')
       expect(targets.length).toBeGreaterThan(0)
       // Only checked addresses reach the proxy, never a name: the site's, and any Chrome's own traffic was given.
