@@ -494,7 +494,13 @@ it('a key runs one browser-lane scrape at a time; a second waits with Retry-Afte
   expect(busy.status).toBe(429)
   expect(Number(busy.headers.get('retry-after'))).toBeGreaterThanOrEqual(1)
   expect(Number(busy.headers.get('retry-after'))).toBeLessThanOrEqual(BROWSER_BUSY_RETRY_MAX_S)
-  expect(await busy.json()).toMatchObject({ code: 'browser_busy' })
+  const refused = await busy.json() as { code: string; agentHints: string[] }
+  expect(refused.code).toBe('browser_busy')
+  // This key has no account, so no batch job to turn to: fastMode first, with when it helps, then the wait as it really is.
+  expect(refused.agentHints.join(' ')).not.toMatch(/batch/i)
+  expect(refused.agentHints[0]).toMatch(/fastMode: true.*scripts/)
+  expect(refused.agentHints.at(-1)).toContain(`${busy.headers.get('retry-after')} s`)
+  expect(refused.agentHints.at(-1)).toContain('5 minutes')
   // Over HTTP alone the same key is not held back, and map never is.
   expect((await post(url, '/v1/scrape', { url: `${origin}/page`, fastMode: true }, auth)).status).toBe(200)
   expect((await post(url, '/v1/map', { url: `${origin}/page` }, auth)).status).toBe(200)

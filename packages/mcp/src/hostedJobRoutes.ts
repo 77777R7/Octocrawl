@@ -376,6 +376,8 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
   return {
     /** Whether the account may start jobs, so that an MCP connection lists the job tools only to an account that may. */
     allows: async (uid: string) => config.allows === undefined || await config.allows(uid),
+    /** Whether a job this account starts now would be taken: the switch is on and the account may, as start() asks. */
+    accepts: async (uid: string) => (config.enabled === undefined || await config.enabled()) && (config.allows === undefined || await config.allows(uid)),
     async handle(request: Request, caller: JobCaller): Promise<Response> {
       const url = new URL(request.url)
       const method = request.method
