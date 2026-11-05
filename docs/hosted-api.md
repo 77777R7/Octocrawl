@@ -549,6 +549,17 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 
 Write the result to `research/hosted/` with the date, the pages per lane, the billed amount and the cost per 1,000 pages; the allowances and `--max-instances` are adjusted from that record, not before.
 
+The service's own structured lines (`jsonPayload.event`), each one JSON on stdout, never a page's content:
+
+- `hosted_usage`: a key's or account's start that passed its allowance or reserved its credits (the key's HMAC prefix, plan, `uid`, endpoint, day); `hosted_keyless_usage`: a keyless start (address prefix or the `claude` pool).
+- `hosted_credits`: what an account's call cost once settled (`uid`, kind, used, reserved, the model's part).
+- `hosted_scrape_phases`: one line per scrape with its rungs and waits, and since 2026-11-05 `caller` (`keyless`, `key`, `oauth` or `site`) and `uid`, so the phases can be split by who called.
+- `hosted_mcp_initialize`: each MCP `initialize` with the client's name and version; `hosted_mcp_call` (since 2026-11-05): each tool call's end with `endpoint`, `caller`, `tool`, `ms`, `truncated` (the answer was cut to the size budget) and `error` (it ended as a tool error).
+- `hosted_refused` (since 2026-11-05): every 401, 403, 404 and 429 the gate answers, with `status`, `code`, `path`, `caller` (null before the caller is known) and, for a limit, `pool`: `minute` (the per-minute rate), `browser` (browser_busy), `credits`, `account`, `accounts`, or the day's pool (`site`, `keyless`, `keyless-<address prefix>`, `keyless-claude`, `key-<prefix>`).
+- `hosted_quota_threshold` (WARNING): a shared pool at 70% of its day; `hosted_api_error` and `hosted_mcp_error` (ERROR): a request that threw.
+
+Not logged: which field an `invalid_request` named (the 400 body is not written), and the inner API's own 4xx answers, which pass through the gate unlogged.
+
 ### Alerts
 
 The API and the job worker log `{"event":"hosted_quota_threshold","pool":…,"day":…,"count":…,"limit":…}` once a pool a day, from the use that takes a shared pool to 70% of its limit. A log-based alert mails it, and a billing budget mails spend. Set them up once, in this order:

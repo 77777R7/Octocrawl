@@ -1674,3 +1674,26 @@ describe('the compatible transport, granted per request (ADR 0005 compatible_tra
     expect(await tried()).toEqual(['http'])
   })
 })
+
+it('logs who was refused and why, each MCP call by tool, and the caller on a phase line (2026-11-05 audit: the logs could not say)', async () => {
+  const lines: string[] = []
+  const { url } = await start({ keylessDaily: 1, log: (line) => lines.push(line) })
+  const events = (name: string) => lines.flatMap((line) => { try { return [JSON.parse(line) as Record<string, unknown>] } catch { return [] } }).filter((line) => line.event === name)
+  const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(transport)
+    const result = await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, formats: ['markdown'] } })
+    expect(result.isError).not.toBe(true)
+    // The keyless day of one page is spent: the next start is refused, and the line says by which pool.
+    const refused = await post(url, '/v1/scrape', { url: `${origin}/page` })
+    expect(refused.status).toBe(429)
+  } finally { await client.close() }
+  expect(events('hosted_mcp_call')).toEqual([expect.objectContaining({ severity: 'INFO', endpoint: '/mcp', caller: 'keyless', tool: 'scrape', truncated: false, error: false, ms: expect.any(Number) })])
+  expect(events('hosted_scrape_phases').map((line) => line.caller)).toEqual(['keyless'])
+  const refusals = events('hosted_refused')
+  expect(refusals).toHaveLength(1)
+  expect(refusals[0]).toMatchObject({ severity: 'INFO', status: 429, code: 'quota_exhausted', path: '/v1/scrape', caller: 'keyless' })
+  // The address's HMAC is cut to the 16 characters the other lines log, never the whole digest.
+  expect(String(refusals[0]!.pool)).toMatch(/^keyless-[0-9a-f]{16}$/)
+})
