@@ -47,7 +47,7 @@ export interface McpServerOptions {
    * (repeatedScrapes.ts): hosted Octocrawl shares one tracker across its connections and names the key or the keyless
    * address; a local server counts its one client under `local` by default.
    */
-  repeatedScrapes?: { tracker: RepeatedScrapes; caller: string }
+  repeatedScrapes?: { tracker: RepeatedScrapes; caller: string; /** A server on the person's computer: a hint about batch_scrape names the toolset flag, not an account. */ local?: boolean }
 }
 
 /** A local server's count of its one client's scrapes by host (repeatedScrapes.ts), when a deployment gives none. */
@@ -82,7 +82,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
   const keepScrapeId = listed.some(tool => (tool as { name: string }).name === 'get_scrape')
   // The hint on repeated scrapes names batch_scrape where this deployment lists it, else where it runs (repeatedScrapes.ts).
   const listsBatch = listed.some(tool => (tool as { name: string }).name === 'batch_scrape')
-  const repeated = options.repeatedScrapes ?? { tracker: LOCAL_REPEATED_SCRAPES, caller: 'local' }
+  const repeated = options.repeatedScrapes ?? { tracker: LOCAL_REPEATED_SCRAPES, caller: 'local', local: true }
   const server = new Server(
     { ...SERVER_IDENTITY, version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server&utm_medium=listing' },
     { capabilities: { tools: {} }, instructions },
@@ -103,7 +103,8 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       // A tool this deployment leaves out stays a protocol error, as the spec has an unknown tool, but says what is offered.
       if (options.allowedTools && !options.allowedTools.has(request.params.name)) {
         const hint = typeof options.unavailableHint === 'function' ? options.unavailableHint(request.params.name) : options.unavailableHint
-        throw new Error(`tool not available in this deployment: ${request.params.name}; this server offers ${[...options.allowedTools].join(', ')}.${hint === undefined ? '' : ` ${hint}`}`)
+        // Named from the tools this caller is listed, not the deployment's whole set: a keyless caller is not offered scrape_product.
+        throw new Error(`tool not available in this deployment: ${request.params.name}; this server offers ${listed.map(tool => (tool as { name: string }).name).join(', ')}.${hint === undefined ? '' : ` ${hint}`}`)
       }
       let result: unknown
       let contract: VerifyContract | undefined
@@ -123,7 +124,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
           // From a caller's third scrape of one host in ten minutes, the answer names the tools that read many pages as one job.
           if (request.params.name === 'scrape') {
             const url = (args as Record<string, unknown>).url
-            result = withRepeatedScrapesHint(result, url, repeated.tracker.note(repeated.caller, url), listsBatch)
+            result = withRepeatedScrapesHint(result, url, repeated.tracker.note(repeated.caller, url), listsBatch, repeated.local === true)
           }
         }
         finally { progress?.stop() }

@@ -308,7 +308,7 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
     const text = (result.content as { type: string; text: string }[])[0]!.text
     expect(JSON.parse(text)).toMatchObject({ status: 'success', lane: 'http' })
     // A tool hosted Octocrawl leaves out stays a protocol error, and says what it offers and where crawls run.
-    await expect(client.callTool({ name: 'crawl', arguments: { url: `${origin}/` } })).rejects.toThrow(/tool not available in this deployment: crawl; this server offers scrape, map, scrape_product\. Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve/)
+    await expect(client.callTool({ name: 'crawl', arguments: { url: `${origin}/` } })).rejects.toThrow(/tool not available in this deployment: crawl; this server offers scrape, map\. Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve/)
     expectIsError(await client.callTool({ name: 'scrape_product', arguments: { url: 'https://www.amazon.sg/dp/B000VW9PIK' } }), 'needs a key')
     await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
     await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
