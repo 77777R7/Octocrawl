@@ -168,6 +168,10 @@ The final URL is off the page when its path, after the folding `map` applies to 
 
 `N` and `C` are the HTTP rung's own `quality_low_yield` figures, or else its `extract` confidence. A rendered page that answered carries no such warning.
 
+An `https://` URL of a site with no working HTTPS is asked for once over `http://`, with `{ code: "https_unavailable", message }`. Sites that never took up HTTPS are still listed under `https://`: of the 9 URLs hosted Octocrawl could not read on 2026-11-04, three had no working HTTPS. It happens on `scrape`, `batch_scrape` and `crawl` pages when the first request, for the page or for its robots.txt, was refused (`ECONNREFUSED`), reset (`ECONNRESET`) or answered by a plain server (`ERR_SSL_WRONG_VERSION_NUMBER`). `requestedUrl` stays the `https://` URL, that origin's robots.txt applies, and the `https_fallback` trace event says why. A page read this way arrived unencrypted, so anyone on the path could have changed it.
+
+Everything else keeps its answer: a certificate that did not verify (`tls_error`), a timeout, a failure after a redirect, any other network error, and a site that answered at all. So does a request with `headers`, `actions`, a query string, cookies, a login or credentials in the URL, as those are not sent in the clear; a `robotsOverride` does not carry over to the `http://` address; and a server behind a proxy (`HTTPS_PROXY`, an egress pool), as a refusal then says nothing of the site. When `http://` reaches nothing either, the answer stays the `https://` failure, with the try in the ladder audit. A `crawl` that falls back follows the `http://` links of the page it read. `map` does not fall back.
+
 Every response that carries `warnings` also carries `warning`: their messages joined with a space, Firecrawl's name for it. This holds for full and compact scrape responses, batch items, crawl pages, and `data.warning` on `/fc`, which so passes the native warnings through.
 
 ## readiness

@@ -1190,6 +1190,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * The history of one set of rungs, under the key its channels are kept by (mode, egress, access enhanced). The file
    * records how the egress leaves (pool, environment or direct), never the proxy's address.
    */
+  /** Whether a page connects to its site directly: a refused connection then says something of the site, not of a proxy. */
+  const unproxied = (egress: Egress | undefined): boolean => egress === undefined && (networkPolicy.egressProxy ?? null) === null
   const historyFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced = false): SqliteRoutingHistory => {
     const key = channelsKey(mode, egress, enhanced)
     const existing = historiesByKey.get(key)
@@ -1739,7 +1741,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
-    const runnerFor = (lane: ReturnType<typeof channelsForUrl>, egress: Egress | undefined) => new LadderRunner(lane.channels, { mode, ...(selection?.access === 'enhanced' ? { enhanced: true } : {}), ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode, egress, selection?.access === 'enhanced'), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered, ...(selection?.verify === undefined ? {} : { verify: selection.verify }) })
+    const runnerFor = (lane: ReturnType<typeof channelsForUrl>, egress: Egress | undefined) => new LadderRunner(lane.channels, { mode, ...(selection?.access === 'enhanced' ? { enhanced: true } : {}), ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode, egress, selection?.access === 'enhanced'), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered, httpFallback: unproxied(egress), ...(selection?.verify === undefined ? {} : { verify: selection.verify }) })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -2007,7 +2009,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ? { allowlistedDomains: req.allowlistedDomains }
         : {}),
     }
-    const runner = new LadderRunner(rungs.channels, policy, historyFor(mode, scrapeEgress, req.access === 'enhanced'), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, ...(req.verify === undefined ? {} : { verify: req.verify }) })
+    const runner = new LadderRunner(rungs.channels, policy, historyFor(mode, scrapeEgress, req.access === 'enhanced'), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, httpFallback: unproxied(scrapeEgress), ...(req.verify === undefined ? {} : { verify: req.verify }) })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
     // The URL a scrape names; a Monitor's capture (no record) re-reads its URL on a schedule, as a crawler does.
     const robotsOverride = req.robotsOverride ?? (record ? namedUrlOverride : undefined)
