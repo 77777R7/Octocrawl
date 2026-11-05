@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { hostedNetworkPolicy } from '@w2l/contracts'
-import { createHostedApi, HOSTED_JOB_TOOLS, keyDigest, MemoryHostedKeys, MemoryHostedOAuthTokens, MemoryHostedQuota, type HostedKeyRecord } from '../src/hostedApi.js'
+import { accessTokenDigest, createHostedApi, HOSTED_JOB_TOOLS, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, siteAccountAssertion, type HostedKeyRecord, type HostedLeases } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
 import { MemoryHostedJobStore, type HostedJob } from '../src/hostedJobs.js'
 import type { JobFiles } from '../src/hostedJobRoutes.js'
@@ -33,7 +33,7 @@ afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true }); root = undefined
 })
 
-async function start(options: { addressPerMinute?: number; allowed?: readonly string[]; privateSites?: boolean } = {}) {
+async function start(options: { addressPerMinute?: number; allowed?: readonly string[]; privateSites?: boolean; leases?: HostedLeases; allows?: (uid: string) => Promise<boolean>; enabled?: () => Promise<boolean> } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-job-mcp-'))
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening')
   const port = (probe.address() as AddressInfo).port
@@ -42,18 +42,20 @@ async function start(options: { addressPerMinute?: number; allowed?: readonly st
   const segments = new Map<string, string[]>()
   const files: JobFiles = { segment: async (job, slice) => segments.get(`${job.id}/${slice}`) ?? null, exportUrl: async (job) => `https://storage.example/${job.id}` }
   const enqueued: HostedJob[] = []
-  const keys = new MemoryHostedKeys(new Map(Object.entries(KEYS).map(([key, record]) => [keyDigest(HASH_KEY, key), record])))
+  const keys = new MemoryHostedKeys(new Map([...Object.entries(KEYS).map(([key, record]) => [keyDigest(HASH_KEY, key), record] as const), ['oauth-connection', { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1', kind: 'oauth' }] as const]))
+  const oauthTokens = new MemoryHostedOAuthTokens(new Map([[accessTokenDigest(HASH_KEY, 'oca_connection'), { keyId: 'oauth-connection', resource: MCP_OAUTH_RESOURCE, expiresAt: Date.now() + 3_600_000 }]]))
   const service = createHostedApi({
-    port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys, oauthTokens: new MemoryHostedOAuthTokens(new Map()), quota: new MemoryHostedQuota(),
+    port, host: '127.0.0.1', taskRoot: root, hashKey: HASH_KEY, keys, oauthTokens, quota: new MemoryHostedQuota(),
     credits: new MemoryCreditsStore(1_000), networkPolicy: options.privateSites === true ? { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] } : hostedNetworkPolicy(), log: () => {}, ...(options.addressPerMinute === undefined ? {} : { addressPerMinute: options.addressPerMinute }),
-    jobs: { store, files, enqueueSlice: async (job) => { enqueued.push(job) }, ...(options.allowed === undefined ? {} : { allows: async (uid: string) => options.allowed!.includes(uid) }) },
+    ...(options.leases === undefined ? {} : { leases: options.leases }),
+    jobs: { store, files, enqueueSlice: async (job) => { enqueued.push(job) }, ...(options.enabled === undefined ? {} : { enabled: options.enabled }), ...(options.allows !== undefined ? { allows: options.allows } : options.allowed === undefined ? {} : { allows: async (uid: string) => options.allowed!.includes(uid) }) },
   })
   close = service.close
   if (!service.server.listening) await once(service.server, 'listening')
   const url = `http://127.0.0.1:${port}`
-  const connect = async (key: string | null) => {
+  const connect = async (key: string | null, path = '/mcp') => {
     const client = new Client({ name: 'octocrawl-job-mcp-test', version: '1.0.0' })
-    await client.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: key === null ? {} : { authorization: `Bearer ${key}` } } }))
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${url}${path}`), { requestInit: { headers: key === null ? {} : { authorization: `Bearer ${key}` } } }))
     clients.push(client)
     return client
   }
@@ -62,7 +64,7 @@ async function start(options: { addressPerMinute?: number; allowed?: readonly st
     segments.set(`${id}/${job.counts.slices}`, items.map((item) => JSON.stringify(item)))
     store.jobs.set(id, { ...job, counts: { pages: job.counts.pages + items.length, errors: job.counts.errors, slices: job.counts.slices + 1 } })
   }
-  return { connect, store, enqueued, sliceWrote }
+  return { url, connect, store, enqueued, sliceWrote }
 }
 
 const structured = (result: unknown) => (result as { structuredContent?: Record<string, unknown> }).structuredContent ?? {}
@@ -100,6 +102,85 @@ describe('hosted job tools over MCP', () => {
     // A connection without the browser lane is not offered what needs it.
     const http = (await (await connect('oc_http')).listTools()).tools.find((tool) => tool.name === 'batch_scrape')!
     expect((http.inputSchema as { properties: Record<string, unknown> }).properties).not.toHaveProperty('waitFor')
+  })
+
+  it('says scrapes run one at a time where a lease can refuse one, and names batch_scrape only where it is listed', async () => {
+    const { connect } = await start()
+    const scrapeOf = async (key: string | null) => (await (await connect(key)).listTools()).tools.find((tool) => tool.name === 'scrape')!.description
+    expect(await scrapeOf('oc_account')).toMatch(/one scrape runs at a time.*fastMode.*browser_busy.*batch_scrape/i)
+    // No account: batch_scrape is not listed, so the description stays as the budget measures it. No browser lane: no lease.
+    for (const key of ['oc_plain', 'oc_http', null]) expect(await scrapeOf(key), String(key)).not.toContain('browser_busy')
+    const instructionsOf = async (key: string | null) => (await connect(key)).getInstructions() ?? ''
+    const account = await instructionsOf('oc_account')
+    expect(account).toMatch(/one scrape runs at a time.*fastMode.*browser_busy.*batch_scrape/i)
+    expect(account.length).toBeLessThan(2_000)
+    const plain = await instructionsOf('oc_plain')
+    expect(plain).toMatch(/one scrape runs at a time.*browser_busy/i)
+    expect(plain).not.toContain('batch_scrape')
+    for (const key of ['oc_http', null]) expect(await instructionsOf(key), String(key)).not.toContain('browser_busy')
+  })
+
+  it('points a scrape refused by the lease at a batch job first, where the account can run one, with fastMode and the real wait after it', async () => {
+    const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
+    const { connect } = await start({ leases })
+    const refused = await (await connect('oc_account')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })
+    expect(refused.isError).toBe(true)
+    const next = text(refused).split('\n').filter((line) => line.startsWith('Next: '))
+    expect(next).toHaveLength(3)
+    expect(next[0]).toContain('batch_scrape')
+    expect(next[0]).toContain('POST /v1/batches')
+    // Named as scrape, since scrape_product takes no fastMode and takes this lease too; and waitFor and a screenshot need the browser.
+    expect(next[1]).toMatch(/^Next: scrape with fastMode: true.*scripts.*no waitFor or screenshot/)
+    expect(next[2]).toContain('7 s')
+    expect(next[2]).toContain('5 minutes')
+    // A key without an account lists no batch_scrape, so it is not told to use one.
+    expect(text(await (await connect('oc_plain')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } }))).not.toMatch(/batch/i)
+  })
+
+  it('names no batch job to an account that is not invited to run one', async () => {
+    const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
+    const { connect } = await start({ leases, allowed: [] })
+    const refused = await (await connect('oc_account')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })
+    expect(text(refused)).toContain('browser_busy')
+    expect(text(refused)).not.toMatch(/batch/i)
+  })
+
+  it('names no batch job while jobs are paused', async () => {
+    const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
+    const { connect } = await start({ leases, enabled: async () => false })
+    const refused = await (await connect('oc_account')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })
+    expect(text(refused)).toContain('browser_busy')
+    expect(text(refused)).not.toMatch(/batch/i)
+  })
+
+  it('tells an OAuth connection only what it can do: batch_scrape, no REST route, and the longest MCP call', async () => {
+    const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
+    const { connect } = await start({ leases })
+    const refused = text(await (await connect('oca_connection', '/mcp-oauth')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } }))
+    expect(refused).toContain('batch_scrape')
+    expect(refused).not.toContain('POST /v1/batches')
+    expect(refused).toContain('up to 3 minutes')
+  })
+
+  it('gives a Playground run the wait alone: the dashboard shows the first hint and has neither a batch nor fastMode', async () => {
+    const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
+    const { url } = await start({ leases })
+    const refused = await fetch(`${url}/v1/scrape`, { method: 'POST', headers: { [SITE_ACCOUNT_HEADER]: siteAccountAssertion(HASH_KEY, 'account-1'), 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://example.com/', formats: ['markdown', 'links'] }) })
+    expect(refused.status).toBe(429)
+    const { agentHints } = await refused.json() as { agentHints: string[] }
+    expect(agentHints).toHaveLength(1)
+    expect(agentHints[0]).toContain('7 s')
+    expect(agentHints[0]).not.toMatch(/batch|fastMode/i)
+  })
+
+  it('stays a 429 when reading whether the account can run a job fails, without the batch hint', async () => {
+    const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
+    const { url } = await start({ leases, allows: async () => { throw new Error('config unreadable') } })
+    const refused = await fetch(`${url}/v1/scrape`, { method: 'POST', headers: { authorization: 'Bearer oc_account', 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://example.com/' }) })
+    expect(refused.status).toBe(429)
+    const body = await refused.json() as { code: string; agentHints: string[] }
+    expect(body.code).toBe('browser_busy')
+    expect(body.agentHints.join(' ')).not.toMatch(/batch/i)
   })
 
   it('describes and offers only what hosted serves: the errors list\'s shape, no screenshot without the browser lane, no authed mode, appendToId or large files (H2 M7, M9)', async () => {
