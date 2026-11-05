@@ -55,15 +55,15 @@ describe('the account page\'s data', () => {
     // No spending yet this month: the whole grant, with bought credits on top.
     data.balances.set('account-0001', { month: '2026-09', grant: 12, purchased: 40 })
     data.signInMethods.set('account-0001', ['github.com', 'emailLink'])
-    data.usageDays.set('a', { uid: 'account-0001', day: '2026-10-10', http: 3, browser: 1, notFound: 0, map: 1, unread: 2, credits: 9 })
-    data.usageDays.set('b', { uid: 'account-0001', day: '2026-08-01', http: 9, browser: 0, notFound: 0, map: 0, unread: 0, credits: 9 })
-    data.usageDays.set('c', { uid: 'someone-else', day: '2026-10-10', http: 5, browser: 0, notFound: 0, map: 0, unread: 0, credits: 5 })
+    data.usageDays.set('a', { uid: 'account-0001', day: '2026-10-10', http: 3, browser: 1, notFound: 0, map: 1, unread: 2, jobPages: 0, credits: 9 })
+    data.usageDays.set('b', { uid: 'account-0001', day: '2026-08-01', http: 9, browser: 0, notFound: 0, map: 0, unread: 0, jobPages: 0, credits: 9 })
+    data.usageDays.set('c', { uid: 'someone-else', day: '2026-10-10', http: 5, browser: 0, notFound: 0, map: 0, unread: 0, jobPages: 0, credits: 5 })
     const body = await (await fetch(`${url}/api/account`, { headers: { cookie } })).json()
     expect(body).toEqual({
       email: 'ada@example.org',
       providers: ['github.com', 'emailLink'],
       credits: { remaining: 1_040, monthly: { left: 1_000, of: 1_000, resetsAt: '2026-11-01T00:00:00.000Z' }, purchased: 40 },
-      usage: [{ day: '2026-10-10', http: 3, browser: 1, notFound: 0, map: 1, unread: 2, credits: 9 }],
+      usage: [{ day: '2026-10-10', http: 3, browser: 1, notFound: 0, map: 1, unread: 2, jobPages: 0, credits: 9 }],
       keys: [],
       // No OAuth connections served here: an empty list, not a missing field.
       connections: [],
@@ -143,7 +143,7 @@ describe('the account page\'s data', () => {
     const memory = new MemoryAccountData()
     for (const uid of ['account-0001', 'account-0002']) {
       memory.balances.set(uid, { month: '2026-10', grant: 900, purchased: 0 })
-      memory.usageDays.set(`${uid}-2026-10-12`, { uid, day: '2026-10-12', http: 1, browser: 0, notFound: 0, map: 0, unread: 0, credits: 1 })
+      memory.usageDays.set(`${uid}-2026-10-12`, { uid, day: '2026-10-12', http: 1, browser: 0, notFound: 0, map: 0, unread: 0, jobPages: 0, credits: 1 })
       memory.keyRecords.set(`key-${uid}`, { uid, id: `key-${uid}`, label: 'k', prefix: 'oc_x', createdAt: '2026-10-12T00:00:00Z', enabled: true })
       memory.requestLines.set(uid, [])
     }
@@ -181,6 +181,37 @@ describe('the account page\'s data', () => {
     }) as typeof fetch
     const lines = await new FirestoreAccountData('octocrawl-test', fetcher).requests('account-0001', 10)
     expect(lines.map(line => [line.id, line.formats, line.ms])).toEqual([['1-a', ['markdown', 'json'], 1834], ['2-b', [], 12], ['3-c', null, null]])
+  })
+
+  it('reads a job\'s Activity line with its pages by outcome, and leaves `job` off a call\'s line', async () => {
+    const root = 'projects/p/databases/(default)/documents/requestLog/account-0001/requests'
+    const fields = { at: { timestampValue: '2026-11-05T10:00:00Z' }, keyId: { stringValue: 'k'.repeat(64) }, url: { stringValue: 'https://example.org/' }, credits: { integerValue: '3' } }
+    const fetcher = (async (input: string | URL) => {
+      if (String(input).startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
+      return Response.json([
+        { document: { name: `${root}/1-a`, fields: { ...fields, endpoint: { stringValue: 'batch' }, status: { stringValue: 'completed' }, kind: { stringValue: 'job' }, job: { mapValue: { fields: {
+          id: { stringValue: 'job-1' }, requested: { integerValue: '12' }, pages: { integerValue: '12' }, errors: { integerValue: '9' },
+          outcomes: { mapValue: { fields: { read: { integerValue: '3' }, robots_unreachable: { integerValue: '9' } } } },
+        } } } } } },
+        { document: { name: `${root}/2-b`, fields: { ...fields, endpoint: { stringValue: 'scrape' }, status: { stringValue: 'success' }, kind: { stringValue: 'http' } } } },
+      ])
+    }) as typeof fetch
+    const lines = await new FirestoreAccountData('octocrawl-test', fetcher).requests('account-0001', 10)
+    expect(lines[0]).toMatchObject({ endpoint: 'batch', kind: 'job', job: { id: 'job-1', requested: 12, pages: 12, errors: 9, outcomes: { read: 3, robots_unreachable: 9 } } })
+    expect(Object.keys(lines[1]!)).not.toContain('job')
+  })
+
+  it('reads how many of a day\'s pages were a job\'s', async () => {
+    const root = 'projects/p/databases/(default)/documents/creditUsage'
+    const fetcher = (async (input: string | URL) => {
+      if (String(input).startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
+      return Response.json([
+        { document: { name: `${root}/a`, fields: { day: { stringValue: '2026-11-05' }, http: { integerValue: '5' }, unread: { integerValue: '4' }, job_pages: { integerValue: '7' }, credits: { integerValue: '5' } } } },
+        { document: { name: `${root}/b`, fields: { day: { stringValue: '2026-11-04' }, http: { integerValue: '2' }, credits: { integerValue: '2' } } } },
+      ])
+    }) as typeof fetch
+    const days = await new FirestoreAccountData('octocrawl-test', fetcher).usage('account-0001', '2026-11-01')
+    expect(days.map(day => [day.day, day.jobPages])).toEqual([['2026-11-04', 0], ['2026-11-05', 7]])
   })
 
   it('remembers what was left of the month under the address\'s key, and carries it to a new account only', async () => {

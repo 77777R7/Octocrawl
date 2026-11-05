@@ -24,12 +24,16 @@ export interface HostedJob {
   workspaceId: string
   uid: string
   keyId: string
+  /** The whole id of the key that started it, as a request line names a key (`keyId` is its first 16 characters); absent on a job started before Activity lines (2026-11-05). */
+  requestKeyId?: string
   kind: HostedJobKind
   /** The parsed request, without header values. */
   request: unknown
   status: HostedJobStatus
   failureReason: string | null
   counts: { pages: number; errors: number; slices: number }
+  /** Its pages by outcome so far (hostedJobWorker.ts pageOutcome), for its request line. */
+  outcomes?: Record<string, number>
   credits: { reserved: number; used: number; maxCredits: number | null }
   generation: number
   lease: { holder: string; expireAt: string } | null
@@ -137,9 +141,9 @@ export const JOB_LIST_MAX = 200
 
 const days = (from: Date, n: number) => new Date(from.getTime() + n * 86_400_000).toISOString()
 
-export function newHostedJob(input: { id: string; workspaceId: string; uid: string; keyId: string; kind: HostedJobKind; request: unknown; maxCredits: number | null; webhook?: HostedJobWebhook | null }, now = new Date()): HostedJob {
+export function newHostedJob(input: { id: string; workspaceId: string; uid: string; keyId: string; requestKeyId?: string; kind: HostedJobKind; request: unknown; maxCredits: number | null; webhook?: HostedJobWebhook | null }, now = new Date()): HostedJob {
   return {
-    id: input.id, workspaceId: input.workspaceId, uid: input.uid, keyId: input.keyId, kind: input.kind, request: input.request, ...(input.webhook ? { webhook: input.webhook } : {}),
+    id: input.id, workspaceId: input.workspaceId, uid: input.uid, keyId: input.keyId, ...(input.requestKeyId === undefined ? {} : { requestKeyId: input.requestKeyId }), kind: input.kind, request: input.request, ...(input.webhook ? { webhook: input.webhook } : {}),
     status: 'queued', failureReason: null, counts: { pages: 0, errors: 0, slices: 0 }, credits: { reserved: 0, used: 0, maxCredits: input.maxCredits },
     generation: 0, lease: null, hosts: {}, createdAt: now.toISOString(), startedAt: null, finishedAt: null, expireAt: null, deleteAt: days(now, JOB_TOMBSTONE_DAYS),
   }
