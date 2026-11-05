@@ -124,7 +124,7 @@ import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, de
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, BrowserIdentityChoice, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
-import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
+import { agentHintsFor, httpLaneAskedForBrowser, mapAgentHints, MAX_AGENT_HINTS, pinnedFastModeHints, type FastModePin, type HintOffers } from './hints.js'
 import { HandoffNotThrough, openUserChrome, type AllowedSites, type ApprovalLog, type UserChrome, type UserChromeOptions } from './chromeHandoff.js'
 import { importChromeLogin, listSavedLogins, loginDomain, removeSavedLogin } from './chromeLogin.js'
 import { JobEventHub, jobKindOf, type JobTerminalStatus } from './jobEvents.js'
@@ -215,6 +215,9 @@ export interface HostedChromeClient {
   close?(): Promise<void>
 }
 
+/** The answer to a call's request for its turn on the browser lane; refused, `hints` lead the answer's. */
+export type BrowserTurn = { ok: true } | { ok: false; code: 'browser_busy' | 'browser_unavailable' | 'browser_credits'; retryAfterSeconds: number; message: string; hints: readonly string[] }
+
 /** A scrape's context, and a fastMode its caller pinned: the answer and the scrape record then say the pin's reason. */
 export interface ScrapeContext extends ExecutionContext {
   /** The capabilities this call alone holds, within the engine's `callCapabilities`: hosted Octocrawl's switches, per request. */
@@ -222,6 +225,12 @@ export interface ScrapeContext extends ExecutionContext {
   /** The account the call is made for (hosted Octocrawl's caller), which hosted_chrome's counter counts it under. */
   account?: string
   fastModePin?: FastModePin
+  /**
+   * Asked just before a rung that runs a browser starts, so a page HTTP reads asks for nothing (hosted Octocrawl's one
+   * browser page at a time per key). Refused, the rung is left out and the answer is what the rungs before it read, with
+   * a warning of the refusal's code; absent, a browser rung runs whenever it is reached.
+   */
+  browserTurn?: () => Promise<BrowserTurn>
   /** Told the call's whole run, its trace and ladder trace whatever `debug` asks, before the answer is shaped; never part of it (hosted's phase line). */
   observe?: (run: ScrapeRun, scrapeId: string) => void
 }
@@ -987,6 +996,14 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // The regular-expression checks run with a time limit; a hosted engine takes them when its operator switched them on (ADR 0006, amendment of 2026-10-29).
     const regexRefusal = hosted ? hostedVerifyRefusal(req.verify, { regexChecks: options.hostedRegexChecks === true }) : null
     if (regexRefusal !== null) throw new RequestError(regexRefusal, 'unsupported_parameter', { parameters: ['verify'] })
+  }
+  /**
+   * waitFor waits in the browser lane, which fastMode declines: no URL can answer both, so a scrape, a batch and a crawl are
+   * refused at their start (a hosted job's start asks these checks alone, not the rungs). A caller the hosted gate pinned
+   * fastMode for never gets here with a waitFor: the gate refuses that by what the caller lacks.
+   */
+  const checkFastModeWait = (req: PageOptions): void => {
+    if (req.fastMode === true && req.waitFor !== undefined && req.waitFor > 0) throw new RequestError('waitFor requires the browser lane, which fastMode declines')
   }
   /**
    * `access: "enhanced"` asks for what the server's access grant of tier enhanced approves (ADR 0005), within its
@@ -1981,6 +1998,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     checkVerificationFormats(req)
     checkRobotsOverride('robotsOverride', req.robotsOverride)
     checkHostedOptions(req)
+    checkFastModeWait(req)
     const overallStart = performance.now()
     const requestedAt = new Date().toISOString()
     const scrapeId = crypto.randomUUID()
@@ -2001,7 +2019,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ? { allowlistedDomains: req.allowlistedDomains }
         : {}),
     }
-    const runner = new LadderRunner(rungs.channels, policy, historyFor(mode, scrapeEgress, req.access === 'enhanced'), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, ...(req.verify === undefined ? {} : { verify: req.verify }) })
+    let turnHints: readonly string[] = []
+    const channels = context.browserTurn === undefined ? rungs.channels : withBrowserTurn(rungs.channels, context.browserTurn, (hints) => { turnHints = hints })
+    const runner = new LadderRunner(channels, policy, historyFor(mode, scrapeEgress, req.access === 'enhanced'), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, ...(req.verify === undefined ? {} : { verify: req.verify }) })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
     // The URL a scrape names; a Monitor's capture (no record) re-reads its URL on a schedule, as a crawler does.
     const robotsOverride = req.robotsOverride ?? (record ? namedUrlOverride : undefined)
@@ -2010,7 +2030,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const deliver = async (run: ScrapeRun, shapeScope: ReturnType<typeof createExecutionScope>, fetched: boolean): Promise<ScrapeResponse | CompactScrapeResponse> => {
       // A pinned fastMode's reason replaces the engine's "retry without fastMode" in the answer and the record alike.
       const pinned = context.fastModePin === undefined ? [] : pinnedFastModeHints(run.agentHints ?? [], context.fastModePin)
-      const full: ScrapeRun = pinned.length === 0 ? run : { ...run, agentHints: pinned }
+      const told = pinned.length === 0 ? run.agentHints ?? [] : pinned
+      const full: ScrapeRun = pinned.length === 0 && turnHints.length === 0 ? run : { ...run, agentHints: [...turnHints, ...told].slice(0, MAX_AGENT_HINTS) }
       // An observer that throws does not cost the caller the page.
       try { context.observe?.(full, scrapeId) } catch { /* the observer's own fault */ }
       const response = await prepareScrapeResponse(full, req, modelGated(shapeScope, context), null, overallStart, scrapeId, fetched).finally(() => { if (shapeScope !== scope) shapeScope.dispose() })
@@ -2177,6 +2198,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     checkListSelectors(req.formats)
     checkVerificationFormats(req)
     checkHostedOptions(req)
+    checkFastModeWait(req)
     checkAccessChoice(req)
     const webhookConfig = jobWebhooks.check(req.webhook)
     if (defaultMaxPages !== null && req.maxPages != null && req.maxPages > defaultMaxPages) {
@@ -2197,6 +2219,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     checkVerificationFormats(req)
     checkRobotsOverride('robotsOverrides', req.robotsOverrides)
     checkHostedOptions(req)
+    checkFastModeWait(req)
     checkAccessChoice(req)
     checkMyBrowser(req)
     const webhookConfig = jobWebhooks.check(req.webhook)
@@ -2829,6 +2852,22 @@ async function hostedChromeAdmission(meter: HostedChromeMeter, call: HostedChrom
   const admission = await meter.admit({ account: call.account })
   if (admission.ok) return admission
   return { ok: false, reason: admission.reason, warning: { code: 'hosted_chrome_not_admitted', message: admission.message }, ...(admission.detail === undefined ? {} : { detail: admission.detail }) }
+}
+
+/** An admission with nothing to settle: a rung that has none of its own, once its call has its browser turn. */
+const ADMITTED: ChannelAdmission = { ok: true, settle: async () => {} }
+
+/** The rungs of one call, each that runs a browser asking for the call's turn first, then its own admission; a refused turn hands its hints to `refused`. */
+function withBrowserTurn(channels: readonly Channel[], browserTurn: () => Promise<BrowserTurn>, refused: (hints: readonly string[]) => void): Channel[] {
+  return channels.map(channel => channel.waitsFor !== true ? channel : {
+    ...channel,
+    admit: async (url, execution) => {
+      const turn = await browserTurn()
+      if (turn.ok) return channel.admit === undefined ? ADMITTED : await channel.admit(url, execution)
+      refused(turn.hints)
+      return { ok: false, reason: turn.code, warning: { code: turn.code, message: turn.message } }
+    },
+  })
 }
 
 /** The local rungs that render a page and so can capture the `screenshot` format. */

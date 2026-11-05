@@ -84,7 +84,7 @@ const DELIVERY = 'Webhook destinations for Monitors and jobs are a local server\
 const SCREENSHOT = `A connection with the browser lane only, at ${CREDITS.browserPage} credits a page; an account with fewer credits reads over HTTP alone, where a screenshot is refused.`
 const REGEX = 'Every check type, markdownMatches and markdownCountMin included: pattern checks run with the same time limits on every server (ADR 0006, amendment of 2026-10-29). Hosted takes those two behind its operator\'s switch, W2L_HOSTED_REGEX_CHECKS=1, on api.octocrawl.dev and the job worker since 2026-10-31; an instance whose start-up self-test failed refuses them by name.'
 const FILE_CAP = `At most ${mib(HOSTED_MAX_FILE_BYTES)} (local ${mib(MAX_FILE_BYTES_CEILING)}).`
-const BROWSER_LANE = 'A connection with the browser lane only; one without reads over HTTP alone.'
+const WAIT_FOR = `A connection with the browser lane only, at ${CREDITS.browserPage} credits a page; one without does not list it, and one that sends it anyway, or an account with fewer credits, is refused: a page is never read without the wait.`
 const WEBHOOK = 'REST takes it for the job\'s end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript.'
 
 const monitorTool: ToolEntry = { status: 'planned', item: 'monitors_delivery', note: MONITORS }
@@ -139,7 +139,7 @@ const cacheOption = (sent: WhenSent, how = ''): OptionEntry => ({ status: 'plann
 /** The page options scrape, crawl and batch_scrape share, as hosted serves them on a scrape. */
 const SCRAPE_PAGE_OPTIONS = {
   onlyMainContent: supported,
-  waitFor: { status: 'limited', note: BROWSER_LANE },
+  waitFor: { status: 'limited', note: WAIT_FOR },
   timeout: { status: 'limited', note: `At most ${s(HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS)}, and ${s(HOSTED_MCP_SCRAPE_TIMEOUT_MS)} when left out (local ${s(caps('scrape', 'timeout').local ?? 0)}, and ${s(MCP_SCRAPE_TIMEOUT_MS)} when left out): 60 s inside the 240 s claude.ai gives a tool call, under Cloud Run's ${s(HOSTED_REQUEST_TIMEOUT_MS)} request timeout.` },
   maxFileBytes: { status: 'limited', note: FILE_CAP },
   includeTags: supported,
