@@ -148,13 +148,12 @@ export function robotsOverrideApplied(trace: readonly TraceEvent[], warning: Fet
 }
 
 /**
- * How long one robots.txt lookup may take. A hosted server reads from one
- * region: a European or Korean site that answered a page in 2 to 3 s from
- * Singapore timed out at the former 5 s often enough to fail a real run
- * (2026-11-04, 10 of 13 policy_denied results), while the page itself has
- * a 120 s deadline.
+ * How long one robots.txt lookup may take. 15 s was tried and undone on
+ * 2026-11-05: the hosts that timed out at 5 s on 2026-11-04 timed out at
+ * 15 s too, and a probe from the hosted region did not finish TCP with them
+ * in 40 s, so the longer wait only made such a host slower to fail.
  */
-export const ROBOTS_TIMEOUT_MS = 15_000
+export const ROBOTS_TIMEOUT_MS = 5_000
 /** How long an unreachable robots.txt (a 5xx) stays a complete disallow before it is fetched again. */
 export const ROBOTS_UNREACHABLE_TTL_MS = 5 * 60_000
 /**
@@ -284,8 +283,8 @@ export class RobotsOriginCache {
         entry = await read()
       } catch (error) {
         // A socket-level failure (a reset, a refusal, a dropped connection) gets one more read within the same
-        // deadline: the second often says what the host does where the first said only what the network did. The
-        // deadline itself, a certificate that did not verify and the lookup's own limits fail the same way again.
+        // deadline, which clears a transient one; a host that refuses every time fails it too. The deadline itself,
+        // a certificate that did not verify and the lookup's own limits fail the same way again.
         if (scope.signal.aborted || isTlsError(error) || !isNetworkFailure(error)) throw error
         await raceWithSignal(new Promise<void>((resolve) => setTimeout(resolve, ROBOTS_RETRY_DELAY_MS)), scope.signal)
         entry = await read()

@@ -432,7 +432,7 @@ describe('ProviderSubject robots gate', () => {
     try {
       vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason))))
       const pending = robotsFetcherVia()('https://shop.example/robots.txt', 'ProviderBot/1.0')
-      await vi.advanceTimersByTimeAsync(14_000)
+      await vi.advanceTimersByTimeAsync(4_000)
       expect(vi.getTimerCount()).toBeGreaterThan(0)
       await vi.advanceTimersByTimeAsync(1_000)
       expect(await pending).toEqual({ unreachable: 'timeout' })
