@@ -107,40 +107,39 @@ describe('hosted job tools over MCP', () => {
   it('says scrapes run one at a time where a lease can refuse one, and names batch_scrape only where it is listed', async () => {
     const { connect } = await start()
     const scrapeOf = async (key: string | null) => (await (await connect(key)).listTools()).tools.find((tool) => tool.name === 'scrape')!.description
-    expect(await scrapeOf('oc_account')).toMatch(/one scrape runs at a time.*fastMode.*browser_busy.*batch_scrape/i)
+    expect(await scrapeOf('oc_account')).toMatch(/one scrape at a time.*browser_busy.*batch_scrape/i)
     // No account: batch_scrape is not listed, so the description stays as the budget measures it. No browser lane: no lease.
     for (const key of ['oc_plain', 'oc_http', null]) expect(await scrapeOf(key), String(key)).not.toContain('browser_busy')
     const instructionsOf = async (key: string | null) => (await connect(key)).getInstructions() ?? ''
     const account = await instructionsOf('oc_account')
-    expect(account).toMatch(/one scrape runs at a time.*fastMode.*browser_busy.*batch_scrape/i)
+    expect(account).toMatch(/one scrape at a time.*browser_busy.*batch_scrape/i)
     expect(account.length).toBeLessThan(2_000)
     const plain = await instructionsOf('oc_plain')
-    expect(plain).toMatch(/one scrape runs at a time.*browser_busy/i)
+    expect(plain).toMatch(/one scrape at a time.*browser_busy/i)
     expect(plain).not.toContain('batch_scrape')
     for (const key of ['oc_http', null]) expect(await instructionsOf(key), String(key)).not.toContain('browser_busy')
   })
 
-  it('points a scrape refused by the lease at a batch job first, where the account can run one, with fastMode and the real wait after it', async () => {
+  it('points a scrape refused by the lease at a batch job first, where the account can run one, with what needs no turn and the real wait after it', async () => {
     const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
     const { connect } = await start({ leases })
-    const refused = await (await connect('oc_account')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })
+    const refused = await (await connect('oc_account')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/', waitFor: 500 } })
     expect(refused.isError).toBe(true)
     const next = text(refused).split('\n').filter((line) => line.startsWith('Next: '))
     expect(next).toHaveLength(3)
     expect(next[0]).toContain('batch_scrape')
     expect(next[0]).toContain('POST /v1/batches')
-    // Named as scrape, since scrape_product takes no fastMode and takes this lease too; and waitFor and a screenshot need the browser.
-    expect(next[1]).toMatch(/^Next: scrape with fastMode: true.*scripts.*no waitFor or screenshot/)
+    expect(next[1]).toMatch(/^Next: without waitFor, a screenshot/)
     expect(next[2]).toContain('7 s')
     expect(next[2]).toContain('5 minutes')
     // A key without an account lists no batch_scrape, so it is not told to use one.
-    expect(text(await (await connect('oc_plain')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } }))).not.toMatch(/batch/i)
+    expect(text(await (await connect('oc_plain')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/', waitFor: 500 } }))).not.toMatch(/batch/i)
   })
 
   it('names no batch job to an account that is not invited to run one', async () => {
     const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
     const { connect } = await start({ leases, allowed: [] })
-    const refused = await (await connect('oc_account')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })
+    const refused = await (await connect('oc_account')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/', waitFor: 500 } })
     expect(text(refused)).toContain('browser_busy')
     expect(text(refused)).not.toMatch(/batch/i)
   })
@@ -148,7 +147,7 @@ describe('hosted job tools over MCP', () => {
   it('names no batch job while jobs are paused', async () => {
     const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
     const { connect } = await start({ leases, enabled: async () => false })
-    const refused = await (await connect('oc_account')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } })
+    const refused = await (await connect('oc_account')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/', waitFor: 500 } })
     expect(text(refused)).toContain('browser_busy')
     expect(text(refused)).not.toMatch(/batch/i)
   })
@@ -156,7 +155,7 @@ describe('hosted job tools over MCP', () => {
   it('tells an OAuth connection only what it can do: batch_scrape, no REST route, and the longest MCP call', async () => {
     const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
     const { connect } = await start({ leases })
-    const refused = text(await (await connect('oca_connection', '/mcp-oauth')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/' } }))
+    const refused = text(await (await connect('oca_connection', '/mcp-oauth')).callTool({ name: 'scrape', arguments: { url: 'https://example.com/', waitFor: 500 } }))
     expect(refused).toContain('batch_scrape')
     expect(refused).not.toContain('POST /v1/batches')
     expect(refused).toContain('up to 3 minutes')
@@ -165,18 +164,18 @@ describe('hosted job tools over MCP', () => {
   it('gives a Playground run the wait alone: the dashboard shows the first hint and has neither a batch nor fastMode', async () => {
     const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
     const { url } = await start({ leases })
-    const refused = await fetch(`${url}/v1/scrape`, { method: 'POST', headers: { [SITE_ACCOUNT_HEADER]: siteAccountAssertion(HASH_KEY, 'account-1'), 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://example.com/', formats: ['markdown', 'links'] }) })
+    const refused = await fetch(`${url}/v1/scrape`, { method: 'POST', headers: { [SITE_ACCOUNT_HEADER]: siteAccountAssertion(HASH_KEY, 'account-1'), 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://example.com/', formats: ['screenshot'] }) })
     expect(refused.status).toBe(429)
     const { agentHints } = await refused.json() as { agentHints: string[] }
     expect(agentHints).toHaveLength(1)
     expect(agentHints[0]).toContain('7 s')
-    expect(agentHints[0]).not.toMatch(/batch|fastMode/i)
+    expect(agentHints[0]).not.toMatch(/batch|without waitFor/i)
   })
 
   it('stays a 429 when reading whether the account can run a job fails, without the batch hint', async () => {
     const leases: HostedLeases = { acquire: async () => ({ ok: false, retryAfterSeconds: 7 }) }
     const { url } = await start({ leases, allows: async () => { throw new Error('config unreadable') } })
-    const refused = await fetch(`${url}/v1/scrape`, { method: 'POST', headers: { authorization: 'Bearer oc_account', 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://example.com/' }) })
+    const refused = await fetch(`${url}/v1/scrape`, { method: 'POST', headers: { authorization: 'Bearer oc_account', 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://example.com/', waitFor: 500 }) })
     expect(refused.status).toBe(429)
     const body = await refused.json() as { code: string; agentHints: string[] }
     expect(body.code).toBe('browser_busy')
