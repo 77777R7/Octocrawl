@@ -54,7 +54,8 @@ export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'incl
    * the rungs it dropped (`ladder_channels_filtered`), and `agentHints` says
    * when the http lane asked for the browser lane. Not a lane option: the
    * engine selects channels by it. Default false. A URL the server binds to
-   * the browser lane refuses it with HTTP 400.
+   * the browser lane refuses it with HTTP 400, and so does a `waitFor` above 0
+   * beside it.
    */
   fastMode?: boolean
   /**

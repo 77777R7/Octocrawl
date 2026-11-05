@@ -429,6 +429,35 @@ it('a caller without the browser lane is told why a shell was read over HTTP alo
   } finally { await client.close() }
 })
 
+it('a caller without the browser lane is told what it lacks when it sends waitFor, not a fastMode the gate pinned; one with the lane is told fastMode declines it', async () => {
+  const credits = new MemoryCreditsStore(3)
+  const { url } = await start({ keylessDaily: 10, credits, keys: { oc_http: { enabled: true, plan: 'free', dailyLimit: 5, browser: false }, oc_low: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' }, oc_browser: { enabled: true, plan: 'free', dailyLimit: 5, browser: true } } })
+  const refusal = async (body: Record<string, unknown>, headers: Record<string, string> = {}) => {
+    const answer = await post(url, '/v1/scrape', { url: `${origin}/page`, ...body }, headers)
+    expect(answer.status).toBe(400)
+    return await answer.json() as { error: string; code: string; agentHints?: string[] }
+  }
+  const lacks = [
+    [{}, 'waitFor needs the browser lane, which hosted Octocrawl opens only with a key'],
+    [{ authorization: 'Bearer oc_http' }, 'waitFor needs the browser lane, which this key does not have'],
+    [{ authorization: 'Bearer oc_low' }, 'waitFor needs the browser lane, and this account has fewer credits than a browser page (5)'],
+  ] as const
+  for (const [headers, error] of lacks) {
+    // Sending fastMode too, or false, changes nothing: what it lacks is still the cause, and leaving out waitFor is the way on.
+    for (const body of [{ waitFor: 500 }, { waitFor: 500, fastMode: true }, { waitFor: 500, fastMode: false }]) {
+      const answer = await refusal(body, headers)
+      expect(answer).toMatchObject({ error, code: 'invalid_request' })
+      expect(answer.agentHints?.[0]).toBe('leave out waitFor to read this page over HTTP alone')
+    }
+  }
+  // The refused calls cost the account nothing, and the way on the hint names works.
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 3 })
+  const page = await (await post(url, '/v1/scrape', { url: `${origin}/page` })).json() as { status: string; lane: string }
+  expect(page).toMatchObject({ status: 'success', lane: 'http' })
+  // A caller that has the lane closed it itself: fastMode is the cause.
+  expect(await refusal({ waitFor: 500, fastMode: true }, { authorization: 'Bearer oc_browser' })).toEqual({ error: 'waitFor requires the browser lane, which fastMode declines', code: 'invalid_request' })
+})
+
 it('keeps the pinned HTTP-only hint in the final verified response and stored record', async () => {
   const { url } = await start({ keylessDaily: 3 })
   const request = { url: `${origin}/page?cache-projection`, formats: ['markdown'], fastMode: false, debug: false, maxAge: 3_600_000 }
