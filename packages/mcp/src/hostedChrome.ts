@@ -124,6 +124,12 @@ function readOf(body: unknown, now: number, regexChecks: boolean): HostedChromeR
 }
 
 /**
+ * How long robots.txt has through a proxy. Every redirect hop opens a tunnel of its own: www.bisico.de took about 8 s and
+ * www.mani-germany.com about 6 s for their two hops (2026-11-05), and both answered. A direct lookup keeps its 5 s.
+ */
+const EXIT_ROBOTS_TIMEOUT_MS = 12_000
+
+/**
  * The production reader: the hosted browser lane on the `hosted_chrome` engine, behind an address guard of its own on
  * `networkPolicy` (without a login, as Chrome takes none), leaving through `exit` (hostedChromeEgress.ts): Cloud Run's
  * own egress, or the operator's datacenter proxies as the guard's dial, one chosen for each read before it starts. One
@@ -133,7 +139,7 @@ export function hostedChromeReader(networkPolicy: NetworkPolicy, exit: HostedChr
   const guard = new CompatAddressGuard(networkPolicy, resolve, { login: false, ...(exit.dial === undefined ? {} : { dial: exit.dial }) })
   // A browser on a route of its own reads robots.txt on that route: what the site says there is what the page will be read under.
   const route = exit.dial === undefined ? null : guard.dispatcher()
-  const robots = route === null ? undefined : new RobotsOriginCache(networkPolicy, route)
+  const robots = route === null ? undefined : new RobotsOriginCache({ ...networkPolicy, robotsTimeoutMs: EXIT_ROBOTS_TIMEOUT_MS }, route)
   const subject = new BrowserLocalSubject('standard', null, true, networkPolicy, null, undefined, null, undefined, undefined, null, false, undefined, 'hosted_chrome', 'actual', seams, null, robots, { guard, egressKind: exit.kind, proxy: () => exit.proxy() })
   return {
     // The service reads one page at a time (createHostedChromeService), so the read's exit is chosen here and held by all its connections.
