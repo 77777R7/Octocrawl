@@ -1016,7 +1016,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const site = quota.limited.endsWith('-site')
       const shared = quota.limited === keylessTotal
       return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served the ${quota.limit} pages a day it serves without an account` : shared ? `the ${quota.limit} pages a day that hosted Octocrawl serves without a key are used up` : caller.pool === 'claude' ? `the ${quota.limit} pages a day that every Claude connector without a key shares are used up` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
-        [...(caller.kind === 'keyless' ? [signInHint] : []), LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) }, { pool: quota.limited.slice(day.length + 1) })
+        [...(caller.kind === 'keyless' ? [signInHint] : []), LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) }, { pool: quota.limited.slice(day.length + 1).replace(/^(keyless|key)-([0-9a-f]{64})$/, (_, kind, hmac) => `${kind}-${hmac.slice(0, 16)}`) })
     }
     logQuotaThresholds(entries, quota.counts, day, log)
     logUsage(caller, path, day)

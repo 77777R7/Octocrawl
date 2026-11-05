@@ -1437,5 +1437,6 @@ it('logs who was refused and why, each MCP call by tool, and the caller on a pha
   const refusals = events('hosted_refused')
   expect(refusals).toHaveLength(1)
   expect(refusals[0]).toMatchObject({ severity: 'INFO', status: 429, code: 'quota_exhausted', path: '/v1/scrape', caller: 'keyless' })
-  expect(String(refusals[0]!.pool)).toMatch(/^keyless-/)
+  // The address's HMAC is cut to the 16 characters the other lines log, never the whole digest.
+  expect(String(refusals[0]!.pool)).toMatch(/^keyless-[0-9a-f]{16}$/)
 })
