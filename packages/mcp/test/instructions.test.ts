@@ -50,6 +50,19 @@ describe('server instructions and identity', () => {
     expect(local).toContain('may still have begun')
   })
 
+  it('teaches the directory route where batch_scrape is listed, URLs first and one batch, naming map only where it is', () => {
+    const jobs = ['scrape', 'map', 'scrape_product', 'batch_scrape', 'get_batch', 'get_batch_items', 'wait_batch', 'cancel_batch', 'get_batch_errors', 'crawl', 'get_crawl', 'wait_crawl', 'get_crawl_pages', 'get_crawl_errors', 'cancel_crawl']
+    const hosted = serverInstructions(jobs, { kind: 'hosted', connection: 'oauth', browser: true })
+    expectUsableInstructions(hosted, jobs)
+    expect(hosted).toContain("A directory's detail pages: URLs first (map where a sitemap lists them; else batch_scrape the listing pages with formats: [\"links\"] and keep the detail links), then one batch_scrape of them, not one scrape each.")
+    const noMap = serverInstructions(jobs.filter((name) => name !== 'map'), { kind: 'local' })
+    expect(noMap).toContain('(batch_scrape the listing pages with formats: ["links"] and keep the detail links)')
+    expect(noMap).not.toContain('map where')
+    expect(serverInstructions(['scrape', 'map', 'scrape_product'], { kind: 'hosted', connection: 'keyless', browser: false })).not.toContain("A directory's detail pages")
+    // Every hosted shape stays under the length a client keeps whole.
+    for (const connection of ['key', 'oauth'] as const) for (const browser of [true, false]) expectUsableInstructions(serverInstructions(jobs, { kind: 'hosted', connection, browser }), jobs)
+  })
+
   it('keeps MCP_VERSION at the package version, so a release moves both', () => {
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
     expect(MCP_VERSION).toBe(pkg.version)
