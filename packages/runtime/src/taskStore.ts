@@ -34,6 +34,11 @@ export interface StepPage {
 
 export interface TaskStore {
   putTask(task: Task): Promise<void>
+  /**
+   * Write a task's pace (Task.pacing) alone, as a run notes a host slowed or eased mid-run: the row's status and URL
+   * list stay whatever another writer (a cancel, an append) made them meanwhile. A store without it is not written mid-run.
+   */
+  putTaskPacing?(taskId: string, pacing: NonNullable<Task['pacing']>, updatedAt: string): Promise<void>
   getTask(taskId: string): Promise<Task | null>
   listTasks(): Promise<readonly Task[]>
   putAttempt(attempt: Attempt): Promise<void>

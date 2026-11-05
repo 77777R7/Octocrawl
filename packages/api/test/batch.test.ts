@@ -496,6 +496,21 @@ describe('persistent URL-array batch', () => {
     expect(items.find((item) => item.url === `${f.origin}/item/1`)).toMatchObject({ status: 'success', readiness: { state: 'ready' } })
   })
 
+  it('slows a host after two pages in a row that the site answered with another page: one page at a time, two seconds apart, and the status says so', async () => {
+    // One page at a time on the host, so the two redirected pages answer one after the other: two signals in a row.
+    const f = await fixture({ perHostConcurrency: 1 })
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const starts = new Map<string, number>()
+    f.setHold(async (path) => { starts.set(path, Date.now()) })
+    const { client: w2l } = client(engine)
+    const accepted = await w2l.batchScrape([`${f.origin}/moved/1`, `${f.origin}/moved/2`, `${f.origin}/item/3`, `${f.origin}/item/4`])
+    const report = await w2l.waitBatch(accepted.taskId, { timeoutMs: 30_000 })
+    expect(report).toMatchObject({ status: 'completed', succeeded: 4, redirectedOffPage: 2, pacing: { '127.0.0.1': { ceiling: 1, delayMs: 2_000, slowdowns: 1 } } })
+    // The two pages after the slowdown started two seconds apart, under the host's new pace.
+    expect(starts.get('/item/4')! - starts.get('/item/3')!).toBeGreaterThanOrEqual(1_900)
+  })
+
   it('persists JSON-only results, paginates all URLs, and sends a terminal SSE event', async () => {
     const f = await fixture()
     const engine = f.engine()
