@@ -562,7 +562,8 @@
     const days = lastDays(data.usage)
     set('side-credits', number(data.credits.remaining))
     setBar('side-meter', monthly.left, monthly.of)
-    set('side-renews', `of ${number(monthly.of)} this month · renews ${longDay(monthly.resetsAt)} (UTC)`)
+    // Bought credits sit beside the month's grant, so a figure above the grant is explained where it is shown.
+    set('side-renews', `of ${number(monthly.of)} this month${data.credits.purchased ? ` + ${number(data.credits.purchased)} bought` : ''} · renews ${longDay(monthly.resetsAt)} (UTC)`)
     set('side-email', data.email || 'your account')
     // The avatar's letters: the first two of the address before the @.
     set('me-initials', ((data.email || '').split('@')[0].replace(/[^a-z0-9]/gi, '').slice(0, 2) || 'me').toUpperCase())
@@ -609,7 +610,7 @@
       const names = (data.providers || []).map((p) => PROVIDERS[p] || p)
       providers.replaceChildren(...(names.length ? names : ['Not recorded']).map((name) => { const chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = name; return chip }))
     }
-    set('acct-month', `${number(monthly.left)} of ${number(monthly.of)} free credits left, renewed on ${day(monthly.resetsAt)} (UTC)`)
+    set('acct-month', `${number(monthly.left)} of ${number(monthly.of)} free credits left; renews on ${day(monthly.resetsAt)} (UTC)`)
     set('acct-bought', data.credits.purchased ? number(data.credits.purchased) : 'None')
     set('acct-plan', `Free: ${number(monthly.of)} credits a month`)
     for (const ready of accountReady) ready(data)
@@ -833,7 +834,6 @@
     let answer = null
     let view = 'markdown'
     let lang = 'curl'
-    const IDLE_NOTE = ''
     const COST = {
       scrape: ['1–5 credits', 'A page read over HTTP costs 1 credit, one that needs a browser 5, and one that is blocked or kept out by robots.txt nothing.'],
       map: ['0–1 credit', 'A map that finds URLs costs 1 credit; one that finds none costs nothing.'],
@@ -1034,7 +1034,8 @@
       if (push && $('pg-go-label')) morph($('pg-go-label'), LABEL[next]); else goLabel()
       if (!push) close()
       $('play-result').hidden = true
-      set('play-summary', IDLE_NOTE)
+      // What the cost chip's range means, said in the band's note, where a touch or a keyboard reaches it too (the chip's title does not).
+      set('play-summary', COST[next][1])
       answer = null
       view = next === 'scrape' ? play.view.value : 'links'
       if (push) { const url = play.url.value.trim(); history.replaceState(null, '', `/dashboard/${next}/${url ? `?url=${encodeURIComponent(url)}` : ''}`) }
@@ -1109,7 +1110,7 @@
     }
     /** Whether the site answered another page in place of the one asked for (#821): a redirected_off_page warning, or readiness not_served. */
     const offPage = (result) => (Array.isArray(result.warnings) && result.warnings.some((warning) => warning && warning.code === 'redirected_off_page')) || (result.readiness && result.readiness.state === 'not_served')
-    const idle = (note = IDLE_NOTE) => { if (creature) creature.set('idle'); $('pg-stage').classList.remove('is-running'); set('play-summary', note) }
+    const idle = (note = COST[endpoint][1]) => { if (creature) creature.set('idle'); $('pg-stage').classList.remove('is-running'); set('play-summary', note) }
     play.addEventListener('submit', async (event) => {
       event.preventDefault()
       close()
