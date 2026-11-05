@@ -9,7 +9,8 @@ import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Client as ModernClient, StreamableHTTPClientTransport as ModernTransport } from '@modelcontextprotocol/client'
-import { hostedNetworkPolicy, parseScrapeRequest, type CompactScrapeResponse, type ScrapeRun } from '@w2l/contracts'
+import { hostedNetworkPolicy, identityBundleFrom, modeIdentity, parseScrapeRequest, type CompactScrapeResponse, type FetchResult, type ScrapeRun } from '@w2l/contracts'
+import type { ApiEngineOptions } from '@w2l/api'
 import { MCP_VERSION } from '../src/server.js'
 import { expectUsableInstructions } from './instructionChecks.js'
 import { TOOL_NAMES } from '../src/tools.js'
@@ -19,7 +20,7 @@ import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } fr
 import { MemoryHostedAccess, type HostedAccessSource } from '../src/hostedAccess.js'
 import { CompatAddressGuard } from '@w2l/bench'
 import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
-import { BROWSER_LEASE_MS, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS } from '../src/hostedApi.js'
+import { BROWSER_LEASE_MS, browserLeaseTurn, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS } from '../src/hostedApi.js'
 import { expectIsError } from './toolErrorChecks.js'
 import { collectGarbage } from './collectGarbage.js'
 
@@ -28,6 +29,20 @@ const PROSE = 'The harbour office records tide height, wind and visibility for e
 const PAGE = `<!doctype html><html lang="en"><head><title>Tides</title></head><body><main><article><h1>Tides</h1><p>${PROSE}</p></article></main></body></html>`
 // A client-rendered shell: the http lane asks for the browser lane, which a caller without one never gets.
 const SHELL = '<!doctype html><html><head><title>App</title></head><body><div id="root"></div><noscript>Enable JavaScript to run this app.</noscript></body></html>'
+
+/** A page as a rung reads it. */
+const rungPage = (url: string, lane: FetchResult['lane'], over: Partial<FetchResult> = {}): FetchResult => ({
+  requestedUrl: url, status: 'success', failureReason: null, blockReason: null, budgetExceeded: null, lane, escalations: [], handoff: null, markdown: `# Tides\n\n${PROSE}`,
+  truncated: false, truncatedAt: null, compliance: null, evidence: { finalUrl: url, httpStatus: 200, redirectChain: [], contentType: 'text/html', rawBodySha256: null, artifacts: [] },
+  usage: { wallMs: 5, bytesWire: 1, bytesDecompressed: 1, requestCount: 1, attemptCount: 1, contentTokens: 400, browserMs: 0, externalCostUsd: 0 }, trace: [], ...over,
+})
+/** Rungs with no real browser: /page reads over HTTP, any other URL is stopped there and goes on to `browser`. */
+const fakeRungs = (browser: (url: string) => Promise<FetchResult>): NonNullable<ApiEngineOptions['channelsFor']> => (mode) => [
+  { id: 'http', identity: identityBundleFrom(modeIdentity(mode)), fetch: async (url) => url.endsWith('/page') ? rungPage(url, 'http') : rungPage(url, 'http', { status: 'blocked', blockReason: 'cloudflare_challenge', markdown: null }) },
+  { id: 'browser_local', identity: identityBundleFrom(modeIdentity(mode)), waitsFor: true, fetch: (url) => browser(url) },
+]
+/** A browser rung that takes as long as /slow, so a test can cut a call that holds the lease. */
+const slowBrowser = fakeRungs(async (url) => { await new Promise((resolve) => setTimeout(resolve, 1_500)); return rungPage(url, 'browser_local') })
 
 let site: Server
 let origin: string
@@ -55,7 +70,7 @@ async function freePort(): Promise<number> {
   return port
 }
 
-async function start(options: { keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; siteDaily?: number; accountDaily?: number; accountsDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void; model?: HostedModel; access?: HostedAccessSource; compatHosts?: string[]; regexChecks?: boolean } = {}) {
+async function start(options: { channelsFor?: ApiEngineOptions['channelsFor']; keylessDaily?: number; claudeDaily?: number; keylessTotalDaily?: number; siteDaily?: number; accountDaily?: number; accountsDaily?: number; proxySecret?: string; keys?: Record<string, HostedKeyRecord>; keyRecords?: Record<string, HostedKeyRecord>; oauthTokens?: Record<string, HostedOAuthTokenRecord>; oauthTokenStore?: HostedOAuthTokens; now?: () => number; keyStore?: HostedKeys; credits?: CreditsStore | null; leases?: MemoryHostedLeases; log?: (line: string) => void; model?: HostedModel; access?: HostedAccessSource; compatHosts?: string[]; regexChecks?: boolean } = {}) {
   root = await mkdtemp(join(tmpdir(), 'octocrawl-hosted-api-'))
   const port = await freePort()
   // `keys` are stored under their plaintext's digest; `keyRecords` under their own id, as a connection's key record has no plaintext.
@@ -69,6 +84,7 @@ async function start(options: { keylessDaily?: number; claudeDaily?: number; key
     ...(options.access === undefined ? {} : { access: options.access }),
     ...(options.compatHosts === undefined ? {} : { compatHosts: options.compatHosts }),
     ...(options.regexChecks === undefined ? {} : { regexChecks: options.regexChecks }),
+    ...(options.channelsFor === undefined ? {} : { channelsFor: options.channelsFor }),
     keylessDaily: options.keylessDaily ?? 2, claudeDaily: options.claudeDaily, siteDaily: options.siteDaily ?? 100, keylessTotalDaily: options.keylessTotalDaily, accountDaily: options.accountDaily, accountsDaily: options.accountsDaily, proxySecret: options.proxySecret,
     networkPolicy: { ...hostedNetworkPolicy(), privateAllowlist: ['127.0.0.0/8'] }, log: options.log ?? (() => {}),
   })
@@ -429,6 +445,35 @@ it('a caller without the browser lane is told why a shell was read over HTTP alo
   } finally { await client.close() }
 })
 
+it('a caller without the browser lane is told what it lacks when it sends waitFor, not a fastMode the gate pinned; one with the lane is told fastMode declines it', async () => {
+  const credits = new MemoryCreditsStore(3)
+  const { url } = await start({ keylessDaily: 10, credits, keys: { oc_http: { enabled: true, plan: 'free', dailyLimit: 5, browser: false }, oc_low: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' }, oc_browser: { enabled: true, plan: 'free', dailyLimit: 5, browser: true } } })
+  const refusal = async (body: Record<string, unknown>, headers: Record<string, string> = {}) => {
+    const answer = await post(url, '/v1/scrape', { url: `${origin}/page`, ...body }, headers)
+    expect(answer.status).toBe(400)
+    return await answer.json() as { error: string; code: string; agentHints?: string[] }
+  }
+  const lacks = [
+    [{}, 'waitFor needs the browser lane, which hosted Octocrawl opens only with a key'],
+    [{ authorization: 'Bearer oc_http' }, 'waitFor needs the browser lane, which this key does not have'],
+    [{ authorization: 'Bearer oc_low' }, 'waitFor needs the browser lane, and this account has fewer credits than a browser page (5)'],
+  ] as const
+  for (const [headers, error] of lacks) {
+    // Sending fastMode too, or false, changes nothing: what it lacks is still the cause, and leaving out waitFor is the way on.
+    for (const body of [{ waitFor: 500 }, { waitFor: 500, fastMode: true }, { waitFor: 500, fastMode: false }]) {
+      const answer = await refusal(body, headers)
+      expect(answer).toMatchObject({ error, code: 'invalid_request' })
+      expect(answer.agentHints?.[0]).toBe('leave out waitFor to read this page over HTTP alone')
+    }
+  }
+  // The refused calls cost the account nothing, and the way on the hint names works.
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 3 })
+  const page = await (await post(url, '/v1/scrape', { url: `${origin}/page` })).json() as { status: string; lane: string }
+  expect(page).toMatchObject({ status: 'success', lane: 'http' })
+  // A caller that has the lane closed it itself: fastMode is the cause.
+  expect(await refusal({ waitFor: 500, fastMode: true }, { authorization: 'Bearer oc_browser' })).toEqual({ error: 'waitFor requires the browser lane, which fastMode declines', code: 'invalid_request' })
+})
+
 it('keeps the pinned HTTP-only hint in the final verified response and stored record', async () => {
   const { url } = await start({ keylessDaily: 3 })
   const request = { url: `${origin}/page?cache-projection`, formats: ['markdown'], fastMode: false, debug: false, maxAge: 3_600_000 }
@@ -476,29 +521,252 @@ it('a key revoked while its lookup is cached stops at its next start; reading a 
   expect(asked).toEqual([true, false, true])
 })
 
-it('a key runs one browser-lane scrape at a time; a second waits with Retry-After, fastMode does not, and the lease is freed after', async () => {
+it('a key holds the browser lane only while a browser runs: a page HTTP reads takes no turn, one that needs it keeps what HTTP read, and a call that starts in the browser waits with Retry-After', async () => {
   const leases = new MemoryHostedLeases()
   const { url } = await start({ leases, keys: { oc_browser: { enabled: true, plan: 'free', dailyLimit: 20, browser: true } } })
   const auth = { authorization: 'Bearer oc_browser' }
-  const running = post(url, '/v1/scrape', { url: `${origin}/slow` }, auth)
-  await new Promise((resolve) => setTimeout(resolve, 300))
-  const busy = await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)
-  expect(busy.status).toBe(429)
-  expect(Number(busy.headers.get('retry-after'))).toBeGreaterThanOrEqual(1)
-  expect(Number(busy.headers.get('retry-after'))).toBeLessThanOrEqual(BROWSER_BUSY_RETRY_MAX_S)
-  const refused = await busy.json() as { code: string; agentHints: string[] }
-  expect(refused.code).toBe('browser_busy')
-  // This key has no account, so no batch job to turn to: fastMode first, with when it helps, then the wait as it really is.
-  expect(refused.agentHints.join(' ')).not.toMatch(/batch/i)
-  expect(refused.agentHints[0]).toMatch(/fastMode: true.*scripts/)
-  expect(refused.agentHints.at(-1)).toContain(`${busy.headers.get('retry-after')} s`)
-  expect(refused.agentHints.at(-1)).toContain('5 minutes')
+  const running = await leases.acquire(`browser-${keyDigest(HASH_KEY, 'oc_browser')}`, BROWSER_LEASE_MS)
+  if (!running.ok) throw new Error('the test could not hold the lease')
+  // A page HTTP reads is not held back by the scrape that has the browser.
+  const read = await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)
+  expect(read.status).toBe(200)
+  expect(await read.json()).toMatchObject({ status: 'success', lane: 'http' })
+  // A page that needs the browser answers what HTTP read, says the lane was held, and tells the way on.
+  const shell = await post(url, '/v1/scrape', { url: `${origin}/shell` }, auth)
+  expect(shell.status).toBe(200)
+  const kept = await shell.json() as { status: string; failureReason: string; lane: string; warnings: { code: string }[]; agentHints: string[] }
+  expect(kept).toMatchObject({ status: 'failed', failureReason: 'empty_unverified', lane: 'http' })
+  expect(kept.warnings.map((warning) => warning.code)).toContain('browser_busy')
+  expect(kept.agentHints.join(' ')).not.toMatch(/batch/i)
+  expect(kept.agentHints[0]).toMatch(/ask again in \d+ s.*5 minutes/)
+  // A wait or a screenshot starts in the browser, with no HTTP answer to keep, so it is refused at once.
+  for (const extra of [{ waitFor: 500 }, { formats: ['screenshot'] }]) {
+    const busy = await post(url, '/v1/scrape', { url: `${origin}/page`, ...extra }, auth)
+    expect(busy.status).toBe(429)
+    expect(Number(busy.headers.get('retry-after'))).toBeGreaterThanOrEqual(1)
+    expect(Number(busy.headers.get('retry-after'))).toBeLessThanOrEqual(BROWSER_BUSY_RETRY_MAX_S)
+    const refused = await busy.json() as { code: string; agentHints: string[] }
+    expect(refused.code).toBe('browser_busy')
+    // This key has no account, so no batch job to turn to: what needs no turn first, then the wait as it really is.
+    expect(refused.agentHints.join(' ')).not.toMatch(/batch/i)
+    expect(refused.agentHints[0]).toMatch(/without waitFor, a screenshot/)
+    expect(refused.agentHints.at(-1)).toContain(`${busy.headers.get('retry-after')} s`)
+    expect(refused.agentHints.at(-1)).toContain('5 minutes')
+  }
   // Over HTTP alone the same key is not held back, and map never is.
   expect((await post(url, '/v1/scrape', { url: `${origin}/page`, fastMode: true }, auth)).status).toBe(200)
   expect((await post(url, '/v1/map', { url: `${origin}/page` }, auth)).status).toBe(200)
-  expect((await running).status).toBe(200)
+  expect(leases.held.size).toBe(1)
+  await running.release()
+  expect(leases.held.size).toBe(0)
+})
+
+it('takes a key\'s lease when the browser rung starts, holds it while the rung runs, and frees it after', async () => {
+  const leases = new MemoryHostedLeases()
+  const heldDuring: number[] = []
+  const channelsFor = fakeRungs(async (url) => { heldDuring.push(leases.held.size); return rungPage(url, 'browser_local') })
+  const { url } = await start({ leases, channelsFor, keys: { oc_browser: { enabled: true, plan: 'free', dailyLimit: 20, browser: true } } })
+  const auth = { authorization: 'Bearer oc_browser' }
+  expect(await (await post(url, '/v1/scrape', { url: `${origin}/rendered` }, auth)).json()).toMatchObject({ status: 'success', lane: 'browser_local' })
+  expect(heldDuring).toEqual([1])
+  expect(leases.held.size).toBe(0)
+  // A wait takes it before the call runs, as it starts in the browser, and frees it the same way.
+  expect((await post(url, '/v1/scrape', { url: `${origin}/rendered`, waitFor: 500 }, auth)).status).toBe(200)
+  expect(heldDuring).toEqual([1, 1])
+  expect(leases.held.size).toBe(0)
+})
+
+it('charges a page kept because the browser lane was held as what it is: 0 for one nothing was read from, 1 for one HTTP read', async () => {
+  const credits = new MemoryCreditsStore(1_000)
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ credits, leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const auth = { authorization: 'Bearer oc_account' }
+  const running = await leases.acquire(`browser-${keyDigest(HASH_KEY, 'oc_account')}`, BROWSER_LEASE_MS)
+  if (!running.ok) throw new Error('the test could not hold the lease')
+  expect(await (await post(url, '/v1/scrape', { url: `${origin}/shell` }, auth)).json()).toMatchObject({ status: 'failed' })
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 1_000 })
+  expect(await (await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)).json()).toMatchObject({ status: 'success', lane: 'http' })
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 999 })
+  await running.release()
+})
+
+it('a Playground run takes its lease before it runs, so a second one hears at once with the wait alone: the dashboard reads the hint of a refusal, not of a result', async () => {
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ leases, keys: {} })
+  const running = await leases.acquire('browser-playground:account-1', BROWSER_LEASE_MS)
+  if (!running.ok) throw new Error('the test could not hold the lease')
+  const busy = await post(url, '/v1/scrape', { url: `${origin}/page` }, { [SITE_ACCOUNT_HEADER]: siteAccountAssertion(HASH_KEY, 'account-1') })
+  expect(busy.status).toBe(429)
+  const { agentHints } = await busy.json() as { agentHints: string[] }
+  expect(agentHints).toHaveLength(1)
+  expect(agentHints[0]).toMatch(/ask again in \d+ s/)
+  await running.release()
+})
+
+it('reserves an HTTP page at the start, so a small account\'s parallel scrapes do not look like spent credits to each other', async () => {
+  const credits = new MemoryCreditsStore(5)
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ credits, leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const auth = { authorization: 'Bearer oc_account' }
+  const first = post(url, '/v1/scrape', { url: `${origin}/slow` }, auth)
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(await (await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)).json()).toMatchObject({ status: 'success', lane: 'http' })
+  expect(await (await first).json()).toMatchObject({ status: 'success', lane: 'http' })
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 3 })
+})
+
+it('reserves the rest of a browser page when its rung has the lease, so what a running browser holds is never read as credits used up', async () => {
+  const credits = new MemoryCreditsStore(5)
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ credits, leases, channelsFor: slowBrowser, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const auth = { authorization: 'Bearer oc_account' }
+  const first = post(url, '/v1/scrape', { url: `${origin}/rendered` }, auth)
+  await vi.waitFor(() => expect(credits.balances.get('account-1')).toMatchObject({ grant: 0 }))
+  expect(leases.held.size).toBe(1)
+  const second = await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)
+  expect(second.status).toBe(429)
+  expect(Number(second.headers.get('retry-after'))).toBeLessThanOrEqual(BROWSER_BUSY_RETRY_MAX_S)
+  const refused = await second.json() as { code: string; error: string; agentHints: string[] }
+  expect(refused.code).toBe('browser_busy')
+  expect(refused.error).toContain('credits')
+  expect(refused.agentHints.join(' ')).not.toMatch(/batch|without waitFor/i)
+  expect(await (await first).json()).toMatchObject({ status: 'success', lane: 'browser_local' })
+  expect(leases.held.size).toBe(0)
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 0 })
+  // With nothing running, no credits is what it says.
+  const spent = await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)
+  expect(await spent.json()).toMatchObject({ code: 'quota_exhausted' })
+})
+
+it('leaves the browser rung out when the account cannot pay the rest of a browser page: what HTTP read stands, it costs what that read costs, and the lease goes back', async () => {
+  const credits = new MemoryCreditsStore(3)
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ credits, leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const kept = await (await post(url, '/v1/scrape', { url: `${origin}/shell` }, { authorization: 'Bearer oc_account' })).json() as { status: string; lane: string; warnings: { code: string }[]; agentHints: string[] }
+  expect(kept).toMatchObject({ status: 'failed', lane: 'http' })
+  expect(kept.warnings.map((warning) => warning.code)).toContain('browser_credits')
+  expect(kept.agentHints[0]).toContain('fewer credits than a browser page')
+  // Another call's reservation may be what is short, so the hint says that too, and does not send it to the 1st alone.
+  expect(kept.agentHints[0]).toContain('a running call')
+  expect(leases.held.size).toBe(0)
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 3 })
+})
+
+it('a fastMode scrape reserves an HTTP page, which is all it can cost, so it holds no browser page\'s credits without the lease', async () => {
+  const credits = new MemoryCreditsStore(5)
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ credits, leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const auth = { authorization: 'Bearer oc_account' }
+  const first = post(url, '/v1/scrape', { url: `${origin}/slow`, fastMode: true }, auth)
+  await vi.waitFor(() => expect(credits.balances.get('account-1')).toMatchObject({ grant: 4 }))
+  expect(leases.held.size).toBe(0)
+  expect(await (await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)).json()).toMatchObject({ status: 'success', lane: 'http' })
+  expect((await first).status).toBe(200)
+  expect(credits.balances.get('account-1')).toMatchObject({ grant: 3 })
+})
+
+it('gives back what a call reserved for its browser page even when the call is cut while that reservation is still answering', async () => {
+  let answer = () => {}
+  const held = new Promise<void>((resolve) => { answer = resolve })
+  class SlowSecondReservation extends MemoryCreditsStore {
+    override async reserve(...args: Parameters<MemoryCreditsStore['reserve']>) {
+      if (args[2].length === 0) await held
+      return await super.reserve(...args)
+    }
+  }
+  const credits = new SlowSecondReservation(1_000)
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ credits, leases, channelsFor: slowBrowser, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const session = connectH2(url)
+  try {
+    const { stream } = h2Post(session, '/v1/scrape', { url: `${origin}/rendered` }, { authorization: 'Bearer oc_account' })
+    await vi.waitFor(() => expect(leases.held.size).toBe(1))
+    stream.close(h2.NGHTTP2_CANCEL)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    answer()
+    await vi.waitFor(() => expect(leases.held.size).toBe(0), { timeout: 2_000 })
+    await vi.waitFor(() => expect(credits.balances.get('account-1')).toMatchObject({ grant: 1_000 }), { timeout: 2_000 })
+  } finally { session.close() }
+})
+
+it('a call that asks for the json model fallback reserves all it could cost and takes the lease first, as the model is priced with the page', async () => {
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const running = await leases.acquire(`browser-${keyDigest(HASH_KEY, 'oc_account')}`, BROWSER_LEASE_MS)
+  if (!running.ok) throw new Error('the test could not hold the lease')
+  const busy = await post(url, '/v1/scrape', { url: `${origin}/page`, formats: [{ type: 'json', schema: { type: 'object' }, modelFallback: true }] }, { authorization: 'Bearer oc_account' })
+  expect(busy.status).toBe(429)
+  expect((await busy.json() as { agentHints: string[] }).agentHints.join(' ')).toMatch(/modelFallback/)
+  await running.release()
+})
+
+it('an account with credits to spare holds nothing while HTTP reads its page', async () => {
+  const leases = new MemoryHostedLeases()
+  const { url } = await start({ leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const auth = { authorization: 'Bearer oc_account' }
+  const first = post(url, '/v1/scrape', { url: `${origin}/slow` }, auth)
+  await new Promise((resolve) => setTimeout(resolve, 300))
   expect(leases.held.size).toBe(0)
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, auth)).status).toBe(200)
+  expect((await first).status).toBe(200)
+})
+
+it('says the lease could not be read when the store fails, not that another scrape holds the lane', async () => {
+  const lines: string[] = []
+  class FailingLeases extends MemoryHostedLeases {
+    override async acquire(): Promise<never> { throw new Error('store down') }
+  }
+  const leases = new FailingLeases()
+  const { url } = await start({ leases, log: (line) => lines.push(line), keys: { oc_browser: { enabled: true, plan: 'free', dailyLimit: 20, browser: true } } })
+  const kept = await (await post(url, '/v1/scrape', { url: `${origin}/shell` }, { authorization: 'Bearer oc_browser' })).json() as { status: string; warnings: { code: string; message: string }[]; agentHints: string[] }
+  expect(kept.status).toBe('failed')
+  expect(kept.warnings.map((warning) => warning.code)).toContain('browser_unavailable')
+  expect(kept.warnings.map((warning) => warning.code)).not.toContain('browser_busy')
+  expect(JSON.stringify(kept)).not.toMatch(/another scrape|running call/)
+  expect(kept.agentHints[0]).toMatch(/ask again/)
+  expect(lines.some((line) => line.includes('hosted_lease_failed'))).toBe(true)
+})
+
+describe('a call\'s turn on the browser lane', () => {
+  const refusal = async (seconds: number) => ({ ok: false as const, code: 'browser_busy' as const, retryAfterSeconds: seconds, message: `busy ${seconds}`, hints: [] })
+  const storeFailed = () => ({ ok: false as const, code: 'browser_unavailable' as const, retryAfterSeconds: 1, message: 'no lease', hints: [] })
+
+  it('is taken once for the call, kept for a later rung, and given back when the call ends', async () => {
+    let taken = 0, released = 0
+    const turn = browserLeaseTurn(async () => { taken += 1; return { ok: true, release: async () => { released += 1 } } }, refusal, storeFailed)
+    expect(await turn.take()).toEqual({ ok: true })
+    expect(await turn.take()).toEqual({ ok: true })
+    expect(taken).toBe(1)
+    await turn.release()
+    expect(released).toBe(1)
+  })
+
+  it('stays refused for the call once refused, so a later rung does not start beside the other call', async () => {
+    let asked = 0
+    const turn = browserLeaseTurn(async () => { asked += 1; return { ok: false, retryAfterSeconds: 4 } }, refusal, storeFailed)
+    expect(await turn.take()).toMatchObject({ ok: false, message: 'busy 4' })
+    expect(await turn.take()).toMatchObject({ ok: false, message: 'busy 4' })
+    expect(asked).toBe(1)
+  })
+
+  it('gives back at once a lease that came in after the call ended, so a cut call leaves none held until it expires', async () => {
+    let finish: (value: { ok: true; release: () => Promise<void> }) => void = () => {}
+    let released = 0
+    const turn = browserLeaseTurn(() => new Promise((resolve) => { finish = resolve }), refusal, storeFailed)
+    const asked = turn.take()
+    await turn.release()
+    finish({ ok: true, release: async () => { released += 1 } })
+    expect(await asked).toMatchObject({ ok: false })
+    expect(released).toBe(1)
+  })
+
+  it('refuses the turn when the lease store fails, says so, and leaves the page to what HTTP read', async () => {
+    const failures: unknown[] = []
+    const turn = browserLeaseTurn(async () => { throw new Error('store down') }, refusal, (error) => { failures.push(error); return storeFailed() })
+    expect(await turn.take()).toMatchObject({ ok: false, code: 'browser_unavailable' })
+    expect(await turn.take()).toMatchObject({ ok: false, code: 'browser_unavailable' })
+    expect(failures).toHaveLength(1)
+  })
 })
 
 it('logs the name and version an MCP client gives when it connects, cut to plain text, and nothing else of the handshake', async () => {
@@ -692,7 +960,7 @@ it('an account\'s MCP tool calls spend its credits through the same gate, and a 
 it('a hosted MCP scrape the client cancels frees its browser lease and costs nothing', async () => {
   const credits = new MemoryCreditsStore(1_000)
   const leases = new MemoryHostedLeases()
-  const { url } = await start({ credits, leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const { url } = await start({ credits, leases, channelsFor: slowBrowser, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
   const holder = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
   try {
     await holder.connect(new StreamableHTTPClientTransport(new URL(`${url}/mcp`), { requestInit: { headers: { authorization: 'Bearer oc_account' } } }))
@@ -727,7 +995,7 @@ function h2Post(session: ClientHttp2Session, path: string, body: unknown, header
 it('a hosted scrape whose HTTP/2 stream the client resets stops, frees its browser lease and costs nothing, over MCP and REST', async () => {
   const credits = new MemoryCreditsStore(1_000)
   const leases = new MemoryHostedLeases()
-  const { url } = await start({ credits, leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const { url } = await start({ credits, leases, channelsFor: slowBrowser, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
   const auth = { authorization: 'Bearer oc_account' }
   const session = connectH2(url)
   try {
@@ -753,7 +1021,7 @@ it('a hosted scrape whose HTTP/2 stream the client resets stops, frees its brows
 it('a hosted MCP scrape stops on its client\'s notifications/cancelled alone, frees its browser lease and costs nothing', async () => {
   const credits = new MemoryCreditsStore(1_000)
   const leases = new MemoryHostedLeases()
-  const { url } = await start({ credits, leases, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
+  const { url } = await start({ credits, leases, channelsFor: slowBrowser, keys: { oc_account: { enabled: true, plan: 'account', dailyLimit: 0, browser: true, uid: 'account-1' } } })
   const headers = { authorization: 'Bearer oc_account', accept: 'application/json, text/event-stream' }
   const call = post(url, '/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scrape', arguments: { url: `${origin}/slow` } } }, headers)
   await vi.waitFor(() => expect(leases.held.size).toBe(1))
