@@ -644,7 +644,9 @@ const LOOP_SAMPLE_MS = 10
  * runs before the final judgement, so that line is written by `stop`; a scrape without a contract starts no timer and is
  * logged by `observe`, as before.
  */
-function phaseObserver(req: { url: string; verify?: unknown }, log: (line: string) => void): { observe: (run: ScrapeRun, scrapeId: string) => void; stop: () => void } {
+/** Who a phase line is about: the caller's kind (`keyless`, `key`, `oauth`, `site`) and the account, so the line can be split by caller (the 2026-11-05 audit had to infer it). */
+type PhaseWho = { caller: string; uid?: string }
+function phaseObserver(req: { url: string; verify?: unknown }, log: (line: string) => void, who: PhaseWho): { observe: (run: ScrapeRun, scrapeId: string) => void; stop: () => void } {
   const loop = req.verify === undefined ? null : createHistogram()
   // The first interval counts from now: monitorEventLoopDelay skips its first one, and with it a hold that begins at once.
   loop?.recordDelta()
@@ -653,7 +655,7 @@ function phaseObserver(req: { url: string; verify?: unknown }, log: (line: strin
   const waited = (ns: number): number | null => loop!.count === 0 ? null : Math.round(Math.max(0, ns / 1e6 - LOOP_SAMPLE_MS) * 10) / 10
   return {
     observe: (run, scrapeId) => {
-      line = scrapePhaseLine(req.url, run, scrapeId)
+      line = { ...scrapePhaseLine(req.url, run, scrapeId), caller: who.caller, ...(who.uid === undefined ? {} : { uid: who.uid }) }
       if (loop === null) log(JSON.stringify(line))
     },
     stop: () => {
@@ -845,8 +847,17 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const sweeper = setInterval(() => { sweepTaskRoot(config.taskRoot).catch((error) => log(JSON.stringify({ severity: 'WARNING', event: 'hosted_sweep_failed', message: String(error) }))) }, SWEEP_EVERY_MS)
   sweeper.unref()
 
-  const refuse = (c: Context, status: 401 | 403 | 404 | 429, code: string, message: string, hints: readonly string[], headers: Record<string, string> = {}) => {
+  /**
+   * A refusal, and its log line: `hosted_refused` with the status, the code, the path, who was refused (`keyless`, `key`,
+   * `oauth`, `site`, or null before the caller is known) and, for a limit, which pool or limit it was (`pool`), so the
+   * request log's 4xx counts can be read by cause (the 2026-11-05 audit could not tell a bad key from a used-up day).
+   */
+  const refuse = (c: Context, status: 401 | 403 | 404 | 429, code: string, message: string, hints: readonly string[], headers: Record<string, string> = {}, detail: Record<string, unknown> = {}) => {
     for (const [name, value] of Object.entries(headers)) c.header(name, value)
+    let who: HostedCaller | undefined
+    try { who = (c as Context<GateEnv>).get('caller') } catch { who = undefined }
+    const pool = code === 'rate_limited' ? { pool: 'minute' } : code === 'browser_busy' ? { pool: 'browser' } : {}
+    log(JSON.stringify({ severity: 'INFO', event: 'hosted_refused', status, code, path: c.req.path, caller: who === undefined ? null : who.via ?? who.kind, ...pool, ...detail }))
     return c.json({ error: message, code, agentHints: hints }, status)
   }
 
@@ -1005,7 +1016,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const site = quota.limited.endsWith('-site')
       const shared = quota.limited === keylessTotal
       return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served the ${quota.limit} pages a day it serves without an account` : shared ? `the ${quota.limit} pages a day that hosted Octocrawl serves without a key are used up` : caller.pool === 'claude' ? `the ${quota.limit} pages a day that every Claude connector without a key shares are used up` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
-        [...(caller.kind === 'keyless' ? [signInHint] : []), LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+        [...(caller.kind === 'keyless' ? [signInHint] : []), LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) }, { pool: quota.limited.slice(day.length + 1) })
     }
     logQuotaThresholds(entries, quota.counts, day, log)
     logUsage(caller, path, day)
@@ -1024,7 +1035,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const capabilities = await grantedCapabilities(config.access, caller)
       const refusedEnhanced = enhancedRefusal(req, capabilities)
       if (refusedEnhanced !== null) throw refusedEnhanced
-      const phases = phaseObserver(req, log)
+      const phases = phaseObserver(req, log, { caller: caller.via ?? caller.kind, ...(caller.uid === undefined ? {} : { uid: caller.uid }) })
       return c.json(await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: phases.observe, ...(caller.browser ? {} : httpOnlyPin(body, HTTP_ONLY_HINTS[caller.kind])) }).finally(phases.stop), 200)
     }
     await next()
@@ -1070,11 +1081,11 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       if (reserved.limited === 'account') return refuse(c, 401, 'unauthorized', 'this key\'s account no longer exists', [])
       if (reserved.limited === 'quota') {
         const seconds = secondsToUtcMidnight(now)
-        return refuse(c, 429, 'quota_exhausted', reserved.id === accounts.id ? `hosted Octocrawl has served the ${reserved.limit} pages a day it serves to accounts` : `this account has started its ${reserved.limit} hosted pages for today`, [LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+        return refuse(c, 429, 'quota_exhausted', reserved.id === accounts.id ? `hosted Octocrawl has served the ${reserved.limit} pages a day it serves to accounts` : `this account has started its ${reserved.limit} hosted pages for today`, [LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) }, { pool: reserved.id === accounts.id ? 'accounts' : 'account' })
       }
       const seconds = secondsToNextGrant(now)
       return refuse(c, 429, 'quota_exhausted', `this account's credits are used up (${reserved.remaining} left)`,
-        [`the monthly credits come back on the 1st at 00:00 UTC, in ${seconds} s`, LOCAL_HINT], { 'Retry-After': String(seconds), 'X-Credits-Remaining': String(reserved.remaining) })
+        [`the monthly credits come back on the 1st at 00:00 UTC, in ${seconds} s`, LOCAL_HINT], { 'Retry-After': String(seconds), 'X-Credits-Remaining': String(reserved.remaining) }, { pool: 'credits' })
     }
     logQuotaThresholds(quotas, reserved.counts, day, log)
     logUsage(caller, path, day)
@@ -1115,7 +1126,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
           const capabilities = await grantedCapabilities(config.access, caller)
           const refusedEnhanced = enhancedRefusal(req, capabilities)
           if (refusedEnhanced !== null) throw refusedEnhanced
-          const phases = phaseObserver(req, log)
+          const phases = phaseObserver(req, log, { caller: caller.via ?? caller.kind, uid })
           const result = await engine.scrape(req, { signal: c.req.raw.signal, modelGate, capabilities, ...(caller.uid === undefined ? {} : { account: caller.uid }), observe: phases.observe, ...(browser ? {} : httpOnlyPin(body, caller.browser ? HTTP_ONLY_HINTS.credits : HTTP_ONLY_HINTS.key)) }).finally(phases.stop)
           charge = scrapeCharge(result as Parameters<typeof scrapeCharge>[0])
           // Two more where the model was called for the page: never more than was reserved, as only a reserved gate admits.
@@ -1254,6 +1265,8 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       instructions,
       minimalResults: true,
       repeatedScrapes: { tracker: repeatedScrapes, caller: caller.id },
+      // Each tool call's end, by tool: the JSON-RPC body is the only other place the tool's name is, and it is not logged.
+      onCall: (call) => log(JSON.stringify({ severity: 'INFO', event: 'hosted_mcp_call', endpoint: oauth ? '/mcp-oauth' : '/mcp', caller: oauth ? 'oauth' : caller.kind, ...call })),
       // What a scrape result's re-judgements cost, when they ran a pattern scan: the engine's line does not see them.
       onRegexChecks: (stats) => log(regexChecksLine(config.hashKey, stats, { kind: 'mcp_result', ...(caller.uid === undefined ? {} : { account: caller.uid }) })),
       calls: post,
