@@ -52,6 +52,14 @@ describe('REST /v1/scrape and /v1/crawl', () => {
     await rm(taskRoot, { recursive: true, force: true })
   })
 
+  it('GET / says what the server is and how to reach it, instead of a 404', async () => {
+    const app = createApp(engine)
+    const res = await app.request('/')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ service: 'Octocrawl API', mcp: 'claude mcp add octocrawl -- npx -y @octocrawl/mcp', routes: expect.arrayContaining(['POST /v1/scrape']) })
+    expect((await app.request('/nothing-here')).status).toBe(404)
+  })
+
   it('POST /v1/scrape returns a FetchResult for the listing fixture', async () => {
     const app = createApp(engine)
     const res = await app.request('/v1/scrape', {

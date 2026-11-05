@@ -605,6 +605,14 @@ export function createApp(engine: ApiEngine, options: AppOptions = {}): Hono {
     return c.json(wrapCrawlStatus({ status: page.status }, page.steps, { ...counts, ...(next === undefined ? {} : { next }) }), 200)
   })
 
+  // A person who opens the server's address in a browser gets what it is and how to reach it, not a 404 for GET /.
+  app.get('/', (c) => c.json({
+    service: 'Octocrawl API',
+    routes: ['POST /v1/scrape', 'POST /v1/map', 'POST /v1/crawl', 'POST /v1/batches'],
+    mcp: 'claude mcp add octocrawl -- npx -y @octocrawl/mcp',
+    docs: 'https://octocrawl.dev/docs/reference/',
+  }))
+
   app.notFound((c) => fail(c, 'not_found', `no route for ${c.req.method} ${c.req.path}`))
 
   app.onError((err, c) => {
