@@ -414,6 +414,11 @@ export interface FetchWarning {
    * as `not_served`. A redirect that keeps the page (scheme, www, a trailing
    * slash, index.html, a language prefix, a new slug, a deeper page) raises
    * none; a page a request's `actions` led elsewhere raises none either.
+   * `https_unavailable`: the site has no working HTTPS (its first request was
+   * refused, reset, or answered by a plain server), and its http:// twin was
+   * asked for, under that origin's robots.txt: `requestedUrl` stays the https
+   * one, and the `https_fallback` trace event says why. The message says what
+   * came of it. See docs/scrape-options.md for what never falls back.
    */
   code: string
   message: string

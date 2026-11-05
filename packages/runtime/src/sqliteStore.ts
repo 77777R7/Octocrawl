@@ -186,6 +186,11 @@ export class SqliteTaskStore implements TaskStore {
     }
   }
 
+  async putTaskPacing(taskId: string, pacing: NonNullable<Task['pacing']>, updatedAt: string): Promise<void> {
+    assertId('taskId', taskId)
+    this.db.prepare('UPDATE tasks SET pacing_json = @pacing_json, updated_at = @updated_at WHERE id = @id').run({ id: taskId, pacing_json: JSON.stringify(pacing), updated_at: updatedAt })
+  }
+
   async putTask(task: Task): Promise<void> {
     assertId('task.id', task.id)
     this.db

@@ -39,6 +39,7 @@ import { rankVendors, shadowRankVendors, startingVendor } from './vendorRouter.j
 import { identityCompromised } from './identity.js'
 import { decideNext, ladderActionDecisionEvent, type ActionDecision, type LadderAction } from './decideNext.js'
 import { loadSessionForHost, sessionCoversHost, type SessionSnapshot, type SessionStore } from './sessionStore.js'
+import { httpFallbackFor, withHttpFallback } from './httpFallback.js'
 
 /** One attempt of the run: the rung that answered, its place in the run, when it was asked and answered. */
 function attemptOf(channel: Channel, id: string, result: FetchResult, ordinal: number, startedAt: string): LadderAttempt {
@@ -446,6 +447,8 @@ export type ContractFailureClassifier = (result: FetchResult, verification: Veri
 
 export interface LadderRunnerOptions {
   channelsFiltered?: readonly ChannelsFiltered[]
+  /** An https page of a site proved to have no HTTPS is asked for once over http (httpFallback.ts). Only where nothing proxies the connection. */
+  httpFallback?: boolean
   /**
    * The request's task contract (`verify`, ADR 0006). A rung's page that passes every check is the answer, with no
    * quality hop after it; one that fails a check goes on up the ladder as the classifier says. A check this page
@@ -652,6 +655,16 @@ export class LadderRunner {
    * vendor rung.
    */
   async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}, options: FetchOptions = {}): Promise<LadderRunResult> {
+    const first = await this.runOnce(url, session, execution, options)
+    if (this.options.httpFallback !== true) return first
+    const fallback = httpFallbackFor(url, first, { authed: this.policy.mode === 'authed', session, execution, options })
+    if (fallback === null || execution.signal?.aborted === true || deadlineReached(execution)) return first
+    // A robots override is the word of whoever named the https URL; the http twin was named by no one.
+    const { robotsOverride: _named, ...twin } = options
+    return withHttpFallback(url, fallback, first, await this.runOnce(fallback.url, session, execution, twin))
+  }
+
+  private async runOnce(url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
     const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [], charged: null, paidCalls: [], grant: null, ledger: null, solves: 0, steppedPast: null, notAdmitted: [] }
     for (const filtered of this.options.channelsFiltered ?? []) {

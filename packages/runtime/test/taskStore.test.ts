@@ -188,6 +188,16 @@ function runStoreContract(name: string, open: () => Promise<{ store: TaskStore; 
       expect(await store.getTask('task-1')).toEqual(task())
     })
 
+    it('writes a task\'s pace alone with putTaskPacing: a status another writer set meanwhile stays', async () => {
+      ;({ store, cleanup } = await open())
+      await store.putTask(task())
+      // Another writer (a cancel from another process) lands between the run's read and its pacing write.
+      await store.putTask({ ...task(), status: 'cancelled' })
+      const pacing = { 'example.com': { lastStartedAtMs: 1_790_000_000_000, crawlDelayMs: null, cooldownUntilMs: 1_790_000_002_000, adaptive: { ceiling: 1, delayMs: 2_000, signals: 0, okStreak: 0, slowdowns: 1 } } }
+      await store.putTaskPacing!('task-1', pacing, LATER)
+      expect(await store.getTask('task-1')).toEqual({ ...task(), status: 'cancelled', pacing, updatedAt: LATER })
+    })
+
     it('counts unique completed URLs and pages all outcomes without loading bodies for status', async () => {
       ;({ store, cleanup } = await open())
       await seed(store)
@@ -404,13 +414,16 @@ describe('@w2l/runtime public surface', () => {
       'CrawlOrchestrator',
       'DeliveryStore',
       'DeliveryWorker',
+      'FIRST_SLOW_DELAY_MS',
       'Frontier',
       'IDEMPOTENCY_FILENAME',
       'IdempotencyStore',
       'InvalidCursorError',
+      'MAX_SLOW_DELAY_MS',
       'MapRunner',
       'MemoryTaskStore',
       'MonitorStore',
+      'OK_PAGES_TO_RECOVER',
       'PageCache',
       'REGEX_SCAN_LIMIT_MS',
       'REGEX_STEERING_POOL_MS',
@@ -420,6 +433,7 @@ describe('@w2l/runtime public surface', () => {
       'RegexLedger',
       'RegexPool',
       'SHELL_TEXT_MAX',
+      'SIGNALS_TO_SLOW',
       'SqliteTaskStore',
       'VERIFIER_VERSION',
       'WebhookInbox',
@@ -451,6 +465,7 @@ describe('@w2l/runtime public surface', () => {
       'requestFingerprint',
       'runConfiguredMonitor',
       'runFirecrawlMonitor',
+      'softBlockSignal',
       'sourceCommitFromEnv',
       'systemClock',
       'toEvidenceRecord',

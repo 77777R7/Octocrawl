@@ -31,7 +31,7 @@ import { assertSafeUrl, BodyTooLargeError, browserProxySettings, chromiumProxyLa
 import type { FileStore } from '../fileStore.js'
 import { declaredLength, fileTooLarge, readFileResponse } from './fileResult.js'
 import type { SubjectAdapter } from '../subject.js'
-import { applicableOverride, overriddenDetail, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
+import { applicableOverride, overriddenDetail, robotsConnectionCode, RobotsOriginCache, robotsOverrideApplied, robotsOverrideWarning } from '../robotsLookup.js'
 import { dropLastStep, runPageActions, type ActionRun } from './browserActions.js'
 import { isNavigationError, LOADING_WAIT_MAX_MS, loadingWaitEvent, waitForRenderedStability, withStillLoadingWarning } from '../browserSettle.js'
 import { withOffPageWarning } from '../offPage.js'
@@ -667,7 +667,7 @@ export class BrowserLocalSubject implements SubjectAdapter {
           at: wallMs,
           lane: 'browser_local',
           event: 'robots_disallowed',
-          detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }) },
+          detail: { url, appliedRules: robotsDecision.appliedRules, ...(robotsDecision.unreachable === undefined ? {} : { unreachable: robotsDecision.unreachable }), ...(robotsConnectionCode(cachedRobots) === null ? {} : { code: robotsConnectionCode(cachedRobots) }) },
         })
         // robots.txt unreadable because the host's certificate does not verify: the page would fail the same way, and that is the fact to report.
         const tlsFailed = robotsDecision.unreachable !== undefined && cachedRobots?.error?.tls === true

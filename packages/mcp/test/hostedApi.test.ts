@@ -227,6 +227,8 @@ it('one account starts at most its share of the site\'s day, refused with nothin
   expect(refusal.code).toBe('quota_exhausted')
   expect(refusal.error).toContain('this account has started its 2 hosted pages for today')
   expect(refusal.agentHints.join(' ')).toContain('00:00 UTC')
+  // The wait is said in hours and minutes; Retry-After keeps the seconds.
+  expect(refusal.agentHints.join(' ')).toMatch(/resets at 00:00 UTC, in (\d+ h \d+ min|\d+ min|under a minute)$/)
   expect(credits.balances.get('account-1')).toMatchObject({ grant: 998 })
   expect((await post(url, '/v1/scrape', { url: `${origin}/page` }, { authorization: 'Bearer oc_two' })).status).toBe(200)
 })
@@ -287,7 +289,13 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
   const { url } = await start({ keylessDaily: 3, keys: { 'oc_live': { enabled: true, plan: 'free', dailyLimit: 3, browser: true } } })
   expect((await fetch(`${url}/mcp`, { method: 'GET' })).status).toBe(405)
   expect((await fetch(`${url}/mcp`, { method: 'POST', headers: { 'mcp-protocol-version': 'not-a-version', 'content-type': 'application/json' }, body: '{}' })).status).toBe(400)
-  expect((await fetch(`${url}/mcp`, { method: 'POST', headers: { authorization: 'Bearer oc_nobody', 'content-type': 'application/json' }, body: '{}' })).status).toBe(401)
+  const nobody = await fetch(`${url}/mcp`, { method: 'POST', headers: { authorization: 'Bearer oc_nobody', 'content-type': 'application/json' }, body: '{}' })
+  expect(nobody.status).toBe(401)
+  // A refused bearer says where a key comes from and where a signed-in client belongs, not the bare refusal alone.
+  const refusedKey = await nobody.json() as { error: string; agentHints: string[] }
+  expect(refusedKey.error).toBe('this key is not one Octocrawl issued, or it was revoked')
+  expect(refusedKey.agentHints.join(' ')).toContain('https://octocrawl.dev/dashboard/keys/')
+  expect(refusedKey.agentHints.join(' ')).toContain('/mcp-oauth')
   const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
   const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
   try {
@@ -300,7 +308,7 @@ it('the /mcp endpoint speaks Streamable HTTP, offers its tools read-only, scrape
     const text = (result.content as { type: string; text: string }[])[0]!.text
     expect(JSON.parse(text)).toMatchObject({ status: 'success', lane: 'http' })
     // A tool hosted Octocrawl leaves out stays a protocol error, and says what it offers and where crawls run.
-    await expect(client.callTool({ name: 'crawl', arguments: { url: `${origin}/` } })).rejects.toThrow(/tool not available in this deployment: crawl; this server offers scrape, map, scrape_product\. Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve/)
+    await expect(client.callTool({ name: 'crawl', arguments: { url: `${origin}/` } })).rejects.toThrow(/tool not available in this deployment: crawl; this server offers scrape, map\. Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve/)
     expectIsError(await client.callTool({ name: 'scrape_product', arguments: { url: 'https://www.amazon.sg/dp/B000VW9PIK' } }), 'needs a key')
     await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
     await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page` } })
@@ -1384,6 +1392,16 @@ it('a request line tells a robots.txt that could not be read from one that disal
   expect(note.robots).toBe('disallowed')
 })
 
+it('a request line carries the scrape\'s readiness, so a success the site answered with another page (not_served, #821) is told from a page that was read', () => {
+  const note: RequestNote = { endpoint: 'scrape', keyId: 'k', url: 'https://example.com/exhibitor/acme/', finalUrl: null, lane: null, status: 'error', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: [], ms: null, scrapeId: null, paidCallIds: null }
+  noteScrape(note, { status: 'success', readiness: { state: 'not_served', basis: ['redirected_off_page'] }, evidenceRecord: { finalUrl: 'https://example.com/', httpStatus: 200 } })
+  expect(note).toMatchObject({ status: 'success', finalUrl: 'https://example.com/', readiness: 'not_served' })
+  noteScrape(note, { status: 'success', readiness: { state: 'ready', basis: [] }, evidenceRecord: {} })
+  expect(note.readiness).toBe('ready')
+  noteScrape(note, { status: 'failed', evidenceRecord: {} })
+  expect(note.readiness).toBeNull()
+})
+
 it('a scrape\'s phase line says how long each rung took and what the page waited for, by the URL\'s host alone', () => {
   // T009 on hosted after O6 (2026-10-27): the http rung's header cap, then browser_local.
   const run = {
@@ -1691,4 +1709,27 @@ describe('the compatible transport, granted per request (ADR 0005 compatible_tra
     expect(await tried({ authorization: 'Bearer oc_two' })).toEqual(['http'])
     expect(await tried()).toEqual(['http'])
   })
+})
+
+it('logs who was refused and why, each MCP call by tool, and the caller on a phase line (2026-11-05 audit: the logs could not say)', async () => {
+  const lines: string[] = []
+  const { url } = await start({ keylessDaily: 1, log: (line) => lines.push(line) })
+  const events = (name: string) => lines.flatMap((line) => { try { return [JSON.parse(line) as Record<string, unknown>] } catch { return [] } }).filter((line) => line.event === name)
+  const transport = new StreamableHTTPClientTransport(new URL(`${url}/mcp`))
+  const client = new Client({ name: 'octocrawl-test-client', version: '1.0.0' })
+  try {
+    await client.connect(transport)
+    const result = await client.callTool({ name: 'scrape', arguments: { url: `${origin}/page`, formats: ['markdown'] } })
+    expect(result.isError).not.toBe(true)
+    // The keyless day of one page is spent: the next start is refused, and the line says by which pool.
+    const refused = await post(url, '/v1/scrape', { url: `${origin}/page` })
+    expect(refused.status).toBe(429)
+  } finally { await client.close() }
+  expect(events('hosted_mcp_call')).toEqual([expect.objectContaining({ severity: 'INFO', endpoint: '/mcp', caller: 'keyless', tool: 'scrape', truncated: false, error: false, ms: expect.any(Number) })])
+  expect(events('hosted_scrape_phases').map((line) => line.caller)).toEqual(['keyless'])
+  const refusals = events('hosted_refused')
+  expect(refusals).toHaveLength(1)
+  expect(refusals[0]).toMatchObject({ severity: 'INFO', status: 429, code: 'quota_exhausted', path: '/v1/scrape', caller: 'keyless' })
+  // The address's HMAC is cut to the 16 characters the other lines log, never the whole digest.
+  expect(String(refusals[0]!.pool)).toMatch(/^keyless-[0-9a-f]{16}$/)
 })

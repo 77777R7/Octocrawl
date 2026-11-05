@@ -55,6 +55,8 @@ export interface RequestView {
   /** The formats a scrape asked for (empty: none named) and how long the call took; null on lines written before
    * the hosted API recorded them (2026-10-12) and, for formats, on a map. */
   formats: string[] | null; ms: number | null
+  /** The scrape's readiness state (`not_served`: the site answered another page); null on a map and on lines from before 2026-11-05. */
+  readiness: string | null
   /** On a hosted job's one line: what it was asked, what it read and its pages by outcome. */
   job?: { id: string; requested: number; pages: number; errors: number; outcomes: Record<string, number> }
 }
@@ -224,6 +226,7 @@ export class FirestoreAccountData implements AccountData {
         sha256: text(f.sha256), links: count(f.links), kind: text(f.kind) ?? '', credits: count(f.credits) ?? 0,
         formats: f.formats?.arrayValue ? (f.formats.arrayValue.values ?? []).flatMap(value => typeof value.stringValue === 'string' ? [value.stringValue] : []) : null,
         ms: count(f.ms),
+        readiness: text(f.readiness),
         ...(job === undefined ? {} : { job: {
           id: text(job.id) ?? '', requested: count(job.requested) ?? 0, pages: count(job.pages) ?? 0, errors: count(job.errors) ?? 0,
           outcomes: Object.fromEntries(Object.entries(job.outcomes?.mapValue?.fields ?? {}).map(([name, value]) => [name, count(value) ?? 0])),

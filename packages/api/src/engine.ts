@@ -79,6 +79,7 @@ import {
   type Task,
   type TaskStatus,
   type BudgetKind,
+  type HostPace,
   type HostPacing,
   type CrawlPageQuery,
   type ExecutionContext,
@@ -761,10 +762,13 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * request its rung would take: mode standard, a URL the channel policy leaves to the ladder, and none of the options
    * the rung refuses. A browser kept to a list of hosts builds no such rung, so it recommends none.
    */
-  const hintOffers = (mode: Task['mode'], url: string, page: FetchOptions): HintOffers =>
-    userChrome !== null && !installedChrome && options.browserAllowedHosts === undefined && mode === 'standard'
+  const hintOffers = (mode: Task['mode'], url: string, page: FetchOptions): HintOffers => ({
+    // A hosted server's hints name the routes a server on the person's computer has (logins, handoff, actions), never its own.
+    ...(options.hosted === true ? { hosted: true } : {}),
+    ...(userChrome !== null && !installedChrome && options.browserAllowedHosts === undefined && mode === 'standard'
       && (options.channelPolicy?.(url) ?? 'ladder') === 'ladder' && installedChromeRefusal(page) === null
-      ? { installedChrome: true } : {}
+      ? { installedChrome: true } : {}),
+  })
   /** The same for a page of a stored batch or crawl, under the options it was started with. */
   const taskHintOffers = (task: Task, url: string): HintOffers => {
     const stored = task.batch ?? task.crawl
@@ -1015,7 +1019,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    */
   const checkAccessChoice = (req: { access?: AccessChoice }): void => {
     if (req.access !== 'enhanced' || accessGrant?.tier === 'enhanced' || hostedChrome !== null) return
-    throw new RequestError('access enhanced: this server has no approved budget for enhanced access (an access grant of tier enhanced, --access-grant or W2L_ACCESS_GRANT, ADR 0005); ask with access standard, or my-browser on your own machine', 'unsupported_parameter', { parameters: ['access'] }, [REFUSAL_HINTS.stealth])
+    throw new RequestError('access enhanced: this server has no approved budget for enhanced access (an access grant of tier enhanced, --access-grant or W2L_ACCESS_GRANT, ADR 0005); ask with access standard, or my-browser on your own machine', 'unsupported_parameter', { parameters: ['access'] }, [options.hosted === true ? REFUSAL_HINTS.hostedStealth : REFUSAL_HINTS.stealth])
   }
   // A job's events: durable webhook deliveries (the control database, the worker of the API process or the MCP runtime), and the in-process hub streaming consumers subscribe to.
   const jobEvents = new JobEventHub()
@@ -1202,6 +1206,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
    * The history of one set of rungs, under the key its channels are kept by (mode, egress, access enhanced). The file
    * records how the egress leaves (pool, environment or direct), never the proxy's address.
    */
+  /** Whether a page connects to its site directly: a refused connection then says something of the site, not of a proxy. */
+  const unproxied = (egress: Egress | undefined): boolean => egress === undefined && (networkPolicy.egressProxy ?? null) === null
   const historyFor = (mode: 'standard' | 'research' | 'authed', egress?: Egress, enhanced = false): SqliteRoutingHistory => {
     const key = channelsKey(mode, egress, enhanced)
     const existing = historiesByKey.get(key)
@@ -1268,6 +1274,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         ...(task.batch.verify === undefined ? {} : await store.countVerifications(taskId)),
         // The cap in force: the batch's own, never above this service's worker count.
         maxConcurrency: task.batch.lane === 'my-browser' ? 1 : Math.min(task.batch.maxConcurrency ?? workerCount, workerCount),
+        // The hosts the batch slowed after soft blocks, at the pace they hold now.
+        ...slowedHosts(task),
         ...(task.batch.invalidURLs === undefined ? {} : { invalidURLs: task.batch.invalidURLs }),
         ...(waitingForPerson === undefined ? {} : { waitingForPerson }),
         ...(approvalsWaiting.has(taskId) ? { waitingForApproval: true as const } : {}),
@@ -1751,7 +1759,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     // Saved logins go to a batch alone: a crawl follows every link, a sign-out link included, so a crawl stored in mode
     // authed (before crawl refused it) and resumed runs without the user's session.
     // Governance sees the hosts the frontier may lead to (policyAllowlist); every page still gets its own robots.txt, SSRF and identity checks.
-    const runnerFor = (lane: ReturnType<typeof channelsForUrl>, egress: Egress | undefined) => new LadderRunner(lane.channels, { mode, ...(selection?.access === 'enhanced' ? { enhanced: true } : {}), ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode, egress, selection?.access === 'enhanced'), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered, ...(selection?.verify === undefined ? {} : { verify: selection.verify }) })
+    const runnerFor = (lane: ReturnType<typeof channelsForUrl>, egress: Egress | undefined) => new LadderRunner(lane.channels, { mode, ...(selection?.access === 'enhanced' ? { enhanced: true } : {}), ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) }, historyFor(mode, egress, selection?.access === 'enhanced'), null, task.batch === undefined ? null : sessionsFor(mode), { channelsFiltered: lane.filtered, httpFallback: unproxied(egress), ...(selection?.verify === undefined ? {} : { verify: selection.verify }) })
     // A batch's recorded robots overrides are per URL: only the URL an
     // override names is fetched past a disallow, never its neighbours. A
     // server that takes none applies none, also to a task stored with them.
@@ -2021,7 +2029,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     }
     let turnHints: readonly string[] = []
     const channels = context.browserTurn === undefined ? rungs.channels : withBrowserTurn(rungs.channels, context.browserTurn, (hints) => { turnHints = hints })
-    const runner = new LadderRunner(channels, policy, historyFor(mode, scrapeEgress, req.access === 'enhanced'), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, ...(req.verify === undefined ? {} : { verify: req.verify }) })
+    const runner = new LadderRunner(channels, policy, historyFor(mode, scrapeEgress, req.access === 'enhanced'), null, sessionsFor(mode), { channelsFiltered: rungs.filtered, httpFallback: unproxied(scrapeEgress), ...(req.verify === undefined ? {} : { verify: req.verify }) })
     // A Monitor's capture (no record) neither reads nor fills the cache: a preview persists nothing.
     // The URL a scrape names; a Monitor's capture (no record) re-reads its URL on a schedule, as a crawler does.
     const robotsOverride = req.robotsOverride ?? (record ? namedUrlOverride : undefined)
@@ -2585,7 +2593,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
               const pacing: Record<string, HostPacing> = { ...(current.pacing ?? {}) }
               for (const [origin, until] of Object.entries(cooldowns)) {
                 const host = new URL(origin).host
-                pacing[host] = { lastStartedAtMs: pacing[host]?.lastStartedAtMs ?? null, crawlDelayMs: pacing[host]?.crawlDelayMs ?? null, cooldownUntilMs: Math.max(until, pacing[host]?.cooldownUntilMs ?? 0) }
+                pacing[host] = { ...pacing[host], lastStartedAtMs: pacing[host]?.lastStartedAtMs ?? null, crawlDelayMs: pacing[host]?.crawlDelayMs ?? null, cooldownUntilMs: Math.max(until, pacing[host]?.cooldownUntilMs ?? 0) }
               }
               await writer.putTask({ ...current, pacing })
             }
@@ -3401,4 +3409,21 @@ export function defaultSessionsFile(env: NodeJS.ProcessEnv = process.env): strin
 /** A session store the engine reads but never writes: saved logins come from `octocrawl login import` alone. */
 function readOnlySessions(store: SessionStore): SessionStore {
   return { load: (domain) => store.load(domain), save: async () => {} }
+}
+
+/** The hosts a task slowed (HostPacing.adaptive), as a status reports them (`pacing`); nothing while every host runs at its baseline. */
+function slowedHosts(task: Task): { pacing?: Record<string, HostPace> } {
+  const pacing: Record<string, HostPace> = {}
+  const now = Date.now()
+  for (const [host, pace] of Object.entries(task.pacing ?? {})) {
+    if (pace.adaptive == null || pace.adaptive.slowdowns === 0) continue
+    const cooldownUntilMs = pace.cooldownUntilMs ?? null
+    pacing[host] = {
+      ceiling: pace.adaptive.ceiling,
+      delayMs: pace.adaptive.delayMs,
+      slowdowns: pace.adaptive.slowdowns,
+      ...(cooldownUntilMs !== null && cooldownUntilMs > now ? { cooldownUntil: new Date(cooldownUntilMs).toISOString() } : {}),
+    }
+  }
+  return Object.keys(pacing).length === 0 ? {} : { pacing }
 }
