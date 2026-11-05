@@ -158,6 +158,22 @@ describe('API keys: last used and this month', () => {
     expect(rowsOf(keys.$('keys-body'))[0]![3]).toBe('Oct 18')
   })
 
+  it('takes a job\'s pages off the day\'s usage before it checks the lines, and counts a job as one call of its key', async () => {
+    // Twelve pages of a job, read the day before it finished: the usage counts them, and no line stands for each.
+    const job = { ...line('2026-10-20T11:50:00.000Z', KEY_B, 3), endpoint: 'batch', kind: 'job', status: 'completed', httpStatus: null, lane: null, formats: null, robots: null, sha256: null, job: { id: 'job-1', requested: 12, pages: 12, errors: 9, outcomes: { read: 3, robots_unreachable: 9 } } }
+    const calls = octoberLines()
+    const usage = usageOf(calls).map((day) => ({ ...day, jobPages: 0 }))
+    const before = usage.find((day) => day.day === '2026-10-18')!
+    before.unread += 9; before.http += 3; before.jobPages = 12
+    const answers = octoberAnswers([calls[0]!, job, ...calls.slice(1)], usage)
+    const rows = rowsOf((await page('/dashboard/keys/', '', OCTOBER.now, answers)).$('keys-body'))
+    expect(rows[0]!.slice(3, 5)).toEqual(['5 min ago', 'at least 6 credits · 2 calls'])
+    expect(rows[1]!.slice(3, 5)).toEqual(['10 min ago', '3 credits · 1 call'])
+    // Pages that are neither a line's nor a job's still say so.
+    before.unread += 1
+    expect(rowsOf((await page('/dashboard/keys/', '', OCTOBER.now, answers)).$('keys-body'))[0]![3]).toBe('5 min ago or later')
+  })
+
   it('compares the lines with the usage read before them, not with usage read again after a revoke', async () => {
     const lines = octoberLines()
     const answers: Record<string, [number, unknown]> = { ...octoberAnswers(lines), [`POST /api/account/keys/${KEY_A}/revoke`]: [204, null] }
@@ -485,6 +501,54 @@ describe('Usage', () => {
     expect(bars[2]).toBeLessThan(bars[0]!)
     expect($('hours-empty').hidden).toBe(true)
     expect($('results-list').closest('.panel')!.querySelector('.lines-note')!.textContent).toBe('calls, from request lines')
+  })
+
+  it('shows a job as one row on Activity and counts its pages by outcome on Usage', async () => {
+    const job = (endpoint: string, url: string, status: string, summary: Record<string, unknown>, reason: string | null = null) => ({ ...line('2026-10-20T11:30:00.000Z', KEY_A, 3), endpoint, url, status, reason, kind: 'job', httpStatus: null, lane: null, formats: null, robots: null, sha256: null, ms: 42_000, job: summary })
+    const batch = job('batch', 'https://www.klockner.es/', 'completed', { id: 'job-1', requested: 12, pages: 12, errors: 9, outcomes: { read: 3, robots_unreachable: 9 } })
+    const crawl = job('crawl', 'https://docs.example.org/', 'completed', { id: 'job-2', requested: 1, pages: 40, errors: 0, outcomes: { read: 40 } })
+    const stopped = job('crawl', 'https://example.net/', 'failed', { id: 'job-3', requested: 1, pages: 0, errors: 0, outcomes: {} }, 'no_progress')
+    const answers = octoberAnswers([...lines(), batch, crawl, stopped])
+    const { $ } = await page('/dashboard/activity/', '', OCTOBER.now, answers)
+    const rows = rowsOf($('activity-body'))
+    const shown = rows.filter((row) => row[1] === '/batch' || row[1] === '/crawl').map((row) => row.slice(1, 9))
+    expect(shown).toEqual([
+      ['/batch', 'www.klockner.es/ + 11 more', '—', '—', '12 pages · 9 not read', '9 unreachable', '42 s', '3'],
+      ['/crawl', 'docs.example.org/', '—', '—', '40 pages', '—', '42 s', '3'],
+      ['/crawl', 'example.net/', '—', '—', 'failed · no_progress', '—', '42 s', '3'],
+    ])
+    const usage = await page('/dashboard/usage/', '', OCTOBER.now, answers)
+    const list = (id: string) => [...usage.$(id).querySelectorAll('li p')].map(row => row.textContent)
+    expect(list('results-list')).toEqual(['Read45 · 79%', 'robots.txt not readable9 · 16%', 'Blocked by the site1 · 2%', 'Not found1 · 2%', 'Map: URLs found1 · 2%'])
+    // Read of what was answered, page by page: 3 of 5 calls and 43 of 52 job pages.
+    expect(usage.$('sum-rate').textContent).toBe('81%')
+    expect(usage.$('sum-rate-sub').textContent).toBe('57 calls in 30 days')
+    const csv = await page('/dashboard/activity/', '', OCTOBER.now, answers)
+    let saved: unknown = null
+    ;(csv.window as unknown as { URL: { createObjectURL: (blob: unknown) => string; revokeObjectURL: () => void } }).URL.createObjectURL = (blob) => { saved = blob; return 'blob:x' }
+    ;(csv.window as unknown as { URL: { revokeObjectURL: () => void } }).URL.revokeObjectURL = () => {}
+    csv.$('export-csv').click()
+    const text = await (saved as Blob).text()
+    expect(text.split('\n')[0]).toContain(',jobId,pages,errors')
+    expect(text).toContain('job-1,12,9')
+  })
+
+  it('counts a job\'s duplicates neither as read nor as failed, and calls a page no outcome read not read', async () => {
+    const job = (id: string, summary: Record<string, unknown>) => ({ ...line('2026-10-20T11:30:00.000Z', KEY_A, 2), id, endpoint: 'crawl', url: 'https://docs.example.org/', status: 'completed', kind: 'job', httpStatus: null, lane: null, formats: null, robots: null, sha256: null, job: { requested: 1, ...summary } })
+    const answers = octoberAnswers([job('a', { id: 'job-1', pages: 4, errors: 0, outcomes: { read: 2, duplicate: 2 } }), job('b', { id: 'job-2', pages: 3, errors: 0, outcomes: { read: 2, failed: 1 } })])
+    const { $ } = await page('/dashboard/activity/', '', OCTOBER.now, answers)
+    expect(rowsOf($('activity-body')).map((row) => row[5])).toEqual(['4 pages', '3 pages · 1 not read'])
+    const usage = await page('/dashboard/usage/', '', OCTOBER.now, answers)
+    expect([...usage.$('results-list').querySelectorAll('li p')].map(row => row.textContent)).toEqual(['Read4 · 57%', 'Duplicate of another page2 · 29%', 'Failed1 · 14%'])
+    expect(usage.$('sum-rate').textContent).toBe('80%')
+    expect(usage.$('sum-rate-sub').textContent).toBe('5 calls in 30 days')
+  })
+
+  it('keeps a batch\'s credits apart from the site of its first URL', async () => {
+    const batch = { ...line('2026-10-20T11:30:00.000Z', KEY_A, 7), endpoint: 'batch', url: 'https://www.klockner.es/', status: 'completed', kind: 'job', job: { id: 'job-1', requested: 12, pages: 12, errors: 0, outcomes: { read: 12 } } }
+    const { $ } = await page('/dashboard/usage/', '', OCTOBER.now, octoberAnswers([...lines(), batch]), { width: 640 })
+    expect($('site-map').textContent).toContain('Batches')
+    expect($('site-map').textContent).not.toContain('klockner')
   })
 
   it('tells a call that was never sent from one that got no answer', async () => {
