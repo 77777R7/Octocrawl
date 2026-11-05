@@ -19,7 +19,7 @@ import { createApiEngine, type ApiEngineOptions, type HostedChromeOperator, type
 import { RequestError, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import { canonicalizeUrl, CHECKPOINT_FILENAME, foldCheckpoint, hostOf, SqliteTaskStore, webhookSignature, type WebhookTransport } from '@w2l/runtime'
 import { jobEngineOptions, logQuotaThresholds, type HostedLeases } from './hostedApi.js'
-import { CREDITS, scrapeCharge, type CreditsStore, type Reservation, type UsageKind } from './hostedCredits.js'
+import { CREDITS, scrapeCharge, type CreditsStore, type RequestNote, type Reservation, type UsageKind } from './hostedCredits.js'
 import type { UploadResult } from './hostedCloud.js'
 import { asksModelFallback, MODEL_REFUSALS, type HostedModel } from './hostedModel.js'
 import { grantedCapabilities, type HostedAccessSource } from './hostedAccess.js'
@@ -308,6 +308,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     const priced = priceOf(result.charges, modelPrice > 0)
     const used = Math.min(priced.used, reservedPages * price)
     const perKind = priced.perKind
+    const outcomes = result.charges.map(pageOutcome)
     const errors = result.charges.filter((charge) => ERROR_STATUSES.has(charge.status)).length
     const idle = result.items.length === 0 && result.status === 'paused'
     const idleSlices = idle ? (job.idleSlices ?? 0) + 1 : 0
@@ -317,6 +318,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     const done: Committed = await commit((j) => ({
       ...j, status, failureReason: status === 'failed' ? (idleSlices >= limits.idleSlicesToFail ? 'no_progress' : 'task_failed') : j.failureReason,
       counts: { pages: j.counts.pages + result!.items.length - errors, errors: j.counts.errors + errors, slices: j.counts.slices + 1 },
+      outcomes: outcomes.reduce((all, outcome) => ({ ...all, [outcome]: (all[outcome] ?? 0) + 1 }), j.outcomes ?? {}),
       credits: { ...j.credits, used: j.credits.used + used }, idleSlices, budgetExceeded: result!.budgetExceeded ?? j.budgetExceeded ?? null,
       segments: [...(j.segments ?? []), segment], checkpoint: nextCheckpoint,
       // Kept until settled: if the settle below fails, the next delivery settles it.
@@ -341,7 +343,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
   } finally {
     // A slice that ends without committing gives its credits back. One whose commit may have applied (it threw) leaves its
     // reservation to the next delivery, which settles it from the job: used, if the commit applied; nothing, if it did not.
-    if (reservation !== null && !commitMayHaveApplied) await deps.credits.settle(reservation, 0, 'unread', now()).catch(() => {})
+    if (reservation !== null && !commitMayHaveApplied) await deps.credits.settle(reservation, 0, 'unread', now(), undefined, {}).catch(() => {})
     for (const release of releases) await release().catch(() => {})
     rmSync(taskRoot, { recursive: true, force: true })
   }
@@ -352,7 +354,7 @@ async function settlePending(deps: JobWorkerDeps, job: HostedJob, at: Date, log:
   const pending = job.reservation
   if (pending === undefined || pending === null) return
   // A failure throws: the delivery answers 500 and Cloud Tasks retries it, with the reservation still on the job.
-  try { await deps.credits.settle(pending.reservation as Reservation, pending.used ?? 0, pending.used === null ? 'unread' : 'http', at, undefined, pending.used === null ? undefined : pending.perKind as Partial<Record<UsageKind, number>>) }
+  try { await deps.credits.settle(pending.reservation as Reservation, pending.used ?? 0, pending.used === null ? 'unread' : 'http', at, undefined, pending.used === null ? {} : pending.perKind as Partial<Record<UsageKind, number>>) }
   catch (error) { log(JSON.stringify({ severity: 'ERROR', event: 'hosted_job_settle_failed', jobId: job.id, message: String(error) })); throw error }
 }
 
@@ -415,6 +417,7 @@ export async function runJobWebhook(deps: Pick<JobWorkerDeps, 'store' | 'webhook
 async function finish(deps: JobWorkerDeps, job: HostedJob, log: (line: string) => void): Promise<void> {
   if (job.status === 'expired') return
   await settlePending(deps, job, (deps.now ?? (() => new Date()))(), log)
+  await writeRequestLine(deps, job, log)
   const lines: string[] = []
   for (const name of job.segments ?? []) {
     const segment = await deps.files.download(name)
@@ -429,6 +432,22 @@ async function finish(deps: JobWorkerDeps, job: HostedJob, log: (line: string) =
     if (promoted !== null && promoted.status === 'running' && promoted.startedAt === null) await deps.enqueueSlice(promoted)
   }
   log(JSON.stringify({ severity: 'INFO', event: 'hosted_job_finished', workspaceId: job.workspaceId, jobId: job.id, status: job.status, failureReason: job.failureReason, pages: job.counts.pages, errors: job.counts.errors, credits: job.credits.used }))
+}
+
+/**
+ * The job's one line on the account's Activity. A line that cannot be written is logged, not retried by the delivery: it
+ * must not hold up the job's export or webhook, and the day's usage already counted the pages.
+ */
+async function writeRequestLine(deps: JobWorkerDeps, job: HostedJob, log: (line: string) => void): Promise<void> {
+  const request = job.request as { url?: string; urls?: readonly string[] }
+  const at = job.finishedAt === null ? (deps.now ?? (() => new Date()))() : new Date(job.finishedAt)
+  const note: RequestNote = {
+    endpoint: job.kind, keyId: job.requestKeyId ?? job.keyId, url: request.url ?? request.urls?.[0] ?? '', finalUrl: null, lane: null, status: job.status, httpStatus: null,
+    reason: job.failureReason, robots: null, sha256: null, links: null, formats: null, ms: job.startedAt === null ? null : at.getTime() - Date.parse(job.startedAt), scrapeId: null, paidCallIds: null,
+    job: { id: job.id, requested: request.urls?.length ?? 1, pages: job.counts.pages + job.counts.errors, errors: job.counts.errors, outcomes: job.outcomes ?? {} },
+  }
+  const failed = (extra: Record<string, unknown>) => log(JSON.stringify({ severity: 'ERROR', event: 'hosted_job_line_failed', jobId: job.id, ...extra }))
+  await deps.credits.writeJobLine(job.uid, note, job.credits.used, at).then((written) => { if (!written) failed({ message: 'not written' }) }, (error: unknown) => failed({ message: String(error) }))
 }
 
 /** The hosts a slice should read, in the order their URLs come: a crawl's seed host; a batch's hosts with URLs not yet read. */
@@ -450,13 +469,26 @@ export async function hostsOf(job: HostedJob, taskDir: string | null): Promise<s
   return hosts
 }
 
+/** What a job's page came to, in the terms the dashboard counts a scrape's in (dashboard.js category). */
+export function pageOutcome(charge: SliceCharge): string {
+  if (charge.status === 'success' || charge.status === 'empty_verified') return 'read'
+  if (charge.status === 'partial') return 'partial'
+  // Fetched, and no page of its own: an earlier page of the job has the same body.
+  if (charge.status === 'duplicate') return 'duplicate'
+  if (charge.robots !== null) return `robots_${charge.robots}`
+  if (charge.httpStatus === 404 || charge.httpStatus === 410) return 'not_found'
+  if (charge.status === 'blocked') return 'blocked'
+  return charge.status === 'timeout' || charge.failureReason === 'timeout' ? 'timeout' : 'failed'
+}
+
 /**
  * What a slice's pages cost, as a scrape of each would (hostedCredits.ts scrapeCharge), and how many of each kind; with
- * `model` (the slice reserved the model's credits), two more for each page whose json called the model.
+ * `model` (the slice reserved the model's credits), two more for each page whose json called the model. `job_pages` counts
+ * them all, beside their kinds.
  */
 export function priceOf(charges: readonly SliceCharge[], model = false): { used: number; perKind: Partial<Record<UsageKind, number>> } {
   let used = 0
-  const perKind: Partial<Record<UsageKind, number>> = {}
+  const perKind: Partial<Record<UsageKind, number>> = charges.length > 0 ? { job_pages: charges.length } : {}
   for (const charge of charges) {
     const priced = scrapeCharge({ status: charge.status, lane: charge.lane, failureReason: charge.failureReason, evidenceRecord: { httpStatus: charge.httpStatus } } as Parameters<typeof scrapeCharge>[0])
     used += priced.credits
