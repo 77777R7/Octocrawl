@@ -14,6 +14,7 @@ runCli(process.argv.slice(2), {
   stdout: (text) => process.stdout.write(`${text}\n`),
   stderr: (text) => process.stderr.write(`${text}\n`),
   signal: controller.signal,
+  tty: process.stdout.isTTY === true,
 }).then((code) => { process.exitCode = code }, (error: unknown) => {
   process.stderr.write(`octocrawl: ${error instanceof Error ? error.message : String(error)}\n`)
   process.exitCode = 1

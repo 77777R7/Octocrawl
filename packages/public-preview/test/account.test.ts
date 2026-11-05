@@ -75,7 +75,7 @@ describe('the account page\'s data', () => {
   it('lists the account\'s request lines newest first, only its own and only the last 30 days', async () => {
     const { url, data, cookie } = await start()
     expect((await fetch(`${url}/api/account/activity`)).status).toBe(401)
-    const line = (id: string, at: string, extra = {}) => ({ id, at, endpoint: 'scrape', keyId: 'k'.repeat(64), url: 'https://example.org/', finalUrl: 'https://example.org/', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed', sha256: 'f'.repeat(64), links: null, kind: 'http', credits: 1, formats: null, ms: null, ...extra })
+    const line = (id: string, at: string, extra = {}) => ({ id, at, endpoint: 'scrape', keyId: 'k'.repeat(64), url: 'https://example.org/', finalUrl: 'https://example.org/', lane: 'http', status: 'success', httpStatus: 200, reason: null, robots: 'allowed', sha256: 'f'.repeat(64), links: null, kind: 'http', credits: 1, formats: null, ms: null, readiness: null, ...extra })
     data.requestLines.set('account-0001', [line('8209-b', '2026-10-10T08:00:00.000Z'), line('8208-a', '2026-10-11T07:00:00.000Z', { endpoint: 'map', links: 12 }), line('8300-old', '2026-09-01T00:00:00.000Z')])
     data.requestLines.set('someone-else', [line('8000-x', '2026-10-11T07:30:00.000Z')])
     const body = await (await fetch(`${url}/api/account/activity`, { headers: { cookie } })).json() as { requests: Array<{ id: string }>; limit: number; retentionDays: number }
@@ -174,13 +174,15 @@ describe('the account page\'s data', () => {
     const fetcher = (async (input: string | URL) => {
       if (String(input).startsWith('http://metadata.google.internal/')) return Response.json({ access_token: 'token' })
       return Response.json([
-        doc('1-a', { formats: { arrayValue: { values: [{ stringValue: 'markdown' }, { stringValue: 'json' }] } }, ms: { integerValue: '1834' } }),
-        doc('2-b', { formats: { arrayValue: {} }, ms: { integerValue: '12' } }),
+        doc('1-a', { formats: { arrayValue: { values: [{ stringValue: 'markdown' }, { stringValue: 'json' }] } }, ms: { integerValue: '1834' }, readiness: { stringValue: 'not_served' } }),
+        doc('2-b', { formats: { arrayValue: {} }, ms: { integerValue: '12' }, readiness: { stringValue: 'ready' } }),
         doc('3-c', {}),
       ])
     }) as typeof fetch
     const lines = await new FirestoreAccountData('octocrawl-test', fetcher).requests('account-0001', 10)
     expect(lines.map(line => [line.id, line.formats, line.ms])).toEqual([['1-a', ['markdown', 'json'], 1834], ['2-b', [], 12], ['3-c', null, null]])
+    // The scrape's readiness (2026-11-05) comes back as stored, and null on a line from before it.
+    expect(lines.map(line => line.readiness)).toEqual(['not_served', 'ready', null])
   })
 
   it('reads a job\'s Activity line with its pages by outcome, and leaves `job` off a call\'s line', async () => {

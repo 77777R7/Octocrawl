@@ -104,6 +104,34 @@ describe('the dashboard pages render', () => {
     select.value = 'playground'
     $('activity-filters').dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event)
     expect(rowsOf($('activity-body'))).toHaveLength(1)
+    // A filter that matches nothing is said as such, not as an account without requests; clearing it brings the default text back.
+    const search = $('f-search') as HTMLInputElement
+    search.value = 'nowhere.example'
+    $('activity-filters').dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event)
+    expect(rowsOf($('activity-body'))).toHaveLength(0)
+    expect($('activity-empty').hidden).toBe(false)
+    expect($('activity-empty').textContent).toBe('No requests match these filters.')
+    search.value = ''
+    select.value = ''
+    $('activity-filters').dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event)
+    expect($('activity-empty').hidden).toBe(true)
+    expect($('activity-empty').textContent).toMatch(/^No requests yet\./)
+  })
+
+  it('tells a success the site answered with another page (readiness not_served, #821) from a page that was read, on Activity and in the Results meter', async () => {
+    const shown = [
+      { ...line('2026-10-20T11:00:00.000Z', KEY_A, 1), url: 'https://docs.example/exhibitor/acme/', finalUrl: 'https://docs.example/', readiness: 'not_served' },
+      { ...line('2026-10-20T10:00:00.000Z', KEY_A, 1), readiness: 'ready' },
+    ]
+    const activity = await page('/dashboard/activity/', '', OCTOBER.now, octoberAnswers(shown))
+    const rows = rowsOf(activity.$('activity-body'))
+    expect(rows[0]).toContain('200 · another page')
+    expect(rows[1]).toContain('200')
+    expect(rows[1]).not.toContain('200 · another page')
+    const usage = await page('/dashboard/usage/', '', OCTOBER.now, octoberAnswers(shown), { width: 640 })
+    const results = [...usage.$('results-list').querySelectorAll('li p')].map(row => row.textContent)
+    expect(results).toContain('Read1 · 50%')
+    expect(results).toContain('Another page answered1 · 50%')
   })
 })
 
@@ -415,6 +443,51 @@ describe('the Playground takes over what the home page asked for', () => {
   })
 })
 
+describe('the Playground says what a result is', () => {
+  const record = {
+    requestedUrl: 'https://docs.example/a', finalUrl: 'https://docs.example/', fetchedAt: '2026-10-20T11:00:00.000Z', httpStatus: 200, status: 'success', reason: null, lane: 'http',
+    robotsDecision: { decision: 'disallowed', robotsUrl: 'https://docs.example/robots.txt', unreachable: 'timeout' }, rawSha256: 'f'.repeat(64), outputSha256: { markdown: 'e'.repeat(64) }, extractor: { name: 'extract-tf', version: 'extract-tf/48' },
+  }
+  const hint = 'docs.example answered https://docs.example/ in place of https://docs.example/a; check that the link is still live'
+  const elsewhere = { status: 'success', requestedUrl: 'https://docs.example/a', markdown: '# Home', warnings: [{ code: 'redirected_off_page', message: 'The site sent the request on.' }], readiness: { state: 'not_served', basis: ['redirected_off_page'] }, agentHints: [hint], evidenceRecord: record }
+  const run = async (answer: unknown) => {
+    const opened = await page('/dashboard/scrape/', '?url=https%3A%2F%2Fdocs.example%2Fa', OCTOBER.now, { ...octoberAnswers(), 'POST /api/account/run': [200, answer] })
+    opened.$('play-form').dispatchEvent(new opened.window.Event('submit', { bubbles: true, cancelable: true }))
+    await settle()
+    return opened
+  }
+  const evidenceRows = ($: Page['$']) => [...$('play-evidence').querySelectorAll('dt')].map((term, i) => [term.textContent, $('play-evidence').querySelectorAll('dd')[i]!.textContent])
+
+  it('marks a page the site answered in place of the one asked for, names both, and says the next step (#821)', async () => {
+    const { $ } = await run(elsewhere)
+    expect($('play-status').textContent).toBe('success · another page')
+    expect($('play-status').className).toBe('status warn')
+    expect($('play-detail').textContent).toMatch(/^Asked for https:\/\/docs\.example\/a; the site answered https:\/\/docs\.example\/ · HTTP 200 · http lane/)
+    expect($('play-next').hidden).toBe(false)
+    expect($('play-next').textContent).toBe(`Next: ${hint}`)
+    // The Evidence Record tells a robots.txt that could not be read from a rule the site wrote.
+    ;($('play-result').querySelector('[data-view="evidence"]') as HTMLElement).click()
+    await settle()
+    expect(evidenceRows($)).toContainEqual(['robots.txt', 'unreachable (timeout): counts as a disallow, not a rule the site wrote'])
+  })
+
+  it('shows a page that was read as read, with no next step, and a failed one with its reason and hint', async () => {
+    const read = { ...elsewhere, warnings: [], readiness: { state: 'ready', basis: [] }, agentHints: [], evidenceRecord: { ...record, finalUrl: 'https://docs.example/a', robotsDecision: { decision: 'allowed', robotsUrl: 'https://docs.example/robots.txt', unreachable: null } } }
+    const ok = await run(read)
+    expect(ok.$('play-status').textContent).toBe('success')
+    expect(ok.$('play-status').className).toBe('status ok')
+    expect(ok.$('play-detail').textContent).toMatch(/^https:\/\/docs\.example\/a · HTTP 200 · http lane/)
+    expect(ok.$('play-next').hidden).toBe(true)
+    ;(ok.$('play-result').querySelector('[data-view="evidence"]') as HTMLElement).click()
+    await settle()
+    expect(evidenceRows(ok.$)).toContainEqual(['robots.txt', 'allowed'])
+    const failed = await run({ status: 'failed', failureReason: 'timeout', requestedUrl: 'https://docs.example/a', markdown: null, agentHints: ['no lane answered within the request\'s deadline; raise timeout (up to 300000 ms over REST, 180000 ms from an MCP tool)'], evidenceRecord: { ...record, status: 'failed', reason: 'timeout', httpStatus: null, finalUrl: 'https://docs.example/a' } })
+    expect(failed.$('play-status').textContent).toBe('failed · timeout')
+    expect(failed.$('play-status').className).toBe('status bad')
+    expect(failed.$('play-next').textContent).toBe('Next: no lane answered within the request\'s deadline; raise timeout (up to 300000 ms over REST, 180000 ms from an MCP tool)')
+  })
+})
+
 describe('the account menu and the credit bars', () => {
   it('lists the account\'s places and the docs under the avatar, opens and closes from the keyboard', async () => {
     const { $, window } = await page('/dashboard/', '', OCTOBER.now, octoberAnswers())
@@ -617,7 +690,7 @@ describe('Receipts and Activity show the format and the duration', () => {
 describe('Settings', () => {
   it('shows the profile and the plan, and keeps preferences in this browser', async () => {
     const { $, window } = await page('/dashboard/settings/', '', OCTOBER.now, octoberAnswers())
-    expect([$('acct-email').textContent, $('acct-providers').textContent, $('acct-plan').textContent, $('acct-bought').textContent]).toEqual(['reader@example.com', 'GitHub', 'Free: 1,000 credits a month', 'None'])
+    expect([$('acct-email').textContent, $('acct-providers').textContent, $('acct-plan').textContent, $('acct-bought').textContent]).toEqual(['reader@example.com', 'GitHub', 'Free: 1,000 credits a month', 'None: credit packs are not sold yet'])
     const select = $('pref-view') as HTMLSelectElement
     expect(select.value).toBe('markdown')
     select.value = 'links'
@@ -756,5 +829,39 @@ describe('the Jobs page', () => {
     button().click()
     await settle()
     expect(opened).toEqual([link])
+  })
+})
+
+describe('the first five minutes explain themselves (2026-11-05 audit)', () => {
+  it('names bought credits beside the month\'s grant, and the Overview\'s MCP line is the sign-in URL', async () => {
+    const bought = { ...account(OCTOBER.resetsAt, usageOf(octoberLines())), credits: { remaining: 2382, monthly: { left: 988, of: 1000, resetsAt: OCTOBER.resetsAt }, purchased: 1394 } }
+    const { $ } = await page('/dashboard/', '', OCTOBER.now, { ...octoberAnswers(), 'GET /api/account': [200, bought] })
+    expect($('side-credits').textContent).toBe('2,382')
+    expect($('side-renews').textContent).toBe('of 1,000 this month + 1,394 bought · renews Nov 1 (UTC)')
+    expect($('ov-mcp').textContent).toBe('https://mcp.octocrawl.dev/mcp-oauth')
+    expect($('kpi-left').closest('.kpi')!.textContent).toContain('1 per page over HTTP · 5 per page in a browser · 0 when blocked or kept out')
+    expect([...$('ev-title').closest('.ev-copy')!.querySelectorAll('a')].map(a => a.textContent!.trim())).toEqual(['Try a page →', 'Connect your agent →', 'What a record holds'])
+  })
+
+  it('says on API keys what a key is for and where an agent goes instead, on both empty lists', async () => {
+    const none = { ...account(OCTOBER.resetsAt, usageOf(octoberLines())), keys: [] }
+    const { $, window } = await page('/dashboard/keys/', '', OCTOBER.now, { ...octoberAnswers(), 'GET /api/account': [200, none], 'GET /api/account/connections': [200, { connections: [] }] })
+    expect(window.document.querySelector('#keys-title + span + p, #keys-title')!.closest('section')!.querySelector('p')!.textContent).toContain('1,000 credits a month instead of the keyless 20 pages a day')
+    expect($('keys-empty').hidden).toBe(false)
+    expect($('keys-empty').querySelector('a')!.getAttribute('href')).toBe('/dashboard/connect/')
+    expect($('connections-empty').querySelector('a')!.getAttribute('href')).toBe('/dashboard/connect/')
+    expect([...window.document.querySelectorAll('th')].map(th => th.textContent)).toContain('Sends you back to')
+  })
+
+  it('tells Connect\'s local section as two steps, and the Playground what the cost chip means', async () => {
+    const connect = await page('/dashboard/connect/', '', OCTOBER.now, octoberAnswers())
+    expect(connect.$('c-local-code').textContent).toBe('npx octocrawl serve')
+    expect(connect.$('c-local-claude').textContent).toBe('claude mcp add octocrawl -- npx -y @octocrawl/mcp')
+    expect(connect.$('c-local').closest('section')!.textContent).toContain('Needs Node.js 22.13 or later')
+    expect(connect.$('agents-title').closest('section')!.textContent).toContain('claude mcp remove octocrawl')
+    const play = await page('/dashboard/scrape/', '', OCTOBER.now, octoberAnswers())
+    expect(play.$('play-summary').textContent).toBe('A page read over HTTP costs 1 credit, one that needs a browser 5, and one that is blocked or kept out by robots.txt nothing.')
+    const map = await page('/dashboard/map/', '', OCTOBER.now, octoberAnswers())
+    expect(map.$('play-summary').textContent).toBe('A map that finds URLs costs 1 credit; one that finds none costs nothing.')
   })
 })

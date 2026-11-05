@@ -14,6 +14,7 @@ vi.mock('@w2l/api', async (importOriginal) => {
 })
 
 import { COMMANDS, EVIDENCE_COLUMNS, flagName, optionKeys, parseCommandLine, runCli, usage } from '../src/index.js'
+import { verdictLine } from '../src/run.js'
 
 describe('flags', () => {
   it('names every API option in kebab case', () => {
@@ -74,7 +75,16 @@ describe('flags', () => {
     expect(() => parseCommandLine('scrape', ['u', '--mobile=yes'])).toThrow('--mobile is true or false')
     expect(() => parseCommandLine('scrape', ['u', '--no-mobile=false'])).toThrow('--no-mobile takes no value')
     expect(() => parseCommandLine('scrape', ['u', '--task-root='])).toThrow('--task-root takes a directory')
-    expect(() => parseCommandLine('map', ['u', '--out', 'dir'])).toThrow('unknown flag --out for octocrawl map')
+    // The command line's own flags on a command that does not take them are sent where they belong, and each command's help lists its own.
+    expect(() => parseCommandLine('map', ['u', '--out', 'dir'])).toThrow('--out is not taken by map: its answer is the JSON on stdout')
+    expect(() => parseCommandLine('batch', ['u', '--markdown'])).toThrow('--markdown prints a scrape\'s Markdown alone; a batch or crawl writes each page\'s Markdown to a file with --out <dir>')
+    expect(() => parseCommandLine('scrape', ['u', '--urls-file', 'f'])).toThrow('--urls-file <file> is a batch flag')
+    expect(() => parseCommandLine('batch', ['u', '--resume', 'x'])).toThrow('--resume <taskId> is a crawl flag')
+    expect(usage('scrape')).toMatch(/--markdown {3}print the Markdown alone/)
+    expect(usage('scrape')).toMatch(/--out <dir> {3}write results\.jsonl/)
+    expect(usage('batch')).toMatch(/--urls-file <file> {3}one URL per line/)
+    expect(usage('crawl')).toMatch(/--resume <taskId> {3}continue a crawl/)
+    expect(usage(null)).toContain('octocrawl --version prints the version')
     // A command runs no delivery worker, so it offers no webhook.
     expect(() => parseCommandLine('crawl', ['u', '--webhook', 'https://hooks.example/w'])).toThrow(/--webhook is not offered by the command line.*octocrawl serve/)
     expect(() => parseCommandLine('batch', ['u', '--webhook={"url":"https://hooks.example/w"}'])).toThrow(/--webhook is not offered/)
@@ -131,6 +141,39 @@ describe('octocrawl against a local site', () => {
     expect(await readFile(join(dir, files.find((file) => file.endsWith('.csv'))!), 'utf8')).toBe('Station,Height\r\n"North, ""outer""",4.2\r\n')
   })
 
+  it('says on stderr what a result that is not the page is, in every output mode, with the first hint', async () => {
+    // A page that answers after the deadline: --markdown prints nothing on stdout, and stderr says why and what to do.
+    const markdown = await cli(['scrape', `${origin}/slow`, '--timeout', '1000', '--markdown'])
+    expect(markdown.code).toBe(1)
+    expect(markdown.out).toBe('')
+    expect(markdown.err).toMatch(/^octocrawl scrape: failed \(timeout\); no lane answered within the request's deadline; raise timeout \(up to 300000 ms\)$/)
+    // The same line beside the JSON, and beside the files.
+    const json = await cli(['scrape', `${origin}/slow`, '--timeout', '1000'])
+    expect(json.code).toBe(1)
+    expect(JSON.parse(json.out)).toMatchObject({ status: 'failed', failureReason: 'timeout' })
+    expect(json.err).toMatch(/octocrawl scrape: failed \(timeout\); no lane answered/)
+    const dir = join(root, 'out-slow')
+    const written = await cli(['scrape', `${origin}/slow`, '--timeout', '1000', '--out', dir])
+    expect(written.code).toBe(1)
+    expect(written.err).toMatch(/octocrawl: wrote 1 results[\s\S]*octocrawl scrape: failed \(timeout\)/)
+    // A page that was read says nothing more on stderr unless stdout is a terminal, where one line says what the JSON holds.
+    const quiet = await cli(['scrape', `${origin}/tides/a`, '--markdown'])
+    expect(quiet.err).not.toMatch(/octocrawl scrape:/)
+    const err: string[] = []
+    const code = await runCli(['scrape', `${origin}/tides/a`], { env: { W2L_TASK_ROOT: join(root, 'tasks') }, stdout: () => {}, stderr: (text) => err.push(text), tty: true })
+    expect(code).toBe(0)
+    expect(err.at(-1)).toMatch(/^octocrawl scrape: success on the http lane; [\d,]+ characters of Markdown in the JSON above \(--markdown prints the Markdown alone, --out <dir> writes files\)$/)
+    // Without the markdown format there is no Markdown to count: the line names the formats instead.
+    const formatsErr: string[] = []
+    await runCli(['scrape', `${origin}/tides/a`, '--formats', 'links'], { env: { W2L_TASK_ROOT: join(root, 'tasks') }, stdout: () => {}, stderr: (text) => formatsErr.push(text), tty: true })
+    expect(formatsErr.at(-1)).toMatch(/^octocrawl scrape: success on the http lane; the links format in the JSON above/)
+    expect(verdictLine('scrape', { status: 'empty_verified' })).toBe('octocrawl scrape: empty_verified (the page was read and holds nothing to extract)')
+    expect(verdictLine('scrape', { status: 'success', warnings: [{ code: 'redirected_off_page', message: 'sent on' }], agentHints: ['example.test answered / in place of /x'] })).toBe('octocrawl scrape: success, but the site answered another page; example.test answered / in place of /x')
+    expect(verdictLine('scrape', { status: 'blocked', blockReason: 'login_wall', failureReason: null })).toBe('octocrawl scrape: blocked (login_wall)')
+    expect(verdictLine('scrape', { status: 'failed', failureReason: 'empty_unverified', warnings: [{ code: 'browser_not_installed', message: 'Chromium is not installed; run npx playwright install chromium' }] })).toBe('octocrawl scrape: failed (empty_unverified); Chromium is not installed; run npx playwright install chromium')
+    expect(verdictLine('scrape', { status: 'success' })).toBeNull()
+  })
+
   it('writes results.csv with one row of evidence per page, a failed page kept, hashes matching the files', async () => {
     const dir = join(root, 'out-batch')
     const unreachable = 'http://127.0.0.1:1/gone'
@@ -174,7 +217,20 @@ describe('octocrawl against a local site', () => {
     expect(refused.code).toBe(2)
     expect(refused.err).toMatch(/maxAge must be an integer number of milliseconds/)
     expect((await cli(['fetch', 'x'])).code).toBe(2)
-    expect((await cli(['scrape'])).err).toMatch(/takes one URL/)
+    expect((await cli(['scrape'])).err).toMatch(/^octocrawl scrape: takes one URL, got 0 \(octocrawl scrape --help\)$/)
+    // No command at all is an error: the usage goes to stderr with exit 2; asked for, it is the answer on stdout.
+    const bare = await cli([])
+    expect(bare).toMatchObject({ code: 2, out: '' })
+    expect(bare.err).toMatch(/^usage: octocrawl <command>/)
+    expect((await cli(['--help'])).out).toMatch(/^usage: octocrawl <command>/)
+    // A URL without its scheme is answered with the URL meant, before the API's own check.
+    expect(await cli(['scrape', 'example.com'])).toMatchObject({ code: 2, err: 'octocrawl scrape: "example.com" has no scheme; did you mean https://example.com?' })
+    // A local address is plain http; an IDN host and a port are still a host.
+    expect((await cli(['scrape', 'localhost:8787/x'])).err).toBe('octocrawl scrape: "localhost:8787/x" has no scheme; did you mean http://localhost:8787/x?')
+    expect((await cli(['scrape', '127.0.0.1:8787'])).err).toBe('octocrawl scrape: "127.0.0.1:8787" has no scheme; did you mean http://127.0.0.1:8787?')
+    expect((await cli(['scrape', 'bücher.de/a'])).err).toBe('octocrawl scrape: "bücher.de/a" has no scheme; did you mean https://bücher.de/a?')
+    expect((await cli(['batch', 'https://example.com/', 'not a url'])).err).toBe('octocrawl batch: "not a url" is not a URL: a URL starts with http:// or https://')
+    expect((await cli(['batch', 'https://example.com/', 'not a url', '--ignore-invalid-urls', '--max-concurrency', '1'])).code).toBe(0)
     // Every message names the command the person types.
     expect((await cli(['bogus'])).err).toMatch(/^octocrawl: unknown command bogus/)
     // A one-off command listens nowhere: a listen address for the API server in the environment is not its concern.
@@ -205,6 +261,8 @@ describe('octocrawl against a local site', () => {
     const batch = await cli(['batch', `${origin}/tides/b`, '--urls-file', urlsFile, '--max-concurrency', '2'])
     expect(batch.code).toBe(0)
     expect(batch.err).toMatch(/octocrawl batch: task [0-9a-f-]{36}/)
+    // One line on how it ended, and where the pages are.
+    expect(batch.err).toMatch(/octocrawl batch: completed; 3 of 3 pages read; the report and every page are the JSON above \(--out <dir> writes them as files\)$/)
     const answer = JSON.parse(batch.out)
     expect(answer.report).toMatchObject({ status: 'completed', requested: 3, completed: 3 })
     expect(answer.items.map((item: { url: string }) => item.url).sort()).toEqual([`${origin}/tides/a`, `${origin}/tides/b`, `${origin}/tides/c`])
@@ -255,7 +313,13 @@ describe('octocrawl against a local site', () => {
     }
     expect(status).toBe(200)
     controller.abort()
-    expect((await serving).code).toBe(0)
+    const served = await serving
+    expect(served.code).toBe(0)
+    // What it printed as it started: where it listens, how an agent reaches it (this port is not the default), how it stops.
+    expect(served.err).toMatch(new RegExp(`octocrawl local API listening on http://127\\.0\\.0\\.1:${port}`))
+    expect(served.err).toContain(`claude mcp add octocrawl -- npx -y @octocrawl/mcp (this server is not on the default port, so set W2L_API_URL=http://127.0.0.1:${port} where the MCP server runs)`)
+    expect(served.err).toContain('Ctrl-C stops the server')
+    expect(served.err).not.toContain('w2l-api')
   })
 })
 

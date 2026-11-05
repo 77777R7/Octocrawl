@@ -37,13 +37,17 @@ export class RepeatedScrapes {
   }
 }
 
-/** The hint for `count` scrapes of `host` in the window, from the third; null before it. `jobs` says whether this deployment lists batch_scrape to the caller. */
-export function repeatedScrapesHint(count: number, host: string, jobs: boolean): string | null {
+/**
+ * The hint for `count` scrapes of `host` in the window, from the third; null before it. `jobs` says whether this
+ * deployment lists batch_scrape to the caller; where it does not, `local` says whether this is a server on the person's
+ * computer started without the batch toolset (the flag lists it) or hosted Octocrawl to a caller without an account.
+ */
+export function repeatedScrapesHint(count: number, host: string, jobs: boolean, local = false): string | null {
   if (count < REPEATED_SCRAPES_FROM) return null
   const seen = `${count} scrapes of ${host} in the last 10 minutes`
-  return jobs
-    ? `${seen}: a known list of URLs runs as one batch_scrape (then wait_batch and get_batch_items), a section of a site as one crawl, and map lists a site's URLs without reading each page`
-    : `${seen}: with an account's connection a known list of URLs runs as one batch_scrape job (then wait_batch and get_batch_items); or run Octocrawl on your computer (npx octocrawl serve) for batch_scrape and crawl`
+  if (jobs) return `${seen}: a known list of URLs runs as one batch_scrape (then wait_batch and get_batch_items), a section of a site as one crawl, and map lists a site's URLs without reading each page`
+  if (local) return `${seen}: this server does not list batch_scrape (its batch toolset is off, or it is read-only); started with --toolsets=all and without --read-only, a known list of URLs runs as one batch_scrape and a section of a site as one crawl`
+  return `${seen}: with an account's connection a known list of URLs runs as one batch_scrape job (then wait_batch and get_batch_items); or run Octocrawl on your computer (npx octocrawl serve) for batch_scrape and crawl`
 }
 
 /** A URL's host as a site is counted: lower-cased, one leading `www.` removed (www and the apex are one site, as map and crawl count them); null for no http(s) URL. */
@@ -60,10 +64,10 @@ export function hostOf(url: unknown): string | null {
 const MAX_AGENT_HINTS = 5
 
 /** A scrape's result with the hint for `count` scrapes of its URL's host appended to its agentHints; the result as it was when there is none, or when the page's own hints already fill the five. */
-export function withRepeatedScrapesHint(result: unknown, url: unknown, count: number, jobs: boolean): unknown {
+export function withRepeatedScrapesHint(result: unknown, url: unknown, count: number, jobs: boolean, local = false): unknown {
   const host = hostOf(url)
   if (host === null || result === null || typeof result !== 'object' || Array.isArray(result)) return result
-  const hint = repeatedScrapesHint(count, host, jobs)
+  const hint = repeatedScrapesHint(count, host, jobs, local)
   if (hint === null) return result
   const existing = (result as { agentHints?: unknown }).agentHints
   const hints = Array.isArray(existing) ? existing : []
