@@ -28,6 +28,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **`octocrawl serve` says how to connect to it.** It printed three `w2l-api:` lines and "listening on", and `GET /` on it was a 404. It now starts with `octocrawl local API listening on http://127.0.0.1:8787`, then one line with the Claude Code command (`claude mcp add octocrawl -- npx -y @octocrawl/mcp`, plus `W2L_API_URL=…` when the port is not 8787), where other clients' setups are, the REST address and that Ctrl-C stops it; its notices say `octocrawl:`; `GET /` answers what the server is, its routes and that command.
 - **A hosted `browser_busy` refusal says what to do instead, and connections say the rule before it happens.** Its hints used to lead with "retry after 10 s, when the running call ends", though a running call can take up to 5 minutes. They now name a batch job first where the account can run one, then `fastMode: true` with when it helps, then the wait as it really is. The hosted MCP instructions, and `scrape`'s description where `batch_scrape` is listed, say that one scrape runs at a time. What is refused has not changed.
 
 ## 0.8.3 — 2026-11-05

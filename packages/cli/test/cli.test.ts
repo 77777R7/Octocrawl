@@ -255,7 +255,13 @@ describe('octocrawl against a local site', () => {
     }
     expect(status).toBe(200)
     controller.abort()
-    expect((await serving).code).toBe(0)
+    const served = await serving
+    expect(served.code).toBe(0)
+    // What it printed as it started: where it listens, how an agent reaches it (this port is not the default), how it stops.
+    expect(served.err).toMatch(new RegExp(`octocrawl local API listening on http://127\\.0\\.0\\.1:${port}`))
+    expect(served.err).toContain(`claude mcp add octocrawl -- npx -y @octocrawl/mcp (this server is not on the default port, so set W2L_API_URL=http://127.0.0.1:${port} where the MCP server runs)`)
+    expect(served.err).toContain('Ctrl-C stops the server')
+    expect(served.err).not.toContain('w2l-api')
   })
 })
 
