@@ -28,6 +28,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A hosted `browser_busy` refusal says what to do instead, and connections say the rule before it happens.** Its hints used to lead with "retry after 10 s, when the running call ends", though a running call can take up to 5 minutes. They now name a batch job first where the account can run one, then `fastMode: true` with when it helps, then the wait as it really is. The hosted MCP instructions, and `scrape`'s description where `batch_scrape` is listed, say that one scrape runs at a time. What is refused has not changed.
+
 ## 0.8.3 — 2026-11-05
 
 The published packages at 0.8.3. **Many pages as one job, and three fixes:** from a caller's third `scrape` of one host within ten minutes, the answer names `batch_scrape`, `crawl` and `map`; a batch's `maxConcurrency` takes any integer from 1 and the server lowers it to its worker count; Skyscanner's human check is named on its market domains; a robots.txt lookup gets 5 s again.

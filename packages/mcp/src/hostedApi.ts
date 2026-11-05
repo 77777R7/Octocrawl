@@ -29,7 +29,7 @@ import type { RegexStats } from '@w2l/runtime'
 import { W2L } from '@w2l/sdk'
 import { createMcpServer, MCP_VERSION, SERVER_IDENTITY } from './server.js'
 import { RepeatedScrapes } from './repeatedScrapes.js'
-import { serverInstructions } from './instructions.js'
+import { oneScrapeAtATime, serverInstructions } from './instructions.js'
 import { MAX_WAIT_MS, MCP_SCRAPE_TIMEOUT_MS, SCRAPE_RECORD_HINT, TOOLS } from './tools.js'
 import { scrapeSchemaWithout } from './toolsets.js'
 import { InFlightCalls, trackPost } from './inFlight.js'
@@ -207,6 +207,22 @@ export const KEY_PER_MINUTE = 60
 export const HOSTED_REQUEST_TIMEOUT_MS = 300_000
 /** How long a browser-lane lease is held at most: the request timeout and a margin, so a lease left by a crash frees itself. */
 export const BROWSER_LEASE_MS = HOSTED_REQUEST_TIMEOUT_MS + 10_000
+
+/**
+ * What a scrape refused by the lease is told, the way past the lease first. Retry-After is when to ask again, capped at
+ * BROWSER_BUSY_RETRY_MAX_S; the lease stays held for as long as the running call runs. A Playground run (`site`) gets the
+ * wait alone: the dashboard shows the first hint and offers neither way past. An OAuth connection has MCP calls only, so
+ * no REST route to name and a shorter longest call. `batchJobs`: a job this account starts now would be taken.
+ */
+function browserBusyHints(retryAfterSeconds: number, via: HostedCaller['via'], batchJobs: boolean): string[] {
+  if (via === 'site') return [`ask again in ${retryAfterSeconds} s: the run before this one may still be going then`]
+  const longestMs = via === 'oauth' ? HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS : HOSTED_REQUEST_TIMEOUT_MS
+  return [
+    ...(batchJobs ? [`several URLs run as one batch job, which does not wait for this: ${via === 'oauth' ? 'batch_scrape' : 'batch_scrape, or POST /v1/batches'}`] : []),
+    'scrape with fastMode: true reads this page now over HTTP alone, which helps only if its text does not come from scripts; it takes no waitFor or screenshot',
+    `or ask again in ${retryAfterSeconds} s: the running call can take up to ${longestMs / 60_000} minutes, so this may be refused again`,
+  ]
+}
 /** Requests of any kind per minute from one address, counted before the key lookup, so unknown keys cannot drive the key store. */
 export const ADDRESS_PER_MINUTE = 120
 /** A file (PDF, CSV, ...) a hosted call may read: the preview's cap. Files land under the task root, which Cloud Run keeps in memory. */
@@ -234,15 +250,20 @@ const REMEMBERED_CALLERS = 20_000
 /** The tools the remote endpoint offers; the rest are refused by name. */
 export const HOSTED_API_TOOLS: ReadonlySet<string> = new Set(['scrape', 'map', 'scrape_product'])
 
+/** A tool's description here: scrape names get_scrape only to a connection that lists it (`jobs`), and there, with the browser lane, the lease's rule and batch_scrape, the way past it. */
+function hostedDescription(tool: { name: string; description: string }, browser: boolean, jobs: boolean): string {
+  if (!jobs) return tool.description.replace(SCRAPE_RECORD_HINT, '')
+  return tool.name === 'scrape' && browser ? `${tool.description} ${oneScrapeAtATime(true)}` : tool.description
+}
+
 /** The tools hosted Octocrawl lists to a caller: scrape_product only to a key with the browser lane, since it needs one,
  * so every tool a client sees can answer. All are read-only here: hosted Octocrawl refuses page actions and logins.
- * scrape's description names get_scrape only to a connection that lists it (`jobs`), and its verify the regular-expression
- * checks only on a server that takes them (`regexChecks`, HostedApiConfig). */
+ * scrape's verify names the regular-expression checks only on a server that takes them (`regexChecks`, HostedApiConfig). */
 export function hostedTools(browser: boolean, jobs = false, regexChecks = false) {
   return TOOLS.filter((tool) => (HOSTED_API_TOOLS.has(tool.name) && (browser || tool.name !== 'scrape_product')) || (jobs && HOSTED_JOB_TOOLS.has(tool.name)))
     .map((tool) => HOSTED_JOB_TOOLS.has(tool.name) ? hostedJobTool(tool, browser) : ({
       ...tool,
-      description: jobs ? tool.description : tool.description.replace(SCRAPE_RECORD_HINT, ''),
+      description: hostedDescription(tool, browser, jobs),
       inputSchema: hostedInputSchema(tool.name, tool.inputSchema, browser, regexChecks),
       annotations: { ...tool.annotations, readOnlyHint: true },
       _meta: { ...('_meta' in tool ? tool._meta : {}), ...HOSTED_INVOCATION[tool.name as keyof typeof HOSTED_INVOCATION] },
@@ -656,6 +677,8 @@ export interface HostedCaller {
   plan: string
   /** The account whose credits the call spends; absent for keyless callers and keys issued by hand. */
   uid?: string
+  /** How an account's call came other than with its key: an OAuth connection, or the dashboard's Playground through the site. */
+  via?: 'oauth' | 'site'
 }
 
 /** A Map that forgets its oldest entries past a size, so what callers make it remember stays bounded. */
@@ -829,7 +852,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (token === null || token.resource !== MCP_OAUTH_RESOURCE || !(token.expiresAt > (config.now ?? Date.now)()) || !SITE_UID.test(token.keyId)) return null
     const record = await config.keys.lookup(token.keyId, { fresh })
     if (record === null || !record.enabled || record.kind !== 'oauth' || record.uid === undefined) return null
-    return { kind: 'key', id: token.keyId, uid: record.uid, dailyLimit: 0, browser: record.browser, plan: 'account' }
+    return { kind: 'key', id: token.keyId, uid: record.uid, dailyLimit: 0, browser: record.browser, plan: 'account', via: 'oauth' }
   }
 
   /**
@@ -888,7 +911,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (signed !== undefined) {
       const uid = verifySiteAccount(config.hashKey, signed)
       if (uid === null) return refuse(c, 401, 'unauthorized', 'the site\'s account header is not valid, or it expired', ['sign in again at https://octocrawl.dev/dashboard/'])
-      caller = { kind: 'key', id: `playground:${uid}`, uid, dailyLimit: 0, browser: true, plan: 'account' }
+      caller = { kind: 'key', id: `playground:${uid}`, uid, dailyLimit: 0, browser: true, plan: 'account', via: 'site' }
     } else {
       // Every request counts against its address first, before any lookup, so a flood of made-up keys reaches no store.
       // A call the MCP handler makes in this process (a wait's polls among them) was counted with its MCP POST.
@@ -924,7 +947,9 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     if (path === '/v1/scrape' && caller.kind === 'key' && caller.browser && !(await asksHttpOnly(c))) {
       const taken = await leases.acquire(`browser-${caller.id}`, BROWSER_LEASE_MS, now)
       if (!taken.ok) {
-        return refuse(c, 429, 'browser_busy', 'this key already has a scrape running on the browser lane: one at a time per key', [`retry after ${taken.retryAfterSeconds} s, when the running call ends`, 'or send fastMode: true to read this page over HTTP alone'], { 'Retry-After': String(taken.retryAfterSeconds) })
+        // Jobs take no such lease, so an account that can run one is pointed at it. A failed read only leaves the hint out: this stays a 429.
+        const batchJobs = jobRoutes !== null && caller.uid !== undefined && await jobRoutes.accepts(caller.uid).catch(() => false)
+        return refuse(c, 429, 'browser_busy', 'this key already has a scrape running on the browser lane: one at a time per key', browserBusyHints(taken.retryAfterSeconds, caller.via, batchJobs), { 'Retry-After': String(taken.retryAfterSeconds) })
       }
       lease = taken
     }

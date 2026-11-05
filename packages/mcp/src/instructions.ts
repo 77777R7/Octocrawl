@@ -10,6 +10,14 @@ export type InstructionsSurface =
   | { kind: 'local'; /** Started with --read-only: scrape does not act as the person (docs/mcp-client-ux-tasks.md W10.2). */ readOnly?: boolean }
   | { kind: 'hosted'; connection: 'keyless' | 'key' | 'oauth'; browser: boolean; /** A keyless caller from Claude's egress range, whose allowance every such connector shares. */ sharedPool?: boolean }
 
+/**
+ * The rule behind browser_busy on a connection with the browser lane (the lease in hostedApi.ts): said here and, where
+ * batch_scrape is listed, in scrape's description, since a client can load either one without the other.
+ */
+export function oneScrapeAtATime(listsBatch: boolean): string {
+  return `One scrape runs at a time on this key or sign-in unless fastMode is true: parallel calls come back browser_busy, so ${listsBatch ? 'send many URLs as one batch_scrape' : 'send them in turn'}.`
+}
+
 export function serverInstructions(toolNames: Iterable<string>, surface: InstructionsSurface): string {
   const tools = new Set(toolNames)
   const has = (...names: string[]) => names.every((name) => tools.has(name))
@@ -51,7 +59,7 @@ export function serverInstructions(toolNames: Iterable<string>, surface: Instruc
         ? 'This connection spends the signed-in account\'s credits: 1 per HTTP page, 5 per browser page, 1 per map, 2 more for a page whose json modelFallback called the model.'
         : 'With a key, pages count against the key\'s daily allowance, or an account\'s credits: 1 per HTTP page, 5 per browser page, 1 per map, 2 more for a page whose json modelFallback called the model.'
       const lane = surface.browser
-        ? 'A page that needs scripts goes on to the browser lane; fastMode: true keeps a call over HTTP alone, and waitFor above 0 starts in the browser.'
+        ? `A page that needs scripts goes on to the browser lane; fastMode: true keeps a call over HTTP alone, and waitFor above 0 starts in the browser. ${oneScrapeAtATime(has('batch_scrape'))}`
         : 'This connection reads over HTTP alone: it has no browser lane.'
       lines.push(`${spends} ${lane}`)
     }
