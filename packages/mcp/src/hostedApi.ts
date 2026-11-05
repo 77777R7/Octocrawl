@@ -861,7 +861,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
   const accountDaily = config.accountDaily ?? DEFAULT_ACCOUNT_DAILY
   const accountsDaily = config.accountsDaily ?? DEFAULT_ACCOUNTS_DAILY
   // Signing in is free and its credits are outside every keyless pool, so a caller without an account is told so first.
-  const signInHint = `sign in free for ${(config.monthlyCredits ?? DEFAULT_MONTHLY_CREDITS).toLocaleString('en-US')} credits a month: an MCP client connects to ${MCP_OAUTH_RESOURCE} and signs in there, and the API takes a key made at https://octocrawl.dev/signin/?utm_source=hosted&utm_medium=quota`
+  const signInHint = `sign in free for ${(config.monthlyCredits ?? DEFAULT_MONTHLY_CREDITS).toLocaleString('en-US')} credits a month: an MCP client connects to ${MCP_OAUTH_RESOURCE} and signs in there (a client that already lists this keyless server as octocrawl removes that entry first, e.g. claude mcp remove octocrawl), and the API takes a key made at https://octocrawl.dev/signin/?utm_source=hosted&utm_medium=quota`
   const waitForRefusal = (lacks: keyof typeof WAIT_FOR_REFUSALS): RequestError =>
     new RequestError(WAIT_FOR_REFUSALS[lacks], 'invalid_request', undefined, ['leave out waitFor to read this page over HTTP alone', ...(lacks === 'keyless' ? [signInHint] : []), LOCAL_HINT])
   const policy = hostedPolicy(config.networkPolicy ?? hostedNetworkPolicy(), env)
@@ -1347,7 +1347,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     const invited = account && await jobRoutes!.allows(caller.uid!)
     const jobs = account && invited
     const tools = oauth ? oauthTools(caller.browser, jobs, config.regexChecks === true) : hostedTools(caller.browser === true, jobs, config.regexChecks === true)
-    const instructions = serverInstructions(tools.map((tool) => tool.name), { kind: 'hosted', connection: oauth ? 'oauth' : caller.kind === 'key' ? 'key' : 'keyless', browser: caller.browser === true, sharedPool: caller.kind === 'keyless' && caller.pool === 'claude' })
+    const instructions = serverInstructions(tools.map((tool) => tool.name), { kind: 'hosted', connection: oauth ? 'oauth' : caller.kind === 'key' ? 'key' : 'keyless', browser: caller.browser === true, sharedPool: caller.kind === 'keyless' && caller.pool === 'claude', ...(caller.kind === 'keyless' ? { allowance: caller.dailyLimit } : {}) })
     await serveMcpPost(req, res, parsed, () => createMcpServer(client, {
       allowedTools: jobs ? new Set([...HOSTED_API_TOOLS, ...HOSTED_JOB_TOOLS]) : HOSTED_API_TOOLS,
       tools,

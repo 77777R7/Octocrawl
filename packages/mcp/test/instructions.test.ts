@@ -41,6 +41,10 @@ describe('server instructions and identity', () => {
     expect(shared).toContain('every Claude connector without a key shares')
     expect(shared).not.toContain('per address')
     expect(serverInstructions(['scrape', 'map'], { kind: 'hosted', connection: 'keyless', browser: false })).toContain('per address')
+    // The number, and that every call counts, where the server knows them: a caller otherwise learns the allowance when it is gone.
+    const counted = serverInstructions(['scrape', 'map'], { kind: 'hosted', connection: 'keyless', browser: false, allowance: 20 })
+    expect(counted).toContain('within a daily allowance of 20 pages per address (every call counts, whether or not a page came back; it resets at 00:00 UTC)')
+    expect(serverInstructions(['scrape', 'map'], { kind: 'hosted', connection: 'keyless', browser: false, sharedPool: true, allowance: 200 })).toContain('a daily allowance of 200 pages that every Claude connector without a key shares')
     const local = serverInstructions(['scrape', 'crawl', 'get_crawl', 'get_crawl_pages'], { kind: 'local' })
     expect(local).not.toMatch(/did not run/)
     expect(local).toContain('may still have begun')

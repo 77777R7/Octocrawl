@@ -23,6 +23,8 @@ export interface McpServerOptions {
   calls?: PostCalls
   /** What initialize tells the client about this server; by default written from the tools it lists, for a local server. */
   instructions?: string
+  /** A line added after the instructions: what the server found at start (its API not answering) that the first call will meet. */
+  instructionsNote?: string
   /** Said after "this server offers ..." when a client calls a tool this deployment leaves out: where the tool does run, or how to list it. */
   unavailableHint?: string | ((tool: string) => string | undefined)
   /** The API this server calls, named when it cannot be reached (a local server's base URL). */
@@ -74,7 +76,8 @@ export function mcpOrigin(client: { name: string; version: string } | undefined)
 
 export function createMcpServer(client: W2L, options: McpServerOptions = {}): Server {
   const listed = options.tools ?? TOOLS.filter(tool => options.allowedTools === undefined || options.allowedTools.has(tool.name))
-  const instructions = options.instructions ?? serverInstructions(listed.map(tool => (tool as { name: string }).name), { kind: 'local' })
+  const written = options.instructions ?? serverInstructions(listed.map(tool => (tool as { name: string }).name), { kind: 'local' })
+  const instructions = options.instructionsNote === undefined ? written : `${written}\n${options.instructionsNote}`
   // A minimal result keeps a scrape's record id where get_scrape is listed to read it back.
   const keepScrapeId = listed.some(tool => (tool as { name: string }).name === 'get_scrape')
   // The hint on repeated scrapes names batch_scrape where this deployment lists it, else where it runs (repeatedScrapes.ts).
