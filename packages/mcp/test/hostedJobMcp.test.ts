@@ -11,7 +11,7 @@ import { hostedNetworkPolicy } from '@w2l/contracts'
 import { accessTokenDigest, createHostedApi, HOSTED_JOB_TOOLS, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, siteAccountAssertion, type HostedKeyRecord, type HostedLeases } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
 import { MemoryHostedJobStore, type HostedJob } from '../src/hostedJobs.js'
-import type { JobFiles } from '../src/hostedJobRoutes.js'
+import { jobStatus, type JobFiles } from '../src/hostedJobRoutes.js'
 
 // Hosted job tools over MCP (ROADMAP PH H2, docs/h2-hosted-jobs-tasks.md M1–M3, M5): an account's connection lists the
 // crawl and batch tools, which call the job routes through the gate; no worker runs here, a test writes a slice's pages.
@@ -242,6 +242,26 @@ describe('hosted job tools over MCP', () => {
       const items = ((result as { structuredContent?: unknown }).structuredContent === undefined ? JSON.parse(text(result)) : structured(result)).items as Array<Record<string, unknown>>
       expect(items[0], name).toMatchObject({ usage: { credits: 1 }, trace: [{ step: 'fetch', ms }], evidenceRecord })
     }
+  })
+
+  it('answers a hosted batch\'s start with the floor for reading every URL, none under maxCredits, and again on a replay', async () => {
+    const { connect } = await start()
+    const client = await connect('oc_account')
+    const urls = [1, 2, 3, 4, 5, 6, 7].map((n) => `https://example.com/${n}`)
+    const started = structured(await client.callTool({ name: 'batch_scrape', arguments: { urls, idempotencyKey: 'floor-1' } }))
+    // Seven pages of one host, 250 ms apart: 1.5 s, said in whole seconds.
+    expect(started.minimumSeconds).toBe(1)
+    expect(structured(await client.callTool({ name: 'batch_scrape', arguments: { urls, idempotencyKey: 'floor-1' } }))).toMatchObject({ replayed: true, minimumSeconds: 1 })
+    expect(structured(await client.callTool({ name: 'get_batch', arguments: { id: started.taskId as string } })).rate).toEqual({ pagesPerMinute: null, etaSeconds: null, measuredPages: 0 })
+  })
+
+  it('measures a hosted batch\'s rate from its first slice, not from its wait in the queue, and says none for a crawl or a job that ended', () => {
+    const job = { id: 'j', kind: 'batch', status: 'running', failureReason: null, request: { urls: Array.from({ length: 1_000 }, (_, i) => `https://example.com/${i}`) }, counts: { pages: 10, errors: 0, slices: 1 }, credits: { used: 10, maxCredits: null }, createdAt: '2026-11-05T00:00:00.000Z', startedAt: '2026-11-05T00:40:00.000Z', finishedAt: null, expireAt: '2026-11-12T00:00:00.000Z' } as unknown as HostedJob
+    // 40 minutes in the queue, then 10 pages in 20 s: 30 a minute, 33 minutes left, not 66 hours.
+    expect(jobStatus(job, Date.parse('2026-11-05T00:40:20.000Z')).rate).toEqual({ pagesPerMinute: 30, etaSeconds: 1_980, measuredPages: 10 })
+    expect(jobStatus({ ...job, startedAt: null, counts: { pages: 0, errors: 0, slices: 0 }, status: 'queued' }, Date.parse('2026-11-05T00:40:20.000Z')).rate).toEqual({ pagesPerMinute: null, etaSeconds: null, measuredPages: 0 })
+    expect(jobStatus({ ...job, status: 'completed' })).not.toHaveProperty('rate')
+    expect(jobStatus({ ...job, kind: 'crawl', request: { url: 'https://example.com/' } })).not.toHaveProperty('rate')
   })
 
   it('projects a hosted batch\'s items to the fields asked for, keeping url and status', async () => {

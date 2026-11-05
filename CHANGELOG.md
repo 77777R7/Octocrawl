@@ -30,6 +30,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A batch says how long it should take, from what it knows.** A start answers `minimumSeconds`, the floor the per-host interval sets for reading every URL, and a running batch's status (`GET /v1/batches/:id`, `get_batch`, `wait_batch`) carries `rate`: `pagesPerMinute`, `etaSeconds` and `measuredPages`, measured on its own pages, so an agent knows when to come back. Both numbers are null until 5 pages have been read: no estimate is made from other sites. A local server measures on its latest 20 pages of the run, a hosted job on all of them since its first slice. `rate` is absent once the batch has ended.
+
 ## 0.8.5 — 2026-11-06
 
 The published packages at 0.8.5. **A page that shows the wrong thing can now fail its contract:** `markdownExcludes` refuses a page that holds a given text, beside a check of what it must hold. The MCP instructions teach a directory as URLs first, then one `batch_scrape`; a hosted call with `access: "enhanced"` can read a site whose robots.txt the hosted network cannot reach; a `screenshot` is refused for what the caller lacks.

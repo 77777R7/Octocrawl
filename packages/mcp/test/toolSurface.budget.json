@@ -58,7 +58,7 @@
     },
     "wait_batch": {
       "inputBytes": 161,
-      "descriptionChars": 181
+      "descriptionChars": 255
     },
     "cancel_batch": {
       "inputBytes": 102,
@@ -262,7 +262,7 @@
     },
     "wait_batch": {
       "inputBytes": 161,
-      "descriptionChars": 181
+      "descriptionChars": 255
     },
     "get_batch_errors": {
       "inputBytes": 183,

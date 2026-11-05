@@ -677,6 +677,49 @@ export interface BatchAccepted extends CrawlAccepted {
   invalidURLs?: string[]
   requested?: number
   appended?: number
+  /**
+   * The soonest every URL of a new batch can be read, in whole seconds, rounded down: the wait the server keeps between
+   * two pages of one host, on the host with most URLs (batchFloorSeconds). A floor, not an estimate: nothing is known yet
+   * of how fast these pages answer. A batch stopped early (a cancel, a budget, credits that run out) ends sooner. Absent
+   * when it is under a second, on an append, and on a hosted start with `maxCredits`.
+   */
+  minimumSeconds?: number
+}
+
+/** How fast a running batch is reading, measured on its own pages (`rate` on its status); never an estimate from other sites. */
+export interface BatchRate {
+  /** Pages a minute over the pages measured, 1 decimal place; null until enough have been read (BATCH_RATE_MIN_PAGES). */
+  pagesPerMinute: number | null
+  /** Seconds until the rest are read at that rate, rounded up; null with `pagesPerMinute`. */
+  etaSeconds: number | null
+  /** The pages the rate was measured on. */
+  measuredPages: number
+}
+
+/** The fewest pages a rate is said on: fewer say more about one slow page than about the batch. */
+export const BATCH_RATE_MIN_PAGES = 5
+/** The latest pages of the run a local server measures on, so a host slowed mid-run shows in the rate within this many pages. */
+export const BATCH_RATE_WINDOW_PAGES = 20
+
+/** The rate of `pages` read in `spanMs`, and the time left for `remaining` at it. Too few pages, or no time passed, is not a rate. */
+export function batchRate(input: { pages: number; spanMs: number; remaining: number }): BatchRate {
+  const { pages, spanMs, remaining } = input
+  if (pages < BATCH_RATE_MIN_PAGES || spanMs <= 0) return { pagesPerMinute: null, etaSeconds: null, measuredPages: pages }
+  const perMs = pages / spanMs
+  return { pagesPerMinute: Math.round(perMs * 60_000 * 10) / 10, etaSeconds: Math.ceil(remaining / perMs / 1_000), measuredPages: pages }
+}
+
+/**
+ * The soonest `urls` can all be read at `perHostMinDelayMs` between two page starts on a host, in whole seconds, rounded down: the
+ * host with most URLs, its starts in a row. A robots.txt Crawl-delay or a slowdown only adds to it.
+ */
+export function batchFloorSeconds(urls: readonly string[], perHostMinDelayMs: number): number {
+  const perHost = new Map<string, number>()
+  for (const url of urls) {
+    const host = new URL(url).hostname
+    perHost.set(host, (perHost.get(host) ?? 0) + 1)
+  }
+  return Math.floor((Math.max(1, ...perHost.values()) - 1) * perHostMinDelayMs / 1_000)
 }
 
 export interface BatchStatusResponse extends CrawlReport {
@@ -696,6 +739,11 @@ export interface BatchStatusResponse extends CrawlReport {
    * normal pages in a row have brought its wait back to the baseline.
    */
   pacing?: Readonly<Record<string, HostPace>>
+  /**
+   * While the batch runs: how fast it is reading and how long the rest should take at that rate, measured on its own pages
+   * (a local server: its latest 20 of this run; a hosted job: all of them since its first slice). Absent once it has ended.
+   */
+  rate?: BatchRate
   /** The entries `ignoreInvalidURLs` skipped at submission; present exactly when the option was on. */
   invalidURLs?: readonly string[]
   /** Items stopped at a check a person can get through in their own Chrome (`POST /v1/batches/:id/handoff`); present on a server that offers the handoff. */
