@@ -97,9 +97,13 @@ export async function runApiServer(argv: readonly string[], env: NodeJS.ProcessE
   const url = `http://${listen.host}:${port}`
   log(`octocrawl ${listen.mode} API listening on ${url}`)
   // The line a person who just started it needs: how an agent reaches it, and how it stops. A self-hosted server's clients take --base-url and --token instead.
-  if (listen.mode === 'local') {
-    const elsewhere = url === 'http://127.0.0.1:8787' ? '' : ` (this server is not on the default port, so set W2L_API_URL=${url} where the MCP server runs)`
+  const loopback = listen.host === '127.0.0.1' || listen.host === 'localhost' || listen.host === '::1'
+  if (listen.mode === 'local' && loopback) {
+    const elsewhere = port === 8787 ? '' : ` (this server is not on the default port, so set W2L_API_URL=http://127.0.0.1:${port} where the MCP server runs)`
     log(`octocrawl: connect Claude Code with: claude mcp add octocrawl -- npx -y @octocrawl/mcp${elsewhere}; other clients run npx -y @octocrawl/mcp as their MCP server (https://octocrawl.dev/docs/connect-mcp/#run-it-on-your-computer); REST is POST ${url}/v1/scrape; Ctrl-C stops the server`)
+  } else if (listen.mode === 'local') {
+    // Bound to another address, the server took a token: an MCP server elsewhere needs the machine's address and that token, not the bind address.
+    log(`octocrawl: an MCP server on another machine reaches this one with W2L_API_URL=http://<this machine's address>:${port} and W2L_API_TOKEN=<the token this server was started with> (npx -y @octocrawl/mcp); Ctrl-C stops the server`)
   }
   return { url, close }
 }
