@@ -55,7 +55,7 @@ export interface PageOptions extends Omit<FetchOptions, 'robotsOverride' | 'incl
    * when the http lane asked for the browser lane. Not a lane option: the
    * engine selects channels by it. Default false. A URL the server binds to
    * the browser lane refuses it with HTTP 400, and so does a `waitFor` above 0
-   * beside it.
+   * or a screenshot beside it.
    */
   fastMode?: boolean
   /**

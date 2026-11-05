@@ -451,6 +451,22 @@ describe('hosted job worker', () => {
     expect(refusals.map((line) => line.message)).toEqual([expect.stringMatching(/^includeTags entry uses .*: div:has\(p\)/), expect.stringMatching(/^includeTags entry uses .*: div:has\(p\)/)])
   })
 
+  it('fails a job stored with a screenshot and fastMode at its first slice, by its reason, instead of retrying it to delivery_failed: the rungs, which refused it, run outside the refusal\'s catch', async () => {
+    const { origin, seen, store, credits, deps, create, queue } = await setup()
+    const lines: string[] = []
+    deps.log = (line) => lines.push(line)
+    for (const [kind, request] of [['batch', parseBatchStartRequest({ urls: [`${origin}/a`], fastMode: true, formats: ['screenshot'] })], ['crawl', parseCrawlStartRequest({ url: `${origin}/`, fastMode: true, formats: ['screenshot'] })]] as const) {
+      const id = await create(request, kind)
+      queue.splice(queue.findIndex((task) => task.jobId === id), 1)
+      expect(await runJobSlice(deps, id, 0), kind).toEqual({ status: 200, outcome: 'failed' })
+      expect(await store.get(id), kind).toMatchObject({ status: 'failed', failureReason: 'request_refused', failedAttempts: 0, lease: null, counts: { pages: 0, errors: 0 } })
+    }
+    expect(seen).toEqual([])
+    expect(await credits.balance('account-1', NOW)).toBe(1_000)
+    const refusals = lines.map((line) => JSON.parse(line) as { event?: string; message?: string }).filter((line) => line.event === 'hosted_job_request_refused')
+    expect(refusals.map((line) => line.message)).toEqual(Array(2).fill('screenshot requires the browser lane, which fastMode declines'))
+  })
+
   it('runs a job\'s regular-expression checks on a hosted engine whose operator switched them on, logging what each page\'s cost, and refuses them at the first slice otherwise (ADR 0006, amendment of 2026-10-29)', async () => {
     for (const regexChecks of [true, false]) {
       const { origin, store, deps, create, drain, exportLines } = await setup()
