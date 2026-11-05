@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { createSecureServer, type Http2SecureServer } from 'node:http2'
-import { connect, type AddressInfo, type Socket } from 'node:net'
+import { connect, createServer as createNetServer, type AddressInfo, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -256,6 +256,38 @@ describe('the address guard without a login, as hosted Chrome is given it (ADR 0
       expect(answer).toContain('Tide ledger')
       expect(seen.at(-1)).toEqual({ url: '/article', host: `pinned.test:${port}` })
     } finally { await guard.close() }
+  })
+
+  it('carries a read of its own, as robots.txt on hosted_chrome is, through the same check and the same dial', async () => {
+    const dial = recordingDial()
+    const guard = new CompatAddressGuard(hosted('pinned.test'), resolver({ 'pinned.test': ['127.0.0.1'], 'a.test': ['10.0.0.7'], 'c.test': ['169.254.169.254'] }), { login: false, dial })
+    const route = guard.dispatcher()
+    const read = (url: string) => fetch(url, { dispatcher: route } as RequestInit)
+    try {
+      const answer = await read(`http://pinned.test:${port}/robots.txt`)
+      expect(await answer.text()).toContain('User-agent')
+      expect(dial.calls).toEqual([`127.0.0.1:${port}`])
+      // A name that resolves to a private or metadata address, a literal the policy refuses, and a name nobody knows.
+      for (const url of [`http://a.test:${port}/robots.txt`, `http://c.test:${port}/robots.txt`, `http://10.0.0.7:${port}/robots.txt`, `http://nowhere.test:${port}/robots.txt`]) {
+        await expect(read(url), url).rejects.toThrow()
+      }
+      expect(dial.calls).toEqual([`127.0.0.1:${port}`])
+    } finally { await route.close(); await guard.close() }
+  })
+
+  it('gives up on a connection that stalls in its handshake, closes it, and lets the dispatcher close', async () => {
+    const open = new Set<Socket>()
+    // It reads what it is sent and answers nothing, so it sees its client leave.
+    const silent = createNetServer((socket) => { open.add(socket); socket.resume(); socket.on('error', () => {}); socket.on('close', () => open.delete(socket)) })
+    await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve))
+    const silentPort = (silent.address() as AddressInfo).port
+    const guard = new CompatAddressGuard(hosted('pinned.test'), resolver({ 'pinned.test': ['127.0.0.1'] }), { login: false, dial: (host, to) => connect({ host, port: to }) })
+    const route = guard.dispatcher(100)
+    try {
+      await expect(fetch(`https://pinned.test:${silentPort}/robots.txt`, { dispatcher: route } as RequestInit)).rejects.toThrow()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(open.size).toBe(0)
+    } finally { await route.destroy(); await guard.close(); await new Promise<void>((resolve) => silent.close(() => resolve())) }
   })
 
   it('hands its dial only an address it checked, never a name, and nothing it refused', async () => {

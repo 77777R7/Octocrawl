@@ -27,6 +27,8 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { connect, createServer, isIP, type Server, type Socket } from 'node:net'
+import { connect as connectTls } from 'node:tls'
+import { Agent, type Dispatcher } from 'undici'
 import { evaluateHostname, evaluateResolved, type NetworkPolicy } from '@w2l/contracts'
 
 /** How the guard resolves a name; dns.lookup's shape, so a test can name the addresses. */
@@ -81,6 +83,9 @@ function messages(socket: Socket): { read: (n: number) => Promise<Buffer>; rest:
 function reply(code: number): Buffer {
   return Buffer.from([5, code, 0, 1, 0, 0, 0, 0, 0, 0])
 }
+
+/** How long a read of the guard's own has to connect, undici's own default. */
+const READ_CONNECT_MS = 10_000
 
 /** A connection error as the guard answers it; 0x04 is kept for a name that does not resolve. */
 function connectReply(error: NodeJS.ErrnoException): number {
@@ -137,6 +142,44 @@ export class CompatAddressGuard {
     client.on('error', () => {})
     client.setTimeout(HANDSHAKE_MS, () => client.destroy())
     void this.negotiate(client).catch(() => client.destroy())
+  }
+
+  /**
+   * A dispatcher for a read of the service's own: each connection's name is checked and its address dialled as a client's
+   * through the guard would be, and TLS is made here, with the certificate verified. A connection not ready within
+   * `connectMs` is closed, as undici's own connector would. The caller closes the dispatcher.
+   */
+  dispatcher(connectMs = READ_CONNECT_MS): Dispatcher {
+    return new Agent({ connect: (options, done) => { void this.connected(options, connectMs).then((socket) => done(null, socket), (error: Error) => done(error, null)) } })
+  }
+
+  private connected(options: { hostname: string; port: string; protocol: string; servername?: string | null }, connectMs: number): Promise<Socket> {
+    const secure = options.protocol === 'https:'
+    const host = options.hostname.replace(/^\[|\]$/g, '')
+    return new Promise((resolve, reject) => {
+      let open: Socket | null = null
+      let over = false
+      const end = (settle: () => void) => { if (over) return; over = true; clearTimeout(timer); settle() }
+      const fail = (error: Error) => end(() => { open?.destroy(); reject(error) })
+      const timer = setTimeout(() => fail(Object.assign(new Error(`the connection to ${host} was not ready in time`), { code: 'ETIMEDOUT' })), connectMs)
+      const ready = (socket: Socket) => end(() => resolve(socket))
+      void (async () => {
+        const address = await this.check(host)
+        if (typeof address === 'number') throw Object.assign(new Error(`the address guard refused ${host}`), { code: address === REPLY.hostUnreachable ? 'ENOTFOUND' : 'EACCES' })
+        if (over) return
+        const socket = await this.dial(address, Number(options.port) || (secure ? 443 : 80))
+        // A dial that outlived the deadline hands over a tunnel nobody will use.
+        if (over) return void socket.destroy()
+        open = socket
+        if (socket.connecting) await new Promise<void>((done, failed) => { socket.once('connect', done); socket.once('error', failed) })
+        if (over) return
+        if (!secure) return ready(socket)
+        const tls = connectTls({ socket, servername: options.servername ?? host, ALPNProtocols: ['http/1.1'] })
+        open = tls
+        tls.once('secureConnect', () => { tls.off('error', fail); ready(tls) })
+        tls.once('error', fail)
+      })().catch(fail)
+    })
   }
 
   private async negotiate(client: Socket): Promise<void> {

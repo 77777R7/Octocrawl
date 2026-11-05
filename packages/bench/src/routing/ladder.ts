@@ -39,7 +39,7 @@ import { rankVendors, shadowRankVendors, startingVendor } from './vendorRouter.j
 import { identityCompromised } from './identity.js'
 import { decideNext, ladderActionDecisionEvent, type ActionDecision, type LadderAction } from './decideNext.js'
 import { loadSessionForHost, sessionCoversHost, type SessionSnapshot, type SessionStore } from './sessionStore.js'
-import { httpFallbackFor, withHttpFallback } from './httpFallback.js'
+import { fallsBackToHttp, httpFallbackFor, withHttpFallback } from './httpFallback.js'
 
 /** One attempt of the run: the rung that answered, its place in the run, when it was asked and answered. */
 function attemptOf(channel: Channel, id: string, result: FetchResult, ordinal: number, startedAt: string): LadderAttempt {
@@ -257,6 +257,17 @@ function strongerRungMayAnswer(result: FetchResult, channelId: string, next: Cha
   if (result.failureReason === 'connection_error' && HTTP_CHANNELS.has(channelId)) return 'connection_error'
   if (result.failureReason === 'connection_error' && next?.id === 'installed_chrome' && next.vendorId === undefined) return 'connection_error'
   return null
+}
+
+/**
+ * Whether robots.txt kept the page out only because this rung's network could not reach it: nothing the site said. A
+ * rule or a 5xx is the site's word, and so is a lookup it answered before it failed (a redirect loop, a body too large),
+ * which carries no connection `code`. hosted_chrome reads robots.txt from an exit of its own and obeys what it finds there
+ * (ADR 0005, revision of 2026-11-05), so a call that chose access enhanced and holds it goes on to that rung.
+ */
+function robotsOutOfReach(result: FetchResult): boolean {
+  if (result.failureReason !== 'policy_denied') return false
+  return result.trace.some((event) => event.event === 'robots_disallowed' && (event.detail?.unreachable === 'timeout' || (event.detail?.unreachable === 'network_error' && typeof event.detail.code === 'string')))
 }
 
 /**
@@ -655,16 +666,23 @@ export class LadderRunner {
    * vendor rung.
    */
   async run(url: string, session?: SessionSnapshot | null, execution: ExecutionContext = {}, options: FetchOptions = {}): Promise<LadderRunResult> {
-    const first = await this.runOnce(url, session, execution, options)
-    if (this.options.httpFallback !== true) return first
+    if (this.options.httpFallback !== true) return this.runOnce(url, session, execution, options, 'go')
+    const stopped = (): boolean => execution.signal?.aborted === true || deadlineReached(execution)
+    const first = await this.runOnce(url, session, execution, options, 'hold')
     const fallback = httpFallbackFor(url, first, { authed: this.policy.mode === 'authed', session, execution, options })
-    if (fallback === null || execution.signal?.aborted === true || deadlineReached(execution)) return first
-    // A robots override is the word of whoever named the https URL; the http twin was named by no one.
+    if (fallback === null || stopped()) return first
+    // A robots override is the word of whoever named the https URL; the http twin was named by no one. Nor does the twin
+    // go to the exit: a refusal from this network is no proof the site has no HTTPS, and the exit can ask https itself.
     const { robotsOverride: _named, ...twin } = options
-    return withHttpFallback(url, fallback, first, await this.runOnce(fallback.url, session, execution, twin))
+    const answer = withHttpFallback(url, fallback, first, await this.runOnce(fallback.url, session, execution, twin, 'none'))
+    if (answer.result !== first.result || !robotsOutOfReach(first.result) || this.policy.enhanced !== true || !this.channels.some((channel) => channel.id === 'hosted_chrome')) return answer
+    if (stopped()) return answer
+    const climbed = await this.runOnce(url, session, execution, options, 'go')
+    return { ...climbed, ladderTrace: [...answer.ladderTrace, ...climbed.ladderTrace] }
   }
 
-  private async runOnce(url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions): Promise<LadderRunResult> {
+  /** `exit`, for hosted_chrome after a robots.txt out of reach: `go` climbs to it, `hold` leaves a site with no HTTPS to the http fallback, `none` leaves the rung out. */
+  private async runOnce(url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, exit: 'go' | 'hold' | 'none'): Promise<LadderRunResult> {
     const scope = createExecutionScope(execution)
     const progress: LadderProgress = { startedAt: performance.now(), channelsTried: [], ladderTrace: [], attempts: [], robotsOverrides: [], charged: null, paidCalls: [], grant: null, ledger: null, solves: 0, steppedPast: null, notAdmitted: [] }
     for (const filtered of this.options.channelsFiltered ?? []) {
@@ -672,7 +690,7 @@ export class LadderRunner {
     }
     // A rung says so the moment it sets a rule aside, so the run knows even when that rung never returns.
     const rungs: ExecutionContext = { ...scope, onRobotsOverride: (applied) => { progress.robotsOverrides.push(applied); execution.onRobotsOverride?.(applied) } }
-    try { return withNotAdmitted(withRunCost(carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress), progress.robotsOverrides), progress), progress) }
+    try { return withNotAdmitted(withRunCost(carryRobotsOverride(await this.runWithinBudget(url, session, rungs, options, progress, exit), progress.robotsOverrides), progress), progress) }
     catch (error) {
       // A run that throws keeps its paid calls on the error, for the record of whatever result the error becomes.
       if (!deadlineReached(scope)) throw progress.paidCalls.length === 0 ? error : carryPaidCalls(error, paidCallsEvent(progress, new Set(), Math.max(0, performance.now() - progress.startedAt), 'provider'))
@@ -680,7 +698,7 @@ export class LadderRunner {
     } finally { scope.dispose() }
   }
 
-  private async runWithinBudget(url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, progress: LadderProgress): Promise<LadderRunResult> {
+  private async runWithinBudget(url: string, session: SessionSnapshot | null | undefined, execution: ExecutionContext, options: FetchOptions, progress: LadderProgress, exit: 'go' | 'hold' | 'none'): Promise<LadderRunResult> {
     const { startedAt, channelsTried, ladderTrace, attempts, robotsOverrides } = progress
     throwIfExecutionStopped(execution)
     const decision = evaluateGovernance(url, this.policy)
@@ -715,6 +733,8 @@ export class LadderRunner {
       const stepped = progress.steppedPast
       const crashed = result.failureReason === 'internal_error' && !result.trace.some((event) => event.event === 'rung_threw')
       if (stepped === null || stepped.result === result || crashed || (result.evidence.httpStatus != null && result.failureReason !== 'provider_error')) return result
+      // hosted_chrome's own result, whatever it is, is the later word: only a rung that threw has none to give.
+      if (robotsOutOfReach(stepped.result) && !result.trace.some((event) => event.event === 'rung_threw')) return result
       ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_evidence_kept', channel: stepped.channel, detail: { kept: stepped.channel, failed: channelsTried.at(-1) ?? null, reason: result.failureReason ?? result.blockReason } })
       return notImproved(withoutPassedRetryAt(stepped.result))
     }
@@ -765,6 +785,7 @@ export class LadderRunner {
     const providers = this.channels.filter((c) => c.vendorId !== undefined && permitted.has(c.id) && served(c))
 
     let ordered = [...local, ...(await raceWithSignal(this.orderProviders(url, providers, routeContextOf(url, options, this.options.verify), ladderTrace), execution.signal))]
+    if (exit === 'none') ordered = ordered.filter((c) => c.id !== 'hosted_chrome')
 
     // A saved login for this host goes first: many sites answer a logged-out
     // visitor with a 200 (a login form, a public variant of the page), which
@@ -802,6 +823,8 @@ export class LadderRunner {
     /** A rung's page failed the task contract with its content there but not extracted: a paid rung would read the same page. */
     let contractNotExtracted = false
     let headersTimeoutFallback: Channel | null = null
+    /** hosted_chrome, once robots.txt was out of this network's reach: the one rung left that can read it (robotsOutOfReach). */
+    let robotsExit: Channel | null = null
     /** The local browser after a rung that a header timeout on that rung may fall back to (ADR 0007). */
     const fallbackBrowserAfter = (channel: Channel): Channel | null => ordered.slice(ordered.indexOf(channel) + 1).find((candidate) => candidate.id === 'browser_local'
       && candidate.vendorId === undefined && refuseChannelIdentity(url, candidate) === null) ?? null
@@ -812,6 +835,8 @@ export class LadderRunner {
         // A header timeout asks for a browser, not another HTTP client: the rungs before the qualified local browser
         // (compat) are skipped. From that browser on, the ladder goes on by its ordinary rules (ADR 0007, 2026-10-26).
         if (headersTimeoutFallback !== null && channel !== headersTimeoutFallback) continue
+        // The rungs before hosted_chrome read robots.txt on the network that could not reach it.
+        if (robotsExit !== null && channel !== robotsExit) continue
         if (channel.vendorId !== undefined && challengedWithRetryAt) {
           ladderTrace.push({ at: 0, event: 'ladder_channel_skipped', channel: channel.id, detail: { vendorId: channel.vendorId, reason: 'a rung met a challenge served with 429 or 503; after a 429 the run keeps its own exit (ADR 0005), and a vendor rung leaves through another' } })
           continue
@@ -1146,9 +1171,15 @@ export class LadderRunner {
         headersTimeoutFallback = fallbackBrowserAfter(channel)
         if (headersTimeoutFallback !== null) ladderTrace.push({ at: result.usage.wallMs, event: 'ladder_headers_timeout_fallback', channel: channel.id, detail: { to: 'browser_local', remainingMs: execution.deadlineAt! - Date.now(), maxMs: HEADERS_TIMEOUT_FALLBACK_MS, ...(promised ? { promised: true } : {}) } })
       }
-      const stronger = headersTimeoutFallback !== null ? 'http_headers_timeout'
+      // A site that looks to have no HTTPS is the http fallback's first: it reads the page for one credit, with no paid rung.
+      if (cls === null && !subjectAsked && best === null && robotsExit === null && robotsOutOfReach(result)
+        && !(exit === 'hold' && fallsBackToHttp(url, result, { authed: this.policy.mode === 'authed', session, execution, options }))) {
+        robotsExit = ordered.slice(ordered.indexOf(channel) + 1).find((later) => later.id === 'hosted_chrome') ?? null
+      }
+      const climbing = robotsExit !== null && channel !== robotsExit
+      const stronger = headersTimeoutFallback !== null ? 'http_headers_timeout' : climbing ? 'robots_unreachable'
         : cls === null && !subjectAsked && best === null && channel !== sessionFirst && channel.id !== 'authed_session' ? strongerRungMayAnswer(result, channel.id, next) : null
-      if (stronger !== null && (result.evidence.httpStatus != null || result.markdown !== null)) progress.steppedPast = { channel: channel.id, result }
+      if (stronger !== null && (result.evidence.httpStatus != null || result.markdown !== null || (climbing && progress.steppedPast === null))) progress.steppedPast = { channel: channel.id, result }
 
       ladderTrace.push({
         at: result.usage.wallMs,
@@ -1686,7 +1717,8 @@ function deadlineOutcome(url: string, progress: LadderProgress, returned: FetchR
     // the timeout, as evidence.
     const evidence = noMainContentEvidence(attempts)
     // Else the page a rung was stepped past for (a 403 the site answered, a block), over a cut rung that returned no page.
-    const stepped = evidence === null && (returned === null || returned.evidence.httpStatus == null) && progress.steppedPast !== null
+    // A rung that returned its own timeout has said what happened at the exit: robots.txt out of reach here is not the answer.
+    const stepped = evidence === null && (returned === null || (returned.evidence.httpStatus == null && !robotsOutOfReach(progress.steppedPast?.result ?? returned))) && progress.steppedPast !== null
       ? { ...progress.steppedPast, result: withoutPassedRetryAt(progress.steppedPast.result) } : null
     const base = evidence?.result ?? stepped?.result ??(returned?.status === 'failed' ? returned : deadlineFailure(url, laneOf(interrupted), at))
     const kept = evidence?.channel ?? stepped?.channel ?? null
