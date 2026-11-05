@@ -2578,7 +2578,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             status: ended?.status ?? 'failed', attemptId, newPages, budgetExceeded: attempt?.budgetExceeded ?? null,
             // Each page keeps its trace (the robots.txt and Crawl-delay evidence a page is judged by); the routing audit is left out.
             items: steps.map((step) => { const { audit: _audit, ...item } = toCrawlPage(step, ended!, false, taskHintOffers(ended!, step.url)); return item as CrawlPage }),
-            charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null, modelCalled: (step.result?.json?.modelUsage?.attempts ?? 0) > 0 })),
+            charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null, robots: sliceRobots(step.result ?? null), modelCalled: (step.result?.json?.modelUsage?.attempts ?? 0) > 0 })),
           }
         } finally { await after.close() }
       } finally {
@@ -3022,8 +3022,16 @@ export interface SliceResult {
   charges: SliceCharge[]
 }
 
-/** `modelCalled`: the page's json model fallback called the model (its json's `modelUsage` names an attempt). */
-export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null; modelCalled: boolean }
+/**
+ * `robots`: what kept the page out, when robots.txt did: a rule it holds, or a file that could not be read (a disallow by
+ * RFC 9309, but not one the site wrote). `modelCalled`: the page's json model fallback called the model (its json's
+ * `modelUsage` names an attempt).
+ */
+export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null; robots: 'disallowed' | 'unreachable' | null; modelCalled: boolean }
+function sliceRobots(result: FetchResult | null): SliceCharge['robots'] {
+  const refusal = result === null ? null : robotsRefusal(result)
+  return refusal === null ? null : refusal.unreachable === null ? 'disallowed' : 'unreachable'
+}
 
 /** A batch never discovers: its frontier takes the whole host and exact canonical URLs. */
 const BATCH_SCOPE: CrawlScopeOptions = { regexOnFullURL: false, ignoreQueryParameters: false, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: false, allowExternalLinks: false }

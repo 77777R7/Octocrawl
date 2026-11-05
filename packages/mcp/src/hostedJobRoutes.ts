@@ -287,7 +287,7 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
       expireAt: new Date(at.getTime() + IDEMPOTENCY_TTL_MS).toISOString(),
     }
     const secret = webhook === undefined ? null : `whsec_${randomBytes(32).toString('base64url')}`
-    const job = newHostedJob({ id: randomUUID(), workspaceId, uid: caller.uid, keyId: caller.keyId.slice(0, 16), kind, request: stored, maxCredits: (maxCredits as number | undefined) ?? null, webhook: webhook === undefined ? null : { ...webhook, secret: secret!, delivery: null } }, at)
+    const job = newHostedJob({ id: randomUUID(), workspaceId, uid: caller.uid, keyId: caller.keyId.slice(0, 16), requestKeyId: caller.keyId, kind, request: stored, maxCredits: (maxCredits as number | undefined) ?? null, webhook: webhook === undefined ? null : { ...webhook, secret: secret!, delivery: null } }, at)
     const created = await config.store.create(job, limits, claim, at)
     if (!created.ok && created.reason === 'conflict') return refusal(409, 'idempotency_conflict', 'this idempotency key started a different job in the last 24 hours')
     if (!created.ok) return refusal(429, 'jobs_busy', `this account has ${created.running} jobs running and ${created.queued} waiting, the most it may`, ['wait for one to finish, or cancel one'], { 'Retry-After': '60' })
