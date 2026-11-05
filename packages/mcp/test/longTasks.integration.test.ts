@@ -118,6 +118,10 @@ describe('wait_crawl', () => {
     const report = (await callTool(client, 'wait_crawl', { id: 'crawl-1', timeoutMs: 50 })) as { status: string; agentHints: string[] }
     expect(report.status).toBe('running')
     expect(report.agentHints.at(-1)).toMatch(/wait_crawl again, or read get_crawl_pages/)
+    // wait_batch says the same of its own next step.
+    const batch = (await callTool(apiAnswering(() => ({ taskId: 'batch-1', status: 'running' })), 'wait_batch', { id: 'batch-1', timeoutMs: 50 })) as { status: string; agentHints: string[] }
+    expect(batch.status).toBe('running')
+    expect(batch.agentHints.at(-1)).toMatch(/still running after 50 ms: wait_batch again, or read get_batch_items/)
   })
 
   it('stops polling when the call is cancelled', async () => {

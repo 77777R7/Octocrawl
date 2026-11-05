@@ -776,6 +776,15 @@ function clientText(value: unknown): string | null {
 function secondsToUtcMidnight(now: Date): number {
   return Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime()) / 1000))
 }
+/** A wait said in hours and minutes for a person or a model, where Retry-After carries the seconds: "11 h 56 min", "4 min", "under a minute". */
+export function waitInWords(seconds: number): string {
+  const minutes = Math.ceil(seconds / 60)
+  if (minutes < 1) return 'under a minute'
+  const hours = Math.floor(minutes / 60)
+  return hours === 0 ? `${minutes} min` : `${hours} h ${minutes % 60} min`
+}
+/** The hint a refused bearer carries: where a key comes from, and that a signed-in connection belongs on the OAuth URL. */
+const BAD_KEY_HINT = `a key is made on https://octocrawl.dev/dashboard/keys/ and sent as Authorization: Bearer; a client that signed in belongs on ${MCP_OAUTH_RESOURCE}, not here; without a key, https://mcp.octocrawl.dev/mcp serves a daily allowance`
 function digest(hashKey: string, kind: 'key' | 'ip' | 'oca' | 'acct', value: string): string {
   return createHmac('sha256', hashKey).update(`${kind}:${value}`).digest('hex')
 }
@@ -1058,7 +1067,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       const site = quota.limited.endsWith('-site')
       const shared = quota.limited === keylessTotal
       return refuse(c, 429, 'quota_exhausted', site ? `hosted Octocrawl has served the ${quota.limit} pages a day it serves without an account` : shared ? `the ${quota.limit} pages a day that hosted Octocrawl serves without a key are used up` : caller.pool === 'claude' ? `the ${quota.limit} pages a day that every Claude connector without a key shares are used up` : `the ${caller.kind === 'key' ? 'key' : 'keyless'} allowance of ${quota.limit} pages a day is used up`,
-        [...(caller.kind === 'keyless' ? [signInHint] : []), LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+        [...(caller.kind === 'keyless' ? [signInHint] : []), LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${waitInWords(seconds)}`], { 'Retry-After': String(seconds) })
     }
     logQuotaThresholds(entries, quota.counts, day, log)
     logUsage(caller, path, day)
@@ -1137,11 +1146,11 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       if (reserved.limited === 'account') return refuse(c, 401, 'unauthorized', 'this key\'s account no longer exists', [])
       if (reserved.limited === 'quota') {
         const seconds = secondsToUtcMidnight(now)
-        return refuse(c, 429, 'quota_exhausted', reserved.id === accounts.id ? `hosted Octocrawl has served the ${reserved.limit} pages a day it serves to accounts` : `this account has started its ${reserved.limit} hosted pages for today`, [LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${seconds} s`], { 'Retry-After': String(seconds) })
+        return refuse(c, 429, 'quota_exhausted', reserved.id === accounts.id ? `hosted Octocrawl has served the ${reserved.limit} pages a day it serves to accounts` : `this account has started its ${reserved.limit} hosted pages for today`, [LOCAL_HINT, `the allowance resets at 00:00 UTC, in ${waitInWords(seconds)}`], { 'Retry-After': String(seconds) })
       }
       const seconds = secondsToNextGrant(now)
       return refuse(c, 429, 'quota_exhausted', `this account's credits are used up (${reserved.remaining} left)`,
-        [`the monthly credits come back on the 1st at 00:00 UTC, in ${seconds} s`, LOCAL_HINT], { 'Retry-After': String(seconds), 'X-Credits-Remaining': String(reserved.remaining) })
+        [`the monthly credits come back on the 1st at 00:00 UTC, in ${waitInWords(seconds)}`, LOCAL_HINT], { 'Retry-After': String(seconds), 'X-Credits-Remaining': String(reserved.remaining) })
     }
     logQuotaThresholds(quotas, reserved.counts, day, log)
     logUsage(caller, path, day)
@@ -1287,7 +1296,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       caller = connection
     } else {
       const identified = await identify(headers, address)
-      if (identified === 'unknown_key' || identified === 'oauth_token' || identified === 'oauth_ended') { sendJson(res, 401, { error: 'this key is not one Octocrawl issued, or it was revoked' }, { 'www-authenticate': 'Bearer' }); return }
+      if (identified === 'unknown_key' || identified === 'oauth_token' || identified === 'oauth_ended') { sendJson(res, 401, { error: 'this key is not one Octocrawl issued, or it was revoked', agentHints: [BAD_KEY_HINT] }, { 'www-authenticate': 'Bearer' }); return }
       caller = identified
     }
     const size = Number(req.headers['content-length'] ?? 0)
@@ -1349,7 +1358,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
       unavailableHint: jobs
         ? 'Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.'
         : account
-          ? 'Hosted crawls and batches are open to invited accounts for now. They, Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.'
+          ? 'Hosted crawls and batches are not open to this account right now. They, Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.'
           : jobRoutes !== null
           ? `Crawls and batches run on hosted Octocrawl for an account: connect with an account's key from https://octocrawl.dev/dashboard/ or sign in at ${MCP_OAUTH_RESOURCE}. Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.`
           : 'Crawls, batches, Monitors and saved logins run on a server on your computer: npx octocrawl serve, then npx -y @octocrawl/mcp.',

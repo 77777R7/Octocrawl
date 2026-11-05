@@ -462,7 +462,7 @@ describe('REST /v1/scrape and /v1/crawl', () => {
         return { status: res.status, body: await res.json() }
       }
       const wall = `${server.url}/block/login-wall`
-      const login = 'the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session'
+      const login = 'the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session (octocrawl login import <host> saves it from your Chrome)'
       const full = (await post('/v1/scrape', { url: wall })).body
       expect(full).toMatchObject({ status: 'blocked', blockReason: 'login_wall', agentHints: [login] })
       expect((await post('/v1/scrape', { url: wall, debug: false })).body).toMatchObject({ status: 'blocked', agentHints: [login] })
