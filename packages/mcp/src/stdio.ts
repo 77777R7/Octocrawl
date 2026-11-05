@@ -29,9 +29,18 @@ export function parseToken(argv: readonly string[], env: NodeJS.ProcessEnv): str
  * served on 2026-07-28, one opening with initialize on its 2025-era revision.
  * `selection` lists some toolsets, or read-only tools alone (docs/mcp-client-ux-tasks.md W10); by default all.
  */
-export function serveMcpStdio(client: W2L, transport?: Transport, apiUrl?: string, selection: ToolSelection = {}): StdioServerHandle {
+export function serveMcpStdio(client: W2L, transport?: Transport, apiUrl?: string, selection: ToolSelection = {}, instructionsNote?: string): StdioServerHandle {
   const listed = selectionOptions(selection)
-  return serveStdio(() => createMcpServer(client, { progress: true, ...listed, ...(apiUrl === undefined ? {} : { apiUrl }) }), transport === undefined ? {} : { transport })
+  return serveStdio(() => createMcpServer(client, { progress: true, ...listed, ...(apiUrl === undefined ? {} : { apiUrl }), ...(instructionsNote === undefined ? {} : { instructionsNote }) }), transport === undefined ? {} : { transport })
+}
+
+/**
+ * What the instructions say when nothing answered at the API's base URL as the server started: the model reads this at
+ * initialize, where a client shows it, while the stderr line (warnIfUnreachable) is only in the client's log. It names
+ * the start, since the API may be running by the time a tool is called.
+ */
+export function unreachableNote(baseUrl: string): string {
+  return `When this server started, no Octocrawl API answered at ${baseUrl}. A tool that answers api_unreachable needs the person to run npx octocrawl serve in a terminal and keep it open (or to point W2L_API_URL at a running API); ask them, then call the tool again.`
 }
 
 /**
@@ -54,8 +63,9 @@ async function main(): Promise<void> {
   const token = parseToken(argv, process.env)
   // An unknown toolset name stops the start, naming the valid ones.
   const selection = parseToolSelection(argv, process.env)
-  serveMcpStdio(new W2L({ baseUrl, token }), undefined, baseUrl, selection)
-  void warnIfUnreachable(baseUrl)
+  // Checked before the server answers initialize (at most 2 s), so the instructions can say it where the model reads them.
+  const reachable = await warnIfUnreachable(baseUrl)
+  serveMcpStdio(new W2L({ baseUrl, token }), undefined, baseUrl, selection, reachable ? undefined : unreachableNote(baseUrl))
 }
 
 // Run as the bin: through node_modules/.bin the entry is a symlink, so its real path is compared.

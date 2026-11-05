@@ -28,6 +28,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A keyless MCP connection is told its allowance before it is spent, and a local MCP server says at initialize when its API is not running.** Hosted Octocrawl's `instructions` for a connection without a key now give the number (20 pages a day per address; 200 shared by Claude's connectors), that every call counts whether or not a page came back, and the reset time, instead of "a daily allowance". The quota refusal's sign-in hint says to remove an earlier keyless `octocrawl` entry first (`claude mcp remove octocrawl`), since the sign-in setup uses the same name. `npx -y @octocrawl/mcp` checks its API before answering initialize (at most 2 s) and, when nothing answered, adds a line to its instructions saying so and that the person has to run `npx octocrawl serve`; before, that line went only to stderr, which clients do not show the model.
 - **A hosted `browser_busy` refusal says what to do instead, and connections say the rule before it happens.** Its hints used to lead with "retry after 10 s, when the running call ends", though a running call can take up to 5 minutes. They now name a batch job first where the account can run one, then `fastMode: true` with when it helps, then the wait as it really is. The hosted MCP instructions, and `scrape`'s description where `batch_scrape` is listed, say that one scrape runs at a time. What is refused has not changed.
 
 ## 0.8.3 — 2026-11-05

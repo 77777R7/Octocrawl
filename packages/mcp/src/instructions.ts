@@ -8,7 +8,7 @@
 /** Where the server runs, and for hosted Octocrawl what the caller brought. */
 export type InstructionsSurface =
   | { kind: 'local'; /** Started with --read-only: scrape does not act as the person (docs/mcp-client-ux-tasks.md W10.2). */ readOnly?: boolean }
-  | { kind: 'hosted'; connection: 'keyless' | 'key' | 'oauth'; browser: boolean; /** A keyless caller from Claude's egress range, whose allowance every such connector shares. */ sharedPool?: boolean }
+  | { kind: 'hosted'; connection: 'keyless' | 'key' | 'oauth'; browser: boolean; /** A keyless caller from Claude's egress range, whose allowance every such connector shares. */ sharedPool?: boolean; /** A keyless caller's pages a day (the address's, or the shared pool's), said so the model knows the number before it is spent. */ allowance?: number }
 
 /**
  * The rule behind browser_busy on a connection with the browser lane (the lease in hostedApi.ts): said here and, where
@@ -52,8 +52,10 @@ export function serverInstructions(toolNames: Iterable<string>, surface: Instruc
     if (has('scrape', 'map')) lines.push('If this server\'s API is hosted Octocrawl (api.octocrawl.dev) rather than npx octocrawl serve on this computer, only scrape and map run there.')
   } else {
     if (surface.connection === 'keyless') {
-      const allowance = surface.sharedPool ? 'within a daily allowance that every Claude connector without a key shares' : 'within a daily allowance per address'
-      lines.push(`This connection has no key: pages are read over HTTP alone, ${allowance}, so a page that fills itself in with scripts comes back as a shell (client_rendered_suspected). Signing in or a key adds the browser lane and spends the account's credits.`)
+      // The number, where the server knows it: a keyless caller otherwise learns the allowance only when it is used up.
+      const pages = surface.allowance === undefined ? '' : ` of ${surface.allowance.toLocaleString('en-US')} pages`
+      const allowance = surface.sharedPool ? `within a daily allowance${pages} that every Claude connector without a key shares` : `within a daily allowance${pages} per address`
+      lines.push(`This connection has no key: pages are read over HTTP alone, ${allowance} (every call counts, whether or not a page came back; it resets at 00:00 UTC), so a page that fills itself in with scripts comes back as a shell (client_rendered_suspected). Signing in or a key adds the browser lane and spends the account's credits.`)
     } else {
       const spends = surface.connection === 'oauth'
         ? 'This connection spends the signed-in account\'s credits: 1 per HTTP page, 5 per browser page, 1 per map, 2 more for a page whose json modelFallback called the model.'

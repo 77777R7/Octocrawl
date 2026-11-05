@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/client'
 import { InMemoryTransport } from '@modelcontextprotocol/server'
 import { W2L } from '@w2l/sdk'
-import { serveMcpStdio } from '../src/stdio.js'
+import { serveMcpStdio, unreachableNote } from '../src/stdio.js'
 import { TOOL_NAMES, TOOLS } from '../src/tools.js'
 import { parseToolSelection, selectionOptions, TOOLSET_NAMES, TOOLSETS } from '../src/toolsets.js'
 import { expectUsableInstructions } from './instructionChecks.js'
@@ -124,5 +124,25 @@ describe('--read-only', () => {
       expect(ok.isError).not.toBe(true)
       await expect(server.mcp.callTool({ name: 'crawl', arguments: { url: 'https://example.com/' } })).rejects.toThrow(/--read-only/)
     } finally { await server.close() }
+  })
+})
+
+describe('a server whose API did not answer at start', () => {
+  it('says so in its instructions, where the model reads it, and names what the person has to run', async () => {
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
+    const handle = serveMcpStdio(client, serverSide, 'http://127.0.0.1:8787', {}, unreachableNote('http://127.0.0.1:8787'))
+    const mcp = new Client({ name: 'toolsets-test', version: '1.0.0' })
+    try {
+      await mcp.connect(clientSide)
+      const instructions = mcp.getInstructions() ?? ''
+      expect(instructions.endsWith(unreachableNote('http://127.0.0.1:8787'))).toBe(true)
+      for (const part of ['no Octocrawl API answered at http://127.0.0.1:8787', 'api_unreachable', 'npx octocrawl serve', 'W2L_API_URL']) expect(instructions).toContain(part)
+      // The note is a line after the ordinary instructions, which stay whole; a server whose API answered carries none.
+      expectUsableInstructions(instructions.slice(0, instructions.length - unreachableNote('http://127.0.0.1:8787').length - 1), [...TOOL_NAMES])
+      const [plainClient, plainServer] = InMemoryTransport.createLinkedPair()
+      const plain = serveMcpStdio(client, plainServer, 'http://127.0.0.1:8787')
+      const other = new Client({ name: 'toolsets-test', version: '1.0.0' })
+      try { await other.connect(plainClient); expect(other.getInstructions() ?? '').not.toContain('api_unreachable') } finally { await other.close(); await plain.close() }
+    } finally { await mcp.close(); await handle.close() }
   })
 })
