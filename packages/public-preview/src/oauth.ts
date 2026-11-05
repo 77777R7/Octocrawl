@@ -596,7 +596,7 @@ export function createOAuthRoutes(options: OAuthOptions) {
       `<p class="oauth-sub">It will send you back to <strong>${host}</strong>.</p>`,
       LOOPBACK.has(target.hostname) ? `<p class="oauth-notice">This app runs on your computer: it sends you back to ${host} on this machine. Connect it only if you started this from an app you use.</p>` : '',
       '<div class="oauth-scopes"><p class="oauth-scopes-label">Your account will be used to:</p><ul>',
-      '<li>Use Octocrawl\'s MCP tools, which read web pages and change nothing</li>',
+      '<li>Use Octocrawl\'s MCP tools: they read web pages and write nothing to any site; crawl and batch_scrape start jobs on your account that spend its credits</li>',
       `<li>Spend your account's credits${credits === null ? '' : `: ${credits} credits left this month`}</li>`,
       `<li>Stay connected until you disconnect it, or until it goes ${IDLE_DAYS} days unused</li>`,
       '</ul></div>',
@@ -606,7 +606,7 @@ export function createOAuthRoutes(options: OAuthOptions) {
       '<button class="oauth-authorize" type="submit" name="decision" value="allow">Authorize</button><button class="oauth-decline" type="submit" name="decision" value="deny">Decline</button>',
       '</form>',
       `<div class="oauth-account">Signed in as <strong>${escape(session.email ?? 'your account')}</strong>. Not you? <form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>`,
-      '<p class="oauth-note">The connection is listed on your dashboard with its own activity, and you can disconnect it there.</p></div>',
+      '<p class="oauth-note">The connection is listed under <a href="/dashboard/keys/#connections-title">MCP connections</a> on your dashboard, with its own activity, and you can disconnect it there.</p></div>',
     ].join('')
     res.writeHead(200, PAGE_HEADERS).end(page(`Connect ${request.client.name}`, body))
   }
@@ -657,7 +657,7 @@ export function createOAuthRoutes(options: OAuthOptions) {
     const at2 = now()
     if (await options.store.activeGrants(session.uid, at2) >= MAX_CONNECTIONS) {
       log({ event: 'w2l_oauth', step: 'consent', outcome: 'too_many_connections', client: request.client.id })
-      errorPage(res, 409, 'Too many connections', `Your account has ${MAX_CONNECTIONS} connections, the most it can hold. Disconnect one on your dashboard, then connect this app again.`)
+      errorPage(res, 409, 'Too many connections', `Your account has ${MAX_CONNECTIONS} connections, the most it can hold. Disconnect one under MCP connections on API keys (octocrawl.dev/dashboard/keys/), then connect this app again.`)
       return
     }
     const grantId = random(18)

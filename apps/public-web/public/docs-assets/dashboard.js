@@ -443,6 +443,12 @@
     renderRuns(activity.filter(fromPlayground).slice(0, 6))
     const shown = filtered()
     renderRequests('activity', shown, keyNames)
+    // Nothing shown while lines exist is the filters' doing, not an empty account: say which.
+    const activityEmpty = $('activity-empty')
+    if (activityEmpty) {
+      activityEmpty.dataset.empty ??= activityEmpty.textContent
+      activityEmpty.textContent = activity.length > 0 && shown.length === 0 ? 'No requests match these filters.' : activityEmpty.dataset.empty
+    }
     set('activity-count', `${number(shown.length)} of ${number(activity.length)} in 30 days`)
     // Read of the calls that had a result: an invalid request had none. Unknown (no lines yet) is a dash, not zero.
     const answered = activity.filter((line) => line.status !== 'invalid_request')
@@ -606,7 +612,8 @@
       providers.replaceChildren(...(names.length ? names : ['Not recorded']).map((name) => { const chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = name; return chip }))
     }
     set('acct-month', `${number(monthly.left)} of ${number(monthly.of)} free credits left, renewed on ${day(monthly.resetsAt)} (UTC)`)
-    set('acct-bought', data.credits.purchased ? number(data.credits.purchased) : 'None')
+    // Packs are not sold yet (FAQ), so "None" alone would read as a lack.
+    set('acct-bought', data.credits.purchased ? number(data.credits.purchased) : 'None: credit packs are not sold yet')
     set('acct-plan', `Free: ${number(monthly.of)} credits a month`)
     for (const ready of accountReady) ready(data)
     set('play-left', `You have ${number(data.credits.remaining)} left.`)
