@@ -418,7 +418,7 @@ gcloud firestore fields ttls update expireAt --collection-group=hostedChromeSpen
   - 503 means a page is being read: one window per instance.
   - `GET /health` answers 200.
 - **How each page is read.** The service reads each page with the hosted browser lane on the `hosted_chrome` engine:
-  - robots.txt is read and obeyed, as on every hosted rung, on the route the page is read on: with the proxy list mounted, it goes through the same address guard and the same exit;
+  - robots.txt is read and obeyed, as on every hosted rung, on the route the page is read on: with the proxy list mounted, it goes through the same address guard and the same exit, with 12 seconds to answer, since every redirect hop opens a tunnel of its own (a direct lookup has 5);
   - every connection goes through its address guard;
   - each call gets a fresh profile, deleted after;
   - its trace names the pinned version, the launch (`nodriver-0.50.6-no-allow-origins+webrtc-proxied-udp-only`) and the exit's kind, which the Evidence Record carries: `google` from Cloud Run's own egress, or `datacenter` with the proxy as `host:port` (`access.egress.proxy`, source `pool`).
