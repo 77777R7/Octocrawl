@@ -39,6 +39,22 @@ const REFUSED_FLAGS: Readonly<Record<string, string>> = {
   webhook: '--webhook is not offered by the command line, which runs no delivery worker: start the API (octocrawl serve) and send the crawl or batch to it',
 }
 
+/** The CLI's own flags where a command does not take them: where each belongs. */
+const ELSEWHERE: Readonly<Record<string, string>> = {
+  markdown: '--markdown prints a scrape\'s Markdown alone; a batch or crawl writes each page\'s Markdown to a file with --out <dir>',
+  out: '--out is not taken by map: its answer is the JSON on stdout',
+  'urls-file': '--urls-file <file> is a batch flag (octocrawl batch --urls-file <file>): one URL per line',
+  resume: '--resume <taskId> is a crawl flag (octocrawl crawl --resume <taskId>); a batch resumes when the API starts on its task root',
+}
+
+/** The CLI's own flags, by command, listed in its help beside the API options. */
+const CLI_FLAG_LINES: Readonly<Record<Command, readonly string[]>> = {
+  scrape: ['  --markdown   print the Markdown alone, nothing else', '  --out <dir>   write results.jsonl, results.csv, the Markdown and each table as CSV there'],
+  batch: ['  --urls-file <file>   one URL per line (# comments); beside the URLs on the command line', '  --out <dir>   write results.jsonl, results.csv, report.json, the Markdown and each table as CSV there', '  --handoff   when the batch ends, open each page a check stopped in your own Chrome'],
+  crawl: ['  --resume <taskId>   continue a crawl Ctrl-C paused, in place of a URL', '  --out <dir>   write results.jsonl, results.csv, report.json, the Markdown and each table as CSV there'],
+  map: [],
+}
+
 const KEYS: Readonly<Record<Command, readonly string[]>> = { scrape: SCRAPE_KEYS, crawl: CRAWL_KEYS, batch: BATCH_KEYS, map: MAP_KEYS }
 
 /** The options a command takes as flags, by API name. */
@@ -132,7 +148,11 @@ export function parseCommandLine(command: Command, argv: readonly string[]): Par
       name = name.slice(3)
     }
     const key = byFlag.get(name)
-    if (key === undefined) throw new UsageError(`unknown flag --${name} for octocrawl ${command} (octocrawl ${command} --help lists them)`)
+    if (key === undefined) {
+      // A flag of another command is sent where it belongs, not called unknown.
+      const elsewhere = ELSEWHERE[name]
+      throw new UsageError(elsewhere ?? `unknown flag --${name} for octocrawl ${command} (octocrawl ${command} --help lists them)`)
+    }
     const kind = KINDS[key] ?? 'json'
     switch (kind) {
       case 'boolean': {
@@ -212,7 +232,7 @@ export function usage(command: Command | null): string {
       '  login import <site>   save your login to a site from the Chrome you use, for --mode authed (octocrawl login --help)',
       '',
       'Every option of the REST API is a flag under its kebab-case name: maxAge is --max-age.',
-      'octocrawl <command> --help lists them. A command\'s task root is --task-root, else W2L_TASK_ROOT,',
+      'octocrawl <command> --help lists them; octocrawl --version prints the version. A command\'s task root is --task-root, else W2L_TASK_ROOT,',
       'else .w2l/cli, apart from the API\'s .w2l/api: never point a command at the task root of a running server.',
     ].join('\n')
   }
@@ -230,5 +250,5 @@ export function usage(command: Command | null): string {
     }
     return `  --${flagName(key)}${hint[kind]}${kind === 'boolean' ? ` (or --no-${flagName(key)})` : ''}   ${key}`
   })
-  return [synopsis[command], '', 'Options (the API option each sets is on the right; the API reference describes them):', ...lines, '  --task-root <dir>   where tasks, files and the page cache live (default W2L_TASK_ROOT, else .w2l/cli)', '  --help'].join('\n')
+  return [synopsis[command], '', 'Options (the API option each sets is on the right; the API reference describes them):', ...lines, '', 'The command line\'s own:', ...CLI_FLAG_LINES[command], '  --task-root <dir>   where tasks, files and the page cache live (default W2L_TASK_ROOT, else .w2l/cli)', '  --help'].join('\n')
 }
