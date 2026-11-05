@@ -7,7 +7,7 @@ export { ChromeLoginError, chromeEndpoint, chromeUserDataDir, connectCdp, cookie
 export type { CdpConnection, ImportChromeLoginOptions, ImportedLogin } from './chromeLogin.js'
 export { HandoffNotThrough, openUserChrome } from './chromeHandoff.js'
 export type { UserChrome, UserChromeOptions, UserChromeReadOptions } from './chromeHandoff.js'
-export type { ApiEngine, ApiEngineOptions, CallCapability, CrawlWithSteps, HandoffHooks, HostedChromeAdmission, HostedChromeClient, HostedChromeMeter, HostedChromeOperator, SliceCharge, SliceLimits, SliceResult } from './engine.js'
+export type { ApiEngine, ApiEngineOptions, BrowserTurn, CallCapability, CrawlWithSteps, HandoffHooks, HostedChromeAdmission, HostedChromeClient, HostedChromeMeter, HostedChromeOperator, SliceCharge, SliceLimits, SliceResult } from './engine.js'
 export { compactScrapeResponse, extractStructured, modelCallsMaxCostUsd, structuredModelConfigFromEnv } from './structured.js'
 export { deliveryConfig, JOB_STREAMS_OFF_NOTICE, parseListen, parsePort } from './listen.js'
 export { loadEngineConfig, preloadEngineModules, startCaptchaSolving, tunedPolicy } from './engineConfig.js'
