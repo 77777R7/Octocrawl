@@ -29,7 +29,7 @@ const accountMenu = `<div class="dash-me"><div class="dash-menu" id="me-menu" ro
 <button class="dash-me-button" type="button" id="me-button" aria-haspopup="menu" aria-expanded="false" aria-controls="me-menu"><span class="dash-avatar" id="me-initials" aria-hidden="true">··</span><span class="dash-me-email" id="side-email">…</span><span class="dash-caret" aria-hidden="true">▴</span></button></div>`
 const dashCode = (id, text) => `<div class="code"><pre id="${id}">${escape(text)}</pre><button class="copy" type="button" data-copy="${id}">Copy</button></div>`
 /** The request table the Activity page and the Overview share: dashboard.js fills its body from /api/account/activity. */
-const requestTable = (id, rows, empty = 'No requests yet. Each call made with one of your keys or in the Playground shows here, with what it cost.') => `<div class="table-scroll"><table class="dash-table requests" data-rows="${rows}"><thead><tr><th class="time-head">Time (UTC)</th><th>Endpoint</th><th>URL</th><th>Format</th><th>Lane</th><th>Result</th><th>robots.txt</th><th class="num">Duration</th><th class="num">Credits</th><th>Evidence</th></tr></thead><tbody id="${id}-body"></tbody></table></div><p class="dash-small" id="${id}-empty" hidden>${empty}</p>`
+const requestTable = (id, rows, empty = 'No requests yet. Each call made with one of your keys or in the Playground shows here, with what it cost.') => `<div class="table-scroll"><table class="dash-table requests" data-rows="${rows}"><thead><tr><th class="time-head">Time (UTC)</th><th>Endpoint</th><th>URL</th><th>Format</th><th>Lane</th><th>Result</th><th>robots.txt</th><th class="num">Duration</th><th class="num">Credits</th><th title="The SHA-256 of the body as received, from the Evidence Record; the full hash is on the cell">Evidence</th></tr></thead><tbody id="${id}-body"></tbody></table></div><p class="dash-small" id="${id}-empty" hidden>${empty}</p>`
 export function dashboardPageHtml(path, title, lead, body, assetVersions) {
   // The Playground's pages keep their header to a line, as Firecrawl's does: the selector and the URL card come first.
   const playground = path === '/dashboard/scrape/' || path === '/dashboard/map/'
@@ -244,14 +244,14 @@ const settingsBody = `<div class="settings-grid">
 </div>
 <section class="panel" aria-labelledby="out-title"><div class="panel-head"><h2 id="out-title">Session</h2></div><p>Signing out ends this session in this browser. Your keys keep working.</p><form method="post" action="/auth/logout"><button class="button quiet" type="submit">Sign out</button></form></section>
 <section class="panel danger" aria-labelledby="delete-title"><div class="panel-head"><h2 id="delete-title">Delete account</h2></div>
-<p>Deleting your account deletes, at once and for good: your API keys (they stop working within a minute), your credits, bought ones included, your daily usage, your request lines, and your sign-in record and sessions. Service logs that name the account's id are deleted with the rest of the logs, 30 days on, as the <a href="/docs/privacy/">privacy page</a> says.</p>
+<p>Deleting your account deletes, at once and for good: your API keys (they stop working within a minute), your MCP connections, your credits, bought ones included, your daily usage, your request lines, your hosted jobs (their stored result files expire on their own, at most 7 days after a job ends), and your sign-in record and sessions. Service logs that name the account's id are deleted with the rest of the logs, 30 days on, as the <a href="/docs/privacy/">privacy page</a> says.</p>
 <p>To confirm, type your email address, then sign in once more the way you usually do: that sign-in deletes the account instead of opening it. You can make a new account with the same email address later; it starts empty.</p>
 <div class="dash-form delete-form"><label for="delete-confirm"><span id="delete-label">Your email address</span><input id="delete-confirm" autocomplete="off" spellcheck="false" /></label><button class="button danger-button" type="button" id="delete-start" disabled>Delete account</button></div></section>`
 
 /** Each page: its path, title, the line under the title, and its body. */
 export const DASHBOARD_BODIES = [
   ['/dashboard/', 'Overview', 'This month\'s credits, the last 30 days of use, and the lines to connect an agent.', overviewBody],
-  ['/dashboard/activity/', 'Activity', 'Every call made with your keys in the last 30 days: what was asked for, what came back, and what it cost.', activityBody],
+  ['/dashboard/activity/', 'Activity', 'Every call made with your keys, your MCP connections or in the Playground in the last 30 days: what was asked for, what came back, and what it cost.', activityBody],
   ['/dashboard/jobs/', 'Jobs', 'Hosted batch and crawl jobs on this account: their progress, what they cost and where their results are.', jobsBody],
   ['/dashboard/usage/', 'Usage', 'What the hosted API and MCP read for this account, day by day, and what it cost.', usageBody],
   ['/dashboard/scrape/', 'Scrape', 'Read one page as Markdown, with its Evidence Record, on this account\'s credits at the API\'s price.', playgroundBody('scrape')],

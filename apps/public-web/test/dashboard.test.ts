@@ -104,6 +104,18 @@ describe('the dashboard pages render', () => {
     select.value = 'playground'
     $('activity-filters').dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event)
     expect(rowsOf($('activity-body'))).toHaveLength(1)
+    // A filter that matches nothing is said as such, not as an account without requests; clearing it brings the default text back.
+    const search = $('f-search') as HTMLInputElement
+    search.value = 'nowhere.example'
+    $('activity-filters').dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event)
+    expect(rowsOf($('activity-body'))).toHaveLength(0)
+    expect($('activity-empty').hidden).toBe(false)
+    expect($('activity-empty').textContent).toBe('No requests match these filters.')
+    search.value = ''
+    select.value = ''
+    $('activity-filters').dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event)
+    expect($('activity-empty').hidden).toBe(true)
+    expect($('activity-empty').textContent).toMatch(/^No requests yet\./)
   })
 
   it('tells a success the site answered with another page (readiness not_served, #821) from a page that was read, on Activity and in the Results meter', async () => {
@@ -678,7 +690,7 @@ describe('Receipts and Activity show the format and the duration', () => {
 describe('Settings', () => {
   it('shows the profile and the plan, and keeps preferences in this browser', async () => {
     const { $, window } = await page('/dashboard/settings/', '', OCTOBER.now, octoberAnswers())
-    expect([$('acct-email').textContent, $('acct-providers').textContent, $('acct-plan').textContent, $('acct-bought').textContent]).toEqual(['reader@example.com', 'GitHub', 'Free: 1,000 credits a month', 'None'])
+    expect([$('acct-email').textContent, $('acct-providers').textContent, $('acct-plan').textContent, $('acct-bought').textContent]).toEqual(['reader@example.com', 'GitHub', 'Free: 1,000 credits a month', 'None: credit packs are not sold yet'])
     const select = $('pref-view') as HTMLSelectElement
     expect(select.value).toBe('markdown')
     select.value = 'links'
