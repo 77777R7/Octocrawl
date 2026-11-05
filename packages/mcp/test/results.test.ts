@@ -150,10 +150,32 @@ describe('MCP result budget', () => {
     }
   })
 
+  it('keeps a markdownExcludes failure through every shortened version: a cut can remove the text from the answer, not from the page', () => {
+    const contract = { checks: [{ type: 'markdownIncludes' as const, text: 'Exhibitor' }, { type: 'markdownExcludes' as const, text: 'Log in for contact details' }] }
+    const failed = { status: 'failed', verifier: 'verify/11', contractSha256: 'a'.repeat(64), reason: 'checks_failed', checks: [{ index: 0, type: 'markdownIncludes', data: true, passed: true, observed: 'the text is in the Markdown' }, { index: 1, type: 'markdownExcludes', data: true, passed: false, observed: 'the text is in the Markdown' }] }
+    const answer = (markdown: string) => ({ status: 'success', url: 'https://example.com/', markdown, verification: failed, readiness: { state: 'not_served', basis: ['checks_failed', 'excluded_text'] }, evidenceRecord: { outputSha256: { markdown: 'x', json: null }, verification: { status: 'failed' }, readiness: { state: 'not_served', basis: ['checks_failed', 'excluded_text'] } } })
+    const shortened = [
+      // Cut to the budget, the text past the cut.
+      shapeResult('scrape', answer(`Exhibitor ${'word '.repeat(20_000)}Log in for contact details`), contract).value,
+      // Read on from an offset past the text.
+      shapeResult('scrape', answer(`Log in for contact details ${'word '.repeat(50)}Exhibitor`), contract, undefined, 40).value,
+    ] as Array<Record<string, any>>
+    for (const value of shortened) {
+      expect(value.markdown).not.toContain('Log in for contact details')
+      expect(value.verification).toMatchObject({ status: 'failed', reason: 'checks_failed' })
+      expect(value.verification.checks[1]).toMatchObject({ type: 'markdownExcludes', passed: false })
+      expect(value.readiness).toMatchObject({ state: 'not_served', basis: ['checks_failed', 'excluded_text'] })
+      expect(value.evidenceRecord.verification).toMatchObject({ status: 'failed', failed: ['markdownExcludes'] })
+    }
+    // A page that never held the text still passes when it is cut.
+    const clean = shapeResult('scrape', { ...answer(`Exhibitor ${'word '.repeat(20_000)}`), verification: { ...failed, status: 'passed', reason: null }, readiness: { state: 'ready', basis: ['verified'] } }, contract).value as Record<string, any>
+    expect(clean.verification.status).toBe('passed')
+  })
+
   it('does not reuse a stored page pass after cutting it without its original contract', async () => {
     const markdown = 'word '.repeat(20_000) + 'REQUIRED_TAIL_FIELD'
     // The second check was decided at a minimum of 0 although its scan stopped at a limit (ADR 0006, amendment of 2026-10-29).
-    const verification = { status: 'passed', verifier: 'verify/10', contractSha256: 'a'.repeat(64), reason: null, checks: [{ index: 0, type: 'markdownCountMin', data: true, passed: true, observed: '1 match, at least 1 asked', observedCount: 1, asked: 1 }, { index: 1, type: 'markdownCountMin', data: true, passed: true, limit: 'error', limitMs: 250, asked: 0, observed: 'not judged: the regular-expression engine could not run the pattern here (RangeError); at least 0 asked, which any count holds' }] }
+    const verification = { status: 'passed', verifier: 'verify/11', contractSha256: 'a'.repeat(64), reason: null, checks: [{ index: 0, type: 'markdownCountMin', data: true, passed: true, observed: '1 match, at least 1 asked', observedCount: 1, asked: 1 }, { index: 1, type: 'markdownCountMin', data: true, passed: true, limit: 'error', limitMs: 250, asked: 0, observed: 'not judged: the regular-expression engine could not run the pattern here (RangeError); at least 0 asked, which any count holds' }] }
     const readiness = { state: 'ready', basis: ['verified'], waitedMs: 123 }
     const first = { ...page(1, markdown), verification, readiness, evidenceRecord: { rawSha256: 'b'.repeat(64), outputSha256: { markdown: createHash('sha256').update(markdown).digest('hex'), json: null }, verification: { status: 'passed' }, readiness: { state: 'ready', basis: ['verified'] } } }
     const mcp = await connect(apiAnswering(() => ({ items: [first, page(2, 'later')], nextCursor: null, hasMore: false })))
@@ -232,7 +254,7 @@ describe('MCP result budget', () => {
 
   it('judges a check on the part of the Markdown it answers, so text before the offset no longer passes it', async () => {
     const markdown = 'HEAD_FIELD ' + 'word '.repeat(100)
-    const mcp = await connect(scrapeAnswering({ markdown, verification: { status: 'passed', verifier: 'verify/10', contractSha256: 'a'.repeat(64), reason: null, checks: [{ index: 0, type: 'markdownIncludes', passed: true }] }, readiness: { state: 'ready', basis: ['verified'] } }))
+    const mcp = await connect(scrapeAnswering({ markdown, verification: { status: 'passed', verifier: 'verify/11', contractSha256: 'a'.repeat(64), reason: null, checks: [{ index: 0, type: 'markdownIncludes', passed: true }] }, readiness: { state: 'ready', basis: ['verified'] } }))
     const result = (await mcp.callTool({ name: 'scrape', arguments: { url: 'https://example.com/', markdownOffset: 11, verify: { checks: [{ type: 'markdownIncludes', text: 'HEAD_FIELD' }] } } })) as ToolResult
     expectTyped('scrape', result)
     expect(result.structuredContent).toMatchObject({ markdown: markdown.slice(11), verification: { status: 'failed' }, readiness: { state: 'not_extracted', basis: ['checks_failed', 'mcp_result_offset'] } })

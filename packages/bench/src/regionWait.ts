@@ -286,7 +286,7 @@ export class RegionTracker {
     this.judged++
     const markdown = this.markdownOf(view)
     const verifyView: VerifyView = { status: 'success', ...(tables === undefined ? {} : { tables }), tableCount: tables === undefined ? view.tableCount ?? 0 : tables.filter(table => table.omitted === undefined).length, ...(markdown === undefined ? {} : { markdown }), ...(view.list === undefined ? {} : { list: view.list }) }
-    const verification = verify(this.spec.contract, verifyView, { partial: true })
+    const verification = verify(this.spec.contract, verifyView, { partial: true, live: true })
     const checks = verification.status === 'not_requested' ? [] : verification.checks.map(({ index, type, passed, observedCount }) => ({ index, type, passed, ...(observedCount === undefined ? {} : { observedCount }) }))
     // A view that can judge none of the checks is not waited on. A lane with a table reader is: a bounded capture can be
     // unavailable for a while, so its table checks are retried within the same region budget, never counted as passed.
@@ -318,7 +318,7 @@ export class RegionTracker {
     if (passed && markdown !== undefined) {
       const answerMarkdown = this.answerMarkdownOf(view)
       if (answerMarkdown !== undefined && answerMarkdown !== null) {
-        const answer = verify(this.spec.contract, { ...verifyView, markdown: answerMarkdown }, { partial: true })
+        const answer = verify(this.spec.contract, { ...verifyView, markdown: answerMarkdown }, { partial: true, live: true })
         if (answer.status !== 'passed') {
           passed = false
           if (answer.status !== 'not_requested') reported = answer.checks.map(({ index, type, passed: held, observedCount }) => ({ index, type, passed: held, ...(observedCount === undefined ? {} : { observedCount }) }))

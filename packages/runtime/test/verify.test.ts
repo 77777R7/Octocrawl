@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { unsafeRegexReason, type VerifyCheck, type VerifyContract } from '@w2l/contracts'
-import { contractSha256, verify, VERIFIER_VERSION } from '../src/verify.js'
+import { contractSha256, ROUTE_VERIFIER_VERSION, verify, VERIFIER_VERSION } from '../src/verify.js'
 // The access task runner's own judgement (research/access/run-set.mjs), which a task sent as a contract must match.
 import { isData, judge } from '../../../research/access/judge.mjs'
 
@@ -223,6 +223,36 @@ describe('the task verifier (ADR 0006)', () => {
     expect(a).toMatch(/^[0-9a-f]{64}$/)
     expect(b).toBe(a)
     expect(contractSha256({ checks: [{ type: 'markdownCountMin', pattern: '\\$\\d', min: 6, flags: 'i' }], emptyOk: false })).not.toBe(a)
+  })
+})
+
+describe('markdownExcludes: what a page must not show', () => {
+  const holds = { type: 'markdownIncludes' as const, text: 'Exhibitor' }
+  const excludes = { type: 'markdownExcludes' as const, text: 'Log in for contact details' }
+  const contract: VerifyContract = { checks: [holds, excludes] }
+
+  it('passes when the text is absent and fails when it is present, saying which without quoting the page', () => {
+    expect(verify(contract, { status: 'success', markdown: '# Exhibitor\n\nPhone +49 221 000' })).toMatchObject({ status: 'passed', checks: [{ passed: true }, { index: 1, type: 'markdownExcludes', data: true, passed: true, observed: 'the text is not in the Markdown' }] })
+    const shown = verify(contract, { status: 'success', markdown: '# Exhibitor\n\nLog in for contact details' })
+    expect(shown).toMatchObject({ status: 'failed', reason: 'checks_failed', checks: [{ passed: true }, { passed: false, observed: 'the text is in the Markdown' }] })
+  })
+
+  it('reads a page\'s view as markdownIncludes does: a partial view without Markdown does not judge it', () => {
+    expect(verify(contract, { status: 'success', tableCount: 0 }, { partial: true })).toMatchObject({ checks: [{ passed: null }, { passed: null }] })
+    // A rung's verdict reads the result: a page that shows the text fails there, so the ladder sees it.
+    expect(verify(contract, { status: 'success', markdown: 'Exhibitor. Log in for contact details' }, { partial: true })).toMatchObject({ status: 'failed', checks: [{ passed: true }, { passed: false }] })
+  })
+
+  it('judges nothing on a live page, where the text missing proves nothing: it may not have arrived yet', () => {
+    const live = verify(contract, { status: 'success', markdown: 'Exhibitor' }, { partial: true, live: true })
+    expect(live).toMatchObject({ status: 'passed', checks: [{ passed: true }, { passed: null, observed: 'not judged on a page still loading' }] })
+    expect(verify(contract, { status: 'success', markdown: 'Exhibitor. Log in for contact details' }, { partial: true, live: true })).toMatchObject({ status: 'passed', checks: [{ passed: true }, { passed: null }] })
+  })
+
+  it('is a new verifier version for the record, and a page not read still fails before any check', () => {
+    expect(VERIFIER_VERSION).toBe('verify/11')
+    expect(ROUTE_VERIFIER_VERSION).toBe('verify/9')
+    expect(verify(contract, { status: 'blocked', markdown: null })).toMatchObject({ status: 'failed', reason: 'page_not_read', checks: [] })
   })
 })
 

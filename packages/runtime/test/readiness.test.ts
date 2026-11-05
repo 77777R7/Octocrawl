@@ -196,10 +196,23 @@ describe('explicit source outage readiness', () => {
   })
 })
 
+it('reads a page that shows what the contract excludes as not served, on the region\'s word or without it', () => {
+  const shown = { index: 1, type: 'markdownExcludes' as const, data: true, passed: false, observed: 'the text is in the Markdown' }
+  const held = { index: 0, type: 'markdownIncludes' as const, data: true, passed: true, observed: 'the text is in the Markdown' }
+  const verification = { status: 'failed' as const, verifier: 'verify/11', contractSha256: 'f'.repeat(64), reason: 'checks_failed' as const, checks: [held, shown] }
+  // The login prompt is on the page: the region it asked for held, and nothing went wrong in extraction.
+  const ready: TraceEvent = { at: 1, lane: 'browser_local', event: 'region_wait', detail: { ready: true, empty: false, waitedMs: 500, reads: 2, judged: 2, loading: false, steady: true, contractSha256: 'f'.repeat(64) } }
+  expect(readinessOf(result({ verification }, [ready]))).toMatchObject({ state: 'not_served', basis: ['checks_failed', 'excluded_text'] })
+  expect(readinessOf(result({ lane: 'http', verification }))).toMatchObject({ state: 'not_served', basis: ['checks_failed', 'excluded_text'] })
+  // A check that held says nothing of the kind.
+  const passedCheck = { ...shown, passed: true, observed: 'the text is not in the Markdown' }
+  expect(readinessOf(result({ verification: { ...verification, status: 'passed', reason: null, checks: [held, passedCheck] } }))).toMatchObject({ state: 'ready', basis: ['verified'] })
+})
+
 it('never reads a page ready, or its region absent, when a check stopped at its limit and none failed (ADR 0006, amendment of 2026-10-29)', () => {
   const undecided = { index: 0, type: 'markdownMatches' as const, data: true, passed: null, limit: 'time' as const, limitMs: 250, observed: 'not judged' }
   const failedCheck = { index: 1, type: 'markdownIncludes' as const, data: true, passed: false, observed: 'the text is not in the Markdown' }
-  const verification = (checks: VerificationCheck[]) => ({ status: 'failed' as const, verifier: 'verify/10', contractSha256: 'f'.repeat(64), reason: 'checks_failed' as const, checks })
+  const verification = (checks: VerificationCheck[]) => ({ status: 'failed' as const, verifier: 'verify/11', contractSha256: 'f'.repeat(64), reason: 'checks_failed' as const, checks })
   expect(readinessOf(result({ verification: verification([undecided]) }))).toEqual({ state: 'not_extracted', basis: ['checks_undecided'] })
   // A page still loading stays not loaded, with the same basis added.
   expect(readinessOf(result({ verification: verification([undecided]), warnings: warned('page_still_loading') }))).toMatchObject({ state: 'not_loaded', basis: ['page_still_loading', 'checks_undecided'] })
