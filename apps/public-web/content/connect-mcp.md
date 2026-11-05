@@ -44,6 +44,8 @@ claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp-oauth
 
 Then run `/mcp` in Claude Code, select octocrawl and sign in in the browser it opens (`claude mcp login octocrawl` does the same from a terminal). The Octocrawl plugin sets up the same server: `/plugin install octocrawl --marketplace 77777R7/Octocrawl`, then sign in from `/mcp` the same way. **Clear authentication** in `/mcp` signs it out. The key setup above keeps working on `/mcp`. ([Claude Code's guide](https://code.claude.com/docs/en/mcp))
 
+If you added the keyless server first (the home page's `claude mcp add --transport http octocrawl https://mcp.octocrawl.dev/mcp`), it has the same name: run `claude mcp remove octocrawl` before the command above. Codex: `codex mcp remove octocrawl`; Cursor, OpenCode and Cline: replace the `octocrawl` entry in the JSON.
+
 Checked with Claude Code 2.1.301 on 2026-10-16.
 
 ### Cursor
@@ -82,7 +84,7 @@ Checked with OpenCode 1.18.26 on 2026-10-17.
 Use Octocrawl's scrape tool on https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Overview with formats ["markdown"]. Show the final URL, the HTTP status and the robots.txt decision from its evidenceRecord, then the first heading of the Markdown.
 ```
 
-The answer carries the page's Markdown and an Evidence Record: final URL, fetch time, HTTP status, the robots.txt decision and hashes of what was read. A page that could not be read comes back as a result with a reason (`blocked`, `incomplete`, `timeout`), not as an invented page. Over the daily allowance the tool answers with the time until it resets (00:00 UTC) and how to get a key. For a walk-through of a real task in Claude Code, from finding the page with `map` to citing its Evidence Record, see [Claude Code web scraping](/blog/claude-code-web-scraping/).
+The answer carries the page's Markdown and an Evidence Record: final URL, fetch time, HTTP status, the robots.txt decision and hashes of what was read. A page that could not be read comes back as a result whose status says so (`blocked` with a `blockReason`, `failed` with a `failureReason` such as `timeout`, or `empty_verified`), not as an invented page. Over the daily allowance the tool answers with the time until it resets (00:00 UTC) and how to get a key. For a walk-through of a real task in Claude Code, from finding the page with `map` to citing its Evidence Record, see [Claude Code web scraping](/blog/claude-code-web-scraping/).
 
 ### Check the first result before continuing
 
@@ -113,7 +115,7 @@ Without an account the tools are not listed, and a call says it needs one. A job
 - Each page costs credits as a scrape does: 1 over HTTP and 5 in a browser.
 - An account runs two jobs at a time, with up to ten more waiting.
 - Results are kept 7 days after the job ends.
-- A wait returns after at most 90 seconds with the status so far. Call it again, or check later with `get_crawl` or `get_batch`.
+- A wait returns after at most 120 seconds (`timeoutMs`, default 30 seconds) with the status so far. Call it again, or check later with `get_crawl` or `get_batch`.
 
 ```text
 Use Octocrawl's batch_scrape tool on https://example.com/ and https://books.toscrape.com/ with fastMode true. Wait for it, then list its items with each URL, status and first heading.

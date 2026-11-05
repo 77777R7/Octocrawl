@@ -33,6 +33,8 @@ export interface CliIo {
   stderr: (text: string) => void
   /** Aborted to stop a running crawl or batch (SIGINT): the job stays paused and resumable. */
   signal?: AbortSignal
+  /** stdout is a terminal, so a person is reading the JSON: one line on stderr says what it holds and how to get less. */
+  tty?: boolean
 }
 
 /** Exit codes: 0 a contentful page or a completed job, 1 anything else W2L answered, 2 a refused command line, 130 interrupted. */
@@ -49,10 +51,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 
 async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
   const [name, ...rest] = argv
-  if (name === undefined || name === '--help' || name === 'help') {
-    io.stdout(usage(null))
-    return name === undefined ? 2 : 0
-  }
+  // No command is a mistake, so its usage goes where errors go; asked for, the usage is the answer.
+  if (name === undefined) { io.stderr(usage(null)); return 2 }
+  if (name === '--help' || name === 'help') { io.stdout(usage(null)); return 0 }
   if (name === '--version') { io.stdout(CLI_VERSION); return 0 }
   if (name === 'serve') return serve(rest, io)
   if (name === 'login') return login(rest, io)
@@ -65,6 +66,8 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
     const line = parseCommandLine(command, rest)
     if (line.cli.help) { io.stdout(usage(command)); return 0 }
     if (command === 'batch' && line.cli.urlsFile !== undefined) line.urls.push(...await urlsFrom(line.cli.urlsFile))
+    // A URL typed without its scheme is the likeliest first mistake: say the URL meant, before the API's own check refuses it.
+    if (line.body.ignoreInvalidURLs !== true) for (const url of line.urls) checkUrl(url)
     // Apart from the API server's .w2l/api by default: two processes on one task root could run the same job twice.
     const taskRoot = line.cli.taskRoot ?? io.env.W2L_TASK_ROOT ?? '.w2l/cli'
     // A one-off command listens nowhere: the API server's listen address is not its concern, only the network policy is.
@@ -118,9 +121,37 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<number> {
 
 const ORIGIN = `cli@${CLI_VERSION}`
 
+/** A URL as typed: one without http(s):// is refused with the URL meant, so the API's "url must be http(s)" is not the first thing a person reads. */
+function checkUrl(url: string): void {
+  if (/^https?:\/\//i.test(url)) return
+  // A host name (IDN letters included), localhost or an IPv4 address, with a port or not, then a path or nothing.
+  const host = /^([\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+|localhost|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?(?:[/?#]|$)/iu.exec(url)
+  if (host !== null) {
+    // A local address is nearly always plain http; anything else is https today.
+    const scheme = /^(localhost|127\.|10\.|192\.168\.|0\.0\.0\.0)/i.test(host[1]!) || host[1]!.toLowerCase().endsWith('.localhost') ? 'http' : 'https'
+    throw new UsageError(`"${url}" has no scheme; did you mean ${scheme}://${url}?`)
+  }
+  throw new UsageError(`"${url}" is not a URL: a URL starts with http:// or https://`)
+}
+
+/** What a scrape's result is, when it is not the page asked for: the status, its reason, and the first hint, for the terminal. */
+type Verdict = { status: string; failureReason?: string | null; blockReason?: string | null; warnings?: ReadonlyArray<{ code: string; message: string }>; agentHints?: readonly string[] }
+export function verdictLine(command: string, response: Verdict): string | null {
+  const offPage = response.warnings?.some((warning) => warning.code === 'redirected_off_page') === true
+  if (CONTENTFUL_STATUS.has(response.status as never) && !offPage) return null
+  const reason = response.failureReason ?? response.blockReason ?? null
+  // A verified-empty page was read: it holds nothing to extract, which is not a failure (exit 1 stands, as before).
+  const head = offPage && CONTENTFUL_STATUS.has(response.status as never) ? `${response.status}, but the site answered another page`
+    : response.status === 'empty_verified' ? 'empty_verified (the page was read and holds nothing to extract)'
+    : `${response.status}${reason === null ? '' : ` (${reason})`}`
+  // The hint says the next step; without one, a browser that could not start is the next thing to know.
+  const hint = response.agentHints?.[0] ?? response.warnings?.find((warning) => warning.code === 'browser_not_installed')?.message
+  return `octocrawl ${command}: ${head}${hint === undefined ? '' : `; ${hint}`}`
+}
+
 async function runCommand(engine: ApiEngine, command: Command, urls: string[], body: Record<string, unknown>, cli: CliOptions, io: CliIo): Promise<number> {
   const one = (): string => {
-    if (urls.length !== 1) throw new UsageError(`octocrawl ${command} takes one URL, got ${urls.length}`)
+    if (urls.length !== 1) throw new UsageError(`takes one URL, got ${urls.length} (octocrawl ${command} --help)`)
     return urls[0]!
   }
   switch (command) {
@@ -134,11 +165,23 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       if (cli.out !== undefined) await writeOut(cli.out, [response], null, io)
       if (cli.markdown) io.stdout(response.markdown ?? '')
       else if (cli.out === undefined) io.stdout(JSON.stringify(response, null, 2))
+      // A result that is not the page says so on stderr in every output mode: the Markdown alone, or a file, would hide it.
+      const verdict = verdictLine('scrape', response)
+      if (verdict !== null) io.stderr(verdict)
+      else if (io.tty === true && !cli.markdown && cli.out === undefined) {
+        // The Markdown is counted only when it was asked for: another format alone carries none.
+        const formats = (req.formats ?? []).map((format) => typeof format === 'string' ? format : format.type)
+        const holds = typeof response.markdown === 'string' ? `${response.markdown.length.toLocaleString('en-US')} characters of Markdown` : `the ${formats.join(', ')} ${formats.length === 1 ? 'format' : 'formats'}`
+        io.stderr(`octocrawl scrape: ${response.status} on the ${response.lane} lane; ${holds} in the JSON above (--markdown prints the Markdown alone, --out <dir> writes files)`)
+      }
       return CONTENTFUL_STATUS.has(response.status) ? 0 : 1
     }
     case 'map': {
       const response = await engine.map(parseMapRequest({ ...body, url: one(), origin: ORIGIN }), io.signal === undefined ? {} : { signal: io.signal })
       io.stdout(JSON.stringify(response, null, 2))
+      const hint = response.agentHints?.[0]
+      if (response.status === 'failed') io.stderr(`octocrawl map: failed${hint === undefined ? '' : `; ${hint}`}`)
+      else if (io.tty === true) io.stderr(`octocrawl map: ${response.status}, ${response.links.length.toLocaleString('en-US')} URLs in the JSON above${hint === undefined ? '' : `; ${hint}`}`)
       return response.status === 'failed' ? 1 : 0
     }
     case 'crawl': {
@@ -160,7 +203,7 @@ async function runCommand(engine: ApiEngine, command: Command, urls: string[], b
       return finish(engine, 'crawl', taskId, cli, io)
     }
     case 'batch': {
-      if (urls.length === 0) throw new UsageError('octocrawl batch takes URLs as arguments or --urls-file')
+      if (urls.length === 0) throw new UsageError('takes URLs as arguments or --urls-file <file> (octocrawl batch --help)')
       const accepted = await engine.startBatch(parseBatchStartRequest({ ...body, urls, origin: ORIGIN }))
       io.stderr(`octocrawl batch: task ${accepted.taskId}${accepted.invalidURLs?.length ? `, ${accepted.invalidURLs.length} invalid URLs skipped` : ''}`)
       if (body.lane === 'my-browser' || body.access === 'my-browser') io.stderr('octocrawl batch: in your Chrome, click Allow, then Allow reading these sites in the page Octocrawl opened (it lists every site of the batch); close that page or click Revoke to stop')
@@ -200,7 +243,21 @@ async function finish(engine: ApiEngine, kind: 'crawl' | 'batch', taskId: string
   } else {
     io.stdout(JSON.stringify({ report, items }, null, 2))
   }
+  io.stderr(summaryLine(kind, report, items, cli.out === undefined))
   return report.status === 'completed' ? 0 : 1
+}
+
+/** One line on how the job ended: its status, how many pages were read and how many were not, and where the pages are. */
+function summaryLine(kind: 'crawl' | 'batch', report: CrawlReport, items: readonly CrawlPage[], onStdout: boolean): string {
+  // A verified-empty page was read, as the batch's own `succeeded` counts it.
+  const read = items.filter((item) => CONTENTFUL_STATUS.has(item.status as never) || item.status === 'empty_verified').length
+  const notRead = items.length - read
+  const offPage = items.filter((item) => item.warnings?.some((warning) => warning.code === 'redirected_off_page')).length
+  const parts = [`${report.status}`, `${read.toLocaleString('en-US')} of ${items.length.toLocaleString('en-US')} pages read`]
+  if (notRead > 0) parts.push(`${notRead.toLocaleString('en-US')} not read (each item says why, with its agentHints)`)
+  if (offPage > 0) parts.push(`${offPage.toLocaleString('en-US')} answered by another page of the site (redirected_off_page)`)
+  if (onStdout) parts.push('the report and every page are the JSON above (--out <dir> writes them as files)')
+  return `octocrawl ${kind}: ${parts.join('; ')}`
 }
 
 /** What a handoff tells the person on the terminal while it waits for them. */

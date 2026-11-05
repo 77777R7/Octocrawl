@@ -23,6 +23,10 @@ export interface McpServerOptions {
   calls?: PostCalls
   /** What initialize tells the client about this server; by default written from the tools it lists, for a local server. */
   instructions?: string
+  /** A line added after the instructions: what the server found at start (its API not answering) that the first call will meet. */
+  instructionsNote?: string
+  /** Told each tool call's end: the tool, how long it took, whether its answer was cut to the budget, and whether it ended as a tool error (hosted's `hosted_mcp_call` line). */
+  onCall?: (call: { tool: string; ms: number; truncated: boolean; error: boolean }) => void
   /** Said after "this server offers ..." when a client calls a tool this deployment leaves out: where the tool does run, or how to list it. */
   unavailableHint?: string | ((tool: string) => string | undefined)
   /** The API this server calls, named when it cannot be reached (a local server's base URL). */
@@ -45,7 +49,7 @@ export interface McpServerOptions {
    * (repeatedScrapes.ts): hosted Octocrawl shares one tracker across its connections and names the key or the keyless
    * address; a local server counts its one client under `local` by default.
    */
-  repeatedScrapes?: { tracker: RepeatedScrapes; caller: string }
+  repeatedScrapes?: { tracker: RepeatedScrapes; caller: string; /** A server on the person's computer: a hint about batch_scrape names the toolset flag, not an account. */ local?: boolean }
 }
 
 /** A local server's count of its one client's scrapes by host (repeatedScrapes.ts), when a deployment gives none. */
@@ -74,12 +78,13 @@ export function mcpOrigin(client: { name: string; version: string } | undefined)
 
 export function createMcpServer(client: W2L, options: McpServerOptions = {}): Server {
   const listed = options.tools ?? TOOLS.filter(tool => options.allowedTools === undefined || options.allowedTools.has(tool.name))
-  const instructions = options.instructions ?? serverInstructions(listed.map(tool => (tool as { name: string }).name), { kind: 'local' })
+  const written = options.instructions ?? serverInstructions(listed.map(tool => (tool as { name: string }).name), { kind: 'local' })
+  const instructions = options.instructionsNote === undefined ? written : `${written}\n${options.instructionsNote}`
   // A minimal result keeps a scrape's record id where get_scrape is listed to read it back.
   const keepScrapeId = listed.some(tool => (tool as { name: string }).name === 'get_scrape')
   // The hint on repeated scrapes names batch_scrape where this deployment lists it, else where it runs (repeatedScrapes.ts).
   const listsBatch = listed.some(tool => (tool as { name: string }).name === 'batch_scrape')
-  const repeated = options.repeatedScrapes ?? { tracker: LOCAL_REPEATED_SCRAPES, caller: 'local' }
+  const repeated = options.repeatedScrapes ?? { tracker: LOCAL_REPEATED_SCRAPES, caller: 'local', local: true }
   const server = new Server(
     { ...SERVER_IDENTITY, version: MCP_VERSION, websiteUrl: 'https://octocrawl.dev/?utm_source=mcp-server&utm_medium=listing' },
     { capabilities: { tools: {} }, instructions },
@@ -100,11 +105,14 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
       // A tool this deployment leaves out stays a protocol error, as the spec has an unknown tool, but says what is offered.
       if (options.allowedTools && !options.allowedTools.has(request.params.name)) {
         const hint = typeof options.unavailableHint === 'function' ? options.unavailableHint(request.params.name) : options.unavailableHint
-        throw new Error(`tool not available in this deployment: ${request.params.name}; this server offers ${[...options.allowedTools].join(', ')}.${hint === undefined ? '' : ` ${hint}`}`)
+        // Named from the tools this caller is listed, not the deployment's whole set: a keyless caller is not offered scrape_product.
+        throw new Error(`tool not available in this deployment: ${request.params.name}; this server offers ${listed.map(tool => (tool as { name: string }).name).join(', ')}.${hint === undefined ? '' : ` ${hint}`}`)
       }
       let result: unknown
       let contract: VerifyContract | undefined
       let progress: ProgressReporter | undefined
+      const startedAt = Date.now()
+      const told = (truncated: boolean, error: boolean): void => { try { options.onCall?.({ tool: request.params.name, ms: Date.now() - startedAt, truncated, error }) } catch { /* the observer's own fault */ } }
       try {
         options.authorizeCall?.(request.params.name,request.params.arguments ?? {})
         const args = options.normalizeCall?.(request.params.name, request.params.arguments ?? {}) ?? request.params.arguments ?? {}
@@ -120,7 +128,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
           // From a caller's third scrape of one host in ten minutes, the answer names the tools that read many pages as one job.
           if (request.params.name === 'scrape') {
             const url = (args as Record<string, unknown>).url
-            result = withRepeatedScrapesHint(result, url, repeated.tracker.note(repeated.caller, url), listsBatch)
+            result = withRepeatedScrapesHint(result, url, repeated.tracker.note(repeated.caller, url), listsBatch, repeated.local === true)
           }
         }
         finally { progress?.stop() }
@@ -128,6 +136,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
         if (signal.aborted) throw requestCancelled()
         if (error instanceof Error && error.message.startsWith('unknown tool: ')) throw withErrorCode(error)
         // A call that did not run is a tool result the client hands the model (docs/mcp-client-ux-tasks.md W5).
+        told(false, true)
         return toolErrorResult(error, request.params.name, options.apiUrl)
       }
       if (signal.aborted) throw requestCancelled()
@@ -143,6 +152,7 @@ export function createMcpServer(client: W2L, options: McpServerOptions = {}): Se
         ledger.close()
         if (ledger.stats.scans > 0 || ledger.stats.memoHits > 0) { try { options.onRegexChecks?.(ledger.stats) } catch { /* the observer's own fault */ } }
       }
+      told((value as { truncated?: unknown } | null)?.truncated === true, false)
       return { content: [{ type: 'text', text: JSON.stringify(value) }, ...images], ...(structured ? { structuredContent: value as Record<string, unknown> } : {}) }
     } finally { call?.end() }
   })

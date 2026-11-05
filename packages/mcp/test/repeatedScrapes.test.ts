@@ -62,6 +62,16 @@ describe('repeated scrapes of one host', () => {
     } finally { await mcp.close() }
   })
 
+  it('names the toolset flag, not an account, on a server on the person\'s computer started without the batch toolset', async () => {
+    const { mcp, scrape } = await connect({ allowedTools: new Set(['scrape', 'map']) })
+    try {
+      for (const path of ['a', 'b']) await scrape(`https://example.com/${path}`)
+      const hint = (await scrape('https://example.com/c')).agentHints?.[1]
+      expect(hint).toBe('3 scrapes of example.com in the last 10 minutes: this server does not list batch_scrape (its batch toolset is off, or it is read-only); started with --toolsets=all and without --read-only, a known list of URLs runs as one batch_scrape and a section of a site as one crawl')
+      expect(hint).not.toContain('account')
+    } finally { await mcp.close() }
+  })
+
   it('counts without a tracker given, under one caller, so a local server needs no setup', async () => {
     const { mcp, scrape } = await connect()
     try {

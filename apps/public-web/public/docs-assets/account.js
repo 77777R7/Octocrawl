@@ -57,7 +57,7 @@
       button.disabled = true
       try {
         const response = await fetch('/auth/email', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, next }) })
-        if (response.ok) say(message, `We sent a sign-in link to ${email}. Open it in this browser. It works once, for an hour.`)
+        if (response.ok) say(message, `We sent a sign-in link to ${email}. Open it in this browser, or in another one and type your email again there. It works once, for an hour; if it does not arrive, check the spam folder.`)
         else if (response.status === 400) say(message, 'Check the email address and try again.', true)
         else if (response.status === 429) say(message, 'Too many sign-in links were asked for. Wait an hour, or sign in with GitHub or Google.', true)
         else say(message, ERRORS.unavailable, true)
