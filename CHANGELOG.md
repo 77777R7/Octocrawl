@@ -29,6 +29,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **The MCP instructions teach the directory route: URLs first, then one batch.** On 2026-11-04 a directory's 272 detail pages were read with one `scrape` call each. Where `batch_scrape` is listed, the instructions a client reads at `initialize` now say: get the detail pages' URLs first (`map` where a sitemap lists them, else `batch_scrape` the listing pages with `formats: ["links"]` and keep the detail links), then read them as one `batch_scrape`, not one scrape per page. To stay under the 2,000 characters a client keeps whole, four other sentences are shorter, and the rule said beside `browser_busy` reads "One scrape at a time in the browser per key or sign-in". `docs/batch-crawl-map.md` has the route in full (From a directory to its detail pages).
+
 ## 0.8.4 — 2026-11-05
 
 The published packages at 0.8.4. **Every failure names its next step, locally and on hosted Octocrawl:** the command line says on stderr when a result is not the page and its help lists its own flags; `octocrawl serve` prints the command that connects Claude Code to it, and `npx -y @octocrawl/mcp` says at initialize when its API is not running; an `https://` URL of a site with no working HTTPS is read over `http://`, with an `https_unavailable` warning; a batch or crawl slows a host that pushes back and says so; `waitFor` with `fastMode` is refused by name. On hosted Octocrawl the hints name only what hosted can do, the dashboard shows a result that is not the page as such, and the logs say who was refused and why.
