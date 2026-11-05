@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import type { FetchOptions, FetchResult, JsonFormatRequest } from '@w2l/contracts'
+import { parseBatchStartRequest, parseCrawlStartRequest, type FetchOptions, type FetchResult, type JsonFormatRequest } from '@w2l/contracts'
 import { buildChannels } from '@w2l/bench'
 import { createApp } from '../src/app.js'
 import { createApiEngine, type ApiEngineOptions } from '../src/engine.js'
@@ -331,6 +331,23 @@ describe('onlyMainContent, waitFor and timeout on scrape, batch and crawl', () =
     const refused = await httpOnly.post('/v1/scrape', { url: `${httpOnly.origin}/chrome`, waitFor: 500 })
     expect(refused).toMatchObject({ status: 200, body: { status: 'failed', failureReason: 'policy_denied', markdown: null } })
     expect(refused.body.trace).toContainEqual(expect.objectContaining({ event: 'wait_for_unavailable' }))
+    // A lack of this server's for this URL, so it stays the page's result; the hint says so, and names no option the caller did not send.
+    expect(refused.body.agentHints).toEqual(['waitFor needs the browser lane and no browser rung is open to this request for this URL, so nothing was read; send it without waitFor to read the page without the wait'])
+  })
+
+  it('refuses waitFor with fastMode by name before anything is read, on a scrape, a batch and a crawl; a waitFor of 0 is no wait', async () => {
+    const seen: Seen[] = []
+    const { origin, post, engine } = await setup(recordingBrowser(seen))
+    const url = `${origin}/chrome`
+    const refused = { status: 400, body: { error: 'waitFor requires the browser lane, which fastMode declines', code: 'invalid_request' } }
+    expect(await post('/v1/scrape', { url, waitFor: 500, fastMode: true })).toEqual(refused)
+    expect(await post('/v1/batches', { urls: [url], waitFor: 500, fastMode: true })).toEqual(refused)
+    expect(await post('/v1/crawl', { url, waitFor: 500, fastMode: true })).toEqual(refused)
+    // A hosted job's start asks these two alone: its caller gets the reason at submit, not a job that later failed request_refused.
+    expect(() => engine.checkBatchStart(parseBatchStartRequest({ urls: [url], waitFor: 500, fastMode: true }))).toThrow(refused.body.error)
+    expect(() => engine.checkCrawlStart(parseCrawlStartRequest({ url, waitFor: 500, fastMode: true }))).toThrow(refused.body.error)
+    expect(seen).toEqual([])
+    expect(await post('/v1/scrape', { url, waitFor: 0, fastMode: true })).toMatchObject({ status: 200, body: { lane: 'http', channelsTried: ['http'] } })
   })
 
   it('hands the lanes the request\'s task contract, for the browser to wait for its region (ADR 0007)', async () => {
