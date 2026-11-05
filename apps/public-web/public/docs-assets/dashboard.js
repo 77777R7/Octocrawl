@@ -102,9 +102,10 @@
       if (!stats.last || line.at > stats.last) stats.last = line.at
       if (line.at >= start.toISOString()) { stats.calls += 1; stats.credits += line.credits }
       byKey.set(line.keyId, stats)
-      perDay.set(line.at.slice(0, 10), (perDay.get(line.at.slice(0, 10)) ?? 0) + 1)
+      // A job's line stands for no one day's count: the usage says how many of a day's pages were a job's instead.
+      if (!line.job) perDay.set(line.at.slice(0, 10), (perDay.get(line.at.slice(0, 10)) ?? 0) + 1)
     }
-    const missing = usage.some((d) => Date.parse(`${d.day}T00:00:00Z`) >= since && (perDay.get(d.day) ?? 0) < d.http + d.browser + d.notFound + d.map + d.unread)
+    const missing = usage.some((d) => Date.parse(`${d.day}T00:00:00Z`) >= since && (perDay.get(d.day) ?? 0) < d.http + d.browser + d.notFound + d.map + d.unread - (d.jobPages ?? 0))
     // A full page of lines all from today leaves no whole day to make a claim from.
     const why = missing ? UNKNOWN : since > Date.now() ? `The page holds only the latest ${number(limit)} request lines, all from today, so this is not known.` : null
     return { byKey, since: new Date(since).toISOString(), known: why === null, why, missing, monthWhole: !missing && since <= start.getTime() }
@@ -282,11 +283,23 @@
     ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
     : `${longDay(iso)} ${iso.slice(11, 16)}`)
   /** What a scrape asked for; a map asks for no format. Lines from before the hosted API kept it say so. */
-  const formatsOf = (line) => (line.endpoint === 'map' ? '—' : !Array.isArray(line.formats) ? 'not recorded' : line.formats.length ? line.formats.join(' + ') : 'default')
+  const formatsOf = (line) => (line.endpoint === 'map' || line.job ? '—' : !Array.isArray(line.formats) ? 'not recorded' : line.formats.length ? line.formats.join(' + ') : 'default')
   const durationOf = (line) => (typeof line.ms !== 'number' ? 'not recorded' : line.ms < 1_000 ? `${line.ms} ms` : `${(line.ms / 1_000).toFixed(line.ms < 10_000 ? 1 : 0)} s`)
   const laneOf = (lane) => (!lane ? '—' : lane === 'http' ? 'HTTP' : lane.startsWith('browser') ? 'Browser' : lane)
+  /** A job's pages as a scrape's would count: `duplicate` pages were fetched and were no page of their own, so they are neither. */
+  const jobPages = (job) => {
+    const { read = 0, partial = 0, duplicate = 0 } = job.outcomes
+    return { total: Object.values(job.outcomes).reduce((sum, n) => sum + n, 0) - duplicate, read: read + partial }
+  }
   /** What a request line shows as its result, and how it is marked: read, not charged, or failed. */
   const outcome = (line) => {
+    if (line.job) {
+      if (line.status !== 'completed') return [line.reason ? `${line.status} · ${line.reason}` : line.status, line.status === 'failed' ? 'bad' : 'warn']
+      const pages = `${number(line.job.pages)} page${line.job.pages === 1 ? '' : 's'}`
+      const { total, read } = jobPages(line.job)
+      const missed = Math.max(line.job.errors, total - read)
+      return missed ? [`${pages} · ${number(missed)} not read`, 'warn'] : [pages, 'ok']
+    }
     if (line.endpoint === 'map') return line.links !== null && line.links > 0 ? [`${number(line.links)} links`, 'ok'] : [line.status === 'invalid_request' ? 'invalid request' : 'no links', 'warn']
     // A success whose page is another page of the site (readiness not_served, #821) is not a read.
     if (READ.has(line.status) && line.readiness === 'not_served') return [`${line.httpStatus ? `${line.httpStatus} · ` : ''}another page`, 'warn']
@@ -294,6 +307,12 @@
     if (line.status === 'failed' && (line.httpStatus === 404 || line.httpStatus === 410)) return [`${line.httpStatus}`, 'warn']
     if (line.status === 'invalid_request') return ['invalid request', 'warn']
     return [line.reason ? `${line.status} · ${line.reason}` : line.status || 'error', 'bad']
+  }
+  /** What robots.txt did: a call's decision, or how many of a job's pages it kept out. */
+  const robotsOf = (line) => {
+    if (!line.job) return line.robots ?? '—'
+    const { robots_unreachable: unreachable, robots_disallowed: disallowed } = line.job.outcomes
+    return [unreachable ? `${number(unreachable)} unreachable` : '', disallowed ? `${number(disallowed)} disallowed` : ''].filter(Boolean).join(' · ') || '—'
   }
   const cell = (row, text, className = '') => { const td = document.createElement('td'); if (className) td.className = className; td.textContent = text; row.append(td); return td }
   const renderRequests = (id, lines, keyNames) => {
@@ -307,17 +326,20 @@
       if (/^https?:\/\//.test(line.url)) {
         const link = document.createElement('a'); link.href = line.url; link.rel = 'noopener noreferrer'; link.target = '_blank'; link.textContent = line.url.replace(/^https?:\/\//, ''); link.title = line.url
         url.append(link)
+        if (line.job?.requested > 1) url.append(` + ${number(line.job.requested - 1)} more`)
       } else url.textContent = line.url || '(no URL)'
       cell(row, formatsOf(line))
       const lane = cell(row, laneOf(line.lane)); if (line.lane) lane.title = line.lane
       const [label, mark] = outcome(line)
       const result = cell(row, '')
       const pill = document.createElement('span'); pill.className = `status ${mark}`; pill.textContent = label; result.append(pill)
-      cell(row, line.robots ?? '—')
+      cell(row, robotsOf(line))
       cell(row, durationOf(line), 'num')
       cell(row, number(line.credits), 'num')
       const hash = cell(row, line.sha256 ? `sha256 ${line.sha256.slice(0, 12)}…` : '—', 'hash')
       if (line.sha256) hash.title = line.sha256
+      // A job's pages, each with its Evidence Record, are on the Jobs page.
+      if (line.job) { const pages = document.createElement('a'); pages.href = '/dashboard/jobs/'; pages.textContent = 'Jobs'; hash.replaceChildren(pages) }
       if (keyNames) row.title = `Key: ${keyName(line)}`
       return row
     }))
@@ -337,8 +359,9 @@
   const csvField = (value) => { const text = value === null || value === undefined ? '' : String(value); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text }
   /** Request lines as a CSV file to save: every field the page has, formats joined with `+`, unknown left empty. */
   const saveCsv = (lines) => {
-    const columns = ['at', 'endpoint', 'url', 'finalUrl', 'formats', 'lane', 'status', 'httpStatus', 'reason', 'robots', 'links', 'ms', 'credits', 'sha256', 'keyId']
-    const text = [columns.join(','), ...lines.map((line) => columns.map((c) => csvField(c === 'formats' ? (Array.isArray(line.formats) ? line.formats.join('+') : null) : line[c])).join(','))].join('\n')
+    const columns = ['at', 'endpoint', 'url', 'finalUrl', 'formats', 'lane', 'status', 'httpStatus', 'reason', 'robots', 'links', 'ms', 'credits', 'sha256', 'keyId', 'jobId', 'pages', 'errors']
+    const field = (line, c) => (c === 'formats' ? (Array.isArray(line.formats) ? line.formats.join('+') : null) : c === 'jobId' ? line.job?.id : c === 'pages' || c === 'errors' ? line.job?.[c] : line[c])
+    const text = [columns.join(','), ...lines.map((line) => columns.map((c) => csvField(field(line, c))).join(','))].join('\n')
     const link = document.createElement('a')
     link.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }))
     link.download = `octocrawl-activity-${new Date().toISOString().slice(0, 10)}.csv`
@@ -426,9 +449,13 @@
     set('activity-count', `${number(shown.length)} of ${number(activity.length)} in 30 days`)
     // Read of the calls that had a result: an invalid request had none. Unknown (no lines yet) is a dash, not zero.
     const answered = activity.filter((line) => line.status !== 'invalid_request')
-    set('sum-rate', answered.length ? `${Math.round((answered.filter((line) => outcome(line)[1] === 'ok').length / answered.length) * 100)}%` : '—')
-    set('sum-rate-sub', answered.length ? `${number(answered.length)} calls in 30 days` : 'no request lines yet')
-    const sites = tally(activity, (line) => host(line.url), (line) => line.credits === 0)
+    // A job counts page by page, as the day's usage does.
+    const total = answered.reduce((sum, line) => sum + (line.job ? jobPages(line.job).total : 1), 0)
+    const read = answered.reduce((sum, line) => sum + (line.job ? jobPages(line.job).read : outcome(line)[1] === 'ok' ? 1 : 0), 0)
+    set('sum-rate', total ? `${Math.round((read / total) * 100)}%` : '—')
+    set('sum-rate-sub', answered.length ? `${number(total)} calls in 30 days` : 'no request lines yet')
+    // A batch's URLs can be on any number of sites, so its first URL does not name one.
+    const sites = tally(activity, (line) => (line.endpoint === 'batch' ? 'Batches' : host(line.url)), (line) => line.credits === 0)
     const siteHost = $('site-map')
     if (siteHost && charts) {
       const top = sites.slice(0, 12)
@@ -455,7 +482,12 @@
     }
     const scrapes = activity.filter((line) => line.endpoint === 'scrape')
     const counted = (lines, keyOf) => { const counts = new Map(); for (const line of lines) { const key = keyOf(line); counts.set(key, (counts.get(key) ?? 0) + 1) } return [...counts].sort((a, b) => b[1] - a[1]) }
-    meterList('results', counted(activity, category))
+    const results = new Map()
+    for (const line of activity) {
+      if (line.job) for (const [name, n] of Object.entries(line.job.outcomes)) results.set(JOB_OUTCOMES[name] ?? 'Failed', (results.get(JOB_OUTCOMES[name] ?? 'Failed') ?? 0) + n)
+      else results.set(category(line), (results.get(category(line)) ?? 0) + 1)
+    }
+    meterList('results', [...results].sort((a, b) => b[1] - a[1]))
     // A call kept out by robots.txt or refused as invalid was never sent, which is not the same as no answer.
     meterList('codes', counted(scrapes, (line) => (line.httpStatus !== null ? String(line.httpStatus) : line.robots === 'disallowed' || line.robots === 'unreachable' || line.status === 'invalid_request' ? 'Not requested' : 'No response')))
     const lanes = ['http', 'browser'].map((kind) => { const lines = activity.filter((line) => line.kind === kind); return [kind === 'http' ? 'HTTP' : 'Browser', lines.length, `${number(lines.reduce((sum, line) => sum + line.credits, 0))} credits`] }).filter(([, calls]) => calls > 0)
@@ -483,6 +515,8 @@
     if (line.status === 'timeout' || line.reason === 'timeout') return 'Timed out'
     return 'Failed'
   }
+  /** A job's pages by outcome (hostedJobWorker.ts pageOutcome), in the words of `category`. */
+  const JOB_OUTCOMES = { read: 'Read', partial: 'Partly read', robots_disallowed: 'Kept out by robots.txt', robots_unreachable: 'robots.txt not readable', not_found: 'Not found', blocked: 'Blocked by the site', timeout: 'Timed out', duplicate: 'Duplicate of another page', failed: 'Failed' }
   /** A ranked list of [label, count, note?], each with its share as a solid bar. */
   const meterList = (id, rows) => {
     const list = $(`${id}-list`)

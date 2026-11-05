@@ -46,14 +46,16 @@ describe('hosted job worker', () => {
   const cleanup: Array<() => Promise<void>> = []
   afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
 
-  async function setup(options: { balance?: number; limits?: Partial<NonNullable<JobWorkerDeps['limits']>>; gate?: string; clock?: { t: Date }; model?: HostedModel } = {}) {
+  async function setup(options: { robotsStatus?: number; twins?: boolean; balance?: number; limits?: Partial<NonNullable<JobWorkerDeps['limits']>>; gate?: string; clock?: { t: Date }; model?: HostedModel } = {}) {
     const seen: string[] = []
     const handler = async (req: IncomingMessage, res: ServerResponse) => {
       const path = req.url ?? '/'
-      if (path === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
+      if (path === '/robots.txt') { res.writeHead(options.robotsStatus ?? 200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
       if (path === '/sitemap.xml') { res.writeHead(404).end(); return }
       seen.push(path)
       if (path === options.gate) return
+      if (options.twins && path !== '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('/twin')); return }
+      if (path === '/gone') { res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(page(path)); return }
       if (path === '/archive.tar.bz2') { res.writeHead(200, { 'content-type': 'application/octet-stream' }).end(Buffer.alloc(6 * 1024 * 1024, 7)); return }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(path))
     }
@@ -86,7 +88,7 @@ describe('hosted job worker', () => {
     let n = 0
     const create = async (request: unknown, kind: 'batch' | 'crawl' = 'batch', maxCredits: number | null = null, webhook: HostedJobWebhook | null = null) => {
       const id = `6f1c2a4e-1b2c-4d3e-8f90-${String(++n).padStart(12, '0')}`
-      const created = await store.create(newHostedJob({ id, workspaceId: 'ws_account-1', uid: 'account-1', keyId: 'key-1', kind, request, maxCredits, webhook }, clock.t), { maxRunning: 2, maxQueued: 10 }, null, clock.t)
+      const created = await store.create(newHostedJob({ id, workspaceId: 'ws_account-1', uid: 'account-1', keyId: 'key-1', requestKeyId: 'key-1-whole-hmac', kind, request, maxCredits, webhook }, clock.t), { maxRunning: 2, maxQueued: 10 }, null, clock.t)
       if (!created.ok) throw new Error('not created')
       queue.push({ jobId: id, generation: 0, delaySeconds: 0 })
       return id
@@ -125,6 +127,60 @@ describe('hosted job worker', () => {
     expect(expiries).toEqual([id])
     // The day's job pools counted the pages each slice reserved.
     expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBeGreaterThanOrEqual(5)
+  })
+
+  it('leaves one Activity line for a finished job: its pages by outcome, its credits and the key that started it', async () => {
+    const { origin, credits, deps, store, clock, create, drain } = await setup()
+    const start = clock.t
+    const id = await create(parseBatchStartRequest({ urls: ['/a', '/b', '/gone'].map((path) => `${origin}${path}`), fastMode: true }))
+    await drain(id)
+    const job = (await store.get(id))!
+    expect(job).toMatchObject({ status: 'completed', counts: { pages: 2, errors: 1 }, outcomes: { read: 2, not_found: 1 } })
+    const lines = credits.requests.get('account-1') ?? []
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({
+      endpoint: 'batch', keyId: 'key-1-whole-hmac', url: `${origin}/a`, status: 'completed', reason: null, kind: 'job', credits: 3, at: start.toISOString(),
+      job: { id, requested: 3, pages: 3, errors: 1, outcomes: { read: 2, not_found: 1 } },
+    })
+    // The day's usage says how many of its pages were a job's, which is what the dashboard's check of the lines takes off.
+    expect(credits.usage.get('account-1-2026-10-19')).toMatchObject({ http: 2, not_found: 1, job_pages: 3 })
+    // Another delivery of the finished job writes the same line again, not a second.
+    expect(await runJobSlice(deps, id, job.generation)).toEqual({ status: 200, outcome: 'finished' })
+    expect(credits.requests.get('account-1')).toHaveLength(1)
+  })
+
+  it('tells pages a robots.txt that could not be read kept out from a rule the site wrote, on the job\'s line', async () => {
+    const { origin, credits, deps, create, drain } = await setup({ robotsStatus: 503 })
+    const engine = deps.engineOptions!
+    deps.engineOptions = () => ({ ...engine(), hosted: true })
+    const id = await create(parseBatchStartRequest({ urls: [`${origin}/a`, `${origin}/b`], fastMode: true }))
+    await drain(id)
+    expect(credits.requests.get('account-1')?.[0]).toMatchObject({ status: 'completed', credits: 0, job: { pages: 2, errors: 2, outcomes: { robots_unreachable: 2 } } })
+    expect(credits.usage.get('account-1-2026-10-19')).toMatchObject({ unread: 2, job_pages: 2 })
+  })
+
+  it('counts a crawl\'s page with the body of an earlier one as a duplicate on the job\'s line, not as a failure', async () => {
+    const { origin, credits, create, drain } = await setup({ twins: true })
+    const id = await create(parseCrawlStartRequest({ url: `${origin}/`, maxPages: 5, fastMode: true }), 'crawl')
+    await drain(id)
+    const line = credits.requests.get('account-1')?.[0]
+    expect(line?.job?.outcomes.failed).toBeUndefined()
+    expect(line?.job?.outcomes.duplicate).toBeGreaterThan(0)
+    expect(line?.job?.errors).toBe(0)
+  })
+
+  it('names a crawl by its start URL on its Activity line, and a line that cannot be written does not hold the job up', async () => {
+    const { origin, credits, deps, expiries, create, drain } = await setup()
+    const logged: string[] = []
+    deps.log = (line) => logged.push(line)
+    const crawled = await create(parseCrawlStartRequest({ url: `${origin}/`, maxPages: 3, fastMode: true }), 'crawl')
+    await drain(crawled)
+    expect(credits.requests.get('account-1')?.[0]).toMatchObject({ endpoint: 'crawl', url: `${origin}/`, job: { id: crawled, requested: 1 } })
+    vi.spyOn(credits, 'writeJobLine').mockRejectedValue(new Error('firestore is down'))
+    const batch = await create(parseBatchStartRequest({ urls: [`${origin}/a`], fastMode: true }))
+    expect((await drain(batch)).at(-1)).toBe('completed')
+    expect(expiries).toContain(batch)
+    expect(logged.some((line) => line.includes('hosted_job_line_failed') && line.includes(batch))).toBe(true)
   })
 
   it('gives a slice\'s pages the compatible transport while the switch grants it to the job\'s account, at an HTTP page\'s price', async () => {
@@ -361,6 +417,8 @@ describe('hosted job worker', () => {
     expect(await runJobSlice(deps, id, 0)).toEqual({ status: 200, outcome: 'lost' })
     expect([...files.objects.keys()].filter((name) => name.includes(id))).toEqual([])
     expect(await credits.balance('account-1', NOW)).toBe(1_000)
+    // Nothing was read, so the day counts nothing: a count with no page and no line would read as a call without a line.
+    expect(credits.usage.get('account-1-2026-10-19')).toMatchObject({ http: 0, unread: 0 })
   })
 
   it('fails a job whose slice fails five times in a row, gives its slot back and writes its export (H1 D7)', async () => {

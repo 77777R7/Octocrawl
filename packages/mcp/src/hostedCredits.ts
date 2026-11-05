@@ -20,6 +20,10 @@
  * commit: the URL asked for and the formats a scrape named, what came back (status, HTTP status, lane, robots.txt
  * decision, the body's SHA-256 from the Evidence Record), how long the call took and what it cost. Never the page's content. Lines expire after 30 days (TTL on `expireAt`), and only
  * the account sees them, on the dashboard's Activity page (decided by Howard on 2026-10-12).
+ *
+ * A hosted job leaves one line when it ends, not one a page: what it was asked, its pages by outcome and what it cost
+ * (`writeJobLine`). The day's usage counts its pages as they are read, and under `job_pages` how many of them were a
+ * job's, so that the dashboard can check every other call has a line.
  */
 import type { QuotaEntry } from './hostedApi.js'
 
@@ -34,7 +38,7 @@ const ACTIVITY_URL_CHARS = 2_048
 
 /** What the API knows of a call by an account's key when it settles: the request line, before its cost. */
 export interface RequestNote {
-  endpoint: 'scrape' | 'map'
+  endpoint: 'scrape' | 'map' | 'batch' | 'crawl'
   /** The key's HMAC: the id the dashboard lists keys by. */
   keyId: string
   url: string
@@ -73,17 +77,21 @@ export interface RequestNote {
    * before 2026-11-05, and null for a map.
    */
   readiness?: string | null
+  /** What a hosted job came to; only on a job's line. */
+  job?: JobLineSummary
 }
-export interface RequestLine extends RequestNote { id: string; at: string; kind: UsageKind; credits: number }
+/** A job's line: `requested` URLs (a crawl's one start URL), the `pages` it read of them, the `errors` among those, and its pages by outcome (hostedJobWorker.ts pageOutcome). */
+export interface JobLineSummary { id: string; requested: number; pages: number; errors: number; outcomes: Record<string, number> }
+export interface RequestLine extends RequestNote { id: string; at: string; kind: UsageKind | 'job'; credits: number }
 
-/** A request line's id: newest first in Firestore's default (ascending) order, which needs no index, then a random tail. */
-export function requestLineId(now: Date, random = Math.random().toString(36).slice(2, 10)): string {
-  return `${String(9_999_999_999_999 - now.getTime()).padStart(13, '0')}-${random.replace(/[^a-z0-9]/g, '').slice(0, 12) || '0'}`
+/** A request line's id: newest first in Firestore's default (ascending) order, which needs no index, then a random tail, or one given for a line written again. */
+export function requestLineId(now: Date, tail = Math.random().toString(36).slice(2, 10)): string {
+  return `${String(9_999_999_999_999 - now.getTime()).padStart(13, '0')}-${tail.replace(/[^a-z0-9]/g, '').slice(0, 12) || '0'}`
 }
 /** A half of a surrogate pair with no other half (a caller's body, or a cut at the length limit) becomes U+FFFD:
  * Firestore takes only well-formed text, and a refused line must not refuse the charge it is written with. */
 const wellFormed = (text: string) => text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD')
-function requestLine(note: RequestNote, id: string, now: Date, kind: UsageKind, credits: number): RequestLine {
+function requestLine(note: RequestNote, id: string, now: Date, kind: RequestLine['kind'], credits: number): RequestLine {
   const clean = (value: string | null, chars = 200) => (value === null ? null : wellFormed(value.slice(0, chars)))
   return {
     ...note, url: wellFormed(note.url.slice(0, ACTIVITY_URL_CHARS)), finalUrl: clean(note.finalUrl, ACTIVITY_URL_CHARS), lane: clean(note.lane), status: wellFormed(note.status.slice(0, 200)),
@@ -93,8 +101,8 @@ function requestLine(note: RequestNote, id: string, now: Date, kind: UsageKind, 
   }
 }
 
-/** What a settled call is counted as on the account page; `model` counts the pages whose json called the model, beside their own kind. */
-export type UsageKind = 'http' | 'browser' | 'not_found' | 'map' | 'unread' | 'model'
+/** What a settled call is counted as on the account page; `model` counts the pages whose json called the model, and `job_pages` the pages a job read, each beside their own kind. */
+export type UsageKind = 'http' | 'browser' | 'not_found' | 'map' | 'unread' | 'model' | 'job_pages'
 
 const BROWSER_LANES: ReadonlySet<string> = new Set(['browser_local', 'browser_local_authed', 'browser_proxy', 'provider', 'my_browser'])
 const READ_STATUSES: ReadonlySet<string> = new Set(['success', 'partial', 'empty_verified'])
@@ -162,6 +170,12 @@ export interface CreditsStore {
   settle(reservation: Reservation, used: number, kind: UsageKind, now?: Date, note?: RequestNote, perKind?: Partial<Record<UsageKind, number>>): Promise<{ remaining: number }>
   /** The credits the account has this month, taking nothing; a hosted job's start checks it covers a slice. */
   balance(uid: string, now?: Date): Promise<number>
+  /**
+   * A finished job's one request line, `at` its end and named by its job, so a later delivery writes the same line again.
+   * Its `credits` were charged slice by slice, so nothing is settled here. False: the line was not written, the account
+   * being gone or its record too busy.
+   */
+  writeJobLine(uid: string, note: RequestNote, credits: number, at: Date): Promise<boolean>
 }
 
 export function utcMonth(now: Date): string { return now.toISOString().slice(0, 7) }
@@ -231,6 +245,12 @@ export class MemoryCreditsStore implements CreditsStore {
     this.usage.set(day, counts)
     return { remaining: balance.grant + balance.purchased }
   }
+  async writeJobLine(uid: string, note: RequestNote, credits: number, at: Date): Promise<boolean> {
+    if (!this.balances.has(uid)) return false
+    const line = requestLine(note, requestLineId(at, note.job?.id), at, 'job', credits)
+    this.requests.set(uid, [line, ...(this.requests.get(uid) ?? []).filter((other) => other.id !== line.id)])
+    return true
+  }
 }
 
 // ---- Firestore: `credits/{uid}` holds the balance, `hostedQuotas/{day}-accounts` every account's starts and `hostedQuotas/{day}-account-{uid}` the account's (a job's slice: `{day}-jobs` and `{day}-jobs-account-{uid}`), `creditUsage/{uid}-{day}` the day's use ----
@@ -256,6 +276,11 @@ function requestLineFields(line: RequestLine, uid: string, now: Date): Record<st
   for (const name of ['httpStatus', 'links', 'ms', 'modelCredits'] as const) {
     const value = line[name]
     if (typeof value === 'number' && Number.isSafeInteger(value)) fields[name] = { integerValue: String(value) }
+  }
+  if (line.job !== undefined) {
+    const { id, requested, pages, errors, outcomes } = line.job
+    const count = (n: number) => ({ integerValue: String(n) })
+    fields.job = { mapValue: { fields: { id: { stringValue: id }, requested: count(requested), pages: count(pages), errors: count(errors), outcomes: { mapValue: { fields: Object.fromEntries(Object.entries(outcomes).map(([name, n]) => [name, count(n)])) } } } } }
   }
   return fields
 }
@@ -383,6 +408,21 @@ export class FirestoreCreditsStore implements CreditsStore {
     const purchased = Number(results[1]?.integerValue)
     // The balance after the refund, as the server computed it; else what the reservation left plus the refund.
     return { remaining: Number.isSafeInteger(grant) && Number.isSafeInteger(purchased) ? grant + purchased : reservation.remaining + refund }
+  }
+
+  async writeJobLine(uid: string, note: RequestNote, credits: number, at: Date): Promise<boolean> {
+    const line = requestLine(note, requestLineId(at, note.job?.id), at, 'job', credits)
+    const writes = [
+      // Adds nothing: the commit holds only while the account does, so an account erased as its job ended keeps no line.
+      { update: { name: `${this.resource}/credits/${uid}`, fields: {} }, updateMask: { fieldPaths: [] }, updateTransforms: [{ fieldPath: 'grant', increment: { integerValue: '0' } }], currentDocument: { exists: true } },
+      { update: { name: `${this.resource}/requestLog/${uid}/requests/${line.id}`, fields: requestLineFields(line, uid, at) } },
+    ]
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = await this.commit(await this.token(), writes, true)
+      if (response === 'missing') return false
+      if (response !== 'retry') return true
+    }
+    return false
   }
 
   private async read(path: string, token: string): Promise<FirestoreDoc | null> {

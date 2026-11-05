@@ -184,6 +184,30 @@ describe('the Firestore ledger', () => {
     expect(firestore.docs.get(`${firestore.resource}/hostedQuotas/${SITE.id}`)!.fields.count).toEqual({ integerValue: '2' })
   })
 
+  it('writes a job\'s Activity line once whichever delivery writes it, and none for an account erased meanwhile', async () => {
+    const firestore = fakeFirestore()
+    const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
+    const reserved = await store.reserve('account-1', 1, [SITE], OCT)
+    if (!reserved.ok) throw new Error('unreachable')
+    const job = { id: '6f1c2a4e-1b2c-4d3e-8f90-000000000001', requested: 12, pages: 12, errors: 9, outcomes: { read: 3, robots_unreachable: 9 } }
+    const note = { endpoint: 'batch' as const, keyId: 'k'.repeat(64), url: 'https://example.org/', finalUrl: null, lane: null, status: 'completed', httpStatus: null, reason: null, robots: null, sha256: null, links: null, formats: null, ms: 9_000, scrapeId: null, paidCallIds: null, job }
+    expect(await store.writeJobLine('account-1', note, 3, OCT)).toBe(true)
+    expect(await store.writeJobLine('account-1', note, 3, OCT)).toBe(true)
+    const names = [...firestore.docs.keys()].filter((name) => name.includes('/requestLog/'))
+    expect(names).toHaveLength(1)
+    expect(names[0]).toContain('/requestLog/account-1/requests/')
+    const fields = firestore.docs.get(names[0]!)!.fields as unknown as Record<string, unknown>
+    expect(fields).toMatchObject({ endpoint: { stringValue: 'batch' }, kind: { stringValue: 'job' }, credits: { integerValue: '3' }, status: { stringValue: 'completed' }, ms: { integerValue: '9000' } })
+    expect(fields.job).toEqual({ mapValue: { fields: {
+      id: { stringValue: job.id }, requested: { integerValue: '12' }, pages: { integerValue: '12' }, errors: { integerValue: '9' },
+      outcomes: { mapValue: { fields: { read: { integerValue: '3' }, robots_unreachable: { integerValue: '9' } } } },
+    } } })
+    expect(Object.keys(fields)).not.toContain('formats')
+    expect(await store.balance('account-1', OCT)).toBe(999)
+    expect(await store.writeJobLine('account-erased', note, 3, OCT)).toBe(false)
+    expect([...firestore.docs.keys()].filter((name) => name.includes('/requestLog/account-erased/'))).toEqual([])
+  })
+
   it('writes a call\'s request line in the settle\'s commit, without nulls, to expire in 30 days, newest first by id', async () => {
     const firestore = fakeFirestore()
     const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)

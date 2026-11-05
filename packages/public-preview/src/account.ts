@@ -45,7 +45,8 @@ export const ACTIVITY_LIMIT = 1_000
 export const ACTIVITY_DAYS = 30
 
 export interface Balance { month: string; grant: number; purchased: number }
-export interface UsageDay { day: string; http: number; browser: number; notFound: number; map: number; unread: number; credits: number }
+/** `jobPages`: how many of the day's pages a hosted job read; they have no request line each (hostedCredits.ts). */
+export interface UsageDay { day: string; http: number; browser: number; notFound: number; map: number; unread: number; jobPages: number; credits: number }
 export interface KeyView { id: string; label: string; prefix: string; createdAt: string; enabled: boolean }
 /** One call by one of the account's keys, as the hosted API recorded it (hostedCredits.ts, RequestLine). */
 export interface RequestView {
@@ -56,6 +57,8 @@ export interface RequestView {
   formats: string[] | null; ms: number | null
   /** The scrape's readiness state (`not_served`: the site answered another page); null on a map and on lines from before 2026-11-05. */
   readiness: string | null
+  /** On a hosted job's one line: what it was asked, what it read and its pages by outcome. */
+  job?: { id: string; requested: number; pages: number; errors: number; outcomes: Record<string, number> }
 }
 
 /** An OAuth connection as the account page shows it: the app, the host it returns to, and the key id its calls carry
@@ -149,7 +152,7 @@ export class MemoryAccountData implements AccountData {
   }
 }
 
-type Value = { stringValue?: string; integerValue?: string; booleanValue?: boolean; timestampValue?: string; arrayValue?: { values?: Value[] } }
+type Value = { stringValue?: string; integerValue?: string; booleanValue?: boolean; timestampValue?: string; arrayValue?: { values?: Value[] }; mapValue?: { fields?: Record<string, Value> } }
 interface Doc { name: string; fields?: Record<string, Value> }
 
 export class FirestoreAccountData implements AccountData {
@@ -186,7 +189,7 @@ export class FirestoreAccountData implements AccountData {
   async usage(uid: string, since: string): Promise<UsageDay[]> {
     const n = (value: Value | undefined) => Number(value?.integerValue ?? 0) || 0
     return (await this.byUid('creditUsage', uid))
-      .map(doc => ({ day: doc.fields?.day?.stringValue ?? '', http: n(doc.fields?.http), browser: n(doc.fields?.browser), notFound: n(doc.fields?.not_found), map: n(doc.fields?.map), unread: n(doc.fields?.unread), credits: n(doc.fields?.credits) }))
+      .map(doc => ({ day: doc.fields?.day?.stringValue ?? '', http: n(doc.fields?.http), browser: n(doc.fields?.browser), notFound: n(doc.fields?.not_found), map: n(doc.fields?.map), unread: n(doc.fields?.unread), jobPages: n(doc.fields?.job_pages), credits: n(doc.fields?.credits) }))
       .filter(day => day.day >= since).sort((a, b) => a.day.localeCompare(b.day))
   }
   async keys(uid: string): Promise<KeyView[]> {
@@ -216,6 +219,7 @@ export class FirestoreAccountData implements AccountData {
     const count = (value: Value | undefined) => { const n = Number(value?.integerValue); return value?.integerValue !== undefined && Number.isSafeInteger(n) ? n : null }
     return rows.flatMap(row => row.document ? [row.document] : []).map(doc => {
       const f = doc.fields ?? {}
+      const job = f.job?.mapValue?.fields
       return {
         id: doc.name.split('/').pop()!, at: f.at?.timestampValue ?? '', endpoint: text(f.endpoint) ?? '', keyId: text(f.keyId) ?? '', url: text(f.url) ?? '',
         finalUrl: text(f.finalUrl), lane: text(f.lane), status: text(f.status) ?? '', httpStatus: count(f.httpStatus), reason: text(f.reason), robots: text(f.robots),
@@ -223,6 +227,10 @@ export class FirestoreAccountData implements AccountData {
         formats: f.formats?.arrayValue ? (f.formats.arrayValue.values ?? []).flatMap(value => typeof value.stringValue === 'string' ? [value.stringValue] : []) : null,
         ms: count(f.ms),
         readiness: text(f.readiness),
+        ...(job === undefined ? {} : { job: {
+          id: text(job.id) ?? '', requested: count(job.requested) ?? 0, pages: count(job.pages) ?? 0, errors: count(job.errors) ?? 0,
+          outcomes: Object.fromEntries(Object.entries(job.outcomes?.mapValue?.fields ?? {}).map(([name, value]) => [name, count(value) ?? 0])),
+        } }),
       }
     })
   }
