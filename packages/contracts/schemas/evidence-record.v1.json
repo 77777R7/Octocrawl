@@ -429,6 +429,13 @@
             { "type": "null" }
           ]
         },
+        "sessionApplied": {
+          "description": "The person's saved login as it went into the browser: how many cookies and origins' localStorage, never their values. It says the login was sent, not that the site took it. Null when the page was read with no saved login. Added for the login check of 2026-11-06: optional here so that earlier records stay valid.",
+          "anyOf": [
+            { "$ref": "#/$defs/accessSessionApplied" },
+            { "type": "null" }
+          ]
+        },
         "paidCalls": {
           "description": "Every paid provider call the page was read with (ROADMAP PA item 4), in order: the provider, what the spend ledger reserved and charged, the price the provider stated, and what Octocrawl made of what came back. Null when no provider was called. Added with the spend ledger: optional here so that earlier records stay valid.",
           "anyOf": [
@@ -506,6 +513,23 @@
           "description": "The session's id, as the session_cookies trace event names it.",
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "accessSessionApplied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cookies", "localStorageOrigins"],
+      "properties": {
+        "cookies": {
+          "description": "Cookies the browser held once the login was added, an expired one not among them; null when the lane did not count them.",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "localStorageOrigins": {
+          "description": "Origins whose localStorage was restored.",
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
