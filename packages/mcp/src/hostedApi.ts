@@ -329,7 +329,7 @@ const HOSTED_JOB_STATUSES = ['queued', 'running', 'completed', 'failed', 'cancel
 const HOSTED_JOB_NOTE = ' On hosted Octocrawl a job runs in slices: a crawl reads at most 500 pages and a batch 1,000 URLs, each page costs credits as a scrape does (maxCredits caps the job), and results are kept 7 days after it ends.'
 
 /** get_batch_errors as hosted answers it (H2 M7): the job's failed items in a page list, not the local { errors, robotsBlocked }. */
-const HOSTED_BATCH_ERRORS_DESCRIPTION = `List a batch's items that did not succeed (status failed, blocked, cancelled or budget_exceeded), each as get_batch_items lists it: { items, nextCursor, hasMore }, in pages of up to ${HOSTED_MCP_LIST_MAX} (cursor, limit). A URL robots.txt refused is among them, blocked with its blockReason.`
+const HOSTED_BATCH_ERRORS_DESCRIPTION = `List a batch's items that did not succeed (status failed, blocked, cancelled or budget_exceeded), each as get_batch_items lists it: { items, nextCursor, hasMore }, in pages of up to ${HOSTED_MCP_LIST_MAX} (cursor, limit). A URL robots.txt refused is among them, blocked with its blockReason. notServed lists pages read but not the one asked for.`
 
 /** list_active_crawls as hosted answers it (GET /v1/crawl/active): the account's crawl jobs, in its jobs' own statuses, without their options. */
 const HOSTED_ACTIVE_CRAWLS_DESCRIPTION = 'List this account\'s crawls that are queued or running, oldest first: each with its id, start URL, status and pages so far. Empty when none is.'

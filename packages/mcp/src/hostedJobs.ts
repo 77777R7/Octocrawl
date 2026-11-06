@@ -31,7 +31,11 @@ export interface HostedJob {
   request: unknown
   status: HostedJobStatus
   failureReason: string | null
-  counts: { pages: number; errors: number; slices: number }
+  /**
+   * `redirectedOffPage` and `notServed`, among the `pages`: what `CrawlReport` says under those names. Absent on a job
+   * started before they were counted, which reports neither: its earlier slices were not counted.
+   */
+  counts: { pages: number; errors: number; slices: number; redirectedOffPage?: number; notServed?: number }
   /** Its pages by outcome so far (hostedJobWorker.ts pageOutcome), for its request line. */
   outcomes?: Record<string, number>
   credits: { reserved: number; used: number; maxCredits: number | null }
@@ -146,7 +150,7 @@ const days = (from: Date, n: number) => new Date(from.getTime() + n * 86_400_000
 export function newHostedJob(input: { id: string; workspaceId: string; uid: string; keyId: string; requestKeyId?: string; kind: HostedJobKind; request: unknown; maxCredits: number | null; webhook?: HostedJobWebhook | null }, now = new Date()): HostedJob {
   return {
     id: input.id, workspaceId: input.workspaceId, uid: input.uid, keyId: input.keyId, ...(input.requestKeyId === undefined ? {} : { requestKeyId: input.requestKeyId }), kind: input.kind, request: input.request, ...(input.webhook ? { webhook: input.webhook } : {}),
-    status: 'queued', failureReason: null, counts: { pages: 0, errors: 0, slices: 0 }, credits: { reserved: 0, used: 0, maxCredits: input.maxCredits },
+    status: 'queued', failureReason: null, counts: { pages: 0, errors: 0, slices: 0, redirectedOffPage: 0, notServed: 0 }, credits: { reserved: 0, used: 0, maxCredits: input.maxCredits },
     generation: 0, lease: null, hosts: {}, createdAt: now.toISOString(), startedAt: null, finishedAt: null, expireAt: null, deleteAt: days(now, JOB_TOMBSTONE_DAYS),
   }
 }

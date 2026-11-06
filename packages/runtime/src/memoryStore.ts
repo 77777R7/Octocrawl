@@ -1,5 +1,5 @@
 import type { Attempt, ListPageRead, PaidCallRecord, StepRecord, StepStatus, Task } from '@w2l/contracts'
-import { assertId, cloneJson, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore, type VerificationCounts, VERIFICATION_COUNTED_STATUSES } from './taskStore.js'
+import { assertId, cloneJson, decodeStepCursor, encodeStepCursor, READ_STATUSES, type StepPageQuery, type TaskStore, type VerificationCounts, VERIFICATION_COUNTED_STATUSES } from './taskStore.js'
 
 /**
  * In-memory TaskStore for tests and the benchmark harness (ADR 0003).
@@ -123,6 +123,13 @@ export class MemoryTaskStore implements TaskStore {
       if (step.result?.warnings?.some((warning) => warning.code === code) === true) count++
     }
     return count
+  }
+
+  async listNotServedCandidates(taskId: string, attemptId?: string): Promise<StepRecord[]> {
+    return [...this.steps.values()]
+      .filter((step) => step.taskId === taskId && (attemptId === undefined || step.attemptId === attemptId) && READ_STATUSES.includes(step.status) && step.result !== null)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map(cloneJson)
   }
 
   async countBlockReasons(taskId: string): Promise<Record<string, number>> {
