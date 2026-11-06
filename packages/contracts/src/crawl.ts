@@ -276,9 +276,15 @@ export interface CrawlReport {
   /**
    * The pages delivered in place of the one asked for (a `redirected_off_page` warning: the site sent the request to its
    * home page or a page above it), among the pages `succeeded` counts (a batch's every attempt, a crawl's latest). A local
-   * server always says it, 0 included; absent from a server that does not count it (hosted jobs) and from a crawl with no attempt yet.
+   * server always says it, 0 included; absent from a hosted job started before it was counted and from a crawl with no attempt yet.
    */
   redirectedOffPage?: number
+  /**
+   * Among the same pages, those whose `readiness` is `not_served`: read, and not what was asked for (the pages
+   * `redirectedOffPage` counts unless a contract passed, a page showing what the contract excludes, one the source said
+   * it could not serve). Absent where `redirectedOffPage` is.
+   */
+  notServed?: number
   /** Who started the task, as the request said (`origin`, `integration`); absent when it named neither. */
   attribution?: RequestAttribution
   /** The task's webhook and how its deliveries stand; absent when the request set none. */

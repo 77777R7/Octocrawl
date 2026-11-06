@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
 import type { Attempt, AttemptStatus, CrawlBudget, CrawlMode, FetchResult, Lane, LadderRunAudit, ListPageRead, PaidCallRecord, PaidCallState, StepRecord, StepStatus, Task, TaskStatus } from '@w2l/contracts'
-import { assertId, decodeStepCursor, encodeStepCursor, type StepPageQuery, type TaskStore, type VerificationCounts, VERIFICATION_COUNTED_STATUSES } from './taskStore.js'
+import { assertId, decodeStepCursor, encodeStepCursor, NOT_SERVED_WARNINGS, READ_STATUSES, type StepPageQuery, type TaskStore, type VerificationCounts, VERIFICATION_COUNTED_STATUSES } from './taskStore.js'
 
 export const CHECKPOINT_FILENAME = 'checkpoint.sqlite'
 
@@ -403,6 +403,13 @@ export class SqliteTaskStore implements TaskStore {
       .prepare(`SELECT COUNT(*) AS count FROM steps WHERE task_id = ?${attemptId === undefined ? '' : ' AND attempt_id = ?'} AND status IN (${VERIFICATION_COUNTED_STATUSES.map(() => '?').join(', ')}) AND result_json IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(result_json, '$.warnings') WHERE json_extract(json_each.value, '$.code') = ?)`)
       .get(taskId, ...(attemptId === undefined ? [] : [attemptId]), ...VERIFICATION_COUNTED_STATUSES, code) as { count: number }
     return row.count
+  }
+
+  async listNotServedCandidates(taskId: string, attemptId?: string): Promise<StepRecord[]> {
+    const rows = this.db
+      .prepare(`SELECT * FROM steps WHERE task_id = ?${attemptId === undefined ? '' : ' AND attempt_id = ?'} AND status IN (${READ_STATUSES.map(() => '?').join(', ')}) AND result_json IS NOT NULL AND (json_extract(result_json, '$.verification.status') = 'failed' OR instr(result_json, '"sourceUnavailable":true') > 0 OR EXISTS (SELECT 1 FROM json_each(result_json, '$.warnings') WHERE json_extract(json_each.value, '$.code') IN (${NOT_SERVED_WARNINGS.map(() => '?').join(', ')}))) ORDER BY created_at ASC, id ASC`)
+      .all(taskId, ...(attemptId === undefined ? [] : [attemptId]), ...READ_STATUSES, ...NOT_SERVED_WARNINGS) as StepRow[]
+    return rows.map(stepFromRow)
   }
 
   async countBlockReasons(taskId: string): Promise<Record<string, number>> {

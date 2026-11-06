@@ -39,7 +39,7 @@ A batch reads a list of URLs you already know, as one durable task. It follows n
 
 **Status and errors.**
 
-- `GET /v1/batches/:id` reports `succeeded` beside `completed`. `succeeded` counts items recorded `success`, `partial` or `empty_verified`. It also reports `failed`, the items the errors report lists, and `redirectedOffPage`, the succeeded items whose site answered another page in place of the one asked for (a `redirected_off_page` warning on each); a crawl's status reports the same count for its latest attempt.
+- `GET /v1/batches/:id` reports `succeeded` beside `completed`. `succeeded` counts items recorded `success`, `partial` or `empty_verified`. It also reports `failed`, the items the errors report lists, `redirectedOffPage`, the succeeded items whose site answered another page in place of the one asked for (a `redirected_off_page` warning on each), and `notServed`, the succeeded items whose `readiness` is `not_served`, which `GET /v1/batches/:id/errors` names; a crawl's status reports both counts for its latest attempt.
 - `GET /v1/batches/:id/errors` (SDK `getBatchErrors`, MCP `get_batch_errors`) lists the items that did not succeed, across every attempt of the batch. A batch interrupted and resumed keeps its earlier failures on the record.
 - Each error is `{ id, timestamp, url, status, code, error, httpStatus }`, Firecrawl's names. `code` is the item's `failureReason`, `blockReason` or `budgetExceeded`. Pages hold up to 1000 errors.
 - `robotsBlocked` lists the URLs robots.txt refused: `policy_denied` items with a `robots_disallowed` trace event that no recorded override set aside. A governance or SSRF refusal is `policy_denied` too, but not robots.txt, so it stays in `errors` only.

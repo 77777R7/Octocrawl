@@ -55,6 +55,7 @@ describe('hosted job worker', () => {
       seen.push(path)
       if (path === options.gate) return
       if (options.twins && path !== '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('/twin')); return }
+      if (path.startsWith('/moved/')) { res.writeHead(302, { location: '/' }).end(); return }
       if (path === '/gone') { res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(page(path)); return }
       if (path === '/archive.tar.bz2') { res.writeHead(200, { 'content-type': 'application/octet-stream' }).end(Buffer.alloc(6 * 1024 * 1024, 7)); return }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(path))
@@ -127,6 +128,13 @@ describe('hosted job worker', () => {
     expect(expiries).toEqual([id])
     // The day's job pools counted the pages each slice reserved.
     expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBeGreaterThanOrEqual(5)
+  })
+
+  it('counts on the job the pages the site answered with another page, slice after slice', async () => {
+    const { origin, store, create, drain } = await setup()
+    const id = await create(parseBatchStartRequest({ urls: ['/a', '/moved/1', '/b', '/moved/2'].map((path) => `${origin}${path}`), fastMode: true }))
+    await drain(id)
+    expect(await store.get(id)).toMatchObject({ status: 'completed', counts: { pages: 4, errors: 0, redirectedOffPage: 2, notServed: 2 } })
   })
 
   it('leaves one Activity line for a finished job: its pages by outcome, its credits and the key that started it', async () => {

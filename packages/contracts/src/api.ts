@@ -882,7 +882,19 @@ export interface BatchErrorItem {
   httpStatus: number | null
 }
 
-/** `GET /v1/batches/:id/errors`: the batch's errors across every attempt, one page at a time, and the URLs robots.txt refused (every attempt, not paginated). */
+/** An item of a batch that was read and is not what was asked for: its `status` is one `succeeded` counts, its `readiness` is `not_served`. */
+export interface BatchNotServedItem {
+  /** The item's step id, as on `GET /v1/batches/:id/items`. */
+  id: string
+  url: string
+  status: string
+  /** Why, the last entry of the item's `readiness.basis`: `redirected_off_page`, `excluded_text`, `source_unavailable`, ... */
+  code: string
+  /** The URL the page came from; null when the record has none. */
+  finalUrl: string | null
+}
+
+/** `GET /v1/batches/:id/errors`: the batch's errors across every attempt, one page at a time, and the URLs robots.txt refused and the pages not served (every attempt, not paginated). */
 export interface BatchErrorsResponse {
   errors: BatchErrorItem[]
   /**
@@ -892,6 +904,8 @@ export interface BatchErrorsResponse {
    * this list (it is still in `errors`).
    */
   robotsBlocked: string[]
+  /** The items `notServed` on the batch's status counts: read, so they are not in `errors`. */
+  notServed: BatchNotServedItem[]
   nextCursor: string | null
   hasMore: boolean
 }

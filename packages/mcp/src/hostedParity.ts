@@ -109,7 +109,7 @@ export const TOOL_PARITY: Record<ToolName, ToolEntry> = {
   get_batch_items: jobTool(`; ${listCaps('get_batch_items', ['limit', 'maxResults'])}`),
   wait_batch: jobTool(),
   cancel_batch: jobTool(),
-  get_batch_errors: jobTool(`; answers the failed items as { items, nextCursor, hasMore } (local { errors, robotsBlocked }), ${listCaps('get_batch_errors', ['limit'])}`),
+  get_batch_errors: jobTool(`; answers the failed items as { items, notServed, nextCursor, hasMore } (local { errors, robotsBlocked, notServed }), ${listCaps('get_batch_errors', ['limit'])}`),
   hand_off_batch: { status: 'different_on_purpose', note: PERSON_CHROME },
   scrape_product: { status: 'limited', note: 'A key or a signed-in connection with the browser lane only.' },
   batch_products: { status: 'planned', item: null, note: 'Not listed; more Amazon.sg work is paused (ROADMAP Paused).' },

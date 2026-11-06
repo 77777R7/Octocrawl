@@ -9,7 +9,7 @@ import { hostedNetworkPolicy } from '@w2l/contracts'
 import { createHostedApi, keyDigest, MemoryHostedKeys, MemoryHostedOAuthTokens, MemoryHostedQuota, type HostedKeyRecord } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
 import { MemoryHostedJobStore, type HostedJob } from '../src/hostedJobs.js'
-import { AUTHED_ROUTE_HINT, BROWSER_LANE_HINT, gcsJobFiles, isJobRoute, JOB_WORKER_COUNT, type JobFiles } from '../src/hostedJobRoutes.js'
+import { AUTHED_ROUTE_HINT, BROWSER_LANE_HINT, gcsJobFiles, isJobRoute, JOB_WORKER_COUNT, jobStatus, type JobFiles } from '../src/hostedJobRoutes.js'
 import type { GcsBucket } from '../src/hostedCloud.js'
 import { gzipSync } from 'node:zlib'
 
@@ -60,11 +60,12 @@ async function start(options: { credits?: MemoryCreditsStore; enabled?: boolean;
   const call = (method: string, path: string, key: string | null, body?: unknown, headers: Record<string, string> = {}) =>
     fetch(`${url}${path}`, { method, headers: { 'content-type': 'application/json', ...(key === null ? {} : { authorization: `Bearer ${key}` }), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   /** The worker's part: a slice stored these items, and the job's counts say so. */
-  const sliceWrote = async (id: string, items: Array<{ url: string; status: string }>) => {
+  const sliceWrote = async (id: string, items: Array<{ url: string; status: string; id?: string; readiness?: { state: string; basis: string[] }; evidenceRecord?: { finalUrl: string } }>) => {
     const job = store.jobs.get(id)!
     segments.set(`${id}/${job.counts.slices}`, items.map((item) => JSON.stringify(item)))
     const errors = items.filter((item) => ['failed', 'blocked'].includes(item.status)).length
-    store.jobs.set(id, { ...job, counts: { pages: job.counts.pages + items.length - errors, errors: job.counts.errors + errors, slices: job.counts.slices + 1 } })
+    const notServed = items.filter((item) => item.readiness?.state === 'not_served' && item.status === 'success').length
+    store.jobs.set(id, { ...job, counts: { ...job.counts, pages: job.counts.pages + items.length - errors, errors: job.counts.errors + errors, slices: job.counts.slices + 1, notServed: (job.counts.notServed ?? 0) + notServed } })
   }
   return { call, store, enqueued, finished, credits, sliceWrote }
 }
@@ -324,6 +325,29 @@ describe('hosted job routes', () => {
     const gone = await call('GET', `/v1/batches/${taskId}/items`, 'oc_one')
     expect(gone.status).toBe(410)
     expect(((await gone.json()) as { code: string }).code).toBe('job_expired')
+  })
+
+  it('counts the pages read that are not what was asked for, and names them beside the errors, across every slice and whatever page of errors is asked for', async () => {
+    const { call, sliceWrote } = await start()
+    const { taskId } = await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(4) })).json() as { taskId: string }
+    const moved = { url: 'moved', status: 'success', id: 's1', readiness: { state: 'not_served', basis: ['redirected_off_page'] }, evidenceRecord: { finalUrl: 'https://example.com/' } }
+    await sliceWrote(taskId, [{ url: 'a', status: 'success', readiness: { state: 'ready', basis: [] } }, moved])
+    await sliceWrote(taskId, [{ url: 'gone', status: 'blocked', readiness: { state: 'not_served', basis: ['robots'] } }, { url: 'excluded', status: 'success', id: 's2', readiness: { state: 'not_served', basis: ['checks_failed', 'excluded_text'] }, evidenceRecord: { finalUrl: 'https://example.com/excluded' } }])
+    expect(await (await call('GET', `/v1/batches/${taskId}`, 'oc_one')).json()).toMatchObject({ succeeded: 3, failed: 1, redirectedOffPage: 0, notServed: 2 })
+    const listed = await (await call('GET', `/v1/batches/${taskId}/errors?limit=1`, 'oc_one')).json() as { items: Array<{ url: string }>; notServed: unknown[] }
+    expect(listed.items.map((item) => item.url)).toEqual(['gone'])
+    expect(listed.notServed).toEqual([
+      { id: 's1', url: 'moved', status: 'success', code: 'redirected_off_page', finalUrl: 'https://example.com/' },
+      { id: 's2', url: 'excluded', status: 'success', code: 'excluded_text', finalUrl: 'https://example.com/excluded' },
+    ])
+    // The errors report's alone.
+    expect(await (await call('GET', `/v1/batches/${taskId}/items`, 'oc_one')).json()).not.toHaveProperty('notServed')
+  })
+
+  it('reports neither count for a job started before they were kept', () => {
+    const job = { id: 'j', kind: 'crawl', status: 'running', failureReason: null, request: {}, counts: { pages: 3, errors: 0, slices: 1 }, credits: { used: 3, maxCredits: null }, createdAt: '2026-11-05T00:00:00.000Z', startedAt: null, finishedAt: null, expireAt: '2026-11-12T00:00:00.000Z' } as unknown as HostedJob
+    expect(jobStatus(job)).not.toHaveProperty('notServed')
+    expect(jobStatus(job)).not.toHaveProperty('redirectedOffPage')
   })
 
   it('pages a job\'s items across its slice files with a cursor, and lists a crawl\'s pages and errors apart', async () => {
