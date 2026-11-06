@@ -841,8 +841,9 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     const exit = await settledBy(egressPool.exitOf(egress.id), context)
     return exit === null ? result : { ...result, trace: [...result.trace, { at: 0, lane: result.lane, event: 'egress_exit', detail: { proxy: egress.id, ...exit } }] }
   }
-  // Files (PDF, CSV, ...) are saved as received under the task root: files/<sha256>.<ext>.
-  const fileStore = new FileStore(join(taskRoot, 'files'))
+  // Files (PDF, CSV, ...) are saved as received under the task root: files/<sha256>.<ext>. Hosted Octocrawl saves none:
+  // no route hands a file back and an instance's disk is its memory, so a file there is read, hashed and answered as text.
+  const fileStore = options.hosted === true ? null : new FileStore(join(taskRoot, 'files'))
   // Successful page results stored for reuse (`maxAge`, `storeInCache`, `lockdown`): <taskRoot>/page-cache.sqlite.
   const pageCache = PageCache.open(taskRoot)
   /**

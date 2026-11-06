@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { agentHintsFor, mapAgentHints, offPageHint, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedGateHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, mapAgentHints, offPageHint, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedFileNotKeptHint, hostedGateHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -206,6 +206,15 @@ describe('agent hints', () => {
     expect(hints(file('pdf', 'pdf_text', 'files/aaa.pdf'))).toEqual(['the response was a pdf file kept at files/aaa.pdf; markdown is its text layer'])
     expect(hints(file('csv', 'text', 'files/aaa.csv'))).toEqual(['the response was a csv file kept at files/aaa.csv; markdown is its text as received'])
     expect(hints(file('xlsx', null, null))).toEqual(['the response was a xlsx file not saved; it has no markdown'])
+    // Hosted Octocrawl keeps no file, so its hint names no place, and the route to a file with no text is the person's own computer.
+    const hosted = (run: Parameters<typeof hints>[0]) => agentHintsFor({}, { channelsTried: ['http'], result: run }, { hosted: true })
+    expect(hosted(file('pdf', 'pdf_text', null))).toEqual(['the response was a pdf file; markdown is its text layer'])
+    expect(hosted(file('csv', 'text', null))).toEqual(['the response was a csv file; markdown is its text as received'])
+    expect(hosted(file('xlsx', null, null))).toEqual([hostedFileNotKeptHint('xlsx')])
+    expect(hostedFileNotKeptHint('xlsx')).toBe('the response was a xlsx file; it has no markdown, and hosted Octocrawl keeps no files; on your computer Octocrawl saves it as received: npx octocrawl scrape <url>')
+    // An empty file has nothing to save anywhere.
+    const empty = file('csv', null, null)
+    expect(hosted({ ...empty, file: { ...empty.file!, bytes: 0 } })).toEqual(['the response was a csv file; it has no markdown'])
   })
 
   it('names what the http lane got when a browser lane served the page after it, and nothing for the ladder\'s ordinary thin-page hop', () => {

@@ -755,7 +755,7 @@ class SlidingWindowLimiter {
 /** Deletes the scrape and map records and the saved files older than the TTL: hosted phase 1 retains nothing, and the task root is Cloud Run's memory. */
 export async function sweepTaskRoot(taskRoot: string, ttlMs = HOSTED_RECORD_TTL_MS, now = Date.now()): Promise<number> {
   let removed = 0
-  for (const dir of ['files', 'scrapes', 'maps']) {
+  for (const dir of ['scrapes', 'maps']) {
     const base = join(taskRoot, dir)
     let entries: string[]
     try { entries = await readdir(base) } catch { continue }

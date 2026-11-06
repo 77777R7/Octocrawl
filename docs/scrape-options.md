@@ -248,7 +248,7 @@ The hints:
 | `empty_unverified` without a shell or thin-content caveat | `Octocrawl found no main content on the page; onlyMainContent: false returns the whole page's Markdown as content, and includeTags names the elements to read instead`. For a PDF without a text layer: `the PDF has no text layer, and Octocrawl runs no OCR`. |
 | An incomplete `json` | `json is incomplete: the required field(s) <paths> ... not found on the page; modelFallback fills what the page does not state when the server has W2L_EXTRACT_BASE_URL and W2L_EXTRACT_MODEL`. On hosted Octocrawl the sentence after the semicolon is `modelFallback: true asks hosted Octocrawl's model to fill what the page does not state, for an account at 2 credits more a page, when the model is switched on` |
 | A model fallback that did not run | `the json model fallback did not run: <reason>` |
-| A file | `the response was a <kind> file kept at <path>; markdown is its text layer`. A CSV, JSON or text file says `markdown is its text as received`. An XLSX, XLS or ZIP file says `it has no markdown`. When the server keeps no files, `not saved` replaces the path. |
+| A file | `the response was a <kind> file kept at <path>; markdown is its text layer`. A CSV, JSON or text file says `markdown is its text as received`. An XLSX, XLS or ZIP file says `it has no markdown`. When the server keeps no files, `not saved` replaces the path. Hosted Octocrawl keeps none and names no place: `the response was a <kind> file; markdown is its text as received`, and a file with no Markdown names `npx octocrawl scrape <url>`, which saves it on your computer. |
 
 A refused option that Octocrawl does not offer also gets a hint, in the error body (`agentHints`; `agent_hints` on `/fc`):
 

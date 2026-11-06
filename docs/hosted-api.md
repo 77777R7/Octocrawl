@@ -660,7 +660,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `scrape` `onlyMainContent` | Supported |  |
 | `scrape` `waitFor` | Limited | A connection with the browser lane only, at 5 credits a page; one without does not list it, and one that sends it anyway, or an account with fewer credits, is refused: a page is never read without the wait. |
 | `scrape` `timeout` | Limited | At most 180 s, and 120 s when left out (local 300 s, and 120 s when left out): 60 s inside the 240 s claude.ai gives a tool call, under Cloud Run's 300 s request timeout. |
-| `scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). |
+| `scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). A file is read and hashed, and not saved: `file.path` is `null`. |
 | `scrape` `includeTags` | Supported |  |
 | `scrape` `excludeTags` | Supported |  |
 | `scrape` `headers` | Supported |  |
@@ -718,7 +718,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `crawl` `onlyMainContent` | Supported |  |
 | `crawl` `waitFor` | Limited | A connection with the browser lane only, at 5 credits a page; one without does not list it, and one that sends it anyway, or an account with fewer credits, is refused: a page is never read without the wait. |
 | `crawl` `timeout` | Supported |  |
-| `crawl` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). REST takes a larger value and the start refuses it by name. |
+| `crawl` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). A file is read and hashed, and not saved: `file.path` is `null`. REST takes a larger value and the start refuses it by name. |
 | `crawl` `includeTags` | Supported |  |
 | `crawl` `excludeTags` | Supported |  |
 | `crawl` `headers` | Supported |  |
@@ -742,7 +742,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `batch_scrape` `onlyMainContent` | Supported |  |
 | `batch_scrape` `waitFor` | Limited | A connection with the browser lane only, at 5 credits a page; one without does not list it, and one that sends it anyway, or an account with fewer credits, is refused: a page is never read without the wait. |
 | `batch_scrape` `timeout` | Supported |  |
-| `batch_scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). REST takes a larger value and the start refuses it by name. |
+| `batch_scrape` `maxFileBytes` | Limited | At most 5 MiB (local 500 MiB). A file is read and hashed, and not saved: `file.path` is `null`. REST takes a larger value and the start refuses it by name. |
 | `batch_scrape` `includeTags` | Supported |  |
 | `batch_scrape` `excludeTags` | Supported |  |
 | `batch_scrape` `headers` | Supported |  |
