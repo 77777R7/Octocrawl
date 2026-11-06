@@ -564,7 +564,7 @@ Not logged: which field an `invalid_request` named (the 400 body is not written)
 
 ### Alerts
 
-The API and the job worker log `{"event":"hosted_quota_threshold","pool":…,"day":…,"count":…,"limit":…}` once a pool a day, from the use that takes a shared pool to 70% of its limit. A log-based alert mails it, and a billing budget mails spend. Set them up once, in this order:
+The API and the job worker log `{"event":"hosted_quota_threshold","pool":…,"day":…,"count":…,"limit":…}` once a pool a day, from the use that takes a shared pool to 70% of its limit. The `jobs` pool can log a few such lines around the mark, since a slice gives back the pages it did not read and a later one crosses again. A log-based alert mails it, and a billing budget mails spend. Set them up once, in this order:
 
 ```sh
 # 1. An email channel; the command prints the channel's name (projects/…/notificationChannels/…).

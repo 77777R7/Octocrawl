@@ -184,7 +184,9 @@ export const QUOTA_ALERT_SHARE = 0.7
 /**
  * Logs `hosted_quota_threshold` for each entry marked `alert` that this use took to QUOTA_ALERT_SHARE of its limit. Counts
  * only grow during a day and each use is one commit, so exactly one use crosses the mark: one line a pool a day, with no
- * state kept. The pool is named without its day: `site`, `keyless`, `keyless-claude`, `accounts`, `jobs`.
+ * state kept. The `jobs` pool is the exception: a slice gives back the pages it did not read, so it can fall under the mark
+ * and a later slice cross it again; it is never missed, and may log a few lines. The pool is named without its day: `site`,
+ * `keyless`, `keyless-claude`, `accounts`, `jobs`.
  */
 export function logQuotaThresholds(entries: readonly QuotaEntry[], counts: readonly number[] | undefined, day: string, log: (line: string) => void): void {
   if (counts === undefined) return

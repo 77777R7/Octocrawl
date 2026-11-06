@@ -284,15 +284,16 @@ describe('hosted job worker', () => {
     expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(6)
   })
 
-  it('logs once when the day\'s job pool for every account reaches 70%, and never for one account\'s pool', async () => {
+  it('logs when a slice takes the day\'s job pool for every account to 70%, and never for one account\'s pool', async () => {
     const { origin, deps, create, drain } = await setup({ limits: { jobsDaily: 10 } })
     const lines: string[] = []
     deps.log = (line) => lines.push(line)
     const id = await create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/e', '/f', '/g', '/h'].map((path) => `${origin}${path}`), fastMode: true }))
     await drain(id)
     const alerts = lines.map((line) => JSON.parse(line) as { event?: string; pool?: string; limit?: number; count?: number }).filter((line) => line.event === 'hosted_quota_threshold')
-    expect(alerts).toHaveLength(1)
-    expect(alerts[0]).toMatchObject({ pool: 'jobs', day: '2026-10-19', limit: 10 })
+    // At least once: a slice's unread pages go back, so a later slice can take the pool past the mark again.
+    expect(alerts.length).toBeGreaterThanOrEqual(1)
+    for (const alert of alerts) expect(alert).toMatchObject({ pool: 'jobs', day: '2026-10-19', limit: 10 })
     expect(alerts[0]!.count).toBeGreaterThanOrEqual(7)
   })
 

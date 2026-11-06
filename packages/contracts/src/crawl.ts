@@ -239,7 +239,7 @@ export const EMPTY_CRAWL_DISCOVERY: CrawlDiscovery = {
   sitemap: null,
 }
 
-/** Why a hosted job waits for the next UTC day (`paused` on its status): a day's pool of job pages is used up. It goes on by itself at `resumesAt`. */
+/** Why a hosted job waits for the next UTC day (`paused` on its status): a day's pool of job pages has fewer left than its next slice takes. It goes on by itself at `resumesAt`. */
 export interface JobPause {
   /** `account_daily_pages`: this account's pages of the day. `daily_pages`: the pages of every account together. */
   reason: 'account_daily_pages' | 'daily_pages'

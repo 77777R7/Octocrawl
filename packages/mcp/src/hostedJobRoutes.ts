@@ -43,10 +43,10 @@ export function readHostedWebhook(value: unknown): Omit<HostedJobWebhook, 'secre
 function jobPause(job: HostedJob, nowMs: number): JobPause | null {
   const paused = job.paused
   if (paused === undefined || paused === null || (job.status !== 'queued' && job.status !== 'running') || Date.parse(paused.until) <= nowMs) return null
-  const whose = paused.pool === 'account' ? 'This account has' : 'Every account together has'
+  const whose = paused.pool === 'account' ? 'This account has' : 'All accounts together have'
   return {
     reason: paused.pool === 'account' ? 'account_daily_pages' : 'daily_pages', limit: paused.limit, resumesAt: paused.until,
-    message: `${whose} read the ${paused.limit} job pages of this UTC day. The job goes on by itself at ${paused.until}: nothing is lost, no credit is spent while it waits, and it need not be cancelled.`,
+    message: `${whose} fewer of the ${paused.limit} job pages of this UTC day left than the job's next slice takes. The job goes on by itself at ${paused.until}: nothing is lost, no credit is spent while it waits, and it need not be cancelled.`,
   }
 }
 

@@ -249,7 +249,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
       const reason = reserved.limited === 'account' ? 'account_deleted' : 'credits_exhausted'
       return await pass((j) => ({ ...j, status: 'failed', failureReason: reason }))
     }
-    const poolCounts = reserved.counts
+    logQuotaThresholds(pools(reservedPages), reserved.counts, day, log)
     // Until the slice commits it read nothing it can be held to: a slice that dies gives all of it back.
     reservation = { ...reserved.reservation, quotasBack: poolsBack(reservedPages) }
     const held = await deps.store.updateHeld(jobId, holder, (j) => ({ ...j, reservation: { reservation, used: null }, paused: null }))
@@ -342,8 +342,6 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     }
     // Charged what it used; a settle that fails here is settled by the next delivery, from the reservation on the job.
     await deps.credits.settle(settled, used, 'http', now(), undefined, perKind).catch((error: unknown) => log(JSON.stringify({ severity: 'ERROR', event: 'hosted_job_settle_failed', jobId, message: String(error) })))
-    // By the pages it read: what it held and gave back would take the pool past 70% and under it again, slice after slice.
-    logQuotaThresholds(pools(read), poolCounts?.map((count) => count - reservedPages + read), day, log)
     line('hosted_job_slice', { slice, pages: result.items.length, errors, used, status: done.outcome.outcome })
     await done.next()
     return done.outcome
