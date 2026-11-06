@@ -35,6 +35,7 @@ export type {
   ScrapeResponseMetadata,
   BatchAccepted,
   BatchErrorItem,
+  BatchNotServedItem,
   BatchErrorStatus,
   BatchErrorsQuery,
   BatchErrorsResponse,

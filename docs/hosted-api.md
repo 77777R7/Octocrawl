@@ -621,7 +621,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `get_batch_items` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); limit at most 50 (local 50), maxResults at most 100 (local 200). |
 | `wait_batch` | Limited | An account's connection only (its key, or signing in at /mcp-oauth). |
 | `cancel_batch` | Limited | An account's connection only (its key, or signing in at /mcp-oauth). |
-| `get_batch_errors` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); answers the failed items as { items, nextCursor, hasMore } (local { errors, robotsBlocked }), limit at most 100 (local 1,000). |
+| `get_batch_errors` | Limited | An account's connection only (its key, or signing in at /mcp-oauth); answers the failed items as { items, notServed, nextCursor, hasMore } (local { errors, robotsBlocked, notServed }), limit at most 100 (local 1,000). |
 | `hand_off_batch` | Different on purpose | Reads or hands over the page in the person's own Chrome. Hosted never drives the person's Chrome (ADR 0005); stage H item 5 forwards such calls to the server on their own computer (decided 2026-11-04). |
 | `scrape_product` | Limited | A key or a signed-in connection with the browser lane only. |
 | `batch_products` | Planned: no stage H item yet | Not listed; more Amazon.sg work is paused (ROADMAP Paused). |

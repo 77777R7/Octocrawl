@@ -66,7 +66,7 @@
     },
     "get_batch_errors": {
       "inputBytes": 183,
-      "descriptionChars": 271
+      "descriptionChars": 320
     },
     "hand_off_batch": {
       "inputBytes": 164,
@@ -266,7 +266,7 @@
     },
     "get_batch_errors": {
       "inputBytes": 183,
-      "descriptionChars": 271
+      "descriptionChars": 320
     },
     "scrape_product": {
       "inputBytes": 131,

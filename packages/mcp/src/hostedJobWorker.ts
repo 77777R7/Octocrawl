@@ -327,7 +327,11 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     commitMayHaveApplied = true
     const done: Committed = await commit((j) => ({
       ...j, status, failureReason: status === 'failed' ? (idleSlices >= limits.idleSlicesToFail ? 'no_progress' : 'task_failed') : j.failureReason,
-      counts: { pages: j.counts.pages + result!.items.length - errors, errors: j.counts.errors + errors, slices: j.counts.slices + 1 },
+      counts: {
+        ...j.counts, pages: j.counts.pages + result!.items.length - errors, errors: j.counts.errors + errors, slices: j.counts.slices + 1,
+        ...(j.counts.redirectedOffPage === undefined ? {} : { redirectedOffPage: j.counts.redirectedOffPage + result!.charges.filter((charge) => charge.redirectedOffPage === true).length }),
+        ...(j.counts.notServed === undefined ? {} : { notServed: j.counts.notServed + result!.charges.filter((charge) => charge.notServed === true).length }),
+      },
       outcomes: outcomes.reduce((all, outcome) => ({ ...all, [outcome]: (all[outcome] ?? 0) + 1 }), j.outcomes ?? {}),
       credits: { ...j.credits, used: j.credits.used + used }, idleSlices, budgetExceeded: result!.budgetExceeded ?? j.budgetExceeded ?? null,
       segments: [...(j.segments ?? []), segment], checkpoint: nextCheckpoint,

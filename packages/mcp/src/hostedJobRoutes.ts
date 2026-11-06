@@ -60,6 +60,8 @@ export function jobStatus(job: HostedJob, nowMs = Date.now()): Record<string, un
     taskId: job.id, kind: job.kind, status: job.status, failureReason: job.failureReason, budgetExceeded: job.budgetExceeded ?? null,
     // As a local crawl counts them: pagesFetched is every page read, failed ones included; succeeded and failed split them.
     pagesFetched: completed, succeeded: job.counts.pages, failed: job.counts.errors, errors: job.counts.errors, completed,
+    ...(job.counts.redirectedOffPage === undefined ? {} : { redirectedOffPage: job.counts.redirectedOffPage }),
+    ...(job.counts.notServed === undefined ? {} : { notServed: job.counts.notServed }),
     ...(requested === null ? {} : { requested, remaining: Math.max(0, requested - completed) }),
     // While it runs, how fast: its pages since its first slice took it, up to now, the gaps between slices included. Not since
     // it was accepted: a wait in the queue happens once, and spread over every page left it would say hours for minutes.
@@ -86,6 +88,8 @@ export const JOB_WORKER_COUNT = 2
 export const JOB_LIMITS: JobLimits = { maxRunning: 2, maxQueued: 10 }
 const IDEMPOTENCY_TTL_MS = 24 * 3_600_000
 const PAGE_LIST_DEFAULT = 50
+/** A page read: the statuses `succeeded` counts. */
+const READ_ITEM_STATUSES: ReadonlySet<string> = new Set(['success', 'partial', 'empty_verified'])
 const PAGE_LIST_MAX = 100
 /** A page of items stays under this many bytes of JSON, well under Cloud Run's 32 MiB response limit; one larger item is a page alone. */
 const PAGE_LIST_MAX_BYTES = 16_000_000
@@ -370,7 +374,21 @@ export function createJobRoutes(config: HostedJobsConfig, credits: CreditsStore,
       if (full) break
     }
     const hasMore = slice < job.counts.slices
-    return json({ items, nextCursor: hasMore ? `${slice}:${line}` : null, hasMore })
+    return json({ items, nextCursor: hasMore ? `${slice}:${line}` : null, hasMore, ...(filter === 'errors' && job.counts.notServed !== undefined ? { notServed: await notServedItems(job) } : {}) })
+  }
+
+  /** The pages read that are not what was asked for, as a local errors report names them: over the whole job, not paged. None to look for, no file is read. */
+  async function notServedItems(job: HostedJob): Promise<unknown[]> {
+    if (job.counts.notServed === 0) return []
+    const items: unknown[] = []
+    for (let slice = 0; slice < job.counts.slices; slice++) {
+      for (const text of await config.files.segment(job, slice) ?? []) {
+        const item = JSON.parse(text) as { id: string; url: string; status: string; readiness?: { state: string; basis: readonly string[] } | null; evidenceRecord?: { finalUrl?: string | null } | null }
+        if (item.readiness?.state !== 'not_served' || !READ_ITEM_STATUSES.has(item.status)) continue
+        items.push({ id: item.id, url: item.url, status: item.status, code: item.readiness.basis.at(-1) ?? 'not_served', finalUrl: item.evidenceRecord?.finalUrl ?? null })
+      }
+    }
+    return items
   }
 
   /** The account's jobs, newest first, a page at a time: `before` is the job the previous page ended at. */

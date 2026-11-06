@@ -129,7 +129,7 @@ import {
   type ScrapeOutcome,
 } from '@w2l/contracts'
 import { accessGrantRef, createExecutionScope, createSpendLedger, evaluateGovernance, type AccessAttestationInput, type AccessGrant, type CrawlPolicy } from '@w2l/http-core'
-import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, withRegexLedger, type RegexStats, type StepPageQuery } from '@w2l/runtime'
+import { CrawlOrchestrator, MapRunner, canonicalizeUrl, crawlReportFromStore, decodeStepCursor, encodeStepCursor, IdempotencyStore, notServedSteps, READ_STATUSES, readinessOf, reportFromTaskAttempt, requestFingerprint, SqliteTaskStore, toEvidenceRecord, withRegexLedger, type RegexStats, type StepPageQuery } from '@w2l/runtime'
 import { PageCache, cacheHitResult, cacheMissResult, pageCacheKey, sourceCommitFromEnv, untriedAudit, verify, withCacheMiss, withCacheStored, type PageCacheBounds } from '@w2l/runtime'
 import type { BrowserEngineName, BrowserIdentityChoice, CaptchaSolving, ChannelAdmission, ChannelsFiltered, InstalledChromeTestSeams, PricedExit } from '@w2l/bench'
 import { EgressPool, egressInDoubt, MAX_EGRESS_SWITCHES, probeEgress, type Egress } from './egressPool.js'
@@ -1281,6 +1281,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         failed: (counts.failed ?? 0) + (counts.blocked ?? 0) + (counts.cancelled ?? 0) + (counts.budget_exceeded ?? 0),
         // Among the succeeded: the pages the site answered with another page (its home page, one above the URL asked for).
         redirectedOffPage: await store.countStepsWarned(taskId, 'redirected_off_page'),
+        // And every page read that is not what was asked for, those among them.
+        notServed: (await notServedSteps(store, taskId)).length,
         // With a task contract: how many of those passed it and how many did not (ADR 0006).
         ...(task.batch.verify === undefined ? {} : await store.countVerifications(taskId)),
         // The cap in force: the batch's own, never above this service's worker count.
@@ -2441,7 +2443,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
           if (!all.hasMore || all.nextCursor === null) break
           cursor = all.nextCursor
         }
-        return { errors: page.steps.map(batchErrorItem), robotsBlocked, nextCursor: page.nextCursor, hasMore: page.hasMore }
+        const notServed = (await notServedSteps(store, taskId)).map(({ step, code }) => ({ id: step.id, url: step.url, status: step.status, code, finalUrl: step.result?.evidence.finalUrl ?? null }))
+        return { errors: page.steps.map(batchErrorItem), robotsBlocked, notServed, nextCursor: page.nextCursor, hasMore: page.hasMore }
       } finally { await store.close() }
     },
 
@@ -2623,7 +2626,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
             status: ended?.status ?? 'failed', attemptId, newPages, budgetExceeded: attempt?.budgetExceeded ?? null,
             // Each page keeps its trace (the robots.txt and Crawl-delay evidence a page is judged by); the routing audit is left out.
             items: steps.map((step) => { const { audit: _audit, ...item } = toCrawlPage(step, ended!, false, taskHintOffers(ended!, step.url)); return item as CrawlPage }),
-            charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null, robots: sliceRobots(step.result ?? null), modelCalled: (step.result?.json?.modelUsage?.attempts ?? 0) > 0 })),
+            charges: steps.map((step) => ({ status: step.result?.status ?? step.status, lane: step.result?.lane ?? step.lane, failureReason: step.result?.failureReason ?? null, httpStatus: step.result?.evidence.httpStatus ?? null, robots: sliceRobots(step.result ?? null), modelCalled: (step.result?.json?.modelUsage?.attempts ?? 0) > 0, ...sliceServed(step) })),
           }
         } finally { await after.close() }
       } finally {
@@ -3088,10 +3091,17 @@ export interface SliceResult {
  * RFC 9309, but not one the site wrote). `modelCalled`: the page's json model fallback called the model (its json's
  * `modelUsage` names an attempt).
  */
-export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null; robots: 'disallowed' | 'unreachable' | null; modelCalled: boolean }
+export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null; robots: 'disallowed' | 'unreachable' | null; modelCalled: boolean; redirectedOffPage?: boolean; notServed?: boolean }
 function sliceRobots(result: FetchResult | null): SliceCharge['robots'] {
   const refusal = result === null ? null : robotsRefusal(result)
   return refusal === null ? null : refusal.unreachable === null ? 'disallowed' : 'unreachable'
+}
+
+/** Of a page read, what the job's status counts beside `succeeded`: another page in its place, and a page that is not what was asked for. */
+function sliceServed(step: StepRecord): Pick<SliceCharge, 'redirectedOffPage' | 'notServed'> {
+  const result = step.result
+  if (result === null || !READ_STATUSES.includes(step.status)) return {}
+  return { redirectedOffPage: result.warnings?.some((warning) => warning.code === 'redirected_off_page') === true, notServed: readinessOf(result).state === 'not_served' }
 }
 
 /** A batch never discovers: its frontier takes the whole host and exact canonical URLs. */

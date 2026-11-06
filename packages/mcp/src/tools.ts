@@ -506,7 +506,7 @@ const DEFINITIONS = [
   })),
   {
     name: 'get_batch_errors',
-    description: 'List a batch\'s items that did not succeed, across every attempt. errors [{ id, timestamp, url, status, code, error, httpStatus }] come in pages of up to 1000 (cursor, limit); robotsBlocked lists every URL robots.txt refused (a governance or SSRF refusal stays in errors).',
+    description: 'List a batch\'s items that did not succeed, across every attempt. errors [{ id, timestamp, url, status, code, error, httpStatus }] come in pages of up to 1000 (cursor, limit); robotsBlocked lists every URL robots.txt refused (a governance or SSRF refusal stays in errors); notServed, pages read but not the one asked for.',
     inputSchema: { type: 'object', properties: { id: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 1000 } }, required: ['id'], additionalProperties: false },
   },
   {

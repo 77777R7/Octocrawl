@@ -1,5 +1,15 @@
 import type { Attempt, CrawlReport, PaidCallRecord, PaidCallTotals, Task } from '@w2l/contracts'
+import { readinessOf } from './readiness.js'
 import type { TaskStore } from './taskStore.js'
+
+/** The read steps whose `readiness` is `not_served`, with why (the basis's last entry): of an attempt, or of every attempt without attemptId. */
+export async function notServedSteps(store: TaskStore, taskId: string, attemptId?: string) {
+  const steps = await store.listNotServedCandidates(taskId, attemptId)
+  return steps.flatMap((step) => {
+    const readiness = step.result === null ? null : readinessOf(step.result)
+    return readiness?.state === 'not_served' ? [{ step, code: readiness.basis.at(-1) ?? 'not_served' }] : []
+  })
+}
 
 export async function crawlReportFromStore(store: TaskStore, taskId: string): Promise<CrawlReport | null> {
   const task = await store.getTask(taskId)
@@ -36,7 +46,7 @@ export async function crawlReportFromStore(store: TaskStore, taskId: string): Pr
   const counted = {
     ...report,
     ...(crawl && task.crawl?.verify !== undefined ? await store.countVerifications(taskId, latest.id) : {}),
-    ...(crawl ? { redirectedOffPage: await store.countStepsWarned(taskId, 'redirected_off_page', latest.id) } : {}),
+    ...(crawl ? { redirectedOffPage: await store.countStepsWarned(taskId, 'redirected_off_page', latest.id), notServed: (await notServedSteps(store, taskId, latest.id)).length } : {}),
   }
   const paid = await store.listPaidCalls(taskId)
   return paid.length === 0 ? counted : { ...counted, paidCalls: paidCallTotals(paid) }

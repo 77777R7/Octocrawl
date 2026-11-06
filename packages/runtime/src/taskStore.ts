@@ -18,6 +18,10 @@ export interface VerificationCounts {
 
 /** The step statuses a job's `succeeded` and `failed` count, and so its verification counts: not a step in flight, nor a duplicate of a page counted already. */
 export const VERIFICATION_COUNTED_STATUSES: readonly StepStatus[] = ['success', 'partial', 'empty_verified', 'failed', 'blocked', 'cancelled', 'budget_exceeded']
+/** The statuses of a page read, the ones a batch's `succeeded` counts. */
+export const READ_STATUSES: readonly StepStatus[] = ['success', 'partial', 'empty_verified']
+/** The warnings that make a page read `not_served` whatever else it shows (readiness.ts). */
+export const NOT_SERVED_WARNINGS: readonly string[] = ['source_data_error', 'redirected_off_page']
 export interface StepPageQuery {
   attemptId?: string
   cursor?: string
@@ -65,6 +69,8 @@ export interface TaskStore {
   countVerifications(taskId: string, attemptId?: string): Promise<VerificationCounts>
   /** How many of an attempt's steps (every attempt's without attemptId) that `succeeded` and `failed` count carry a warning of this code, without reading their text. */
   countStepsWarned(taskId: string, code: string, attemptId?: string): Promise<number>
+  /** The steps of a page read that `readinessOf` could call `not_served` (notServedSteps decides), in stored order: of an attempt, or of every attempt without attemptId. */
+  listNotServedCandidates(taskId: string, attemptId?: string): Promise<StepRecord[]>
   listStepsPage(taskId: string, query: StepPageQuery): Promise<StepPage>
   /**
    * Latest step for this canonical URL on the task (any attempt).
