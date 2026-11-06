@@ -242,6 +242,7 @@ export const OPTION_PARITY: { [N in OptionTool]: Record<OptionOf<N>, OptionEntry
     actions: { status: 'planned', item: 'actions', note: 'Hosted takes no page actions yet; stage H item 3 brings them to keyed callers.', sent: 'refused' },
     robotsOverrides: { status: 'different_on_purpose', note: ROBOTS, sent: 'refused' },
     maxConcurrency: { status: 'limited', item: 'limits_capacity', note: `At most ${JOB_WORKER_COUNT}, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT, with no ceiling in the schema); the start lowers a larger value to ${JOB_WORKER_COUNT}, as a crawl's.`, over: { value: JOB_WORKER_COUNT + 1, sent: 'not_honoured' } },
+    retry: supported,
     ignoreInvalidURLs: supported,
     allowExternalLinks: { status: 'planned', item: null, note: 'Locally only false is taken, since a batch follows no link; hosted refuses the field by name.', sent: 'refused' },
     includeSubdomains: { status: 'planned', item: null, note: 'Locally only false is taken, since a batch follows no link; hosted refuses the field by name.', sent: 'refused' },

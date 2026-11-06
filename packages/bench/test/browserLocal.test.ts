@@ -216,7 +216,7 @@ beforeAll(async () => {
     } else if (req.url === '/landing') {
       res.writeHead(200, { 'content-type': 'text/html; charset=iso-8859-1' })
       res.end('<!doctype html><html><body><article><h1>Landing</h1><p>The page two redirects lead to, served with a content type the evidence must repeat as sent.</p></article></body></html>')
-    } else if (req.url?.startsWith('/client/') || req.url === '/') {
+    } else if (req.url?.startsWith('/client/') || req.url?.startsWith('/exhibitor/') || req.url?.startsWith('/our-exhibitors/') || req.url === '/') {
       // Pages that move on by themselves after they answered: a script, a meta
       // refresh or the history API. /client/gone and /client/spa-missing answer 404.
       const article = (title: string) => `<article><h1>${title}</h1><p>The page the browser shows at the end, long enough for the extraction cascade to select it as the content of the page.</p></article>`
@@ -232,6 +232,9 @@ beforeAll(async () => {
         '/client/refresh-loop': [200, 'text/html; charset=utf-8', `<meta http-equiv="refresh" content="0">${article('Again')}`],
         // A detail page the site sends to its home page: by a script, or by a 302 (/client/deep/hop-home below).
         '/client/to-home': [200, 'text/html; charset=utf-8', '<p>Moving on.</p><script>location.replace("/")</script>'],
+        // A detail page whose script leaves it for the site's list, a path as deep with nothing in common.
+        '/exhibitor/acme': [200, 'text/html; charset=utf-8', '<p>Moving on.</p><script>location.replace("/our-exhibitors/list/?go=x&")</script>'],
+        '/our-exhibitors/list/?go=x&': [200, 'text/html; charset=utf-8', article('List of exhibitors')],
         '/': [200, 'text/html; charset=utf-8', article('Home')],
       }
       const page = pages[req.url]
@@ -1186,6 +1189,10 @@ describe('BrowserLocalSubject after the page moves on by itself', () => {
         expect(out.warnings?.[0]?.message).toContain(path)
         expect(readinessOf(out)).toEqual({ state: 'not_served', basis: ['redirected_off_page'] })
       }
+      const list = await subject.fetch(`${url}/exhibitor/acme`)
+      expect(list.evidence.finalUrl).toBe(`${url}/our-exhibitors/list/?go=x&`)
+      expect(list.warnings?.map((warning) => warning.code)).toEqual(['redirected_off_page'])
+      expect(readinessOf(list)).toEqual({ state: 'not_served', basis: ['redirected_off_page'] })
       // The history API keeps the document: a page that only changed its address is the page asked for.
       expect((await subject.fetch(`${url}/client/push`)).warnings).toBeUndefined()
     } finally {

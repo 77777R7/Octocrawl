@@ -16,7 +16,7 @@ import { newHostedJob, type HostedJob, type HostedJobStore, type HostedJobWebhoo
 
 /** The options of a page in a job, as hosted serves them on a scrape (HOSTED_SCRAPE_KEYS), less the scrape's own. */
 const JOB_PAGE_KEYS = ['onlyMainContent', 'waitFor', 'timeout', 'maxFileBytes', 'includeTags', 'excludeTags', 'headers', 'mobile', 'fastMode', 'blockAds', 'removeBase64Images', 'verify', 'origin', 'integration'] as const
-export const HOSTED_BATCH_KEYS: ReadonlySet<string> = new Set(['urls', 'mode', 'formats', 'includeLinks', 'maxConcurrency', 'ignoreInvalidURLs', 'idempotencyKey', 'maxCredits', 'webhook', ...JOB_PAGE_KEYS])
+export const HOSTED_BATCH_KEYS: ReadonlySet<string> = new Set(['urls', 'mode', 'formats', 'includeLinks', 'maxConcurrency', 'retry', 'ignoreInvalidURLs', 'idempotencyKey', 'maxCredits', 'webhook', ...JOB_PAGE_KEYS])
 export const HOSTED_CRAWL_KEYS: ReadonlySet<string> = new Set(['url', 'mode', 'maxPages', 'maxDepth', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'maxCredits', 'webhook', ...JOB_PAGE_KEYS])
 const WEBHOOK_EVENTS: readonly HostedWebhookEvent[] = ['completed', 'failed', 'cancelled']
 
@@ -62,6 +62,7 @@ export function jobStatus(job: HostedJob, nowMs = Date.now()): Record<string, un
     pagesFetched: completed, succeeded: job.counts.pages, failed: job.counts.errors, errors: job.counts.errors, completed,
     ...(job.counts.redirectedOffPage === undefined ? {} : { redirectedOffPage: job.counts.redirectedOffPage }),
     ...(job.counts.notServed === undefined ? {} : { notServed: job.counts.notServed }),
+    ...(job.counts.retried === undefined ? {} : { retried: job.counts.retried }),
     ...(requested === null ? {} : { requested, remaining: Math.max(0, requested - completed) }),
     // While it runs, how fast: its pages since its first slice took it, up to now, the gaps between slices included. Not since
     // it was accepted: a wait in the queue happens once, and spread over every page left it would say hours for minutes.

@@ -646,6 +646,152 @@ describe('CrawlOrchestrator with a fake scrape atom', () => {
   })
 })
 
+describe('CrawlOrchestrator reads a batch page again after a soft block', () => {
+  const HOST = 'https://fixture.test'
+  const off = (url: string): ScrapeOutcome => {
+    const base = page(url)
+    return { result: { ...base, evidence: { ...base.evidence, finalUrl: `${HOST}/` }, warnings: [{ code: 'redirected_off_page', message: 'sent on' }] }, links: [] }
+  }
+  const limited = (url: string): ScrapeOutcome => {
+    const base = page(url)
+    return { result: { ...base, status: 'failed', failureReason: 'http_error', markdown: null, evidence: { ...base.evidence, httpStatus: 429 } }, links: [] }
+  }
+  async function run(urls: readonly string[], answer: (url: string, read: number) => ScrapeOutcome, softBlocks?: number) {
+    const store = new MemoryTaskStore()
+    await store.putTask({ id: 'retry-1', seedUrl: urls[0]!, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls, formats: ['markdown'], includeLinks: false, ...(softBlocks === undefined ? {} : { retry: { softBlocks } }) }, createdAt: '2026-11-06T00:00:00.000Z', updatedAt: '2026-11-06T00:00:00.000Z' })
+    const clock = new FakeClock()
+    const reads: string[] = []
+    const atom: ScrapeAtom = { scrape: async (url) => { reads.push(url); return answer(url, reads.filter((seen) => seen === url).length) }, close: async () => {} }
+    const report = await new CrawlOrchestrator({ store, atom, clock, workerCount: 1, perHostMinDelayMs: 0 }).run({ seedUrl: urls[0]!, taskDir: '/tmp/w2l-batch', resumeFrom: 'retry-1', skipFetchedOnResume: true, maxDepth: 0 })
+    return { store, clock, reads, report, steps: await store.listSteps('retry-1') }
+  }
+  const retries = (step: { result: FetchResult | null }) => step.result!.trace.filter((event) => event.event === 'soft_block_retry').map((event) => event.detail)
+
+  it('keeps one step per URL, the last read, with the read set aside on its trace, and leaves the wait to the other pages', async () => {
+    const urls = [`${HOST}/a`, `${HOST}/b`, `${HOST}/c`]
+    const { reads, steps, report } = await run(urls, (url, read) => url === urls[0] && read === 1 ? off(url) : outcome(url, []))
+    expect(report.status).toBe('completed')
+    // The two seconds the page waits go to the pages behind it.
+    expect(reads).toEqual([urls[0], urls[1], urls[2], urls[0]])
+    expect(steps.map((step) => step.url).sort()).toEqual(urls)
+    const first = steps.find((step) => step.url === urls[0])!
+    expect(first.result?.warnings ?? []).toEqual([])
+    expect(retries(first)).toEqual([{ read: 1, signal: 'redirected_off_page', status: 'success', httpStatus: 200, finalUrl: `${HOST}/` }])
+  })
+
+  it('keeps on the page that was stored what a read set aside did to the pace', async () => {
+    const urls = [`${HOST}/a`, `${HOST}/b`]
+    // Two signals in a row: the read of /a set aside, then /b.
+    const { steps } = await run(urls, (url, read) => read === 1 ? off(url) : outcome(url, []))
+    const events = steps.flatMap((step) => step.result!.trace.filter((event) => event.event === 'pacing_adjusted').map((event) => event.detail?.change))
+    expect(events).toContain('slowed')
+  })
+
+  it('stops at softBlocks, keeping the last answer; 0 reads once; a 429 goes back like a page sent away', async () => {
+    const urls = [`${HOST}/a`]
+    const twice = await run(urls, (url) => limited(url), 2)
+    expect(twice.reads).toHaveLength(3)
+    expect(twice.steps).toHaveLength(1)
+    expect(twice.steps[0]).toMatchObject({ status: 'failed' })
+    expect(retries(twice.steps[0]!)).toHaveLength(2)
+    expect((await run(urls, (url) => limited(url), 0)).reads).toHaveLength(1)
+    expect((await run(urls, (url) => limited(url))).reads).toHaveLength(2)
+  })
+
+  it('counts what a read set aside cost, though only the last read is stored', async () => {
+    const url = `${HOST}/a`
+    const { report } = await run([url], (_url, read) => ({ result: page(url, { cost: 0.5, hash: `h${read}` }), links: [] }))
+    expect(report.costUsd).toBe(0.5)
+    const { report: twice } = await run([url], (_url, read) => { const paid = page(url, { cost: 0.5 }); return read === 1 ? { ...off(url), result: { ...off(url).result, usage: paid.usage } } : { result: paid, links: [] } })
+    expect(twice.costUsd).toBe(1)
+  })
+
+  it('lets a host go when a page answers the same however slowly it is read: the wait is bounded, and the rest of the batch runs at its own pace', async () => {
+    const urls = Array.from({ length: 40 }, (_, i) => `${HOST}/exhibitor/${i}`)
+    const { reads, steps, clock, store } = await run(urls, (url) => off(url))
+    expect(steps).toHaveLength(40)
+    const pacing = (await store.getTask('retry-1'))!.pacing!['fixture.test']!
+    expect(pacing.settled).toEqual(['redirected_off_page'])
+    expect(pacing.adaptive ?? null).toBeNull()
+    // About two minutes of slow reads once, not 120 s a page; and no page is read again after that.
+    expect(clock.t - 1_000).toBeLessThan(240_000)
+    expect(reads.length).toBeLessThan(60)
+    const last = reads.slice(-10)
+    expect(new Set(last).size).toBe(10)
+  })
+
+  it('never lets a host go on a 429, however slowly it is read', async () => {
+    const urls = Array.from({ length: 16 }, (_, i) => `${HOST}/p/${i}`)
+    const { store } = await run(urls, (url) => limited(url), 0)
+    const pacing = (await store.getTask('retry-1'))!.pacing!['fixture.test']!
+    expect(pacing.settled).toBeUndefined()
+    expect(pacing.adaptive?.delayMs).toBe(120_000)
+  })
+
+  it('keeps a host slowed when its pages come back: a limit on rate, not on the pages', async () => {
+    // The site answers another page for its first 8 reads, then serves every page.
+    let answered = 0
+    const urls = Array.from({ length: 20 }, (_, i) => `${HOST}/p/${i}`)
+    const { steps, store } = await run(urls, (url) => ++answered <= 8 ? off(url) : outcome(url, []))
+    // The first pages were read twice inside the limit and are stored as they came; the rest of the batch is the pages asked for.
+    expect(steps.filter((step) => (step.result?.warnings ?? []).length > 0)).toHaveLength(4)
+    const pacing = (await store.getTask('retry-1'))!.pacing!['fixture.test']!
+    expect(pacing.settled).toBeUndefined()
+    expect(pacing.adaptive?.slowdowns).toBeGreaterThan(0)
+  })
+
+  it('carries a signal the host settled into the next run', async () => {
+    const store = new MemoryTaskStore()
+    const urls = [`${HOST}/a`, `${HOST}/b`, `${HOST}/c`]
+    await store.putTask({ id: 'retry-2', seedUrl: urls[0]!, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls, formats: ['markdown'], includeLinks: false }, pacing: { 'fixture.test': { lastStartedAtMs: null, crawlDelayMs: null, settled: ['redirected_off_page'] } }, createdAt: '2026-11-06T00:00:00.000Z', updatedAt: '2026-11-06T00:00:00.000Z' })
+    const reads: string[] = []
+    const atom: ScrapeAtom = { scrape: async (url) => { reads.push(url); return off(url) }, close: async () => {} }
+    await new CrawlOrchestrator({ store, atom, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ seedUrl: urls[0]!, taskDir: '/tmp/w2l-batch', resumeFrom: 'retry-2', skipFetchedOnResume: true, maxDepth: 0 })
+    expect(reads).toEqual(urls)
+  })
+
+  it('waits out a Retry-After before the read again, and does not sit out one past the longest wait', async () => {
+    const url = `${HOST}/a`
+    const until = (ms: number, clock: { at?: number }) => ({ ...limited(url), result: { ...limited(url).result, retryAt: (clock.at ?? 1_000) + ms } })
+    const near = await run([url], (_url, read) => read === 1 ? until(60_000, {}) : outcome(url, []))
+    expect(near.reads).toHaveLength(2)
+    expect(near.clock.t).toBeGreaterThanOrEqual(61_000)
+    expect(near.steps[0]).toMatchObject({ status: 'success' })
+    const far = await run([url], () => until(3_600_000, {}))
+    expect(far.reads).toHaveLength(1)
+    expect(far.steps[0]).toMatchObject({ status: 'failed' })
+  })
+
+  it('stores the read in hand when the run stops with a page waiting: a read was made, so the page has an answer', async () => {
+    const url = `${HOST}/a`
+    const store = new MemoryTaskStore()
+    await store.putTask({ id: 'retry-3', seedUrl: url, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: { ...DEFAULT_CRAWL_BUDGET, maxWallMs: 500 }, batch: { urls: [url], formats: ['markdown'], includeLinks: false }, createdAt: '2026-11-06T00:00:00.000Z', updatedAt: '2026-11-06T00:00:00.000Z' })
+    const atom: ScrapeAtom = { scrape: async () => off(url), close: async () => {} }
+    const report = await new CrawlOrchestrator({ store, atom, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ seedUrl: url, taskDir: '/tmp/w2l-batch', resumeFrom: 'retry-3', skipFetchedOnResume: true, maxDepth: 0, budget: { ...DEFAULT_CRAWL_BUDGET, maxWallMs: 500 } })
+    expect(report.budgetExceeded).toBe('time')
+    const steps = await store.listSteps('retry-3')
+    expect(steps).toHaveLength(1)
+    expect(steps[0]?.result?.warnings?.map((warning) => warning.code)).toEqual(['redirected_off_page'])
+  })
+
+  it('does not run a page\'s steps twice', async () => {
+    const url = `${HOST}/a`
+    const store = new MemoryTaskStore()
+    await store.putTask({ id: 'retry-4', seedUrl: url, taskDir: '/tmp/w2l-batch', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls: [url], formats: ['markdown'], includeLinks: false, actions: [{ type: 'click', selector: '#send' }] }, createdAt: '2026-11-06T00:00:00.000Z', updatedAt: '2026-11-06T00:00:00.000Z' })
+    const reads: string[] = []
+    const atom: ScrapeAtom = { scrape: async (read) => { reads.push(read); return off(read) }, close: async () => {} }
+    await new CrawlOrchestrator({ store, atom, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ seedUrl: url, taskDir: '/tmp/w2l-batch', resumeFrom: 'retry-4', skipFetchedOnResume: true, maxDepth: 0 })
+    expect(reads).toHaveLength(1)
+  })
+
+  it('reads a crawl\'s pages once', async () => {
+    const reads: string[] = []
+    const atom: ScrapeAtom = { scrape: async (url) => { reads.push(url); return off(url) }, close: async () => {} }
+    await new CrawlOrchestrator({ store: new MemoryTaskStore(), atom, clock: new FakeClock(), workerCount: 1, perHostMinDelayMs: 0 }).run({ seedUrl: SEED, taskDir: '/tmp/w2l-crawl' })
+    expect(reads).toEqual([SEED])
+  })
+})
+
 describe('CrawlOrchestrator batch append', () => {
   const BATCH_A = 'https://fixture.test/batch/a'
   const BATCH_B = 'https://fixture.test/batch/b'
@@ -1089,7 +1235,7 @@ describe('adaptive pacing: a batch slows a host that pushes back', () => {
 
   it('two 429s in a row hold the host to one page at a time two seconds apart, write a pacing_adjusted trace line on the page that tipped it, and keep the pace with the task', async () => {
     const store = new MemoryTaskStore()
-    await store.putTask({ id: 'paced-1', seedUrl: HOST_URLS[0]!, taskDir: '/tmp/w2l-paced', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls: HOST_URLS, formats: ['markdown'], includeLinks: false }, createdAt: '2026-11-05T00:00:00.000Z', updatedAt: '2026-11-05T00:00:00.000Z' })
+    await store.putTask({ id: 'paced-1', seedUrl: HOST_URLS[0]!, taskDir: '/tmp/w2l-paced', mode: 'standard', status: 'pending', budget: DEFAULT_CRAWL_BUDGET, batch: { urls: HOST_URLS, formats: ['markdown'], includeLinks: false, retry: { softBlocks: 0 } }, createdAt: '2026-11-05T00:00:00.000Z', updatedAt: '2026-11-05T00:00:00.000Z' })
     const clock = new FakeClock()
     const started: number[] = []
     const atom: ScrapeAtom = {
@@ -1105,7 +1251,7 @@ describe('adaptive pacing: a batch slows a host that pushes back', () => {
     const steps = [...(await store.listSteps('paced-1'))].sort((a, b) => a.url.localeCompare(b.url))
     const adjusted = steps.map((step) => step.result?.trace.filter((event) => event.event === 'pacing_adjusted').map((event) => event.detail) ?? [])
     expect(adjusted).toEqual([[], [{ host: 'paced.test', change: 'slowed', signal: 'rate_limited', ceiling: 1, delayMs: 2_000, untilMs: 3_250 }], [], []])
-    expect((await store.getTask('paced-1'))?.pacing).toEqual({ 'paced.test': { lastStartedAtMs: 5_250, crawlDelayMs: null, cooldownUntilMs: 3_250, adaptive: { ceiling: 1, delayMs: 2_000, signals: 0, okStreak: 2, slowdowns: 1 } } })
+    expect((await store.getTask('paced-1'))?.pacing).toEqual({ 'paced.test': { lastStartedAtMs: 5_250, crawlDelayMs: null, cooldownUntilMs: 3_250, adaptive: { ceiling: 1, delayMs: 2_000, signals: 0, okStreak: 2, slowdowns: 1, cause: 'rate_limited' } } })
   })
 
   it('a resumed run on another orchestrator starts under the stored pace', async () => {

@@ -331,6 +331,7 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
         ...j.counts, pages: j.counts.pages + result!.items.length - errors, errors: j.counts.errors + errors, slices: j.counts.slices + 1,
         ...(j.counts.redirectedOffPage === undefined ? {} : { redirectedOffPage: j.counts.redirectedOffPage + result!.charges.filter((charge) => charge.redirectedOffPage === true).length }),
         ...(j.counts.notServed === undefined ? {} : { notServed: j.counts.notServed + result!.charges.filter((charge) => charge.notServed === true).length }),
+        ...(j.counts.retried === undefined ? {} : { retried: j.counts.retried + result!.charges.filter((charge) => charge.retried === true).length }),
       },
       outcomes: outcomes.reduce((all, outcome) => ({ ...all, [outcome]: (all[outcome] ?? 0) + 1 }), j.outcomes ?? {}),
       credits: { ...j.credits, used: j.credits.used + used }, idleSlices, budgetExceeded: result!.budgetExceeded ?? j.budgetExceeded ?? null,

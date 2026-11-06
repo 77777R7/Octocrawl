@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { localNetworkPolicy } from '@w2l/contracts'
+import { localNetworkPolicy, parseBatchStartRequest } from '@w2l/contracts'
 import { SqliteTaskStore } from '@w2l/runtime'
 import { buildChannels } from '@w2l/bench'
 import { W2L, type BatchAccepted } from '@w2l/sdk'
@@ -26,6 +26,7 @@ describe('persistent URL-array batch', () => {
     let maxInFlight = 0
     let hold: (path: string) => Promise<void> = async () => {}
     const seen: string[] = []
+    const movedOnce = new Set<string>()
     const server = createServer(async (req, res) => {
       if (req.url === '/robots.txt') { res.writeHead(200).end('User-agent: *\nDisallow: /private\nAllow: /'); return }
       const path = req.url ?? ''
@@ -43,6 +44,8 @@ describe('persistent URL-array batch', () => {
         if (path.startsWith('/empty/')) { res.writeHead(204).end(); return }
         // A detail page the site sends to its home page with a 302, as www.english.ids-cologne.de did for 98 of 272 exhibitor pages (2026-11-04).
         if (path.startsWith('/moved/')) { res.writeHead(302, { location: '/' }).end(); return }
+        // A page the site sends away once, as a limit on rate does, and serves when it is asked again.
+        if (path.startsWith('/once-moved/') && !movedOnce.has(path)) { movedOnce.add(path); res.writeHead(302, { location: '/' }).end(); return }
         if (path.startsWith('/missing/')) {
           res.writeHead(404, { 'content-type': 'text/html' })
           res.end('<html><head><title>Not Found</title></head><body><main><h1>Not Found</h1><p>There is no such item on this fixture server; the page you asked for does not exist here and never did, so this answer is the error page itself.</p></main></body></html>')
@@ -501,7 +504,7 @@ describe('persistent URL-array batch', () => {
     const engine = f.engine()
     cleanup.push(() => engine.close())
     const { client: w2l } = client(engine)
-    const accepted = await w2l.batchScrape([`${f.origin}/item/1`, `${f.origin}/moved/2`, `${f.origin}/item/3`], { verify: { checks: [{ type: 'markdownMatches', pattern: 'Fixture item \\d' }, { type: 'markdownExcludes', text: 'Fixture item 3' }] } })
+    const accepted = await w2l.batchScrape([`${f.origin}/item/1`, `${f.origin}/moved/2`, `${f.origin}/item/3`], { retry: { softBlocks: 0 }, verify: { checks: [{ type: 'markdownMatches', pattern: 'Fixture item \\d' }, { type: 'markdownExcludes', text: 'Fixture item 3' }] } })
     const report = await w2l.waitBatch(accepted.taskId)
     expect(report).toMatchObject({ status: 'completed', succeeded: 3, failed: 0, redirectedOffPage: 1, notServed: 2 })
     const listed = await w2l.getBatchErrors(accepted.taskId)
@@ -511,9 +514,41 @@ describe('persistent URL-array batch', () => {
       { url: `${f.origin}/moved/2`, status: 'success', code: 'redirected_off_page', finalUrl: `${f.origin}/` },
     ])
     // A contract the page passes holds: the warning is still counted, and the page is what the task asked for.
-    const accepting = await w2l.batchScrape([`${f.origin}/moved/4`], { verify: { checks: [{ type: 'markdownIncludes', text: 'Fixture item' }] } })
+    const accepting = await w2l.batchScrape([`${f.origin}/moved/4`], { retry: { softBlocks: 0 }, verify: { checks: [{ type: 'markdownIncludes', text: 'Fixture item' }] } })
     expect(await w2l.waitBatch(accepting.taskId)).toMatchObject({ redirectedOffPage: 1, notServed: 0 })
     expect((await w2l.getBatchErrors(accepting.taskId)).notServed).toEqual([])
+  })
+
+  it('reads again a page the site sent away, after the wait, and stores it once, as the page it asked for', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const urls = [`${f.origin}/once-moved/1`, `${f.origin}/item/2`]
+    const accepted = await w2l.batchScrape(urls)
+    const report = await w2l.waitBatch(accepted.taskId, { timeoutMs: 30_000 })
+    expect(report).toMatchObject({ status: 'completed', requested: 2, completed: 2, succeeded: 2, failed: 0, redirectedOffPage: 0, notServed: 0, retried: 1 })
+    const items = (await w2l.getBatchItems(accepted.taskId, { limit: 10, debug: true })).items
+    expect(items.map((item) => item.url).sort()).toEqual([...urls].sort())
+    const read = items.find((item) => item.url === urls[0])!
+    expect(read).toMatchObject({ status: 'success', readiness: { state: 'ready' }, evidenceRecord: { finalUrl: urls[0] } })
+    expect(read.trace.find((event) => event.event === 'soft_block_retry')?.detail).toMatchObject({ read: 1, signal: 'redirected_off_page', finalUrl: `${f.origin}/` })
+  })
+
+  it('reads again from the site, not from the cache, whatever maxAge says', async () => {
+    const f = await fixture()
+    const engine = f.engine()
+    cleanup.push(() => engine.close())
+    const { client: w2l } = client(engine)
+    const accepted = await w2l.batchScrape([`${f.origin}/once-moved/9`], { maxAge: 600_000 })
+    expect(await w2l.waitBatch(accepted.taskId, { timeoutMs: 30_000 })).toMatchObject({ succeeded: 1, redirectedOffPage: 0, retried: 1 })
+    expect(f.seen.filter((path) => path === '/once-moved/9')).toHaveLength(2)
+  })
+
+  it('refuses a retry it cannot honour, by name', async () => {
+    for (const retry of [{ softBlocks: 4 }, { softBlocks: -1 }, { softBlocks: 1.5 }, {}, 1]) expect(() => parseBatchStartRequest({ urls: ['https://example.com/'], retry }), JSON.stringify(retry)).toThrow(/retry/)
+    expect(() => parseBatchStartRequest({ urls: ['https://example.com/'], retry: { softBlocks: 1, other: 1 } })).toThrow(/other/)
+    expect(parseBatchStartRequest({ urls: ['https://example.com/'], retry: { softBlocks: 0 } }).retry).toEqual({ softBlocks: 0 })
   })
 
   it('slows a host after two pages in a row that the site answered with another page: one page at a time, two seconds apart, and the status says so', async () => {
@@ -524,7 +559,7 @@ describe('persistent URL-array batch', () => {
     const starts = new Map<string, number>()
     f.setHold(async (path) => { starts.set(path, Date.now()) })
     const { client: w2l } = client(engine)
-    const accepted = await w2l.batchScrape([`${f.origin}/moved/1`, `${f.origin}/moved/2`, `${f.origin}/item/3`, `${f.origin}/item/4`])
+    const accepted = await w2l.batchScrape([`${f.origin}/moved/1`, `${f.origin}/moved/2`, `${f.origin}/item/3`, `${f.origin}/item/4`], { retry: { softBlocks: 0 } })
     const report = await w2l.waitBatch(accepted.taskId, { timeoutMs: 30_000 })
     expect(report).toMatchObject({ status: 'completed', succeeded: 4, redirectedOffPage: 2, pacing: { '127.0.0.1': { ceiling: 1, delayMs: 2_000, slowdowns: 1 } } })
     // The two pages after the slowdown started two seconds apart, under the host's new pace.

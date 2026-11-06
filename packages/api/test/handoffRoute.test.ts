@@ -41,7 +41,7 @@ describe('the handoff route', () => {
       ...(userChrome ? { userChrome: { userDataDir: join(root, 'no-chrome') } } : {}),
     })
     const app = createApp(engine)
-    const { taskId } = await engine.startBatch({ urls: [`${server.url}/gate`, `${server.url}/slow`, `${server.url}/ok`] } as never)
+    const { taskId } = await engine.startBatch({ urls: [`${server.url}/gate`, `${server.url}/slow`, `${server.url}/ok`], retry: { softBlocks: 0 } } as never)
     for (let i = 0; i < 200; i++) {
       const report = await engine.getBatch(taskId)
       if (report?.status === 'completed') break

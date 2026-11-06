@@ -8,7 +8,7 @@
  * whole URL is retried. Block-level checkpoint is out of Phase 1.
  */
 
-import type { AccessChoice, PageOptions, RequestAttribution, RobotsUrlOverride, WebhookEvent } from './api.js'
+import type { AccessChoice, BatchRetry, PageOptions, RequestAttribution, RobotsUrlOverride, WebhookEvent } from './api.js'
 import type { CrawlMode } from './compliance.js'
 import type { WebhookPayloadFormat } from './delivery.js'
 import type { CrawlDiscovery, SitemapMode } from './crawl.js'
@@ -93,7 +93,7 @@ export interface Task {
    * place, pushing to the end in order: the orchestrator seeds the tail past
    * what it has seeded, by index, and never a URL twice.
    */
-  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[]; maxConcurrency?: number; invalidURLs?: readonly string[]; webhook?: StoredJobWebhook; lane?: 'my-browser'; access?: AccessChoice } & PageOptions
+  batch?: { urls: readonly string[]; formats: readonly ScrapeFormat[]; includeLinks: boolean; robotsOverrides?: readonly RobotsUrlOverride[]; maxConcurrency?: number; invalidURLs?: readonly string[]; webhook?: StoredJobWebhook; lane?: 'my-browser'; access?: AccessChoice; retry?: BatchRetry } & PageOptions
   /**
    * Every crawl option but the page budget (`budget`), stored when the crawl
    * starts so a resumed crawl runs with the options it was started with.
@@ -151,6 +151,12 @@ export interface HostPacing {
   cooldownUntilMs?: number | null
   /** The pace the task set for the host after soft blocks (adaptive pacing); absent while the host runs at its baseline. */
   adaptive?: AdaptivePacing | null
+  /**
+   * Signals that stopped counting on this host: slowed by that signal as far as SETTLE_DELAY_MS, a page read again still
+   * answered the same, so the pace is not why. They no longer slow the host, and a page that shows one is not read again.
+   * Absent: none.
+   */
+  settled?: readonly string[]
 }
 
 /**
@@ -170,6 +176,8 @@ export interface AdaptivePacing {
   okStreak: number
   /** How many times the task slowed the host. */
   slowdowns: number
+  /** The signal behind every slowdown of this pace; absent when two signals share it, or on a pace stored before it was kept. */
+  cause?: string
 }
 
 /**

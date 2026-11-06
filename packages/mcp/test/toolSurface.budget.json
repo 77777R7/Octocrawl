@@ -45,8 +45,8 @@
       "descriptionChars": 221
     },
     "batch_scrape": {
-      "inputBytes": 5127,
-      "descriptionChars": 550
+      "inputBytes": 5272,
+      "descriptionChars": 487
     },
     "get_batch": {
       "inputBytes": 102,

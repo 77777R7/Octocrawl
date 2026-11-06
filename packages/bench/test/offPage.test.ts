@@ -36,6 +36,17 @@ describe('a page delivered in place of the one asked for (redirected_off_page)',
     expect(redirectedOffPage('not a url', 'https://site.test/')).toBe(false)
   })
 
+  it('takes a page a script left for one as deep, with nothing in common, as off the page; a server redirect of that shape, a shared segment or a deeper page stay (IDS Cologne, 2026-11-06)', () => {
+    const asked = 'https://site.test/exhibitor/acme/'
+    const list = 'https://site.test/our-exhibitors/list-of-exhibitors/?go=x&'
+    expect(redirectedOffPage(asked, list, true)).toBe(true)
+    expect(redirectedOffPage(asked, list)).toBe(false)
+    expect(redirectedOffPage(asked, 'https://site.test/exhibitor/acme-gmbh/', true)).toBe(false)
+    expect(redirectedOffPage(asked, 'https://site.test/a/b/c', true)).toBe(false)
+    expect(offPageWarning(asked, list, true)?.message).toContain('another page, by a script of its own')
+    expect(offPageWarning(asked, 'https://site.test/', true)?.message).toContain('its home page')
+  })
+
   it('names the requested and the final URL in the warning, and where the site sent the request', () => {
     expect(offPageWarning('https://site.test/a/b', 'https://site.test/')).toEqual({ code: 'redirected_off_page', message: 'The site sent the request for https://site.test/a/b on to https://site.test/, its home page: the content is that page\'s, not the requested page\'s.' })
     expect(offPageWarning('https://site.test/a/b', 'https://site.test/a')?.message).toContain('a page above the one asked for')
