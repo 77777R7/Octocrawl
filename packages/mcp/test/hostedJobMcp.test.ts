@@ -267,6 +267,23 @@ describe('hosted job tools over MCP', () => {
     expect(structured(await client.callTool({ name: 'wait_batch', arguments: { id, timeoutMs: 1 } })).paused).toEqual(paused)
   })
 
+  it('hands a finished batch\'s download link to the agent through get_batch and wait_batch, with the hint that says what it is', async () => {
+    const { connect, store } = await start()
+    const client = await connect('oc_account')
+    const started = structured(await client.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/1', 'https://example.com/2'] } }))
+    const id = started.taskId as string
+    expect(structured(await client.callTool({ name: 'get_batch', arguments: { id } }))).not.toHaveProperty('export')
+    store.jobs.set(id, { ...store.jobs.get(id)!, status: 'completed', finishedAt: new Date().toISOString() })
+    for (const name of ['get_batch', 'wait_batch'] as const) {
+      const result = await client.callTool({ name, arguments: { id } })
+      expect(result.isError ?? false, text(result)).toBe(false)
+      const status = structured(result)
+      expect(status.export).toEqual({ url: `https://storage.example/${id}`, expiresInSeconds: 86_400 })
+      const hints = status.agentHints as string[]
+      expect(hints.some((hint) => hint.includes('export.url') && hint.includes('gzip') && hint.includes('24 hours') && hint.includes('get_batch_items'))).toBe(true)
+    }
+  })
+
   it('measures a hosted batch\'s rate from its first slice, not from its wait in the queue, and says none for a crawl or a job that ended', () => {
     const job = { id: 'j', kind: 'batch', status: 'running', failureReason: null, request: { urls: Array.from({ length: 1_000 }, (_, i) => `https://example.com/${i}`) }, counts: { pages: 10, errors: 0, slices: 1 }, credits: { used: 10, maxCredits: null }, createdAt: '2026-11-05T00:00:00.000Z', startedAt: '2026-11-05T00:40:00.000Z', finishedAt: null, expireAt: '2026-11-12T00:00:00.000Z' } as unknown as HostedJob
     // 40 minutes in the queue, then 10 pages in 20 s: 30 a minute, 33 minutes left, not 66 hours.

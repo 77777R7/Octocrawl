@@ -31,6 +31,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A finished job says where every page is.** A server on your computer writes `results.jsonl` (a page a line, as `get_batch_items` lists them) and `results.csv` (a row a page, the CLI's evidence columns) beside the task's checkpoint when a crawl or batch ends, and the status names them in `resultFiles`; a hosted job's status carries `export`, a link that downloads every page as one gzip JSONL file, good for 24 hours, with a fresh link on each read. `get_batch`, `wait_batch`, `get_crawl` and `wait_crawl` add an `agentHints` line that says so, so an agent hands the person a file or a link instead of paging a thousand items through the chat. The CLI's `--out` writes the same columns, plus `markdown_file`.
 - **Hosted Octocrawl no longer names a path on its own server for a file.** A hosted read of a PDF, CSV or text file said it was `kept at /tmp/octocrawl-hosted/files/…`, in `agentHints`, `file.path` and the `artifacts` of `snapshot` and the Evidence Record, a place no client could read and that was swept after ten minutes. Hosted now saves no files: `file.path` is `null`, `artifacts` is empty, `file.sha256` still identifies the bytes, and a file with no Markdown names `npx octocrawl scrape <url>`, which saves it on your computer. A self-hosted `serve --hosted` server keeps its files as before.
 
 ## 0.8.6 — 2026-11-07
