@@ -93,6 +93,7 @@ export async function readFileResponse(response: FileResponse, bytes: Uint8Array
   const path = context.store === null ? null : await context.store.save(bytes, hash, FILE_EXTENSIONS[kind])
   trace.push({ at: at(), lane, event: path === null ? 'file_not_saved' : 'file_saved', detail: { kind, detectedBy: response.decision.detectedBy, contentType: response.contentType, bytes: bytes.byteLength, sha256: hash, ...(path === null ? { reason: 'no file store is configured' } : { path }) } })
   const file: FileDescription = { ...described(response), bytes: bytes.byteLength, sha256: hash, path }
+  const bytesAre = path === null ? 'the bytes were not saved' : 'the bytes are saved as received'
   const content = (status: FileContent['status'], failureReason: FileContent['failureReason'], markdown: string | null, over: Partial<FileDescription> = {}, extra: { deadlineExceeded?: boolean; textMs?: number; pages?: readonly PdfPageMarkdown[] } = {}): FileContent => ({
     status,
     failureReason,
@@ -113,7 +114,7 @@ export async function readFileResponse(response: FileResponse, bytes: Uint8Array
     // `parsers: []` asks for no PDF text: the file is kept as received, like a spreadsheet.
     if (context.parsers !== undefined && parser === undefined) {
       trace.push({ at: at(), lane, event: 'pdf_not_parsed', detail: { reason: 'parsers' } })
-      return content('success', null, null, { warnings: [{ code: 'pdf_not_parsed', message: 'The request\'s parsers name no pdf entry, so no text was read; the bytes are saved as received.' }] })
+      return content('success', null, null, { warnings: [{ code: 'pdf_not_parsed', message: `The request's parsers name no pdf entry, so no text was read; ${bytesAre}.` }] })
     }
     const left = context.deadlineAt === undefined ? Infinity : context.deadlineAt - PDF_DEADLINE_RESERVE_MS - Date.now()
     const deadlineBound = left < PDF_TEXT_DEFAULTS.timeBudgetMs
@@ -154,7 +155,7 @@ export async function readFileResponse(response: FileResponse, bytes: Uint8Array
   if (TEXT_FILE_KINDS.has(kind)) {
     const decoded = decodeFileText(bytes, response.contentType)
     if (decoded === null) {
-      return content('success', null, null, { warnings: [{ code: 'text_not_decoded', message: `The file is not valid text in the encoding it declares or in UTF-8, so no text is returned; the bytes are saved as received.` }] })
+      return content('success', null, null, { warnings: [{ code: 'text_not_decoded', message: `The file is not valid text in the encoding it declares or in UTF-8, so no text is returned; ${bytesAre}.` }] })
     }
     if (decoded.text === '') return content('empty_verified', null, null, { encoding: decoded.encoding })
     return content('success', null, decoded.text, { markdownFrom: 'text', encoding: decoded.encoding })

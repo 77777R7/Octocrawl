@@ -20,7 +20,7 @@ import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } fr
 import { MemoryHostedAccess, type HostedAccessSource } from '../src/hostedAccess.js'
 import { CompatAddressGuard } from '@w2l/bench'
 import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
-import { BROWSER_LEASE_MS, browserLeaseTurn, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS } from '../src/hostedApi.js'
+import { BROWSER_LEASE_MS, browserLeaseTurn, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS, jobEngineOptions } from '../src/hostedApi.js'
 import { expectIsError } from './toolErrorChecks.js'
 import { collectGarbage } from './collectGarbage.js'
 
@@ -52,6 +52,10 @@ beforeAll(async () => {
     if (req.url === '/missing') return void res.writeHead(404, { 'content-type': 'text/html' }).end('<!doctype html><title>Not found</title><h1>Not found</h1>')
     if (req.url === '/shell') return void res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(SHELL)
     if (req.url === '/slow') return void setTimeout(() => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE), 1_500)
+    if (req.url === '/challenge') return void res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><html><head><title>Just a moment...</title></head><body><h1>Just a moment...</h1><p>Enable JavaScript and cookies to continue.</p><script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script></body></html>')
+    if (req.url === '/broken.txt') return void res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end(Buffer.from([0x74, 0xff, 0x65]))
+    if (req.url === '/notes.txt') return void res.writeHead(200, { 'content-type': 'text/plain' }).end('tide ledger, read as text')
+    if (req.url === '/sheet.xlsx') return void res.writeHead(200, { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }).end(Buffer.from('PK\x03\x04 a sheet'))
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE)
   })
   site.listen(0, '127.0.0.1'); await once(site, 'listening')
@@ -95,6 +99,36 @@ async function start(options: { channelsFor?: ApiEngineOptions['channelsFor']; k
 
 const post = (url: string, path: string, body: unknown, headers: Record<string, string> = {}) =>
   fetch(`${url}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) })
+
+it('answers a challenge page served with a 200 as blocked, not as the page', async () => {
+  const { url } = await start()
+  const body = await (await post(url, '/v1/scrape', { url: `${origin}/challenge` })).json() as { status: string; blockReason: string; readiness: { state: string }; evidenceRecord: { httpStatus: number; status: string } }
+  expect(body).toMatchObject({ status: 'blocked', blockReason: 'cloudflare_challenge', readiness: { state: 'not_served' }, evidenceRecord: { httpStatus: 200, status: 'blocked' } })
+})
+
+it('keeps no file on the server and names no path of its own, since nothing could read one', async () => {
+  const { url } = await start({ keylessDaily: 3 })
+  const text = await post(url, '/v1/scrape', { url: `${origin}/notes.txt` })
+  const sheet = await post(url, '/v1/scrape', { url: `${origin}/sheet.xlsx` })
+  const read = await text.text()
+  const binary = await sheet.text()
+  expect(`${read}${binary}`).not.toContain(root!)
+  const textBody = JSON.parse(read) as { status: string; markdown: string; agentHints: string[]; file: { path: string | null; sha256: string }; evidenceRecord: { rawSha256: string; artifacts: unknown[] } }
+  expect(textBody).toMatchObject({ status: 'success', markdown: 'tide ledger, read as text', file: { path: null }, evidenceRecord: { artifacts: [] } })
+  // The bytes stay traceable by their hash, the one thing the record needs of them here.
+  expect(textBody.file.sha256).toMatch(/^[0-9a-f]{64}$/)
+  expect(textBody.evidenceRecord.rawSha256).toBe(textBody.file.sha256)
+  expect(textBody.agentHints).toEqual(['the response was a text file; markdown is its text as received'])
+  const sheetBody = JSON.parse(binary) as { status: string; markdown: string | null; agentHints: string[] }
+  expect(sheetBody).toMatchObject({ status: 'success', markdown: null })
+  expect(sheetBody.agentHints).toEqual(['the response was a xlsx file; it has no markdown, and hosted Octocrawl keeps no files; on your computer Octocrawl saves it as received: npx octocrawl scrape <url>'])
+  // A warning about the bytes says what happened to them here.
+  const broken = await (await post(url, '/v1/scrape', { url: `${origin}/broken.txt` })).json() as { file: { warnings: { code: string; message: string }[] } }
+  expect(broken.file.warnings).toEqual([{ code: 'text_not_decoded', message: expect.stringMatching(/the bytes were not saved\.$/) }])
+  expect(await readdir(join(root!, 'files')).catch(() => [])).toEqual([])
+  // A job's pages are read by the worker's engine, which keeps none either.
+  expect(jobEngineOptions(root!).noFileStore).toBe(true)
+})
 
 it('serves scrape and map only, and refuses the rest by name with a hint to run locally', async () => {
   const { url, server } = await start()
@@ -1333,17 +1367,17 @@ it('a body that is not JSON is 400, and a flood of made-up keys is limited per a
   expect(limited).toBeGreaterThan(0)
 })
 
-it('sweeps scrape and map records and saved files older than the TTL from the task root', async () => {
+it('sweeps scrape and map records older than the TTL from the task root', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'octocrawl-sweep-'))
-  for (const sub of ['files', 'scrapes', 'maps']) {
+  for (const sub of ['scrapes', 'maps']) {
     await mkdir(join(dir, sub), { recursive: true })
     await writeFile(join(dir, sub, 'old'), 'x')
     await writeFile(join(dir, sub, 'new'), 'x')
     const past = new Date(Date.now() - 20 * 60_000)
     await utimes(join(dir, sub, 'old'), past, past)
   }
-  expect(await sweepTaskRoot(dir, 10 * 60_000)).toBe(3)
-  for (const sub of ['files', 'scrapes', 'maps']) expect(await readdir(join(dir, sub))).toEqual(['new'])
+  expect(await sweepTaskRoot(dir, 10 * 60_000)).toBe(2)
+  for (const sub of ['scrapes', 'maps']) expect(await readdir(join(dir, sub))).toEqual(['new'])
   await rm(dir, { recursive: true, force: true })
 })
 

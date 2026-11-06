@@ -85,7 +85,7 @@ export interface FileDescription {
   sha256: string | null
   /**
    * Where the bytes were saved, as received: `<task root>/files/<sha256>.<ext>`.
-   * Null when they were not saved (over the cap, or no file store is configured).
+   * Null when they were not saved (over the cap, or no file store is configured, as on hosted Octocrawl).
    */
   path: string | null
   /**

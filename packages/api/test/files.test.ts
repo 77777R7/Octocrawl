@@ -122,6 +122,29 @@ describe('file download on scrape', () => {
     expect(valid(csv.evidenceRecord)).toMatchObject({ extractor: { name: 'file-text', version: FILE_TEXT_VERSION }, artifacts: [fileArtifact(CSV, 'text/csv', 'csv')] })
   })
 
+  it('keeps a file on a self-hosted hosted server, and saves none with noFileStore, the record valid either way', async () => {
+    const read = async (options: { noFileStore?: boolean }) => {
+      const taskRoot = await mkdtemp(join(tmpdir(), 'w2l-api-files-store-'))
+      const own = createApiEngine({ taskRoot, networkPolicy: policy, hosted: true, ...options })
+      try {
+        const res = await createApp(own).request('/v1/scrape', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: `${origin}/data.csv` }) })
+        return { taskRoot, body: await res.json() as Body & { agentHints: string[] }, saved: await readFile(join(taskRoot, 'files', `${sha(CSV)}.csv`), 'utf8').catch(() => null) }
+      } finally {
+        await own.close()
+        await rm(taskRoot, { recursive: true, force: true })
+      }
+    }
+    const selfHosted = await read({})
+    expect(selfHosted.saved).toBe(CSV)
+    expect(selfHosted.body.file!.path).toBe(join(selfHosted.taskRoot, 'files', `${sha(CSV)}.csv`))
+    expect(selfHosted.body.agentHints).toEqual([`the response was a csv file kept at ${selfHosted.body.file!.path}; markdown is its text as received`])
+    const ours = await read({ noFileStore: true })
+    expect(ours.saved).toBeNull()
+    expect(ours.body).toMatchObject({ status: 'success', markdown: CSV, file: { path: null, sha256: sha(CSV) } })
+    expect(valid(ours.body.evidenceRecord).artifacts).toEqual([])
+    expect(ours.body.agentHints).toEqual(['the response was a csv file; markdown is its text as received'])
+  })
+
   it('returns a page served as text/markdown as it was sent, not read as HTML', async () => {
     const guide = await scrape({ url: `${origin}/guide.md` })
     expect(guide).toMatchObject({ status: 'success', markdown: GUIDE, file: { kind: 'text' }, channelsTried: ['http'] })

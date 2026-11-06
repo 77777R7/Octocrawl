@@ -83,7 +83,7 @@ const MONITORS = 'Monitors run on a server on the person\'s computer; stage H it
 const DELIVERY = 'Webhook destinations for Monitors and jobs are a local server\'s; stage H item 4 brings them to hosted. A hosted job\'s end can already be posted over REST (POST /v1/crawl, POST /v1/batches).'
 const SCREENSHOT = `A connection with the browser lane only, at ${CREDITS.browserPage} credits a page; an account with fewer credits reads over HTTP alone, where a screenshot is refused.`
 const REGEX = 'Every check type, markdownMatches and markdownCountMin included: pattern checks run with the same time limits on every server (ADR 0006, amendment of 2026-10-29). Hosted takes those two behind its operator\'s switch, W2L_HOSTED_REGEX_CHECKS=1, on api.octocrawl.dev and the job worker since 2026-10-31; an instance whose start-up self-test failed refuses them by name.'
-const FILE_CAP = `At most ${mib(HOSTED_MAX_FILE_BYTES)} (local ${mib(MAX_FILE_BYTES_CEILING)}).`
+const FILE_CAP = `At most ${mib(HOSTED_MAX_FILE_BYTES)} (local ${mib(MAX_FILE_BYTES_CEILING)}). A file is read and hashed, and not saved: \`file.path\` is \`null\`.`
 const WAIT_FOR = `A connection with the browser lane only, at ${CREDITS.browserPage} credits a page; one without does not list it, and one that sends it anyway, or an account with fewer credits, is refused: a page is never read without the wait.`
 const WEBHOOK = 'REST takes it for the job\'s end (https, no headers or secretEnv), signed with a secret the start returns; the MCP tool refuses it so the secret stays out of the transcript.'
 

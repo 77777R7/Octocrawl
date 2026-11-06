@@ -88,10 +88,16 @@ export function offPageHint(result: Pick<HintedResult, 'requestedUrl' | 'evidenc
   return `${hostOf(result)} answered ${result.evidence.finalUrl} in place of ${result.requestedUrl}, and the content is that page's, not the requested page's; check that the link is still live (the site may have moved or removed the page, or sent an automated request to its home page), and scrape ${result.evidence.finalUrl} on purpose only when it is the page you want`
 }
 
-/** The hint a file result carries: what its markdown is. */
-export function fileHint(file: NonNullable<FetchResult['file']>): string {
-  const kept = file.path === null ? 'not saved' : `kept at ${file.path}`
+/** What hosted Octocrawl says of a file it gave no text for: it keeps none, so the file is had on the person's own computer. */
+export function hostedFileNotKeptHint(kind: string): string {
+  return `the response was a ${kind} file; it has no markdown, and hosted Octocrawl keeps no files; on your computer Octocrawl saves it as received: npx octocrawl scrape <url>`
+}
+
+/** The hint a file result carries: what its markdown is, and on a server that keeps files, where the file is. */
+export function fileHint(file: NonNullable<FetchResult['file']>, noFiles = false): string {
   const markdown = file.markdownFrom === 'pdf_text' ? 'markdown is its text layer' : file.markdownFrom === 'text' ? 'markdown is its text as received' : 'it has no markdown'
+  if (noFiles) return file.markdownFrom === null && file.bytes !== 0 ? hostedFileNotKeptHint(file.kind) : `the response was a ${file.kind} file; ${markdown}`
+  const kept = file.path === null ? 'not saved' : `kept at ${file.path}`
   return `the response was a ${file.kind} file ${kept}; ${markdown}`
 }
 
@@ -132,6 +138,8 @@ export interface HintOffers {
   installedChrome?: boolean
   /** True on hosted Octocrawl: the hints above the lanes name the routes a server on the person's computer has. */
   hosted?: boolean
+  /** True on hosted Octocrawl's own service, which saves no file; a self-hosted hosted server keeps its files. */
+  noFiles?: boolean
 }
 
 /** A fastMode the scrape's caller pinned, not the person asking (the hosted gate, for a caller without the browser lane). */
@@ -347,7 +355,7 @@ export function agentHintsFor(req: Pick<ScrapeRequest, 'fastMode' | 'waitFor'>, 
     else if (status === 404) hints.push('the server answered 404; check the link')
   }
   hints.push(...jsonHints(result, hosted))
-  if (result.file !== undefined) hints.push(fileHint(result.file))
+  if (result.file !== undefined) hints.push(fileHint(result.file, offers.noFiles === true))
   return hints.slice(0, MAX_AGENT_HINTS)
 }
 

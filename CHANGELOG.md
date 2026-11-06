@@ -31,6 +31,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **Hosted Octocrawl no longer names a path on its own server for a file.** A hosted read of a PDF, CSV or text file said it was `kept at /tmp/octocrawl-hosted/files/…`, in `agentHints`, `file.path` and the `artifacts` of `snapshot` and the Evidence Record, a place no client could read and that was swept after ten minutes. Hosted now saves no files: `file.path` is `null`, `artifacts` is empty, `file.sha256` still identifies the bytes, and a file with no Markdown names `npx octocrawl scrape <url>`, which saves it on your computer. A self-hosted `serve --hosted` server keeps its files as before.
+
 ## 0.8.6 — 2026-11-07
 
 The published packages at 0.8.6. **A batch reads a page again when the site pushed back on it:** a 429 or 503, a move up to the home page or a failed contract gets one more read after the host's wait, and only the last read is charged. It is on by default, so a batch a site limits takes longer; `retry: { softBlocks: 0 }` turns it off. A batch also counts and names the pages that are not what was asked for (`notServed`) and says its rate and how long it should take, the Evidence Record says what a saved login put into the browser, and a hosted job's day counts only the pages it read.

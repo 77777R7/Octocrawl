@@ -556,6 +556,11 @@ export interface ApiEngineOptions {
    * no model. A self-hosted `serve --hosted` leaves it unset and keeps calling its own configured model.
    */
   requireModelGate?: boolean
+  /**
+   * Hosted Octocrawl's own service (hostedApi.ts): a file is read and hashed, and not saved, since no route hands one back
+   * and an instance's disk is its memory. A self-hosted `serve --hosted` leaves it unset and keeps files on its own disk.
+   */
+  noFileStore?: boolean
   perHostConcurrency?: number
   perHostMinDelayMs?: number
   crawlDelayMsByHost?: ReadonlyMap<string, number>
@@ -776,6 +781,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
   const hintOffers = (mode: Task['mode'], url: string, page: FetchOptions): HintOffers => ({
     // A hosted server's hints name the routes a server on the person's computer has (logins, handoff, actions), never its own.
     ...(options.hosted === true ? { hosted: true } : {}),
+    ...(options.noFileStore === true ? { noFiles: true } : {}),
     ...(userChrome !== null && !installedChrome && options.browserAllowedHosts === undefined && mode === 'standard'
       && (options.channelPolicy?.(url) ?? 'ladder') === 'ladder' && installedChromeRefusal(page) === null
       ? { installedChrome: true } : {}),
@@ -842,7 +848,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
     return exit === null ? result : { ...result, trace: [...result.trace, { at: 0, lane: result.lane, event: 'egress_exit', detail: { proxy: egress.id, ...exit } }] }
   }
   // Files (PDF, CSV, ...) are saved as received under the task root: files/<sha256>.<ext>.
-  const fileStore = new FileStore(join(taskRoot, 'files'))
+  const fileStore = options.noFileStore === true ? null : new FileStore(join(taskRoot, 'files'))
   // Successful page results stored for reuse (`maxAge`, `storeInCache`, `lockdown`): <taskRoot>/page-cache.sqlite.
   const pageCache = PageCache.open(taskRoot)
   /**
