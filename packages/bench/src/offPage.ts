@@ -8,7 +8,11 @@
  * reads as `not_served`: the content is real, and it is another page's. A
  * redirect that keeps the page (http to https, www and apex, a trailing slash,
  * index.html, a new slug beside the old one, a deeper default page) is not off
- * the page; the redirect chain records it as before.
+ * the page; the redirect chain records it as before. A script that loads a
+ * page as deep as the one asked for, with no path segment in common, is off
+ * the page too: the site's server answered the URL, then its own page left it
+ * (39 of 60 exhibitor pages of the same site on 2026-11-06, each sent to the
+ * list). A server redirect of that shape stays a moved page.
  */
 
 import type { FetchResult, FetchWarning } from '@w2l/contracts'
@@ -42,21 +46,23 @@ function foldedPath(url: string): string | null {
  * `/home`; `/en/exhibitor/x` to `/de`, a home in another language). The host, the scheme and the query do not count: a
  * redirect may change them and keep the page. False when the requested path is the root itself (`/`, `/en/`, `/home`),
  * when the two fold to the same path, and when the final path is as deep or deeper (a renamed slug, a default sub-page).
+ * `byScript`: the page's own script loaded the final document, so a path as deep with no segment in common counts as well.
  */
-export function redirectedOffPage(requestedUrl: string, finalUrl: string): boolean {
+export function redirectedOffPage(requestedUrl: string, finalUrl: string, byScript = false): boolean {
   const requested = foldedPath(requestedUrl)
   const final = foldedPath(finalUrl)
   if (requested === null || final === null || requested === '/' || requested === final) return false
   if (final === '/' || requested.startsWith(`${final}/`)) return true
   const requestedSegments = requested.split('/').filter((segment) => segment.length > 0)
   const finalSegments = final.split('/').filter((segment) => segment.length > 0)
-  return finalSegments.length < requestedSegments.length && !finalSegments.some((segment) => requestedSegments.includes(segment))
+  const limit = requestedSegments.length + (byScript ? 1 : 0)
+  return finalSegments.length < limit && !finalSegments.some((segment) => requestedSegments.includes(segment))
 }
 
 /** The caveat a result delivered in place of the page asked for carries; null when the final URL keeps the page. */
-export function offPageWarning(requestedUrl: string, finalUrl: string): FetchWarning | null {
-  if (!redirectedOffPage(requestedUrl, finalUrl)) return null
-  const where = foldedPath(finalUrl) === '/' ? 'its home page' : 'a page above the one asked for'
+export function offPageWarning(requestedUrl: string, finalUrl: string, byScript = false): FetchWarning | null {
+  if (!redirectedOffPage(requestedUrl, finalUrl, byScript)) return null
+  const where = foldedPath(finalUrl) === '/' ? 'its home page' : redirectedOffPage(requestedUrl, finalUrl) ? 'a page above the one asked for' : 'another page, by a script of its own'
   return { code: REDIRECTED_OFF_PAGE, message: `The site sent the request for ${requestedUrl} on to ${finalUrl}, ${where}: the content is that page's, not the requested page's.` }
 }
 
@@ -68,6 +74,7 @@ export function offPageWarning(requestedUrl: string, finalUrl: string): FetchWar
 export function withOffPageWarning<T extends FetchResult>(result: T): T {
   if (result.status !== 'success' && result.status !== 'partial') return result
   if (result.actions !== undefined || result.warnings?.some((warning) => warning.code === REDIRECTED_OFF_PAGE) === true) return result
-  const warning = offPageWarning(result.requestedUrl, result.evidence.finalUrl)
+  // More than one document in the main frame: a script or a meta refresh loaded the last one (a server's redirect commits one).
+  const warning = offPageWarning(result.requestedUrl, result.evidence.finalUrl, (result.evidence.document?.generation ?? 1) > 1)
   return warning === null ? result : { ...result, warnings: [...(result.warnings ?? []), warning] }
 }

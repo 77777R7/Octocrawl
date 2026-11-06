@@ -622,6 +622,8 @@ export interface BatchStartRequest extends PageOptions, RequestAttribution {
    * runs under the same cap.
    */
   maxConcurrency?: number
+  /** How a page the site pushed back on is read again ({@link BatchRetry}). Omitted takes the default. */
+  retry?: BatchRetry
   /**
    * Start the batch with the entries of `urls` that are http(s) URLs and
    * report the rest as `invalidURLs` instead of refusing the request. A
@@ -750,6 +752,21 @@ export interface BatchStatusResponse extends CrawlReport {
   waitingForPerson?: number
   /** A batch on the my-browser lane waiting for the person to allow its sites in the page Octocrawl opened in their Chrome; present only while it waits. */
   waitingForApproval?: true
+}
+
+/** The most times `retry.softBlocks` may ask a page to be read again. */
+export const BATCH_MAX_SOFT_BLOCK_RETRIES = 3
+/** Times a page is read again when a batch does not say. */
+export const BATCH_DEFAULT_SOFT_BLOCK_RETRIES = 1
+
+/**
+ * A batch reads a page again, after the site's cooldown, when the site pushed back on it: a 429 or 503, another page in
+ * its place (`redirected_off_page`), a failed task contract. `softBlocks`: how many times, 0 to 3; 0 turns it off. Only the
+ * last read is kept and charged; each one before it stays on the page's trace (`soft_block_retry`). A timeout or a
+ * challenge page is not read again: on the 2026-11-06 Amedcon rerun, a second read 2 to 7 minutes later got 0 of 13.
+ */
+export interface BatchRetry {
+  softBlocks: number
 }
 
 /** A slowed host's pace on a batch status (`pacing`). */
@@ -1124,7 +1141,7 @@ export const CRAWL_SCOPE_KEYS = ['regexOnFullURL', 'ignoreQueryParameters', 'ded
 export const CRAWL_KEYS = ['url', 'mode', 'access', 'maxPages', 'maxDepth', 'useCached', 'allowlistedDomains', 'formats', 'includeLinks', 'includePaths', 'excludePaths', ...CRAWL_SCOPE_KEYS, 'sitemap', 'maxConcurrency', 'idempotencyKey', 'maxCredits', 'webhook', 'ignoreRobotsTxt', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** Firecrawl's extract scope flags a batch takes in their no-op form (`false`), each with the crawl option that does what `true` would ask for. */
 const BATCH_SCOPE_NOOP_KEYS = { allowExternalLinks: 'allowExternalLinks', includeSubdomains: 'allowSubdomains' } as const
-export const BATCH_KEYS = ['urls', 'mode', 'lane', 'access', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'maxCredits', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
+export const BATCH_KEYS = ['urls', 'mode', 'lane', 'access', 'formats', 'includeLinks', 'robotsOverrides', 'maxConcurrency', 'retry', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'maxCredits', 'appendToId', 'webhook', 'actions', ...PAGE_KEYS, ...ATTRIBUTION_KEYS] as const
 /** What a batch body may carry beside `appendToId`: the job's own options are not among them (the scope no-ops change nothing, so they may come along). */
 export const BATCH_APPEND_KEYS = ['urls', 'appendToId', 'ignoreInvalidURLs', 'allowExternalLinks', 'includeSubdomains', 'idempotencyKey', 'robotsOverrides', ...ATTRIBUTION_KEYS] as const
 const ROBOTS_OVERRIDE_KEYS = ['reason', 'recordedBy'] as const
@@ -1336,6 +1353,17 @@ function readMaxConcurrency(value: unknown, name: string): number | undefined {
   if (value === undefined) return undefined
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new RequestError(`${name} must be an integer >= 1`)
   return value
+}
+
+/** A batch's `retry`: `softBlocks`, an integer from 0 to BATCH_MAX_SOFT_BLOCK_RETRIES. */
+function readBatchRetry(value: unknown): BatchRetry | undefined {
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RequestError('retry must be an object')
+  const rec = value as Record<string, unknown>
+  rejectUnknownKeys(rec, ['softBlocks'])
+  const { softBlocks } = rec
+  if (typeof softBlocks !== 'number' || !Number.isInteger(softBlocks) || softBlocks < 0 || softBlocks > BATCH_MAX_SOFT_BLOCK_RETRIES) throw new RequestError(`retry.softBlocks must be an integer from 0 to ${BATCH_MAX_SOFT_BLOCK_RETRIES}`)
+  return { softBlocks }
 }
 
 function readMode(value: unknown): ApiCrawlMode | undefined {
@@ -2347,6 +2375,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
   if (rec.includeLinks !== undefined && typeof rec.includeLinks !== 'boolean') throw new RequestError('includeLinks must be a boolean')
   const robotsOverrides = readRobotsOverrides(rec.robotsOverrides, urls)
   const maxConcurrency = readMaxConcurrency(rec.maxConcurrency, 'maxConcurrency')
+  const retry = readBatchRetry(rec.retry)
   const allowExternalLinks = readBatchScopeNoOp(rec.allowExternalLinks, 'allowExternalLinks')
   const includeSubdomains = readBatchScopeNoOp(rec.includeSubdomains, 'includeSubdomains')
   const webhook = readWebhook(rec.webhook)
@@ -2362,6 +2391,7 @@ export function parseBatchStartRequest(body: unknown): ParsedBatchStartRequest {
     ...page,
     ...(robotsOverrides === undefined ? {} : { robotsOverrides }),
     ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
+    ...(retry === undefined ? {} : { retry }),
     ...(ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs }),
     ...(ignoreInvalidURLs === true ? { invalidURLs } : {}),
     ...(allowExternalLinks === undefined ? {} : { allowExternalLinks }),

@@ -363,7 +363,7 @@ describe('Frontier adaptive pacing: a host that answers with soft blocks is slow
     frontier.release(`${SEED}b`)
     expect(frontier.dequeue(t0 + 4_299).item).toBeNull()
     expect(frontier.dequeue(t0 + 4_300).item?.canonicalUrl).toBe(`${SEED}c`)
-    expect(frontier.pacing()[HOST]).toEqual({ lastStartedAtMs: t0 + 4_300, crawlDelayMs: null, cooldownUntilMs: t0 + 2_300, adaptive: { ceiling: 1, delayMs: 2_000, signals: 0, okStreak: 0, slowdowns: 1 } })
+    expect(frontier.pacing()[HOST]).toEqual({ lastStartedAtMs: t0 + 4_300, crawlDelayMs: null, cooldownUntilMs: t0 + 2_300, adaptive: { ceiling: 1, delayMs: 2_000, signals: 0, okStreak: 0, slowdowns: 1, cause: 'rate_limited' } })
   })
 
   it('doubles the wait on each further slowdown up to 120 s, and every ten normal pages halve it until the baseline, where the ceiling comes back', () => {

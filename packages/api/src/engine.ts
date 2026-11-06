@@ -1283,6 +1283,8 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         redirectedOffPage: await store.countStepsWarned(taskId, 'redirected_off_page'),
         // And every page read that is not what was asked for, those among them.
         notServed: (await notServedSteps(store, taskId)).length,
+        // The pages read again after a soft block, however the last read went.
+        retried: (await store.listStepIdsWithTraceEvent(taskId, 'soft_block_retry')).length,
         // With a task contract: how many of those passed it and how many did not (ADR 0006).
         ...(task.batch.verify === undefined ? {} : await store.countVerifications(taskId)),
         // The cap in force: the batch's own, never above this service's worker count.
@@ -1814,7 +1816,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         const custom = customJsonFormat(formats)
         const cachePlan = cachePlanFor(url, mode, selection, selection.formats, lane.rungs.channels, recordedOverrideFor?.(url), robotsOverrideFor?.(url) !== undefined)
         // A page fetched with the session's cookies neither reuses an anonymous one nor is stored; a lockdown request fetches nothing, so its cache-only answer stands.
-        const plan = myBrowser !== null ? null : lane.cookieSession === undefined || cachePlan?.lockdown === true ? cachePlan : null
+        const plan = myBrowser !== null || (context?.fresh === true && cachePlan?.lockdown !== true) ? null : lane.cookieSession === undefined || cachePlan?.lockdown === true ? cachePlan : null
         const answer = consultCache(plan, url, { mode, ...(req.policyAllowlist.length ? { allowlistedDomains: req.policyAllowlist } : {}) })
         // JSON extraction, its model fallback included, runs within the page's deadline too.
         const { outcome, json } = await (async () => {
@@ -2381,6 +2383,7 @@ export function createApiEngine(options: ApiEngineOptions = {}): ApiEngine {
         urls, formats: req.formats ?? ['markdown'], includeLinks: req.includeLinks === true, ...pageOptions(req),
         ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }),
         ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }),
+        ...(req.retry === undefined ? {} : { retry: req.retry }),
         ...(invalidURLs === undefined ? {} : { invalidURLs }),
         ...(webhookConfig === undefined ? {} : { webhook: jobWebhooks.register(taskId, webhookConfig, req.webhookPayloadFormat) }),
         ...(req.lane === undefined ? {} : { lane: req.lane }),
@@ -3091,17 +3094,19 @@ export interface SliceResult {
  * RFC 9309, but not one the site wrote). `modelCalled`: the page's json model fallback called the model (its json's
  * `modelUsage` names an attempt).
  */
-export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null; robots: 'disallowed' | 'unreachable' | null; modelCalled: boolean; redirectedOffPage?: boolean; notServed?: boolean }
+export interface SliceCharge { status: string; lane: string | null; failureReason: string | null; httpStatus: number | null; robots: 'disallowed' | 'unreachable' | null; modelCalled: boolean; redirectedOffPage?: boolean; notServed?: boolean; retried?: boolean }
 function sliceRobots(result: FetchResult | null): SliceCharge['robots'] {
   const refusal = result === null ? null : robotsRefusal(result)
   return refusal === null ? null : refusal.unreachable === null ? 'disallowed' : 'unreachable'
 }
 
 /** Of a page read, what the job's status counts beside `succeeded`: another page in its place, and a page that is not what was asked for. */
-function sliceServed(step: StepRecord): Pick<SliceCharge, 'redirectedOffPage' | 'notServed'> {
+function sliceServed(step: StepRecord): Pick<SliceCharge, 'redirectedOffPage' | 'notServed' | 'retried'> {
   const result = step.result
-  if (result === null || !READ_STATUSES.includes(step.status)) return {}
-  return { redirectedOffPage: result.warnings?.some((warning) => warning.code === 'redirected_off_page') === true, notServed: readinessOf(result).state === 'not_served' }
+  if (result === null) return {}
+  const retried = result.trace.some((event) => event.event === 'soft_block_retry')
+  if (!READ_STATUSES.includes(step.status)) return { retried }
+  return { redirectedOffPage: result.warnings?.some((warning) => warning.code === 'redirected_off_page') === true, notServed: readinessOf(result).state === 'not_served', retried }
 }
 
 /** A batch never discovers: its frontier takes the whole host and exact canonical URLs. */
@@ -3436,8 +3441,9 @@ function readOnlySessions(store: SessionStore): SessionStore {
 }
 
 /** The hosts a task slowed (HostPacing.adaptive), as a status reports them (`pacing`); nothing while every host runs at its baseline. */
-function slowedHosts(task: Task): { pacing?: Record<string, HostPace> } {
+function slowedHosts(task: Task): { pacing?: Record<string, HostPace>; settled?: Record<string, readonly string[]> } {
   const pacing: Record<string, HostPace> = {}
+  const settled = Object.fromEntries(Object.entries(task.pacing ?? {}).flatMap(([host, pace]) => pace.settled === undefined ? [] : [[host, pace.settled]]))
   const now = Date.now()
   for (const [host, pace] of Object.entries(task.pacing ?? {})) {
     if (pace.adaptive == null || pace.adaptive.slowdowns === 0) continue
@@ -3449,7 +3455,7 @@ function slowedHosts(task: Task): { pacing?: Record<string, HostPace> } {
       ...(cooldownUntilMs !== null && cooldownUntilMs > now ? { cooldownUntil: new Date(cooldownUntilMs).toISOString() } : {}),
     }
   }
-  return Object.keys(pacing).length === 0 ? {} : { pacing }
+  return { ...(Object.keys(pacing).length === 0 ? {} : { pacing }), ...(Object.keys(settled).length === 0 ? {} : { settled }) }
 }
 
 /** A page list under a `fields` projection (CrawlPageQuery.fields): each item keeps id, url, status, createdAt and the fields asked for; the list as it is without one. */

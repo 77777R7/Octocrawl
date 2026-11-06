@@ -285,6 +285,8 @@ export interface CrawlReport {
    * it could not serve). Absent where `redirectedOffPage` is.
    */
   notServed?: number
+  /** Among a batch's stored pages, those read more than once after a soft block (`retry`); absent where `notServed` is, and from a crawl. */
+  retried?: number
   /** Who started the task, as the request said (`origin`, `integration`); absent when it named neither. */
   attribution?: RequestAttribution
   /** The task's webhook and how its deliveries stand; absent when the request set none. */

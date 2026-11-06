@@ -599,7 +599,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 <!-- hosted-parity:start -->
 **Tools.** Of the local server's 39 MCP tools, hosted serves 17: 2 as locally and 15 limited. 21 are planned and 1 is different on purpose.
 
-**Options.** Of the 119 local options of scrape, map, crawl and batch_scrape, hosted lists 86: 74 as locally and 12 limited. 23 are planned and 10 different on purpose. Below the options, 7 option values that hosted leaves out or limits.
+**Options.** Of the 120 local options of scrape, map, crawl and batch_scrape, hosted lists 87: 75 as locally and 12 limited. 23 are planned and 10 different on purpose. Below the options, 7 option values that hosted leaves out or limits.
 
 **Planned, by stage H item** (tools, options and values): item 2, hosted access: 3; item 3, actions and waitFor: 2; item 4, monitors and delivery: 18; item 5, identity-bound features: 5; item 7, the json model fallback: 1; item 8, beyond local: 13; no item yet: 5.
 
@@ -759,6 +759,7 @@ The table is generated from the manifest, `packages/mcp/src/hostedParity.ts`. `p
 | `batch_scrape` `actions` | Planned: stage H item 3, actions and waitFor | Hosted takes no page actions yet; stage H item 3 brings them to keyed callers. Sent anyway: refused by name. |
 | `batch_scrape` `robotsOverrides` | Different on purpose | Hosted fetches from the operator's addresses and obeys robots.txt for every URL (ROADMAP Direction). Sent anyway: refused by name. |
 | `batch_scrape` `maxConcurrency` | Limited | At most 2, the pages a job's slice reads at once (local: up to the server's worker count, W2L_WORKER_COUNT, with no ceiling in the schema); the start lowers a larger value to 2, as a crawl's. Stage H item 6, limits and capacity raises it. |
+| `batch_scrape` `retry` | Supported |  |
 | `batch_scrape` `ignoreInvalidURLs` | Supported |  |
 | `batch_scrape` `allowExternalLinks` | Planned: no stage H item yet | Locally only false is taken, since a batch follows no link; hosted refuses the field by name. Sent anyway: refused by name. |
 | `batch_scrape` `includeSubdomains` | Planned: no stage H item yet | Locally only false is taken, since a batch follows no link; hosted refuses the field by name. Sent anyway: refused by name. |

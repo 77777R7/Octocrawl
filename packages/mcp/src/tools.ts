@@ -470,7 +470,7 @@ const DEFINITIONS = [
   },
   {
     name: 'batch_scrape',
-    description: 'Run 1-1000 known URLs as one persistent job. Returns { taskId } at once (with ignoreInvalidURLs also invalidURLs, the entries skipped); wait_batch waits for it, get_batch_items pages the results and get_batch_errors lists the failures and robots refusals. Each URL takes scrape\'s page options (formats, onlyMainContent, includeTags, waitFor, timeout, verify, actions and the rest; their descriptions are on scrape). appendToId adds the urls to an existing batch; idempotencyKey makes a retry safe. How long the server keeps the results is not stated.',
+    description: 'Run 1-1000 known URLs as one persistent job. Returns { taskId } at once; wait_batch waits for it, get_batch_items pages the results and get_batch_errors lists the failures and robots refusals. Each URL takes scrape\'s page options (formats, onlyMainContent, includeTags, waitFor, timeout, verify, actions and the rest; their descriptions are on scrape). appendToId adds the urls to an existing batch; idempotencyKey makes a retry safe. How long the server keeps the results is not stated.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -488,9 +488,10 @@ const DEFINITIONS = [
           items: { type: 'object', properties: { url: { type: 'string' }, ...ROBOTS_OVERRIDE_PROPERTIES }, required: ['url', 'reason'], additionalProperties: false },
         },
         maxConcurrency: { type: 'integer', minimum: 1, description: 'Pages in flight at once, at most.' },
+        retry: { type: 'object', description: 'softBlocks: extra reads after a 429, 503, other page or failed verify; default 1.', properties: { softBlocks: { type: 'integer', minimum: 0, maximum: 3 } } },
         ignoreInvalidURLs: { type: 'boolean', description: 'List non-URL entries as invalidURLs instead of refusing the batch.' },
-        allowExternalLinks: { type: 'boolean', const: false, description: 'false only: a batch follows no link.' },
-        includeSubdomains: { type: 'boolean', const: false, description: 'false only: a batch follows no link.' },
+        allowExternalLinks: { type: 'boolean', const: false, description: 'false only.' },
+        includeSubdomains: { type: 'boolean', const: false, description: 'false only.' },
         idempotencyKey: IDEMPOTENCY_KEY_PROPERTY,
         appendToId: { type: 'string', minLength: 1, maxLength: 200, description: 'Add urls to this existing batch instead; a completed batch runs again for them.' },
         webhook: WEBHOOK_PROPERTY,
@@ -792,7 +793,7 @@ async function dispatchTool(client: W2L, name: string, args: unknown, request: T
     const req = parseBatchStartRequest(withoutOrigin(args))
     // With ignoreInvalidURLs the server's list is authoritative: the entries go as the caller sent them, and the API reports the ones it skipped.
     const urls = req.ignoreInvalidURLs === true ? (args as { urls: readonly string[] }).urls : req.urls
-    return client.batchScrape(urls, { ...(req.actions === undefined ? {} : { actions: req.actions }), mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.maxCredits === undefined ? {} : { maxCredits: req.maxCredits }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...(req.lane === undefined ? {} : { lane: req.lane }), ...(req.access === undefined ? {} : { access: req.access }), ...(req.verify === undefined ? {} : { verify: req.verify }), ...integrationOf(req) }, request)
+    return client.batchScrape(urls, { ...(req.actions === undefined ? {} : { actions: req.actions }), mode: req.mode, formats: req.formats, includeLinks: req.includeLinks, onlyMainContent: req.onlyMainContent, waitFor: req.waitFor, timeout: req.timeout, maxFileBytes: req.maxFileBytes, includeTags: req.includeTags, excludeTags: req.excludeTags, ...executionOptions(req), ...cacheOptions(req), ...(req.robotsOverrides === undefined ? {} : { robotsOverrides: req.robotsOverrides }), ...(req.maxConcurrency === undefined ? {} : { maxConcurrency: req.maxConcurrency }), ...(req.retry === undefined ? {} : { retry: req.retry }), ...(req.ignoreInvalidURLs === undefined ? {} : { ignoreInvalidURLs: req.ignoreInvalidURLs }), ...(req.allowExternalLinks === undefined ? {} : { allowExternalLinks: req.allowExternalLinks }), ...(req.includeSubdomains === undefined ? {} : { includeSubdomains: req.includeSubdomains }), ...(req.idempotencyKey === undefined ? {} : { idempotencyKey: req.idempotencyKey }), ...(req.maxCredits === undefined ? {} : { maxCredits: req.maxCredits }), ...(req.appendToId === undefined ? {} : { appendToId: req.appendToId }), ...(req.webhook === undefined ? {} : { webhook: req.webhook }), ...(req.lane === undefined ? {} : { lane: req.lane }), ...(req.access === undefined ? {} : { access: req.access }), ...(req.verify === undefined ? {} : { verify: req.verify }), ...integrationOf(req) }, request)
   }
   if (name === 'get_batch_errors') {
     const rec = readRecord(args)

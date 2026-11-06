@@ -8,6 +8,8 @@ import type { VerifyContract } from './verify.js'
 export interface ExecutionContext {
   signal?: AbortSignal
   deadlineAt?: number
+  /** A page read again after a soft block: from the site, never from the cache, and not kept in it. */
+  fresh?: boolean
   /** Persist publisher cooldown immediately, before an interruptible inline wait. */
   onRetryAfter?: (url: string, retryAt: number) => void
   /**

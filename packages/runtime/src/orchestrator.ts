@@ -29,6 +29,8 @@
 
 import {
   CONTENTFUL_STATUS,
+  BATCH_DEFAULT_SOFT_BLOCK_RETRIES,
+  givenUpPaidCalls,
   DEFAULT_CRAWL_SPEC,
   EMPTY_CRAWL_DISCOVERY,
   paidCallsOfError,
@@ -58,8 +60,8 @@ import {
 } from '@w2l/contracts'
 import { abortableSleep, createExecutionScope, createSpendLedger, raceWithSignal, throwIfExecutionStopped } from '@w2l/http-core'
 import { paidCallExposureUsd, paidCallTotals, reportFromTaskAttempt } from './crawlReport.js'
-import { Frontier, type FrontierEnqueueResult, type FrontierItem, type FrontierOptions } from './frontier.js'
-import { softBlockSignal } from './pacing.js'
+import { Frontier, type FrontierEnqueueResult, type FrontierItem, type FrontierOptions, type SoftBlockRetry } from './frontier.js'
+import { MAX_SLOW_DELAY_MS, RETRIED_SIGNALS, softBlockSignal } from './pacing.js'
 import { canonicalizeUrl, hostOf } from './canonicalize.js'
 import type { TaskStore } from './taskStore.js'
 import { withRegexLedger, type RegexStats } from './regexCheck.js'
@@ -354,6 +356,29 @@ export class CrawlOrchestrator {
       }
       pollTimer = setTimeout(() => { void pollCancellation() }, 100)
 
+      const softBlockRetries = runningTask.batch === undefined ? 0 : runningTask.batch.retry?.softBlocks ?? BATCH_DEFAULT_SOFT_BLOCK_RETRIES
+      // The reads set aside and waiting to be read again, by canonical URL: the latest of each, and what its page has spent.
+      const heldReads = new Map<string, { item: FrontierItem; read: SoftBlockRetry; result: FetchResult; audit: import('@w2l/contracts').LadderRunAudit | undefined; ledger: SpendLedger | undefined; settledUsd: number; paidBefore: readonly TraceEvent[] }>()
+      // A read's charge: what its answer or attempts report, and no less than what its ledger settled, which holds every
+      // paid call the page made (a re-read's, a call that threw or was cut). An unknown cost no ceiling bounds stops a capped run.
+      const meterPage = (result: FetchResult, audit: import('@w2l/contracts').LadderRunAudit | undefined, pageLedger: SpendLedger | undefined, settledBefore: number): void => {
+        const tried = audit?.summary.attempts ?? [{ result }]
+        const reported = result.usage.externalCostChargedUsd ?? tried.reduce((sum, { result: attempt }) => sum + (attempt.usage.externalCostUsd ?? 0), 0)
+        chargedUsd += Math.max(reported, (pageLedger?.settledUsd ?? 0) - settledBefore)
+        unboundedCost ||= tried.some(({ result: attempt }) => attempt.usage.externalCostUsd === null && attempt.usage.externalCostChargedUsd === undefined)
+        const meter = audit?.summary
+        if (meter !== undefined) {
+          costUsd += meter.externalCost.knownSubtotal
+          costUnknown ||= meter.externalCost.unknown
+          contentTokens += meter.contentTokenMeter.knownSubtotal
+          contentTokensUnknown ||= meter.contentTokenMeter.unknown
+        } else {
+          costUsd += result.usage.externalCostUsd ?? 0
+          costUnknown ||= result.usage.externalCostUsd === null
+          contentTokens += result.usage.contentTokens ?? 0
+          contentTokensUnknown ||= result.usage.contentTokens === null
+        }
+      }
       const work = async (): Promise<void> => {
         for (;;) {
           const now = this.clock.now()
@@ -404,9 +429,11 @@ export class CrawlOrchestrator {
               // A batch with a paginate step keeps each page the step reads in the checkpoint (ROADMAP PA item 3): a run cut
               // at page N resumes from them. The whole URL is still the step; the pages are its progress until it is stored.
               const pagesRead = listsPages(runningTask) ? await this.store.listPagesRead(runningTask.id, item.canonicalUrl) : []
-              pageLedger = spend?.child(spec.budget.maxCostPerPageUsd ?? null)
+              // A page's cap holds over its reads: a read again goes on the ledger of the read it follows.
+              pageLedger = heldReads.get(item.canonicalUrl)?.ledger ?? spend?.child(spec.budget.maxCostPerPageUsd ?? null)
               const pageSpend = { paidCalls, ...(pageLedger === undefined ? {} : { spend: pageLedger }) }
-              const pageScope = !listsPages(runningTask) ? { ...scope, ...pageSpend } : {
+              const pageFresh = item.retries === undefined ? {} : { fresh: true }
+              const pageScope = !listsPages(runningTask) ? { ...scope, ...pageSpend, ...pageFresh } : {
                 ...scope,
                 ...pageSpend,
                 onListPage: (page: ListPageRead) => { void this.store.putPageRead(runningTask.id, item.canonicalUrl, page).catch(() => {}) },
@@ -428,7 +455,7 @@ export class CrawlOrchestrator {
                 if (paid !== null && namesRent(paid)) outcome = { ...outcome, result: { ...outcome.result, usage: { ...outcome.result.usage, externalCostUsd: null } } }
                 // Every paid call of this page reserved through its ledger before it was made: what that ledger settled is the
                 // page's whole paid spend, though the scrape threw before reporting a cost.
-                if (pageLedger !== undefined) outcome = { ...outcome, result: { ...outcome.result, usage: { ...outcome.result.usage, externalCostChargedUsd: pageLedger.settledUsd } } }
+                if (pageLedger !== undefined) outcome = { ...outcome, result: { ...outcome.result, usage: { ...outcome.result.usage, externalCostChargedUsd: pageLedger.settledUsd - (heldReads.get(item.canonicalUrl)?.settledUsd ?? 0) } } }
               }
               result = outcome.result; links = outcome.links.length > 0 ? outcome.links : linksOf(outcome.result); audit = outcome.audit
               if (outcome.cached === true) {
@@ -445,7 +472,8 @@ export class CrawlOrchestrator {
             // longer wait), normal pages ease it back. The change goes on the page's record and, at once, on the task's pace
             // alone (never over its status or URL list, which a cancel or an append may be writing), so a status read or the
             // job's next slice sees the pace in force.
-            const paceChange = cachedPage ? null : frontier.noteResult(item.host, softBlockSignal(result), this.clock.now())
+            const signal = cachedPage ? null : softBlockSignal(result)
+            const paceChange = cachedPage ? null : frontier.noteResult(item.host, signal, this.clock.now(), signal !== null && item.retries?.at(-1)?.signal === signal)
             if (paceChange !== null) {
               result = { ...result, trace: [...result.trace, { at: result.usage.wallMs, lane: result.lane, event: 'pacing_adjusted', detail: { ...paceChange } }] }
               if (this.store.putTaskPacing !== undefined) await this.store.putTaskPacing(runningTask.id, frontier.pacing(), new Date(this.clock.now()).toISOString())
@@ -457,6 +485,23 @@ export class CrawlOrchestrator {
             }
             if (spec.budget.maxWallMs !== null && this.clock.now() - startedAtMs >= spec.budget.maxWallMs) markTimeBudget()
             throwIfExecutionStopped(scope)
+            // A batch page the site pushed back on goes back for another read, after the host's wait. Nothing is stored for
+            // the read set aside, so the page stays one step and one charge; what it spent counts all the same, and it is
+            // kept, to be the page's answer if the run stops first. A run drained here reads the URL again. Steps that
+            // ran on the page are not run twice, and a Retry-After past the longest wait is not sat out.
+            const earlier = heldReads.get(item.canonicalUrl)
+            const retryAt = result.retryAt
+            if (signal !== null && RETRIED_SIGNALS.has(signal) && (item.retries?.length ?? 0) < softBlockRetries && !frontier.settled(item.host, signal) && !listsPages(runningTask) && runningTask.batch?.actions === undefined && (retryAt === undefined || retryAt - this.clock.now() <= MAX_SLOW_DELAY_MS)) {
+              meterPage(result, audit, pageLedger, earlier?.settledUsd ?? 0)
+              inFlight = false
+              pagesInFlight--
+              const read: SoftBlockRetry = { signal, status: result.status, httpStatus: result.evidence.httpStatus, finalUrl: result.evidence.finalUrl, ...(paceChange === null ? {} : { paced: paceChange }) }
+              heldReads.set(item.canonicalUrl, { item, read, result, audit, ledger: pageLedger, settledUsd: pageLedger?.settledUsd ?? 0, paidBefore: [...(earlier?.paidBefore ?? []), ...earlierPaid(earlier)] })
+              frontier.retry(item, read, this.clock.now(), retryAt)
+              continue
+            }
+            heldReads.delete(item.canonicalUrl)
+            result = withEarlierReads(result, item.retries, [...(earlier?.paidBefore ?? []), ...earlierPaid(earlier)])
             const hash = result.evidence.rawBodySha256
             if (task?.batch === undefined && hash !== null && CONTENTFUL_STATUS.has(result.status)) {
               const prior = seenHash.get(hash)
@@ -491,27 +536,7 @@ export class CrawlOrchestrator {
             taskUrls.add(item.canonicalUrl)
             if (reserved) { newPagesReserved--; reserved = false }
             if (cachedPage) cachedPages += 1; else pagesFetched += 1
-            if (!cachedPage) {
-              // The page's charge: what its answer or attempts report, and no less than what its ledger settled, which holds
-              // every paid call the page made (a re-read's, a call that threw or was cut). An unknown cost no ceiling bounds
-              // stops a capped run.
-              const tried = audit?.summary.attempts ?? [{ result }]
-              const reported = result.usage.externalCostChargedUsd ?? tried.reduce((sum, { result: attempt }) => sum + (attempt.usage.externalCostUsd ?? 0), 0)
-              chargedUsd += Math.max(reported, pageLedger?.settledUsd ?? 0)
-              unboundedCost ||= tried.some(({ result: attempt }) => attempt.usage.externalCostUsd === null && attempt.usage.externalCostChargedUsd === undefined)
-              const meter = audit?.summary
-              if (meter !== undefined) {
-                costUsd += meter.externalCost.knownSubtotal
-                costUnknown ||= meter.externalCost.unknown
-                contentTokens += meter.contentTokenMeter.knownSubtotal
-                contentTokensUnknown ||= meter.contentTokenMeter.unknown
-              } else {
-                costUsd += result.usage.externalCostUsd ?? 0
-                costUnknown ||= result.usage.externalCostUsd === null
-                contentTokens += result.usage.contentTokens ?? 0
-                contentTokensUnknown ||= result.usage.contentTokens === null
-              }
-            }
+            if (!cachedPage) meterPage(result, audit, pageLedger, earlier?.settledUsd ?? 0)
             // A status read while the crawl runs sees its progress.
             await this.store.putAttempt({ ...runningAttempt, ...meters() })
             if (this.onStep !== undefined) await this.onStep(step)
@@ -536,6 +561,19 @@ export class CrawlOrchestrator {
       const settled = await Promise.allSettled(workers)
       const firstFailure = settled.find((entry): entry is PromiseRejectedResult => entry.status === 'rejected')
       if (firstFailure !== undefined) throw firstFailure.reason
+      // A run that stopped with reads waiting (a budget) ends without reading them again: the read in hand is the page's
+      // answer, its charge already counted. A drained run leaves them, for the next to read.
+      if (this.drainSignal?.aborted !== true && this.shutdownSignal?.aborted !== true) {
+        for (const { item, result, audit, paidBefore } of heldReads.values()) {
+          const at = new Date(this.clock.now()).toISOString()
+          const kept = withEarlierReads(result, item.retries, paidBefore)
+          const step: StepRecord = { id: this.newId(), taskId: runningTask.id, attemptId: runningAttempt.id, url: item.url, canonicalUrl: item.canonicalUrl, depth: item.depth, status: stepStatusFromResult(kept.status), lane: kept.lane, contentHash: kept.evidence.rawBodySha256, cached: false, result: kept, audit, createdAt: at, updatedAt: at }
+          await this.store.putStep(step)
+          pagesFetched += 1
+          await this.store.putAttempt({ ...runningAttempt, ...meters() })
+          if (this.onStep !== undefined) await this.onStep(step)
+        }
+      }
     } catch (err) {
       if (!stopped()) failed = err
     } finally {
@@ -751,19 +789,34 @@ export class CrawlOrchestrator {
  * The frontier's pace options with a task's stored pace (Task.pacing) folded in: each host's last start, and the
  * strictest Crawl-delay of the server's and the task's.
  */
-function pacedFrom(serverDelays: ReadonlyMap<string, number> | undefined, pacing: Task['pacing']): Pick<FrontierOptions, 'crawlDelayMsByHost' | 'lastStartedAtMsByHost' | 'cooldownUntilMsByHost' | 'adaptiveByHost'> {
+function pacedFrom(serverDelays: ReadonlyMap<string, number> | undefined, pacing: Task['pacing']): Pick<FrontierOptions, 'crawlDelayMsByHost' | 'lastStartedAtMsByHost' | 'cooldownUntilMsByHost' | 'adaptiveByHost' | 'settledByHost'> {
   if (pacing === undefined) return {}
   const delays = new Map(serverDelays ?? [])
   const starts = new Map<string, number>()
   const cooldowns = new Map<string, number>()
   const adaptive = new Map<string, AdaptivePacing>()
+  const settled = new Map<string, readonly string[]>()
   for (const [host, pace] of Object.entries(pacing)) {
     if (pace.crawlDelayMs !== null) delays.set(host, Math.max(delays.get(host) ?? 0, pace.crawlDelayMs))
     if (pace.lastStartedAtMs !== null) starts.set(host, pace.lastStartedAtMs)
     if (typeof pace.cooldownUntilMs === 'number') cooldowns.set(host, pace.cooldownUntilMs)
     if (pace.adaptive != null && pace.adaptive.slowdowns > 0) adaptive.set(host, pace.adaptive)
+    if (pace.settled !== undefined) settled.set(host, pace.settled)
   }
-  return { crawlDelayMsByHost: delays, lastStartedAtMsByHost: starts, cooldownUntilMsByHost: cooldowns, adaptiveByHost: adaptive }
+  return { crawlDelayMsByHost: delays, lastStartedAtMsByHost: starts, cooldownUntilMsByHost: cooldowns, adaptiveByHost: adaptive, settledByHost: settled }
+}
+
+/** The result with the reads set aside before it on its trace, and what they did to the pace and paid for: the page's whole record. */
+function withEarlierReads(result: FetchResult, reads: readonly SoftBlockRetry[] | undefined, paid: readonly TraceEvent[]): FetchResult {
+  if (reads === undefined) return result
+  const lane = result.lane
+  const events = reads.flatMap(({ paced, ...read }, index) => [{ at: 0, lane, event: 'soft_block_retry', detail: { read: index + 1, ...read } }, ...(paced === undefined ? [] : [{ at: 0, lane, event: 'pacing_adjusted', detail: { ...paced } }])])
+  return { ...result, trace: [...events, ...paid, ...result.trace] }
+}
+
+/** The paid provider calls of the read set aside, if one was: none of them the page's answer, all of them on its record. */
+function earlierPaid(held: { result: FetchResult } | undefined): readonly TraceEvent[] {
+  return held === undefined ? [] : givenUpPaidCalls(held.result.trace)
 }
 
 /** Whether a result is a list step stopped at a check the site put up (ListStop `challenge`), its pages kept for a later run. */

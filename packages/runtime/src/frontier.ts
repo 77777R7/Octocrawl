@@ -44,7 +44,7 @@ import { DEFAULT_NETWORK_POLICY, type AdaptivePacing, type HostPacing } from '@w
 import { hostMatchesAllowlist } from '@w2l/http-core'
 import { canonicalizeUrl, hostOf, visitKey } from './canonicalize.js'
 import { compilePathFilter, type PathFilter } from './pathFilter.js'
-import { FIRST_SLOW_DELAY_MS, MAX_SLOW_DELAY_MS, OK_PAGES_TO_RECOVER, SIGNALS_TO_SLOW, type SoftBlockSignal } from './pacing.js'
+import { FIRST_SLOW_DELAY_MS, MAX_SLOW_DELAY_MS, OK_PAGES_TO_RECOVER, SETTLE_DELAY_MS, SETTLING_SIGNALS, SIGNALS_TO_SLOW, type SoftBlockSignal } from './pacing.js'
 
 export interface FrontierItem {
   url: string
@@ -55,6 +55,20 @@ export interface FrontierItem {
   via: 'seed' | 'link' | 'sitemap'
   /** The canonical URL of the page that linked it, when a link; the URL of the sitemap file that listed it, when a sitemap entry. */
   from?: string
+  /** The reads a soft block set aside, oldest first; absent on a first read. */
+  retries?: readonly SoftBlockRetry[]
+  /** Not before this time (epoch ms): the wait a read set aside leaves the page to. */
+  notBeforeMs?: number
+}
+
+/** A read of a batch page set aside after a soft block, as the page's trace keeps it (`soft_block_retry`). */
+export interface SoftBlockRetry {
+  signal: SoftBlockSignal
+  status: string
+  httpStatus: number | null
+  finalUrl: string
+  /** What the read did to its host's pace, if anything: the page's trace keeps it, as it would a page stored. */
+  paced?: PacingChange
 }
 
 export interface FrontierEnqueueResult {
@@ -79,7 +93,7 @@ export interface FrontierEnqueueResult {
 /** What a page's result did to its host's pace (Frontier.noteResult): the host was slowed, its wait halved, or its baseline restored. */
 export interface PacingChange {
   host: string
-  change: 'slowed' | 'eased' | 'restored'
+  change: 'slowed' | 'eased' | 'restored' | 'settled'
   /** The signal that tipped a slowdown; null on an easing. */
   signal: SoftBlockSignal | null
   ceiling: number
@@ -112,6 +126,8 @@ export interface FrontierOptions {
   cooldownUntilMsByHost?: ReadonlyMap<string, number>
   /** The pace an earlier run of the task set for each host it slowed (HostPacing.adaptive). */
   adaptiveByHost?: ReadonlyMap<string, AdaptivePacing>
+  /** The signals an earlier run of the task found the pace is not why of (HostPacing.settled). */
+  settledByHost?: ReadonlyMap<string, readonly string[]>
   includePaths?: readonly string[]
   excludePaths?: readonly string[]
   /** Match includePaths / excludePaths against the canonical URL instead of the pathname. */
@@ -162,6 +178,8 @@ export class Frontier {
   private readonly cooldownUntilMs = new Map<string, number>()
   /** The pace of each host the task slowed; a host at its baseline has no entry. */
   private readonly adaptive = new Map<string, AdaptivePacing>()
+  /** Per host, the signals that stopped counting (HostPacing.settled). */
+  private readonly settledSignals = new Map<string, Set<string>>()
   /** Hosts a page has reported robots.txt for, with or without a Crawl-delay. */
   private readonly robotsKnown = new Set<string>()
 
@@ -189,6 +207,7 @@ export class Frontier {
     for (const [host, at] of options.lastStartedAtMsByHost ?? []) this.lastStartedAtMs.set(host, at)
     for (const [host, until] of options.cooldownUntilMsByHost ?? []) this.cooldownUntilMs.set(host, until)
     for (const [host, pace] of options.adaptiveByHost ?? []) this.adaptive.set(host, { ...pace })
+    for (const [host, signals] of options.settledByHost ?? []) this.settledSignals.set(host, new Set(signals))
   }
 
   seed(url: string = this.seedCanonicalUrl, depth = 0): FrontierEnqueueResult {
@@ -217,6 +236,10 @@ export class Frontier {
       if (admit !== undefined && !admit(item)) {
         this.pending.splice(i--, 1)
         refused++
+        continue
+      }
+      if (item.notBeforeMs !== undefined && nowMs < item.notBeforeMs) {
+        nextReadyAtMs = nextReadyAtMs === null ? item.notBeforeMs : Math.min(nextReadyAtMs, item.notBeforeMs)
         continue
       }
       const inFlight = this.inFlight.get(item.host) ?? 0
@@ -250,6 +273,21 @@ export class Frontier {
     const inFlight = this.inFlight.get(host) ?? 0
     if (inFlight <= 1) this.inFlight.delete(host)
     else this.inFlight.set(host, inFlight - 1)
+  }
+
+  /**
+   * A read set aside after a soft block: the page goes back to the front of its queue, to start once its host's wait and
+   * any Retry-After have passed and no sooner than the first wait a slowdown sets. Near the front, so that a site the pace does not help is
+   * found out early, before the batch is slowed for nothing. The URL stays visited: only this puts it back.
+   */
+  retry(item: FrontierItem, read: SoftBlockRetry, nowMs: number, retryAtMs = 0): void {
+    const { notBeforeMs: _spent, ...page } = item
+    this.pending.unshift({ ...page, retries: [...(item.retries ?? []), read], notBeforeMs: Math.max(retryAtMs, nowMs + Math.max(FIRST_SLOW_DELAY_MS, this.hostDelayMs(item.host))) })
+  }
+
+  /** Whether `signal` stopped counting on `host`. */
+  settled(host: string, signal: SoftBlockSignal): boolean {
+    return this.settledSignals.get(host)?.has(signal) === true
   }
 
   has(canonicalUrl: string): boolean {
@@ -296,11 +334,22 @@ export class Frontier {
   /**
    * A page on `host` ended with `signal` (null: a normal page). The second signal in a row slows the host: one page at a
    * time, the wait doubled (2 s the first time, at most 120 s) and the host left alone for that wait from `nowMs`. Ten
-   * normal pages in a row halve the wait; at the baseline the host runs as the policy allows again. The change, if any.
+   * normal pages in a row halve the wait; at the baseline the host runs as the policy allows again. `readAgain`: the page
+   * answered the same on its read before; at SETTLE_DELAY_MS, a wait this signal alone set, that ends the signal on the host. The change, if any.
    */
-  noteResult(host: string, signal: SoftBlockSignal | null, nowMs: number): PacingChange | null {
+  noteResult(host: string, signal: SoftBlockSignal | null, nowMs: number, readAgain = false): PacingChange | null {
+    // A signal that stopped counting is no news either way: not a push back, and not a normal page.
+    if (signal !== null && this.settled(host, signal)) return null
     const current = this.adaptive.get(host)
     if (signal !== null) {
+      // Slowed this far by this signal, and the page itself, read again, still the same: the pace is not why. A page that
+      // came back, or one that only reports the signal for the first time, says nothing of the kind.
+      if (readAgain && SETTLING_SIGNALS.has(signal) && current !== undefined && current.cause === signal && current.delayMs >= SETTLE_DELAY_MS) {
+        this.settledSignals.set(host, new Set([...(this.settledSignals.get(host) ?? []), signal]))
+        this.adaptive.delete(host)
+        this.cooldownUntilMs.delete(host)
+        return { host, change: 'settled', signal, ceiling: this.perHostConcurrency, delayMs: this.baselineDelayMs(host) }
+      }
       const signals = (current?.signals ?? 0) + 1
       if (signals < SIGNALS_TO_SLOW) {
         if (current !== undefined) this.adaptive.set(host, { ...current, signals, okStreak: 0 })
@@ -309,7 +358,9 @@ export class Frontier {
       }
       const delayMs = Math.min(MAX_SLOW_DELAY_MS, Math.max(FIRST_SLOW_DELAY_MS, (current?.slowdowns ?? 0) === 0 ? 0 : (current?.delayMs ?? 0) * 2))
       const untilMs = nowMs + delayMs
-      this.adaptive.set(host, { ceiling: 1, delayMs, signals: 0, okStreak: 0, slowdowns: (current?.slowdowns ?? 0) + 1 })
+      // The wait is this signal's alone only while every slowdown was.
+      const cause = (current?.slowdowns ?? 0) === 0 || current?.cause === signal ? { cause: signal } : {}
+      this.adaptive.set(host, { ceiling: 1, delayMs, signals: 0, okStreak: 0, slowdowns: (current?.slowdowns ?? 0) + 1, ...cause })
       this.cooldownUntilMs.set(host, Math.max(this.cooldownUntilMs.get(host) ?? 0, untilMs))
       return { host, change: 'slowed', signal, ceiling: 1, delayMs, untilMs }
     }
@@ -351,7 +402,7 @@ export class Frontier {
    */
   pacing(): Record<string, HostPacing> {
     const out: Record<string, HostPacing> = {}
-    for (const host of new Set([...this.lastStartedAtMs.keys(), ...this.crawlDelayMsByHost.keys(), ...this.cooldownUntilMs.keys(), ...this.adaptive.keys()])) {
+    for (const host of new Set([...this.lastStartedAtMs.keys(), ...this.crawlDelayMsByHost.keys(), ...this.cooldownUntilMs.keys(), ...this.adaptive.keys(), ...this.settledSignals.keys()])) {
       const adaptive = this.adaptive.get(host)
       const cooldownUntilMs = this.cooldownUntilMs.get(host)
       // A cooldown an earlier run set and that passed before this run started a page on the host is over.
@@ -362,6 +413,7 @@ export class Frontier {
         crawlDelayMs: this.crawlDelayMsByHost.get(host) ?? null,
         ...(cooldownHolds ? { cooldownUntilMs } : {}),
         ...(adaptive !== undefined && adaptive.slowdowns > 0 ? { adaptive: { ...adaptive } } : {}),
+        ...(this.settledSignals.has(host) ? { settled: [...this.settledSignals.get(host)!] } : {}),
       }
     }
     return out

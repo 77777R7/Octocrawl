@@ -56,6 +56,7 @@ describe('hosted job worker', () => {
       if (path === options.gate) return
       if (options.twins && path !== '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('/twin')); return }
       if (path.startsWith('/moved/')) { res.writeHead(302, { location: '/' }).end(); return }
+      if (path.startsWith('/once-moved/') && seen.filter((earlier) => earlier === path).length === 1) { res.writeHead(302, { location: '/' }).end(); return }
       if (path === '/gone') { res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(page(path)); return }
       if (path === '/archive.tar.bz2') { res.writeHead(200, { 'content-type': 'application/octet-stream' }).end(Buffer.alloc(6 * 1024 * 1024, 7)); return }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page(path))
@@ -132,9 +133,20 @@ describe('hosted job worker', () => {
 
   it('counts on the job the pages the site answered with another page, slice after slice', async () => {
     const { origin, store, create, drain } = await setup()
-    const id = await create(parseBatchStartRequest({ urls: ['/a', '/moved/1', '/b', '/moved/2'].map((path) => `${origin}${path}`), fastMode: true }))
+    const id = await create(parseBatchStartRequest({ urls: ['/a', '/moved/1', '/b', '/moved/2'].map((path) => `${origin}${path}`), fastMode: true, retry: { softBlocks: 0 } }))
     await drain(id)
     expect(await store.get(id)).toMatchObject({ status: 'completed', counts: { pages: 4, errors: 0, redirectedOffPage: 2, notServed: 2 } })
+  })
+
+  it('reads again a page the site sent away and counts and charges it once: a read set aside stores nothing and spends no credit', async () => {
+    const { origin, seen, store, create, drain, exportLines } = await setup()
+    const urls = ['/a', '/once-moved/1'].map((path) => `${origin}${path}`)
+    const id = await create(parseBatchStartRequest({ urls, fastMode: true }))
+    await drain(id)
+    const job = (await store.get(id))!
+    expect(seen.filter((path) => path === '/once-moved/1')).toHaveLength(2)
+    expect(job).toMatchObject({ status: 'completed', counts: { pages: 2, errors: 0, retried: 1, redirectedOffPage: 0, notServed: 0 }, credits: { used: 2 } })
+    expect(exportLines(job)?.map((item) => item.url).sort()).toEqual([...urls].sort())
   })
 
   it('leaves one Activity line for a finished job: its pages by outcome, its credits and the key that started it', async () => {

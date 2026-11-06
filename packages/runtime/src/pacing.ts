@@ -25,8 +25,30 @@ export const OK_PAGES_TO_RECOVER = 10
 export const FIRST_SLOW_DELAY_MS = 2_000
 /** The longest wait a slowdown sets, ms. */
 export const MAX_SLOW_DELAY_MS = 120_000
+/**
+ * The wait at which a signal that may have nothing to do with pace can stop counting, ms. A host slowed to it has had
+ * more than a minute of slow reading. If a page read again still answers the same, the pace is not why, where a limit on rate clears
+ * (www.english.ids-cologne.de, 2026-11-04: pages came back after about 40 s). Once settled the signal is not looked at
+ * on that host: a limit that starts later goes unseen, and only `notServed` tells.
+ */
+export const SETTLE_DELAY_MS = 32_000
+/** Signals a page itself can cause, whatever the pace: they can settle. A 429 or 503 is the site speaking of rate, and never does. */
+export const SETTLING_SIGNALS: ReadonlySet<SoftBlockSignal> = new Set(['redirected_off_page', 'verification_failed'])
+/** Signals a page is read again after (BatchRetry). A challenge page is not: it does not go away with a wait. */
+export const RETRIED_SIGNALS: ReadonlySet<SoftBlockSignal> = new Set(['rate_limited', 'redirected_off_page', 'verification_failed'])
 
 const CHALLENGE_REASONS = new Set(['cloudflare_challenge', 'captcha', 'bot_detected_generic'])
+
+/**
+ * Whether `finalUrl`'s path is shorter than `requestedUrl`'s. A limit on rate sends a page up, to the home page: 14 pages of
+ * www.english.ids-cologne.de that read well at 18 pages a minute got a 302 to it at 100 a minute (2026-11-06). A script
+ * that replaces a page with one as deep says something of that page, not of the pace: the same site's list took the place
+ * of 39 of 60 exhibitors at any speed. That page is `redirected_off_page` all the same; it just says nothing of the pace.
+ */
+function shallower(finalUrl: string, requestedUrl: string): boolean {
+  const depth = (url: string) => new URL(url).pathname.split('/').filter((segment) => segment.length > 0).length
+  try { return depth(finalUrl) < depth(requestedUrl) } catch { return false }
+}
 
 /** What in `result` says the site is pushing back, or null for a page that counts as normal. */
 export function softBlockSignal(result: FetchResult): SoftBlockSignal | null {
@@ -37,7 +59,8 @@ export function softBlockSignal(result: FetchResult): SoftBlockSignal | null {
     if (result.blockReason !== null && CHALLENGE_REASONS.has(result.blockReason)) return 'challenge'
     return null
   }
-  if ((result.warnings ?? []).some((warning) => warning.code === 'redirected_off_page')) return 'redirected_off_page'
-  if (result.verification?.status === 'failed') return 'verification_failed'
+  if ((result.warnings ?? []).some((warning) => warning.code === 'redirected_off_page') && shallower(result.evidence.finalUrl, result.requestedUrl)) return 'redirected_off_page'
+  // A page not read fails its contract without saying anything of the page: its own status tells what happened.
+  if (result.verification?.status === 'failed' && result.verification.reason !== 'page_not_read') return 'verification_failed'
   return null
 }

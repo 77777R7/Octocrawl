@@ -24,7 +24,7 @@ const KINDS: Readonly<Record<string, Kind>> = {
   // A path pattern is a regex and may hold a comma: one per flag.
   includePaths: 'repeat', excludePaths: 'repeat',
   formats: 'formats', parsers: 'parsers', headers: 'headers', webhook: 'webhook',
-  robotsOverride: 'json', robotsOverrides: 'json',
+  robotsOverride: 'json', robotsOverrides: 'json', retry: 'json',
 }
 
 /**

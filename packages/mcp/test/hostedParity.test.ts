@@ -151,7 +151,7 @@ const SAMPLES: Record<string, unknown> = {
   regexOnFullURL: true, ignoreQueryParameters: true, deduplicateSimilarURLs: false, crawlEntireDomain: true, allowSubdomains: true, allowExternalLinks: true, sitemap: 'skip',
   maxConcurrency: 1, idempotencyKey: 'parity-check', onlyMainContent: false, waitFor: 200, timeout: 20_000, maxFileBytes: 1_000_000, includeTags: ['main'], excludeTags: ['nav'],
   headers: { 'accept-language': 'en' }, mobile: true, fastMode: true, blockAds: false, removeBase64Images: false, verify: { checks: [{ type: 'markdownIncludes', text: 'Tides' }] },
-  integration: 'parity-check', ignoreInvalidURLs: true,
+  integration: 'parity-check', ignoreInvalidURLs: true, retry: { softBlocks: 1 },
   handoff: true, lane: 'my-browser', access: 'enhanced', skipTlsVerification: true, maxAge: 60_000, minAge: 1, storeInCache: true, lockdown: true,
   actions: [{ type: 'wait', milliseconds: 1 }], robotsOverride: { reason: 'parity check' }, robotsOverrides: [{ url: 'https://example.com/a', reason: 'parity check' }],
   ignoreRobotsTxt: true, useCached: true, appendToId: 'batch-1', webhook: 'https://example.com/hook',
