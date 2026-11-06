@@ -60,7 +60,7 @@ The exit code doesn't tell you about failed rows: a batch that finished exits 0 
 awk -F, '$2 != "success" && $2 != "partial"' out/results.csv
 ```
 
-To retry, put the failed URLs in a new file and run a new batch. Octocrawl doesn't retry failed rows by itself.
+To retry, put the failed URLs in a new file and run a new batch. A batch reads a page again by itself only when the site pushed back on it: a 429 or 503, a move up to the home page, or a failed task contract gets one more read after a wait. Anything else, such as a 404, a timeout or a challenge page, stays as it was until you run it again. `--retry '{"softBlocks":0}'` turns the second read off.
 
 ## What if the batch stops halfway?
 
