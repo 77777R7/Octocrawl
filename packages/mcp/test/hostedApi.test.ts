@@ -20,7 +20,7 @@ import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } fr
 import { MemoryHostedAccess, type HostedAccessSource } from '../src/hostedAccess.js'
 import { CompatAddressGuard } from '@w2l/bench'
 import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
-import { BROWSER_LEASE_MS, browserLeaseTurn, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS } from '../src/hostedApi.js'
+import { BROWSER_LEASE_MS, browserLeaseTurn, HOSTED_MCP_SCRAPE_MAX_TIMEOUT_MS, HOSTED_MCP_WAIT_MS, HOSTED_REQUEST_TIMEOUT_MS, jobEngineOptions } from '../src/hostedApi.js'
 import { expectIsError } from './toolErrorChecks.js'
 import { collectGarbage } from './collectGarbage.js'
 
@@ -126,6 +126,8 @@ it('keeps no file on the server and names no path of its own, since nothing coul
   const broken = await (await post(url, '/v1/scrape', { url: `${origin}/broken.txt` })).json() as { file: { warnings: { code: string; message: string }[] } }
   expect(broken.file.warnings).toEqual([{ code: 'text_not_decoded', message: expect.stringMatching(/the bytes were not saved\.$/) }])
   expect(await readdir(join(root!, 'files')).catch(() => [])).toEqual([])
+  // A job's pages are read by the worker's engine, which keeps none either.
+  expect(jobEngineOptions(root!).noFileStore).toBe(true)
 })
 
 it('serves scrape and map only, and refuses the rest by name with a hint to run locally', async () => {

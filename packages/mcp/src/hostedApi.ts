@@ -268,7 +268,7 @@ function startsInBrowser(body: Record<string, unknown>): boolean {
 }
 /** Requests of any kind per minute from one address, counted before the key lookup, so unknown keys cannot drive the key store. */
 export const ADDRESS_PER_MINUTE = 120
-/** A file (PDF, CSV, ...) a hosted call may read: the preview's cap. Files land under the task root, which Cloud Run keeps in memory. */
+/** A file (PDF, CSV, ...) a hosted call may read: the preview's cap. It is held in memory while it is read, and not saved. */
 export const HOSTED_MAX_FILE_BYTES = 5 * 1024 * 1024
 /** The network policy hosted Octocrawl reads under, the gate's and the job worker's: the file cap and the operator's contact. */
 export function hostedPolicy(base: NetworkPolicy, env: NodeJS.ProcessEnv = process.env): NetworkPolicy {
@@ -280,12 +280,12 @@ export function hostedPolicy(base: NetworkPolicy, env: NodeJS.ProcessEnv = proce
  */
 export function jobEngineOptions(taskRoot: string, extra: Partial<ApiEngineOptions> = {}): ApiEngineOptions {
   return {
-    taskRoot, hosted: true, defaultMaxPages: JOB_MAX_CRAWL_PAGES, allowRobotsOverride: false, sessionsFile: null, userChrome: null,
+    taskRoot, hosted: true, noFileStore: true, defaultMaxPages: JOB_MAX_CRAWL_PAGES, allowRobotsOverride: false, sessionsFile: null, userChrome: null,
     workerCount: JOB_WORKER_COUNT, resumeOnStart: false, deferLaunch: true, ...HOSTED_ACCESS_ENGINE, ...extra,
     networkPolicy: hostedPolicy(extra.networkPolicy ?? hostedNetworkPolicy()),
   }
 }
-/** Scrape and map records and saved files are swept from the task root after this long: hosted phase 1 keeps nothing. */
+/** Scrape and map records are swept from the task root after this long: hosted phase 1 keeps nothing. */
 export const HOSTED_RECORD_TTL_MS = 10 * 60_000
 const SWEEP_EVERY_MS = 60_000
 /** Callers a limiter or cache remembers at most; the oldest are forgotten first, so a flood of addresses or keys cannot grow memory without bound. */
@@ -877,6 +877,7 @@ export function createHostedApi(config: HostedApiConfig): { server: HttpServer; 
     taskRoot: config.taskRoot,
     networkPolicy: policy,
     hosted: true,
+    noFileStore: true,
     // No page calls the model without the gate a start passes: its credits, the switch and the day's cap.
     requireModelGate: true,
     defaultMaxPages: 1,

@@ -207,11 +207,13 @@ describe('agent hints', () => {
     expect(hints(file('csv', 'text', 'files/aaa.csv'))).toEqual(['the response was a csv file kept at files/aaa.csv; markdown is its text as received'])
     expect(hints(file('xlsx', null, null))).toEqual(['the response was a xlsx file not saved; it has no markdown'])
     // Hosted Octocrawl keeps no file, so its hint names no place, and the route to a file with no text is the person's own computer.
-    const hosted = (run: Parameters<typeof hints>[0]) => agentHintsFor({}, { channelsTried: ['http'], result: run }, { hosted: true })
+    const hosted = (run: Parameters<typeof hints>[0]) => agentHintsFor({}, { channelsTried: ['http'], result: run }, { hosted: true, noFiles: true })
     expect(hosted(file('pdf', 'pdf_text', null))).toEqual(['the response was a pdf file; markdown is its text layer'])
     expect(hosted(file('csv', 'text', null))).toEqual(['the response was a csv file; markdown is its text as received'])
     expect(hosted(file('xlsx', null, null))).toEqual([hostedFileNotKeptHint('xlsx')])
     expect(hostedFileNotKeptHint('xlsx')).toBe('the response was a xlsx file; it has no markdown, and hosted Octocrawl keeps no files; on your computer Octocrawl saves it as received: npx octocrawl scrape <url>')
+    // A self-hosted hosted server keeps its files, and its hint says where.
+    expect(agentHintsFor({}, { channelsTried: ['http'], result: file('csv', 'text', 'files/aaa.csv') }, { hosted: true })).toEqual(['the response was a csv file kept at files/aaa.csv; markdown is its text as received'])
     // An empty file has nothing to save anywhere.
     const empty = file('csv', null, null)
     expect(hosted({ ...empty, file: { ...empty.file!, bytes: 0 } })).toEqual(['the response was a csv file; it has no markdown'])
