@@ -105,7 +105,8 @@ const JOB_MAX_PAGES = 500
 /** A slice's lease outlasts a delivery's dispatch deadline (900 s). */
 const LEASE_FLOOR_MS = 16 * 60_000
 const ERROR_STATUSES = new Set(['failed', 'blocked', 'cancelled', 'budget_exceeded'])
-const secondsToUtcMidnight = (now: Date) => Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime()) / 1000))
+const nextUtcMidnight = (now: Date) => Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
+const secondsToUtcMidnight = (now: Date) => Math.max(1, Math.ceil((nextUtcMidnight(now) - now.getTime()) / 1000))
 
 export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation: number): Promise<SliceOutcome> {
   const limits = { ...WORKER_LIMITS, ...deps.limits }
@@ -218,6 +219,9 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     // flight finish, so a slice can store one page more than it asked for (two workers): that page is reserved too.
     const day = now().toISOString().slice(0, 10)
     const pools = (n: number) => [{ id: `${day}-jobs`, limit: limits.jobsDaily, amount: n, alert: true }, { id: `${day}-jobs-account-${job.uid}`, limit: limits.jobsAccountDaily, amount: n }]
+    // What goes back when the slice settles: the pools count the pages it read, not the ones it held. A slice of many hosts
+    // reads a page a host, 20 of the 100 it holds; counted as held, 400 pages would use up an account's 2,000.
+    const poolsBack = (n: number) => pools(n).map(({ id, amount }) => ({ id, amount }))
     const reservationId = `${jobId}-${generation}-${holder}`
     // Under maxCredits the reservation stays within what is left of it; a page a drain stores past it is not charged.
     let reservedPages = Math.min(pages + headroom, job.credits.maxCredits === null ? Number.POSITIVE_INFINITY : allowed)
@@ -237,13 +241,18 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
       reserved = await deps.credits.reserve(job.uid, reservedPages * price, pools(reservedPages), now(), reservationId)
     }
     if (!reserved.ok) {
-      if (reserved.limited === 'quota') { line('hosted_job_daily_pool', { pool: reserved.id }); return await pass(unchanged, secondsToUtcMidnight(now())) }
+      if (reserved.limited === 'quota') {
+        line('hosted_job_daily_pool', { pool: reserved.id })
+        const paused = { pool: reserved.id === `${day}-jobs` ? 'all' as const : 'account' as const, limit: reserved.limit, until: new Date(nextUtcMidnight(now())).toISOString() }
+        return await pass((j) => ({ ...unchanged(j), paused }), secondsToUtcMidnight(now()))
+      }
       const reason = reserved.limited === 'account' ? 'account_deleted' : 'credits_exhausted'
       return await pass((j) => ({ ...j, status: 'failed', failureReason: reason }))
     }
     logQuotaThresholds(pools(reservedPages), reserved.counts, day, log)
-    reservation = reserved.reservation
-    const held = await deps.store.updateHeld(jobId, holder, (j) => ({ ...j, reservation: { reservation, used: null } }))
+    // Until the slice commits it read nothing it can be held to: a slice that dies gives all of it back.
+    reservation = { ...reserved.reservation, quotasBack: poolsBack(reservedPages) }
+    const held = await deps.store.updateHeld(jobId, holder, (j) => ({ ...j, reservation: { reservation, used: null }, paused: null }))
     if (!held.ok) return { status: 200, outcome: held.reason }
 
     // The slice: a new engine over the restored task, stopped by the job's cancel or the switch meanwhile.
@@ -313,7 +322,8 @@ export async function runJobSlice(deps: JobWorkerDeps, jobId: string, generation
     const idle = result.items.length === 0 && result.status === 'paused'
     const idleSlices = idle ? (job.idleSlices ?? 0) + 1 : 0
     const status = result.status === 'completed' || result.status === 'failed' || result.status === 'cancelled' ? result.status : idleSlices >= limits.idleSlicesToFail ? 'failed' : 'running'
-    const settled = reservation
+    const read = result.items.length
+    const settled = { ...reservation!, quotasBack: poolsBack(Math.max(0, reservedPages - read)) }
     commitMayHaveApplied = true
     const done: Committed = await commit((j) => ({
       ...j, status, failureReason: status === 'failed' ? (idleSlices >= limits.idleSlicesToFail ? 'no_progress' : 'task_failed') : j.failureReason,

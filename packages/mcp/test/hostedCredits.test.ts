@@ -78,6 +78,18 @@ describe('the in-memory ledger', () => {
     expect(store.usage.get('account-1-2026-10-11')).toMatchObject({ http: 10, browser: 4, credits: 30 })
   })
 
+  it('gives back the daily counts a reservation names, once, and no other count', async () => {
+    const store = new MemoryCreditsStore(1_000)
+    const POOL = { id: '2026-10-11-jobs', limit: 150, amount: 100 }
+    const reserved = await store.reserve('account-1', 100, [POOL, { id: '2026-10-11-starts', limit: 5 }], OCT, 'slice-1')
+    if (!reserved.ok) throw new Error('unreachable')
+    const settling = { ...reserved.reservation, quotasBack: [{ id: POOL.id, amount: 80 }] }
+    await store.settle(settling, 20, 'http', OCT, undefined, { http: 20 })
+    await store.settle(settling, 20, 'http', OCT, undefined, { http: 20 })
+    expect(store.site.get(POOL.id)).toBe(20)
+    expect(store.site.get('2026-10-11-starts')).toBe(1)
+  })
+
   it('settles a reservation with an id once: a second settle, a refund after a charge or the other way, changes nothing', async () => {
     const store = new MemoryCreditsStore(100)
     const reserved = await store.reserve('account-1', 10, [SITE], OCT, 'job-1-0-h1')
@@ -206,6 +218,23 @@ describe('the Firestore ledger', () => {
     expect(await store.balance('account-1', OCT)).toBe(999)
     expect(await store.writeJobLine('account-erased', note, 3, OCT)).toBe(false)
     expect([...firestore.docs.keys()].filter((name) => name.includes('/requestLog/account-erased/'))).toEqual([])
+  })
+
+  it('gives back a reservation\'s daily counts in the settle\'s commit, with a server-side increment, once', async () => {
+    const firestore = fakeFirestore()
+    const store = new FirestoreCreditsStore('octocrawl-test', async () => 'token', 1_000, firestore.fetcher)
+    const POOL = { id: '2026-10-11-jobs', limit: 150, amount: 100 }
+    const reserved = await store.reserve('account-1', 100, [POOL], OCT, 'slice-1')
+    if (!reserved.ok) throw new Error('unreachable')
+    const settling = { ...reserved.reservation, quotasBack: [{ id: POOL.id, amount: 80 }, { id: 'nothing-back', amount: 0 }] }
+    await store.settle(settling, 20, 'http', OCT, undefined, { http: 20 })
+    await store.settle(settling, 20, 'http', OCT, undefined, { http: 20 })
+    const counter = firestore.docs.get(`${firestore.resource}/hostedQuotas/${POOL.id}`)!
+    expect(counter.fields.count).toEqual({ integerValue: '20' })
+    expect(counter.fields.expireAt).toEqual({ timestampValue: '2026-10-13T00:00:00.000Z' })
+    expect(firestore.docs.has(`${firestore.resource}/hostedQuotas/nothing-back`)).toBe(false)
+    // The reply's balance is read from the first write's transforms: the counts come after it.
+    expect((firestore.commits.at(-1) as { writes: Array<{ update: { name: string } }> }).writes[0]!.update.name).toMatch(/credits\/account-1$/)
   })
 
   it('writes a call\'s request line in the settle\'s commit, without nulls, to expire in 30 days, newest first by id', async () => {

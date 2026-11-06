@@ -10,7 +10,7 @@ import { buildChannels } from '@w2l/bench'
 import { MemoryHostedLeases } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
 import { MemoryHostedJobStore, newHostedJob, type HostedJob, type HostedJobWebhook } from '../src/hostedJobs.js'
-import { exportName } from '../src/hostedJobRoutes.js'
+import { exportName, jobStatus } from '../src/hostedJobRoutes.js'
 import { HostedModel, MemoryModelSettings, MemoryModelSpend, MODEL_REFUSALS } from '../src/hostedModel.js'
 import { MemoryHostedAccess } from '../src/hostedAccess.js'
 import { googleOidcVerifier, runJobExpiry, runJobSlice, runJobWebhook, startJobWorker, WEBHOOK_MAX_ATTEMPTS, type JobWorkerDeps, type WorkerFiles } from '../src/hostedJobWorker.js'
@@ -253,15 +253,47 @@ describe('hosted job worker', () => {
     expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(5)
   })
 
-  it('logs once when the day\'s job pool for every account reaches 70%, and never for one account\'s pool', async () => {
+  it('counts on the day\'s job pools the pages a slice read, not the ones it reserved, so pages never read stop no batch', async () => {
+    // One host a slice: the first reserves five pages and the headroom page, and reads the three of its host. Counted as
+    // reserved, nine pages would pass the limit of eight before the second slice could start.
+    const { origin, credits, create, drain } = await setup({ limits: { slicePages: 5, maxHostsPerSlice: 1, jobsAccountDaily: 8 } })
+    const other = origin.replace('127.0.0.1', 'localhost')
+    const id = await create(parseBatchStartRequest({ urls: [...['/a', '/b', '/c'].map((path) => `${origin}${path}`), ...['/d', '/e', '/f'].map((path) => `${other}${path}`)], fastMode: true }))
+    expect((await drain(id)).at(-1)).toBe('completed')
+    expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(6)
+    expect(credits.site.get('2026-10-19-jobs')).toBe(6)
+  })
+
+  it('gives the day\'s job pools back with the credits when a slice dies before it commits', async () => {
+    const { origin, credits, files, deps, create, drain } = await setup({ limits: { slicePages: 5 } })
+    const id = await create(parseBatchStartRequest({ urls: ['/a', '/b', '/c'].map((path) => `${origin}${path}`), fastMode: true }))
+    files.onUpload = (name) => { if (name.includes('/pages/')) { files.onUpload = undefined; throw new Error('instance died') } }
+    await expect(runJobSlice(deps, id, 0)).rejects.toThrow(/died/)
+    expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(0)
+    expect((await drain(id)).at(-1)).toBe('completed')
+    expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(3)
+  })
+
+  it('gives back what a committed slice did not read on the next delivery, when the slice\'s own settle failed', async () => {
+    const { origin, credits, create, drain } = await setup({ limits: { slicePages: 5 } })
+    const id = await create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/e', '/f'].map((path) => `${origin}${path}`), fastMode: true }))
+    const settle = credits.settle.bind(credits)
+    let failures = 1
+    credits.settle = async (...args) => { if (failures-- > 0) throw new Error('settle down'); return settle(...args) }
+    expect((await drain(id)).at(-1)).toBe('completed')
+    expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(6)
+  })
+
+  it('logs when a slice takes the day\'s job pool for every account to 70%, and never for one account\'s pool', async () => {
     const { origin, deps, create, drain } = await setup({ limits: { jobsDaily: 10 } })
     const lines: string[] = []
     deps.log = (line) => lines.push(line)
     const id = await create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/e', '/f', '/g', '/h'].map((path) => `${origin}${path}`), fastMode: true }))
     await drain(id)
     const alerts = lines.map((line) => JSON.parse(line) as { event?: string; pool?: string; limit?: number; count?: number }).filter((line) => line.event === 'hosted_quota_threshold')
-    expect(alerts).toHaveLength(1)
-    expect(alerts[0]).toMatchObject({ pool: 'jobs', day: '2026-10-19', limit: 10 })
+    // At least once: a slice's unread pages go back, so a later slice can take the pool past the mark again.
+    expect(alerts.length).toBeGreaterThanOrEqual(1)
+    for (const alert of alerts) expect(alert).toMatchObject({ pool: 'jobs', day: '2026-10-19', limit: 10 })
     expect(alerts[0]!.count).toBeGreaterThanOrEqual(7)
   })
 
@@ -369,6 +401,8 @@ describe('hosted job worker', () => {
     expect((await drain(id)).at(-1)).toBe('completed')
     const job = (await store.get(id))!
     expect(await credits.balance('account-1', clock.t)).toBe(1_000 - job.credits.used)
+    // The slice that died took its pages from the day's pools too: they came back from the reservation on the job.
+    expect(credits.site.get('2026-10-19-jobs-account-account-1')).toBe(2)
   })
 
   it('queues the first slice of the job promoted into a finished job\'s slot on the finished job\'s next delivery, if no one did', async () => {
@@ -587,11 +621,24 @@ describe('hosted job worker', () => {
     })
   })
 
-  it('waits for the next UTC day at the day\'s job pool, and for a busy host', async () => {
-    const pool = await setup({ limits: { jobsAccountDaily: 3 } })
+  it('waits for the next UTC day at the day\'s job pool, says why on its status, goes on by itself, and waits for a busy host', async () => {
+    const clock = { t: NOW }
+    const pool = await setup({ clock, limits: { jobsAccountDaily: 3 } })
     const id = await pool.create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d'].map((path) => `${pool.origin}${path}`), fastMode: true }))
     await pool.drain(id, 2)
     expect(pool.queue).toEqual([{ jobId: id, generation: 2, delaySeconds: 16 * 3_600 }])
+    const waiting = (await pool.store.get(id))!
+    expect(jobStatus(waiting, clock.t.getTime())).toMatchObject({ status: 'running', paused: { reason: 'account_daily_pages', limit: 3, resumesAt: '2026-10-20T00:00:00.000Z', message: expect.stringContaining('2026-10-20T00:00:00.000Z') } })
+    // The day turned and its delivery has not come yet: the status no longer promises a time already past.
+    clock.t = new Date('2026-10-20T00:00:05Z')
+    expect(jobStatus(waiting, clock.t.getTime())).not.toHaveProperty('paused')
+    expect((await pool.drain(id)).at(-1)).toBe('completed')
+    expect((await pool.store.get(id))!.paused ?? null).toBeNull()
+    // The pool of every account says so instead.
+    const shared = await setup({ limits: { jobsDaily: 3 } })
+    const sharedId = await shared.create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d'].map((path) => `${shared.origin}${path}`), fastMode: true }))
+    await shared.drain(sharedId, 2)
+    expect(jobStatus((await shared.store.get(sharedId))!, NOW.getTime())).toMatchObject({ paused: { reason: 'daily_pages', limit: 3 } })
     const busy = await setup()
     const busyId = await busy.create(parseBatchStartRequest({ urls: [`${busy.origin}/a`], fastMode: true }))
     await busy.hostLeases.acquire('host-127.0.0.1', 60_000, NOW)

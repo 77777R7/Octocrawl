@@ -146,6 +146,11 @@ export interface Reservation {
    * that died): a second settle of the same id changes nothing (`creditSettles/{id}`).
    */
   id?: string
+  /**
+   * Daily counters the settle gives back, in its one commit, so they go back once as the credits do: a slice's pages it
+   * reserved and did not read. A counter of starts (a scrape's) is not named here: a start stays counted.
+   */
+  quotasBack?: ReadonlyArray<{ id: string; amount: number }>
 }
 
 export type ReserveResult =
@@ -233,6 +238,7 @@ export class MemoryCreditsStore implements CreditsStore {
     const refund = Math.max(0, reservation.fromGrant + reservation.fromPurchased - used)
     const back = giveBack(refund, reservation)
     if (note) this.requests.set(reservation.uid, [requestLine(note, requestLineId(now), now, kind, used), ...(this.requests.get(reservation.uid) ?? [])])
+    for (const quota of reservation.quotasBack ?? []) this.site.set(quota.id, (this.site.get(quota.id) ?? 0) - quota.amount)
     const balance = this.balances.get(reservation.uid)!
     balance.grant += back.toGrant
     balance.purchased += back.toPurchased
@@ -367,6 +373,7 @@ export class FirestoreCreditsStore implements CreditsStore {
     // The id is fixed before the first attempt, so a retried commit writes the same line again rather than a second one.
     const line = note ? requestLine(note, requestLineId(now), now, kind, used) : null
     const expireAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + USAGE_RETENTION_DAYS)).toISOString()
+    const quotaExpireAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2)).toISOString()
     const increment = (fieldPath: string, by: number) => ({ fieldPath, increment: { integerValue: String(by) } })
     // Increments need no read, so a refused commit is retried as it is; one that timed out may have applied (see the log line).
     const writes = (withLine: boolean) => [
@@ -382,6 +389,12 @@ export class FirestoreCreditsStore implements CreditsStore {
         updateTransforms: [...(perKind === undefined ? [increment(kind, 1)] : Object.entries(perKind).filter(([, n]) => n > 0).map(([name, n]) => increment(name, n))), increment('credits', used)],
       },
       ...(line === null || !withLine ? [] : [{ update: { name: `${this.resource}/requestLog/${reservation.uid}/requests/${line.id}`, fields: requestLineFields(line, reservation.uid, now) } }]),
+      // No precondition: a counter its TTL already took comes back negative and past its day, which no reservation reads, and goes again.
+      ...(reservation.quotasBack ?? []).filter((quota) => quota.amount > 0).map((quota) => ({
+        update: { name: `${this.resource}/hostedQuotas/${quota.id}`, fields: { expireAt: { timestampValue: quotaExpireAt } } },
+        updateMask: { fieldPaths: ['expireAt'] },
+        updateTransforms: [increment('count', -quota.amount)],
+      })),
       // Settled once: the record must not exist yet, so a second settle of the same reservation applies nothing.
       ...(reservation.id === undefined ? [] : [{ update: { name: `${this.resource}/creditSettles/${reservation.id}`, fields: { uid: { stringValue: reservation.uid }, used: { integerValue: String(used) }, expireAt: { timestampValue: new Date(now.getTime() + 30 * 86_400_000).toISOString() } } }, currentDocument: { exists: false } }]),
     ]
