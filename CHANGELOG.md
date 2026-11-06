@@ -9,6 +9,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 | Version | Date | What changed |
 | --- | --- | --- |
 | Unreleased | | |
+| 0.8.6 | 2026-11-07 | A batch reads a page again when the site pushed back, `retry.softBlocks` on by default; it counts and names the pages that are not what was asked for (`notServed`) and says its rate and how long it should take; the Evidence Record says what a saved login put into the browser; a hosted job's day counts only the pages it read |
 | 0.8.5 | 2026-11-06 | A task contract can say what a page must not show (`markdownExcludes`); the MCP instructions teach URLs first, then one `batch_scrape`; a hosted call with `access: "enhanced"` can read a site whose robots.txt the hosted network cannot reach; a hosted `screenshot` is refused for what the caller lacks, and a job's `screenshot` with `fastMode` at its start |
 | 0.8.4 | 2026-11-05 | The command line says on stderr when a result is not the page, and its help lists its own flags; `octocrawl serve` prints the command that connects Claude Code to it, and `@octocrawl/mcp` says at initialize when its API is not running; an `https://` URL of a site with no working HTTPS is read over `http://`; a batch or crawl slows a host that pushes back; `waitFor` with `fastMode` is refused by name; hosted Octocrawl's hints, dashboard, texts and logs say what happened and the next step |
 | 0.8.3 | 2026-11-05 | A caller's third `scrape` of one host within ten minutes names `batch_scrape`, `crawl` and `map`; a batch's `maxConcurrency` takes any integer from 1, lowered to the server's worker count (2 on hosted); Skyscanner's human check is named on its market domains; a robots.txt lookup gets 5 s again, since 15 s reached none of the hosts that timed out |
@@ -29,6 +30,10 @@ Releases are listed newest first, by date. Each release opens with what matters 
 | 0.1.0 | 2026-09-18 | First cut of the identity ladder |
 
 ## Unreleased
+
+## 0.8.6 — 2026-11-07
+
+The published packages at 0.8.6. **A batch reads a page again when the site pushed back on it:** a 429 or 503, a move up to the home page or a failed contract gets one more read after the host's wait, and only the last read is charged. It is on by default, so a batch a site limits takes longer; `retry: { softBlocks: 0 }` turns it off. A batch also counts and names the pages that are not what was asked for (`notServed`) and says its rate and how long it should take, the Evidence Record says what a saved login put into the browser, and a hosted job's day counts only the pages it read.
 
 - **The Evidence Record says what a saved login put into the browser.** `access.sessionApplied` is `{ cookies, localStorageOrigins }`, counts alone, or `null` with no saved login, so a page read signed out can be told from a login that never arrived. It does not say the site took the login; a `verify` contract with `markdownExcludes` does ([Your own login](docs/access.md#your-own-login-mode-authed)).
 - **A batch counts the pages read that are not what was asked for, and names them.** `GET /v1/batches/:id` and a crawl's status say `notServed`, the succeeded pages whose `readiness` is `not_served`, and the batch's errors report lists them under `notServed` with why (`redirected_off_page`, `excluded_text`, …); `errors` and `failed` stay the items that failed. Hosted jobs now report `redirectedOffPage` and `notServed` too, from the job's next start on.
