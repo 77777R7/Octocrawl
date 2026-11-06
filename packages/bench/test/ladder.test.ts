@@ -948,6 +948,41 @@ describe('LadderRunner — an answer without content', () => {
     expect([...browserbase.calls, ...steel.calls]).toEqual([])
   })
 
+  it('carries the empty_selection warning whichever rung answered, once, and only when includeTags asked', async () => {
+    const asked = { includeTags: ['script'] }
+    const codes = (result: FetchResult) => (result.warnings ?? []).map((warning) => warning.code)
+    const http = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [emptyAnswer('browser_local')])], { mode: 'standard' }).run(url, undefined, {}, asked)
+    expect(http.result).toMatchObject({ status: 'success', lane: 'http', markdown: '' })
+    expect(codes(http.result).filter((code) => code === 'empty_selection')).toHaveLength(1)
+    const unreachable = { ...failedResult(url, 'connection_error'), lane: 'http' as const }
+    const browser = await new LadderRunner([channel('http', [unreachable]), channel('browser_local', [emptyAnswer('browser_local')])], { mode: 'standard' }).run(url, undefined, {}, asked)
+    expect(browser.result).toMatchObject({ status: 'success', lane: 'browser_local', markdown: '' })
+    expect(codes(browser.result)).toContain('empty_selection')
+    // Empty Markdown nobody selected, a selection with content, a page not read and a file are not this.
+    const plain = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [emptyAnswer('browser_local')])], { mode: 'standard' }).run(url)
+    expect(codes(plain.result)).not.toContain('empty_selection')
+    const named = await new LadderRunner([channel('http', [contentfulResult(url, 'http')])], { mode: 'standard' }).run(url, undefined, {}, asked)
+    expect(codes(named.result)).not.toContain('empty_selection')
+    const blocked = await new LadderRunner([channel('http', [{ ...blockedResult(url, 'login_wall'), lane: 'http' as const }])], { mode: 'standard' }).run(url, undefined, {}, asked)
+    expect(codes(blocked.result)).not.toContain('empty_selection')
+    const file = { ...emptyAnswer('http'), trace: [], file: { kind: 'text' } } as unknown as FetchResult
+    const read = await new LadderRunner([channel('http', [file])], { mode: 'standard' }).run(url, undefined, {}, asked)
+    expect(codes(read.result)).not.toContain('empty_selection')
+  })
+
+  it('carries the empty_selection warning on the deadline\'s answer and on a human\'s retry, neither of which ends in the run\'s own finish', async () => {
+    const asked = { includeTags: ['script'] }
+    const hanging: Channel = { id: 'browser_local', identity: COHERENT, fetch: (_url, _session, execution) => new Promise<FetchResult>((_, reject) => execution?.signal?.addEventListener('abort', () => reject(execution.signal!.reason))) }
+    const cut = await new LadderRunner([channel('http', [emptyAnswer('http')]), hanging], { mode: 'standard' }).run(url, undefined, { deadlineAt: Date.now() + 150 }, asked)
+    expect(cut.result).toMatchObject({ status: 'partial', lane: 'http', markdown: '', warnings: expect.arrayContaining([expect.objectContaining({ code: 'empty_selection' })]) })
+    const stopped = { ...blockedResult(url, 'captcha'), lane: 'browser_local' as const, handoff: { reason: 'captcha', url } } as unknown as FetchResult
+    const session = { domain: 'example.com', cookies: [], attestedBy: 'human', attestedAt: '2026-08-22T00:00:00.000Z', vendor: 'steel' } as unknown as SessionSnapshot
+    const handoff: HumanHandoff = { async takeOver() { return session } }
+    const retried = await new LadderRunner([channel('browser_local', [stopped, emptyAnswer('browser_local')])], { mode: 'authed' }, null, handoff).run(url, undefined, {}, asked)
+    expect(retried.channelsTried).toEqual(['browser_local', 'browser_local(retry)'])
+    expect(retried.result).toMatchObject({ status: 'success', markdown: '', warnings: expect.arrayContaining([expect.objectContaining({ code: 'empty_selection' })]) })
+  })
+
   it('stays the answer when the next rung fails without a page, and is not the partial answer of a run that met a block', async () => {
     const unreachable = { ...failedResult(url, 'connection_error'), lane: 'browser_local' as const }
     const run = await new LadderRunner([channel('http', [emptyAnswer('http')]), channel('browser_local', [unreachable])], { mode: 'standard' }).run(url)

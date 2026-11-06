@@ -68,6 +68,12 @@ export const NO_MAIN_CONTENT_WARNING: FetchWarning = {
   message: 'No main content was found on the rendered page; the Markdown is the whole page, its header, navigation and footer kept.',
 }
 
+/** The caveat on an answer whose `includeTags` selection holds nothing to read (withEmptySelectionWarning). */
+export const EMPTY_SELECTION_WARNING: FetchWarning = {
+  code: 'empty_selection',
+  message: 'The includeTags selection gave no content: it named no element, or none with text or an image Markdown can show.',
+}
+
 /**
  * Whether a rendered page whose extractor found no main region at all (`noRegion`, as opposed to one that was hidden,
  * empty under the page's frame or only headings, which say the content had not come) is answered with its whole
@@ -228,6 +234,17 @@ export function contentSelectionEvent(options: FetchOptions, lane: Lane, at: num
  */
 export function selectionAsked(options: FetchOptions): boolean {
   return options.includeTags !== undefined && options.includeTags.length > 0
+}
+
+/**
+ * The result with the `empty_selection` warning when `includeTags` was asked and its Markdown shows nothing: no element
+ * was named, or those named hold no text and no image (script blocks are left out as always). It stays the answer the
+ * lane gave. A result not read as content keeps its own verdict, and `includeTags` does not apply to a file.
+ */
+export function withEmptySelectionWarning<T extends FetchResult>(result: T, options: FetchOptions): T {
+  if (!selectionAsked(options) || (result.status !== 'success' && result.status !== 'partial') || result.file !== undefined) return result
+  if (result.markdown === null || visibleText(result.markdown) !== '') return result
+  return { ...result, warnings: [...(result.warnings ?? []), EMPTY_SELECTION_WARNING] }
 }
 
 /**

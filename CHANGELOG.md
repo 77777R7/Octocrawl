@@ -31,6 +31,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **An `includeTags` selection with nothing to read says so.** A selector that matches nothing, or only elements without text or an image (a JSON-LD script block, an empty element), still answers `success` with empty Markdown and `readiness` `ready`, and now carries an `empty_selection` warning and an agent hint naming what a selection leaves out and what reads it instead: `rawHtml`, or a selector of elements that hold text.
 - **Hosted Octocrawl no longer names a path on its own server for a file.** A hosted read of a PDF, CSV or text file said it was `kept at /tmp/octocrawl-hosted/files/…`, in `agentHints`, `file.path` and the `artifacts` of `snapshot` and the Evidence Record, a place no client could read and that was swept after ten minutes. Hosted now saves no files: `file.path` is `null`, `artifacts` is empty, `file.sha256` still identifies the bytes, and a file with no Markdown names `npx octocrawl scrape <url>`, which saves it on your computer. A self-hosted `serve --hosted` server keeps its files as before.
 
 ## 0.8.6 — 2026-11-07
