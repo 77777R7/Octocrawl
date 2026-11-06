@@ -690,7 +690,7 @@ export interface BatchAccepted extends CrawlAccepted {
 export interface BatchRate {
   /** Pages a minute over the pages measured, 1 decimal place; null until enough have been read (BATCH_RATE_MIN_PAGES). */
   pagesPerMinute: number | null
-  /** Seconds until the rest are read at that rate, rounded up; null with `pagesPerMinute`. */
+  /** Seconds until the rest are read at that rate, rounded up; null with `pagesPerMinute`, and while a hosted job waits for the next UTC day (`paused`). */
   etaSeconds: number | null
   /** The pages the rate was measured on. */
   measuredPages: number

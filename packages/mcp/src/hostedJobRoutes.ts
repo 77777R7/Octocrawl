@@ -7,7 +7,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
-import { batchFloorSeconds, batchRate, CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlPageFields, parseCrawlStartRequest, projectCrawlPage, readWebhook, RequestError, type CrawlPageField, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
+import { batchFloorSeconds, batchRate, CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlPageFields, parseCrawlStartRequest, projectCrawlPage, readWebhook, RequestError, type CrawlPageField, type JobPause, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import type { CreditsStore } from './hostedCredits.js'
 import { CREDITS } from './hostedCredits.js'
 import { asksModelFallback } from './hostedModel.js'
@@ -39,10 +39,23 @@ export function readHostedWebhook(value: unknown): Omit<HostedJobWebhook, 'secre
   return { url: config.url, events: [...events] as HostedWebhookEvent[], metadata: { ...(config.metadata ?? {}) } }
 }
 
+/** Why a job waits for the next UTC day, as its status says it; null once it has ended or the time has come. */
+function jobPause(job: HostedJob, nowMs: number): JobPause | null {
+  const paused = job.paused
+  if (paused === undefined || paused === null || (job.status !== 'queued' && job.status !== 'running') || Date.parse(paused.until) <= nowMs) return null
+  const whose = paused.pool === 'account' ? 'This account has' : 'Every account together has'
+  return {
+    reason: paused.pool === 'account' ? 'account_daily_pages' : 'daily_pages', limit: paused.limit, resumesAt: paused.until,
+    message: `${whose} read the ${paused.limit} job pages of this UTC day. The job goes on by itself at ${paused.until}: nothing is lost, no credit is spent while it waits, and it need not be cancelled.`,
+  }
+}
+
 /** A job's status as its routes, its list and its webhook report it; the webhook's secret is never in it. */
 export function jobStatus(job: HostedJob, nowMs = Date.now()): Record<string, unknown> {
   const requested = job.kind === 'batch' ? (job.request as { urls: readonly string[] }).urls.length : null
   const completed = job.counts.pages + job.counts.errors
+  const paused = jobPause(job, nowMs)
+  const rate = requested === null ? null : batchRate({ pages: completed, spanMs: job.startedAt === null ? 0 : nowMs - Date.parse(job.startedAt), remaining: Math.max(0, requested - completed) })
   return {
     taskId: job.id, kind: job.kind, status: job.status, failureReason: job.failureReason, budgetExceeded: job.budgetExceeded ?? null,
     // As a local crawl counts them: pagesFetched is every page read, failed ones included; succeeded and failed split them.
@@ -50,7 +63,9 @@ export function jobStatus(job: HostedJob, nowMs = Date.now()): Record<string, un
     ...(requested === null ? {} : { requested, remaining: Math.max(0, requested - completed) }),
     // While it runs, how fast: its pages since its first slice took it, up to now, the gaps between slices included. Not since
     // it was accepted: a wait in the queue happens once, and spread over every page left it would say hours for minutes.
-    ...(requested !== null && (job.status === 'queued' || job.status === 'running') ? { rate: batchRate({ pages: completed, spanMs: job.startedAt === null ? 0 : nowMs - Date.parse(job.startedAt), remaining: Math.max(0, requested - completed) }) } : {}),
+    // A job waiting for the next day has no time left to promise: the rest takes the wait and then the reading.
+    ...(rate !== null && (job.status === 'queued' || job.status === 'running') ? { rate: paused === null ? rate : { ...rate, etaSeconds: null } } : {}),
+    ...(paused === null ? {} : { paused }),
     credits: { used: job.credits.used, maxCredits: job.credits.maxCredits },
     ...(job.webhook ? { webhook: { url: job.webhook.url, events: job.webhook.events, delivery: job.webhook.delivery } } : {}),
     createdAt: job.createdAt, finishedAt: job.finishedAt, expiresAt: job.expireAt,

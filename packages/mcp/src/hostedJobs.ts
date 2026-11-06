@@ -56,6 +56,8 @@ export interface HostedJob {
    * or one given back after an error (abandon). A commit sets it back to 0; at the worker's limit the job fails.
    */
   failedAttempts?: number
+  /** Why the job waits for the next UTC day: which day's pool of job pages refused its slice, that pool's limit, and when its next slice comes. Null or absent otherwise. */
+  paused?: { pool: 'account' | 'all'; limit: number; until: string } | null
   /** The budget the job's last slice stopped at (`pages` once a crawl reached its maxPages), as a local crawl reports it. */
   budgetExceeded?: string | null
   /** The queued job this one's end promoted into its slot: a later delivery of this job queues its first slice if no one did. */

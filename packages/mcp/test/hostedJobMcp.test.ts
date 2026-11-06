@@ -255,6 +255,18 @@ describe('hosted job tools over MCP', () => {
     expect(structured(await client.callTool({ name: 'get_batch', arguments: { id: started.taskId as string } })).rate).toEqual({ pagesPerMinute: null, etaSeconds: null, measuredPages: 0 })
   })
 
+  it('says through get_batch and wait_batch why a job waits for the next UTC day', async () => {
+    const { connect, store } = await start()
+    const client = await connect('oc_account')
+    const started = structured(await client.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/1', 'https://example.com/2'] } }))
+    const id = started.taskId as string
+    const until = new Date(Date.now() + 3_600_000).toISOString()
+    store.jobs.set(id, { ...store.jobs.get(id)!, status: 'running', paused: { pool: 'account', limit: 2_000, until } })
+    const paused = { reason: 'account_daily_pages', limit: 2_000, resumesAt: until, message: expect.stringContaining('need not be cancelled') }
+    expect(structured(await client.callTool({ name: 'get_batch', arguments: { id } })).paused).toEqual(paused)
+    expect(structured(await client.callTool({ name: 'wait_batch', arguments: { id, timeoutMs: 1 } })).paused).toEqual(paused)
+  })
+
   it('measures a hosted batch\'s rate from its first slice, not from its wait in the queue, and says none for a crawl or a job that ended', () => {
     const job = { id: 'j', kind: 'batch', status: 'running', failureReason: null, request: { urls: Array.from({ length: 1_000 }, (_, i) => `https://example.com/${i}`) }, counts: { pages: 10, errors: 0, slices: 1 }, credits: { used: 10, maxCredits: null }, createdAt: '2026-11-05T00:00:00.000Z', startedAt: '2026-11-05T00:40:00.000Z', finishedAt: null, expireAt: '2026-11-12T00:00:00.000Z' } as unknown as HostedJob
     // 40 minutes in the queue, then 10 pages in 20 s: 30 a minute, 33 minutes left, not 66 hours.

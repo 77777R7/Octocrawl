@@ -586,7 +586,9 @@ gcloud billing budgets create --billing-account=<billing account id> --display-n
   --threshold-rule=percent=0.5 --threshold-rule=percent=0.9 --threshold-rule=percent=1.0 --filter-projects="projects/${W2L_PROJECT_ID}" --billing-project="$W2L_PROJECT_ID"
 ```
 
-A pool's limit is its environment variable on the service (`W2L_SITE_DAILY`, `W2L_KEYLESS_TOTAL_DAILY`, `W2L_CLAUDE_DAILY`, `W2L_ACCOUNTS_DAILY` on `octocrawl-api`; `W2L_JOBS_DAILY` on `octocrawl-jobs`); raising one is a new revision with `--update-env-vars`, moved to as any deploy is.
+A pool's limit is its environment variable on the service (`W2L_SITE_DAILY`, `W2L_KEYLESS_TOTAL_DAILY`, `W2L_CLAUDE_DAILY`, `W2L_ACCOUNTS_DAILY` on `octocrawl-api`; `W2L_JOBS_DAILY` and `W2L_JOBS_ACCOUNT_DAILY` on `octocrawl-jobs`); raising one is a new revision with `--update-env-vars`, moved to as any deploy is.
+
+The two job pools count pages read. A slice takes its pages from them before it reads, and its settle gives back the pages it did not read, in the commit that gives back its credits; a slice that dies gives back all of them. A job a pool refuses waits for 00:00 UTC, and its status says so (`paused`, [How long it takes](batch-crawl-map.md)); the worker logs `hosted_job_daily_pool`.
 
 ## Hosted and local, side by side
 

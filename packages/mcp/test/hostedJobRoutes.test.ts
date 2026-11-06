@@ -369,6 +369,19 @@ describe('hosted job routes', () => {
     expect(listed.items.find((item) => item.taskId === taskId)?.rate.pagesPerMinute).toEqual(expect.any(Number))
   })
 
+  it('says why a batch stopped at the day\'s job pool and when it goes on, and promises no time left until then', async () => {
+    const { call, store, sliceWrote } = await start({ credits: new MemoryCreditsStore(100_000) })
+    const { taskId } = await (await call('POST', '/v1/batches', 'oc_one', { urls: urls(9) })).json() as { taskId: string }
+    await sliceWrote(taskId, urls(5).map((url) => ({ url, status: 'success', markdown: '# Page' })) as never)
+    const until = new Date(Date.now() + 3_600_000).toISOString()
+    store.jobs.set(taskId, { ...store.jobs.get(taskId)!, status: 'running', startedAt: new Date(Date.now() - 30_000).toISOString(), paused: { pool: 'account', limit: 2_000, until } })
+    const status = await (await call('GET', `/v1/batches/${taskId}`, 'oc_one')).json() as Record<string, unknown>
+    expect(status.paused).toEqual({ reason: 'account_daily_pages', limit: 2_000, resumesAt: until, message: expect.stringContaining(until) })
+    expect(status.rate).toMatchObject({ measuredPages: 5, pagesPerMinute: expect.any(Number), etaSeconds: null })
+    store.jobs.set(taskId, { ...store.jobs.get(taskId)!, status: 'cancelled' })
+    expect(await (await call('GET', `/v1/batches/${taskId}`, 'oc_one')).json()).not.toHaveProperty('paused')
+  })
+
   it('lists the account\'s own jobs, newest first, a page at a time (H2 P1)', async () => {
     const { call } = await start({ credits: new MemoryCreditsStore(100_000) })
     const ids: string[] = []
