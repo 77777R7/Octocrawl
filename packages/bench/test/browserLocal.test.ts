@@ -88,16 +88,16 @@ beforeAll(async () => {
           '<script>setTimeout(function () { document.getElementById("app").innerHTML = "<main><h1>Drills</h1><ol>" + [1, 2, 3, 4, 5, 6].map(function (n) { return "<li>Result " + n + ": a drill with a price of $" + n * 20 + "</li>" }).join("") + "</ol></main>" }, 2500)</script>' +
           '</body></html>',
       )
-    } else if (req.url === '/image-loader-done') {
-      // Finished pages: the app's loaders left hidden, a picture whose alt only starts with the word, and a page with text
-      // whose lazy images still say so: its text is what it shows.
+    } else if (req.url === '/image-loader-text' || req.url === '/image-loader-short' || req.url === '/image-loader-gallery') {
+      // Finished pages. -text: lazy images that still say so beside the page's text. -short: almost no text, the app's
+      // loader left hidden, a picture whose alt only starts with the word. -gallery: no text, its lazy images below the first screen.
+      const image = (alt: string, side = 64) => `<img alt="${alt}" width="${side}" height="${side}" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">`
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      res.end(
-        '<!doctype html><html><body><main><h1>The harbour</h1><p>The ferry leaves the harbour at nine and returns at five, every day of the week, from the north pier beside the old customs house, weather and tides allowing, all through the summer and the autumn.</p>' +
-          '<div style="display: none"><img alt="Loading..." width="64" height="64" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div>' +
-          '<img alt="Loading dock at the north pier" width="64" height="64" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">' +
-          '<img alt="Loading..." width="64" height="64" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></main></body></html>',
-      )
+      res.end('<!doctype html><html><body><main>' + (req.url === '/image-loader-text'
+        ? `<h1>The harbour</h1><p>The ferry leaves the harbour at nine and returns at five, every day of the week, from the north pier beside the old customs house, weather and tides allowing, all through the summer and the autumn.</p>${image('Loading...')}`
+        : req.url === '/image-loader-short'
+          ? `<h1>The harbour</h1><div style="display: none">${image('Loading...')}</div>${image('Loading dock at the north pier')}`
+          : Array.from({ length: 4 }, (_, i) => image(`Photo ${i}`, 400)).join('') + Array.from({ length: 36 }, () => image('Loading...', 400)).join('')) + '</main></body></html>')
     } else if (req.url === '/help-shell' || req.url === '/help-shell-stuck') {
       // help.autodesk.com (2026-10-24): the banner (a home link, a language menu) renders, the role="main" stays empty
       // until the article arrives, 2.5 s after load here (or never).
@@ -712,15 +712,17 @@ describe('BrowserLocalSubject transport', () => {
     }
   })
 
-  it('waits for a page that shows only a spinner image, and not for a loading alt beside text', async () => {
+  it('waits for a page that shows only a spinner image, and not for a loading alt beside text or below the first screen', async () => {
     const subject = new BrowserLocalSubject()
     try {
       const spinner = await subject.fetch(`${url}/image-loader`)
       expect(spinner.markdown).toContain('Result 6: a drill with a price of $120')
       expect(spinner.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
-      const done = await subject.fetch(`${url}/image-loader-done`)
-      expect(done.status).toBe('success')
-      expect(done.trace.some((event) => event.event === 'loading_wait')).toBe(false)
+      for (const path of ['/image-loader-text', '/image-loader-short', '/image-loader-gallery']) {
+        const done = await subject.fetch(`${url}${path}`)
+        expect(done.status, path).toBe('success')
+        expect(done.trace.some((event) => event.event === 'loading_wait'), path).toBe(false)
+      }
     } finally {
       await subject.teardown()
     }
