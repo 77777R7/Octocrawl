@@ -91,13 +91,13 @@ beforeAll(async () => {
     } else if (req.url === '/image-loader-text' || req.url === '/image-loader-short' || req.url === '/image-loader-gallery') {
       // Finished pages. -text: lazy images that still say so beside the page's text. -short: almost no text, the app's
       // loader left hidden, a picture whose alt only starts with the word. -gallery: no text, its lazy images below the first screen.
-      const image = (alt: string, side = 64) => `<img alt="${alt}" width="${side}" height="${side}" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">`
+      const image = (alt: string) => `<img alt="${alt}" width="64" height="64" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">`
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       res.end('<!doctype html><html><body><main>' + (req.url === '/image-loader-text'
         ? `<h1>The harbour</h1><p>The ferry leaves the harbour at nine and returns at five, every day of the week, from the north pier beside the old customs house, weather and tides allowing, all through the summer and the autumn.</p>${image('Loading...')}`
         : req.url === '/image-loader-short'
-          ? `<h1>The harbour</h1><div style="display: none">${image('Loading...')}</div>${image('Loading dock at the north pier')}`
-          : Array.from({ length: 4 }, (_, i) => image(`Photo ${i}`, 400)).join('') + Array.from({ length: 36 }, () => image('Loading...', 400)).join('')) + '</main></body></html>')
+          ? `<h1>The harbour</h1><p>The ferry leaves at nine and returns at five.</p><div style="display: none">${image('Loading...')}</div>${image('Loading dock at the north pier')}`
+          : Array.from({ length: 40 }, (_, i) => `<img alt="${i < 4 ? `Photo ${i}` : 'Loading...'}" src="/photos/${i}.jpg" style="display: block; width: 400px; height: 400px">`).join('')) + '</main></body></html>')
     } else if (req.url === '/help-shell' || req.url === '/help-shell-stuck') {
       // help.autodesk.com (2026-10-24): the banner (a home link, a language menu) renders, the role="main" stays empty
       // until the article arrives, 2.5 s after load here (or never).
