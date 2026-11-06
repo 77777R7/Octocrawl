@@ -504,7 +504,7 @@ describe('persistent URL-array batch', () => {
     const engine = f.engine()
     cleanup.push(() => engine.close())
     const { client: w2l } = client(engine)
-    const accepted = await w2l.batchScrape([`${f.origin}/item/1`, `${f.origin}/moved/2`, `${f.origin}/item/3`], { verify: { checks: [{ type: 'markdownMatches', pattern: 'Fixture item \\d' }, { type: 'markdownExcludes', text: 'Fixture item 3' }] } })
+    const accepted = await w2l.batchScrape([`${f.origin}/item/1`, `${f.origin}/moved/2`, `${f.origin}/item/3`], { retry: { softBlocks: 0 }, verify: { checks: [{ type: 'markdownMatches', pattern: 'Fixture item \\d' }, { type: 'markdownExcludes', text: 'Fixture item 3' }] } })
     const report = await w2l.waitBatch(accepted.taskId)
     expect(report).toMatchObject({ status: 'completed', succeeded: 3, failed: 0, redirectedOffPage: 1, notServed: 2 })
     const listed = await w2l.getBatchErrors(accepted.taskId)
@@ -514,7 +514,7 @@ describe('persistent URL-array batch', () => {
       { url: `${f.origin}/moved/2`, status: 'success', code: 'redirected_off_page', finalUrl: `${f.origin}/` },
     ])
     // A contract the page passes holds: the warning is still counted, and the page is what the task asked for.
-    const accepting = await w2l.batchScrape([`${f.origin}/moved/4`], { verify: { checks: [{ type: 'markdownIncludes', text: 'Fixture item' }] } })
+    const accepting = await w2l.batchScrape([`${f.origin}/moved/4`], { retry: { softBlocks: 0 }, verify: { checks: [{ type: 'markdownIncludes', text: 'Fixture item' }] } })
     expect(await w2l.waitBatch(accepting.taskId)).toMatchObject({ redirectedOffPage: 1, notServed: 0 })
     expect((await w2l.getBatchErrors(accepting.taskId)).notServed).toEqual([])
   })
