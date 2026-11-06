@@ -35,6 +35,7 @@ const TIMED = [
   'packages/api/test/pageOptions.test.ts',
   'packages/bench/test/browserLocal.test.ts',
   'packages/bench/test/fileDownload.test.ts',
+  'packages/bench/test/mainContentWait.test.ts',
   'packages/bench/test/originScheduler.test.ts',
   'packages/bench/test/pageOptions.test.ts',
   'packages/bench/test/sitemapSource.test.ts',
