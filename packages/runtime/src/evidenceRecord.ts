@@ -213,7 +213,7 @@ function evidenceAccess(result: FetchResult): EvidenceAccess {
   }
   // What the lane put into the browser: counts alone, as it traced them. Whether the site took the login is not here.
   const attached = laneEvent('session_attached')
-  const sessionApplied: EvidenceAccessSessionApplied | null = attached === undefined ? null : { cookies: typeof attached.cookieCount === 'number' ? attached.cookieCount : null, localStorageOrigins: typeof attached.localStorageOrigins === 'number' ? attached.localStorageOrigins : 0 }
+  const sessionApplied: EvidenceAccessSessionApplied | null = attached === undefined ? null : { cookies: typeof attached.cookiesHeld === 'number' ? attached.cookiesHeld : null, localStorageOrigins: typeof attached.localStorageOrigins === 'number' ? attached.localStorageOrigins : 0 }
   const route = (r: EvidenceAccess['route'], executor: string | null, executorVersion: string | null = null, profile: string | null = null, completion: AccessCompletion = 'unattended'): EvidenceAccess =>
     ({ route: r, executor, executorVersion, profile, externalCostUsd, completion: read && r !== null ? completion : null, egress: egress(r), session: session(r), sessionApplied, paidCalls: paid.calls, grant: paid.grant })
   const laneRan = result.trace.some((e) => e.event === 'identity_sent' || e.event === 'identity_declared' || e.event === 'provider_selected')

@@ -1347,6 +1347,21 @@ describe('BrowserLocalSubject user-owned access', () => {
     }
   })
 
+  it('records the cookies the browser kept, not the ones the login lists: an expired one is dropped', async () => {
+    const subject = new BrowserLocalSubject('standard', {
+      session: {
+        cookies: [{ name: 'sid', value: 'live', domain: '127.0.0.1', path: '/' }, { name: 'old', value: 'gone', domain: '127.0.0.1', path: '/', expires: 1 }],
+      },
+      attestation: ATTESTATION,
+    })
+    try {
+      const out = await subject.fetch(`${url}/spa`)
+      expect(out.trace.find((t) => t.event === 'session_attached')?.detail).toMatchObject({ cookieCount: 2, cookiesHeld: 1 })
+    } finally {
+      await subject.teardown()
+    }
+  })
+
   it('does not change the declared identity when a session is inherited', async () => {
     // The whole No-go: bringing your own access changes the route and the
     // credentials. It must not change the UA, or we would be spoofing.

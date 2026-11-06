@@ -228,7 +228,7 @@ export interface EvidenceAccessEgressExit {
 }
 
 export interface EvidenceAccessSessionApplied {
-  /** Cookies added to the browser; null when the lane did not count them. */
+  /** Cookies the browser held once the login was added, an expired one not among them; null when the lane did not count them. */
   cookies: number | null
   /** Origins whose localStorage was restored. */
   localStorageOrigins: number

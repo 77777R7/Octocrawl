@@ -116,10 +116,10 @@ describe('toEvidenceRecord', () => {
 
   it('says what a saved login put into the browser, counts alone, on either saved-login lane, and nothing without one', () => {
     const access = (lane: TraceEvent['lane'], trace: TraceEvent[]) => toEvidenceRecord(result({ lane }, [{ at: 0, lane, event: 'identity_declared', detail: {} }, ...trace]), { mode: 'authed' }, {}, { sourceCommit: 'c' }).access!
-    const attached: TraceEvent = { at: 1, lane: 'browser_local', event: 'session_attached', detail: { cookieCount: 5, localStorageOrigins: 2, sessionSha256: 'a'.repeat(64) } }
+    const attached: TraceEvent = { at: 1, lane: 'browser_local', event: 'session_attached', detail: { cookieCount: 7, cookiesHeld: 5, localStorageOrigins: 2, sessionSha256: 'a'.repeat(64) } }
     expect(access('browser_local', [attached])).toMatchObject({ route: 'authed_browser', sessionApplied: { cookies: 5, localStorageOrigins: 2 } })
     expect(access('browser_local_authed', [{ ...attached, lane: 'browser_local_authed' }])).toMatchObject({ route: 'authed_browser', sessionApplied: { cookies: 5, localStorageOrigins: 2 } })
-    expect(access('browser_local', [{ ...attached, detail: { cookieCount: 0, localStorageOrigins: 1 } }]).sessionApplied).toEqual({ cookies: 0, localStorageOrigins: 1 })
+    expect(access('browser_local', [{ ...attached, detail: { cookieCount: 0, cookiesHeld: 0, localStorageOrigins: 1 } }]).sessionApplied).toEqual({ cookies: 0, localStorageOrigins: 1 })
     expect(access('browser_local', []).sessionApplied).toBeNull()
     expect(JSON.stringify(access('browser_local', [attached]))).not.toContain('a'.repeat(64))
   })

@@ -522,7 +522,7 @@
       "required": ["cookies", "localStorageOrigins"],
       "properties": {
         "cookies": {
-          "description": "Cookies added to the browser; null when the lane did not count them.",
+          "description": "Cookies the browser held once the login was added, an expired one not among them; null when the lane did not count them.",
           "type": ["integer", "null"],
           "minimum": 0
         },

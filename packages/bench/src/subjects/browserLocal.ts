@@ -838,13 +838,15 @@ export class BrowserLocalSubject implements SubjectAdapter {
         )
       }
       if (userCookies.length > 0 || storedOrigins > 0) {
+        // What the browser kept: it drops a cookie past its expiry without a word, so an expired login is not what the session lists.
+        const cookiesHeld = (await context.cookies()).length
         trace.push({
           at: Date.now() - start,
           lane: 'browser_local',
           event: 'session_attached',
           // Count and scope only. A trace that printed cookie or storage values
           // would leak the user's account into every bench artifact.
-          detail: { cookieCount: userCookies.length, ...(storedOrigins === 0 ? {} : { localStorageOrigins: storedOrigins }), sessionSha256: this.access.sessionSha256 },
+          detail: { cookieCount: userCookies.length, cookiesHeld, ...(storedOrigins === 0 ? {} : { localStorageOrigins: storedOrigins }), sessionSha256: this.access.sessionSha256 },
         })
       }
       if (execution.cookieSession !== undefined && this.accessConfig?.session === undefined && context !== this.managedContext) {
