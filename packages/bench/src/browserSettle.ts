@@ -29,7 +29,10 @@ export interface SettleOutcome {
  * a loading message ("Loading…", "Fetching results...", "Please wait", "Search Results Fetching..."), or main landmarks
  * (`<main>`, `role="main"`) that hold nothing while all the text one can see is in the page's frame (its banner,
  * navigation, search or footer): the page has said where its content goes and it is not there yet (help.autodesk.com,
- * 2026-10-24, read with only its banner). Content beside an empty main landmark is content. A page with more
+ * 2026-10-24, read with only its banner), or an image, not a button's or a link's, whose alt is such a message on a page
+ * with almost no text (at most LOADING_IMAGE_PAGE_TEXT_MAX characters): an app's spinner, all it shows until its data
+ * comes (teamziereis.de, 2026-11-06, read as one image); beside text, the same alt is a lazy image's placeholder.
+ * Content beside an empty main landmark is content. A page with more
  * text than LOADING_PAGE_TEXT_MAX is read for that text: a loader left on it (more comments, a feed's next page) is not its
  * data. Visible means a box of some size on the page that neither it nor an ancestor hides (`checkVisibility`, with
  * opacity). Progress bars and skeleton classes are not signs: rating histograms, language bars and button styles use
@@ -37,6 +40,7 @@ export interface SettleOutcome {
  * a vendor page read in 1.5 s said "Inventory Search Results Fetching...").
  */
 export const LOADING_PAGE_TEXT_MAX = 4_000
+export const LOADING_IMAGE_PAGE_TEXT_MAX = 200
 
 export const LOADING_PROBE = `(() => {
   try {
@@ -76,6 +80,12 @@ export const LOADING_PROBE = `(() => {
     }
     const message = /^(?:(?:loading|fetching|please wait|one moment|searching|retrieving)(?:\\s+[\\w-]+){0,3}\\s*(?:\\.{2,3}|\\u2026)|loading|fetching|please wait)$/i
     const trailing = /\\b(?:loading|fetching)\\s*(?:\\.{2,3}|\\u2026)$/i
+    if ((body.innerText ?? '').trim().length <= ${LOADING_IMAGE_PAGE_TEXT_MAX}) {
+      for (const image of body.querySelectorAll('img[alt]')) {
+        const alt = (image.getAttribute('alt') ?? '').trim()
+        if (alt.length > 0 && alt.length <= 48 && (message.test(alt) || trailing.test(alt)) && image.closest('button, a') === null && shown(image)) return true
+      }
+    }
     // 4 is NodeFilter.SHOW_TEXT, named so that a page replacing NodeFilter cannot break the probe.
     const walker = document.createTreeWalker(body, 4)
     let seen = 0

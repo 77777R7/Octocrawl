@@ -79,6 +79,25 @@ beforeAll(async () => {
       res.end('<!doctype html><html><body><header><a href="/">Site</a></header>' + (req.url === '/main-search'
         ? '<main><form><input name="q" placeholder="Search the timetable"></form></main>'
         : '<main></main><div><h1>Article</h1><p>The ferry leaves the harbour at nine and returns at five, every day of the week.</p></div>') + '</body></html>')
+    } else if (req.url === '/image-loader') {
+      // teamziereis.de (2026-11-06): an app whose first paint is one spinner image in the middle of the page, no text at
+      // all, and everything else 2.5 s after load. Read at the usual settle, the spinner was the whole answer.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><div id="app"><div style="position: absolute; top: 50%; left: 50%"><img alt="Loading..." width="64" height="64" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div></div>' +
+          '<script>setTimeout(function () { document.getElementById("app").innerHTML = "<main><h1>Drills</h1><ol>" + [1, 2, 3, 4, 5, 6].map(function (n) { return "<li>Result " + n + ": a drill with a price of $" + n * 20 + "</li>" }).join("") + "</ol></main>" }, 2500)</script>' +
+          '</body></html>',
+      )
+    } else if (req.url === '/image-loader-done') {
+      // Finished pages: the app's loaders left hidden, a picture whose alt only starts with the word, and a page with text
+      // whose lazy images still say so: its text is what it shows.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(
+        '<!doctype html><html><body><main><h1>The harbour</h1><p>The ferry leaves the harbour at nine and returns at five, every day of the week, from the north pier beside the old customs house, weather and tides allowing, all through the summer and the autumn.</p>' +
+          '<div style="display: none"><img alt="Loading..." width="64" height="64" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div>' +
+          '<img alt="Loading dock at the north pier" width="64" height="64" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">' +
+          '<img alt="Loading..." width="64" height="64" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></main></body></html>',
+      )
     } else if (req.url === '/help-shell' || req.url === '/help-shell-stuck') {
       // help.autodesk.com (2026-10-24): the banner (a home link, a language menu) renders, the role="main" stays empty
       // until the article arrives, 2.5 s after load here (or never).
@@ -688,6 +707,20 @@ describe('BrowserLocalSubject transport', () => {
       expect(boot.status).toBe('success')
       expect(boot.markdown).toContain('An object that represents a session that interacts with a language model.')
       expect(boot.trace).toContainEqual(expect.objectContaining({ event: 'content_wait', detail: expect.objectContaining({ ended: 'content' }) }))
+    } finally {
+      await subject.teardown()
+    }
+  })
+
+  it('waits for a page that shows only a spinner image, and not for a loading alt beside text', async () => {
+    const subject = new BrowserLocalSubject()
+    try {
+      const spinner = await subject.fetch(`${url}/image-loader`)
+      expect(spinner.markdown).toContain('Result 6: a drill with a price of $120')
+      expect(spinner.trace).toContainEqual(expect.objectContaining({ event: 'loading_wait', detail: expect.objectContaining({ cleared: true }) }))
+      const done = await subject.fetch(`${url}/image-loader-done`)
+      expect(done.status).toBe('success')
+      expect(done.trace.some((event) => event.event === 'loading_wait')).toBe(false)
     } finally {
       await subject.teardown()
     }
