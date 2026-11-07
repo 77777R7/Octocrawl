@@ -33,6 +33,8 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A finished job on your computer leaves each page's Markdown as a file of its own.** A server on your computer wrote `results.jsonl` and `results.csv` when a crawl or batch ended, so an agent asked for the pages as Markdown files wrote a script to split the JSONL, and a coding agent stops to ask before running one. It now also writes `markdown/0001-<host-path>.md`, a file a page with content (`success` or `partial`; a failed, blocked or empty page has none), numbered as the results are; `results.csv` gains `markdown_file`, as `--out` writes it, the status names the directory in `resultFiles.markdown`, and `get_batch`, `wait_batch`, `get_crawl` and `wait_crawl` say to hand those files on.
+
 ## 0.8.8 — 2026-11-07
 
 The published packages at 0.8.8. **A sign-in in your Chrome no longer holds your agent:** a my-browser read at a sign-in nobody acts on for 90 s ends `blocked` with `login_wall` and leaves the tab open, so your agent can tell you what the page needs. The page that asks you to allow sites shows its text in a dark Chrome and says how many sites it asks for. A finished batch says what to do about every failed page, a line a reason. A page read in a tab out of sight keeps what it shows.
