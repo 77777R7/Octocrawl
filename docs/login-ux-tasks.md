@@ -66,7 +66,7 @@
 
 - `packages/api/src/hints.ts:292-298`：本地首次撞墙 "the page asks for a login; Octocrawl does not create accounts; use mode authed with your own session (octocrawl login import <host> saves it from your Chrome)"；登录过期 "<host> refused your saved login for <domain> (expired or signed out); sign in to it again in Chrome and run octocrawl login import <domain>"；hosted 用 `HOSTED_LOGIN_WALL_HINT`（`:51`）。两条本地 hint 都不提 `my-browser`。
 - `hints.ts:133-143`：`HintOffers` 只有 `installedChrome`、`hosted`、`noFiles`。`engine.ts:781-793` 的 `hintOffers` 和 `taskHintOffers` 决定给什么；batch 和 crawl 的每页也走它（`:3359`）。
-- `engine.ts:1654-1664`：配了 `userChrome` 的服务器在结果上加 `handoff: { reason: 'login_required', rationale }`，rationale 说 "send the request again with handoff: true"。compact 结果保留 `handoff`（`contracts/src/api.ts:342`、`structured.ts:1929`），MCP 的 `scrape` 结果里是否看得到，待核（L1.4）。
+- `engine.ts:1654-1664`：配了 `userChrome` 的服务器在结果上加 `handoff: { reason: 'login_required', rationale }`，rationale 说 "send the request again with handoff: true"。compact 结果保留 `handoff`（`contracts/src/api.ts:342`、`structured.ts:1929`），MCP 的 `scrape` 结果里看得到（L1.4 实测）。
 - 对应测试：`packages/api/test/hints.test.ts:65`、`:68`（本地两句的原文）、`:81`（hosted）、`:134`；`packages/cli/test/cli.test.ts:171-172`（verdict 行，用的是编造的 hint，不含真实文字）。
 
 MCP：
@@ -119,15 +119,16 @@ ROADMAP：
 
 起因：时刻 2 和 4。今天 agent 拿到 `login_wall` 只看到 mode authed 和一条命令，要自己去 instructions 和参数描述里拼出"该问用户"和"有 my-browser"。
 
-- [ ] **L1.1** `hints.ts:133-143` 的 `HintOffers` 加两个字段，两条路是分开的：`personChrome?: boolean`（这个请求能在用户的 Chrome 里读：`userChrome !== null`，且不要 `actions` 或 `screenshot`，即 `unreadByPerson(...) === null`，`engine.ts:3246-3250`）和 `savedLogins?: boolean`（这台服务器读 saved logins）。请求带 `actions` 或截图时，第一个为假、第二个为真，所以一个字段不够。`engine.ts:781-787` 的 `hintOffers` 填它们；`taskHintOffers`（`:789-793`）跟着生效。`engine.ts:2086` 和 `:2108` 的 read 分支今天不传 offers，要补上，否则这两处会说这台服务器没有这两条路。hosted 永远不填。
+- [ ] **L1.1** `hints.ts:133-143` 的 `HintOffers` 加两个字段，两条路是分开的：`personChrome?: boolean`（这个请求能在用户的 Chrome 里读：`userChrome !== null`，且不要 `actions` 或 `screenshot`，即 `unreadByPerson(...) === null`，`engine.ts:3246-3250`）、`savedLogins?: boolean`（这台服务器读 saved logins）和 `scriptAction?: boolean`（请求带 `executeJavascript` 动作：mode authed 拒绝它，`contracts/src/api.ts:2072`）。请求带 `actions` 或截图时，第一个为假、第二个为真，所以一个字段不够。`engine.ts:781-787` 的 `hintOffers` 填它们；`taskHintOffers`（`:789-793`）跟着生效。`engine.ts:2086` 和 `:2108` 的 read 分支今天不传 offers，要补上，否则这两处会说这台服务器没有这两条路。hosted 永远不填。
 - [ ] **L1.2** 本地首次撞墙（没有 `ladder_session_rejected`）的 hint 按 offers 组句（按 D2、D3）。站点名用请求的主机，不用 `hostOf`：它优先取最终 URL，跳到 SSO 时会让人导入 SSO 站点的登录。`my-browser` 拒绝 mode authed 和 research（`engine.ts:1496`），所以写明 mode standard；crawl 两条路都不收，所以写明 on a scrape or batch。
   - 两条路都有："the page asks for a login; Octocrawl does not sign in or create accounts for anyone; ask the person first, naming <host>, whether to read it in the Chrome they are signed in to (lane my-browser in mode standard on a scrape or batch, octocrawl scrape --lane my-browser; they turn on remote debugging at chrome://inspect/#remote-debugging, click Allow there, then Allow reading these sites) or with a login they save once (import_login <host>, or octocrawl login import <host>, then mode authed on a scrape or batch: no click per page after that)"
   - 只有一条路（请求带 `actions` 或截图时只有 saved login）：只说这一条。
+  - 请求带 `executeJavascript` 动作：两条路都不收，所以先说去掉它："send the request without its executeJavascript action, which mode authed refuses, and ask the person first"。
   - 两条都没有（本地服务器监听在 loopback 之外，或没配 saved logins）："the page asks for a login; this server reads no saved login and no Chrome of the person's; on their own computer Octocrawl reads it as them, after asking them (npx octocrawl serve, then lane my-browser, or octocrawl login import <host> and mode authed)"。今天这种服务器的 hint 让 agent 用它没有的 mode authed，和 hosted 改前的死胡同一样。
   - 已经在用户的 Chrome 里读过（lane `my_browser`），页面仍要登录："<host> asks for a login in the person's own Chrome too: ask them to sign in to it there, then read it again"。这时再推荐 my-browser 没有意义。
   - hosted：`HOSTED_LOGIN_WALL_HINT` 不变。
 - [ ] **L1.3** 登录过期的 hint 改成先说发生了什么、再说下一步，不以命令开头："<host> no longer accepts the saved login for <domain> (expired or signed out); ask the person to sign in to it again in Chrome, then save it again (import_login <domain>, or octocrawl login import <domain>): a running server uses the new one at once"。`personChrome` 为真时加一句 "or, with their yes, read this page in their Chrome now (lane my-browser in mode standard)"。
-- [ ] **L1.4** 确认 `engine.ts:1654-1664` 的 `handoff.rationale` 和新 hint 不矛盾（rationale 说 handoff，hint 说 my-browser 和 saved login，三条路都是本机的）。compact 结果保留 `handoff`（`structured.ts:1929`）；用真实运行确认 MCP 的 `scrape` 结果里看得到它。
+- [ ] **L1.4** 确认 `engine.ts:1654-1664` 的 `handoff.rationale` 和新 hint 不矛盾（rationale 说 handoff，hint 说 my-browser 和 saved login，三条路都是本机的）。compact 结果保留 `handoff`（`structured.ts:1929`）；2026-11-07 在 `fdccc110` 上用 stdio MCP 调 `scrape` 实测，结果里看得到它。
 - [ ] **L1.5** `docs/scrape-options.md:231` 的 hint 表跟着改；CHANGELOG 的 Unreleased 写一条。
 - 验收：
   - 先改 `hints.test.ts:65` 和 `:68` 的断言让它在 `main` 上失败；新增两条路都有、只有 saved login、两条都没有、已在 Chrome 里读过、hosted 五组断言；`ladder_session_rejected` 的 `personChrome` 真、假各一组；跳到 SSO 时 hint 里是请求的主机。
@@ -136,6 +137,7 @@ ROADMAP：
   - `cli.test.ts:171-172` 的 verdict 测试用的是编造的 hint，不受影响。用本地 fixture 的登录墙（`packages/fixtures/src/fixtures.ts:1206-1217`，`/block/login-wall`，密码框加登录标题，`expectedBlockReason: 'login_wall'`）跑一次 `octocrawl scrape`，stderr 打出新 hint。
   - 每条 hint 都说要先问用户，都有站点名，都没有值。
   - `npm run typecheck`、`npm test` 通过。
+- 实现：PR #869（`fdccc110`），开着，合并后再勾上面几项。
 - 指标：登录墙 hint 提到 my-browser 的服务器配置 0 → 全部提供它的配置；"先问用户"从 instructions 一处 → 结果本身也说。
 - 决定：D2、D3。
 
