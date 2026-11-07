@@ -6,6 +6,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { CREDITS_RECHECK_SECONDS, MORE_CREDITS_HINT } from './hostedCredits.js'
 import { gunzipSync } from 'node:zlib'
 import { batchFloorSeconds, batchRate, CRAWL_SCOPE_KEYS, evaluateHostname, hostedNetworkPolicy, hostedVerifyRefusal, parseBatchStartRequest, parseCrawlPageFields, parseCrawlStartRequest, projectCrawlPage, readWebhook, RequestError, type ApiErrorDetails, type CrawlPageField, type JobPause, type ParsedBatchStartRequest, type ParsedCrawlStartRequest } from '@w2l/contracts'
 import type { CreditsStore } from './hostedCredits.js'
@@ -43,6 +44,12 @@ export function readHostedWebhook(value: unknown): Omit<HostedJobWebhook, 'secre
 function jobPause(job: HostedJob, nowMs: number): JobPause | null {
   const paused = job.paused
   if (paused === undefined || paused === null || (job.status !== 'queued' && job.status !== 'running') || Date.parse(paused.until) <= nowMs) return null
+  if (paused.pool === 'credits') {
+    return {
+      reason: 'credits', limit: paused.limit, resumesAt: paused.until,
+      message: `This account's credits are used up, and the job's next page needs ${paused.limit}. The job keeps what it read and goes on by itself when the monthly credits come back at ${paused.until}, or within ${CREDITS_RECHECK_SECONDS / 3_600} hours once more are added: nothing is lost, no credit is spent while it waits, and it need not be cancelled. ${MORE_CREDITS_HINT}.`,
+    }
+  }
   const whose = paused.pool === 'account' ? 'This account has' : 'All accounts together have'
   return {
     reason: paused.pool === 'account' ? 'account_daily_pages' : 'daily_pages', limit: paused.limit, resumesAt: paused.until,
@@ -84,8 +91,14 @@ export const JOB_DEFAULT_CRAWL_PAGES = 100
 export const JOB_MAX_CRAWL_PAGES = 500
 /** New pages a slice stores at most (docs/launch/2026-10-19-h1-hosted-jobs-plan.md §5): a start needs the credits for one. */
 export const JOB_SLICE_PAGES = 100
-/** Pages a job's slice reads at once, its engine's workers (hostedJobWorker.ts): the most a crawl's or a batch's maxConcurrency gets. */
-export const JOB_WORKER_COUNT = 2
+/**
+ * Pages a job's slice reads at once, its engine's workers (hostedJobWorker.ts): the most a crawl's or a batch's
+ * maxConcurrency gets. HTTP pages all run; JOB_BROWSER_PAGES of them render at once (2 until 2026-11-07, when a batch of
+ * many hosts read at 2 pages at once however light its pages were).
+ */
+export const JOB_WORKER_COUNT = 8
+/** Pages a slice renders in a browser at once, within JOB_WORKER_COUNT: a browser page takes about 115 MiB and a share of the worker's one core, an HTTP page neither. */
+export const JOB_BROWSER_PAGES = 2
 export const JOB_LIMITS: JobLimits = { maxRunning: 2, maxQueued: 10 }
 const IDEMPOTENCY_TTL_MS = 24 * 3_600_000
 const PAGE_LIST_DEFAULT = 50

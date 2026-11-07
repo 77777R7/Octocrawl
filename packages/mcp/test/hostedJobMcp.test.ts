@@ -11,7 +11,7 @@ import { hostedNetworkPolicy } from '@w2l/contracts'
 import { accessTokenDigest, createHostedApi, HOSTED_JOB_TOOLS, keyDigest, MCP_OAUTH_RESOURCE, MemoryHostedKeys, MemoryHostedOAuthTokens, MemoryHostedQuota, SITE_ACCOUNT_HEADER, siteAccountAssertion, type HostedKeyRecord, type HostedLeases } from '../src/hostedApi.js'
 import { MemoryCreditsStore } from '../src/hostedCredits.js'
 import { MemoryHostedJobStore, type HostedJob } from '../src/hostedJobs.js'
-import { jobStatus, type JobFiles } from '../src/hostedJobRoutes.js'
+import { JOB_WORKER_COUNT, jobStatus, type JobFiles } from '../src/hostedJobRoutes.js'
 
 // Hosted job tools over MCP (ROADMAP PH H2, docs/h2-hosted-jobs-tasks.md M1–M3, M5): an account's connection lists the
 // crawl and batch tools, which call the job routes through the gate; no worker runs here, a test writes a slice's pages.
@@ -88,10 +88,10 @@ describe('hosted job tools over MCP', () => {
     // A job's credit cap is offered over MCP too (H2 M6).
     expect(properties.maxCredits).toMatchObject({ type: 'integer', minimum: 1 })
     expect(properties.maxPages?.maximum).toBe(500)
-    // A slice reads two pages at once, and a crawl is offered no more (stage H W0).
-    expect(properties.maxConcurrency?.maximum).toBe(2)
+    // A slice reads JOB_WORKER_COUNT pages at once, and a crawl is offered no more (stage H W0).
+    expect(properties.maxConcurrency?.maximum).toBe(JOB_WORKER_COUNT)
     // A batch is offered no more either (docs/launch/2026-11-05-batch-concurrency-plan.md D4): locally the schema has no ceiling.
-    expect((tools.find((tool) => tool.name === 'batch_scrape')!.inputSchema as { properties: Record<string, { maximum?: number }> }).properties.maxConcurrency?.maximum).toBe(2)
+    expect((tools.find((tool) => tool.name === 'batch_scrape')!.inputSchema as { properties: Record<string, { maximum?: number }> }).properties.maxConcurrency?.maximum).toBe(JOB_WORKER_COUNT)
     const wait = tools.find((tool) => tool.name === 'wait_crawl')!
     expect((wait.inputSchema as unknown as { properties: { timeoutMs: { maximum: number } } }).properties.timeoutMs.maximum).toBe(120_000)
     // Its instructions say jobs run here, not only on the person's computer.
@@ -265,6 +265,11 @@ describe('hosted job tools over MCP', () => {
     const paused = { reason: 'account_daily_pages', limit: 2_000, resumesAt: until, message: expect.stringContaining('need not be cancelled') }
     expect(structured(await client.callTool({ name: 'get_batch', arguments: { id } })).paused).toEqual(paused)
     expect(structured(await client.callTool({ name: 'wait_batch', arguments: { id, timeoutMs: 1 } })).paused).toEqual(paused)
+    // A job waiting for credits says so too, and where more come from.
+    store.jobs.set(id, { ...store.jobs.get(id)!, status: 'running', paused: { pool: 'credits', limit: 1, until } })
+    const credits = structured(await client.callTool({ name: 'get_batch', arguments: { id } })).paused as { reason: string; message: string }
+    expect(credits).toMatchObject({ reason: 'credits', limit: 1, resumesAt: until })
+    expect(credits.message).toContain('hello@octocrawl.dev')
   })
 
   it('hands a finished batch\'s download link to the agent through get_batch and wait_batch, with the hint that says what it is', async () => {
@@ -440,13 +445,13 @@ describe('hosted job tools over MCP', () => {
       expect(text(result), name).toMatch(/^unsupported_parameter: verify: markdownCountMin checks are not available in hosted mode/)
     }
     expect(enqueued).toEqual([])
-    const crawl = await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/', maxConcurrency: 8 } })
+    const crawl = await client.callTool({ name: 'crawl', arguments: { url: 'https://example.com/', maxConcurrency: JOB_WORKER_COUNT + 6 } })
     expect(crawl.isError ?? false, text(crawl)).toBe(false)
-    expect(enqueued.map((job) => job.request)).toMatchObject([{ maxConcurrency: 2 }])
+    expect(enqueued.map((job) => job.request)).toMatchObject([{ maxConcurrency: JOB_WORKER_COUNT }])
     // A batch's larger maxConcurrency is lowered at the start too, so the stored request says what the slices run (D4).
-    const batch = await client.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/'], maxConcurrency: 8 } })
+    const batch = await client.callTool({ name: 'batch_scrape', arguments: { urls: ['https://example.com/'], maxConcurrency: JOB_WORKER_COUNT + 6 } })
     expect(batch.isError ?? false, text(batch)).toBe(false)
-    expect(enqueued.map((job) => job.request)).toMatchObject([{ maxConcurrency: 2 }, { maxConcurrency: 2 }])
+    expect(enqueued.map((job) => job.request)).toMatchObject([{ maxConcurrency: JOB_WORKER_COUNT }, { maxConcurrency: JOB_WORKER_COUNT }])
   })
 
   it('refuses at a job tool\'s start, by name, a selector the worker\'s engine would refuse at the first slice (stage H W0)', async () => {

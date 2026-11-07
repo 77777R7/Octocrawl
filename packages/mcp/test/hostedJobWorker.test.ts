@@ -46,13 +46,17 @@ describe('hosted job worker', () => {
   const cleanup: Array<() => Promise<void>> = []
   afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
 
-  async function setup(options: { robotsStatus?: number; twins?: boolean; balance?: number; limits?: Partial<NonNullable<JobWorkerDeps['limits']>>; gate?: string; clock?: { t: Date }; model?: HostedModel } = {}) {
+  async function setup(options: { robotsStatus?: number; twins?: boolean; balance?: number; limits?: Partial<NonNullable<JobWorkerDeps['limits']>>; gate?: string; clock?: { t: Date }; model?: HostedModel; delayMs?: number; perHostConcurrency?: number; trialCredits?: number } = {}) {
     const seen: string[] = []
+    // Pages being answered right now, and the most there ever were at once: how many the slice's engine reads at once.
+    let inFlight = 0
+    const most = { pages: 0 }
     const handler = async (req: IncomingMessage, res: ServerResponse) => {
       const path = req.url ?? '/'
       if (path === '/robots.txt') { res.writeHead(options.robotsStatus ?? 200, { 'content-type': 'text/plain' }).end('User-agent: *\nAllow: /\n'); return }
       if (path === '/sitemap.xml') { res.writeHead(404).end(); return }
       seen.push(path)
+      if (options.delayMs !== undefined) { inFlight++; most.pages = Math.max(most.pages, inFlight); await new Promise<void>((resolve) => setTimeout(resolve, options.delayMs)); inFlight-- }
       if (path === options.gate) return
       if (options.twins && path !== '/') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page('/twin')); return }
       if (path.startsWith('/moved/')) { res.writeHead(302, { location: '/' }).end(); return }
@@ -76,7 +80,7 @@ describe('hosted job worker', () => {
     const receiver = { answer: (): number | Error => 204 }
     const hostLeases = new MemoryHostedLeases()
     const clock = options.clock ?? { t: NOW }
-    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0 }
+    const policy = { ...localNetworkPolicy(), perHostMinDelayMs: 0, ...(options.perHostConcurrency === undefined ? {} : { perHostConcurrency: options.perHostConcurrency }) }
     const deps: JobWorkerDeps = {
       store, credits, files, hostLeases, workRoot, pollMs: 20, log: () => {}, now: () => clock.t,
       enqueueSlice: async (job, delaySeconds = 0) => { queue.push({ jobId: job.id, generation: job.generation, delaySeconds }) },
@@ -85,6 +89,7 @@ describe('hosted job worker', () => {
       webhookTransport: async (request) => { posts.push(request); const answer = receiver.answer(); if (answer instanceof Error) throw answer; return { status: answer, retryAfter: null } },
       engineOptions: () => ({ networkPolicy: policy, hosted: false, channelsFor: (mode) => buildChannels(mode, { networkPolicy: policy, localSubjects: { browser_local: { fetch: async () => { throw new Error('worker tests stay on HTTP') } } } }) }),
       limits: { slicePages: 2, sliceMs: 30_000, graceMs: 2_000, ...options.limits },
+      ...(options.trialCredits === undefined ? {} : { trialCredits: options.trialCredits }),
       ...(options.model === undefined ? {} : { model: options.model }),
     }
     let n = 0
@@ -107,7 +112,7 @@ describe('hosted job worker', () => {
       return outcomes
     }
     const exportLines = (job: HostedJob) => { const object = files.objects.get(exportName(job)); return object === undefined ? null : gunzipSync(object.body).toString('utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { url: string; status: string }) }
-    return { origin, seen, store, credits, files, queue, expiries, webhooks, posts, receiver, hostLeases, deps, create, drain, exportLines, clock }
+    return { origin, seen, store, credits, files, queue, expiries, webhooks, posts, receiver, hostLeases, deps, create, drain, exportLines, clock, most }
   }
 
   it('runs a batch a slice at a time to the end: each URL read once, pages and credits counted, segments, export and expiry written', async () => {
@@ -276,7 +281,7 @@ describe('hosted job worker', () => {
   it('counts on the day\'s job pools the pages a slice read, not the ones it reserved, so pages never read stop no batch', async () => {
     // One host a slice: the first reserves five pages and the headroom page, and reads the three of its host. Counted as
     // reserved, nine pages would pass the limit of eight before the second slice could start.
-    const { origin, credits, create, drain } = await setup({ limits: { slicePages: 5, maxHostsPerSlice: 1, jobsAccountDaily: 8 } })
+    const { origin, credits, create, drain } = await setup({ limits: { slicePages: 5, maxHostsPerSlice: 1, jobsAccountDaily: 8, headroomPages: 1 } })
     const other = origin.replace('127.0.0.1', 'localhost')
     const id = await create(parseBatchStartRequest({ urls: [...['/a', '/b', '/c'].map((path) => `${origin}${path}`), ...['/d', '/e', '/f'].map((path) => `${other}${path}`)], fastMode: true }))
     expect((await drain(id)).at(-1)).toBe('completed')
@@ -546,16 +551,34 @@ describe('hosted job worker', () => {
     }
   })
 
-  it('reads what the credits allow, then fails the job for credits; and stops at the job\'s maxCredits', async () => {
-    const short = await setup({ balance: 3, limits: { slicePages: 5 } })
+  it('reads what the credits allow, then waits for credits with its status saying so and how to get more, goes on once they come, and stops at the job\'s maxCredits', async () => {
+    const clock = { t: NOW }
+    const short = await setup({ balance: 3, limits: { slicePages: 5 }, clock })
     const id = await short.create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/'].map((path) => `${short.origin}${path}`), fastMode: true }))
-    await short.drain(id)
+    expect((await short.drain(id)).at(-1)).toBe('running')
     const shortJob = (await short.store.get(id))!
-    expect(shortJob).toMatchObject({ status: 'failed', failureReason: 'credits_exhausted' })
+    // Not failed: paused for credits, with the next try in six hours (the grant is further away), and the status says why.
+    expect(shortJob).toMatchObject({ status: 'running', failureReason: null, paused: { pool: 'credits', until: '2026-11-01T00:00:00.000Z' } })
+    expect(short.queue).toEqual([{ jobId: id, generation: expect.any(Number), delaySeconds: 6 * 3_600 }])
+    const status = jobStatus(shortJob, clock.t.getTime())
+    expect(status.paused).toMatchObject({ reason: 'credits', resumesAt: '2026-11-01T00:00:00.000Z', message: expect.stringContaining('hello@octocrawl.dev') })
+    expect((status.paused as { message: string }).message).toContain('need not be cancelled')
     // Every page it stored was paid for, and no more than the balance was spent.
     expect(shortJob.credits.used).toBe(shortJob.counts.pages)
     expect(shortJob.credits.used).toBeLessThanOrEqual(3)
     expect(await short.credits.balance('account-1', NOW)).toBe(3 - shortJob.credits.used)
+    // Credits added by hand: the next delivery reads the rest.
+    await short.credits.topUp('account-1', 10, 'hand-1', NOW)
+    expect((await short.drain(id)).at(-1)).toBe('completed')
+    expect((await short.store.get(id))!.paused ?? null).toBeNull()
+    // The trial pack, where the operator set one: granted once at the first wall, so the job goes on at once; the next account-wide wall gets none.
+    const trial = await setup({ balance: 3, limits: { slicePages: 5 }, trialCredits: 4 })
+    const trialId = await trial.create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/'].map((path) => `${trial.origin}${path}`), fastMode: true }))
+    expect((await trial.drain(trialId)).at(-1)).toBe('completed')
+    expect(await trial.credits.balance('account-1', NOW)).toBe(3 + 4 - 5)
+    const again = await trial.create(parseBatchStartRequest({ urls: ['/e', '/f', '/g'].map((path) => `${trial.origin}${path}`), fastMode: true }))
+    expect((await trial.drain(again)).at(-1)).toBe('running')
+    expect((await trial.store.get(again))!.paused).toMatchObject({ pool: 'credits' })
     const capped = await setup()
     const capId = await capped.create(parseBatchStartRequest({ urls: ['/a', '/b', '/c', '/d', '/'].map((path) => `${capped.origin}${path}`), fastMode: true }), 'batch', 3)
     await capped.drain(capId)
@@ -665,6 +688,19 @@ describe('hosted job worker', () => {
     expect(await busy.drain(busyId, 1)).toEqual(['running'])
     expect(busy.queue).toEqual([{ jobId: busyId, generation: 1, delaySeconds: 30 }])
     expect(busy.seen).toEqual([])
+  })
+
+  it('reads the last of a batch with every worker: a slice that holds all the URLs left reserves no headroom and no worker can overrun it', async () => {
+    // Two hosts at four pages each: the second slice holds every URL left, so it reserves no headroom; with one worker it
+    // would read one page at a time (the regression the review of 2026-11-07 found), with the engine's eight several.
+    const { origin, create, drain, most } = await setup({ limits: { slicePages: 50, firstSlicePages: 2 }, delayMs: 60, perHostConcurrency: 4 })
+    const other = origin.replace('127.0.0.1', 'localhost')
+    const urls = [...Array.from({ length: 12 }, (_, i) => `${origin}/a${i}`), ...Array.from({ length: 12 }, (_, i) => `${other}/b${i}`)]
+    const id = await create(parseBatchStartRequest({ urls, fastMode: true }))
+    expect(await drain(id, 1)).toEqual(['running'])
+    most.pages = 0
+    expect((await drain(id)).at(-1)).toBe('completed')
+    expect(most.pages).toBeGreaterThanOrEqual(3)
   })
 
   it('fails a job whose slices store nothing twice in a row', async () => {

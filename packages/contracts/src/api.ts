@@ -2304,11 +2304,11 @@ export function parseMapRequest(body: unknown): MapRequest {
   rejectUnknownKeys(rec, MAP_KEYS)
   if (rec.mode === 'authed') throw new RequestError('mode authed is not available for map: a map reads public sitemaps and one public page')
   if (rec.mode !== undefined && rec.mode !== 'standard' && rec.mode !== 'research') throw new RequestError('mode must be standard or research')
+  // The largest limit and timeout are the engine's to refuse: a hosted server's are smaller than a local one's.
   const limit = rec.limit
-  if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > MAX_MAP_LIMIT)) {
-    throw new RequestError(`limit must be an integer from 1 to ${MAX_MAP_LIMIT}`)
-  }
-  const timeout = readMilliseconds(rec.timeout, 'timeout', MIN_SCRAPE_TIMEOUT_MS, MAX_MAP_TIMEOUT_MS)
+  if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) throw new RequestError('limit must be a whole number, 1 or more')
+  const timeout = rec.timeout
+  if (timeout !== undefined && (typeof timeout !== 'number' || !Number.isInteger(timeout) || timeout < MIN_SCRAPE_TIMEOUT_MS)) throw new RequestError(`timeout must be a whole number of milliseconds, ${MIN_SCRAPE_TIMEOUT_MS} or more`)
   const search = readMapSearch(rec.search)
   const sitemap = readSitemapMode(rec.sitemap)
   const scope: Partial<Record<(typeof MAP_SCOPE_KEYS)[number], boolean>> = {}

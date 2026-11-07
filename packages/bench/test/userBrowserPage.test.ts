@@ -31,6 +31,14 @@ const read = (html: string, extra: Partial<UserBrowserRead> = {}): UserBrowserRe
 })
 
 describe('a page read in the person\'s browser', () => {
+  it('says when includeTags selects nothing readable, as any other lane does', () => {
+    const page = '<!doctype html><html><head><title>Members</title></head><body><main><h1>Members</h1><p>The harbour office keeps a list of every member and the moorings each one holds through the year.</p></main><script type="application/ld+json">{"name":"Harbour office"}</script></body></html>'
+    const codes = (includeTags: string[]) => (pageFromUserBrowser(read(page), null, { includeTags }).warnings ?? []).map((warning) => warning.code)
+    expect(pageFromUserBrowser(read(page), null, { includeTags: ['script'] })).toMatchObject({ status: 'success', lane: 'my_browser', markdown: '' })
+    expect(codes(['script'])).toContain('empty_selection')
+    expect(codes(['h1'])).not.toContain('empty_selection')
+  })
+
   it('keeps the publisher error when an empty rendered page exits before content formatting', () => {
     const state = { page: '/browse/[...seo]', query: { seo: ['electronics', 'laptops', '123'] }, props: { pageProps: { initialData: {
       searchResult: { itemStacks: [] }, pageMetadata: { pageContext: { browseContext: { errorResponse: { errors: [{ errorType: 'FATAL', statusCode: 'POLARIS_1001', statusMsg: 'INVALID_CAT_ID' }] } } } },

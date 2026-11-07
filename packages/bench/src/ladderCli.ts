@@ -191,6 +191,8 @@ export function buildChannels(
     }
     /** Opt-in headed Chromium on the browser arm only. Default remains headless. */
     headed?: boolean
+    /** The process's browser keeper (subjects/browserKeeper.ts): the public browser rung's Chromium outlives these channels. */
+    browserKeeper?: import('./subjects/browserKeeper.js').BrowserKeeper
     /**
      * The engine the public browser rung launches, as the entry point chose it after checking the
      * access grant (browserEngineChoice). Default stock Playwright.
@@ -277,7 +279,7 @@ export function buildChannels(
   const seams = opts.installedChromeSeams ?? {}
   const plainSolving: CaptchaSolving | null = solving !== null && installedChromeRung ? { ...solving, defersTo: { rung: 'installed_chrome', carries: installedChromeCarries(solving.solver, seams) } } : solving
   // The run's robots.txt cache serves every rung on its routes, by origin and User-Agent; a host-pinned browser reads its own.
-  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared', {}, plainSolving, opts.browserAllowedHosts === undefined ? opts.robotsCache : undefined)
+  const plainBrowser = new BrowserLocalSubject(mode, null, opts.headed === true, opts.networkPolicy, null, originScheduler, opts.publicPreferenceState ?? null, opts.browserAllowedHosts, opts.onRenderedHtml, fileStore, preview, undefined, opts.browserEngine ?? 'playwright', opts.browserIdentity ?? 'declared', {}, plainSolving, opts.browserAllowedHosts === undefined ? opts.robotsCache : undefined, null, opts.browserKeeper ?? null)
   const declared: IdentityBundle = preview ? identityBundleFrom(previewIdentity(modeIdentity(mode))) : identityForRoute(mode)
   const installedChrome = installedChromeRung
     ? new BrowserLocalSubject(mode, null, true, opts.networkPolicy, null, originScheduler, null, undefined, opts.onRenderedHtml, fileStore, false, undefined, 'installed_chrome', 'actual', seams, solving, opts.robotsCache)
