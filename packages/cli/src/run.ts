@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createApiEngine, csvField, defaultSessionsFile, evidenceRow, parseListen, preloadEngineModules, RESULT_COLUMNS, runApiServer, startCaptchaSolving, type ApiEngine, type HandoffHooks, type ResultPage } from '@w2l/api'
+import { createApiEngine, csvField, defaultSessionsFile, evidenceRow, markdownFileName, parseListen, preloadEngineModules, RESULT_FILE_COLUMNS, runApiServer, startCaptchaSolving, type ApiEngine, type HandoffHooks, type ResultPage } from '@w2l/api'
 import {
   CONTENTFUL_STATUS,
   parseBatchStartRequest,
@@ -311,7 +311,7 @@ async function writeOut(dir: string, pages: readonly Page[], report: CrawlReport
   let tables = 0
   const rows: string[] = [EVIDENCE_COLUMNS.join(',')]
   for (const [n, page] of pages.entries()) {
-    const stem = `${String(n + 1).padStart(4, '0')}-${slug(page.url ?? page.requestedUrl ?? '')}`
+    const stem = markdownFileName(n + 1, page.url ?? page.requestedUrl ?? '').replace(/\.md$/, '')
     const markdownFile = typeof page.markdown === 'string' ? `${stem}.md` : null
     if (markdownFile !== null) { await writeFile(join(dir, markdownFile), page.markdown!); markdowns++ }
     rows.push([...evidenceRow(page), markdownFile].map(csvField).join(','))
@@ -326,17 +326,10 @@ async function writeOut(dir: string, pages: readonly Page[], report: CrawlReport
 }
 
 /**
- * The columns of `results.csv`, in order: those a server writes when a job ends (RESULT_COLUMNS, docs/cli.md), then the
- * Markdown file written beside it. A value Octocrawl did not observe is empty, never 0.
+ * The columns of `results.csv`, in order: the same as a server writes when a job ends (RESULT_FILE_COLUMNS, docs/cli.md),
+ * the evidence, then the page's Markdown file. A value Octocrawl did not observe is empty, never 0.
  */
-export const EVIDENCE_COLUMNS = [...RESULT_COLUMNS, 'markdown_file'] as const
-
-/** A file-name stem from a URL: host and path, letters, digits, dots and dashes only, at most 80 characters. */
-function slug(url: string): string {
-  let text = url
-  try { const parsed = new URL(url); text = parsed.host + parsed.pathname } catch {}
-  return text.replace(/[^A-Za-z0-9.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'page'
-}
+export const EVIDENCE_COLUMNS = RESULT_FILE_COLUMNS
 
 async function urlsFrom(file: string): Promise<string[]> {
   return (await readFile(file, 'utf8')).split(/\r?\n/).map((line) => line.replace(/#.*/, '').trim()).filter((line) => line !== '')

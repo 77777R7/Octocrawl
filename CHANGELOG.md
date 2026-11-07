@@ -33,6 +33,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A finished job on your computer leaves each page's Markdown as a file of its own.** A server on your computer wrote `results.jsonl` and `results.csv` when a crawl or batch ended, so an agent asked for the pages as Markdown files wrote a script to split the JSONL, and a coding agent stops to ask before running one. It now also writes `markdown/0001-<host-path>.md`, a file a page with content (`success` or `partial`; a failed, blocked or empty page has none), numbered as the results are; `results.csv` gains `markdown_file`, as `--out` writes it, the status names the directory in `resultFiles.markdown`, and `get_batch`, `wait_batch`, `get_crawl` and `wait_crawl` say to hand those files on.
 - **A compact `scrape` of a page its site adapter could not vouch for returns its Markdown too.** Without `formats`, a compact scrape (the MCP `scrape`, `octocrawl scrape`, an SDK `scrape` with `debug: false`) of a page on a site with an adapter (X, Amazon) was answered with the adapter's JSON alone, even when the adapter's check of the page failed (`adapterValidation.valid: false`): an X home timeline read in your Chrome came back `success` and `ready` with an empty incomplete JSON and no Markdown, and the agent had to ask again. Such an answer now carries the page's Markdown beside the JSON.
 
 ## 0.8.8 — 2026-11-07
