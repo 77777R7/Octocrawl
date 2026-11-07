@@ -160,19 +160,20 @@ ROADMAP：
 
 起因：时刻 1。0.8.4 让 serve 打印 Claude Code 的接入命令（`cli.ts:103`），这是用户装好后第一眼看到的东西，而登录态在这里一个字没有。
 
-- [ ] **L3.1** `cli.ts` 在 `servesLogins` 为真时紧跟接入命令那行打一行："octocrawl: pages behind your login: an agent can read them in the Chrome you are signed in to (lane my-browser) or with a login you save once (octocrawl login import <site>, then mode authed); it asks you first, and your logins stay on this computer"。`--hosted` 和不在 loopback 时不打（后者保留今天的 "not read" 警告）。
-- [ ] **L3.2** 有 saved logins 时附数量："N saved logins (octocrawl login list)"；读 `sessionsFile` 失败不阻止启动，只不附。
+- [ ] **L3.1** `cli.ts` 在 `servesLogins` 为真时紧跟接入命令那行打一行："octocrawl: a page behind your login: an agent is told to ask you first, then reads it in the Chrome you are signed in to (lane my-browser; you click Allow) or with a login you save once (npx octocrawl login import <site>, then mode authed); saved logins stay on this computer"。写 "is told to"，不写 "it asks"：Octocrawl 定规则，但保证不了 agent 的行为，saved login 这条路也没有人工点击。写 `npx octocrawl`：用 npx 启动的人 PATH 里不一定有 `octocrawl`。`--hosted` 和不在 loopback 时不打（后者保留今天的 "not read" 警告）。
+- [ ] **L3.2** 有 saved logins 时附数量："(N saved: npx octocrawl login list)"。登录文件损坏时只是不附数量，不影响启动：`listSavedLogins` 在 `{"sessions":[null]}` 这类内容上会抛错，所以要接住。
 - 验收：
-  - `packages/api/test` 里没有 `runApiServer` 的测试，也没有测试捕获它的日志（`packages/mcp/test/entryRoutes.test.ts:66` 传 `log: () => {}` 丢掉了）；新加一个用 `options.log` 捕获的测试。先写失败测试：loopback 启动的日志不含 "pages behind your login"。
-  - 改后：loopback 含且只含一行；`--host 0.0.0.0` 不含，含今天的 "not read"；`--hosted` 不含。
+  - `packages/api/test` 里之前没有测试捕获 `runApiServer` 的日志，新增 `serveStartup.test.ts`（`--port 0` 被拒绝，用探测到的空闲端口）。先写失败测试：loopback 启动的日志不含 "a page behind your login"。
+  - 改后：loopback 含且只含一行；`--host 0.0.0.0` 不含，含今天的 "not read"；`--hosted` 不含；损坏的登录文件照常启动，不带数量。
+- 实现：L3 和 L4 都在 PR #874（`d9982f87`），开着，合并后再勾。
 - 指标：首次启动看到登录态能力的入口 0 → 1。
 
-### L4 CLI help 和 verdict　S（可与 L3 同一个 PR）
+### L4 CLI help 和 verdict　S（与 L3 同一个 PR）
 
-- [ ] **L4.1** `flags.ts:232` 顶层 usage 在 `login import` 那行下加一行："a page behind your login: --lane my-browser reads it in the Chrome you are signed in to; --mode authed reads it with a login you saved"。
-- [ ] **L4.2** `flags.ts:241` `scrape` 的 synopsis 里 `--lane my-browser` 那段开头加 "for a page behind your login, or one your Chrome shows and Octocrawl cannot fetch"，让它和 `--handoff`（给 check）分工清楚。
-- [ ] **L4.3** `run.ts:137-150` 不改逻辑；L1 的新 hint 会从这里打出。确认 `login_wall` 时 stderr 的那行不超过两行终端宽度（hint 长了就只打到第一个分号后的句子，待定：量了再说）。
-- 验收：`cli.test.ts` 的 help 快照更新；`octocrawl --help`、`octocrawl scrape --help` 人工看一遍写进 PR。
+- [ ] **L4.1** `flags.ts:232` 顶层 usage 在 `login import` 那行下加一句："A page behind your login: --lane my-browser reads it in the Chrome you are signed in to; --mode authed reads it with a login you saved."
+- [ ] **L4.2** `scrape` 和 `batch` 的 `--lane my-browser` 那段改成 "for a page behind your login, or one that needs your address or a real browser: ..."，并写明要开 remote debugging。不写 "Octocrawl 抓不到的页面"：bot 检查也可能拒绝用户的 Chrome（`docs/access.md:187`）。
+- [ ] **L4.3** `run.ts:137-150` 不改。量过：配上 L1 的 hint，stderr 这行约 600 字符，多于两行终端宽度；但在第一个分号截断会丢掉下一步，所以保留全文。
+- 验收：`cli.test.ts` 加 help 断言；`octocrawl --help`、`octocrawl scrape --help` 人工看一遍写进 PR。
 
 ### L5 文档和站点文案　S
 
