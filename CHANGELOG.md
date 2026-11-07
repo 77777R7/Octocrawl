@@ -32,6 +32,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 ## Unreleased
 
 - **Hosted Octocrawl no longer names a path on its own server for a file.** A hosted read of a PDF, CSV or text file said it was `kept at /tmp/octocrawl-hosted/files/…`, in `agentHints`, `file.path` and the `artifacts` of `snapshot` and the Evidence Record, a place no client could read and that was swept after ten minutes. Hosted now saves no files: `file.path` is `null`, `artifacts` is empty, `file.sha256` still identifies the bytes, and a file with no Markdown names `npx octocrawl scrape <url>`, which saves it on your computer. A self-hosted `serve --hosted` server keeps its files as before.
+- **A hosted refusal says which field in the answer and in the operator's log.** A hosted 400 for an option it does not take now carries `details.parameters`, as a local server's does. The `hosted_refused` log line covers every 4xx of the API routes, not only the gate's own, and a 400's line (and an MCP call's, when the tool refused its arguments) names the refused fields, never what was sent in them.
 
 ## 0.8.6 — 2026-11-07
 
