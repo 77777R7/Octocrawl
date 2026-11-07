@@ -33,6 +33,10 @@ describe('the page that asks the person to allow sites', () => {
     expect(html).toContain('<button id="allow">Allow reading these sites</button>')
   })
 
+  it('stands still for reduced motion', () => {
+    expect(page(['site.test'])).toContain('if (!still) window.requestAnimationFrame(frame)')
+  })
+
   it('loads nothing from the network', () => {
     expect(page(['site.test'])).not.toMatch(/(?:src|href)="?https?:|url\(http|@import/)
   })
