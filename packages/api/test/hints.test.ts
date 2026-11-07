@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALLED_CHROME_INSTALL } from '@w2l/bench'
-import { agentHintsFor, mapAgentHints, offPageHint, THIN_PAGE_HINT, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedFileNotKeptHint, hostedGateHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
+import { agentHintsFor, mapAgentHints, offPageHint, SIGN_IN_PROMPT_HINT, THIN_PAGE_HINT, BROWSER_NOT_INSTALLED_HINT, FAST_MODE_DECLINED_HINT, HOSTED_LOGIN_WALL_HINT, hostedFileNotKeptHint, hostedGateHint, INSTALLED_CHROME_MISSING_HINT, renderedLowYieldHint, renderedNotLoadedHint, INSTALLED_CHROME_RECOMMENDED_HINT, lowContentYieldHint, MAX_AGENT_HINTS, pinnedFastModeHints, RENDERED_LOW_YIELD_HINT, SCREENSHOT_UNAVAILABLE_HINT, type HintedAttempt, type HintedResult } from '../src/hints.js'
 
 const URL_ = 'https://example.test/report'
 
@@ -22,6 +22,10 @@ describe('agent hints', () => {
     expect(hints(result({ status: 'empty_verified', markdown: null }))).toEqual([])
     expect(hints(result({ warnings: [{ code: 'tls_unverified', message: 'not verified' }] }))).toEqual([])
     expect(hints(result({ status: 'failed', failureReason: 'dns_error', markdown: null }))).toEqual([])
+  })
+
+  it('says what to do about a page read without the login it needed', () => {
+    expect(hints(result({ lane: 'my_browser', warnings: [{ code: 'sign_in_prompt', message: 'says "Log in for contact details"' }] }))).toEqual([SIGN_IN_PROMPT_HINT])
   })
 
   it('says what to do about a page that came far shorter than the others of its site', () => {

@@ -26,6 +26,12 @@ describe('readinessOf (ADR 0007, ROADMAP PA item 11)', () => {
     expect(readinessOf({ ...page, verification: { status: 'passed', verifier: 'test', contractSha256: 'x', reason: null, checks: [] } })).toEqual({ state: 'ready', basis: ['verified'] })
   })
 
+  it('reads a page that held its content back from the login as not served, unless a contract passed on it', () => {
+    const page = result({ lane: 'my_browser', warnings: warned('sign_in_prompt') })
+    expect(readinessOf(page)).toEqual({ state: 'not_served', basis: ['sign_in_prompt'] })
+    expect(readinessOf({ ...page, verification: { status: 'passed', verifier: 'test', contractSha256: 'x', reason: null, checks: [] } })).toEqual({ state: 'ready', basis: ['verified'] })
+  })
+
   it('reads a page delivered in place of the one asked for as not served, on every lane, unless a contract passed on it', () => {
     // www.english.ids-cologne.de, 2026-11-04: an exhibitor page answered with the home page, HTTP 200.
     const home = (lane: FetchResult['lane']) => result({ lane, requestedUrl: 'https://source.example/exhibitor/acme/', evidence: { ...result().evidence, finalUrl: 'https://source.example/', redirectChain: ['https://source.example/exhibitor/acme/', 'https://source.example/'] }, warnings: warned('redirected_off_page') })

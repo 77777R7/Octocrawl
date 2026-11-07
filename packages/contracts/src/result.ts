@@ -414,6 +414,10 @@ export interface FetchWarning {
    * as `not_served`. A redirect that keeps the page (scheme, www, a trailing
    * slash, index.html, a language prefix, a new slug, a deeper page) raises
    * none; a page a request's `actions` led elsewhere raises none either.
+   * `sign_in_prompt`: a page read with the person's login (lane my-browser, a
+   * handoff, or mode authed with a saved login) shows a line that holds content back behind a sign-in, "Log
+   * in for contact details": the login did not reach the page, or has lapsed.
+   * The message quotes the line; `readiness` reads it as `not_served`.
    * `thin_page`: a batch page of 300 characters of Markdown or fewer, under a
    * quarter of the median of at least five other plain pages of its host in
    * the run, still so after any read again. A page that really is that short

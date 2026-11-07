@@ -21,6 +21,7 @@ import { contentSelectors, contentSelectionEvent, listSelectionAsked, errorPageE
 import { steadyWaitEvents, withStillChangingWarning, withStillLoadingWarning, type SteadyOutcome } from '../browserSettle.js'
 import { regionWaitEvent, type RegionOutcome } from '../regionWait.js'
 import { withOffPageWarning } from '../offPage.js'
+import { withSignInWarning } from '../signInAsked.js'
 import { sameDocument } from './browserDocuments.js'
 
 /** The lanes a page read in the person's browser is recorded on: after a handoff, or on the my-browser lane. */
@@ -161,7 +162,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
   const tables = tablesFormat(wholePageAsked(options) || delivered
     ? { html: body, options: { baseUrl: finalUrl, exclude: options.excludeTags, ...markdownOptions(options) } }
     : { html: extracted.mainHtml, options: { baseUrl: extracted.baseUrl, ...markdownOptions(options) } }, finalUrl, options, trace, LANE, wallMs)
-  return withEmptySelectionWarning(withOffPageWarning(withReadHiddenWarning(read, withStillChangingWarning(withStillLoadingWarning(withListCaveat({
+  return withSignInWarning(withEmptySelectionWarning(withOffPageWarning(withReadHiddenWarning(read, withStillChangingWarning(withStillLoadingWarning(withListCaveat({
     ...base,
     status: 'success',
     failureReason: null,
@@ -190,7 +191,7 @@ export function pageFromUserBrowser(read: UserBrowserRead, prior: FetchResult | 
     },
     ...htmlFormats(whole, body, extracted.mainHtml, options, wholePageAsked(options) || delivered),
     usage: { ...base.usage, contentTokens: estimateTokens(markdown) },
-  }))))), options)
+  }))))), options))
 }
 
 /** A read of the page as it shows that found its tab still out of sight: the whole document was read instead. */

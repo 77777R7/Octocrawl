@@ -27,7 +27,7 @@ The official website is [octocrawl.dev](https://octocrawl.dev/). The official so
 
 Hosted Octocrawl supports single-page scraping and site URL mapping. Keyless requests use HTTP within a daily allowance. An account adds crawl and batch jobs (up to 500 pages a crawl and 1,000 URLs a batch), and a key enables the browser lane, subject to credits and service limits.
 
-Run Octocrawl locally for larger crawls and batches, browser actions, saved login sessions and monitoring workflows. Browser actions require browser setup; scheduled monitoring requires local workers from a repository checkout. See [Connect MCP](/docs/connect-mcp/#run-it-on-your-computer) and the [Monitor guide](/docs/guides/monitor-webhook/).
+Run Octocrawl locally for larger crawls and batches, browser actions and monitoring workflows. Pages behind your own sign-in can often be read there too: the agent is told to ask you first, then reads them in the Chrome where you are signed in to the site, or with a login you save. Browser actions require browser setup; scheduled monitoring requires local workers from a repository checkout. See [Connect MCP](/docs/connect-mcp/#run-it-on-your-computer) and the [Monitor guide](/docs/guides/monitor-webhook/).
 
 Installing an SDK or connecting an MCP client does not expand the capabilities of the server it uses. The website preview is a single-page trial with its own limits. See [Limits and result states](/docs/limits/) for the differences.
 
