@@ -32,6 +32,7 @@ Releases are listed newest first, by date. Each release opens with what matters 
 
 ## Unreleased
 
+- **A my-browser read of a site you are not signed in to no longer holds your agent for 10 minutes.** If the page asks you to sign in and nobody acts on it within 90 s, the scrape ends `blocked` with `login_wall`, the tab stays open in your Chrome, and your agent can tell you what the page needs. Once you click or type on the page it waits the full 10 minutes as before. A `handoff.waitMs` you give is kept, and batches are unchanged. The page that asks you to allow sites now says a sign-in waits for you.
 - **The page that asks you to allow sites shows its text in a dark Chrome.** The page Octocrawl opens in your Chrome before it reads there set a dark text colour and no background, so a dark Chrome showed two buttons on black, with the task and the sites invisible. It now has its own background, looks like octocrawl.dev, with Octocrawl and Chrome joined at the top and a glyph sea rolling below, and says how many sites it is asking for. What it asks, and what its buttons do, did not change.
 
 ## 0.8.7 — 2026-11-07

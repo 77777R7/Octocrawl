@@ -48,6 +48,8 @@ export interface UserChromeOptions {
   connect?: (endpoint: string, timeoutMs: number, signal?: AbortSignal) => Promise<CdpConnection>
   /** The default hiddenWaitMs of this Chrome's reads (a test shortens it). Default HIDDEN_WAIT_MS. */
   hiddenWaitMs?: number
+  /** Replaces a read's loginWaitMs (a test shortens it). */
+  loginWaitMs?: number
 }
 
 export interface UserChromeReadOptions {
@@ -55,6 +57,12 @@ export interface UserChromeReadOptions {
   waitMs?: number
   /** Between two reads of the page. Default 0.5 s: a click just before the page moves on is seen. */
   pollMs?: number
+  /**
+   * How long a sign-in page nobody has acted on holds this read: then the read ends, blocked at `login_wall`, and the
+   * tab stays open, so a caller waiting on it can tell the person what the page needs. Once they act on it, in the tab,
+   * the read waits on to `waitMs`. Default: no such limit.
+   */
+  loginWaitMs?: number
   /** Told once, when the page shows a check the person has to pass. */
   onWaiting?: (url: string, check: string) => void
   /** Told once, when the page shows no check and W2L waits for the person to click on it to have it read. */
@@ -118,6 +126,9 @@ export interface UserBrowserListRead {
 const CLEAR_READS = 3
 /** With shownOnly, how long a page ready to read in a tab out of sight is waited for to come in sight. */
 export const HIDDEN_WAIT_MS = 30_000
+
+/** How long a sign-in nobody acts on holds a scrape in the person's Chrome: a read of it is the whole of what its caller is waiting for, and the caller can tell them. Long enough to get to the tab and start. */
+export const LOGIN_WAIT_MS = 90_000
 /** Times W2L takes the tab back to the page asked for when the person's way through ended elsewhere on the site (a home page after a sign-in). */
 const RETURNS = 2
 /** A document answered with one of these is a check, whatever its body. */
@@ -257,7 +268,11 @@ export async function openUserChrome(options: UserChromeOptions = {}, signal?: A
     // The version is evidence, not a condition: unknown is recorded as `chrome`.
   }
   return {
-    read: (url, readOptions = {}) => readPage(connection, browser, url, options.hiddenWaitMs === undefined || readOptions.hiddenWaitMs !== undefined ? readOptions : { ...readOptions, hiddenWaitMs: options.hiddenWaitMs }),
+    read: (url, readOptions = {}) => readPage(connection, browser, url, {
+      ...readOptions,
+      ...(options.hiddenWaitMs === undefined || readOptions.hiddenWaitMs !== undefined ? {} : { hiddenWaitMs: options.hiddenWaitMs }),
+      ...(options.loginWaitMs === undefined || readOptions.loginWaitMs === undefined ? {} : { loginWaitMs: options.loginWaitMs }),
+    }),
     readList: (url, readOptions) => readList(connection, browser, url, readOptions),
     allow: (scope, allowOptions = {}) => allowSites(connection, scope, allowOptions),
     close: () => connection.close(),
@@ -564,6 +579,8 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
     // The page's own address and the documents heard of at the last read: the page as it shows must be read on the same one.
     let seen = { href: '', documents: 0 }
     let last: { state: PageState; response: DocumentResponse | null } | null = null
+    // Since when the tab has been on a sign-in page nobody has acted on, with loginWaitMs.
+    let loginSince: number | null = null
     // With shownOnly, since when a page ready to read has waited for its tab to come in sight, and how long it waited once it did.
     let hiddenWaitSince: number | null = null
     let hiddenWaited: number | undefined
@@ -622,6 +639,15 @@ async function readOpen(connection: CdpConnection, browser: string, url: string,
       // What the page showed, as evidence: a generic bot check only on decisive markers, not a loading page's weak ones.
       if (full !== null && (full.reason !== 'bot_detected_generic' || decisive !== null)) sawGate ??= full.reason
       if (gate !== null && !told) { told = true; options.onWaiting?.(url, gate.reason) }
+      if (options.loginWaitMs !== undefined && heard.act === null && (gate?.reason === 'login_wall' || onLoginPath(state.href, url))) {
+        loginSince ??= Date.now()
+        if (Date.now() - loginSince >= options.loginWaitMs) {
+          // Nobody is there to sign in: the caller can tell them, and the tab stays for when they do.
+          kept = true
+          for (const stop of stops) stop()
+          throw new HandoffNotThrough(`${url} asked for a sign-in in your Chrome and nobody acted on it for ${Math.round(options.loginWaitMs / 1000)} s: its tab stays open there`, 'login_wall')
+        }
+      } else loginSince = null
       const typing = state.field !== null && field !== undefined && state.field !== field
       field = state.field
       // The page asked for: the URL, or where it leads when W2L opens it; after a return, once its document has come.
